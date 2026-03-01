@@ -8,7 +8,9 @@ pub mod agent;
 pub mod agent_session;
 pub mod context;
 pub mod error;
+pub mod router;
 pub mod state;
+pub mod tool;
 
 // Re-export wire types that runtime users need
 pub use gemini_live_wire;
