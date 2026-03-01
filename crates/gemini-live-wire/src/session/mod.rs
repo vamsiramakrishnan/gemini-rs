@@ -159,6 +159,10 @@ pub enum SessionEvent {
     Error(String),
     /// Session resumption handle received from server.
     SessionResumeHandle(String),
+    /// Server-side voice activity detected (user started speaking).
+    VoiceActivityStart,
+    /// Server-side voice activity ended (user stopped speaking).
+    VoiceActivityEnd,
 }
 
 // ---------------------------------------------------------------------------

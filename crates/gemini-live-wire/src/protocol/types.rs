@@ -468,12 +468,38 @@ pub struct InputAudioTranscription {}
 #[serde(rename_all = "camelCase")]
 pub struct OutputAudioTranscription {}
 
+/// Controls how incoming audio interacts with model output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ActivityHandling {
+    /// User speech interrupts model output (barge-in). Default.
+    #[serde(rename = "START_OF_ACTIVITY_INTERRUPTS")]
+    StartOfActivityInterrupts,
+    /// Model continues speaking even during user speech.
+    #[serde(rename = "NO_INTERRUPTION")]
+    NoInterruption,
+}
+
+/// Controls which input counts toward a user's conversation turn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TurnCoverage {
+    /// Only speech/audio included in turn (VAD-filtered). Default.
+    #[serde(rename = "TURN_INCLUDES_ONLY_ACTIVITY")]
+    TurnIncludesOnlyActivity,
+    /// All input including silence included in turn.
+    #[serde(rename = "TURN_INCLUDES_ALL_INPUT")]
+    TurnIncludesAllInput,
+}
+
 /// Server-side VAD configuration for the setup message.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RealtimeInputConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub automatic_activity_detection: Option<AutomaticActivityDetection>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub activity_handling: Option<ActivityHandling>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub turn_coverage: Option<TurnCoverage>,
 }
 
 /// Automatic activity detection (VAD) settings.
@@ -508,6 +534,9 @@ pub struct ContextWindowCompressionConfig {
     /// Sliding window mechanism for context compression.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sliding_window: Option<SlidingWindow>,
+    /// Token threshold that triggers context window compression.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trigger_tokens: Option<u32>,
 }
 
 /// Sliding window configuration for context compression.
@@ -577,6 +606,9 @@ pub struct ThinkingConfig {
     /// Token budget for thinking/reasoning steps.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking_budget: Option<u32>,
+    /// Whether to include the model's thought process in responses.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include_thoughts: Option<bool>,
 }
 
 /// Media resolution for image/video inputs.
@@ -913,9 +945,37 @@ impl SessionConfig {
 
     /// Configure server-side VAD.
     pub fn server_vad(mut self, detection: AutomaticActivityDetection) -> Self {
-        self.realtime_input_config = Some(RealtimeInputConfig {
-            automatic_activity_detection: Some(detection),
+        let mut ric = self.realtime_input_config.unwrap_or(RealtimeInputConfig {
+            automatic_activity_detection: None,
+            activity_handling: None,
+            turn_coverage: None,
         });
+        ric.automatic_activity_detection = Some(detection);
+        self.realtime_input_config = Some(ric);
+        self
+    }
+
+    /// Set how incoming audio interacts with model output (barge-in behavior).
+    pub fn activity_handling(mut self, handling: ActivityHandling) -> Self {
+        let mut ric = self.realtime_input_config.unwrap_or(RealtimeInputConfig {
+            automatic_activity_detection: None,
+            activity_handling: None,
+            turn_coverage: None,
+        });
+        ric.activity_handling = Some(handling);
+        self.realtime_input_config = Some(ric);
+        self
+    }
+
+    /// Set which input counts toward a user's conversation turn.
+    pub fn turn_coverage(mut self, coverage: TurnCoverage) -> Self {
+        let mut ric = self.realtime_input_config.unwrap_or(RealtimeInputConfig {
+            automatic_activity_detection: None,
+            activity_handling: None,
+            turn_coverage: None,
+        });
+        ric.turn_coverage = Some(coverage);
+        self.realtime_input_config = Some(ric);
         self
     }
 
@@ -927,11 +987,25 @@ impl SessionConfig {
 
     /// Configure context window compression for long sessions.
     pub fn context_window_compression(mut self, target_tokens: u32) -> Self {
-        self.context_window_compression = Some(ContextWindowCompressionConfig {
-            sliding_window: Some(SlidingWindow {
-                target_tokens: Some(target_tokens),
-            }),
+        let mut cwc = self.context_window_compression.unwrap_or(ContextWindowCompressionConfig {
+            sliding_window: None,
+            trigger_tokens: None,
         });
+        cwc.sliding_window = Some(SlidingWindow {
+            target_tokens: Some(target_tokens),
+        });
+        self.context_window_compression = Some(cwc);
+        self
+    }
+
+    /// Set the token threshold that triggers context window compression.
+    pub fn context_window_trigger_tokens(mut self, tokens: u32) -> Self {
+        let mut cwc = self.context_window_compression.unwrap_or(ContextWindowCompressionConfig {
+            sliding_window: None,
+            trigger_tokens: None,
+        });
+        cwc.trigger_tokens = Some(tokens);
+        self.context_window_compression = Some(cwc);
         self
     }
 
@@ -945,9 +1019,23 @@ impl SessionConfig {
 
     /// Enable thinking/reasoning with a token budget (Gemini 2.5+).
     pub fn thinking(mut self, budget: u32) -> Self {
-        self.generation_config.thinking_config = Some(ThinkingConfig {
-            thinking_budget: Some(budget),
+        let mut tc = self.generation_config.thinking_config.unwrap_or(ThinkingConfig {
+            thinking_budget: None,
+            include_thoughts: None,
         });
+        tc.thinking_budget = Some(budget);
+        self.generation_config.thinking_config = Some(tc);
+        self
+    }
+
+    /// Include the model's thought process in responses.
+    pub fn include_thoughts(mut self) -> Self {
+        let mut tc = self.generation_config.thinking_config.unwrap_or(ThinkingConfig {
+            thinking_budget: None,
+            include_thoughts: None,
+        });
+        tc.include_thoughts = Some(true);
+        self.generation_config.thinking_config = Some(tc);
         self
     }
 
@@ -1488,5 +1576,49 @@ mod tests {
         let tools = vec![Tool::google_search()];
         let decls = tools.declarations();
         assert_eq!(decls.len(), 1);
+    }
+
+    // ── ActivityHandling / TurnCoverage / VoiceActivityType serialization tests ──
+
+    #[test]
+    fn activity_handling_serialization() {
+        let interrupts = ActivityHandling::StartOfActivityInterrupts;
+        let json = serde_json::to_string(&interrupts).unwrap();
+        assert_eq!(json, "\"START_OF_ACTIVITY_INTERRUPTS\"");
+        let parsed: ActivityHandling = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, interrupts);
+
+        let no_int = ActivityHandling::NoInterruption;
+        let json = serde_json::to_string(&no_int).unwrap();
+        assert_eq!(json, "\"NO_INTERRUPTION\"");
+        let parsed: ActivityHandling = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, no_int);
+    }
+
+    #[test]
+    fn turn_coverage_serialization() {
+        let only = TurnCoverage::TurnIncludesOnlyActivity;
+        let json = serde_json::to_string(&only).unwrap();
+        assert_eq!(json, "\"TURN_INCLUDES_ONLY_ACTIVITY\"");
+        let parsed: TurnCoverage = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, only);
+
+        let all = TurnCoverage::TurnIncludesAllInput;
+        let json = serde_json::to_string(&all).unwrap();
+        assert_eq!(json, "\"TURN_INCLUDES_ALL_INPUT\"");
+        let parsed: TurnCoverage = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, all);
+    }
+
+    #[test]
+    fn thinking_config_with_include_thoughts() {
+        let config = SessionConfig::new("key")
+            .thinking(2048)
+            .include_thoughts();
+        let json = config.to_setup_json();
+        assert!(json.contains("\"thinkingBudget\""));
+        assert!(json.contains("2048"));
+        assert!(json.contains("\"includeThoughts\""));
+        assert!(json.contains("true"));
     }
 }

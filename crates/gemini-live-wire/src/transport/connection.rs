@@ -445,6 +445,19 @@ fn handle_server_msg(
             }
         }
 
+        ServerMessage::VoiceActivity(msg) => {
+            if let Some(vat) = msg.voice_activity.voice_activity_type {
+                match vat {
+                    VoiceActivityType::VoiceActivityStart => {
+                        let _ = event_tx.send(SessionEvent::VoiceActivityStart);
+                    }
+                    VoiceActivityType::VoiceActivityEnd => {
+                        let _ = event_tx.send(SessionEvent::VoiceActivityEnd);
+                    }
+                }
+            }
+        }
+
         ServerMessage::Unknown(_) => {
             // Forward-compatible: ignore unknown messages
         }

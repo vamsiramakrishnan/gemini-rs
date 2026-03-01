@@ -215,6 +215,12 @@ pub struct ServerContentPayload {
     pub grounding_metadata: Option<GroundingMetadata>,
     #[serde(default)]
     pub url_context_metadata: Option<UrlContextMetadata>,
+    /// Reason why the model's turn completed (e.g. "STOP", "MAX_TOKENS").
+    #[serde(default)]
+    pub turn_complete_reason: Option<String>,
+    /// Whether the server is waiting for user input.
+    #[serde(default)]
+    pub waiting_for_input: Option<bool>,
 }
 
 /// Transcription text from server.
@@ -284,6 +290,36 @@ pub struct SessionResumptionUpdatePayload {
     /// Whether the session is currently resumable.
     #[serde(default)]
     pub resumable: Option<bool>,
+    /// Index of the last client message consumed by the server.
+    #[serde(default)]
+    pub last_consumed_client_message_index: Option<String>,
+}
+
+/// Server-side voice activity detection event.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VoiceActivityMessage {
+    pub voice_activity: VoiceActivityPayload,
+}
+
+/// Payload for voice activity detection.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VoiceActivityPayload {
+    /// The type of voice activity event.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub voice_activity_type: Option<VoiceActivityType>,
+}
+
+/// Type of voice activity event from the server.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum VoiceActivityType {
+    /// Voice activity started (user began speaking).
+    #[serde(rename = "VOICE_ACTIVITY_START")]
+    VoiceActivityStart,
+    /// Voice activity ended (user stopped speaking).
+    #[serde(rename = "VOICE_ACTIVITY_END")]
+    VoiceActivityEnd,
 }
 
 /// Server message wrapper — includes optional usage metadata alongside the message.
@@ -308,6 +344,7 @@ pub enum ServerMessage {
     ToolCallCancellation(ToolCallCancellationMessage),
     GoAway(GoAwayMessage),
     SessionResumptionUpdate(SessionResumptionUpdateMessage),
+    VoiceActivity(VoiceActivityMessage),
     Unknown(serde_json::Value),
 }
 
@@ -332,6 +369,9 @@ impl ServerMessage {
         } else if text.contains("\"sessionResumptionUpdate\"") {
             serde_json::from_str::<SessionResumptionUpdateMessage>(text)
                 .map(ServerMessage::SessionResumptionUpdate)
+        } else if text.contains("\"voiceActivity\"") {
+            serde_json::from_str::<VoiceActivityMessage>(text)
+                .map(ServerMessage::VoiceActivity)
         } else {
             serde_json::from_str::<serde_json::Value>(text).map(ServerMessage::Unknown)
         }
@@ -575,6 +615,48 @@ mod tests {
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains("\"activityStart\""));
+    }
+
+    #[test]
+    fn voice_activity_type_serialization() {
+        let start = VoiceActivityType::VoiceActivityStart;
+        let json = serde_json::to_string(&start).unwrap();
+        assert_eq!(json, "\"VOICE_ACTIVITY_START\"");
+        let parsed: VoiceActivityType = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, start);
+
+        let end = VoiceActivityType::VoiceActivityEnd;
+        let json = serde_json::to_string(&end).unwrap();
+        assert_eq!(json, "\"VOICE_ACTIVITY_END\"");
+        let parsed: VoiceActivityType = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, end);
+    }
+
+    #[test]
+    fn parse_voice_activity_message() {
+        let json = r#"{"voiceActivity":{"voiceActivityType":"VOICE_ACTIVITY_START"}}"#;
+        let msg = ServerMessage::parse(json).unwrap();
+        match msg {
+            ServerMessage::VoiceActivity(va) => {
+                assert_eq!(
+                    va.voice_activity.voice_activity_type,
+                    Some(VoiceActivityType::VoiceActivityStart)
+                );
+            }
+            _ => panic!("Expected VoiceActivity"),
+        }
+
+        let json = r#"{"voiceActivity":{"voiceActivityType":"VOICE_ACTIVITY_END"}}"#;
+        let msg = ServerMessage::parse(json).unwrap();
+        match msg {
+            ServerMessage::VoiceActivity(va) => {
+                assert_eq!(
+                    va.voice_activity.voice_activity_type,
+                    Some(VoiceActivityType::VoiceActivityEnd)
+                );
+            }
+            _ => panic!("Expected VoiceActivity"),
+        }
     }
 
     #[test]
