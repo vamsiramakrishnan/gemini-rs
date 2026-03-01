@@ -1,0 +1,21 @@
+[package]
+name = "gemini-live-agents-cookbook"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[[bin]]
+name = "weather-agent"
+path = "src/weather_agent.rs"
+
+[[bin]]
+name = "research-pipeline"
+path = "src/research_pipeline.rs"
+
+[dependencies]
+gemini-live = { path = "../../crates/gemini-live" }
+gemini-live-runtime = { path = "../../crates/gemini-live-runtime" }
+gemini-live-wire = { path = "../../crates/gemini-live-wire" }
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+serde_json = "1"

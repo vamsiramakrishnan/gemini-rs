@@ -5,6 +5,7 @@ members = [
     "crates/gemini-live-runtime",
     "crates/gemini-live",
     "cookbooks/ui",
+    "cookbooks/agents",
 ]
 
 [workspace.package]
