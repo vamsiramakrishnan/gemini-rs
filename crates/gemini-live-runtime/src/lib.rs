@@ -11,6 +11,7 @@ pub mod error;
 pub mod middleware;
 pub mod router;
 pub mod state;
+pub mod telemetry;
 pub mod tool;
 
 // Re-export key tool types for convenience

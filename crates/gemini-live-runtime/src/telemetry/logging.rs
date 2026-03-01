@@ -1,0 +1,97 @@
+//! Structured logging helpers for agent lifecycle.
+//!
+//! All log events carry consistent fields for correlation.
+//! Feature-gated behind `tracing-support`.
+
+/// Log that an agent has started.
+#[cfg(feature = "tracing-support")]
+pub fn log_agent_started(agent_name: &str, tool_count: usize) {
+    tracing::info!(
+        agent_name = agent_name,
+        tool_count = tool_count,
+        "Agent started"
+    );
+}
+
+/// Log that an agent has completed.
+#[cfg(feature = "tracing-support")]
+pub fn log_agent_completed(agent_name: &str, duration_ms: f64) {
+    tracing::info!(
+        agent_name = agent_name,
+        duration_ms = duration_ms,
+        "Agent completed"
+    );
+}
+
+/// Log a tool dispatch.
+#[cfg(feature = "tracing-support")]
+pub fn log_tool_dispatch(agent_name: &str, tool_name: &str, tool_class: &str) {
+    tracing::info!(
+        agent_name = agent_name,
+        tool_name = tool_name,
+        tool_class = tool_class,
+        "Tool dispatched"
+    );
+}
+
+/// Log a tool result.
+#[cfg(feature = "tracing-support")]
+pub fn log_tool_result(agent_name: &str, tool_name: &str, success: bool, duration_ms: f64) {
+    tracing::info!(
+        agent_name = agent_name,
+        tool_name = tool_name,
+        success = success,
+        duration_ms = duration_ms,
+        "Tool result"
+    );
+}
+
+/// Log an agent transfer.
+#[cfg(feature = "tracing-support")]
+pub fn log_agent_transfer(from: &str, to: &str) {
+    tracing::info!(from = from, to = to, "Agent transfer");
+}
+
+/// Log an agent error (warn level).
+#[cfg(feature = "tracing-support")]
+pub fn log_agent_error(agent_name: &str, error: &str) {
+    tracing::warn!(
+        agent_name = agent_name,
+        error = error,
+        "Agent error"
+    );
+}
+
+/// Log an agent-as-tool dispatch.
+#[cfg(feature = "tracing-support")]
+pub fn log_agent_tool_dispatch(parent: &str, child: &str) {
+    tracing::info!(parent = parent, child = child, "Agent tool dispatch");
+}
+
+/// Log event loop lag (warn level).
+#[cfg(feature = "tracing-support")]
+pub fn log_event_loop_lag(agent_name: &str, skipped: u64) {
+    tracing::warn!(
+        agent_name = agent_name,
+        skipped = skipped,
+        "Event loop lag — skipped events"
+    );
+}
+
+// No-op stubs when tracing is disabled.
+#[cfg(not(feature = "tracing-support"))]
+pub fn log_agent_started(_: &str, _: usize) {}
+#[cfg(not(feature = "tracing-support"))]
+pub fn log_agent_completed(_: &str, _: f64) {}
+#[cfg(not(feature = "tracing-support"))]
+pub fn log_tool_dispatch(_: &str, _: &str, _: &str) {}
+#[cfg(not(feature = "tracing-support"))]
+pub fn log_tool_result(_: &str, _: &str, _: bool, _: f64) {}
+#[cfg(not(feature = "tracing-support"))]
+pub fn log_agent_transfer(_: &str, _: &str) {}
+#[cfg(not(feature = "tracing-support"))]
+pub fn log_agent_error(_: &str, _: &str) {}
+#[cfg(not(feature = "tracing-support"))]
+pub fn log_agent_tool_dispatch(_: &str, _: &str) {}
+#[cfg(not(feature = "tracing-support"))]
+pub fn log_event_loop_lag(_: &str, _: u64) {}
