@@ -1,0 +1,181 @@
+//! P — Prompt composition.
+//!
+//! Compose prompt sections additively with `+`.
+
+/// A section of a prompt.
+#[derive(Clone, Debug)]
+pub struct PromptSection {
+    pub kind: PromptSectionKind,
+    pub content: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum PromptSectionKind {
+    Role,
+    Task,
+    Constraint,
+    Format,
+    Example,
+    Text,
+}
+
+impl PromptSection {
+    /// Render this section as a formatted string.
+    pub fn render(&self) -> String {
+        match &self.kind {
+            PromptSectionKind::Role => format!("You are {}.", self.content),
+            PromptSectionKind::Task => format!("Your task: {}", self.content),
+            PromptSectionKind::Constraint => format!("Constraint: {}", self.content),
+            PromptSectionKind::Format => format!("Output format: {}", self.content),
+            PromptSectionKind::Example => self.content.clone(),
+            PromptSectionKind::Text => self.content.clone(),
+        }
+    }
+}
+
+/// Compose two prompt sections with `+`.
+impl std::ops::Add for PromptSection {
+    type Output = PromptComposite;
+
+    fn add(self, rhs: PromptSection) -> Self::Output {
+        PromptComposite {
+            sections: vec![self, rhs],
+        }
+    }
+}
+
+/// A composed prompt built from multiple sections.
+#[derive(Clone, Debug)]
+pub struct PromptComposite {
+    pub sections: Vec<PromptSection>,
+}
+
+impl PromptComposite {
+    /// Render the full prompt by joining all sections.
+    pub fn render(&self) -> String {
+        self.sections
+            .iter()
+            .map(|s| s.render())
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    }
+}
+
+impl std::ops::Add<PromptSection> for PromptComposite {
+    type Output = PromptComposite;
+
+    fn add(mut self, rhs: PromptSection) -> Self::Output {
+        self.sections.push(rhs);
+        self
+    }
+}
+
+/// The `P` namespace — static factory methods for prompt sections.
+pub struct P;
+
+impl P {
+    /// Define the agent's role.
+    pub fn role(role: &str) -> PromptSection {
+        PromptSection {
+            kind: PromptSectionKind::Role,
+            content: role.to_string(),
+        }
+    }
+
+    /// Define the agent's task.
+    pub fn task(task: &str) -> PromptSection {
+        PromptSection {
+            kind: PromptSectionKind::Task,
+            content: task.to_string(),
+        }
+    }
+
+    /// Add a constraint.
+    pub fn constraint(c: &str) -> PromptSection {
+        PromptSection {
+            kind: PromptSectionKind::Constraint,
+            content: c.to_string(),
+        }
+    }
+
+    /// Specify output format.
+    pub fn format(f: &str) -> PromptSection {
+        PromptSection {
+            kind: PromptSectionKind::Format,
+            content: f.to_string(),
+        }
+    }
+
+    /// Add an input/output example.
+    pub fn example(input: &str, output: &str) -> PromptSection {
+        PromptSection {
+            kind: PromptSectionKind::Example,
+            content: format!("Example:\nInput: {input}\nOutput: {output}"),
+        }
+    }
+
+    /// Add free-form text.
+    pub fn text(t: &str) -> PromptSection {
+        PromptSection {
+            kind: PromptSectionKind::Text,
+            content: t.to_string(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn role_renders() {
+        let s = P::role("analyst");
+        assert_eq!(s.render(), "You are analyst.");
+    }
+
+    #[test]
+    fn task_renders() {
+        let s = P::task("analyze data");
+        assert_eq!(s.render(), "Your task: analyze data");
+    }
+
+    #[test]
+    fn constraint_renders() {
+        let s = P::constraint("be concise");
+        assert_eq!(s.render(), "Constraint: be concise");
+    }
+
+    #[test]
+    fn format_renders() {
+        let s = P::format("JSON");
+        assert_eq!(s.render(), "Output format: JSON");
+    }
+
+    #[test]
+    fn example_renders() {
+        let s = P::example("hello", "world");
+        assert!(s.render().contains("Input: hello"));
+        assert!(s.render().contains("Output: world"));
+    }
+
+    #[test]
+    fn compose_with_add() {
+        let prompt = P::role("analyst") + P::task("analyze data") + P::format("JSON");
+        assert_eq!(prompt.sections.len(), 3);
+    }
+
+    #[test]
+    fn composite_renders_all() {
+        let prompt = P::role("analyst") + P::task("analyze data");
+        let rendered = prompt.render();
+        assert!(rendered.contains("You are analyst."));
+        assert!(rendered.contains("Your task: analyze data"));
+    }
+
+    #[test]
+    fn section_kinds() {
+        assert_eq!(P::role("x").kind, PromptSectionKind::Role);
+        assert_eq!(P::task("x").kind, PromptSectionKind::Task);
+        assert_eq!(P::text("x").kind, PromptSectionKind::Text);
+    }
+}
