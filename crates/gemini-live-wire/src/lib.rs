@@ -21,6 +21,10 @@ pub mod vad;
 pub mod session;
 pub mod flow;
 pub mod telemetry;
+pub mod quick;
+
+// Top-level re-exports for convenience.
+pub use quick::{quick_connect, quick_connect_vertex};
 
 /// Convenient re-exports for wire-level usage.
 pub mod prelude {
@@ -55,4 +59,7 @@ pub mod prelude {
 
     // Telemetry
     pub use crate::telemetry::TelemetryConfig;
+
+    // Quick-start
+    pub use crate::quick::{quick_connect, quick_connect_vertex};
 }
