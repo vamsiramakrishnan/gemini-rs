@@ -27,6 +27,7 @@ pub mod prelude {
     // Protocol types
     pub use crate::protocol::types::*;
     pub use crate::protocol::messages::*;
+    pub use crate::protocol::Platform;
 
     // Transport
     pub use crate::transport::{connect, connect_with, Codec, CodecError, JsonCodec, TransportConfig};
