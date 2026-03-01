@@ -232,12 +232,88 @@ pub struct FunctionDeclaration {
     pub parameters: Option<serde_json::Value>,
 }
 
-/// A collection of function declarations to send during setup.
+/// A tool declaration sent in the setup message.
+/// Each Tool object can contain one of: function declarations, urlContext,
+/// googleSearch, codeExecution, or googleSearchRetrieval.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ToolDeclaration {
-    pub function_declarations: Vec<FunctionDeclaration>,
+pub struct Tool {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub function_declarations: Option<Vec<FunctionDeclaration>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url_context: Option<UrlContext>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub google_search: Option<GoogleSearch>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code_execution: Option<ToolCodeExecution>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub google_search_retrieval: Option<GoogleSearchRetrieval>,
 }
+
+impl Tool {
+    /// Create a tool with function declarations.
+    pub fn functions(declarations: Vec<FunctionDeclaration>) -> Self {
+        Self {
+            function_declarations: Some(declarations),
+            url_context: None,
+            google_search: None,
+            code_execution: None,
+            google_search_retrieval: None,
+        }
+    }
+
+    /// Create a URL context tool (enables the model to fetch and use web content).
+    pub fn url_context() -> Self {
+        Self {
+            function_declarations: None,
+            url_context: Some(UrlContext {}),
+            google_search: None,
+            code_execution: None,
+            google_search_retrieval: None,
+        }
+    }
+
+    /// Create a Google Search tool (enables grounded search).
+    pub fn google_search() -> Self {
+        Self {
+            function_declarations: None,
+            url_context: None,
+            google_search: Some(GoogleSearch {}),
+            code_execution: None,
+            google_search_retrieval: None,
+        }
+    }
+
+    /// Create a code execution tool.
+    pub fn code_execution() -> Self {
+        Self {
+            function_declarations: None,
+            url_context: None,
+            google_search: None,
+            code_execution: Some(ToolCodeExecution {}),
+            google_search_retrieval: None,
+        }
+    }
+}
+
+/// URL context tool configuration (empty — presence enables the feature).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UrlContext {}
+
+/// Google Search tool configuration (empty — presence enables the feature).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GoogleSearch {}
+
+/// Code execution tool configuration (empty — presence enables the feature).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolCodeExecution {}
+
+/// Google Search retrieval tool configuration.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GoogleSearchRetrieval {}
+
+/// Backward-compatible alias for `Tool`.
+pub type ToolDeclaration = Tool;
 
 /// Controls how and when the model uses tools.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -516,7 +592,7 @@ pub struct SessionConfig {
     pub model: GeminiModel,
     pub generation_config: GenerationConfig,
     pub system_instruction: Option<Content>,
-    pub tools: Vec<ToolDeclaration>,
+    pub tools: Vec<Tool>,
     pub tool_config: Option<ToolConfig>,
     pub input_audio_transcription: Option<InputAudioTranscription>,
     pub output_audio_transcription: Option<OutputAudioTranscription>,
@@ -635,8 +711,26 @@ impl SessionConfig {
     }
 
     /// Add a tool declaration.
-    pub fn add_tool(mut self, tool: ToolDeclaration) -> Self {
+    pub fn add_tool(mut self, tool: Tool) -> Self {
         self.tools.push(tool);
+        self
+    }
+
+    /// Enable URL context tool.
+    pub fn with_url_context(mut self) -> Self {
+        self.tools.push(Tool::url_context());
+        self
+    }
+
+    /// Enable Google Search grounding.
+    pub fn with_google_search(mut self) -> Self {
+        self.tools.push(Tool::google_search());
+        self
+    }
+
+    /// Enable code execution.
+    pub fn with_code_execution(mut self) -> Self {
+        self.tools.push(Tool::code_execution());
         self
     }
 
@@ -931,5 +1025,69 @@ mod tests {
     fn google_ai_model_uri_unchanged() {
         let config = SessionConfig::new("key").model(GeminiModel::Gemini2_0FlashLive);
         assert_eq!(config.model_uri(), "models/gemini-2.0-flash-live-001");
+    }
+
+    // ── Tool type tests ──
+
+    #[test]
+    fn tool_url_context_serialization() {
+        let tool = Tool::url_context();
+        let json = serde_json::to_string(&tool).unwrap();
+        assert!(json.contains("\"urlContext\""));
+        assert!(!json.contains("\"functionDeclarations\""));
+        assert!(!json.contains("\"googleSearch\""));
+    }
+
+    #[test]
+    fn tool_google_search_serialization() {
+        let tool = Tool::google_search();
+        let json = serde_json::to_string(&tool).unwrap();
+        assert!(json.contains("\"googleSearch\""));
+        assert!(!json.contains("\"urlContext\""));
+    }
+
+    #[test]
+    fn tool_code_execution_serialization() {
+        let tool = Tool::code_execution();
+        let json = serde_json::to_string(&tool).unwrap();
+        assert!(json.contains("\"codeExecution\""));
+    }
+
+    #[test]
+    fn tool_function_declarations_serialization() {
+        let tool = Tool::functions(vec![FunctionDeclaration {
+            name: "get_weather".to_string(),
+            description: "Get weather".to_string(),
+            parameters: None,
+        }]);
+        let json = serde_json::to_string(&tool).unwrap();
+        assert!(json.contains("\"functionDeclarations\""));
+        assert!(json.contains("\"get_weather\""));
+    }
+
+    #[test]
+    fn tool_url_context_is_empty_object() {
+        let tool = Tool::url_context();
+        let json = serde_json::to_string(&tool).unwrap();
+        assert_eq!(json, r#"{"urlContext":{}}"#);
+    }
+
+    #[test]
+    fn session_config_convenience_tools() {
+        let config = SessionConfig::new("key")
+            .with_url_context()
+            .with_google_search()
+            .with_code_execution();
+        assert_eq!(config.tools.len(), 3);
+        let json = config.to_setup_json();
+        assert!(json.contains("\"urlContext\""));
+        assert!(json.contains("\"googleSearch\""));
+        assert!(json.contains("\"codeExecution\""));
+    }
+
+    #[test]
+    fn tool_backward_compat_alias() {
+        // ToolDeclaration is a type alias for Tool
+        let _td: ToolDeclaration = Tool::functions(vec![]);
     }
 }

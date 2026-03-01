@@ -24,7 +24,7 @@ pub struct SetupPayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system_instruction: Option<Content>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub tools: Vec<ToolDeclaration>,
+    pub tools: Vec<Tool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_config: Option<ToolConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
