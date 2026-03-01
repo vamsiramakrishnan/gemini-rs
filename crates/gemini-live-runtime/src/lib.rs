@@ -6,6 +6,7 @@
 
 pub mod agent;
 pub mod agent_session;
+pub mod agent_tool;
 pub mod context;
 pub mod error;
 pub mod llm_agent;
@@ -16,6 +17,7 @@ pub mod telemetry;
 pub mod tool;
 
 // Re-export key types for convenience
+pub use agent_tool::AgentTool;
 pub use llm_agent::{LlmAgent, LlmAgentBuilder};
 pub use tool::TypedTool;
 

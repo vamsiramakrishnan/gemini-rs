@@ -11,7 +11,7 @@
 //! ONE queue, ONE consumer task, zero-copy on the hot path.
 
 use gemini_live_wire::prelude::{Content, FunctionResponse};
-use gemini_live_wire::session::{SessionEvent, SessionHandle, SessionWriter};
+use gemini_live_wire::session::{SessionError, SessionEvent, SessionHandle, SessionWriter};
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
@@ -168,6 +168,42 @@ impl AgentSession {
     /// Number of input-streaming subscribers (for diagnostics).
     pub fn input_subscriber_count(&self) -> usize {
         self.input_broadcast.receiver_count()
+    }
+}
+
+/// A SessionWriter that discards all writes.
+/// Used for isolated agent execution (AgentTool) where no real WebSocket exists.
+pub struct NoOpSessionWriter;
+
+#[async_trait::async_trait]
+impl SessionWriter for NoOpSessionWriter {
+    async fn send_audio(&self, _data: Vec<u8>) -> Result<(), SessionError> {
+        Ok(())
+    }
+    async fn send_text(&self, _text: String) -> Result<(), SessionError> {
+        Ok(())
+    }
+    async fn send_tool_response(
+        &self,
+        _responses: Vec<FunctionResponse>,
+    ) -> Result<(), SessionError> {
+        Ok(())
+    }
+    async fn send_client_content(
+        &self,
+        _turns: Vec<Content>,
+        _turn_complete: bool,
+    ) -> Result<(), SessionError> {
+        Ok(())
+    }
+    async fn signal_activity_start(&self) -> Result<(), SessionError> {
+        Ok(())
+    }
+    async fn signal_activity_end(&self) -> Result<(), SessionError> {
+        Ok(())
+    }
+    async fn disconnect(&self) -> Result<(), SessionError> {
+        Ok(())
     }
 }
 
