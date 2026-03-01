@@ -31,7 +31,7 @@ pub async fn connect(
     let (event_tx, _) = broadcast::channel(transport_config.event_channel_capacity);
     let (phase_tx, phase_rx) = watch::channel(SessionPhase::Disconnected);
 
-    let state = Arc::new(SessionState::new(phase_tx));
+    let state = Arc::new(SessionState::with_events(phase_tx, event_tx.clone()));
 
     let handle = SessionHandle::new(
         command_tx,

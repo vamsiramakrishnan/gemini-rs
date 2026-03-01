@@ -241,6 +241,8 @@ impl Default for Turn {
 pub struct SessionState {
     /// Current phase (updated atomically via watch channel).
     phase_tx: watch::Sender<SessionPhase>,
+    /// Optional broadcast sender to emit `PhaseChanged` events on transitions.
+    event_tx: Option<broadcast::Sender<SessionEvent>>,
     /// Session ID.
     pub session_id: String,
     /// Session resume handle from server.
@@ -252,10 +254,26 @@ pub struct SessionState {
 }
 
 impl SessionState {
-    /// Create new session state.
+    /// Create new session state (no `PhaseChanged` event emission).
     pub fn new(phase_tx: watch::Sender<SessionPhase>) -> Self {
         Self {
             phase_tx,
+            event_tx: None,
+            session_id: uuid::Uuid::new_v4().to_string(),
+            resume_handle: parking_lot::Mutex::new(None),
+            turns: parking_lot::Mutex::new(Vec::new()),
+            current_turn: parking_lot::Mutex::new(None),
+        }
+    }
+
+    /// Create new session state that emits `PhaseChanged` events on transitions.
+    pub fn with_events(
+        phase_tx: watch::Sender<SessionPhase>,
+        event_tx: broadcast::Sender<SessionEvent>,
+    ) -> Self {
+        Self {
+            phase_tx,
+            event_tx: Some(event_tx),
             session_id: uuid::Uuid::new_v4().to_string(),
             resume_handle: parking_lot::Mutex::new(None),
             turns: parking_lot::Mutex::new(Vec::new()),
@@ -269,12 +287,18 @@ impl SessionState {
     }
 
     /// Attempt a validated phase transition.
+    ///
+    /// If an `event_tx` was provided via [`with_events`](Self::with_events),
+    /// a [`SessionEvent::PhaseChanged`] is broadcast after a successful transition.
     pub fn transition_to(&self, to: SessionPhase) -> Result<SessionPhase, SessionError> {
         let from = self.phase();
         if !from.can_transition_to(&to) {
             return Err(SessionError::InvalidTransition { from, to });
         }
         self.phase_tx.send_replace(to);
+        if let Some(ref tx) = self.event_tx {
+            let _ = tx.send(SessionEvent::PhaseChanged(to));
+        }
         Ok(to)
     }
 
@@ -640,6 +664,32 @@ mod tests {
             to: SessionPhase::SetupSent,
         };
         assert_eq!(err.to_string(), "Invalid transition from Active to SetupSent");
+    }
+
+    // -----------------------------------------------------------------------
+    // PhaseChanged event emission tests
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn phase_changed_event_emitted_on_transition() {
+        let (phase_tx, _phase_rx) = watch::channel(SessionPhase::Disconnected);
+        let (event_tx, mut event_rx) = broadcast::channel(16);
+        let state = SessionState::with_events(phase_tx, event_tx);
+
+        state.transition_to(SessionPhase::Connecting).unwrap();
+
+        match event_rx.try_recv() {
+            Ok(SessionEvent::PhaseChanged(SessionPhase::Connecting)) => {}
+            other => panic!("expected PhaseChanged(Connecting), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn phase_changed_not_emitted_without_event_tx() {
+        let (phase_tx, _phase_rx) = watch::channel(SessionPhase::Disconnected);
+        let state = SessionState::new(phase_tx);
+        // Should not panic even though no event_tx
+        state.transition_to(SessionPhase::Connecting).unwrap();
     }
 
     // -----------------------------------------------------------------------
