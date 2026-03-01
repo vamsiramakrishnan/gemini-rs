@@ -354,6 +354,19 @@ async fn run_session(
                             let _ = ws_write.send(Message::Text(json)).await;
                         }
                     }
+                    Some(SessionCommand::SendClientContent { turns, turn_complete }) => {
+                        let msg = ClientContentMessage {
+                            client_content: ClientContentPayload {
+                                turns,
+                                turn_complete: Some(turn_complete),
+                            },
+                        };
+                        if let Ok(json) = serde_json::to_string(&msg) {
+                            if ws_write.send(Message::Text(json)).await.is_err() {
+                                return DisconnectReason::Error("Failed to send client content".to_string());
+                            }
+                        }
+                    }
                     Some(SessionCommand::Disconnect) => {
                         let _ = state.transition_to(SessionPhase::Disconnecting);
                         let _ = ws_write.send(Message::Close(None)).await;

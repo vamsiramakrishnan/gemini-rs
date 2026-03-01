@@ -7,7 +7,7 @@ pub mod state;
 
 pub use state::SessionPhase;
 
-use crate::protocol::{FunctionCall, FunctionResponse};
+use crate::protocol::{Content, FunctionCall, FunctionResponse};
 use std::sync::Arc;
 use std::time::Instant;
 use thiserror::Error;
@@ -109,6 +109,11 @@ pub enum SessionCommand {
     ActivityStart,
     /// Signal activity end (client VAD detected silence).
     ActivityEnd,
+    /// Send client content (conversation history or context injection).
+    SendClientContent {
+        turns: Vec<Content>,
+        turn_complete: bool,
+    },
     /// Gracefully disconnect.
     Disconnect,
 }
@@ -353,6 +358,17 @@ impl SessionHandle {
     /// Signal activity end (user stopped speaking).
     pub async fn signal_activity_end(&self) -> Result<(), SessionError> {
         self.send_command(SessionCommand::ActivityEnd).await
+    }
+
+    /// Send client content (turns + turn_complete flag).
+    /// Used for injecting conversation history, context, or multi-turn text.
+    pub async fn send_client_content(
+        &self,
+        turns: Vec<Content>,
+        turn_complete: bool,
+    ) -> Result<(), SessionError> {
+        self.send_command(SessionCommand::SendClientContent { turns, turn_complete })
+            .await
     }
 
     /// Gracefully disconnect the session.
