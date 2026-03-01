@@ -1,9 +1,12 @@
 //! Tool dispatch — regular, streaming, and input-streaming tools.
 
 use std::collections::HashMap;
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use schemars::JsonSchema;
+use serde::de::DeserializeOwned;
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -263,6 +266,95 @@ impl ToolFunction for SimpleTool {
     }
 }
 
+/// Type-safe function tool with auto-generated JSON Schema.
+///
+/// Unlike [`SimpleTool`] which takes raw `serde_json::Value` arguments and
+/// requires a manually written schema, `TypedTool` auto-generates the JSON
+/// Schema from a struct that derives [`schemars::JsonSchema`] and deserializes
+/// the arguments into that struct before calling the handler.
+///
+/// # Example
+///
+/// ```ignore
+/// use schemars::JsonSchema;
+/// use serde::Deserialize;
+///
+/// #[derive(Deserialize, JsonSchema)]
+/// struct WeatherArgs {
+///     /// The city to get weather for
+///     city: String,
+/// }
+///
+/// let tool = TypedTool::new::<WeatherArgs>(
+///     "get_weather",
+///     "Get current weather for a city",
+///     |args: WeatherArgs| async move {
+///         Ok(serde_json::json!({ "temp": 22, "city": args.city }))
+///     },
+/// );
+/// ```
+pub struct TypedTool<T: DeserializeOwned + JsonSchema + Send + Sync + 'static> {
+    name: String,
+    description: String,
+    schema: serde_json::Value,
+    handler: Box<
+        dyn Fn(T) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<serde_json::Value, ToolError>> + Send>>
+            + Send
+            + Sync,
+    >,
+    _phantom: PhantomData<T>,
+}
+
+impl<T: DeserializeOwned + JsonSchema + Send + Sync + 'static> TypedTool<T> {
+    /// Create a new typed function tool with auto-generated schema.
+    ///
+    /// The JSON Schema is derived from `T`'s [`JsonSchema`] implementation,
+    /// including any doc-comment descriptions on fields.
+    pub fn new<F, Fut>(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        handler: F,
+    ) -> Self
+    where
+        F: Fn(T) -> Fut + Send + Sync + 'static,
+        Fut: std::future::Future<Output = Result<serde_json::Value, ToolError>> + Send + 'static,
+    {
+        let root_schema = schemars::schema_for!(T);
+        let schema = serde_json::to_value(root_schema)
+            .expect("schemars schema should serialize to JSON");
+
+        Self {
+            name: name.into(),
+            description: description.into(),
+            schema,
+            handler: Box::new(move |args| Box::pin(handler(args))),
+            _phantom: PhantomData,
+        }
+    }
+}
+
+#[async_trait]
+impl<T: DeserializeOwned + JsonSchema + Send + Sync + 'static> ToolFunction for TypedTool<T> {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn description(&self) -> &str {
+        &self.description
+    }
+
+    fn parameters(&self) -> Option<serde_json::Value> {
+        Some(self.schema.clone())
+    }
+
+    async fn call(&self, args: serde_json::Value) -> Result<serde_json::Value, ToolError> {
+        let typed_args: T = serde_json::from_value(args).map_err(|e| {
+            ToolError::InvalidArgs(format!("Failed to deserialize arguments: {e}"))
+        })?;
+        (self.handler)(typed_args).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -380,5 +472,131 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result["sum"], 7.0);
+    }
+
+    // --- TypedTool tests ---
+
+    #[derive(serde::Deserialize, JsonSchema)]
+    struct WeatherArgs {
+        /// The city to get weather for
+        city: String,
+        /// Temperature units (celsius or fahrenheit)
+        #[serde(default = "default_units")]
+        units: String,
+    }
+
+    fn default_units() -> String {
+        "celsius".to_string()
+    }
+
+    #[test]
+    fn typed_tool_auto_generates_schema() {
+        let tool = TypedTool::new(
+            "get_weather",
+            "Get current weather for a city",
+            |_args: WeatherArgs| async move { Ok(json!({})) },
+        );
+
+        let params = tool.parameters().expect("should have parameters");
+
+        // The schema should be an object type with "city" and "units" properties
+        let props = &params["properties"];
+        assert!(
+            props.get("city").is_some(),
+            "schema should contain 'city' property"
+        );
+        assert!(
+            props.get("units").is_some(),
+            "schema should contain 'units' property"
+        );
+
+        // "city" should be required (no default), "units" has a default so may not be
+        let required = params["required"]
+            .as_array()
+            .expect("should have required array");
+        let required_names: Vec<&str> = required.iter().filter_map(|v| v.as_str()).collect();
+        assert!(
+            required_names.contains(&"city"),
+            "city should be required"
+        );
+    }
+
+    #[tokio::test]
+    async fn typed_tool_deserializes_args() {
+        let tool = TypedTool::new(
+            "get_weather",
+            "Get current weather for a city",
+            |args: WeatherArgs| async move {
+                Ok(json!({
+                    "temp": 22,
+                    "city": args.city,
+                    "units": args.units,
+                }))
+            },
+        );
+
+        let result = tool
+            .call(json!({"city": "London", "units": "fahrenheit"}))
+            .await
+            .unwrap();
+        assert_eq!(result["city"], "London");
+        assert_eq!(result["units"], "fahrenheit");
+        assert_eq!(result["temp"], 22);
+    }
+
+    #[tokio::test]
+    async fn typed_tool_invalid_args_returns_error() {
+        let tool = TypedTool::new(
+            "get_weather",
+            "Get current weather for a city",
+            |_args: WeatherArgs| async move { Ok(json!({})) },
+        );
+
+        // Missing required field "city"
+        let result = tool.call(json!({"units": "celsius"})).await;
+        assert!(result.is_err(), "should fail with missing required field");
+        let err = result.unwrap_err();
+        match &err {
+            ToolError::InvalidArgs(msg) => {
+                assert!(
+                    msg.contains("city"),
+                    "error message should mention the missing field: {msg}"
+                );
+            }
+            other => panic!("expected ToolError::InvalidArgs, got: {other:?}"),
+        }
+
+        // Wrong type for "city" (number instead of string)
+        let result = tool
+            .call(json!({"city": 12345}))
+            .await;
+        assert!(result.is_err(), "should fail with wrong type");
+    }
+
+    #[tokio::test]
+    async fn typed_tool_registers_in_dispatcher() {
+        let tool = TypedTool::new(
+            "get_weather",
+            "Get current weather for a city",
+            |args: WeatherArgs| async move {
+                Ok(json!({"city": args.city}))
+            },
+        );
+
+        let mut dispatcher = ToolDispatcher::new();
+        dispatcher.register_function(Arc::new(tool));
+
+        assert_eq!(dispatcher.classify("get_weather"), Some(ToolClass::Regular));
+        assert_eq!(dispatcher.len(), 1);
+
+        let result = dispatcher
+            .call_function("get_weather", json!({"city": "Paris"}))
+            .await
+            .unwrap();
+        assert_eq!(result["city"], "Paris");
+
+        // Verify it appears in tool declarations
+        let decls = dispatcher.to_tool_declarations();
+        assert_eq!(decls.len(), 1);
     }
 }

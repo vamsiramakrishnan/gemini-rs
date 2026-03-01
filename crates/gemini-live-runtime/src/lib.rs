@@ -13,5 +13,8 @@ pub mod router;
 pub mod state;
 pub mod tool;
 
+// Re-export key tool types for convenience
+pub use tool::TypedTool;
+
 // Re-export wire types that runtime users need
 pub use gemini_live_wire;
