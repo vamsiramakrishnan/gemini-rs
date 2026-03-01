@@ -1,0 +1,18 @@
+[package]
+name = "gemini-live-ui"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+gemini-live-wire = { path = "../../crates/gemini-live-wire" }
+tokio = { version = "1.0", features = ["full"] }
+axum = { version = "0.7", features = ["ws", "macros"] }
+tower-http = { version = "0.5", features = ["fs", "cors"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+futures = "0.3"
+tokio-stream = "0.1"
+dotenvy = "0.15"
+base64 = "0.22"

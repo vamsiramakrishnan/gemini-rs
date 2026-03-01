@@ -2,9 +2,6 @@
 resolver = "2"
 members = [
     "crates/gemini-live-wire",
-]
-# cookbooks/ui excluded until Layer 2 crate replaces old gemini-live-rs dependency
-exclude = [
     "cookbooks/ui",
 ]
 
