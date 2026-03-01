@@ -40,8 +40,8 @@ pub mod prelude {
 
     // Session
     pub use crate::session::{
-        AuthError, SessionCommand, SessionError, SessionEvent, SessionHandle, SessionPhase,
-        SessionReader, SessionWriter, SetupError, WebSocketError,
+        recv_event, AuthError, SessionCommand, SessionError, SessionEvent, SessionHandle,
+        SessionPhase, SessionReader, SessionWriter, SetupError, WebSocketError,
     };
 
     // Buffers

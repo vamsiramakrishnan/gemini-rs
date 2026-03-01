@@ -13,6 +13,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use thiserror::Error;
 use tokio::sync::{broadcast, mpsc, watch};
+use tokio::task::JoinHandle;
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -397,6 +398,12 @@ pub struct SessionHandle {
     pub state: Arc<SessionState>,
     /// Phase watch receiver for async observation.
     phase_rx: watch::Receiver<SessionPhase>,
+    /// Handle to the spawned connection loop task.
+    ///
+    /// Wrapped in `Arc<Mutex<Option<...>>>` so that `SessionHandle` remains
+    /// `Clone` (since `JoinHandle` is not `Clone`). The first call to
+    /// [`join()`](Self::join) takes the handle; subsequent calls return `Ok(())`.
+    task: Arc<tokio::sync::Mutex<Option<JoinHandle<()>>>>,
 }
 
 impl SessionHandle {
@@ -412,6 +419,33 @@ impl SessionHandle {
             event_tx,
             state,
             phase_rx,
+            task: Arc::new(tokio::sync::Mutex::new(None)),
+        }
+    }
+
+    /// Store the connection loop task handle.
+    ///
+    /// Called by the transport layer after spawning the connection loop.
+    pub fn set_task(&self, handle: JoinHandle<()>) {
+        // Use try_lock to avoid blocking — this is only called once at startup.
+        if let Ok(mut guard) = self.task.try_lock() {
+            *guard = Some(handle);
+        }
+    }
+
+    /// Wait for the session connection loop to complete.
+    ///
+    /// Returns `Ok(())` when the session disconnects normally.
+    /// Returns `Err` if the connection task panicked.
+    ///
+    /// Only the first call across all clones actually awaits the task;
+    /// subsequent calls return `Ok(())` immediately.
+    pub async fn join(&self) -> Result<(), tokio::task::JoinError> {
+        let task = self.task.lock().await.take();
+        if let Some(handle) = task {
+            handle.await
+        } else {
+            Ok(())
         }
     }
 
@@ -557,6 +591,40 @@ impl SessionReader for SessionHandle {
 
     fn session_id(&self) -> &str {
         &self.state.session_id
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Broadcast lag helper
+// ---------------------------------------------------------------------------
+
+/// Receive the next event from a broadcast receiver, handling lag gracefully.
+///
+/// If the receiver falls behind (too slow to keep up with the sender), the
+/// skipped events are logged and the next available event is returned.
+/// Returns `None` when the channel is closed.
+///
+/// # Example
+///
+/// ```ignore
+/// let mut events = handle.subscribe();
+/// while let Some(event) = recv_event(&mut events).await {
+///     // handle event
+/// }
+/// ```
+pub async fn recv_event(rx: &mut broadcast::Receiver<SessionEvent>) -> Option<SessionEvent> {
+    loop {
+        match rx.recv().await {
+            Ok(event) => return Some(event),
+            Err(broadcast::error::RecvError::Lagged(n)) => {
+                #[cfg(feature = "tracing-support")]
+                tracing::warn!(skipped = n, "Event subscriber lagged, skipped {n} events");
+                // Without tracing, silently continue
+                let _ = n;
+                continue;
+            }
+            Err(broadcast::error::RecvError::Closed) => return None,
+        }
     }
 }
 
@@ -813,5 +881,122 @@ mod tests {
 
         let session_err = SessionError::WebSocket(WebSocketError::ProtocolError("test".into()));
         let _ = session_err.clone();
+    }
+
+    // -----------------------------------------------------------------------
+    // JoinHandle tracking tests
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn session_handle_join_returns_ok_after_task_completes() {
+        let (command_tx, _command_rx) = mpsc::channel(8);
+        let (event_tx, _) = broadcast::channel(16);
+        let (phase_tx, phase_rx) = watch::channel(SessionPhase::Disconnected);
+        let state = Arc::new(SessionState::with_events(phase_tx, event_tx.clone()));
+
+        let handle = SessionHandle::new(command_tx, event_tx, state, phase_rx);
+
+        // Spawn a trivial task that completes immediately
+        let task = tokio::spawn(async {});
+        handle.set_task(task);
+
+        // join() should return Ok(())
+        let result = handle.join().await;
+        assert!(result.is_ok(), "join() should return Ok after task completes");
+    }
+
+    #[tokio::test]
+    async fn session_handle_join_without_task_returns_ok() {
+        let (command_tx, _command_rx) = mpsc::channel(8);
+        let (event_tx, _) = broadcast::channel(16);
+        let (phase_tx, phase_rx) = watch::channel(SessionPhase::Disconnected);
+        let state = Arc::new(SessionState::with_events(phase_tx, event_tx.clone()));
+
+        let handle = SessionHandle::new(command_tx, event_tx, state, phase_rx);
+
+        // join() without set_task should return Ok immediately
+        let result = handle.join().await;
+        assert!(result.is_ok(), "join() without task should return Ok");
+    }
+
+    #[tokio::test]
+    async fn session_handle_join_idempotent() {
+        let (command_tx, _command_rx) = mpsc::channel(8);
+        let (event_tx, _) = broadcast::channel(16);
+        let (phase_tx, phase_rx) = watch::channel(SessionPhase::Disconnected);
+        let state = Arc::new(SessionState::with_events(phase_tx, event_tx.clone()));
+
+        let handle = SessionHandle::new(command_tx, event_tx, state, phase_rx);
+
+        let task = tokio::spawn(async {});
+        handle.set_task(task);
+
+        // First join takes the handle
+        assert!(handle.join().await.is_ok());
+        // Second join returns Ok immediately (handle already taken)
+        assert!(handle.join().await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn session_handle_join_works_on_clone() {
+        let (command_tx, _command_rx) = mpsc::channel(8);
+        let (event_tx, _) = broadcast::channel(16);
+        let (phase_tx, phase_rx) = watch::channel(SessionPhase::Disconnected);
+        let state = Arc::new(SessionState::with_events(phase_tx, event_tx.clone()));
+
+        let handle = SessionHandle::new(command_tx, event_tx, state, phase_rx);
+        let handle_clone = handle.clone();
+
+        let task = tokio::spawn(async {});
+        handle.set_task(task);
+
+        // join() on clone should work (shares the Arc)
+        let result = handle_clone.join().await;
+        assert!(result.is_ok(), "join() on clone should work");
+
+        // Original handle's join should now return Ok (handle already taken)
+        assert!(handle.join().await.is_ok());
+    }
+
+    // -----------------------------------------------------------------------
+    // recv_event tests
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn recv_event_returns_events_normally() {
+        let (tx, mut rx) = broadcast::channel(16);
+
+        tx.send(SessionEvent::Connected).unwrap();
+        tx.send(SessionEvent::TurnComplete).unwrap();
+
+        let event = recv_event(&mut rx).await;
+        assert!(matches!(event, Some(SessionEvent::Connected)));
+
+        let event = recv_event(&mut rx).await;
+        assert!(matches!(event, Some(SessionEvent::TurnComplete)));
+    }
+
+    #[tokio::test]
+    async fn recv_event_returns_none_on_closed_channel() {
+        let (tx, mut rx) = broadcast::channel::<SessionEvent>(16);
+        drop(tx);
+
+        let event = recv_event(&mut rx).await;
+        assert!(event.is_none(), "should return None when channel is closed");
+    }
+
+    #[tokio::test]
+    async fn recv_event_handles_lag() {
+        // Create a tiny broadcast channel (capacity 2)
+        let (tx, mut rx) = broadcast::channel(2);
+
+        // Send 4 events — the receiver will lag behind
+        for i in 0..4 {
+            let _ = tx.send(SessionEvent::TextDelta(format!("msg{i}")));
+        }
+
+        // recv_event should skip the lagged events and return the next available
+        let event = recv_event(&mut rx).await;
+        assert!(event.is_some(), "should get an event after lag");
     }
 }

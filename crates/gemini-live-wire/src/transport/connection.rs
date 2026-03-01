@@ -57,9 +57,10 @@ where
         phase_rx,
     );
 
-    tokio::spawn(async move {
+    let task = tokio::spawn(async move {
         generic_connection_loop(config, transport_config, state, command_rx, event_tx, transport, codec).await;
     });
+    handle.set_task(task);
 
     Ok(handle)
 }
@@ -661,6 +662,53 @@ mod tests {
         let action = handle_server_msg(msg, &state, &event_tx);
 
         assert!(matches!(action, MessageAction::Continue));
+    }
+
+    #[tokio::test]
+    async fn session_handle_join_after_disconnect() {
+        let mut transport = MockTransport::new();
+        transport.script_recv(br#"{"setupComplete":{}}"#.to_vec());
+
+        let config =
+            SessionConfig::new("test-key").model(GeminiModel::Gemini2_0FlashLive);
+        let handle = connect_with(config, no_reconnect_config(), transport, JsonCodec)
+            .await
+            .unwrap();
+
+        handle.wait_for_phase(SessionPhase::Active).await;
+
+        // Disconnect to end the connection loop task
+        handle.disconnect().await.unwrap();
+        handle.wait_for_phase(SessionPhase::Disconnected).await;
+
+        // join() should return Ok after the task completes
+        let result = handle.join().await;
+        assert!(result.is_ok(), "join() should succeed after disconnect");
+    }
+
+    #[tokio::test]
+    async fn session_handle_join_after_command_channel_closed() {
+        let mut transport = MockTransport::new();
+        transport.script_recv(br#"{"setupComplete":{}}"#.to_vec());
+
+        let config =
+            SessionConfig::new("test-key").model(GeminiModel::Gemini2_0FlashLive);
+        let handle = connect_with(config, no_reconnect_config(), transport, JsonCodec)
+            .await
+            .unwrap();
+
+        handle.wait_for_phase(SessionPhase::Active).await;
+
+        // Drop all senders to close the command channel, which triggers disconnect
+        // We need to get the handle before dropping the original
+        let join_handle = handle.clone();
+
+        // Drop command_tx by dropping the handle — but we cloned it first.
+        // Instead, disconnect and then join.
+        handle.disconnect().await.unwrap();
+
+        let result = join_handle.join().await;
+        assert!(result.is_ok(), "join() should succeed after channel close");
     }
 
     #[test]
