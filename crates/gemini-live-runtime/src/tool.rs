@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use schemars::JsonSchema;
@@ -73,10 +74,14 @@ pub struct ActiveStreamingTool {
     pub cancel: CancellationToken,
 }
 
+/// Default timeout for tool execution (30 seconds).
+const DEFAULT_TOOL_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Routes function calls to the right tool implementation.
 pub struct ToolDispatcher {
     tools: HashMap<String, ToolKind>,
     active: Arc<tokio::sync::Mutex<HashMap<String, ActiveStreamingTool>>>,
+    default_timeout: Duration,
 }
 
 impl ToolDispatcher {
@@ -84,7 +89,19 @@ impl ToolDispatcher {
         Self {
             tools: HashMap::new(),
             active: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            default_timeout: DEFAULT_TOOL_TIMEOUT,
         }
+    }
+
+    /// Set the default timeout for tool calls.
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.default_timeout = timeout;
+        self
+    }
+
+    /// Returns the configured default timeout.
+    pub fn default_timeout(&self) -> Duration {
+        self.default_timeout
     }
 
     /// Register a regular function tool.
@@ -114,18 +131,65 @@ impl ToolDispatcher {
         })
     }
 
-    /// Call a regular function tool by name.
+    /// Call a regular function tool by name, using the default timeout.
     pub async fn call_function(
         &self,
         name: &str,
         args: serde_json::Value,
     ) -> Result<serde_json::Value, ToolError> {
-        match self.tools.get(name) {
-            Some(ToolKind::Function(f)) => f.call(args).await,
-            Some(_) => Err(ToolError::Other(format!(
-                "{name} is not a regular function tool"
-            ))),
-            None => Err(ToolError::NotFound(name.to_string())),
+        self.call_function_with_timeout(name, args, self.default_timeout)
+            .await
+    }
+
+    /// Call a regular function tool by name with an explicit timeout.
+    ///
+    /// If the tool does not complete within the given duration, its future is
+    /// dropped (cancelling it) and `ToolError::Timeout` is returned.
+    pub async fn call_function_with_timeout(
+        &self,
+        name: &str,
+        args: serde_json::Value,
+        timeout: Duration,
+    ) -> Result<serde_json::Value, ToolError> {
+        let func = match self.tools.get(name) {
+            Some(ToolKind::Function(f)) => f.clone(),
+            Some(_) => {
+                return Err(ToolError::Other(format!(
+                    "{name} is not a regular function tool"
+                )))
+            }
+            None => return Err(ToolError::NotFound(name.to_string())),
+        };
+
+        match tokio::time::timeout(timeout, func.call(args)).await {
+            Ok(result) => result,
+            Err(_elapsed) => Err(ToolError::Timeout(timeout)),
+        }
+    }
+
+    /// Call a regular function tool by name, racing against a cancellation token.
+    ///
+    /// If the token is cancelled before the tool completes, its future is
+    /// dropped and `ToolError::Cancelled` is returned.
+    pub async fn call_function_with_cancel(
+        &self,
+        name: &str,
+        args: serde_json::Value,
+        cancel: CancellationToken,
+    ) -> Result<serde_json::Value, ToolError> {
+        let func = match self.tools.get(name) {
+            Some(ToolKind::Function(f)) => f.clone(),
+            Some(_) => {
+                return Err(ToolError::Other(format!(
+                    "{name} is not a regular function tool"
+                )))
+            }
+            None => return Err(ToolError::NotFound(name.to_string())),
+        };
+
+        tokio::select! {
+            result = func.call(args) => result,
+            _ = cancel.cancelled() => Err(ToolError::Cancelled),
         }
     }
 
@@ -598,5 +662,106 @@ mod tests {
         // Verify it appears in tool declarations
         let decls = dispatcher.to_tool_declarations();
         assert_eq!(decls.len(), 1);
+    }
+
+    // --- Timeout and cancellation tests ---
+
+    /// A tool that sleeps forever (until cancelled/timed out).
+    struct SlowTool;
+
+    #[async_trait]
+    impl ToolFunction for SlowTool {
+        fn name(&self) -> &str {
+            "slow_tool"
+        }
+        fn description(&self) -> &str {
+            "A tool that never completes"
+        }
+        fn parameters(&self) -> Option<serde_json::Value> {
+            None
+        }
+        async fn call(&self, _args: serde_json::Value) -> Result<serde_json::Value, ToolError> {
+            // Sleep effectively forever
+            tokio::time::sleep(Duration::from_secs(3600)).await;
+            Ok(json!({"result": "should never reach here"}))
+        }
+    }
+
+    #[tokio::test]
+    async fn tool_timeout_returns_error() {
+        let mut dispatcher = ToolDispatcher::new();
+        dispatcher.register_function(Arc::new(SlowTool));
+
+        let timeout = Duration::from_millis(50);
+        let result = dispatcher
+            .call_function_with_timeout("slow_tool", json!({}), timeout)
+            .await;
+
+        match result {
+            Err(ToolError::Timeout(d)) => assert_eq!(d, timeout),
+            other => panic!("expected ToolError::Timeout, got: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn tool_completes_before_timeout() {
+        let mut dispatcher = ToolDispatcher::new();
+        dispatcher.register_function(Arc::new(MockTool));
+
+        let result = dispatcher
+            .call_function_with_timeout("mock_tool", json!({}), Duration::from_secs(5))
+            .await
+            .unwrap();
+        assert_eq!(result["result"], "ok");
+    }
+
+    #[tokio::test]
+    async fn tool_cancelled_returns_error() {
+        let mut dispatcher = ToolDispatcher::new();
+        dispatcher.register_function(Arc::new(SlowTool));
+
+        let cancel = CancellationToken::new();
+        let cancel_clone = cancel.clone();
+
+        // Cancel after a short delay
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            cancel_clone.cancel();
+        });
+
+        let result = dispatcher
+            .call_function_with_cancel("slow_tool", json!({}), cancel)
+            .await;
+
+        match result {
+            Err(ToolError::Cancelled) => {} // expected
+            other => panic!("expected ToolError::Cancelled, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn default_timeout_is_30s() {
+        let dispatcher = ToolDispatcher::new();
+        assert_eq!(dispatcher.default_timeout(), Duration::from_secs(30));
+    }
+
+    #[test]
+    fn with_timeout_overrides_default() {
+        let dispatcher = ToolDispatcher::new().with_timeout(Duration::from_secs(10));
+        assert_eq!(dispatcher.default_timeout(), Duration::from_secs(10));
+    }
+
+    #[tokio::test]
+    async fn call_function_uses_default_timeout() {
+        // Set a very short default timeout so the slow tool times out
+        let mut dispatcher = ToolDispatcher::new().with_timeout(Duration::from_millis(50));
+        dispatcher.register_function(Arc::new(SlowTool));
+
+        let result = dispatcher.call_function("slow_tool", json!({})).await;
+
+        match result {
+            Err(ToolError::Timeout(d)) => assert_eq!(d, Duration::from_millis(50)),
+            other => panic!("expected ToolError::Timeout, got: {other:?}"),
+        }
     }
 }

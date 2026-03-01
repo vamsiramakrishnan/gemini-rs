@@ -40,6 +40,9 @@ pub enum ToolError {
     #[error("Tool cancelled")]
     Cancelled,
 
+    #[error("Tool execution timed out after {0:?}")]
+    Timeout(std::time::Duration),
+
     #[error("{0}")]
     Other(String),
 }
