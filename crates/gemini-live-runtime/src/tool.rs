@@ -226,6 +226,11 @@ impl ToolDispatcher {
         }
     }
 
+    /// Store an active streaming tool (for cancellation tracking).
+    pub(crate) async fn store_active(&self, id: String, tool: ActiveStreamingTool) {
+        self.active.lock().await.insert(id, tool);
+    }
+
     /// Cancel streaming tools by IDs.
     pub async fn cancel_by_ids(&self, ids: &[String]) {
         let mut active = self.active.lock().await;
