@@ -4,6 +4,7 @@
 //! Provides the Agent trait, AgentSession (intercepting wrapper around SessionHandle),
 //! tool dispatch, streaming tools, agent transfer, and middleware.
 
+pub mod agent;
 pub mod agent_session;
 pub mod context;
 pub mod error;
