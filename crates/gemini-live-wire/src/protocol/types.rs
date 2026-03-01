@@ -369,6 +369,20 @@ impl Tool {
     }
 }
 
+/// Declares tools for a Gemini session setup message.
+/// Implement this trait to provide tools from any source (runtime ToolDispatcher, etc.).
+pub trait ToolProvider: Send + Sync + 'static {
+    /// Return tool declarations for the setup message.
+    fn declarations(&self) -> Vec<Tool>;
+}
+
+/// `Vec<Tool>` is a trivial `ToolProvider`.
+impl ToolProvider for Vec<Tool> {
+    fn declarations(&self) -> Vec<Tool> {
+        self.clone()
+    }
+}
+
 /// URL context tool configuration (empty — presence enables the feature).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UrlContext {}
@@ -1448,5 +1462,31 @@ mod tests {
         assert!(json.contains("\"enableAffectiveDialog\""));
         assert!(json.contains("\"seed\""));
         assert!(json.contains("\"mediaResolution\""));
+    }
+
+    // ── ToolProvider trait tests ──
+
+    #[test]
+    fn vec_tool_implements_tool_provider() {
+        fn assert_impl<T: ToolProvider>() {}
+        assert_impl::<Vec<Tool>>();
+    }
+
+    #[test]
+    fn tool_provider_is_object_safe() {
+        fn _assert(_: &dyn ToolProvider) {}
+    }
+
+    #[test]
+    fn empty_vec_tool_provider() {
+        let tools: Vec<Tool> = vec![];
+        assert!(tools.declarations().is_empty());
+    }
+
+    #[test]
+    fn vec_tool_provider_round_trip() {
+        let tools = vec![Tool::google_search()];
+        let decls = tools.declarations();
+        assert_eq!(decls.len(), 1);
     }
 }

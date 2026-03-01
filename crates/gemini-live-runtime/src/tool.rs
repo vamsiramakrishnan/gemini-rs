@@ -208,6 +208,12 @@ impl Default for ToolDispatcher {
     }
 }
 
+impl gemini_live_wire::prelude::ToolProvider for ToolDispatcher {
+    fn declarations(&self) -> Vec<gemini_live_wire::prelude::Tool> {
+        self.to_tool_declarations()
+    }
+}
+
 /// Simple function tool that wraps an async closure.
 pub struct SimpleTool {
     name: String,
@@ -343,6 +349,15 @@ mod tests {
             Err(ToolError::ExecutionFailed("boom".to_string())),
         );
         assert!(resp.response["error"].as_str().unwrap().contains("boom"));
+    }
+
+    #[test]
+    fn tool_dispatcher_implements_tool_provider() {
+        use gemini_live_wire::prelude::ToolProvider;
+        let mut dispatcher = ToolDispatcher::new();
+        dispatcher.register_function(Arc::new(MockTool));
+        let decls = dispatcher.declarations();
+        assert_eq!(decls.len(), 1);
     }
 
     #[tokio::test]
