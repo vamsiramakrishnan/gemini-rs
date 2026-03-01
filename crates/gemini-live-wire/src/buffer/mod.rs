@@ -3,8 +3,10 @@
 //! - [`SpscRing`]: Single-producer single-consumer ring buffer for zero-copy audio streaming.
 //! - [`AudioJitterBuffer`]: Adaptive jitter buffer for smooth playback of network audio.
 
+pub mod convert;
 pub mod jitter;
 
+pub use convert::{bytes_to_i16, i16_to_bytes, into_shared};
 pub use jitter::{AudioJitterBuffer, JitterConfig};
 
 use std::sync::atomic::{AtomicUsize, Ordering};

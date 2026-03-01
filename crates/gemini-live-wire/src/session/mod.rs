@@ -132,7 +132,10 @@ pub enum SessionEvent {
     /// Complete text of a finished model turn.
     TextComplete(String),
     /// Audio data from model response (PCM16 samples, base64-decoded).
-    AudioData(Vec<u8>),
+    ///
+    /// Uses [`bytes::Bytes`] for zero-copy fan-out: cloning a `Bytes` handle
+    /// bumps an `Arc` refcount instead of copying the underlying data.
+    AudioData(bytes::Bytes),
     /// Input transcription from server.
     InputTranscription(String),
     /// Output transcription from server.

@@ -36,6 +36,7 @@ uuid = { version = "1", features = ["v4"] }
 
 # Byte manipulation
 bytes = "1"
+bytemuck = { version = "1", features = ["derive"] }
 
 # Concurrency
 parking_lot = "0.12"

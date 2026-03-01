@@ -379,7 +379,7 @@ fn handle_server_msg(
                                     .decode(&inline_data.data)
                             {
                                 let _ =
-                                    event_tx.send(SessionEvent::AudioData(audio_bytes));
+                                    event_tx.send(SessionEvent::AudioData(bytes::Bytes::from(audio_bytes)));
                             }
                         }
                         _ => {}

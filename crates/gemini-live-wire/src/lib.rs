@@ -46,6 +46,7 @@ pub mod prelude {
 
     // Buffers
     pub use crate::buffer::{AudioJitterBuffer, JitterConfig, SpscRing};
+    pub use crate::buffer::{bytes_to_i16, i16_to_bytes, into_shared};
 
     // VAD
     #[cfg(feature = "vad")]
