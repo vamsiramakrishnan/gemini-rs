@@ -1,17 +1,18 @@
 //! AgentSession — intercepting wrapper around SessionHandle.
 //!
 //! Replaces ADK Python's LiveRequestQueue. Instead of adding a second queue
-//! on top of SessionHandle's existing mpsc channel, this wraps SessionHandle
+//! on top of SessionHandle's existing mpsc channel, this wraps a SessionWriter
 //! and intercepts sends for: (1) input fan-out to streaming tools,
 //! (2) middleware hooks, (3) state tracking.
 //!
-//! Data flow: App → AgentSession → SessionHandle → WebSocket
+//! Data flow: App → AgentSession → SessionWriter → WebSocket
 //!                                ↘ broadcast to input-streaming tools
 //!
 //! ONE queue, ONE consumer task, zero-copy on the hot path.
 
 use gemini_live_wire::prelude::{Content, FunctionResponse};
-use gemini_live_wire::session::{SessionEvent, SessionHandle};
+use gemini_live_wire::session::{SessionEvent, SessionHandle, SessionWriter};
+use std::sync::Arc;
 use tokio::sync::broadcast;
 
 use crate::error::AgentError;
@@ -31,14 +32,16 @@ pub enum InputEvent {
     ActivityEnd,
 }
 
-/// Intercepting wrapper around SessionHandle.
+/// Intercepting wrapper around a SessionWriter.
 ///
 /// Adds input fan-out, middleware hooks, and state tracking without
 /// introducing a second queue (avoids double-queuing).
 #[derive(Clone)]
 pub struct AgentSession {
-    /// The underlying wire-level session (Layer 0).
-    session: SessionHandle,
+    /// The underlying wire-level session writer (Layer 0).
+    writer: Arc<dyn SessionWriter>,
+    /// Event subscription source.
+    event_tx: broadcast::Sender<SessionEvent>,
     /// Fan-out for input-streaming tools.
     /// Zero-cost when no tools are subscribed (receiver_count == 0).
     input_broadcast: broadcast::Sender<InputEvent>,
@@ -50,8 +53,24 @@ impl AgentSession {
     /// Create a new AgentSession wrapping a SessionHandle.
     pub fn new(session: SessionHandle) -> Self {
         let (input_broadcast, _) = broadcast::channel(256);
+        let event_tx = session.event_sender().clone();
         Self {
-            session,
+            writer: Arc::new(session),
+            event_tx,
+            input_broadcast,
+            state: State::new(),
+        }
+    }
+
+    /// Create from a trait-object writer (enables mock testing and middleware injection).
+    pub fn from_writer(
+        writer: Arc<dyn SessionWriter>,
+        event_tx: broadcast::Sender<SessionEvent>,
+    ) -> Self {
+        let (input_broadcast, _) = broadcast::channel(256);
+        Self {
+            writer,
+            event_tx,
             input_broadcast,
             state: State::new(),
         }
@@ -64,7 +83,7 @@ impl AgentSession {
             let _ = self.input_broadcast.send(InputEvent::Audio(data.clone()));
         }
         // Forward directly to Layer 0 (ONE hop to WebSocket)
-        self.session.send_audio(data).await.map_err(AgentError::Session)
+        self.writer.send_audio(data).await.map_err(AgentError::Session)
     }
 
     /// Send a text message.
@@ -73,7 +92,7 @@ impl AgentSession {
         if self.input_broadcast.receiver_count() > 0 {
             let _ = self.input_broadcast.send(InputEvent::Text(t.clone()));
         }
-        self.session.send_text(t).await.map_err(AgentError::Session)
+        self.writer.send_text(t).await.map_err(AgentError::Session)
     }
 
     /// Send tool responses.
@@ -81,7 +100,7 @@ impl AgentSession {
         &self,
         responses: Vec<FunctionResponse>,
     ) -> Result<(), AgentError> {
-        self.session
+        self.writer
             .send_tool_response(responses)
             .await
             .map_err(AgentError::Session)
@@ -93,7 +112,7 @@ impl AgentSession {
         turns: Vec<Content>,
         turn_complete: bool,
     ) -> Result<(), AgentError> {
-        self.session
+        self.writer
             .send_client_content(turns, turn_complete)
             .await
             .map_err(AgentError::Session)
@@ -104,7 +123,7 @@ impl AgentSession {
         if self.input_broadcast.receiver_count() > 0 {
             let _ = self.input_broadcast.send(InputEvent::ActivityStart);
         }
-        self.session
+        self.writer
             .signal_activity_start()
             .await
             .map_err(AgentError::Session)
@@ -115,7 +134,7 @@ impl AgentSession {
         if self.input_broadcast.receiver_count() > 0 {
             let _ = self.input_broadcast.send(InputEvent::ActivityEnd);
         }
-        self.session
+        self.writer
             .signal_activity_end()
             .await
             .map_err(AgentError::Session)
@@ -123,7 +142,7 @@ impl AgentSession {
 
     /// Gracefully disconnect.
     pub async fn disconnect(&self) -> Result<(), AgentError> {
-        self.session.disconnect().await.map_err(AgentError::Session)
+        self.writer.disconnect().await.map_err(AgentError::Session)
     }
 
     /// Subscribe to input events (for input-streaming tools).
@@ -131,14 +150,14 @@ impl AgentSession {
         self.input_broadcast.subscribe()
     }
 
-    /// Subscribe to session events (delegates to SessionHandle).
+    /// Subscribe to session events.
     pub fn subscribe_events(&self) -> broadcast::Receiver<SessionEvent> {
-        self.session.subscribe()
+        self.event_tx.subscribe()
     }
 
-    /// Access the underlying SessionHandle for advanced wire-level control.
-    pub fn wire(&self) -> &SessionHandle {
-        &self.session
+    /// Access the underlying session writer.
+    pub fn writer(&self) -> &dyn SessionWriter {
+        &*self.writer
     }
 
     /// Access conversation state.
@@ -235,5 +254,15 @@ mod tests {
 
         assert!(matches!(input_rx.try_recv(), Ok(InputEvent::ActivityStart)));
         assert!(matches!(input_rx.try_recv(), Ok(InputEvent::ActivityEnd)));
+    }
+
+    #[tokio::test]
+    async fn from_writer_with_mock() {
+        // Create a mock writer using a real SessionHandle (simplest mock available)
+        let handle = mock_session_handle();
+        let event_tx = handle.event_sender().clone();
+        let writer: Arc<dyn SessionWriter> = Arc::new(handle);
+        let session = AgentSession::from_writer(writer, event_tx);
+        assert_eq!(session.input_subscriber_count(), 0);
     }
 }
