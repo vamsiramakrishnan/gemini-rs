@@ -7,6 +7,7 @@ pub mod state;
 
 pub use state::SessionPhase;
 
+use async_trait::async_trait;
 use crate::protocol::{Content, FunctionCall, FunctionResponse};
 use std::sync::Arc;
 use std::time::Instant;
@@ -353,6 +354,29 @@ impl SessionState {
 }
 
 // ---------------------------------------------------------------------------
+// Session traits (for testability and middleware injection)
+// ---------------------------------------------------------------------------
+
+/// Write-side of a session — send commands without owning the full handle.
+#[async_trait]
+pub trait SessionWriter: Send + Sync + 'static {
+    async fn send_audio(&self, data: Vec<u8>) -> Result<(), SessionError>;
+    async fn send_text(&self, text: String) -> Result<(), SessionError>;
+    async fn send_tool_response(&self, responses: Vec<FunctionResponse>) -> Result<(), SessionError>;
+    async fn send_client_content(&self, turns: Vec<Content>, turn_complete: bool) -> Result<(), SessionError>;
+    async fn signal_activity_start(&self) -> Result<(), SessionError>;
+    async fn signal_activity_end(&self) -> Result<(), SessionError>;
+    async fn disconnect(&self) -> Result<(), SessionError>;
+}
+
+/// Read-side of a session — subscribe to events and observe phase.
+pub trait SessionReader: Send + Sync + 'static {
+    fn subscribe(&self) -> broadcast::Receiver<SessionEvent>;
+    fn phase(&self) -> SessionPhase;
+    fn session_id(&self) -> &str;
+}
+
+// ---------------------------------------------------------------------------
 // Session handle (public API)
 // ---------------------------------------------------------------------------
 
@@ -479,6 +503,57 @@ impl std::fmt::Debug for SessionHandle {
             .field("session_id", &self.state.session_id)
             .field("phase", &self.state.phase())
             .finish()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Trait implementations for SessionHandle
+// ---------------------------------------------------------------------------
+
+#[async_trait]
+impl SessionWriter for SessionHandle {
+    async fn send_audio(&self, data: Vec<u8>) -> Result<(), SessionError> {
+        self.send_command(SessionCommand::SendAudio(data)).await
+    }
+
+    async fn send_text(&self, text: String) -> Result<(), SessionError> {
+        self.send_command(SessionCommand::SendText(text)).await
+    }
+
+    async fn send_tool_response(&self, responses: Vec<FunctionResponse>) -> Result<(), SessionError> {
+        self.send_command(SessionCommand::SendToolResponse(responses))
+            .await
+    }
+
+    async fn send_client_content(&self, turns: Vec<Content>, turn_complete: bool) -> Result<(), SessionError> {
+        self.send_command(SessionCommand::SendClientContent { turns, turn_complete })
+            .await
+    }
+
+    async fn signal_activity_start(&self) -> Result<(), SessionError> {
+        self.send_command(SessionCommand::ActivityStart).await
+    }
+
+    async fn signal_activity_end(&self) -> Result<(), SessionError> {
+        self.send_command(SessionCommand::ActivityEnd).await
+    }
+
+    async fn disconnect(&self) -> Result<(), SessionError> {
+        self.send_command(SessionCommand::Disconnect).await
+    }
+}
+
+impl SessionReader for SessionHandle {
+    fn subscribe(&self) -> broadcast::Receiver<SessionEvent> {
+        self.event_tx.subscribe()
+    }
+
+    fn phase(&self) -> SessionPhase {
+        self.state.phase()
+    }
+
+    fn session_id(&self) -> &str {
+        &self.state.session_id
     }
 }
 
@@ -664,6 +739,32 @@ mod tests {
             to: SessionPhase::SetupSent,
         };
         assert_eq!(err.to_string(), "Invalid transition from Active to SetupSent");
+    }
+
+    // -----------------------------------------------------------------------
+    // SessionWriter / SessionReader trait tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn session_handle_implements_session_writer() {
+        fn assert_impl<T: SessionWriter>() {}
+        assert_impl::<SessionHandle>();
+    }
+
+    #[test]
+    fn session_handle_implements_session_reader() {
+        fn assert_impl<T: SessionReader>() {}
+        assert_impl::<SessionHandle>();
+    }
+
+    #[test]
+    fn session_writer_is_object_safe() {
+        fn _assert(_: &dyn SessionWriter) {}
+    }
+
+    #[test]
+    fn session_reader_is_object_safe() {
+        fn _assert(_: &dyn SessionReader) {}
     }
 
     // -----------------------------------------------------------------------
