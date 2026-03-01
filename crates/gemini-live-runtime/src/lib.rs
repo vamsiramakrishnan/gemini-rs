@@ -12,6 +12,7 @@ pub mod error;
 pub mod llm_agent;
 pub mod middleware;
 pub mod router;
+pub mod runner;
 pub mod state;
 pub mod telemetry;
 pub mod tool;
@@ -19,6 +20,7 @@ pub mod tool;
 // Re-export key types for convenience
 pub use agent_tool::AgentTool;
 pub use llm_agent::{LlmAgent, LlmAgentBuilder};
+pub use runner::Runner;
 pub use tool::TypedTool;
 
 // Re-export wire types that runtime users need
