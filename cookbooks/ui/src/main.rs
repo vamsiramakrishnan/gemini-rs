@@ -176,12 +176,12 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                             }
                         };
 
-                        // Use the requested model or default to standard Live
+                        // Use the requested model or default to native audio
                         let model_enum = match model.as_deref() {
                             Some("gemini-2.0-flash-live-001") => GeminiModel::Gemini2_0FlashLive,
-                            Some("gemini-2.5-flash-live-native-audio") => GeminiModel::Custom("gemini-2.5-flash-live-native-audio".to_string()),
+                            Some("gemini-live-2.5-flash-native-audio") => GeminiModel::GeminiLive2_5FlashNativeAudio,
                             Some(other) => GeminiModel::Custom(other.to_string()),
-                            None => GeminiModel::Gemini2_0FlashLive,
+                            None => GeminiModel::GeminiLive2_5FlashNativeAudio,
                         };
 
                         let mut config = base_config

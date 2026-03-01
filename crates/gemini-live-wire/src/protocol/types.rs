@@ -11,10 +11,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Default)]
 pub enum GeminiModel {
     #[serde(rename = "models/gemini-2.0-flash-live-001")]
-    #[default]
     Gemini2_0FlashLive,
-    #[serde(rename = "models/gemini-2.5-flash-preview-native-audio")]
-    Gemini2_5FlashNativeAudio,
+    #[serde(rename = "models/gemini-live-2.5-flash-native-audio")]
+    #[default]
+    GeminiLive2_5FlashNativeAudio,
     /// Custom model string for forward compatibility.
     #[serde(untagged)]
     Custom(String),
@@ -25,8 +25,8 @@ impl std::fmt::Display for GeminiModel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Gemini2_0FlashLive => write!(f, "models/gemini-2.0-flash-live-001"),
-            Self::Gemini2_5FlashNativeAudio => {
-                write!(f, "models/gemini-2.5-flash-preview-native-audio")
+            Self::GeminiLive2_5FlashNativeAudio => {
+                write!(f, "models/gemini-live-2.5-flash-native-audio")
             }
             Self::Custom(s) => write!(f, "{s}"),
         }
@@ -1020,7 +1020,7 @@ mod tests {
     #[test]
     fn vertex_session_config() {
         let config = SessionConfig::from_vertex("my-project", "us-central1", "token123")
-            .model(GeminiModel::Gemini2_5FlashNativeAudio);
+            .model(GeminiModel::GeminiLive2_5FlashNativeAudio);
         assert!(config.is_vertex());
         assert!(config.bearer_token() == Some("token123"));
     }

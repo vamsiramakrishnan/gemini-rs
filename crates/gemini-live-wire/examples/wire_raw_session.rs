@@ -14,7 +14,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Configure a text-only session
     let config = SessionConfig::new(api_key)
-        .model(GeminiModel::Gemini2_0FlashLive)
+        .model(GeminiModel::GeminiLive2_5FlashNativeAudio)
         .system_instruction("You are a helpful assistant. Be concise.")
         .response_modalities(vec![Modality::Text]);
 
