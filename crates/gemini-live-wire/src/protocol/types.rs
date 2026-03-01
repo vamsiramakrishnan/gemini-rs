@@ -483,6 +483,24 @@ pub struct UrlContextMetadata {
     pub url_metadata: Vec<serde_json::Value>,
 }
 
+/// Configuration for model thinking/reasoning (Gemini 2.5+).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThinkingConfig {
+    /// Token budget for thinking/reasoning steps.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking_budget: Option<u32>,
+}
+
+/// Media resolution for image/video inputs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum MediaResolution {
+    Low,
+    Medium,
+    High,
+}
+
 /// Generation config sent in the setup message.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -499,6 +517,14 @@ pub struct GenerationConfig {
     pub top_k: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_output_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking_config: Option<ThinkingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enable_affective_dialog: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub media_resolution: Option<MediaResolution>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seed: Option<u32>,
 }
 
 /// API endpoint selector — Google AI (direct) or Vertex AI.
@@ -645,6 +671,10 @@ impl SessionConfig {
                 top_p: None,
                 top_k: None,
                 max_output_tokens: None,
+                thinking_config: None,
+                enable_affective_dialog: None,
+                media_resolution: None,
+                seed: None,
             },
             system_instruction: None,
             tools: Vec::new(),
@@ -787,6 +817,32 @@ impl SessionConfig {
         self.proactivity = Some(ProactivityConfig {
             proactive_audio: Some(enabled),
         });
+        self
+    }
+
+    /// Enable thinking/reasoning with a token budget (Gemini 2.5+).
+    pub fn thinking(mut self, budget: u32) -> Self {
+        self.generation_config.thinking_config = Some(ThinkingConfig {
+            thinking_budget: Some(budget),
+        });
+        self
+    }
+
+    /// Enable affective dialog (emotionally expressive responses).
+    pub fn affective_dialog(mut self, enabled: bool) -> Self {
+        self.generation_config.enable_affective_dialog = Some(enabled);
+        self
+    }
+
+    /// Set the media resolution for image/video inputs.
+    pub fn media_resolution(mut self, res: MediaResolution) -> Self {
+        self.generation_config.media_resolution = Some(res);
+        self
+    }
+
+    /// Set the random seed for deterministic generation.
+    pub fn seed(mut self, seed: u32) -> Self {
+        self.generation_config.seed = Some(seed);
         self
     }
 
@@ -1089,5 +1145,54 @@ mod tests {
     fn tool_backward_compat_alias() {
         // ToolDeclaration is a type alias for Tool
         let _td: ToolDeclaration = Tool::functions(vec![]);
+    }
+
+    // ── GenerationConfig new fields tests ──
+
+    #[test]
+    fn thinking_config_serialization() {
+        let config = SessionConfig::new("key").thinking(1024);
+        let json = config.to_setup_json();
+        assert!(json.contains("\"thinkingConfig\""));
+        assert!(json.contains("\"thinkingBudget\""));
+        assert!(json.contains("1024"));
+    }
+
+    #[test]
+    fn affective_dialog_serialization() {
+        let config = SessionConfig::new("key").affective_dialog(true);
+        let json = config.to_setup_json();
+        assert!(json.contains("\"enableAffectiveDialog\""));
+        assert!(json.contains("true"));
+    }
+
+    #[test]
+    fn seed_serialization() {
+        let config = SessionConfig::new("key").seed(42);
+        let json = config.to_setup_json();
+        assert!(json.contains("\"seed\""));
+        assert!(json.contains("42"));
+    }
+
+    #[test]
+    fn media_resolution_serialization() {
+        let config = SessionConfig::new("key").media_resolution(MediaResolution::High);
+        let json = config.to_setup_json();
+        assert!(json.contains("\"mediaResolution\""));
+        assert!(json.contains("\"HIGH\""));
+    }
+
+    #[test]
+    fn combined_new_generation_fields() {
+        let config = SessionConfig::new("key")
+            .thinking(2048)
+            .affective_dialog(true)
+            .seed(123)
+            .media_resolution(MediaResolution::Medium);
+        let json = config.to_setup_json();
+        assert!(json.contains("\"thinkingConfig\""));
+        assert!(json.contains("\"enableAffectiveDialog\""));
+        assert!(json.contains("\"seed\""));
+        assert!(json.contains("\"mediaResolution\""));
     }
 }
