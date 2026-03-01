@@ -1,0 +1,17 @@
+[package]
+name = "gemini-live"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Fluent DX for Gemini Live — builder API, operator algebra, composition modules"
+
+[dependencies]
+gemini-live-wire = { path = "../gemini-live-wire" }
+gemini-live-runtime = { path = "../gemini-live-runtime" }
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+tokio-test = "0.4"
