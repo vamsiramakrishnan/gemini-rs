@@ -6,6 +6,9 @@ members = [
     "crates/gemini-live",
     "cookbooks/ui",
     "cookbooks/agents",
+    "cookbooks/text-chat",
+    "cookbooks/voice-chat",
+    "cookbooks/tool-calling",
 ]
 
 [workspace.package]
