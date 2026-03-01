@@ -1,10 +1,12 @@
 //! WebSocket transport layer — connection, full-duplex messaging, flow control.
 
+pub mod auth;
 pub mod codec;
 pub mod connection;
 pub mod flow;
 pub mod ws;
 
+pub use auth::{AuthProvider, GoogleAIAuth, GoogleAITokenAuth, VertexAIAuth};
 pub use codec::{Codec, CodecError, JsonCodec};
 pub use connection::{connect, connect_with};
 pub use flow::{FlowConfig, TokenBucket};

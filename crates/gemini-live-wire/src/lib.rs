@@ -30,6 +30,7 @@ pub mod prelude {
 
     // Transport
     pub use crate::transport::{connect, connect_with, Codec, CodecError, JsonCodec, TransportConfig};
+    pub use crate::transport::auth::{AuthProvider, GoogleAIAuth, GoogleAITokenAuth, VertexAIAuth};
     pub use crate::transport::ws::{Transport, TungsteniteTransport, MockTransport};
 
     // Session
