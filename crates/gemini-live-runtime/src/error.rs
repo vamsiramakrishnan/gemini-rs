@@ -13,6 +13,9 @@ pub enum AgentError {
     #[error("Unknown agent: {0}")]
     UnknownAgent(String),
 
+    #[error("Transfer requested to agent: {0}")]
+    TransferRequested(String),
+
     #[error("Agent transfer failed: {0}")]
     TransferFailed(String),
 

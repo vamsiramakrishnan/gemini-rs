@@ -122,6 +122,11 @@ impl ToolDispatcher {
             .insert(tool.name().to_string(), ToolKind::InputStream(tool));
     }
 
+    /// Get a tool by name (for introspection/streaming tool spawning).
+    pub fn get_tool(&self, name: &str) -> Option<&ToolKind> {
+        self.tools.get(name)
+    }
+
     /// Classify a tool by name.
     pub fn classify(&self, name: &str) -> Option<ToolClass> {
         self.tools.get(name).map(|t| match t {

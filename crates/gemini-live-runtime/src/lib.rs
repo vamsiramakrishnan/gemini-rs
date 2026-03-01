@@ -8,13 +8,15 @@ pub mod agent;
 pub mod agent_session;
 pub mod context;
 pub mod error;
+pub mod llm_agent;
 pub mod middleware;
 pub mod router;
 pub mod state;
 pub mod telemetry;
 pub mod tool;
 
-// Re-export key tool types for convenience
+// Re-export key types for convenience
+pub use llm_agent::{LlmAgent, LlmAgentBuilder};
 pub use tool::TypedTool;
 
 // Re-export wire types that runtime users need

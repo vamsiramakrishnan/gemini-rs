@@ -65,6 +65,11 @@ impl MiddlewareChain {
         self.layers.push(middleware);
     }
 
+    /// Prepend a middleware to the front of the chain.
+    pub fn prepend(&mut self, middleware: Arc<dyn Middleware>) {
+        self.layers.insert(0, middleware);
+    }
+
     pub async fn run_before_agent(&self, ctx: &InvocationContext) -> Result<(), AgentError> {
         for m in &self.layers {
             m.before_agent(ctx).await?;

@@ -3,6 +3,7 @@
 use tokio::sync::broadcast;
 
 use crate::agent_session::AgentSession;
+use crate::middleware::MiddlewareChain;
 
 /// Events emitted by agents during live execution.
 /// Wraps SessionEvent (Layer 0) and adds agent-specific events.
@@ -49,15 +50,29 @@ pub struct InvocationContext {
 
     /// Event bus — agents emit events here, application code subscribes.
     pub event_tx: broadcast::Sender<AgentEvent>,
+
+    /// Middleware chain for lifecycle hooks.
+    pub middleware: MiddlewareChain,
 }
 
 impl InvocationContext {
-    /// Create a new invocation context.
+    /// Create a new invocation context with an empty middleware chain.
     pub fn new(agent_session: AgentSession) -> Self {
         let (event_tx, _) = broadcast::channel(256);
         Self {
             agent_session,
             event_tx,
+            middleware: MiddlewareChain::new(),
+        }
+    }
+
+    /// Create a new invocation context with a pre-configured middleware chain.
+    pub fn with_middleware(agent_session: AgentSession, middleware: MiddlewareChain) -> Self {
+        let (event_tx, _) = broadcast::channel(256);
+        Self {
+            agent_session,
+            event_tx,
+            middleware,
         }
     }
 
