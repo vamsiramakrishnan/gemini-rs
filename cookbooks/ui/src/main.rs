@@ -219,7 +219,10 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                                         }
                                     }
 
-                                    while let Ok(event) = events.recv().await {
+                                    // Use recv_event() for lag-resilient event consumption.
+                                    // If the UI consumer falls behind, skipped events are
+                                    // handled gracefully instead of causing channel errors.
+                                    while let Some(event) = recv_event(&mut events).await {
                                         match event {
                                             SessionEvent::TextDelta(t) => {
                                                 let _ = tx.send(ServerMessage::TextDelta { text: t }).await;
@@ -228,6 +231,8 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                                                 let _ = tx.send(ServerMessage::TextComplete { text: t }).await;
                                             }
                                             SessionEvent::AudioData(data) => {
+                                                // AudioData uses bytes::Bytes for zero-copy fan-out.
+                                                // Bytes: Deref<[u8]>, so BASE64.encode(&data) works directly.
                                                 let base64_data = BASE64.encode(&data);
                                                 let _ = tx.send(ServerMessage::Audio { data: base64_data }).await;
                                             }

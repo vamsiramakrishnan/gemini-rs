@@ -1,7 +1,7 @@
 //! Runtime agent example — using gemini-live-runtime.
 //!
-//! Demonstrates the Agent trait, ToolDispatcher, and SimpleTool
-//! for building agents with function calling capabilities.
+//! Demonstrates the Agent trait, TypedTool (type-safe with auto-generated
+//! JSON Schema), and ToolDispatcher with configurable timeouts.
 //!
 //! This example shows the structure — it won't run without a live
 //! Gemini API connection, but illustrates the programming model.
@@ -12,9 +12,19 @@ use gemini_live_runtime::agent::Agent;
 use gemini_live_runtime::context::InvocationContext;
 use gemini_live_runtime::error::AgentError;
 use gemini_live_runtime::router::AgentRegistry;
-use gemini_live_runtime::tool::{SimpleTool, ToolDispatcher};
+use gemini_live_runtime::tool::{TypedTool, ToolDispatcher};
 
 use async_trait::async_trait;
+use schemars::JsonSchema;
+use serde::Deserialize;
+
+/// Type-safe arguments for the weather tool — schema is auto-generated
+/// from this struct via `schemars::JsonSchema`.
+#[derive(Deserialize, JsonSchema)]
+struct WeatherArgs {
+    /// City name to get weather for
+    city: String,
+}
 
 /// A weather agent that can look up weather data.
 struct WeatherAgent {
@@ -23,28 +33,24 @@ struct WeatherAgent {
 
 impl WeatherAgent {
     fn new() -> Self {
-        let mut dispatcher = ToolDispatcher::new();
-
-        let weather_tool = SimpleTool::new(
+        // TypedTool auto-generates JSON Schema from WeatherArgs — no manual
+        // schema needed. The doc comment on `city` becomes the field description.
+        let weather_tool = TypedTool::new(
             "get_weather",
             "Get current weather for a city",
-            Some(serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "city": { "type": "string", "description": "City name" }
-                },
-                "required": ["city"]
-            })),
-            |args| async move {
-                let city = args["city"].as_str().unwrap_or("unknown");
+            |args: WeatherArgs| async move {
                 Ok(serde_json::json!({
-                    "city": city,
+                    "city": args.city,
                     "temperature": "22°C",
                     "condition": "Sunny"
                 }))
             },
         );
 
+        // ToolDispatcher::with_timeout sets the default timeout for all tool
+        // calls. Individual calls can still override via call_function_with_timeout().
+        let mut dispatcher = ToolDispatcher::new()
+            .with_timeout(std::time::Duration::from_secs(10));
         dispatcher.register_function(Arc::new(weather_tool));
 
         Self { dispatcher }
@@ -63,7 +69,10 @@ impl Agent for WeatherAgent {
         // 2. When a FunctionCall arrives, dispatch to self.dispatcher
         // 3. Send tool responses back via ctx.agent_session
         // 4. Emit AgentEvents for observability
-        println!("WeatherAgent running with {} tools", self.dispatcher.len());
+        println!("WeatherAgent running with {} tools (default timeout: {:?})",
+            self.dispatcher.len(),
+            self.dispatcher.default_timeout(),
+        );
         Ok(())
     }
 
