@@ -193,25 +193,30 @@ async fn establish_connection(
         .map_err(|e| SessionError::WebSocket(e.to_string()))?;
 
     // Wait for setupComplete
+    // Note: Vertex AI sends JSON in Binary frames, Google AI uses Text frames.
     let setup_complete = tokio::time::timeout(
         Duration::from_secs(transport_config.setup_timeout_secs),
         async {
             while let Some(msg) = ws_read.next().await {
-                match msg {
-                    Ok(Message::Text(text)) => {
-                        if let Ok(ServerMessage::SetupComplete(sc)) =
-                            ServerMessage::parse(&text)
-                        {
-                            return Ok(sc);
-                        }
+                let text = match msg {
+                    Ok(Message::Text(t)) => t,
+                    Ok(Message::Binary(b)) => {
+                        String::from_utf8(b).unwrap_or_default()
                     }
-                    Ok(Message::Close(_)) => {
-                        return Err(SessionError::SetupFailed("Connection closed during setup".into()));
+                    Ok(Message::Close(frame)) => {
+                        return Err(SessionError::SetupFailed(
+                            format!("Connection closed during setup: {:?}", frame),
+                        ));
                     }
                     Err(e) => {
                         return Err(SessionError::WebSocket(e.to_string()));
                     }
-                    _ => {}
+                    _ => continue,
+                };
+                if let Ok(ServerMessage::SetupComplete(sc)) =
+                    ServerMessage::parse(&text)
+                {
+                    return Ok(sc);
                 }
             }
             Err(SessionError::SetupFailed("Stream ended before setup complete".into()))
@@ -258,15 +263,12 @@ async fn run_session(
     loop {
         tokio::select! {
             // Receive from WebSocket
+            // Note: Vertex AI sends JSON in Binary frames; Google AI uses Text frames.
             msg = ws_read.next() => {
-                match msg {
-                    Some(Ok(Message::Text(text))) => {
-                        match handle_server_message(&text, state, event_tx) {
-                            MessageAction::Continue => {}
-                            MessageAction::GoAway(time_left) => {
-                                return DisconnectReason::GoAway(time_left);
-                            }
-                        }
+                let text = match msg {
+                    Some(Ok(Message::Text(t))) => Some(t),
+                    Some(Ok(Message::Binary(b))) => {
+                        String::from_utf8(b).ok()
                     }
                     Some(Ok(Message::Close(_))) => {
                         return DisconnectReason::Error("Server closed connection".to_string());
@@ -277,7 +279,15 @@ async fn run_session(
                     None => {
                         return DisconnectReason::Error("WebSocket stream ended".to_string());
                     }
-                    _ => {} // Ping/Pong handled by tungstenite
+                    _ => None, // Ping/Pong handled by tungstenite
+                };
+                if let Some(text) = text {
+                    match handle_server_message(&text, state, event_tx) {
+                        MessageAction::Continue => {}
+                        MessageAction::GoAway(time_left) => {
+                            return DisconnectReason::GoAway(time_left);
+                        }
+                    }
                 }
             }
 

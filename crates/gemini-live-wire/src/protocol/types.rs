@@ -527,13 +527,20 @@ pub struct GenerationConfig {
     pub seed: Option<u32>,
 }
 
-/// API endpoint selector — Google AI (direct) or Vertex AI.
+/// API endpoint selector — Google AI (direct), Google AI with OAuth token, or Vertex AI.
 ///
-/// # Google AI (default)
+/// # Google AI with API Key (default)
 ///
 /// Uses an API key passed as a query parameter. The WebSocket URL is
 /// `wss://generativelanguage.googleapis.com/ws/...?key={api_key}` and model
 /// URIs are `models/{model}`.
+///
+/// # Google AI with Access Token
+///
+/// Uses an OAuth2 access token (e.g. from `gcloud auth print-access-token`)
+/// passed as a query parameter. Same endpoint as Google AI but with
+/// `access_token` instead of `key`. This is the recommended approach when
+/// using gcloud credentials without an API key.
 ///
 /// # Vertex AI
 ///
@@ -546,12 +553,15 @@ pub struct GenerationConfig {
 /// ```
 /// # use gemini_live_wire::protocol::types::{ApiEndpoint, VertexConfig};
 /// let google_ai = ApiEndpoint::google_ai("MY_API_KEY");
+/// let with_token = ApiEndpoint::google_ai_token("ya29.ACCESS_TOKEN");
 /// let vertex = ApiEndpoint::vertex("my-project", "us-central1", "ACCESS_TOKEN");
 /// ```
 #[derive(Debug, Clone)]
 pub enum ApiEndpoint {
     /// Google AI Studio — API-key authentication.
     GoogleAI { api_key: String },
+    /// Google AI with OAuth2 access token (e.g. from gcloud).
+    GoogleAIToken { access_token: String },
     /// Vertex AI — project + location + OAuth2 bearer token.
     VertexAI(VertexConfig),
 }
@@ -572,10 +582,20 @@ pub struct VertexConfig {
 }
 
 impl ApiEndpoint {
-    /// Shorthand for Google AI endpoint.
+    /// Shorthand for Google AI endpoint with API key.
     pub fn google_ai(api_key: impl Into<String>) -> Self {
         Self::GoogleAI {
             api_key: api_key.into(),
+        }
+    }
+
+    /// Google AI endpoint with an OAuth2 access token.
+    ///
+    /// Use this when authenticating with `gcloud auth print-access-token`
+    /// or any other OAuth2 flow instead of an API key.
+    pub fn google_ai_token(access_token: impl Into<String>) -> Self {
+        Self::GoogleAIToken {
+            access_token: access_token.into(),
         }
     }
 
@@ -641,7 +661,25 @@ impl SessionConfig {
         Self::from_endpoint(ApiEndpoint::google_ai(api_key))
     }
 
+    /// Create a session configuration with an OAuth2 access token.
+    ///
+    /// Uses the Google AI endpoint (`generativelanguage.googleapis.com`) with
+    /// an access token instead of an API key. This is the recommended approach
+    /// when using `gcloud auth print-access-token` credentials.
+    ///
+    /// ```rust
+    /// # use gemini_live_wire::protocol::types::SessionConfig;
+    /// let config = SessionConfig::from_access_token("ya29.ACCESS_TOKEN");
+    /// ```
+    pub fn from_access_token(access_token: impl Into<String>) -> Self {
+        Self::from_endpoint(ApiEndpoint::google_ai_token(access_token))
+    }
+
     /// Create a session configuration for Vertex AI.
+    ///
+    /// Uses the regional Vertex AI endpoint (`{location}-aiplatform.googleapis.com`).
+    /// For the global endpoint, consider using [`SessionConfig::from_access_token`]
+    /// instead.
     ///
     /// ```rust
     /// # use gemini_live_wire::protocol::types::SessionConfig;
@@ -862,8 +900,10 @@ impl SessionConfig {
 
     /// Build the WebSocket URL for connecting to the Gemini Live API.
     ///
-    /// - **Google AI**: `wss://generativelanguage.googleapis.com/ws/...?key={key}`
-    /// - **Vertex AI**: `wss://{location}-aiplatform.googleapis.com/ws/google.cloud.aiplatform.v1.LlmBidiService/BidiGenerateContent`
+    /// - **Google AI (key)**: `wss://generativelanguage.googleapis.com/ws/...?key={key}`
+    /// - **Google AI (token)**: `wss://generativelanguage.googleapis.com/ws/...?access_token={token}`
+    /// - **Vertex AI**: `wss://{location}-aiplatform.googleapis.com/ws/...` or
+    ///   `wss://aiplatform.googleapis.com/ws/...` for global
     pub fn ws_url(&self) -> String {
         match &self.endpoint {
             ApiEndpoint::GoogleAI { api_key } => format!(
@@ -872,19 +912,31 @@ impl SessionConfig {
                  ?key={}",
                 api_key
             ),
+            ApiEndpoint::GoogleAIToken { access_token } => format!(
+                "wss://generativelanguage.googleapis.com/ws/\
+                 google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent\
+                 ?access_token={}",
+                access_token
+            ),
             ApiEndpoint::VertexAI(v) => {
                 let host = v
                     .api_host
                     .as_deref()
                     .unwrap_or("");
                 let host = if host.is_empty() {
-                    format!("{}-aiplatform.googleapis.com", v.location)
+                    // "global" uses `aiplatform.googleapis.com` (no prefix),
+                    // regional uses `{location}-aiplatform.googleapis.com`.
+                    if v.location == "global" {
+                        "aiplatform.googleapis.com".to_string()
+                    } else {
+                        format!("{}-aiplatform.googleapis.com", v.location)
+                    }
                 } else {
                     host.to_string()
                 };
                 format!(
                     "wss://{host}/ws/\
-                     google.cloud.aiplatform.v1.LlmBidiService/BidiGenerateContent"
+                     google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent"
                 )
             }
         }
@@ -892,11 +944,13 @@ impl SessionConfig {
 
     /// Build the model URI used in the setup message.
     ///
-    /// - **Google AI**: `models/{model}`
+    /// - **Google AI / Google AI Token**: `models/{model}`
     /// - **Vertex AI**: `projects/{project}/locations/{location}/publishers/google/models/{model}`
     pub fn model_uri(&self) -> String {
         match &self.endpoint {
-            ApiEndpoint::GoogleAI { .. } => self.model.to_string(),
+            ApiEndpoint::GoogleAI { .. } | ApiEndpoint::GoogleAIToken { .. } => {
+                self.model.to_string()
+            }
             ApiEndpoint::VertexAI(v) => {
                 // Strip the `models/` prefix from the Display representation
                 let model_name = self.model.to_string();
@@ -912,10 +966,11 @@ impl SessionConfig {
     /// Returns the bearer token when using Vertex AI, `None` for Google AI.
     ///
     /// Used by the transport layer to set the `Authorization` HTTP header
-    /// during the WebSocket upgrade handshake.
+    /// during the WebSocket upgrade handshake. Google AI endpoints pass the
+    /// token as a query parameter instead.
     pub fn bearer_token(&self) -> Option<&str> {
         match &self.endpoint {
-            ApiEndpoint::GoogleAI { .. } => None,
+            ApiEndpoint::GoogleAI { .. } | ApiEndpoint::GoogleAIToken { .. } => None,
             ApiEndpoint::VertexAI(v) => Some(&v.access_token),
         }
     }
@@ -923,6 +978,14 @@ impl SessionConfig {
     /// Returns `true` if this config targets Vertex AI.
     pub fn is_vertex(&self) -> bool {
         matches!(self.endpoint, ApiEndpoint::VertexAI(_))
+    }
+
+    /// Returns `true` if this config uses an access token (either GoogleAIToken or VertexAI).
+    pub fn uses_access_token(&self) -> bool {
+        matches!(
+            self.endpoint,
+            ApiEndpoint::GoogleAIToken { .. } | ApiEndpoint::VertexAI(_)
+        )
     }
 }
 
@@ -1026,16 +1089,26 @@ mod tests {
     }
 
     #[test]
-    fn vertex_ws_url() {
+    fn vertex_ws_url_regional() {
         let config = SessionConfig::from_vertex("proj", "us-central1", "tok");
         let url = config.ws_url();
         assert_eq!(
             url,
             "wss://us-central1-aiplatform.googleapis.com/ws/\
-             google.cloud.aiplatform.v1.LlmBidiService/BidiGenerateContent"
+             google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent"
         );
-        // No API key in URL
         assert!(!url.contains("key="));
+    }
+
+    #[test]
+    fn vertex_ws_url_global() {
+        let config = SessionConfig::from_vertex("proj", "global", "tok");
+        let url = config.ws_url();
+        assert_eq!(
+            url,
+            "wss://aiplatform.googleapis.com/ws/\
+             google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent"
+        );
     }
 
     #[test]

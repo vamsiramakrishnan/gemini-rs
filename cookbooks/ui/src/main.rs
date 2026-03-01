@@ -79,8 +79,8 @@ async fn main() {
         .unwrap_or(false);
 
     let auth = if use_vertex {
-        let project = std::env::var("GOOGLE_CLOUD_PROJECT").expect("GOOGLE_CLOUD_PROJECT must be set when using Vertex AI");
-        let location = std::env::var("GOOGLE_CLOUD_LOCATION").expect("GOOGLE_CLOUD_LOCATION must be set when using Vertex AI");
+        let project = std::env::var("GOOGLE_CLOUD_PROJECT").expect("GOOGLE_CLOUD_PROJECT must be set for Vertex AI");
+        let location = std::env::var("GOOGLE_CLOUD_LOCATION").unwrap_or_else(|_| "global".to_string());
         info!("Using Vertex AI backend (Project: {}, Location: {})", project, location);
         AuthConfig::VertexAI { project, location }
     } else {
@@ -158,9 +158,8 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                             },
                             AuthConfig::VertexAI { project, location } => {
                                 info!("Fetching token via gcloud...");
-                                // Obtain token via gcloud
                                 match std::process::Command::new("gcloud")
-                                    .args(&["auth", "print-access-token"])
+                                    .args(["auth", "print-access-token"])
                                     .output() {
                                     Ok(output) if output.status.success() => {
                                         info!("Successfully fetched gcloud token");
@@ -169,7 +168,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                                     },
                                     err => {
                                         error!("Failed to fetch gcloud token: {:?}", err);
-                                        let _ = ws_tx.send(ServerMessage::Error { message: "Failed to obtain Vertex AI token via gcloud".into() }).await;
+                                        let _ = ws_tx.send(ServerMessage::Error { message: "Failed to obtain access token via gcloud".into() }).await;
                                         continue;
                                     }
                                 }

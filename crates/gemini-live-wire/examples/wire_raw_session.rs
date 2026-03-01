@@ -3,6 +3,10 @@
 //! Demonstrates the lowest-level API: connect to Gemini, send text,
 //! and print responses. No agent abstraction, no tools — pure protocol.
 //!
+//! The native audio model (gemini-live-2.5-flash-native-audio) only
+//! supports AUDIO output modality. For text-only responses, use
+//! gemini-2.0-flash-live-001.
+//!
 //! Usage:
 //!   GEMINI_API_KEY=your-key cargo run -p gemini-live-wire --example wire_raw_session
 
@@ -12,9 +16,9 @@ use gemini_live_wire::prelude::*;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let api_key = std::env::var("GEMINI_API_KEY").expect("Set GEMINI_API_KEY");
 
-    // Configure a text-only session
+    // Use text-compatible model with TEXT modality
     let config = SessionConfig::new(api_key)
-        .model(GeminiModel::GeminiLive2_5FlashNativeAudio)
+        .model(GeminiModel::Gemini2_0FlashLive)
         .system_instruction("You are a helpful assistant. Be concise.")
         .response_modalities(vec![Modality::Text]);
 
