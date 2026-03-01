@@ -6,7 +6,7 @@ pub mod flow;
 pub mod ws;
 
 pub use codec::{Codec, CodecError, JsonCodec};
-pub use connection::connect;
+pub use connection::{connect, connect_with};
 pub use flow::{FlowConfig, TokenBucket};
 pub use ws::{MockTransport, MockTransportError, Transport, TungsteniteTransport};
 

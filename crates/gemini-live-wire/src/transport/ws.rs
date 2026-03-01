@@ -160,10 +160,14 @@ impl Transport for TungsteniteTransport {
 
 /// Mock transport for unit testing.
 ///
-/// Records sent data and replays scripted responses from a queue.
+/// Records sent data and replays scripted responses from a queue. When the
+/// queue is empty and the transport is connected, [`recv`](Transport::recv)
+/// will pend indefinitely — simulating a connected-but-idle transport.
+/// Call [`close`](Transport::close) to signal connection closure (returns `None`).
 pub struct MockTransport {
     sent: Vec<Vec<u8>>,
     recv_queue: std::collections::VecDeque<Vec<u8>>,
+    /// Whether connect() has been called (and close() has not).
     connected: bool,
 }
 
@@ -231,7 +235,19 @@ impl Transport for MockTransport {
         if !self.connected {
             return Err(MockTransportError::NotConnected);
         }
-        Ok(self.recv_queue.pop_front())
+        // Yield to the scheduler so tests can observe intermediate states
+        // (phase transitions, events) before the next message is processed.
+        tokio::task::yield_now().await;
+
+        if let Some(data) = self.recv_queue.pop_front() {
+            return Ok(Some(data));
+        }
+
+        // Queue is empty: pend indefinitely, simulating a connected-but-idle
+        // transport waiting for the next message from the server.
+        // The connection loop uses `tokio::select!` so this future is dropped
+        // when a command (e.g., Disconnect) arrives on the command channel.
+        std::future::pending().await
     }
 
     async fn close(&mut self) -> Result<(), Self::Error> {
@@ -279,14 +295,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mock_transport_recv_returns_none_when_empty() {
+    async fn mock_transport_recv_pends_when_queue_empty() {
         let mut transport = MockTransport::new();
         transport
             .connect("wss://example.com", vec![])
             .await
             .unwrap();
-        let data = transport.recv().await.unwrap();
-        assert!(data.is_none());
+        // recv() should pend when queue is empty (simulating idle transport)
+        let result = tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            transport.recv(),
+        )
+        .await;
+        assert!(result.is_err(), "recv should pend when queue is empty");
+    }
+
+    #[tokio::test]
+    async fn mock_transport_recv_errors_when_not_connected() {
+        let mut transport = MockTransport::new();
+        // Not connected yet — recv should error
+        let result = transport.recv().await;
+        assert!(result.is_err());
     }
 
     #[tokio::test]
