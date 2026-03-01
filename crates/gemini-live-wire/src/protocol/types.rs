@@ -211,12 +211,85 @@ pub enum Part {
     },
 }
 
+impl Part {
+    /// Create a text part.
+    pub fn text(s: impl Into<String>) -> Self {
+        Part::Text { text: s.into() }
+    }
+
+    /// Create an inline data part (e.g. audio or image blob).
+    pub fn inline_data(mime_type: impl Into<String>, data: impl Into<String>) -> Self {
+        Part::InlineData {
+            inline_data: Blob {
+                mime_type: mime_type.into(),
+                data: data.into(),
+            },
+        }
+    }
+
+    /// Create a function call part.
+    pub fn function_call(call: FunctionCall) -> Self {
+        Part::FunctionCall {
+            function_call: call,
+        }
+    }
+}
+
+/// Role in a conversation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Role {
+    User,
+    Model,
+    System,
+}
+
 /// A content message containing a role and a sequence of parts.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Content {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub role: Option<String>,
+    pub role: Option<Role>,
     pub parts: Vec<Part>,
+}
+
+impl Content {
+    /// Create a user-role content with a single text part.
+    pub fn user(text: impl Into<String>) -> Self {
+        Self {
+            role: Some(Role::User),
+            parts: vec![Part::text(text)],
+        }
+    }
+
+    /// Create a model-role content with a single text part.
+    pub fn model(text: impl Into<String>) -> Self {
+        Self {
+            role: Some(Role::Model),
+            parts: vec![Part::text(text)],
+        }
+    }
+
+    /// Create a user-role content with a single function response part.
+    pub fn function_response(name: impl Into<String>, response: serde_json::Value) -> Self {
+        Self {
+            role: Some(Role::User),
+            parts: vec![Part::FunctionResponse {
+                function_response: FunctionResponse {
+                    name: name.into(),
+                    response,
+                    id: None,
+                },
+            }],
+        }
+    }
+
+    /// Create a content from an explicit role and parts list.
+    pub fn from_parts(role: Role, parts: Vec<Part>) -> Self {
+        Self {
+            role: Some(role),
+            parts,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -758,9 +831,7 @@ impl SessionConfig {
     pub fn system_instruction(mut self, instruction: impl Into<String>) -> Self {
         self.system_instruction = Some(Content {
             role: None,
-            parts: vec![Part::Text {
-                text: instruction.into(),
-            }],
+            parts: vec![Part::text(instruction)],
         });
         self
     }
@@ -1218,6 +1289,116 @@ mod tests {
     fn tool_backward_compat_alias() {
         // ToolDeclaration is a type alias for Tool
         let _td: ToolDeclaration = Tool::functions(vec![]);
+    }
+
+    // ── Role enum tests ──
+
+    #[test]
+    fn role_serializes_lowercase() {
+        assert_eq!(serde_json::to_string(&Role::User).unwrap(), "\"user\"");
+        assert_eq!(serde_json::to_string(&Role::Model).unwrap(), "\"model\"");
+        assert_eq!(serde_json::to_string(&Role::System).unwrap(), "\"system\"");
+    }
+
+    #[test]
+    fn role_deserializes_lowercase() {
+        assert_eq!(serde_json::from_str::<Role>("\"user\"").unwrap(), Role::User);
+        assert_eq!(serde_json::from_str::<Role>("\"model\"").unwrap(), Role::Model);
+        assert_eq!(serde_json::from_str::<Role>("\"system\"").unwrap(), Role::System);
+    }
+
+    #[test]
+    fn role_round_trip() {
+        for role in [Role::User, Role::Model, Role::System] {
+            let json = serde_json::to_string(&role).unwrap();
+            let parsed: Role = serde_json::from_str(&json).unwrap();
+            assert_eq!(role, parsed);
+        }
+    }
+
+    // ── Content builder tests ──
+
+    #[test]
+    fn content_user_builder() {
+        let c = Content::user("Hello");
+        assert_eq!(c.role, Some(Role::User));
+        assert_eq!(c.parts.len(), 1);
+        assert!(matches!(&c.parts[0], Part::Text { text } if text == "Hello"));
+    }
+
+    #[test]
+    fn content_model_builder() {
+        let c = Content::model("Hi there");
+        assert_eq!(c.role, Some(Role::Model));
+        assert_eq!(c.parts.len(), 1);
+        assert!(matches!(&c.parts[0], Part::Text { text } if text == "Hi there"));
+    }
+
+    #[test]
+    fn content_function_response_builder() {
+        let c = Content::function_response("get_weather", serde_json::json!({"temp": 22}));
+        assert_eq!(c.role, Some(Role::User));
+        assert_eq!(c.parts.len(), 1);
+        match &c.parts[0] {
+            Part::FunctionResponse { function_response } => {
+                assert_eq!(function_response.name, "get_weather");
+                assert_eq!(function_response.response, serde_json::json!({"temp": 22}));
+                assert!(function_response.id.is_none());
+            }
+            _ => panic!("Expected FunctionResponse part"),
+        }
+    }
+
+    #[test]
+    fn content_from_parts_builder() {
+        let parts = vec![Part::text("a"), Part::text("b")];
+        let c = Content::from_parts(Role::Model, parts);
+        assert_eq!(c.role, Some(Role::Model));
+        assert_eq!(c.parts.len(), 2);
+    }
+
+    // ── Part builder tests ──
+
+    #[test]
+    fn part_text_builder() {
+        let p = Part::text("hello");
+        assert_eq!(p, Part::Text { text: "hello".to_string() });
+    }
+
+    #[test]
+    fn part_inline_data_builder() {
+        let p = Part::inline_data("audio/pcm", "AQID");
+        assert_eq!(
+            p,
+            Part::InlineData {
+                inline_data: Blob {
+                    mime_type: "audio/pcm".to_string(),
+                    data: "AQID".to_string(),
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn part_function_call_builder() {
+        let call = FunctionCall {
+            name: "test".to_string(),
+            args: serde_json::json!({}),
+            id: None,
+        };
+        let p = Part::function_call(call.clone());
+        assert_eq!(p, Part::FunctionCall { function_call: call });
+    }
+
+    // ── Content serialization round-trip with Role ──
+
+    #[test]
+    fn content_with_role_round_trip() {
+        let c = Content::user("test message");
+        let json = serde_json::to_string(&c).unwrap();
+        assert!(json.contains("\"role\":\"user\""));
+        let parsed: Content = serde_json::from_str(&json).unwrap();
+        assert_eq!(c, parsed);
     }
 
     // ── GenerationConfig new fields tests ──

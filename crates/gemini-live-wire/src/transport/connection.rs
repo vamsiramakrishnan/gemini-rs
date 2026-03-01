@@ -317,10 +317,7 @@ async fn run_session(
                     Some(SessionCommand::SendText(text)) => {
                         let msg = ClientContentMessage {
                             client_content: ClientContentPayload {
-                                turns: vec![Content {
-                                    role: Some("user".to_string()),
-                                    parts: vec![Part::Text { text }],
-                                }],
+                                turns: vec![Content::user(text)],
                                 turn_complete: Some(true),
                             },
                         };

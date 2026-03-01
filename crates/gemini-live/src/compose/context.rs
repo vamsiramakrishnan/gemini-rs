@@ -100,10 +100,11 @@ impl C {
 
     /// Keep only messages with role "user".
     pub fn user_only() -> ContextPolicy {
+        use gemini_live_wire::prelude::Role;
         ContextPolicy::new("user_only", move |history| {
             history
                 .iter()
-                .filter(|c| c.role.as_deref() == Some("user"))
+                .filter(|c| c.role == Some(Role::User))
                 .cloned()
                 .collect()
         })
@@ -120,34 +121,33 @@ impl C {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gemini_live_wire::prelude::{Content, Part};
-
-    fn msg(role: &str, text: &str) -> Content {
-        Content {
-            role: Some(role.to_string()),
-            parts: vec![Part::Text {
-                text: text.to_string(),
-            }],
-        }
-    }
+    use gemini_live_wire::prelude::Content;
 
     #[test]
     fn window_limits_messages() {
-        let history = vec![msg("user", "a"), msg("model", "b"), msg("user", "c")];
+        let history = vec![
+            Content::user("a"),
+            Content::model("b"),
+            Content::user("c"),
+        ];
         let result = C::window(2).apply(&history);
         assert_eq!(result.len(), 2);
     }
 
     #[test]
     fn window_keeps_all_if_under_limit() {
-        let history = vec![msg("user", "a")];
+        let history = vec![Content::user("a")];
         let result = C::window(5).apply(&history);
         assert_eq!(result.len(), 1);
     }
 
     #[test]
     fn user_only_filters() {
-        let history = vec![msg("user", "a"), msg("model", "b"), msg("user", "c")];
+        let history = vec![
+            Content::user("a"),
+            Content::model("b"),
+            Content::user("c"),
+        ];
         let result = C::user_only().apply(&history);
         assert_eq!(result.len(), 2);
     }

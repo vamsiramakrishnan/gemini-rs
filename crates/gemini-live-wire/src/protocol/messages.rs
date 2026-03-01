@@ -556,12 +556,7 @@ mod tests {
     fn client_content_serialization() {
         let msg = ClientContentMessage {
             client_content: ClientContentPayload {
-                turns: vec![Content {
-                    role: Some("user".to_string()),
-                    parts: vec![Part::Text {
-                        text: "Hello".to_string(),
-                    }],
-                }],
+                turns: vec![Content::user("Hello")],
                 turn_complete: Some(true),
             },
         };
