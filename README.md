@@ -1,1 +1,1 @@
-# gemini-live-rs
+# gemini-live-rs\nGemini Live API implementation in Rust.

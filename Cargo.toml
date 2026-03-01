@@ -1,0 +1,114 @@
+[package]
+name = "gemini-live-rs"
+version = "0.1.0"
+edition = "2021"
+description = "Ultra-low-latency Rust library for the Gemini Multimodal Live API"
+license = "Apache-2.0"
+keywords = ["gemini", "multimodal", "live", "audio", "realtime"]
+categories = ["api-bindings", "multimedia::audio", "network-programming"]
+
+[features]
+default = ["vad", "tracing-support"]
+vad = []
+opus = ["dep:audiopus"]
+tracing-support = ["dep:tracing", "dep:tracing-subscriber"]
+metrics = ["dep:metrics", "dep:metrics-exporter-prometheus"]
+agent-adk = ["dep:reqwest"]
+agent-a2a = ["dep:reqwest"]
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
+futures-util = "0.3"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+
+# Error handling
+thiserror = "2"
+
+# Identifiers
+uuid = { version = "1", features = ["v4"] }
+
+# Byte manipulation
+bytes = "1"
+
+# Concurrency
+parking_lot = "0.12"
+dashmap = "6"
+arc-swap = "1"
+
+# URL parsing
+url = "2"
+
+# Audio (optional)
+audiopus = { version = "0.3.0-rc.0", optional = true }
+
+# Tracing (optional)
+tracing = { version = "0.1", optional = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"], optional = true }
+
+# Metrics (optional)
+metrics = { version = "0.24", optional = true }
+metrics-exporter-prometheus = { version = "0.16", optional = true }
+
+# HTTP client for agent integrations (optional)
+reqwest = { version = "0.12", features = ["json"], optional = true }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+proptest = "1"
+tokio-test = "0.4"
+
+[[bench]]
+name = "buffer_throughput"
+harness = false
+
+[[bench]]
+name = "vad_latency"
+harness = false
+
+[[example]]
+name = "simple_conversation"
+path = "examples/simple_conversation.rs"
+
+[[example]]
+name = "function_calling_agent"
+path = "examples/function_calling_agent.rs"
+
+[[example]]
+name = "text_only_agent"
+path = "examples/text_only_agent.rs"
+
+[[example]]
+name = "adk_bridge"
+path = "examples/adk_bridge.rs"
+required-features = ["agent-adk"]
+
+[[example]]
+name = "a2a_dispatch"
+path = "examples/a2a_dispatch.rs"
+required-features = ["agent-a2a"]
+
+[[example]]
+name = "sugar_conversation"
+path = "examples/sugar_conversation.rs"
+
+[[example]]
+name = "sugar_agent"
+path = "examples/sugar_agent.rs"
+
+[[example]]
+name = "call_lifecycle"
+path = "examples/call_lifecycle.rs"
+
+[[example]]
+name = "engineering_layers"
+path = "examples/engineering_layers.rs"
+
+[[example]]
+name = "vertex_agent"
+path = "examples/vertex_agent.rs"
