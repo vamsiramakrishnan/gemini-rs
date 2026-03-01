@@ -13,6 +13,7 @@ use crate::protocol::messages::*;
 use crate::protocol::types::*;
 use crate::session::{
     SessionCommand, SessionError, SessionEvent, SessionHandle, SessionPhase, SessionState,
+    SetupError, WebSocketError,
 };
 use crate::transport::TransportConfig;
 
@@ -161,14 +162,16 @@ async fn establish_connection(
     // Build request — attach Authorization header for Vertex AI
     let mut request = url
         .into_client_request()
-        .map_err(|e| SessionError::WebSocket(e.to_string()))?;
+        .map_err(|e| SessionError::WebSocket(WebSocketError::ProtocolError(e.to_string())))?;
     if let Some(token) = config.bearer_token() {
         request.headers_mut().insert(
             "Authorization",
             format!("Bearer {token}")
                 .parse()
                 .map_err(|e: tokio_tungstenite::tungstenite::http::header::InvalidHeaderValue| {
-                    SessionError::SetupFailed(format!("invalid bearer token header: {e}"))
+                    SessionError::SetupFailed(SetupError::AuthenticationFailed(
+                        format!("invalid bearer token header: {e}"),
+                    ))
                 })?,
         );
     }
@@ -179,8 +182,11 @@ async fn establish_connection(
         tokio_tungstenite::connect_async(request),
     )
     .await
-    .map_err(|_| SessionError::Timeout)?
-    .map_err(|e| SessionError::WebSocket(e.to_string()))?;
+    .map_err(|_| SessionError::Timeout {
+        phase: SessionPhase::Connecting,
+        elapsed: Duration::from_secs(transport_config.connect_timeout_secs),
+    })?
+    .map_err(|e| SessionError::WebSocket(WebSocketError::ConnectionRefused(e.to_string())))?;
 
     let (mut ws_write, mut ws_read) = ws_stream.split();
 
@@ -190,7 +196,7 @@ async fn establish_connection(
     ws_write
         .send(Message::Text(setup_json))
         .await
-        .map_err(|e| SessionError::WebSocket(e.to_string()))?;
+        .map_err(|e| SessionError::WebSocket(WebSocketError::ProtocolError(e.to_string())))?;
 
     // Wait for setupComplete
     // Note: Vertex AI sends JSON in Binary frames, Google AI uses Text frames.
@@ -205,11 +211,16 @@ async fn establish_connection(
                     }
                     Ok(Message::Close(frame)) => {
                         return Err(SessionError::SetupFailed(
-                            format!("Connection closed during setup: {:?}", frame),
+                            SetupError::ServerRejected {
+                                code: None,
+                                message: format!("Connection closed during setup: {:?}", frame),
+                            },
                         ));
                     }
                     Err(e) => {
-                        return Err(SessionError::WebSocket(e.to_string()));
+                        return Err(SessionError::WebSocket(
+                            WebSocketError::ProtocolError(e.to_string()),
+                        ));
                     }
                     _ => continue,
                 };
@@ -219,11 +230,14 @@ async fn establish_connection(
                     return Ok(sc);
                 }
             }
-            Err(SessionError::SetupFailed("Stream ended before setup complete".into()))
+            Err(SessionError::SetupFailed(SetupError::Timeout))
         },
     )
     .await
-    .map_err(|_| SessionError::Timeout)??;
+    .map_err(|_| SessionError::Timeout {
+        phase: SessionPhase::SetupSent,
+        elapsed: Duration::from_secs(transport_config.setup_timeout_secs),
+    })??;
 
     // Extract session resume handle if present
     if let Some(ref resumption) = setup_complete.setup_complete.session_resumption {
