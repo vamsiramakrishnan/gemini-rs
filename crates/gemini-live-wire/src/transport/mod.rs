@@ -1,8 +1,10 @@
 //! WebSocket transport layer — connection, full-duplex messaging, flow control.
 
+pub mod codec;
 pub mod connection;
 pub mod flow;
 
+pub use codec::{Codec, CodecError, JsonCodec};
 pub use connection::connect;
 pub use flow::{FlowConfig, TokenBucket};
 

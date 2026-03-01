@@ -29,7 +29,7 @@ pub mod prelude {
     pub use crate::protocol::messages::*;
 
     // Transport
-    pub use crate::transport::{connect, TransportConfig};
+    pub use crate::transport::{connect, Codec, CodecError, JsonCodec, TransportConfig};
 
     // Session
     pub use crate::session::{
