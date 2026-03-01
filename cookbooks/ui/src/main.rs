@@ -63,6 +63,14 @@ enum ServerMessage {
     Interrupted,
     #[serde(rename = "error")]
     Error { message: String },
+    #[serde(rename = "inputTranscription")]
+    InputTranscription { text: String },
+    #[serde(rename = "outputTranscription")]
+    OutputTranscription { text: String },
+    #[serde(rename = "voiceActivityStart")]
+    VoiceActivityStart,
+    #[serde(rename = "voiceActivityEnd")]
+    VoiceActivityEnd,
 }
 
 #[tokio::main]
@@ -241,6 +249,18 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                                             }
                                             SessionEvent::Interrupted => {
                                                 let _ = tx.send(ServerMessage::Interrupted).await;
+                                            }
+                                            SessionEvent::InputTranscription(t) => {
+                                                let _ = tx.send(ServerMessage::InputTranscription { text: t }).await;
+                                            }
+                                            SessionEvent::OutputTranscription(t) => {
+                                                let _ = tx.send(ServerMessage::OutputTranscription { text: t }).await;
+                                            }
+                                            SessionEvent::VoiceActivityStart => {
+                                                let _ = tx.send(ServerMessage::VoiceActivityStart).await;
+                                            }
+                                            SessionEvent::VoiceActivityEnd => {
+                                                let _ = tx.send(ServerMessage::VoiceActivityEnd).await;
                                             }
                                             SessionEvent::Error(e) => {
                                                 error!("Session error: {}", e);

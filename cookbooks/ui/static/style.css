@@ -216,3 +216,55 @@ button:disabled {
     border-radius: 20px;
     padding: 10px 20px;
 }
+
+/* Transcription styles */
+.transcription {
+    font-style: italic;
+    opacity: 0.8;
+    font-size: 0.9em;
+    padding: 4px 8px;
+    margin: 2px 0;
+    border-radius: 6px;
+    max-width: 80%;
+    word-wrap: break-word;
+    line-height: 1.4;
+}
+
+.transcription.user {
+    background: rgba(59, 130, 246, 0.1);
+    text-align: right;
+    margin-left: 20%;
+    align-self: flex-end;
+}
+
+.transcription.model {
+    background: rgba(16, 185, 129, 0.1);
+    margin-right: 20%;
+    align-self: flex-start;
+}
+
+.transcription .label {
+    font-weight: 600;
+    font-size: 0.8em;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Speaking / listening indicator */
+.speaking-indicator {
+    display: none;
+    padding: 4px 12px;
+    font-size: 0.85em;
+    color: #10b981;
+    text-align: center;
+    animation: indicator-pulse 1.5s ease-in-out infinite;
+}
+
+.speaking-indicator.active {
+    display: block;
+}
+
+@keyframes indicator-pulse {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 1; }
+}

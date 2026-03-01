@@ -9,6 +9,7 @@ members = [
     "cookbooks/text-chat",
     "cookbooks/voice-chat",
     "cookbooks/tool-calling",
+    "cookbooks/transcription",
 ]
 
 [workspace.package]

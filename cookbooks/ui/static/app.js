@@ -12,6 +12,8 @@ const micBtn = document.getElementById('mic-btn');
 let ws = null;
 let isConnected = false;
 let currentBotMessageDiv = null;
+let currentUserTranscriptionDiv = null;
+let currentModelTranscriptionDiv = null;
 
 // Audio context and nodes
 let audioContext = null;
@@ -112,15 +114,29 @@ connectBtn.addEventListener('click', () => {
                 break;
             case 'turnComplete':
                 currentBotMessageDiv = null;
+                currentModelTranscriptionDiv = null;
                 break;
             case 'interrupted':
                 currentBotMessageDiv = null;
+                currentModelTranscriptionDiv = null;
                 addMessage('Model interrupted.', 'system');
                 // clear audio queue
                 nextPlayTime = audioContext.currentTime;
                 break;
             case 'audio':
                 playAudio(msg.data);
+                break;
+            case 'inputTranscription':
+                appendTranscription('user', msg.text);
+                break;
+            case 'outputTranscription':
+                appendTranscription('model', msg.text);
+                break;
+            case 'voiceActivityStart':
+                showSpeakingIndicator(true);
+                break;
+            case 'voiceActivityEnd':
+                showSpeakingIndicator(false);
                 break;
             case 'error':
                 addMessage(`Error: ${msg.message}`, 'error');
@@ -276,3 +292,52 @@ function stopRecording() {
 }
 
 micBtn.addEventListener('click', toggleRecording);
+
+// Transcription display
+function appendTranscription(role, text) {
+    if (role === 'user') {
+        if (!currentUserTranscriptionDiv) {
+            currentUserTranscriptionDiv = document.createElement('div');
+            currentUserTranscriptionDiv.className = 'transcription user';
+            const label = document.createElement('span');
+            label.className = 'label';
+            label.textContent = '[You] ';
+            currentUserTranscriptionDiv.appendChild(label);
+            const content = document.createElement('span');
+            content.className = 'transcription-content';
+            currentUserTranscriptionDiv.appendChild(content);
+            messagesDiv.appendChild(currentUserTranscriptionDiv);
+        }
+        const content = currentUserTranscriptionDiv.querySelector('.transcription-content');
+        content.textContent += text;
+    } else {
+        if (!currentModelTranscriptionDiv) {
+            currentModelTranscriptionDiv = document.createElement('div');
+            currentModelTranscriptionDiv.className = 'transcription model';
+            const label = document.createElement('span');
+            label.className = 'label';
+            label.textContent = '[Assistant] ';
+            currentModelTranscriptionDiv.appendChild(label);
+            const content = document.createElement('span');
+            content.className = 'transcription-content';
+            currentModelTranscriptionDiv.appendChild(content);
+            messagesDiv.appendChild(currentModelTranscriptionDiv);
+        }
+        const content = currentModelTranscriptionDiv.querySelector('.transcription-content');
+        content.textContent += text;
+    }
+    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+}
+
+function showSpeakingIndicator(speaking) {
+    const indicator = document.getElementById('speaking-indicator');
+    if (indicator) {
+        if (speaking) {
+            indicator.classList.add('active');
+            // Reset transcription divs when new speech starts
+            currentUserTranscriptionDiv = null;
+        } else {
+            indicator.classList.remove('active');
+        }
+    }
+}
