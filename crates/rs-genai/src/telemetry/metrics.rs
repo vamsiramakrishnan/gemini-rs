@@ -72,6 +72,22 @@ pub fn record_ws_bytes_received(bytes: u64) {
     metrics::counter!("rs_genai_ws_bytes_received_total").increment(bytes);
 }
 
+/// Record an HTTP REST API request.
+#[cfg(feature = "metrics")]
+pub fn record_http_request(method: &str, status: u16, duration_ms: f64) {
+    metrics::counter!(
+        "rs_genai_http_requests_total",
+        "method" => method.to_string(),
+        "status" => status.to_string()
+    )
+    .increment(1);
+    metrics::histogram!(
+        "rs_genai_http_request_duration_ms",
+        "method" => method.to_string()
+    )
+    .record(duration_ms);
+}
+
 // No-op stubs when metrics feature is disabled.
 #[cfg(not(feature = "metrics"))]
 pub fn record_session_connected() {}
@@ -95,3 +111,5 @@ pub fn record_reconnection() {}
 pub fn record_ws_bytes_sent(_: u64) {}
 #[cfg(not(feature = "metrics"))]
 pub fn record_ws_bytes_received(_: u64) {}
+#[cfg(not(feature = "metrics"))]
+pub fn record_http_request(_: &str, _: u16, _: f64) {}

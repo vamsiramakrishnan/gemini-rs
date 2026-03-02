@@ -7,7 +7,7 @@ pub mod connection;
 pub mod flow;
 pub mod ws;
 
-pub use auth::{AuthProvider, GoogleAIAuth, GoogleAITokenAuth, VertexAIAuth};
+pub use auth::{AuthProvider, GoogleAIAuth, GoogleAITokenAuth, ServiceEndpoint, VertexAIAuth};
 pub use builder::ConnectBuilder;
 pub use codec::{Codec, CodecError, JsonCodec};
 pub use connection::{connect, connect_with};

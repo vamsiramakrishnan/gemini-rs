@@ -8,9 +8,21 @@ keywords = ["gemini", "multimodal", "live", "audio", "realtime"]
 categories = ["api-bindings", "multimedia::audio", "network-programming"]
 
 [features]
-default = ["vad", "tracing-support"]
+default = ["live", "vad", "tracing-support"]
+live = []
 vad = []
 opus = ["dep:audiopus"]
+http = ["dep:reqwest"]
+generate = ["http"]
+embed = ["http"]
+files = ["http"]
+models = ["http"]
+tokens = ["http"]
+caches = ["http"]
+tunings = ["http"]
+batches = ["http"]
+chats = ["generate"]
+all-apis = ["generate", "embed", "files", "models", "tokens", "caches", "tunings", "batches", "chats"]
 tracing-support = ["dep:tracing", "dep:tracing-subscriber"]
 metrics = ["dep:metrics", "dep:metrics-exporter-prometheus"]
 
@@ -45,6 +57,9 @@ arc-swap = "1"
 
 # URL parsing
 url = "2"
+
+# HTTP client (optional, for REST APIs)
+reqwest = { version = "0.12", features = ["json"], optional = true }
 
 # Audio (optional)
 audiopus = { version = "0.3.0-rc.0", optional = true }

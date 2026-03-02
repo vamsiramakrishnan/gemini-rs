@@ -22,9 +22,11 @@ pub mod session;
 pub mod flow;
 pub mod telemetry;
 pub mod quick;
+pub mod client;
 
 // Top-level re-exports for convenience.
 pub use quick::{quick_connect, quick_connect_vertex};
+pub use client::Client;
 
 /// Convenient re-exports for wire-level usage.
 pub mod prelude {
@@ -35,7 +37,7 @@ pub mod prelude {
 
     // Transport
     pub use crate::transport::{connect, connect_with, Codec, CodecError, ConnectBuilder, JsonCodec, TransportConfig};
-    pub use crate::transport::auth::{AuthProvider, GoogleAIAuth, GoogleAITokenAuth, VertexAIAuth};
+    pub use crate::transport::auth::{AuthProvider, GoogleAIAuth, GoogleAITokenAuth, ServiceEndpoint, VertexAIAuth};
     pub use crate::transport::ws::{Transport, TungsteniteTransport, MockTransport};
 
     // Session
@@ -60,6 +62,11 @@ pub mod prelude {
 
     // Telemetry
     pub use crate::telemetry::TelemetryConfig;
+
+    // Client
+    pub use crate::client::Client;
+    #[cfg(feature = "http")]
+    pub use crate::client::http::{HttpClient, HttpConfig, HttpError};
 
     // Quick-start
     pub use crate::quick::{quick_connect, quick_connect_vertex};

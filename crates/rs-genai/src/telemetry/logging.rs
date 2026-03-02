@@ -71,6 +71,40 @@ pub fn log_vad_event(session_id: &str, event: &str) {
     );
 }
 
+/// Log an HTTP request (info level).
+#[cfg(feature = "tracing-support")]
+pub fn log_http_request(method: &str, url: &str) {
+    tracing::info!(
+        event = "http_request",
+        http.method = method,
+        http.url = url,
+        "HTTP request"
+    );
+}
+
+/// Log an HTTP response (info level).
+#[cfg(feature = "tracing-support")]
+pub fn log_http_response(status: u16, duration_ms: f64) {
+    tracing::info!(
+        event = "http_response",
+        http.status = status,
+        duration_ms = duration_ms,
+        "HTTP response"
+    );
+}
+
+/// Log an HTTP retry attempt (warn level).
+#[cfg(feature = "tracing-support")]
+pub fn log_http_retry(url: &str, attempt: u32, delay_ms: u64) {
+    tracing::warn!(
+        event = "http_retry",
+        http.url = url,
+        attempt = attempt,
+        delay_ms = delay_ms,
+        "HTTP retry"
+    );
+}
+
 // No-op stubs when tracing is disabled.
 #[cfg(not(feature = "tracing-support"))]
 pub fn log_session_event(_: &str, _: &str, _: &str) {}
@@ -84,3 +118,9 @@ pub fn log_jitter_underrun(_: &str, _: f64) {}
 pub fn log_reconnection(_: &str, _: u32, _: u64) {}
 #[cfg(not(feature = "tracing-support"))]
 pub fn log_vad_event(_: &str, _: &str) {}
+#[cfg(not(feature = "tracing-support"))]
+pub fn log_http_request(_: &str, _: &str) {}
+#[cfg(not(feature = "tracing-support"))]
+pub fn log_http_response(_: u16, _: f64) {}
+#[cfg(not(feature = "tracing-support"))]
+pub fn log_http_retry(_: &str, _: u32, _: u64) {}

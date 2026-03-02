@@ -2,17 +2,87 @@
 //!
 //! This module defines the [`AuthProvider`] trait and built-in implementations
 //! for Google AI (API key and OAuth2 token) and Vertex AI (Bearer token).
+//!
+//! The [`ServiceEndpoint`] enum allows constructing URLs for both WebSocket (Live)
+//! and REST API endpoints from the same auth provider.
 
 use async_trait::async_trait;
 
 use crate::protocol::types::GeminiModel;
 use crate::session::AuthError;
 
+/// Identifies which Gemini API service to connect to.
+///
+/// Used by [`AuthProvider::rest_url`] to construct the correct REST endpoint URL.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ServiceEndpoint {
+    /// WebSocket Live/Bidi streaming endpoint.
+    LiveWs,
+    /// POST /models/{model}:generateContent
+    GenerateContent,
+    /// POST /models/{model}:streamGenerateContent
+    StreamGenerateContent,
+    /// POST /models/{model}:embedContent
+    EmbedContent,
+    /// POST /models/{model}:countTokens
+    CountTokens,
+    /// POST /models/{model}:computeTokens
+    ComputeTokens,
+    /// GET /models
+    ListModels,
+    /// GET /models/{model}
+    GetModel,
+    /// Files CRUD (upload, get, list, delete)
+    Files,
+    /// Cached content CRUD
+    CachedContents,
+    /// Tuning jobs CRUD
+    TuningJobs,
+    /// Batch jobs CRUD
+    BatchJobs,
+}
+
+impl ServiceEndpoint {
+    /// REST method suffix appended to the model path (e.g., `:generateContent`).
+    /// Returns `None` for endpoints that don't use a model suffix.
+    pub fn model_method(&self) -> Option<&'static str> {
+        match self {
+            Self::GenerateContent => Some("generateContent"),
+            Self::StreamGenerateContent => Some("streamGenerateContent"),
+            Self::EmbedContent => Some("embedContent"),
+            Self::CountTokens => Some("countTokens"),
+            Self::ComputeTokens => Some("computeTokens"),
+            _ => None,
+        }
+    }
+
+    /// Whether this endpoint requires a model ID in the path.
+    pub fn requires_model(&self) -> bool {
+        matches!(
+            self,
+            Self::GenerateContent
+                | Self::StreamGenerateContent
+                | Self::EmbedContent
+                | Self::CountTokens
+                | Self::ComputeTokens
+                | Self::GetModel
+        )
+    }
+}
+
 /// Provides authentication credentials and URL construction for Gemini API connections.
 #[async_trait]
 pub trait AuthProvider: Send + Sync + 'static {
     /// Build the WebSocket URL for the given model.
     fn ws_url(&self, model: &GeminiModel) -> String;
+
+    /// Build a REST API URL for the given service endpoint and model.
+    ///
+    /// Default implementation panics — override when using HTTP client features.
+    fn rest_url(&self, endpoint: ServiceEndpoint, model: Option<&GeminiModel>) -> String {
+        let _ = (endpoint, model);
+        unimplemented!("REST URLs require a concrete auth provider (GoogleAIAuth or VertexAIAuth)")
+    }
 
     /// HTTP headers for the WebSocket upgrade request (e.g., Bearer token).
     async fn auth_headers(&self) -> Result<Vec<(String, String)>, AuthError>;
@@ -57,6 +127,11 @@ impl AuthProvider for GoogleAIAuth {
         )
     }
 
+    fn rest_url(&self, endpoint: ServiceEndpoint, model: Option<&GeminiModel>) -> String {
+        let base = "https://generativelanguage.googleapis.com/v1beta";
+        build_google_ai_rest_url(base, endpoint, model, &self.api_key)
+    }
+
     async fn auth_headers(&self) -> Result<Vec<(String, String)>, AuthError> {
         Ok(vec![]) // API key is in the URL
     }
@@ -95,8 +170,17 @@ impl AuthProvider for GoogleAITokenAuth {
         )
     }
 
+    fn rest_url(&self, endpoint: ServiceEndpoint, model: Option<&GeminiModel>) -> String {
+        let base = "https://generativelanguage.googleapis.com/v1beta";
+        // Token auth uses Bearer header, not query param — build URL without key
+        build_google_ai_rest_url_no_key(base, endpoint, model)
+    }
+
     async fn auth_headers(&self) -> Result<Vec<(String, String)>, AuthError> {
-        Ok(vec![])
+        Ok(vec![(
+            "Authorization".to_string(),
+            format!("Bearer {}", self.access_token),
+        )])
     }
 }
 
@@ -152,12 +236,115 @@ impl AuthProvider for VertexAIAuth {
         )
     }
 
+    fn rest_url(&self, endpoint: ServiceEndpoint, model: Option<&GeminiModel>) -> String {
+        let host = if self.location == "global" {
+            "aiplatform.googleapis.com".to_string()
+        } else {
+            format!("{}-aiplatform.googleapis.com", self.location)
+        };
+        build_vertex_rest_url(&host, &self.project, &self.location, endpoint, model)
+    }
+
     async fn auth_headers(&self) -> Result<Vec<(String, String)>, AuthError> {
         let token = self.token.lock().clone();
         Ok(vec![(
             "Authorization".to_string(),
             format!("Bearer {token}"),
         )])
+    }
+}
+
+// ---------------------------------------------------------------------------
+// REST URL builders (shared by auth implementations)
+// ---------------------------------------------------------------------------
+
+/// Build a Google AI REST URL with API key as query parameter.
+fn build_google_ai_rest_url(
+    base: &str,
+    endpoint: ServiceEndpoint,
+    model: Option<&GeminiModel>,
+    api_key: &str,
+) -> String {
+    let path = build_rest_path(endpoint, model);
+    format!("{base}/{path}?key={api_key}")
+}
+
+/// Build a Google AI REST URL without an API key (for token-based auth).
+fn build_google_ai_rest_url_no_key(
+    base: &str,
+    endpoint: ServiceEndpoint,
+    model: Option<&GeminiModel>,
+) -> String {
+    let path = build_rest_path(endpoint, model);
+    format!("{base}/{path}")
+}
+
+/// Build a Vertex AI REST URL.
+fn build_vertex_rest_url(
+    host: &str,
+    project: &str,
+    location: &str,
+    endpoint: ServiceEndpoint,
+    model: Option<&GeminiModel>,
+) -> String {
+    let base = format!(
+        "https://{host}/v1beta1/projects/{project}/locations/{location}",
+    );
+    match endpoint {
+        ServiceEndpoint::LiveWs => {
+            // LiveWs should use ws_url(), not rest_url()
+            panic!("Use ws_url() for LiveWs endpoints")
+        }
+        ServiceEndpoint::Files => {
+            // Vertex AI files are at project/location level
+            format!("{base}/files")
+        }
+        ServiceEndpoint::CachedContents => {
+            format!("{base}/cachedContents")
+        }
+        ServiceEndpoint::TuningJobs => {
+            format!("{base}/tuningJobs")
+        }
+        ServiceEndpoint::BatchJobs => {
+            format!("{base}/batchPredictionJobs")
+        }
+        ServiceEndpoint::ListModels => {
+            format!("{base}/publishers/google/models")
+        }
+        endpoint => {
+            // Model-scoped endpoints
+            let model_id = model
+                .map(|m| m.to_string().trim_start_matches("models/").to_string())
+                .unwrap_or_default();
+            let publisher_model = format!("publishers/google/models/{model_id}");
+            if let Some(method) = endpoint.model_method() {
+                format!("{base}/{publisher_model}:{method}")
+            } else {
+                format!("{base}/{publisher_model}")
+            }
+        }
+    }
+}
+
+/// Build the REST path segment for Google AI (mldev) endpoints.
+fn build_rest_path(endpoint: ServiceEndpoint, model: Option<&GeminiModel>) -> String {
+    match endpoint {
+        ServiceEndpoint::LiveWs => {
+            panic!("Use ws_url() for LiveWs endpoints")
+        }
+        ServiceEndpoint::Files => "files".to_string(),
+        ServiceEndpoint::CachedContents => "cachedContents".to_string(),
+        ServiceEndpoint::TuningJobs => "tunedModels".to_string(),
+        ServiceEndpoint::BatchJobs => "batchJobs".to_string(),
+        ServiceEndpoint::ListModels => "models".to_string(),
+        endpoint => {
+            let model_str = model.map(|m| m.to_string()).unwrap_or_default();
+            if let Some(method) = endpoint.model_method() {
+                format!("{model_str}:{method}")
+            } else {
+                model_str
+            }
+        }
     }
 }
 
@@ -255,5 +442,91 @@ mod tests {
         let auth = VertexAIAuth::new("proj", "loc", "tok");
         let params = auth.query_params();
         assert!(params.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // REST URL tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn google_ai_rest_url_generate_content() {
+        let auth = GoogleAIAuth::new("test-key");
+        let model = GeminiModel::Gemini2_0FlashLive;
+        let url = auth.rest_url(ServiceEndpoint::GenerateContent, Some(&model));
+        assert!(url.starts_with("https://generativelanguage.googleapis.com/v1beta/"));
+        assert!(url.contains(":generateContent"));
+        assert!(url.contains("key=test-key"));
+    }
+
+    #[test]
+    fn google_ai_rest_url_list_models() {
+        let auth = GoogleAIAuth::new("key123");
+        let url = auth.rest_url(ServiceEndpoint::ListModels, None);
+        assert!(url.contains("/models?key=key123"));
+    }
+
+    #[test]
+    fn google_ai_rest_url_files() {
+        let auth = GoogleAIAuth::new("key");
+        let url = auth.rest_url(ServiceEndpoint::Files, None);
+        assert!(url.contains("/files?key=key"));
+    }
+
+    #[test]
+    fn google_ai_token_rest_url_no_key_in_url() {
+        let auth = GoogleAITokenAuth::new("oauth-token");
+        let url = auth.rest_url(ServiceEndpoint::CountTokens, Some(&GeminiModel::default()));
+        assert!(url.contains(":countTokens"));
+        assert!(!url.contains("key="));
+        assert!(!url.contains("access_token="));
+    }
+
+    #[test]
+    fn vertex_rest_url_generate_content() {
+        let auth = VertexAIAuth::new("my-project", "us-central1", "token");
+        let model = GeminiModel::Gemini2_0FlashLive;
+        let url = auth.rest_url(ServiceEndpoint::GenerateContent, Some(&model));
+        assert!(url.starts_with("https://us-central1-aiplatform.googleapis.com/v1beta1/"));
+        assert!(url.contains("projects/my-project/locations/us-central1"));
+        assert!(url.contains(":generateContent"));
+    }
+
+    #[test]
+    fn vertex_rest_url_list_models() {
+        let auth = VertexAIAuth::new("proj", "us-east1", "tok");
+        let url = auth.rest_url(ServiceEndpoint::ListModels, None);
+        assert!(url.contains("publishers/google/models"));
+    }
+
+    #[test]
+    fn vertex_rest_url_global() {
+        let auth = VertexAIAuth::new("proj", "global", "tok");
+        let model = GeminiModel::default();
+        let url = auth.rest_url(ServiceEndpoint::EmbedContent, Some(&model));
+        assert!(url.starts_with("https://aiplatform.googleapis.com/"));
+        assert!(!url.contains("global-aiplatform"));
+        assert!(url.contains(":embedContent"));
+    }
+
+    #[test]
+    fn service_endpoint_model_method() {
+        assert_eq!(
+            ServiceEndpoint::GenerateContent.model_method(),
+            Some("generateContent")
+        );
+        assert_eq!(
+            ServiceEndpoint::StreamGenerateContent.model_method(),
+            Some("streamGenerateContent")
+        );
+        assert_eq!(ServiceEndpoint::ListModels.model_method(), None);
+        assert_eq!(ServiceEndpoint::Files.model_method(), None);
+    }
+
+    #[test]
+    fn service_endpoint_requires_model() {
+        assert!(ServiceEndpoint::GenerateContent.requires_model());
+        assert!(ServiceEndpoint::CountTokens.requires_model());
+        assert!(!ServiceEndpoint::ListModels.requires_model());
+        assert!(!ServiceEndpoint::Files.requires_model());
     }
 }

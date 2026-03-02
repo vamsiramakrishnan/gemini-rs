@@ -63,6 +63,16 @@ pub fn disconnect_span(session_id: &str, reason: &str) -> tracing::Span {
     )
 }
 
+/// Create a span for an HTTP REST API request.
+#[cfg(feature = "tracing-support")]
+pub fn http_request_span(method: &str, url: &str) -> tracing::Span {
+    tracing::info_span!(
+        "rs_genai.http_request",
+        http.method = method,
+        http.url = url,
+    )
+}
+
 // No-op stubs when tracing is disabled — these compile to nothing.
 #[cfg(not(feature = "tracing-support"))]
 pub fn session_span(_: &str) {}
@@ -80,3 +90,5 @@ pub fn tool_call_span(_: &str, _: &str) {}
 pub fn tool_response_span(_: &str) {}
 #[cfg(not(feature = "tracing-support"))]
 pub fn disconnect_span(_: &str, _: &str) {}
+#[cfg(not(feature = "tracing-support"))]
+pub fn http_request_span(_: &str, _: &str) {}
