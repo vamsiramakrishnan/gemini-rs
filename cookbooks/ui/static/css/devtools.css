@@ -1,0 +1,492 @@
+/* devtools.css — Devtools panel styles */
+
+/* ============================================
+   Devtools Pane
+   ============================================ */
+.devtools-pane {
+  display: flex;
+  flex-direction: column;
+  width: 380px;
+  min-width: 380px;
+  background: var(--devtools-bg);
+  border-left: 1px solid var(--devtools-border);
+  position: relative;
+  transition: width 0.2s, min-width 0.2s;
+}
+
+.devtools-pane.collapsed {
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
+  border-left: none;
+}
+
+/* ============================================
+   Tab Bar
+   ============================================ */
+.devtools-tabs {
+  display: flex;
+  align-items: center;
+  height: 40px;
+  min-height: 40px;
+  border-bottom: 1px solid var(--devtools-border);
+  background: #ffffff;
+  padding: 0 4px;
+  gap: 2px;
+}
+
+.devtools-tab {
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border: none;
+  background: none;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+  height: 100%;
+  display: flex;
+  align-items: center;
+}
+
+.devtools-tab:hover {
+  color: var(--text-primary);
+}
+
+.devtools-tab.active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+
+.devtools-tab-spacer {
+  flex: 1;
+}
+
+.devtools-collapse-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  border-radius: 4px;
+  transition: background 0.15s, color 0.15s;
+  margin-right: 4px;
+}
+
+.devtools-collapse-btn:hover {
+  background: var(--border-light);
+  color: var(--text-primary);
+}
+
+.devtools-collapse-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* ============================================
+   Tab Content
+   ============================================ */
+.devtools-content {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+.devtools-panel {
+  display: none;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.devtools-panel.active {
+  display: flex;
+}
+
+/* ============================================
+   State Tab
+   ============================================ */
+.state-panel {
+  overflow-y: auto;
+  padding: 0;
+}
+
+.state-panel::-webkit-scrollbar {
+  width: 5px;
+}
+
+.state-panel::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+.state-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-style: italic;
+}
+
+.state-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.state-table th {
+  text-align: left;
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  background: #ffffff;
+  border-bottom: 1px solid var(--devtools-border);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.state-table td {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border-light);
+  vertical-align: top;
+}
+
+.state-table tr:last-child td {
+  border-bottom: none;
+}
+
+.state-key {
+  color: var(--primary);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.state-value {
+  color: var(--text-primary);
+  word-break: break-all;
+  max-width: 220px;
+}
+
+.state-value.string { color: #137333; }
+.state-value.number { color: #1967d2; }
+.state-value.boolean { color: #b06000; }
+.state-value.null { color: var(--text-muted); font-style: italic; }
+
+/* Change highlight */
+.state-row-flash {
+  animation: state-flash 1.2s ease-out;
+}
+
+@keyframes state-flash {
+  0% { background: rgba(251,188,4,0.3); }
+  100% { background: transparent; }
+}
+
+/* ============================================
+   Events Tab
+   ============================================ */
+.events-panel {
+  overflow-y: auto;
+  padding: 0;
+}
+
+.events-panel::-webkit-scrollbar {
+  width: 5px;
+}
+
+.events-panel::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+.events-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-style: italic;
+}
+
+.event-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border-light);
+  font-size: 12px;
+  font-family: var(--mono);
+  animation: event-in 0.15s ease-out;
+}
+
+@keyframes event-in {
+  from { opacity: 0; background: rgba(66,133,244,0.06); }
+  to { opacity: 1; background: transparent; }
+}
+
+.event-entry:last-child {
+  border-bottom: none;
+}
+
+.event-time {
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  min-width: 60px;
+}
+
+.event-type-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.event-type-badge.textDelta,
+.event-type-badge.textComplete {
+  background: #e8f0fe;
+  color: #1967d2;
+}
+
+.event-type-badge.audio {
+  background: #f3e8fd;
+  color: #7627bb;
+}
+
+.event-type-badge.turnComplete {
+  background: #e6f4ea;
+  color: #137333;
+}
+
+.event-type-badge.stateUpdate {
+  background: #fef7e0;
+  color: #b06000;
+}
+
+.event-type-badge.phaseChange {
+  background: #fff3e0;
+  color: #e65100;
+}
+
+.event-type-badge.evaluation {
+  background: #e0f7fa;
+  color: #00695c;
+}
+
+.event-type-badge.violation {
+  background: #fce8e6;
+  color: #c5221f;
+}
+
+.event-type-badge.connected,
+.event-type-badge.appMeta {
+  background: #f1f3f4;
+  color: #5f6368;
+}
+
+.event-type-badge.inputTranscription,
+.event-type-badge.outputTranscription {
+  background: #e8f0fe;
+  color: #1967d2;
+}
+
+.event-type-badge.voiceActivityStart,
+.event-type-badge.voiceActivityEnd {
+  background: #f3e8fd;
+  color: #7627bb;
+}
+
+.event-type-badge.interrupted {
+  background: #fce8e6;
+  color: #c5221f;
+}
+
+.event-type-badge.error {
+  background: #fce8e6;
+  color: #c5221f;
+}
+
+.event-content {
+  color: var(--text-primary);
+  word-break: break-all;
+  flex: 1;
+  min-width: 0;
+}
+
+.event-content .truncated {
+  color: var(--text-muted);
+}
+
+/* ============================================
+   Evaluator / Playbook Panels
+   ============================================ */
+.playbook-panel,
+.evaluator-panel {
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.phase-card {
+  background: #ffffff;
+  border: 1px solid var(--devtools-border);
+  border-radius: 6px;
+  padding: 12px;
+  margin-bottom: 10px;
+}
+
+.phase-card .phase-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.phase-card .phase-name {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.phase-card .phase-arrow {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.phase-card .phase-reason {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-family: var(--mono);
+}
+
+.eval-card {
+  background: #ffffff;
+  border: 1px solid var(--devtools-border);
+  border-radius: 6px;
+  padding: 12px;
+  margin-bottom: 10px;
+}
+
+.eval-card .eval-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.eval-card .eval-phase {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.eval-card .eval-score {
+  font-weight: 700;
+  font-size: 14px;
+  font-family: var(--mono);
+}
+
+.eval-card .eval-score.high { color: var(--success); }
+.eval-card .eval-score.medium { color: var(--warning); }
+.eval-card .eval-score.low { color: var(--error); }
+
+.eval-card .eval-notes {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.violation-card {
+  background: var(--error-light);
+  border: 1px solid #f5c6c2;
+  border-radius: 6px;
+  padding: 12px;
+  margin-bottom: 10px;
+}
+
+.violation-card .violation-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.violation-card .violation-rule {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--error);
+}
+
+.violation-card .violation-severity {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--error);
+  color: #ffffff;
+}
+
+.violation-card .violation-severity.warning {
+  background: var(--warning);
+  color: #202124;
+}
+
+.violation-card .violation-detail {
+  font-size: 12px;
+  color: #5f2120;
+  line-height: 1.5;
+}
+
+/* ============================================
+   Expand button (for collapsed state)
+   ============================================ */
+.devtools-expand-btn {
+  position: absolute;
+  top: 60px;
+  right: 0;
+  width: 24px;
+  height: 48px;
+  background: var(--devtools-bg);
+  border: 1px solid var(--devtools-border);
+  border-right: none;
+  border-radius: 4px 0 0 4px;
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  z-index: 5;
+}
+
+.devtools-expand-btn:hover {
+  background: #ffffff;
+  color: var(--text-primary);
+}
+
+.devtools-expand-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+.devtools-expand-btn.visible {
+  display: flex;
+}

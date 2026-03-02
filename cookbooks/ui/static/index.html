@@ -1,63 +1,202 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gemini Live RS - Tester UI</title>
-    <link rel="stylesheet" href="style.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gemini Live Cookbooks</title>
+  <link rel="stylesheet" href="/static/css/main.css">
+  <link rel="stylesheet" href="/static/css/landing.css">
 </head>
-<body>
-    <div class="container">
-        <aside class="sidebar">
-            <h2>Configuration</h2>
-            <div class="form-group">
-                <label for="model-select">Model</label>
-                <select id="model-select">
-                    <option value="gemini-live-2.5-flash-native-audio" selected>Gemini Live 2.5 Flash (Native Audio)</option>
-                    <option value="gemini-2.0-flash-live-001">Gemini 2.0 Flash Live</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label for="voice-select">Voice</label>
-                <select id="voice-select">
-                    <option value="Aoede">Aoede</option>
-                    <option value="Puck">Puck</option>
-                    <option value="Charon">Charon</option>
-                    <option value="Kore">Kore</option>
-                    <option value="Fenrir">Fenrir</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label for="system-instruction">System Instruction</label>
-                <textarea id="system-instruction" rows="4">You are a helpful voice assistant. Keep responses concise.</textarea>
-            </div>
-            <button id="connect-btn" class="primary-btn">Connect</button>
-            <button id="disconnect-btn" class="danger-btn" disabled>Disconnect</button>
-            
-            <div class="status-box">
-                Status: <span id="status-text" class="status-disconnected">Disconnected</span>
-            </div>
-        </aside>
+<body class="landing">
 
-        <main class="chat-area">
-            <header class="chat-header">
-                <h2>Conversation</h2>
-            </header>
-            
-            <div class="messages" id="messages">
-                <!-- Messages will be injected here -->
-            </div>
-
-            <div id="speaking-indicator" class="speaking-indicator">Listening...</div>
-
-            <div class="input-area">
-                <button id="mic-btn" class="mic-btn" disabled>🎤</button>
-                <input type="text" id="text-input" placeholder="Type a message..." disabled>
-                <button id="send-btn" disabled>Send</button>
-            </div>
-        </main>
+  <!-- Header -->
+  <header class="landing-header">
+    <div class="header-content">
+      <h1>Gemini Live <span class="accent">Cookbooks</span></h1>
+      <p class="tagline">
+        Interactive demos showcasing real-time multimodal patterns with the
+        Gemini Live API. Voice, text, tool calling, state machines, and guardrails.
+      </p>
+      <div class="header-stats" id="header-stats" style="display: none;">
+        <div class="stat">
+          <span class="stat-value" id="stat-apps">0</span>
+          <span class="stat-label">Apps</span>
+        </div>
+        <div class="stat">
+          <span class="stat-value" id="stat-categories">0</span>
+          <span class="stat-label">Categories</span>
+        </div>
+        <div class="stat">
+          <span class="stat-value" id="stat-features">0</span>
+          <span class="stat-label">Features</span>
+        </div>
+      </div>
     </div>
+  </header>
 
-    <script src="app.js"></script>
+  <!-- Main Content -->
+  <main class="landing-main" id="main-content">
+    <!-- Loading skeleton -->
+    <div id="loading-skeleton" class="skeleton-grid">
+      <div class="skeleton-card">
+        <div class="skeleton-line short"></div>
+        <div class="skeleton-line full"></div>
+        <div class="skeleton-line medium"></div>
+      </div>
+      <div class="skeleton-card">
+        <div class="skeleton-line short"></div>
+        <div class="skeleton-line full"></div>
+        <div class="skeleton-line medium"></div>
+      </div>
+      <div class="skeleton-card">
+        <div class="skeleton-line short"></div>
+        <div class="skeleton-line full"></div>
+        <div class="skeleton-line medium"></div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    (function () {
+      'use strict';
+
+      const CATEGORY_META = {
+        basic: {
+          label: 'Basic',
+          desc: 'Core patterns for text chat, voice, and tool calling'
+        },
+        advanced: {
+          label: 'Advanced',
+          desc: 'State machines, multi-phase conversations, and guardrails'
+        },
+        showcase: {
+          label: 'Showcase',
+          desc: 'Full-featured demos combining multiple patterns'
+        }
+      };
+
+      const CATEGORY_ORDER = ['basic', 'advanced', 'showcase'];
+
+      const FEATURE_CLASSES = {
+        'voice': 'voice',
+        'text': 'text',
+        'tools': 'tools',
+        'tool-calling': 'tools',
+        'state-machine': 'state-machine',
+        'guardrails': 'guardrails',
+        'audio': 'audio',
+        'streaming': 'streaming',
+        'evaluation': 'evaluation'
+      };
+
+      function toUrlName(name) {
+        return name.toLowerCase().replace(/\s+/g, '-');
+      }
+
+      function featureBadgeClass(feature) {
+        const lower = feature.toLowerCase();
+        return FEATURE_CLASSES[lower] || '';
+      }
+
+      function escapeHtml(str) {
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+      }
+
+      function renderApps(apps) {
+        const main = document.getElementById('main-content');
+        const skeleton = document.getElementById('loading-skeleton');
+        if (skeleton) skeleton.remove();
+
+        // Empty state
+        if (!apps || apps.length === 0) {
+          main.innerHTML = `
+            <div class="landing-empty">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                <line x1="9" y1="9" x2="15" y2="15"/>
+                <line x1="15" y1="9" x2="9" y2="15"/>
+              </svg>
+              <div class="empty-title">No apps registered yet</div>
+              <div class="empty-subtitle">Apps will appear here once they are implemented.<br>Check the cookbooks source for progress.</div>
+            </div>
+          `;
+          return;
+        }
+
+        // Group by category
+        const groups = {};
+        apps.forEach(function (app) {
+          const cat = app.category || 'basic';
+          if (!groups[cat]) groups[cat] = [];
+          groups[cat].push(app);
+        });
+
+        // Stats
+        const allFeatures = new Set();
+        apps.forEach(function (app) {
+          (app.features || []).forEach(function (f) { allFeatures.add(f); });
+        });
+
+        var statsEl = document.getElementById('header-stats');
+        statsEl.style.display = 'flex';
+        document.getElementById('stat-apps').textContent = apps.length;
+        document.getElementById('stat-categories').textContent = Object.keys(groups).length;
+        document.getElementById('stat-features').textContent = allFeatures.size;
+
+        // Render categories in order
+        var html = '';
+        CATEGORY_ORDER.forEach(function (catKey) {
+          var catApps = groups[catKey];
+          if (!catApps || catApps.length === 0) return;
+
+          var meta = CATEGORY_META[catKey] || { label: catKey, desc: '' };
+
+          html += '<section class="category-section">';
+          html += '<div class="category-header">';
+          html += '<h2>' + escapeHtml(meta.label) + '</h2>';
+          html += '<span class="category-count">' + catApps.length + ' app' + (catApps.length !== 1 ? 's' : '') + '</span>';
+          html += '<span class="category-desc">' + escapeHtml(meta.desc) + '</span>';
+          html += '</div>';
+          html += '<div class="apps-grid">';
+
+          catApps.forEach(function (app) {
+            var urlName = toUrlName(app.name);
+            var badges = (app.features || []).map(function (f) {
+              var cls = featureBadgeClass(f);
+              return '<span class="feature-badge ' + cls + '">' + escapeHtml(f) + '</span>';
+            }).join('');
+
+            html += '<a href="/app/' + urlName + '" class="app-card">';
+            html += '<div class="card-header">';
+            html += '<span class="card-name">' + escapeHtml(app.name) + '</span>';
+            html += '<span class="card-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span>';
+            html += '</div>';
+            html += '<div class="card-description">' + escapeHtml(app.description) + '</div>';
+            html += '<div class="card-badges">' + badges + '</div>';
+            html += '</a>';
+          });
+
+          html += '</div></section>';
+        });
+
+        main.innerHTML = html;
+      }
+
+      // Fetch apps
+      fetch('/api/apps')
+        .then(function (r) { return r.json(); })
+        .then(renderApps)
+        .catch(function (err) {
+          console.error('Failed to fetch apps:', err);
+          var skeleton = document.getElementById('loading-skeleton');
+          if (skeleton) {
+            skeleton.innerHTML = '<p style="color: #ea4335; grid-column: 1/-1;">Failed to load apps. Is the server running?</p>';
+          }
+        });
+    })();
+  </script>
+
 </body>
 </html>
