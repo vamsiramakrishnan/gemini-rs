@@ -9,6 +9,7 @@ pub mod agent_tool;
 pub mod agents;
 pub mod artifacts;
 pub mod callback;
+pub mod code_executors;
 pub mod context;
 pub mod error;
 pub mod events;
