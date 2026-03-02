@@ -1,5 +1,7 @@
+mod all_config;
 mod guardrails;
 mod playbook;
+mod support;
 mod text_chat;
 mod tool_calling;
 mod voice_chat;
@@ -16,6 +18,8 @@ pub fn register_all(registry: &mut AppRegistry) {
     registry.register(tool_calling::ToolCalling);
     registry.register(playbook::Playbook);
     registry.register(guardrails::Guardrails);
+    registry.register(support::SupportAssistant);
+    registry.register(all_config::AllConfig);
 }
 
 /// Parameters extracted from the browser's Start message.
