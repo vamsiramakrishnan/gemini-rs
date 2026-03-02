@@ -20,8 +20,8 @@ use axum::{
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use futures::{sink::SinkExt, stream::StreamExt};
-use gemini_live_runtime::tool::{ToolDispatcher, TypedTool};
-use gemini_live_wire::prelude::*;
+use rs_adk::tool::{ToolDispatcher, TypedTool};
+use rs_genai::prelude::*;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;

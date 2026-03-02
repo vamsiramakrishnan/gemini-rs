@@ -1,4 +1,4 @@
-# gemini-live-rs — Rust ADK for Gemini Live
+# rs-genai-workspace — Rust ADK for Gemini Live
 
 **A Layered Rust Agent Development Kit for the Gemini Multimodal Live API**
 
@@ -31,12 +31,12 @@ This library combines ADK's runtime architecture with adk-fluent's composition e
 ## 2. Architecture: Three Layered Crates + Python Bindings
 
 ```
-gemini-live-rs/
+rs-genai-workspace/
 ├── crates/
-│   ├── gemini-live-wire/         # Layer 0: Raw protocol + transport
-│   ├── gemini-live-runtime/      # Layer 1: Agent runtime
+│   ├── rs-genai/         # Layer 0: Raw protocol + transport
+│   ├── rs-adk/      # Layer 1: Agent runtime
 │   ├── gemini-live/              # Layer 2: Fluent DX
-│   └── gemini-live-python/       # PyO3 bindings (all layers)
+│   └── adk-rs-python/       # PyO3 bindings (all layers)
 ├── examples/
 └── docs/
 ```
@@ -45,10 +45,10 @@ Each layer is independently usable. Advanced users mix layers freely.
 
 | Layer | Crate | Purpose | Depends On |
 |-------|-------|---------|------------|
-| 0 | `gemini-live-wire` | Wire protocol types, WebSocket transport, buffers, telemetry | Nothing |
-| 1 | `gemini-live-runtime` | Agent trait, LiveRequestQueue, tool dispatch, agent transfer, middleware | Layer 0 |
-| 2 | `gemini-live` | Fluent builders, operator algebra, composition modules, patterns, testing | Layer 1 |
-| Bindings | `gemini-live-python` | PyO3 native Python module exposing all layers | Layer 2 |
+| 0 | `rs-genai` | Wire protocol types, WebSocket transport, buffers, telemetry | Nothing |
+| 1 | `rs-adk` | Agent trait, LiveRequestQueue, tool dispatch, agent transfer, middleware | Layer 0 |
+| 2 | `adk-rs-fluent` | Fluent builders, operator algebra, composition modules, patterns, testing | Layer 1 |
+| Bindings | `adk-rs-python` | PyO3 native Python module exposing all layers | Layer 2 |
 
 ### Origin: JS SDK Audit + ADK Python Analysis
 
@@ -60,12 +60,12 @@ This design is informed by:
 
 ---
 
-## 3. Layer 0: Wire Protocol (`gemini-live-wire`)
+## 3. Layer 0: Wire Protocol (`rs-genai`)
 
 ### 3.1 Structure
 
 ```
-crates/gemini-live-wire/src/
+crates/rs-genai/src/
 ├── lib.rs
 ├── protocol/
 │   ├── mod.rs
@@ -165,12 +165,12 @@ The following are verified correct against the JS SDK:
 
 ---
 
-## 4. Layer 1: Agent Runtime (`gemini-live-runtime`)
+## 4. Layer 1: Agent Runtime (`rs-adk`)
 
 ### 4.1 Structure
 
 ```
-crates/gemini-live-runtime/src/
+crates/rs-adk/src/
 ├── lib.rs
 ├── agent.rs          # Agent trait + LlmAgent + AgentEvent
 ├── tool.rs           # ToolFunction, StreamingTool, InputStreamingTool, ToolDispatcher
@@ -436,12 +436,12 @@ async fn get_weather(city: String, units: Option<String>) -> Result<serde_json::
 
 ---
 
-## 5. Layer 2: Fluent DX (`gemini-live`)
+## 5. Layer 2: Fluent DX (`adk-rs-fluent`)
 
 ### 5.1 Structure
 
 ```
-crates/gemini-live/src/
+crates/adk-rs-fluent/src/
 ├── lib.rs            # Prelude re-exports
 ├── builder.rs        # AgentBuilder, Pipeline, FanOut, Loop, Fallback, Route
 ├── operators.rs      # Shr(>>), BitOr(|), Mul(*), Div(//) trait impls
@@ -637,12 +637,12 @@ pub enum ContractViolation {
 
 ---
 
-## 6. Python Bindings (`gemini-live-python`)
+## 6. Python Bindings (`adk-rs-python`)
 
 ### 6.1 Structure
 
 ```
-crates/gemini-live-python/
+crates/adk-rs-fluent-python/
 ├── Cargo.toml
 ├── pyproject.toml
 └── src/
@@ -659,7 +659,7 @@ crates/gemini-live-python/
 
 **Tier 1: Raw wire access**
 ```python
-from gemini_live import wire
+from adk_rs_fluent import wire
 
 session = await wire.connect(api_key="...", model="gemini-2.0-flash-live-001",
     tools=[wire.Tool.url_context()], response_modalities=["TEXT"])
@@ -673,7 +673,7 @@ async for event in session.events():
 
 **Tier 2: Agent runtime**
 ```python
-from gemini_live import Agent, Tool
+from adk_rs_fluent import Agent, Tool
 
 @Tool.function
 async def get_weather(city: str) -> dict:
@@ -689,7 +689,7 @@ async with agent.session(api_key="...") as chat:
 
 **Tier 3: Fluent composition**
 ```python
-from gemini_live import Agent, Pipeline, FanOut
+from adk_rs_fluent import Agent, Pipeline, FanOut
 pipeline = researcher >> writer >> (reviewer * 3)
 ```
 
@@ -729,14 +729,14 @@ pipeline = researcher >> writer >> (reviewer * 3)
 | adk-fluent S, C, P, M, T modules | Rust modules with builder traits | 2 |
 | adk-fluent `review_loop`, `cascade` | `patterns::review_loop`, `patterns::cascade` | 2 |
 | adk-fluent `MockBackend`, `AgentHarness` | `testing::MockBackend`, `testing::AgentHarness` | 2 |
-| PyO3 bindings | `gemini-live-python` crate | Bindings |
+| PyO3 bindings | `adk-rs-python` crate | Bindings |
 
 ---
 
 ## 8. Full Example — All Layers
 
 ```rust
-use gemini_live::prelude::*;
+use adk_rs_fluent::prelude::*;
 
 #[tool(description = "Search the web for information")]
 async fn web_search(query: String) -> Result<Value, ToolError> {
@@ -794,7 +794,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## 9. Crate Dependencies
 
-### Layer 0: `gemini-live-wire`
+### Layer 0: `rs-genai`
 
 | Crate | Purpose |
 |---|---|
@@ -809,28 +809,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | `tracing` (optional) | Structured spans |
 | `metrics` (optional) | Prometheus metrics |
 
-### Layer 1: `gemini-live-runtime`
+### Layer 1: `rs-adk`
 
 | Crate | Purpose |
 |---|---|
-| `gemini-live-wire` | Wire protocol |
+| `rs-genai` | Wire protocol |
 | `dashmap` | Concurrent HashMap (active tools) |
 | `tokio-util` | CancellationToken |
 | `arc-swap` | Hot-swap configuration |
 | `async-trait` | Async trait support |
 
-### Layer 2: `gemini-live`
+### Layer 2: `adk-rs-fluent`
 
 | Crate | Purpose |
 |---|---|
-| `gemini-live-runtime` | Agent runtime |
+| `rs-adk` | Agent runtime |
 | (proc-macro crate) | `#[tool]` macro |
 
-### Bindings: `gemini-live-python`
+### Bindings: `adk-rs-python`
 
 | Crate | Purpose |
 |---|---|
-| `gemini-live` | All layers |
+| `adk-rs-fluent` | All layers |
 | `pyo3` | Python bindings |
 | `pyo3-async-runtimes` | tokio↔asyncio bridge |
 | `pythonize` | serde↔Python conversion |

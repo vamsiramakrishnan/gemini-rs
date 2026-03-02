@@ -1,10 +1,10 @@
 [package]
-name = "gemini-live-ui"
+name = "rs-genai-ui"
 version = "0.1.0"
 edition.workspace = true
 
 [dependencies]
-gemini-live-wire = { path = "../../crates/gemini-live-wire" }
+rs-genai = { path = "../../crates/rs-genai" }
 tokio = { version = "1.0", features = ["full"] }
 axum = { version = "0.7", features = ["ws", "macros"] }
 tower-http = { version = "0.5", features = ["fs", "cors"] }

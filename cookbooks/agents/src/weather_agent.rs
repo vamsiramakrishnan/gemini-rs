@@ -4,12 +4,12 @@
 //! sends back the tool response, and prints the model's final answer.
 //!
 //! Usage:
-//!   cargo run -p gemini-live-agents-cookbook --bin weather-agent
+//!   cargo run -p agents-cookbook --bin weather-agent
 
 use std::sync::Arc;
 
-use gemini_live_runtime::tool::{ToolDispatcher, TypedTool};
-use gemini_live_wire::prelude::*;
+use rs_adk::tool::{ToolDispatcher, TypedTool};
+use rs_genai::prelude::*;
 use schemars::JsonSchema;
 use serde::Deserialize;
 

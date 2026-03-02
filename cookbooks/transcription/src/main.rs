@@ -24,7 +24,7 @@ use axum::{
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use futures::{sink::SinkExt, stream::StreamExt};
-use gemini_live_wire::prelude::*;
+use rs_genai::prelude::*;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tower_http::{

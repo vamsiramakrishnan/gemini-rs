@@ -1,7 +1,7 @@
 //! Benchmark: SPSC ring buffer throughput.
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use gemini_live_rs::buffer::SpscRing;
+use rs_genai::buffer::SpscRing;
 
 fn bench_spsc_write(c: &mut Criterion) {
     let ring = SpscRing::<i16>::new(65536);

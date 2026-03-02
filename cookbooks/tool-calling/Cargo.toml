@@ -5,8 +5,8 @@ edition.workspace = true
 publish = false
 
 [dependencies]
-gemini-live-wire = { path = "../../crates/gemini-live-wire" }
-gemini-live-runtime = { path = "../../crates/gemini-live-runtime" }
+rs-genai = { path = "../../crates/rs-genai" }
+rs-adk = { path = "../../crates/rs-adk" }
 tokio = { version = "1", features = ["full"] }
 axum = { version = "0.7", features = ["ws"] }
 tower-http = { version = "0.5", features = ["fs", "cors"] }

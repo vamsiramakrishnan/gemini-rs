@@ -10,7 +10,7 @@ use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(name = "adk-transpiler")]
-#[command(about = "Transpiles ADK-JS and js-genai TypeScript to Rust targeting gemini-live-rs")]
+#[command(about = "Transpiles ADK-JS and js-genai TypeScript to Rust targeting rs-genai")]
 #[command(version)]
 struct Cli {
     #[command(subcommand)]
@@ -59,13 +59,13 @@ enum Commands {
         #[arg(short, long)]
         output: PathBuf,
     },
-    /// One-shot: read ADK-JS source and generate compilable Rust code targeting gemini-live-runtime
+    /// One-shot: read ADK-JS source and generate compilable Rust code targeting rs-adk
     Transpile {
         /// Path to the ADK-JS source directory (e.g. /tmp/adk-js/core/src/)
         #[arg(short, long)]
         source: PathBuf,
 
-        /// Output Rust source file path (e.g. crates/gemini-live-runtime/src/agents/generated.rs)
+        /// Output Rust source file path (e.g. crates/rs-adk/src/agents/generated.rs)
         #[arg(short, long)]
         output: PathBuf,
 
@@ -407,5 +407,5 @@ fn run_transpile(source: &Path, output: &Path, genai_source: Option<&Path>) {
     println!("Tools: {}", schema.tools.len());
     println!("Types: {}", schema.types.len());
     println!("Output size: {} bytes", rust_code.len());
-    println!("Target: gemini-live-runtime (compilable)");
+    println!("Target: rs-adk (compilable)");
 }

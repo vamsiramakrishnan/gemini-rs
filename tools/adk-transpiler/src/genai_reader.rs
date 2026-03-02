@@ -2,7 +2,7 @@
 //!
 //! Extracts all exported types, enums, type aliases, and helper functions
 //! from the js-genai source tree. Maps each extracted type to its
-//! gemini-live-wire Rust equivalent where one exists.
+//! rs-genai Rust equivalent where one exists.
 
 use std::collections::HashMap;
 use std::fs;
@@ -20,157 +20,157 @@ use crate::schema::{
 // Wire crate type mapping
 // ---------------------------------------------------------------------------
 
-/// Comprehensive mapping of js-genai type names → gemini-live-wire Rust paths.
+/// Comprehensive mapping of js-genai type names → rs-genai Rust paths.
 /// Built from comparing the js-genai exports against our wire crate's public API.
 fn wire_type_map() -> HashMap<&'static str, &'static str> {
     let mut m = HashMap::new();
 
     // Content & Parts
-    m.insert("Content", "gemini_live_wire::prelude::Content");
-    m.insert("Part", "gemini_live_wire::prelude::Part");
-    m.insert("Blob", "gemini_live_wire::prelude::Blob");
-    m.insert("FileData", "gemini_live_wire::prelude::FileData");
-    m.insert("ExecutableCode", "gemini_live_wire::prelude::ExecutableCode");
+    m.insert("Content", "rs_genai::prelude::Content");
+    m.insert("Part", "rs_genai::prelude::Part");
+    m.insert("Blob", "rs_genai::prelude::Blob");
+    m.insert("FileData", "rs_genai::prelude::FileData");
+    m.insert("ExecutableCode", "rs_genai::prelude::ExecutableCode");
     m.insert(
         "CodeExecutionResult",
-        "gemini_live_wire::prelude::CodeExecutionResult",
+        "rs_genai::prelude::CodeExecutionResult",
     );
 
     // Function calling
-    m.insert("FunctionCall", "gemini_live_wire::prelude::FunctionCall");
+    m.insert("FunctionCall", "rs_genai::prelude::FunctionCall");
     m.insert(
         "FunctionResponse",
-        "gemini_live_wire::prelude::FunctionResponse",
+        "rs_genai::prelude::FunctionResponse",
     );
     m.insert(
         "FunctionDeclaration",
-        "gemini_live_wire::prelude::FunctionDeclaration",
+        "rs_genai::prelude::FunctionDeclaration",
     );
-    m.insert("Tool", "gemini_live_wire::prelude::Tool");
-    m.insert("ToolConfig", "gemini_live_wire::prelude::ToolConfig");
+    m.insert("Tool", "rs_genai::prelude::Tool");
+    m.insert("ToolConfig", "rs_genai::prelude::ToolConfig");
     m.insert(
         "FunctionCallingConfig",
-        "gemini_live_wire::prelude::FunctionCallingConfig",
+        "rs_genai::prelude::FunctionCallingConfig",
     );
 
     // Enums
-    m.insert("Modality", "gemini_live_wire::prelude::Modality");
-    m.insert("Role", "gemini_live_wire::prelude::Role");
+    m.insert("Modality", "rs_genai::prelude::Modality");
+    m.insert("Role", "rs_genai::prelude::Role");
 
     // Configuration
     m.insert(
         "GenerationConfig",
-        "gemini_live_wire::prelude::GenerationConfig",
+        "rs_genai::prelude::GenerationConfig",
     );
-    m.insert("SpeechConfig", "gemini_live_wire::prelude::SpeechConfig");
-    m.insert("VoiceConfig", "gemini_live_wire::prelude::VoiceConfig");
+    m.insert("SpeechConfig", "rs_genai::prelude::SpeechConfig");
+    m.insert("VoiceConfig", "rs_genai::prelude::VoiceConfig");
     m.insert(
         "PrebuiltVoiceConfig",
-        "gemini_live_wire::prelude::PrebuiltVoiceConfig",
+        "rs_genai::prelude::PrebuiltVoiceConfig",
     );
-    m.insert("ThinkingConfig", "gemini_live_wire::prelude::ThinkingConfig");
+    m.insert("ThinkingConfig", "rs_genai::prelude::ThinkingConfig");
     m.insert(
         "RealtimeInputConfig",
-        "gemini_live_wire::prelude::RealtimeInputConfig",
+        "rs_genai::prelude::RealtimeInputConfig",
     );
     m.insert(
         "AutomaticActivityDetection",
-        "gemini_live_wire::prelude::AutomaticActivityDetection",
+        "rs_genai::prelude::AutomaticActivityDetection",
     );
     m.insert(
         "SessionResumptionConfig",
-        "gemini_live_wire::prelude::SessionResumptionConfig",
+        "rs_genai::prelude::SessionResumptionConfig",
     );
     m.insert(
         "ContextWindowCompressionConfig",
-        "gemini_live_wire::prelude::ContextWindowCompressionConfig",
+        "rs_genai::prelude::ContextWindowCompressionConfig",
     );
     m.insert(
         "SlidingWindow",
-        "gemini_live_wire::prelude::SlidingWindow",
+        "rs_genai::prelude::SlidingWindow",
     );
     m.insert(
         "ProactivityConfig",
-        "gemini_live_wire::prelude::ProactivityConfig",
+        "rs_genai::prelude::ProactivityConfig",
     );
     m.insert(
         "InputAudioTranscription",
-        "gemini_live_wire::prelude::InputAudioTranscription",
+        "rs_genai::prelude::InputAudioTranscription",
     );
     m.insert(
         "OutputAudioTranscription",
-        "gemini_live_wire::prelude::OutputAudioTranscription",
+        "rs_genai::prelude::OutputAudioTranscription",
     );
 
     // Metadata
-    m.insert("UsageMetadata", "gemini_live_wire::prelude::UsageMetadata");
+    m.insert("UsageMetadata", "rs_genai::prelude::UsageMetadata");
     m.insert(
         "GroundingMetadata",
-        "gemini_live_wire::prelude::GroundingMetadata",
+        "rs_genai::prelude::GroundingMetadata",
     );
     m.insert(
         "UrlContextMetadata",
-        "gemini_live_wire::prelude::UrlContextMetadata",
+        "rs_genai::prelude::UrlContextMetadata",
     );
 
     // Session/Live API messages (mapped to wire message types)
     m.insert(
         "LiveServerMessage",
-        "gemini_live_wire::prelude::ServerMessage",
+        "rs_genai::prelude::ServerMessage",
     );
     m.insert(
         "LiveServerSetupComplete",
-        "gemini_live_wire::prelude::SetupCompletePayload",
+        "rs_genai::prelude::SetupCompletePayload",
     );
     m.insert(
         "LiveServerContent",
-        "gemini_live_wire::prelude::ServerContentPayload",
+        "rs_genai::prelude::ServerContentPayload",
     );
     m.insert(
         "LiveServerToolCall",
-        "gemini_live_wire::prelude::ToolCallPayload",
+        "rs_genai::prelude::ToolCallPayload",
     );
     m.insert(
         "LiveServerToolCallCancellation",
-        "gemini_live_wire::prelude::ToolCallCancellationPayload",
+        "rs_genai::prelude::ToolCallCancellationPayload",
     );
     m.insert(
         "LiveServerGoAway",
-        "gemini_live_wire::prelude::GoAwayPayload",
+        "rs_genai::prelude::GoAwayPayload",
     );
     m.insert(
         "LiveServerSessionResumptionUpdate",
-        "gemini_live_wire::prelude::SessionResumptionUpdatePayload",
+        "rs_genai::prelude::SessionResumptionUpdatePayload",
     );
     m.insert(
         "LiveClientContent",
-        "gemini_live_wire::prelude::ClientContentPayload",
+        "rs_genai::prelude::ClientContentPayload",
     );
     m.insert(
         "LiveClientRealtimeInput",
-        "gemini_live_wire::prelude::RealtimeInputPayload",
+        "rs_genai::prelude::RealtimeInputPayload",
     );
     m.insert(
         "LiveClientToolResponse",
-        "gemini_live_wire::prelude::ToolResponsePayload",
+        "rs_genai::prelude::ToolResponsePayload",
     );
     m.insert(
         "LiveClientSetup",
-        "gemini_live_wire::prelude::SetupPayload",
+        "rs_genai::prelude::SetupPayload",
     );
     m.insert(
         "ActivityStart",
-        "gemini_live_wire::prelude::ActivityStart",
+        "rs_genai::prelude::ActivityStart",
     );
-    m.insert("ActivityEnd", "gemini_live_wire::prelude::ActivityEnd");
+    m.insert("ActivityEnd", "rs_genai::prelude::ActivityEnd");
 
     // Session abstraction
-    m.insert("Session", "gemini_live_wire::prelude::SessionHandle");
+    m.insert("Session", "rs_genai::prelude::SessionHandle");
 
     // Transcription
     m.insert(
         "Transcription",
-        "gemini_live_wire::prelude::TranscriptionPayload",
+        "rs_genai::prelude::TranscriptionPayload",
     );
 
     m
@@ -194,9 +194,9 @@ fn helper_map() -> HashMap<&'static str, &'static str> {
 /// Map of js-genai enum names → wire crate equivalents.
 fn enum_map() -> HashMap<&'static str, &'static str> {
     let mut m = HashMap::new();
-    m.insert("Modality", "gemini_live_wire::prelude::Modality");
-    m.insert("MediaResolution", "gemini_live_wire::prelude::MediaResolution");
-    m.insert("Type", "gemini_live_wire::prelude::SchemaType"); // JSON Schema Type enum
+    m.insert("Modality", "rs_genai::prelude::Modality");
+    m.insert("MediaResolution", "rs_genai::prelude::MediaResolution");
+    m.insert("Type", "rs_genai::prelude::SchemaType"); // JSON Schema Type enum
     m
 }
 
@@ -538,7 +538,7 @@ mod tests {
     fn map_alias_with_wire_type() {
         let wire = wire_type_map();
         let result = map_genai_alias_to_rust("Content | Part[] | string", &wire);
-        assert_eq!(result, "gemini_live_wire::prelude::Content");
+        assert_eq!(result, "rs_genai::prelude::Content");
     }
 
     #[test]
@@ -579,14 +579,14 @@ export function createUserContent(parts: Part[]): Content {
                 description: None,
                 fields: vec![],
                 extends: None,
-                wire_type: Some("gemini_live_wire::prelude::Content".to_string()),
+                wire_type: Some("rs_genai::prelude::Content".to_string()),
                 has_wire_equivalent: true,
             }],
             enums: vec![GenaiEnumDef {
                 name: "Modality".to_string(),
                 variants: vec!["TEXT".to_string(), "AUDIO".to_string()],
                 description: None,
-                wire_type: Some("gemini_live_wire::prelude::Modality".to_string()),
+                wire_type: Some("rs_genai::prelude::Modality".to_string()),
                 has_wire_equivalent: true,
             }],
             type_aliases: vec![],
@@ -596,11 +596,11 @@ export function createUserContent(parts: Part[]): Content {
         let lookup = build_type_lookup(&schema);
         assert_eq!(
             lookup.get("Content"),
-            Some(&"gemini_live_wire::prelude::Content".to_string())
+            Some(&"rs_genai::prelude::Content".to_string())
         );
         assert_eq!(
             lookup.get("Modality"),
-            Some(&"gemini_live_wire::prelude::Modality".to_string())
+            Some(&"rs_genai::prelude::Modality".to_string())
         );
     }
 }

@@ -1,9 +1,9 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/gemini-live-wire",
-    "crates/gemini-live-runtime",
-    "crates/gemini-live",
+    "crates/rs-genai",
+    "crates/rs-adk",
+    "crates/adk-rs-fluent",
     "cookbooks/ui",
     "cookbooks/agents",
     "cookbooks/text-chat",

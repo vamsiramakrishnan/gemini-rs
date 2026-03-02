@@ -134,7 +134,7 @@ pub struct TypeDef {
 // ---------------------------------------------------------------------------
 
 /// Schema for the @google/genai SDK type surface.
-/// Maps js-genai types to their gemini-live-wire Rust equivalents.
+/// Maps js-genai types to their rs-genai Rust equivalents.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenaiSchema {
     /// Source information

@@ -2,9 +2,9 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Restructure gemini-live-rs from a monolithic crate into a three-layer workspace (wire + runtime + fluent DX) with PyO3 Python bindings, implementing the ADK-equivalent agent runtime and adk-fluent-style composition algebra.
+**Goal:** Restructure rs-genai-workspace from a monolithic crate into a three-layer workspace (wire + runtime + fluent DX) with PyO3 Python bindings, implementing the ADK-equivalent agent runtime and adk-fluent-style composition algebra.
 
-**Architecture:** Three crates in a Cargo workspace — `gemini-live-wire` (Layer 0: raw protocol + transport), `gemini-live-runtime` (Layer 1: agent runtime with LiveRequestQueue, streaming tools, agent transfer), `gemini-live` (Layer 2: fluent builder API with operator overloading and composition modules). Plus `gemini-live-python` for PyO3 bindings.
+**Architecture:** Three crates in a Cargo workspace — `rs-genai` (Layer 0: raw protocol + transport), `rs-adk` (Layer 1: agent runtime with LiveRequestQueue, streaming tools, agent transfer), `adk-rs-fluent` (Layer 2: fluent builder API with operator overloading and composition modules). Plus `adk-rs-python` for PyO3 bindings.
 
 **Tech Stack:** Rust 2021, Tokio 1.x, tokio-tungstenite, serde/serde_json, PyO3 0.23, maturin, DashMap, parking_lot, async-trait, tokio-util (CancellationToken)
 
@@ -14,19 +14,19 @@
 
 ## Phase 1: Workspace Scaffold + Layer 0 Protocol Fixes
 
-### Task 1: Create workspace structure and move existing code to `gemini-live-wire`
+### Task 1: Create workspace structure and move existing code to `rs-genai`
 
 **Files:**
 - Create: `Cargo.toml` (workspace root — replaces existing)
-- Create: `crates/gemini-live-wire/Cargo.toml`
-- Create: `crates/gemini-live-wire/src/lib.rs`
-- Move: `src/protocol/` → `crates/gemini-live-wire/src/protocol/`
-- Move: `src/transport/` → `crates/gemini-live-wire/src/transport/`
-- Move: `src/buffer/` → `crates/gemini-live-wire/src/buffer/`
-- Move: `src/vad/` → `crates/gemini-live-wire/src/vad/`
-- Move: `src/session/` → `crates/gemini-live-wire/src/session/`
-- Move: `src/telemetry/` → `crates/gemini-live-wire/src/telemetry/`
-- Move: `src/flow/` → `crates/gemini-live-wire/src/flow/`
+- Create: `crates/rs-genai/Cargo.toml`
+- Create: `crates/rs-genai/src/lib.rs`
+- Move: `src/protocol/` → `crates/rs-genai/src/protocol/`
+- Move: `src/transport/` → `crates/rs-genai/src/transport/`
+- Move: `src/buffer/` → `crates/rs-genai/src/buffer/`
+- Move: `src/vad/` → `crates/rs-genai/src/vad/`
+- Move: `src/session/` → `crates/rs-genai/src/session/`
+- Move: `src/telemetry/` → `crates/rs-genai/src/telemetry/`
+- Move: `src/flow/` → `crates/rs-genai/src/flow/`
 
 **Step 1: Create workspace root Cargo.toml**
 
@@ -35,7 +35,7 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/gemini-live-wire",
+    "crates/rs-genai",
 ]
 
 [workspace.package]
@@ -46,22 +46,22 @@ license = "Apache-2.0"
 **Step 2: Create crates directory and move source files**
 
 ```bash
-mkdir -p crates/gemini-live-wire/src
+mkdir -p crates/rs-genai/src
 # Move core wire modules
-cp -r src/protocol crates/gemini-live-wire/src/
-cp -r src/transport crates/gemini-live-wire/src/
-cp -r src/buffer crates/gemini-live-wire/src/
-cp -r src/vad crates/gemini-live-wire/src/
-cp -r src/session crates/gemini-live-wire/src/
-cp -r src/telemetry crates/gemini-live-wire/src/
-cp -r src/flow crates/gemini-live-wire/src/
+cp -r src/protocol crates/rs-genai/src/
+cp -r src/transport crates/rs-genai/src/
+cp -r src/buffer crates/rs-genai/src/
+cp -r src/vad crates/rs-genai/src/
+cp -r src/session crates/rs-genai/src/
+cp -r src/telemetry crates/rs-genai/src/
+cp -r src/flow crates/rs-genai/src/
 ```
 
-**Step 3: Create `crates/gemini-live-wire/Cargo.toml`**
+**Step 3: Create `crates/rs-genai/Cargo.toml`**
 
 ```toml
 [package]
-name = "gemini-live-wire"
+name = "rs-genai"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
@@ -100,10 +100,10 @@ proptest = "1"
 tokio-test = "0.4"
 ```
 
-**Step 4: Create `crates/gemini-live-wire/src/lib.rs`**
+**Step 4: Create `crates/rs-genai/src/lib.rs`**
 
 ```rust
-//! # gemini-live-wire
+//! # rs-genai
 //!
 //! Raw wire protocol and transport for the Gemini Multimodal Live API.
 //! This crate provides zero-abstraction access to the Gemini Live WebSocket API.
@@ -133,11 +133,11 @@ pub mod prelude {
 
 **Step 5: Fix all `use crate::` paths in moved files**
 
-Every file in `crates/gemini-live-wire/src/` that references `use crate::protocol`, `use crate::session`, etc. stays unchanged since they're now within the same crate. The key change is removing any references to modules that did NOT move (`app`, `call`, `client`, `context`, `prompt`, `state`, `pipeline`, `agent`).
+Every file in `crates/rs-genai/src/` that references `use crate::protocol`, `use crate::session`, etc. stays unchanged since they're now within the same crate. The key change is removing any references to modules that did NOT move (`app`, `call`, `client`, `context`, `prompt`, `state`, `pipeline`, `agent`).
 
 Grep for any cross-references:
 ```bash
-grep -r "use crate::" crates/gemini-live-wire/src/ | grep -E "(app|call|client|context|prompt|state::ConversationState|pipeline|agent)"
+grep -r "use crate::" crates/rs-genai/src/ | grep -E "(app|call|client|context|prompt|state::ConversationState|pipeline|agent)"
 ```
 
 Fix any found references (these modules belong to higher layers).
@@ -145,7 +145,7 @@ Fix any found references (these modules belong to higher layers).
 **Step 6: Verify it compiles**
 
 ```bash
-cd crates/gemini-live-wire && cargo check
+cd crates/rs-genai && cargo check
 ```
 
 Expected: Compiles clean. All existing tests in `protocol/messages.rs` and `protocol/types.rs` pass.
@@ -153,7 +153,7 @@ Expected: Compiles clean. All existing tests in `protocol/messages.rs` and `prot
 **Step 7: Run existing tests**
 
 ```bash
-cd crates/gemini-live-wire && cargo test
+cd crates/rs-genai && cargo test
 ```
 
 Expected: All existing unit tests pass.
@@ -162,7 +162,7 @@ Expected: All existing unit tests pass.
 
 ```bash
 git add -A
-git commit -m "refactor: extract gemini-live-wire crate from monolith"
+git commit -m "refactor: extract rs-genai crate from monolith"
 ```
 
 ---
@@ -170,13 +170,13 @@ git commit -m "refactor: extract gemini-live-wire crate from monolith"
 ### Task 2: Fix `Tool` type — add built-in tools (urlContext, googleSearch, codeExecution)
 
 **Files:**
-- Modify: `crates/gemini-live-wire/src/protocol/types.rs`
-- Modify: `crates/gemini-live-wire/src/protocol/messages.rs`
+- Modify: `crates/rs-genai/src/protocol/types.rs`
+- Modify: `crates/rs-genai/src/protocol/messages.rs`
 - Test: inline in `types.rs` and `messages.rs`
 
 **Step 1: Write failing tests for the new Tool type**
 
-Add to `crates/gemini-live-wire/src/protocol/types.rs` tests:
+Add to `crates/rs-genai/src/protocol/types.rs` tests:
 
 ```rust
 #[test]
@@ -227,14 +227,14 @@ fn tool_mixed_not_allowed() {
 **Step 2: Run tests to verify they fail**
 
 ```bash
-cd crates/gemini-live-wire && cargo test tool_url_context
+cd crates/rs-genai && cargo test tool_url_context
 ```
 
 Expected: FAIL — `Tool` type doesn't exist yet.
 
 **Step 3: Implement the new `Tool` type**
 
-In `crates/gemini-live-wire/src/protocol/types.rs`, add the new type and replace `ToolDeclaration`:
+In `crates/rs-genai/src/protocol/types.rs`, add the new type and replace `ToolDeclaration`:
 
 ```rust
 // Replace the existing ToolDeclaration with:
@@ -368,7 +368,7 @@ pub fn code_execution(mut self) -> Self {
 **Step 5: Run all tests**
 
 ```bash
-cd crates/gemini-live-wire && cargo test
+cd crates/rs-genai && cargo test
 ```
 
 Expected: ALL tests pass (existing + new).
@@ -385,7 +385,7 @@ git commit -m "feat(wire): add built-in tool types (urlContext, googleSearch, co
 ### Task 3: Add missing GenerationConfig fields (thinkingConfig, affectiveDialog, mediaResolution, seed)
 
 **Files:**
-- Modify: `crates/gemini-live-wire/src/protocol/types.rs`
+- Modify: `crates/rs-genai/src/protocol/types.rs`
 
 **Step 1: Write failing tests**
 
@@ -419,7 +419,7 @@ fn seed_serialization() {
 **Step 2: Run tests to verify they fail**
 
 ```bash
-cd crates/gemini-live-wire && cargo test thinking_config
+cd crates/rs-genai && cargo test thinking_config
 ```
 
 Expected: FAIL
@@ -493,7 +493,7 @@ Update `SessionConfig::from_endpoint` to initialize the new fields to `None`.
 **Step 4: Run tests**
 
 ```bash
-cd crates/gemini-live-wire && cargo test
+cd crates/rs-genai && cargo test
 ```
 
 Expected: ALL pass.
@@ -512,8 +512,8 @@ git commit -m "feat(wire): add thinkingConfig, affectiveDialog, mediaResolution,
 The current `SessionHandle` has `send_text()` which wraps content, but no direct `send_client_content()` for sending arbitrary conversation history — needed by the runtime layer.
 
 **Files:**
-- Modify: `crates/gemini-live-wire/src/session/mod.rs`
-- Modify: `crates/gemini-live-wire/src/transport/connection.rs`
+- Modify: `crates/rs-genai/src/session/mod.rs`
+- Modify: `crates/rs-genai/src/transport/connection.rs`
 
 **Step 1: Write failing test**
 
@@ -542,7 +542,7 @@ fn session_command_has_client_content_variant() {
 **Step 2: Run test to verify it fails**
 
 ```bash
-cd crates/gemini-live-wire && cargo test session_command_has_client_content
+cd crates/rs-genai && cargo test session_command_has_client_content
 ```
 
 Expected: FAIL — variant doesn't exist.
@@ -593,7 +593,7 @@ SessionCommand::SendClientContent { turns, turn_complete } => {
 **Step 4: Run tests**
 
 ```bash
-cd crates/gemini-live-wire && cargo test
+cd crates/rs-genai && cargo test
 ```
 
 Expected: ALL pass.
@@ -607,16 +607,16 @@ git commit -m "feat(wire): add send_client_content to SessionHandle"
 
 ---
 
-## Phase 2: Layer 1 — Agent Runtime (`gemini-live-runtime`)
+## Phase 2: Layer 1 — Agent Runtime (`rs-adk`)
 
-### Task 5: Scaffold `gemini-live-runtime` crate with core types
+### Task 5: Scaffold `rs-adk` crate with core types
 
 **Files:**
-- Create: `crates/gemini-live-runtime/Cargo.toml`
-- Create: `crates/gemini-live-runtime/src/lib.rs`
-- Create: `crates/gemini-live-runtime/src/live_queue.rs`
-- Create: `crates/gemini-live-runtime/src/state.rs`
-- Create: `crates/gemini-live-runtime/src/context.rs`
+- Create: `crates/rs-adk/Cargo.toml`
+- Create: `crates/rs-adk/src/lib.rs`
+- Create: `crates/rs-adk/src/live_queue.rs`
+- Create: `crates/rs-adk/src/state.rs`
+- Create: `crates/rs-adk/src/context.rs`
 - Modify: workspace `Cargo.toml`
 
 **Step 1: Add to workspace**
@@ -626,23 +626,23 @@ In root `Cargo.toml`:
 [workspace]
 resolver = "2"
 members = [
-    "crates/gemini-live-wire",
-    "crates/gemini-live-runtime",
+    "crates/rs-genai",
+    "crates/rs-adk",
 ]
 ```
 
-**Step 2: Create `crates/gemini-live-runtime/Cargo.toml`**
+**Step 2: Create `crates/rs-adk/Cargo.toml`**
 
 ```toml
 [package]
-name = "gemini-live-runtime"
+name = "rs-adk"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 description = "Agent runtime for Gemini Live — tools, streaming, agent transfer, middleware"
 
 [dependencies]
-gemini-live-wire = { path = "../gemini-live-wire" }
+rs-genai = { path = "../rs-genai" }
 tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7"
 async-trait = "0.1"
@@ -659,17 +659,17 @@ tokio-test = "0.4"
 
 [features]
 default = []
-tracing-support = ["dep:tracing", "gemini-live-wire/tracing-support"]
+tracing-support = ["dep:tracing", "rs-genai/tracing-support"]
 ```
 
-**Step 3: Create `crates/gemini-live-runtime/src/live_queue.rs`**
+**Step 3: Create `crates/rs-adk/src/live_queue.rs`**
 
 ```rust
 //! LiveRequestQueue — the input pipeline for live sessions.
 //!
 //! Rust equivalent of ADK Python's `LiveRequestQueue`. Uses Tokio MPSC channels.
 
-use gemini_live_wire::prelude::{Blob, Content, Part};
+use rs_genai::prelude::{Blob, Content, Part};
 use tokio::sync::mpsc;
 
 /// A request that can be sent into a live session.
@@ -805,7 +805,7 @@ mod tests {
 }
 ```
 
-**Step 4: Create `crates/gemini-live-runtime/src/state.rs`**
+**Step 4: Create `crates/rs-adk/src/state.rs`**
 
 ```rust
 //! Typed key-value state container for agents.
@@ -935,10 +935,10 @@ mod tests {
 }
 ```
 
-**Step 5: Create `crates/gemini-live-runtime/src/lib.rs`**
+**Step 5: Create `crates/rs-adk/src/lib.rs`**
 
 ```rust
-//! # gemini-live-runtime
+//! # rs-adk
 //!
 //! Agent runtime for the Gemini Multimodal Live API.
 //! Provides the Agent trait, LiveRequestQueue, tool dispatch,
@@ -948,13 +948,13 @@ pub mod live_queue;
 pub mod state;
 
 // Re-export wire types that runtime users need
-pub use gemini_live_wire;
+pub use rs_genai;
 ```
 
 **Step 6: Verify it compiles and tests pass**
 
 ```bash
-cargo test -p gemini-live-runtime
+cargo test -p rs-adk
 ```
 
 Expected: All tests pass.
@@ -963,7 +963,7 @@ Expected: All tests pass.
 
 ```bash
 git add -A
-git commit -m "feat(runtime): scaffold gemini-live-runtime with LiveRequestQueue and State"
+git commit -m "feat(runtime): scaffold rs-adk with LiveRequestQueue and State"
 ```
 
 ---
@@ -971,16 +971,16 @@ git commit -m "feat(runtime): scaffold gemini-live-runtime with LiveRequestQueue
 ### Task 6: Implement the Agent trait and AgentError
 
 **Files:**
-- Create: `crates/gemini-live-runtime/src/agent.rs`
-- Create: `crates/gemini-live-runtime/src/error.rs`
-- Modify: `crates/gemini-live-runtime/src/lib.rs`
+- Create: `crates/rs-adk/src/agent.rs`
+- Create: `crates/rs-adk/src/error.rs`
+- Modify: `crates/rs-adk/src/lib.rs`
 
-**Step 1: Create `crates/gemini-live-runtime/src/error.rs`**
+**Step 1: Create `crates/rs-adk/src/error.rs`**
 
 ```rust
 //! Error types for the agent runtime.
 
-use gemini_live_wire::session::SessionError;
+use rs_genai::session::SessionError;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AgentError {
@@ -1025,7 +1025,7 @@ pub enum ToolError {
 }
 ```
 
-**Step 2: Create `crates/gemini-live-runtime/src/agent.rs`**
+**Step 2: Create `crates/rs-adk/src/agent.rs`**
 
 ```rust
 //! The core Agent trait and AgentEvent type.
@@ -1033,7 +1033,7 @@ pub enum ToolError {
 use std::time::Duration;
 
 use async_trait::async_trait;
-use gemini_live_wire::prelude::{FunctionCall, Tool};
+use rs_genai::prelude::{FunctionCall, Tool};
 
 use crate::context::InvocationContext;
 use crate::error::AgentError;
@@ -1113,7 +1113,7 @@ mod tests {
 }
 ```
 
-**Step 3: Create a stub `crates/gemini-live-runtime/src/context.rs`**
+**Step 3: Create a stub `crates/rs-adk/src/context.rs`**
 
 ```rust
 //! InvocationContext — the session state container flowing through agent execution.
@@ -1161,13 +1161,13 @@ pub mod agent;
 pub mod error;
 pub mod context;
 
-pub use gemini_live_wire;
+pub use rs_genai;
 ```
 
 **Step 5: Verify compilation**
 
 ```bash
-cargo test -p gemini-live-runtime
+cargo test -p rs-adk
 ```
 
 Expected: ALL pass.
@@ -1184,8 +1184,8 @@ git commit -m "feat(runtime): add Agent trait, AgentEvent, AgentError, Invocatio
 ### Task 7: Implement ToolDispatcher with three tool types
 
 **Files:**
-- Create: `crates/gemini-live-runtime/src/tool.rs`
-- Modify: `crates/gemini-live-runtime/src/lib.rs`
+- Create: `crates/rs-adk/src/tool.rs`
+- Modify: `crates/rs-adk/src/lib.rs`
 
 **Step 1: Write failing tests**
 
@@ -1247,7 +1247,7 @@ use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use gemini_live_wire::prelude::{FunctionCall, FunctionDeclaration, FunctionResponse, Tool};
+use rs_genai::prelude::{FunctionCall, FunctionDeclaration, FunctionResponse, Tool};
 
 use crate::error::ToolError;
 use crate::live_queue::LiveRequest;
@@ -1431,7 +1431,7 @@ impl ToolDispatcher {
 **Step 3: Update lib.rs and run tests**
 
 ```bash
-cargo test -p gemini-live-runtime
+cargo test -p rs-adk
 ```
 
 Expected: ALL pass.
@@ -1448,8 +1448,8 @@ git commit -m "feat(runtime): add ToolDispatcher with regular, streaming, and in
 ### Task 8: Implement Middleware trait and built-in middleware
 
 **Files:**
-- Create: `crates/gemini-live-runtime/src/middleware.rs`
-- Modify: `crates/gemini-live-runtime/src/lib.rs`
+- Create: `crates/rs-adk/src/middleware.rs`
+- Modify: `crates/rs-adk/src/lib.rs`
 
 **Step 1: Implement middleware.rs**
 
@@ -1461,7 +1461,7 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 
-use gemini_live_wire::prelude::FunctionCall;
+use rs_genai::prelude::FunctionCall;
 
 use crate::agent::AgentEvent;
 use crate::context::InvocationContext;
@@ -1612,7 +1612,7 @@ mod tests {
 **Step 2: Update lib.rs, compile, test, commit**
 
 ```bash
-cargo test -p gemini-live-runtime
+cargo test -p rs-adk
 git add -A
 git commit -m "feat(runtime): add Middleware trait, MiddlewareChain, and built-in middleware"
 ```
@@ -1622,8 +1622,8 @@ git commit -m "feat(runtime): add Middleware trait, MiddlewareChain, and built-i
 ### Task 9: Implement AgentRegistry for agent transfer routing
 
 **Files:**
-- Create: `crates/gemini-live-runtime/src/router.rs`
-- Modify: `crates/gemini-live-runtime/src/lib.rs`
+- Create: `crates/rs-adk/src/router.rs`
+- Modify: `crates/rs-adk/src/lib.rs`
 
 **Step 1: Implement router.rs**
 
@@ -1694,30 +1694,30 @@ mod tests {
 **Step 2: Update lib.rs, compile, test, commit**
 
 ```bash
-cargo test -p gemini-live-runtime
+cargo test -p rs-adk
 git add -A
 git commit -m "feat(runtime): add AgentRegistry for agent transfer routing"
 ```
 
 ---
 
-## Phase 3: Layer 2 — Fluent DX (`gemini-live`)
+## Phase 3: Layer 2 — Fluent DX (`adk-rs-fluent`)
 
-### Task 10: Scaffold `gemini-live` crate with AgentBuilder
+### Task 10: Scaffold `adk-rs-fluent` crate with AgentBuilder
 
 **Files:**
-- Create: `crates/gemini-live/Cargo.toml`
-- Create: `crates/gemini-live/src/lib.rs`
-- Create: `crates/gemini-live/src/builder.rs`
+- Create: `crates/adk-rs-fluent/Cargo.toml`
+- Create: `crates/adk-rs-fluent/src/lib.rs`
+- Create: `crates/adk-rs-fluent/src/builder.rs`
 - Modify: workspace `Cargo.toml`
 
 **Step 1: Add to workspace**
 
 ```toml
 members = [
-    "crates/gemini-live-wire",
-    "crates/gemini-live-runtime",
-    "crates/gemini-live",
+    "crates/rs-genai",
+    "crates/rs-adk",
+    "crates/adk-rs-fluent",
 ]
 ```
 
@@ -1725,15 +1725,15 @@ members = [
 
 ```toml
 [package]
-name = "gemini-live"
+name = "adk-rs-fluent"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 description = "Fluent DX for Gemini Live — builder API, operator algebra, composition modules"
 
 [dependencies]
-gemini-live-wire = { path = "../gemini-live-wire" }
-gemini-live-runtime = { path = "../gemini-live-runtime" }
+rs-genai = { path = "../rs-genai" }
+rs-adk = { path = "../rs-adk" }
 tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
@@ -1757,22 +1757,22 @@ Implement the copy-on-write fluent builder with all setter methods as specified 
 ```rust
 pub mod builder;
 
-pub use gemini_live_wire;
-pub use gemini_live_runtime;
+pub use rs_genai;
+pub use rs_adk;
 
 pub mod prelude {
     pub use crate::builder::*;
-    pub use gemini_live_wire::prelude::*;
-    pub use gemini_live_runtime::agent::*;
-    pub use gemini_live_runtime::state::State;
-    pub use gemini_live_runtime::live_queue::*;
+    pub use rs_genai::prelude::*;
+    pub use rs_adk::agent::*;
+    pub use rs_adk::state::State;
+    pub use rs_adk::live_queue::*;
 }
 ```
 
 **Step 5: Compile, test, commit**
 
 ```bash
-cargo test -p gemini-live
+cargo test -p adk-rs-fluent
 git add -A
 git commit -m "feat(fluent): scaffold gemini-live crate with AgentBuilder"
 ```
@@ -1782,9 +1782,9 @@ git commit -m "feat(fluent): scaffold gemini-live crate with AgentBuilder"
 ### Task 11: Implement operator overloading (>>, |, *, //)
 
 **Files:**
-- Create: `crates/gemini-live/src/operators.rs`
-- Create: `crates/gemini-live/src/ir.rs`
-- Modify: `crates/gemini-live/src/lib.rs`
+- Create: `crates/adk-rs-fluent/src/operators.rs`
+- Create: `crates/adk-rs-fluent/src/ir.rs`
+- Modify: `crates/adk-rs-fluent/src/lib.rs`
 
 Implement the `Composable` trait and operator overloads as specified in design doc Section 5.3. Define `Pipeline`, `FanOut`, `Loop`, `Fallback` workflow types. The IR nodes serve as the intermediate representation.
 
@@ -1806,12 +1806,12 @@ git commit -m "feat(fluent): add operator algebra (>>, |, *, //) for agent compo
 ### Task 12: Implement composition modules (S, C, P, M, T)
 
 **Files:**
-- Create: `crates/gemini-live/src/compose/mod.rs`
-- Create: `crates/gemini-live/src/compose/state.rs` (S module)
-- Create: `crates/gemini-live/src/compose/context.rs` (C module)
-- Create: `crates/gemini-live/src/compose/prompt.rs` (P module)
-- Create: `crates/gemini-live/src/compose/middleware.rs` (M module)
-- Create: `crates/gemini-live/src/compose/tools.rs` (T module)
+- Create: `crates/adk-rs-fluent/src/compose/mod.rs`
+- Create: `crates/adk-rs-fluent/src/compose/state.rs` (S module)
+- Create: `crates/adk-rs-fluent/src/compose/context.rs` (C module)
+- Create: `crates/adk-rs-fluent/src/compose/prompt.rs` (P module)
+- Create: `crates/adk-rs-fluent/src/compose/middleware.rs` (M module)
+- Create: `crates/adk-rs-fluent/src/compose/tools.rs` (T module)
 
 Implement each module as specified in design doc Section 5.4. Each module has:
 - A struct with static factory methods
@@ -1828,8 +1828,8 @@ git commit -m "feat(fluent): add S, C, P, M, T composition modules"
 ### Task 13: Implement pre-built patterns and testing utilities
 
 **Files:**
-- Create: `crates/gemini-live/src/patterns.rs`
-- Create: `crates/gemini-live/src/testing.rs`
+- Create: `crates/adk-rs-fluent/src/patterns.rs`
+- Create: `crates/adk-rs-fluent/src/testing.rs`
 
 Implement the patterns from design doc Section 5.6 (`review_loop`, `cascade`, `fan_out_merge`, `supervised`, `map_over`) and testing utilities from Section 5.7 (`MockBackend`, `AgentHarness`, `check_contracts`).
 
@@ -1842,14 +1842,14 @@ git commit -m "feat(fluent): add pre-built patterns and testing utilities"
 
 ## Phase 4: Python Bindings
 
-### Task 14: Scaffold `gemini-live-python` crate with PyO3
+### Task 14: Scaffold `adk-rs-python` crate with PyO3
 
 **Files:**
-- Create: `crates/gemini-live-python/Cargo.toml`
-- Create: `crates/gemini-live-python/pyproject.toml`
-- Create: `crates/gemini-live-python/src/lib.rs`
-- Create: `crates/gemini-live-python/src/py_types.rs`
-- Create: `crates/gemini-live-python/src/py_config.rs`
+- Create: `crates/adk-rs-fluent-python/Cargo.toml`
+- Create: `crates/adk-rs-fluent-python/pyproject.toml`
+- Create: `crates/adk-rs-fluent-python/src/lib.rs`
+- Create: `crates/adk-rs-fluent-python/src/py_types.rs`
+- Create: `crates/adk-rs-fluent-python/src/py_config.rs`
 - Modify: workspace `Cargo.toml`
 
 Set up the basic PyO3 module structure with type wrappers. Verify it builds with `maturin develop`.
@@ -1864,10 +1864,10 @@ git commit -m "feat(python): scaffold PyO3 bindings crate"
 ### Task 15: Implement Python session and event bindings
 
 **Files:**
-- Create: `crates/gemini-live-python/src/py_session.rs`
-- Create: `crates/gemini-live-python/src/py_events.rs`
-- Create: `crates/gemini-live-python/src/py_agent.rs`
-- Create: `crates/gemini-live-python/src/py_tool.rs`
+- Create: `crates/adk-rs-fluent-python/src/py_session.rs`
+- Create: `crates/adk-rs-fluent-python/src/py_events.rs`
+- Create: `crates/adk-rs-fluent-python/src/py_agent.rs`
+- Create: `crates/adk-rs-fluent-python/src/py_tool.rs`
 
 Implement the three-tier Python API from design doc Section 6.2.
 
@@ -1885,7 +1885,7 @@ git commit -m "feat(python): implement session, event, agent, and tool bindings"
 **Files:**
 - Create: `examples/wire_raw_session.rs`
 
-A minimal example using only `gemini-live-wire` to connect, send text, and print responses. Verifies the protocol fixes work end-to-end.
+A minimal example using only `rs-genai` to connect, send text, and print responses. Verifies the protocol fixes work end-to-end.
 
 **Commit:**
 ```bash
@@ -1899,7 +1899,7 @@ git commit -m "feat: add wire-level raw session example"
 **Files:**
 - Create: `examples/runtime_agent.rs`
 
-An example using `gemini-live-runtime` with the Agent trait, ToolDispatcher, and LiveRequestQueue. Demonstrates function calling and streaming tools.
+An example using `rs-adk` with the Agent trait, ToolDispatcher, and LiveRequestQueue. Demonstrates function calling and streaming tools.
 
 **Commit:**
 ```bash
@@ -1913,7 +1913,7 @@ git commit -m "feat: add runtime agent example with tool dispatch"
 **Files:**
 - Create: `examples/fluent_pipeline.rs`
 
-An example using `gemini-live` with the operator algebra, composition modules, and builder API. The full "deep research" pipeline from the design doc.
+An example using `adk-rs-fluent` with the operator algebra, composition modules, and builder API. The full "deep research" pipeline from the design doc.
 
 **Commit:**
 ```bash
@@ -1941,8 +1941,8 @@ git commit -m "refactor: remove old monolithic src/ in favor of workspace crates
 
 | Phase | Tasks | Crate | Key Deliverables |
 |-------|-------|-------|-----------------|
-| 1 | 1-4 | `gemini-live-wire` | Workspace scaffold, protocol fixes (Tool type, ThinkingConfig), send_client_content |
-| 2 | 5-9 | `gemini-live-runtime` | LiveRequestQueue, State, Agent trait, ToolDispatcher, Middleware, AgentRegistry |
-| 3 | 10-13 | `gemini-live` | AgentBuilder, operator algebra, S/C/P/M/T modules, patterns, testing |
-| 4 | 14-15 | `gemini-live-python` | PyO3 bindings with three-tier Python API |
+| 1 | 1-4 | `rs-genai` | Workspace scaffold, protocol fixes (Tool type, ThinkingConfig), send_client_content |
+| 2 | 5-9 | `rs-adk` | LiveRequestQueue, State, Agent trait, ToolDispatcher, Middleware, AgentRegistry |
+| 3 | 10-13 | `adk-rs-fluent` | AgentBuilder, operator algebra, S/C/P/M/T modules, patterns, testing |
+| 4 | 14-15 | `adk-rs-python` | PyO3 bindings with three-tier Python API |
 | 5 | 16-19 | All | Examples, cleanup |

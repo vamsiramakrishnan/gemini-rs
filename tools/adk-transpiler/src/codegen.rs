@@ -28,20 +28,20 @@ fn escape_keyword(name: &str) -> String {
 }
 
 /// Check if a resolved type can derive Default.
-/// Types like `Content` (from gemini-live-wire) don't implement Default.
+/// Types like `Content` (from rs-genai) don't implement Default.
 /// Wire crate types that do NOT implement Default.
 const NON_DEFAULT_WIRE_TYPES: &[&str] = &[
-    "gemini_live_wire::prelude::Content",
-    "gemini_live_wire::prelude::Part",
-    "gemini_live_wire::prelude::Blob",
-    "gemini_live_wire::prelude::FunctionCall",
-    "gemini_live_wire::prelude::FunctionResponse",
-    "gemini_live_wire::prelude::FunctionDeclaration",
-    "gemini_live_wire::prelude::ExecutableCode",
-    "gemini_live_wire::prelude::CodeExecutionResult",
-    "gemini_live_wire::prelude::Tool",
-    "gemini_live_wire::prelude::ToolConfig",
-    "gemini_live_wire::prelude::FileData",
+    "rs_genai::prelude::Content",
+    "rs_genai::prelude::Part",
+    "rs_genai::prelude::Blob",
+    "rs_genai::prelude::FunctionCall",
+    "rs_genai::prelude::FunctionResponse",
+    "rs_genai::prelude::FunctionDeclaration",
+    "rs_genai::prelude::ExecutableCode",
+    "rs_genai::prelude::CodeExecutionResult",
+    "rs_genai::prelude::Tool",
+    "rs_genai::prelude::ToolConfig",
+    "rs_genai::prelude::FileData",
 ];
 
 fn type_supports_default(resolved_type: &str) -> bool {
@@ -177,7 +177,7 @@ pub fn generate(schema: &AdkSchema) -> String {
 
     // Placeholder trait/type definitions so the generated code compiles standalone
     out.push_str("// -- Placeholder trait and type definitions --\n");
-    out.push_str("// Replace these with actual imports from gemini-live-runtime.\n\n");
+    out.push_str("// Replace these with actual imports from rs-adk.\n\n");
     out.push_str("#[async_trait]\n");
     out.push_str("pub trait Agent: Send + Sync {\n");
     out.push_str("    fn name(&self) -> &str;\n");
@@ -448,10 +448,10 @@ fn generate_tool(tool: &ToolDef) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Compilable codegen — produces code that compiles against gemini-live-runtime
+// Compilable codegen — produces code that compiles against rs-adk
 // ---------------------------------------------------------------------------
 
-/// Resolve a phantom Rust type to a real type from `gemini-live-runtime`.
+/// Resolve a phantom Rust type to a real type from `rs-adk`.
 ///
 /// Resolution order:
 /// 1. ADK-specific mappings (AgentRef, ToolRef, etc.)
@@ -490,25 +490,25 @@ fn resolve_runtime_type(rust_type: &str) -> String {
 
     // 3. Built-in wire type mappings for common js-genai types
     match rust_type {
-        "Content" => return "gemini_live_wire::prelude::Content".to_string(),
-        "Part" => return "gemini_live_wire::prelude::Part".to_string(),
-        "Blob" => return "gemini_live_wire::prelude::Blob".to_string(),
-        "FunctionCall" => return "gemini_live_wire::prelude::FunctionCall".to_string(),
-        "FunctionResponse" => return "gemini_live_wire::prelude::FunctionResponse".to_string(),
+        "Content" => return "rs_genai::prelude::Content".to_string(),
+        "Part" => return "rs_genai::prelude::Part".to_string(),
+        "Blob" => return "rs_genai::prelude::Blob".to_string(),
+        "FunctionCall" => return "rs_genai::prelude::FunctionCall".to_string(),
+        "FunctionResponse" => return "rs_genai::prelude::FunctionResponse".to_string(),
         "FunctionDeclaration" => {
-            return "gemini_live_wire::prelude::FunctionDeclaration".to_string()
+            return "rs_genai::prelude::FunctionDeclaration".to_string()
         }
-        "Tool" => return "gemini_live_wire::prelude::Tool".to_string(),
-        "GenerationConfig" => return "gemini_live_wire::prelude::GenerationConfig".to_string(),
-        "SpeechConfig" => return "gemini_live_wire::prelude::SpeechConfig".to_string(),
-        "Modality" => return "gemini_live_wire::prelude::Modality".to_string(),
-        "UsageMetadata" => return "gemini_live_wire::prelude::UsageMetadata".to_string(),
-        "GroundingMetadata" => return "gemini_live_wire::prelude::GroundingMetadata".to_string(),
-        "ExecutableCode" => return "gemini_live_wire::prelude::ExecutableCode".to_string(),
+        "Tool" => return "rs_genai::prelude::Tool".to_string(),
+        "GenerationConfig" => return "rs_genai::prelude::GenerationConfig".to_string(),
+        "SpeechConfig" => return "rs_genai::prelude::SpeechConfig".to_string(),
+        "Modality" => return "rs_genai::prelude::Modality".to_string(),
+        "UsageMetadata" => return "rs_genai::prelude::UsageMetadata".to_string(),
+        "GroundingMetadata" => return "rs_genai::prelude::GroundingMetadata".to_string(),
+        "ExecutableCode" => return "rs_genai::prelude::ExecutableCode".to_string(),
         "CodeExecutionResult" => {
-            return "gemini_live_wire::prelude::CodeExecutionResult".to_string()
+            return "rs_genai::prelude::CodeExecutionResult".to_string()
         }
-        "SessionHandle" => return "gemini_live_wire::prelude::SessionHandle".to_string(),
+        "SessionHandle" => return "rs_genai::prelude::SessionHandle".to_string(),
         _ => {}
     }
 
@@ -607,7 +607,7 @@ fn is_pure_base(agent: &AgentDef) -> bool {
     agent.kind == AgentKind::Base && agent.extends.is_none()
 }
 
-/// Generate Rust source code that compiles against `gemini-live-runtime`.
+/// Generate Rust source code that compiles against `rs-adk`.
 ///
 /// Differences from the standalone `generate()`:
 /// - Uses real imports from the runtime crate
@@ -631,7 +631,7 @@ pub fn generate_compilable(schema: &AdkSchema) -> String {
     // Attributes
     out.push_str("#![allow(dead_code, unused_imports, clippy::type_complexity)]\n\n");
 
-    // Imports — uses `crate::` because the generated file lives inside gemini-live-runtime.
+    // Imports — uses `crate::` because the generated file lives inside rs-adk.
     out.push_str("use std::sync::Arc;\n");
     out.push_str("use async_trait::async_trait;\n");
     out.push_str("use crate::{Agent, AgentError, InvocationContext, ToolFunction};\n");
@@ -1367,7 +1367,7 @@ mod tests {
         assert_eq!(resolve_runtime_type("AgentRef"), "Arc<dyn Agent>");
         assert_eq!(resolve_runtime_type("ToolRef"), "Arc<dyn ToolFunction>");
         assert_eq!(resolve_runtime_type("CodeExecutorRef"), "serde_json::Value");
-        assert_eq!(resolve_runtime_type("Content"), "gemini_live_wire::prelude::Content");
+        assert_eq!(resolve_runtime_type("Content"), "rs_genai::prelude::Content");
         assert_eq!(resolve_runtime_type("String"), "String");
         assert_eq!(resolve_runtime_type("bool"), "bool");
         assert_eq!(resolve_runtime_type("f64"), "f64");
@@ -1499,7 +1499,7 @@ mod tests {
 
         assert!(
             code.contains("use crate::{Agent, AgentError, InvocationContext, ToolFunction};"),
-            "Should import from crate (inside gemini-live-runtime)"
+            "Should import from crate (inside rs-adk)"
         );
         assert!(
             !code.contains("pub trait Agent"),

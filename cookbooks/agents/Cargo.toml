@@ -1,5 +1,5 @@
 [package]
-name = "gemini-live-agents-cookbook"
+name = "agents-cookbook"
 version = "0.1.0"
 edition.workspace = true
 publish = false
@@ -13,9 +13,9 @@ name = "research-pipeline"
 path = "src/research_pipeline.rs"
 
 [dependencies]
-gemini-live = { path = "../../crates/gemini-live" }
-gemini-live-runtime = { path = "../../crates/gemini-live-runtime" }
-gemini-live-wire = { path = "../../crates/gemini-live-wire" }
+adk-rs-fluent = { path = "../../crates/adk-rs-fluent" }
+rs-adk = { path = "../../crates/rs-adk" }
+rs-genai = { path = "../../crates/rs-genai" }
 tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"
 schemars = "0.8"

@@ -7,7 +7,7 @@
 //! - Apply pre-built patterns (review_loop, cascade, supervised)
 //! - Validate contracts with check_contracts
 
-use gemini_live::prelude::*;
+use adk_rs_fluent::prelude::*;
 
 fn main() {
     println!("=== Research Pipeline Cookbook ===\n");
