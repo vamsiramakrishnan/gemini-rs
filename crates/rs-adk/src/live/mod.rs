@@ -14,6 +14,7 @@ pub mod handle;
 pub mod phase;
 pub(crate) mod processor;
 pub mod session_signals;
+pub mod temporal;
 pub mod transcript;
 pub mod watcher;
 
@@ -24,5 +25,9 @@ pub use extractor::{LlmExtractor, TurnExtractor};
 pub use handle::LiveHandle;
 pub use phase::{Phase, PhaseInstruction, PhaseMachine, PhaseTransition, Transition};
 pub use session_signals::{SessionSignals, SessionType};
+pub use temporal::{
+    ConsecutiveFailureDetector, PatternDetector, RateDetector, SustainedDetector,
+    TemporalPattern, TemporalRegistry, TurnCountDetector,
+};
 pub use transcript::{TranscriptBuffer, TranscriptTurn};
 pub use watcher::{PredicateFn, WatchPredicate, Watcher, WatcherRegistry};
