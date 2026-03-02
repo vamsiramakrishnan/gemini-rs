@@ -3,9 +3,11 @@
 //! Mirrors ADK-JS's `BaseArtifactService`. Provides a trait for storing
 //! and retrieving versioned artifacts with an in-memory default.
 
+mod file_service;
 mod forwarding;
 mod in_memory;
 
+pub use file_service::FileArtifactService;
 pub use forwarding::ForwardingArtifactService;
 pub use in_memory::InMemoryArtifactService;
 
@@ -125,7 +127,7 @@ pub trait ArtifactService: Send + Sync {
     ) -> Result<(), ArtifactError>;
 }
 
-fn now_secs() -> u64 {
+pub(crate) fn now_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()

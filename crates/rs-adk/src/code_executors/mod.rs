@@ -1,8 +1,11 @@
 pub mod types;
 pub mod base;
+pub mod built_in;
+pub mod utils;
 
 pub use types::{CodeExecutionInput, CodeExecutionResult, CodeFile};
 pub use base::{CodeExecutor, CodeExecutorError};
+pub use built_in::BuiltInCodeExecutor;
 
 #[cfg(test)]
 mod tests {
@@ -140,5 +143,126 @@ mod tests {
     fn code_executor_is_object_safe() {
         let exec = StubExecutor;
         _assert_object_safe(&exec);
+    }
+
+    // --- BuiltInCodeExecutor tests ---
+
+    #[test]
+    fn built_in_process_llm_request_adds_code_execution_for_gemini2() {
+        let executor = built_in::BuiltInCodeExecutor;
+        let mut request = crate::llm::LlmRequest::from_text("hello");
+        executor
+            .process_llm_request(&mut request, "gemini-2.5-flash")
+            .unwrap();
+        assert_eq!(request.tools.len(), 1);
+        assert!(request.tools[0].code_execution.is_some());
+    }
+
+    #[test]
+    fn built_in_process_llm_request_rejects_non_gemini2() {
+        let executor = built_in::BuiltInCodeExecutor;
+        let mut request = crate::llm::LlmRequest::from_text("hello");
+        let err = executor
+            .process_llm_request(&mut request, "gemini-1.5-pro")
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("Gemini 2.0+"),
+            "expected UnsupportedModel error, got: {}",
+            err
+        );
+        assert!(request.tools.is_empty());
+    }
+
+    #[tokio::test]
+    async fn built_in_execute_code_returns_empty() {
+        let executor = built_in::BuiltInCodeExecutor;
+        let input = CodeExecutionInput {
+            code: "print('hi')".into(),
+            input_files: Vec::new(),
+            execution_id: None,
+        };
+        let result = executor.execute_code(input).await.unwrap();
+        assert!(result.stdout.is_empty());
+        assert!(result.stderr.is_empty());
+        assert!(result.output_files.is_empty());
+    }
+
+    // --- utils tests ---
+
+    #[test]
+    fn extract_code_from_tool_code_block() {
+        let text = "Some text\n```tool_code\nprint('hello')\n```\nMore text";
+        let delimiters = vec![
+            ("```tool_code\n".to_string(), "\n```".to_string()),
+            ("```python\n".to_string(), "\n```".to_string()),
+        ];
+        let (code, remaining) = utils::extract_code_from_text(text, &delimiters).unwrap();
+        assert_eq!(code, "print('hello')");
+        assert_eq!(remaining, "Some text\n\nMore text");
+    }
+
+    #[test]
+    fn extract_code_from_python_block() {
+        let text = "Intro\n```python\nx = 42\n```\nDone";
+        let delimiters = vec![
+            ("```tool_code\n".to_string(), "\n```".to_string()),
+            ("```python\n".to_string(), "\n```".to_string()),
+        ];
+        let (code, remaining) = utils::extract_code_from_text(text, &delimiters).unwrap();
+        assert_eq!(code, "x = 42");
+        assert_eq!(remaining, "Intro\n\nDone");
+    }
+
+    #[test]
+    fn extract_code_returns_none_when_no_block() {
+        let text = "Just plain text, no code blocks here.";
+        let delimiters = vec![
+            ("```tool_code\n".to_string(), "\n```".to_string()),
+            ("```python\n".to_string(), "\n```".to_string()),
+        ];
+        assert!(utils::extract_code_from_text(text, &delimiters).is_none());
+    }
+
+    #[test]
+    fn build_executable_code_part_correct() {
+        let part = utils::build_executable_code_part("x = 1");
+        match part {
+            rs_genai::prelude::Part::ExecutableCode { executable_code } => {
+                assert_eq!(executable_code.language, "PYTHON");
+                assert_eq!(executable_code.code, "x = 1");
+            }
+            other => panic!("expected ExecutableCode, got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn build_code_execution_result_part_ok_outcome() {
+        let part = utils::build_code_execution_result_part("42\n", "");
+        match part {
+            rs_genai::prelude::Part::CodeExecutionResult {
+                code_execution_result,
+            } => {
+                assert_eq!(code_execution_result.outcome, "OK");
+                assert_eq!(code_execution_result.output.as_deref(), Some("42\n"));
+            }
+            other => panic!("expected CodeExecutionResult, got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn build_code_execution_result_part_failed_outcome() {
+        let part =
+            utils::build_code_execution_result_part("partial output", "NameError: x not defined");
+        match part {
+            rs_genai::prelude::Part::CodeExecutionResult {
+                code_execution_result,
+            } => {
+                assert_eq!(code_execution_result.outcome, "FAILED");
+                let output = code_execution_result.output.unwrap();
+                assert!(output.contains("partial output"));
+                assert!(output.contains("NameError: x not defined"));
+            }
+            other => panic!("expected CodeExecutionResult, got: {:?}", other),
+        }
     }
 }
