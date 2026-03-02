@@ -4,7 +4,10 @@
 //! from any LLM. The `GeminiLlm` implementation wraps rs-genai's `Client`
 //! for Gemini models.
 
+pub mod gemini;
 pub mod registry;
+
+pub use gemini::{GeminiLlm, GeminiLlmParams};
 pub use registry::LlmRegistry;
 
 use async_trait::async_trait;

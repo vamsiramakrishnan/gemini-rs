@@ -28,6 +28,7 @@ tokio-test = "0.4"
 
 [features]
 default = []
+gemini-llm = ["rs-genai/http", "rs-genai/generate"]
 gcs-artifacts = []
 tracing-support = ["dep:tracing", "rs-genai/tracing-support"]
 metrics = ["dep:metrics"]
