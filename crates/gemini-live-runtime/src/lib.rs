@@ -7,6 +7,7 @@
 pub mod agent;
 pub mod agent_session;
 pub mod agent_tool;
+pub mod agents;
 pub mod context;
 pub mod error;
 pub mod llm_agent;
@@ -20,6 +21,7 @@ pub mod tool;
 // Ergonomic re-exports
 pub use agent::Agent;
 pub use agent_tool::AgentTool;
+pub use agents::{LoopAgent, ParallelAgent, SequentialAgent};
 pub use context::{AgentEvent, InvocationContext};
 pub use error::{AgentError, ToolError};
 pub use llm_agent::{LlmAgent, LlmAgentBuilder};
