@@ -7,11 +7,14 @@ pub mod agent;
 pub mod agent_session;
 pub mod agent_tool;
 pub mod agents;
+pub mod artifacts;
 pub mod callback;
 pub mod context;
 pub mod error;
 pub mod events;
+pub mod llm;
 pub mod llm_agent;
+pub mod memory;
 pub mod middleware;
 pub mod plugin;
 pub mod router;
@@ -40,6 +43,9 @@ pub use state::State;
 pub use tool::{SimpleTool, ToolDispatcher, ToolFunction, TypedTool};
 pub use callback::{AfterToolCallback, BeforeToolCallback, BeforeToolResult, ToolCallResult};
 pub use plugin::{Plugin, PluginManager, PluginResult};
+pub use memory::{InMemoryMemoryService, MemoryEntry, MemoryService};
+pub use artifacts::{Artifact, ArtifactService, InMemoryArtifactService};
+pub use llm::{BaseLlm, LlmRequest, LlmResponse};
 
 // Wire re-export
 pub use rs_genai;
