@@ -6,6 +6,7 @@ use std::pin::Pin;
 /// A boxed future type used across live session modules.
 pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
 
+pub mod background_tool;
 pub mod builder;
 pub mod callbacks;
 pub mod computed;
@@ -18,6 +19,7 @@ pub mod temporal;
 pub mod transcript;
 pub mod watcher;
 
+pub use background_tool::{BackgroundToolTracker, DefaultResultFormatter, ResultFormatter, ToolExecutionMode};
 pub use builder::LiveSessionBuilder;
 pub use callbacks::EventCallbacks;
 pub use computed::{ComputedRegistry, ComputedVar};
