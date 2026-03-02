@@ -33,6 +33,8 @@ pub mod models;
 pub mod embed;
 #[cfg(feature = "files")]
 pub mod files;
+#[cfg(feature = "caches")]
+pub mod caches;
 #[cfg(feature = "chats")]
 pub mod chats;
 
@@ -110,6 +112,13 @@ pub mod prelude {
     #[cfg(feature = "files")]
     pub use crate::files::{
         File, FileSource, FileState, FilesError, ListFilesResponse, UploadFileConfig,
+    };
+
+    // Caches API
+    #[cfg(feature = "caches")]
+    pub use crate::caches::{
+        CachedContent, CachedContentUsageMetadata, CachesError, CreateCachedContentConfig,
+        ListCachedContentsResponse, UpdateCachedContentRequest,
     };
 
     // Chat API
