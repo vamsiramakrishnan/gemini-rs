@@ -14,7 +14,7 @@ pub use rs_genai;
 
 pub mod prelude {
     pub use crate::builder::*;
-    pub use crate::compose::{C, M, P, S, T};
+    pub use crate::compose::{A, C, M, P, S, T};
     pub use crate::operators::*;
     pub use crate::patterns::*;
     pub use crate::testing::*;
