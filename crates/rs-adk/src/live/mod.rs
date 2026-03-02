@@ -2,6 +2,7 @@
 
 pub mod builder;
 pub mod callbacks;
+pub mod computed;
 pub mod extractor;
 pub mod handle;
 pub(crate) mod processor;
@@ -10,6 +11,7 @@ pub mod transcript;
 
 pub use builder::LiveSessionBuilder;
 pub use callbacks::EventCallbacks;
+pub use computed::{ComputedRegistry, ComputedVar};
 pub use extractor::{LlmExtractor, TurnExtractor};
 pub use handle::LiveHandle;
 pub use session_signals::{SessionSignals, SessionType};
