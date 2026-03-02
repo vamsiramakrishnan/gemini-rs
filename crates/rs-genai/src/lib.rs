@@ -35,6 +35,8 @@ pub mod embed;
 pub mod files;
 #[cfg(feature = "caches")]
 pub mod caches;
+#[cfg(feature = "tunings")]
+pub mod tunings;
 #[cfg(feature = "chats")]
 pub mod chats;
 
@@ -119,6 +121,13 @@ pub mod prelude {
     pub use crate::caches::{
         CachedContent, CachedContentUsageMetadata, CachesError, CreateCachedContentConfig,
         ListCachedContentsResponse, UpdateCachedContentRequest,
+    };
+
+    // Tunings API
+    #[cfg(feature = "tunings")]
+    pub use crate::tunings::{
+        CreateTuningJobConfig, ListTuningJobsResponse, SupervisedTuningSpec, TuningHyperParameters,
+        TuningJob, TuningJobState, TuningsError,
     };
 
     // Chat API
