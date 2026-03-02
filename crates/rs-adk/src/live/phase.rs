@@ -138,6 +138,15 @@ impl PhaseMachine {
         }
         for transition in &phase.transitions {
             if (transition.guard)(state) {
+                // Check target phase guard — if the target phase has a guard
+                // that returns false, skip this transition and try the next one.
+                if let Some(target_phase) = self.phases.get(&transition.target) {
+                    if let Some(ref phase_guard) = target_phase.guard {
+                        if !phase_guard(state) {
+                            continue;
+                        }
+                    }
+                }
                 return Some(&transition.target);
             }
         }
@@ -593,5 +602,93 @@ mod tests {
 
         let result = machine.transition("dynamic", &state, &writer, 1).await;
         assert_eq!(result, Some("Discuss weather.".to_string()));
+    }
+
+    // ── phase-level guard blocks transition into guarded phase ─────────
+
+    #[test]
+    fn phase_guard_blocks_transition() {
+        let state = State::new();
+        state.set("ready", true);
+        // "verified" is NOT set, so the target phase guard will reject entry.
+
+        let mut greeting = simple_phase("greeting", "Say hello");
+        greeting.transitions.push(Transition {
+            target: "secure".to_string(),
+            guard: Arc::new(|s: &State| s.get::<bool>("ready").unwrap_or(false)),
+        });
+
+        // Target phase has a guard that requires "verified" to be true.
+        let mut secure = simple_phase("secure", "Secure area");
+        secure.guard = Some(Arc::new(|s: &State| {
+            s.get::<bool>("verified").unwrap_or(false)
+        }));
+
+        let mut machine = PhaseMachine::new("greeting");
+        machine.add_phase(greeting);
+        machine.add_phase(secure);
+
+        // Transition guard fires (ready=true), but target phase guard blocks
+        // (verified is not set), so evaluate returns None.
+        assert_eq!(machine.evaluate(&state), None);
+    }
+
+    #[test]
+    fn phase_guard_allows_transition_when_satisfied() {
+        let state = State::new();
+        state.set("ready", true);
+        state.set("verified", true);
+
+        let mut greeting = simple_phase("greeting", "Say hello");
+        greeting.transitions.push(Transition {
+            target: "secure".to_string(),
+            guard: Arc::new(|s: &State| s.get::<bool>("ready").unwrap_or(false)),
+        });
+
+        // Target phase guard requires "verified" — which IS set.
+        let mut secure = simple_phase("secure", "Secure area");
+        secure.guard = Some(Arc::new(|s: &State| {
+            s.get::<bool>("verified").unwrap_or(false)
+        }));
+
+        let mut machine = PhaseMachine::new("greeting");
+        machine.add_phase(greeting);
+        machine.add_phase(secure);
+
+        // Both transition guard and phase guard pass.
+        assert_eq!(machine.evaluate(&state), Some("secure"));
+    }
+
+    #[test]
+    fn phase_guard_skips_to_next_transition() {
+        let state = State::new();
+        state.set("ready", true);
+        // "verified" is NOT set — first target's phase guard will block.
+
+        let mut greeting = simple_phase("greeting", "Say hello");
+        // First transition → "secure" (phase guard will block)
+        greeting.transitions.push(Transition {
+            target: "secure".to_string(),
+            guard: Arc::new(|s: &State| s.get::<bool>("ready").unwrap_or(false)),
+        });
+        // Second transition → "fallback" (no phase guard)
+        greeting.transitions.push(Transition {
+            target: "fallback".to_string(),
+            guard: Arc::new(|s: &State| s.get::<bool>("ready").unwrap_or(false)),
+        });
+
+        let mut secure = simple_phase("secure", "Secure area");
+        secure.guard = Some(Arc::new(|s: &State| {
+            s.get::<bool>("verified").unwrap_or(false)
+        }));
+
+        let mut machine = PhaseMachine::new("greeting");
+        machine.add_phase(greeting);
+        machine.add_phase(secure);
+        machine.add_phase(simple_phase("fallback", "Fallback"));
+
+        // First transition fires but phase guard blocks → falls through to
+        // second transition which has no phase guard → returns "fallback".
+        assert_eq!(machine.evaluate(&state), Some("fallback"));
     }
 }
