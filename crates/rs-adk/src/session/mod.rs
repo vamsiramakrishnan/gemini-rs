@@ -6,6 +6,13 @@
 mod memory;
 mod types;
 
+#[cfg(feature = "database-sessions")]
+mod database;
+#[cfg(feature = "database-sessions")]
+pub use database::DatabaseSessionService;
+
+pub mod db_schema;
+
 pub use memory::InMemorySessionService;
 pub use types::{Session, SessionId};
 
@@ -116,5 +123,45 @@ mod tests {
     #[tokio::test]
     async fn session_service_is_object_safe() {
         fn _assert(_: &dyn SessionService) {}
+    }
+}
+
+#[cfg(test)]
+mod schema_tests {
+    use super::db_schema;
+
+    #[test]
+    fn postgres_schema_has_tables() {
+        assert!(db_schema::POSTGRES_SCHEMA.contains("CREATE TABLE IF NOT EXISTS sessions"));
+        assert!(db_schema::POSTGRES_SCHEMA.contains("CREATE TABLE IF NOT EXISTS events"));
+    }
+
+    #[test]
+    fn sqlite_schema_has_tables() {
+        assert!(db_schema::SQLITE_SCHEMA.contains("CREATE TABLE IF NOT EXISTS sessions"));
+        assert!(db_schema::SQLITE_SCHEMA.contains("CREATE TABLE IF NOT EXISTS events"));
+    }
+
+    #[test]
+    fn postgres_schema_has_indexes() {
+        assert!(db_schema::POSTGRES_SCHEMA.contains("idx_events_session"));
+        assert!(db_schema::POSTGRES_SCHEMA.contains("idx_sessions_app_user"));
+    }
+
+    #[test]
+    fn sqlite_schema_has_indexes() {
+        assert!(db_schema::SQLITE_SCHEMA.contains("idx_events_session"));
+        assert!(db_schema::SQLITE_SCHEMA.contains("idx_sessions_app_user"));
+    }
+
+    #[test]
+    fn postgres_schema_uses_jsonb() {
+        assert!(db_schema::POSTGRES_SCHEMA.contains("JSONB"));
+    }
+
+    #[test]
+    fn sqlite_schema_uses_text_for_json() {
+        // SQLite doesn't have JSONB, so JSON columns use TEXT
+        assert!(!db_schema::SQLITE_SCHEMA.contains("JSONB"));
     }
 }
