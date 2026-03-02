@@ -621,7 +621,7 @@ pub enum MediaResolution {
 }
 
 /// Generation config sent in the setup message.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerationConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1160,6 +1160,119 @@ impl SessionConfig {
             ApiEndpoint::GoogleAIToken { .. } | ApiEndpoint::VertexAI(_)
         )
     }
+}
+
+// ---------------------------------------------------------------------------
+// Safety types (shared by Generate, Live, and other APIs)
+// ---------------------------------------------------------------------------
+
+/// Categories of potential harm in model output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum HarmCategory {
+    HarmCategoryUnspecified,
+    HarmCategoryHarassment,
+    HarmCategoryHateSpeech,
+    HarmCategorySexuallyExplicit,
+    HarmCategoryDangerousContent,
+    HarmCategoryCivicIntegrity,
+}
+
+/// Blocking threshold for safety settings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum HarmBlockThreshold {
+    BlockNone,
+    BlockOnlyHigh,
+    BlockMediumAndAbove,
+    BlockLowAndAbove,
+}
+
+/// Probability that content is harmful.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum HarmProbability {
+    Negligible,
+    Low,
+    Medium,
+    High,
+}
+
+/// Per-category safety configuration for content generation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SafetySetting {
+    pub category: HarmCategory,
+    pub threshold: HarmBlockThreshold,
+}
+
+/// Per-category safety assessment of generated content.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SafetyRating {
+    pub category: HarmCategory,
+    pub probability: HarmProbability,
+    #[serde(default)]
+    pub blocked: bool,
+}
+
+/// Why the model stopped generating.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum FinishReason {
+    /// Natural stop or stop sequence.
+    Stop,
+    /// Hit max_output_tokens.
+    MaxTokens,
+    /// Blocked by safety filter.
+    Safety,
+    /// Recitation risk.
+    Recitation,
+    /// Model-internal reasoning (e.g., language).
+    Language,
+    /// Other or unspecified.
+    Other,
+    /// Blocklist triggered.
+    Blocklist,
+    /// Prohibited content.
+    ProhibitedContent,
+    /// SPII detected.
+    Spii,
+    /// Malformed function call.
+    MalformedFunctionCall,
+    /// Unknown/unrecognized.
+    #[serde(other)]
+    FinishReasonUnspecified,
+}
+
+/// Citation metadata for a response.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CitationMetadata {
+    #[serde(default)]
+    pub citation_sources: Vec<CitationSource>,
+}
+
+/// A single citation source.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CitationSource {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_index: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_index: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uri: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub license: Option<String>,
+}
+
+/// Reference to an uploaded file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileData {
+    pub file_uri: String,
+    pub mime_type: String,
 }
 
 #[cfg(test)]

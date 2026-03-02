@@ -23,6 +23,8 @@ pub mod flow;
 pub mod telemetry;
 pub mod quick;
 pub mod client;
+#[cfg(feature = "generate")]
+pub mod generate;
 
 // Top-level re-exports for convenience.
 pub use quick::{quick_connect, quick_connect_vertex};
@@ -63,10 +65,22 @@ pub mod prelude {
     // Telemetry
     pub use crate::telemetry::TelemetryConfig;
 
+    // Safety types (shared across all APIs)
+    pub use crate::protocol::types::{
+        CitationMetadata, CitationSource, FileData, FinishReason, HarmBlockThreshold,
+        HarmCategory, HarmProbability, SafetyRating, SafetySetting,
+    };
+
     // Client
     pub use crate::client::Client;
     #[cfg(feature = "http")]
     pub use crate::client::http::{HttpClient, HttpConfig, HttpError};
+
+    // Generate API
+    #[cfg(feature = "generate")]
+    pub use crate::generate::{
+        Candidate, GenerateContentConfig, GenerateContentResponse, GenerateError,
+    };
 
     // Quick-start
     pub use crate::quick::{quick_connect, quick_connect_vertex};
