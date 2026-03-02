@@ -1,13 +1,14 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use crate::schema::{AdkSchema, AgentDef, FieldDef, ToolDef};
+use crate::schema::{AdkSchema, AgentDef, FieldDef, ToolDef, TypeDef};
 
 /// Result of diffing two AdkSchema documents.
 #[derive(Debug, Default)]
 pub struct SchemaDiff {
     pub agents: EntityDiffs,
     pub tools: EntityDiffs,
+    pub types: EntityDiffs,
 }
 
 #[derive(Debug, Default)]
@@ -111,13 +112,48 @@ impl fmt::Display for SchemaDiff {
             writeln!(f)?;
         }
 
+        // Types
+        if !self.types.is_empty() {
+            writeln!(f, "--- Types ---")?;
+            for name in &self.types.added {
+                writeln!(f, "  + ADDED: {}", name)?;
+            }
+            for name in &self.types.removed {
+                writeln!(f, "  - REMOVED: {}", name)?;
+            }
+            for change in &self.types.changed {
+                writeln!(f, "  ~ CHANGED: {}", change.name)?;
+                for fc in &change.field_changes {
+                    match fc {
+                        FieldChange::Added(name, ty) => {
+                            writeln!(f, "      + field '{}': {}", name, ty)?;
+                        }
+                        FieldChange::Removed(name, ty) => {
+                            writeln!(f, "      - field '{}': {}", name, ty)?;
+                        }
+                        FieldChange::TypeChanged(name, old, new) => {
+                            writeln!(f, "      ~ field '{}': {} -> {}", name, old, new)?;
+                        }
+                        FieldChange::OptionalityChanged(name, old, new) => {
+                            writeln!(
+                                f,
+                                "      ~ field '{}': optional {} -> {}",
+                                name, old, new
+                            )?;
+                        }
+                    }
+                }
+            }
+            writeln!(f)?;
+        }
+
         Ok(())
     }
 }
 
 impl SchemaDiff {
     pub fn is_empty(&self) -> bool {
-        self.agents.is_empty() && self.tools.is_empty()
+        self.agents.is_empty() && self.tools.is_empty() && self.types.is_empty()
     }
 }
 
@@ -132,6 +168,7 @@ pub fn diff_schemas(old: &AdkSchema, new: &AdkSchema) -> SchemaDiff {
     SchemaDiff {
         agents: diff_agents(&old.agents, &new.agents),
         tools: diff_tools(&old.tools, &new.tools),
+        types: diff_types(&old.types, &new.types),
     }
 }
 
@@ -212,6 +249,43 @@ fn diff_tools(old: &[ToolDef], new: &[ToolDef]) -> EntityDiffs {
     diffs
 }
 
+fn diff_types(old: &[TypeDef], new: &[TypeDef]) -> EntityDiffs {
+    let old_map: HashMap<&str, &TypeDef> = old.iter().map(|t| (t.name.as_str(), t)).collect();
+    let new_map: HashMap<&str, &TypeDef> = new.iter().map(|t| (t.name.as_str(), t)).collect();
+
+    let mut diffs = EntityDiffs::default();
+
+    for name in new_map.keys() {
+        if !old_map.contains_key(name) {
+            diffs.added.push(name.to_string());
+        }
+    }
+
+    for name in old_map.keys() {
+        if !new_map.contains_key(name) {
+            diffs.removed.push(name.to_string());
+        }
+    }
+
+    for (name, old_type) in &old_map {
+        if let Some(new_type) = new_map.get(name) {
+            let changes = diff_fields(&old_type.fields, &new_type.fields);
+            if !changes.is_empty() {
+                diffs.changed.push(EntityChange {
+                    name: name.to_string(),
+                    field_changes: changes,
+                });
+            }
+        }
+    }
+
+    diffs.added.sort();
+    diffs.removed.sort();
+    diffs.changed.sort_by(|a, b| a.name.cmp(&b.name));
+
+    diffs
+}
+
 fn diff_fields(old: &[FieldDef], new: &[FieldDef]) -> Vec<FieldChange> {
     let old_map: HashMap<&str, &FieldDef> = old.iter().map(|f| (f.name.as_str(), f)).collect();
     let new_map: HashMap<&str, &FieldDef> = new.iter().map(|f| (f.name.as_str(), f)).collect();
@@ -275,6 +349,7 @@ mod tests {
             },
             agents,
             tools,
+            types: vec![],
         }
     }
 
@@ -370,6 +445,7 @@ mod tests {
                 changed: vec![],
             },
             tools: EntityDiffs::default(),
+            types: EntityDiffs::default(),
         };
         let output = format!("{}", diff);
         assert!(output.contains("ADDED: NewAgent"));

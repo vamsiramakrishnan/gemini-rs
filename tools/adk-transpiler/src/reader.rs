@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
@@ -5,7 +6,7 @@ use regex::Regex;
 use walkdir::WalkDir;
 
 use crate::schema::{
-    AdkSchema, AgentDef, AgentKind, CallbackDef, FieldDef, SourceInfo, ToolDef,
+    AdkSchema, AgentDef, AgentKind, CallbackDef, FieldDef, SourceInfo, ToolDef, TypeDef,
 };
 
 /// Well-known callback type names that should be extracted as CallbackDef
@@ -25,7 +26,27 @@ const CALLBACK_TYPE_NAMES: &[&str] = &[
     "InstructionProvider",
 ];
 
-/// Read all TypeScript files from a directory tree and extract agent/tool
+/// Determine the module name from a file path relative to the source directory.
+///
+/// For example, if source_dir is `/tmp/adk-js/core/src/` and the file is
+/// `/tmp/adk-js/core/src/events/event.ts`, the module is `"events"`.
+/// Files directly in the source directory get module `"root"`.
+fn module_from_path(source_dir: &Path, file_path: &Path) -> String {
+    if let Ok(relative) = file_path.strip_prefix(source_dir) {
+        // The first component of the relative path is the module directory
+        if let Some(first) = relative.components().next() {
+            let first_str = first.as_os_str().to_str().unwrap_or("root");
+            // If the first component is also the file itself (no subdirectory), module is "root"
+            if relative.components().count() == 1 {
+                return "root".to_string();
+            }
+            return first_str.to_string();
+        }
+    }
+    "root".to_string()
+}
+
+/// Read all TypeScript files from a directory tree and extract agent/tool/type
 /// definitions into an AdkSchema.
 pub fn read_source_dir(source_dir: &Path) -> Result<AdkSchema, String> {
     let source_dir_str = source_dir
@@ -35,6 +56,7 @@ pub fn read_source_dir(source_dir: &Path) -> Result<AdkSchema, String> {
 
     let mut agents = Vec::new();
     let mut tools = Vec::new();
+    let mut types = Vec::new();
 
     // Collect all .ts files
     let ts_files: Vec<_> = WalkDir::new(source_dir)
@@ -57,6 +79,8 @@ pub fn read_source_dir(source_dir: &Path) -> Result<AdkSchema, String> {
             .and_then(|s| s.to_str())
             .unwrap_or("");
 
+        let module = module_from_path(source_dir, path);
+
         // Extract interfaces from this file
         let interfaces = extract_interfaces(&content);
 
@@ -66,25 +90,69 @@ pub fn read_source_dir(source_dir: &Path) -> Result<AdkSchema, String> {
 
             if is_tool {
                 tools.push(build_tool_def(iface));
-            } else if kind.is_some() {
-                agents.push(build_agent_def(iface, kind.unwrap()));
+            } else if let Some(agent_kind) = kind {
+                agents.push(build_agent_def(iface, agent_kind));
+            } else {
+                // All other exported interfaces become TypeDef entries
+                types.push(build_type_def_from_interface(iface, &module));
             }
-            // Interfaces that aren't agents or tools are skipped (type aliases, etc.)
+        }
+
+        // Extract enums: `export enum Foo { A, B, C }`
+        let enums = extract_enums(&content);
+        for (name, jsdoc, variants) in &enums {
+            types.push(TypeDef {
+                name: name.clone(),
+                module: module.clone(),
+                description: jsdoc.clone(),
+                fields: Vec::new(),
+                extends: None,
+                is_enum: true,
+                variants: variants.clone(),
+            });
+        }
+
+        // Extract string union type aliases as enums:
+        // `export type Foo = 'a' | 'b' | 'c';`
+        let type_aliases = extract_type_aliases(&content);
+        for (name, value) in &type_aliases {
+            if is_string_union(value) {
+                let variants = parse_string_union_variants(value);
+                types.push(TypeDef {
+                    name: name.clone(),
+                    module: module.clone(),
+                    description: None,
+                    fields: Vec::new(),
+                    extends: None,
+                    is_enum: true,
+                    variants,
+                });
+            }
         }
     }
 
-    // Also extract type aliases for documentation purposes
-    for entry in &ts_files {
-        let path = entry.path();
-        let content = fs::read_to_string(path).unwrap_or_default();
-        let _type_aliases = extract_type_aliases(&content);
-        // Type aliases are used for enriching callback definitions
-        // but not directly emitted as top-level schema items
+    // Deduplicate types by name (keep the one with more fields)
+    {
+        let mut seen: HashMap<String, usize> = HashMap::new();
+        let mut deduped_types: Vec<TypeDef> = Vec::new();
+        for type_def in types {
+            if let Some(&existing_idx) = seen.get(&type_def.name) {
+                // Keep the one with more fields
+                if type_def.fields.len() > deduped_types[existing_idx].fields.len() {
+                    deduped_types[existing_idx] = type_def;
+                }
+            } else {
+                seen.insert(type_def.name.clone(), deduped_types.len());
+                deduped_types.push(type_def);
+            }
+        }
+        types = deduped_types;
     }
 
     // Sort for deterministic output
     agents.sort_by(|a, b| a.name.cmp(&b.name));
     tools.sort_by(|a, b| a.name.cmp(&b.name));
+    types.sort_by(|a, b| a.name.cmp(&b.name));
 
     let now = chrono_like_now();
 
@@ -96,6 +164,7 @@ pub fn read_source_dir(source_dir: &Path) -> Result<AdkSchema, String> {
         },
         agents,
         tools,
+        types,
     })
 }
 
@@ -213,6 +282,69 @@ fn extract_type_aliases(source: &str) -> Vec<(String, String)> {
         results.push((name, value));
     }
     results
+}
+
+/// Extract `export enum Foo { A, B, C }` blocks from TypeScript source.
+/// Returns a list of (name, optional jsdoc, variants).
+fn extract_enums(source: &str) -> Vec<(String, Option<String>, Vec<String>)> {
+    let mut results = Vec::new();
+
+    let enum_re = Regex::new(
+        r"(?m)(?:^|\n)\s*(?:export\s+)?(?:const\s+)?enum\s+(\w+)\s*\{"
+    ).unwrap();
+
+    for cap in enum_re.captures_iter(source) {
+        let name = cap[1].to_string();
+        let match_start = cap.get(0).unwrap().start();
+        let body_start = cap.get(0).unwrap().end();
+
+        let jsdoc = extract_preceding_jsdoc(source, match_start);
+
+        if let Some(body) = extract_brace_block(source, body_start) {
+            let variants: Vec<String> = body
+                .split(',')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                // Strip enum value assignments: `A = 'a'` -> `A`
+                .map(|s| {
+                    if let Some(eq_pos) = s.find('=') {
+                        s[..eq_pos].trim().to_string()
+                    } else {
+                        s.to_string()
+                    }
+                })
+                // Filter out comments and empty entries
+                .filter(|s| !s.starts_with("//") && !s.starts_with("/*") && !s.is_empty())
+                .collect();
+
+            if !variants.is_empty() {
+                results.push((name, jsdoc, variants));
+            }
+        }
+    }
+
+    results
+}
+
+/// Check if a type alias value is a string literal union (e.g. `'a' | 'b' | 'c'`).
+fn is_string_union(value: &str) -> bool {
+    let parts: Vec<&str> = value.split('|').map(|s| s.trim()).collect();
+    parts.len() >= 2 && parts.iter().all(|p| {
+        let p = p.trim();
+        (p.starts_with('\'') && p.ends_with('\''))
+            || (p.starts_with('"') && p.ends_with('"'))
+    })
+}
+
+/// Parse string union variants from a type alias value.
+/// E.g. `'a' | 'b' | 'c'` -> `["a", "b", "c"]`
+fn parse_string_union_variants(value: &str) -> Vec<String> {
+    value
+        .split('|')
+        .map(|s| s.trim())
+        .map(|s| s.trim_matches('\'').trim_matches('"').to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
 }
 
 /// Extract the JSDoc block comment (`/** ... */`) immediately preceding a
@@ -451,6 +583,19 @@ fn parse_fields(body: &str) -> (Vec<FieldDef>, Vec<CallbackDef>) {
         }
     }
 
+    // Deduplicate fields by name (keep the last occurrence)
+    {
+        let mut seen = std::collections::HashSet::new();
+        let mut deduped = Vec::new();
+        for field in fields.into_iter().rev() {
+            if seen.insert(field.name.clone()) {
+                deduped.push(field);
+            }
+        }
+        deduped.reverse();
+        fields = deduped;
+    }
+
     (fields, callbacks)
 }
 
@@ -645,6 +790,19 @@ fn build_tool_def(iface: &RawInterface) -> ToolDef {
     }
 }
 
+fn build_type_def_from_interface(iface: &RawInterface, module: &str) -> TypeDef {
+    let (fields, _callbacks) = parse_fields(&iface.body);
+    TypeDef {
+        name: iface.name.clone(),
+        module: module.to_string(),
+        description: iface.jsdoc.clone(),
+        fields,
+        extends: iface.extends.clone(),
+        is_enum: false,
+        variants: Vec::new(),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -817,6 +975,81 @@ export interface LlmAgentConfig extends BaseAgentConfig {
         let cleaned = clean_jsdoc(comment);
         assert!(cleaned.contains("shell agent"));
         assert!(cleaned.contains("loop"));
+    }
+
+    #[test]
+    fn test_extract_enums() {
+        let source = r#"
+/** Status of the session. */
+export enum SessionStatus {
+    Active = 'active',
+    Closed = 'closed',
+    Pending = 'pending',
+}
+"#;
+        let enums = extract_enums(source);
+        assert_eq!(enums.len(), 1);
+        assert_eq!(enums[0].0, "SessionStatus");
+        assert!(enums[0].1.as_ref().unwrap().contains("Status of the session"));
+        assert_eq!(enums[0].2, vec!["Active", "Closed", "Pending"]);
+    }
+
+    #[test]
+    fn test_is_string_union() {
+        assert!(is_string_union("'a' | 'b' | 'c'"));
+        assert!(is_string_union("'default' | 'none'"));
+        assert!(!is_string_union("string | number"));
+        assert!(!is_string_union("BaseTool | BaseToolset"));
+    }
+
+    #[test]
+    fn test_parse_string_union_variants() {
+        let variants = parse_string_union_variants("'default' | 'none'");
+        assert_eq!(variants, vec!["default", "none"]);
+    }
+
+    #[test]
+    fn test_module_from_path() {
+        use std::path::PathBuf;
+        let source_dir = PathBuf::from("/tmp/adk-js/core/src");
+        assert_eq!(
+            module_from_path(&source_dir, &PathBuf::from("/tmp/adk-js/core/src/events/event.ts")),
+            "events"
+        );
+        assert_eq!(
+            module_from_path(&source_dir, &PathBuf::from("/tmp/adk-js/core/src/models/base_llm.ts")),
+            "models"
+        );
+        assert_eq!(
+            module_from_path(&source_dir, &PathBuf::from("/tmp/adk-js/core/src/index.ts")),
+            "root"
+        );
+    }
+
+    #[test]
+    fn test_non_agent_non_tool_becomes_type_def() {
+        let source = r#"
+/** An event in the agent system. */
+export interface Event {
+    id: string;
+    timestamp?: number;
+    actions?: EventActions;
+}
+"#;
+        let interfaces = extract_interfaces(source);
+        assert_eq!(interfaces.len(), 1);
+        let iface = &interfaces[0];
+
+        // Not an agent or tool
+        assert!(classify_agent(&iface.name, "event").is_none());
+        assert!(!is_tool_interface(&iface.name, "event"));
+
+        // Should be built as a TypeDef
+        let type_def = build_type_def_from_interface(iface, "events");
+        assert_eq!(type_def.name, "Event");
+        assert_eq!(type_def.module, "events");
+        assert!(!type_def.is_enum);
+        assert!(type_def.fields.len() >= 2);
     }
 
     #[test]

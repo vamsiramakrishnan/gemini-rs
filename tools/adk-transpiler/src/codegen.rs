@@ -1,6 +1,55 @@
 use std::collections::HashMap;
 
-use crate::schema::{AdkSchema, AgentDef, AgentKind, CallbackDef, FieldDef, ToolDef};
+use crate::schema::{AdkSchema, AgentDef, AgentKind, CallbackDef, FieldDef, ToolDef, TypeDef};
+
+/// Rust reserved keywords that must be escaped with `r#` when used as identifiers.
+const RUST_KEYWORDS: &[&str] = &[
+    "as", "async", "await", "break", "const", "continue", "crate", "dyn", "else", "enum",
+    "extern", "false", "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod", "move",
+    "mut", "pub", "ref", "return", "self", "Self", "static", "struct", "super", "trait", "true",
+    "type", "unsafe", "use", "where", "while", "yield", "abstract", "become", "box", "do",
+    "final", "macro", "override", "priv", "try", "typeof", "unsized", "virtual",
+];
+
+/// Escape a Rust keyword by prefixing with `r#`.
+fn escape_keyword(name: &str) -> String {
+    if RUST_KEYWORDS.contains(&name) {
+        format!("r#{}", name)
+    } else {
+        name.to_string()
+    }
+}
+
+/// Check if a resolved type can derive Default.
+/// Types like `Content` (from gemini-live-wire) don't implement Default.
+fn type_supports_default(resolved_type: &str) -> bool {
+    !resolved_type.contains("dyn ")
+        && !resolved_type.contains("gemini_live_wire::prelude::Content")
+}
+
+/// Convert a SCREAMING_SNAKE_CASE enum variant to CamelCase.
+/// E.g. "FUNCTION_CALL" -> "FunctionCall", "Active" -> "Active"
+fn to_camel_case_variant(name: &str) -> String {
+    // If it contains underscores and is all uppercase, it's SCREAMING_SNAKE
+    if name.contains('_') && name.chars().all(|c| c.is_uppercase() || c == '_' || c.is_ascii_digit()) {
+        name.split('_')
+            .filter(|s| !s.is_empty())
+            .map(|part| {
+                let mut chars = part.chars();
+                match chars.next() {
+                    Some(first) => {
+                        let rest: String = chars.map(|c| c.to_lowercase().next().unwrap()).collect();
+                        format!("{}{}", first, rest)
+                    }
+                    None => String::new(),
+                }
+            })
+            .collect()
+    } else {
+        // Already CamelCase or mixed case -- keep as-is
+        name.to_string()
+    }
+}
 
 /// Convert a TypeScript camelCase or PascalCase name to Rust snake_case.
 pub fn to_snake_case(name: &str) -> String {
@@ -125,6 +174,57 @@ pub fn generate(schema: &AdkSchema) -> String {
         out.push('\n');
     }
 
+    // Generate general types
+    if !schema.types.is_empty() {
+        out.push_str("// ============================================================\n");
+        out.push_str("// General type definitions extracted from ADK-JS source\n");
+        out.push_str("// ============================================================\n\n");
+        for type_def in &schema.types {
+            out.push_str(&generate_type_def(type_def));
+            out.push('\n');
+        }
+    }
+
+    out
+}
+
+/// Generate Rust code for a general type definition (interface or enum).
+fn generate_type_def(type_def: &TypeDef) -> String {
+    let mut out = String::new();
+
+    out.push_str(&format!("// ---- {} (module: {}) ----\n\n", type_def.name, type_def.module));
+
+    if let Some(desc) = &type_def.description {
+        for line in desc.lines() {
+            out.push_str(&format!("/// {}\n", line));
+        }
+    }
+
+    if type_def.is_enum {
+        // Generate Rust enum
+        out.push_str("#[derive(Debug, Clone, PartialEq, Eq)]\n");
+        out.push_str(&format!("pub enum {} {{\n", type_def.name));
+        for variant in &type_def.variants {
+            out.push_str(&format!("    {},\n", escape_keyword(&to_camel_case_variant(variant))));
+        }
+        out.push_str("}\n\n");
+    } else {
+        // Generate Rust struct
+        out.push_str("#[derive(Debug, Clone, Default)]\n");
+        out.push_str(&format!("pub struct {} {{\n", type_def.name));
+
+        for field in &type_def.fields {
+            if let Some(desc) = &field.description {
+                out.push_str(&format!("    /// {}\n", desc));
+            }
+            let snake = escape_keyword(&to_snake_case(&field.name));
+            let rtype = field_rust_type(field);
+            out.push_str(&format!("    pub {}: {},\n", snake, rtype));
+        }
+
+        out.push_str("}\n\n");
+    }
+
     out
 }
 
@@ -170,7 +270,7 @@ fn generate_agent(agent: &AgentDef) -> String {
         if let Some(desc) = &field.description {
             out.push_str(&format!("    /// {}\n", desc));
         }
-        let snake = to_snake_case(&field.name);
+        let snake = escape_keyword(&to_snake_case(&field.name));
         let rtype = field_rust_type(field);
         out.push_str(&format!("    pub {}: {},\n", snake, rtype));
     }
@@ -194,7 +294,7 @@ fn generate_agent(agent: &AgentDef) -> String {
     out.push_str("            name: String::new(),\n");
 
     for field in &fields {
-        let snake = to_snake_case(&field.name);
+        let snake = escape_keyword(&to_snake_case(&field.name));
         let default = rust_default_for_type(&field.rust_type, field.optional);
         out.push_str(&format!("            {}: {},\n", snake, default));
     }
@@ -225,7 +325,7 @@ fn generate_agent(agent: &AgentDef) -> String {
 
     // Builder methods for each field
     for field in &fields {
-        let snake = to_snake_case(&field.name);
+        let snake = escape_keyword(&to_snake_case(&field.name));
         if field.optional {
             // For optional fields, the setter takes the inner type
             out.push_str(&format!(
@@ -313,7 +413,7 @@ fn generate_tool(tool: &ToolDef) -> String {
         if let Some(desc) = &field.description {
             out.push_str(&format!("    /// {}\n", desc));
         }
-        let snake = to_snake_case(&field.name);
+        let snake = escape_keyword(&to_snake_case(&field.name));
         let rtype = field_rust_type(field);
         out.push_str(&format!("    pub {}: {},\n", snake, rtype));
     }
@@ -492,6 +592,76 @@ pub fn generate_compilable(schema: &AdkSchema) -> String {
         out.push('\n');
     }
 
+    // Generate general types
+    if !schema.types.is_empty() {
+        out.push_str("// ============================================================\n");
+        out.push_str("// General type definitions extracted from ADK-JS source\n");
+        out.push_str("// ============================================================\n\n");
+        for type_def in &schema.types {
+            out.push_str(&generate_compilable_type_def(type_def));
+            out.push('\n');
+        }
+    }
+
+    out
+}
+
+/// Generate compilable Rust code for a general type definition.
+fn generate_compilable_type_def(type_def: &TypeDef) -> String {
+    let mut out = String::new();
+
+    out.push_str(&format!("// ---- {} (module: {}) ----\n\n", type_def.name, type_def.module));
+
+    if let Some(desc) = &type_def.description {
+        for line in desc.lines() {
+            out.push_str(&format!("/// {}\n", line));
+        }
+    }
+
+    if type_def.is_enum {
+        // Generate Rust enum
+        out.push_str("#[derive(Debug, Clone, PartialEq, Eq)]\n");
+        out.push_str(&format!("pub enum {} {{\n", type_def.name));
+        for variant in &type_def.variants {
+            out.push_str(&format!("    {},\n", escape_keyword(&to_camel_case_variant(variant))));
+        }
+        out.push_str("}\n\n");
+    } else {
+        // Check if all resolved types are cloneable
+        let all_cloneable = type_def.fields.iter().all(|f| {
+            let resolved = resolve_runtime_type(&f.rust_type);
+            type_is_cloneable(&resolved)
+        });
+
+        // Check if all resolved types support Default
+        let all_defaultable = type_def.fields.iter().all(|f| {
+            let resolved = resolve_runtime_type(&f.rust_type);
+            type_supports_default(&resolved) || f.optional
+        });
+
+        if all_cloneable && all_defaultable {
+            out.push_str("#[derive(Debug, Clone, Default)]\n");
+        } else if all_cloneable {
+            out.push_str("#[derive(Debug, Clone)]\n");
+        } else if all_defaultable {
+            out.push_str("// Cannot derive Clone: contains trait objects\n");
+        } else {
+            out.push_str("// Cannot derive Clone or Default\n");
+        }
+        out.push_str(&format!("pub struct {} {{\n", type_def.name));
+
+        for field in &type_def.fields {
+            if let Some(desc) = &field.description {
+                out.push_str(&format!("    /// {}\n", desc));
+            }
+            let snake = escape_keyword(&to_snake_case(&field.name));
+            let rtype = resolved_field_type(field);
+            out.push_str(&format!("    pub {}: {},\n", snake, rtype));
+        }
+
+        out.push_str("}\n\n");
+    }
+
     out
 }
 
@@ -544,14 +714,14 @@ fn generate_compilable_agent(
         if let Some(desc) = &field.description {
             out.push_str(&format!("    /// {}\n", desc));
         }
-        let snake = to_snake_case(&field.name);
+        let snake = escape_keyword(&to_snake_case(&field.name));
         let rtype = resolved_field_type(field);
         out.push_str(&format!("    pub {}: {},\n", snake, rtype));
     }
 
     // Callbacks as real types
     for cb in &flattened_callbacks {
-        let snake = to_snake_case(&cb.name);
+        let snake = escape_keyword(&to_snake_case(&cb.name));
         if let Some(desc) = &cb.description {
             out.push_str(&format!("    /// {}\n", desc));
         }
@@ -570,14 +740,14 @@ fn generate_compilable_agent(
     out.push_str("            name: name.into(),\n");
 
     for field in &flattened_fields {
-        let snake = to_snake_case(&field.name);
+        let snake = escape_keyword(&to_snake_case(&field.name));
         let resolved = resolve_runtime_type(&field.rust_type);
         let default = runtime_default_for_type(&resolved, field.optional);
         out.push_str(&format!("            {}: {},\n", snake, default));
     }
 
     for cb in &flattened_callbacks {
-        let snake = to_snake_case(&cb.name);
+        let snake = escape_keyword(&to_snake_case(&cb.name));
         out.push_str(&format!("            {}: None,\n", snake));
     }
 
@@ -604,7 +774,7 @@ fn generate_compilable_agent(
 
     // Builder methods for each field
     for field in &flattened_fields {
-        let snake = to_snake_case(&field.name);
+        let snake = escape_keyword(&to_snake_case(&field.name));
         let resolved = resolve_runtime_type(&field.rust_type);
         if field.optional {
             out.push_str(&format!(
@@ -750,7 +920,7 @@ fn generate_compilable_tool(tool: &ToolDef) -> String {
         if let Some(desc) = &field.description {
             out.push_str(&format!("    /// {}\n", desc));
         }
-        let snake = to_snake_case(&field.name);
+        let snake = escape_keyword(&to_snake_case(&field.name));
         let rtype = resolved_field_type(field);
         out.push_str(&format!("    pub {}: {},\n", snake, rtype));
     }
@@ -805,6 +975,7 @@ mod tests {
             },
             agents,
             tools,
+            types: vec![],
         }
     }
 

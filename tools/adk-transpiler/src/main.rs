@@ -85,9 +85,10 @@ fn run_read(source: &Path, output: &Path) {
     match reader::read_source_dir(source) {
         Ok(schema) => {
             eprintln!(
-                "Extracted {} agents, {} tools",
+                "Extracted {} agents, {} tools, {} types",
                 schema.agents.len(),
-                schema.tools.len()
+                schema.tools.len(),
+                schema.types.len()
             );
 
             let json = serde_json::to_string_pretty(&schema).expect("Failed to serialize schema");
@@ -135,6 +136,30 @@ fn run_read(source: &Path, output: &Path) {
                         .unwrap_or_default()
                 );
             }
+            println!();
+            println!("Types ({}):", schema.types.len());
+            for type_def in &schema.types {
+                if type_def.is_enum {
+                    println!(
+                        "  - {} [enum, {} variants] (module: {})",
+                        type_def.name,
+                        type_def.variants.len(),
+                        type_def.module
+                    );
+                } else {
+                    println!(
+                        "  - {} [{} fields] (module: {}){}",
+                        type_def.name,
+                        type_def.fields.len(),
+                        type_def.module,
+                        type_def
+                            .extends
+                            .as_ref()
+                            .map(|e| format!(" extends {}", e))
+                            .unwrap_or_default()
+                    );
+                }
+            }
         }
         Err(e) => {
             eprintln!("Error: {}", e);
@@ -174,9 +199,10 @@ fn run_generate(schema_path: &Path, output_path: &Path) {
         .unwrap_or_else(|e| panic!("Failed to parse {}: {}", schema_path.display(), e));
 
     eprintln!(
-        "Schema contains {} agents, {} tools",
+        "Schema contains {} agents, {} tools, {} types",
         schema.agents.len(),
-        schema.tools.len()
+        schema.tools.len(),
+        schema.types.len()
     );
 
     let rust_code = codegen::generate(&schema);
@@ -195,6 +221,7 @@ fn run_generate(schema_path: &Path, output_path: &Path) {
     println!("Source framework: {}", schema.source.framework);
     println!("Agents generated: {}", schema.agents.len());
     println!("Tools generated: {}", schema.tools.len());
+    println!("Types generated: {}", schema.types.len());
     println!(
         "Output size: {} bytes",
         rust_code.len()
@@ -214,9 +241,10 @@ fn run_transpile(source: &Path, output: &Path) {
     };
 
     eprintln!(
-        "Extracted {} agents, {} tools",
+        "Extracted {} agents, {} tools, {} types",
         schema.agents.len(),
-        schema.tools.len()
+        schema.tools.len(),
+        schema.types.len()
     );
 
     // Step 2: Generate compilable Rust code
@@ -238,6 +266,7 @@ fn run_transpile(source: &Path, output: &Path) {
     println!("Framework: {}", schema.source.framework);
     println!("Agents: {}", schema.agents.len());
     println!("Tools: {}", schema.tools.len());
+    println!("Types: {}", schema.types.len());
     println!("Output size: {} bytes", rust_code.len());
     println!("Target: gemini-live-runtime (compilable)");
 }

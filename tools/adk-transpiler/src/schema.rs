@@ -9,6 +9,9 @@ pub struct AdkSchema {
     pub agents: Vec<AgentDef>,
     /// Extracted tool definitions
     pub tools: Vec<ToolDef>,
+    /// All other extracted type definitions (interfaces, enums, type aliases)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub types: Vec<TypeDef>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -99,4 +102,29 @@ pub struct ToolDef {
     /// Parent interface/class this extends
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub extends: Option<String>,
+}
+
+/// A general type definition extracted from TypeScript source.
+/// Captures interfaces, type aliases, and enums that aren't agents or tools.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TypeDef {
+    /// Name of the type
+    pub name: String,
+    /// Module/directory it was found in (e.g. "events", "sessions", "models")
+    pub module: String,
+    /// JSDoc description
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Fields (for interfaces)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fields: Vec<FieldDef>,
+    /// Parent interface (extends)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extends: Option<String>,
+    /// Whether this is an enum
+    #[serde(default)]
+    pub is_enum: bool,
+    /// Enum variants (if is_enum)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub variants: Vec<String>,
 }
