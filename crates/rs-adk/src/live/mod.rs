@@ -5,10 +5,12 @@ pub mod callbacks;
 pub mod extractor;
 pub mod handle;
 pub(crate) mod processor;
+pub mod session_signals;
 pub mod transcript;
 
 pub use builder::LiveSessionBuilder;
 pub use callbacks::EventCallbacks;
 pub use extractor::{LlmExtractor, TurnExtractor};
 pub use handle::LiveHandle;
+pub use session_signals::{SessionSignals, SessionType};
 pub use transcript::{TranscriptBuffer, TranscriptTurn};
