@@ -9,6 +9,7 @@ pub mod phase;
 pub(crate) mod processor;
 pub mod session_signals;
 pub mod transcript;
+pub mod watcher;
 
 pub use builder::LiveSessionBuilder;
 pub use callbacks::EventCallbacks;
@@ -18,3 +19,4 @@ pub use handle::LiveHandle;
 pub use phase::{Phase, PhaseInstruction, PhaseMachine, PhaseTransition, Transition};
 pub use session_signals::{SessionSignals, SessionType};
 pub use transcript::{TranscriptBuffer, TranscriptTurn};
+pub use watcher::{WatchPredicate, Watcher, WatcherRegistry};
