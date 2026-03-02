@@ -1,6 +1,13 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
 
 use crate::schema::{AdkSchema, AgentDef, AgentKind, CallbackDef, FieldDef, ToolDef, TypeDef};
+
+// Thread-local genai type lookup for use during code generation.
+// When set, resolve_runtime_type checks this map before falling back to heuristics.
+thread_local! {
+    static GENAI_LOOKUP: RefCell<Option<HashMap<String, String>>> = const { RefCell::new(None) };
+}
 
 /// Rust reserved keywords that must be escaped with `r#` when used as identifiers.
 const RUST_KEYWORDS: &[&str] = &[
@@ -22,9 +29,26 @@ fn escape_keyword(name: &str) -> String {
 
 /// Check if a resolved type can derive Default.
 /// Types like `Content` (from gemini-live-wire) don't implement Default.
+/// Wire crate types that do NOT implement Default.
+const NON_DEFAULT_WIRE_TYPES: &[&str] = &[
+    "gemini_live_wire::prelude::Content",
+    "gemini_live_wire::prelude::Part",
+    "gemini_live_wire::prelude::Blob",
+    "gemini_live_wire::prelude::FunctionCall",
+    "gemini_live_wire::prelude::FunctionResponse",
+    "gemini_live_wire::prelude::FunctionDeclaration",
+    "gemini_live_wire::prelude::ExecutableCode",
+    "gemini_live_wire::prelude::CodeExecutionResult",
+    "gemini_live_wire::prelude::Tool",
+    "gemini_live_wire::prelude::ToolConfig",
+    "gemini_live_wire::prelude::FileData",
+];
+
 fn type_supports_default(resolved_type: &str) -> bool {
     !resolved_type.contains("dyn ")
-        && !resolved_type.contains("gemini_live_wire::prelude::Content")
+        && !NON_DEFAULT_WIRE_TYPES
+            .iter()
+            .any(|t| resolved_type.contains(t))
 }
 
 /// Convert a SCREAMING_SNAKE_CASE enum variant to CamelCase.
@@ -428,34 +452,79 @@ fn generate_tool(tool: &ToolDef) -> String {
 // ---------------------------------------------------------------------------
 
 /// Resolve a phantom Rust type to a real type from `gemini-live-runtime`.
+///
+/// Resolution order:
+/// 1. ADK-specific mappings (AgentRef, ToolRef, etc.)
+/// 2. Genai type lookup (if set via thread-local from combined transpile)
+/// 3. Built-in wire type mappings
+/// 4. Heuristic fallback (PascalCase → serde_json::Value)
 fn resolve_runtime_type(rust_type: &str) -> String {
+    // 1. ADK-specific phantom types
     match rust_type {
-        "AgentRef" => "Arc<dyn Agent>".to_string(),
-        "ToolRef" => "Arc<dyn ToolFunction>".to_string(),
-        "CodeExecutorRef" => "serde_json::Value".to_string(),
-        "BaseLlmRequestProcessor" => "serde_json::Value".to_string(),
-        "BaseLlmResponseProcessor" => "serde_json::Value".to_string(),
-        "Content" => "gemini_live_wire::prelude::Content".to_string(),
-        other => {
-            // Vec<X> — resolve the inner type
-            if let Some(inner) = other.strip_prefix("Vec<").and_then(|s| s.strip_suffix('>')) {
-                let resolved_inner = resolve_runtime_type(inner);
-                return format!("Vec<{}>", resolved_inner);
-            }
-            // Unknown PascalCase class — fallback to serde_json::Value
-            if other
-                .chars()
-                .next()
-                .is_some_and(|c| c.is_uppercase())
-                && !other.starts_with("String")
-                && !other.starts_with("Option<")
-                && !other.contains("::")
-            {
-                return "serde_json::Value".to_string();
-            }
-            other.to_string()
-        }
+        "AgentRef" => return "Arc<dyn Agent>".to_string(),
+        "ToolRef" => return "Arc<dyn ToolFunction>".to_string(),
+        "CodeExecutorRef" => return "serde_json::Value".to_string(),
+        "BaseLlmRequestProcessor" => return "serde_json::Value".to_string(),
+        "BaseLlmResponseProcessor" => return "serde_json::Value".to_string(),
+        _ => {}
     }
+
+    // Vec<X> — resolve the inner type
+    if let Some(inner) = rust_type
+        .strip_prefix("Vec<")
+        .and_then(|s| s.strip_suffix('>'))
+    {
+        let resolved_inner = resolve_runtime_type(inner);
+        return format!("Vec<{}>", resolved_inner);
+    }
+
+    // 2. Check genai lookup (set during combined transpile)
+    let from_genai = GENAI_LOOKUP.with(|cell| {
+        cell.borrow()
+            .as_ref()
+            .and_then(|m| m.get(rust_type).cloned())
+    });
+    if let Some(wire_type) = from_genai {
+        return wire_type;
+    }
+
+    // 3. Built-in wire type mappings for common js-genai types
+    match rust_type {
+        "Content" => return "gemini_live_wire::prelude::Content".to_string(),
+        "Part" => return "gemini_live_wire::prelude::Part".to_string(),
+        "Blob" => return "gemini_live_wire::prelude::Blob".to_string(),
+        "FunctionCall" => return "gemini_live_wire::prelude::FunctionCall".to_string(),
+        "FunctionResponse" => return "gemini_live_wire::prelude::FunctionResponse".to_string(),
+        "FunctionDeclaration" => {
+            return "gemini_live_wire::prelude::FunctionDeclaration".to_string()
+        }
+        "Tool" => return "gemini_live_wire::prelude::Tool".to_string(),
+        "GenerationConfig" => return "gemini_live_wire::prelude::GenerationConfig".to_string(),
+        "SpeechConfig" => return "gemini_live_wire::prelude::SpeechConfig".to_string(),
+        "Modality" => return "gemini_live_wire::prelude::Modality".to_string(),
+        "UsageMetadata" => return "gemini_live_wire::prelude::UsageMetadata".to_string(),
+        "GroundingMetadata" => return "gemini_live_wire::prelude::GroundingMetadata".to_string(),
+        "ExecutableCode" => return "gemini_live_wire::prelude::ExecutableCode".to_string(),
+        "CodeExecutionResult" => {
+            return "gemini_live_wire::prelude::CodeExecutionResult".to_string()
+        }
+        "SessionHandle" => return "gemini_live_wire::prelude::SessionHandle".to_string(),
+        _ => {}
+    }
+
+    // 4. Heuristic fallback — unknown PascalCase → serde_json::Value
+    if rust_type
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_uppercase())
+        && !rust_type.starts_with("String")
+        && !rust_type.starts_with("Option<")
+        && !rust_type.contains("::")
+    {
+        return "serde_json::Value".to_string();
+    }
+
+    rust_type.to_string()
 }
 
 /// Return the Rust type for a field after resolving to runtime types.
@@ -604,6 +673,30 @@ pub fn generate_compilable(schema: &AdkSchema) -> String {
     }
 
     out
+}
+
+/// Generate compilable Rust code with js-genai type lookup for precise resolution.
+///
+/// This is the combined transpiler path: it reads both ADK-JS and js-genai sources,
+/// using the genai type mapping to resolve SDK types to exact wire crate paths
+/// instead of falling back to serde_json::Value.
+pub fn generate_compilable_with_genai(
+    schema: &AdkSchema,
+    genai_lookup: &HashMap<String, String>,
+) -> String {
+    // Set the thread-local lookup so resolve_runtime_type can use it
+    GENAI_LOOKUP.with(|cell| {
+        *cell.borrow_mut() = Some(genai_lookup.clone());
+    });
+
+    let result = generate_compilable(schema);
+
+    // Clear the lookup
+    GENAI_LOOKUP.with(|cell| {
+        *cell.borrow_mut() = None;
+    });
+
+    result
 }
 
 /// Generate compilable Rust code for a general type definition.

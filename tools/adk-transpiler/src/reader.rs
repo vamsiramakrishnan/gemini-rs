@@ -240,10 +240,10 @@ struct RawInterface {
 fn extract_interfaces(source: &str) -> Vec<RawInterface> {
     let mut results = Vec::new();
 
-    // Pattern: optional `export` keyword, then `interface Name [extends Parent] {`
+    // Pattern: optional `export [declare]` keyword, then `interface Name [extends Parent] {`
     // We use `(?m)` for multiline and allow leading whitespace instead of strict `^`.
     let iface_re = Regex::new(
-        r"(?m)(?:^|\n)\s*(?:export\s+)?interface\s+(\w+)(?:\s+extends\s+(\w+))?\s*\{"
+        r"(?m)(?:^|\n)\s*(?:export\s+)?(?:declare\s+)?interface\s+(\w+)(?:\s+extends\s+(\w+))?\s*\{"
     ).unwrap();
 
     for cap in iface_re.captures_iter(source) {
@@ -290,7 +290,7 @@ fn extract_enums(source: &str) -> Vec<(String, Option<String>, Vec<String>)> {
     let mut results = Vec::new();
 
     let enum_re = Regex::new(
-        r"(?m)(?:^|\n)\s*(?:export\s+)?(?:const\s+)?enum\s+(\w+)\s*\{"
+        r"(?m)(?:^|\n)\s*(?:export\s+)?(?:declare\s+)?(?:const\s+)?enum\s+(\w+)\s*\{"
     ).unwrap();
 
     for cap in enum_re.captures_iter(source) {
@@ -801,6 +801,51 @@ fn build_type_def_from_interface(iface: &RawInterface, module: &str) -> TypeDef 
         is_enum: false,
         variants: Vec::new(),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Public API for genai_reader
+// ---------------------------------------------------------------------------
+
+/// Public wrapper for extracting interfaces. Used by genai_reader.
+pub fn extract_interfaces_pub(source: &str) -> Vec<RawInterfacePub> {
+    extract_interfaces(source)
+        .into_iter()
+        .map(|i| RawInterfacePub {
+            name: i.name,
+            extends: i.extends,
+            jsdoc: i.jsdoc,
+            body: i.body,
+        })
+        .collect()
+}
+
+/// Public form of RawInterface for cross-module use.
+pub struct RawInterfacePub {
+    pub name: String,
+    pub extends: Option<String>,
+    pub jsdoc: Option<String>,
+    pub body: String,
+}
+
+/// Public wrapper for parsing fields from an interface body.
+pub fn parse_fields_pub(body: &str) -> (Vec<FieldDef>, Vec<CallbackDef>) {
+    parse_fields(body)
+}
+
+/// Public wrapper for extracting enums.
+pub fn extract_enums_pub(source: &str) -> Vec<(String, Option<String>, Vec<String>)> {
+    extract_enums(source)
+}
+
+/// Public wrapper for extracting type aliases.
+pub fn extract_type_aliases_pub(source: &str) -> Vec<(String, String)> {
+    extract_type_aliases(source)
+}
+
+/// Public wrapper for the timestamp function.
+pub fn chrono_like_now_pub() -> String {
+    chrono_like_now()
 }
 
 // ---------------------------------------------------------------------------
