@@ -10,12 +10,21 @@ use std::time::Duration;
 use bytes::Bytes;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde_json::Value;
 
 use rs_adk::live::extractor::{LlmExtractor, TurnExtractor};
-use rs_adk::live::{EventCallbacks, LiveHandle, LiveSessionBuilder};
+use rs_adk::live::{
+    ComputedRegistry, ComputedVar, EventCallbacks, LiveHandle, LiveSessionBuilder, Phase,
+    PhaseMachine, RateDetector, SustainedDetector, TemporalPattern, TemporalRegistry,
+    TurnCountDetector, Watcher, WatcherRegistry,
+};
 use rs_adk::llm::BaseLlm;
 use rs_adk::tool::ToolDispatcher;
+use rs_adk::State;
 use rs_genai::prelude::*;
+use rs_genai::session::SessionWriter;
+
+use crate::live_builders::{PhaseBuilder, WatchBuilder};
 
 /// Fluent builder for Gemini Live sessions.
 ///
@@ -56,6 +65,12 @@ pub struct Live {
     callbacks: EventCallbacks,
     dispatcher: Option<ToolDispatcher>,
     extractors: Vec<Arc<dyn TurnExtractor>>,
+    // L1 registries
+    computed: ComputedRegistry,
+    phases: Vec<Phase>,
+    initial_phase: Option<String>,
+    watchers: WatcherRegistry,
+    temporal: TemporalRegistry,
 }
 
 impl Live {
@@ -66,6 +81,11 @@ impl Live {
             callbacks: EventCallbacks::default(),
             dispatcher: None,
             extractors: Vec::new(),
+            computed: ComputedRegistry::new(),
+            phases: Vec::new(),
+            initial_phase: None,
+            watchers: WatcherRegistry::new(),
+            temporal: TemporalRegistry::new(),
         }
     }
 
@@ -347,6 +367,135 @@ impl Live {
         self
     }
 
+    // -- Computed State --
+
+    /// Register a computed (derived) state variable.
+    ///
+    /// The compute function receives the full `State` and returns `Some(value)`
+    /// to write to `derived:{key}`, or `None` to skip.
+    pub fn computed(
+        mut self,
+        key: impl Into<String>,
+        deps: &[&str],
+        f: impl Fn(&State) -> Option<Value> + Send + Sync + 'static,
+    ) -> Self {
+        self.computed.register(ComputedVar {
+            key: key.into(),
+            dependencies: deps.iter().map(|s| s.to_string()).collect(),
+            compute: Arc::new(f),
+        });
+        self
+    }
+
+    // -- Phase Machine --
+
+    /// Start building a conversation phase.
+    ///
+    /// Returns a [`PhaseBuilder`] that flows back to this `Live` via `.done()`.
+    pub fn phase(self, name: impl Into<String>) -> PhaseBuilder {
+        PhaseBuilder::new(self, name)
+    }
+
+    /// Set the initial phase name (must match a registered phase).
+    pub fn initial_phase(mut self, name: impl Into<String>) -> Self {
+        self.initial_phase = Some(name.into());
+        self
+    }
+
+    /// Internal method called by [`PhaseBuilder::done`].
+    pub(crate) fn add_phase(&mut self, phase: Phase) {
+        self.phases.push(phase);
+    }
+
+    // -- Watchers --
+
+    /// Start building a state watcher.
+    ///
+    /// Returns a [`WatchBuilder`] that flows back to this `Live` via `.then()`.
+    pub fn watch(self, key: impl Into<String>) -> WatchBuilder {
+        WatchBuilder::new(self, key)
+    }
+
+    /// Internal method called by [`WatchBuilder::then`].
+    pub(crate) fn add_watcher(&mut self, watcher: Watcher) {
+        self.watchers.add(watcher);
+    }
+
+    // -- Temporal Patterns --
+
+    /// Register a sustained condition pattern.
+    ///
+    /// Fires when the condition remains true for at least `duration`.
+    pub fn when_sustained<F, Fut>(
+        mut self,
+        name: impl Into<String>,
+        condition: impl Fn(&State) -> bool + Send + Sync + 'static,
+        duration: Duration,
+        action: F,
+    ) -> Self
+    where
+        F: Fn(State, Arc<dyn SessionWriter>) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        let detector = SustainedDetector::new(Arc::new(condition), duration);
+        self.temporal.add(TemporalPattern::new(
+            name,
+            Box::new(detector),
+            Arc::new(move |s, w| Box::pin(action(s, w))),
+            None,
+        ));
+        self
+    }
+
+    /// Register a rate detection pattern.
+    ///
+    /// Fires when at least `count` matching events occur within `window`.
+    pub fn when_rate<F, Fut>(
+        mut self,
+        name: impl Into<String>,
+        filter: impl Fn(&SessionEvent) -> bool + Send + Sync + 'static,
+        count: u32,
+        window: Duration,
+        action: F,
+    ) -> Self
+    where
+        F: Fn(State, Arc<dyn SessionWriter>) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        let detector = RateDetector::new(Arc::new(filter), count, window);
+        self.temporal.add(TemporalPattern::new(
+            name,
+            Box::new(detector),
+            Arc::new(move |s, w| Box::pin(action(s, w))),
+            None,
+        ));
+        self
+    }
+
+    /// Register a turn count pattern.
+    ///
+    /// Fires when the condition is true for `turn_count` consecutive turns.
+    pub fn when_turns<F, Fut>(
+        mut self,
+        name: impl Into<String>,
+        condition: impl Fn(&State) -> bool + Send + Sync + 'static,
+        turn_count: u32,
+        action: F,
+    ) -> Self
+    where
+        F: Fn(State, Arc<dyn SessionWriter>) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        let detector = TurnCountDetector::new(Arc::new(condition), turn_count);
+        self.temporal.add(TemporalPattern::new(
+            name,
+            Box::new(detector),
+            Arc::new(move |s, w| Box::pin(action(s, w))),
+            None,
+        ));
+        self
+    }
+
     // -- Fast Lane Callbacks (sync, < 1ms) --
 
     /// Called for each audio chunk from the model (PCM16 24kHz).
@@ -488,18 +637,11 @@ impl Live {
 
     /// Connect using a pre-configured SessionConfig (advanced).
     pub async fn connect(
-        self,
+        mut self,
         config: SessionConfig,
     ) -> Result<LiveHandle, rs_adk::error::AgentError> {
-        let mut builder = LiveSessionBuilder::new(config);
-        if let Some(dispatcher) = self.dispatcher {
-            builder = builder.dispatcher(dispatcher);
-        }
-        builder = builder.callbacks(self.callbacks);
-        for ext in self.extractors {
-            builder = builder.extractor(ext);
-        }
-        builder.connect().await
+        self.config = config;
+        self.build_and_connect().await
     }
 
     async fn build_and_connect(self) -> Result<LiveHandle, rs_adk::error::AgentError> {
@@ -511,6 +653,23 @@ impl Live {
         for ext in self.extractors {
             builder = builder.extractor(ext);
         }
+
+        // Pass L1 registries
+        if !self.computed.is_empty() {
+            builder = builder.computed(self.computed);
+        }
+        if let Some(initial) = self.initial_phase {
+            let mut pm = PhaseMachine::new(&initial);
+            for phase in self.phases {
+                pm.add_phase(phase);
+            }
+            builder = builder.phase_machine(pm);
+        }
+        if !self.watchers.observed_keys().is_empty() {
+            builder = builder.watchers(self.watchers);
+        }
+        builder = builder.temporal(self.temporal);
+
         builder.connect().await
     }
 }
@@ -591,5 +750,169 @@ mod tests {
                 }
             });
         // Just verify the builder chain with all features compiles
+    }
+
+    #[test]
+    fn builder_with_computed_state_compiles() {
+        let _live = Live::builder()
+            .model(GeminiModel::Gemini2_0FlashLive)
+            .instruction("Test computed state")
+            .computed("doubled", &["app:count"], |state| {
+                let count: i64 = state.get("app:count")?;
+                Some(serde_json::json!(count * 2))
+            })
+            .computed("level", &["app:score"], |state| {
+                let score: f64 = state.get("app:score")?;
+                if score > 0.5 {
+                    Some(serde_json::json!("high"))
+                } else {
+                    Some(serde_json::json!("low"))
+                }
+            });
+    }
+
+    #[test]
+    fn builder_with_phases_compiles() {
+        let _live = Live::builder()
+            .model(GeminiModel::Gemini2_0FlashLive)
+            .phase("greeting")
+                .instruction("Welcome the user warmly")
+                .transition("main", |s| s.get::<bool>("greeted").unwrap_or(false))
+                .on_enter(|state, _writer| async move {
+                    state.set("entered_greeting", true);
+                })
+                .done()
+            .phase("main")
+                .dynamic_instruction(|s| {
+                    let topic: String = s.get("topic").unwrap_or_default();
+                    format!("Discuss {topic}")
+                })
+                .tools(vec!["search".into(), "lookup".into()])
+                .transition("farewell", |s| s.get::<bool>("done").unwrap_or(false))
+                .done()
+            .phase("farewell")
+                .instruction("Say goodbye")
+                .terminal()
+                .done()
+            .initial_phase("greeting");
+    }
+
+    #[test]
+    fn builder_with_phase_guard_compiles() {
+        let _live = Live::builder()
+            .model(GeminiModel::Gemini2_0FlashLive)
+            .phase("start")
+                .instruction("Begin")
+                .transition("secure", |_| true)
+                .done()
+            .phase("secure")
+                .instruction("Secure area")
+                .guard(|s| s.get::<bool>("verified").unwrap_or(false))
+                .on_exit(|state, _writer| async move {
+                    state.set("left_secure", true);
+                })
+                .terminal()
+                .done()
+            .initial_phase("start");
+    }
+
+    #[test]
+    fn builder_with_watchers_compiles() {
+        let _live = Live::builder()
+            .model(GeminiModel::Gemini2_0FlashLive)
+            .watch("app:score")
+                .crossed_above(0.9)
+                .then(|_old, _new, state| async move {
+                    state.set("high_score_alert", true);
+                })
+            .watch("app:status")
+                .changed_to(serde_json::json!("complete"))
+                .blocking()
+                .then(|_old, _new, _state| async move {
+                    // blocking action
+                })
+            .watch("app:flag")
+                .became_true()
+                .then(|_old, _new, _state| async move {
+                    // flag became true
+                });
+    }
+
+    #[test]
+    fn builder_with_temporal_patterns_compiles() {
+        let _live = Live::builder()
+            .model(GeminiModel::Gemini2_0FlashLive)
+            .when_sustained(
+                "user_confused",
+                |s| s.get::<bool>("confused").unwrap_or(false),
+                Duration::from_secs(30),
+                |_state, _writer| async move {
+                    // offer help
+                },
+            )
+            .when_rate(
+                "rapid_errors",
+                |evt| matches!(evt, SessionEvent::TextDelta(_)),
+                5,
+                Duration::from_secs(10),
+                |_state, _writer| async move {
+                    // throttle
+                },
+            )
+            .when_turns(
+                "stuck_in_loop",
+                |s| s.get::<bool>("repeating").unwrap_or(false),
+                3,
+                |_state, _writer| async move {
+                    // break loop
+                },
+            );
+    }
+
+    #[test]
+    fn builder_full_l1_chain_compiles() {
+        // Full chain combining all L1 features in a single builder
+        let _live = Live::builder()
+            .model(GeminiModel::Gemini2_0FlashLive)
+            .voice(Voice::Kore)
+            .instruction("Full featured agent")
+            // Computed state
+            .computed("sentiment_level", &["app:sentiment_score"], |state| {
+                let score: f64 = state.get("app:sentiment_score")?;
+                if score > 0.7 {
+                    Some(serde_json::json!("positive"))
+                } else if score < 0.3 {
+                    Some(serde_json::json!("negative"))
+                } else {
+                    Some(serde_json::json!("neutral"))
+                }
+            })
+            // Phases
+            .phase("greeting")
+                .instruction("Greet the user")
+                .transition("help", |s| s.get::<bool>("needs_help").unwrap_or(false))
+                .done()
+            .phase("help")
+                .instruction("Help the user")
+                .terminal()
+                .done()
+            .initial_phase("greeting")
+            // Watchers
+            .watch("app:sentiment_score")
+                .crossed_below(0.2)
+                .then(|_old, _new, state| async move {
+                    state.set("alert:low_sentiment", true);
+                })
+            // Temporal
+            .when_turns(
+                "repeated_confusion",
+                |s| s.get::<bool>("confused").unwrap_or(false),
+                3,
+                |_state, _writer| async move {},
+            )
+            // Standard callbacks
+            .on_audio(|_data| {})
+            .on_text(|_t| {})
+            .on_turn_complete(|| async {});
     }
 }

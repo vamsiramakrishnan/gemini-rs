@@ -6,6 +6,7 @@
 pub mod builder;
 pub mod compose;
 pub mod live;
+pub mod live_builders;
 pub mod operators;
 pub mod patterns;
 pub mod testing;
@@ -17,6 +18,7 @@ pub mod prelude {
     pub use crate::builder::*;
     pub use crate::compose::{A, C, M, P, S, T};
     pub use crate::live::Live;
+    pub use crate::live_builders::*;
     pub use crate::operators::*;
     pub use crate::patterns::*;
     pub use crate::testing::*;
