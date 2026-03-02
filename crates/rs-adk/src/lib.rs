@@ -32,6 +32,7 @@ pub mod credentials;
 pub mod instruction;
 pub mod confirmation;
 pub mod text_runner;
+pub mod utils;
 
 #[cfg(test)]
 pub(crate) mod test_helpers;
