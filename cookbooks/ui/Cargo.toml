@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 rs-genai = { path = "../../crates/rs-genai" }
+rs-adk = { path = "../../crates/rs-adk" }
 tokio = { version = "1.0", features = ["full"] }
 axum = { version = "0.7", features = ["ws", "macros"] }
 tower-http = { version = "0.5", features = ["fs", "cors"] }
@@ -16,3 +17,5 @@ futures = "0.3"
 tokio-stream = "0.1"
 dotenvy = "0.15"
 base64 = "0.22"
+async-trait = "0.1"
+thiserror = "2"

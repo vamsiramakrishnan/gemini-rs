@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>App</title></head>
+<body>
+<h1>App Screen</h1>
+<p>This will be the two-pane app layout (CUI-3).</p>
+<script>
+// Extract app name from URL
+const appName = window.location.pathname.split('/').pop();
+document.title = appName + ' — Cookbooks';
+</script>
+</body>
+</html>
