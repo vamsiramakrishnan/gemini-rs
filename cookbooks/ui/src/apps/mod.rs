@@ -1,3 +1,5 @@
+mod guardrails;
+mod playbook;
 mod text_chat;
 mod tool_calling;
 mod voice_chat;
@@ -12,6 +14,8 @@ pub fn register_all(registry: &mut AppRegistry) {
     registry.register(text_chat::TextChat);
     registry.register(voice_chat::VoiceChat);
     registry.register(tool_calling::ToolCalling);
+    registry.register(playbook::Playbook);
+    registry.register(guardrails::Guardrails);
 }
 
 /// Parameters extracted from the browser's Start message.
@@ -113,4 +117,30 @@ pub fn send_app_meta(tx: &WsSender, app: &dyn CookbookApp) {
             features: app.features(),
         },
     });
+}
+
+/// Rolling buffer of recent conversation turns for analysis.
+pub struct ConversationBuffer {
+    turns: Vec<String>,
+    max_turns: usize,
+}
+
+impl ConversationBuffer {
+    pub fn new(max_turns: usize) -> Self {
+        Self {
+            turns: Vec::new(),
+            max_turns,
+        }
+    }
+
+    pub fn push(&mut self, text: String) {
+        self.turns.push(text);
+        if self.turns.len() > self.max_turns {
+            self.turns.remove(0);
+        }
+    }
+
+    pub fn recent_text(&self) -> String {
+        self.turns.join(" ")
+    }
 }
