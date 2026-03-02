@@ -187,6 +187,10 @@ pub enum SessionCommand {
         turns: Vec<Content>,
         turn_complete: bool,
     },
+    /// Send video/image data (raw JPEG bytes, will be base64-encoded).
+    SendVideo(Vec<u8>),
+    /// Update system instruction mid-session (sends client_content with role=system).
+    UpdateInstruction(String),
     /// Gracefully disconnect.
     Disconnect,
 }
@@ -372,6 +376,8 @@ pub trait SessionWriter: Send + Sync + 'static {
     async fn send_text(&self, text: String) -> Result<(), SessionError>;
     async fn send_tool_response(&self, responses: Vec<FunctionResponse>) -> Result<(), SessionError>;
     async fn send_client_content(&self, turns: Vec<Content>, turn_complete: bool) -> Result<(), SessionError>;
+    async fn send_video(&self, jpeg_data: Vec<u8>) -> Result<(), SessionError>;
+    async fn update_instruction(&self, instruction: String) -> Result<(), SessionError>;
     async fn signal_activity_start(&self) -> Result<(), SessionError>;
     async fn signal_activity_end(&self) -> Result<(), SessionError>;
     async fn disconnect(&self) -> Result<(), SessionError>;
@@ -503,6 +509,16 @@ impl SessionHandle {
             .await
     }
 
+    /// Send a video/image frame (raw JPEG bytes).
+    pub async fn send_video(&self, jpeg_data: Vec<u8>) -> Result<(), SessionError> {
+        self.send_command(SessionCommand::SendVideo(jpeg_data)).await
+    }
+
+    /// Update the system instruction mid-session.
+    pub async fn update_instruction(&self, instruction: impl Into<String>) -> Result<(), SessionError> {
+        self.send_command(SessionCommand::UpdateInstruction(instruction.into())).await
+    }
+
     /// Signal activity start (user started speaking).
     pub async fn signal_activity_start(&self) -> Result<(), SessionError> {
         self.send_command(SessionCommand::ActivityStart).await
@@ -569,6 +585,14 @@ impl SessionWriter for SessionHandle {
     async fn send_client_content(&self, turns: Vec<Content>, turn_complete: bool) -> Result<(), SessionError> {
         self.send_command(SessionCommand::SendClientContent { turns, turn_complete })
             .await
+    }
+
+    async fn send_video(&self, jpeg_data: Vec<u8>) -> Result<(), SessionError> {
+        self.send_command(SessionCommand::SendVideo(jpeg_data)).await
+    }
+
+    async fn update_instruction(&self, instruction: String) -> Result<(), SessionError> {
+        self.send_command(SessionCommand::UpdateInstruction(instruction)).await
     }
 
     async fn signal_activity_start(&self) -> Result<(), SessionError> {

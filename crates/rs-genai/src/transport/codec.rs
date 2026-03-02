@@ -109,6 +109,34 @@ impl Codec for JsonCodec {
                 };
                 serde_json::to_vec(&msg).map_err(|e| CodecError::Serialize(e.to_string()))
             }
+            SessionCommand::SendVideo(data) => {
+                let encoded = base64::engine::general_purpose::STANDARD.encode(data);
+                let msg = RealtimeInputMessage {
+                    realtime_input: RealtimeInputPayload {
+                        media_chunks: Vec::new(),
+                        audio: None,
+                        video: Some(Blob {
+                            mime_type: "image/jpeg".to_string(),
+                            data: encoded,
+                        }),
+                        audio_stream_end: None,
+                        text: None,
+                    },
+                };
+                serde_json::to_vec(&msg).map_err(|e| CodecError::Serialize(e.to_string()))
+            }
+            SessionCommand::UpdateInstruction(instruction) => {
+                let msg = ClientContentMessage {
+                    client_content: ClientContentPayload {
+                        turns: vec![Content {
+                            role: Some(Role::System),
+                            parts: vec![Part::Text { text: instruction.clone() }],
+                        }],
+                        turn_complete: Some(false),
+                    },
+                };
+                serde_json::to_vec(&msg).map_err(|e| CodecError::Serialize(e.to_string()))
+            }
             SessionCommand::Disconnect => Ok(Vec::new()),
         }
     }
@@ -269,6 +297,32 @@ mod tests {
             json.contains("\"turnComplete\":false"),
             "should contain turnComplete set to false"
         );
+    }
+
+    #[test]
+    fn json_codec_encode_send_video() {
+        let codec = JsonCodec;
+        let config = test_config();
+        let cmd = SessionCommand::SendVideo(vec![0xFF, 0xD8, 0xFF]); // JPEG magic bytes
+        let bytes = codec.encode_command(&cmd, &config).unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            json["realtimeInput"]["video"]["mimeType"].as_str().unwrap(),
+            "image/jpeg"
+        );
+        assert!(json["realtimeInput"]["video"]["data"].is_string());
+    }
+
+    #[test]
+    fn json_codec_encode_update_instruction() {
+        let codec = JsonCodec;
+        let config = test_config();
+        let cmd = SessionCommand::UpdateInstruction("New instruction".into());
+        let bytes = codec.encode_command(&cmd, &config).unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let turns = &json["clientContent"]["turns"];
+        assert_eq!(turns[0]["role"], "system");
+        assert_eq!(turns[0]["parts"][0]["text"], "New instruction");
     }
 
     #[test]
