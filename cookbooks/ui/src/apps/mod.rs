@@ -5,7 +5,7 @@ mod voice_chat;
 use rs_genai::prelude::*;
 use tokio::sync::mpsc;
 
-use crate::app::{AppError, AppRegistry, ClientMessage};
+use crate::app::{AppError, AppInfo, AppRegistry, ClientMessage, CookbookApp, ServerMessage, WsSender};
 
 /// Register all basic cookbook apps.
 pub fn register_all(registry: &mut AppRegistry) {
@@ -101,4 +101,16 @@ pub fn build_session_config(model: Option<&str>) -> Result<SessionConfig, String
     }
 
     Ok(config)
+}
+
+/// Send appMeta message to the browser so devtools can configure tabs.
+pub fn send_app_meta(tx: &WsSender, app: &dyn CookbookApp) {
+    let _ = tx.send(ServerMessage::AppMeta {
+        info: AppInfo {
+            name: app.name().to_string(),
+            description: app.description().to_string(),
+            category: app.category(),
+            features: app.features(),
+        },
+    });
 }

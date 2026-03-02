@@ -6,7 +6,7 @@ use rs_genai::prelude::*;
 
 use crate::app::{AppCategory, AppError, ClientMessage, CookbookApp, ServerMessage, WsSender};
 
-use super::{build_session_config, wait_for_start};
+use super::{build_session_config, send_app_meta, wait_for_start};
 
 /// Minimal text-only Gemini Live session.
 pub struct TextChat;
@@ -55,6 +55,7 @@ impl CookbookApp for TextChat {
 
         handle.wait_for_phase(SessionPhase::Active).await;
         let _ = tx.send(ServerMessage::Connected);
+        send_app_meta(&tx, self);
         info!("TextChat session connected");
 
         // Subscribe to server events.
