@@ -5,10 +5,14 @@
 
 mod file_service;
 mod forwarding;
+#[cfg(feature = "gcs-artifacts")]
+mod gcs_service;
 mod in_memory;
 
 pub use file_service::FileArtifactService;
 pub use forwarding::ForwardingArtifactService;
+#[cfg(feature = "gcs-artifacts")]
+pub use gcs_service::GcsArtifactService;
 pub use in_memory::InMemoryArtifactService;
 
 use async_trait::async_trait;

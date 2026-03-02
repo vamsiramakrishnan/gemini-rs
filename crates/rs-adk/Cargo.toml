@@ -28,5 +28,7 @@ tokio-test = "0.4"
 
 [features]
 default = []
+gcs-artifacts = []
 tracing-support = ["dep:tracing", "rs-genai/tracing-support"]
 metrics = ["dep:metrics"]
+database-sessions = []
