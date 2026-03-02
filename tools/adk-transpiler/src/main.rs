@@ -38,13 +38,23 @@ enum Commands {
         #[arg(long)]
         new: PathBuf,
     },
-    /// Generate Rust code from an AdkSchema JSON file
+    /// Generate Rust code from an AdkSchema JSON file (standalone, with placeholder traits)
     Generate {
         /// Path to the input AdkSchema JSON file
         #[arg(short, long)]
         schema: PathBuf,
 
         /// Output Rust source file path
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+    /// One-shot: read ADK-JS source and generate compilable Rust code targeting gemini-live-runtime
+    Transpile {
+        /// Path to the ADK-JS source directory (e.g. /tmp/adk-js/core/src/agents/)
+        #[arg(short, long)]
+        source: PathBuf,
+
+        /// Output Rust source file path (e.g. crates/gemini-live-runtime/src/agents/generated.rs)
         #[arg(short, long)]
         output: PathBuf,
     },
@@ -62,6 +72,9 @@ fn main() {
         }
         Commands::Generate { schema, output } => {
             run_generate(&schema, &output);
+        }
+        Commands::Transpile { source, output } => {
+            run_transpile(&source, &output);
         }
     }
 }
@@ -186,4 +199,45 @@ fn run_generate(schema_path: &Path, output_path: &Path) {
         "Output size: {} bytes",
         rust_code.len()
     );
+}
+
+fn run_transpile(source: &Path, output: &Path) {
+    eprintln!("Transpiling ADK-JS source from: {}", source.display());
+
+    // Step 1: Read TypeScript source
+    let schema = match reader::read_source_dir(source) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error reading source: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    eprintln!(
+        "Extracted {} agents, {} tools",
+        schema.agents.len(),
+        schema.tools.len()
+    );
+
+    // Step 2: Generate compilable Rust code
+    let rust_code = codegen::generate_compilable(&schema);
+
+    if let Some(parent) = output.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+
+    std::fs::write(output, &rust_code)
+        .unwrap_or_else(|e| panic!("Failed to write {}: {}", output.display(), e));
+
+    eprintln!("Compilable Rust code written to: {}", output.display());
+
+    // Print summary
+    println!("=== Transpile Summary ===");
+    println!("Source: {}", source.display());
+    println!("Output: {}", output.display());
+    println!("Framework: {}", schema.source.framework);
+    println!("Agents: {}", schema.agents.len());
+    println!("Tools: {}", schema.tools.len());
+    println!("Output size: {} bytes", rust_code.len());
+    println!("Target: gemini-live-runtime (compilable)");
 }

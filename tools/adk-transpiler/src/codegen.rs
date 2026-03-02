@@ -1,4 +1,6 @@
-use crate::schema::{AdkSchema, AgentDef, AgentKind, FieldDef, ToolDef};
+use std::collections::HashMap;
+
+use crate::schema::{AdkSchema, AgentDef, AgentKind, CallbackDef, FieldDef, ToolDef};
 
 /// Convert a TypeScript camelCase or PascalCase name to Rust snake_case.
 pub fn to_snake_case(name: &str) -> String {
@@ -322,6 +324,443 @@ fn generate_tool(tool: &ToolDef) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// Compilable codegen — produces code that compiles against gemini-live-runtime
+// ---------------------------------------------------------------------------
+
+/// Resolve a phantom Rust type to a real type from `gemini-live-runtime`.
+fn resolve_runtime_type(rust_type: &str) -> String {
+    match rust_type {
+        "AgentRef" => "Arc<dyn Agent>".to_string(),
+        "ToolRef" => "Arc<dyn ToolFunction>".to_string(),
+        "CodeExecutorRef" => "serde_json::Value".to_string(),
+        "BaseLlmRequestProcessor" => "serde_json::Value".to_string(),
+        "BaseLlmResponseProcessor" => "serde_json::Value".to_string(),
+        "Content" => "gemini_live_wire::prelude::Content".to_string(),
+        other => {
+            // Vec<X> — resolve the inner type
+            if let Some(inner) = other.strip_prefix("Vec<").and_then(|s| s.strip_suffix('>')) {
+                let resolved_inner = resolve_runtime_type(inner);
+                return format!("Vec<{}>", resolved_inner);
+            }
+            // Unknown PascalCase class — fallback to serde_json::Value
+            if other
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_uppercase())
+                && !other.starts_with("String")
+                && !other.starts_with("Option<")
+                && !other.contains("::")
+            {
+                return "serde_json::Value".to_string();
+            }
+            other.to_string()
+        }
+    }
+}
+
+/// Return the Rust type for a field after resolving to runtime types.
+fn resolved_field_type(field: &FieldDef) -> String {
+    let resolved = resolve_runtime_type(&field.rust_type);
+    if field.optional {
+        format!("Option<{}>", resolved)
+    } else {
+        resolved
+    }
+}
+
+/// Check if a resolved type can derive Clone.
+/// Types containing `dyn` trait objects cannot derive Clone.
+fn type_is_cloneable(rust_type: &str) -> bool {
+    !rust_type.contains("dyn ")
+}
+
+/// Build a flattened list of fields for an agent, merging parent fields.
+///
+/// The inheritance chain is resolved by looking up the parent agent name.
+fn flatten_fields<'a>(
+    agent: &'a AgentDef,
+    agents_by_name: &'a HashMap<&str, &AgentDef>,
+) -> (Vec<&'a FieldDef>, Vec<&'a CallbackDef>) {
+    let mut all_fields: Vec<&'a FieldDef> = Vec::new();
+    let mut all_callbacks: Vec<&'a CallbackDef> = Vec::new();
+    let mut seen_field_names: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut seen_callback_names: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+
+    // Collect ancestor chain (child first, parent last)
+    let mut chain: Vec<&'a AgentDef> = Vec::new();
+    let mut current = Some(agent);
+    while let Some(a) = current {
+        chain.push(a);
+        current = a
+            .extends
+            .as_deref()
+            .and_then(|parent_name| agents_by_name.get(parent_name).copied());
+    }
+
+    // Iterate from child to parent — child fields take precedence
+    for ancestor in &chain {
+        for field in &ancestor.fields {
+            if field.name != "name" && seen_field_names.insert(field.name.clone()) {
+                all_fields.push(field);
+            }
+        }
+        for cb in &ancestor.callbacks {
+            if seen_callback_names.insert(cb.name.clone()) {
+                all_callbacks.push(cb);
+            }
+        }
+    }
+
+    (all_fields, all_callbacks)
+}
+
+/// Return the Rust default expression for a resolved runtime type.
+fn runtime_default_for_type(resolved_type: &str, optional: bool) -> String {
+    if optional {
+        "None".to_string()
+    } else {
+        match resolved_type {
+            "String" => "String::new()".to_string(),
+            "bool" => "false".to_string(),
+            "f64" => "0.0".to_string(),
+            "()" => "()".to_string(),
+            t if t.starts_with("Vec<") => "Vec::new()".to_string(),
+            _ => "Default::default()".to_string(),
+        }
+    }
+}
+
+/// Check if an agent is a "pure base" class (BaseAgentConfig) that
+/// should not be generated as a standalone struct — it only contributes
+/// fields via inheritance.
+fn is_pure_base(agent: &AgentDef) -> bool {
+    agent.kind == AgentKind::Base && agent.extends.is_none()
+}
+
+/// Generate Rust source code that compiles against `gemini-live-runtime`.
+///
+/// Differences from the standalone `generate()`:
+/// - Uses real imports from the runtime crate
+/// - Flattens inheritance (merges parent fields into child)
+/// - Resolves phantom types to real runtime types
+/// - Generates real Agent trait impls for composition agents
+/// - Generates real callback types
+/// - Skips pure base classes
+pub fn generate_compilable(schema: &AdkSchema) -> String {
+    let mut out = String::new();
+
+    // File header
+    out.push_str("// AUTO-GENERATED by adk-transpiler -- do not edit manually\n");
+    out.push_str(&format!("// Source: {}\n", schema.source.framework));
+    out.push_str(&format!(
+        "// Generated: {}\n",
+        schema.source.extracted_at
+    ));
+    out.push('\n');
+
+    // Attributes
+    out.push_str("#![allow(dead_code, unused_imports)]\n\n");
+
+    // Imports — uses `crate::` because the generated file lives inside gemini-live-runtime.
+    out.push_str("use std::sync::Arc;\n");
+    out.push_str("use async_trait::async_trait;\n");
+    out.push_str("use crate::{Agent, AgentError, InvocationContext, ToolFunction};\n");
+    out.push_str("use crate::context::AgentEvent;\n");
+    out.push('\n');
+
+    // Build agent lookup map for inheritance resolution
+    let agents_by_name: HashMap<&str, &AgentDef> =
+        schema.agents.iter().map(|a| (a.name.as_str(), a)).collect();
+
+    // Generate agents (skip pure base classes)
+    for agent in &schema.agents {
+        if is_pure_base(agent) {
+            out.push_str(&format!(
+                "// {} — base class, fields merged into child agents via inheritance.\n\n",
+                to_rust_struct_name(&agent.name)
+            ));
+            continue;
+        }
+        out.push_str(&generate_compilable_agent(agent, &agents_by_name));
+        out.push('\n');
+    }
+
+    // Generate tools
+    for tool in &schema.tools {
+        out.push_str(&generate_compilable_tool(tool));
+        out.push('\n');
+    }
+
+    out
+}
+
+/// Generate compilable Rust code for a single agent definition with
+/// inheritance flattening and real runtime types.
+fn generate_compilable_agent(
+    agent: &AgentDef,
+    agents_by_name: &HashMap<&str, &AgentDef>,
+) -> String {
+    let struct_name = to_rust_struct_name(&agent.name);
+    let config_name = format!("{}Config", struct_name);
+    let builder_name = format!("{}Builder", struct_name);
+
+    let (flattened_fields, flattened_callbacks) = flatten_fields(agent, agents_by_name);
+
+    let mut out = String::new();
+
+    // Section separator
+    out.push_str(&format!("// ---- {} ----\n\n", struct_name));
+
+    // Doc comment
+    if let Some(desc) = &agent.description {
+        for line in desc.lines() {
+            out.push_str(&format!("/// {}\n", line));
+        }
+    }
+    if agent.extends.is_some() {
+        out.push_str(&format!(
+            "/// (Inherits fields from {})\n",
+            to_rust_struct_name(agent.extends.as_deref().unwrap())
+        ));
+    }
+
+    // Check if all resolved field types are cloneable
+    let all_cloneable = flattened_fields.iter().all(|f| {
+        let resolved = resolve_runtime_type(&f.rust_type);
+        type_is_cloneable(&resolved)
+    });
+
+    // --- Config struct ---
+    if all_cloneable {
+        out.push_str("#[derive(Debug, Clone)]\n");
+    } else {
+        out.push_str("// Cannot derive Clone: contains trait objects\n");
+    }
+    out.push_str(&format!("pub struct {} {{\n", config_name));
+    out.push_str("    pub name: String,\n");
+
+    for field in &flattened_fields {
+        if let Some(desc) = &field.description {
+            out.push_str(&format!("    /// {}\n", desc));
+        }
+        let snake = to_snake_case(&field.name);
+        let rtype = resolved_field_type(field);
+        out.push_str(&format!("    pub {}: {},\n", snake, rtype));
+    }
+
+    // Callbacks as real types
+    for cb in &flattened_callbacks {
+        let snake = to_snake_case(&cb.name);
+        if let Some(desc) = &cb.description {
+            out.push_str(&format!("    /// {}\n", desc));
+        }
+        out.push_str(&format!(
+            "    pub {}: Option<Box<dyn Fn(&InvocationContext) + Send + Sync>>,\n",
+            snake
+        ));
+    }
+
+    out.push_str("}\n\n");
+
+    // --- Config impl with new() ---
+    out.push_str(&format!("impl {} {{\n", config_name));
+    out.push_str("    pub fn new(name: impl Into<String>) -> Self {\n");
+    out.push_str("        Self {\n");
+    out.push_str("            name: name.into(),\n");
+
+    for field in &flattened_fields {
+        let snake = to_snake_case(&field.name);
+        let resolved = resolve_runtime_type(&field.rust_type);
+        let default = runtime_default_for_type(&resolved, field.optional);
+        out.push_str(&format!("            {}: {},\n", snake, default));
+    }
+
+    for cb in &flattened_callbacks {
+        let snake = to_snake_case(&cb.name);
+        out.push_str(&format!("            {}: None,\n", snake));
+    }
+
+    out.push_str("        }\n");
+    out.push_str("    }\n");
+    out.push_str("}\n\n");
+
+    // --- Builder ---
+    out.push_str(&format!("pub struct {} {{\n", builder_name));
+    out.push_str(&format!("    config: {},\n", config_name));
+    out.push_str("}\n\n");
+
+    out.push_str(&format!("impl {} {{\n", builder_name));
+
+    // Builder::new
+    out.push_str("    pub fn new(name: impl Into<String>) -> Self {\n");
+    out.push_str("        Self {\n");
+    out.push_str(&format!(
+        "            config: {}::new(name),\n",
+        config_name
+    ));
+    out.push_str("        }\n");
+    out.push_str("    }\n\n");
+
+    // Builder methods for each field
+    for field in &flattened_fields {
+        let snake = to_snake_case(&field.name);
+        let resolved = resolve_runtime_type(&field.rust_type);
+        if field.optional {
+            out.push_str(&format!(
+                "    pub fn {}(mut self, value: {}) -> Self {{\n",
+                snake, resolved
+            ));
+            out.push_str(&format!(
+                "        self.config.{} = Some(value);\n",
+                snake
+            ));
+        } else {
+            out.push_str(&format!(
+                "    pub fn {}(mut self, value: {}) -> Self {{\n",
+                snake, resolved
+            ));
+            out.push_str(&format!(
+                "        self.config.{} = value;\n",
+                snake
+            ));
+        }
+        out.push_str("        self\n");
+        out.push_str("    }\n\n");
+    }
+
+    // Builder::build
+    out.push_str(&format!(
+        "    pub fn build(self) -> {} {{\n",
+        struct_name
+    ));
+    out.push_str(&format!(
+        "        {} {{ config: self.config }}\n",
+        struct_name
+    ));
+    out.push_str("    }\n");
+    out.push_str("}\n\n");
+
+    // --- Wrapper struct ---
+    out.push_str(&format!("pub struct {} {{\n", struct_name));
+    out.push_str(&format!("    pub config: {},\n", config_name));
+    out.push_str("}\n\n");
+
+    // --- Agent trait impl ---
+    if is_composition_agent(&agent.kind) {
+        out.push_str(&generate_composition_agent_impl(agent, &struct_name));
+    } else {
+        out.push_str(&format!(
+            "// Agent trait impl for {} should be provided by the application.\n\n",
+            struct_name
+        ));
+    }
+
+    out
+}
+
+/// Generate a real Agent trait impl for a composition agent that delegates
+/// to the runtime's built-in composition agent.
+fn generate_composition_agent_impl(agent: &AgentDef, struct_name: &str) -> String {
+    let mut out = String::new();
+
+    out.push_str("#[async_trait]\n");
+    out.push_str(&format!("impl Agent for {} {{\n", struct_name));
+
+    // name()
+    out.push_str("    fn name(&self) -> &str {\n");
+    out.push_str("        &self.config.name\n");
+    out.push_str("    }\n\n");
+
+    // sub_agents()
+    out.push_str("    fn sub_agents(&self) -> Vec<Arc<dyn Agent>> {\n");
+    out.push_str("        self.config.sub_agents.clone().unwrap_or_default()\n");
+    out.push_str("    }\n\n");
+
+    // run_live() — delegates to the runtime's composition agent
+    out.push_str("    async fn run_live(&self, ctx: &mut InvocationContext) -> Result<(), AgentError> {\n");
+
+    match agent.kind {
+        AgentKind::Sequential => {
+            out.push_str("        let inner = crate::agents::sequential::SequentialAgent::new(\n");
+            out.push_str("            &self.config.name,\n");
+            out.push_str("            self.sub_agents(),\n");
+            out.push_str("        );\n");
+            out.push_str("        inner.run_live(ctx).await\n");
+        }
+        AgentKind::Parallel => {
+            out.push_str("        let inner = crate::agents::parallel::ParallelAgent::new(\n");
+            out.push_str("            &self.config.name,\n");
+            out.push_str("            self.sub_agents(),\n");
+            out.push_str("        );\n");
+            out.push_str("        inner.run_live(ctx).await\n");
+        }
+        AgentKind::Loop => {
+            out.push_str("        let inner = crate::agents::loop_agent::LoopAgent::new(\n");
+            out.push_str("            &self.config.name,\n");
+            out.push_str("            self.sub_agents(),\n");
+            out.push_str(
+                "            self.config.max_iterations.map(|v| v as u32).unwrap_or(10),\n",
+            );
+            out.push_str("        );\n");
+            out.push_str("        inner.run_live(ctx).await\n");
+        }
+        _ => {
+            out.push_str(&format!(
+                "        todo!(\"{}::run_live\")\n",
+                struct_name
+            ));
+        }
+    }
+
+    out.push_str("    }\n");
+    out.push_str("}\n\n");
+
+    out
+}
+
+/// Generate compilable Rust code for a tool definition.
+fn generate_compilable_tool(tool: &ToolDef) -> String {
+    let struct_name = to_rust_struct_name(&tool.name);
+
+    let mut out = String::new();
+
+    out.push_str(&format!("// ---- {} ----\n\n", struct_name));
+
+    if let Some(desc) = &tool.description {
+        for line in desc.lines() {
+            out.push_str(&format!("/// {}\n", line));
+        }
+    }
+
+    // Check if all resolved field types are cloneable
+    let all_cloneable = tool.fields.iter().all(|f| {
+        let resolved = resolve_runtime_type(&f.rust_type);
+        type_is_cloneable(&resolved)
+    });
+
+    if all_cloneable {
+        out.push_str("#[derive(Debug, Clone, Default)]\n");
+    } else {
+        out.push_str("// Cannot derive Clone: contains trait objects\n");
+    }
+    out.push_str(&format!("pub struct {} {{\n", struct_name));
+
+    for field in &tool.fields {
+        if let Some(desc) = &field.description {
+            out.push_str(&format!("    /// {}\n", desc));
+        }
+        let snake = to_snake_case(&field.name);
+        let rtype = resolved_field_type(field);
+        out.push_str(&format!("    pub {}: {},\n", snake, rtype));
+    }
+
+    out.push_str("}\n\n");
+
+    out
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -636,5 +1075,356 @@ mod tests {
         assert!(code.contains("impl Agent for LoopAgent {"));
         assert!(code.contains("todo!(\"ParallelAgent::run_live\")"));
         assert!(code.contains("todo!(\"LoopAgent::run_live\")"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Compilable codegen tests
+    // -----------------------------------------------------------------------
+
+    fn make_agent_with_extends(
+        name: &str,
+        kind: AgentKind,
+        fields: Vec<FieldDef>,
+        callbacks: Vec<CallbackDef>,
+        extends: Option<&str>,
+    ) -> AgentDef {
+        AgentDef {
+            name: name.to_string(),
+            kind,
+            description: Some("Test agent.".to_string()),
+            fields,
+            callbacks,
+            extends: extends.map(|s| s.to_string()),
+        }
+    }
+
+    #[test]
+    fn resolve_runtime_type_basic() {
+        assert_eq!(resolve_runtime_type("AgentRef"), "Arc<dyn Agent>");
+        assert_eq!(resolve_runtime_type("ToolRef"), "Arc<dyn ToolFunction>");
+        assert_eq!(resolve_runtime_type("CodeExecutorRef"), "serde_json::Value");
+        assert_eq!(resolve_runtime_type("Content"), "gemini_live_wire::prelude::Content");
+        assert_eq!(resolve_runtime_type("String"), "String");
+        assert_eq!(resolve_runtime_type("bool"), "bool");
+        assert_eq!(resolve_runtime_type("f64"), "f64");
+        assert_eq!(resolve_runtime_type("serde_json::Value"), "serde_json::Value");
+    }
+
+    #[test]
+    fn resolve_runtime_type_vec() {
+        assert_eq!(resolve_runtime_type("Vec<AgentRef>"), "Vec<Arc<dyn Agent>>");
+        assert_eq!(resolve_runtime_type("Vec<ToolRef>"), "Vec<Arc<dyn ToolFunction>>");
+        assert_eq!(resolve_runtime_type("Vec<String>"), "Vec<String>");
+    }
+
+    #[test]
+    fn resolve_runtime_type_unknown_class() {
+        assert_eq!(
+            resolve_runtime_type("BaseLlmRequestProcessor"),
+            "serde_json::Value"
+        );
+        assert_eq!(
+            resolve_runtime_type("BaseLlmResponseProcessor"),
+            "serde_json::Value"
+        );
+    }
+
+    #[test]
+    fn compilable_skips_pure_base() {
+        let base = make_agent(
+            "BaseAgentConfig",
+            AgentKind::Base,
+            vec![
+                make_field("description", "String", true),
+                make_field("subAgents", "Vec<AgentRef>", true),
+            ],
+            vec![CallbackDef {
+                name: "beforeAgentCallback".to_string(),
+                ts_signature: "BeforeAgentCallback".to_string(),
+                description: None,
+            }],
+        );
+        let schema = make_schema_with(vec![base], vec![]);
+        let code = generate_compilable(&schema);
+
+        // Should NOT generate a struct for the pure base
+        assert!(
+            !code.contains("pub struct BaseAgentConfig {"),
+            "Should skip pure base class struct"
+        );
+        // Should have a comment about it
+        assert!(
+            code.contains("base class, fields merged into child agents"),
+            "Should contain comment about base class"
+        );
+    }
+
+    #[test]
+    fn compilable_flattens_inheritance() {
+        let base = make_agent(
+            "BaseAgentConfig",
+            AgentKind::Base,
+            vec![
+                make_field("description", "String", true),
+                make_field("subAgents", "Vec<AgentRef>", true),
+            ],
+            vec![CallbackDef {
+                name: "beforeAgentCallback".to_string(),
+                ts_signature: "BeforeAgentCallback".to_string(),
+                description: None,
+            }],
+        );
+        let llm = make_agent_with_extends(
+            "LlmAgentConfig",
+            AgentKind::Llm,
+            vec![
+                make_field("model", "String", true),
+                make_field("tools", "Vec<ToolRef>", true),
+            ],
+            vec![CallbackDef {
+                name: "beforeModelCallback".to_string(),
+                ts_signature: "BeforeModelCallback".to_string(),
+                description: None,
+            }],
+            Some("BaseAgentConfig"),
+        );
+        let schema = make_schema_with(vec![base, llm], vec![]);
+        let code = generate_compilable(&schema);
+
+        // LlmAgent should have BOTH its own and parent fields
+        assert!(
+            code.contains("pub struct LlmAgentConfig {"),
+            "Should generate LlmAgentConfig struct"
+        );
+        // Own fields
+        assert!(
+            code.contains("pub model: Option<String>,"),
+            "Should contain own field 'model'"
+        );
+        assert!(
+            code.contains("pub tools: Option<Vec<Arc<dyn ToolFunction>>>,"),
+            "Should resolve ToolRef to Arc<dyn ToolFunction>, got:\n{}",
+            code
+        );
+        // Inherited fields
+        assert!(
+            code.contains("pub description: Option<String>,"),
+            "Should contain inherited 'description' field"
+        );
+        assert!(
+            code.contains("pub sub_agents: Option<Vec<Arc<dyn Agent>>>,"),
+            "Should resolve inherited Vec<AgentRef> to Vec<Arc<dyn Agent>>, got:\n{}",
+            code
+        );
+        // Inherited callback
+        assert!(
+            code.contains("pub before_agent_callback:"),
+            "Should contain inherited callback"
+        );
+        // Own callback
+        assert!(
+            code.contains("pub before_model_callback:"),
+            "Should contain own callback"
+        );
+    }
+
+    #[test]
+    fn compilable_uses_real_imports() {
+        let schema = make_schema_with(vec![], vec![]);
+        let code = generate_compilable(&schema);
+
+        assert!(
+            code.contains("use crate::{Agent, AgentError, InvocationContext, ToolFunction};"),
+            "Should import from crate (inside gemini-live-runtime)"
+        );
+        assert!(
+            !code.contains("pub trait Agent"),
+            "Should NOT define placeholder Agent trait"
+        );
+        assert!(
+            !code.contains("pub struct InvocationContext;"),
+            "Should NOT define placeholder InvocationContext"
+        );
+    }
+
+    #[test]
+    fn compilable_sequential_delegates_to_runtime() {
+        let seq = make_agent_with_extends(
+            "SequentialAgentConfig",
+            AgentKind::Sequential,
+            vec![make_field("subAgents", "Vec<AgentRef>", true)],
+            vec![],
+            Some("BaseAgentConfig"),
+        );
+        let base = make_agent(
+            "BaseAgentConfig",
+            AgentKind::Base,
+            vec![make_field("description", "String", true)],
+            vec![],
+        );
+        let schema = make_schema_with(vec![base, seq], vec![]);
+        let code = generate_compilable(&schema);
+
+        assert!(
+            code.contains("impl Agent for SequentialAgent {"),
+            "Should generate Agent impl"
+        );
+        assert!(
+            code.contains("crate::agents::sequential::SequentialAgent::new"),
+            "Should delegate to runtime SequentialAgent"
+        );
+        assert!(
+            !code.contains("todo!"),
+            "Should NOT contain todo! stubs"
+        );
+    }
+
+    #[test]
+    fn compilable_parallel_delegates_to_runtime() {
+        let par = make_agent_with_extends(
+            "ParallelAgentConfig",
+            AgentKind::Parallel,
+            vec![make_field("subAgents", "Vec<AgentRef>", true)],
+            vec![],
+            Some("BaseAgentConfig"),
+        );
+        let base = make_agent(
+            "BaseAgentConfig",
+            AgentKind::Base,
+            vec![],
+            vec![],
+        );
+        let schema = make_schema_with(vec![base, par], vec![]);
+        let code = generate_compilable(&schema);
+
+        assert!(
+            code.contains("crate::agents::parallel::ParallelAgent::new"),
+            "Should delegate to runtime ParallelAgent"
+        );
+    }
+
+    #[test]
+    fn compilable_loop_delegates_to_runtime_with_max_iterations() {
+        let loop_agent = make_agent_with_extends(
+            "LoopAgentConfig",
+            AgentKind::Loop,
+            vec![
+                make_field("subAgents", "Vec<AgentRef>", true),
+                make_field("maxIterations", "f64", true),
+            ],
+            vec![],
+            Some("BaseAgentConfig"),
+        );
+        let base = make_agent(
+            "BaseAgentConfig",
+            AgentKind::Base,
+            vec![],
+            vec![],
+        );
+        let schema = make_schema_with(vec![base, loop_agent], vec![]);
+        let code = generate_compilable(&schema);
+
+        assert!(
+            code.contains("crate::agents::loop_agent::LoopAgent::new"),
+            "Should delegate to runtime LoopAgent"
+        );
+        assert!(
+            code.contains("self.config.max_iterations.map(|v| v as u32).unwrap_or(10)"),
+            "Should convert max_iterations to u32"
+        );
+    }
+
+    #[test]
+    fn compilable_callbacks_are_real_types() {
+        let agent = make_agent(
+            "LlmAgentConfig",
+            AgentKind::Llm,
+            vec![],
+            vec![
+                CallbackDef {
+                    name: "beforeModelCallback".to_string(),
+                    ts_signature: "BeforeModelCallback".to_string(),
+                    description: Some("Called before model.".to_string()),
+                },
+            ],
+        );
+        let schema = make_schema_with(vec![agent], vec![]);
+        let code = generate_compilable(&schema);
+
+        assert!(
+            code.contains("pub before_model_callback: Option<Box<dyn Fn(&InvocationContext) + Send + Sync>>,"),
+            "Should generate real callback type, got:\n{}",
+            code
+        );
+        assert!(
+            !code.contains("// TODO: Implement Rust callback type"),
+            "Should NOT contain TODO for callbacks"
+        );
+    }
+
+    #[test]
+    fn compilable_tool_resolves_types() {
+        let tool = ToolDef {
+            name: "AgentToolConfig".to_string(),
+            description: Some("Config for an agent tool.".to_string()),
+            fields: vec![
+                make_field("agent", "AgentRef", false),
+                make_field("skipToolsInvocation", "bool", true),
+            ],
+            extends: None,
+        };
+        let schema = make_schema_with(vec![], vec![tool]);
+        let code = generate_compilable(&schema);
+
+        assert!(
+            code.contains("pub agent: Arc<dyn Agent>,"),
+            "Should resolve AgentRef to Arc<dyn Agent>, got:\n{}",
+            code
+        );
+    }
+
+    #[test]
+    fn compilable_config_has_new_constructor() {
+        let agent = make_agent(
+            "LlmAgentConfig",
+            AgentKind::Llm,
+            vec![
+                make_field("model", "String", true),
+            ],
+            vec![],
+        );
+        let schema = make_schema_with(vec![agent], vec![]);
+        let code = generate_compilable(&schema);
+
+        assert!(
+            code.contains("impl LlmAgentConfig {"),
+            "Should generate impl block for config"
+        );
+        assert!(
+            code.contains("pub fn new(name: impl Into<String>) -> Self"),
+            "Should have new() constructor"
+        );
+    }
+
+    #[test]
+    fn compilable_sub_agents_method() {
+        let seq = make_agent_with_extends(
+            "SequentialAgentConfig",
+            AgentKind::Sequential,
+            vec![make_field("subAgents", "Vec<AgentRef>", true)],
+            vec![],
+            None,
+        );
+        let schema = make_schema_with(vec![seq], vec![]);
+        let code = generate_compilable(&schema);
+
+        assert!(
+            code.contains("fn sub_agents(&self) -> Vec<Arc<dyn Agent>>"),
+            "Should generate sub_agents() method"
+        );
+        assert!(
+            code.contains("self.config.sub_agents.clone().unwrap_or_default()"),
+            "Should return cloned sub_agents"
+        );
     }
 }

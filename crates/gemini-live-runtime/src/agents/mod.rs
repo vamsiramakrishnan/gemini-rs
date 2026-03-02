@@ -7,6 +7,13 @@ pub mod loop_agent;
 pub mod parallel;
 pub mod sequential;
 
+// Auto-generated agent definitions from ADK-JS transpiler.
+// Run `cargo run -p adk-transpiler -- transpile --source <path> --output crates/gemini-live-runtime/src/agents/generated.rs`
+// to regenerate.
+#[path = "generated.rs"]
+#[allow(clippy::module_inception)]
+pub mod generated;
+
 pub use loop_agent::LoopAgent;
 pub use parallel::ParallelAgent;
 pub use sequential::SequentialAgent;
