@@ -58,7 +58,13 @@ impl SessionSignals {
         }
     }
 
-    /// Called by the processor on every event.  Updates `session:*` state keys.
+    /// Called from the event router task.  Updates `session:*` state keys.
+    ///
+    /// # Single-writer invariant
+    ///
+    /// Must be called from a single task — counter increments (e.g.
+    /// `interrupt_count`, `error_count`) use read-modify-write through
+    /// [`State`] which is not atomic.
     pub fn on_event(&self, event: &SessionEvent) {
         match event {
             SessionEvent::Connected => {
@@ -154,13 +160,21 @@ impl SessionSignals {
                 *self.last_activity.lock() = Instant::now();
             }
 
-            SessionEvent::AudioData(_) | SessionEvent::TextDelta(_) => {
-                // High-frequency events: just update activity timer.
+            SessionEvent::AudioData(_)
+            | SessionEvent::TextDelta(_)
+            | SessionEvent::TextComplete(_) => {
+                // High-frequency / completion events: just update activity timer.
                 *self.last_activity.lock() = Instant::now();
             }
 
             SessionEvent::TurnComplete => {
                 *self.last_activity.lock() = Instant::now();
+            }
+
+            SessionEvent::Disconnected(_reason) => {
+                // Clear connected_at so elapsed/remaining timing stops advancing.
+                *self.connected_at.lock() = None;
+                self.state.session().set("disconnected", true);
             }
 
             // Remaining variants — no special tracking needed.
@@ -511,5 +525,50 @@ mod tests {
 
         let silence: u64 = s.state.session().get("silence_ms").unwrap_or(u64::MAX);
         assert!(silence < 100);
+    }
+
+    // Extra: text complete updates activity
+    #[test]
+    fn text_complete_updates_activity() {
+        let s = signals();
+        s.on_event(&SessionEvent::Connected);
+        s.on_event(&SessionEvent::TextComplete("done".into()));
+
+        let silence: u64 = s.state.session().get("silence_ms").unwrap_or(u64::MAX);
+        assert!(silence < 100);
+    }
+
+    // Disconnected — clears connected_at, sets disconnected flag, stops timing
+    #[test]
+    fn disconnected_clears_connected_at_and_sets_flag() {
+        let s = signals();
+        s.on_event(&SessionEvent::Connected);
+        assert!(s.connected_at.lock().is_some());
+
+        s.on_event(&SessionEvent::Disconnected(Some("server closed".into())));
+
+        // connected_at should be cleared
+        assert!(s.connected_at.lock().is_none());
+        // disconnected flag should be set
+        assert_eq!(
+            s.state.session().get::<bool>("disconnected"),
+            Some(true)
+        );
+        // elapsed_ms / remaining_budget_ms should NOT be updated after disconnect
+        // (the if-let on connected_at guards this)
+    }
+
+    #[test]
+    fn disconnected_without_reason() {
+        let s = signals();
+        s.on_event(&SessionEvent::Connected);
+
+        s.on_event(&SessionEvent::Disconnected(None));
+
+        assert!(s.connected_at.lock().is_none());
+        assert_eq!(
+            s.state.session().get::<bool>("disconnected"),
+            Some(true)
+        );
     }
 }
