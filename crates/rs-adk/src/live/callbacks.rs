@@ -18,6 +18,16 @@ use crate::state::State;
 /// A boxed future for async callbacks.
 pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
 
+/// Controls how a callback is executed relative to the event loop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CallbackMode {
+    /// Callback is awaited inline — the event loop waits for completion.
+    #[default]
+    Blocking,
+    /// Callback is spawned as a concurrent task — the event loop continues immediately.
+    Concurrent,
+}
+
 /// Typed callback registry for Live session events.
 ///
 /// Callbacks are divided into two lanes:

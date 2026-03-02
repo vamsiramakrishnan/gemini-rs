@@ -203,6 +203,93 @@ impl State {
             prefix: "temp:",
         }
     }
+
+    /// Access state with the `session:` prefix scope (auto-tracked signals).
+    pub fn session(&self) -> PrefixedState<'_> {
+        PrefixedState {
+            state: self,
+            prefix: "session:",
+        }
+    }
+
+    /// Access state with the `turn:` prefix scope (reset each turn).
+    pub fn turn(&self) -> PrefixedState<'_> {
+        PrefixedState {
+            state: self,
+            prefix: "turn:",
+        }
+    }
+
+    /// Access state with the `bg:` prefix scope (background tasks).
+    pub fn bg(&self) -> PrefixedState<'_> {
+        PrefixedState {
+            state: self,
+            prefix: "bg:",
+        }
+    }
+
+    /// Access read-only state with the `derived:` prefix scope (computed vars only).
+    pub fn derived(&self) -> ReadOnlyPrefixedState<'_> {
+        ReadOnlyPrefixedState {
+            state: self,
+            prefix: "derived:",
+        }
+    }
+
+    // ── Utility methods ───────────────────────────────────────────────────
+
+    /// Snapshot the values of specific keys. Returns HashMap of key -> current value.
+    /// Used by watchers to capture state before mutations.
+    pub fn snapshot_values(&self, keys: &[&str]) -> HashMap<String, Value> {
+        keys.iter()
+            .filter_map(|&k| self.get_raw(k).map(|v| (k.to_string(), v)))
+            .collect()
+    }
+
+    /// Diff current state against a previous snapshot.
+    /// Returns Vec of (key, old_value, new_value) for keys that changed.
+    pub fn diff_values(
+        &self,
+        prev: &HashMap<String, Value>,
+        keys: &[&str],
+    ) -> Vec<(String, Value, Value)> {
+        keys.iter()
+            .filter_map(|&k| {
+                let old = prev.get(k);
+                let new = self.get_raw(k);
+                match (old, new) {
+                    (Some(o), Some(n)) if o != &n => Some((k.to_string(), o.clone(), n)),
+                    (None, Some(n)) => Some((k.to_string(), Value::Null, n)),
+                    (Some(o), None) => Some((k.to_string(), o.clone(), Value::Null)),
+                    _ => None,
+                }
+            })
+            .collect()
+    }
+
+    /// Remove all keys with the given prefix.
+    pub fn clear_prefix(&self, prefix: &str) {
+        let keys_to_remove: Vec<String> = self
+            .inner
+            .iter()
+            .filter(|entry| entry.key().starts_with(prefix))
+            .map(|entry| entry.key().clone())
+            .collect();
+        for key in keys_to_remove {
+            self.inner.remove(&key);
+        }
+        if self.track_delta {
+            let delta_keys: Vec<String> = self
+                .delta
+                .iter()
+                .filter(|entry| entry.key().starts_with(prefix))
+                .map(|entry| entry.key().clone())
+                .collect();
+            for key in delta_keys {
+                self.delta.remove(&key);
+            }
+        }
+    }
 }
 
 /// A borrowed view of state that automatically prepends a prefix to all keys.
@@ -239,6 +326,45 @@ impl<'a> PrefixedState<'a> {
     /// Remove a key (with prefix applied).
     pub fn remove(&self, key: &str) -> Option<Value> {
         self.state.remove(&self.prefixed_key(key))
+    }
+
+    /// Get all keys within this prefix scope (prefix stripped from results).
+    pub fn keys(&self) -> Vec<String> {
+        self.state
+            .keys()
+            .into_iter()
+            .filter_map(|k| k.strip_prefix(self.prefix).map(|s| s.to_string()))
+            .collect()
+    }
+}
+
+/// A borrowed, read-only view of state that automatically prepends a prefix to all keys.
+///
+/// Unlike `PrefixedState`, this does not expose `set()` or `remove()` methods,
+/// making it suitable for computed/derived state that user code should not mutate.
+pub struct ReadOnlyPrefixedState<'a> {
+    state: &'a State,
+    prefix: &'static str,
+}
+
+impl<'a> ReadOnlyPrefixedState<'a> {
+    fn prefixed_key(&self, key: &str) -> String {
+        format!("{}{}", self.prefix, key)
+    }
+
+    /// Get a value by key (with prefix applied).
+    pub fn get<T: serde::de::DeserializeOwned>(&self, key: &str) -> Option<T> {
+        self.state.get(&self.prefixed_key(key))
+    }
+
+    /// Get a raw JSON value by key (with prefix applied).
+    pub fn get_raw(&self, key: &str) -> Option<Value> {
+        self.state.get_raw(&self.prefixed_key(key))
+    }
+
+    /// Check if a key exists (with prefix applied).
+    pub fn contains(&self, key: &str) -> bool {
+        self.state.contains(&self.prefixed_key(key))
     }
 
     /// Get all keys within this prefix scope (prefix stripped from results).
@@ -475,5 +601,264 @@ mod tests {
 
         tracked.commit();
         assert_eq!(state.get::<bool>("app:flag"), Some(true));
+    }
+
+    // ── New prefix accessor tests ────────────────────────────────────────
+
+    #[test]
+    fn prefix_session_set_and_get() {
+        let state = State::new();
+        state.session().set("turn_count", 5);
+        assert_eq!(state.session().get::<i32>("turn_count"), Some(5));
+        assert_eq!(state.get::<i32>("session:turn_count"), Some(5));
+    }
+
+    #[test]
+    fn prefix_turn_set_and_get() {
+        let state = State::new();
+        state.turn().set("transcript", "hello");
+        assert_eq!(
+            state.turn().get::<String>("transcript"),
+            Some("hello".to_string())
+        );
+        assert_eq!(
+            state.get::<String>("turn:transcript"),
+            Some("hello".to_string())
+        );
+    }
+
+    #[test]
+    fn prefix_bg_set_and_get() {
+        let state = State::new();
+        state.bg().set("task_id", "abc-123");
+        assert_eq!(
+            state.bg().get::<String>("task_id"),
+            Some("abc-123".to_string())
+        );
+        assert_eq!(
+            state.get::<String>("bg:task_id"),
+            Some("abc-123".to_string())
+        );
+    }
+
+    #[test]
+    fn prefix_session_contains_and_remove() {
+        let state = State::new();
+        state.session().set("x", 1);
+        assert!(state.session().contains("x"));
+        state.session().remove("x");
+        assert!(!state.session().contains("x"));
+    }
+
+    #[test]
+    fn prefix_turn_keys() {
+        let state = State::new();
+        state.turn().set("a", 1);
+        state.turn().set("b", 2);
+        state.session().set("c", 3);
+
+        let turn_keys = state.turn().keys();
+        assert_eq!(turn_keys.len(), 2);
+        assert!(turn_keys.contains(&"a".to_string()));
+        assert!(turn_keys.contains(&"b".to_string()));
+    }
+
+    // ── ReadOnlyPrefixedState (derived) tests ────────────────────────────
+
+    #[test]
+    fn derived_read_only_get() {
+        let state = State::new();
+        // Write via raw key (simulating ComputedRegistry)
+        state.set("derived:sentiment", "positive");
+        assert_eq!(
+            state.derived().get::<String>("sentiment"),
+            Some("positive".to_string())
+        );
+    }
+
+    #[test]
+    fn derived_read_only_get_raw() {
+        let state = State::new();
+        state.set("derived:score", serde_json::json!(0.95));
+        let raw = state.derived().get_raw("score");
+        assert!(raw.is_some());
+        assert_eq!(raw.unwrap(), serde_json::json!(0.95));
+    }
+
+    #[test]
+    fn derived_read_only_contains() {
+        let state = State::new();
+        state.set("derived:exists", true);
+        assert!(state.derived().contains("exists"));
+        assert!(!state.derived().contains("missing"));
+    }
+
+    #[test]
+    fn derived_read_only_keys() {
+        let state = State::new();
+        state.set("derived:a", 1);
+        state.set("derived:b", 2);
+        state.set("app:c", 3);
+
+        let derived_keys = state.derived().keys();
+        assert_eq!(derived_keys.len(), 2);
+        assert!(derived_keys.contains(&"a".to_string()));
+        assert!(derived_keys.contains(&"b".to_string()));
+    }
+
+    #[test]
+    fn derived_missing_key_returns_none() {
+        let state = State::new();
+        assert_eq!(state.derived().get::<String>("nope"), None);
+        assert_eq!(state.derived().get_raw("nope"), None);
+    }
+
+    // ── snapshot_values tests ────────────────────────────────────────────
+
+    #[test]
+    fn snapshot_values_captures_existing_keys() {
+        let state = State::new();
+        state.set("a", 1);
+        state.set("b", "hello");
+        state.set("c", true);
+
+        let snap = state.snapshot_values(&["a", "b", "missing"]);
+        assert_eq!(snap.len(), 2);
+        assert_eq!(snap.get("a"), Some(&serde_json::json!(1)));
+        assert_eq!(snap.get("b"), Some(&serde_json::json!("hello")));
+        assert!(!snap.contains_key("missing"));
+    }
+
+    #[test]
+    fn snapshot_values_empty_keys() {
+        let state = State::new();
+        state.set("a", 1);
+        let snap = state.snapshot_values(&[]);
+        assert!(snap.is_empty());
+    }
+
+    // ── diff_values tests ────────────────────────────────────────────────
+
+    #[test]
+    fn diff_values_detects_changed_value() {
+        let state = State::new();
+        state.set("x", 1);
+        let snap = state.snapshot_values(&["x"]);
+
+        state.set("x", 2);
+        let diffs = state.diff_values(&snap, &["x"]);
+        assert_eq!(diffs.len(), 1);
+        assert_eq!(diffs[0].0, "x");
+        assert_eq!(diffs[0].1, serde_json::json!(1));
+        assert_eq!(diffs[0].2, serde_json::json!(2));
+    }
+
+    #[test]
+    fn diff_values_detects_new_key() {
+        let state = State::new();
+        let snap = state.snapshot_values(&["y"]);
+
+        state.set("y", "new");
+        let diffs = state.diff_values(&snap, &["y"]);
+        assert_eq!(diffs.len(), 1);
+        assert_eq!(diffs[0].0, "y");
+        assert_eq!(diffs[0].1, Value::Null);
+        assert_eq!(diffs[0].2, serde_json::json!("new"));
+    }
+
+    #[test]
+    fn diff_values_detects_removed_key() {
+        let state = State::new();
+        state.set("z", 42);
+        let snap = state.snapshot_values(&["z"]);
+
+        state.remove("z");
+        let diffs = state.diff_values(&snap, &["z"]);
+        assert_eq!(diffs.len(), 1);
+        assert_eq!(diffs[0].0, "z");
+        assert_eq!(diffs[0].1, serde_json::json!(42));
+        assert_eq!(diffs[0].2, Value::Null);
+    }
+
+    #[test]
+    fn diff_values_no_change() {
+        let state = State::new();
+        state.set("stable", 10);
+        let snap = state.snapshot_values(&["stable"]);
+
+        // No mutation
+        let diffs = state.diff_values(&snap, &["stable"]);
+        assert!(diffs.is_empty());
+    }
+
+    #[test]
+    fn diff_values_multiple_keys_mixed_changes() {
+        let state = State::new();
+        state.set("a", 1);
+        state.set("b", 2);
+        let snap = state.snapshot_values(&["a", "b", "c"]);
+
+        state.set("a", 10); // changed
+        // b unchanged
+        state.set("c", 3); // new
+
+        let diffs = state.diff_values(&snap, &["a", "b", "c"]);
+        assert_eq!(diffs.len(), 2); // a changed, c new; b unchanged
+        let diff_keys: Vec<&str> = diffs.iter().map(|(k, _, _)| k.as_str()).collect();
+        assert!(diff_keys.contains(&"a"));
+        assert!(diff_keys.contains(&"c"));
+    }
+
+    // ── clear_prefix tests ───────────────────────────────────────────────
+
+    #[test]
+    fn clear_prefix_removes_matching_keys() {
+        let state = State::new();
+        state.set("turn:a", 1);
+        state.set("turn:b", 2);
+        state.set("app:c", 3);
+        state.set("session:d", 4);
+
+        state.clear_prefix("turn:");
+        assert!(!state.contains("turn:a"));
+        assert!(!state.contains("turn:b"));
+        assert!(state.contains("app:c"));
+        assert!(state.contains("session:d"));
+    }
+
+    #[test]
+    fn clear_prefix_no_matching_keys_is_noop() {
+        let state = State::new();
+        state.set("app:x", 1);
+        state.clear_prefix("turn:");
+        assert!(state.contains("app:x"));
+    }
+
+    #[test]
+    fn clear_prefix_also_clears_delta() {
+        let state = State::new();
+        state.set("turn:committed", 1);
+        let tracked = state.with_delta_tracking();
+        tracked.set("turn:delta_val", 2);
+
+        // Both committed and delta have turn: keys
+        assert!(tracked.contains("turn:committed"));
+        assert!(tracked.contains("turn:delta_val"));
+
+        tracked.clear_prefix("turn:");
+        assert!(!tracked.contains("turn:committed"));
+        assert!(!tracked.contains("turn:delta_val"));
+    }
+
+    #[test]
+    fn clear_prefix_via_turn_accessor() {
+        let state = State::new();
+        state.turn().set("x", 1);
+        state.turn().set("y", 2);
+        state.app().set("z", 3);
+
+        state.clear_prefix("turn:");
+        assert!(state.turn().keys().is_empty());
+        assert!(state.app().contains("z"));
     }
 }
