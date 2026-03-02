@@ -17,6 +17,9 @@ pub struct GenaiSchema {
     /// Helper function signatures
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub helpers: Vec<GenaiHelperDef>,
+    /// REST API module definitions
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rest_modules: Vec<RestModuleDef>,
 }
 
 /// A type from js-genai with its wire crate mapping.
@@ -145,6 +148,56 @@ pub struct GenaiHelperDef {
     /// Wire crate equivalent (e.g. "Part::text")
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wire_equivalent: Option<String>,
+}
+
+// ── REST Module Schema ──────────────────────────────────────────────────────
+
+/// HTTP method for REST operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum HttpMethod {
+    Get,
+    Post,
+    Patch,
+    Put,
+    Delete,
+}
+
+/// A single REST method extracted from a module class.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RestMethodDef {
+    /// TypeScript method name (e.g., "get", "list", "create")
+    pub ts_name: String,
+    /// Rust method name (e.g., "get_file", "list_files")
+    pub rust_name: String,
+    /// HTTP method (GET, POST, PATCH, DELETE)
+    pub http_method: HttpMethod,
+    /// Return type name (e.g., "File", "ListFilesResponse")
+    pub return_type: String,
+    /// JSDoc description
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Whether this is a special method needing manual implementation (upload/download)
+    #[serde(default)]
+    pub is_special: bool,
+    /// Whether the method returns void/empty (delete, cancel)
+    #[serde(default)]
+    pub returns_void: bool,
+}
+
+/// REST API module extracted from a js-genai class.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RestModuleDef {
+    /// Module name (e.g., "files", "caches")
+    pub name: String,
+    /// Class name in TypeScript (e.g., "Files", "Caches")
+    pub class_name: String,
+    /// ServiceEndpoint variant name (e.g., "Files", "CachedContents")
+    pub service_endpoint: String,
+    /// Extracted public methods
+    pub methods: Vec<RestMethodDef>,
+    /// Rust error enum name (e.g., "FilesError")
+    pub error_type: String,
 }
 
 /// Combined schema for both js-genai and ADK-JS sources.

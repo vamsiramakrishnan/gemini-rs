@@ -82,6 +82,21 @@ enum Commands {
         #[arg(short, long)]
         output_dir: PathBuf,
     },
+    /// Transpile js-genai REST module classes into per-module Rust client code
+    TranspileRest {
+        /// Path to the js-genai source directory (e.g. /tmp/js-genai/src/)
+        #[arg(short, long)]
+        source: PathBuf,
+
+        /// Output directory for generated Rust modules (e.g. crates/rs-genai/src/)
+        #[arg(short, long)]
+        output_dir: PathBuf,
+
+        /// Modules to generate (comma-separated, e.g. "files,caches,batches")
+        /// If not specified, generates all detected modules
+        #[arg(short, long)]
+        modules: Option<String>,
+    },
     /// Read adk-fluent Python source and extract builder/factory/operator definitions
     ReadFluent {
         /// Path to the adk-fluent source directory (e.g. /tmp/adk-fluent/src/adk_fluent/)
@@ -119,6 +134,13 @@ fn main() {
         }
         Commands::TranspileGenai { source, output_dir } => {
             run_transpile_genai(&source, &output_dir);
+        }
+        Commands::TranspileRest {
+            source,
+            output_dir,
+            modules,
+        } => {
+            run_transpile_rest(&source, &output_dir, modules.as_deref());
         }
         Commands::ReadFluent { source, output } => {
             run_read_fluent(&source, &output);
@@ -467,6 +489,43 @@ fn run_transpile_genai(source: &Path, output_dir: &Path) {
     }
     println!("Types with existing wire equiv (skipped): {}", with_wire);
     println!("Types generated: {}", without_wire);
+}
+
+fn run_transpile_rest(source: &Path, output_dir: &Path, modules_filter: Option<&str>) {
+    eprintln!("Reading REST modules from: {}", source.display());
+
+    let mut rest_modules = match readers::read_rest_modules(source) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("Error reading REST modules: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    if let Some(filter) = modules_filter {
+        let allowed: Vec<&str> = filter.split(',').map(|s| s.trim()).collect();
+        rest_modules.retain(|m| allowed.contains(&m.name.as_str()));
+    }
+
+    eprintln!("Found {} REST modules", rest_modules.len());
+    for m in &rest_modules {
+        eprintln!("  - {} ({} methods)", m.name, m.methods.len());
+    }
+
+    let output = codegen::generate_rest_modules(&rest_modules);
+
+    if let Err(e) = codegen::rest::write_rest_modules(&output, output_dir) {
+        eprintln!("Error writing output: {}", e);
+        std::process::exit(1);
+    }
+
+    println!("=== Transpile REST Summary ===");
+    println!("Source: {}", source.display());
+    println!("Output dir: {}", output_dir.display());
+    println!("Modules generated: {}", output.modules.len());
+    for (name, code) in &output.modules {
+        println!("  - {}/mod.rs ({} bytes)", name, code.len());
+    }
 }
 
 fn run_read_fluent(source: &Path, output: &Path) {

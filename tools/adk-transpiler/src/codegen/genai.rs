@@ -218,6 +218,7 @@ mod tests {
             enums: vec![],
             type_aliases: vec![],
             helpers: vec![],
+            rest_modules: vec![],
         }
     }
 

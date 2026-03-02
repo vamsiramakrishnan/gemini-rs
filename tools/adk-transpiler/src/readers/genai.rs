@@ -305,6 +305,7 @@ pub fn read_genai_source(source_dir: &Path) -> Result<GenaiSchema, String> {
         enums,
         type_aliases,
         helpers: helper_defs,
+        rest_modules: vec![],
     })
 }
 
@@ -458,6 +459,7 @@ mod tests {
                 source_dir: "/tmp/test".to_string(),
                 extracted_at: "2026-01-01T00:00:00Z".to_string(),
             },
+            rest_modules: vec![],
             types: vec![GenaiTypeDef {
                 name: "Content".to_string(),
                 category: GenaiTypeCategory::Content,
