@@ -22,6 +22,7 @@ use crate::agent::Agent;
 use crate::context::{AgentEvent, InvocationContext};
 use crate::error::{AgentError, ToolError};
 use crate::middleware::MiddlewareChain;
+use crate::plugin::{PluginManager, PluginResult};
 use crate::tool::{
     ActiveStreamingTool, InputStreamingTool, SimpleTool, StreamingTool, ToolClass, ToolDispatcher,
     ToolFunction, ToolKind, TypedTool,
@@ -36,6 +37,7 @@ pub struct LlmAgent {
     name: String,
     dispatcher: ToolDispatcher,
     middleware: MiddlewareChain,
+    plugins: PluginManager,
     sub_agents: Vec<Arc<dyn Agent>>,
 }
 
@@ -46,6 +48,7 @@ impl LlmAgent {
             name: name.into(),
             dispatcher: ToolDispatcher::new(),
             middleware: MiddlewareChain::new(),
+            plugins: PluginManager::new(),
             sub_agents: Vec::new(),
         }
     }
@@ -58,6 +61,11 @@ impl LlmAgent {
     /// Access the middleware chain.
     pub fn middleware(&self) -> &MiddlewareChain {
         &self.middleware
+    }
+
+    /// Access the plugin manager.
+    pub fn plugins(&self) -> &PluginManager {
+        &self.plugins
     }
 
     /// Core event loop -- processes SessionEvents, dispatches tools, detects transfers.
@@ -85,6 +93,39 @@ impl LlmAgent {
                             args: call.args.clone(),
                         });
                         let _ = ctx.middleware.run_before_tool(call).await;
+
+                        // Plugin before_tool hook — can deny or short-circuit
+                        let plugin_result = self.plugins.run_before_tool(call, ctx).await;
+                        match &plugin_result {
+                            PluginResult::Deny(reason) => {
+                                ctx.emit(AgentEvent::ToolCallFailed {
+                                    name: call.name.clone(),
+                                    error: format!("Denied by plugin: {}", reason),
+                                });
+                                responses.push(ToolDispatcher::build_response(
+                                    call,
+                                    Err(ToolError::ExecutionFailed(format!(
+                                        "Denied by plugin: {}",
+                                        reason
+                                    ))),
+                                ));
+                                continue;
+                            }
+                            PluginResult::ShortCircuit(value) => {
+                                let _ = ctx.middleware.run_after_tool(call, value).await;
+                                ctx.emit(AgentEvent::ToolCallCompleted {
+                                    name: call.name.clone(),
+                                    result: value.clone(),
+                                    duration: std::time::Duration::ZERO,
+                                });
+                                responses.push(ToolDispatcher::build_response(
+                                    call,
+                                    Ok(value.clone()),
+                                ));
+                                continue;
+                            }
+                            PluginResult::Continue => {}
+                        }
 
                         let tool_start = std::time::Instant::now();
                         let tool_class = self.dispatcher.classify(&call.name);
@@ -117,6 +158,7 @@ impl LlmAgent {
                                         }
 
                                         let _ = ctx.middleware.run_after_tool(call, value).await;
+                                        let _ = self.plugins.run_after_tool(call, value, ctx).await;
                                         ctx.emit(AgentEvent::ToolCallCompleted {
                                             name: call.name.clone(),
                                             result: value.clone(),
@@ -347,6 +389,7 @@ pub struct LlmAgentBuilder {
     name: String,
     dispatcher: ToolDispatcher,
     middleware: MiddlewareChain,
+    plugins: PluginManager,
     sub_agents: Vec<Arc<dyn Agent>>,
 }
 
@@ -381,6 +424,12 @@ impl LlmAgentBuilder {
     /// Add middleware to the agent.
     pub fn middleware(mut self, mw: impl crate::middleware::Middleware + 'static) -> Self {
         self.middleware.add(Arc::new(mw));
+        self
+    }
+
+    /// Add a plugin to the agent.
+    pub fn plugin(mut self, plugin: impl crate::plugin::Plugin + 'static) -> Self {
+        self.plugins.add(Arc::new(plugin));
         self
     }
 
@@ -431,6 +480,7 @@ impl LlmAgentBuilder {
             name: self.name,
             dispatcher: self.dispatcher,
             middleware: self.middleware,
+            plugins: self.plugins,
             sub_agents: self.sub_agents,
         }
     }
@@ -446,10 +496,20 @@ impl Agent for LlmAgent {
         let agent_name = self.name.clone();
         let start = std::time::Instant::now();
 
-        // Telemetry + middleware
+        // Telemetry + middleware + plugins
         crate::telemetry::logging::log_agent_started(&agent_name, self.dispatcher.len());
         crate::telemetry::metrics::record_agent_started(&agent_name);
         ctx.middleware.run_before_agent(ctx).await?;
+
+        // Plugin before_agent hook
+        let plugin_result = self.plugins.run_before_agent(ctx).await;
+        if let PluginResult::Deny(reason) = plugin_result {
+            return Err(AgentError::Other(format!(
+                "Agent denied by plugin: {}",
+                reason
+            )));
+        }
+
         ctx.emit(AgentEvent::AgentStarted {
             name: agent_name.clone(),
         });
@@ -461,6 +521,7 @@ impl Agent for LlmAgent {
         // Cleanup
         let elapsed = start.elapsed();
         ctx.middleware.run_after_agent(ctx).await?;
+        let _ = self.plugins.run_after_agent(ctx).await;
         ctx.emit(AgentEvent::AgentCompleted {
             name: agent_name.clone(),
         });

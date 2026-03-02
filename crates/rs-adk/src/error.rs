@@ -29,7 +29,7 @@ pub enum AgentError {
     Other(String),
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum ToolError {
     #[error("Tool execution failed: {0}")]
     ExecutionFailed(String),
