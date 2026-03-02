@@ -2,9 +2,21 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Restructure rs-genai-workspace from a monolithic crate into a three-layer workspace (wire + runtime + fluent DX) with PyO3 Python bindings, implementing the ADK-equivalent agent runtime and adk-fluent-style composition algebra.
+**Goal:** Restructure gemini-live-rs from a monolithic crate into a three-layer workspace (wire + runtime + fluent DX) with PyO3 Python bindings, implementing the ADK-equivalent agent runtime and adk-fluent-style composition algebra.
 
-**Architecture:** Three crates in a Cargo workspace — `rs-genai` (Layer 0: raw protocol + transport), `rs-adk` (Layer 1: agent runtime with LiveRequestQueue, streaming tools, agent transfer), `adk-rs-fluent` (Layer 2: fluent builder API with operator overloading and composition modules). Plus `adk-rs-python` for PyO3 bindings.
+**Architecture:** Three crates in a Cargo workspace — `gemini-live-wire` (Layer 0: raw protocol + transport), `gemini-live-runtime` (Layer 1: agent runtime with AgentSession, streaming tools, agent transfer), `gemini-live` (Layer 2: fluent builder API with operator overloading and composition modules). Plus `gemini-live-python` for PyO3 bindings.
+
+**Key Design Decisions (see design doc §10-11):**
+- `AgentSession` wraps `SessionHandle` instead of ADK's `LiveRequestQueue` (avoids double-queuing)
+- `AgentEvent` wraps `SessionEvent` (no duplicate variants)
+- Operators compile directly to `Agent` impls (no IR — single backend)
+- `FnTool::typed<T>()` with `schemars` for auto-generated schemas (no proc macro, type-safe args)
+- `ToolSpec` enum replacing all-optional `Tool` struct (illegal states unrepresentable)
+- `Bytes` (Arc refcount) for audio fan-out instead of `Vec<u8>` clone (zero-copy broadcast)
+- `CancellationToken` on all tool calls with configurable timeout
+- Tentative barge-in (duck → confirm → flush) to prevent false-positive silence
+- `bytemuck::cast_slice` for zero-copy i16↔u8 on audio hot path
+- Drop-oldest backpressure for audio send queue
 
 **Tech Stack:** Rust 2021, Tokio 1.x, tokio-tungstenite, serde/serde_json, PyO3 0.23, maturin, DashMap, parking_lot, async-trait, tokio-util (CancellationToken)
 
@@ -14,19 +26,19 @@
 
 ## Phase 1: Workspace Scaffold + Layer 0 Protocol Fixes
 
-### Task 1: Create workspace structure and move existing code to `rs-genai`
+### Task 1: Create workspace structure and move existing code to `gemini-live-wire`
 
 **Files:**
 - Create: `Cargo.toml` (workspace root — replaces existing)
-- Create: `crates/rs-genai/Cargo.toml`
-- Create: `crates/rs-genai/src/lib.rs`
-- Move: `src/protocol/` → `crates/rs-genai/src/protocol/`
-- Move: `src/transport/` → `crates/rs-genai/src/transport/`
-- Move: `src/buffer/` → `crates/rs-genai/src/buffer/`
-- Move: `src/vad/` → `crates/rs-genai/src/vad/`
-- Move: `src/session/` → `crates/rs-genai/src/session/`
-- Move: `src/telemetry/` → `crates/rs-genai/src/telemetry/`
-- Move: `src/flow/` → `crates/rs-genai/src/flow/`
+- Create: `crates/gemini-live-wire/Cargo.toml`
+- Create: `crates/gemini-live-wire/src/lib.rs`
+- Move: `src/protocol/` → `crates/gemini-live-wire/src/protocol/`
+- Move: `src/transport/` → `crates/gemini-live-wire/src/transport/`
+- Move: `src/buffer/` → `crates/gemini-live-wire/src/buffer/`
+- Move: `src/vad/` → `crates/gemini-live-wire/src/vad/`
+- Move: `src/session/` → `crates/gemini-live-wire/src/session/`
+- Move: `src/telemetry/` → `crates/gemini-live-wire/src/telemetry/`
+- Move: `src/flow/` → `crates/gemini-live-wire/src/flow/`
 
 **Step 1: Create workspace root Cargo.toml**
 
@@ -35,7 +47,7 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/rs-genai",
+    "crates/gemini-live-wire",
 ]
 
 [workspace.package]
@@ -46,22 +58,22 @@ license = "Apache-2.0"
 **Step 2: Create crates directory and move source files**
 
 ```bash
-mkdir -p crates/rs-genai/src
+mkdir -p crates/gemini-live-wire/src
 # Move core wire modules
-cp -r src/protocol crates/rs-genai/src/
-cp -r src/transport crates/rs-genai/src/
-cp -r src/buffer crates/rs-genai/src/
-cp -r src/vad crates/rs-genai/src/
-cp -r src/session crates/rs-genai/src/
-cp -r src/telemetry crates/rs-genai/src/
-cp -r src/flow crates/rs-genai/src/
+cp -r src/protocol crates/gemini-live-wire/src/
+cp -r src/transport crates/gemini-live-wire/src/
+cp -r src/buffer crates/gemini-live-wire/src/
+cp -r src/vad crates/gemini-live-wire/src/
+cp -r src/session crates/gemini-live-wire/src/
+cp -r src/telemetry crates/gemini-live-wire/src/
+cp -r src/flow crates/gemini-live-wire/src/
 ```
 
-**Step 3: Create `crates/rs-genai/Cargo.toml`**
+**Step 3: Create `crates/gemini-live-wire/Cargo.toml`**
 
 ```toml
 [package]
-name = "rs-genai"
+name = "gemini-live-wire"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
@@ -100,10 +112,10 @@ proptest = "1"
 tokio-test = "0.4"
 ```
 
-**Step 4: Create `crates/rs-genai/src/lib.rs`**
+**Step 4: Create `crates/gemini-live-wire/src/lib.rs`**
 
 ```rust
-//! # rs-genai
+//! # gemini-live-wire
 //!
 //! Raw wire protocol and transport for the Gemini Multimodal Live API.
 //! This crate provides zero-abstraction access to the Gemini Live WebSocket API.
@@ -133,11 +145,11 @@ pub mod prelude {
 
 **Step 5: Fix all `use crate::` paths in moved files**
 
-Every file in `crates/rs-genai/src/` that references `use crate::protocol`, `use crate::session`, etc. stays unchanged since they're now within the same crate. The key change is removing any references to modules that did NOT move (`app`, `call`, `client`, `context`, `prompt`, `state`, `pipeline`, `agent`).
+Every file in `crates/gemini-live-wire/src/` that references `use crate::protocol`, `use crate::session`, etc. stays unchanged since they're now within the same crate. The key change is removing any references to modules that did NOT move (`app`, `call`, `client`, `context`, `prompt`, `state`, `pipeline`, `agent`).
 
 Grep for any cross-references:
 ```bash
-grep -r "use crate::" crates/rs-genai/src/ | grep -E "(app|call|client|context|prompt|state::ConversationState|pipeline|agent)"
+grep -r "use crate::" crates/gemini-live-wire/src/ | grep -E "(app|call|client|context|prompt|state::ConversationState|pipeline|agent)"
 ```
 
 Fix any found references (these modules belong to higher layers).
@@ -145,7 +157,7 @@ Fix any found references (these modules belong to higher layers).
 **Step 6: Verify it compiles**
 
 ```bash
-cd crates/rs-genai && cargo check
+cd crates/gemini-live-wire && cargo check
 ```
 
 Expected: Compiles clean. All existing tests in `protocol/messages.rs` and `protocol/types.rs` pass.
@@ -153,7 +165,7 @@ Expected: Compiles clean. All existing tests in `protocol/messages.rs` and `prot
 **Step 7: Run existing tests**
 
 ```bash
-cd crates/rs-genai && cargo test
+cd crates/gemini-live-wire && cargo test
 ```
 
 Expected: All existing unit tests pass.
@@ -162,7 +174,7 @@ Expected: All existing unit tests pass.
 
 ```bash
 git add -A
-git commit -m "refactor: extract rs-genai crate from monolith"
+git commit -m "refactor: extract gemini-live-wire crate from monolith"
 ```
 
 ---
@@ -170,13 +182,13 @@ git commit -m "refactor: extract rs-genai crate from monolith"
 ### Task 2: Fix `Tool` type — add built-in tools (urlContext, googleSearch, codeExecution)
 
 **Files:**
-- Modify: `crates/rs-genai/src/protocol/types.rs`
-- Modify: `crates/rs-genai/src/protocol/messages.rs`
+- Modify: `crates/gemini-live-wire/src/protocol/types.rs`
+- Modify: `crates/gemini-live-wire/src/protocol/messages.rs`
 - Test: inline in `types.rs` and `messages.rs`
 
 **Step 1: Write failing tests for the new Tool type**
 
-Add to `crates/rs-genai/src/protocol/types.rs` tests:
+Add to `crates/gemini-live-wire/src/protocol/types.rs` tests:
 
 ```rust
 #[test]
@@ -227,14 +239,14 @@ fn tool_mixed_not_allowed() {
 **Step 2: Run tests to verify they fail**
 
 ```bash
-cd crates/rs-genai && cargo test tool_url_context
+cd crates/gemini-live-wire && cargo test tool_url_context
 ```
 
 Expected: FAIL — `Tool` type doesn't exist yet.
 
 **Step 3: Implement the new `Tool` type**
 
-In `crates/rs-genai/src/protocol/types.rs`, add the new type and replace `ToolDeclaration`:
+In `crates/gemini-live-wire/src/protocol/types.rs`, add the new type and replace `ToolDeclaration`:
 
 ```rust
 // Replace the existing ToolDeclaration with:
@@ -368,7 +380,7 @@ pub fn code_execution(mut self) -> Self {
 **Step 5: Run all tests**
 
 ```bash
-cd crates/rs-genai && cargo test
+cd crates/gemini-live-wire && cargo test
 ```
 
 Expected: ALL tests pass (existing + new).
@@ -385,7 +397,7 @@ git commit -m "feat(wire): add built-in tool types (urlContext, googleSearch, co
 ### Task 3: Add missing GenerationConfig fields (thinkingConfig, affectiveDialog, mediaResolution, seed)
 
 **Files:**
-- Modify: `crates/rs-genai/src/protocol/types.rs`
+- Modify: `crates/gemini-live-wire/src/protocol/types.rs`
 
 **Step 1: Write failing tests**
 
@@ -419,7 +431,7 @@ fn seed_serialization() {
 **Step 2: Run tests to verify they fail**
 
 ```bash
-cd crates/rs-genai && cargo test thinking_config
+cd crates/gemini-live-wire && cargo test thinking_config
 ```
 
 Expected: FAIL
@@ -493,7 +505,7 @@ Update `SessionConfig::from_endpoint` to initialize the new fields to `None`.
 **Step 4: Run tests**
 
 ```bash
-cd crates/rs-genai && cargo test
+cd crates/gemini-live-wire && cargo test
 ```
 
 Expected: ALL pass.
@@ -512,8 +524,8 @@ git commit -m "feat(wire): add thinkingConfig, affectiveDialog, mediaResolution,
 The current `SessionHandle` has `send_text()` which wraps content, but no direct `send_client_content()` for sending arbitrary conversation history — needed by the runtime layer.
 
 **Files:**
-- Modify: `crates/rs-genai/src/session/mod.rs`
-- Modify: `crates/rs-genai/src/transport/connection.rs`
+- Modify: `crates/gemini-live-wire/src/session/mod.rs`
+- Modify: `crates/gemini-live-wire/src/transport/connection.rs`
 
 **Step 1: Write failing test**
 
@@ -542,7 +554,7 @@ fn session_command_has_client_content_variant() {
 **Step 2: Run test to verify it fails**
 
 ```bash
-cd crates/rs-genai && cargo test session_command_has_client_content
+cd crates/gemini-live-wire && cargo test session_command_has_client_content
 ```
 
 Expected: FAIL — variant doesn't exist.
@@ -593,7 +605,7 @@ SessionCommand::SendClientContent { turns, turn_complete } => {
 **Step 4: Run tests**
 
 ```bash
-cd crates/rs-genai && cargo test
+cd crates/gemini-live-wire && cargo test
 ```
 
 Expected: ALL pass.
@@ -607,16 +619,16 @@ git commit -m "feat(wire): add send_client_content to SessionHandle"
 
 ---
 
-## Phase 2: Layer 1 — Agent Runtime (`rs-adk`)
+## Phase 2: Layer 1 — Agent Runtime (`gemini-live-runtime`)
 
-### Task 5: Scaffold `rs-adk` crate with core types
+### Task 5: Scaffold `gemini-live-runtime` crate with core types
 
 **Files:**
-- Create: `crates/rs-adk/Cargo.toml`
-- Create: `crates/rs-adk/src/lib.rs`
-- Create: `crates/rs-adk/src/live_queue.rs`
-- Create: `crates/rs-adk/src/state.rs`
-- Create: `crates/rs-adk/src/context.rs`
+- Create: `crates/gemini-live-runtime/Cargo.toml`
+- Create: `crates/gemini-live-runtime/src/lib.rs`
+- Create: `crates/gemini-live-runtime/src/agent_session.rs`
+- Create: `crates/gemini-live-runtime/src/state.rs`
+- Create: `crates/gemini-live-runtime/src/context.rs`
 - Modify: workspace `Cargo.toml`
 
 **Step 1: Add to workspace**
@@ -626,23 +638,23 @@ In root `Cargo.toml`:
 [workspace]
 resolver = "2"
 members = [
-    "crates/rs-genai",
-    "crates/rs-adk",
+    "crates/gemini-live-wire",
+    "crates/gemini-live-runtime",
 ]
 ```
 
-**Step 2: Create `crates/rs-adk/Cargo.toml`**
+**Step 2: Create `crates/gemini-live-runtime/Cargo.toml`**
 
 ```toml
 [package]
-name = "rs-adk"
+name = "gemini-live-runtime"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 description = "Agent runtime for Gemini Live — tools, streaming, agent transfer, middleware"
 
 [dependencies]
-rs-genai = { path = "../rs-genai" }
+gemini-live-wire = { path = "../gemini-live-wire" }
 tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7"
 async-trait = "0.1"
@@ -659,153 +671,200 @@ tokio-test = "0.4"
 
 [features]
 default = []
-tracing-support = ["dep:tracing", "rs-genai/tracing-support"]
+tracing-support = ["dep:tracing", "gemini-live-wire/tracing-support"]
 ```
 
-**Step 3: Create `crates/rs-adk/src/live_queue.rs`**
+**Step 3: Create `crates/gemini-live-runtime/src/agent_session.rs`**
 
 ```rust
-//! LiveRequestQueue — the input pipeline for live sessions.
+//! AgentSession — intercepting wrapper around SessionHandle.
 //!
-//! Rust equivalent of ADK Python's `LiveRequestQueue`. Uses Tokio MPSC channels.
+//! Replaces ADK Python's LiveRequestQueue. Instead of adding a second queue
+//! on top of SessionHandle's existing mpsc channel, this wraps SessionHandle
+//! and intercepts sends for: (1) input fan-out to streaming tools,
+//! (2) middleware hooks, (3) state tracking.
+//!
+//! Data flow: App → AgentSession → SessionHandle → WebSocket
+//!                                ↘ broadcast to input-streaming tools
+//!
+//! ONE queue, ONE consumer task, zero-copy on the hot path.
 
-use rs_genai::prelude::{Blob, Content, Part};
-use tokio::sync::mpsc;
+use gemini_live_wire::prelude::{FunctionResponse};
+use gemini_live_wire::session::{SessionEvent, SessionHandle};
+use tokio::sync::broadcast;
 
-/// A request that can be sent into a live session.
+use crate::error::AgentError;
+use crate::state::State;
+
+/// Input events broadcast to input-streaming tools.
+/// Distinct from SessionCommand — this is observation-only.
 #[derive(Debug, Clone)]
-pub enum LiveRequest {
-    /// Text or function response content.
-    Content(Content),
-    /// Realtime audio/video blob.
-    Realtime(Blob),
-    /// User started speaking (VAD signal).
+pub enum InputEvent {
+    /// Raw PCM16 audio bytes.
+    Audio(Vec<u8>),
+    /// Text content.
+    Text(String),
+    /// User started speaking.
     ActivityStart,
-    /// User stopped speaking (VAD signal).
+    /// User stopped speaking.
     ActivityEnd,
-    /// Graceful shutdown signal.
-    Close,
 }
 
-/// The sending half — cheaply cloneable, given to application code and tools.
+/// Intercepting wrapper around SessionHandle.
+///
+/// Adds input fan-out, middleware hooks, and state tracking without
+/// introducing a second queue (avoids double-queuing).
 #[derive(Clone)]
-pub struct LiveSender {
-    tx: mpsc::Sender<LiveRequest>,
+pub struct AgentSession {
+    /// The underlying wire-level session (Layer 0).
+    session: SessionHandle,
+    /// Fan-out for input-streaming tools.
+    /// Zero-cost when no tools are subscribed (receiver_count == 0).
+    input_broadcast: broadcast::Sender<InputEvent>,
+    /// Conversation state container.
+    state: State,
 }
 
-impl LiveSender {
-    /// Send content (text turns or function responses).
-    pub async fn send_content(&self, content: Content) -> Result<(), LiveQueueError> {
-        self.tx.send(LiveRequest::Content(content)).await
-            .map_err(|_| LiveQueueError::Closed)
+impl AgentSession {
+    /// Create a new AgentSession wrapping a SessionHandle.
+    pub fn new(session: SessionHandle) -> Self {
+        let (input_broadcast, _) = broadcast::channel(256);
+        Self {
+            session,
+            input_broadcast,
+            state: State::new(),
+        }
     }
 
-    /// Send a text message as a user turn with turn_complete=true.
-    pub async fn send_text(&self, text: impl Into<String>) -> Result<(), LiveQueueError> {
-        let content = Content {
-            role: Some("user".to_string()),
-            parts: vec![Part::Text { text: text.into() }],
-        };
-        self.send_content(content).await
+    /// Send audio data. Fans out to input-streaming tools ONLY if listeners exist.
+    pub async fn send_audio(&self, data: Vec<u8>) -> Result<(), AgentError> {
+        // Fan-out ONLY if input-streaming tools are listening (zero-copy when not)
+        if self.input_broadcast.receiver_count() > 0 {
+            let _ = self.input_broadcast.send(InputEvent::Audio(data.clone()));
+        }
+        // Forward directly to Layer 0 (ONE hop to WebSocket)
+        self.session.send_audio(data).await.map_err(AgentError::Session)
     }
 
-    /// Send realtime audio/video blob.
-    pub async fn send_realtime(&self, blob: Blob) -> Result<(), LiveQueueError> {
-        self.tx.send(LiveRequest::Realtime(blob)).await
-            .map_err(|_| LiveQueueError::Closed)
+    /// Send a text message.
+    pub async fn send_text(&self, text: impl Into<String>) -> Result<(), AgentError> {
+        let t = text.into();
+        if self.input_broadcast.receiver_count() > 0 {
+            let _ = self.input_broadcast.send(InputEvent::Text(t.clone()));
+        }
+        self.session.send_text(t).await.map_err(AgentError::Session)
     }
 
-    /// Signal that the user started speaking.
-    pub fn send_activity_start(&self) -> Result<(), LiveQueueError> {
-        self.tx.try_send(LiveRequest::ActivityStart)
-            .map_err(|_| LiveQueueError::Closed)
+    /// Send tool responses.
+    pub async fn send_tool_response(
+        &self,
+        responses: Vec<FunctionResponse>,
+    ) -> Result<(), AgentError> {
+        self.session.send_tool_response(responses).await.map_err(AgentError::Session)
     }
 
-    /// Signal that the user stopped speaking.
-    pub fn send_activity_end(&self) -> Result<(), LiveQueueError> {
-        self.tx.try_send(LiveRequest::ActivityEnd)
-            .map_err(|_| LiveQueueError::Closed)
+    /// Signal activity start (user started speaking).
+    pub async fn signal_activity_start(&self) -> Result<(), AgentError> {
+        if self.input_broadcast.receiver_count() > 0 {
+            let _ = self.input_broadcast.send(InputEvent::ActivityStart);
+        }
+        self.session.signal_activity_start().await.map_err(AgentError::Session)
     }
 
-    /// Signal graceful shutdown.
-    pub fn close(&self) {
-        let _ = self.tx.try_send(LiveRequest::Close);
+    /// Signal activity end (user stopped speaking).
+    pub async fn signal_activity_end(&self) -> Result<(), AgentError> {
+        if self.input_broadcast.receiver_count() > 0 {
+            let _ = self.input_broadcast.send(InputEvent::ActivityEnd);
+        }
+        self.session.signal_activity_end().await.map_err(AgentError::Session)
     }
-}
 
-/// The receiving half — owned by the agent runner's send task.
-pub struct LiveReceiver {
-    rx: mpsc::Receiver<LiveRequest>,
-}
-
-impl LiveReceiver {
-    /// Receive the next request (blocks until available or channel closed).
-    pub async fn recv(&mut self) -> Option<LiveRequest> {
-        self.rx.recv().await
+    /// Gracefully disconnect.
+    pub async fn disconnect(&self) -> Result<(), AgentError> {
+        self.session.disconnect().await.map_err(AgentError::Session)
     }
-}
 
-/// Create a new live request queue with the given capacity.
-pub fn live_queue(capacity: usize) -> (LiveSender, LiveReceiver) {
-    let (tx, rx) = mpsc::channel(capacity);
-    (LiveSender { tx }, LiveReceiver { rx })
-}
+    /// Subscribe to input events (for input-streaming tools).
+    pub fn subscribe_input(&self) -> broadcast::Receiver<InputEvent> {
+        self.input_broadcast.subscribe()
+    }
 
-/// Errors from the live queue.
-#[derive(Debug, Clone, thiserror::Error)]
-pub enum LiveQueueError {
-    #[error("Live queue closed")]
-    Closed,
+    /// Subscribe to session events (delegates to SessionHandle).
+    pub fn subscribe_events(&self) -> broadcast::Receiver<SessionEvent> {
+        self.session.subscribe()
+    }
+
+    /// Access the underlying SessionHandle for advanced wire-level control.
+    pub fn wire(&self) -> &SessionHandle {
+        &self.session
+    }
+
+    /// Access conversation state.
+    pub fn state(&self) -> &State {
+        &self.state
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::sync::{broadcast, mpsc, watch};
+    use gemini_live_wire::session::{SessionHandle, SessionState, SessionPhase};
+    use std::sync::Arc;
+
+    fn mock_session_handle() -> SessionHandle {
+        let (cmd_tx, _cmd_rx) = mpsc::channel(16);
+        let (evt_tx, _) = broadcast::channel(16);
+        let (phase_tx, phase_rx) = watch::channel(SessionPhase::Disconnected);
+        let state = Arc::new(SessionState::new(phase_tx));
+        SessionHandle::new(cmd_tx, evt_tx, state, phase_rx)
+    }
 
     #[tokio::test]
-    async fn send_and_receive_text() {
-        let (sender, mut receiver) = live_queue(16);
-        sender.send_text("hello").await.unwrap();
-        let req = receiver.recv().await.unwrap();
-        match req {
-            LiveRequest::Content(c) => {
-                assert_eq!(c.role, Some("user".to_string()));
-                assert_eq!(c.parts.len(), 1);
-            }
-            _ => panic!("expected Content"),
+    async fn send_audio_without_subscribers_no_clone() {
+        let handle = mock_session_handle();
+        let session = AgentSession::new(handle);
+        // No subscribers — input_broadcast.receiver_count() == 0
+        // send_audio should NOT clone data for broadcast
+        assert_eq!(session.input_broadcast.receiver_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn send_audio_with_subscriber_broadcasts() {
+        let handle = mock_session_handle();
+        let session = AgentSession::new(handle);
+        let mut input_rx = session.subscribe_input();
+        assert_eq!(session.input_broadcast.receiver_count(), 1);
+
+        // send_audio will fail at SessionHandle level (no real WS), but
+        // the broadcast should still fire
+        let data = vec![1, 2, 3, 4];
+        let _ = session.send_audio(data.clone()).await;
+
+        match input_rx.try_recv() {
+            Ok(InputEvent::Audio(received)) => assert_eq!(received, data),
+            other => panic!("expected Audio, got {:?}", other),
         }
     }
 
-    #[tokio::test]
-    async fn close_signal() {
-        let (sender, mut receiver) = live_queue(16);
-        sender.close();
-        let req = receiver.recv().await.unwrap();
-        assert!(matches!(req, LiveRequest::Close));
+    #[test]
+    fn agent_session_is_clone() {
+        let handle = mock_session_handle();
+        let session = AgentSession::new(handle);
+        let _clone = session.clone();
     }
 
-    #[tokio::test]
-    async fn activity_signals() {
-        let (sender, mut receiver) = live_queue(16);
-        sender.send_activity_start().unwrap();
-        sender.send_activity_end().unwrap();
-        assert!(matches!(receiver.recv().await.unwrap(), LiveRequest::ActivityStart));
-        assert!(matches!(receiver.recv().await.unwrap(), LiveRequest::ActivityEnd));
-    }
-
-    #[tokio::test]
-    async fn sender_is_clone() {
-        let (sender, mut receiver) = live_queue(16);
-        let sender2 = sender.clone();
-        sender.send_text("from 1").await.unwrap();
-        sender2.send_text("from 2").await.unwrap();
-        let _ = receiver.recv().await.unwrap();
-        let _ = receiver.recv().await.unwrap();
+    #[test]
+    fn state_accessible() {
+        let handle = mock_session_handle();
+        let session = AgentSession::new(handle);
+        session.state().set("key", "value");
+        assert_eq!(session.state().get::<String>("key"), Some("value".to_string()));
     }
 }
 ```
 
-**Step 4: Create `crates/rs-adk/src/state.rs`**
+**Step 4: Create `crates/gemini-live-runtime/src/state.rs`**
 
 ```rust
 //! Typed key-value state container for agents.
@@ -935,26 +994,26 @@ mod tests {
 }
 ```
 
-**Step 5: Create `crates/rs-adk/src/lib.rs`**
+**Step 5: Create `crates/gemini-live-runtime/src/lib.rs`**
 
 ```rust
-//! # rs-adk
+//! # gemini-live-runtime
 //!
 //! Agent runtime for the Gemini Multimodal Live API.
-//! Provides the Agent trait, LiveRequestQueue, tool dispatch,
-//! streaming tools, agent transfer, and middleware.
+//! Provides the Agent trait, AgentSession (intercepting wrapper around SessionHandle),
+//! tool dispatch, streaming tools, agent transfer, and middleware.
 
-pub mod live_queue;
+pub mod agent_session;
 pub mod state;
 
 // Re-export wire types that runtime users need
-pub use rs_genai;
+pub use gemini_live_wire;
 ```
 
 **Step 6: Verify it compiles and tests pass**
 
 ```bash
-cargo test -p rs-adk
+cargo test -p gemini-live-runtime
 ```
 
 Expected: All tests pass.
@@ -963,7 +1022,7 @@ Expected: All tests pass.
 
 ```bash
 git add -A
-git commit -m "feat(runtime): scaffold rs-adk with LiveRequestQueue and State"
+git commit -m "feat(runtime): scaffold gemini-live-runtime with AgentSession and State"
 ```
 
 ---
@@ -971,16 +1030,16 @@ git commit -m "feat(runtime): scaffold rs-adk with LiveRequestQueue and State"
 ### Task 6: Implement the Agent trait and AgentError
 
 **Files:**
-- Create: `crates/rs-adk/src/agent.rs`
-- Create: `crates/rs-adk/src/error.rs`
-- Modify: `crates/rs-adk/src/lib.rs`
+- Create: `crates/gemini-live-runtime/src/agent.rs`
+- Create: `crates/gemini-live-runtime/src/error.rs`
+- Modify: `crates/gemini-live-runtime/src/lib.rs`
 
-**Step 1: Create `crates/rs-adk/src/error.rs`**
+**Step 1: Create `crates/gemini-live-runtime/src/error.rs`**
 
 ```rust
 //! Error types for the agent runtime.
 
-use rs_genai::session::SessionError;
+use gemini_live_wire::session::SessionError;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AgentError {
@@ -996,8 +1055,8 @@ pub enum AgentError {
     #[error("Agent transfer failed: {0}")]
     TransferFailed(String),
 
-    #[error("Live queue closed")]
-    QueueClosed,
+    #[error("Agent session closed")]
+    SessionClosed,
 
     #[error("Timeout")]
     Timeout,
@@ -1025,7 +1084,7 @@ pub enum ToolError {
 }
 ```
 
-**Step 2: Create `crates/rs-adk/src/agent.rs`**
+**Step 2: Create `crates/gemini-live-runtime/src/agent.rs`**
 
 ```rust
 //! The core Agent trait and AgentEvent type.
@@ -1033,7 +1092,7 @@ pub enum ToolError {
 use std::time::Duration;
 
 use async_trait::async_trait;
-use rs_genai::prelude::{FunctionCall, Tool};
+use gemini_live_wire::prelude::{FunctionCall, Tool};
 
 use crate::context::InvocationContext;
 use crate::error::AgentError;
@@ -1061,41 +1120,24 @@ pub trait Agent: Send + Sync + 'static {
 }
 
 /// Events emitted by agents during live execution.
-/// Application code subscribes to these via broadcast channel.
+/// Wraps SessionEvent (Layer 0) and adds agent-specific events.
+/// No duplicate variants — use AgentEvent::Session(_) for wire-level events.
 #[derive(Debug, Clone)]
 pub enum AgentEvent {
-    /// Agent started running.
-    Started { agent_name: String },
-    /// Incremental text from model.
-    TextDelta(String),
-    /// Complete text for a turn.
-    TextComplete(String),
-    /// Audio data from model.
-    AudioData(Vec<u8>),
-    /// Input transcription (user speech -> text).
-    InputTranscription(String),
-    /// Output transcription (model speech -> text).
-    OutputTranscription(String),
-    /// Tool was called.
+    /// Passthrough of wire-level session events (text, audio, turn lifecycle).
+    Session(gemini_live_wire::session::SessionEvent),
+    /// Agent lifecycle.
+    AgentStarted { name: String },
+    AgentCompleted { name: String },
+    /// Tool lifecycle (not in SessionEvent).
     ToolCallStarted { name: String, args: serde_json::Value },
-    /// Tool returned a result.
     ToolCallCompleted { name: String, result: serde_json::Value, duration: Duration },
-    /// Tool errored.
     ToolCallFailed { name: String, error: String },
-    /// Streaming tool yielded an intermediate result.
     StreamingToolYield { name: String, value: serde_json::Value },
-    /// Model's turn is complete.
-    TurnComplete,
-    /// User interrupted the model (barge-in).
-    Interrupted,
-    /// Agent transferred to another agent.
+    /// Multi-agent lifecycle.
     AgentTransfer { from: String, to: String },
-    /// State was modified.
+    /// State changes.
     StateChanged { key: String },
-    /// Session disconnected.
-    Disconnected(Option<String>),
-    /// Non-fatal error.
-    Error(String),
 }
 
 #[cfg(test)]
@@ -1113,7 +1155,7 @@ mod tests {
 }
 ```
 
-**Step 3: Create a stub `crates/rs-adk/src/context.rs`**
+**Step 3: Create a stub `crates/gemini-live-runtime/src/context.rs`**
 
 ```rust
 //! InvocationContext — the session state container flowing through agent execution.
@@ -1125,23 +1167,19 @@ use parking_lot::Mutex;
 use tokio::sync::broadcast;
 
 use crate::agent::AgentEvent;
-use crate::live_queue::LiveSender;
-use crate::state::State;
+use crate::agent_session::AgentSession;
 
 /// The context object that flows through agent execution.
 /// Holds everything a running agent needs.
+///
+/// Note: State is accessed via agent_session.state() — single source of truth.
 pub struct InvocationContext {
-    /// The live session input queue (send side).
-    pub live_sender: LiveSender,
+    /// AgentSession wraps SessionHandle with fan-out + middleware.
+    /// Replaces LiveSender — sends go directly through SessionHandle (one hop).
+    pub agent_session: AgentSession,
 
     /// Event bus — agents emit events here, application code subscribes.
     pub event_tx: broadcast::Sender<AgentEvent>,
-
-    /// Typed state container.
-    pub state: State,
-
-    /// Session resumption handle for transparent reconnection.
-    pub resumption_handle: Arc<Mutex<Option<String>>>,
 }
 
 impl InvocationContext {
@@ -1149,25 +1187,30 @@ impl InvocationContext {
     pub fn emit(&self, event: AgentEvent) {
         let _ = self.event_tx.send(event);
     }
+
+    /// Convenience: access the state container.
+    pub fn state(&self) -> &crate::state::State {
+        self.agent_session.state()
+    }
 }
 ```
 
 **Step 4: Update `lib.rs`**
 
 ```rust
-pub mod live_queue;
+pub mod agent_session;
 pub mod state;
 pub mod agent;
 pub mod error;
 pub mod context;
 
-pub use rs_genai;
+pub use gemini_live_wire;
 ```
 
 **Step 5: Verify compilation**
 
 ```bash
-cargo test -p rs-adk
+cargo test -p gemini-live-runtime
 ```
 
 Expected: ALL pass.
@@ -1184,8 +1227,8 @@ git commit -m "feat(runtime): add Agent trait, AgentEvent, AgentError, Invocatio
 ### Task 7: Implement ToolDispatcher with three tool types
 
 **Files:**
-- Create: `crates/rs-adk/src/tool.rs`
-- Modify: `crates/rs-adk/src/lib.rs`
+- Create: `crates/gemini-live-runtime/src/tool.rs`
+- Modify: `crates/gemini-live-runtime/src/lib.rs`
 
 **Step 1: Write failing tests**
 
@@ -1247,10 +1290,10 @@ use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use rs_genai::prelude::{FunctionCall, FunctionDeclaration, FunctionResponse, Tool};
+use gemini_live_wire::prelude::{FunctionCall, FunctionDeclaration, FunctionResponse, Tool};
 
 use crate::error::ToolError;
-use crate::live_queue::LiveRequest;
+use crate::agent_session::InputEvent;
 
 /// A regular tool — called once, returns a result.
 #[async_trait]
@@ -1283,7 +1326,7 @@ pub trait InputStreamingTool: Send + Sync + 'static {
     async fn run(
         &self,
         args: serde_json::Value,
-        input_rx: broadcast::Receiver<LiveRequest>,
+        input_rx: broadcast::Receiver<InputEvent>,
         yield_tx: mpsc::Sender<serde_json::Value>,
     ) -> Result<(), ToolError>;
 }
@@ -1306,7 +1349,7 @@ pub enum ToolKind {
 /// Handle to a running streaming tool.
 pub struct ActiveStreamingTool {
     pub task: JoinHandle<()>,
-    pub input_tx: Option<broadcast::Sender<LiveRequest>>,
+    pub input_tx: Option<broadcast::Sender<InputEvent>>,
     pub cancel: CancellationToken,
 }
 
@@ -1431,7 +1474,7 @@ impl ToolDispatcher {
 **Step 3: Update lib.rs and run tests**
 
 ```bash
-cargo test -p rs-adk
+cargo test -p gemini-live-runtime
 ```
 
 Expected: ALL pass.
@@ -1448,8 +1491,8 @@ git commit -m "feat(runtime): add ToolDispatcher with regular, streaming, and in
 ### Task 8: Implement Middleware trait and built-in middleware
 
 **Files:**
-- Create: `crates/rs-adk/src/middleware.rs`
-- Modify: `crates/rs-adk/src/lib.rs`
+- Create: `crates/gemini-live-runtime/src/middleware.rs`
+- Modify: `crates/gemini-live-runtime/src/lib.rs`
 
 **Step 1: Implement middleware.rs**
 
@@ -1461,7 +1504,7 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 
-use rs_genai::prelude::FunctionCall;
+use gemini_live_wire::prelude::FunctionCall;
 
 use crate::agent::AgentEvent;
 use crate::context::InvocationContext;
@@ -1612,7 +1655,7 @@ mod tests {
 **Step 2: Update lib.rs, compile, test, commit**
 
 ```bash
-cargo test -p rs-adk
+cargo test -p gemini-live-runtime
 git add -A
 git commit -m "feat(runtime): add Middleware trait, MiddlewareChain, and built-in middleware"
 ```
@@ -1622,8 +1665,8 @@ git commit -m "feat(runtime): add Middleware trait, MiddlewareChain, and built-i
 ### Task 9: Implement AgentRegistry for agent transfer routing
 
 **Files:**
-- Create: `crates/rs-adk/src/router.rs`
-- Modify: `crates/rs-adk/src/lib.rs`
+- Create: `crates/gemini-live-runtime/src/router.rs`
+- Modify: `crates/gemini-live-runtime/src/lib.rs`
 
 **Step 1: Implement router.rs**
 
@@ -1694,30 +1737,30 @@ mod tests {
 **Step 2: Update lib.rs, compile, test, commit**
 
 ```bash
-cargo test -p rs-adk
+cargo test -p gemini-live-runtime
 git add -A
 git commit -m "feat(runtime): add AgentRegistry for agent transfer routing"
 ```
 
 ---
 
-## Phase 3: Layer 2 — Fluent DX (`adk-rs-fluent`)
+## Phase 3: Layer 2 — Fluent DX (`gemini-live`)
 
-### Task 10: Scaffold `adk-rs-fluent` crate with AgentBuilder
+### Task 10: Scaffold `gemini-live` crate with AgentBuilder
 
 **Files:**
-- Create: `crates/adk-rs-fluent/Cargo.toml`
-- Create: `crates/adk-rs-fluent/src/lib.rs`
-- Create: `crates/adk-rs-fluent/src/builder.rs`
+- Create: `crates/gemini-live/Cargo.toml`
+- Create: `crates/gemini-live/src/lib.rs`
+- Create: `crates/gemini-live/src/builder.rs`
 - Modify: workspace `Cargo.toml`
 
 **Step 1: Add to workspace**
 
 ```toml
 members = [
-    "crates/rs-genai",
-    "crates/rs-adk",
-    "crates/adk-rs-fluent",
+    "crates/gemini-live-wire",
+    "crates/gemini-live-runtime",
+    "crates/gemini-live",
 ]
 ```
 
@@ -1725,15 +1768,15 @@ members = [
 
 ```toml
 [package]
-name = "adk-rs-fluent"
+name = "gemini-live"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 description = "Fluent DX for Gemini Live — builder API, operator algebra, composition modules"
 
 [dependencies]
-rs-genai = { path = "../rs-genai" }
-rs-adk = { path = "../rs-adk" }
+gemini-live-wire = { path = "../gemini-live-wire" }
+gemini-live-runtime = { path = "../gemini-live-runtime" }
 tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
@@ -1757,22 +1800,22 @@ Implement the copy-on-write fluent builder with all setter methods as specified 
 ```rust
 pub mod builder;
 
-pub use rs_genai;
-pub use rs_adk;
+pub use gemini_live_wire;
+pub use gemini_live_runtime;
 
 pub mod prelude {
     pub use crate::builder::*;
-    pub use rs_genai::prelude::*;
-    pub use rs_adk::agent::*;
-    pub use rs_adk::state::State;
-    pub use rs_adk::live_queue::*;
+    pub use gemini_live_wire::prelude::*;
+    pub use gemini_live_runtime::agent::*;
+    pub use gemini_live_runtime::state::State;
+    pub use gemini_live_runtime::agent_session::*;
 }
 ```
 
 **Step 5: Compile, test, commit**
 
 ```bash
-cargo test -p adk-rs-fluent
+cargo test -p gemini-live
 git add -A
 git commit -m "feat(fluent): scaffold gemini-live crate with AgentBuilder"
 ```
@@ -1782,9 +1825,9 @@ git commit -m "feat(fluent): scaffold gemini-live crate with AgentBuilder"
 ### Task 11: Implement operator overloading (>>, |, *, //)
 
 **Files:**
-- Create: `crates/adk-rs-fluent/src/operators.rs`
-- Create: `crates/adk-rs-fluent/src/ir.rs`
-- Modify: `crates/adk-rs-fluent/src/lib.rs`
+- Create: `crates/gemini-live/src/operators.rs`
+- Create: `crates/gemini-live/src/ir.rs`
+- Modify: `crates/gemini-live/src/lib.rs`
 
 Implement the `Composable` trait and operator overloads as specified in design doc Section 5.3. Define `Pipeline`, `FanOut`, `Loop`, `Fallback` workflow types. The IR nodes serve as the intermediate representation.
 
@@ -1806,12 +1849,12 @@ git commit -m "feat(fluent): add operator algebra (>>, |, *, //) for agent compo
 ### Task 12: Implement composition modules (S, C, P, M, T)
 
 **Files:**
-- Create: `crates/adk-rs-fluent/src/compose/mod.rs`
-- Create: `crates/adk-rs-fluent/src/compose/state.rs` (S module)
-- Create: `crates/adk-rs-fluent/src/compose/context.rs` (C module)
-- Create: `crates/adk-rs-fluent/src/compose/prompt.rs` (P module)
-- Create: `crates/adk-rs-fluent/src/compose/middleware.rs` (M module)
-- Create: `crates/adk-rs-fluent/src/compose/tools.rs` (T module)
+- Create: `crates/gemini-live/src/compose/mod.rs`
+- Create: `crates/gemini-live/src/compose/state.rs` (S module)
+- Create: `crates/gemini-live/src/compose/context.rs` (C module)
+- Create: `crates/gemini-live/src/compose/prompt.rs` (P module)
+- Create: `crates/gemini-live/src/compose/middleware.rs` (M module)
+- Create: `crates/gemini-live/src/compose/tools.rs` (T module)
 
 Implement each module as specified in design doc Section 5.4. Each module has:
 - A struct with static factory methods
@@ -1828,8 +1871,8 @@ git commit -m "feat(fluent): add S, C, P, M, T composition modules"
 ### Task 13: Implement pre-built patterns and testing utilities
 
 **Files:**
-- Create: `crates/adk-rs-fluent/src/patterns.rs`
-- Create: `crates/adk-rs-fluent/src/testing.rs`
+- Create: `crates/gemini-live/src/patterns.rs`
+- Create: `crates/gemini-live/src/testing.rs`
 
 Implement the patterns from design doc Section 5.6 (`review_loop`, `cascade`, `fan_out_merge`, `supervised`, `map_over`) and testing utilities from Section 5.7 (`MockBackend`, `AgentHarness`, `check_contracts`).
 
@@ -1842,14 +1885,14 @@ git commit -m "feat(fluent): add pre-built patterns and testing utilities"
 
 ## Phase 4: Python Bindings
 
-### Task 14: Scaffold `adk-rs-python` crate with PyO3
+### Task 14: Scaffold `gemini-live-python` crate with PyO3
 
 **Files:**
-- Create: `crates/adk-rs-fluent-python/Cargo.toml`
-- Create: `crates/adk-rs-fluent-python/pyproject.toml`
-- Create: `crates/adk-rs-fluent-python/src/lib.rs`
-- Create: `crates/adk-rs-fluent-python/src/py_types.rs`
-- Create: `crates/adk-rs-fluent-python/src/py_config.rs`
+- Create: `crates/gemini-live-python/Cargo.toml`
+- Create: `crates/gemini-live-python/pyproject.toml`
+- Create: `crates/gemini-live-python/src/lib.rs`
+- Create: `crates/gemini-live-python/src/py_types.rs`
+- Create: `crates/gemini-live-python/src/py_config.rs`
 - Modify: workspace `Cargo.toml`
 
 Set up the basic PyO3 module structure with type wrappers. Verify it builds with `maturin develop`.
@@ -1864,10 +1907,10 @@ git commit -m "feat(python): scaffold PyO3 bindings crate"
 ### Task 15: Implement Python session and event bindings
 
 **Files:**
-- Create: `crates/adk-rs-fluent-python/src/py_session.rs`
-- Create: `crates/adk-rs-fluent-python/src/py_events.rs`
-- Create: `crates/adk-rs-fluent-python/src/py_agent.rs`
-- Create: `crates/adk-rs-fluent-python/src/py_tool.rs`
+- Create: `crates/gemini-live-python/src/py_session.rs`
+- Create: `crates/gemini-live-python/src/py_events.rs`
+- Create: `crates/gemini-live-python/src/py_agent.rs`
+- Create: `crates/gemini-live-python/src/py_tool.rs`
 
 Implement the three-tier Python API from design doc Section 6.2.
 
@@ -1885,7 +1928,7 @@ git commit -m "feat(python): implement session, event, agent, and tool bindings"
 **Files:**
 - Create: `examples/wire_raw_session.rs`
 
-A minimal example using only `rs-genai` to connect, send text, and print responses. Verifies the protocol fixes work end-to-end.
+A minimal example using only `gemini-live-wire` to connect, send text, and print responses. Verifies the protocol fixes work end-to-end.
 
 **Commit:**
 ```bash
@@ -1899,7 +1942,7 @@ git commit -m "feat: add wire-level raw session example"
 **Files:**
 - Create: `examples/runtime_agent.rs`
 
-An example using `rs-adk` with the Agent trait, ToolDispatcher, and LiveRequestQueue. Demonstrates function calling and streaming tools.
+An example using `gemini-live-runtime` with the Agent trait, ToolDispatcher, and AgentSession. Demonstrates function calling and streaming tools.
 
 **Commit:**
 ```bash
@@ -1913,7 +1956,7 @@ git commit -m "feat: add runtime agent example with tool dispatch"
 **Files:**
 - Create: `examples/fluent_pipeline.rs`
 
-An example using `adk-rs-fluent` with the operator algebra, composition modules, and builder API. The full "deep research" pipeline from the design doc.
+An example using `gemini-live` with the operator algebra, composition modules, and builder API. The full "deep research" pipeline from the design doc.
 
 **Commit:**
 ```bash
@@ -1937,12 +1980,155 @@ git commit -m "refactor: remove old monolithic src/ in favor of workspace crates
 
 ---
 
+---
+
+## Phase 6: Audit-Driven Hardening
+
+### Task 20: Wire protocol completeness (missing Gemini features)
+
+**Files:**
+- Modify: `crates/gemini-live-wire/src/protocol/types.rs`
+- Modify: `crates/gemini-live-wire/src/protocol/messages.rs`
+
+Add all missing wire features identified in JS SDK audit:
+- `ToolSpec` enum replacing all-optional `Tool` struct (sum type, not product type)
+- `Role` enum replacing `Option<String>` for `Content.role`
+- `Blob.data` as `Vec<u8>` with `#[serde(with = "base64_serde")]`
+- `RealtimeInputConfig`: `activity_handling`, `turn_coverage`
+- `ContextWindowCompression`, `Proactivity` in setup config
+- `RealtimeInput`: `video`, `text`, `audio_stream_end` fields
+- `ServerContent`: `generation_complete`, `grounding_metadata`, `turn_complete_reason`, `waiting_for_input`
+- `SessionResumptionUpdate`: `last_consumed_client_message_index`
+- `VoiceActivity` server message
+
+**Commit:**
+```bash
+git commit -m "feat(wire): complete wire protocol from JS SDK audit"
+```
+
+### Task 21: Audio hot path optimization
+
+**Files:**
+- Modify: `crates/gemini-live-wire/Cargo.toml` (add `bytemuck`)
+- Modify: `crates/gemini-live-wire/src/transport/connection.rs`
+
+Replace 6-allocation audio path with:
+1. `bytemuck::cast_slice` for zero-copy i16→u8
+2. Pre-allocated `SendBuffer` for base64 + JSON serialization
+3. `Bytes` type for audio data through channels
+
+**Commit:**
+```bash
+git commit -m "perf(wire): reduce audio hot path from 6 to 2 allocations"
+```
+
+### Task 22: Typed tool registration with schemars
+
+**Files:**
+- Modify: `crates/gemini-live-runtime/Cargo.toml` (add `schemars`)
+- Modify: `crates/gemini-live-runtime/src/tool.rs`
+
+Add `FnTool::typed<T: Deserialize + JsonSchema>()` alongside existing `FnTool::new()`.
+Auto-generate JSON Schema from struct. Deserialize args before calling handler.
+
+**Commit:**
+```bash
+git commit -m "feat(runtime): add FnTool::typed with auto-schema via schemars"
+```
+
+### Task 23: Tool timeout and cancellation
+
+**Files:**
+- Modify: `crates/gemini-live-runtime/src/tool.rs`
+
+Add `CancellationToken` parameter to `ToolFunction::call()`. Implement timeout
+wrapper in `ToolDispatcher`. On timeout: cancel token → grace period → abort → error response.
+
+**Commit:**
+```bash
+git commit -m "feat(runtime): add tool timeout and CancellationToken support"
+```
+
+### Task 24: Barge-in race condition fix
+
+**Files:**
+- Modify: `crates/gemini-live-wire/src/flow/barge_in.rs`
+
+Implement tentative barge-in: duck volume on VAD PendingSpeech, flush on confirmed
+Speech, restore on false positive.
+
+**Commit:**
+```bash
+git commit -m "fix(wire): tentative barge-in to prevent false-positive silence"
+```
+
+### Task 25: JoinHandle tracking and broadcast lag handling
+
+**Files:**
+- Modify: `crates/gemini-live-wire/src/transport/connection.rs`
+- Modify: `crates/gemini-live-wire/src/session/mod.rs`
+- Modify: `crates/gemini-live-runtime/src/agent_session.rs`
+
+Store connection_loop JoinHandle in SessionHandle. Use JoinSet for tool tasks.
+Handle RecvError::Lagged explicitly in event consumers.
+
+**Commit:**
+```bash
+git commit -m "fix(wire): track JoinHandles and handle broadcast lag"
+```
+
+### Task 26: Integration test infrastructure
+
+**Files:**
+- Create: `tests/integration/mock_server.rs`
+- Create: `tests/integration/connect_test.rs`
+- Create: `tests/integration/tool_dispatch_test.rs`
+
+Mock WebSocket server for end-to-end testing of connection, setup handshake,
+text exchange, tool dispatch, and reconnection.
+
+**Commit:**
+```bash
+git commit -m "test: add mock WebSocket server and integration tests"
+```
+
+### Task 27: Performance benchmarks
+
+**Files:**
+- Create: `benches/audio_pipeline.rs`
+- Create: `benches/session_memory.rs`
+
+Criterion benchmarks validating: audio frame latency, memory per session,
+concurrent session throughput.
+
+**Commit:**
+```bash
+git commit -m "bench: add audio pipeline and session memory benchmarks"
+```
+
+### Task 28: DX convenience APIs
+
+**Files:**
+- Create: `crates/gemini-live-wire/src/quick.rs` (quick_connect convenience fn)
+- Create: `crates/gemini-live-runtime/src/llm_agent.rs` (LlmAgent golden path)
+
+Add `quick_connect()` for 5-line hello world. Add `LlmAgent::builder()` that
+hides InvocationContext/ToolDispatcher/event loop from basic users.
+
+**Commit:**
+```bash
+git commit -m "feat: add quick_connect and LlmAgent convenience APIs"
+```
+
+---
+
 ## Summary
 
 | Phase | Tasks | Crate | Key Deliverables |
 |-------|-------|-------|-----------------|
-| 1 | 1-4 | `rs-genai` | Workspace scaffold, protocol fixes (Tool type, ThinkingConfig), send_client_content |
-| 2 | 5-9 | `rs-adk` | LiveRequestQueue, State, Agent trait, ToolDispatcher, Middleware, AgentRegistry |
-| 3 | 10-13 | `adk-rs-fluent` | AgentBuilder, operator algebra, S/C/P/M/T modules, patterns, testing |
-| 4 | 14-15 | `adk-rs-python` | PyO3 bindings with three-tier Python API |
+| 1 | 1-4 | `gemini-live-wire` | Workspace scaffold, protocol fixes (ToolSpec enum, ThinkingConfig), send_client_content |
+| 2 | 5-9 | `gemini-live-runtime` | AgentSession, State, Agent trait, ToolDispatcher, Middleware, AgentRegistry |
+| 3 | 10-13 | `gemini-live` | AgentBuilder, operator algebra, compose modules, patterns, testing |
+| 4 | 14-15 | `gemini-live-python` | PyO3 bindings with three-tier Python API |
 | 5 | 16-19 | All | Examples, cleanup |
+| 6 | 20-28 | All | Wire completeness, hot path optimization, typed tools, tool timeout, barge-in fix, JoinHandle tracking, integration tests, benchmarks, DX convenience APIs |
