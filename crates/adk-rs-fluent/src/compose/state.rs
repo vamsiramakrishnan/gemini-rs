@@ -141,6 +141,30 @@ impl S {
         StateTransform::new("map", f)
     }
 
+    /// Flatten a nested object key into the top level.
+    pub fn flatten(key: &str) -> StateTransform {
+        let key = key.to_string();
+        StateTransform::new("flatten", move |state| {
+            if let Some(obj) = state.as_object_mut() {
+                if let Some(serde_json::Value::Object(nested)) = obj.remove(&key) {
+                    for (k, v) in nested {
+                        obj.insert(k, v);
+                    }
+                }
+            }
+        })
+    }
+
+    /// Set a key to a fixed value.
+    pub fn set(key: &str, value: serde_json::Value) -> StateTransform {
+        let key = key.to_string();
+        StateTransform::new("set", move |state| {
+            if let Some(obj) = state.as_object_mut() {
+                obj.insert(key.clone(), value.clone());
+            }
+        })
+    }
+
     /// Drop the specified keys.
     pub fn drop(keys: &[&str]) -> StateTransform {
         let keys: Vec<String> = keys.iter().map(|k| k.to_string()).collect();
@@ -213,6 +237,34 @@ mod tests {
         let mut state = json!({"a": 1, "b": 2, "c": 3});
         chain.apply(&mut state);
         assert_eq!(state, json!({"x": 1, "b": 2}));
+    }
+
+    #[test]
+    fn flatten_nested_object() {
+        let mut state = json!({"nested": {"x": 1, "y": 2}, "z": 3});
+        S::flatten("nested").apply(&mut state);
+        assert_eq!(state, json!({"x": 1, "y": 2, "z": 3}));
+    }
+
+    #[test]
+    fn flatten_missing_key_is_noop() {
+        let mut state = json!({"a": 1});
+        S::flatten("nonexistent").apply(&mut state);
+        assert_eq!(state, json!({"a": 1}));
+    }
+
+    #[test]
+    fn set_inserts_value() {
+        let mut state = json!({"a": 1});
+        S::set("b", json!(42)).apply(&mut state);
+        assert_eq!(state, json!({"a": 1, "b": 42}));
+    }
+
+    #[test]
+    fn set_overwrites_existing() {
+        let mut state = json!({"a": 1});
+        S::set("a", json!("replaced")).apply(&mut state);
+        assert_eq!(state, json!({"a": "replaced"}));
     }
 
     #[test]

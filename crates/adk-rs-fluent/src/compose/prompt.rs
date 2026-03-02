@@ -17,6 +17,9 @@ pub enum PromptSectionKind {
     Format,
     Example,
     Text,
+    Context,
+    Persona,
+    Guidelines,
 }
 
 impl PromptSection {
@@ -29,6 +32,9 @@ impl PromptSection {
             PromptSectionKind::Format => format!("Output format: {}", self.content),
             PromptSectionKind::Example => self.content.clone(),
             PromptSectionKind::Text => self.content.clone(),
+            PromptSectionKind::Context => format!("Context: {}", self.content),
+            PromptSectionKind::Persona => format!("Persona: {}", self.content),
+            PromptSectionKind::Guidelines => self.content.clone(),
         }
     }
 }
@@ -121,6 +127,35 @@ impl P {
             content: t.to_string(),
         }
     }
+
+    /// Add background context.
+    pub fn context(ctx: &str) -> PromptSection {
+        PromptSection {
+            kind: PromptSectionKind::Context,
+            content: ctx.to_string(),
+        }
+    }
+
+    /// Define a personality/persona.
+    pub fn persona(desc: &str) -> PromptSection {
+        PromptSection {
+            kind: PromptSectionKind::Persona,
+            content: desc.to_string(),
+        }
+    }
+
+    /// Add multiple guidelines as a bulleted list.
+    pub fn guidelines(items: &[&str]) -> PromptSection {
+        let content = items
+            .iter()
+            .map(|item| format!("- {item}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        PromptSection {
+            kind: PromptSectionKind::Guidelines,
+            content: format!("Guidelines:\n{content}"),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -170,6 +205,30 @@ mod tests {
         let rendered = prompt.render();
         assert!(rendered.contains("You are analyst."));
         assert!(rendered.contains("Your task: analyze data"));
+    }
+
+    #[test]
+    fn context_renders() {
+        let s = P::context("user is a developer");
+        assert_eq!(s.render(), "Context: user is a developer");
+        assert_eq!(s.kind, PromptSectionKind::Context);
+    }
+
+    #[test]
+    fn persona_renders() {
+        let s = P::persona("friendly and concise");
+        assert_eq!(s.render(), "Persona: friendly and concise");
+        assert_eq!(s.kind, PromptSectionKind::Persona);
+    }
+
+    #[test]
+    fn guidelines_renders() {
+        let s = P::guidelines(&["be concise", "use examples", "cite sources"]);
+        assert!(s.render().contains("Guidelines:"));
+        assert!(s.render().contains("- be concise"));
+        assert!(s.render().contains("- use examples"));
+        assert!(s.render().contains("- cite sources"));
+        assert_eq!(s.kind, PromptSectionKind::Guidelines);
     }
 
     #[test]

@@ -117,6 +117,167 @@ impl C {
     ) -> ContextPolicy {
         ContextPolicy::new("custom", f)
     }
+
+    /// Keep only messages with role "model".
+    pub fn model_only() -> ContextPolicy {
+        use rs_genai::prelude::Role;
+        ContextPolicy::new("model_only", move |history| {
+            history
+                .iter()
+                .filter(|c| c.role == Some(Role::Model))
+                .cloned()
+                .collect()
+        })
+    }
+
+    /// Keep the first `n` messages (head).
+    pub fn head(n: usize) -> ContextPolicy {
+        ContextPolicy::new("head", move |history| {
+            history.iter().take(n).cloned().collect()
+        })
+    }
+
+    /// Keep every `n`-th message (sampling).
+    pub fn sample(n: usize) -> ContextPolicy {
+        ContextPolicy::new("sample", move |history| {
+            history
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| i % n == 0)
+                .map(|(_, c)| c.clone())
+                .collect()
+        })
+    }
+
+    /// Exclude messages that contain tool-related parts (function calls/responses).
+    pub fn exclude_tools() -> ContextPolicy {
+        use rs_genai::prelude::Part;
+        ContextPolicy::new("exclude_tools", move |history| {
+            history
+                .iter()
+                .filter(|c| {
+                    c.parts.iter().all(|p| {
+                        !matches!(p, Part::FunctionCall { .. } | Part::FunctionResponse { .. })
+                    })
+                })
+                .cloned()
+                .collect()
+        })
+    }
+
+    /// Prepend a system message to the context.
+    pub fn prepend(content: Content) -> ContextPolicy {
+        ContextPolicy::new("prepend", move |history| {
+            let mut result = vec![content.clone()];
+            result.extend(history.iter().cloned());
+            result
+        })
+    }
+
+    /// Append a content to the context.
+    pub fn append(content: Content) -> ContextPolicy {
+        ContextPolicy::new("append", move |history| {
+            let mut result = history.to_vec();
+            result.push(content.clone());
+            result
+        })
+    }
+
+    /// Keep only messages that contain text parts.
+    pub fn text_only() -> ContextPolicy {
+        use rs_genai::prelude::Part;
+        ContextPolicy::new("text_only", move |history| {
+            history
+                .iter()
+                .filter(|c| c.parts.iter().any(|p| matches!(p, Part::Text { .. })))
+                .cloned()
+                .collect()
+        })
+    }
+
+    /// Filter messages by a predicate on Content.
+    pub fn filter(
+        f: impl Fn(&Content) -> bool + Send + Sync + 'static,
+    ) -> ContextPolicy {
+        ContextPolicy::new("filter", move |history| {
+            history.iter().filter(|c| f(c)).cloned().collect()
+        })
+    }
+
+    /// Map/transform each message in the context.
+    pub fn map(
+        f: impl Fn(&Content) -> Content + Send + Sync + 'static,
+    ) -> ContextPolicy {
+        ContextPolicy::new("map", move |history| {
+            history.iter().map(|c| f(c)).collect()
+        })
+    }
+
+    /// Truncate context to approximately `max_chars` total characters of text.
+    pub fn truncate(max_chars: usize) -> ContextPolicy {
+        use rs_genai::prelude::Part;
+        ContextPolicy::new("truncate", move |history| {
+            let mut total = 0;
+            let mut result = Vec::new();
+            // Work backwards to keep most recent messages
+            for c in history.iter().rev() {
+                let text_len: usize = c
+                    .parts
+                    .iter()
+                    .filter_map(|p| match p {
+                        Part::Text { text } => Some(text.len()),
+                        _ => None,
+                    })
+                    .sum();
+                if total + text_len > max_chars && !result.is_empty() {
+                    break;
+                }
+                total += text_len;
+                result.push(c.clone());
+            }
+            result.reverse();
+            result
+        })
+    }
+
+    /// Keep messages within a time window (by index offset from end).
+    /// Alias for `window` — provided for API symmetry.
+    pub fn last(n: usize) -> ContextPolicy {
+        Self::window(n)
+    }
+
+    /// Return an empty context (useful for isolated agents).
+    pub fn empty() -> ContextPolicy {
+        ContextPolicy::new("empty", |_| Vec::new())
+    }
+
+    /// Deduplicate adjacent messages with identical text content.
+    pub fn dedup() -> ContextPolicy {
+        use rs_genai::prelude::Part;
+        ContextPolicy::new("dedup", |history| {
+            fn extract_text(c: &Content) -> String {
+                c.parts
+                    .iter()
+                    .filter_map(|p| match p {
+                        Part::Text { text } => Some(text.as_str()),
+                        _ => None,
+                    })
+                    .collect()
+            }
+            let mut result: Vec<Content> = Vec::new();
+            for c in history {
+                let dominated = result.last().map_or(false, |prev| {
+                    let prev_text = extract_text(prev);
+                    let curr_text = extract_text(c);
+                    prev_text == curr_text && !prev_text.is_empty()
+                });
+                if !dominated {
+                    result.push(c.clone());
+                }
+            }
+            result
+        })
+    }
 }
 
 #[cfg(test)]
@@ -163,5 +324,109 @@ mod tests {
     fn chain_extends_with_add() {
         let chain = C::window(10) + C::user_only() + C::custom(|h| h.to_vec());
         assert_eq!(chain.policies.len(), 3);
+    }
+
+    #[test]
+    fn model_only_filters() {
+        let history = vec![
+            Content::user("a"),
+            Content::model("b"),
+            Content::user("c"),
+        ];
+        let result = C::model_only().apply(&history);
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn head_keeps_first_n() {
+        let history = vec![
+            Content::user("a"),
+            Content::model("b"),
+            Content::user("c"),
+        ];
+        let result = C::head(2).apply(&history);
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn sample_every_nth() {
+        let history = vec![
+            Content::user("a"),
+            Content::model("b"),
+            Content::user("c"),
+            Content::model("d"),
+        ];
+        let result = C::sample(2).apply(&history);
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn empty_returns_nothing() {
+        let history = vec![Content::user("a"), Content::model("b")];
+        let result = C::empty().apply(&history);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn last_is_alias_for_window() {
+        let history = vec![
+            Content::user("a"),
+            Content::model("b"),
+            Content::user("c"),
+        ];
+        let result = C::last(1).apply(&history);
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn text_only_filters_non_text() {
+        let history = vec![Content::user("text msg")];
+        let result = C::text_only().apply(&history);
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn filter_with_predicate() {
+        use rs_genai::prelude::Part;
+        let history = vec![
+            Content::user("keep"),
+            Content::user("skip"),
+            Content::user("keep this too"),
+        ];
+        let result = C::filter(|c| {
+            c.parts.iter().any(|p| match p {
+                Part::Text { text } => text.contains("keep"),
+                _ => false,
+            })
+        })
+        .apply(&history);
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn dedup_removes_adjacent_duplicates() {
+        let history = vec![
+            Content::user("hello"),
+            Content::user("hello"),
+            Content::user("world"),
+            Content::user("world"),
+            Content::user("world"),
+        ];
+        let result = C::dedup().apply(&history);
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn prepend_adds_to_front() {
+        let history = vec![Content::user("existing")];
+        let result = C::prepend(Content::model("system")).apply(&history);
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn append_adds_to_back() {
+        let history = vec![Content::user("existing")];
+        let result = C::append(Content::model("suffix")).apply(&history);
+        assert_eq!(result.len(), 2);
     }
 }

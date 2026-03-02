@@ -2,10 +2,11 @@
 //!
 //! Compose tools in any order with `|`.
 
+use std::future::Future;
 use std::sync::Arc;
 
 use rs_genai::prelude::Tool;
-use rs_adk::tool::ToolFunction;
+use rs_adk::tool::{SimpleTool, ToolFunction};
 
 /// A tool composite — one or more tool entries.
 #[derive(Clone)]
@@ -79,6 +80,30 @@ impl T {
     pub fn code_execution() -> ToolComposite {
         ToolComposite::from_built_in(Tool::code_execution())
     }
+
+    /// Create a simple tool from a name, description, and async closure.
+    pub fn simple<F, Fut>(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        f: F,
+    ) -> ToolComposite
+    where
+        F: Fn(serde_json::Value) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<serde_json::Value, rs_adk::ToolError>> + Send + 'static,
+    {
+        let tool = SimpleTool::new(name, description, None, f);
+        ToolComposite::from_function(Arc::new(tool))
+    }
+
+    /// Combine multiple tool functions into a single composite.
+    pub fn toolset(tools: Vec<Arc<dyn ToolFunction>>) -> ToolComposite {
+        ToolComposite {
+            entries: tools
+                .into_iter()
+                .map(ToolCompositeEntry::Function)
+                .collect(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -107,5 +132,35 @@ mod tests {
     fn compose_with_bitor() {
         let t = T::google_search() | T::url_context() | T::code_execution();
         assert_eq!(t.len(), 3);
+    }
+
+    #[test]
+    fn simple_creates_tool() {
+        let t = T::simple("greet", "Greets the user", |_args| async {
+            Ok(serde_json::json!({"message": "hello"}))
+        });
+        assert_eq!(t.len(), 1);
+        match &t.entries[0] {
+            ToolCompositeEntry::Function(f) => assert_eq!(f.name(), "greet"),
+            _ => panic!("expected Function entry"),
+        }
+    }
+
+    #[test]
+    fn toolset_combines_functions() {
+        let tool_a: Arc<dyn ToolFunction> = Arc::new(SimpleTool::new(
+            "a",
+            "tool a",
+            None,
+            |_| async { Ok(serde_json::json!(null)) },
+        ));
+        let tool_b: Arc<dyn ToolFunction> = Arc::new(SimpleTool::new(
+            "b",
+            "tool b",
+            None,
+            |_| async { Ok(serde_json::json!(null)) },
+        ));
+        let t = T::toolset(vec![tool_a, tool_b]);
+        assert_eq!(t.len(), 2);
     }
 }

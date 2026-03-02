@@ -8,10 +8,13 @@ description = "Fluent DX for Gemini Live — builder API, operator algebra, comp
 [dependencies]
 rs-genai = { path = "../rs-genai" }
 rs-adk = { path = "../rs-adk" }
+bytes = "1"
 tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+schemars = "0.8"
+parking_lot = "0.12"
 
 [dev-dependencies]
 tokio-test = "0.4"
