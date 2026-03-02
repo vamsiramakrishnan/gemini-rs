@@ -8,18 +8,17 @@
 //! control lane) and concurrent (spawned via `tokio::spawn`).
 
 use std::collections::HashSet;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use serde_json::Value;
 
+use super::BoxFuture;
 use crate::state::State;
 
-/// A boxed future type for watcher actions.
-pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
-
 // ── Predicate ────────────────────────────────────────────────────────────────
+
+/// Custom predicate function type for state change watchers.
+pub type PredicateFn = Arc<dyn Fn(&Value, &Value) -> bool + Send + Sync>;
 
 /// Condition under which a watcher fires, evaluated against (old, new) values.
 pub enum WatchPredicate {
@@ -38,7 +37,22 @@ pub enum WatchPredicate {
     /// Fires when old == true AND new != true (JSON bool).
     BecameFalse,
     /// Fires when the custom function returns true for (old, new).
-    Custom(Arc<dyn Fn(&Value, &Value) -> bool + Send + Sync>),
+    Custom(PredicateFn),
+}
+
+impl std::fmt::Debug for WatchPredicate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Changed => write!(f, "Changed"),
+            Self::ChangedTo(v) => write!(f, "ChangedTo({v})"),
+            Self::ChangedFrom(v) => write!(f, "ChangedFrom({v})"),
+            Self::CrossedAbove(t) => write!(f, "CrossedAbove({t})"),
+            Self::CrossedBelow(t) => write!(f, "CrossedBelow({t})"),
+            Self::BecameTrue => write!(f, "BecameTrue"),
+            Self::BecameFalse => write!(f, "BecameFalse"),
+            Self::Custom(_) => write!(f, "Custom(<fn>)"),
+        }
+    }
 }
 
 impl WatchPredicate {
@@ -85,6 +99,16 @@ pub struct Watcher {
     /// If `true`, the processor awaits this action sequentially on the control
     /// lane. If `false`, the processor spawns it concurrently.
     pub blocking: bool,
+}
+
+impl std::fmt::Debug for Watcher {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Watcher")
+            .field("key", &self.key)
+            .field("predicate", &self.predicate)
+            .field("blocking", &self.blocking)
+            .finish_non_exhaustive()
+    }
 }
 
 // ── WatcherRegistry ──────────────────────────────────────────────────────────

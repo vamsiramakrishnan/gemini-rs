@@ -1,5 +1,11 @@
 //! Live session management — callback-driven full-duplex event handling.
 
+use std::future::Future;
+use std::pin::Pin;
+
+/// A boxed future type used across live session modules.
+pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
+
 pub mod builder;
 pub mod callbacks;
 pub mod computed;
@@ -19,4 +25,4 @@ pub use handle::LiveHandle;
 pub use phase::{Phase, PhaseInstruction, PhaseMachine, PhaseTransition, Transition};
 pub use session_signals::{SessionSignals, SessionType};
 pub use transcript::{TranscriptBuffer, TranscriptTurn};
-pub use watcher::{WatchPredicate, Watcher, WatcherRegistry};
+pub use watcher::{PredicateFn, WatchPredicate, Watcher, WatcherRegistry};

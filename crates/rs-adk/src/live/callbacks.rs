@@ -4,8 +4,6 @@
 //! Control lane callbacks (async, can block): tool calls, lifecycle, interruptions.
 //! Outbound interceptors: transform tool responses, inject context at turn boundaries.
 
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -13,10 +11,8 @@ use bytes::Bytes;
 use rs_genai::prelude::{FunctionCall, FunctionResponse, SessionPhase};
 use rs_genai::session::SessionWriter;
 
+use super::BoxFuture;
 use crate::state::State;
-
-/// A boxed future for async callbacks.
-pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
 
 /// Controls how a callback is executed relative to the event loop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

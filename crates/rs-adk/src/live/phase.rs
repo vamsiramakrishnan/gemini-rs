@@ -8,17 +8,13 @@
 //! required — `&self` for reads, `&mut self` for mutations.
 
 use std::collections::HashMap;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Instant;
 
 use rs_genai::session::SessionWriter;
 
+use super::BoxFuture;
 use crate::state::State;
-
-/// A boxed future used by phase callbacks.
-type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
 
 // ── Core types ──────────────────────────────────────────────────────────────
 
