@@ -30,6 +30,7 @@ pub mod text;
 pub mod tool;
 pub mod tools;
 pub mod toolset;
+pub mod auth;
 pub mod credentials;
 pub mod instruction;
 pub mod confirmation;
