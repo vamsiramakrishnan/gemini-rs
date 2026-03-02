@@ -460,7 +460,7 @@ pub fn generate_compilable(schema: &AdkSchema) -> String {
     out.push('\n');
 
     // Attributes
-    out.push_str("#![allow(dead_code, unused_imports)]\n\n");
+    out.push_str("#![allow(dead_code, unused_imports, clippy::type_complexity)]\n\n");
 
     // Imports — uses `crate::` because the generated file lives inside gemini-live-runtime.
     out.push_str("use std::sync::Arc;\n");
