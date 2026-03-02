@@ -37,6 +37,8 @@ pub mod files;
 pub mod caches;
 #[cfg(feature = "tunings")]
 pub mod tunings;
+#[cfg(feature = "batches")]
+pub mod batches;
 #[cfg(feature = "chats")]
 pub mod chats;
 
@@ -128,6 +130,13 @@ pub mod prelude {
     pub use crate::tunings::{
         CreateTuningJobConfig, ListTuningJobsResponse, SupervisedTuningSpec, TuningHyperParameters,
         TuningJob, TuningJobState, TuningsError,
+    };
+
+    // Batches API
+    #[cfg(feature = "batches")]
+    pub use crate::batches::{
+        BatchJob, BatchJobDestination, BatchJobSource, BatchJobState, BatchesError,
+        CreateBatchJobConfig, ListBatchJobsResponse,
     };
 
     // Chat API
