@@ -82,6 +82,16 @@ enum Commands {
         #[arg(short, long)]
         output_dir: PathBuf,
     },
+    /// Read adk-fluent Python source and extract builder/factory/operator definitions
+    ReadFluent {
+        /// Path to the adk-fluent source directory (e.g. /tmp/adk-fluent/src/adk_fluent/)
+        #[arg(short, long)]
+        source: PathBuf,
+
+        /// Output JSON file path
+        #[arg(short, long)]
+        output: PathBuf,
+    },
 }
 
 fn main() {
@@ -109,6 +119,9 @@ fn main() {
         }
         Commands::TranspileGenai { source, output_dir } => {
             run_transpile_genai(&source, &output_dir);
+        }
+        Commands::ReadFluent { source, output } => {
+            run_read_fluent(&source, &output);
         }
     }
 }
@@ -454,4 +467,99 @@ fn run_transpile_genai(source: &Path, output_dir: &Path) {
     }
     println!("Types with existing wire equiv (skipped): {}", with_wire);
     println!("Types generated: {}", without_wire);
+}
+
+fn run_read_fluent(source: &Path, output: &Path) {
+    eprintln!(
+        "Reading adk-fluent Python source from: {}",
+        source.display()
+    );
+
+    match readers::read_fluent_source(source) {
+        Ok(schema) => {
+            eprintln!(
+                "Extracted {} builder methods, {} factories, {} operators, {} workflows",
+                schema.builder_methods.len(),
+                schema.factories.len(),
+                schema.operators.len(),
+                schema.workflows.len(),
+            );
+
+            let json =
+                serde_json::to_string_pretty(&schema).expect("Failed to serialize schema");
+
+            if let Some(parent) = output.parent() {
+                std::fs::create_dir_all(parent).ok();
+            }
+
+            std::fs::write(output, &json)
+                .unwrap_or_else(|e| panic!("Failed to write {}: {}", output.display(), e));
+
+            eprintln!("Schema written to: {}", output.display());
+
+            println!("=== adk-fluent Schema Summary ===");
+            println!("Source: {}", schema.source.source_dir);
+            println!();
+
+            println!("Builder Methods ({}):", schema.builder_methods.len());
+            for m in &schema.builder_methods {
+                println!(
+                    "  - {}({}) -> {}",
+                    m.name, m.param_type, m.rust_type
+                );
+            }
+
+            println!();
+            println!("Factory Functions ({}):", schema.factories.len());
+
+            // Group by module
+            let mut by_module = std::collections::HashMap::new();
+            for f in &schema.factories {
+                by_module
+                    .entry(f.module.rust_module())
+                    .or_insert_with(Vec::new)
+                    .push(f);
+            }
+            for (module, fns) in &by_module {
+                println!("  {} ({} functions):", module.to_uppercase(), fns.len());
+                for f in fns {
+                    let params: Vec<String> = f
+                        .params
+                        .iter()
+                        .map(|p| {
+                            if let Some(ref d) = p.default {
+                                format!("{}: {} = {}", p.name, p.py_type, d)
+                            } else {
+                                format!("{}: {}", p.name, p.py_type)
+                            }
+                        })
+                        .collect();
+                    println!("    - {}({}) -> {}", f.name, params.join(", "), f.return_type);
+                }
+            }
+
+            println!();
+            println!("Operators ({}):", schema.operators.len());
+            for op in &schema.operators {
+                println!(
+                    "  - {} {} {} -> {}",
+                    op.lhs, op.operator, op.rhs, op.output
+                );
+            }
+
+            println!();
+            println!("Workflows ({}):", schema.workflows.len());
+            for w in &schema.workflows {
+                println!(
+                    "  - {} [{} methods]",
+                    w.name,
+                    w.methods.len()
+                );
+            }
+        }
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            std::process::exit(1);
+        }
+    }
 }
