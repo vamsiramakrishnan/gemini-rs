@@ -36,6 +36,7 @@ pub mod instruction;
 pub mod confirmation;
 pub mod text_runner;
 pub mod utils;
+pub mod a2a;
 
 #[cfg(test)]
 pub(crate) mod test_helpers;
