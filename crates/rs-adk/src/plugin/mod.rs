@@ -90,6 +90,54 @@ pub trait Plugin: Send + Sync + 'static {
     async fn on_event(&self, _event: &Event, _ctx: &InvocationContext) -> PluginResult {
         PluginResult::Continue
     }
+
+    /// Called when a user message is received.
+    async fn on_user_message(&self, _message: &str, _ctx: &InvocationContext) -> PluginResult {
+        PluginResult::Continue
+    }
+
+    /// Called before a run starts (before the agent loop).
+    async fn before_run(&self, _ctx: &InvocationContext) -> PluginResult {
+        PluginResult::Continue
+    }
+
+    /// Called after a run completes (after the agent loop).
+    async fn after_run(&self, _ctx: &InvocationContext) -> PluginResult {
+        PluginResult::Continue
+    }
+
+    /// Called before a model generation request.
+    async fn before_model(
+        &self,
+        _request: &crate::llm::LlmRequest,
+        _ctx: &InvocationContext,
+    ) -> PluginResult {
+        PluginResult::Continue
+    }
+
+    /// Called after a model generation response.
+    async fn after_model(
+        &self,
+        _response: &crate::llm::LlmResponse,
+        _ctx: &InvocationContext,
+    ) -> PluginResult {
+        PluginResult::Continue
+    }
+
+    /// Called when a model generation fails.
+    async fn on_model_error(&self, _error: &str, _ctx: &InvocationContext) -> PluginResult {
+        PluginResult::Continue
+    }
+
+    /// Called when a tool execution fails.
+    async fn on_tool_error(
+        &self,
+        _call: &FunctionCall,
+        _error: &str,
+        _ctx: &InvocationContext,
+    ) -> PluginResult {
+        PluginResult::Continue
+    }
 }
 
 /// Manages an ordered list of plugins, running them in sequence.
@@ -189,6 +237,104 @@ impl PluginManager {
         }
         PluginResult::Continue
     }
+
+    /// Run on_user_message hooks.
+    pub async fn run_on_user_message(
+        &self,
+        message: &str,
+        ctx: &InvocationContext,
+    ) -> PluginResult {
+        for plugin in &self.plugins {
+            let result = plugin.on_user_message(message, ctx).await;
+            if !result.is_continue() {
+                return result;
+            }
+        }
+        PluginResult::Continue
+    }
+
+    /// Run before_run hooks.
+    pub async fn run_before_run(&self, ctx: &InvocationContext) -> PluginResult {
+        for plugin in &self.plugins {
+            let result = plugin.before_run(ctx).await;
+            if !result.is_continue() {
+                return result;
+            }
+        }
+        PluginResult::Continue
+    }
+
+    /// Run after_run hooks.
+    pub async fn run_after_run(&self, ctx: &InvocationContext) -> PluginResult {
+        for plugin in self.plugins.iter().rev() {
+            let result = plugin.after_run(ctx).await;
+            if !result.is_continue() {
+                return result;
+            }
+        }
+        PluginResult::Continue
+    }
+
+    /// Run before_model hooks.
+    pub async fn run_before_model(
+        &self,
+        request: &crate::llm::LlmRequest,
+        ctx: &InvocationContext,
+    ) -> PluginResult {
+        for plugin in &self.plugins {
+            let result = plugin.before_model(request, ctx).await;
+            if !result.is_continue() {
+                return result;
+            }
+        }
+        PluginResult::Continue
+    }
+
+    /// Run after_model hooks.
+    pub async fn run_after_model(
+        &self,
+        response: &crate::llm::LlmResponse,
+        ctx: &InvocationContext,
+    ) -> PluginResult {
+        for plugin in self.plugins.iter().rev() {
+            let result = plugin.after_model(response, ctx).await;
+            if !result.is_continue() {
+                return result;
+            }
+        }
+        PluginResult::Continue
+    }
+
+    /// Run on_model_error hooks.
+    pub async fn run_on_model_error(
+        &self,
+        error: &str,
+        ctx: &InvocationContext,
+    ) -> PluginResult {
+        for plugin in &self.plugins {
+            let result = plugin.on_model_error(error, ctx).await;
+            if !result.is_continue() {
+                return result;
+            }
+        }
+        PluginResult::Continue
+    }
+
+    /// Run on_tool_error hooks.
+    pub async fn run_on_tool_error(
+        &self,
+        call: &FunctionCall,
+        error: &str,
+        ctx: &InvocationContext,
+    ) -> PluginResult {
+        for plugin in &self.plugins {
+            let result = plugin.on_tool_error(call, error, ctx).await;
+            if !result.is_continue() {
+                return result;
+            }
+        }
+        PluginResult::Continue
+    }
 }
 
 #[cfg(test)]
@@ -264,6 +410,73 @@ mod tests {
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             PluginResult::Continue
         }
+    }
+
+    // Test that new hooks default to Continue
+    #[tokio::test]
+    async fn new_hooks_default_to_continue() {
+        use tokio::sync::broadcast;
+
+        let mut pm = PluginManager::new();
+        pm.add(Arc::new(LoggingPlugin::new()));
+
+        let (evt_tx, _) = broadcast::channel(16);
+        let writer: Arc<dyn rs_genai::session::SessionWriter> =
+            Arc::new(crate::test_helpers::MockWriter);
+        let session =
+            crate::agent_session::AgentSession::from_writer(writer, evt_tx);
+        let ctx = InvocationContext::new(session);
+
+        assert!(pm.run_before_run(&ctx).await.is_continue());
+        assert!(pm.run_after_run(&ctx).await.is_continue());
+        assert!(pm.run_on_user_message("hello", &ctx).await.is_continue());
+
+        let req = crate::llm::LlmRequest::from_text("test");
+        assert!(pm.run_before_model(&req, &ctx).await.is_continue());
+
+        assert!(pm.run_on_model_error("err", &ctx).await.is_continue());
+
+        let call = FunctionCall {
+            name: "t".into(),
+            args: serde_json::json!({}),
+            id: None,
+        };
+        assert!(pm.run_on_tool_error(&call, "err", &ctx).await.is_continue());
+    }
+
+    // Test custom plugin implementing before_model
+    struct ModelBlockerPlugin;
+
+    #[async_trait]
+    impl Plugin for ModelBlockerPlugin {
+        fn name(&self) -> &str { "model-blocker" }
+
+        async fn before_model(
+            &self,
+            _request: &crate::llm::LlmRequest,
+            _ctx: &InvocationContext,
+        ) -> PluginResult {
+            PluginResult::Deny("model calls blocked".into())
+        }
+    }
+
+    #[tokio::test]
+    async fn custom_before_model_plugin() {
+        use tokio::sync::broadcast;
+
+        let mut pm = PluginManager::new();
+        pm.add(Arc::new(ModelBlockerPlugin));
+
+        let (evt_tx, _) = broadcast::channel(16);
+        let writer: Arc<dyn rs_genai::session::SessionWriter> =
+            Arc::new(crate::test_helpers::MockWriter);
+        let session =
+            crate::agent_session::AgentSession::from_writer(writer, evt_tx);
+        let ctx = InvocationContext::new(session);
+
+        let req = crate::llm::LlmRequest::from_text("test");
+        let result = pm.run_before_model(&req, &ctx).await;
+        assert!(result.is_deny());
     }
 
     // Test that a deny plugin prevents later plugins from running

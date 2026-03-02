@@ -3,6 +3,9 @@
 //! Mirrors ADK-JS's event types. Each event captures a discrete action
 //! within an agent invocation (user message, model response, tool call, etc.).
 
+pub mod structured;
+pub use structured::*;
+
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};

@@ -11,6 +11,7 @@ use crate::agent_session::AgentSession;
 use crate::context::InvocationContext;
 use crate::error::AgentError;
 use crate::middleware::MiddlewareChain;
+use crate::plugin::{Plugin, PluginManager};
 use crate::router::AgentRegistry;
 use crate::state::State;
 
@@ -37,6 +38,7 @@ pub struct Runner {
     root_agent: Arc<dyn Agent>,
     registry: AgentRegistry,
     middleware: MiddlewareChain,
+    plugins: PluginManager,
     state: State,
 }
 
@@ -52,6 +54,7 @@ impl Runner {
             root_agent: agent,
             registry,
             middleware: MiddlewareChain::new(),
+            plugins: PluginManager::new(),
             state: State::new(),
         }
     }
@@ -64,6 +67,7 @@ impl Runner {
             root_agent,
             registry,
             middleware: MiddlewareChain::new(),
+            plugins: PluginManager::new(),
             state: State::new(),
         }
     }
@@ -71,6 +75,12 @@ impl Runner {
     /// Add middleware to the runner (applied to all agent invocations).
     pub fn with_middleware(mut self, mw: impl crate::middleware::Middleware + 'static) -> Self {
         self.middleware.add(Arc::new(mw));
+        self
+    }
+
+    /// Add a plugin to the runner.
+    pub fn with_plugin(mut self, plugin: impl Plugin + 'static) -> Self {
+        self.plugins.add(Arc::new(plugin));
         self
     }
 
@@ -134,9 +144,14 @@ impl Runner {
                 self.middleware.clone(),
             );
 
+            // Run before_run plugins
+            self.plugins.run_before_run(&ctx).await;
+
             // Run the agent
             match current_agent.run_live(&mut ctx).await {
                 Ok(()) => {
+                    // Run after_run plugins
+                    self.plugins.run_after_run(&ctx).await;
                     // Agent completed normally — preserve state and return
                     runner_state.merge(agent_session.state());
                     break;

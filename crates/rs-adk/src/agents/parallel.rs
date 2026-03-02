@@ -51,6 +51,8 @@ impl Agent for ParallelAgent {
                     agent_session,
                     event_tx,
                     middleware,
+                    run_config: crate::run_config::RunConfig::default(),
+                    session_id: None,
                 };
                 sub.run_live(&mut branch_ctx).await
             }));

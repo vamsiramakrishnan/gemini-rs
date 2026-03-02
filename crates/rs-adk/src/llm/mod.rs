@@ -4,6 +4,9 @@
 //! from any LLM. The `GeminiLlm` implementation wraps rs-genai's `Client`
 //! for Gemini models.
 
+pub mod registry;
+pub use registry::LlmRegistry;
+
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
