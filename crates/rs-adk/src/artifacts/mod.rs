@@ -3,8 +3,10 @@
 //! Mirrors ADK-JS's `BaseArtifactService`. Provides a trait for storing
 //! and retrieving versioned artifacts with an in-memory default.
 
+mod forwarding;
 mod in_memory;
 
+pub use forwarding::ForwardingArtifactService;
 pub use in_memory::InMemoryArtifactService;
 
 use async_trait::async_trait;
