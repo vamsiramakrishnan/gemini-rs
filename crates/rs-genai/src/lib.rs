@@ -31,6 +31,8 @@ pub mod tokens;
 pub mod models;
 #[cfg(feature = "embed")]
 pub mod embed;
+#[cfg(feature = "files")]
+pub mod files;
 #[cfg(feature = "chats")]
 pub mod chats;
 
@@ -102,6 +104,12 @@ pub mod prelude {
     #[cfg(feature = "embed")]
     pub use crate::embed::{
         ContentEmbedding, EmbedContentConfig, EmbedContentResponse, EmbedError, TaskType,
+    };
+
+    // Files API
+    #[cfg(feature = "files")]
+    pub use crate::files::{
+        File, FileSource, FileState, FilesError, ListFilesResponse, UploadFileConfig,
     };
 
     // Chat API
