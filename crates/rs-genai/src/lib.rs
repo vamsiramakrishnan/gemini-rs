@@ -25,6 +25,14 @@ pub mod quick;
 pub mod client;
 #[cfg(feature = "generate")]
 pub mod generate;
+#[cfg(feature = "tokens")]
+pub mod tokens;
+#[cfg(feature = "models")]
+pub mod models;
+#[cfg(feature = "embed")]
+pub mod embed;
+#[cfg(feature = "chats")]
+pub mod chats;
 
 // Top-level re-exports for convenience.
 pub use quick::{quick_connect, quick_connect_vertex};
@@ -81,6 +89,24 @@ pub mod prelude {
     pub use crate::generate::{
         Candidate, GenerateContentConfig, GenerateContentResponse, GenerateError,
     };
+
+    // Tokens API
+    #[cfg(feature = "tokens")]
+    pub use crate::tokens::{CountTokensResponse, TokensError};
+
+    // Models API
+    #[cfg(feature = "models")]
+    pub use crate::models::{ListModelsResponse, ModelInfo, ModelsError};
+
+    // Embed API
+    #[cfg(feature = "embed")]
+    pub use crate::embed::{
+        ContentEmbedding, EmbedContentConfig, EmbedContentResponse, EmbedError, TaskType,
+    };
+
+    // Chat API
+    #[cfg(feature = "chats")]
+    pub use crate::chats::ChatSession;
 
     // Quick-start
     pub use crate::quick::{quick_connect, quick_connect_vertex};
