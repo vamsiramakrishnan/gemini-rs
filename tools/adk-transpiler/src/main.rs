@@ -1,3 +1,4 @@
+mod codegen;
 mod diff;
 mod reader;
 mod schema;
@@ -37,6 +38,16 @@ enum Commands {
         #[arg(long)]
         new: PathBuf,
     },
+    /// Generate Rust code from an AdkSchema JSON file
+    Generate {
+        /// Path to the input AdkSchema JSON file
+        #[arg(short, long)]
+        schema: PathBuf,
+
+        /// Output Rust source file path
+        #[arg(short, long)]
+        output: PathBuf,
+    },
 }
 
 fn main() {
@@ -48,6 +59,9 @@ fn main() {
         }
         Commands::Diff { old, new } => {
             run_diff(&old, &new);
+        }
+        Commands::Generate { schema, output } => {
+            run_generate(&schema, &output);
         }
     }
 }
@@ -135,4 +149,41 @@ fn run_diff(old_path: &Path, new_path: &Path) {
     } else {
         std::process::exit(1);
     }
+}
+
+fn run_generate(schema_path: &Path, output_path: &Path) {
+    eprintln!("Reading schema from: {}", schema_path.display());
+
+    let json = std::fs::read_to_string(schema_path)
+        .unwrap_or_else(|e| panic!("Failed to read {}: {}", schema_path.display(), e));
+
+    let schema: schema::AdkSchema = serde_json::from_str(&json)
+        .unwrap_or_else(|e| panic!("Failed to parse {}: {}", schema_path.display(), e));
+
+    eprintln!(
+        "Schema contains {} agents, {} tools",
+        schema.agents.len(),
+        schema.tools.len()
+    );
+
+    let rust_code = codegen::generate(&schema);
+
+    if let Some(parent) = output_path.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+
+    std::fs::write(output_path, &rust_code)
+        .unwrap_or_else(|e| panic!("Failed to write {}: {}", output_path.display(), e));
+
+    eprintln!("Generated Rust code written to: {}", output_path.display());
+
+    // Print summary
+    println!("=== Codegen Summary ===");
+    println!("Source framework: {}", schema.source.framework);
+    println!("Agents generated: {}", schema.agents.len());
+    println!("Tools generated: {}", schema.tools.len());
+    println!(
+        "Output size: {} bytes",
+        rust_code.len()
+    );
 }
