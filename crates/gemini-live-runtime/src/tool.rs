@@ -296,6 +296,7 @@ pub struct SimpleTool {
     name: String,
     description: String,
     parameters: Option<serde_json::Value>,
+    #[allow(clippy::type_complexity)]
     handler: Box<
         dyn Fn(serde_json::Value) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<serde_json::Value, ToolError>> + Send>>
             + Send
@@ -371,6 +372,7 @@ pub struct TypedTool<T: DeserializeOwned + JsonSchema + Send + Sync + 'static> {
     name: String,
     description: String,
     schema: serde_json::Value,
+    #[allow(clippy::type_complexity)]
     handler: Box<
         dyn Fn(T) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<serde_json::Value, ToolError>> + Send>>
             + Send

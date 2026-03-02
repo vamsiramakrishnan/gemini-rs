@@ -17,11 +17,17 @@ pub mod state;
 pub mod telemetry;
 pub mod tool;
 
-// Re-export key types for convenience
+// Ergonomic re-exports
+pub use agent::Agent;
 pub use agent_tool::AgentTool;
+pub use context::{AgentEvent, InvocationContext};
+pub use error::{AgentError, ToolError};
 pub use llm_agent::{LlmAgent, LlmAgentBuilder};
+pub use middleware::{Middleware, MiddlewareChain};
+pub use router::AgentRegistry;
 pub use runner::Runner;
-pub use tool::TypedTool;
+pub use state::State;
+pub use tool::{SimpleTool, ToolDispatcher, ToolFunction, TypedTool};
 
-// Re-export wire types that runtime users need
+// Wire re-export
 pub use gemini_live_wire;

@@ -298,17 +298,15 @@ async fn generic_run_session<T: Transport, C: Codec>(
             data = transport.recv() => {
                 match data {
                     Ok(Some(bytes)) => {
-                        match codec.decode_message(&bytes) {
-                            Ok(msg) => {
-                                match handle_server_msg(msg, state, event_tx) {
-                                    MessageAction::Continue => {}
-                                    MessageAction::GoAway(time_left) => {
-                                        return DisconnectReason::GoAway(time_left);
-                                    }
+                        if let Ok(msg) = codec.decode_message(&bytes) {
+                            match handle_server_msg(msg, state, event_tx) {
+                                MessageAction::Continue => {}
+                                MessageAction::GoAway(time_left) => {
+                                    return DisconnectReason::GoAway(time_left);
                                 }
                             }
-                            Err(_) => {} // Skip unparseable messages
                         }
+                        // Skip unparseable messages
                     }
                     Ok(None) => return DisconnectReason::Error("Transport closed".into()),
                     Err(e) => return DisconnectReason::Error(e.to_string()),

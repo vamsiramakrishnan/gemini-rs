@@ -10,6 +10,7 @@ use gemini_live_wire::prelude::Content;
 #[derive(Clone)]
 pub struct ContextPolicy {
     name: &'static str,
+    #[allow(clippy::type_complexity)]
     filter: Arc<dyn Fn(&[Content]) -> Vec<Content> + Send + Sync>,
 }
 
