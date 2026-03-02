@@ -17,6 +17,7 @@ pub mod llm_agent;
 pub mod memory;
 pub mod middleware;
 pub mod plugin;
+pub mod processors;
 pub mod router;
 pub mod runner;
 pub mod session;
@@ -46,6 +47,10 @@ pub use plugin::{Plugin, PluginManager, PluginResult};
 pub use memory::{InMemoryMemoryService, MemoryEntry, MemoryService};
 pub use artifacts::{Artifact, ArtifactService, InMemoryArtifactService};
 pub use llm::{BaseLlm, LlmRequest, LlmResponse};
+pub use processors::{
+    ContentFilter, InstructionInserter, RequestProcessor, RequestProcessorChain,
+    ResponseProcessor, ResponseProcessorChain,
+};
 
 // Wire re-export
 pub use rs_genai;
