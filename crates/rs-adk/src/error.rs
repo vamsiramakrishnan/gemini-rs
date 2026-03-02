@@ -25,6 +25,9 @@ pub enum AgentError {
     #[error("Timeout")]
     Timeout,
 
+    #[error("Configuration error: {0}")]
+    Config(String),
+
     #[error("{0}")]
     Other(String),
 }

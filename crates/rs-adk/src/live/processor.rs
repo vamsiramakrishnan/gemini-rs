@@ -16,9 +16,15 @@ use rs_genai::session::SessionWriter;
 use crate::state::State;
 use crate::tool::ToolDispatcher;
 
+use super::background_tool::BackgroundToolTracker;
 use super::callbacks::EventCallbacks;
+use super::computed::ComputedRegistry;
 use super::extractor::TurnExtractor;
+use super::phase::PhaseMachine;
+use super::session_signals::SessionSignals;
+use super::temporal::TemporalRegistry;
 use super::transcript::TranscriptBuffer;
+use super::watcher::WatcherRegistry;
 
 /// Events routed to the fast lane (sync processing).
 pub(crate) enum FastEvent {
@@ -68,6 +74,13 @@ pub(crate) fn spawn_event_processor(
     transcript_buffer: Option<Arc<parking_lot::Mutex<TranscriptBuffer>>>,
     extractors: Vec<Arc<dyn TurnExtractor>>,
     state: State,
+    // Registry parameters:
+    session_signals: Option<SessionSignals>,
+    computed: Option<ComputedRegistry>,
+    phase_machine: Option<tokio::sync::Mutex<PhaseMachine>>,
+    watchers: Option<WatcherRegistry>,
+    temporal: Option<Arc<TemporalRegistry>>,
+    background_tracker: Option<Arc<BackgroundToolTracker>>,
 ) -> (tokio::task::JoinHandle<()>, tokio::task::JoinHandle<()>) {
     let shared = Arc::new(SharedState {
         interrupted: AtomicBool::new(false),
@@ -87,6 +100,10 @@ pub(crate) fn spawn_event_processor(
         loop {
             match event_rx.recv().await {
                 Ok(event) => {
+                    // Auto-track session signals on every event
+                    if let Some(ref signals) = session_signals {
+                        signals.on_event(&event);
+                    }
                     route_event(event, &fast_tx_clone, &ctrl_tx_clone, &shared_clone).await;
                 }
                 Err(broadcast::error::RecvError::Lagged(n)) => {
@@ -107,6 +124,11 @@ pub(crate) fn spawn_event_processor(
         run_fast_lane(fast_rx, fast_callbacks, fast_shared, fast_buffer).await;
     });
 
+    // Clone for the timer task (before moving into ctrl spawn)
+    let timer_temporal = temporal.clone();
+    let timer_state = state.clone();
+    let timer_writer = writer.clone();
+
     // Spawn control processor
     let ctrl_callbacks = callbacks;
     let ctrl_shared = shared;
@@ -120,9 +142,30 @@ pub(crate) fn spawn_event_processor(
             transcript_buffer,
             extractors,
             state,
+            computed,
+            phase_machine,
+            watchers,
+            temporal,
+            background_tracker,
         )
         .await;
     });
+
+    // Optional timer task for sustained temporal patterns
+    if let Some(ref temporal_ref) = timer_temporal {
+        if temporal_ref.needs_timer() {
+            let t = temporal_ref.clone();
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(Duration::from_millis(500));
+                loop {
+                    interval.tick().await;
+                    for action in t.check_all(&timer_state, None, &timer_writer) {
+                        tokio::spawn(action);
+                    }
+                }
+            });
+        }
+    }
 
     (fast_handle, ctrl_handle)
 }
@@ -273,6 +316,11 @@ async fn run_control_lane(
     transcript_buffer: Option<Arc<parking_lot::Mutex<TranscriptBuffer>>>,
     extractors: Vec<Arc<dyn TurnExtractor>>,
     state: State,
+    computed: Option<ComputedRegistry>,
+    phase_machine: Option<tokio::sync::Mutex<PhaseMachine>>,
+    watchers: Option<WatcherRegistry>,
+    temporal: Option<Arc<TemporalRegistry>>,
+    background_tracker: Option<Arc<BackgroundToolTracker>>,
 ) {
     while let Some(event) = rx.recv().await {
         match event {
@@ -329,6 +377,10 @@ async fn run_control_lane(
                 }
             }
             ControlEvent::ToolCallCancelled(ids) => {
+                // Cancel background tasks first
+                if let Some(ref tracker) = background_tracker {
+                    tracker.cancel(&ids);
+                }
                 if let Some(ref disp) = dispatcher {
                     disp.cancel_by_ids(&ids).await;
                 }
@@ -337,6 +389,10 @@ async fn run_control_lane(
                 }
             }
             ControlEvent::Interrupted => {
+                // Truncate current model turn on interruption
+                if let Some(ref buf) = transcript_buffer {
+                    buf.lock().truncate_current_model_turn();
+                }
                 if let Some(cb) = &callbacks.on_interrupted {
                     cb().await;
                 }
@@ -344,11 +400,39 @@ async fn run_control_lane(
                 shared.interrupted.store(false, Ordering::Release);
             }
             ControlEvent::TurnComplete => {
-                // 1. Finalize transcript turn and run extractors
-                if let Some(ref buf) = transcript_buffer {
-                    let _turn = buf.lock().end_turn();
+                // 1. Reset turn-scoped state
+                state.clear_prefix("turn:");
 
-                    // Run each extractor with its requested window
+                // 2. Finalize transcript (prefer server transcriptions when available)
+                if let Some(ref buf) = transcript_buffer {
+                    {
+                        let mut tb = buf.lock();
+                        if let Some(input_text) =
+                            state.session().get::<String>("last_input_transcription")
+                        {
+                            tb.set_input_transcription(&input_text);
+                        }
+                        if let Some(output_text) =
+                            state.session().get::<String>("last_output_transcription")
+                        {
+                            tb.set_output_transcription(&output_text);
+                        }
+                        tb.end_turn();
+                    }
+                }
+
+                // 3. Snapshot watched keys BEFORE extractors
+                let pre_snapshot = watchers.as_ref().map(|w| {
+                    state.snapshot_values(
+                        &w.observed_keys()
+                            .iter()
+                            .map(|s| s.as_str())
+                            .collect::<Vec<_>>(),
+                    )
+                });
+
+                // 4. Run extractors
+                if let Some(ref buf) = transcript_buffer {
                     for extractor in &extractors {
                         let window_size = extractor.window_size();
                         let window: Vec<_> = buf.lock().window(window_size).to_vec();
@@ -356,7 +440,6 @@ async fn run_control_lane(
                             match extractor.extract(&window).await {
                                 Ok(value) => {
                                     state.set(extractor.name(), &value);
-                                    // Fire on_extracted callback
                                     if let Some(cb) = &callbacks.on_extracted {
                                         cb(extractor.name().to_string(), value).await;
                                     }
@@ -365,7 +448,7 @@ async fn run_control_lane(
                                     #[cfg(feature = "tracing-support")]
                                     tracing::warn!(
                                         extractor = extractor.name(),
-                                        "Turn extractor failed: {_e}"
+                                        "Extraction failed: {_e}"
                                     );
                                     let _ = _e;
                                 }
@@ -374,7 +457,70 @@ async fn run_control_lane(
                     }
                 }
 
-                // 2. State-reactive instruction template (deduped)
+                // 5. Recompute derived state
+                if let Some(ref computed) = computed {
+                    computed.recompute(&state);
+                }
+
+                // 6. Evaluate phase transitions
+                if let Some(ref pm) = phase_machine {
+                    let mut machine = pm.lock().await;
+                    if let Some(target) =
+                        machine.evaluate(&state).map(|s| s.to_string())
+                    {
+                        let turn =
+                            state.session().get::<u32>("turn_count").unwrap_or(0);
+                        let instruction =
+                            machine.transition(&target, &state, &writer, turn).await;
+                        if let Some(inst) = instruction {
+                            // Dedup against last instruction
+                            let should_update = {
+                                let last = shared.last_instruction.lock();
+                                last.as_deref() != Some(&inst)
+                            };
+                            if should_update {
+                                *shared.last_instruction.lock() =
+                                    Some(inst.clone());
+                                writer.update_instruction(inst).await.ok();
+                            }
+                        }
+                        state.session().set("phase", machine.current());
+                    }
+                }
+
+                // 7. Fire watchers (compare pre vs post snapshots)
+                if let (Some(ref watchers), Some(pre)) =
+                    (&watchers, pre_snapshot)
+                {
+                    let post_keys: Vec<&str> = watchers
+                        .observed_keys()
+                        .iter()
+                        .map(|s| s.as_str())
+                        .collect();
+                    let diffs = state.diff_values(&pre, &post_keys);
+                    if !diffs.is_empty() {
+                        let (blocking, concurrent) =
+                            watchers.evaluate(&diffs, &state);
+                        for action in blocking {
+                            action.await;
+                        }
+                        for action in concurrent {
+                            tokio::spawn(action);
+                        }
+                    }
+                }
+
+                // 8. Check temporal patterns
+                if let Some(ref temporal) = temporal {
+                    let event = SessionEvent::TurnComplete;
+                    for action in
+                        temporal.check_all(&state, Some(&event), &writer)
+                    {
+                        tokio::spawn(action);
+                    }
+                }
+
+                // 9. Instruction template (may override phase instruction)
                 if let Some(ref template) = callbacks.instruction_template {
                     if let Some(new_instruction) = template(&state) {
                         let should_update = {
@@ -382,25 +528,30 @@ async fn run_control_lane(
                             last.as_deref() != Some(&new_instruction)
                         };
                         if should_update {
-                            *shared.last_instruction.lock() = Some(new_instruction.clone());
-                            if let Err(_e) = writer.update_instruction(new_instruction).await {
-                                #[cfg(feature = "tracing-support")]
-                                tracing::warn!("Failed to update instruction: {_e}");
-                                let _ = _e;
-                            }
+                            *shared.last_instruction.lock() =
+                                Some(new_instruction.clone());
+                            writer
+                                .update_instruction(new_instruction)
+                                .await
+                                .ok();
                         }
                     }
                 }
 
-                // 3. Turn boundary hook (context stuffing, state injection)
+                // 10. Turn boundary hook
                 if let Some(cb) = &callbacks.on_turn_boundary {
                     cb(state.clone(), writer.clone()).await;
                 }
 
-                // 4. Fire user turn-complete callback
+                // 11. User turn-complete callback
                 if let Some(cb) = &callbacks.on_turn_complete {
                     cb().await;
                 }
+
+                // 12. Update session turn count
+                let tc: u32 =
+                    state.session().get("turn_count").unwrap_or(0);
+                state.session().set("turn_count", tc + 1);
             }
             ControlEvent::GoAway(time_left) => {
                 let duration = time_left
@@ -458,7 +609,7 @@ mod tests {
             Arc::new(crate::agent_session::NoOpSessionWriter);
 
         let (fast_handle, ctrl_handle) =
-            spawn_event_processor(event_rx, callbacks, None, writer, None, vec![], State::new());
+            spawn_event_processor(event_rx, callbacks, None, writer, None, vec![], State::new(), None, None, None, None, None, None);
 
         // Send audio events
         let _ = event_tx.send(SessionEvent::AudioData(Bytes::from_static(b"audio1")));
@@ -493,7 +644,7 @@ mod tests {
             Arc::new(crate::agent_session::NoOpSessionWriter);
 
         let (fast_handle, ctrl_handle) =
-            spawn_event_processor(event_rx, callbacks, None, writer, None, vec![], State::new());
+            spawn_event_processor(event_rx, callbacks, None, writer, None, vec![], State::new(), None, None, None, None, None, None);
 
         // Send audio, then interrupt, then more audio
         let _ = event_tx.send(SessionEvent::AudioData(Bytes::from_static(b"before")));
@@ -533,7 +684,7 @@ mod tests {
             Arc::new(crate::agent_session::NoOpSessionWriter);
 
         let (fast_handle, ctrl_handle) =
-            spawn_event_processor(event_rx, callbacks, None, writer, None, vec![], State::new());
+            spawn_event_processor(event_rx, callbacks, None, writer, None, vec![], State::new(), None, None, None, None, None, None);
 
         let _ = event_tx.send(SessionEvent::TurnComplete);
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -564,6 +715,12 @@ mod tests {
             Some(buffer.clone()),
             vec![],
             State::new(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
         );
 
         // Send transcripts
@@ -650,6 +807,12 @@ mod tests {
             Some(buffer.clone()),
             extractors,
             state.clone(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
         );
 
         // Send transcript + turn complete
@@ -728,6 +891,12 @@ mod tests {
             None,
             vec![],
             state,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
         );
 
         // Send a tool call
@@ -838,6 +1007,12 @@ mod tests {
             Some(buffer.clone()),
             vec![],
             state.clone(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
         );
 
         // Turn 1: set phase to "ordering"
@@ -922,6 +1097,12 @@ mod tests {
             Some(buffer),
             vec![],
             state,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
         );
 
         let _ = event_tx.send(SessionEvent::InputTranscription("hi".to_string()));

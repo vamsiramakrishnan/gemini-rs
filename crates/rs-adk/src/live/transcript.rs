@@ -103,6 +103,23 @@ impl TranscriptBuffer {
         out
     }
 
+    /// Set server-provided input transcription for current turn.
+    /// Overwrites client-accumulated input if server transcription is available.
+    pub fn set_input_transcription(&mut self, text: &str) {
+        self.current_user = text.to_string();
+    }
+
+    /// Set server-provided output transcription for current turn.
+    pub fn set_output_transcription(&mut self, text: &str) {
+        self.current_model = text.to_string();
+    }
+
+    /// Truncate the current model turn in progress. Called on interruption.
+    /// Only what was already delivered to the client is retained.
+    pub fn truncate_current_model_turn(&mut self) {
+        self.current_model.clear();
+    }
+
     /// Whether there is any pending (un-finalized) transcript content.
     pub fn has_pending(&self) -> bool {
         !self.current_user.is_empty() || !self.current_model.is_empty()
@@ -187,6 +204,41 @@ mod tests {
         assert!(buf.has_pending());
         buf.end_turn();
         assert!(!buf.has_pending());
+    }
+
+    #[test]
+    fn set_input_transcription_overwrites_accumulated() {
+        let mut buf = TranscriptBuffer::new();
+        buf.push_input("partial ");
+        buf.push_input("input");
+        // Server provides authoritative transcription
+        buf.set_input_transcription("server transcription");
+        let turn = buf.end_turn().expect("should produce a turn");
+        assert_eq!(turn.user, "server transcription");
+    }
+
+    #[test]
+    fn set_output_transcription_overwrites_accumulated() {
+        let mut buf = TranscriptBuffer::new();
+        buf.push_output("partial ");
+        buf.push_output("output");
+        // Server provides authoritative transcription
+        buf.set_output_transcription("server output");
+        let turn = buf.end_turn().expect("should produce a turn");
+        assert_eq!(turn.model, "server output");
+    }
+
+    #[test]
+    fn truncate_current_model_turn_clears_model_text() {
+        let mut buf = TranscriptBuffer::new();
+        buf.push_input("user said something");
+        buf.push_output("model was saying something but got");
+        // Interruption happens
+        buf.truncate_current_model_turn();
+        assert!(buf.has_pending()); // user text is still there
+        let turn = buf.end_turn().expect("should produce a turn");
+        assert_eq!(turn.user, "user said something");
+        assert_eq!(turn.model, ""); // model output was truncated
     }
 
     #[test]
