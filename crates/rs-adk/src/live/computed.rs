@@ -54,7 +54,11 @@ impl ComputedRegistry {
     /// Register a computed variable. Re-sorts the internal list and rebuilds
     /// the dependency index. **Panics** if the new variable introduces a cycle.
     pub fn register(&mut self, var: ComputedVar) {
-        self.vars.push(var);
+        if let Some(pos) = self.vars.iter().position(|v| v.key == var.key) {
+            self.vars[pos] = var; // replace existing
+        } else {
+            self.vars.push(var);
+        }
         self.topo_sort_or_panic();
         self.rebuild_dep_index();
     }
@@ -83,7 +87,8 @@ impl ComputedRegistry {
     /// computed var changes, its dependents are also scheduled for recomputation.
     /// Returns keys that actually changed.
     pub fn recompute_affected(&self, state: &State, changed_keys: &[String]) -> Vec<String> {
-        // Collect indices of affected vars transitively (deduplicated).
+        // Collect indices of affected vars transitively (deduplicated via bitmap).
+        let mut visited = vec![false; self.vars.len()];
         let mut affected_set = Vec::new();
 
         // Seed the work queue with the initial changed keys.
@@ -93,7 +98,8 @@ impl ComputedRegistry {
             // Look up vars that depend on this key directly.
             if let Some(indices) = self.dep_index.get(&key) {
                 for &idx in indices {
-                    if !affected_set.contains(&idx) {
+                    if !visited[idx] {
+                        visited[idx] = true;
                         affected_set.push(idx);
                         // This computed var's output (derived:<key>) might be
                         // a dependency of other vars, so enqueue it.
@@ -258,18 +264,9 @@ impl ComputedRegistry {
         }
 
         // Reorder vars according to topological sort.
-        // We need to move elements, so we drain and reinsert.
-        let old_vars: Vec<ComputedVar> = self.vars.drain(..).collect();
-        for &idx in &order {
-            // We can't move out of a Vec by index after draining, so we
-            // collected into old_vars. But we need index-based access.
-            // Since we drained, old_vars owns them. We need to consume
-            // in order. Use a temporary indexed container.
-            // Actually, let's use a different approach: swap into a vec of Options.
-            let _ = idx; // handled below
-        }
-        // Re-do: use Option wrapping for safe index-based extraction.
-        let mut slots: Vec<Option<ComputedVar>> = old_vars.into_iter().map(Some).collect();
+        // Use Option wrapping for safe index-based extraction.
+        let mut slots: Vec<Option<ComputedVar>> =
+            self.vars.drain(..).map(Some).collect();
         for &idx in &order {
             if let Some(var) = slots[idx].take() {
                 self.vars.push(var);
