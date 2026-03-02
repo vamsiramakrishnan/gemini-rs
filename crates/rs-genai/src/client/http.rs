@@ -92,6 +92,26 @@ impl HttpClient {
         self.request_with_retry("POST", url, auth_headers, Some(body)).await
     }
 
+    /// PATCH JSON to a URL and return the parsed response.
+    pub async fn patch_json(
+        &self,
+        url: &str,
+        auth_headers: Vec<(String, String)>,
+        body: &impl serde::Serialize,
+    ) -> Result<serde_json::Value, HttpError> {
+        self.request_with_retry("PATCH", url, auth_headers, Some(body)).await
+    }
+
+    /// PUT JSON to a URL and return the parsed response.
+    pub async fn put_json(
+        &self,
+        url: &str,
+        auth_headers: Vec<(String, String)>,
+        body: &impl serde::Serialize,
+    ) -> Result<serde_json::Value, HttpError> {
+        self.request_with_retry("PUT", url, auth_headers, Some(body)).await
+    }
+
     /// GET a URL and return the parsed response.
     pub async fn get_json(
         &self,
