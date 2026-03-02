@@ -28,6 +28,12 @@ impl SessionWriter for MockWriter {
     ) -> Result<(), SessionError> {
         Ok(())
     }
+    async fn send_video(&self, _jpeg_data: Vec<u8>) -> Result<(), SessionError> {
+        Ok(())
+    }
+    async fn update_instruction(&self, _instruction: String) -> Result<(), SessionError> {
+        Ok(())
+    }
     async fn signal_activity_start(&self) -> Result<(), SessionError> {
         Ok(())
     }

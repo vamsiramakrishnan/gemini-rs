@@ -1,0 +1,248 @@
+//! Turn-windowed extraction — OOB LLM structured data extraction between turns.
+//!
+//! A `TurnExtractor` runs after each turn completes, taking a window of recent
+//! transcript turns and producing a structured JSON value via an out-of-band
+//! LLM call.
+
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use serde_json::Value;
+
+use crate::llm::{BaseLlm, LlmError, LlmRequest};
+
+use super::transcript::TranscriptTurn;
+
+/// Trait for between-turn extraction from transcript windows.
+///
+/// Implementations receive a window of recent transcript turns and produce
+/// a structured JSON value. The processor stores the result in `State`
+/// under the extractor's name.
+#[async_trait]
+pub trait TurnExtractor: Send + Sync {
+    /// Name of this extractor (used as the State key).
+    fn name(&self) -> &str;
+
+    /// How many recent turns this extractor needs.
+    fn window_size(&self) -> usize;
+
+    /// Extract structured data from the transcript window.
+    async fn extract(&self, window: &[TranscriptTurn]) -> Result<Value, LlmError>;
+}
+
+/// LLM-backed turn extractor that sends transcript windows to an OOB LLM
+/// with a structured extraction prompt.
+pub struct LlmExtractor {
+    name: String,
+    llm: Arc<dyn BaseLlm>,
+    prompt: String,
+    window_size: usize,
+    schema: Option<Value>,
+}
+
+impl LlmExtractor {
+    /// Create a new LLM-backed extractor.
+    ///
+    /// - `name`: key for storing results in State
+    /// - `llm`: the out-of-band LLM to use for extraction
+    /// - `prompt`: system instruction describing what to extract
+    /// - `window_size`: how many recent turns to include
+    pub fn new(
+        name: impl Into<String>,
+        llm: Arc<dyn BaseLlm>,
+        prompt: impl Into<String>,
+        window_size: usize,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            llm,
+            prompt: prompt.into(),
+            window_size,
+            schema: None,
+        }
+    }
+
+    /// Set a JSON Schema for structured output.
+    ///
+    /// When set, the schema is included in the prompt to guide the LLM
+    /// toward producing valid JSON matching the schema.
+    pub fn with_schema(mut self, schema: Value) -> Self {
+        self.schema = schema.into();
+        self
+    }
+
+    /// Format transcript turns for the LLM prompt.
+    fn format_transcript(window: &[TranscriptTurn]) -> String {
+        let mut out = String::new();
+        for turn in window {
+            if !turn.user.is_empty() {
+                out.push_str("User: ");
+                out.push_str(turn.user.trim());
+                out.push('\n');
+            }
+            if !turn.model.is_empty() {
+                out.push_str("Assistant: ");
+                out.push_str(turn.model.trim());
+                out.push('\n');
+            }
+            out.push('\n');
+        }
+        out
+    }
+}
+
+#[async_trait]
+impl TurnExtractor for LlmExtractor {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn window_size(&self) -> usize {
+        self.window_size
+    }
+
+    async fn extract(&self, window: &[TranscriptTurn]) -> Result<Value, LlmError> {
+        let transcript = Self::format_transcript(window);
+
+        let mut system = self.prompt.clone();
+        if let Some(schema) = &self.schema {
+            system.push_str("\n\nRespond with valid JSON matching this schema:\n");
+            system.push_str(&serde_json::to_string_pretty(schema).unwrap_or_default());
+        } else {
+            system.push_str("\n\nRespond with valid JSON only, no markdown fences.");
+        }
+
+        let mut request = LlmRequest::from_text(format!(
+            "Transcript:\n{transcript}\nExtract the requested information."
+        ));
+        request.system_instruction = Some(system);
+
+        let response = self.llm.generate(request).await?;
+        let text = response.text();
+
+        // Parse the response as JSON
+        serde_json::from_str(&text).map_err(|e| {
+            LlmError::Other(format!(
+                "Failed to parse extraction result as JSON: {e}. Raw: {text}"
+            ))
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::llm::LlmResponse;
+    use rs_genai::prelude::{Content, Part, Role};
+    use std::time::Instant;
+
+    struct MockLlm {
+        response: String,
+    }
+
+    #[async_trait]
+    impl BaseLlm for MockLlm {
+        fn model_id(&self) -> &str {
+            "mock"
+        }
+        async fn generate(&self, _request: LlmRequest) -> Result<LlmResponse, LlmError> {
+            Ok(LlmResponse {
+                content: Content {
+                    role: Some(Role::Model),
+                    parts: vec![Part::Text {
+                        text: self.response.clone(),
+                    }],
+                },
+                finish_reason: Some("STOP".into()),
+                usage: None,
+            })
+        }
+    }
+
+    fn make_turns(pairs: &[(&str, &str)]) -> Vec<TranscriptTurn> {
+        pairs
+            .iter()
+            .enumerate()
+            .map(|(i, (user, model))| TranscriptTurn {
+                turn_number: i as u32,
+                user: user.to_string(),
+                model: model.to_string(),
+                timestamp: Instant::now(),
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn llm_extractor_produces_json() {
+        let llm = Arc::new(MockLlm {
+            response: r#"{"phase": "ordering", "items": ["pizza"]}"#.to_string(),
+        });
+
+        let extractor = LlmExtractor::new("OrderState", llm, "Extract order state", 3);
+
+        let turns = make_turns(&[
+            ("I'd like a pizza", "Great! What size?"),
+            ("Large please", "Coming right up!"),
+        ]);
+
+        let result = extractor.extract(&turns).await.unwrap();
+        assert_eq!(result["phase"], "ordering");
+        assert_eq!(result["items"][0], "pizza");
+    }
+
+    #[tokio::test]
+    async fn llm_extractor_with_schema() {
+        let llm = Arc::new(MockLlm {
+            response: r#"{"sentiment": "positive", "score": 0.9}"#.to_string(),
+        });
+
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "sentiment": {"type": "string", "enum": ["positive", "neutral", "negative"]},
+                "score": {"type": "number"}
+            }
+        });
+
+        let extractor = LlmExtractor::new("Sentiment", llm, "Rate sentiment", 1)
+            .with_schema(schema);
+
+        let turns = make_turns(&[("This is great!", "Glad you think so!")]);
+        let result = extractor.extract(&turns).await.unwrap();
+        assert_eq!(result["sentiment"], "positive");
+    }
+
+    #[tokio::test]
+    async fn llm_extractor_invalid_json_returns_error() {
+        let llm = Arc::new(MockLlm {
+            response: "not json at all".to_string(),
+        });
+
+        let extractor = LlmExtractor::new("Bad", llm, "Extract", 1);
+        let turns = make_turns(&[("hi", "hello")]);
+        let result = extractor.extract(&turns).await;
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn format_transcript_readable() {
+        let turns = make_turns(&[
+            ("Hello", "Hi there!"),
+            ("How are you?", "I'm doing well"),
+        ]);
+        let formatted = LlmExtractor::format_transcript(&turns);
+        assert!(formatted.contains("User: Hello"));
+        assert!(formatted.contains("Assistant: Hi there!"));
+        assert!(formatted.contains("User: How are you?"));
+    }
+
+    #[test]
+    fn extractor_name_and_window_size() {
+        let llm = Arc::new(MockLlm {
+            response: "{}".to_string(),
+        });
+        let ext = LlmExtractor::new("TestExtractor", llm, "test", 5);
+        assert_eq!(ext.name(), "TestExtractor");
+        assert_eq!(ext.window_size(), 5);
+    }
+}

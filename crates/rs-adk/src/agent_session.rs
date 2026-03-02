@@ -118,6 +118,16 @@ impl AgentSession {
             .map_err(AgentError::Session)
     }
 
+    /// Send video/image data (raw JPEG bytes).
+    pub async fn send_video(&self, jpeg_data: Vec<u8>) -> Result<(), AgentError> {
+        self.writer.send_video(jpeg_data).await.map_err(AgentError::Session)
+    }
+
+    /// Update the system instruction mid-session.
+    pub async fn update_instruction(&self, instruction: impl Into<String>) -> Result<(), AgentError> {
+        self.writer.update_instruction(instruction.into()).await.map_err(AgentError::Session)
+    }
+
     /// Signal activity start (user started speaking).
     pub async fn signal_activity_start(&self) -> Result<(), AgentError> {
         if self.input_broadcast.receiver_count() > 0 {
@@ -194,6 +204,12 @@ impl SessionWriter for NoOpSessionWriter {
         _turns: Vec<Content>,
         _turn_complete: bool,
     ) -> Result<(), SessionError> {
+        Ok(())
+    }
+    async fn send_video(&self, _jpeg_data: Vec<u8>) -> Result<(), SessionError> {
+        Ok(())
+    }
+    async fn update_instruction(&self, _instruction: String) -> Result<(), SessionError> {
         Ok(())
     }
     async fn signal_activity_start(&self) -> Result<(), SessionError> {
