@@ -8,6 +8,8 @@
 
 pub mod config;
 pub mod credential;
+pub mod exchanger;
+pub mod handler;
 pub mod schemes;
 
 pub use config::{AuthConfig, AuthToolArguments};
@@ -15,4 +17,6 @@ pub use credential::{
     AuthCredential, AuthCredentialType, HttpAuth, HttpCredentials, OAuth2Auth,
     ServiceAccountCredential,
 };
+pub use exchanger::{CredentialExchangeError, CredentialExchanger, CredentialExchangerRegistry};
+pub use handler::AuthHandler;
 pub use schemes::{AuthScheme, OAuthGrantType};
