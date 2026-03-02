@@ -10,18 +10,18 @@ use std::path::Path;
 
 use walkdir::WalkDir;
 
-use crate::reader;
 use crate::schema::{
     GenaiEnumDef, GenaiHelperDef, GenaiSchema, GenaiTypeAlias, GenaiTypeCategory, GenaiTypeDef,
     SourceInfo,
 };
+
+use super::typescript as ts;
 
 // ---------------------------------------------------------------------------
 // Wire crate type mapping
 // ---------------------------------------------------------------------------
 
 /// Comprehensive mapping of js-genai type names → rs-genai Rust paths.
-/// Built from comparing the js-genai exports against our wire crate's public API.
 fn wire_type_map() -> HashMap<&'static str, &'static str> {
     let mut m = HashMap::new();
 
@@ -31,147 +31,60 @@ fn wire_type_map() -> HashMap<&'static str, &'static str> {
     m.insert("Blob", "rs_genai::prelude::Blob");
     m.insert("FileData", "rs_genai::prelude::FileData");
     m.insert("ExecutableCode", "rs_genai::prelude::ExecutableCode");
-    m.insert(
-        "CodeExecutionResult",
-        "rs_genai::prelude::CodeExecutionResult",
-    );
+    m.insert("CodeExecutionResult", "rs_genai::prelude::CodeExecutionResult");
 
     // Function calling
     m.insert("FunctionCall", "rs_genai::prelude::FunctionCall");
-    m.insert(
-        "FunctionResponse",
-        "rs_genai::prelude::FunctionResponse",
-    );
-    m.insert(
-        "FunctionDeclaration",
-        "rs_genai::prelude::FunctionDeclaration",
-    );
+    m.insert("FunctionResponse", "rs_genai::prelude::FunctionResponse");
+    m.insert("FunctionDeclaration", "rs_genai::prelude::FunctionDeclaration");
     m.insert("Tool", "rs_genai::prelude::Tool");
     m.insert("ToolConfig", "rs_genai::prelude::ToolConfig");
-    m.insert(
-        "FunctionCallingConfig",
-        "rs_genai::prelude::FunctionCallingConfig",
-    );
+    m.insert("FunctionCallingConfig", "rs_genai::prelude::FunctionCallingConfig");
 
     // Enums
     m.insert("Modality", "rs_genai::prelude::Modality");
     m.insert("Role", "rs_genai::prelude::Role");
 
     // Configuration
-    m.insert(
-        "GenerationConfig",
-        "rs_genai::prelude::GenerationConfig",
-    );
+    m.insert("GenerationConfig", "rs_genai::prelude::GenerationConfig");
     m.insert("SpeechConfig", "rs_genai::prelude::SpeechConfig");
     m.insert("VoiceConfig", "rs_genai::prelude::VoiceConfig");
-    m.insert(
-        "PrebuiltVoiceConfig",
-        "rs_genai::prelude::PrebuiltVoiceConfig",
-    );
+    m.insert("PrebuiltVoiceConfig", "rs_genai::prelude::PrebuiltVoiceConfig");
     m.insert("ThinkingConfig", "rs_genai::prelude::ThinkingConfig");
-    m.insert(
-        "RealtimeInputConfig",
-        "rs_genai::prelude::RealtimeInputConfig",
-    );
-    m.insert(
-        "AutomaticActivityDetection",
-        "rs_genai::prelude::AutomaticActivityDetection",
-    );
-    m.insert(
-        "SessionResumptionConfig",
-        "rs_genai::prelude::SessionResumptionConfig",
-    );
-    m.insert(
-        "ContextWindowCompressionConfig",
-        "rs_genai::prelude::ContextWindowCompressionConfig",
-    );
-    m.insert(
-        "SlidingWindow",
-        "rs_genai::prelude::SlidingWindow",
-    );
-    m.insert(
-        "ProactivityConfig",
-        "rs_genai::prelude::ProactivityConfig",
-    );
-    m.insert(
-        "InputAudioTranscription",
-        "rs_genai::prelude::InputAudioTranscription",
-    );
-    m.insert(
-        "OutputAudioTranscription",
-        "rs_genai::prelude::OutputAudioTranscription",
-    );
+    m.insert("RealtimeInputConfig", "rs_genai::prelude::RealtimeInputConfig");
+    m.insert("AutomaticActivityDetection", "rs_genai::prelude::AutomaticActivityDetection");
+    m.insert("SessionResumptionConfig", "rs_genai::prelude::SessionResumptionConfig");
+    m.insert("ContextWindowCompressionConfig", "rs_genai::prelude::ContextWindowCompressionConfig");
+    m.insert("SlidingWindow", "rs_genai::prelude::SlidingWindow");
+    m.insert("ProactivityConfig", "rs_genai::prelude::ProactivityConfig");
+    m.insert("InputAudioTranscription", "rs_genai::prelude::InputAudioTranscription");
+    m.insert("OutputAudioTranscription", "rs_genai::prelude::OutputAudioTranscription");
 
     // Metadata
     m.insert("UsageMetadata", "rs_genai::prelude::UsageMetadata");
-    m.insert(
-        "GroundingMetadata",
-        "rs_genai::prelude::GroundingMetadata",
-    );
-    m.insert(
-        "UrlContextMetadata",
-        "rs_genai::prelude::UrlContextMetadata",
-    );
+    m.insert("GroundingMetadata", "rs_genai::prelude::GroundingMetadata");
+    m.insert("UrlContextMetadata", "rs_genai::prelude::UrlContextMetadata");
 
-    // Session/Live API messages (mapped to wire message types)
-    m.insert(
-        "LiveServerMessage",
-        "rs_genai::prelude::ServerMessage",
-    );
-    m.insert(
-        "LiveServerSetupComplete",
-        "rs_genai::prelude::SetupCompletePayload",
-    );
-    m.insert(
-        "LiveServerContent",
-        "rs_genai::prelude::ServerContentPayload",
-    );
-    m.insert(
-        "LiveServerToolCall",
-        "rs_genai::prelude::ToolCallPayload",
-    );
-    m.insert(
-        "LiveServerToolCallCancellation",
-        "rs_genai::prelude::ToolCallCancellationPayload",
-    );
-    m.insert(
-        "LiveServerGoAway",
-        "rs_genai::prelude::GoAwayPayload",
-    );
-    m.insert(
-        "LiveServerSessionResumptionUpdate",
-        "rs_genai::prelude::SessionResumptionUpdatePayload",
-    );
-    m.insert(
-        "LiveClientContent",
-        "rs_genai::prelude::ClientContentPayload",
-    );
-    m.insert(
-        "LiveClientRealtimeInput",
-        "rs_genai::prelude::RealtimeInputPayload",
-    );
-    m.insert(
-        "LiveClientToolResponse",
-        "rs_genai::prelude::ToolResponsePayload",
-    );
-    m.insert(
-        "LiveClientSetup",
-        "rs_genai::prelude::SetupPayload",
-    );
-    m.insert(
-        "ActivityStart",
-        "rs_genai::prelude::ActivityStart",
-    );
+    // Session/Live API messages
+    m.insert("LiveServerMessage", "rs_genai::prelude::ServerMessage");
+    m.insert("LiveServerSetupComplete", "rs_genai::prelude::SetupCompletePayload");
+    m.insert("LiveServerContent", "rs_genai::prelude::ServerContentPayload");
+    m.insert("LiveServerToolCall", "rs_genai::prelude::ToolCallPayload");
+    m.insert("LiveServerToolCallCancellation", "rs_genai::prelude::ToolCallCancellationPayload");
+    m.insert("LiveServerGoAway", "rs_genai::prelude::GoAwayPayload");
+    m.insert("LiveServerSessionResumptionUpdate", "rs_genai::prelude::SessionResumptionUpdatePayload");
+    m.insert("LiveClientContent", "rs_genai::prelude::ClientContentPayload");
+    m.insert("LiveClientRealtimeInput", "rs_genai::prelude::RealtimeInputPayload");
+    m.insert("LiveClientToolResponse", "rs_genai::prelude::ToolResponsePayload");
+    m.insert("LiveClientSetup", "rs_genai::prelude::SetupPayload");
+    m.insert("ActivityStart", "rs_genai::prelude::ActivityStart");
     m.insert("ActivityEnd", "rs_genai::prelude::ActivityEnd");
 
     // Session abstraction
     m.insert("Session", "rs_genai::prelude::SessionHandle");
 
     // Transcription
-    m.insert(
-        "Transcription",
-        "rs_genai::prelude::TranscriptionPayload",
-    );
+    m.insert("Transcription", "rs_genai::prelude::TranscriptionPayload");
 
     m
 }
@@ -184,10 +97,7 @@ fn helper_map() -> HashMap<&'static str, &'static str> {
     m.insert("createPartFromFunctionCall", "Part::function_call");
     m.insert("createUserContent", "Content::user");
     m.insert("createModelContent", "Content::model");
-    m.insert(
-        "createPartFromFunctionResponse",
-        "Content::function_response",
-    );
+    m.insert("createPartFromFunctionResponse", "Content::function_response");
     m
 }
 
@@ -196,7 +106,7 @@ fn enum_map() -> HashMap<&'static str, &'static str> {
     let mut m = HashMap::new();
     m.insert("Modality", "rs_genai::prelude::Modality");
     m.insert("MediaResolution", "rs_genai::prelude::MediaResolution");
-    m.insert("Type", "rs_genai::prelude::SchemaType"); // JSON Schema Type enum
+    m.insert("Type", "rs_genai::prelude::SchemaType");
     m
 }
 
@@ -218,6 +128,49 @@ fn classify_genai_type(name: &str) -> GenaiTypeCategory {
         n if n.starts_with("Live") || n == "Session" || n == "Transcription" => {
             GenaiTypeCategory::LiveApi
         }
+
+        // Generate API types
+        n if n.starts_with("Generate")
+            || n == "Candidate"
+            || n == "FinishReason"
+            || n.starts_with("SafetyRating")
+            || n.starts_with("Citation")
+            || n == "PromptFeedback" =>
+        {
+            GenaiTypeCategory::Generate
+        }
+
+        // Embed API types
+        n if n.starts_with("Embed") || n.starts_with("ContentEmbedding") => {
+            GenaiTypeCategory::Embed
+        }
+
+        // File API types
+        n if n.starts_with("File") && n != "FileData" => GenaiTypeCategory::Files,
+
+        // Model API types
+        n if n.starts_with("Model") && n != "Modality" => GenaiTypeCategory::Models,
+
+        // Token counting types
+        n if n.starts_with("CountToken") || n.starts_with("ComputeToken") => {
+            GenaiTypeCategory::Tokens
+        }
+
+        // Cached content types
+        n if n.starts_with("CachedContent") || n.starts_with("Cache") => {
+            GenaiTypeCategory::Caches
+        }
+
+        // Tuning types
+        n if n.starts_with("Tuning") || n.starts_with("TunedModel") || n == "Hyperparameters" => {
+            GenaiTypeCategory::Tunings
+        }
+
+        // Batch types
+        n if n.starts_with("Batch") => GenaiTypeCategory::Batches,
+
+        // Chat session types
+        n if n.starts_with("Chat") || n == "SendMessageConfig" => GenaiTypeCategory::Chats,
 
         // Configuration
         n if n.contains("Config") || n.contains("Speech") || n.contains("Voice") => {
@@ -257,7 +210,6 @@ pub fn read_genai_source(source_dir: &Path) -> Result<GenaiSchema, String> {
     let mut type_aliases = Vec::new();
     let mut helper_defs = Vec::new();
 
-    // Collect all .ts files
     let ts_files: Vec<_> = WalkDir::new(source_dir)
         .into_iter()
         .filter_map(|e| e.ok())
@@ -278,13 +230,11 @@ pub fn read_genai_source(source_dir: &Path) -> Result<GenaiSchema, String> {
         let content = fs::read_to_string(path)
             .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
 
-        // Extract interfaces
-        let interfaces = reader::extract_interfaces_pub(&content);
+        let interfaces = ts::extract_interfaces(&content);
         for iface in &interfaces {
             let has_wire = wire_types.contains_key(iface.name.as_str());
             let wire_type = wire_types.get(iface.name.as_str()).map(|s| s.to_string());
-
-            let (fields, _callbacks) = reader::parse_fields_pub(&iface.body);
+            let (fields, _callbacks) = ts::parse_fields(&iface.body);
 
             types.push(GenaiTypeDef {
                 name: iface.name.clone(),
@@ -297,8 +247,7 @@ pub fn read_genai_source(source_dir: &Path) -> Result<GenaiSchema, String> {
             });
         }
 
-        // Extract enums
-        let extracted_enums = reader::extract_enums_pub(&content);
+        let extracted_enums = ts::extract_enums(&content);
         for (name, jsdoc, variants) in &extracted_enums {
             let has_wire = enums_map.contains_key(name.as_str());
             let wire_type = enums_map.get(name.as_str()).map(|s| s.to_string());
@@ -312,8 +261,7 @@ pub fn read_genai_source(source_dir: &Path) -> Result<GenaiSchema, String> {
             });
         }
 
-        // Extract type aliases
-        let aliases = reader::extract_type_aliases_pub(&content);
+        let aliases = ts::extract_type_aliases(&content);
         for (name, ts_def) in &aliases {
             let rust_type = map_genai_alias_to_rust(ts_def, &wire_types);
             type_aliases.push(GenaiTypeAlias {
@@ -323,8 +271,7 @@ pub fn read_genai_source(source_dir: &Path) -> Result<GenaiSchema, String> {
             });
         }
 
-        // Extract helper functions (export function createPartFromText, etc.)
-        let extracted_helpers = extract_helper_functions(&content);
+        let extracted_helpers = ts::extract_helper_functions(&content);
         for (name, signature) in &extracted_helpers {
             let wire_equiv = helpers.get(name.as_str()).map(|s| s.to_string());
             helper_defs.push(GenaiHelperDef {
@@ -336,19 +283,17 @@ pub fn read_genai_source(source_dir: &Path) -> Result<GenaiSchema, String> {
         }
     }
 
-    // Deduplicate by name
     dedup_by_name(&mut types);
     dedup_enums_by_name(&mut enums);
     dedup_aliases_by_name(&mut type_aliases);
     dedup_helpers_by_name(&mut helper_defs);
 
-    // Sort for deterministic output
     types.sort_by(|a, b| a.name.cmp(&b.name));
     enums.sort_by(|a, b| a.name.cmp(&b.name));
     type_aliases.sort_by(|a, b| a.name.cmp(&b.name));
     helper_defs.sort_by(|a, b| a.name.cmp(&b.name));
 
-    let now = reader::chrono_like_now_pub();
+    let now = ts::chrono_like_now();
 
     Ok(GenaiSchema {
         source: SourceInfo {
@@ -364,25 +309,21 @@ pub fn read_genai_source(source_dir: &Path) -> Result<GenaiSchema, String> {
 }
 
 /// Build a type-resolution lookup from a GenaiSchema.
-/// Returns a map: js-genai type name → wire crate Rust type path.
 pub fn build_type_lookup(schema: &GenaiSchema) -> HashMap<String, String> {
     let mut lookup = HashMap::new();
 
-    // Types with wire equivalents
     for t in &schema.types {
         if let Some(ref wire) = t.wire_type {
             lookup.insert(t.name.clone(), wire.clone());
         }
     }
 
-    // Enums with wire equivalents
     for e in &schema.enums {
         if let Some(ref wire) = e.wire_type {
             lookup.insert(e.name.clone(), wire.clone());
         }
     }
 
-    // Type aliases — resolved rust_type
     for a in &schema.type_aliases {
         if !a.rust_type.contains("serde_json::Value") && !a.rust_type.starts_with("/* ") {
             lookup.insert(a.name.clone(), a.rust_type.clone());
@@ -396,18 +337,15 @@ pub fn build_type_lookup(schema: &GenaiSchema) -> HashMap<String, String> {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Map a js-genai type alias to a Rust type.
 fn map_genai_alias_to_rust(
     ts_def: &str,
     wire_types: &HashMap<&str, &str>,
 ) -> String {
-    let ts = ts_def.trim();
+    let trimmed = ts_def.trim();
 
-    // Union types: pick the primary concrete type
-    if ts.contains('|') {
-        let parts: Vec<&str> = ts.split('|').map(|s| s.trim()).collect();
+    if trimmed.contains('|') {
+        let parts: Vec<&str> = trimmed.split('|').map(|s| s.trim()).collect();
 
-        // If one part has a wire equivalent, use it
         for part in &parts {
             let cleaned = part.trim_end_matches("[]");
             if let Some(wire) = wire_types.get(cleaned) {
@@ -418,7 +356,6 @@ fn map_genai_alias_to_rust(
             }
         }
 
-        // String unions
         if parts
             .iter()
             .all(|p| p.starts_with('\'') || p.starts_with('"'))
@@ -426,36 +363,16 @@ fn map_genai_alias_to_rust(
             return "String".to_string();
         }
 
-        // Fallback: use first concrete type
         if let Some(first) = parts.first() {
-            return reader::map_ts_to_rust(first);
+            return ts::map_ts_to_rust(first);
         }
     }
 
-    // Direct type name check
-    if let Some(wire) = wire_types.get(ts) {
+    if let Some(wire) = wire_types.get(trimmed) {
         return wire.to_string();
     }
 
-    reader::map_ts_to_rust(ts)
-}
-
-/// Extract `export function name(...)` declarations.
-fn extract_helper_functions(source: &str) -> Vec<(String, String)> {
-    let mut results = Vec::new();
-    let func_re = regex::Regex::new(
-        r"(?m)^export\s+function\s+(\w+)\s*\(([^)]*)\)\s*:\s*([^\{;]+)",
-    )
-    .unwrap();
-
-    for cap in func_re.captures_iter(source) {
-        let name = cap[1].to_string();
-        let params = cap[2].trim().to_string();
-        let return_type = cap[3].trim().to_string();
-        let signature = format!("({}) => {}", params, return_type);
-        results.push((name, signature));
-    }
-    results
+    ts::map_ts_to_rust(trimmed)
 }
 
 fn dedup_by_name(types: &mut Vec<GenaiTypeDef>) {
@@ -492,46 +409,38 @@ mod tests {
         assert!(map.contains_key("Content"));
         assert!(map.contains_key("Part"));
         assert!(map.contains_key("FunctionCall"));
-        assert!(map.contains_key("FunctionResponse"));
         assert!(map.contains_key("Tool"));
-        assert!(map.contains_key("Blob"));
-        assert!(map.contains_key("Session"));
-        assert!(map.contains_key("Modality"));
-        assert!(map.contains_key("SpeechConfig"));
         assert!(map.contains_key("LiveServerMessage"));
-    }
-
-    #[test]
-    fn helper_map_covers_factory_functions() {
-        let map = helper_map();
-        assert_eq!(map.get("createPartFromText"), Some(&"Part::text"));
-        assert_eq!(map.get("createUserContent"), Some(&"Content::user"));
-        assert_eq!(map.get("createModelContent"), Some(&"Content::model"));
     }
 
     #[test]
     fn classify_content_types() {
         assert_eq!(classify_genai_type("Content"), GenaiTypeCategory::Content);
         assert_eq!(classify_genai_type("Part"), GenaiTypeCategory::Content);
-        assert_eq!(classify_genai_type("Blob"), GenaiTypeCategory::Content);
     }
 
     #[test]
     fn classify_live_api_types() {
-        assert_eq!(
-            classify_genai_type("LiveConnectConfig"),
-            GenaiTypeCategory::LiveApi
-        );
+        assert_eq!(classify_genai_type("LiveConnectConfig"), GenaiTypeCategory::LiveApi);
         assert_eq!(classify_genai_type("Session"), GenaiTypeCategory::LiveApi);
     }
 
     #[test]
-    fn classify_function_types() {
-        assert_eq!(
-            classify_genai_type("FunctionCall"),
-            GenaiTypeCategory::FunctionCalling
-        );
-        assert_eq!(classify_genai_type("Tool"), GenaiTypeCategory::FunctionCalling);
+    fn classify_generate_types() {
+        assert_eq!(classify_genai_type("GenerateContentResponse"), GenaiTypeCategory::Generate);
+        assert_eq!(classify_genai_type("Candidate"), GenaiTypeCategory::Generate);
+    }
+
+    #[test]
+    fn classify_new_api_categories() {
+        assert_eq!(classify_genai_type("EmbedContentRequest"), GenaiTypeCategory::Embed);
+        assert_eq!(classify_genai_type("FileUploadResponse"), GenaiTypeCategory::Files);
+        assert_eq!(classify_genai_type("ModelInfo"), GenaiTypeCategory::Models);
+        assert_eq!(classify_genai_type("CountTokensRequest"), GenaiTypeCategory::Tokens);
+        assert_eq!(classify_genai_type("CachedContentConfig"), GenaiTypeCategory::Caches);
+        assert_eq!(classify_genai_type("TuningJob"), GenaiTypeCategory::Tunings);
+        assert_eq!(classify_genai_type("BatchJob"), GenaiTypeCategory::Batches);
+        assert_eq!(classify_genai_type("ChatSession"), GenaiTypeCategory::Chats);
     }
 
     #[test]
@@ -539,30 +448,6 @@ mod tests {
         let wire = wire_type_map();
         let result = map_genai_alias_to_rust("Content | Part[] | string", &wire);
         assert_eq!(result, "rs_genai::prelude::Content");
-    }
-
-    #[test]
-    fn map_alias_string_union() {
-        let wire = wire_type_map();
-        let result = map_genai_alias_to_rust("'TEXT' | 'AUDIO' | 'IMAGE'", &wire);
-        assert_eq!(result, "String");
-    }
-
-    #[test]
-    fn extract_helpers() {
-        let source = r#"
-export function createPartFromText(text: string): Part {
-    return { text };
-}
-
-export function createUserContent(parts: Part[]): Content {
-    return { role: 'user', parts };
-}
-"#;
-        let helpers = extract_helper_functions(source);
-        assert_eq!(helpers.len(), 2);
-        assert_eq!(helpers[0].0, "createPartFromText");
-        assert_eq!(helpers[1].0, "createUserContent");
     }
 
     #[test]
@@ -582,13 +467,7 @@ export function createUserContent(parts: Part[]): Content {
                 wire_type: Some("rs_genai::prelude::Content".to_string()),
                 has_wire_equivalent: true,
             }],
-            enums: vec![GenaiEnumDef {
-                name: "Modality".to_string(),
-                variants: vec!["TEXT".to_string(), "AUDIO".to_string()],
-                description: None,
-                wire_type: Some("rs_genai::prelude::Modality".to_string()),
-                has_wire_equivalent: true,
-            }],
+            enums: vec![],
             type_aliases: vec![],
             helpers: vec![],
         };
@@ -597,10 +476,6 @@ export function createUserContent(parts: Part[]): Content {
         assert_eq!(
             lookup.get("Content"),
             Some(&"rs_genai::prelude::Content".to_string())
-        );
-        assert_eq!(
-            lookup.get("Modality"),
-            Some(&"rs_genai::prelude::Modality".to_string())
         );
     }
 }

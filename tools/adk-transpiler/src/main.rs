@@ -1,7 +1,6 @@
 mod codegen;
 mod diff;
-mod genai_reader;
-mod reader;
+mod readers;
 mod schema;
 
 use std::path::{Path, PathBuf};
@@ -10,7 +9,7 @@ use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(name = "adk-transpiler")]
-#[command(about = "Transpiles ADK-JS and js-genai TypeScript to Rust targeting rs-genai")]
+#[command(about = "Transpiles ADK-JS, js-genai, and adk-fluent sources to Rust")]
 #[command(version)]
 struct Cli {
     #[command(subcommand)]
@@ -73,6 +72,16 @@ enum Commands {
         #[arg(short, long)]
         genai_source: Option<PathBuf>,
     },
+    /// Transpile js-genai types into per-module Rust files for rs-genai
+    TranspileGenai {
+        /// Path to the js-genai source directory (e.g. /tmp/js-genai/src/)
+        #[arg(short, long)]
+        source: PathBuf,
+
+        /// Output directory for generated Rust modules (e.g. crates/rs-genai/src/generated/)
+        #[arg(short, long)]
+        output_dir: PathBuf,
+    },
 }
 
 fn main() {
@@ -98,13 +107,16 @@ fn main() {
         } => {
             run_transpile(&source, &output, genai_source.as_deref());
         }
+        Commands::TranspileGenai { source, output_dir } => {
+            run_transpile_genai(&source, &output_dir);
+        }
     }
 }
 
 fn run_read(source: &Path, output: &Path) {
     eprintln!("Reading TypeScript source from: {}", source.display());
 
-    match reader::read_source_dir(source) {
+    match readers::read_source_dir(source) {
         Ok(schema) => {
             eprintln!(
                 "Extracted {} agents, {} tools, {} types",
@@ -124,7 +136,6 @@ fn run_read(source: &Path, output: &Path) {
 
             eprintln!("Schema written to: {}", output.display());
 
-            // Print summary
             println!("=== ADK Schema Summary ===");
             println!("Framework: {}", schema.source.framework);
             println!("Source: {}", schema.source.source_dir);
@@ -196,7 +207,7 @@ fn run_read_genai(source: &Path, output: &Path) {
         source.display()
     );
 
-    match genai_reader::read_genai_source(source) {
+    match readers::read_genai_source(source) {
         Ok(schema) => {
             let with_wire = schema.types.iter().filter(|t| t.has_wire_equivalent).count();
             let total_types = schema.types.len();
@@ -223,7 +234,6 @@ fn run_read_genai(source: &Path, output: &Path) {
 
             eprintln!("Schema written to: {}", output.display());
 
-            // Print summary
             println!("=== js-genai Schema Summary ===");
             println!("Source: {}", schema.source.source_dir);
             println!();
@@ -233,16 +243,15 @@ fn run_read_genai(source: &Path, output: &Path) {
             );
             println!();
 
-            // Show wire mappings
             println!("Wire Mappings:");
             for t in &schema.types {
                 if let Some(ref wire) = t.wire_type {
-                    println!("  {} → {}", t.name, wire);
+                    println!("  {} -> {}", t.name, wire);
                 }
             }
             for e in &schema.enums {
                 if let Some(ref wire) = e.wire_type {
-                    println!("  {} → {}", e.name, wire);
+                    println!("  {} -> {}", e.name, wire);
                 }
             }
 
@@ -265,7 +274,7 @@ fn run_read_genai(source: &Path, output: &Path) {
                 let mapping = h
                     .wire_equivalent
                     .as_ref()
-                    .map(|w| format!(" → {}", w))
+                    .map(|w| format!(" -> {}", w))
                     .unwrap_or_default();
                 println!("  - {}{}", h.name, mapping);
             }
@@ -325,7 +334,6 @@ fn run_generate(schema_path: &Path, output_path: &Path) {
 
     eprintln!("Generated Rust code written to: {}", output_path.display());
 
-    // Print summary
     println!("=== Codegen Summary ===");
     println!("Source framework: {}", schema.source.framework);
     println!("Agents generated: {}", schema.agents.len());
@@ -337,15 +345,14 @@ fn run_generate(schema_path: &Path, output_path: &Path) {
 fn run_transpile(source: &Path, output: &Path, genai_source: Option<&Path>) {
     eprintln!("Transpiling ADK-JS source from: {}", source.display());
 
-    // Step 1: Optionally read js-genai types for precise resolution
     let genai_lookup = if let Some(genai_path) = genai_source {
         eprintln!(
             "Reading js-genai types from: {}",
             genai_path.display()
         );
-        match genai_reader::read_genai_source(genai_path) {
+        match readers::read_genai_source(genai_path) {
             Ok(genai_schema) => {
-                let lookup = genai_reader::build_type_lookup(&genai_schema);
+                let lookup = readers::build_type_lookup(&genai_schema);
                 eprintln!(
                     "  {} types, {} enums, {} wire mappings",
                     genai_schema.types.len(),
@@ -363,8 +370,7 @@ fn run_transpile(source: &Path, output: &Path, genai_source: Option<&Path>) {
         None
     };
 
-    // Step 2: Read ADK-JS TypeScript source
-    let schema = match reader::read_source_dir(source) {
+    let schema = match readers::read_source_dir(source) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("Error reading source: {}", e);
@@ -379,7 +385,6 @@ fn run_transpile(source: &Path, output: &Path, genai_source: Option<&Path>) {
         schema.types.len()
     );
 
-    // Step 3: Generate compilable Rust code with genai type lookup
     let rust_code = if let Some(lookup) = genai_lookup {
         codegen::generate_compilable_with_genai(&schema, &lookup)
     } else {
@@ -395,7 +400,6 @@ fn run_transpile(source: &Path, output: &Path, genai_source: Option<&Path>) {
 
     eprintln!("Compilable Rust code written to: {}", output.display());
 
-    // Print summary
     println!("=== Transpile Summary ===");
     println!("Source: {}", source.display());
     if let Some(gs) = genai_source {
@@ -408,4 +412,46 @@ fn run_transpile(source: &Path, output: &Path, genai_source: Option<&Path>) {
     println!("Types: {}", schema.types.len());
     println!("Output size: {} bytes", rust_code.len());
     println!("Target: rs-adk (compilable)");
+}
+
+fn run_transpile_genai(source: &Path, output_dir: &Path) {
+    eprintln!(
+        "Transpiling js-genai types from: {}",
+        source.display()
+    );
+
+    let schema = match readers::read_genai_source(source) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error reading source: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    let with_wire = schema.types.iter().filter(|t| t.has_wire_equivalent).count();
+    let without_wire = schema.types.len() - with_wire;
+
+    eprintln!(
+        "Extracted {} types ({} with wire equiv, {} to generate)",
+        schema.types.len(),
+        with_wire,
+        without_wire
+    );
+
+    let output = codegen::generate_genai_modules(&schema);
+
+    if let Err(e) = codegen::genai::write_genai_modules(&output, output_dir) {
+        eprintln!("Error writing output: {}", e);
+        std::process::exit(1);
+    }
+
+    println!("=== Transpile Genai Summary ===");
+    println!("Source: {}", source.display());
+    println!("Output dir: {}", output_dir.display());
+    println!("Modules generated: {}", output.modules.len());
+    for (name, code) in &output.modules {
+        println!("  - {}.rs ({} bytes)", name, code.len());
+    }
+    println!("Types with existing wire equiv (skipped): {}", with_wire);
+    println!("Types generated: {}", without_wire);
 }
