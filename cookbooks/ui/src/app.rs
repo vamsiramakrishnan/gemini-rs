@@ -30,6 +30,8 @@ pub struct AppInfo {
     pub description: String,
     pub category: AppCategory,
     pub features: Vec<String>,
+    pub tips: Vec<String>,
+    pub try_saying: Vec<String>,
 }
 
 /// Messages sent from app to the WebSocket handler to forward to the browser.
@@ -82,6 +84,8 @@ pub trait CookbookApp: Send + Sync {
     fn description(&self) -> &str;
     fn category(&self) -> AppCategory;
     fn features(&self) -> Vec<String>;
+    fn tips(&self) -> Vec<String> { Vec::new() }
+    fn try_saying(&self) -> Vec<String> { Vec::new() }
 
     /// Handle a full WebSocket session. Called when a client connects to /ws/<name>.
     /// The app receives client messages via rx and sends server messages via tx.
@@ -135,6 +139,8 @@ impl AppRegistry {
                 description: app.description().to_string(),
                 category: app.category(),
                 features: app.features(),
+                tips: app.tips(),
+                try_saying: app.try_saying(),
             })
             .collect()
     }

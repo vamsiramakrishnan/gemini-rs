@@ -145,6 +145,22 @@ impl CookbookApp for AllConfig {
         ]
     }
 
+    fn tips(&self) -> Vec<String> {
+        vec![
+            "Send JSON as the system instruction to configure: temperature, modality, voice, tools, and more".into(),
+            "Supports text-only, audio-only, and both output modalities".into(),
+            "Try enabling Google Search or code execution via the JSON config".into(),
+        ]
+    }
+
+    fn try_saying(&self) -> Vec<String> {
+        vec![
+            "Hello! (with default audio config)".into(),
+            r#"{"modality": "text", "temperature": 1.5}"#.into(),
+            "Ask it to search the web (if Google Search enabled)".into(),
+        ]
+    }
+
     async fn handle_session(
         &self,
         tx: WsSender,

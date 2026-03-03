@@ -104,8 +104,12 @@ pub fn build_session_config(model: Option<&str>) -> Result<SessionConfig, String
         SessionConfig::new(api_key)
     };
 
-    if let Some(m) = model {
-        config = config.model(GeminiModel::Custom(m.to_string()));
+    let effective_model = model
+        .map(|s| s.to_string())
+        .or_else(|| std::env::var("GEMINI_MODEL").ok());
+
+    if let Some(m) = effective_model {
+        config = config.model(GeminiModel::Custom(m));
     }
 
     Ok(config)
@@ -119,6 +123,8 @@ pub fn send_app_meta(tx: &WsSender, app: &dyn CookbookApp) {
             description: app.description().to_string(),
             category: app.category(),
             features: app.features(),
+            tips: app.tips(),
+            try_saying: app.try_saying(),
         },
     });
 }

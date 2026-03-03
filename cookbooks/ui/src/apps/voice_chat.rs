@@ -30,6 +30,22 @@ impl CookbookApp for VoiceChat {
         vec!["voice".into(), "transcription".into()]
     }
 
+    fn tips(&self) -> Vec<String> {
+        vec![
+            "Click the microphone button to start speaking".into(),
+            "Transcriptions appear below each message showing what was said".into(),
+            "You can also type text — the model will respond with voice".into(),
+        ]
+    }
+
+    fn try_saying(&self) -> Vec<String> {
+        vec![
+            "Hello! Tell me a joke.".into(),
+            "What's the weather like on Mars?".into(),
+            "Can you sing a short song?".into(),
+        ]
+    }
+
     async fn handle_session(
         &self,
         tx: WsSender,

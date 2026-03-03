@@ -29,6 +29,21 @@ impl CookbookApp for TextChat {
         vec!["text".into()]
     }
 
+    fn tips(&self) -> Vec<String> {
+        vec![
+            "Text-only mode — no microphone needed".into(),
+            "Watch the streaming text deltas arrive in real time".into(),
+        ]
+    }
+
+    fn try_saying(&self) -> Vec<String> {
+        vec![
+            "What are three interesting facts about octopuses?".into(),
+            "Explain quantum computing in simple terms".into(),
+            "Write a short poem about Rust programming".into(),
+        ]
+    }
+
     async fn handle_session(
         &self,
         tx: WsSender,

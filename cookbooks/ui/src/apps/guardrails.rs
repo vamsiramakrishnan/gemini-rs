@@ -231,6 +231,22 @@ impl CookbookApp for Guardrails {
         ]
     }
 
+    fn tips(&self) -> Vec<String> {
+        vec![
+            "Four active policies: PII detection (SSN/credit card), off-topic detection, sentiment monitoring".into(),
+            "Try triggering a violation — the system will inject corrective instructions in real time".into(),
+            "Watch the devtools Evaluator tab for violation alerts and policy stats".into(),
+        ]
+    }
+
+    fn try_saying(&self) -> Vec<String> {
+        vec![
+            "My SSN is 123-45-6789 (triggers PII detection)".into(),
+            "Did you see the football game last night? (triggers off-topic)".into(),
+            "This is absolutely terrible service! (triggers sentiment alert)".into(),
+        ]
+    }
+
     async fn handle_session(
         &self,
         tx: WsSender,

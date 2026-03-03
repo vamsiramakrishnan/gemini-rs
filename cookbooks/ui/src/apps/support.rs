@@ -358,6 +358,22 @@ impl CookbookApp for SupportAssistant {
         ]
     }
 
+    fn tips(&self) -> Vec<String> {
+        vec![
+            "Starts with a billing agent — describe a technical issue to trigger handoff to technical support".into(),
+            "Watch the devtools for agent handoff events and phase tracking across both agents".into(),
+            "The system tracks evaluation scores for each phase and handoff quality".into(),
+        ]
+    }
+
+    fn try_saying(&self) -> Vec<String> {
+        vec![
+            "I'm having trouble with my internet connection.".into(),
+            "I was overcharged $50 on my last bill.".into(),
+            "My device keeps crashing and won't restart.".into(),
+        ]
+    }
+
     async fn handle_session(
         &self,
         tx: WsSender,

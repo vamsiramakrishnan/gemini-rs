@@ -29,14 +29,14 @@ async fn main() {
 
     let app = Router::new()
         .route("/", get(landing_page))
-        .route("/app/{name}", get(app_page))
+        .route("/app/:name", get(app_page))
         .route("/api/apps", get(list_apps))
-        .route("/ws/{name}", get(ws_upgrade))
+        .route("/ws/:name", get(ws_upgrade))
         .nest_service("/static", ServeDir::new(static_dir))
         .with_state(registry);
 
-    let addr = "0.0.0.0:3000";
-    tracing::info!("Cookbooks UI at http://localhost:3000");
+    let addr = "0.0.0.0:25125";
+    tracing::info!("Cookbooks UI at http://localhost:25125");
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }

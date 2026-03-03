@@ -118,12 +118,16 @@
 
     if (!currentModelBubble) {
       currentModelBubble = addMessage('', 'model');
+      currentModelBubble.parentElement.classList.add('streaming');
     }
     currentModelBubble.textContent += text;
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
   }
 
   function finalizeModelBubble() {
+    if (currentModelBubble) {
+      currentModelBubble.parentElement.classList.remove('streaming');
+    }
     currentModelBubble = null;
     currentModelTranscription = null;
   }
@@ -158,7 +162,15 @@
         bubble.innerHTML = '<span class="label">Assistant</span> <span class="content"></span>';
 
         row.appendChild(bubble);
-        messagesContainer.appendChild(row);
+
+        // Insert after the last model message row for visual grouping
+        const modelRows = messagesContainer.querySelectorAll('.message-row.model');
+        const lastModelRow = modelRows[modelRows.length - 1];
+        if (lastModelRow && lastModelRow.nextSibling) {
+          messagesContainer.insertBefore(row, lastModelRow.nextSibling);
+        } else {
+          messagesContainer.appendChild(row);
+        }
         currentModelTranscription = bubble.querySelector('.content');
       }
       currentModelTranscription.textContent += text;
@@ -319,6 +331,10 @@
           const name = msg.info.name.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
           appTitle.textContent = name;
           document.title = name + ' \u2014 Cookbooks';
+        }
+        if (msg.info && msg.info.try_saying && msg.info.try_saying.length > 0) {
+          const hints = msg.info.try_saying.slice(0, 3).map(p => '\u201c' + p + '\u201d').join('  \u00b7  ');
+          addMessage('Try: ' + hints, 'system');
         }
         break;
     }

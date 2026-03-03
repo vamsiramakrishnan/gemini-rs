@@ -317,10 +317,28 @@ html, body {
   border-radius: 8px;
 }
 
+/* Streaming cursor on model bubbles */
+.message-row.model.streaming .message-bubble::after {
+  content: '';
+  display: inline-block;
+  width: 2px;
+  height: 14px;
+  background: var(--text-secondary);
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  animation: blink-cursor 0.8s step-end infinite;
+}
+
+@keyframes blink-cursor {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
 /* Transcription */
 .transcription-row {
   display: flex;
-  margin-bottom: 8px;
+  margin-bottom: 4px;
+  margin-top: -4px;
   animation: msg-in 0.15s ease-out;
 }
 
@@ -334,20 +352,29 @@ html, body {
 
 .transcription-bubble {
   max-width: 70%;
-  padding: 6px 12px;
+  padding: 4px 12px;
   font-size: 13px;
-  font-style: italic;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   line-height: 1.4;
+  border-radius: 8px;
+  background: #f8f9fa;
+}
+
+.transcription-row.user .transcription-bubble {
+  border-right: 2px solid var(--primary);
+}
+
+.transcription-row.model .transcription-bubble {
+  border-left: 2px solid var(--text-muted);
 }
 
 .transcription-bubble .label {
   font-weight: 600;
-  font-style: normal;
-  font-size: 11px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   margin-right: 4px;
+  color: var(--text-muted);
 }
 
 /* Speaking indicator */

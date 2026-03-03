@@ -264,6 +264,22 @@ impl CookbookApp for Playbook {
         ]
     }
 
+    fn tips(&self) -> Vec<String> {
+        vec![
+            "The agent follows a 6-phase support flow: greet, identify, investigate, explain, resolve, close".into(),
+            "Watch the devtools panel for phase transitions and evaluation scores".into(),
+            "Try giving your name and describing a product issue to trigger state transitions".into(),
+        ]
+    }
+
+    fn try_saying(&self) -> Vec<String> {
+        vec![
+            "Hi, my name is Alex and I need help with my order.".into(),
+            "My order #12345 arrived damaged.".into(),
+            "I'd like a refund please.".into(),
+        ]
+    }
+
     async fn handle_session(
         &self,
         tx: WsSender,

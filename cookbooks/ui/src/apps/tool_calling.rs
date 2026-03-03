@@ -192,6 +192,22 @@ impl CookbookApp for ToolCalling {
         vec!["text".into(), "tools".into()]
     }
 
+    fn tips(&self) -> Vec<String> {
+        vec![
+            "Three demo tools available: get_weather, get_time, calculate".into(),
+            "Watch the devtools State tab to see tool call arguments and results".into(),
+            "Tools return mock data — try asking follow-up questions about the results".into(),
+        ]
+    }
+
+    fn try_saying(&self) -> Vec<String> {
+        vec![
+            "What's the weather in San Francisco?".into(),
+            "What time is it in Tokyo?".into(),
+            "Calculate 15 * 7 + 23".into(),
+        ]
+    }
+
     async fn handle_session(
         &self,
         tx: WsSender,

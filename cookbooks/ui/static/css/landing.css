@@ -234,8 +234,38 @@ body.landing {
   font-size: 13px;
   color: #5f6368;
   line-height: 1.5;
-  margin-bottom: 14px;
-  flex: 1;
+  margin-bottom: 10px;
+}
+
+.app-card .card-tips {
+  font-size: 12px;
+  color: #9aa0a6;
+  line-height: 1.4;
+  margin-bottom: 10px;
+}
+
+.app-card .card-try-saying {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.card-try-saying .try-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #9aa0a6;
+}
+
+.card-try-saying .try-phrase {
+  font-size: 12px;
+  color: #5f6368;
+  padding: 3px 8px;
+  background: #f8f9fa;
+  border-radius: 4px;
+  border-left: 2px solid #4285f4;
 }
 
 .app-card .card-badges {
