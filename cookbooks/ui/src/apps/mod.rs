@@ -1,4 +1,6 @@
 mod all_config;
+#[allow(unused)]
+mod debt_collection;
 pub mod extractors;
 mod guardrails;
 mod playbook;
@@ -21,6 +23,7 @@ pub fn register_all(registry: &mut AppRegistry) {
     registry.register(guardrails::Guardrails);
     registry.register(support::SupportAssistant);
     registry.register(all_config::AllConfig);
+    registry.register(debt_collection::DebtCollection);
 }
 
 /// Parameters extracted from the browser's Start message.
