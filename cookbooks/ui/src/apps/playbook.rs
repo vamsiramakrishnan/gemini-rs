@@ -23,6 +23,7 @@ use super::{build_session_config, resolve_voice, send_app_meta, wait_for_start};
 struct Phase {
     name: &'static str,
     instruction: &'static str,
+    #[cfg_attr(not(test), allow(dead_code))]
     required_keys: &'static [&'static str],
 }
 
@@ -189,6 +190,7 @@ fn extract_state(text: &str, existing: &HashMap<String, serde_json::Value>) -> H
 }
 
 /// Evaluate phase adherence: simple heuristic scoring.
+#[cfg(test)]
 fn evaluate_phase(phase_name: &str, state: &HashMap<String, serde_json::Value>, turn_count: usize) -> (f64, String) {
     let phase = PHASES.iter().find(|p| p.name == phase_name);
     let phase = match phase {

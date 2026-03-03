@@ -143,11 +143,13 @@ pub fn resolve_voice(name: Option<&str>) -> Voice {
 }
 
 /// Rolling buffer of recent conversation turns for analysis.
+#[cfg(test)]
 pub struct ConversationBuffer {
     turns: Vec<String>,
     max_turns: usize,
 }
 
+#[cfg(test)]
 impl ConversationBuffer {
     pub fn new(max_turns: usize) -> Self {
         Self {

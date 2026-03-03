@@ -20,55 +20,18 @@ use super::{build_session_config, resolve_voice, send_app_meta, wait_for_start};
 // Policy rules
 // ---------------------------------------------------------------------------
 
-/// A policy rule that can detect violations and produce corrective instructions.
-#[allow(dead_code)]
-struct PolicyRule {
-    name: &'static str,
-    severity: &'static str,
-    /// Human-readable description of what this rule detects.
-    description: &'static str,
-    /// Instruction injected when a violation is detected.
-    corrective_instruction: &'static str,
-}
-
-const POLICIES: &[PolicyRule] = &[
-    PolicyRule {
-        name: "pii_ssn",
-        severity: "critical",
-        description: "Social Security Number detected in conversation",
-        corrective_instruction: "IMPORTANT: Do NOT ask for, repeat, or acknowledge any Social Security Numbers or government ID numbers. If the customer has shared one, advise them to never share such information in a chat. Redirect the conversation to resolving their issue through safe verification methods.",
-    },
-    PolicyRule {
-        name: "pii_credit_card",
-        severity: "critical",
-        description: "Credit card number detected in conversation",
-        corrective_instruction: "IMPORTANT: Do NOT ask for, repeat, or acknowledge any credit card numbers or payment card details. If the customer has shared one, advise them to never share such information in a chat. Use only secure payment processing channels.",
-    },
-    PolicyRule {
-        name: "off_topic",
-        severity: "warning",
-        description: "Conversation drifted to off-topic subjects",
-        corrective_instruction: "Please stay focused on the customer's support issue. Politely redirect the conversation back to resolving their problem if it drifts to unrelated topics.",
-    },
-    PolicyRule {
-        name: "negative_sentiment",
-        severity: "info",
-        description: "Customer appears frustrated or upset",
-        corrective_instruction: "The customer seems upset. Show extra empathy and patience. Acknowledge their frustration, apologize for the inconvenience, and focus on finding a resolution quickly.",
-    },
-];
+/// Policy names for the active_policies state message.
+const POLICY_NAMES: &[&str] = &["pii_ssn", "pii_credit_card", "off_topic", "negative_sentiment"];
 
 // ---------------------------------------------------------------------------
 // Violation detection
 // ---------------------------------------------------------------------------
 
 /// Detected violation with matched detail.
-#[allow(dead_code)]
 struct DetectedViolation {
     rule_name: &'static str,
     severity: &'static str,
     detail: String,
-    corrective_instruction: &'static str,
 }
 
 // Pre-compiled regex patterns for violation detection.
@@ -88,7 +51,6 @@ fn check_violations(text: &str) -> Vec<DetectedViolation> {
                     rule_name: "pii_ssn",
                     severity: "critical",
                     detail: format!("Possible SSN detected: {}***", &m.as_str()[..3]),
-                    corrective_instruction: POLICIES[0].corrective_instruction,
                 });
             }
         }
@@ -101,7 +63,6 @@ fn check_violations(text: &str) -> Vec<DetectedViolation> {
                 rule_name: "pii_credit_card",
                 severity: "critical",
                 detail: format!("Possible credit card detected: {}****", &m.as_str()[..4]),
-                corrective_instruction: POLICIES[1].corrective_instruction,
             });
         }
     }
@@ -120,7 +81,6 @@ fn check_violations(text: &str) -> Vec<DetectedViolation> {
                 rule_name: "off_topic",
                 severity: "warning",
                 detail: format!("Off-topic content detected: \"{kw}\""),
-                corrective_instruction: POLICIES[2].corrective_instruction,
             });
             break; // One off-topic violation per check is enough.
         }
@@ -138,7 +98,6 @@ fn check_violations(text: &str) -> Vec<DetectedViolation> {
                 rule_name: "negative_sentiment",
                 severity: "info",
                 detail: format!("Negative sentiment keyword: \"{kw}\""),
-                corrective_instruction: POLICIES[3].corrective_instruction,
             });
             break;
         }
@@ -152,7 +111,7 @@ fn check_violations(text: &str) -> Vec<DetectedViolation> {
 // ---------------------------------------------------------------------------
 
 /// Tracks violation counts and types across the session.
-#[allow(dead_code)]
+#[cfg(test)]
 struct ViolationTracker {
     total_count: usize,
     by_rule: std::collections::HashMap<String, usize>,
@@ -161,7 +120,7 @@ struct ViolationTracker {
     cooldown_turns: usize,
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 impl ViolationTracker {
     fn new(cooldown_turns: usize) -> Self {
         Self {
@@ -439,7 +398,7 @@ impl CookbookApp for Guardrails {
         // Send initial state.
         let _ = tx.send(ServerMessage::StateUpdate {
             key: "active_policies".into(),
-            value: json!(POLICIES.iter().map(|p| p.name).collect::<Vec<_>>()),
+            value: json!(POLICY_NAMES),
         });
         let _ = tx.send(ServerMessage::StateUpdate {
             key: "violations".into(),

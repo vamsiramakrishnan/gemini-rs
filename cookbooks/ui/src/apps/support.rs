@@ -20,24 +20,11 @@ use super::{build_session_config, resolve_voice, send_app_meta, wait_for_start};
 // Agent definitions
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AgentKind {
-    Billing,
-    Technical,
-}
-
-impl AgentKind {
-    fn as_str(&self) -> &'static str {
-        match self {
-            AgentKind::Billing => "billing-support",
-            AgentKind::Technical => "technical-support",
-        }
-    }
-}
 
 struct AgentPhase {
     name: &'static str,
     instruction: &'static str,
+    #[cfg_attr(not(test), allow(dead_code))]
     required_keys: &'static [&'static str],
 }
 
@@ -265,6 +252,7 @@ fn extract_state(text: &str, existing: &HashMap<String, serde_json::Value>) -> H
 }
 
 /// Evaluate phase adherence with heuristic scoring.
+#[cfg(test)]
 fn evaluate_phase(
     phase_name: &str,
     phases: &[AgentPhase],
@@ -306,6 +294,7 @@ fn evaluate_phase(
 }
 
 /// Determine if the conversation indicates a handoff from billing to technical.
+#[cfg(test)]
 fn should_handoff_to_technical(state: &HashMap<String, serde_json::Value>) -> bool {
     state.get("issue_type")
         .and_then(|v| v.as_str())
@@ -313,20 +302,6 @@ fn should_handoff_to_technical(state: &HashMap<String, serde_json::Value>) -> bo
         .unwrap_or(false)
 }
 
-/// Build a system instruction incorporating current state context.
-fn build_instruction(phase: &AgentPhase, state: &HashMap<String, serde_json::Value>) -> String {
-    let customer_name = state
-        .get("customer_name")
-        .and_then(|v| v.as_str())
-        .unwrap_or("the customer");
-
-    format!(
-        "{}\n\nCustomer name: {}. Current state: {}",
-        phase.instruction,
-        customer_name,
-        serde_json::to_string(state).unwrap_or_default()
-    )
-}
 
 // ---------------------------------------------------------------------------
 // SupportAssistant app
@@ -846,7 +821,7 @@ impl CookbookApp for SupportAssistant {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::apps::ConversationBuffer;
+
 
     #[test]
     fn extract_billing_issue_type() {
