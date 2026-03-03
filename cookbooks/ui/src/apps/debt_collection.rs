@@ -200,6 +200,111 @@ fn extract_structured(text: &str, existing: &HashMap<String, Value>) -> HashMap<
 }
 
 // ---------------------------------------------------------------------------
+// Tool declarations
+// ---------------------------------------------------------------------------
+
+/// Build the tool declarations so Gemini knows what functions it can call.
+fn debt_collection_tools() -> rs_genai::prelude::Tool {
+    use rs_genai::prelude::{FunctionDeclaration, Tool};
+    Tool::functions(vec![
+        FunctionDeclaration {
+            name: "lookup_account".into(),
+            description: "Look up a debtor's account details including balance, creditor, and payment history.".into(),
+            parameters: Some(json!({
+                "type": "object",
+                "properties": {
+                    "account_id": {
+                        "type": "string",
+                        "description": "The account ID to look up"
+                    }
+                },
+                "required": ["account_id"]
+            })),
+        },
+        FunctionDeclaration {
+            name: "verify_identity".into(),
+            description: "Verify the debtor's identity by checking name, date of birth, and last 4 digits of SSN.".into(),
+            parameters: Some(json!({
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "The debtor's full name"
+                    },
+                    "dob": {
+                        "type": "string",
+                        "description": "Date of birth in YYYY-MM-DD format"
+                    },
+                    "last4ssn": {
+                        "type": "string",
+                        "description": "Last 4 digits of the Social Security Number"
+                    }
+                },
+                "required": ["name", "dob", "last4ssn"]
+            })),
+        },
+        FunctionDeclaration {
+            name: "calculate_payment_plan".into(),
+            description: "Calculate payment plan options given a total balance and number of months.".into(),
+            parameters: Some(json!({
+                "type": "object",
+                "properties": {
+                    "total": {
+                        "type": "number",
+                        "description": "Total debt balance in dollars"
+                    },
+                    "months": {
+                        "type": "integer",
+                        "description": "Number of months for the payment plan"
+                    }
+                },
+                "required": ["total", "months"]
+            })),
+        },
+        FunctionDeclaration {
+            name: "process_payment".into(),
+            description: "Process a payment or set up a recurring payment plan.".into(),
+            parameters: Some(json!({
+                "type": "object",
+                "properties": {
+                    "account_id": {
+                        "type": "string",
+                        "description": "The account ID"
+                    },
+                    "amount": {
+                        "type": "number",
+                        "description": "Payment amount in dollars"
+                    },
+                    "method": {
+                        "type": "string",
+                        "description": "Payment method: bank_transfer, credit_card, or check"
+                    }
+                },
+                "required": ["account_id", "amount", "method"]
+            })),
+        },
+        FunctionDeclaration {
+            name: "log_compliance_event".into(),
+            description: "Log a compliance event for the audit trail.".into(),
+            parameters: Some(json!({
+                "type": "object",
+                "properties": {
+                    "event_type": {
+                        "type": "string",
+                        "description": "Type of compliance event (e.g., disclosure_given, identity_verified, cease_desist)"
+                    },
+                    "details": {
+                        "type": "string",
+                        "description": "Details about the compliance event"
+                    }
+                },
+                "required": ["event_type", "details"]
+            })),
+        },
+    ])
+}
+
+// ---------------------------------------------------------------------------
 // Mock tool execution
 // ---------------------------------------------------------------------------
 
@@ -363,6 +468,7 @@ impl CookbookApp for DebtCollection {
             .voice(selected_voice)
             .enable_input_transcription()
             .enable_output_transcription()
+            .add_tool(debt_collection_tools())
             .system_instruction(DISCLOSURE_INSTRUCTION);
 
         // 2. Create GeminiLlm for LLM extraction
