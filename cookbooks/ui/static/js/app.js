@@ -151,7 +151,7 @@
         messagesContainer.appendChild(row);
         currentUserTranscription = bubble.querySelector('.content');
       }
-      currentUserTranscription.textContent += text;
+      currentUserTranscription.textContent = text;
     } else {
       if (!currentModelTranscription) {
         const row = document.createElement('div');
@@ -323,6 +323,18 @@
 
       case 'violation':
         devtools.handleViolation(msg);
+        break;
+
+      case 'telemetry':
+        devtools.handleTelemetry(msg.stats);
+        break;
+
+      case 'phaseTimeline':
+        devtools.handlePhaseTimeline(msg.entries);
+        break;
+
+      case 'toolCallEvent':
+        devtools.handleToolCallEvent(msg);
         break;
 
       case 'appMeta':

@@ -16,7 +16,7 @@ use rs_adk::llm::LlmError;
 /// A `TurnExtractor` that wraps a regex-based (or any synchronous) extraction
 /// function.
 ///
-/// On each call to [`extract`], the extractor:
+/// On each call to `extract()`, the extractor:
 /// 1. Formats the transcript window into a single text block.
 /// 2. Calls `extract_fn` with that text and the previously-accumulated state.
 /// 3. Merges newly-returned key-value pairs into the accumulated state.
@@ -124,6 +124,7 @@ mod tests {
                 user: user.to_string(),
                 model: model.to_string(),
                 timestamp: Instant::now(),
+                tool_calls: Vec::new(),
             })
             .collect()
     }

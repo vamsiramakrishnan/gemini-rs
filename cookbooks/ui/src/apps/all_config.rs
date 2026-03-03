@@ -299,7 +299,7 @@ impl CookbookApp for AllConfig {
                     text: t.to_string(),
                 });
             })
-            .on_tool_call(move |calls| {
+            .on_tool_call(move |calls, _state| {
                 let tx = tx_tool.clone();
                 async move {
                     info!("Tool calls received: {}", calls.len());

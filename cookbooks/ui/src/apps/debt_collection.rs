@@ -31,12 +31,14 @@ You are a professional debt collection agent. You MUST begin by delivering the M
 \"This is an attempt to collect a debt. Any information obtained will be used for that purpose. \
 This call may be monitored or recorded for quality assurance.\"\n\n\
 After delivering this disclosure, ask the customer to confirm they understand. \
+Once they confirm, let them know you will need to verify their identity before discussing any account details. \
 Be professional and courteous at all times. Do NOT discuss any debt details until the disclosure is acknowledged.";
 
 const VERIFY_IDENTITY_INSTRUCTION: &str = "\
 You need to verify the customer's identity before discussing any account details. \
 Ask for their full name, date of birth, and the last four digits of their Social Security Number. \
 Use the verify_identity tool to confirm their identity. \
+Once you verify inform them that you will get their details to share the exact details of their debt. \
 Be patient and professional. If they are reluctant, explain that this is required for their protection. \
 Do NOT reveal any account information until identity is verified.";
 
@@ -83,6 +85,30 @@ The call is concluding. Wrap up professionally:\n\
 If the call ended due to cease-and-desist, acknowledge their request, confirm that \
 all collection activity will stop, and inform them of any remaining legal obligations. \
 If the debt is disputed, confirm that a validation notice will be sent within 5 business days.";
+
+// ---------------------------------------------------------------------------
+// Per-phase instruction modifiers
+// ---------------------------------------------------------------------------
+
+const DEBT_STATE_KEYS: &[&str] = &[
+    "emotional_state",
+    "willingness_to_pay",
+    "derived:call_risk_level",
+    "identity_verified",
+    "disclosure_given",
+];
+
+const RISK_WARNING: &str = "\
+IMPORTANT: The caller is showing signs of distress. Use extra empathy. \
+Never threaten, harass, or use deceptive language. If they request to stop \
+being contacted, immediately comply with cease-and-desist requirements.";
+
+fn risk_is_elevated(s: &State) -> bool {
+    let risk: String = s
+        .get("derived:call_risk_level")
+        .unwrap_or_else(|| "low".to_string());
+    risk == "high" || risk == "critical"
+}
 
 // ---------------------------------------------------------------------------
 // Mock account data
@@ -527,6 +553,9 @@ impl CookbookApp for DebtCollection {
 
         // 5. Build Live::builder() with full pipeline
         let handle = Live::builder()
+            // --- Model-initiated greeting ---
+            // The agent delivers the Mini-Miranda disclosure immediately on connect
+            .greeting("Begin the call. Deliver the required Mini-Miranda disclosure now.")
             // --- Regex extractor ---
             .extractor(extractor)
             // --- LLM extraction ---
@@ -561,23 +590,36 @@ impl CookbookApp for DebtCollection {
                 }
             })
             // --- Computed state ---
-            .computed("sentiment_score", &["DebtorState"], |state| {
-                let debtor: Value = state.get("DebtorState")?;
-                let emotion = debtor.get("emotional_state")?.as_str()?;
-                Some(json!(sentiment_from_emotion(emotion)))
+            // With auto-flatten, extractor fields are individual state keys.
+            .computed("sentiment_score", &["emotional_state"], |state| {
+                let emotion: String = state.get("emotional_state")?;
+                Some(json!(sentiment_from_emotion(&emotion)))
             })
-            .computed("call_risk_level", &["derived:sentiment_score", "DebtorState"], |state| {
+            .computed("call_risk_level", &["derived:sentiment_score", "cease_desist_requested"], |state| {
                 let sentiment: f64 = state.get("derived:sentiment_score").unwrap_or(0.5);
-                let debtor: Value = state.get("DebtorState").unwrap_or(json!({}));
-                let cease_desist = debtor.get("cease_desist_requested")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
+                let cease_desist: bool = state.get("cease_desist_requested").unwrap_or(false);
                 Some(json!(compute_risk_level(sentiment, cease_desist)))
             })
-            // --- before_tool_response: PII redaction ---
-            .before_tool_response(move |responses, _state| {
+            // --- before_tool_response: PII redaction + state promotion ---
+            // Tool results drive state that guards/watchers need.
+            .before_tool_response(move |responses, state| {
                 async move {
                     responses.into_iter().map(|mut r| {
+                        // Promote tool-response booleans to state keys
+                        match r.name.as_str() {
+                            "verify_identity" => {
+                                if r.response.get("verified").and_then(|v| v.as_bool()).unwrap_or(false) {
+                                    state.set("identity_verified", true);
+                                }
+                            }
+                            "process_payment" => {
+                                if r.response.get("status").and_then(|v| v.as_str()) == Some("processed") {
+                                    state.set("payment_processed", true);
+                                }
+                            }
+                            _ => {}
+                        }
+                        // Redact PII
                         r.response = redact_pii(&r.response);
                         r
                     }).collect()
@@ -609,23 +651,18 @@ impl CookbookApp for DebtCollection {
                     }
                 }
             })
+            // --- Phase defaults (inherited by all phases) ---
+            .phase_defaults(|d| d
+                .with_state(DEBT_STATE_KEYS)
+                .when(risk_is_elevated, RISK_WARNING)
+                .prompt_on_enter(true)
+            )
             // --- 7 Phases ---
             // Phase 1: Disclosure (Mini-Miranda)
             .phase("disclosure")
                 .instruction(DISCLOSURE_INSTRUCTION)
-                .transition("verify_identity", |s| {
-                    let fields: Value = s.get("debt_fields").unwrap_or(json!({}));
-                    fields.get("disclosure_given")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false)
-                })
-                // Cease-and-desist can happen at any time
-                .transition("close", |s| {
-                    let debtor: Value = s.get("DebtorState").unwrap_or(json!({}));
-                    debtor.get("cease_desist_requested")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false)
-                })
+                .transition("verify_identity", S::is_true("disclosure_given"))
+                .transition("close", S::is_true("cease_desist_requested"))
                 .on_enter(move |_state, _writer| {
                     let tx = tx_enter_disclosure.clone();
                     async move {
@@ -649,21 +686,9 @@ impl CookbookApp for DebtCollection {
             // Phase 2: Verify Identity
             .phase("verify_identity")
                 .instruction(VERIFY_IDENTITY_INSTRUCTION)
-                .guard(|s| {
-                    let fields: Value = s.get("debt_fields").unwrap_or(json!({}));
-                    fields.get("disclosure_given")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false)
-                })
-                .transition("inform_debt", |s| {
-                    s.get::<bool>("identity_verified").unwrap_or(false)
-                })
-                .transition("close", |s| {
-                    let debtor: Value = s.get("DebtorState").unwrap_or(json!({}));
-                    debtor.get("cease_desist_requested")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false)
-                })
+                .guard(S::is_true("disclosure_given"))
+                .transition("inform_debt", S::is_true("identity_verified"))
+                .transition("close", S::is_true("cease_desist_requested"))
                 .on_enter(move |_state, _writer| {
                     let tx = tx_enter_verify.clone();
                     async move {
@@ -687,30 +712,15 @@ impl CookbookApp for DebtCollection {
                         });
                     }
                 })
+                .enter_prompt("The caller confirmed the disclosure. I'll now verify their identity.")
                 .done()
             // Phase 3: Inform Debt
             .phase("inform_debt")
                 .instruction(INFORM_DEBT_INSTRUCTION)
-                .guard(|s| {
-                    s.get::<bool>("identity_verified").unwrap_or(false)
-                })
-                .transition("negotiate", |s| {
-                    let debtor: Value = s.get("DebtorState").unwrap_or(json!({}));
-                    debtor.get("debt_acknowledged")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false)
-                })
+                .guard(S::is_true("identity_verified"))
+                .transition("negotiate", S::is_true("debt_acknowledged"))
                 .transition("close", |s| {
-                    // Dispute or cease-and-desist both lead to close
-                    let debtor: Value = s.get("DebtorState").unwrap_or(json!({}));
-                    let cease = debtor.get("cease_desist_requested")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false);
-                    let dispute = debtor.get("negotiation_intent")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s == "dispute")
-                        .unwrap_or(false);
-                    cease || dispute
+                    S::is_true("cease_desist_requested")(s) || S::eq("negotiation_intent", "dispute")(s)
                 })
                 .on_enter(move |_state, _writer| {
                     let tx = tx_enter_inform.clone();
@@ -726,33 +736,15 @@ impl CookbookApp for DebtCollection {
                         });
                     }
                 })
+                .enter_prompt("The caller's identity is verified. I'll now inform them about the debt.")
                 .done()
             // Phase 4: Negotiate
             .phase("negotiate")
                 .instruction(NEGOTIATE_INSTRUCTION)
-                .guard(|s| {
-                    let debtor: Value = s.get("DebtorState").unwrap_or(json!({}));
-                    debtor.get("debt_acknowledged")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false)
-                })
-                .transition("arrange_payment", |s| {
-                    let debtor: Value = s.get("DebtorState").unwrap_or(json!({}));
-                    let intent = debtor.get("negotiation_intent")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
-                    intent == "full_pay" || intent == "partial_pay"
-                })
+                .guard(S::is_true("debt_acknowledged"))
+                .transition("arrange_payment", S::one_of("negotiation_intent", &["full_pay", "partial_pay"]))
                 .transition("close", |s| {
-                    let debtor: Value = s.get("DebtorState").unwrap_or(json!({}));
-                    let cease = debtor.get("cease_desist_requested")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false);
-                    let refuse = debtor.get("negotiation_intent")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s == "refuse")
-                        .unwrap_or(false);
-                    cease || refuse
+                    S::is_true("cease_desist_requested")(s) || S::eq("negotiation_intent", "refuse")(s)
                 })
                 .on_enter(move |_state, _writer| {
                     let tx = tx_enter_negotiate.clone();
@@ -768,26 +760,14 @@ impl CookbookApp for DebtCollection {
                         });
                     }
                 })
+                .enter_prompt("The caller acknowledges the debt. I'll now discuss resolution options.")
                 .done()
             // Phase 5: Arrange Payment
             .phase("arrange_payment")
                 .instruction(ARRANGE_PAYMENT_INSTRUCTION)
-                .guard(|s| {
-                    let debtor: Value = s.get("DebtorState").unwrap_or(json!({}));
-                    let intent = debtor.get("negotiation_intent")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
-                    intent == "full_pay" || intent == "partial_pay"
-                })
-                .transition("confirm", |s| {
-                    s.get::<bool>("payment_processed").unwrap_or(false)
-                })
-                .transition("close", |s| {
-                    let debtor: Value = s.get("DebtorState").unwrap_or(json!({}));
-                    debtor.get("cease_desist_requested")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false)
-                })
+                .guard(S::one_of("negotiation_intent", &["full_pay", "partial_pay"]))
+                .transition("confirm", S::is_true("payment_processed"))
+                .transition("close", S::is_true("cease_desist_requested"))
                 .on_enter(move |_state, _writer| {
                     let tx = tx_enter_arrange.clone();
                     async move {
@@ -802,13 +782,12 @@ impl CookbookApp for DebtCollection {
                         });
                     }
                 })
+                .enter_prompt("We've agreed on a payment arrangement. I'll now collect the payment details.")
                 .done()
             // Phase 6: Confirm
             .phase("confirm")
                 .instruction(CONFIRM_INSTRUCTION)
-                .guard(|s| {
-                    s.get::<bool>("payment_processed").unwrap_or(false)
-                })
+                .guard(S::is_true("payment_processed"))
                 .transition("close", |_s| {
                     // Close after confirmation summary is delivered
                     // (model will naturally complete the summary turn)
@@ -828,6 +807,7 @@ impl CookbookApp for DebtCollection {
                         });
                     }
                 })
+                .enter_prompt("Payment is processed. I'll now confirm the agreement details.")
                 .done()
             // Phase 7: Close
             .phase("close")
@@ -836,13 +816,9 @@ impl CookbookApp for DebtCollection {
                 .on_enter(move |state, _writer| {
                     let tx = tx_enter_close.clone();
                     async move {
-                        let debtor: Value = state.get("DebtorState").unwrap_or(json!({}));
-                        let cease = debtor.get("cease_desist_requested")
-                            .and_then(|v| v.as_bool())
-                            .unwrap_or(false);
-                        let dispute = debtor.get("negotiation_intent")
-                            .and_then(|v| v.as_str())
-                            .map(|s| s == "dispute")
+                        let cease: bool = state.get("cease_desist_requested").unwrap_or(false);
+                        let dispute = state.get::<String>("negotiation_intent")
+                            .map(|i| i == "dispute")
                             .unwrap_or(false);
 
                         let reason = if cease {
@@ -863,55 +839,21 @@ impl CookbookApp for DebtCollection {
                         });
                     }
                 })
+                .enter_prompt_fn(|state, _tw| {
+                    if S::is_true("cease_desist_requested")(state) {
+                        "The caller has requested cease-and-desist. I'll close the call respectfully.".into()
+                    } else if S::eq("negotiation_intent", "dispute")(state) {
+                        "The caller disputes the debt. I'll close the call and arrange validation.".into()
+                    } else {
+                        "I'll now wrap up the call.".into()
+                    }
+                })
                 .done()
             .initial_phase("disclosure")
-            // --- Instruction template: state-reactive instructions ---
-            .instruction_template(|state| {
-                let phase: String = state.get("session:phase").unwrap_or_default();
-                let debtor: Value = state.get("DebtorState").unwrap_or(json!({}));
-                let fields: Value = state.get("debt_fields").unwrap_or(json!({}));
-                let risk: String = state.get("derived:call_risk_level").unwrap_or_else(|| "low".to_string());
-
-                let base = match phase.as_str() {
-                    "disclosure" => DISCLOSURE_INSTRUCTION,
-                    "verify_identity" => VERIFY_IDENTITY_INSTRUCTION,
-                    "inform_debt" => INFORM_DEBT_INSTRUCTION,
-                    "negotiate" => NEGOTIATE_INSTRUCTION,
-                    "arrange_payment" => ARRANGE_PAYMENT_INSTRUCTION,
-                    "confirm" => CONFIRM_INSTRUCTION,
-                    "close" => CLOSE_INSTRUCTION,
-                    _ => DISCLOSURE_INSTRUCTION,
-                };
-
-                let mut instruction = base.to_string();
-
-                // Append risk-aware context
-                if risk == "high" || risk == "critical" {
-                    instruction.push_str(
-                        "\n\nIMPORTANT: The caller is showing signs of distress. Use extra empathy. \
-                         Never threaten, harass, or use deceptive language. If they request to stop \
-                         being contacted, immediately comply with cease-and-desist requirements."
-                    );
-                }
-
-                // Append extracted context
-                let emotion = debtor.get("emotional_state")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown");
-                let willingness = debtor.get("willingness_to_pay")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(0.5);
-
-                instruction.push_str(&format!(
-                    "\n\n[Context: Emotional state: {emotion}, Willingness: {willingness:.1}, \
-                     Risk level: {risk}, Extracted fields: {fields}]"
-                ));
-
-                Some(instruction)
-            })
             // --- Watchers ---
+            // With auto-flatten, each extracted field is its own state key.
             // Numeric: willingness crossed above 0.7
-            .watch("DebtorState")
+            .watch("willingness_to_pay")
                 .crossed_above(0.7)
                 .then({
                     let tx = tx_watcher_willingness.clone();
@@ -946,30 +888,24 @@ impl CookbookApp for DebtCollection {
                     }
                 })
             // Boolean: cease_desist became true
-            .watch("DebtorState")
-                .changed()
+            .watch("cease_desist_requested")
+                .became_true()
                 .blocking()
                 .then({
                     let tx = tx_watcher_cease.clone();
-                    move |_old, new, state| {
+                    move |_old, _new, state| {
                         let tx = tx.clone();
                         async move {
-                            if let Some(cease) = new.get("cease_desist_requested")
-                                .and_then(|v| v.as_bool())
-                            {
-                                if cease {
-                                    let _ = tx.send(ServerMessage::Violation {
-                                        rule: "cease_and_desist".into(),
-                                        severity: "critical".into(),
-                                        detail: "Debtor requested cease-and-desist — must stop collection".into(),
-                                    });
-                                    state.set("cease_desist_active", true);
-                                }
-                            }
+                            let _ = tx.send(ServerMessage::Violation {
+                                rule: "cease_and_desist".into(),
+                                severity: "critical".into(),
+                                detail: "Debtor requested cease-and-desist — must stop collection".into(),
+                            });
+                            state.set("cease_desist_active", true);
                         }
                     }
                 })
-            // Boolean: identity_verified became false (shouldn't happen normally)
+            // Boolean: identity_verified became false
             .watch("identity_verified")
                 .became_false()
                 .then({
@@ -986,24 +922,18 @@ impl CookbookApp for DebtCollection {
                     }
                 })
             // Value: negotiation_intent changed to "dispute"
-            .watch("DebtorState")
-                .changed()
+            .watch("negotiation_intent")
+                .changed_to(json!("dispute"))
                 .then({
                     let tx = tx_watcher_dispute.clone();
-                    move |_old, new, _state| {
+                    move |_old, _new, _state| {
                         let tx = tx.clone();
                         async move {
-                            if let Some(intent) = new.get("negotiation_intent")
-                                .and_then(|v| v.as_str())
-                            {
-                                if intent == "dispute" {
-                                    let _ = tx.send(ServerMessage::Violation {
-                                        rule: "debt_disputed".into(),
-                                        severity: "info".into(),
-                                        detail: "Debtor is disputing the debt — must send validation notice".into(),
-                                    });
-                                }
-                            }
+                            let _ = tx.send(ServerMessage::Violation {
+                                rule: "debt_disputed".into(),
+                                severity: "info".into(),
+                                detail: "Debtor is disputing the debt — must send validation notice".into(),
+                            });
                         }
                     }
                 })
@@ -1097,7 +1027,7 @@ impl CookbookApp for DebtCollection {
                 },
             )
             // --- on_tool_call: mock tool dispatch ---
-            .on_tool_call(move |calls| {
+            .on_tool_call(move |calls, _state| {
                 let tx = tx_tool_call.clone();
                 async move {
                     let mut responses = Vec::new();
@@ -1112,12 +1042,11 @@ impl CookbookApp for DebtCollection {
 
                         let result = execute_tool(&call.name, &call.args);
 
-                        // If verify_identity returned verified=true, set state flag
-                        if call.name == "verify_identity" {
-                            if result.get("verified").and_then(|v| v.as_bool()).unwrap_or(false) {
-                                // We'll communicate this via the response
-                            }
-                        }
+                        let _ = tx.send(ServerMessage::ToolCallEvent {
+                            name: call.name.clone(),
+                            args: serde_json::to_string(&call.args).unwrap_or_default(),
+                            result: serde_json::to_string(&result).unwrap_or_default(),
+                        });
 
                         responses.push(FunctionResponse {
                             name: call.name.clone(),
@@ -1128,6 +1057,9 @@ impl CookbookApp for DebtCollection {
                     Some(responses)
                 }
             })
+            // NOTE: on_turn_boundary for compliance reminders is set above.
+            // Telemetry is auto-collected by the SDK's telemetry lane and
+            // sent to the browser via the periodic telemetry sender post-connect.
             // --- Fast lane callbacks ---
             .on_audio(move |data| {
                 let encoded = b64.encode(data);
@@ -1154,16 +1086,22 @@ impl CookbookApp for DebtCollection {
                 });
             })
             // --- Control lane callbacks ---
-            .on_turn_complete(move || {
+            .on_turn_complete({
                 let tx = tx_turn.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::TurnComplete);
+                move || {
+                    let tx = tx.clone();
+                    async move {
+                        let _ = tx.send(ServerMessage::TurnComplete);
+                    }
                 }
             })
-            .on_interrupted(move || {
+            .on_interrupted({
                 let tx = tx_interrupted.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::Interrupted);
+                move || {
+                    let tx = tx.clone();
+                    async move {
+                        let _ = tx.send(ServerMessage::Interrupted);
+                    }
                 }
             })
             .on_vad_start(move || {
@@ -1203,6 +1141,30 @@ impl CookbookApp for DebtCollection {
         let _ = tx.send(ServerMessage::Connected);
         send_app_meta(&tx, self);
         info!("DebtCollection session connected");
+
+        // Periodic telemetry sender (auto-collected by SDK telemetry lane)
+        let telem = handle.telemetry().clone();
+        let telem_state = handle.state().clone();
+        let tx_telem = tx.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(2));
+            loop {
+                interval.tick().await;
+                let mut stats = telem.snapshot();
+                // Merge app-specific stats
+                if let Some(obj) = stats.as_object_mut() {
+                    let phase: String = telem_state.get("session:phase").unwrap_or_default();
+                    let risk: String = telem_state.get("derived:call_risk_level").unwrap_or_else(|| "low".to_string());
+                    let tc: u32 = telem_state.session().get("turn_count").unwrap_or(0);
+                    obj.insert("current_phase".into(), json!(phase));
+                    obj.insert("risk_level".into(), json!(risk));
+                    obj.insert("turn_count".into(), json!(tc));
+                }
+                if tx_telem.send(ServerMessage::Telemetry { stats }).is_err() {
+                    break;
+                }
+            }
+        });
 
         let _ = tx.send(ServerMessage::PhaseChange {
             from: "none".into(),

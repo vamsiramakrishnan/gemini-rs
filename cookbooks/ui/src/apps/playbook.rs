@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::LazyLock;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use base64::Engine;
@@ -21,6 +22,7 @@ use super::{build_session_config, resolve_voice, send_app_meta, wait_for_start};
 // ---------------------------------------------------------------------------
 
 struct Phase {
+    #[cfg_attr(not(test), allow(dead_code))]
     name: &'static str,
     instruction: &'static str,
     #[cfg_attr(not(test), allow(dead_code))]
@@ -237,6 +239,22 @@ fn evaluate_phase(phase_name: &str, state: &HashMap<String, serde_json::Value>, 
 // ConversationBuffer is imported from super (apps/mod.rs)
 
 // ---------------------------------------------------------------------------
+// Per-phase context formatter
+// ---------------------------------------------------------------------------
+
+fn playbook_context(s: &State) -> String {
+    let extracted: serde_json::Value = s.get("playbook_state").unwrap_or(serde_json::json!({}));
+    let customer_name = extracted
+        .get("customer_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("the customer");
+    format!(
+        "Customer name: {}. Current state: {}",
+        customer_name, extracted
+    )
+}
+
+// ---------------------------------------------------------------------------
 // Playbook app
 // ---------------------------------------------------------------------------
 
@@ -334,6 +352,8 @@ impl CookbookApp for Playbook {
         let tx_enter_close = tx.clone();
 
         let handle = Live::builder()
+            // Model greets the customer immediately on connect
+            .greeting("Begin the conversation. Welcome the customer warmly.")
             .extractor(extractor)
             .on_extracted({
                 let tx = tx.clone();
@@ -364,6 +384,7 @@ impl CookbookApp for Playbook {
                         // Initial phase — entered at session start, no "from" phase.
                     }
                 })
+                .with_context(playbook_context)
                 .done()
             .phase("identify")
                 .instruction(PHASES[1].instruction)
@@ -386,6 +407,7 @@ impl CookbookApp for Playbook {
                         });
                     }
                 })
+                .with_context(playbook_context)
                 .done()
             .phase("investigate")
                 .instruction(PHASES[2].instruction)
@@ -408,6 +430,7 @@ impl CookbookApp for Playbook {
                         });
                     }
                 })
+                .with_context(playbook_context)
                 .done()
             .phase("explain")
                 .instruction(PHASES[3].instruction)
@@ -430,6 +453,7 @@ impl CookbookApp for Playbook {
                         });
                     }
                 })
+                .with_context(playbook_context)
                 .done()
             .phase("resolve")
                 .instruction(PHASES[4].instruction)
@@ -452,6 +476,7 @@ impl CookbookApp for Playbook {
                         });
                     }
                 })
+                .with_context(playbook_context)
                 .done()
             .phase("close")
                 .instruction(PHASES[5].instruction)
@@ -470,26 +495,16 @@ impl CookbookApp for Playbook {
                         });
                     }
                 })
+                .with_context(playbook_context)
                 .done()
             .initial_phase("greet")
-            // State-reactive instruction template: builds context-aware instruction.
-            .instruction_template(|state| {
-                let phase_name: String = state.get("session:phase").unwrap_or_default();
-                let extracted: serde_json::Value = state.get("playbook_state").unwrap_or(json!({}));
-                let customer_name = extracted.get("customer_name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("the customer");
-
-                // Find the phase instruction.
-                let instruction = PHASES.iter()
-                    .find(|p| p.name == phase_name)
-                    .map(|p| p.instruction)
-                    .unwrap_or(PHASES[0].instruction);
-
-                Some(format!(
-                    "{}\n\nCustomer name: {}. Current state: {}",
-                    instruction, customer_name, extracted
-                ))
+            // Turn boundary: increment turn counter.
+            .on_turn_boundary({
+                move |state, _writer| {
+                    async move {
+                        let _turn_count: u32 = state.modify("session:turn_count", 0u32, |n| n + 1);
+                    }
+                }
             })
             // Standard voice callbacks.
             .on_audio(move |data| {
@@ -553,6 +568,20 @@ impl CookbookApp for Playbook {
         let _ = tx.send(ServerMessage::Connected);
         send_app_meta(&tx, self);
         info!("Playbook session connected");
+
+        // Periodic telemetry sender (auto-collected by SDK telemetry lane)
+        let telem = handle.telemetry().clone();
+        let tx_telem = tx.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(2));
+            loop {
+                interval.tick().await;
+                let stats = telem.snapshot();
+                if tx_telem.send(ServerMessage::Telemetry { stats }).is_err() {
+                    break;
+                }
+            }
+        });
 
         // Send initial phase notification.
         let _ = tx.send(ServerMessage::PhaseChange {

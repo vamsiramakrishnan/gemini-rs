@@ -248,7 +248,7 @@ impl CookbookApp for ToolCalling {
                     text: t.to_string(),
                 });
             })
-            .on_tool_call(move |calls| {
+            .on_tool_call(move |calls, _state| {
                 let tx = tx_tool.clone();
                 async move {
                     info!("Tool calls received: {}", calls.len());
@@ -268,6 +268,11 @@ impl CookbookApp for ToolCalling {
                                     "args": call.args,
                                     "result": result,
                                 }),
+                            });
+                            let _ = tx.send(ServerMessage::ToolCallEvent {
+                                name: call.name.clone(),
+                                args: serde_json::to_string(&call.args).unwrap_or_default(),
+                                result: serde_json::to_string(&result).unwrap_or_default(),
                             });
 
                             FunctionResponse {

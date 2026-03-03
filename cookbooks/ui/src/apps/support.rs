@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::LazyLock;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use base64::Engine;
@@ -22,6 +23,7 @@ use super::{build_session_config, resolve_voice, send_app_meta, wait_for_start};
 
 
 struct AgentPhase {
+    #[cfg_attr(not(test), allow(dead_code))]
     name: &'static str,
     instruction: &'static str,
     #[cfg_attr(not(test), allow(dead_code))]
@@ -304,6 +306,22 @@ fn should_handoff_to_technical(state: &HashMap<String, serde_json::Value>) -> bo
 
 
 // ---------------------------------------------------------------------------
+// Per-phase context formatter
+// ---------------------------------------------------------------------------
+
+fn support_context(s: &State) -> String {
+    let extracted: serde_json::Value = s.get("support_state").unwrap_or(serde_json::json!({}));
+    let customer_name = extracted
+        .get("customer_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("the customer");
+    format!(
+        "Customer name: {}. Current state: {}",
+        customer_name, extracted
+    )
+}
+
+// ---------------------------------------------------------------------------
 // SupportAssistant app
 // ---------------------------------------------------------------------------
 
@@ -402,6 +420,8 @@ impl CookbookApp for SupportAssistant {
         let tx_enter_tech_close = tx.clone();
 
         let handle = Live::builder()
+            // Model greets the caller immediately on connect
+            .greeting("Greet the caller warmly and ask how you can help them today.")
             .extractor(extractor)
             .on_extracted({
                 let tx = tx.clone();
@@ -441,6 +461,7 @@ impl CookbookApp for SupportAssistant {
                         // Initial phase — entered at session start, no "from" phase.
                     }
                 })
+                .with_context(support_context)
                 .done()
             .phase("billing:identify")
                 .instruction(BILLING_PHASES[1].instruction)
@@ -472,6 +493,7 @@ impl CookbookApp for SupportAssistant {
                         });
                     }
                 })
+                .with_context(support_context)
                 .done()
             .phase("billing:investigate")
                 .instruction(BILLING_PHASES[2].instruction)
@@ -494,6 +516,7 @@ impl CookbookApp for SupportAssistant {
                         });
                     }
                 })
+                .with_context(support_context)
                 .done()
             .phase("billing:resolve")
                 .instruction(BILLING_PHASES[3].instruction)
@@ -516,6 +539,7 @@ impl CookbookApp for SupportAssistant {
                         });
                     }
                 })
+                .with_context(support_context)
                 .done()
             .phase("billing:close")
                 .instruction(BILLING_PHASES[4].instruction)
@@ -534,6 +558,7 @@ impl CookbookApp for SupportAssistant {
                         });
                     }
                 })
+                .with_context(support_context)
                 .done()
             // --- Technical Phases ---
             .phase("tech:greet")
@@ -564,6 +589,7 @@ impl CookbookApp for SupportAssistant {
                         }
                     }
                 })
+                .with_context(support_context)
                 .done()
             .phase("tech:identify")
                 .instruction(TECHNICAL_PHASES[1].instruction)
@@ -586,6 +612,7 @@ impl CookbookApp for SupportAssistant {
                         });
                     }
                 })
+                .with_context(support_context)
                 .done()
             .phase("tech:troubleshoot")
                 .instruction(TECHNICAL_PHASES[2].instruction)
@@ -608,6 +635,7 @@ impl CookbookApp for SupportAssistant {
                         });
                     }
                 })
+                .with_context(support_context)
                 .done()
             .phase("tech:resolve")
                 .instruction(TECHNICAL_PHASES[3].instruction)
@@ -630,6 +658,7 @@ impl CookbookApp for SupportAssistant {
                         });
                     }
                 })
+                .with_context(support_context)
                 .done()
             .phase("tech:close")
                 .instruction(TECHNICAL_PHASES[4].instruction)
@@ -648,36 +677,9 @@ impl CookbookApp for SupportAssistant {
                         });
                     }
                 })
+                .with_context(support_context)
                 .done()
             .initial_phase("billing:greet")
-            // State-reactive instruction template: builds context-aware instructions.
-            .instruction_template(|state| {
-                let phase_name: String = state.get("session:phase").unwrap_or_default();
-                let extracted: serde_json::Value = state.get("support_state").unwrap_or(json!({}));
-                let customer_name = extracted.get("customer_name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("the customer");
-
-                // Find instruction from the right phase array.
-                let instruction = if phase_name.starts_with("tech:") {
-                    let short_name = phase_name.strip_prefix("tech:").unwrap_or(&phase_name);
-                    TECHNICAL_PHASES.iter()
-                        .find(|p| p.name == short_name)
-                        .map(|p| p.instruction)
-                } else {
-                    let short_name = phase_name.strip_prefix("billing:").unwrap_or(&phase_name);
-                    BILLING_PHASES.iter()
-                        .find(|p| p.name == short_name)
-                        .map(|p| p.instruction)
-                };
-
-                let instruction = instruction.unwrap_or(BILLING_PHASES[0].instruction);
-
-                Some(format!(
-                    "{}\n\nCustomer name: {}. Current state: {}",
-                    instruction, customer_name, extracted
-                ))
-            })
             // Watch for escalation.
             .watch("support_state")
                 .changed()
@@ -700,6 +702,30 @@ impl CookbookApp for SupportAssistant {
                         }
                     }
                 })
+            .on_turn_boundary({
+                let tx = tx.clone();
+                move |state, _writer| {
+                    let tx = tx.clone();
+                    async move {
+                        let turn_count: u32 = state.modify("session:turn_count", 0u32, |n| n + 1);
+                        let current_phase: String = state.get("session:phase").unwrap_or_default();
+                        let active_agent: String = state.get("active_agent").unwrap_or_else(|| "billing-support".to_string());
+
+                        let _ = tx.send(ServerMessage::StateUpdate {
+                            key: "turn_count".into(),
+                            value: json!(turn_count),
+                        });
+                        let _ = tx.send(ServerMessage::StateUpdate {
+                            key: "current_phase".into(),
+                            value: json!(current_phase),
+                        });
+                        let _ = tx.send(ServerMessage::StateUpdate {
+                            key: "active_agent".into(),
+                            value: json!(active_agent),
+                        });
+                    }
+                }
+            })
             // Standard voice callbacks.
             .on_audio(move |data| {
                 let encoded = b64.encode(data);
@@ -776,6 +802,20 @@ impl CookbookApp for SupportAssistant {
         let _ = tx.send(ServerMessage::StateUpdate {
             key: "phase".into(),
             value: json!("billing:greet"),
+        });
+
+        // Periodic telemetry sender (auto-collected by SDK telemetry lane)
+        let telem = handle.telemetry().clone();
+        let tx_telem = tx.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(2));
+            loop {
+                interval.tick().await;
+                let stats = telem.snapshot();
+                if tx_telem.send(ServerMessage::Telemetry { stats }).is_err() {
+                    break;
+                }
+            }
         });
 
         // Browser -> Gemini loop.

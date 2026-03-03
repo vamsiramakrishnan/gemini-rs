@@ -306,31 +306,48 @@ impl CookbookApp for Guardrails {
                         }
                     }
                 })
-            // State-reactive instruction template for corrective instruction injection.
-            .instruction_template(|state| {
+            // Instruction amendment: additively appends corrective instructions based on violations.
+            .instruction_amendment(|state| {
                 let extracted: serde_json::Value = state.get("guardrails_state").unwrap_or(json!({}));
-                let has_violations = extracted.as_object()
-                    .map(|obj| obj.keys().any(|k| k.starts_with("violation:")))
-                    .unwrap_or(false);
+                let obj = match extracted.as_object() {
+                    Some(o) => o,
+                    None => return None,
+                };
 
+                let has_violations = obj.keys().any(|k| k.starts_with("violation:"));
                 if !has_violations {
-                    return Some(BASE_INSTRUCTION.to_string());
+                    return None;
                 }
 
-                let mut instruction = BASE_INSTRUCTION.to_string();
-                let obj = extracted.as_object().unwrap();
+                let mut amendment = String::new();
 
                 if obj.contains_key("violation:pii_ssn") || obj.contains_key("violation:pii_credit_card") {
-                    instruction.push_str("\n\nCRITICAL: The user just shared sensitive PII. Do NOT repeat, acknowledge, or reference any SSNs, credit card numbers, or other sensitive data. Respond helpfully without echoing the sensitive information.");
+                    amendment.push_str("CRITICAL: The user just shared sensitive PII. Do NOT repeat, acknowledge, or reference any SSNs, credit card numbers, or other sensitive data. Respond helpfully without echoing the sensitive information.\n\n");
                 }
                 if obj.contains_key("violation:off_topic") {
-                    instruction.push_str("\n\nNOTE: The conversation has gone off-topic. Gently redirect back to the main topic. Stay focused and professional.");
+                    amendment.push_str("NOTE: The conversation has gone off-topic. Gently redirect back to the main topic. Stay focused and professional.\n\n");
                 }
                 if obj.contains_key("violation:negative_sentiment") {
-                    instruction.push_str("\n\nNOTE: The user is expressing frustration. Show extra empathy and understanding. Acknowledge their feelings before addressing their concern.");
+                    amendment.push_str("NOTE: The user is expressing frustration. Show extra empathy and understanding. Acknowledge their feelings before addressing their concern.\n\n");
                 }
 
-                Some(instruction)
+                if amendment.is_empty() { None } else { Some(amendment.trim().to_string()) }
+            })
+            .on_turn_boundary({
+                let tx = tx.clone();
+                move |state, _writer| {
+                    let tx = tx.clone();
+                    async move {
+                        let turn_count: u32 = state.modify("session:turn_count", 0u32, |n| n + 1);
+                        let violation_count: u32 = state.get("violation_count").unwrap_or(0);
+                        let _ = tx.send(ServerMessage::Telemetry {
+                            stats: json!({
+                                "turn_count": turn_count,
+                                "violation_count": violation_count,
+                            }),
+                        });
+                    }
+                }
             })
             // Standard voice callbacks.
             .on_audio(move |data| {
