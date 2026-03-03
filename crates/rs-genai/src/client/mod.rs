@@ -92,6 +92,35 @@ impl Client {
         }
     }
 
+    /// Create a client with Vertex AI authentication and dynamic token refresh.
+    ///
+    /// The `refresher` closure is called on every REST API request to obtain
+    /// a fresh Bearer token. It should handle caching internally to avoid
+    /// unnecessary overhead (see `GcloudTokenProvider` in rs-adk for an example).
+    ///
+    /// This is the recommended constructor for long-running HTTP clients
+    /// (e.g., extraction LLMs) where tokens may expire during the session.
+    pub fn from_vertex_refreshable(
+        project: impl Into<String>,
+        location: impl Into<String>,
+        refresher: impl Fn() -> String + Send + Sync + 'static,
+    ) -> Self {
+        let proj: String = project.into();
+        let loc: String = location.into();
+        // Get initial token for the ApiEndpoint (used if .live() is called)
+        let initial_token = refresher();
+        let endpoint = ApiEndpoint::vertex(proj.clone(), loc.clone(), initial_token);
+        let auth: Arc<dyn AuthProvider> =
+            Arc::new(VertexAIAuth::with_token_refresher(proj, loc, refresher));
+        Self {
+            endpoint,
+            model: GeminiModel::default(),
+            auth,
+            #[cfg(feature = "http")]
+            http: http::HttpClient::new(http::HttpConfig::default()),
+        }
+    }
+
     /// Set the default model for all API calls.
     pub fn model(mut self, model: impl Into<GeminiModel>) -> Self {
         self.model = model.into();
@@ -250,5 +279,22 @@ mod tests {
     fn live_session_builder_created() {
         let client = Client::from_api_key("key");
         let _builder = client.live(GeminiModel::Gemini2_0FlashLive);
+    }
+
+    #[tokio::test]
+    async fn client_from_vertex_refreshable() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        let call_count = Arc::new(AtomicU32::new(0));
+        let cc = call_count.clone();
+        let client = Client::from_vertex_refreshable("proj", "us-central1", move || {
+            cc.fetch_add(1, Ordering::SeqCst);
+            "refreshed-token".to_string()
+        });
+        // Initial token fetch happens at construction
+        assert!(call_count.load(Ordering::SeqCst) >= 1);
+        // auth_headers should call the refresher again
+        let headers = client.auth_headers().await.unwrap();
+        assert_eq!(headers[0].1, "Bearer refreshed-token");
+        assert!(call_count.load(Ordering::SeqCst) >= 2);
     }
 }

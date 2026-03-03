@@ -94,6 +94,32 @@ impl ResultFormatter for DefaultResultFormatter {
 ///   background task. An immediate "running" acknowledgment is sent to the
 ///   model, and the final result is delivered asynchronously when the task
 ///   completes.
+///
+/// # With the L2 Fluent API
+///
+/// ```rust,ignore
+/// Live::builder()
+///     .tools(dispatcher)
+///     .tool_background("search_kb")           // uses DefaultResultFormatter
+///     .tool_background_with_formatter(         // custom formatter
+///         "analyze",
+///         Arc::new(MyFormatter),
+///     )
+///     .connect_vertex(project, location, token)
+///     .await?;
+/// ```
+///
+/// # With the L1 Builder
+///
+/// ```rust,ignore
+/// LiveSessionBuilder::new(config)
+///     .dispatcher(dispatcher)
+///     .tool_execution_mode("search_kb", ToolExecutionMode::Background {
+///         formatter: None,
+///     })
+///     .connect()
+///     .await?;
+/// ```
 #[derive(Clone, Default)]
 pub enum ToolExecutionMode {
     /// The tool runs inline (blocking the model turn until complete).

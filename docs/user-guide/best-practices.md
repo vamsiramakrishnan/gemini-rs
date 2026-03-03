@@ -27,16 +27,15 @@ use rs_adk::*;
 use rs_genai::prelude::*;
 ```
 
-### Keep tool callbacks fast
+### Keep tool callbacks fast — or use background execution
 
-The model waits for tool responses before continuing. A slow tool blocks the entire conversation turn. If a tool needs to do expensive work (database queries, external API calls), consider:
+The model waits for standard tool responses before continuing. A slow tool blocks the entire conversation turn. For tools that need to do expensive work (database queries, external API calls, LLM pipelines), you have two options:
 
-- Setting appropriate timeouts on external calls
-- Caching frequently accessed data
-- Using `DispatchTextAgent` for truly async work that the model does not need to wait for
+1. **Set timeouts and cache** for tools that must complete before the model continues
+2. **Use background execution** for tools where the model can continue speaking while results arrive
 
 ```rust,ignore
-// Good: fast tool with timeout
+// Option 1: fast tool with timeout
 let tool = SimpleTool::new("lookup", "Quick lookup", None, |args| async move {
     let result = tokio::time::timeout(
         Duration::from_secs(5),
@@ -45,6 +44,31 @@ let tool = SimpleTool::new("lookup", "Quick lookup", None, |args| async move {
     .map_err(|_| ToolError::ExecutionFailed("Database timeout".into()))?;
     Ok(json!(result))
 });
+
+// Option 2: background execution — model gets an ack immediately
+Live::builder()
+    .tools(dispatcher)
+    .tool_background("search_knowledge_base")  // zero dead-air
+```
+
+### Use concurrent callbacks for fire-and-forget work
+
+Control-lane callbacks default to `Blocking` — the event loop waits for completion. For fire-and-forget work (logging, analytics, broadcasting to a UI), use `_concurrent` variants to avoid blocking the pipeline:
+
+```rust,ignore
+// Blocking: appropriate when ordering matters
+.on_turn_complete(|| async { tx.send(TurnComplete).ok(); })
+
+// Concurrent: fire-and-forget — doesn't block the next event
+.on_extracted_concurrent(|name, val| async move {
+    broadcast_to_ui(name, val).await;
+})
+.on_error_concurrent(|e| async move {
+    send_to_error_tracker(&e).await;
+})
+.on_disconnected_concurrent(|reason| async move {
+    info!("Disconnected: {reason:?}");
+})
 ```
 
 ### Use State::modify() for atomic updates

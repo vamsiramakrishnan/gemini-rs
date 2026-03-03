@@ -21,7 +21,7 @@ use crate::state::State;
 use crate::tool::ToolDispatcher;
 
 use super::background_tool::BackgroundToolTracker;
-use super::callbacks::EventCallbacks;
+use super::callbacks::{CallbackMode, EventCallbacks};
 use super::computed::ComputedRegistry;
 use super::extractor::TurnExtractor;
 use super::phase::{PhaseMachine, TransitionResult};
@@ -87,6 +87,7 @@ pub(crate) fn spawn_event_processor(
     watchers: Option<WatcherRegistry>,
     temporal: Option<Arc<TemporalRegistry>>,
     background_tracker: Option<Arc<BackgroundToolTracker>>,
+    execution_modes: std::collections::HashMap<String, super::background_tool::ToolExecutionMode>,
 ) -> (tokio::task::JoinHandle<()>, tokio::task::JoinHandle<()>) {
     let shared = Arc::new(SharedState {
         interrupted: AtomicBool::new(false),
@@ -151,6 +152,7 @@ pub(crate) fn spawn_event_processor(
             watchers,
             temporal,
             background_tracker,
+            execution_modes,
         )
         .await;
         ctrl_timer_cancel.cancel();
@@ -239,6 +241,19 @@ pub(crate) fn spawn_telemetry_lane(
             }
         }
     })
+}
+
+/// Dispatch an async callback respecting its [`CallbackMode`].
+///
+/// - [`Blocking`](CallbackMode::Blocking): awaits the callback inline.
+/// - [`Concurrent`](CallbackMode::Concurrent): spawns as a detached tokio task.
+macro_rules! dispatch_callback {
+    ($mode:expr, $cb:expr) => {
+        match $mode {
+            CallbackMode::Blocking => { $cb.await; }
+            CallbackMode::Concurrent => { let f = $cb; tokio::spawn(async move { f.await; }); }
+        }
+    };
 }
 
 /// Routes a SessionEvent to the appropriate lane.
@@ -385,6 +400,8 @@ async fn handle_tool_calls(
     state: &State,
     phase_machine: &Option<tokio::sync::Mutex<PhaseMachine>>,
     transcript_buffer: &mut TranscriptBuffer,
+    execution_modes: &std::collections::HashMap<String, super::background_tool::ToolExecutionMode>,
+    background_tracker: &Option<Arc<BackgroundToolTracker>>,
 ) {
     // 0. Phase-scoped tool filtering: reject calls not in phase's allowed list
     let (allowed_calls, rejected_responses) = if let Some(ref pm) = phase_machine {
@@ -433,31 +450,53 @@ async fn handle_tool_calls(
         None
     };
 
-    // 2. If no override, auto-dispatch via ToolDispatcher
-    let responses = match responses {
-        Some(r) => r,
+    // 2. If no override, auto-dispatch via ToolDispatcher (split standard vs background)
+    let (responses, background_spawns) = match responses {
+        Some(r) => (r, Vec::new()),
         None => {
             let mut results: Vec<FunctionResponse> = rejected_responses;
+            let mut bg_spawns: Vec<(FunctionCall, Option<Arc<dyn super::background_tool::ResultFormatter>>)> = Vec::new();
+
             if let Some(ref disp) = dispatcher {
                 for call in &allowed_calls {
-                    match disp.call_function(&call.name, call.args.clone()).await {
-                        Ok(result) => results.push(FunctionResponse {
-                            name: call.name.clone(),
-                            response: result,
-                            id: call.id.clone(),
-                        }),
-                        Err(e) => results.push(FunctionResponse {
-                            name: call.name.clone(),
-                            response: serde_json::json!({"error": e.to_string()}),
-                            id: call.id.clone(),
-                        }),
+                    let mode = execution_modes.get(&call.name);
+                    match mode {
+                        Some(super::background_tool::ToolExecutionMode::Background { formatter }) => {
+                            // Send immediate ack
+                            let fmt: &dyn super::background_tool::ResultFormatter = formatter
+                                .as_ref()
+                                .map(|f| f.as_ref())
+                                .unwrap_or(&super::background_tool::DefaultResultFormatter);
+                            let ack = fmt.format_running(call);
+                            results.push(FunctionResponse {
+                                name: call.name.clone(),
+                                response: ack,
+                                id: call.id.clone(),
+                            });
+                            bg_spawns.push((call.clone(), formatter.clone()));
+                        }
+                        _ => {
+                            // Standard: execute inline
+                            match disp.call_function(&call.name, call.args.clone()).await {
+                                Ok(result) => results.push(FunctionResponse {
+                                    name: call.name.clone(),
+                                    response: result,
+                                    id: call.id.clone(),
+                                }),
+                                Err(e) => results.push(FunctionResponse {
+                                    name: call.name.clone(),
+                                    response: serde_json::json!({"error": e.to_string()}),
+                                    id: call.id.clone(),
+                                }),
+                            }
+                        }
                     }
                 }
             } else if results.is_empty() {
                 #[cfg(feature = "tracing-support")]
                 tracing::warn!("Tool call received but no dispatcher or callback registered");
             }
-            results
+            (results, bg_spawns)
         }
     };
 
@@ -478,11 +517,55 @@ async fn handle_tool_calls(
         transcript_buffer.push_tool_call(resp.name.clone(), args, &resp.response);
     }
 
-    // 5. Send tool responses back to Gemini
+    // 5. Send tool responses (standard + ack) back to Gemini
     if !responses.is_empty() {
         if let Err(_e) = writer.send_tool_response(responses).await {
             #[cfg(feature = "tracing-support")]
             tracing::error!("Failed to send tool response: {_e}");
+        }
+    }
+
+    // 6. Spawn background tool tasks
+    for (call, formatter) in background_spawns {
+        let disp = dispatcher.clone();
+        let bg_writer = writer.clone();
+        let tracker = background_tracker.clone();
+        let call_id = call.id.clone().unwrap_or_default();
+        let cancel = CancellationToken::new();
+
+        let handle = tokio::spawn(async move {
+            let result = if let Some(ref d) = disp {
+                d.call_function(&call.name, call.args.clone())
+                    .await
+                    .map_err(|e| crate::error::ToolError::ExecutionFailed(e.to_string()))
+            } else {
+                Err(crate::error::ToolError::NotFound(call.name.clone()))
+            };
+
+            let fmt: &dyn super::background_tool::ResultFormatter = formatter
+                .as_ref()
+                .map(|f| f.as_ref())
+                .unwrap_or(&super::background_tool::DefaultResultFormatter);
+            let formatted = fmt.format_result(&call, result);
+
+            bg_writer
+                .send_tool_response(vec![FunctionResponse {
+                    name: call.name.clone(),
+                    response: formatted,
+                    id: call.id.clone(),
+                }])
+                .await
+                .ok();
+
+            // Self-cleanup from tracker
+            if let Some(ref t) = tracker {
+                t.remove(&call.id.clone().unwrap_or_default());
+            }
+        });
+
+        // Register in tracker for cancellation
+        if let Some(ref t) = background_tracker {
+            t.spawn(call_id, handle, cancel);
         }
     }
 }
@@ -570,12 +653,12 @@ async fn handle_turn_complete(
                         }
                     }
                     if let Some(cb) = &callbacks.on_extracted {
-                        cb(name, value).await;
+                        dispatch_callback!(callbacks.on_extracted_mode, cb(name, value));
                     }
                 }
                 Err((name, error)) => {
                     if let Some(cb) = &callbacks.on_extraction_error {
-                        cb(name, error).await;
+                        dispatch_callback!(callbacks.on_extraction_error_mode, cb(name, error));
                     }
                 }
             }
@@ -705,7 +788,7 @@ async fn handle_turn_complete(
 
     // 16. User turn-complete callback
     if let Some(cb) = &callbacks.on_turn_complete {
-        cb().await;
+        dispatch_callback!(callbacks.on_turn_complete_mode, cb());
     }
 
     // 17. Update session turn count
@@ -730,6 +813,7 @@ async fn run_control_lane(
     watchers: Option<WatcherRegistry>,
     temporal: Option<Arc<TemporalRegistry>>,
     background_tracker: Option<Arc<BackgroundToolTracker>>,
+    execution_modes: std::collections::HashMap<String, super::background_tool::ToolExecutionMode>,
 ) {
     // TranscriptBuffer is exclusively owned by the control lane — no mutex.
     let mut transcript_buffer = TranscriptBuffer::new();
@@ -753,6 +837,8 @@ async fn run_control_lane(
                     &state,
                     &phase_machine,
                     &mut transcript_buffer,
+                    &execution_modes,
+                    &background_tracker,
                 )
                 .await;
             }
@@ -765,7 +851,7 @@ async fn run_control_lane(
                     disp.cancel_by_ids(&ids).await;
                 }
                 if let Some(cb) = &callbacks.on_tool_cancelled {
-                    cb(ids).await;
+                    dispatch_callback!(callbacks.on_tool_cancelled_mode, cb(ids));
                 }
             }
             ControlEvent::Interrupted => {
@@ -799,17 +885,17 @@ async fn run_control_lane(
                     .map(Duration::from_secs)
                     .unwrap_or(Duration::from_secs(60));
                 if let Some(cb) = &callbacks.on_go_away {
-                    cb(duration).await;
+                    dispatch_callback!(callbacks.on_go_away_mode, cb(duration));
                 }
             }
             ControlEvent::Connected => {
                 if let Some(cb) = &callbacks.on_connected {
-                    cb(writer.clone()).await;
+                    dispatch_callback!(callbacks.on_connected_mode, cb(writer.clone()));
                 }
             }
             ControlEvent::Disconnected(reason) => {
                 if let Some(cb) = &callbacks.on_disconnected {
-                    cb(reason).await;
+                    dispatch_callback!(callbacks.on_disconnected_mode, cb(reason));
                 }
             }
             ControlEvent::SessionResumeHandle(_handle) => {
@@ -817,7 +903,7 @@ async fn run_control_lane(
             }
             ControlEvent::Error(err) => {
                 if let Some(cb) = &callbacks.on_error {
-                    cb(err).await;
+                    dispatch_callback!(callbacks.on_error_mode, cb(err));
                 }
             }
         }
@@ -847,7 +933,7 @@ mod tests {
             Arc::new(crate::agent_session::NoOpSessionWriter);
 
         let (fast_handle, ctrl_handle) =
-            spawn_event_processor(event_rx, callbacks, None, writer, vec![], State::new(), None, None, None, None, None);
+            spawn_event_processor(event_rx, callbacks, None, writer, vec![], State::new(), None, None, None, None, None, std::collections::HashMap::new());
 
         // Send audio events
         let _ = event_tx.send(SessionEvent::AudioData(Bytes::from_static(b"audio1")));
@@ -882,7 +968,7 @@ mod tests {
             Arc::new(crate::agent_session::NoOpSessionWriter);
 
         let (fast_handle, ctrl_handle) =
-            spawn_event_processor(event_rx, callbacks, None, writer, vec![], State::new(), None, None, None, None, None);
+            spawn_event_processor(event_rx, callbacks, None, writer, vec![], State::new(), None, None, None, None, None, std::collections::HashMap::new());
 
         // Send audio, then interrupt, then more audio
         let _ = event_tx.send(SessionEvent::AudioData(Bytes::from_static(b"before")));
@@ -921,7 +1007,7 @@ mod tests {
             Arc::new(crate::agent_session::NoOpSessionWriter);
 
         let (fast_handle, ctrl_handle) =
-            spawn_event_processor(event_rx, callbacks, None, writer, vec![], State::new(), None, None, None, None, None);
+            spawn_event_processor(event_rx, callbacks, None, writer, vec![], State::new(), None, None, None, None, None, std::collections::HashMap::new());
 
         let _ = event_tx.send(SessionEvent::TurnComplete);
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -956,6 +1042,7 @@ mod tests {
             None,
             None,
             None,
+            std::collections::HashMap::new(),
         );
 
         // Send transcripts
@@ -1025,6 +1112,7 @@ mod tests {
             None,
             None,
             None,
+            std::collections::HashMap::new(),
         );
 
         // Produce a turn with content
@@ -1074,5 +1162,187 @@ mod tests {
 
         cancel.cancel();
         let _ = telem_handle.await;
+    }
+
+    #[tokio::test]
+    async fn background_tool_sends_ack_immediately() {
+        use crate::tool::{ToolDispatcher, SimpleTool};
+        use crate::live::background_tool::{BackgroundToolTracker, ToolExecutionMode};
+
+        // Create a slow tool
+        let tool = SimpleTool::new(
+            "slow_search",
+            "A slow search tool",
+            Some(serde_json::json!({"type": "object", "properties": {"q": {"type": "string"}}})),
+            |_args| async move {
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                Ok(serde_json::json!({"results": ["found"]}))
+            },
+        );
+
+        let mut dispatcher = ToolDispatcher::new();
+        dispatcher.register(tool);
+
+        let mut execution_modes = std::collections::HashMap::new();
+        execution_modes.insert(
+            "slow_search".to_string(),
+            ToolExecutionMode::Background { formatter: None },
+        );
+
+        let sent = Arc::new(parking_lot::Mutex::new(Vec::<Vec<FunctionResponse>>::new()));
+        let sent_clone = sent.clone();
+
+        // Use a writer that records sent tool responses
+        struct RecordingWriter {
+            sent: Arc<parking_lot::Mutex<Vec<Vec<FunctionResponse>>>>,
+        }
+
+        #[async_trait::async_trait]
+        impl SessionWriter for RecordingWriter {
+            async fn send_audio(&self, _data: Vec<u8>) -> Result<(), rs_genai::session::SessionError> { Ok(()) }
+            async fn send_text(&self, _text: String) -> Result<(), rs_genai::session::SessionError> { Ok(()) }
+            async fn send_video(&self, _data: Vec<u8>) -> Result<(), rs_genai::session::SessionError> { Ok(()) }
+            async fn send_tool_response(&self, responses: Vec<FunctionResponse>) -> Result<(), rs_genai::session::SessionError> {
+                self.sent.lock().push(responses);
+                Ok(())
+            }
+            async fn update_instruction(&self, _instruction: String) -> Result<(), rs_genai::session::SessionError> { Ok(()) }
+            async fn send_client_content(&self, _content: Vec<rs_genai::prelude::Content>, _turn_complete: bool) -> Result<(), rs_genai::session::SessionError> { Ok(()) }
+            async fn signal_activity_start(&self) -> Result<(), rs_genai::session::SessionError> { Ok(()) }
+            async fn signal_activity_end(&self) -> Result<(), rs_genai::session::SessionError> { Ok(()) }
+            async fn disconnect(&self) -> Result<(), rs_genai::session::SessionError> { Ok(()) }
+        }
+
+        let writer: Arc<dyn SessionWriter> = Arc::new(RecordingWriter { sent: sent_clone });
+        let callbacks = Arc::new(EventCallbacks::default());
+        let tracker = Arc::new(BackgroundToolTracker::new());
+
+        let (event_tx, _) = broadcast::channel(16);
+        let event_rx = event_tx.subscribe();
+
+        let (fast_handle, ctrl_handle) = spawn_event_processor(
+            event_rx,
+            callbacks,
+            Some(Arc::new(dispatcher)),
+            writer,
+            vec![],
+            State::new(),
+            None,
+            None,
+            None,
+            None,
+            Some(tracker.clone()),
+            execution_modes,
+        );
+
+        // Send a tool call
+        let _ = event_tx.send(SessionEvent::ToolCall(vec![FunctionCall {
+            name: "slow_search".to_string(),
+            args: serde_json::json!({"q": "test"}),
+            id: Some("fc_1".to_string()),
+        }]));
+
+        // Wait just enough for the ack (but not the full tool)
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let responses = sent.lock();
+        // First batch should be the ack
+        assert!(!responses.is_empty(), "Should have sent ack immediately");
+        assert_eq!(responses[0][0].response["status"], "running");
+
+        drop(responses);
+
+        // Wait for background tool to complete
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
+        let responses = sent.lock();
+        // Second batch should be the completed result
+        assert!(responses.len() >= 2, "Should have sent result after completion");
+        assert_eq!(responses[1][0].response["status"], "completed");
+
+        drop(event_tx);
+        let _ = fast_handle.await;
+        let _ = ctrl_handle.await;
+    }
+
+    #[tokio::test]
+    async fn callback_mode_blocking_awaits_inline() {
+        use std::sync::atomic::AtomicU32;
+
+        let order = Arc::new(AtomicU32::new(0));
+        let order_clone = order.clone();
+
+        let mut callbacks = EventCallbacks::default();
+        // Blocking on_turn_complete sets order to 1
+        callbacks.on_turn_complete = Some(Arc::new(move || {
+            let o = order_clone.clone();
+            Box::pin(async move {
+                // Simulate brief work
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                o.store(1, Ordering::SeqCst);
+            })
+        }));
+        callbacks.on_turn_complete_mode = CallbackMode::Blocking;
+        let callbacks = Arc::new(callbacks);
+
+        let (event_tx, _) = broadcast::channel(16);
+        let event_rx = event_tx.subscribe();
+
+        let writer: Arc<dyn SessionWriter> =
+            Arc::new(crate::agent_session::NoOpSessionWriter);
+
+        let (fast_handle, ctrl_handle) = spawn_event_processor(
+            event_rx, callbacks, None, writer, vec![], State::new(),
+            None, None, None, None, None, std::collections::HashMap::new(),
+        );
+
+        let _ = event_tx.send(SessionEvent::TurnComplete);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // Blocking mode: callback completed before control lane processed next event
+        assert_eq!(order.load(Ordering::SeqCst), 1);
+
+        drop(event_tx);
+        let _ = fast_handle.await;
+        let _ = ctrl_handle.await;
+    }
+
+    #[tokio::test]
+    async fn callback_mode_concurrent_spawns_task() {
+        let called = Arc::new(AtomicBool::new(false));
+        let called_clone = called.clone();
+
+        let mut callbacks = EventCallbacks::default();
+        callbacks.on_turn_complete = Some(Arc::new(move || {
+            let c = called_clone.clone();
+            Box::pin(async move {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                c.store(true, Ordering::SeqCst);
+            })
+        }));
+        callbacks.on_turn_complete_mode = CallbackMode::Concurrent;
+        let callbacks = Arc::new(callbacks);
+
+        let (event_tx, _) = broadcast::channel(16);
+        let event_rx = event_tx.subscribe();
+
+        let writer: Arc<dyn SessionWriter> =
+            Arc::new(crate::agent_session::NoOpSessionWriter);
+
+        let (fast_handle, ctrl_handle) = spawn_event_processor(
+            event_rx, callbacks, None, writer, vec![], State::new(),
+            None, None, None, None, None, std::collections::HashMap::new(),
+        );
+
+        let _ = event_tx.send(SessionEvent::TurnComplete);
+        // Give spawned task time to complete
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // Concurrent mode: callback was spawned and eventually completed
+        assert!(called.load(Ordering::SeqCst));
+
+        drop(event_tx);
+        let _ = fast_handle.await;
+        let _ = ctrl_handle.await;
     }
 }

@@ -24,7 +24,7 @@ pub mod watcher;
 pub use background_agent_dispatch::BackgroundAgentDispatcher;
 pub use background_tool::{BackgroundToolTracker, DefaultResultFormatter, ResultFormatter, ToolExecutionMode};
 pub use builder::LiveSessionBuilder;
-pub use callbacks::EventCallbacks;
+pub use callbacks::{CallbackMode, EventCallbacks};
 pub use computed::{ComputedRegistry, ComputedVar};
 pub use extractor::{LlmExtractor, TurnExtractor};
 pub use handle::LiveHandle;

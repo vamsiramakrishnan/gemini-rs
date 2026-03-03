@@ -75,7 +75,7 @@ pub use instruction::inject_session_state;
 pub use confirmation::ToolConfirmation;
 pub use text_runner::InMemoryRunner;
 pub use state::PrefixedState;
-pub use live::{EventCallbacks, LiveHandle, LiveSessionBuilder, LlmExtractor, ToolCallSummary, TranscriptBuffer, TranscriptTurn, TurnExtractor};
+pub use live::{CallbackMode, EventCallbacks, LiveHandle, LiveSessionBuilder, LlmExtractor, ToolCallSummary, TranscriptBuffer, TranscriptTurn, TurnExtractor};
 pub use llm::{BaseLlm, GeminiLlm, GeminiLlmParams, LlmRegistry, LlmRequest, LlmResponse};
 pub use run_config::{RunConfig, StreamingMode};
 pub use text::{
@@ -95,5 +95,4 @@ pub use code_executors::{CodeExecutor, BuiltInCodeExecutor, CodeExecutionInput, 
 pub use a2a::{A2aMessage, A2aPart, to_a2a_message, to_adk_event, to_a2a_parts, to_genai_parts};
 
 // Wire re-export
-#[allow(missing_docs)]
 pub use rs_genai;

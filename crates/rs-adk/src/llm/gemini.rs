@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use once_cell::sync::Lazy;
 use regex::Regex;
 
-use crate::llm::{BaseLlm, LlmError, LlmRequest, LlmResponse, TokenProvider, EnvTokenProvider};
+use crate::llm::{BaseLlm, GcloudTokenProvider, LlmError, LlmRequest, LlmResponse, TokenProvider, EnvTokenProvider};
 #[cfg(feature = "gemini-llm")]
 use crate::llm::TokenUsage;
 use crate::utils::variant::{get_google_llm_variant, GoogleLlmVariant};
@@ -101,13 +101,25 @@ impl GeminiLlm {
             }
         }
 
-        // Resolve token provider for VertexAI
+        // Resolve token provider for VertexAI.
+        // Default to GcloudTokenProvider (env var -> gcloud CLI fallback) for VertexAI,
+        // matching the auth resolution in build_session_config(). For GeminiApi, use
+        // EnvTokenProvider since API key auth doesn't need token refresh.
         let token_provider: Arc<dyn TokenProvider> = params
             .token_provider
             .take()
-            .unwrap_or_else(|| Arc::new(EnvTokenProvider));
+            .unwrap_or_else(|| {
+                if variant == GoogleLlmVariant::VertexAi {
+                    Arc::new(GcloudTokenProvider::new(std::time::Duration::from_secs(45 * 60)))
+                } else {
+                    Arc::new(EnvTokenProvider)
+                }
+            });
 
         // Create the rs-genai Client once, reuse across generate() calls.
+        // For VertexAI, use from_vertex_refreshable() so the token is dynamically
+        // refreshed on every REST API call (via auth_headers()), preventing 401
+        // errors from stale tokens during long-running sessions.
         #[cfg(feature = "gemini-llm")]
         let client = {
             use rs_genai::prelude::*;
@@ -118,10 +130,10 @@ impl GeminiLlm {
                         .model(GeminiModel::Custom(model.clone()))
                 }
                 GoogleLlmVariant::VertexAi => {
-                    let project = params.project.as_deref().unwrap_or("");
-                    let location = params.location.as_deref().unwrap_or("us-central1");
-                    let token = token_provider.token();
-                    Client::from_vertex(project, location, token)
+                    let project = params.project.as_deref().unwrap_or("").to_string();
+                    let location = params.location.as_deref().unwrap_or("us-central1").to_string();
+                    let tp = token_provider.clone();
+                    Client::from_vertex_refreshable(project, location, move || tp.token())
                         .model(GeminiModel::Custom(model.clone()))
                 }
             }

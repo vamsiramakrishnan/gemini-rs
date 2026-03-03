@@ -446,8 +446,8 @@ async fn handle_session(
              caller_sentiment (friendly/neutral/impatient/hostile).",
             5,
         )
-        // --- on_extracted: broadcast state to browser ---
-        .on_extracted({
+        // --- on_extracted: broadcast state to browser (concurrent — fire-and-forget) ---
+        .on_extracted_concurrent({
             let tx = tx.clone();
             move |name, value| {
                 let tx = tx.clone();
@@ -467,7 +467,7 @@ async fn handle_session(
                 }
             }
         })
-        .on_extraction_error(|name, err| async move {
+        .on_extraction_error_concurrent(|name, err| async move {
             warn!("Extraction error for {name}: {err}");
         })
         // --- Computed state ---
@@ -562,16 +562,26 @@ async fn handle_session(
         .phase_defaults(|d| {
             d.with_state(SCREEN_STATE_KEYS)
                 .when(caller_is_hostile, CAUTION_WARNING)
-                .prompt_on_enter(true)
+            // NOTE: prompt_on_enter(true) removed from defaults.
+            // It inflates turn_count (each prompt generates a TurnComplete),
+            // breaking turn-count-based transition guards. Instead, set it
+            // explicitly on phases that need it (e.g. greeting, transfer).
         })
         // --- 7 Phases ---
         // Phase 1: Greeting
         .phase("greeting")
             .instruction(GREETING_INSTRUCTION)
             .tools(vec!["check_contact_list".into()])
-            .transition("identify_caller", |_s: &State| {
-                // Transition after the initial exchange (model has greeted and caller responds)
-                true
+            .prompt_on_enter(true)
+            .transition("identify_caller", |s: &State| {
+                // Transition once the user has spoken (extractor detects input).
+                // We look for a check_contact_list tool call or any indication
+                // the model has engaged with the caller's identity.
+                // Simplest: wait for the model to have completed at least one
+                // real turn after greeting. Use turn_count >= 2 here because
+                // greeting has prompt_on_enter which consumes turn 1.
+                let tc: u32 = s.session().get("turn_count").unwrap_or(0);
+                tc >= 2
             })
             .on_enter(move |_state: State, _writer: Arc<dyn SessionWriter>| {
                 let tx = tx_enter_greeting.clone();
@@ -593,10 +603,13 @@ async fn handle_session(
                 name.is_some()
             })
             .transition("take_message", |s: &State| {
-                // If caller refuses to identify after several turns, offer to take a message
+                // Safety net only. The model will naturally keep asking for
+                // identity — trust the LLM's conversational ability. This
+                // guard exists solely for the edge case where the caller
+                // genuinely refuses to identify after an extended exchange.
                 let tc: u32 = s.session().get("turn_count").unwrap_or(0);
                 let name: Option<String> = s.get("caller_name");
-                tc >= 3 && name.is_none()
+                tc >= 12 && name.is_none()
             })
             .on_enter(move |_state: State, _writer: Arc<dyn SessionWriter>| {
                 let tx = tx_enter_identify.clone();
@@ -612,7 +625,7 @@ async fn handle_session(
                     });
                 }
             })
-            .enter_prompt("The caller has responded to the greeting. I'll now identify who they are.")
+            .enter_prompt("Ask the caller for their full name and organization.")
             .done()
         // Phase 3: Determine Purpose
         .phase("determine_purpose")
@@ -692,7 +705,7 @@ async fn handle_session(
                     });
                 }
             })
-            .enter_prompt("I'll take a message for Alex. Let me collect the details.")
+            .enter_prompt("I understand Alex is unavailable right now. Ask the caller if they would like to leave a message, and if so, collect their name, callback number, and the message.")
             .done()
         // Phase 6: Transfer
         .phase("transfer")
@@ -848,14 +861,14 @@ async fn handle_session(
                 }
             },
         )
-        // Turns: screening stalled for 4 turns
+        // Turns: screening stalled for 8 turns
         .when_turns(
             "screening_stalled",
             |s: &State| {
                 let phase: String = s.get("session:phase").unwrap_or_default();
                 phase == "identify_caller" || phase == "determine_purpose"
             },
-            4,
+            8,
             {
                 let tx = tx_turns_stalled.clone();
                 move |_state: State, writer: Arc<dyn SessionWriter>| {
@@ -932,13 +945,13 @@ async fn handle_session(
         .on_vad_end(move || {
             let _ = tx_vad_end.send(ServerMessage::VoiceActivityEnd);
         })
-        .on_error(move |msg: String| {
+        .on_error_concurrent(move |msg: String| {
             let tx = tx_error.clone();
             async move {
                 let _ = tx.send(ServerMessage::Error { message: msg });
             }
         })
-        .on_go_away(move |duration: Duration| {
+        .on_go_away_concurrent(move |duration: Duration| {
             let tx = tx_go_away.clone();
             async move {
                 let _ = tx.send(ServerMessage::StateUpdate {
@@ -949,7 +962,7 @@ async fn handle_session(
                 });
             }
         })
-        .on_disconnected(move |reason: Option<String>| {
+        .on_disconnected_concurrent(move |reason: Option<String>| {
             let _tx = tx_disconnected.clone();
             async move {
                 info!("CallScreening session disconnected: {reason:?}");

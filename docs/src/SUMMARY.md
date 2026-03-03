@@ -12,6 +12,7 @@
 
 - [Voice & Live Sessions](./user-guide/live-sessions.md)
 - [Phase System](./user-guide/phases.md)
+- [Phase Transitions Deep Dive](./user-guide/phase-transitions-deep-dive.md)
 - [State Management](./user-guide/state.md)
 - [State Watchers & Temporal Patterns](./user-guide/watchers.md)
 

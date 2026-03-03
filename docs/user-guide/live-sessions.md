@@ -178,6 +178,46 @@ queue behind them).
 })
 ```
 
+### Callback Execution Modes
+
+Control-lane callbacks support two execution modes via `CallbackMode`:
+
+**Blocking (default)** — the event loop waits for the callback to complete.
+Use when subsequent events depend on the callback's side effects, or when
+ordering guarantees are required.
+
+**Concurrent** — the callback is spawned as a detached tokio task. The event
+loop continues immediately. Use for fire-and-forget work: logging, analytics,
+webhook dispatch, or background agent triggering.
+
+Use `_concurrent` suffixed methods to opt in:
+
+```rust,ignore
+Live::builder()
+    // Blocking (default) — client depends on TurnComplete ordering
+    .on_turn_complete(|| async { tx.send(TurnComplete).ok(); })
+
+    // Concurrent — fire-and-forget broadcast, doesn't block the pipeline
+    .on_extracted_concurrent(|name, val| async move {
+        tx.send(StateUpdate { key: name, value: val }).ok();
+    })
+    .on_error_concurrent(|e| async move {
+        webhook::send_alert(&e).await;
+    })
+    .on_disconnected_concurrent(|reason| async move {
+        info!("Disconnected: {reason:?}");
+    })
+```
+
+**Forced-blocking callbacks** (no concurrent variant):
+
+| Callback | Reason |
+|----------|--------|
+| `on_interrupted` | Must clear interrupted flag before audio resumes |
+| `on_tool_call` | Return value is the tool response |
+| `before_tool_response` | Transforms data in the pipeline |
+| `on_turn_boundary` | Content injection must complete before turn_complete |
+
 ### Tool Dispatch
 
 When the model calls a tool, the dispatch logic follows this priority:

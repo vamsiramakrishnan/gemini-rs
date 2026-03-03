@@ -1,5 +1,6 @@
 //! LiveSessionBuilder — combines SessionConfig + callbacks + tools into one setup.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
@@ -11,7 +12,7 @@ use crate::error::AgentError;
 use crate::state::State;
 use crate::tool::ToolDispatcher;
 
-use super::background_tool::BackgroundToolTracker;
+use super::background_tool::{BackgroundToolTracker, ToolExecutionMode};
 use super::callbacks::EventCallbacks;
 use super::computed::ComputedRegistry;
 use super::extractor::TurnExtractor;
@@ -24,6 +25,14 @@ use super::temporal::TemporalRegistry;
 use super::watcher::WatcherRegistry;
 
 /// Builder for a callback-driven Live session.
+///
+/// Combines [`SessionConfig`], [`EventCallbacks`], tool dispatching, extractors,
+/// computed state, phase machines, watchers, and temporal patterns into a
+/// single connection setup. Call [`connect()`](Self::connect) to establish
+/// the WebSocket connection and start the three-lane event processor.
+///
+/// For ergonomic usage, prefer the L2 `Live` builder from `adk-rs-fluent`
+/// which wraps this with a fluent API.
 pub struct LiveSessionBuilder {
     config: SessionConfig,
     callbacks: EventCallbacks,
@@ -35,6 +44,7 @@ pub struct LiveSessionBuilder {
     temporal: Option<TemporalRegistry>,
     greeting: Option<String>,
     state: Option<State>,
+    execution_modes: HashMap<String, ToolExecutionMode>,
 }
 
 impl LiveSessionBuilder {
@@ -51,6 +61,7 @@ impl LiveSessionBuilder {
             temporal: None,
             greeting: None,
             state: None,
+            execution_modes: HashMap::new(),
         }
     }
 
@@ -116,6 +127,19 @@ impl LiveSessionBuilder {
         self
     }
 
+    /// Set the execution mode for a named tool.
+    ///
+    /// Tools default to [`ToolExecutionMode::Standard`]. Set to
+    /// [`ToolExecutionMode::Background`] for zero-dead-air execution.
+    pub fn tool_execution_mode(
+        mut self,
+        tool_name: impl Into<String>,
+        mode: ToolExecutionMode,
+    ) -> Self {
+        self.execution_modes.insert(tool_name.into(), mode);
+        self
+    }
+
     /// Connect to Gemini and start the three-lane event processor.
     pub async fn connect(self) -> Result<LiveHandle, AgentError> {
         // Build-time validations
@@ -174,6 +198,7 @@ impl LiveSessionBuilder {
             self.watchers,
             temporal_arc,
             Some(background_tracker),
+            self.execution_modes,
         );
 
         // Send greeting prompt to trigger model-initiated conversation
