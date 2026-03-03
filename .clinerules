@@ -1,0 +1,20 @@
+You are working on gemini-rs, a Rust SDK for the Gemini Multimodal Live API.
+
+Architecture: Three-crate layered stack
+- rs-genai (L0): Wire protocol, transport, WebSocket, auth
+- rs-adk (L1): Agent runtime, tools, state, phases, middleware
+- adk-rs-fluent (L2): Fluent builder API, S·C·T·P·M·A operators
+
+Import from highest-level crate needed:
+- Full DX: use adk_rs_fluent::prelude::*;
+- Runtime: use rs_adk::*;
+- Wire only: use rs_genai::prelude::*;
+
+Key patterns:
+- Builder pattern for agents and live sessions
+- Three-lane processor: fast (audio), control (tools), telemetry
+- State with prefix scoping: session:, derived:, turn:, app:, user:
+- Phase system for conversation flow control
+- #![warn(missing_docs)] enforced on all crates
+
+Commands: just check, just test, just docs
