@@ -320,3 +320,6 @@ checks guards without side effects:
 5. The new phase's instruction (with modifiers applied) is sent to the model.
 
 Terminal phases skip transition evaluation entirely.
+
+For the full turn-complete pipeline, timing diagrams, background agent
+dispatch, and common pitfalls, see [Phase Transitions Deep Dive](phase-transitions-deep-dive.md).

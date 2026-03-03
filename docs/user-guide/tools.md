@@ -280,6 +280,77 @@ dispatcher.call_function_with_cancel("slow_tool", args, cancel_token).await?;
 let dispatcher = ToolDispatcher::new().with_timeout(Duration::from_secs(10));
 ```
 
+## Background Tool Execution
+
+For tools that take significant time (database queries, API calls, LLM pipelines),
+background execution eliminates dead air in voice sessions.
+
+### How It Works
+
+1. Model calls a background tool
+2. An immediate "running" acknowledgment is sent back
+3. The model continues speaking (e.g., "Let me look that up for you...")
+4. When the tool completes, the result is injected into the conversation
+5. The model incorporates the result naturally
+
+### L2 API
+
+```rust,ignore
+Live::builder()
+    .tools(dispatcher)
+    .tool_background("search_knowledge_base")
+    .tool_background_with_formatter("analyze_doc", Arc::new(MyFormatter))
+    .connect_vertex(project, location, token)
+    .await?;
+```
+
+### L1 API
+
+```rust,ignore
+LiveSessionBuilder::new(config)
+    .dispatcher(dispatcher)
+    .tool_execution_mode("search_knowledge_base", ToolExecutionMode::Background {
+        formatter: None,
+    })
+    .connect()
+    .await?;
+```
+
+### Custom Result Formatting
+
+Implement `ResultFormatter` to control acknowledgment and result shapes:
+
+```rust,ignore
+struct VerboseFormatter;
+
+impl ResultFormatter for VerboseFormatter {
+    fn format_running(&self, call: &FunctionCall) -> Value {
+        json!({ "status": "searching", "query": call.args["query"] })
+    }
+
+    fn format_result(&self, call: &FunctionCall, result: Result<Value, ToolError>) -> Value {
+        match result {
+            Ok(val) => json!({ "status": "done", "tool": call.name, "result": val }),
+            Err(e) => json!({ "status": "error", "tool": call.name, "error": e.to_string() }),
+        }
+    }
+
+    fn format_cancelled(&self, call_id: &str) -> Value {
+        json!({ "status": "cancelled", "call_id": call_id })
+    }
+}
+```
+
+### Cancellation
+
+Background tools are automatically cancelled when:
+- The server sends `ToolCallCancellation`
+- The session disconnects
+- `LiveHandle` is dropped
+
+The `BackgroundToolTracker` provides belt-and-suspenders cleanup: both
+the `CancellationToken` is triggered and the `JoinHandle` is aborted.
+
 ## Intercepting Tool Responses
 
 Transform tool results before they reach Gemini. Use for PII redaction,

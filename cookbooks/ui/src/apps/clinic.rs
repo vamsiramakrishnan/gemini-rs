@@ -619,8 +619,8 @@ async fn handle_session(
              insurance_mentioned (bool).",
             5,
         )
-        // --- on_extracted: broadcast state to browser ---
-        .on_extracted({
+        // --- on_extracted: broadcast state to browser (concurrent — fire-and-forget) ---
+        .on_extracted_concurrent({
             let tx = tx.clone();
             move |name, value| {
                 let tx = tx.clone();
@@ -640,8 +640,8 @@ async fn handle_session(
                 }
             }
         })
-        // --- on_extraction_error ---
-        .on_extraction_error({
+        // --- on_extraction_error (concurrent — fire-and-forget) ---
+        .on_extraction_error_concurrent({
             let tx = tx.clone();
             move |name, error| {
                 let tx = tx.clone();
@@ -1145,13 +1145,13 @@ async fn handle_session(
         .on_vad_end(move || {
             let _ = tx_vad_end.send(ServerMessage::VoiceActivityEnd);
         })
-        .on_error(move |msg| {
+        .on_error_concurrent(move |msg| {
             let tx = tx_error.clone();
             async move {
                 let _ = tx.send(ServerMessage::Error { message: msg });
             }
         })
-        .on_go_away(move |duration| {
+        .on_go_away_concurrent(move |duration| {
             let tx = tx_go_away.clone();
             async move {
                 let _ = tx.send(ServerMessage::StateUpdate {
@@ -1162,7 +1162,7 @@ async fn handle_session(
                 });
             }
         })
-        .on_disconnected(move |reason| {
+        .on_disconnected_concurrent(move |reason| {
             let _tx = tx_disconnected.clone();
             async move {
                 info!("Clinic session disconnected: {reason:?}");

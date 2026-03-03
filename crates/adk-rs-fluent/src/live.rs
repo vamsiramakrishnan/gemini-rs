@@ -2,7 +2,29 @@
 //!
 //! Wraps L1's `LiveSessionBuilder` with ergonomic callback registration
 //! and integration with composition modules (M, T, P).
+//!
+//! # Callback Modes
+//!
+//! Control-lane callbacks support two execution modes via [`CallbackMode`]:
+//!
+//! - **Default methods** (e.g., `.on_turn_complete()`) → [`CallbackMode::Blocking`]
+//! - **`_concurrent` methods** (e.g., `.on_turn_complete_concurrent()`) → [`CallbackMode::Concurrent`]
+//!
+//! Use concurrent mode for fire-and-forget work (logging, analytics, webhook dispatch).
+//!
+//! # Background Tool Execution
+//!
+//! Mark tools for background execution to eliminate dead air in voice sessions:
+//!
+//! ```rust,ignore
+//! Live::builder()
+//!     .tools(dispatcher)
+//!     .tool_background("search_kb")
+//!     .connect_vertex(project, location, token)
+//!     .await?;
+//! ```
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
@@ -14,9 +36,10 @@ use serde_json::Value;
 
 use rs_adk::live::extractor::{LlmExtractor, TurnExtractor};
 use rs_adk::live::{
-    ComputedRegistry, ComputedVar, EventCallbacks, InstructionModifier, LiveHandle,
-    LiveSessionBuilder, Phase, PhaseMachine, RateDetector, SustainedDetector, TemporalPattern,
-    TemporalRegistry, TurnCountDetector, Watcher, WatcherRegistry,
+    CallbackMode, ComputedRegistry, ComputedVar, EventCallbacks, InstructionModifier, LiveHandle,
+    LiveSessionBuilder, Phase, PhaseMachine, RateDetector, ResultFormatter, SustainedDetector,
+    TemporalPattern, TemporalRegistry, ToolExecutionMode, TurnCountDetector, Watcher,
+    WatcherRegistry,
 };
 use rs_adk::llm::BaseLlm;
 use rs_adk::tool::ToolDispatcher;
@@ -70,7 +93,12 @@ struct DeferredAgentTool {
 /// Fluent builder for constructing and connecting Gemini Live sessions.
 ///
 /// Accumulates model configuration, callbacks, extractors, phases, watchers,
-/// and temporal patterns, then connects via one of the `connect_*` methods.
+/// temporal patterns, and tool execution modes, then connects via one of
+/// the `connect_*` methods.
+///
+/// Control-lane callbacks can be registered with `_concurrent` suffixed
+/// methods for fire-and-forget execution. Tools can be marked for background
+/// execution via [`tool_background()`](Self::tool_background).
 pub struct Live {
     config: SessionConfig,
     callbacks: EventCallbacks,
@@ -86,6 +114,8 @@ pub struct Live {
     // Phase defaults: modifiers + prompt_on_enter inherited by all phases.
     pub(crate) phase_default_modifiers: Vec<InstructionModifier>,
     pub(crate) phase_default_prompt_on_enter: bool,
+    // Per-tool execution modes (standard vs background).
+    tool_execution_modes: HashMap<String, ToolExecutionMode>,
     // Deferred agent tools (resolved at connect time).
     deferred_agent_tools: Vec<DeferredAgentTool>,
     // LLMs to warm up at connect time.
@@ -108,6 +138,7 @@ impl Live {
             greeting: None,
             phase_default_modifiers: Vec::new(),
             phase_default_prompt_on_enter: false,
+            tool_execution_modes: HashMap::new(),
             deferred_agent_tools: Vec::new(),
             warm_up_llms: Vec::new(),
         }
@@ -249,6 +280,37 @@ impl Live {
     /// Enable URL context built-in tool.
     pub fn url_context(mut self) -> Self {
         self.config = self.config.with_url_context();
+        self
+    }
+
+    /// Mark a tool for background execution (zero dead-air).
+    ///
+    /// When the model calls this tool, an immediate "running" acknowledgment
+    /// is sent back while the tool executes in a background task. The final
+    /// result is delivered asynchronously when complete.
+    pub fn tool_background(mut self, tool_name: impl Into<String>) -> Self {
+        self.tool_execution_modes.insert(
+            tool_name.into(),
+            ToolExecutionMode::Background { formatter: None },
+        );
+        self
+    }
+
+    /// Mark a tool for background execution with a custom result formatter.
+    ///
+    /// The formatter controls the shape of the acknowledgment ("running"),
+    /// completion, and cancellation messages sent to the model.
+    pub fn tool_background_with_formatter(
+        mut self,
+        tool_name: impl Into<String>,
+        formatter: Arc<dyn ResultFormatter>,
+    ) -> Self {
+        self.tool_execution_modes.insert(
+            tool_name.into(),
+            ToolExecutionMode::Background {
+                formatter: Some(formatter),
+            },
+        );
         self
     }
 
@@ -791,6 +853,88 @@ impl Live {
         self
     }
 
+    // -- Concurrent callback variants --
+    // These set CallbackMode::Concurrent so the callback is spawned as a
+    // detached tokio task instead of being awaited inline.
+
+    /// Called when model turn completes (spawned concurrently).
+    pub fn on_turn_complete_concurrent<F, Fut>(mut self, f: F) -> Self
+    where
+        F: Fn() -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        self.callbacks.on_turn_complete = Some(Arc::new(move || Box::pin(f())));
+        self.callbacks.on_turn_complete_mode = CallbackMode::Concurrent;
+        self
+    }
+
+    /// Called when session connects (spawned concurrently).
+    pub fn on_connected_concurrent<F, Fut>(mut self, f: F) -> Self
+    where
+        F: Fn(Arc<dyn rs_genai::session::SessionWriter>) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        self.callbacks.on_connected = Some(Arc::new(move |w| Box::pin(f(w))));
+        self.callbacks.on_connected_mode = CallbackMode::Concurrent;
+        self
+    }
+
+    /// Called when session disconnects (spawned concurrently).
+    pub fn on_disconnected_concurrent<F, Fut>(mut self, f: F) -> Self
+    where
+        F: Fn(Option<String>) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        self.callbacks.on_disconnected = Some(Arc::new(move |r| Box::pin(f(r))));
+        self.callbacks.on_disconnected_mode = CallbackMode::Concurrent;
+        self
+    }
+
+    /// Called on non-fatal errors (spawned concurrently).
+    pub fn on_error_concurrent<F, Fut>(mut self, f: F) -> Self
+    where
+        F: Fn(String) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        self.callbacks.on_error = Some(Arc::new(move |e| Box::pin(f(e))));
+        self.callbacks.on_error_mode = CallbackMode::Concurrent;
+        self
+    }
+
+    /// Called when server sends GoAway (spawned concurrently).
+    pub fn on_go_away_concurrent<F, Fut>(mut self, f: F) -> Self
+    where
+        F: Fn(Duration) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        self.callbacks.on_go_away = Some(Arc::new(move |d| Box::pin(f(d))));
+        self.callbacks.on_go_away_mode = CallbackMode::Concurrent;
+        self
+    }
+
+    /// Called when a TurnExtractor produces a result (spawned concurrently).
+    pub fn on_extracted_concurrent<F, Fut>(mut self, f: F) -> Self
+    where
+        F: Fn(String, serde_json::Value) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        self.callbacks.on_extracted = Some(Arc::new(move |name, value| Box::pin(f(name, value))));
+        self.callbacks.on_extracted_mode = CallbackMode::Concurrent;
+        self
+    }
+
+    /// Called when a TurnExtractor fails (spawned concurrently).
+    pub fn on_extraction_error_concurrent<F, Fut>(mut self, f: F) -> Self
+    where
+        F: Fn(String, String) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        self.callbacks.on_extraction_error =
+            Some(Arc::new(move |name, error| Box::pin(f(name, error))));
+        self.callbacks.on_extraction_error_mode = CallbackMode::Concurrent;
+        self
+    }
+
     // -- Connect --
 
     /// Connect using a Google AI API key.
@@ -867,6 +1011,11 @@ impl Live {
             builder = builder.watchers(self.watchers);
         }
         builder = builder.temporal(self.temporal);
+
+        // Pass tool execution modes
+        for (name, mode) in self.tool_execution_modes {
+            builder = builder.tool_execution_mode(name, mode);
+        }
 
         // Spawn fire-and-forget warm-up tasks for OOB LLMs
         // (pre-establishes TCP+TLS so first extract call is fast)
@@ -1120,5 +1269,48 @@ mod tests {
             .on_audio(|_data| {})
             .on_text(|_t| {})
             .on_turn_complete(|| async {});
+    }
+
+    #[test]
+    fn builder_with_callback_modes_compiles() {
+        let _live = Live::builder()
+            .model(GeminiModel::Gemini2_0FlashLive)
+            .on_turn_complete_concurrent(|| async {})
+            .on_error_concurrent(|_e| async {})
+            .on_extracted_concurrent(|_name, _val| async {})
+            .on_extraction_error_concurrent(|_name, _err| async {})
+            .on_connected_concurrent(|_w| async {})
+            .on_disconnected_concurrent(|_r| async {})
+            .on_go_away_concurrent(|_d| async {});
+    }
+
+    #[test]
+    fn builder_with_background_tools_compiles() {
+        use rs_adk::live::DefaultResultFormatter;
+
+        let _live = Live::builder()
+            .model(GeminiModel::Gemini2_0FlashLive)
+            .tool_background("search_kb")
+            .tool_background_with_formatter(
+                "analyze_document",
+                Arc::new(DefaultResultFormatter),
+            );
+    }
+
+    #[test]
+    fn builder_mixed_callback_modes_and_bg_tools() {
+        use rs_adk::live::DefaultResultFormatter;
+
+        let _live = Live::builder()
+            .model(GeminiModel::Gemini2_0FlashLive)
+            .voice(Voice::Kore)
+            .instruction("Full featured agent")
+            .tool_background("slow_tool")
+            .tool_background_with_formatter("kb_search", Arc::new(DefaultResultFormatter))
+            .on_turn_complete_concurrent(|| async {})
+            .on_extracted_concurrent(|_name, _val| async {})
+            .on_audio(|_data| {})
+            .on_text(|_t| {})
+            .on_interrupted(|| async {});
     }
 }
