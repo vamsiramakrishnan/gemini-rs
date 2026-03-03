@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::LazyLock;
 
 use async_trait::async_trait;
@@ -7,11 +9,12 @@ use serde_json::json;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
-use rs_genai::prelude::*;
+use adk_rs_fluent::prelude::*;
 
 use crate::app::{AppCategory, AppError, ClientMessage, CookbookApp, ServerMessage, WsSender};
 
-use super::{build_session_config, send_app_meta, wait_for_start, ConversationBuffer};
+use super::extractors::RegexExtractor;
+use super::{build_session_config, resolve_voice, send_app_meta, wait_for_start};
 
 // ---------------------------------------------------------------------------
 // Policy rules
@@ -60,6 +63,7 @@ const POLICIES: &[PolicyRule] = &[
 // ---------------------------------------------------------------------------
 
 /// Detected violation with matched detail.
+#[allow(dead_code)]
 struct DetectedViolation {
     rule_name: &'static str,
     severity: &'static str,
@@ -148,6 +152,7 @@ fn check_violations(text: &str) -> Vec<DetectedViolation> {
 // ---------------------------------------------------------------------------
 
 /// Tracks violation counts and types across the session.
+#[allow(dead_code)]
 struct ViolationTracker {
     total_count: usize,
     by_rule: std::collections::HashMap<String, usize>,
@@ -156,6 +161,7 @@ struct ViolationTracker {
     cooldown_turns: usize,
 }
 
+#[allow(dead_code)]
 impl ViolationTracker {
     fn new(cooldown_turns: usize) -> Self {
         Self {
@@ -255,14 +261,7 @@ impl CookbookApp for Guardrails {
         let start = wait_for_start(&mut rx).await?;
 
         // Resolve voice selection (default to Puck).
-        let selected_voice = match start.voice.as_deref() {
-            Some("Aoede") => Voice::Aoede,
-            Some("Charon") => Voice::Charon,
-            Some("Fenrir") => Voice::Fenrir,
-            Some("Kore") => Voice::Kore,
-            Some("Puck") | None => Voice::Puck,
-            Some(other) => Voice::Custom(other.to_string()),
-        };
+        let selected_voice = resolve_voice(start.voice.as_deref());
 
         // Build session config for voice mode with base instruction.
         let config = build_session_config(start.model.as_deref())
@@ -273,13 +272,166 @@ impl CookbookApp for Guardrails {
             .enable_output_transcription()
             .system_instruction(BASE_INSTRUCTION);
 
-        // Connect to Gemini Live.
-        let handle = ConnectBuilder::new(config)
-            .build()
+        // Create a ViolationExtractor wrapping check_violations.
+        // Guardrails violations are stateless — re-detect each turn, don't accumulate.
+        let extractor = Arc::new(RegexExtractor::new("guardrails_state", 10, |text, _existing| {
+            let violations = check_violations(text);
+            let mut result = HashMap::new();
+            for v in &violations {
+                result.insert(
+                    format!("violation:{}", v.rule_name),
+                    json!({"severity": v.severity, "detail": v.detail}),
+                );
+            }
+            // Track active violation count
+            result.insert("violation_count".into(), json!(violations.len()));
+            result
+        }));
+
+        // Build Live session with callbacks, extraction, watchers, and instruction template.
+        let b64 = base64::engine::general_purpose::STANDARD;
+
+        let tx_audio = tx.clone();
+        let tx_input = tx.clone();
+        let tx_output = tx.clone();
+        let tx_text = tx.clone();
+        let tx_text_complete = tx.clone();
+        let tx_turn = tx.clone();
+        let tx_interrupted = tx.clone();
+        let tx_vad_start = tx.clone();
+        let tx_vad_end = tx.clone();
+        let tx_error = tx.clone();
+        let tx_disconnected = tx.clone();
+
+        let handle = Live::builder()
+            .extractor(extractor)
+            .on_extracted({
+                let tx = tx.clone();
+                move |_name, value| {
+                    let tx = tx.clone();
+                    async move {
+                        if let Some(obj) = value.as_object() {
+                            for (key, val) in obj {
+                                let _ = tx.send(ServerMessage::StateUpdate {
+                                    key: key.clone(),
+                                    value: val.clone(),
+                                });
+                            }
+                        }
+                    }
+                }
+            })
+            // Watcher: detect violations and send to browser.
+            .watch("guardrails_state")
+                .changed()
+                .blocking()
+                .then({
+                    let tx = tx.clone();
+                    move |_old, new, _state| {
+                        let tx = tx.clone();
+                        async move {
+                            if let Some(obj) = new.as_object() {
+                                for (key, val) in obj {
+                                    if key.starts_with("violation:") && key != "violation_count" {
+                                        let rule = key.strip_prefix("violation:").unwrap_or(key);
+                                        let severity = val.get("severity").and_then(|v| v.as_str()).unwrap_or("medium");
+                                        let detail = val.get("detail").and_then(|v| v.as_str()).unwrap_or("");
+                                        let _ = tx.send(ServerMessage::Violation {
+                                            rule: rule.to_string(),
+                                            severity: severity.to_string(),
+                                            detail: detail.to_string(),
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                })
+            // State-reactive instruction template for corrective instruction injection.
+            .instruction_template(|state| {
+                let extracted: serde_json::Value = state.get("guardrails_state").unwrap_or(json!({}));
+                let has_violations = extracted.as_object()
+                    .map(|obj| obj.keys().any(|k| k.starts_with("violation:")))
+                    .unwrap_or(false);
+
+                if !has_violations {
+                    return Some(BASE_INSTRUCTION.to_string());
+                }
+
+                let mut instruction = BASE_INSTRUCTION.to_string();
+                let obj = extracted.as_object().unwrap();
+
+                if obj.contains_key("violation:pii_ssn") || obj.contains_key("violation:pii_credit_card") {
+                    instruction.push_str("\n\nCRITICAL: The user just shared sensitive PII. Do NOT repeat, acknowledge, or reference any SSNs, credit card numbers, or other sensitive data. Respond helpfully without echoing the sensitive information.");
+                }
+                if obj.contains_key("violation:off_topic") {
+                    instruction.push_str("\n\nNOTE: The conversation has gone off-topic. Gently redirect back to the main topic. Stay focused and professional.");
+                }
+                if obj.contains_key("violation:negative_sentiment") {
+                    instruction.push_str("\n\nNOTE: The user is expressing frustration. Show extra empathy and understanding. Acknowledge their feelings before addressing their concern.");
+                }
+
+                Some(instruction)
+            })
+            // Standard voice callbacks.
+            .on_audio(move |data| {
+                let encoded = b64.encode(data);
+                let _ = tx_audio.send(ServerMessage::Audio { data: encoded });
+            })
+            .on_input_transcript(move |text, _is_final| {
+                let _ = tx_input.send(ServerMessage::InputTranscription {
+                    text: text.to_string(),
+                });
+            })
+            .on_output_transcript(move |text, _is_final| {
+                let _ = tx_output.send(ServerMessage::OutputTranscription {
+                    text: text.to_string(),
+                });
+            })
+            .on_text(move |t| {
+                let _ = tx_text.send(ServerMessage::TextDelta {
+                    text: t.to_string(),
+                });
+            })
+            .on_text_complete(move |t| {
+                let _ = tx_text_complete.send(ServerMessage::TextComplete {
+                    text: t.to_string(),
+                });
+            })
+            .on_turn_complete(move || {
+                let tx = tx_turn.clone();
+                async move {
+                    let _ = tx.send(ServerMessage::TurnComplete);
+                }
+            })
+            .on_interrupted(move || {
+                let tx = tx_interrupted.clone();
+                async move {
+                    let _ = tx.send(ServerMessage::Interrupted);
+                }
+            })
+            .on_vad_start(move || {
+                let _ = tx_vad_start.send(ServerMessage::VoiceActivityStart);
+            })
+            .on_vad_end(move || {
+                let _ = tx_vad_end.send(ServerMessage::VoiceActivityEnd);
+            })
+            .on_error(move |msg| {
+                let tx = tx_error.clone();
+                async move {
+                    let _ = tx.send(ServerMessage::Error { message: msg });
+                }
+            })
+            .on_disconnected(move |_reason| {
+                let _tx = tx_disconnected.clone();
+                async move {
+                    info!("Guardrails session disconnected by server");
+                }
+            })
+            .connect(config)
             .await
             .map_err(|e| AppError::Connection(e.to_string()))?;
 
-        handle.wait_for_phase(SessionPhase::Active).await;
         let _ = tx.send(ServerMessage::Connected);
         send_app_meta(&tx, self);
         info!("Guardrails session connected");
@@ -294,152 +446,39 @@ impl CookbookApp for Guardrails {
             value: json!({"total_violations": 0, "by_rule": {}}),
         });
 
-        // Subscribe to server events.
-        let mut events = handle.subscribe();
+        // Browser -> Gemini loop.
         let b64 = base64::engine::general_purpose::STANDARD;
-
-        // Tracking state.
-        let mut tracker = ViolationTracker::new(3); // 3-turn cooldown per rule
-        let mut conversation = ConversationBuffer::new(20);
-        let mut turn_count: usize = 0;
-        let mut active_corrections: Vec<String> = Vec::new();
-
-        loop {
-            tokio::select! {
-                // Client -> Gemini
-                client_msg = rx.recv() => {
-                    match client_msg {
-                        Some(ClientMessage::Audio { data }) => {
-                            match b64.decode(&data) {
-                                Ok(pcm_bytes) => {
-                                    if let Err(e) = handle.send_audio(pcm_bytes).await {
-                                        warn!("Failed to send audio: {e}");
-                                        let _ = tx.send(ServerMessage::Error { message: e.to_string() });
-                                    }
-                                }
-                                Err(e) => {
-                                    warn!("Failed to decode base64 audio: {e}");
-                                }
+        while let Some(msg) = rx.recv().await {
+            match msg {
+                ClientMessage::Audio { data } => {
+                    match b64.decode(&data) {
+                        Ok(pcm_bytes) => {
+                            if let Err(e) = handle.send_audio(pcm_bytes).await {
+                                warn!("Failed to send audio: {e}");
+                                let _ = tx.send(ServerMessage::Error {
+                                    message: e.to_string(),
+                                });
                             }
                         }
-                        Some(ClientMessage::Text { text }) => {
-                            if let Err(e) = handle.send_text(&text).await {
-                                warn!("Failed to send text: {e}");
-                                let _ = tx.send(ServerMessage::Error { message: e.to_string() });
-                            }
+                        Err(e) => {
+                            warn!("Failed to decode base64 audio: {e}");
                         }
-                        Some(ClientMessage::Stop) | None => {
-                            info!("Guardrails session stopping");
-                            let _ = handle.disconnect().await;
-                            break;
-                        }
-                        _ => {}
                     }
                 }
-
-                // Gemini -> Client
-                event = recv_event(&mut events) => {
-                    match event {
-                        Some(SessionEvent::AudioData(bytes)) => {
-                            let encoded = b64.encode(&bytes);
-                            let _ = tx.send(ServerMessage::Audio { data: encoded });
-                        }
-                        Some(SessionEvent::InputTranscription(text)) => {
-                            conversation.push(format!("[User] {text}"));
-                            let _ = tx.send(ServerMessage::InputTranscription { text });
-                        }
-                        Some(SessionEvent::OutputTranscription(text)) => {
-                            conversation.push(format!("[Agent] {text}"));
-                            let _ = tx.send(ServerMessage::OutputTranscription { text });
-                        }
-                        Some(SessionEvent::TextDelta(text)) => {
-                            let _ = tx.send(ServerMessage::TextDelta { text });
-                        }
-                        Some(SessionEvent::TextComplete(text)) => {
-                            conversation.push(format!("[Agent] {text}"));
-                            let _ = tx.send(ServerMessage::TextComplete { text });
-                        }
-                        Some(SessionEvent::TurnComplete) => {
-                            turn_count += 1;
-                            let _ = tx.send(ServerMessage::TurnComplete);
-
-                            // --- Check for policy violations ---
-                            let recent = conversation.recent_text();
-                            let violations = check_violations(&recent);
-
-                            let mut instruction_updated = false;
-                            let mut new_corrections: Vec<String> = Vec::new();
-
-                            for v in &violations {
-                                if tracker.should_fire(v.rule_name, turn_count) {
-                                    tracker.record(v.rule_name, turn_count);
-
-                                    // Send violation to browser.
-                                    let _ = tx.send(ServerMessage::Violation {
-                                        rule: v.rule_name.to_string(),
-                                        severity: v.severity.to_string(),
-                                        detail: v.detail.clone(),
-                                    });
-
-                                    info!(
-                                        "Policy violation: {} ({}): {}",
-                                        v.rule_name, v.severity, v.detail
-                                    );
-
-                                    // Collect corrective instruction if not already active.
-                                    let correction = v.corrective_instruction.to_string();
-                                    if !active_corrections.contains(&correction) {
-                                        new_corrections.push(correction);
-                                        instruction_updated = true;
-                                    }
-                                }
-                            }
-
-                            // Update instruction if new corrections were added.
-                            if instruction_updated {
-                                active_corrections.extend(new_corrections);
-
-                                let full_instruction = format!(
-                                    "{}\n\n--- Active Policy Corrections ---\n{}",
-                                    BASE_INSTRUCTION,
-                                    active_corrections.join("\n\n")
-                                );
-
-                                if let Err(e) = handle.update_instruction(full_instruction).await {
-                                    warn!("Failed to update instruction: {e}");
-                                }
-                            }
-
-                            // Send updated violation stats.
-                            let _ = tx.send(ServerMessage::StateUpdate {
-                                key: "violations".into(),
-                                value: tracker.summary(),
-                            });
-                            let _ = tx.send(ServerMessage::StateUpdate {
-                                key: "turn_count".into(),
-                                value: json!(turn_count),
-                            });
-                        }
-                        Some(SessionEvent::Interrupted) => {
-                            let _ = tx.send(ServerMessage::Interrupted);
-                        }
-                        Some(SessionEvent::VoiceActivityStart) => {
-                            let _ = tx.send(ServerMessage::VoiceActivityStart);
-                        }
-                        Some(SessionEvent::VoiceActivityEnd) => {
-                            let _ = tx.send(ServerMessage::VoiceActivityEnd);
-                        }
-                        Some(SessionEvent::Error(msg)) => {
-                            let _ = tx.send(ServerMessage::Error { message: msg });
-                        }
-                        Some(SessionEvent::Disconnected(_)) => {
-                            info!("Guardrails session disconnected by server");
-                            break;
-                        }
-                        None => break,
-                        _ => {}
+                ClientMessage::Text { text } => {
+                    if let Err(e) = handle.send_text(&text).await {
+                        warn!("Failed to send text: {e}");
+                        let _ = tx.send(ServerMessage::Error {
+                            message: e.to_string(),
+                        });
                     }
                 }
+                ClientMessage::Stop => {
+                    info!("Guardrails session stopping");
+                    let _ = handle.disconnect().await;
+                    break;
+                }
+                _ => {}
             }
         }
 
@@ -450,6 +489,7 @@ impl CookbookApp for Guardrails {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::apps::ConversationBuffer;
 
     #[test]
     fn detect_ssn() {

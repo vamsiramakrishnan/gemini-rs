@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::LazyLock;
 
 use async_trait::async_trait;
@@ -8,11 +9,12 @@ use serde_json::json;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
-use rs_genai::prelude::*;
+use adk_rs_fluent::prelude::*;
 
 use crate::app::{AppCategory, AppError, ClientMessage, CookbookApp, ServerMessage, WsSender};
 
-use super::{build_session_config, send_app_meta, wait_for_start, ConversationBuffer};
+use super::extractors::RegexExtractor;
+use super::{build_session_config, resolve_voice, send_app_meta, wait_for_start};
 
 // ---------------------------------------------------------------------------
 // Agent definitions
@@ -382,19 +384,7 @@ impl CookbookApp for SupportAssistant {
         let start = wait_for_start(&mut rx).await?;
 
         // Resolve voice selection (default to Puck).
-        let selected_voice = match start.voice.as_deref() {
-            Some("Aoede") => Voice::Aoede,
-            Some("Charon") => Voice::Charon,
-            Some("Fenrir") => Voice::Fenrir,
-            Some("Kore") => Voice::Kore,
-            Some("Puck") | None => Voice::Puck,
-            Some(other) => Voice::Custom(other.to_string()),
-        };
-
-        // Start in the billing agent's "greet" phase.
-        let mut active_agent = AgentKind::Billing;
-        let mut current_phase_idx: usize = 0;
-        let initial_phase = &BILLING_PHASES[0];
+        let selected_voice = resolve_voice(start.voice.as_deref());
 
         // Build session config for voice mode with the initial phase instruction.
         let config = build_session_config(start.model.as_deref())
@@ -403,299 +393,449 @@ impl CookbookApp for SupportAssistant {
             .voice(selected_voice)
             .enable_input_transcription()
             .enable_output_transcription()
-            .system_instruction(initial_phase.instruction);
+            .system_instruction(BILLING_PHASES[0].instruction);
 
-        // Connect to Gemini Live.
-        let handle = ConnectBuilder::new(config)
-            .build()
+        // Create a RegexExtractor wrapping the existing extract_state function.
+        let extractor = Arc::new(RegexExtractor::new("support_state", 10, |text, existing| {
+            extract_state(text, existing)
+        }));
+
+        // Build Live session with callbacks, extraction, and phase machine.
+        let b64 = base64::engine::general_purpose::STANDARD;
+
+        let tx_audio = tx.clone();
+        let tx_input = tx.clone();
+        let tx_output = tx.clone();
+        let tx_text = tx.clone();
+        let tx_text_complete = tx.clone();
+        let tx_turn = tx.clone();
+        let tx_interrupted = tx.clone();
+        let tx_vad_start = tx.clone();
+        let tx_vad_end = tx.clone();
+        let tx_error = tx.clone();
+        let tx_disconnected = tx.clone();
+
+        // Phase on_enter callbacks.
+        let tx_enter_billing_identify = tx.clone();
+        let tx_enter_tech_greet = tx.clone();
+        let tx_enter_billing_investigate = tx.clone();
+        let tx_enter_billing_resolve = tx.clone();
+        let tx_enter_billing_close = tx.clone();
+        let tx_enter_tech_identify = tx.clone();
+        let tx_enter_tech_troubleshoot = tx.clone();
+        let tx_enter_tech_resolve = tx.clone();
+        let tx_enter_tech_close = tx.clone();
+
+        let handle = Live::builder()
+            .extractor(extractor)
+            .on_extracted({
+                let tx = tx.clone();
+                move |_name, value| {
+                    let tx = tx.clone();
+                    async move {
+                        if let Some(obj) = value.as_object() {
+                            for (key, val) in obj {
+                                let _ = tx.send(ServerMessage::StateUpdate {
+                                    key: key.clone(),
+                                    value: val.clone(),
+                                });
+                            }
+                        }
+                    }
+                }
+            })
+            // Computed state: active_agent derived from support_state.
+            .computed("active_agent", &["support_state"], |state| {
+                let extracted: serde_json::Value = state.get("support_state").unwrap_or(json!({}));
+                let issue_type = extracted.get("issue_type").and_then(|v| v.as_str());
+                match issue_type {
+                    Some("technical") => Some(json!("technical-support")),
+                    _ => Some(json!("billing-support")),
+                }
+            })
+            // --- Billing Phases ---
+            .phase("billing:greet")
+                .instruction(BILLING_PHASES[0].instruction)
+                .transition("billing:identify", |s| {
+                    s.get::<serde_json::Value>("support_state")
+                        .and_then(|v| v.get("customer_name").cloned())
+                        .is_some()
+                })
+                .on_enter(move |_state, _writer| {
+                    async move {
+                        // Initial phase — entered at session start, no "from" phase.
+                    }
+                })
+                .done()
+            .phase("billing:identify")
+                .instruction(BILLING_PHASES[1].instruction)
+                // Tech handoff transition FIRST (priority over billing:investigate).
+                .transition("tech:greet", |s| {
+                    s.get::<serde_json::Value>("support_state")
+                        .and_then(|v| v.get("issue_type").cloned())
+                        .and_then(|v| v.as_str().map(|s| s.to_string()))
+                        .map(|t| t == "technical")
+                        .unwrap_or(false)
+                })
+                // Then billing:investigate for any other issue_type.
+                .transition("billing:investigate", |s| {
+                    s.get::<serde_json::Value>("support_state")
+                        .and_then(|v| v.get("issue_type").cloned())
+                        .is_some()
+                })
+                .on_enter(move |_state, _writer| {
+                    let tx = tx_enter_billing_identify.clone();
+                    async move {
+                        let _ = tx.send(ServerMessage::PhaseChange {
+                            from: "billing:greet".into(),
+                            to: "billing:identify".into(),
+                            reason: "All required keys present".into(),
+                        });
+                        let _ = tx.send(ServerMessage::StateUpdate {
+                            key: "phase".into(),
+                            value: json!("billing:identify"),
+                        });
+                    }
+                })
+                .done()
+            .phase("billing:investigate")
+                .instruction(BILLING_PHASES[2].instruction)
+                .transition("billing:resolve", |s| {
+                    s.get::<serde_json::Value>("support_state")
+                        .and_then(|v| v.get("billing_detail").cloned())
+                        .is_some()
+                })
+                .on_enter(move |_state, _writer| {
+                    let tx = tx_enter_billing_investigate.clone();
+                    async move {
+                        let _ = tx.send(ServerMessage::PhaseChange {
+                            from: "billing:identify".into(),
+                            to: "billing:investigate".into(),
+                            reason: "All required keys present".into(),
+                        });
+                        let _ = tx.send(ServerMessage::StateUpdate {
+                            key: "phase".into(),
+                            value: json!("billing:investigate"),
+                        });
+                    }
+                })
+                .done()
+            .phase("billing:resolve")
+                .instruction(BILLING_PHASES[3].instruction)
+                .transition("billing:close", |s| {
+                    s.get::<serde_json::Value>("support_state")
+                        .and_then(|v| v.get("resolution_confirmed").cloned())
+                        .is_some()
+                })
+                .on_enter(move |_state, _writer| {
+                    let tx = tx_enter_billing_resolve.clone();
+                    async move {
+                        let _ = tx.send(ServerMessage::PhaseChange {
+                            from: "billing:investigate".into(),
+                            to: "billing:resolve".into(),
+                            reason: "All required keys present".into(),
+                        });
+                        let _ = tx.send(ServerMessage::StateUpdate {
+                            key: "phase".into(),
+                            value: json!("billing:resolve"),
+                        });
+                    }
+                })
+                .done()
+            .phase("billing:close")
+                .instruction(BILLING_PHASES[4].instruction)
+                .terminal()
+                .on_enter(move |_state, _writer| {
+                    let tx = tx_enter_billing_close.clone();
+                    async move {
+                        let _ = tx.send(ServerMessage::PhaseChange {
+                            from: "billing:resolve".into(),
+                            to: "billing:close".into(),
+                            reason: "All required keys present".into(),
+                        });
+                        let _ = tx.send(ServerMessage::StateUpdate {
+                            key: "phase".into(),
+                            value: json!("billing:close"),
+                        });
+                    }
+                })
+                .done()
+            // --- Technical Phases ---
+            .phase("tech:greet")
+                .instruction(TECHNICAL_PHASES[0].instruction)
+                .transition("tech:identify", |s| {
+                    s.get::<serde_json::Value>("support_state")
+                        .and_then(|v| v.get("tech_issue_desc").cloned())
+                        .is_some()
+                })
+                .on_enter({
+                    let tx = tx_enter_tech_greet.clone();
+                    move |_state, _writer| {
+                        let tx = tx.clone();
+                        async move {
+                            let _ = tx.send(ServerMessage::PhaseChange {
+                                from: "billing:identify".into(),
+                                to: "tech:greet".into(),
+                                reason: "Technical issue detected — transferring to technical support".into(),
+                            });
+                            let _ = tx.send(ServerMessage::StateUpdate {
+                                key: "active_agent".into(),
+                                value: json!("technical-support"),
+                            });
+                            let _ = tx.send(ServerMessage::StateUpdate {
+                                key: "phase".into(),
+                                value: json!("tech:greet"),
+                            });
+                        }
+                    }
+                })
+                .done()
+            .phase("tech:identify")
+                .instruction(TECHNICAL_PHASES[1].instruction)
+                .transition("tech:troubleshoot", |s| {
+                    s.get::<serde_json::Value>("support_state")
+                        .and_then(|v| v.get("tech_category").cloned())
+                        .is_some()
+                })
+                .on_enter(move |_state, _writer| {
+                    let tx = tx_enter_tech_identify.clone();
+                    async move {
+                        let _ = tx.send(ServerMessage::PhaseChange {
+                            from: "tech:greet".into(),
+                            to: "tech:identify".into(),
+                            reason: "All required keys present".into(),
+                        });
+                        let _ = tx.send(ServerMessage::StateUpdate {
+                            key: "phase".into(),
+                            value: json!("tech:identify"),
+                        });
+                    }
+                })
+                .done()
+            .phase("tech:troubleshoot")
+                .instruction(TECHNICAL_PHASES[2].instruction)
+                .transition("tech:resolve", |s| {
+                    s.get::<serde_json::Value>("support_state")
+                        .and_then(|v| v.get("troubleshoot_result").cloned())
+                        .is_some()
+                })
+                .on_enter(move |_state, _writer| {
+                    let tx = tx_enter_tech_troubleshoot.clone();
+                    async move {
+                        let _ = tx.send(ServerMessage::PhaseChange {
+                            from: "tech:identify".into(),
+                            to: "tech:troubleshoot".into(),
+                            reason: "All required keys present".into(),
+                        });
+                        let _ = tx.send(ServerMessage::StateUpdate {
+                            key: "phase".into(),
+                            value: json!("tech:troubleshoot"),
+                        });
+                    }
+                })
+                .done()
+            .phase("tech:resolve")
+                .instruction(TECHNICAL_PHASES[3].instruction)
+                .transition("tech:close", |s| {
+                    s.get::<serde_json::Value>("support_state")
+                        .and_then(|v| v.get("final_outcome").cloned())
+                        .is_some()
+                })
+                .on_enter(move |_state, _writer| {
+                    let tx = tx_enter_tech_resolve.clone();
+                    async move {
+                        let _ = tx.send(ServerMessage::PhaseChange {
+                            from: "tech:troubleshoot".into(),
+                            to: "tech:resolve".into(),
+                            reason: "All required keys present".into(),
+                        });
+                        let _ = tx.send(ServerMessage::StateUpdate {
+                            key: "phase".into(),
+                            value: json!("tech:resolve"),
+                        });
+                    }
+                })
+                .done()
+            .phase("tech:close")
+                .instruction(TECHNICAL_PHASES[4].instruction)
+                .terminal()
+                .on_enter(move |_state, _writer| {
+                    let tx = tx_enter_tech_close.clone();
+                    async move {
+                        let _ = tx.send(ServerMessage::PhaseChange {
+                            from: "tech:resolve".into(),
+                            to: "tech:close".into(),
+                            reason: "All required keys present".into(),
+                        });
+                        let _ = tx.send(ServerMessage::StateUpdate {
+                            key: "phase".into(),
+                            value: json!("tech:close"),
+                        });
+                    }
+                })
+                .done()
+            .initial_phase("billing:greet")
+            // State-reactive instruction template: builds context-aware instructions.
+            .instruction_template(|state| {
+                let phase_name: String = state.get("session:phase").unwrap_or_default();
+                let extracted: serde_json::Value = state.get("support_state").unwrap_or(json!({}));
+                let customer_name = extracted.get("customer_name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("the customer");
+
+                // Find instruction from the right phase array.
+                let instruction = if phase_name.starts_with("tech:") {
+                    let short_name = phase_name.strip_prefix("tech:").unwrap_or(&phase_name);
+                    TECHNICAL_PHASES.iter()
+                        .find(|p| p.name == short_name)
+                        .map(|p| p.instruction)
+                } else {
+                    let short_name = phase_name.strip_prefix("billing:").unwrap_or(&phase_name);
+                    BILLING_PHASES.iter()
+                        .find(|p| p.name == short_name)
+                        .map(|p| p.instruction)
+                };
+
+                let instruction = instruction.unwrap_or(BILLING_PHASES[0].instruction);
+
+                Some(format!(
+                    "{}\n\nCustomer name: {}. Current state: {}",
+                    instruction, customer_name, extracted
+                ))
+            })
+            // Watch for escalation.
+            .watch("support_state")
+                .changed()
+                .then({
+                    let tx = tx.clone();
+                    move |_old, new, _state| {
+                        let tx = tx.clone();
+                        async move {
+                            if let Some(outcome) = new.as_object()
+                                .and_then(|obj| obj.get("final_outcome"))
+                                .and_then(|v| v.as_str())
+                            {
+                                if outcome == "escalated" {
+                                    let _ = tx.send(ServerMessage::StateUpdate {
+                                        key: "escalation".into(),
+                                        value: json!({"priority": "high", "reason": "Customer issue escalated"}),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                })
+            // Standard voice callbacks.
+            .on_audio(move |data| {
+                let encoded = b64.encode(data);
+                let _ = tx_audio.send(ServerMessage::Audio { data: encoded });
+            })
+            .on_input_transcript(move |text, _is_final| {
+                let _ = tx_input.send(ServerMessage::InputTranscription {
+                    text: text.to_string(),
+                });
+            })
+            .on_output_transcript(move |text, _is_final| {
+                let _ = tx_output.send(ServerMessage::OutputTranscription {
+                    text: text.to_string(),
+                });
+            })
+            .on_text(move |t| {
+                let _ = tx_text.send(ServerMessage::TextDelta {
+                    text: t.to_string(),
+                });
+            })
+            .on_text_complete(move |t| {
+                let _ = tx_text_complete.send(ServerMessage::TextComplete {
+                    text: t.to_string(),
+                });
+            })
+            .on_turn_complete(move || {
+                let tx = tx_turn.clone();
+                async move {
+                    let _ = tx.send(ServerMessage::TurnComplete);
+                }
+            })
+            .on_interrupted(move || {
+                let tx = tx_interrupted.clone();
+                async move {
+                    let _ = tx.send(ServerMessage::Interrupted);
+                }
+            })
+            .on_vad_start(move || {
+                let _ = tx_vad_start.send(ServerMessage::VoiceActivityStart);
+            })
+            .on_vad_end(move || {
+                let _ = tx_vad_end.send(ServerMessage::VoiceActivityEnd);
+            })
+            .on_error(move |msg| {
+                let tx = tx_error.clone();
+                async move {
+                    let _ = tx.send(ServerMessage::Error { message: msg });
+                }
+            })
+            .on_disconnected(move |_reason| {
+                let _tx = tx_disconnected.clone();
+                async move {
+                    info!("SupportAssistant session disconnected by server");
+                }
+            })
+            .connect(config)
             .await
             .map_err(|e| AppError::Connection(e.to_string()))?;
 
-        handle.wait_for_phase(SessionPhase::Active).await;
         let _ = tx.send(ServerMessage::Connected);
         send_app_meta(&tx, self);
         info!("SupportAssistant session connected");
 
         // Send initial state.
-        let _ = tx.send(ServerMessage::StateUpdate {
-            key: "active_agent".into(),
-            value: json!(active_agent.as_str()),
-        });
         let _ = tx.send(ServerMessage::PhaseChange {
             from: "none".into(),
-            to: initial_phase.name.into(),
-            reason: "Session started with billing agent".into(),
+            to: "billing:greet".into(),
+            reason: "Session started".into(),
+        });
+        let _ = tx.send(ServerMessage::StateUpdate {
+            key: "active_agent".into(),
+            value: json!("billing-support"),
         });
         let _ = tx.send(ServerMessage::StateUpdate {
             key: "phase".into(),
-            value: json!(initial_phase.name),
-        });
-        let _ = tx.send(ServerMessage::StateUpdate {
-            key: "handoff_count".into(),
-            value: json!(0),
+            value: json!("billing:greet"),
         });
 
-        // Subscribe to server events.
-        let mut events = handle.subscribe();
+        // Browser -> Gemini loop.
         let b64 = base64::engine::general_purpose::STANDARD;
-
-        // State tracking.
-        let mut state: HashMap<String, serde_json::Value> = HashMap::new();
-        let mut conversation = ConversationBuffer::new(20);
-        let mut phase_turn_count: usize = 0;
-        let mut handoff_count: usize = 0;
-        let mut handoff_done = false;
-
-        loop {
-            tokio::select! {
-                // Client -> Gemini
-                client_msg = rx.recv() => {
-                    match client_msg {
-                        Some(ClientMessage::Audio { data }) => {
-                            match b64.decode(&data) {
-                                Ok(pcm_bytes) => {
-                                    if let Err(e) = handle.send_audio(pcm_bytes).await {
-                                        warn!("Failed to send audio: {e}");
-                                        let _ = tx.send(ServerMessage::Error { message: e.to_string() });
-                                    }
-                                }
-                                Err(e) => {
-                                    warn!("Failed to decode base64 audio: {e}");
-                                }
+        while let Some(msg) = rx.recv().await {
+            match msg {
+                ClientMessage::Audio { data } => {
+                    match b64.decode(&data) {
+                        Ok(pcm_bytes) => {
+                            if let Err(e) = handle.send_audio(pcm_bytes).await {
+                                warn!("Failed to send audio: {e}");
+                                let _ = tx.send(ServerMessage::Error {
+                                    message: e.to_string(),
+                                });
                             }
                         }
-                        Some(ClientMessage::Text { text }) => {
-                            if let Err(e) = handle.send_text(&text).await {
-                                warn!("Failed to send text: {e}");
-                                let _ = tx.send(ServerMessage::Error { message: e.to_string() });
-                            }
+                        Err(e) => {
+                            warn!("Failed to decode base64 audio: {e}");
                         }
-                        Some(ClientMessage::Stop) | None => {
-                            info!("SupportAssistant session stopping");
-                            let _ = handle.disconnect().await;
-                            break;
-                        }
-                        _ => {}
                     }
                 }
-
-                // Gemini -> Client
-                event = recv_event(&mut events) => {
-                    match event {
-                        Some(SessionEvent::AudioData(bytes)) => {
-                            let encoded = b64.encode(&bytes);
-                            let _ = tx.send(ServerMessage::Audio { data: encoded });
-                        }
-                        Some(SessionEvent::InputTranscription(text)) => {
-                            conversation.push(format!("[User] {text}"));
-                            let _ = tx.send(ServerMessage::InputTranscription { text });
-                        }
-                        Some(SessionEvent::OutputTranscription(text)) => {
-                            conversation.push(format!("[Agent] {text}"));
-                            let _ = tx.send(ServerMessage::OutputTranscription { text });
-                        }
-                        Some(SessionEvent::TextDelta(text)) => {
-                            let _ = tx.send(ServerMessage::TextDelta { text });
-                        }
-                        Some(SessionEvent::TextComplete(text)) => {
-                            conversation.push(format!("[Agent] {text}"));
-                            let _ = tx.send(ServerMessage::TextComplete { text });
-                        }
-                        Some(SessionEvent::TurnComplete) => {
-                            phase_turn_count += 1;
-                            let _ = tx.send(ServerMessage::TurnComplete);
-
-                            // --- Extract state from conversation ---
-                            let recent = conversation.recent_text();
-                            let new_state = extract_state(&recent, &state);
-
-                            for (key, value) in &new_state {
-                                if !state.contains_key(key) || state.get(key) != Some(value) {
-                                    let _ = tx.send(ServerMessage::StateUpdate {
-                                        key: key.clone(),
-                                        value: value.clone(),
-                                    });
-                                }
-                            }
-                            state.extend(new_state);
-
-                            // --- Check for agent handoff ---
-                            // During billing "identify" phase, if issue is technical, handoff.
-                            let active_phases = match active_agent {
-                                AgentKind::Billing => BILLING_PHASES,
-                                AgentKind::Technical => TECHNICAL_PHASES,
-                            };
-
-                            if active_agent == AgentKind::Billing
-                                && !handoff_done
-                                && current_phase_idx == 1 // "identify" phase
-                                && should_handoff_to_technical(&state)
-                            {
-                                // Evaluate the outgoing phase before handoff.
-                                let (score, notes) = evaluate_phase(
-                                    active_phases[current_phase_idx].name,
-                                    active_phases,
-                                    &state,
-                                    phase_turn_count,
-                                );
-                                let _ = tx.send(ServerMessage::Evaluation {
-                                    phase: "billing:identify".into(),
-                                    score,
-                                    notes: format!("{notes}; triggering handoff to technical"),
-                                });
-
-                                // Perform handoff.
-                                handoff_count += 1;
-                                handoff_done = true;
-                                active_agent = AgentKind::Technical;
-                                current_phase_idx = 0;
-                                phase_turn_count = 0;
-
-                                let _ = tx.send(ServerMessage::PhaseChange {
-                                    from: "billing".into(),
-                                    to: "technical".into(),
-                                    reason: "Technical issue detected".into(),
-                                });
-                                let _ = tx.send(ServerMessage::StateUpdate {
-                                    key: "active_agent".into(),
-                                    value: json!("technical-support"),
-                                });
-                                let _ = tx.send(ServerMessage::StateUpdate {
-                                    key: "handoff_count".into(),
-                                    value: json!(handoff_count),
-                                });
-                                let _ = tx.send(ServerMessage::StateUpdate {
-                                    key: "phase".into(),
-                                    value: json!(TECHNICAL_PHASES[0].name),
-                                });
-
-                                // Evaluate handoff quality.
-                                let context_preserved = state.contains_key("customer_name");
-                                let _ = tx.send(ServerMessage::Evaluation {
-                                    phase: "handoff".into(),
-                                    score: if context_preserved { 0.9 } else { 0.6 },
-                                    notes: format!(
-                                        "Handoff #{handoff_count}: billing -> technical. Context preserved: {context_preserved}"
-                                    ),
-                                });
-
-                                // Update system instruction to technical support context.
-                                let tech_instruction = build_instruction(
-                                    &TECHNICAL_PHASES[0],
-                                    &state,
-                                );
-                                info!("Agent handoff: billing -> technical");
-                                if let Err(e) = handle.update_instruction(tech_instruction).await {
-                                    warn!("Failed to update instruction for handoff: {e}");
-                                }
-
-                                continue;
-                            }
-
-                            // --- Check for escalation in technical agent ---
-                            if active_agent == AgentKind::Technical
-                                && current_phase_idx == 3 // "escalate-or-resolve" phase
-                            {
-                                if let Some(outcome) = state.get("final_outcome") {
-                                    if outcome == "escalated" {
-                                        let _ = tx.send(ServerMessage::StateUpdate {
-                                            key: "escalation".into(),
-                                            value: json!({
-                                                "reason": "Troubleshooting steps exhausted",
-                                                "priority": if state.get("sentiment") == Some(&json!("negative")) {
-                                                    "high"
-                                                } else {
-                                                    "normal"
-                                                }
-                                            }),
-                                        });
-                                    }
-                                }
-                            }
-
-                            // --- Check phase transition within current agent ---
-                            let active_phases = match active_agent {
-                                AgentKind::Billing => BILLING_PHASES,
-                                AgentKind::Technical => TECHNICAL_PHASES,
-                            };
-
-                            if current_phase_idx < active_phases.len() - 1 {
-                                let current = &active_phases[current_phase_idx];
-                                let all_keys_present = current
-                                    .required_keys
-                                    .iter()
-                                    .all(|k| state.contains_key(*k));
-
-                                if all_keys_present {
-                                    let (score, notes) = evaluate_phase(
-                                        current.name,
-                                        active_phases,
-                                        &state,
-                                        phase_turn_count,
-                                    );
-                                    let phase_label = format!(
-                                        "{}:{}",
-                                        active_agent.as_str(),
-                                        current.name
-                                    );
-                                    let _ = tx.send(ServerMessage::Evaluation {
-                                        phase: phase_label,
-                                        score,
-                                        notes,
-                                    });
-
-                                    let old_name = current.name;
-                                    current_phase_idx += 1;
-                                    let new_phase = &active_phases[current_phase_idx];
-                                    phase_turn_count = 0;
-
-                                    let _ = tx.send(ServerMessage::PhaseChange {
-                                        from: old_name.into(),
-                                        to: new_phase.name.into(),
-                                        reason: format!(
-                                            "All required keys present: {:?}",
-                                            active_phases[current_phase_idx - 1].required_keys
-                                        ),
-                                    });
-                                    let _ = tx.send(ServerMessage::StateUpdate {
-                                        key: "phase".into(),
-                                        value: json!(new_phase.name),
-                                    });
-
-                                    let context_instruction = build_instruction(new_phase, &state);
-                                    info!(
-                                        "[{}] Phase transition: {} -> {}",
-                                        active_agent.as_str(),
-                                        old_name,
-                                        new_phase.name
-                                    );
-
-                                    if let Err(e) = handle.update_instruction(context_instruction).await {
-                                        warn!("Failed to update instruction: {e}");
-                                    }
-                                }
-                            }
-                        }
-                        Some(SessionEvent::Interrupted) => {
-                            let _ = tx.send(ServerMessage::Interrupted);
-                        }
-                        Some(SessionEvent::VoiceActivityStart) => {
-                            let _ = tx.send(ServerMessage::VoiceActivityStart);
-                        }
-                        Some(SessionEvent::VoiceActivityEnd) => {
-                            let _ = tx.send(ServerMessage::VoiceActivityEnd);
-                        }
-                        Some(SessionEvent::Error(msg)) => {
-                            let _ = tx.send(ServerMessage::Error { message: msg });
-                        }
-                        Some(SessionEvent::Disconnected(_)) => {
-                            info!("SupportAssistant session disconnected by server");
-                            break;
-                        }
-                        None => break,
-                        _ => {}
+                ClientMessage::Text { text } => {
+                    if let Err(e) = handle.send_text(&text).await {
+                        warn!("Failed to send text: {e}");
+                        let _ = tx.send(ServerMessage::Error {
+                            message: e.to_string(),
+                        });
                     }
                 }
+                ClientMessage::Stop => {
+                    info!("SupportAssistant session stopping");
+                    let _ = handle.disconnect().await;
+                    break;
+                }
+                _ => {}
             }
         }
 
@@ -706,6 +846,7 @@ impl CookbookApp for SupportAssistant {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::apps::ConversationBuffer;
 
     #[test]
     fn extract_billing_issue_type() {
