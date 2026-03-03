@@ -1,0 +1,15 @@
+[book]
+title = "gemini-rs"
+description = "Full Rust SDK for the Gemini Multimodal Live API"
+authors = ["Vamsi Ramakrishnan"]
+language = "en"
+src = "src"
+
+[build]
+build-dir = "../target/book"
+
+[output.html]
+default-theme = "navy"
+preferred-dark-theme = "navy"
+git-repository-url = "https://github.com/vamsiramakrishnan/gemini-rs"
+edit-url-template = "https://github.com/vamsiramakrishnan/gemini-rs/edit/main/docs/{path}"

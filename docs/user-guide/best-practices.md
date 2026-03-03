@@ -123,7 +123,7 @@ let tool = TypedTool::new::<WeatherArgs>(
 );
 ```
 
-### Use StateKey<T> for frequently accessed keys
+### Use `StateKey<T>` for frequently accessed keys
 
 Compile-time typed keys prevent typos and give you type inference:
 
@@ -159,7 +159,7 @@ let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
 })
 ```
 
-### Use Arc<dyn SessionWriter> -- do not clone session handles
+### Use `Arc<dyn SessionWriter>` -- do not clone session handles
 
 When you need to share the session writer across tasks, wrap it in `Arc`:
 
