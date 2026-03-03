@@ -1,4 +1,5 @@
 mod all_config;
+pub mod extractors;
 mod guardrails;
 mod playbook;
 mod support;

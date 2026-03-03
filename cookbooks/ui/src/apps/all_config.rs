@@ -5,7 +5,7 @@ use serde_json::json;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
-use rs_genai::prelude::*;
+use adk_rs_fluent::prelude::*;
 
 use crate::app::{AppCategory, AppError, ClientMessage, CookbookApp, ServerMessage, WsSender};
 
@@ -258,13 +258,112 @@ impl CookbookApp for AllConfig {
             config = config.session_resumption(None);
         }
 
-        // Connect to Gemini Live.
-        let handle = ConnectBuilder::new(config)
-            .build()
+        // Build Live session with all callbacks.
+        let b64 = base64::engine::general_purpose::STANDARD;
+
+        let tx_audio = tx.clone();
+        let tx_input = tx.clone();
+        let tx_output = tx.clone();
+        let tx_text = tx.clone();
+        let tx_text_complete = tx.clone();
+        let tx_turn = tx.clone();
+        let tx_interrupted = tx.clone();
+        let tx_vad_start = tx.clone();
+        let tx_vad_end = tx.clone();
+        let tx_error = tx.clone();
+        let tx_disconnected = tx.clone();
+        let tx_tool = tx.clone();
+
+        let handle = Live::builder()
+            .on_audio(move |data| {
+                let encoded = b64.encode(data);
+                let _ = tx_audio.send(ServerMessage::Audio { data: encoded });
+            })
+            .on_input_transcript(move |text, _is_final| {
+                let _ = tx_input.send(ServerMessage::InputTranscription {
+                    text: text.to_string(),
+                });
+            })
+            .on_output_transcript(move |text, _is_final| {
+                let _ = tx_output.send(ServerMessage::OutputTranscription {
+                    text: text.to_string(),
+                });
+            })
+            .on_text(move |t| {
+                let _ = tx_text.send(ServerMessage::TextDelta {
+                    text: t.to_string(),
+                });
+            })
+            .on_text_complete(move |t| {
+                let _ = tx_text_complete.send(ServerMessage::TextComplete {
+                    text: t.to_string(),
+                });
+            })
+            .on_tool_call(move |calls| {
+                let tx = tx_tool.clone();
+                async move {
+                    info!("Tool calls received: {}", calls.len());
+
+                    let responses: Vec<FunctionResponse> = calls
+                        .iter()
+                        .map(|call| {
+                            let result = execute_mock_tool(&call.name, &call.args);
+                            info!("Mock tool '{}' -> {}", call.name, result);
+
+                            let _ = tx.send(ServerMessage::StateUpdate {
+                                key: format!("tool:{}", call.name),
+                                value: json!({
+                                    "name": call.name,
+                                    "args": call.args,
+                                    "result": result,
+                                }),
+                            });
+
+                            FunctionResponse {
+                                name: call.name.clone(),
+                                response: result,
+                                id: call.id.clone(),
+                            }
+                        })
+                        .collect();
+
+                    Some(responses)
+                }
+            })
+            .on_turn_complete(move || {
+                let tx = tx_turn.clone();
+                async move {
+                    let _ = tx.send(ServerMessage::TurnComplete);
+                }
+            })
+            .on_interrupted(move || {
+                let tx = tx_interrupted.clone();
+                async move {
+                    let _ = tx.send(ServerMessage::Interrupted);
+                }
+            })
+            .on_vad_start(move || {
+                let _ = tx_vad_start.send(ServerMessage::VoiceActivityStart);
+            })
+            .on_vad_end(move || {
+                let _ = tx_vad_end.send(ServerMessage::VoiceActivityEnd);
+            })
+            .on_error(move |msg| {
+                let tx = tx_error.clone();
+                async move {
+                    let _ = tx.send(ServerMessage::Error { message: msg });
+                }
+            })
+            .on_disconnected(move |_reason| {
+                let _tx = tx_disconnected.clone();
+                async move {
+                    info!("AllConfig session disconnected by server");
+                }
+            })
+            .connect(config)
             .await
             .map_err(|e| AppError::Connection(e.to_string()))?;
 
-        handle.wait_for_phase(SessionPhase::Active).await;
         let _ = tx.send(ServerMessage::Connected);
         send_app_meta(&tx, self);
         info!("AllConfig session connected");
@@ -279,127 +378,43 @@ impl CookbookApp for AllConfig {
             value: json!(modality_str),
         });
 
-        // Subscribe to server events.
-        let mut events = handle.subscribe();
+        // Browser -> Gemini loop.
         let b64 = base64::engine::general_purpose::STANDARD;
-        let mut tool_call_count: usize = 0;
-
-        loop {
-            tokio::select! {
-                // Client -> Gemini
-                client_msg = rx.recv() => {
-                    match client_msg {
-                        Some(ClientMessage::Audio { data }) => {
-                            if is_audio {
-                                match b64.decode(&data) {
-                                    Ok(pcm_bytes) => {
-                                        if let Err(e) = handle.send_audio(pcm_bytes).await {
-                                            warn!("Failed to send audio: {e}");
-                                            let _ = tx.send(ServerMessage::Error { message: e.to_string() });
-                                        }
-                                    }
-                                    Err(e) => {
-                                        warn!("Failed to decode base64 audio: {e}");
-                                    }
-                                }
-                            }
-                        }
-                        Some(ClientMessage::Text { text }) => {
-                            if is_text || is_audio {
-                                if let Err(e) = handle.send_text(&text).await {
-                                    warn!("Failed to send text: {e}");
-                                    let _ = tx.send(ServerMessage::Error { message: e.to_string() });
-                                }
-                            }
-                        }
-                        Some(ClientMessage::Stop) | None => {
-                            info!("AllConfig session stopping");
-                            let _ = handle.disconnect().await;
-                            break;
-                        }
-                        _ => {}
-                    }
-                }
-
-                // Gemini -> Client
-                event = recv_event(&mut events) => {
-                    match event {
-                        Some(SessionEvent::AudioData(bytes)) => {
-                            let encoded = b64.encode(&bytes);
-                            let _ = tx.send(ServerMessage::Audio { data: encoded });
-                        }
-                        Some(SessionEvent::InputTranscription(text)) => {
-                            let _ = tx.send(ServerMessage::InputTranscription { text });
-                        }
-                        Some(SessionEvent::OutputTranscription(text)) => {
-                            let _ = tx.send(ServerMessage::OutputTranscription { text });
-                        }
-                        Some(SessionEvent::TextDelta(text)) => {
-                            let _ = tx.send(ServerMessage::TextDelta { text });
-                        }
-                        Some(SessionEvent::TextComplete(text)) => {
-                            let _ = tx.send(ServerMessage::TextComplete { text });
-                        }
-                        Some(SessionEvent::ToolCall(calls)) => {
-                            tool_call_count += 1;
-                            info!("Tool calls received: {}", calls.len());
-
-                            let _ = tx.send(ServerMessage::StateUpdate {
-                                key: "tool_call_count".into(),
-                                value: json!(tool_call_count),
-                            });
-
-                            let responses: Vec<FunctionResponse> = calls
-                                .iter()
-                                .map(|call| {
-                                    let result = execute_mock_tool(&call.name, &call.args);
-                                    info!("Mock tool '{}' -> {}", call.name, result);
-
-                                    let _ = tx.send(ServerMessage::StateUpdate {
-                                        key: format!("tool:{}", call.name),
-                                        value: json!({
-                                            "name": call.name,
-                                            "args": call.args,
-                                            "result": result,
-                                        }),
+        while let Some(msg) = rx.recv().await {
+            match msg {
+                ClientMessage::Audio { data } => {
+                    if is_audio {
+                        match b64.decode(&data) {
+                            Ok(pcm_bytes) => {
+                                if let Err(e) = handle.send_audio(pcm_bytes).await {
+                                    warn!("Failed to send audio: {e}");
+                                    let _ = tx.send(ServerMessage::Error {
+                                        message: e.to_string(),
                                     });
-
-                                    FunctionResponse {
-                                        name: call.name.clone(),
-                                        response: result,
-                                        id: call.id.clone(),
-                                    }
-                                })
-                                .collect();
-
-                            if let Err(e) = handle.send_tool_response(responses).await {
-                                warn!("Failed to send tool response: {e}");
-                                let _ = tx.send(ServerMessage::Error { message: e.to_string() });
+                                }
+                            }
+                            Err(e) => {
+                                warn!("Failed to decode base64 audio: {e}");
                             }
                         }
-                        Some(SessionEvent::TurnComplete) => {
-                            let _ = tx.send(ServerMessage::TurnComplete);
-                        }
-                        Some(SessionEvent::Interrupted) => {
-                            let _ = tx.send(ServerMessage::Interrupted);
-                        }
-                        Some(SessionEvent::VoiceActivityStart) => {
-                            let _ = tx.send(ServerMessage::VoiceActivityStart);
-                        }
-                        Some(SessionEvent::VoiceActivityEnd) => {
-                            let _ = tx.send(ServerMessage::VoiceActivityEnd);
-                        }
-                        Some(SessionEvent::Error(msg)) => {
-                            let _ = tx.send(ServerMessage::Error { message: msg });
-                        }
-                        Some(SessionEvent::Disconnected(_)) => {
-                            info!("AllConfig session disconnected by server");
-                            break;
-                        }
-                        None => break,
-                        _ => {}
                     }
                 }
+                ClientMessage::Text { text } => {
+                    if is_text || is_audio {
+                        if let Err(e) = handle.send_text(&text).await {
+                            warn!("Failed to send text: {e}");
+                            let _ = tx.send(ServerMessage::Error {
+                                message: e.to_string(),
+                            });
+                        }
+                    }
+                }
+                ClientMessage::Stop => {
+                    info!("AllConfig session stopping");
+                    let _ = handle.disconnect().await;
+                    break;
+                }
+                _ => {}
             }
         }
 

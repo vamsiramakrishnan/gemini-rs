@@ -3,7 +3,7 @@ use serde_json::json;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
-use rs_genai::prelude::*;
+use adk_rs_fluent::prelude::*;
 
 use crate::app::{AppCategory, AppError, ClientMessage, CookbookApp, ServerMessage, WsSender};
 
@@ -228,100 +228,108 @@ impl CookbookApp for ToolCalling {
                 ),
             );
 
-        // Connect to Gemini Live.
-        let handle = ConnectBuilder::new(config)
-            .build()
+        // Build Live session with callbacks.
+        let tx_text = tx.clone();
+        let tx_text_complete = tx.clone();
+        let tx_turn = tx.clone();
+        let tx_interrupted = tx.clone();
+        let tx_error = tx.clone();
+        let tx_disconnected = tx.clone();
+        let tx_tool = tx.clone();
+
+        let handle = Live::builder()
+            .on_text(move |t| {
+                let _ = tx_text.send(ServerMessage::TextDelta {
+                    text: t.to_string(),
+                });
+            })
+            .on_text_complete(move |t| {
+                let _ = tx_text_complete.send(ServerMessage::TextComplete {
+                    text: t.to_string(),
+                });
+            })
+            .on_tool_call(move |calls| {
+                let tx = tx_tool.clone();
+                async move {
+                    info!("Tool calls received: {}", calls.len());
+
+                    // Execute each tool call and collect responses.
+                    let responses: Vec<FunctionResponse> = calls
+                        .iter()
+                        .map(|call| {
+                            let result = execute_tool(&call.name, &call.args);
+                            info!("Tool '{}' -> {}", call.name, result);
+
+                            // Notify the browser about the tool execution.
+                            let _ = tx.send(ServerMessage::StateUpdate {
+                                key: format!("tool:{}", call.name),
+                                value: json!({
+                                    "name": call.name,
+                                    "args": call.args,
+                                    "result": result,
+                                }),
+                            });
+
+                            FunctionResponse {
+                                name: call.name.clone(),
+                                response: result,
+                                id: call.id.clone(),
+                            }
+                        })
+                        .collect();
+
+                    Some(responses)
+                }
+            })
+            .on_turn_complete(move || {
+                let tx = tx_turn.clone();
+                async move {
+                    let _ = tx.send(ServerMessage::TurnComplete);
+                }
+            })
+            .on_interrupted(move || {
+                let tx = tx_interrupted.clone();
+                async move {
+                    let _ = tx.send(ServerMessage::Interrupted);
+                }
+            })
+            .on_error(move |msg| {
+                let tx = tx_error.clone();
+                async move {
+                    let _ = tx.send(ServerMessage::Error { message: msg });
+                }
+            })
+            .on_disconnected(move |_reason| {
+                let _tx = tx_disconnected.clone();
+                async move {
+                    info!("ToolCalling session disconnected by server");
+                }
+            })
+            .connect(config)
             .await
             .map_err(|e| AppError::Connection(e.to_string()))?;
 
-        handle.wait_for_phase(SessionPhase::Active).await;
         let _ = tx.send(ServerMessage::Connected);
         send_app_meta(&tx, self);
         info!("ToolCalling session connected");
 
-        // Subscribe to server events.
-        let mut events = handle.subscribe();
-
-        loop {
-            tokio::select! {
-                // Client -> Gemini
-                client_msg = rx.recv() => {
-                    match client_msg {
-                        Some(ClientMessage::Text { text }) => {
-                            if let Err(e) = handle.send_text(&text).await {
-                                warn!("Failed to send text: {e}");
-                                let _ = tx.send(ServerMessage::Error { message: e.to_string() });
-                            }
-                        }
-                        Some(ClientMessage::Stop) | None => {
-                            info!("ToolCalling session stopping");
-                            let _ = handle.disconnect().await;
-                            break;
-                        }
-                        _ => {} // Ignore audio messages in text mode
+        // Browser -> Gemini loop.
+        while let Some(msg) = rx.recv().await {
+            match msg {
+                ClientMessage::Text { text } => {
+                    if let Err(e) = handle.send_text(&text).await {
+                        warn!("Failed to send text: {e}");
+                        let _ = tx.send(ServerMessage::Error {
+                            message: e.to_string(),
+                        });
                     }
                 }
-
-                // Gemini -> Client
-                event = recv_event(&mut events) => {
-                    match event {
-                        Some(SessionEvent::ToolCall(calls)) => {
-                            info!("Tool calls received: {}", calls.len());
-
-                            // Execute each tool call and collect responses.
-                            let responses: Vec<FunctionResponse> = calls
-                                .iter()
-                                .map(|call| {
-                                    let result = execute_tool(&call.name, &call.args);
-                                    info!("Tool '{}' -> {}", call.name, result);
-
-                                    // Notify the browser about the tool execution.
-                                    let _ = tx.send(ServerMessage::StateUpdate {
-                                        key: format!("tool:{}", call.name),
-                                        value: json!({
-                                            "name": call.name,
-                                            "args": call.args,
-                                            "result": result,
-                                        }),
-                                    });
-
-                                    FunctionResponse {
-                                        name: call.name.clone(),
-                                        response: result,
-                                        id: call.id.clone(),
-                                    }
-                                })
-                                .collect();
-
-                            // Send tool responses back to Gemini.
-                            if let Err(e) = handle.send_tool_response(responses).await {
-                                warn!("Failed to send tool response: {e}");
-                                let _ = tx.send(ServerMessage::Error { message: e.to_string() });
-                            }
-                        }
-                        Some(SessionEvent::TextDelta(text)) => {
-                            let _ = tx.send(ServerMessage::TextDelta { text });
-                        }
-                        Some(SessionEvent::TextComplete(text)) => {
-                            let _ = tx.send(ServerMessage::TextComplete { text });
-                        }
-                        Some(SessionEvent::TurnComplete) => {
-                            let _ = tx.send(ServerMessage::TurnComplete);
-                        }
-                        Some(SessionEvent::Interrupted) => {
-                            let _ = tx.send(ServerMessage::Interrupted);
-                        }
-                        Some(SessionEvent::Error(msg)) => {
-                            let _ = tx.send(ServerMessage::Error { message: msg });
-                        }
-                        Some(SessionEvent::Disconnected(_)) => {
-                            info!("ToolCalling session disconnected by server");
-                            break;
-                        }
-                        None => break,
-                        _ => {}
-                    }
+                ClientMessage::Stop => {
+                    info!("ToolCalling session stopping");
+                    let _ = handle.disconnect().await;
+                    break;
                 }
+                _ => {} // Ignore audio messages in text mode
             }
         }
 
