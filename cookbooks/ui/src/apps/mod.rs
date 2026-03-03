@@ -1,9 +1,15 @@
 mod all_config;
 #[allow(unused)]
+mod call_screening;
+#[allow(unused)]
+mod clinic;
+#[allow(unused)]
 mod debt_collection;
 pub mod extractors;
 mod guardrails;
 mod playbook;
+#[allow(unused)]
+mod restaurant;
 mod support;
 mod text_chat;
 mod tool_calling;
@@ -24,6 +30,9 @@ pub fn register_all(registry: &mut AppRegistry) {
     registry.register(support::SupportAssistant);
     registry.register(all_config::AllConfig);
     registry.register(debt_collection::DebtCollection);
+    registry.register(call_screening::CallScreening);
+    registry.register(restaurant::Restaurant);
+    registry.register(clinic::Clinic);
 }
 
 /// Parameters extracted from the browser's Start message.

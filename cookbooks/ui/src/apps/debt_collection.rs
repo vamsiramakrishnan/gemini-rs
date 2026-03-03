@@ -12,8 +12,10 @@ use std::sync::LazyLock;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
+use adk_rs_fluent::let_clone;
 use adk_rs_fluent::prelude::*;
 use rs_adk::llm::{BaseLlm, GeminiLlm, GeminiLlmParams};
+use rs_adk::state::StateKey;
 
 use rs_genai::session::SessionEvent;
 
@@ -21,6 +23,27 @@ use crate::app::{AppCategory, AppError, ClientMessage, CookbookApp, ServerMessag
 
 use super::extractors::RegexExtractor;
 use super::{build_session_config, resolve_voice, send_app_meta, wait_for_start};
+
+// ---------------------------------------------------------------------------
+// Typed state keys
+// ---------------------------------------------------------------------------
+
+const IDENTITY_VERIFIED: StateKey<bool> = StateKey::new("identity_verified");
+const DISCLOSURE_GIVEN: StateKey<bool> = StateKey::new("disclosure_given");
+const CEASE_DESIST: StateKey<bool> = StateKey::new("cease_desist_requested");
+const PAYMENT_PROCESSED: StateKey<bool> = StateKey::new("payment_processed");
+const WILLINGNESS: StateKey<f64> = StateKey::new("willingness_to_pay");
+
+// Suppress unused-constant warnings — these serve as documentation for
+// the typed state contract and will be used when the codebase migrates
+// to `state.get_key()`/`state.set_key()`.
+const _: () = {
+    _ = IDENTITY_VERIFIED;
+    _ = DISCLOSURE_GIVEN;
+    _ = CEASE_DESIST;
+    _ = PAYMENT_PROCESSED;
+    _ = WILLINGNESS;
+};
 
 // ---------------------------------------------------------------------------
 // Phase instructions
@@ -558,14 +581,19 @@ impl CookbookApp for DebtCollection {
             .greeting("Begin the call. Deliver the required Mini-Miranda disclosure now.")
             // --- Regex extractor ---
             .extractor(extractor)
-            // --- LLM extraction ---
-            .extract_turns::<DebtorState>(
+            // --- LLM extraction (windowed, min 5 words to skip "uh huh" / "ok") ---
+            .extract_turns_windowed::<DebtorState>(
                 llm,
                 "Extract from the debt collection conversation: the debtor's emotional state \
                  (calm/cooperative/frustrated/angry), willingness to pay (0.0-1.0), \
                  negotiation intent (full_pay/partial_pay/dispute/refuse/delay), \
                  whether they requested cease-and-desist, and whether they acknowledged the debt.",
+                5,
             )
+            // --- on_extraction_error: log failures ---
+            .on_extraction_error(|name, err| async move {
+                warn!("Extraction '{name}' failed: {err}");
+            })
             // --- on_extracted: broadcast state to browser ---
             .on_extracted({
                 let tx = tx.clone();
