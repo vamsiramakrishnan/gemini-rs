@@ -1,4 +1,4 @@
-//! Sub-builders for the fluent [`Live`](crate::live::Live) API.
+//! Sub-builders for the fluent [`Live`] API.
 //!
 //! These builders use a "move self, return `Live`" pattern so that the
 //! caller's chain stays fully typed and fluent:
@@ -24,12 +24,69 @@ use std::sync::Arc;
 use serde_json::Value;
 
 use rs_adk::live::{
-    BoxFuture, Phase, PhaseInstruction, Transition, WatchPredicate, Watcher,
+    BoxFuture, InstructionModifier, Phase, PhaseInstruction, Transition, TranscriptWindow,
+    WatchPredicate, Watcher,
 };
 use rs_adk::State;
+use rs_genai::prelude::Content;
 use rs_genai::session::SessionWriter;
 
 use crate::live::Live;
+
+// ── PhaseDefaults ────────────────────────────────────────────────────────────
+
+/// Default modifiers and settings inherited by all phases.
+///
+/// Created by [`Live::phase_defaults`] and applied in [`PhaseBuilder::done`].
+pub struct PhaseDefaults {
+    pub(crate) modifiers: Vec<InstructionModifier>,
+    pub(crate) prompt_on_enter: bool,
+}
+
+impl PhaseDefaults {
+    pub(crate) fn new() -> Self {
+        Self {
+            modifiers: Vec::new(),
+            prompt_on_enter: false,
+        }
+    }
+
+    /// Append state keys to every phase's instruction at runtime.
+    pub fn with_state(mut self, keys: &[&str]) -> Self {
+        self.modifiers.push(InstructionModifier::StateAppend(
+            keys.iter().map(|s| s.to_string()).collect(),
+        ));
+        self
+    }
+
+    /// Conditionally append text to every phase when predicate is true.
+    pub fn when(
+        mut self,
+        predicate: impl Fn(&State) -> bool + Send + Sync + 'static,
+        text: impl Into<String>,
+    ) -> Self {
+        self.modifiers.push(InstructionModifier::Conditional {
+            predicate: Arc::new(predicate),
+            text: text.into(),
+        });
+        self
+    }
+
+    /// Append custom formatted context to every phase's instruction.
+    pub fn with_context(
+        mut self,
+        f: impl Fn(&State) -> String + Send + Sync + 'static,
+    ) -> Self {
+        self.modifiers.push(InstructionModifier::CustomAppend(Arc::new(f)));
+        self
+    }
+
+    /// Enable `prompt_on_enter` for all phases (model responds immediately on entry).
+    pub fn prompt_on_enter(mut self, enabled: bool) -> Self {
+        self.prompt_on_enter = enabled;
+        self
+    }
+}
 
 // ── PhaseBuilder ─────────────────────────────────────────────────────────────
 
@@ -46,6 +103,11 @@ pub struct PhaseBuilder {
     on_exit: Option<Arc<dyn Fn(State, Arc<dyn SessionWriter>) -> BoxFuture<()> + Send + Sync>>,
     transitions: Vec<Transition>,
     terminal: bool,
+    modifiers: Vec<InstructionModifier>,
+    prompt_on_enter_flag: bool,
+    on_enter_context_fn: Option<Arc<
+        dyn Fn(&State, &TranscriptWindow) -> Option<Vec<Content>> + Send + Sync
+    >>,
 }
 
 impl PhaseBuilder {
@@ -60,6 +122,9 @@ impl PhaseBuilder {
             on_exit: None,
             transitions: Vec::new(),
             terminal: false,
+            modifiers: Vec::new(),
+            prompt_on_enter_flag: false,
+            on_enter_context_fn: None,
         }
     }
 
@@ -132,8 +197,121 @@ impl PhaseBuilder {
         self
     }
 
+    /// Append state keys to the instruction at runtime.
+    /// Renders as `[Context: key1=val1, key2=val2, ...]`.
+    pub fn with_state(mut self, keys: &[&str]) -> Self {
+        self.modifiers.push(InstructionModifier::StateAppend(
+            keys.iter().map(|s| s.to_string()).collect(),
+        ));
+        self
+    }
+
+    /// Conditionally append text when a predicate is true.
+    pub fn when(
+        mut self,
+        predicate: impl Fn(&State) -> bool + Send + Sync + 'static,
+        text: impl Into<String>,
+    ) -> Self {
+        self.modifiers.push(InstructionModifier::Conditional {
+            predicate: Arc::new(predicate),
+            text: text.into(),
+        });
+        self
+    }
+
+    /// Append the result of a custom formatter to the instruction.
+    pub fn with_context(
+        mut self,
+        f: impl Fn(&State) -> String + Send + Sync + 'static,
+    ) -> Self {
+        self.modifiers.push(InstructionModifier::CustomAppend(Arc::new(f)));
+        self
+    }
+
+    /// Send `turnComplete: true` after instruction + context on phase entry,
+    /// causing the model to generate a response immediately.
+    pub fn prompt_on_enter(mut self, enabled: bool) -> Self {
+        self.prompt_on_enter_flag = enabled;
+        self
+    }
+
+    /// Set a context injection callback for phase entry.
+    /// Returns `Content` to send as `client_content` before prompting.
+    pub fn on_enter_context<F>(mut self, f: F) -> Self
+    where
+        F: Fn(&State, &TranscriptWindow) -> Option<Vec<Content>> + Send + Sync + 'static,
+    {
+        self.on_enter_context_fn = Some(Arc::new(f));
+        self
+    }
+
+    /// Inject a model-role bridge message on phase entry and prompt immediately.
+    ///
+    /// Combines `on_enter_context` + `prompt_on_enter(true)` into a single call,
+    /// eliminating the need to import `Content` in cookbook code.
+    ///
+    /// ```ignore
+    /// .phase("verify_identity")
+    ///     .instruction(VERIFY_IDENTITY_INSTRUCTION)
+    ///     .enter_prompt("The caller confirmed the disclosure. I'll now verify their identity.")
+    ///     .done()
+    /// ```
+    pub fn enter_prompt(mut self, message: impl Into<String>) -> Self {
+        let msg = message.into();
+        self.on_enter_context_fn = Some(Arc::new(move |_, _| {
+            Some(vec![Content::model(msg.clone())])
+        }));
+        self.prompt_on_enter_flag = true;
+        self
+    }
+
+    /// Like [`enter_prompt`](Self::enter_prompt) but with a state-aware closure.
+    ///
+    /// ```ignore
+    /// .enter_prompt_fn(|state, _tw| {
+    ///     if state.get::<bool>("cease_desist_requested").unwrap_or(false) {
+    ///         "Cease-and-desist requested. Closing call respectfully.".into()
+    ///     } else {
+    ///         "Wrapping up the call.".into()
+    ///     }
+    /// })
+    /// ```
+    pub fn enter_prompt_fn<F>(mut self, f: F) -> Self
+    where
+        F: Fn(&State, &TranscriptWindow) -> String + Send + Sync + 'static,
+    {
+        self.on_enter_context_fn = Some(Arc::new(move |state, tw| {
+            Some(vec![Content::model(f(state, tw))])
+        }));
+        self.prompt_on_enter_flag = true;
+        self
+    }
+
+    /// Apply a slice of pre-built instruction modifiers to this phase.
+    ///
+    /// Use with `P::with_state()`, `P::when()`, `P::context_fn()` factories.
+    ///
+    /// ```ignore
+    /// .phase("disclosure")
+    ///     .modifiers(&[P::with_state(KEYS), P::when(pred, "warning")])
+    ///     .done()
+    /// ```
+    pub fn modifiers(mut self, mods: &[InstructionModifier]) -> Self {
+        self.modifiers.extend(mods.iter().cloned());
+        self
+    }
+
     /// Finish building this phase and return the `Live` builder.
+    ///
+    /// Merges phase defaults (from [`Live::phase_defaults`]) with phase-specific
+    /// settings. Defaults are prepended so phase-specific modifiers take priority.
     pub fn done(mut self) -> Live {
+        // Merge defaults: prepend default modifiers, inherit prompt_on_enter if not set.
+        let mut merged_modifiers = self.live.phase_default_modifiers.clone();
+        merged_modifiers.append(&mut self.modifiers);
+
+        let prompt = self.prompt_on_enter_flag || self.live.phase_default_prompt_on_enter;
+
         let phase = Phase {
             name: self.name,
             instruction: self
@@ -145,6 +323,9 @@ impl PhaseBuilder {
             on_exit: self.on_exit,
             transitions: self.transitions,
             terminal: self.terminal,
+            modifiers: merged_modifiers,
+            prompt_on_enter: prompt,
+            on_enter_context: self.on_enter_context_fn,
         };
         self.live.add_phase(phase);
         self.live

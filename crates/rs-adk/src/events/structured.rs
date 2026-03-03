@@ -8,28 +8,77 @@ use serde_json::Value;
 /// Classification of a structured event.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EventType {
+    /// Internal reasoning or chain-of-thought.
     Thought,
+    /// User-facing content output.
     Content,
+    /// A tool/function call from the model.
     ToolCall,
+    /// The result of a tool/function call.
     ToolResult,
+    /// A code execution request.
     CallCode,
+    /// The result of a code execution.
     CodeResult,
+    /// An error event.
     Error,
+    /// An activity/status update (e.g., agent transfer).
     Activity,
+    /// A tool confirmation request or response.
     ToolConfirmation,
+    /// The agent has finished processing.
     Finished,
 }
 
 /// A typed, structured representation of an agent event.
 #[derive(Debug, Clone)]
 pub enum StructuredEvent {
-    Thought { text: String },
-    Content { text: String, author: String },
-    ToolCall { name: String, args: Value, call_id: Option<String> },
-    ToolResult { name: String, result: Value },
-    Error { message: String },
-    Activity { description: String },
-    ToolConfirmation { hint: Option<String>, confirmed: bool },
+    /// Internal reasoning or chain-of-thought text.
+    Thought {
+        /// The reasoning text.
+        text: String,
+    },
+    /// User-facing content with author attribution.
+    Content {
+        /// The content text.
+        text: String,
+        /// Who authored this content (e.g., "model", "agent").
+        author: String,
+    },
+    /// A tool/function call from the model.
+    ToolCall {
+        /// Tool name.
+        name: String,
+        /// Tool arguments as JSON.
+        args: Value,
+        /// Optional unique call identifier.
+        call_id: Option<String>,
+    },
+    /// The result of a tool/function call.
+    ToolResult {
+        /// Tool name.
+        name: String,
+        /// The result value.
+        result: Value,
+    },
+    /// An error event.
+    Error {
+        /// Error description.
+        message: String,
+    },
+    /// An activity/status update (e.g., agent transfer, escalation).
+    Activity {
+        /// Human-readable description of the activity.
+        description: String,
+    },
+    /// A tool confirmation request or response.
+    ToolConfirmation {
+        /// Optional hint for the confirmation UI.
+        hint: Option<String>,
+        /// Whether the tool call was confirmed.
+        confirmed: bool,
+    },
+    /// The agent has finished processing.
     Finished,
 }
 

@@ -11,6 +11,7 @@ pub struct AuthHandler {
 }
 
 impl AuthHandler {
+    /// Create a new auth handler with the given configuration.
     pub fn new(config: AuthConfig) -> Self {
         Self { config }
     }

@@ -28,6 +28,7 @@ pub struct TelemetryMiddleware {
 }
 
 impl TelemetryMiddleware {
+    /// Create a new telemetry middleware for the given agent.
     pub fn new(agent_name: impl Into<String>) -> Self {
         Self {
             agent_name: agent_name.into(),

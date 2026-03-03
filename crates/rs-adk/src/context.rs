@@ -19,30 +19,58 @@ pub enum AgentEvent {
     /// Passthrough of wire-level session events (text, audio, turn lifecycle).
     Session(rs_genai::session::SessionEvent),
     /// Agent lifecycle.
-    AgentStarted { name: String },
-    AgentCompleted { name: String },
-    /// Tool lifecycle (not in SessionEvent).
-    ToolCallStarted {
+    /// An agent has started execution.
+    AgentStarted {
+        /// Name of the agent that started.
         name: String,
+    },
+    /// An agent has completed execution.
+    AgentCompleted {
+        /// Name of the agent that completed.
+        name: String,
+    },
+    /// A tool call has started execution.
+    ToolCallStarted {
+        /// Tool name.
+        name: String,
+        /// Tool call arguments.
         args: serde_json::Value,
     },
+    /// A tool call completed successfully.
     ToolCallCompleted {
+        /// Tool name.
         name: String,
+        /// The tool's return value.
         result: serde_json::Value,
+        /// How long the tool call took.
         duration: std::time::Duration,
     },
+    /// A tool call failed.
     ToolCallFailed {
+        /// Tool name.
         name: String,
+        /// Error description.
         error: String,
     },
+    /// A streaming tool yielded an intermediate value.
     StreamingToolYield {
+        /// Tool name.
         name: String,
+        /// The yielded value.
         value: serde_json::Value,
     },
-    /// Multi-agent lifecycle.
-    AgentTransfer { from: String, to: String },
-    /// State changes.
-    StateChanged { key: String },
+    /// An agent transferred control to another agent.
+    AgentTransfer {
+        /// Source agent name.
+        from: String,
+        /// Target agent name.
+        to: String,
+    },
+    /// A state key was changed.
+    StateChanged {
+        /// The key that was modified.
+        key: String,
+    },
 }
 
 /// The context object that flows through agent execution.

@@ -4,14 +4,18 @@ use super::types::{CodeExecutionInput, CodeExecutionResult};
 /// Errors from code executor operations.
 #[derive(Debug, thiserror::Error)]
 pub enum CodeExecutorError {
+    /// The code execution failed at runtime.
     #[error("Code execution failed: {0}")]
     ExecutionFailed(String),
+    /// The requested model does not support code execution.
     #[error("Unsupported model: {0}")]
     UnsupportedModel(String),
+    /// A catch-all for other code executor errors.
     #[error("{0}")]
     Other(String),
 }
 
+/// Trait for sandboxed code execution in agent pipelines.
 #[async_trait]
 pub trait CodeExecutor: Send + Sync {
     /// Delimiters for identifying code blocks in model output.

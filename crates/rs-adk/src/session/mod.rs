@@ -23,8 +23,10 @@ use crate::events::Event;
 /// Errors from session service operations.
 #[derive(Debug, thiserror::Error)]
 pub enum SessionError {
+    /// The session with the given ID was not found.
     #[error("Session not found: {0}")]
     NotFound(SessionId),
+    /// A storage backend error.
     #[error("Storage error: {0}")]
     Storage(String),
 }

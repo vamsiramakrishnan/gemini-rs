@@ -14,9 +14,9 @@ use serde_json::Value;
 
 use rs_adk::live::extractor::{LlmExtractor, TurnExtractor};
 use rs_adk::live::{
-    ComputedRegistry, ComputedVar, EventCallbacks, LiveHandle, LiveSessionBuilder, Phase,
-    PhaseMachine, RateDetector, SustainedDetector, TemporalPattern, TemporalRegistry,
-    TurnCountDetector, Watcher, WatcherRegistry,
+    ComputedRegistry, ComputedVar, EventCallbacks, InstructionModifier, LiveHandle,
+    LiveSessionBuilder, Phase, PhaseMachine, RateDetector, SustainedDetector, TemporalPattern,
+    TemporalRegistry, TurnCountDetector, Watcher, WatcherRegistry,
 };
 use rs_adk::llm::BaseLlm;
 use rs_adk::tool::ToolDispatcher;
@@ -24,7 +24,7 @@ use rs_adk::State;
 use rs_genai::prelude::*;
 use rs_genai::session::SessionWriter;
 
-use crate::live_builders::{PhaseBuilder, WatchBuilder};
+use crate::live_builders::{PhaseBuilder, PhaseDefaults, WatchBuilder};
 
 /// Fluent builder for Gemini Live sessions.
 ///
@@ -60,6 +60,17 @@ use crate::live_builders::{PhaseBuilder, WatchBuilder};
 /// // Read latest extraction from shared State at any time:
 /// let order: Option<OrderState> = handle.extracted("OrderState");
 /// ```
+/// A deferred agent tool registration (resolved at connect time when State is available).
+struct DeferredAgentTool {
+    name: String,
+    description: String,
+    agent: Arc<dyn rs_adk::text::TextAgent>,
+}
+
+/// Fluent builder for constructing and connecting Gemini Live sessions.
+///
+/// Accumulates model configuration, callbacks, extractors, phases, watchers,
+/// and temporal patterns, then connects via one of the `connect_*` methods.
 pub struct Live {
     config: SessionConfig,
     callbacks: EventCallbacks,
@@ -71,6 +82,14 @@ pub struct Live {
     initial_phase: Option<String>,
     watchers: WatcherRegistry,
     temporal: TemporalRegistry,
+    greeting: Option<String>,
+    // Phase defaults: modifiers + prompt_on_enter inherited by all phases.
+    pub(crate) phase_default_modifiers: Vec<InstructionModifier>,
+    pub(crate) phase_default_prompt_on_enter: bool,
+    // Deferred agent tools (resolved at connect time).
+    deferred_agent_tools: Vec<DeferredAgentTool>,
+    // LLMs to warm up at connect time.
+    warm_up_llms: Vec<Arc<dyn BaseLlm>>,
 }
 
 impl Live {
@@ -86,6 +105,11 @@ impl Live {
             initial_phase: None,
             watchers: WatcherRegistry::new(),
             temporal: TemporalRegistry::new(),
+            greeting: None,
+            phase_default_modifiers: Vec::new(),
+            phase_default_prompt_on_enter: false,
+            deferred_agent_tools: Vec::new(),
+            warm_up_llms: Vec::new(),
         }
     }
 
@@ -109,6 +133,25 @@ impl Live {
         self
     }
 
+    /// Set a greeting prompt to trigger the model to initiate the conversation.
+    ///
+    /// When set, this text is sent immediately after the session connects,
+    /// causing the model to respond first (e.g. with a greeting or introduction).
+    ///
+    /// ```ignore
+    /// let handle = Live::builder()
+    ///     .model(GeminiModel::Gemini2_0FlashLive)
+    ///     .instruction("You are a friendly assistant")
+    ///     .greeting("Greet the user warmly and introduce yourself.")
+    ///     .connect_vertex(project, location, token)
+    ///     .await?;
+    /// // Model will speak first without any user input
+    /// ```
+    pub fn greeting(mut self, prompt: impl Into<String>) -> Self {
+        self.greeting = Some(prompt.into());
+        self
+    }
+
     /// Set the temperature.
     pub fn temperature(mut self, temp: f32) -> Self {
         self.config = self.config.temperature(temp);
@@ -120,6 +163,74 @@ impl Live {
     /// Set the tool dispatcher (auto-dispatches tool calls).
     pub fn tools(mut self, dispatcher: ToolDispatcher) -> Self {
         self.dispatcher = Some(dispatcher);
+        self
+    }
+
+    /// Register tools from a `T` module composition.
+    ///
+    /// ```ignore
+    /// use adk_rs_fluent::prelude::*;
+    ///
+    /// Live::builder()
+    ///     .with_tools(
+    ///         T::simple("get_weather", "Get weather", |args| async move {
+    ///             Ok(serde_json::json!({"temp": 22}))
+    ///         })
+    ///         | T::google_search()
+    ///     )
+    /// ```
+    pub fn with_tools(mut self, composite: crate::compose::tools::ToolComposite) -> Self {
+        let dispatcher = self.dispatcher.get_or_insert_with(ToolDispatcher::new);
+        for entry in composite.entries {
+            match entry {
+                crate::compose::tools::ToolCompositeEntry::Function(f) => {
+                    dispatcher.register_function(f);
+                }
+                crate::compose::tools::ToolCompositeEntry::BuiltIn(tool) => {
+                    // Built-in tools go directly to session config
+                    self.config = self.config.add_tool(tool);
+                }
+            }
+        }
+        self
+    }
+
+    /// Register a text agent as a tool the live model can call.
+    ///
+    /// The agent shares the session's `State`, so it can read live-extracted
+    /// values and its mutations are visible to watchers and phase transitions.
+    ///
+    /// ```ignore
+    /// Live::builder()
+    ///     .agent_tool("verify_identity", "Verify caller identity", verifier_agent)
+    ///     .agent_tool("calc_payment", "Calculate payment plans", calc_pipeline)
+    /// ```
+    pub fn agent_tool(
+        mut self,
+        name: impl Into<String>,
+        description: impl Into<String>,
+        agent: impl rs_adk::text::TextAgent + 'static,
+    ) -> Self {
+        self.deferred_agent_tools.push(DeferredAgentTool {
+            name: name.into(),
+            description: description.into(),
+            agent: Arc::new(agent),
+        });
+        self
+    }
+
+    /// Register a text agent (already `Arc`'d) as a tool.
+    pub fn agent_tool_arc(
+        mut self,
+        name: impl Into<String>,
+        description: impl Into<String>,
+        agent: Arc<dyn rs_adk::text::TextAgent>,
+    ) -> Self {
+        self.deferred_agent_tools.push(DeferredAgentTool {
+            name: name.into(),
+            description: description.into(),
+            agent,
+        });
         self
     }
 
@@ -256,6 +367,9 @@ impl Live {
         let schema =
             serde_json::to_value(root_schema).unwrap_or(serde_json::Value::Null);
 
+        // Auto-register LLM for connection warming
+        self.warm_up_llms.push(llm.clone());
+
         let extractor = LlmExtractor::new(name, llm, prompt, window_size).with_schema(schema);
         self.extractors.push(Arc::new(extractor));
         self
@@ -282,6 +396,20 @@ impl Live {
     {
         self.callbacks.on_extracted =
             Some(Arc::new(move |name, value| Box::pin(f(name, value))));
+        self
+    }
+
+    /// Called when a TurnExtractor fails.
+    ///
+    /// The callback receives the extractor name and error message.
+    /// Use this for custom error handling (alerting, retry logic, etc.).
+    pub fn on_extraction_error<F, Fut>(mut self, f: F) -> Self
+    where
+        F: Fn(String, String) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        self.callbacks.on_extraction_error =
+            Some(Arc::new(move |name, error| Box::pin(f(name, error))));
         self
     }
 
@@ -367,6 +495,31 @@ impl Live {
         self
     }
 
+    /// State-reactive instruction amendment (additive, not replacement).
+    ///
+    /// Unlike `instruction_template` (which replaces the entire instruction),
+    /// this appends to the current phase instruction. The developer never needs
+    /// to know or repeat the base instruction.
+    ///
+    /// # Example
+    /// ```ignore
+    /// .instruction_amendment(|state| {
+    ///     let risk: String = state.get("derived:risk").unwrap_or_default();
+    ///     if risk == "high" {
+    ///         Some("[IMPORTANT: Use empathetic language. Do not threaten.]".into())
+    ///     } else {
+    ///         None
+    ///     }
+    /// })
+    /// ```
+    pub fn instruction_amendment(
+        mut self,
+        f: impl Fn(&rs_adk::State) -> Option<String> + Send + Sync + 'static,
+    ) -> Self {
+        self.callbacks.instruction_amendment = Some(Arc::new(f));
+        self
+    }
+
     // -- Computed State --
 
     /// Register a computed (derived) state variable.
@@ -388,6 +541,28 @@ impl Live {
     }
 
     // -- Phase Machine --
+
+    /// Set default modifiers and `prompt_on_enter` inherited by all phases.
+    ///
+    /// Phase-specific modifiers are applied *after* defaults, so they extend (not replace).
+    ///
+    /// ```ignore
+    /// Live::builder()
+    ///     .phase_defaults(|p| {
+    ///         p.with_state(&["emotional_state", "risk_level"])
+    ///          .when(risk_is_elevated, "Show extra empathy.")
+    ///          .prompt_on_enter(true)
+    ///     })
+    ///     .phase("greet").instruction("...").done()
+    ///     .phase("close").instruction("...").done()
+    ///     // Both phases inherit the modifiers and prompt_on_enter.
+    /// ```
+    pub fn phase_defaults(mut self, f: impl FnOnce(PhaseDefaults) -> PhaseDefaults) -> Self {
+        let defaults = f(PhaseDefaults::new());
+        self.phase_default_modifiers = defaults.modifiers;
+        self.phase_default_prompt_on_enter = defaults.prompt_on_enter;
+        self
+    }
 
     /// Start building a conversation phase.
     ///
@@ -554,12 +729,13 @@ impl Live {
 
     /// Called when model requests tool execution.
     /// Return `None` to auto-dispatch, `Some(responses)` to override.
+    /// Receives State for natural state promotion from tool results.
     pub fn on_tool_call<F, Fut>(mut self, f: F) -> Self
     where
-        F: Fn(Vec<FunctionCall>) -> Fut + Send + Sync + 'static,
+        F: Fn(Vec<FunctionCall>, State) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Option<Vec<FunctionResponse>>> + Send + 'static,
     {
-        self.callbacks.on_tool_call = Some(Arc::new(move |calls| Box::pin(f(calls))));
+        self.callbacks.on_tool_call = Some(Arc::new(move |calls, state| Box::pin(f(calls, state))));
         self
     }
 
@@ -584,12 +760,14 @@ impl Live {
     }
 
     /// Called when session connects (setup complete).
+    ///
+    /// Receives a `SessionWriter` for sending messages on connect.
     pub fn on_connected<F, Fut>(mut self, f: F) -> Self
     where
-        F: Fn() -> Fut + Send + Sync + 'static,
+        F: Fn(Arc<dyn rs_genai::session::SessionWriter>) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = ()> + Send + 'static,
     {
-        self.callbacks.on_connected = Some(Arc::new(move || Box::pin(f())));
+        self.callbacks.on_connected = Some(Arc::new(move |w| Box::pin(f(w))));
         self
     }
 
@@ -646,8 +824,28 @@ impl Live {
 
     async fn build_and_connect(self) -> Result<LiveHandle, rs_adk::error::AgentError> {
         let mut builder = LiveSessionBuilder::new(self.config);
-        if let Some(dispatcher) = self.dispatcher {
+
+        // Resolve deferred agent tools: create shared State, register TextAgentTools
+        let mut dispatcher = self.dispatcher;
+        if !self.deferred_agent_tools.is_empty() {
+            let state = State::new();
+            let d = dispatcher.get_or_insert_with(ToolDispatcher::new);
+            for deferred in self.deferred_agent_tools {
+                d.register(rs_adk::TextAgentTool::from_arc(
+                    deferred.name,
+                    deferred.description,
+                    deferred.agent,
+                    state.clone(),
+                ));
+            }
+            builder = builder.with_state(state);
+        }
+
+        if let Some(dispatcher) = dispatcher {
             builder = builder.dispatcher(dispatcher);
+        }
+        if let Some(greeting) = self.greeting {
+            builder = builder.greeting(greeting);
         }
         builder = builder.callbacks(self.callbacks);
         for ext in self.extractors {
@@ -669,6 +867,14 @@ impl Live {
             builder = builder.watchers(self.watchers);
         }
         builder = builder.temporal(self.temporal);
+
+        // Spawn fire-and-forget warm-up tasks for OOB LLMs
+        // (pre-establishes TCP+TLS so first extract call is fast)
+        for llm in self.warm_up_llms {
+            tokio::spawn(async move {
+                let _ = llm.warm_up().await;
+            });
+        }
 
         builder.connect().await
     }
@@ -696,7 +902,7 @@ mod tests {
             .on_interrupted(|| async {})
             .on_turn_complete(|| async {})
             .on_go_away(|_d| async {})
-            .on_connected(|| async {})
+            .on_connected(|_writer| async {})
             .on_disconnected(|_r| async {})
             .on_error(|_e| async {});
         // Just verify the builder chain compiles

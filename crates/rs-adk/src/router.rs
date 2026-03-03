@@ -12,6 +12,7 @@ pub struct AgentRegistry {
 }
 
 impl AgentRegistry {
+    /// Create a new empty agent registry.
     pub fn new() -> Self {
         Self::default()
     }
@@ -36,6 +37,7 @@ impl AgentRegistry {
         self.agents.len()
     }
 
+    /// Whether the registry has no agents.
     pub fn is_empty(&self) -> bool {
         self.agents.is_empty()
     }

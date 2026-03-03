@@ -16,6 +16,7 @@ pub struct McpToolset {
 }
 
 impl McpToolset {
+    /// Create a new MCP toolset connected to the given session manager.
     pub fn new(session_manager: Arc<McpSessionManager>) -> Self {
         Self {
             session_manager,

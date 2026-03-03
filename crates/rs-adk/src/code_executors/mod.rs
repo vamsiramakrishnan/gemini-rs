@@ -1,6 +1,12 @@
+//! Code execution infrastructure — sandboxed code execution for agents.
+
+/// Types used by code executors (input, output, files).
 pub mod types;
+/// Base trait and error types for code execution.
 pub mod base;
+/// Built-in code executor using Gemini's native code execution.
 pub mod built_in;
+/// Utility functions for extracting code blocks and building parts.
 pub mod utils;
 
 pub use types::{CodeExecutionInput, CodeExecutionResult, CodeFile};

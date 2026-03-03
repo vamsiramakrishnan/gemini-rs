@@ -55,8 +55,9 @@ pub struct EventCallbacks {
     pub on_interrupted: Option<Arc<dyn Fn() -> BoxFuture<()> + Send + Sync>>,
     /// Called when model requests tool execution.
     /// Return `None` to use auto-dispatch (ToolDispatcher), `Some` to override.
+    /// Receives State for natural state promotion from tool results.
     pub on_tool_call:
-        Option<Arc<dyn Fn(Vec<FunctionCall>) -> BoxFuture<Option<Vec<FunctionResponse>>> + Send + Sync>>,
+        Option<Arc<dyn Fn(Vec<FunctionCall>, State) -> BoxFuture<Option<Vec<FunctionResponse>>> + Send + Sync>>,
     /// Called when server cancels pending tool calls.
     pub on_tool_cancelled: Option<Arc<dyn Fn(Vec<String>) -> BoxFuture<()> + Send + Sync>>,
     /// Called when the model completes its turn.
@@ -64,7 +65,9 @@ pub struct EventCallbacks {
     /// Called when server sends GoAway (session ending soon).
     pub on_go_away: Option<Arc<dyn Fn(Duration) -> BoxFuture<()> + Send + Sync>>,
     /// Called when session setup completes (connected).
-    pub on_connected: Option<Arc<dyn Fn() -> BoxFuture<()> + Send + Sync>>,
+    ///
+    /// Receives a `SessionWriter` for sending messages on connect (e.g. greeting prompts).
+    pub on_connected: Option<Arc<dyn Fn(Arc<dyn SessionWriter>) -> BoxFuture<()> + Send + Sync>>,
     /// Called when session disconnects.
     pub on_disconnected: Option<Arc<dyn Fn(Option<String>) -> BoxFuture<()> + Send + Sync>>,
     /// Called after session resumes from GoAway.
@@ -76,6 +79,12 @@ pub struct EventCallbacks {
     /// Called when a TurnExtractor produces a result (extractor_name, value).
     pub on_extracted:
         Option<Arc<dyn Fn(String, serde_json::Value) -> BoxFuture<()> + Send + Sync>>,
+    /// Called when a TurnExtractor fails (extractor_name, error_message).
+    ///
+    /// By default, extraction failures are logged via `tracing::warn!`.
+    /// Register this callback to implement custom error handling (retry, alert, etc.).
+    pub on_extraction_error:
+        Option<Arc<dyn Fn(String, String) -> BoxFuture<()> + Send + Sync>>,
 
     // -- Outbound interceptors (transform data going to Gemini) --
 
@@ -95,7 +104,7 @@ pub struct EventCallbacks {
     pub on_turn_boundary:
         Option<Arc<dyn Fn(State, Arc<dyn SessionWriter>) -> BoxFuture<()> + Send + Sync>>,
 
-    /// State-reactive system instruction template.
+    /// State-reactive system instruction template (full replacement).
     ///
     /// Called after extractors run on each TurnComplete. If it returns
     /// `Some(instruction)`, the system instruction is updated mid-session.
@@ -103,6 +112,17 @@ pub struct EventCallbacks {
     ///
     /// This is sync (no async) because instruction generation should be fast.
     pub instruction_template: Option<Arc<dyn Fn(&State) -> Option<String> + Send + Sync>>,
+
+    /// State-reactive instruction amendment (additive, not replacement).
+    ///
+    /// Called after extractors and phase transitions on each TurnComplete.
+    /// If it returns `Some(text)`, the text is appended to the current phase
+    /// instruction (separated by `\n\n`). Returns `None` to skip amendment.
+    ///
+    /// Unlike `instruction_template` (which replaces the entire instruction),
+    /// this only adds to the phase instruction — the developer never needs to
+    /// know or repeat the base instruction.
+    pub instruction_amendment: Option<Arc<dyn Fn(&State) -> Option<String> + Send + Sync>>,
 }
 
 impl Default for EventCallbacks {
@@ -127,9 +147,11 @@ impl Default for EventCallbacks {
             on_error: None,
             on_transfer: None,
             on_extracted: None,
+            on_extraction_error: None,
             before_tool_response: None,
             on_turn_boundary: None,
             instruction_template: None,
+            instruction_amendment: None,
         }
     }
 }
@@ -156,9 +178,11 @@ impl std::fmt::Debug for EventCallbacks {
             .field("on_error", &self.on_error.is_some())
             .field("on_transfer", &self.on_transfer.is_some())
             .field("on_extracted", &self.on_extracted.is_some())
+            .field("on_extraction_error", &self.on_extraction_error.is_some())
             .field("before_tool_response", &self.before_tool_response.is_some())
             .field("on_turn_boundary", &self.on_turn_boundary.is_some())
             .field("instruction_template", &self.instruction_template.is_some())
+            .field("instruction_amendment", &self.instruction_amendment.is_some())
             .finish()
     }
 }

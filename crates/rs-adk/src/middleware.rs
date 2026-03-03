@@ -14,18 +14,23 @@ use crate::error::{AgentError, ToolError};
 /// Middleware hooks — all optional, implement only what you need.
 #[async_trait]
 pub trait Middleware: Send + Sync + 'static {
+    /// Unique name for this middleware (used in logging/debugging).
     fn name(&self) -> &str;
 
+    /// Called before an agent begins execution.
     async fn before_agent(&self, _ctx: &InvocationContext) -> Result<(), AgentError> {
         Ok(())
     }
+    /// Called after an agent completes execution.
     async fn after_agent(&self, _ctx: &InvocationContext) -> Result<(), AgentError> {
         Ok(())
     }
 
+    /// Called before a tool is invoked.
     async fn before_tool(&self, _call: &FunctionCall) -> Result<(), AgentError> {
         Ok(())
     }
+    /// Called after a tool completes successfully.
     async fn after_tool(
         &self,
         _call: &FunctionCall,
@@ -33,6 +38,7 @@ pub trait Middleware: Send + Sync + 'static {
     ) -> Result<(), AgentError> {
         Ok(())
     }
+    /// Called when a tool execution fails.
     async fn on_tool_error(
         &self,
         _call: &FunctionCall,
@@ -41,10 +47,12 @@ pub trait Middleware: Send + Sync + 'static {
         Ok(())
     }
 
+    /// Called when an agent event is emitted.
     async fn on_event(&self, _event: &AgentEvent) -> Result<(), AgentError> {
         Ok(())
     }
 
+    /// Called when an agent error occurs.
     async fn on_error(&self, _err: &AgentError) -> Result<(), AgentError> {
         Ok(())
     }
@@ -57,10 +65,12 @@ pub struct MiddlewareChain {
 }
 
 impl MiddlewareChain {
+    /// Create a new empty middleware chain.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Append a middleware to the end of the chain.
     pub fn add(&mut self, middleware: Arc<dyn Middleware>) {
         self.layers.push(middleware);
     }
@@ -70,6 +80,7 @@ impl MiddlewareChain {
         self.layers.insert(0, middleware);
     }
 
+    /// Run all `before_agent` hooks in order.
     pub async fn run_before_agent(&self, ctx: &InvocationContext) -> Result<(), AgentError> {
         for m in &self.layers {
             m.before_agent(ctx).await?;
@@ -77,6 +88,7 @@ impl MiddlewareChain {
         Ok(())
     }
 
+    /// Run all `after_agent` hooks in reverse order.
     pub async fn run_after_agent(&self, ctx: &InvocationContext) -> Result<(), AgentError> {
         for m in self.layers.iter().rev() {
             m.after_agent(ctx).await?;
@@ -84,6 +96,7 @@ impl MiddlewareChain {
         Ok(())
     }
 
+    /// Run all `before_tool` hooks in order.
     pub async fn run_before_tool(&self, call: &FunctionCall) -> Result<(), AgentError> {
         for m in &self.layers {
             m.before_tool(call).await?;
@@ -91,6 +104,7 @@ impl MiddlewareChain {
         Ok(())
     }
 
+    /// Run all `after_tool` hooks in reverse order.
     pub async fn run_after_tool(
         &self,
         call: &FunctionCall,
@@ -102,6 +116,7 @@ impl MiddlewareChain {
         Ok(())
     }
 
+    /// Run all `on_tool_error` hooks in order.
     pub async fn run_on_tool_error(
         &self,
         call: &FunctionCall,
@@ -113,6 +128,7 @@ impl MiddlewareChain {
         Ok(())
     }
 
+    /// Run all `on_event` hooks in order.
     pub async fn run_on_event(&self, event: &AgentEvent) -> Result<(), AgentError> {
         for m in &self.layers {
             m.on_event(event).await?;
@@ -120,6 +136,7 @@ impl MiddlewareChain {
         Ok(())
     }
 
+    /// Run all `on_error` hooks in order.
     pub async fn run_on_error(&self, err: &AgentError) -> Result<(), AgentError> {
         for m in &self.layers {
             m.on_error(err).await?;
@@ -127,10 +144,12 @@ impl MiddlewareChain {
         Ok(())
     }
 
+    /// Whether the chain has no middleware layers.
     pub fn is_empty(&self) -> bool {
         self.layers.is_empty()
     }
 
+    /// Number of middleware layers in the chain.
     pub fn len(&self) -> usize {
         self.layers.len()
     }
@@ -145,6 +164,7 @@ impl MiddlewareChain {
 pub struct LogMiddleware;
 
 impl LogMiddleware {
+    /// Create a new log middleware.
     pub fn new() -> Self {
         Self
     }
@@ -241,6 +261,7 @@ pub struct LatencyMiddleware {
 }
 
 impl LatencyMiddleware {
+    /// Create a new latency middleware with empty records.
     pub fn new() -> Self {
         Self {
             in_flight: parking_lot::Mutex::new(std::collections::HashMap::new()),

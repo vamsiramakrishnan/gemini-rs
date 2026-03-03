@@ -4,15 +4,20 @@ use rs_genai::prelude::{Blob, CodeExecutionResult, ExecutableCode, FunctionCall,
 use super::types::{A2aFileContent, A2aPart};
 use std::collections::HashMap;
 
-/// Metadata keys used for A2A <-> GenAI conversion.
+/// Metadata key identifying the ADK type of a data part.
 pub const ADK_TYPE_KEY: &str = "adk_type";
+/// Metadata key flagging a function call as long-running.
 pub const ADK_IS_LONG_RUNNING_KEY: &str = "adk_is_long_running";
+/// Metadata key for thought/reasoning content.
 pub const ADK_THOUGHT_KEY: &str = "adk_thought";
 
-/// Data part type tags.
+/// Type tag for function call data parts.
 pub const DATA_TYPE_FUNCTION_CALL: &str = "function_call";
+/// Type tag for function response data parts.
 pub const DATA_TYPE_FUNCTION_RESPONSE: &str = "function_response";
+/// Type tag for code execution result data parts.
 pub const DATA_TYPE_CODE_EXEC_RESULT: &str = "code_execution_result";
+/// Type tag for executable code data parts.
 pub const DATA_TYPE_EXECUTABLE_CODE: &str = "executable_code";
 
 /// Convert GenAI Parts to A2A Parts.

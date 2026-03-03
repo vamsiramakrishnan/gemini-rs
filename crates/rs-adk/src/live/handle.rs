@@ -10,16 +10,19 @@ use tokio::task::JoinHandle;
 
 use crate::state::State;
 
+use super::telemetry::SessionTelemetry;
+
 /// Handle for interacting with a running Live session.
 ///
 /// Provides send methods for audio/text/video, system instruction updates,
-/// event subscription, state access, and graceful shutdown.
+/// event subscription, state access, telemetry, and graceful shutdown.
 #[derive(Clone)]
 pub struct LiveHandle {
     session: SessionHandle,
     _fast_task: Arc<JoinHandle<()>>,
     _ctrl_task: Arc<JoinHandle<()>>,
     state: State,
+    telemetry: Arc<SessionTelemetry>,
 }
 
 impl LiveHandle {
@@ -28,12 +31,14 @@ impl LiveHandle {
         fast_task: JoinHandle<()>,
         ctrl_task: JoinHandle<()>,
         state: State,
+        telemetry: Arc<SessionTelemetry>,
     ) -> Self {
         Self {
             session,
             _fast_task: Arc::new(fast_task),
             _ctrl_task: Arc::new(ctrl_task),
             state,
+            telemetry,
         }
     }
 
@@ -93,6 +98,13 @@ impl LiveHandle {
     /// extractor's name. Use `state().get::<T>(name)` to read typed values.
     pub fn state(&self) -> &State {
         &self.state
+    }
+
+    /// Access the session telemetry (auto-collected by the telemetry lane).
+    ///
+    /// Use `telemetry().snapshot()` to get a JSON snapshot of all metrics.
+    pub fn telemetry(&self) -> &Arc<SessionTelemetry> {
+        &self.telemetry
     }
 
     /// Convenience: get the latest extraction result by extractor name.

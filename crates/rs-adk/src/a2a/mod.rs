@@ -1,5 +1,10 @@
+//! Agent-to-Agent (A2A) protocol types and converters.
+
+/// A2A protocol data types (messages, tasks, artifacts, parts).
 pub mod types;
+/// Bidirectional conversion between A2A parts and GenAI parts.
 pub mod part_converter;
+/// Bidirectional conversion between A2A messages and agent events.
 pub mod event_converter;
 
 pub use types::{

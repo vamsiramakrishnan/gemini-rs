@@ -5,20 +5,32 @@
 /// A section of a prompt.
 #[derive(Clone, Debug)]
 pub struct PromptSection {
+    /// The semantic category of this section.
     pub kind: PromptSectionKind,
+    /// The text content of this section.
     pub content: String,
 }
 
+/// The semantic category of a prompt section.
 #[derive(Clone, Debug, PartialEq)]
 pub enum PromptSectionKind {
+    /// Agent role definition (e.g., "You are ...").
     Role,
+    /// Task description (e.g., "Your task: ...").
     Task,
+    /// Behavioral constraint (e.g., "Constraint: ...").
     Constraint,
+    /// Output format specification.
     Format,
+    /// Input/output example.
     Example,
+    /// Free-form text.
     Text,
+    /// Background context.
     Context,
+    /// Personality or persona description.
     Persona,
+    /// Bulleted guideline list.
     Guidelines,
 }
 
@@ -53,6 +65,7 @@ impl std::ops::Add for PromptSection {
 /// A composed prompt built from multiple sections.
 #[derive(Clone, Debug)]
 pub struct PromptComposite {
+    /// The ordered list of prompt sections.
     pub sections: Vec<PromptSection>,
 }
 
@@ -64,6 +77,18 @@ impl PromptComposite {
             .map(|s| s.render())
             .collect::<Vec<_>>()
             .join("\n\n")
+    }
+}
+
+impl From<PromptComposite> for String {
+    fn from(p: PromptComposite) -> String {
+        p.render()
+    }
+}
+
+impl From<PromptSection> for String {
+    fn from(s: PromptSection) -> String {
+        s.render()
     }
 }
 
@@ -156,6 +181,46 @@ impl P {
             content: format!("Guidelines:\n{content}"),
         }
     }
+
+    // ── Instruction modifier factories ──────────────────────────────────────
+    // Bridge P-module composition to the InstructionModifier system.
+
+    /// Create a state-append modifier that renders selected state keys into the instruction.
+    ///
+    /// ```ignore
+    /// let modifiers = P::with_state(&["emotional_state", "willingness_to_pay"]);
+    /// ```
+    pub fn with_state(keys: &[&str]) -> rs_adk::live::InstructionModifier {
+        rs_adk::live::InstructionModifier::StateAppend(
+            keys.iter().map(|k| k.to_string()).collect(),
+        )
+    }
+
+    /// Create a conditional modifier that appends text when the predicate is true.
+    ///
+    /// ```ignore
+    /// let risk_mod = P::when(risk_is_elevated, "IMPORTANT: Show extra empathy.");
+    /// ```
+    pub fn when(
+        predicate: impl Fn(&rs_adk::State) -> bool + Send + Sync + 'static,
+        text: impl Into<String>,
+    ) -> rs_adk::live::InstructionModifier {
+        rs_adk::live::InstructionModifier::Conditional {
+            predicate: std::sync::Arc::new(predicate),
+            text: text.into(),
+        }
+    }
+
+    /// Create a custom-append modifier from a formatting function.
+    ///
+    /// ```ignore
+    /// let ctx = P::context_fn(|s| format!("Customer: {}", s.get::<String>("name").unwrap_or_default()));
+    /// ```
+    pub fn context_fn(
+        f: impl Fn(&rs_adk::State) -> String + Send + Sync + 'static,
+    ) -> rs_adk::live::InstructionModifier {
+        rs_adk::live::InstructionModifier::CustomAppend(std::sync::Arc::new(f))
+    }
 }
 
 #[cfg(test)]
@@ -236,5 +301,18 @@ mod tests {
         assert_eq!(P::role("x").kind, PromptSectionKind::Role);
         assert_eq!(P::task("x").kind, PromptSectionKind::Task);
         assert_eq!(P::text("x").kind, PromptSectionKind::Text);
+    }
+
+    #[test]
+    fn section_into_string() {
+        let s: String = P::role("analyst").into();
+        assert_eq!(s, "You are analyst.");
+    }
+
+    #[test]
+    fn composite_into_string() {
+        let s: String = (P::role("analyst") + P::task("analyze data")).into();
+        assert!(s.contains("You are analyst."));
+        assert!(s.contains("Your task: analyze data"));
     }
 }

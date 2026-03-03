@@ -55,6 +55,7 @@ impl ArtifactTransform {
 /// An artifact composite — multiple transforms composed together.
 #[derive(Debug, Clone)]
 pub struct ArtifactComposite {
+    /// The list of artifact transforms in this composite.
     pub transforms: Vec<ArtifactTransform>,
 }
 

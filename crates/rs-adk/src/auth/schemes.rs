@@ -7,9 +7,13 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OAuthGrantType {
+    /// Client credentials grant (machine-to-machine).
     ClientCredentials,
+    /// Authorization code grant (user login flow).
     AuthorizationCode,
+    /// Implicit grant (legacy browser flow).
     Implicit,
+    /// Resource owner password grant.
     Password,
 }
 
@@ -38,18 +42,23 @@ pub enum AuthScheme {
     /// OAuth2 authentication.
     #[serde(rename = "oauth2")]
     OAuth2 {
+        /// The OAuth2 grant type.
         #[serde(skip_serializing_if = "Option::is_none")]
         grant_type: Option<OAuthGrantType>,
+        /// Authorization endpoint URL.
         #[serde(skip_serializing_if = "Option::is_none")]
         authorization_url: Option<String>,
+        /// Token endpoint URL.
         #[serde(skip_serializing_if = "Option::is_none")]
         token_url: Option<String>,
+        /// Available scopes (name to description mapping).
         #[serde(skip_serializing_if = "Option::is_none")]
         scopes: Option<HashMap<String, String>>,
     },
     /// OpenID Connect Discovery.
     #[serde(rename = "openIdConnect")]
     OpenIdConnect {
+        /// URL of the OpenID Connect discovery document.
         open_id_connect_url: String,
     },
 }

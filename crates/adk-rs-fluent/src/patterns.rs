@@ -93,7 +93,9 @@ pub fn map_over(agent: AgentBuilder, concurrency: usize) -> MapOver {
 /// A map-over workflow node — applies one agent to many items.
 #[derive(Clone, Debug)]
 pub struct MapOver {
+    /// The agent template applied to each item.
     pub agent: AgentBuilder,
+    /// Maximum number of concurrent executions.
     pub concurrency: usize,
 }
 

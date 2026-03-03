@@ -41,13 +41,17 @@ struct AgentBuilderInner {
 /// An entry in the builder's tool list — either a runtime ToolKind or a declaration.
 #[derive(Clone)]
 pub enum ToolEntry {
+    /// A runtime tool with a handler function.
     Runtime(Arc<dyn ToolEntryTrait>),
+    /// A wire-level tool declaration (e.g., built-in tools like Google Search).
     Declaration(Tool),
 }
 
 /// Trait for tool entries that can provide a name (for dedup/inspection).
 pub trait ToolEntryTrait: Send + Sync + 'static {
+    /// The tool's registered name.
     fn name(&self) -> &str;
+    /// Convert this entry into the runtime `ToolKind` variant for dispatch.
     fn to_tool_kind(&self) -> ToolKind;
 }
 

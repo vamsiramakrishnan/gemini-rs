@@ -22,8 +22,10 @@ pub struct AuthCredential {
 /// Errors from credential service operations.
 #[derive(Debug, thiserror::Error)]
 pub enum CredentialError {
+    /// The requested credential was not found.
     #[error("Credential not found")]
     NotFound,
+    /// A storage backend error.
     #[error("{0}")]
     Storage(String),
 }
@@ -54,6 +56,7 @@ pub struct InMemoryCredentialService {
 }
 
 impl InMemoryCredentialService {
+    /// Create a new empty in-memory credential service.
     pub fn new() -> Self {
         Self {
             inner: DashMap::new(),

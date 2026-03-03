@@ -10,8 +10,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[derive(Default)]
 pub enum GeminiModel {
+    /// Gemini 2.0 Flash Live (gemini-2.0-flash-live-001).
     #[serde(rename = "models/gemini-2.0-flash-live-001")]
     Gemini2_0FlashLive,
+    /// Gemini Live 2.5 Flash with native audio (default).
     #[serde(rename = "models/gemini-live-2.5-flash-native-audio")]
     #[default]
     GeminiLive2_5FlashNativeAudio,
@@ -37,10 +39,15 @@ impl std::fmt::Display for GeminiModel {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[derive(Default)]
 pub enum Voice {
+    /// Aoede voice preset.
     Aoede,
+    /// Charon voice preset.
     Charon,
+    /// Fenrir voice preset.
     Fenrir,
+    /// Kore voice preset.
     Kore,
+    /// Puck voice preset (default).
     #[default]
     Puck,
     /// Custom voice name for forward compatibility.
@@ -80,8 +87,11 @@ impl AudioFormat {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum Modality {
+    /// Text output.
     Text,
+    /// Audio output.
     Audio,
+    /// Image output.
     Image,
 }
 
@@ -140,7 +150,9 @@ pub enum FunctionCallingBehavior {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Blob {
+    /// MIME type of the data (e.g. `"audio/pcm"`, `"image/jpeg"`).
     pub mime_type: String,
+    /// Base64-encoded binary data.
     pub data: String, // base64-encoded
 }
 
@@ -148,8 +160,11 @@ pub struct Blob {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FunctionCall {
+    /// Function name to call.
     pub name: String,
+    /// JSON arguments for the function.
     pub args: serde_json::Value,
+    /// Unique call ID for matching responses.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
 }
@@ -158,8 +173,11 @@ pub struct FunctionCall {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FunctionResponse {
+    /// Name of the function that was called.
     pub name: String,
+    /// JSON response from the function execution.
     pub response: serde_json::Value,
+    /// Call ID matching the original `FunctionCall::id`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
 }
@@ -168,7 +186,9 @@ pub struct FunctionResponse {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExecutableCode {
+    /// Programming language (e.g. `"python"`).
     pub language: String,
+    /// Source code to execute.
     pub code: String,
 }
 
@@ -176,7 +196,9 @@ pub struct ExecutableCode {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CodeExecutionResult {
+    /// Execution outcome (e.g. `"OUTCOME_OK"`, `"OUTCOME_FAILED"`).
     pub outcome: String,
+    /// Standard output from execution.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output: Option<String>,
 }
@@ -186,26 +208,38 @@ pub struct CodeExecutionResult {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Part {
+    /// A text part.
     Text {
+        /// The text content.
         text: String,
     },
+    /// An inline data blob (audio, image, etc.).
     InlineData {
+        /// The blob data.
         #[serde(rename = "inlineData")]
         inline_data: Blob,
     },
+    /// A function call from the model.
     FunctionCall {
+        /// The function call details.
         #[serde(rename = "functionCall")]
         function_call: FunctionCall,
     },
+    /// A function response sent back to the model.
     FunctionResponse {
+        /// The function response details.
         #[serde(rename = "functionResponse")]
         function_response: FunctionResponse,
     },
+    /// Executable code returned by the model.
     ExecutableCode {
+        /// The executable code details.
         #[serde(rename = "executableCode")]
         executable_code: ExecutableCode,
     },
+    /// Result of code execution.
     CodeExecutionResult {
+        /// The code execution result details.
         #[serde(rename = "codeExecutionResult")]
         code_execution_result: CodeExecutionResult,
     },
@@ -239,16 +273,21 @@ impl Part {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Role {
+    /// User role.
     User,
+    /// Model role.
     Model,
+    /// System role (for instructions).
     System,
 }
 
 /// A content message containing a role and a sequence of parts.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Content {
+    /// Role of the content author (User, Model, or System).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<Role>,
+    /// Ordered parts that compose this content.
     pub parts: Vec<Part>,
 }
 
@@ -299,8 +338,11 @@ impl Content {
 /// Schema for a single function that the model can call.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FunctionDeclaration {
+    /// Function name.
     pub name: String,
+    /// Human-readable description for the model.
     pub description: String,
+    /// JSON Schema describing function parameters.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parameters: Option<serde_json::Value>,
 }
@@ -311,14 +353,19 @@ pub struct FunctionDeclaration {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Tool {
+    /// Function declarations for this tool.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub function_declarations: Option<Vec<FunctionDeclaration>>,
+    /// URL context tool (web content fetching).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url_context: Option<UrlContext>,
+    /// Google Search tool (grounded search).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub google_search: Option<GoogleSearch>,
+    /// Code execution tool.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub code_execution: Option<ToolCodeExecution>,
+    /// Google Search retrieval tool.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub google_search_retrieval: Option<GoogleSearchRetrieval>,
 }
@@ -406,6 +453,7 @@ pub type ToolDeclaration = Tool;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolConfig {
+    /// Function calling configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub function_calling_config: Option<FunctionCallingConfig>,
 }
@@ -426,7 +474,9 @@ impl ToolConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FunctionCallingConfig {
+    /// When to call functions (Auto, Any, None).
     pub mode: FunctionCallingMode,
+    /// Whether tool calls block model output.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub behavior: Option<FunctionCallingBehavior>,
 }
@@ -439,6 +489,7 @@ pub struct FunctionCallingConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SpeechConfig {
+    /// Voice selection configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub voice_config: Option<VoiceConfig>,
 }
@@ -447,6 +498,7 @@ pub struct SpeechConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VoiceConfig {
+    /// Prebuilt voice selection.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prebuilt_voice_config: Option<PrebuiltVoiceConfig>,
 }
@@ -455,6 +507,7 @@ pub struct VoiceConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PrebuiltVoiceConfig {
+    /// Name of the prebuilt voice (e.g. `"Puck"`, `"Kore"`).
     pub voice_name: String,
 }
 
@@ -494,10 +547,13 @@ pub enum TurnCoverage {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RealtimeInputConfig {
+    /// Server-side VAD settings.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub automatic_activity_detection: Option<AutomaticActivityDetection>,
+    /// How user speech interacts with model output.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub activity_handling: Option<ActivityHandling>,
+    /// Which input counts toward a user turn.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub turn_coverage: Option<TurnCoverage>,
 }
@@ -506,14 +562,19 @@ pub struct RealtimeInputConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AutomaticActivityDetection {
+    /// Whether automatic activity detection is disabled.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub disabled: Option<bool>,
+    /// Sensitivity for detecting speech onset.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub start_of_speech_sensitivity: Option<Sensitivity>,
+    /// Sensitivity for detecting end of speech.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub end_of_speech_sensitivity: Option<Sensitivity>,
+    /// Milliseconds of audio to include before speech onset.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prefix_padding_ms: Option<u32>,
+    /// Milliseconds of silence before end-of-speech is triggered.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub silence_duration_ms: Option<u32>,
 }
@@ -615,8 +676,11 @@ pub struct ThinkingConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum MediaResolution {
+    /// Low resolution.
     Low,
+    /// Medium resolution.
     Medium,
+    /// High resolution.
     High,
 }
 
@@ -624,24 +688,34 @@ pub enum MediaResolution {
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerationConfig {
+    /// Output modalities (Text, Audio, Image).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_modalities: Option<Vec<Modality>>,
+    /// Speech/voice configuration for audio output.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub speech_config: Option<SpeechConfig>,
+    /// Sampling temperature (0.0 = deterministic, 2.0 = max randomness).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub temperature: Option<f32>,
+    /// Top-p (nucleus) sampling threshold.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub top_p: Option<f32>,
+    /// Top-k sampling: number of top tokens to consider.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub top_k: Option<u32>,
+    /// Maximum number of output tokens.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_output_tokens: Option<u32>,
+    /// Thinking/reasoning configuration (Gemini 2.5+).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking_config: Option<ThinkingConfig>,
+    /// Enable emotionally expressive dialog.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enable_affective_dialog: Option<bool>,
+    /// Resolution for image/video inputs.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub media_resolution: Option<MediaResolution>,
+    /// Random seed for deterministic generation.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub seed: Option<u32>,
 }
@@ -677,10 +751,16 @@ pub struct GenerationConfig {
 /// ```
 #[derive(Debug, Clone)]
 pub enum ApiEndpoint {
-    /// Google AI Studio — API-key authentication.
-    GoogleAI { api_key: String },
+    /// Google AI Studio -- API-key authentication.
+    GoogleAI {
+        /// The API key.
+        api_key: String,
+    },
     /// Google AI with OAuth2 access token (e.g. from gcloud).
-    GoogleAIToken { access_token: String },
+    GoogleAIToken {
+        /// The OAuth2 access token.
+        access_token: String,
+    },
     /// Vertex AI — project + location + OAuth2 bearer token.
     VertexAI(VertexConfig),
 }
@@ -754,20 +834,35 @@ impl ApiEndpoint {
 pub struct SessionConfig {
     /// API endpoint and credentials (Google AI key or Vertex AI project/token).
     pub endpoint: ApiEndpoint,
+    /// Which Gemini model to use.
     pub model: GeminiModel,
+    /// Generation parameters (modalities, temperature, etc.).
     pub generation_config: GenerationConfig,
+    /// System instruction content.
     pub system_instruction: Option<Content>,
+    /// Tool declarations for function calling, search, etc.
     pub tools: Vec<Tool>,
+    /// Tool usage configuration.
     pub tool_config: Option<ToolConfig>,
+    /// Input audio transcription configuration.
     pub input_audio_transcription: Option<InputAudioTranscription>,
+    /// Output audio transcription configuration.
     pub output_audio_transcription: Option<OutputAudioTranscription>,
+    /// Realtime input configuration (VAD, activity handling).
     pub realtime_input_config: Option<RealtimeInputConfig>,
+    /// Session resumption configuration.
     pub session_resumption: Option<SessionResumptionConfig>,
+    /// Context window compression configuration.
     pub context_window_compression: Option<ContextWindowCompressionConfig>,
+    /// Proactivity configuration.
     pub proactivity: Option<ProactivityConfig>,
+    /// Audio format for input (default: PCM16).
     pub input_audio_format: AudioFormat,
+    /// Audio format for output (default: PCM16).
     pub output_audio_format: AudioFormat,
+    /// Input audio sample rate in Hz (default: 16000).
     pub input_sample_rate: u32,
+    /// Output audio sample rate in Hz (default: 24000).
     pub output_sample_rate: u32,
 }
 
@@ -1170,11 +1265,17 @@ impl SessionConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum HarmCategory {
+    /// Unspecified harm category.
     HarmCategoryUnspecified,
+    /// Harassment content.
     HarmCategoryHarassment,
+    /// Hate speech content.
     HarmCategoryHateSpeech,
+    /// Sexually explicit content.
     HarmCategorySexuallyExplicit,
+    /// Dangerous content.
     HarmCategoryDangerousContent,
+    /// Civic integrity violations.
     HarmCategoryCivicIntegrity,
 }
 
@@ -1182,9 +1283,13 @@ pub enum HarmCategory {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum HarmBlockThreshold {
+    /// Do not block any content.
     BlockNone,
+    /// Block only high-probability harmful content.
     BlockOnlyHigh,
+    /// Block medium and above probability harmful content.
     BlockMediumAndAbove,
+    /// Block low and above probability harmful content.
     BlockLowAndAbove,
 }
 
@@ -1192,9 +1297,13 @@ pub enum HarmBlockThreshold {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum HarmProbability {
+    /// Negligible probability of harm.
     Negligible,
+    /// Low probability of harm.
     Low,
+    /// Medium probability of harm.
     Medium,
+    /// High probability of harm.
     High,
 }
 
@@ -1202,7 +1311,9 @@ pub enum HarmProbability {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SafetySetting {
+    /// Which harm category this setting applies to.
     pub category: HarmCategory,
+    /// Blocking threshold for this category.
     pub threshold: HarmBlockThreshold,
 }
 
@@ -1210,8 +1321,11 @@ pub struct SafetySetting {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SafetyRating {
+    /// Which harm category was assessed.
     pub category: HarmCategory,
+    /// Probability of harmful content.
     pub probability: HarmProbability,
+    /// Whether the content was blocked.
     #[serde(default)]
     pub blocked: bool,
 }
@@ -1249,6 +1363,7 @@ pub enum FinishReason {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CitationMetadata {
+    /// List of citation sources.
     #[serde(default)]
     pub citation_sources: Vec<CitationSource>,
 }
@@ -1257,12 +1372,16 @@ pub struct CitationMetadata {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CitationSource {
+    /// Start index in the generated text.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub start_index: Option<i32>,
+    /// End index in the generated text.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub end_index: Option<i32>,
+    /// URI of the cited source.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub uri: Option<String>,
+    /// License of the cited source.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub license: Option<String>,
 }
@@ -1271,7 +1390,9 @@ pub struct CitationSource {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileData {
+    /// URI of the uploaded file.
     pub file_uri: String,
+    /// MIME type of the file.
     pub mime_type: String,
 }
 

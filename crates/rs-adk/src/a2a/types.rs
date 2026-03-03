@@ -5,9 +5,13 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct A2aMessage {
+    /// Unique identifier for this message.
     pub message_id: String,
-    pub role: String,  // "user" or "agent"
+    /// Role of the message sender ("user" or "agent").
+    pub role: String,
+    /// The content parts of the message.
     pub parts: Vec<A2aPart>,
+    /// Optional metadata attached to the message.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<HashMap<String, serde_json::Value>>,
 }
@@ -16,21 +20,30 @@ pub struct A2aMessage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum A2aPart {
+    /// A plain text part.
     #[serde(rename = "text")]
     Text {
+        /// The text content.
         text: String,
+        /// Optional metadata for this part.
         #[serde(skip_serializing_if = "Option::is_none")]
         metadata: Option<HashMap<String, serde_json::Value>>,
     },
+    /// A file attachment part.
     #[serde(rename = "file")]
     File {
+        /// The file content (inline bytes or URI).
         file: A2aFileContent,
+        /// Optional metadata for this part.
         #[serde(skip_serializing_if = "Option::is_none")]
         metadata: Option<HashMap<String, serde_json::Value>>,
     },
+    /// A structured data part (function calls, code execution, etc.).
     #[serde(rename = "data")]
     Data {
+        /// The structured data payload.
         data: serde_json::Value,
+        /// Optional metadata for this part.
         #[serde(skip_serializing_if = "Option::is_none")]
         metadata: Option<HashMap<String, serde_json::Value>>,
     },
@@ -40,8 +53,10 @@ pub enum A2aPart {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct A2aFileContent {
+    /// File name.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// MIME type of the file content.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mime_type: Option<String>,
     /// Inline base64-encoded bytes.
@@ -56,12 +71,19 @@ pub struct A2aFileContent {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum TaskState {
+    /// Task has been submitted but not yet started.
     Submitted,
+    /// Task is actively being processed.
     Working,
+    /// Task requires additional input from the user.
     InputRequired,
+    /// Task has completed successfully.
     Completed,
+    /// Task was canceled by the user or system.
     Canceled,
+    /// Task failed with an error.
     Failed,
+    /// Task state is unknown.
     Unknown,
 }
 
@@ -69,9 +91,12 @@ pub enum TaskState {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskStatus {
+    /// Current state of the task.
     pub state: TaskState,
+    /// Optional message associated with the status.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<A2aMessage>,
+    /// ISO 8601 timestamp of the status update.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timestamp: Option<String>,
 }
@@ -80,12 +105,17 @@ pub struct TaskStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct A2aTask {
+    /// Unique task identifier.
     pub id: String,
+    /// Context identifier for grouping related tasks.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context_id: Option<String>,
+    /// Current status of the task.
     pub status: TaskStatus,
+    /// Artifacts produced by the task.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub artifacts: Option<Vec<A2aArtifact>>,
+    /// Optional task-level metadata.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<HashMap<String, serde_json::Value>>,
 }
@@ -94,9 +124,12 @@ pub struct A2aTask {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct A2aArtifact {
+    /// Artifact name.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Parts composing this artifact.
     pub parts: Vec<A2aPart>,
+    /// Optional artifact-level metadata.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<HashMap<String, serde_json::Value>>,
 }
@@ -105,10 +138,14 @@ pub struct A2aArtifact {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskStatusUpdateEvent {
+    /// Task identifier.
     pub id: String,
+    /// Updated task status.
     pub status: TaskStatus,
+    /// Whether this is the final status update for the task.
     #[serde(rename = "final")]
     pub is_final: bool,
+    /// Optional event-level metadata.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<HashMap<String, serde_json::Value>>,
 }
@@ -117,8 +154,11 @@ pub struct TaskStatusUpdateEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskArtifactUpdateEvent {
+    /// Task identifier.
     pub id: String,
+    /// The updated artifact.
     pub artifact: A2aArtifact,
+    /// Optional event-level metadata.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<HashMap<String, serde_json::Value>>,
 }

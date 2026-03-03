@@ -8,11 +8,26 @@ use crate::builder::AgentBuilder;
 #[derive(Debug, Clone, PartialEq)]
 pub enum ContractViolation {
     /// A consumer reads a key that no producer writes.
-    UnproducedKey { consumer: String, key: String },
+    UnproducedKey {
+        /// Name of the agent that reads the unproduced key.
+        consumer: String,
+        /// The state key that is read but never written.
+        key: String,
+    },
     /// Multiple agents write to the same key (race condition risk).
-    DuplicateWrite { agents: Vec<String>, key: String },
+    DuplicateWrite {
+        /// Names of agents that write to the same key.
+        agents: Vec<String>,
+        /// The contested state key.
+        key: String,
+    },
     /// A producer writes to a key that no consumer reads (dead output).
-    OrphanedOutput { producer: String, key: String },
+    OrphanedOutput {
+        /// Name of the agent that writes the orphaned key.
+        producer: String,
+        /// The state key that is written but never read.
+        key: String,
+    },
 }
 
 /// Check state contracts across a set of agents.

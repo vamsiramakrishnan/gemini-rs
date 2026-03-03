@@ -55,6 +55,7 @@ impl std::ops::Shr for StateTransform {
 /// A chain of state transforms applied sequentially.
 #[derive(Clone)]
 pub struct StateTransformChain {
+    /// The ordered list of transforms applied sequentially.
     pub steps: Vec<StateTransform>,
 }
 
@@ -163,6 +164,52 @@ impl S {
                 obj.insert(key.clone(), value.clone());
             }
         })
+    }
+
+    // ── State predicates ───────────────────────────────────────────────────
+    // Ergonomic helpers for transition guards and `.when()` predicates.
+
+    /// Returns `true` if the given key holds a truthy boolean.
+    ///
+    /// ```ignore
+    /// .transition("next_phase", S::is_true("disclosure_given"))
+    /// ```
+    pub fn is_true(key: &str) -> impl Fn(&rs_adk::State) -> bool + Send + Sync + 'static {
+        let key = key.to_string();
+        move |s: &rs_adk::State| s.get::<bool>(&key).unwrap_or(false)
+    }
+
+    /// Returns `true` if the given key equals the expected string value.
+    ///
+    /// ```ignore
+    /// .transition("tech:greet", S::eq("issue_type", "technical"))
+    /// ```
+    pub fn eq(key: &str, expected: &str) -> impl Fn(&rs_adk::State) -> bool + Send + Sync + 'static {
+        let key = key.to_string();
+        let expected = expected.to_string();
+        move |s: &rs_adk::State| {
+            s.get::<String>(&key)
+                .map(|v| v == expected)
+                .unwrap_or(false)
+        }
+    }
+
+    /// Returns `true` if the given key matches any of the provided string values.
+    ///
+    /// ```ignore
+    /// .transition("arrange_payment", S::one_of("negotiation_intent", &["full_pay", "partial_pay"]))
+    /// ```
+    pub fn one_of(
+        key: &str,
+        values: &[&str],
+    ) -> impl Fn(&rs_adk::State) -> bool + Send + Sync + 'static {
+        let key = key.to_string();
+        let values: Vec<String> = values.iter().map(|v| v.to_string()).collect();
+        move |s: &rs_adk::State| {
+            s.get::<String>(&key)
+                .map(|v| values.iter().any(|expected| *expected == v))
+                .unwrap_or(false)
+        }
     }
 
     /// Drop the specified keys.

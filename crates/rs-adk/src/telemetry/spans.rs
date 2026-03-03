@@ -52,13 +52,18 @@ pub fn runner_span(root_agent: &str) -> tracing::Span {
 }
 
 // No-op stubs when tracing is disabled — these compile to nothing.
+/// Create a span for an agent's run lifecycle (no-op without `tracing-support` feature).
 #[cfg(not(feature = "tracing-support"))]
 pub fn agent_run_span(_: &str, _: &str) {}
+/// Create a span for an agent transfer (no-op without `tracing-support` feature).
 #[cfg(not(feature = "tracing-support"))]
 pub fn agent_transfer_span(_: &str, _: &str, _: &str) {}
+/// Create a span for tool dispatch (no-op without `tracing-support` feature).
 #[cfg(not(feature = "tracing-support"))]
 pub fn tool_dispatch_span(_: &str, _: &str, _: &str) {}
+/// Create a span for agent-as-tool invocation (no-op without `tracing-support` feature).
 #[cfg(not(feature = "tracing-support"))]
 pub fn agent_tool_span(_: &str, _: &str) {}
+/// Create a span for the top-level runner (no-op without `tracing-support` feature).
 #[cfg(not(feature = "tracing-support"))]
 pub fn runner_span(_: &str) {}

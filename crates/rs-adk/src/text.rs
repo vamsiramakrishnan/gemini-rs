@@ -110,7 +110,7 @@ impl LlmTextAgent {
         self
     }
 
-    /// Build the initial LlmRequest from a user prompt in state or empty.
+    /// Build an LlmRequest, taking ownership of contents to avoid cloning.
     fn build_request(&self, contents: Vec<Content>) -> LlmRequest {
         let mut req = LlmRequest::from_contents(contents);
         req.system_instruction = self.instruction.clone();
@@ -178,8 +178,8 @@ impl TextAgent for LlmTextAgent {
                 return Ok(text);
             }
 
-            // Append model response to conversation.
-            contents.push(response.content.clone());
+            // Move model response into conversation (no clone needed).
+            contents.push(response.content);
 
             // Dispatch tools and append responses.
             let tool_responses = self.dispatch_tools(&calls).await;
@@ -246,6 +246,7 @@ pub struct SequentialTextAgent {
 }
 
 impl SequentialTextAgent {
+    /// Create a new sequential agent that runs children in order.
     pub fn new(name: impl Into<String>, children: Vec<Arc<dyn TextAgent>>) -> Self {
         Self {
             name: name.into(),
@@ -281,6 +282,7 @@ pub struct ParallelTextAgent {
 }
 
 impl ParallelTextAgent {
+    /// Create a new parallel agent that runs branches concurrently.
     pub fn new(name: impl Into<String>, branches: Vec<Arc<dyn TextAgent>>) -> Self {
         Self {
             name: name.into(),
@@ -329,6 +331,7 @@ pub struct LoopTextAgent {
 }
 
 impl LoopTextAgent {
+    /// Create a new loop agent that repeats up to `max` iterations.
     pub fn new(name: impl Into<String>, body: Arc<dyn TextAgent>, max: u32) -> Self {
         Self {
             name: name.into(),
@@ -381,6 +384,7 @@ pub struct FallbackTextAgent {
 }
 
 impl FallbackTextAgent {
+    /// Create a new fallback agent that tries candidates in order.
     pub fn new(name: impl Into<String>, candidates: Vec<Arc<dyn TextAgent>>) -> Self {
         Self {
             name: name.into(),
@@ -418,6 +422,7 @@ pub struct RouteRule {
 }
 
 impl RouteRule {
+    /// Create a new route rule with a predicate and target agent.
     pub fn new(
         predicate: impl Fn(&State) -> bool + Send + Sync + 'static,
         agent: Arc<dyn TextAgent>,
@@ -438,6 +443,7 @@ pub struct RouteTextAgent {
 }
 
 impl RouteTextAgent {
+    /// Create a new route agent with rules and a default fallback.
     pub fn new(
         name: impl Into<String>,
         rules: Vec<RouteRule>,
@@ -476,6 +482,7 @@ pub struct RaceTextAgent {
 }
 
 impl RaceTextAgent {
+    /// Create a new race agent that runs agents concurrently and returns the first result.
     pub fn new(name: impl Into<String>, agents: Vec<Arc<dyn TextAgent>>) -> Self {
         Self {
             name: name.into(),
@@ -540,6 +547,7 @@ pub struct TimeoutTextAgent {
 }
 
 impl TimeoutTextAgent {
+    /// Create a new timeout agent wrapping an inner agent with a time limit.
     pub fn new(
         name: impl Into<String>,
         inner: Arc<dyn TextAgent>,
@@ -581,6 +589,7 @@ pub struct MapOverTextAgent {
 }
 
 impl MapOverTextAgent {
+    /// Create a new map-over agent that iterates over a list in state.
     pub fn new(
         name: impl Into<String>,
         agent: Arc<dyn TextAgent>,
@@ -643,6 +652,7 @@ pub struct TapTextAgent {
 }
 
 impl TapTextAgent {
+    /// Create a new tap agent for read-only observation.
     pub fn new(
         name: impl Into<String>,
         f: impl Fn(&State) + Send + Sync + 'static,
@@ -675,6 +685,7 @@ pub struct TaskRegistry {
 }
 
 impl TaskRegistry {
+    /// Create a new empty task registry.
     pub fn new() -> Self {
         Self::default()
     }
@@ -692,6 +703,7 @@ pub struct DispatchTextAgent {
 }
 
 impl DispatchTextAgent {
+    /// Create a new dispatch agent with named children and a concurrency budget.
     pub fn new(
         name: impl Into<String>,
         children: Vec<(String, Arc<dyn TextAgent>)>,
@@ -759,6 +771,7 @@ pub struct JoinTextAgent {
 }
 
 impl JoinTextAgent {
+    /// Create a new join agent that waits for dispatched tasks.
     pub fn new(name: impl Into<String>, registry: TaskRegistry) -> Self {
         Self {
             name: name.into(),

@@ -11,6 +11,7 @@ use crate::llm::{LlmRequest, LlmResponse};
 /// Errors from processor operations.
 #[derive(Debug, thiserror::Error)]
 pub enum ProcessorError {
+    /// An error during request processing.
     #[error("Processor error: {0}")]
     Processing(String),
 }

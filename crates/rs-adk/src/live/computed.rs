@@ -18,8 +18,11 @@ use crate::state::State;
 /// `derived:{key}` in state. When it returns `None`, the key is skipped
 /// (no write, no change detection).
 pub struct ComputedVar {
+    /// The state key this computed variable writes to (prefixed with `derived:`).
     pub key: String,
+    /// State keys this variable depends on.
     pub dependencies: Vec<String>,
+    /// Closure that computes the derived value from current state.
     pub compute: Arc<dyn Fn(&State) -> Option<Value> + Send + Sync>,
 }
 

@@ -2,6 +2,8 @@
 
 use std::sync::Arc;
 
+use tokio_util::sync::CancellationToken;
+
 use rs_genai::prelude::{ConnectBuilder, SessionConfig, SessionPhase};
 use rs_genai::session::SessionWriter;
 
@@ -15,10 +17,10 @@ use super::computed::ComputedRegistry;
 use super::extractor::TurnExtractor;
 use super::handle::LiveHandle;
 use super::phase::PhaseMachine;
-use super::processor::spawn_event_processor;
+use super::processor::{spawn_event_processor, spawn_telemetry_lane};
 use super::session_signals::SessionSignals;
+use super::telemetry::SessionTelemetry;
 use super::temporal::TemporalRegistry;
-use super::transcript::TranscriptBuffer;
 use super::watcher::WatcherRegistry;
 
 /// Builder for a callback-driven Live session.
@@ -31,6 +33,8 @@ pub struct LiveSessionBuilder {
     phase_machine: Option<PhaseMachine>,
     watchers: Option<WatcherRegistry>,
     temporal: Option<TemporalRegistry>,
+    greeting: Option<String>,
+    state: Option<State>,
 }
 
 impl LiveSessionBuilder {
@@ -45,7 +49,25 @@ impl LiveSessionBuilder {
             phase_machine: None,
             watchers: None,
             temporal: None,
+            greeting: None,
+            state: None,
         }
+    }
+
+    /// Provide a pre-created State to use for this session.
+    ///
+    /// If not set, a new State is created at connect time. Use this when
+    /// the State needs to be shared with tools or other components before
+    /// the session connects.
+    pub fn with_state(mut self, state: State) -> Self {
+        self.state = Some(state);
+        self
+    }
+
+    /// Set a greeting prompt sent on connect to trigger the model to speak first.
+    pub fn greeting(mut self, prompt: impl Into<String>) -> Self {
+        self.greeting = Some(prompt.into());
+        self
     }
 
     /// Set the tool dispatcher for auto-dispatch of tool calls.
@@ -94,7 +116,7 @@ impl LiveSessionBuilder {
         self
     }
 
-    /// Connect to Gemini and start the event processor.
+    /// Connect to Gemini and start the three-lane event processor.
     pub async fn connect(self) -> Result<LiveHandle, AgentError> {
         // Build-time validations
         if let Some(ref pm) = self.phase_machine {
@@ -115,29 +137,38 @@ impl LiveSessionBuilder {
 
         let callbacks = Arc::new(self.callbacks);
         let writer: Arc<dyn SessionWriter> = Arc::new(session.clone());
+        let state = self.state.unwrap_or_else(State::new);
+
+        // Subscribe twice: one for router → fast/ctrl, one for telemetry lane
         let event_rx = session.subscribe();
-        let state = State::new();
-
-        let session_signals = SessionSignals::new(state.clone());
-
-        // Always create transcript buffer (for server transcription support)
-        let transcript_buffer =
-            Some(Arc::new(parking_lot::Mutex::new(TranscriptBuffer::new())));
+        let telem_rx = session.subscribe();
 
         let phase_machine_mutex = self.phase_machine.map(tokio::sync::Mutex::new);
         let temporal_arc = self.temporal.map(Arc::new);
         let background_tracker = Arc::new(BackgroundToolTracker::new());
 
-        // Spawn two-lane processor
+        // Create telemetry (auto-collected by the telemetry lane)
+        let telemetry = Arc::new(SessionTelemetry::new());
+        let telem_cancel = CancellationToken::new();
+
+        // Spawn telemetry lane (SessionSignals + SessionTelemetry on own broadcast rx)
+        let session_signals = SessionSignals::new(state.clone());
+        let _telem_handle = spawn_telemetry_lane(
+            telem_rx,
+            session_signals,
+            telemetry.clone(),
+            telem_cancel.clone(),
+        );
+
+        // Spawn fast + control lanes (no session_signals, no transcript mutex)
+        let greeting_writer = writer.clone();
         let (fast_handle, ctrl_handle) = spawn_event_processor(
             event_rx,
             callbacks,
             self.dispatcher,
             writer,
-            transcript_buffer,
             self.extractors,
             state.clone(),
-            Some(session_signals),
             self.computed,
             phase_machine_mutex,
             self.watchers,
@@ -145,7 +176,12 @@ impl LiveSessionBuilder {
             Some(background_tracker),
         );
 
-        Ok(LiveHandle::new(session, fast_handle, ctrl_handle, state))
+        // Send greeting prompt to trigger model-initiated conversation
+        if let Some(greeting) = self.greeting {
+            greeting_writer.send_text(greeting).await.map_err(AgentError::Session)?;
+        }
+
+        Ok(LiveHandle::new(session, fast_handle, ctrl_handle, state, telemetry))
     }
 }
 

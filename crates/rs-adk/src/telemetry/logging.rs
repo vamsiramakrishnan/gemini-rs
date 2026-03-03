@@ -79,19 +79,27 @@ pub fn log_event_loop_lag(agent_name: &str, skipped: u64) {
 }
 
 // No-op stubs when tracing is disabled.
+/// Log that an agent has started (no-op without `tracing-support` feature).
 #[cfg(not(feature = "tracing-support"))]
 pub fn log_agent_started(_: &str, _: usize) {}
+/// Log that an agent completed (no-op without `tracing-support` feature).
 #[cfg(not(feature = "tracing-support"))]
 pub fn log_agent_completed(_: &str, _: f64) {}
+/// Log a tool dispatch (no-op without `tracing-support` feature).
 #[cfg(not(feature = "tracing-support"))]
 pub fn log_tool_dispatch(_: &str, _: &str, _: &str) {}
+/// Log a tool result (no-op without `tracing-support` feature).
 #[cfg(not(feature = "tracing-support"))]
 pub fn log_tool_result(_: &str, _: &str, _: bool, _: f64) {}
+/// Log an agent transfer (no-op without `tracing-support` feature).
 #[cfg(not(feature = "tracing-support"))]
 pub fn log_agent_transfer(_: &str, _: &str) {}
+/// Log an agent error (no-op without `tracing-support` feature).
 #[cfg(not(feature = "tracing-support"))]
 pub fn log_agent_error(_: &str, _: &str) {}
+/// Log an agent-as-tool dispatch (no-op without `tracing-support` feature).
 #[cfg(not(feature = "tracing-support"))]
 pub fn log_agent_tool_dispatch(_: &str, _: &str) {}
+/// Log event loop lag (no-op without `tracing-support` feature).
 #[cfg(not(feature = "tracing-support"))]
 pub fn log_event_loop_lag(_: &str, _: u64) {}

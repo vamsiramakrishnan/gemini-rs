@@ -21,30 +21,40 @@ use crate::builder::AgentBuilder;
 /// A composable workflow node — can be sequenced, fan-out, looped, etc.
 #[derive(Clone, Debug)]
 pub enum Composable {
+    /// A single agent node.
     Agent(AgentBuilder),
+    /// A sequential pipeline of steps.
     Pipeline(Pipeline),
+    /// A parallel fan-out of branches.
     FanOut(FanOut),
+    /// A loop with optional termination predicate.
     Loop(Loop),
+    /// A fallback chain (try each until one succeeds).
     Fallback(Fallback),
 }
 
 /// Sequential pipeline: execute steps in order, passing state between them.
 #[derive(Clone, Debug)]
 pub struct Pipeline {
+    /// Ordered steps to execute sequentially.
     pub steps: Vec<Composable>,
 }
 
 /// Parallel fan-out: execute branches concurrently, merge results.
 #[derive(Clone, Debug)]
 pub struct FanOut {
+    /// Branches to execute concurrently.
     pub branches: Vec<Composable>,
 }
 
 /// Loop: repeat an agent or pipeline up to `max` times, or until a predicate.
 #[derive(Clone)]
 pub struct Loop {
+    /// The composable to repeat.
     pub body: Box<Composable>,
+    /// Maximum number of iterations.
     pub max: u32,
+    /// Optional early-exit predicate evaluated after each iteration.
     pub until: Option<LoopPredicate>,
 }
 
@@ -55,12 +65,14 @@ pub struct LoopPredicate {
 }
 
 impl LoopPredicate {
+    /// Create a new predicate from a closure that checks loop state.
     pub fn new(f: impl Fn(&serde_json::Value) -> bool + Send + Sync + 'static) -> Self {
         Self {
             predicate: std::sync::Arc::new(f),
         }
     }
 
+    /// Evaluate the predicate against the current state.
     pub fn check(&self, state: &serde_json::Value) -> bool {
         (self.predicate)(state)
     }
@@ -85,6 +97,7 @@ impl std::fmt::Debug for Loop {
 /// Fallback chain: try each agent in sequence until one succeeds.
 #[derive(Clone, Debug)]
 pub struct Fallback {
+    /// Candidate composables tried in order until one succeeds.
     pub candidates: Vec<Composable>,
 }
 
@@ -202,6 +215,7 @@ impl Composable {
 // ── Pipeline construction helpers ──
 
 impl Pipeline {
+    /// Create a pipeline from the given steps.
     pub fn new(steps: Vec<Composable>) -> Self {
         Self { steps }
     }
@@ -216,6 +230,7 @@ impl Pipeline {
 }
 
 impl FanOut {
+    /// Create a fan-out from the given branches.
     pub fn new(branches: Vec<Composable>) -> Self {
         Self { branches }
     }
@@ -229,6 +244,7 @@ impl FanOut {
 }
 
 impl Fallback {
+    /// Create a fallback chain from the given candidates.
     pub fn new(candidates: Vec<Composable>) -> Self {
         Self { candidates }
     }

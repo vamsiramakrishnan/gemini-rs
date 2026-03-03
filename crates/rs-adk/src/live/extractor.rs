@@ -26,6 +26,18 @@ pub trait TurnExtractor: Send + Sync {
     /// How many recent turns this extractor needs.
     fn window_size(&self) -> usize;
 
+    /// Whether this extractor should run for the current turn.
+    ///
+    /// Override to skip extraction on trivial turns (e.g., short utterances,
+    /// turns without user speech). Default returns `true` (always extract).
+    ///
+    /// This is checked before launching the async extraction, so returning
+    /// `false` avoids an LLM round-trip entirely.
+    fn should_extract(&self, window: &[TranscriptTurn]) -> bool {
+        let _ = window;
+        true
+    }
+
     /// Extract structured data from the transcript window.
     async fn extract(&self, window: &[TranscriptTurn]) -> Result<Value, LlmError>;
 }
@@ -38,6 +50,10 @@ pub struct LlmExtractor {
     prompt: String,
     window_size: usize,
     schema: Option<Value>,
+    /// Pre-rendered schema string (computed once at construction)
+    schema_str: Option<String>,
+    /// Minimum word count in the last user utterance to trigger extraction.
+    min_words: usize,
 }
 
 impl LlmExtractor {
@@ -59,7 +75,18 @@ impl LlmExtractor {
             prompt: prompt.into(),
             window_size,
             schema: None,
+            schema_str: None,
+            min_words: 0,
         }
+    }
+
+    /// Set the minimum word count in the last user utterance to trigger extraction.
+    ///
+    /// Turns where the user said fewer than `n` words will skip the LLM call.
+    /// Useful for filtering out "uh huh", "ok", "yes" style responses.
+    pub fn with_min_words(mut self, n: usize) -> Self {
+        self.min_words = n;
+        self
     }
 
     /// Set a JSON Schema for structured output.
@@ -67,7 +94,8 @@ impl LlmExtractor {
     /// When set, the schema is included in the prompt to guide the LLM
     /// toward producing valid JSON matching the schema.
     pub fn with_schema(mut self, schema: Value) -> Self {
-        self.schema = schema.into();
+        self.schema_str = serde_json::to_string_pretty(&schema).ok();
+        self.schema = Some(schema);
         self
     }
 
@@ -101,13 +129,25 @@ impl TurnExtractor for LlmExtractor {
         self.window_size
     }
 
+    fn should_extract(&self, window: &[TranscriptTurn]) -> bool {
+        if self.min_words == 0 {
+            return true;
+        }
+        // Check the last user utterance
+        window
+            .iter()
+            .rev()
+            .find(|t| !t.user.is_empty())
+            .map_or(false, |t| t.user.split_whitespace().count() >= self.min_words)
+    }
+
     async fn extract(&self, window: &[TranscriptTurn]) -> Result<Value, LlmError> {
         let transcript = Self::format_transcript(window);
 
         let mut system = self.prompt.clone();
-        if let Some(schema) = &self.schema {
+        if let Some(ref schema_str) = self.schema_str {
             system.push_str("\n\nRespond with valid JSON matching this schema:\n");
-            system.push_str(&serde_json::to_string_pretty(schema).unwrap_or_default());
+            system.push_str(schema_str);
         } else {
             system.push_str("\n\nRespond with valid JSON only, no markdown fences.");
         }
@@ -167,6 +207,7 @@ mod tests {
                 turn_number: i as u32,
                 user: user.to_string(),
                 model: model.to_string(),
+                tool_calls: Vec::new(),
                 timestamp: Instant::now(),
             })
             .collect()

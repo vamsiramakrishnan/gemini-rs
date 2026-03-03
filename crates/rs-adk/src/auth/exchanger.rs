@@ -12,10 +12,13 @@ use super::schemes::AuthScheme;
 /// Error from credential exchange.
 #[derive(Debug, thiserror::Error)]
 pub enum CredentialExchangeError {
+    /// The credential exchange operation failed.
     #[error("Exchange failed: {0}")]
     ExchangeFailed(String),
+    /// No exchanger is registered for the given scheme type.
     #[error("No exchanger registered for scheme type: {0}")]
     NoExchanger(String),
+    /// A catch-all for other exchange errors.
     #[error("{0}")]
     Other(String),
 }
@@ -23,6 +26,7 @@ pub enum CredentialExchangeError {
 /// Trait for exchanging/transforming credentials (e.g. auth code -> access token).
 #[async_trait]
 pub trait CredentialExchanger: Send + Sync {
+    /// Exchange or transform a credential (e.g., auth code to access token).
     async fn exchange(
         &self,
         credential: &AuthCredential,
@@ -36,16 +40,19 @@ pub struct CredentialExchangerRegistry {
 }
 
 impl CredentialExchangerRegistry {
+    /// Create a new empty exchanger registry.
     pub fn new() -> Self {
         Self {
             exchangers: HashMap::new(),
         }
     }
 
+    /// Register an exchanger for a given scheme type (e.g., "oauth2").
     pub fn register(&mut self, scheme_type: &str, exchanger: Arc<dyn CredentialExchanger>) {
         self.exchangers.insert(scheme_type.to_string(), exchanger);
     }
 
+    /// Exchange a credential using the appropriate registered exchanger.
     pub async fn exchange(
         &self,
         credential: &AuthCredential,

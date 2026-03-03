@@ -106,6 +106,7 @@ pub enum ToolExecutionMode {
     /// and cancellation messages are shaped. When `None`, the
     /// [`DefaultResultFormatter`] is used.
     Background {
+        /// Custom formatter for background tool results, or `None` for the default.
         formatter: Option<Arc<dyn ResultFormatter>>,
     },
 }

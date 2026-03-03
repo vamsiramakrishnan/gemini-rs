@@ -6,65 +6,97 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum AuthCredentialType {
+    /// API key authentication.
     ApiKey,
+    /// HTTP-based authentication (basic or bearer).
     Http,
+    /// OAuth 2.0 authentication.
     #[serde(rename = "OAUTH2")]
     OAuth2,
+    /// OpenID Connect authentication.
     OpenIdConnect,
+    /// Google Cloud service account authentication.
     ServiceAccount,
 }
 
 /// HTTP credentials — basic auth or bearer token.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HttpCredentials {
+    /// Username for basic auth.
     pub username: Option<String>,
+    /// Password for basic auth.
     pub password: Option<String>,
+    /// Bearer or other token.
     pub token: Option<String>,
 }
 
 /// HTTP authentication with a named scheme (e.g. "bearer", "basic").
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HttpAuth {
+    /// The authentication scheme name.
     pub scheme: String,
+    /// The credentials for this scheme.
     pub credentials: HttpCredentials,
 }
 
 /// OAuth2 authentication data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OAuth2Auth {
+    /// OAuth2 client identifier.
     pub client_id: Option<String>,
+    /// OAuth2 client secret.
     pub client_secret: Option<String>,
+    /// Authorization endpoint URL.
     pub auth_uri: Option<String>,
+    /// Token endpoint URL.
     pub token_uri: Option<String>,
+    /// Redirect URI for the OAuth2 flow.
     pub redirect_uri: Option<String>,
+    /// Authorization code received from the auth flow.
     pub auth_code: Option<String>,
+    /// The access token.
     pub access_token: Option<String>,
+    /// Token used to refresh the access token.
     pub refresh_token: Option<String>,
+    /// Unix timestamp (seconds) when the access token expires.
     pub expires_at: Option<u64>,
+    /// OAuth2 scopes requested.
     pub scopes: Option<Vec<String>>,
+    /// Full URI of the OAuth2 authorization response.
     pub auth_response_uri: Option<String>,
 }
 
 /// Service account credential for Google Cloud.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServiceAccountCredential {
+    /// Path to the service account key JSON file.
     pub service_account_key_file: Option<String>,
+    /// Inline service account key JSON.
     pub service_account_key: Option<serde_json::Value>,
+    /// Scopes to request with the service account.
     pub scopes: Option<Vec<String>>,
+    /// Whether to use Application Default Credentials.
     pub use_default_credential: Option<bool>,
+    /// Google Cloud project ID.
     pub project_id: Option<String>,
+    /// Universe domain for the credentials.
     pub universe_domain: Option<String>,
 }
 
 /// Full auth credential — discriminated by `auth_type` with variant-specific data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthCredential {
+    /// The type of this credential.
     pub auth_type: AuthCredentialType,
+    /// Optional external resource reference.
     pub resource_ref: Option<String>,
-    // Variant-specific auth data
+    /// API key value (when `auth_type` is `ApiKey`).
     pub api_key: Option<String>,
+    /// HTTP auth data (when `auth_type` is `Http`).
     pub http: Option<HttpAuth>,
+    /// OAuth2 auth data (when `auth_type` is `OAuth2`).
     pub oauth2: Option<OAuth2Auth>,
+    /// Service account data (when `auth_type` is `ServiceAccount`).
     pub service_account: Option<ServiceAccountCredential>,
 }
 

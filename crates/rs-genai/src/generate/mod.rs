@@ -78,11 +78,17 @@ pub enum GenerateError {
 
     /// Content was blocked by safety filters.
     #[error("Content blocked: {reason:?}")]
-    SafetyBlocked { reason: BlockReason },
+    SafetyBlocked {
+        /// The reason the content was blocked.
+        reason: BlockReason,
+    },
 
     /// Prompt was rejected.
     #[error("Prompt blocked: {reason:?}")]
-    PromptBlocked { reason: BlockReason },
+    PromptBlocked {
+        /// The reason the prompt was blocked.
+        reason: BlockReason,
+    },
 }
 
 #[cfg(test)]

@@ -89,27 +89,40 @@ pub fn record_http_request(method: &str, status: u16, duration_ms: f64) {
 }
 
 // No-op stubs when metrics feature is disabled.
+
+/// Record a new session connection (no-op without `metrics` feature).
 #[cfg(not(feature = "metrics"))]
 pub fn record_session_connected() {}
+/// Record a session disconnection (no-op without `metrics` feature).
 #[cfg(not(feature = "metrics"))]
 pub fn record_session_disconnected() {}
+/// Record audio send latency (no-op without `metrics` feature).
 #[cfg(not(feature = "metrics"))]
 pub fn record_audio_latency(_: f64) {}
+/// Record time from end-of-speech to first model response (no-op without `metrics` feature).
 #[cfg(not(feature = "metrics"))]
 pub fn record_response_latency(_: f64) {}
+/// Record current jitter buffer depth (no-op without `metrics` feature).
 #[cfg(not(feature = "metrics"))]
 pub fn record_jitter_depth(_: f64) {}
+/// Record a jitter buffer underrun (no-op without `metrics` feature).
 #[cfg(not(feature = "metrics"))]
 pub fn record_jitter_underrun() {}
+/// Record a tool call execution (no-op without `metrics` feature).
 #[cfg(not(feature = "metrics"))]
 pub fn record_tool_call(_: &str, _: f64) {}
+/// Record a VAD event (no-op without `metrics` feature).
 #[cfg(not(feature = "metrics"))]
 pub fn record_vad_event(_: &str) {}
+/// Record a reconnection attempt (no-op without `metrics` feature).
 #[cfg(not(feature = "metrics"))]
 pub fn record_reconnection() {}
+/// Record WebSocket bytes sent (no-op without `metrics` feature).
 #[cfg(not(feature = "metrics"))]
 pub fn record_ws_bytes_sent(_: u64) {}
+/// Record WebSocket bytes received (no-op without `metrics` feature).
 #[cfg(not(feature = "metrics"))]
 pub fn record_ws_bytes_received(_: u64) {}
+/// Record an HTTP REST API request (no-op without `metrics` feature).
 #[cfg(not(feature = "metrics"))]
 pub fn record_http_request(_: &str, _: u16, _: f64) {}

@@ -11,7 +11,7 @@ pub mod sequential;
 // Run `cargo run -p adk-transpiler -- transpile --source <path> --output crates/rs-adk/src/agents/generated.rs`
 // to regenerate.
 #[path = "generated.rs"]
-#[allow(clippy::module_inception)]
+#[allow(clippy::module_inception, missing_docs, rustdoc::bare_urls)]
 pub mod generated;
 
 pub use loop_agent::LoopAgent;

@@ -1,3 +1,4 @@
+#![warn(missing_docs)]
 //! # rs-genai
 //!
 //! Full Rust equivalent of Google's `@google/genai` SDK.

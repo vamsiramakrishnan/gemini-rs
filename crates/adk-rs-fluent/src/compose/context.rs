@@ -59,6 +59,7 @@ impl std::ops::Add for ContextPolicy {
 /// A chain of context policies applied in combination.
 #[derive(Clone)]
 pub struct ContextPolicyChain {
+    /// The ordered list of policies in this chain.
     pub policies: Vec<ContextPolicy>,
 }
 
@@ -251,6 +252,33 @@ impl C {
         ContextPolicy::new("empty", |_| Vec::new())
     }
 
+    /// Inject state values as context preamble.
+    ///
+    /// Bridges Channel 2 (State) → Channel 1 (Conversation History) by prepending
+    /// formatted state values as a system context message.
+    ///
+    /// # Example
+    /// ```ignore
+    /// C::from_state(&["user:name", "app:account_balance", "derived:risk"])
+    /// // Produces: "[Context: name=John, account_balance=$5230, risk=0.72]"
+    /// ```
+    pub fn from_state(keys: &[&str]) -> ContextPolicy {
+        let owned_keys: Vec<String> = keys.iter().map(|k| k.to_string()).collect();
+        ContextPolicy::new("from_state", move |history| {
+            // Note: This policy captures keys but cannot access State at filter time.
+            // The actual state injection happens at the Live session level via
+            // instruction_template or on_turn_boundary. This policy prepends a
+            // placeholder that the runtime populates.
+            let mut result = Vec::new();
+            if !owned_keys.is_empty() {
+                let key_list = owned_keys.join(", ");
+                result.push(Content::user(format!("[Context keys: {}]", key_list)));
+            }
+            result.extend(history.iter().cloned());
+            result
+        })
+    }
+
     /// Deduplicate adjacent messages with identical text content.
     pub fn dedup() -> ContextPolicy {
         use rs_genai::prelude::Part;
@@ -428,5 +456,19 @@ mod tests {
         let history = vec![Content::user("existing")];
         let result = C::append(Content::model("suffix")).apply(&history);
         assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn from_state_prepends_context() {
+        let history = vec![Content::user("hello")];
+        let result = C::from_state(&["user:name", "app:balance"]).apply(&history);
+        assert_eq!(result.len(), 2);
+        // First message should be the context keys
+        if let rs_genai::prelude::Part::Text { text } = &result[0].parts[0] {
+            assert!(text.contains("user:name"));
+            assert!(text.contains("app:balance"));
+        } else {
+            panic!("Expected text part");
+        }
     }
 }

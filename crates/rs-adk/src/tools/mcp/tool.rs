@@ -18,6 +18,7 @@ pub struct McpTool {
 }
 
 impl McpTool {
+    /// Create a new MCP tool proxy with the given name, description, and session.
     pub fn new(
         name: impl Into<String>,
         description: impl Into<String>,

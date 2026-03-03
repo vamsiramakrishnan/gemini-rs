@@ -39,8 +39,10 @@ impl MemoryEntry {
 /// Errors from memory service operations.
 #[derive(Debug, thiserror::Error)]
 pub enum MemoryError {
+    /// The requested memory key was not found.
     #[error("Memory key not found: {0}")]
     NotFound(String),
+    /// A storage backend error.
     #[error("Storage error: {0}")]
     Storage(String),
 }

@@ -131,10 +131,15 @@ pub struct PromptFeedback {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum BlockReason {
+    /// Block reason not specified.
     BlockReasonUnspecified,
+    /// Blocked due to safety filters.
     Safety,
+    /// Blocked for other reasons.
     Other,
+    /// Blocked due to blocklist match.
     Blocklist,
+    /// Blocked due to prohibited content.
     ProhibitedContent,
 }
 

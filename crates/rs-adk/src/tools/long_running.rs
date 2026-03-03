@@ -17,7 +17,7 @@ const LONG_RUNNING_INSTRUCTION: &str = "NOTE: This is a long-running operation. 
 
 /// Wraps a [`ToolFunction`] and marks it as long-running.
 ///
-/// The wrapper appends [`LONG_RUNNING_INSTRUCTION`] to the inner tool's
+/// The wrapper appends the long-running instruction to the inner tool's
 /// description so the LLM knows not to re-invoke it while a previous call
 /// is still in progress. All other trait methods delegate directly to the
 /// inner tool.

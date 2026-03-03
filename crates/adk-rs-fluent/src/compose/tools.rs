@@ -11,6 +11,7 @@ use rs_adk::tool::{SimpleTool, ToolFunction};
 /// A tool composite — one or more tool entries.
 #[derive(Clone)]
 pub struct ToolComposite {
+    /// The tool entries in this composite.
     pub entries: Vec<ToolCompositeEntry>,
 }
 
@@ -24,12 +25,14 @@ pub enum ToolCompositeEntry {
 }
 
 impl ToolComposite {
+    /// Create a composite containing a single runtime tool function.
     pub fn from_function(f: Arc<dyn ToolFunction>) -> Self {
         Self {
             entries: vec![ToolCompositeEntry::Function(f)],
         }
     }
 
+    /// Create a composite containing a single built-in tool declaration.
     pub fn from_built_in(tool: Tool) -> Self {
         Self {
             entries: vec![ToolCompositeEntry::BuiltIn(tool)],

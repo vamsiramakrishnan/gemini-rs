@@ -11,6 +11,7 @@ use super::types::*;
 /// Top-level setup message sent immediately after WebSocket connect.
 #[derive(Debug, Clone, Serialize)]
 pub struct SetupMessage {
+    /// The setup payload.
     pub setup: SetupPayload,
 }
 
@@ -18,25 +19,36 @@ pub struct SetupMessage {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetupPayload {
+    /// Model URI string (e.g. `"models/gemini-2.0-flash-live-001"`).
     pub model: String,
+    /// Generation parameters (modalities, temperature, etc.).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub generation_config: Option<GenerationConfig>,
+    /// System instruction content.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system_instruction: Option<Content>,
+    /// Tool declarations for function calling, search, etc.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<Tool>,
+    /// Tool usage configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_config: Option<ToolConfig>,
+    /// Enable input audio transcription.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_audio_transcription: Option<InputAudioTranscription>,
+    /// Enable output audio transcription.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_audio_transcription: Option<OutputAudioTranscription>,
+    /// Realtime input configuration (VAD, activity handling).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub realtime_input_config: Option<RealtimeInputConfig>,
+    /// Session resumption configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_resumption: Option<SessionResumptionConfig>,
+    /// Context window compression configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context_window_compression: Option<ContextWindowCompressionConfig>,
+    /// Proactivity configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub proactivity: Option<ProactivityConfig>,
 }
@@ -72,6 +84,7 @@ impl SessionConfig {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RealtimeInputMessage {
+    /// The realtime input payload.
     pub realtime_input: RealtimeInputPayload,
 }
 
@@ -100,7 +113,9 @@ pub struct RealtimeInputPayload {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MediaChunk {
+    /// MIME type of the media (e.g. `"audio/pcm"`).
     pub mime_type: String,
+    /// Base64-encoded media data.
     pub data: String, // base64-encoded
 }
 
@@ -108,6 +123,7 @@ pub struct MediaChunk {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientContentMessage {
+    /// The client content payload.
     pub client_content: ClientContentPayload,
 }
 
@@ -115,7 +131,9 @@ pub struct ClientContentMessage {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientContentPayload {
+    /// Conversation turns to send.
     pub turns: Vec<Content>,
+    /// Whether this completes the client's turn.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub turn_complete: Option<bool>,
 }
@@ -124,6 +142,7 @@ pub struct ClientContentPayload {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolResponseMessage {
+    /// The tool response payload.
     pub tool_response: ToolResponsePayload,
 }
 
@@ -131,6 +150,7 @@ pub struct ToolResponseMessage {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolResponsePayload {
+    /// Function call responses to return to the model.
     pub function_responses: Vec<FunctionResponse>,
 }
 
@@ -138,6 +158,7 @@ pub struct ToolResponsePayload {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivitySignalMessage {
+    /// The activity signal payload.
     pub realtime_input: ActivitySignalPayload,
 }
 
@@ -145,8 +166,10 @@ pub struct ActivitySignalMessage {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivitySignalPayload {
+    /// Present when signaling activity start.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub activity_start: Option<ActivityStart>,
+    /// Present when signaling activity end.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub activity_end: Option<ActivityEnd>,
 }
@@ -167,6 +190,7 @@ pub struct ActivityEnd {}
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetupCompleteMessage {
+    /// The setup complete payload.
     pub setup_complete: SetupCompletePayload,
 }
 
@@ -174,6 +198,7 @@ pub struct SetupCompleteMessage {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetupCompletePayload {
+    /// Session resumption result, if resumption was requested.
     #[serde(default)]
     pub session_resumption: Option<SessionResumptionResult>,
 }
@@ -182,8 +207,10 @@ pub struct SetupCompletePayload {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionResumptionResult {
+    /// Opaque handle for future session resumption.
     #[serde(default)]
     pub handle: Option<String>,
+    /// Whether the session was successfully resumed.
     #[serde(default)]
     pub resumed: Option<bool>,
 }
@@ -192,6 +219,7 @@ pub struct SessionResumptionResult {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerContentMessage {
+    /// The server content payload.
     pub server_content: ServerContentPayload,
 }
 
@@ -199,20 +227,28 @@ pub struct ServerContentMessage {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerContentPayload {
+    /// Model output content for this turn.
     #[serde(default)]
     pub model_turn: Option<Content>,
+    /// Whether the model's turn is complete.
     #[serde(default)]
     pub turn_complete: Option<bool>,
+    /// Whether all generation (including tool use) is complete.
     #[serde(default)]
     pub generation_complete: Option<bool>,
+    /// Whether the model was interrupted by user barge-in.
     #[serde(default)]
     pub interrupted: Option<bool>,
+    /// Transcription of user audio input.
     #[serde(default)]
     pub input_transcription: Option<TranscriptionPayload>,
+    /// Transcription of model audio output.
     #[serde(default)]
     pub output_transcription: Option<TranscriptionPayload>,
+    /// Grounding metadata from search results.
     #[serde(default)]
     pub grounding_metadata: Option<GroundingMetadata>,
+    /// URL context metadata for content sourced from URLs.
     #[serde(default)]
     pub url_context_metadata: Option<UrlContextMetadata>,
     /// Reason why the model's turn completed (e.g. "STOP", "MAX_TOKENS").
@@ -226,6 +262,7 @@ pub struct ServerContentPayload {
 /// Transcription text from server.
 #[derive(Debug, Clone, Deserialize)]
 pub struct TranscriptionPayload {
+    /// The transcribed text.
     #[serde(default)]
     pub text: Option<String>,
 }
@@ -234,6 +271,7 @@ pub struct TranscriptionPayload {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolCallMessage {
+    /// The tool call payload.
     pub tool_call: ToolCallPayload,
 }
 
@@ -241,6 +279,7 @@ pub struct ToolCallMessage {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolCallPayload {
+    /// Function calls requested by the model.
     pub function_calls: Vec<FunctionCall>,
 }
 
@@ -248,6 +287,7 @@ pub struct ToolCallPayload {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolCallCancellationMessage {
+    /// The tool call cancellation payload.
     pub tool_call_cancellation: ToolCallCancellationPayload,
 }
 
@@ -255,6 +295,7 @@ pub struct ToolCallCancellationMessage {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolCallCancellationPayload {
+    /// IDs of the cancelled tool calls.
     pub ids: Vec<String>,
 }
 
@@ -262,6 +303,7 @@ pub struct ToolCallCancellationPayload {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GoAwayMessage {
+    /// The GoAway payload.
     pub go_away: GoAwayPayload,
 }
 
@@ -269,6 +311,7 @@ pub struct GoAwayMessage {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GoAwayPayload {
+    /// Time remaining before forced disconnect (e.g. `"30s"`).
     #[serde(default)]
     pub time_left: Option<String>,
 }
@@ -277,6 +320,7 @@ pub struct GoAwayPayload {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionResumptionUpdateMessage {
+    /// The session resumption update payload.
     pub session_resumption_update: SessionResumptionUpdatePayload,
 }
 
@@ -299,6 +343,7 @@ pub struct SessionResumptionUpdatePayload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VoiceActivityMessage {
+    /// The voice activity payload.
     pub voice_activity: VoiceActivityPayload,
 }
 
@@ -338,13 +383,21 @@ pub struct ServerMessageWrapper {
 /// is O(1) routing.
 #[derive(Debug, Clone)]
 pub enum ServerMessage {
+    /// Setup handshake completed successfully.
     SetupComplete(SetupCompleteMessage),
+    /// Model output content (text, audio, transcription, etc.).
     ServerContent(ServerContentMessage),
+    /// Model requested one or more tool/function calls.
     ToolCall(ToolCallMessage),
+    /// Server cancelled previously requested tool calls.
     ToolCallCancellation(ToolCallCancellationMessage),
+    /// Server requesting graceful disconnect.
     GoAway(GoAwayMessage),
+    /// Updated session resumption handle.
     SessionResumptionUpdate(SessionResumptionUpdateMessage),
+    /// Server-side voice activity detection event.
     VoiceActivity(VoiceActivityMessage),
+    /// Unrecognized message type (forward compatibility).
     Unknown(serde_json::Value),
 }
 

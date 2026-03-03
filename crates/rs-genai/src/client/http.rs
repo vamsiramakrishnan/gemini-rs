@@ -44,8 +44,11 @@ pub enum HttpError {
     /// Server returned an error status.
     #[error("API error {status}: {message}")]
     ApiError {
+        /// HTTP status code.
         status: u16,
+        /// Error message from the API.
         message: String,
+        /// Optional response body.
         body: Option<serde_json::Value>,
     },
 
@@ -60,7 +63,9 @@ pub enum HttpError {
     /// All retries exhausted.
     #[error("All {attempts} retries exhausted: {last_error}")]
     RetriesExhausted {
+        /// Number of retry attempts made.
         attempts: u32,
+        /// Error message from the last attempt.
         last_error: String,
     },
 }

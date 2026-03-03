@@ -10,7 +10,7 @@ use super::{now_secs, Artifact, ArtifactError, ArtifactMetadata, ArtifactService
 /// Each artifact name can have multiple versions. Suitable for testing,
 /// prototyping, and single-process deployments. Data is lost on process restart.
 pub struct InMemoryArtifactService {
-    /// session_id → (artifact_name → Vec<Artifact> (version history))
+    /// Maps session ID to artifact name to version history.
     store: DashMap<String, DashMap<String, Vec<Artifact>>>,
 }
 

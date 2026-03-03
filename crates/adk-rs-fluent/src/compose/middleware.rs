@@ -1,6 +1,9 @@
 //! M — Middleware composition.
 //!
 //! Compose middleware in any order with `|`.
+//!
+//! **Note:** Not yet wired into Live session dispatch. Available for
+//! `TextAgent` pipelines. Hidden from docs until Live integration lands.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -15,10 +18,12 @@ use rs_adk::middleware::{LatencyMiddleware, LogMiddleware, Middleware};
 /// A middleware composite — one or more middleware layers.
 #[derive(Clone)]
 pub struct MiddlewareComposite {
+    /// The ordered list of middleware layers.
     pub layers: Vec<Arc<dyn Middleware>>,
 }
 
 impl MiddlewareComposite {
+    /// Create a composite containing a single middleware layer.
     pub fn new(layer: Arc<dyn Middleware>) -> Self {
         Self {
             layers: vec![layer],
@@ -325,7 +330,11 @@ impl Middleware for AuditMiddleware {
     }
 
     async fn before_tool(&self, call: &FunctionCall) -> Result<(), AgentError> {
-        self.log.lock().push(AuditEntry {
+        let mut log = self.log.lock();
+        if log.len() >= 10_000 {
+            log.drain(..1_000);
+        }
+        log.push(AuditEntry {
             tool_name: call.name.clone(),
             args: call.args.clone(),
             success: None,

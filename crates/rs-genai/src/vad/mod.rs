@@ -93,13 +93,16 @@ pub struct VoiceActivityDetector {
 impl VoiceActivityDetector {
     /// Create a new VAD with the given configuration.
     pub fn new(config: VadConfig) -> Self {
-        let pre_speech_capacity = config.pre_speech_frames;
+        let frame_size = config.frame_size();
+        let pre_speech_buf: Vec<Vec<i16>> = (0..config.pre_speech_frames)
+            .map(|_| vec![0i16; frame_size])
+            .collect();
         Self {
             noise_floor_db: config.initial_noise_floor_db,
             state: VadState::Silence,
             state_frames: 0,
             noise_adapt_frames: 0,
-            pre_speech_buf: Vec::with_capacity(pre_speech_capacity),
+            pre_speech_buf,
             pre_speech_idx: 0,
             config,
         }
@@ -122,7 +125,13 @@ impl VoiceActivityDetector {
 
     /// Get pre-speech frames (the frames captured just before speech onset).
     pub fn drain_pre_speech(&mut self) -> Vec<Vec<i16>> {
-        std::mem::take(&mut self.pre_speech_buf)
+        let frame_size = self.config.frame_size();
+        let mut fresh: Vec<Vec<i16>> = (0..self.config.pre_speech_frames)
+            .map(|_| vec![0i16; frame_size])
+            .collect();
+        std::mem::swap(&mut self.pre_speech_buf, &mut fresh);
+        self.pre_speech_idx = 0;
+        fresh
     }
 
     /// Process a single audio frame and return any state-change event.
@@ -144,14 +153,12 @@ impl VoiceActivityDetector {
                 // Update noise floor during confirmed silence
                 self.update_noise_floor(energy_db);
 
-                // Store pre-speech frame
-                if self.pre_speech_buf.len() < self.config.pre_speech_frames {
-                    self.pre_speech_buf.push(samples.to_vec());
-                } else if self.config.pre_speech_frames > 0 {
+                // Store pre-speech frame (copy into pre-allocated slot, zero-alloc)
+                if self.config.pre_speech_frames > 0 && !self.pre_speech_buf.is_empty() {
                     let idx = self.pre_speech_idx % self.config.pre_speech_frames;
-                    if idx < self.pre_speech_buf.len() {
-                        self.pre_speech_buf[idx] = samples.to_vec();
-                    }
+                    let buf = &mut self.pre_speech_buf[idx];
+                    buf.resize(samples.len(), 0);
+                    buf.copy_from_slice(samples);
                     self.pre_speech_idx += 1;
                 }
 
@@ -199,7 +206,9 @@ impl VoiceActivityDetector {
                     if self.state_frames >= self.config.hangover_frames {
                         self.state = VadState::Silence;
                         self.state_frames = 0;
-                        self.pre_speech_buf.clear();
+                        for buf in &mut self.pre_speech_buf {
+                            buf.iter_mut().for_each(|s| *s = 0);
+                        }
                         self.pre_speech_idx = 0;
                         Some(VadEvent::SpeechEnd)
                     } else {
@@ -224,7 +233,9 @@ impl VoiceActivityDetector {
         self.state_frames = 0;
         self.noise_adapt_frames = 0;
         self.noise_floor_db = self.config.initial_noise_floor_db;
-        self.pre_speech_buf.clear();
+        for buf in &mut self.pre_speech_buf {
+            buf.iter_mut().for_each(|s| *s = 0);
+        }
         self.pre_speech_idx = 0;
     }
 }

@@ -15,6 +15,68 @@ use serde::{Deserialize, Serialize};
 
 use rs_genai::prelude::{Content, Part, Tool};
 
+/// Provides access tokens for VertexAI authentication.
+///
+/// Implement this trait to supply dynamically refreshed tokens.
+/// The default implementation reads `GOOGLE_ACCESS_TOKEN` from the environment.
+pub trait TokenProvider: Send + Sync {
+    /// Return a valid access token. Called before each `generate()` request
+    /// when using VertexAI variant.
+    fn token(&self) -> String;
+}
+
+/// Default token provider — reads `GOOGLE_ACCESS_TOKEN` from environment.
+pub struct EnvTokenProvider;
+
+impl TokenProvider for EnvTokenProvider {
+    fn token(&self) -> String {
+        std::env::var("GOOGLE_ACCESS_TOKEN").unwrap_or_default()
+    }
+}
+
+/// Token provider that shells out to `gcloud auth print-access-token`,
+/// caching the result with a configurable TTL.
+pub struct GcloudTokenProvider {
+    cache: parking_lot::Mutex<(String, std::time::Instant)>,
+    ttl: std::time::Duration,
+}
+
+impl GcloudTokenProvider {
+    /// Create a new provider with the given cache TTL (recommended: 45 minutes).
+    pub fn new(ttl: std::time::Duration) -> Self {
+        Self {
+            cache: parking_lot::Mutex::new((String::new(), std::time::Instant::now())),
+            ttl,
+        }
+    }
+}
+
+impl TokenProvider for GcloudTokenProvider {
+    fn token(&self) -> String {
+        let mut guard = self.cache.lock();
+        let (ref mut cached_token, ref mut fetched_at) = *guard;
+        if !cached_token.is_empty() && fetched_at.elapsed() < self.ttl {
+            return cached_token.clone();
+        }
+        // Shell out to gcloud
+        match std::process::Command::new("gcloud")
+            .args(["auth", "print-access-token"])
+            .output()
+        {
+            Ok(output) if output.status.success() => {
+                let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                *cached_token = token.clone();
+                *fetched_at = std::time::Instant::now();
+                token
+            }
+            _ => {
+                // Fall back to env var
+                std::env::var("GOOGLE_ACCESS_TOKEN").unwrap_or_default()
+            }
+        }
+    }
+}
+
 /// Configuration for an LLM generation request.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LlmRequest {
@@ -111,14 +173,19 @@ pub struct TokenUsage {
 /// Errors from LLM operations.
 #[derive(Debug, thiserror::Error)]
 pub enum LlmError {
+    /// The HTTP request to the LLM API failed.
     #[error("LLM request failed: {0}")]
     RequestFailed(String),
+    /// The requested model is not available.
     #[error("Model not available: {0}")]
     ModelNotAvailable(String),
+    /// The request was rate-limited by the provider.
     #[error("Rate limited")]
     RateLimited,
+    /// The response was filtered by content safety.
     #[error("Content filtered")]
     ContentFiltered,
+    /// A catch-all for other LLM errors.
     #[error("{0}")]
     Other(String),
 }
@@ -133,6 +200,15 @@ pub trait BaseLlm: Send + Sync {
 
     /// Generate content from the LLM.
     async fn generate(&self, request: LlmRequest) -> Result<LlmResponse, LlmError>;
+
+    /// Pre-warm the HTTP connection pool to avoid cold-start latency.
+    ///
+    /// The default implementation is a no-op. `GeminiLlm` overrides this to
+    /// establish the TCP+TLS connection so the first real `generate()` call
+    /// doesn't pay the ~100-300ms handshake penalty.
+    async fn warm_up(&self) -> Result<(), LlmError> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]

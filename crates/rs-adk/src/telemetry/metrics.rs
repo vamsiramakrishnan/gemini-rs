@@ -62,19 +62,27 @@ pub fn record_event_loop_lag(agent_name: &str, skipped: u64) {
 }
 
 // No-op stubs when metrics feature is disabled.
+/// Record that an agent has started (no-op without `metrics` feature).
 #[cfg(not(feature = "metrics"))]
 pub fn record_agent_started(_: &str) {}
+/// Record that an agent completed (no-op without `metrics` feature).
 #[cfg(not(feature = "metrics"))]
 pub fn record_agent_completed(_: &str, _: f64) {}
+/// Record an agent error (no-op without `metrics` feature).
 #[cfg(not(feature = "metrics"))]
 pub fn record_agent_error(_: &str, _: &str) {}
+/// Record a tool dispatch (no-op without `metrics` feature).
 #[cfg(not(feature = "metrics"))]
 pub fn record_agent_tool_dispatched(_: &str, _: &str) {}
+/// Record tool execution duration (no-op without `metrics` feature).
 #[cfg(not(feature = "metrics"))]
 pub fn record_agent_tool_duration(_: &str, _: &str, _: f64) {}
+/// Record an agent transfer (no-op without `metrics` feature).
 #[cfg(not(feature = "metrics"))]
 pub fn record_agent_transfer(_: &str, _: &str) {}
+/// Record agent-as-tool dispatch (no-op without `metrics` feature).
 #[cfg(not(feature = "metrics"))]
 pub fn record_agent_tool_dispatch(_: &str, _: &str, _: f64) {}
+/// Record event loop lag (no-op without `metrics` feature).
 #[cfg(not(feature = "metrics"))]
 pub fn record_event_loop_lag(_: &str, _: u64) {}

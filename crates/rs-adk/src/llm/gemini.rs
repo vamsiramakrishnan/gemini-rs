@@ -5,34 +5,53 @@
 //! pulls in `rs-genai/http` and `rs-genai/generate`.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use once_cell::sync::Lazy;
 use regex::Regex;
 
-use crate::llm::{BaseLlm, LlmError, LlmRequest, LlmResponse};
+use crate::llm::{BaseLlm, LlmError, LlmRequest, LlmResponse, TokenProvider, EnvTokenProvider};
 #[cfg(feature = "gemini-llm")]
 use crate::llm::TokenUsage;
 use crate::utils::variant::{get_google_llm_variant, GoogleLlmVariant};
 
 /// Parameters for constructing a [`GeminiLlm`].
-#[derive(Debug, Clone, Default)]
+#[derive(Default)]
 pub struct GeminiLlmParams {
+    /// Model name (defaults to "gemini-2.5-flash").
     pub model: Option<String>,
+    /// API key for Gemini API (non-Vertex).
     pub api_key: Option<String>,
+    /// Whether to use Vertex AI backend.
     pub vertexai: Option<bool>,
+    /// Google Cloud project ID (Vertex AI only).
     pub project: Option<String>,
+    /// Google Cloud region (Vertex AI only, defaults to "us-central1").
     pub location: Option<String>,
+    /// Custom HTTP headers for requests.
     pub headers: Option<HashMap<String, String>>,
+    /// Custom token provider for VertexAI. Defaults to reading `GOOGLE_ACCESS_TOKEN` env var.
+    pub token_provider: Option<Arc<dyn TokenProvider>>,
 }
 
 /// Concrete Gemini LLM implementation using rs-genai `Client`.
+///
+/// The rs-genai `Client` is created once at construction time and reused for
+/// all `generate()` calls, matching the JS GenAI SDK pattern where a single
+/// `GoogleGenAI` instance is shared across requests.
 pub struct GeminiLlm {
     model: String,
     variant: GoogleLlmVariant,
     /// Stored for constructing the rs-genai `Client` when `gemini-llm` is enabled.
     #[allow(dead_code)]
     params: GeminiLlmParams,
+    /// Token provider for VertexAI token refresh.
+    #[allow(dead_code)]
+    token_provider: Arc<dyn TokenProvider>,
+    /// Cached rs-genai Client, created once at construction time.
+    #[cfg(feature = "gemini-llm")]
+    client: rs_genai::prelude::Client,
 }
 
 static SUPPORTED_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
@@ -48,6 +67,7 @@ impl GeminiLlm {
     ///
     /// Resolves defaults for model, variant, API key, project, and location
     /// from parameters first, then falls back to environment variables.
+    /// The rs-genai `Client` is created once here and reused for all calls.
     pub fn new(mut params: GeminiLlmParams) -> Self {
         // Resolve model (default to "gemini-2.5-flash")
         let model = params
@@ -81,10 +101,39 @@ impl GeminiLlm {
             }
         }
 
+        // Resolve token provider for VertexAI
+        let token_provider: Arc<dyn TokenProvider> = params
+            .token_provider
+            .take()
+            .unwrap_or_else(|| Arc::new(EnvTokenProvider));
+
+        // Create the rs-genai Client once, reuse across generate() calls.
+        #[cfg(feature = "gemini-llm")]
+        let client = {
+            use rs_genai::prelude::*;
+            match variant {
+                GoogleLlmVariant::GeminiApi => {
+                    let api_key = params.api_key.as_deref().unwrap_or("");
+                    Client::from_api_key(api_key)
+                        .model(GeminiModel::Custom(model.clone()))
+                }
+                GoogleLlmVariant::VertexAi => {
+                    let project = params.project.as_deref().unwrap_or("");
+                    let location = params.location.as_deref().unwrap_or("us-central1");
+                    let token = token_provider.token();
+                    Client::from_vertex(project, location, token)
+                        .model(GeminiModel::Custom(model.clone()))
+                }
+            }
+        };
+
         Self {
             model,
             variant,
             params,
+            token_provider,
+            #[cfg(feature = "gemini-llm")]
+            client,
         }
     }
 
@@ -121,45 +170,18 @@ impl BaseLlm for GeminiLlm {
             use rs_genai::generate::GenerateContentConfig;
             use rs_genai::prelude::*;
 
-            let client = match self.variant {
-                GoogleLlmVariant::GeminiApi => {
-                    let api_key = self.params.api_key.as_deref().ok_or_else(|| {
-                        LlmError::RequestFailed("No API key configured".into())
-                    })?;
-                    Client::from_api_key(api_key)
-                        .model(GeminiModel::Custom(self.model.clone()))
-                }
-                GoogleLlmVariant::VertexAi => {
-                    let project = self.params.project.as_deref().ok_or_else(|| {
-                        LlmError::RequestFailed("No project configured".into())
-                    })?;
-                    let location = self
-                        .params
-                        .location
-                        .as_deref()
-                        .unwrap_or("us-central1");
-                    // VertexAI requires an access token, typically obtained via
-                    // application default credentials. For now, check env.
-                    let token = std::env::var("GOOGLE_ACCESS_TOKEN").map_err(|_| {
-                        LlmError::RequestFailed("No access token for VertexAI".into())
-                    })?;
-                    Client::from_vertex(project, location, token)
-                        .model(GeminiModel::Custom(self.model.clone()))
-                }
-            };
-
-            // Build GenerateContentConfig from LlmRequest
+            // Build GenerateContentConfig from LlmRequest — move, don't clone.
             let mut config = if request.contents.is_empty() {
                 GenerateContentConfig::from_text("")
             } else {
-                GenerateContentConfig::from_contents(request.contents.clone())
+                GenerateContentConfig::from_contents(std::mem::take(&mut request.contents))
             };
 
-            if let Some(sys) = &request.system_instruction {
-                config = config.system_instruction(sys);
+            if let Some(sys) = request.system_instruction.take() {
+                config = config.system_instruction(&sys);
             }
             if !request.tools.is_empty() {
-                config.tools = request.tools.clone();
+                config.tools = std::mem::take(&mut request.tools);
             }
             if let Some(temp) = request.temperature {
                 config = config.temperature(temp);
@@ -168,7 +190,7 @@ impl BaseLlm for GeminiLlm {
                 config = config.max_output_tokens(max);
             }
 
-            let response = client
+            let response = self.client
                 .generate_content_with(config, None)
                 .await
                 .map_err(|e| LlmError::RequestFailed(e.to_string()))?;
@@ -211,6 +233,22 @@ impl BaseLlm for GeminiLlm {
                     .into(),
             ))
         }
+    }
+
+    /// Pre-warm the HTTP connection pool by making a lightweight request.
+    ///
+    /// Establishes the TCP+TLS connection so the first real `generate()`
+    /// call doesn't pay the ~100-300ms handshake penalty. reqwest's
+    /// connection pool keeps it alive for subsequent calls.
+    async fn warm_up(&self) -> Result<(), LlmError> {
+        #[cfg(feature = "gemini-llm")]
+        {
+            use rs_genai::generate::GenerateContentConfig;
+            let config = GenerateContentConfig::from_text(".")
+                .max_output_tokens(1);
+            let _ = self.client.generate_content_with(config, None).await;
+        }
+        Ok(())
     }
 }
 

@@ -9,10 +9,13 @@ use crate::session::SessionCommand;
 /// Error during encoding or decoding.
 #[derive(Debug, thiserror::Error, Clone)]
 pub enum CodecError {
+    /// Failed to serialize a client message to JSON.
     #[error("Serialization error: {0}")]
     Serialize(String),
+    /// Failed to deserialize a server message from JSON.
     #[error("Deserialization error: {0}")]
     Deserialize(String),
+    /// Server sent bytes that are not valid UTF-8.
     #[error("Invalid UTF-8")]
     InvalidUtf8,
 }

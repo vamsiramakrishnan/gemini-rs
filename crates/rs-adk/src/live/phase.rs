@@ -7,16 +7,32 @@
 //! The machine is owned by the control-lane task; no internal locking is
 //! required — `&self` for reads, `&mut self` for mutations.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use rs_genai::session::SessionWriter;
 
+use super::transcript::TranscriptWindow;
 use super::BoxFuture;
 use crate::state::State;
 
 // ── Core types ──────────────────────────────────────────────────────────────
+
+/// What caused a phase transition.
+#[derive(Debug, Clone)]
+pub enum TransitionTrigger {
+    /// A named transition guard returned true during evaluate()
+    Guard {
+        /// Index of the transition guard that triggered.
+        transition_index: usize,
+    },
+    /// Explicit programmatic transition
+    Programmatic {
+        /// Source identifier for debugging (e.g., "tool_call", "watcher").
+        source: &'static str,
+    },
+}
 
 /// Instruction source for a phase — either a fixed string or a closure over state.
 pub enum PhaseInstruction {
@@ -32,6 +48,79 @@ impl PhaseInstruction {
         match self {
             PhaseInstruction::Static(s) => s.clone(),
             PhaseInstruction::Dynamic(f) => f(state),
+        }
+    }
+
+    /// Resolve the instruction and apply modifiers, returning the composed instruction.
+    pub fn resolve_with_modifiers(&self, state: &State, modifiers: &[InstructionModifier]) -> String {
+        let mut instruction = self.resolve(state);
+        for modifier in modifiers {
+            modifier.apply(&mut instruction, state);
+        }
+        instruction
+    }
+}
+
+/// A modifier that transforms a phase instruction based on runtime state.
+///
+/// Modifiers are evaluated in order during instruction composition.
+/// They compose additively — each appends to the instruction built so far.
+#[derive(Clone)]
+pub enum InstructionModifier {
+    /// Append formatted state values: `[Context: key1=val1, key2=val2, ...]`
+    StateAppend(Vec<String>),
+    /// Append the result of a custom formatter function.
+    CustomAppend(Arc<dyn Fn(&State) -> String + Send + Sync>),
+    /// Conditionally append text when a predicate is true.
+    Conditional {
+        /// Predicate that determines whether to append the text.
+        predicate: Arc<dyn Fn(&State) -> bool + Send + Sync>,
+        /// Text to append when the predicate is true.
+        text: String,
+    },
+}
+
+impl InstructionModifier {
+    /// Apply this modifier to a base instruction string, mutating it in place.
+    pub fn apply(&self, base: &mut String, state: &State) {
+        match self {
+            InstructionModifier::StateAppend(keys) => {
+                let mut pairs = Vec::with_capacity(keys.len());
+                for key in keys {
+                    let display_key = key
+                        .strip_prefix("derived:")
+                        .or_else(|| key.strip_prefix("session:"))
+                        .or_else(|| key.strip_prefix("app:"))
+                        .or_else(|| key.strip_prefix("user:"))
+                        .unwrap_or(key);
+                    if let Some(val) = state.get::<serde_json::Value>(key) {
+                        match val {
+                            serde_json::Value::String(s) => pairs.push(format!("{display_key}={s}")),
+                            serde_json::Value::Number(n) => pairs.push(format!("{display_key}={n}")),
+                            serde_json::Value::Bool(b) => pairs.push(format!("{display_key}={b}")),
+                            other => pairs.push(format!("{display_key}={other}")),
+                        }
+                    }
+                }
+                if !pairs.is_empty() {
+                    base.push_str("\n\n[Context: ");
+                    base.push_str(&pairs.join(", "));
+                    base.push(']');
+                }
+            }
+            InstructionModifier::CustomAppend(f) => {
+                let text = f(state);
+                if !text.is_empty() {
+                    base.push_str("\n\n");
+                    base.push_str(&text);
+                }
+            }
+            InstructionModifier::Conditional { predicate, text } => {
+                if predicate(state) {
+                    base.push_str("\n\n");
+                    base.push_str(text);
+                }
+            }
         }
     }
 }
@@ -62,6 +151,19 @@ pub struct Phase {
     pub transitions: Vec<Transition>,
     /// If `true`, `evaluate()` always returns `None` — no transitions out.
     pub terminal: bool,
+    /// Instruction modifiers applied during instruction composition.
+    /// Evaluated in order, each appends to the resolved instruction.
+    pub modifiers: Vec<InstructionModifier>,
+    /// If `true`, send `turnComplete: true` after instruction + context on phase entry,
+    /// causing the model to generate a response immediately.
+    pub prompt_on_enter: bool,
+    /// Optional context injection on phase entry.
+    /// Returns Content to send as `client_content` (turnComplete: false).
+    /// Gives the model conversational continuity across phase transitions.
+    pub on_enter_context: Option<Arc<
+        dyn Fn(&State, &TranscriptWindow) -> Option<Vec<rs_genai::prelude::Content>>
+            + Send + Sync
+    >>,
 }
 
 /// Record of a single phase transition for history/debugging.
@@ -74,16 +176,35 @@ pub struct PhaseTransition {
     pub turn: u32,
     /// Wall-clock instant of the transition.
     pub timestamp: Instant,
+    /// What caused this transition.
+    pub trigger: TransitionTrigger,
+    /// How long the machine spent in the source phase before transitioning.
+    pub duration_in_phase: Duration,
+}
+
+/// Result of a phase transition, carrying the resolved instruction
+/// and any context to inject.
+pub struct TransitionResult {
+    /// The resolved instruction for the new phase (with modifiers applied).
+    pub instruction: String,
+    /// Optional context content to inject via `send_client_content`.
+    pub context: Option<Vec<rs_genai::prelude::Content>>,
+    /// Whether to send `turnComplete: true` after instruction + context.
+    pub prompt_on_enter: bool,
 }
 
 // ── PhaseMachine ────────────────────────────────────────────────────────────
+
+/// Maximum phase transitions retained in history ring buffer.
+const MAX_PHASE_HISTORY: usize = 100;
 
 /// Evaluates transitions and manages phase entry/exit lifecycle.
 pub struct PhaseMachine {
     phases: HashMap<String, Phase>,
     current: String,
     initial: String,
-    history: Vec<PhaseTransition>,
+    history: VecDeque<PhaseTransition>,
+    phase_entered_at: Instant,
 }
 
 impl PhaseMachine {
@@ -96,7 +217,8 @@ impl PhaseMachine {
             phases: HashMap::new(),
             current: initial.to_string(),
             initial: initial.to_string(),
-            history: Vec::new(),
+            history: VecDeque::new(),
+            phase_entered_at: Instant::now(),
         }
     }
 
@@ -115,24 +237,24 @@ impl PhaseMachine {
         self.phases.get(&self.current)
     }
 
-    /// The full transition history (oldest first).
-    pub fn history(&self) -> &[PhaseTransition] {
+    /// The transition history (oldest first, capped at 100 entries).
+    pub fn history(&self) -> &VecDeque<PhaseTransition> {
         &self.history
     }
 
     /// Evaluate transitions from the current phase.
     ///
-    /// Returns the target phase name of the first transition whose guard
-    /// returns `true`, or `None` if no transition fires (or the current
-    /// phase is terminal / missing).
+    /// Returns the target phase name and transition index of the first
+    /// transition whose guard returns `true`, or `None` if no transition
+    /// fires (or the current phase is terminal / missing).
     ///
     /// This method is **pure** — it does not modify state or execute callbacks.
-    pub fn evaluate(&self, state: &State) -> Option<&str> {
+    pub fn evaluate(&self, state: &State) -> Option<(&str, usize)> {
         let phase = self.phases.get(&self.current)?;
         if phase.terminal {
             return None;
         }
-        for transition in &phase.transitions {
+        for (index, transition) in phase.transitions.iter().enumerate() {
             if (transition.guard)(state) {
                 // Check target phase guard — if the target phase has a guard
                 // that returns false, skip this transition and try the next one.
@@ -143,7 +265,7 @@ impl PhaseMachine {
                         }
                     }
                 }
-                return Some(&transition.target);
+                return Some((&transition.target, index));
             }
         }
         None
@@ -151,7 +273,7 @@ impl PhaseMachine {
 
     /// Execute a transition: run `on_exit` for the current phase, update
     /// `current`, run `on_enter` for the new phase, record history, and
-    /// return the resolved instruction string for the new phase.
+    /// return the `TransitionResult` for the new phase.
     ///
     /// Returns `None` if the target phase does not exist.
     pub async fn transition(
@@ -160,13 +282,16 @@ impl PhaseMachine {
         state: &State,
         writer: &Arc<dyn SessionWriter>,
         turn: u32,
-    ) -> Option<String> {
+        trigger: TransitionTrigger,
+        transcript_window: &TranscriptWindow,
+    ) -> Option<TransitionResult> {
         // Target must exist.
         if !self.phases.contains_key(target) {
             return None;
         }
 
         let from = self.current.clone();
+        let duration_in_phase = self.phase_entered_at.elapsed();
 
         // Run on_exit for the current phase (if it exists and has callback).
         if let Some(phase) = self.phases.get(&from) {
@@ -178,6 +303,7 @@ impl PhaseMachine {
 
         // Update current phase.
         self.current = target.to_string();
+        self.phase_entered_at = Instant::now();
 
         // Run on_enter for the new phase.
         if let Some(phase) = self.phases.get(target) {
@@ -187,18 +313,37 @@ impl PhaseMachine {
             }
         }
 
-        // Record history.
-        self.history.push(PhaseTransition {
+        // Record history (ring buffer — evict oldest if at capacity).
+        if self.history.len() >= MAX_PHASE_HISTORY {
+            self.history.pop_front();
+        }
+        self.history.push_back(PhaseTransition {
             from,
             to: target.to_string(),
             turn,
             timestamp: Instant::now(),
+            trigger,
+            duration_in_phase,
         });
 
-        // Resolve and return instruction for the new phase.
-        self.phases
-            .get(target)
-            .map(|p| p.instruction.resolve(state))
+        // Build transition result from the new phase.
+        let phase = self.phases.get(target)?;
+        let instruction = phase.instruction.resolve_with_modifiers(state, &phase.modifiers);
+        let context = phase.on_enter_context
+            .as_ref()
+            .and_then(|f| f(state, transcript_window));
+        let prompt_on_enter = phase.prompt_on_enter;
+
+        Some(TransitionResult {
+            instruction,
+            context,
+            prompt_on_enter,
+        })
+    }
+
+    /// Returns how long the machine has been in the current phase.
+    pub fn current_phase_duration(&self) -> Duration {
+        self.phase_entered_at.elapsed()
     }
 
     /// Active tools filter for the current phase.
@@ -247,6 +392,8 @@ impl PhaseMachine {
 mod tests {
     use super::*;
 
+    use super::super::transcript::TranscriptWindow;
+
     /// Helper: create a minimal non-terminal phase with no callbacks.
     fn simple_phase(name: &str, instruction: &str) -> Phase {
         Phase {
@@ -258,6 +405,9 @@ mod tests {
             on_exit: None,
             transitions: Vec::new(),
             terminal: false,
+            modifiers: Vec::new(),
+            prompt_on_enter: false,
+            on_enter_context: None,
         }
     }
 
@@ -272,7 +422,15 @@ mod tests {
             on_exit: None,
             transitions: Vec::new(),
             terminal: true,
+            modifiers: Vec::new(),
+            prompt_on_enter: false,
+            on_enter_context: None,
         }
+    }
+
+    /// Helper: empty transcript window for tests.
+    fn empty_tw() -> TranscriptWindow {
+        TranscriptWindow::new(vec![])
     }
 
     // ── 1. new + add_phase + current ────────────────────────────────────
@@ -303,7 +461,7 @@ mod tests {
         machine.add_phase(greeting);
         machine.add_phase(simple_phase("main", "Main phase"));
 
-        assert_eq!(machine.evaluate(&state), Some("main"));
+        assert_eq!(machine.evaluate(&state), Some(("main", 0)));
     }
 
     // ── 3. evaluate with single transition that does not fire ───────────
@@ -349,8 +507,8 @@ mod tests {
         machine.add_phase(simple_phase("escalated", "Escalated"));
         machine.add_phase(simple_phase("farewell", "Farewell"));
 
-        // Both guards are true, but "escalated" is declared first.
-        assert_eq!(machine.evaluate(&state), Some("escalated"));
+        // Both guards are true, but "escalated" is declared first (index 0).
+        assert_eq!(machine.evaluate(&state), Some(("escalated", 0)));
     }
 
     // ── 5. evaluate on terminal phase returns None ──────────────────────
@@ -385,13 +543,19 @@ mod tests {
         machine.add_phase(simple_phase("greeting", "Say hello"));
         machine.add_phase(simple_phase("main", "Main phase instruction"));
 
-        let result = machine.transition("main", &state, &writer, 1).await;
-        assert_eq!(result, Some("Main phase instruction".to_string()));
+        let trigger = TransitionTrigger::Guard { transition_index: 0 };
+        let tw = empty_tw();
+        let result = machine.transition("main", &state, &writer, 1, trigger, &tw).await;
+        assert_eq!(result.as_ref().map(|r| r.instruction.as_str()), Some("Main phase instruction"));
         assert_eq!(machine.current(), "main");
         assert_eq!(machine.history().len(), 1);
         assert_eq!(machine.history()[0].from, "greeting");
         assert_eq!(machine.history()[0].to, "main");
         assert_eq!(machine.history()[0].turn, 1);
+        assert!(matches!(
+            machine.history()[0].trigger,
+            TransitionTrigger::Guard { transition_index: 0 }
+        ));
     }
 
     // ── 7. active_tools returns correct filter ──────────────────────────
@@ -508,7 +672,9 @@ mod tests {
         let mut machine = PhaseMachine::new("greeting");
         machine.add_phase(simple_phase("greeting", "Hi"));
 
-        let result = machine.transition("no_such_phase", &state, &writer, 0).await;
+        let trigger = TransitionTrigger::Programmatic { source: "test" };
+        let tw = empty_tw();
+        let result = machine.transition("no_such_phase", &state, &writer, 0, trigger, &tw).await;
         assert!(result.is_none());
         // Current phase should remain unchanged.
         assert_eq!(machine.current(), "greeting");
@@ -539,7 +705,9 @@ mod tests {
         machine.add_phase(greeting);
         machine.add_phase(main);
 
-        machine.transition("main", &state, &writer, 1).await;
+        let trigger = TransitionTrigger::Programmatic { source: "test" };
+        let tw = empty_tw();
+        machine.transition("main", &state, &writer, 1, trigger, &tw).await;
 
         assert_eq!(state.get::<bool>("exited_greeting"), Some(true));
         assert_eq!(state.get::<bool>("entered_main"), Some(true));
@@ -557,17 +725,28 @@ mod tests {
         machine.add_phase(simple_phase("b", "Phase B"));
         machine.add_phase(simple_phase("c", "Phase C"));
 
-        machine.transition("b", &state, &writer, 1).await;
-        machine.transition("c", &state, &writer, 3).await;
+        let trigger1 = TransitionTrigger::Guard { transition_index: 0 };
+        let tw = empty_tw();
+        machine.transition("b", &state, &writer, 1, trigger1, &tw).await;
+        let trigger2 = TransitionTrigger::Programmatic { source: "test" };
+        machine.transition("c", &state, &writer, 3, trigger2, &tw).await;
 
         assert_eq!(machine.current(), "c");
         assert_eq!(machine.history().len(), 2);
         assert_eq!(machine.history()[0].from, "a");
         assert_eq!(machine.history()[0].to, "b");
         assert_eq!(machine.history()[0].turn, 1);
+        assert!(matches!(
+            machine.history()[0].trigger,
+            TransitionTrigger::Guard { transition_index: 0 }
+        ));
         assert_eq!(machine.history()[1].from, "b");
         assert_eq!(machine.history()[1].to, "c");
         assert_eq!(machine.history()[1].turn, 3);
+        assert!(matches!(
+            machine.history()[1].trigger,
+            TransitionTrigger::Programmatic { source: "test" }
+        ));
     }
 
     // ── dynamic instruction resolved during transition ──────────────────
@@ -590,14 +769,19 @@ mod tests {
             on_exit: None,
             transitions: Vec::new(),
             terminal: false,
+            modifiers: Vec::new(),
+            prompt_on_enter: false,
+            on_enter_context: None,
         };
 
         let mut machine = PhaseMachine::new("start");
         machine.add_phase(simple_phase("start", "Begin"));
         machine.add_phase(dynamic_phase);
 
-        let result = machine.transition("dynamic", &state, &writer, 1).await;
-        assert_eq!(result, Some("Discuss weather.".to_string()));
+        let trigger = TransitionTrigger::Programmatic { source: "test" };
+        let tw = empty_tw();
+        let result = machine.transition("dynamic", &state, &writer, 1, trigger, &tw).await;
+        assert_eq!(result.as_ref().map(|r| r.instruction.as_str()), Some("Discuss weather."));
     }
 
     // ── phase-level guard blocks transition into guarded phase ─────────
@@ -651,8 +835,8 @@ mod tests {
         machine.add_phase(greeting);
         machine.add_phase(secure);
 
-        // Both transition guard and phase guard pass.
-        assert_eq!(machine.evaluate(&state), Some("secure"));
+        // Both transition guard and phase guard pass (index 0).
+        assert_eq!(machine.evaluate(&state), Some(("secure", 0)));
     }
 
     #[test]
@@ -684,7 +868,70 @@ mod tests {
         machine.add_phase(simple_phase("fallback", "Fallback"));
 
         // First transition fires but phase guard blocks → falls through to
-        // second transition which has no phase guard → returns "fallback".
-        assert_eq!(machine.evaluate(&state), Some("fallback"));
+        // second transition (index 1) which has no phase guard → returns "fallback".
+        assert_eq!(machine.evaluate(&state), Some(("fallback", 1)));
+    }
+
+    // ── InstructionModifier tests ──────────────────────────────────────
+
+    #[test]
+    fn instruction_modifier_state_append() {
+        let state = State::new();
+        state.set("emotion", "happy");
+        state.set("score", 0.8f64);
+
+        let modifier = InstructionModifier::StateAppend(vec![
+            "emotion".to_string(),
+            "score".to_string(),
+        ]);
+        let mut base = "You are an assistant.".to_string();
+        modifier.apply(&mut base, &state);
+        assert!(base.contains("[Context: emotion=happy, score=0.8]"));
+    }
+
+    #[test]
+    fn instruction_modifier_conditional_true() {
+        let state = State::new();
+        state.set("risk", "high");
+
+        let modifier = InstructionModifier::Conditional {
+            predicate: Arc::new(|s: &State| {
+                s.get::<String>("risk").unwrap_or_default() == "high"
+            }),
+            text: "IMPORTANT: Use extra empathy.".to_string(),
+        };
+        let mut base = "Base instruction.".to_string();
+        modifier.apply(&mut base, &state);
+        assert!(base.contains("IMPORTANT: Use extra empathy."));
+    }
+
+    #[test]
+    fn instruction_modifier_conditional_false() {
+        let state = State::new();
+        state.set("risk", "low");
+
+        let modifier = InstructionModifier::Conditional {
+            predicate: Arc::new(|s: &State| {
+                s.get::<String>("risk").unwrap_or_default() == "high"
+            }),
+            text: "IMPORTANT: Use extra empathy.".to_string(),
+        };
+        let mut base = "Base instruction.".to_string();
+        modifier.apply(&mut base, &state);
+        assert!(!base.contains("IMPORTANT"));
+    }
+
+    #[test]
+    fn resolve_with_modifiers_composes() {
+        let state = State::new();
+        state.set("mood", "calm");
+
+        let instr = PhaseInstruction::Static("You are helpful.".to_string());
+        let modifiers = vec![
+            InstructionModifier::StateAppend(vec!["mood".to_string()]),
+        ];
+        let result = instr.resolve_with_modifiers(&state, &modifiers);
+        assert!(result.starts_with("You are helpful."));
+        assert!(result.contains("[Context: mood=calm]"));
     }
 }

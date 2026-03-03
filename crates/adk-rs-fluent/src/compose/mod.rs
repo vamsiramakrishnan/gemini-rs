@@ -13,6 +13,7 @@
 
 pub mod artifacts;
 pub mod context;
+#[doc(hidden)]
 pub mod middleware;
 pub mod prompt;
 pub mod state;

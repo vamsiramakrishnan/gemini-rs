@@ -81,10 +81,18 @@ impl Artifact {
 /// Errors from artifact service operations.
 #[derive(Debug, thiserror::Error)]
 pub enum ArtifactError {
+    /// The requested artifact was not found.
     #[error("Artifact not found: {0}")]
     NotFound(String),
+    /// The requested version of the artifact was not found.
     #[error("Version not found: {name} v{version}")]
-    VersionNotFound { name: String, version: u32 },
+    VersionNotFound {
+        /// Artifact name.
+        name: String,
+        /// Requested version number.
+        version: u32,
+    },
+    /// A storage backend error.
     #[error("Storage error: {0}")]
     Storage(String),
 }

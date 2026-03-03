@@ -4,10 +4,42 @@
 //! and prefix-scoped accessors for namespace isolation.
 
 use std::collections::HashMap;
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 use dashmap::DashMap;
 use serde_json::Value;
+
+/// A compile-time typed state key that eliminates typo bugs and type mismatches.
+///
+/// Create as a const and use with `State::get_key()` / `State::set_key()`:
+///
+/// ```rust,ignore
+/// const TURN_COUNT: StateKey<u32> = StateKey::new("session:turn_count");
+/// const SENTIMENT: StateKey<String> = StateKey::new("derived:sentiment");
+///
+/// state.set_key(&TURN_COUNT, 5);
+/// let count: Option<u32> = state.get_key(&TURN_COUNT);
+/// ```
+pub struct StateKey<T> {
+    key: &'static str,
+    _phantom: PhantomData<fn() -> T>,
+}
+
+impl<T> StateKey<T> {
+    /// Create a new typed state key.
+    pub const fn new(key: &'static str) -> Self {
+        Self {
+            key,
+            _phantom: PhantomData,
+        }
+    }
+
+    /// The string key.
+    pub const fn key(&self) -> &'static str {
+        self.key
+    }
+}
 
 /// A concurrent, type-safe state container that agents read from and write to.
 ///
@@ -28,6 +60,7 @@ impl Default for State {
 }
 
 impl State {
+    /// Create a new empty state container.
     pub fn new() -> Self {
         Self {
             inner: Arc::new(DashMap::new()),
@@ -53,15 +86,85 @@ impl State {
             .and_then(|v| serde_json::from_value(v).ok())
     }
 
+    /// Borrow a value by key without cloning, applying `f` to the reference.
+    ///
+    /// This is the zero-copy alternative to `get_raw()`. The closure receives
+    /// a `&Value` directly from the DashMap ref-guard, avoiding the
+    /// `Value::clone()` + `serde_json::from_value()` overhead of `get()`.
+    ///
+    /// Lookup order: delta (if tracking) → inner → derived fallback.
+    pub fn with<F, R>(&self, key: &str, f: F) -> Option<R>
+    where
+        F: FnOnce(&Value) -> R,
+    {
+        if self.track_delta {
+            if let Some(ref_multi) = self.delta.get(key) {
+                return Some(f(ref_multi.value()));
+            }
+        }
+        if let Some(ref_multi) = self.inner.get(key) {
+            return Some(f(ref_multi.value()));
+        }
+        if !key.contains(':') {
+            let mut derived_key = String::with_capacity(8 + key.len());
+            use std::fmt::Write;
+            let _ = write!(derived_key, "derived:{}", key);
+            if self.track_delta {
+                if let Some(ref_multi) = self.delta.get(&derived_key) {
+                    return Some(f(ref_multi.value()));
+                }
+            }
+            if let Some(ref_multi) = self.inner.get(&derived_key) {
+                return Some(f(ref_multi.value()));
+            }
+        }
+        None
+    }
+
     /// Get a raw JSON value by key.
     /// When delta tracking is enabled, checks delta first, then inner.
+    /// If the key is not found and doesn't contain a prefix, also checks `derived:{key}`
+    /// as a transparent fallback for computed variables.
     pub fn get_raw(&self, key: &str) -> Option<Value> {
         if self.track_delta {
             if let Some(v) = self.delta.get(key) {
                 return Some(v.value().clone());
             }
         }
-        self.inner.get(key).map(|v| v.value().clone())
+        if let Some(v) = self.inner.get(key) {
+            return Some(v.value().clone());
+        }
+        // Transparent derived fallback: if key has no prefix, check derived:{key}
+        if !key.contains(':') {
+            use std::fmt::Write;
+            let mut derived_key = String::with_capacity(8 + key.len());
+            let _ = write!(derived_key, "derived:{}", key);
+            if self.track_delta {
+                if let Some(v) = self.delta.get(&derived_key) {
+                    return Some(v.value().clone());
+                }
+            }
+            return self.inner.get(&derived_key).map(|v| v.value().clone());
+        }
+        None
+    }
+
+    /// Get a typed value using a `StateKey<T>`.
+    pub fn get_key<T: serde::de::DeserializeOwned>(&self, key: &StateKey<T>) -> Option<T> {
+        self.get(key.key())
+    }
+
+    /// Set a typed value using a `StateKey<T>`.
+    pub fn set_key<T: serde::Serialize>(&self, key: &StateKey<T>, value: T) {
+        self.set(key.key(), value);
+    }
+
+    /// Zero-copy borrow using a `StateKey<T>`.
+    pub fn with_key<T, F, R>(&self, key: &StateKey<T>, f: F) -> Option<R>
+    where
+        F: FnOnce(&Value) -> R,
+    {
+        self.with(key.key(), f)
     }
 
     /// Set a value by key.
@@ -79,6 +182,23 @@ impl State {
     pub fn set_committed(&self, key: impl Into<String>, value: impl serde::Serialize) {
         let v = serde_json::to_value(value).expect("value must be serializable");
         self.inner.insert(key.into(), v);
+    }
+
+    /// Atomically read-modify-write a value.
+    ///
+    /// If the key doesn't exist, `default` is used as the initial value.
+    /// The function `f` receives the current value and returns the new value.
+    /// Returns the new value after modification.
+    pub fn modify<T, F>(&self, key: &str, default: T, f: F) -> T
+    where
+        T: serde::Serialize + serde::de::DeserializeOwned,
+        F: FnOnce(T) -> T,
+    {
+        // Read current value from whichever store has it
+        let current: T = self.get(key).unwrap_or(default);
+        let new_val = f(current);
+        self.set(key, &new_val);
+        new_val
     }
 
     /// Check if a key exists (in delta or inner).
@@ -103,13 +223,22 @@ impl State {
 
     /// Get all keys (from both inner and delta when tracking).
     pub fn keys(&self) -> Vec<String> {
-        let mut keys: Vec<String> = self.inner.iter().map(|r| r.key().clone()).collect();
-        if self.track_delta {
-            for entry in self.delta.iter() {
-                let key = entry.key().clone();
-                if !keys.contains(&key) {
-                    keys.push(key);
-                }
+        if !self.track_delta || self.delta.is_empty() {
+            return self.inner.iter().map(|r| r.key().clone()).collect();
+        }
+        let mut seen = std::collections::HashSet::with_capacity(
+            self.inner.len() + self.delta.len(),
+        );
+        let mut keys = Vec::with_capacity(self.inner.len() + self.delta.len());
+        for entry in self.inner.iter() {
+            let key = entry.key().clone();
+            seen.insert(key.clone());
+            keys.push(key);
+        }
+        for entry in self.delta.iter() {
+            let key = entry.key().clone();
+            if seen.insert(key.clone()) {
+                keys.push(key);
             }
         }
         keys
@@ -313,6 +442,14 @@ impl<'a> PrefixedState<'a> {
         self.state.get_raw(&self.prefixed_key(key))
     }
 
+    /// Zero-copy borrow a value by key (with prefix applied).
+    pub fn with<F, R>(&self, key: &str, f: F) -> Option<R>
+    where
+        F: FnOnce(&Value) -> R,
+    {
+        self.state.with(&self.prefixed_key(key), f)
+    }
+
     /// Set a value by key (with prefix applied).
     pub fn set(&self, key: impl AsRef<str>, value: impl serde::Serialize) {
         self.state.set(self.prefixed_key(key.as_ref()), value);
@@ -360,6 +497,14 @@ impl<'a> ReadOnlyPrefixedState<'a> {
     /// Get a raw JSON value by key (with prefix applied).
     pub fn get_raw(&self, key: &str) -> Option<Value> {
         self.state.get_raw(&self.prefixed_key(key))
+    }
+
+    /// Zero-copy borrow a value by key (with prefix applied).
+    pub fn with<F, R>(&self, key: &str, f: F) -> Option<R>
+    where
+        F: FnOnce(&Value) -> R,
+    {
+        self.state.with(&self.prefixed_key(key), f)
     }
 
     /// Check if a key exists (with prefix applied).
@@ -860,5 +1005,180 @@ mod tests {
         state.clear_prefix("turn:");
         assert!(state.turn().keys().is_empty());
         assert!(state.app().contains("z"));
+    }
+
+    // ── modify() tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn modify_increment_existing() {
+        let state = State::new();
+        state.set("count", 5u32);
+        let result = state.modify("count", 0u32, |n| n + 1);
+        assert_eq!(result, 6);
+        assert_eq!(state.get::<u32>("count"), Some(6));
+    }
+
+    #[test]
+    fn modify_uses_default_when_missing() {
+        let state = State::new();
+        let result = state.modify("new_count", 0u32, |n| n + 1);
+        assert_eq!(result, 1);
+        assert_eq!(state.get::<u32>("new_count"), Some(1));
+    }
+
+    #[test]
+    fn modify_with_delta_tracking() {
+        let state = State::new();
+        state.set("x", 10u32);
+        let tracked = state.with_delta_tracking();
+        let result = tracked.modify("x", 0u32, |n| n * 2);
+        assert_eq!(result, 20);
+        // Written to delta, not committed
+        assert_eq!(tracked.get::<u32>("x"), Some(20));
+        assert_eq!(state.get::<u32>("x"), Some(10)); // original unchanged
+    }
+
+    // ── derived fallback tests ──────────────────────────────────────────
+
+    #[test]
+    fn get_falls_back_to_derived_prefix() {
+        let state = State::new();
+        state.set("derived:risk", 0.85);
+        // Access without prefix — should find derived:risk
+        assert_eq!(state.get::<f64>("risk"), Some(0.85));
+    }
+
+    #[test]
+    fn get_prefers_direct_key_over_derived() {
+        let state = State::new();
+        state.set("score", 1.0);
+        state.set("derived:score", 0.5);
+        // Direct key should win
+        assert_eq!(state.get::<f64>("score"), Some(1.0));
+    }
+
+    #[test]
+    fn get_derived_fallback_skipped_for_prefixed_keys() {
+        let state = State::new();
+        state.set("derived:risk", 0.85);
+        // Prefixed key should NOT trigger fallback
+        assert_eq!(state.get::<f64>("app:risk"), None);
+    }
+
+    #[test]
+    fn get_derived_fallback_with_delta_tracking() {
+        let state = State::new();
+        let tracked = state.with_delta_tracking();
+        tracked.set("derived:computed_val", 42);
+        assert_eq!(tracked.get::<i32>("computed_val"), Some(42));
+    }
+
+    // ── with() zero-copy borrow tests ──────────────────────────────────
+
+    #[test]
+    fn with_reads_from_inner() {
+        let state = State::new();
+        state.set("name", "Alice");
+        let len = state.with("name", |v| v.as_str().unwrap().len());
+        assert_eq!(len, Some(5));
+    }
+
+    #[test]
+    fn with_reads_from_delta_first() {
+        let state = State::new();
+        state.set("x", 1);
+        let tracked = state.with_delta_tracking();
+        tracked.set("x", 99);
+        let val = tracked.with("x", |v| v.as_i64().unwrap());
+        assert_eq!(val, Some(99));
+    }
+
+    #[test]
+    fn with_falls_back_to_inner_when_not_in_delta() {
+        let state = State::new();
+        state.set("committed", "yes");
+        let tracked = state.with_delta_tracking();
+        let val = tracked.with("committed", |v| v.as_str().unwrap().to_string());
+        assert_eq!(val, Some("yes".to_string()));
+    }
+
+    #[test]
+    fn with_falls_back_to_derived() {
+        let state = State::new();
+        state.set("derived:risk", 0.85);
+        let val = state.with("risk", |v| v.as_f64().unwrap());
+        assert_eq!(val, Some(0.85));
+    }
+
+    #[test]
+    fn with_derived_fallback_skipped_for_prefixed() {
+        let state = State::new();
+        state.set("derived:risk", 0.85);
+        let val = state.with("app:risk", |v| v.as_f64().unwrap());
+        assert_eq!(val, None);
+    }
+
+    #[test]
+    fn with_returns_none_for_missing() {
+        let state = State::new();
+        let val = state.with("missing", |v| v.clone());
+        assert_eq!(val, None);
+    }
+
+    #[test]
+    fn with_on_prefixed_state() {
+        let state = State::new();
+        state.app().set("flag", true);
+        let val = state.app().with("flag", |v| v.as_bool().unwrap());
+        assert_eq!(val, Some(true));
+    }
+
+    #[test]
+    fn with_on_read_only_prefixed_state() {
+        let state = State::new();
+        state.set("derived:score", serde_json::json!(0.95));
+        let val = state.derived().with("score", |v| v.as_f64().unwrap());
+        assert_eq!(val, Some(0.95));
+    }
+
+    // ── StateKey typed key tests ───────────────────────────────────────
+
+    const TURN_COUNT: StateKey<u32> = StateKey::new("session:turn_count");
+    const NAME: StateKey<String> = StateKey::new("user:name");
+
+    #[test]
+    fn state_key_get_and_set() {
+        let state = State::new();
+        state.set_key(&TURN_COUNT, 5);
+        assert_eq!(state.get_key(&TURN_COUNT), Some(5));
+    }
+
+    #[test]
+    fn state_key_get_missing() {
+        let state = State::new();
+        assert_eq!(state.get_key(&TURN_COUNT), None);
+    }
+
+    #[test]
+    fn state_key_string_type() {
+        let state = State::new();
+        state.set_key(&NAME, "Alice".to_string());
+        assert_eq!(state.get_key(&NAME), Some("Alice".to_string()));
+    }
+
+    #[test]
+    fn state_key_with() {
+        let state = State::new();
+        state.set_key(&TURN_COUNT, 42);
+        let val = state.with_key(&TURN_COUNT, |v| v.as_u64().unwrap());
+        assert_eq!(val, Some(42));
+    }
+
+    #[test]
+    fn state_key_interop_with_raw() {
+        let state = State::new();
+        state.set_key(&TURN_COUNT, 10);
+        // Can also read via raw key
+        assert_eq!(state.get::<u32>("session:turn_count"), Some(10));
     }
 }

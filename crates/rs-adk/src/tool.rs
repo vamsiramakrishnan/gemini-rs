@@ -20,18 +20,26 @@ use crate::error::ToolError;
 /// A regular tool — called once, returns a result.
 #[async_trait]
 pub trait ToolFunction: Send + Sync + 'static {
+    /// The unique name of this tool.
     fn name(&self) -> &str;
+    /// Human-readable description of what this tool does.
     fn description(&self) -> &str;
+    /// JSON Schema for the tool's input parameters, or `None` if parameterless.
     fn parameters(&self) -> Option<serde_json::Value>;
+    /// Execute the tool with the given arguments and return the result.
     async fn call(&self, args: serde_json::Value) -> Result<serde_json::Value, ToolError>;
 }
 
 /// A streaming tool — runs in background, yields multiple results.
 #[async_trait]
 pub trait StreamingTool: Send + Sync + 'static {
+    /// The unique name of this tool.
     fn name(&self) -> &str;
+    /// Human-readable description of what this tool does.
     fn description(&self) -> &str;
+    /// JSON Schema for the tool's input parameters, or `None` if parameterless.
     fn parameters(&self) -> Option<serde_json::Value>;
+    /// Execute the tool, sending intermediate results via `yield_tx`.
     async fn run(
         &self,
         args: serde_json::Value,
@@ -42,9 +50,13 @@ pub trait StreamingTool: Send + Sync + 'static {
 /// An input-streaming tool — receives duplicated live input while running.
 #[async_trait]
 pub trait InputStreamingTool: Send + Sync + 'static {
+    /// The unique name of this tool.
     fn name(&self) -> &str;
+    /// Human-readable description of what this tool does.
     fn description(&self) -> &str;
+    /// JSON Schema for the tool's input parameters, or `None` if parameterless.
     fn parameters(&self) -> Option<serde_json::Value>;
+    /// Execute the tool, receiving live input via `input_rx` and sending results via `yield_tx`.
     async fn run(
         &self,
         args: serde_json::Value,
@@ -56,21 +68,29 @@ pub trait InputStreamingTool: Send + Sync + 'static {
 /// Classification of a registered tool.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolClass {
+    /// A one-shot tool that returns a single result.
     Regular,
+    /// A tool that yields multiple results over time.
     Streaming,
+    /// A tool that receives live input while producing results.
     InputStream,
 }
 
 /// Unified tool storage.
 pub enum ToolKind {
+    /// A regular one-shot function tool.
     Function(Arc<dyn ToolFunction>),
+    /// A streaming tool that yields multiple results.
     Streaming(Arc<dyn StreamingTool>),
+    /// An input-streaming tool that receives live input.
     InputStream(Arc<dyn InputStreamingTool>),
 }
 
 /// Handle to a running streaming tool.
 pub struct ActiveStreamingTool {
+    /// The spawned task handle.
     pub task: JoinHandle<()>,
+    /// Token to cancel this streaming tool.
     pub cancel: CancellationToken,
 }
 
@@ -82,14 +102,18 @@ pub struct ToolDispatcher {
     tools: HashMap<String, ToolKind>,
     active: Arc<tokio::sync::Mutex<HashMap<String, ActiveStreamingTool>>>,
     default_timeout: Duration,
+    /// Cached tool declarations — computed once on first access.
+    cached_declarations: std::sync::OnceLock<Vec<Tool>>,
 }
 
 impl ToolDispatcher {
+    /// Create a new empty tool dispatcher with the default 30-second timeout.
     pub fn new() -> Self {
         Self {
             tools: HashMap::new(),
             active: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             default_timeout: DEFAULT_TOOL_TIMEOUT,
+            cached_declarations: std::sync::OnceLock::new(),
         }
     }
 
@@ -104,7 +128,14 @@ impl ToolDispatcher {
         self.default_timeout
     }
 
-    /// Register a regular function tool.
+    /// Register a tool that implements [`ToolFunction`].
+    pub fn register(&mut self, tool: impl ToolFunction) {
+        let tool = Arc::new(tool);
+        self.tools
+            .insert(tool.name().to_string(), ToolKind::Function(tool));
+    }
+
+    /// Register a regular function tool (pre-wrapped in Arc).
     pub fn register_function(&mut self, tool: Arc<dyn ToolFunction>) {
         self.tools
             .insert(tool.name().to_string(), ToolKind::Function(tool));
@@ -243,29 +274,42 @@ impl ToolDispatcher {
     }
 
     /// Generate Tool declarations for the setup message.
+    ///
+    /// Results are cached after first computation. The cache is invalidated
+    /// when tools are registered via `register*()` methods.
     pub fn to_tool_declarations(&self) -> Vec<Tool> {
-        let declarations: Vec<FunctionDeclaration> = self
-            .tools
-            .values()
-            .map(|t| {
-                let (name, desc, params) = match t {
-                    ToolKind::Function(f) => (f.name(), f.description(), f.parameters()),
-                    ToolKind::Streaming(s) => (s.name(), s.description(), s.parameters()),
-                    ToolKind::InputStream(i) => (i.name(), i.description(), i.parameters()),
-                };
-                FunctionDeclaration {
-                    name: name.to_string(),
-                    description: desc.to_string(),
-                    parameters: params,
+        self.cached_declarations
+            .get_or_init(|| {
+                let declarations: Vec<FunctionDeclaration> = self
+                    .tools
+                    .values()
+                    .map(|t| {
+                        let (name, desc, params) = match t {
+                            ToolKind::Function(f) => {
+                                (f.name(), f.description(), f.parameters())
+                            }
+                            ToolKind::Streaming(s) => {
+                                (s.name(), s.description(), s.parameters())
+                            }
+                            ToolKind::InputStream(i) => {
+                                (i.name(), i.description(), i.parameters())
+                            }
+                        };
+                        FunctionDeclaration {
+                            name: name.to_string(),
+                            description: desc.to_string(),
+                            parameters: params,
+                        }
+                    })
+                    .collect();
+
+                if declarations.is_empty() {
+                    vec![]
+                } else {
+                    vec![Tool::functions(declarations)]
                 }
             })
-            .collect();
-
-        if declarations.is_empty() {
-            vec![]
-        } else {
-            vec![Tool::functions(declarations)]
-        }
+            .clone()
     }
 
     /// Number of registered tools.

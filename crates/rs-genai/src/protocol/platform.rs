@@ -9,7 +9,9 @@ pub enum Platform {
     GoogleAI,
     /// Vertex AI (aiplatform.googleapis.com)
     VertexAI {
+        /// Google Cloud project ID.
         project: String,
+        /// Regional location (e.g. `"us-central1"` or `"global"`).
         location: String,
     },
 }

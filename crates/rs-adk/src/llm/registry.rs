@@ -18,6 +18,7 @@ pub struct LlmRegistry {
 }
 
 impl LlmRegistry {
+    /// Create a new empty LLM registry.
     pub fn new() -> Self {
         Self {
             factories: Vec::new(),

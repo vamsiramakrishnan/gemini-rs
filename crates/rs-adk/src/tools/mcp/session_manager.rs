@@ -8,13 +8,18 @@ use std::time::Duration;
 pub enum McpConnectionParams {
     /// Connect via stdio (subprocess).
     Stdio {
+        /// The command to execute.
         command: String,
+        /// Arguments passed to the command.
         args: Vec<String>,
+        /// Connection timeout.
         timeout: Option<Duration>,
     },
     /// Connect via SSE/StreamableHTTP.
     Sse {
+        /// The URL of the MCP server.
         url: String,
+        /// Optional HTTP headers for authentication.
         headers: Option<HashMap<String, String>>,
     },
 }
@@ -25,10 +30,12 @@ pub struct McpSessionManager {
 }
 
 impl McpSessionManager {
+    /// Create a new MCP session manager with the given connection params.
     pub fn new(params: McpConnectionParams) -> Self {
         Self { params }
     }
 
+    /// Get the connection parameters.
     pub fn params(&self) -> &McpConnectionParams {
         &self.params
     }
@@ -57,20 +64,27 @@ impl McpSessionManager {
 /// Information about an MCP tool.
 #[derive(Debug, Clone)]
 pub struct McpToolInfo {
+    /// Tool name.
     pub name: String,
+    /// Human-readable tool description.
     pub description: String,
+    /// JSON Schema for the tool's input parameters.
     pub input_schema: serde_json::Value,
 }
 
 /// MCP-related errors.
 #[derive(Debug, thiserror::Error)]
 pub enum McpError {
+    /// Failed to connect to the MCP server.
     #[error("Connection failed: {0}")]
     ConnectionFailed(String),
+    /// The MCP session is not connected.
     #[error("Not connected: {0}")]
     NotConnected(String),
+    /// A tool call to the MCP server failed.
     #[error("Tool call failed: {0}")]
     ToolCallFailed(String),
+    /// A catch-all for other MCP errors.
     #[error("{0}")]
     Other(String),
 }

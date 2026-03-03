@@ -29,13 +29,20 @@ pub enum SessionError {
     /// Timeout waiting for handshake or setup.
     #[error("Timeout in {phase} after {elapsed:?}")]
     Timeout {
+        /// Which phase timed out.
         phase: SessionPhase,
+        /// How long was waited before timing out.
         elapsed: std::time::Duration,
     },
 
     /// Attempted an invalid phase transition.
     #[error("Invalid transition from {from} to {to}")]
-    InvalidTransition { from: SessionPhase, to: SessionPhase },
+    InvalidTransition {
+        /// Phase the session was in.
+        from: SessionPhase,
+        /// Phase the transition attempted to reach.
+        to: SessionPhase,
+    },
 
     /// Operation requires an active connection but session is not connected.
     #[error("Not connected")]
@@ -48,6 +55,7 @@ pub enum SessionError {
     /// Server requested graceful disconnect.
     #[error("Server sent GoAway (time left: {time_left:?})")]
     GoAway {
+        /// Time remaining before forced disconnect.
         time_left: Option<std::time::Duration>,
     },
 
@@ -77,7 +85,12 @@ pub enum WebSocketError {
 
     /// Connection was closed with a status code and reason.
     #[error("Connection closed (code={code}, reason={reason})")]
-    Closed { code: u16, reason: String },
+    Closed {
+        /// WebSocket close status code.
+        code: u16,
+        /// Human-readable close reason.
+        reason: String,
+    },
 }
 
 /// Errors during the setup handshake phase.
@@ -94,7 +107,9 @@ pub enum SetupError {
     /// Server rejected the setup request.
     #[error("Server rejected: {message}")]
     ServerRejected {
+        /// Optional error code from the server.
         code: Option<String>,
+        /// Error message from the server.
         message: String,
     },
 
@@ -184,7 +199,9 @@ pub enum SessionCommand {
     ActivityEnd,
     /// Send client content (conversation history or context injection).
     SendClientContent {
+        /// Conversation turns to include.
         turns: Vec<Content>,
+        /// Whether this completes the client's turn.
         turn_complete: bool,
     },
     /// Send video/image data (raw JPEG bytes, will be base64-encoded).
@@ -372,21 +389,33 @@ impl SessionState {
 /// Write-side of a session — send commands without owning the full handle.
 #[async_trait]
 pub trait SessionWriter: Send + Sync + 'static {
+    /// Send raw PCM16 audio bytes.
     async fn send_audio(&self, data: Vec<u8>) -> Result<(), SessionError>;
+    /// Send a text message.
     async fn send_text(&self, text: String) -> Result<(), SessionError>;
+    /// Send tool/function call responses back to the model.
     async fn send_tool_response(&self, responses: Vec<FunctionResponse>) -> Result<(), SessionError>;
+    /// Send client content (conversation history or context).
     async fn send_client_content(&self, turns: Vec<Content>, turn_complete: bool) -> Result<(), SessionError>;
+    /// Send a video/image frame (raw JPEG bytes).
     async fn send_video(&self, jpeg_data: Vec<u8>) -> Result<(), SessionError>;
+    /// Update the system instruction mid-session.
     async fn update_instruction(&self, instruction: String) -> Result<(), SessionError>;
+    /// Signal that user speech activity has started.
     async fn signal_activity_start(&self) -> Result<(), SessionError>;
+    /// Signal that user speech activity has ended.
     async fn signal_activity_end(&self) -> Result<(), SessionError>;
+    /// Gracefully disconnect the session.
     async fn disconnect(&self) -> Result<(), SessionError>;
 }
 
 /// Read-side of a session — subscribe to events and observe phase.
 pub trait SessionReader: Send + Sync + 'static {
+    /// Subscribe to the session event broadcast stream.
     fn subscribe(&self) -> broadcast::Receiver<SessionEvent>;
+    /// Returns the current session phase.
     fn phase(&self) -> SessionPhase;
+    /// Returns the unique session ID.
     fn session_id(&self) -> &str;
 }
 
