@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::LazyLock;
 
 use async_trait::async_trait;
@@ -8,13 +9,12 @@ use serde_json::json;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
-use rs_genai::prelude::*;
+use adk_rs_fluent::prelude::*;
 
 use crate::app::{AppCategory, AppError, ClientMessage, CookbookApp, ServerMessage, WsSender};
 
-use super::ConversationBuffer;
-
-use super::{build_session_config, send_app_meta, wait_for_start};
+use super::extractors::RegexExtractor;
+use super::{build_session_config, resolve_voice, send_app_meta, wait_for_start};
 
 // ---------------------------------------------------------------------------
 // Phase definitions for the customer support state machine
@@ -288,17 +288,7 @@ impl CookbookApp for Playbook {
         let start = wait_for_start(&mut rx).await?;
 
         // Resolve voice selection (default to Puck).
-        let selected_voice = match start.voice.as_deref() {
-            Some("Aoede") => Voice::Aoede,
-            Some("Charon") => Voice::Charon,
-            Some("Fenrir") => Voice::Fenrir,
-            Some("Kore") => Voice::Kore,
-            Some("Puck") | None => Voice::Puck,
-            Some(other) => Voice::Custom(other.to_string()),
-        };
-
-        // Start in the "greet" phase.
-        let initial_phase = &PHASES[0];
+        let selected_voice = resolve_voice(start.voice.as_deref());
 
         // Build session config for voice mode with the initial phase instruction.
         let config = build_session_config(start.model.as_deref())
@@ -307,200 +297,305 @@ impl CookbookApp for Playbook {
             .voice(selected_voice)
             .enable_input_transcription()
             .enable_output_transcription()
-            .system_instruction(initial_phase.instruction);
+            .system_instruction(PHASES[0].instruction);
 
-        // Connect to Gemini Live.
-        let handle = ConnectBuilder::new(config)
-            .build()
+        // Create a RegexExtractor wrapping the existing extract_state function.
+        let extractor = Arc::new(RegexExtractor::new("playbook_state", 10, |text, existing| {
+            extract_state(text, existing)
+        }));
+
+        // Build Live session with callbacks, extraction, and phase machine.
+        let b64 = base64::engine::general_purpose::STANDARD;
+
+        let tx_audio = tx.clone();
+        let tx_input = tx.clone();
+        let tx_output = tx.clone();
+        let tx_text = tx.clone();
+        let tx_text_complete = tx.clone();
+        let tx_turn = tx.clone();
+        let tx_interrupted = tx.clone();
+        let tx_vad_start = tx.clone();
+        let tx_vad_end = tx.clone();
+        let tx_error = tx.clone();
+        let tx_disconnected = tx.clone();
+
+        // Phase on_enter callbacks: send PhaseChange + StateUpdate to the browser.
+        // greet -> identify
+        let tx_enter_identify = tx.clone();
+        // identify -> investigate
+        let tx_enter_investigate = tx.clone();
+        // investigate -> explain
+        let tx_enter_explain = tx.clone();
+        // explain -> resolve
+        let tx_enter_resolve = tx.clone();
+        // resolve -> close
+        let tx_enter_close = tx.clone();
+
+        let handle = Live::builder()
+            .extractor(extractor)
+            .on_extracted({
+                let tx = tx.clone();
+                move |_name, value| {
+                    let tx = tx.clone();
+                    async move {
+                        if let Some(obj) = value.as_object() {
+                            for (key, val) in obj {
+                                let _ = tx.send(ServerMessage::StateUpdate {
+                                    key: key.clone(),
+                                    value: val.clone(),
+                                });
+                            }
+                        }
+                    }
+                }
+            })
+            // Phase machine: 6 phases with transition guards based on extracted state.
+            .phase("greet")
+                .instruction(PHASES[0].instruction)
+                .transition("identify", |s| {
+                    s.get::<serde_json::Value>("playbook_state")
+                        .and_then(|v| v.get("customer_name").cloned())
+                        .is_some()
+                })
+                .on_enter(move |_state, _writer| {
+                    async move {
+                        // Initial phase — entered at session start, no "from" phase.
+                    }
+                })
+                .done()
+            .phase("identify")
+                .instruction(PHASES[1].instruction)
+                .transition("investigate", |s| {
+                    s.get::<serde_json::Value>("playbook_state")
+                        .and_then(|v| v.get("issue_description").cloned())
+                        .is_some()
+                })
+                .on_enter(move |_state, _writer| {
+                    let tx = tx_enter_identify.clone();
+                    async move {
+                        let _ = tx.send(ServerMessage::PhaseChange {
+                            from: "greet".into(),
+                            to: "identify".into(),
+                            reason: "All required keys present".into(),
+                        });
+                        let _ = tx.send(ServerMessage::StateUpdate {
+                            key: "phase".into(),
+                            value: json!("identify"),
+                        });
+                    }
+                })
+                .done()
+            .phase("investigate")
+                .instruction(PHASES[2].instruction)
+                .transition("explain", |s| {
+                    s.get::<serde_json::Value>("playbook_state")
+                        .and_then(|v| v.get("resolution_type").cloned())
+                        .is_some()
+                })
+                .on_enter(move |_state, _writer| {
+                    let tx = tx_enter_investigate.clone();
+                    async move {
+                        let _ = tx.send(ServerMessage::PhaseChange {
+                            from: "identify".into(),
+                            to: "investigate".into(),
+                            reason: "All required keys present".into(),
+                        });
+                        let _ = tx.send(ServerMessage::StateUpdate {
+                            key: "phase".into(),
+                            value: json!("investigate"),
+                        });
+                    }
+                })
+                .done()
+            .phase("explain")
+                .instruction(PHASES[3].instruction)
+                .transition("resolve", |s| {
+                    s.get::<serde_json::Value>("playbook_state")
+                        .and_then(|v| v.get("customer_confirmed").cloned())
+                        .is_some()
+                })
+                .on_enter(move |_state, _writer| {
+                    let tx = tx_enter_explain.clone();
+                    async move {
+                        let _ = tx.send(ServerMessage::PhaseChange {
+                            from: "investigate".into(),
+                            to: "explain".into(),
+                            reason: "All required keys present".into(),
+                        });
+                        let _ = tx.send(ServerMessage::StateUpdate {
+                            key: "phase".into(),
+                            value: json!("explain"),
+                        });
+                    }
+                })
+                .done()
+            .phase("resolve")
+                .instruction(PHASES[4].instruction)
+                .transition("close", |s| {
+                    s.get::<serde_json::Value>("playbook_state")
+                        .and_then(|v| v.get("satisfied").cloned())
+                        .is_some()
+                })
+                .on_enter(move |_state, _writer| {
+                    let tx = tx_enter_resolve.clone();
+                    async move {
+                        let _ = tx.send(ServerMessage::PhaseChange {
+                            from: "explain".into(),
+                            to: "resolve".into(),
+                            reason: "All required keys present".into(),
+                        });
+                        let _ = tx.send(ServerMessage::StateUpdate {
+                            key: "phase".into(),
+                            value: json!("resolve"),
+                        });
+                    }
+                })
+                .done()
+            .phase("close")
+                .instruction(PHASES[5].instruction)
+                .terminal()
+                .on_enter(move |_state, _writer| {
+                    let tx = tx_enter_close.clone();
+                    async move {
+                        let _ = tx.send(ServerMessage::PhaseChange {
+                            from: "resolve".into(),
+                            to: "close".into(),
+                            reason: "All required keys present".into(),
+                        });
+                        let _ = tx.send(ServerMessage::StateUpdate {
+                            key: "phase".into(),
+                            value: json!("close"),
+                        });
+                    }
+                })
+                .done()
+            .initial_phase("greet")
+            // State-reactive instruction template: builds context-aware instruction.
+            .instruction_template(|state| {
+                let phase_name: String = state.get("session:phase").unwrap_or_default();
+                let extracted: serde_json::Value = state.get("playbook_state").unwrap_or(json!({}));
+                let customer_name = extracted.get("customer_name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("the customer");
+
+                // Find the phase instruction.
+                let instruction = PHASES.iter()
+                    .find(|p| p.name == phase_name)
+                    .map(|p| p.instruction)
+                    .unwrap_or(PHASES[0].instruction);
+
+                Some(format!(
+                    "{}\n\nCustomer name: {}. Current state: {}",
+                    instruction, customer_name, extracted
+                ))
+            })
+            // Standard voice callbacks.
+            .on_audio(move |data| {
+                let encoded = b64.encode(data);
+                let _ = tx_audio.send(ServerMessage::Audio { data: encoded });
+            })
+            .on_input_transcript(move |text, _is_final| {
+                let _ = tx_input.send(ServerMessage::InputTranscription {
+                    text: text.to_string(),
+                });
+            })
+            .on_output_transcript(move |text, _is_final| {
+                let _ = tx_output.send(ServerMessage::OutputTranscription {
+                    text: text.to_string(),
+                });
+            })
+            .on_text(move |t| {
+                let _ = tx_text.send(ServerMessage::TextDelta {
+                    text: t.to_string(),
+                });
+            })
+            .on_text_complete(move |t| {
+                let _ = tx_text_complete.send(ServerMessage::TextComplete {
+                    text: t.to_string(),
+                });
+            })
+            .on_turn_complete(move || {
+                let tx = tx_turn.clone();
+                async move {
+                    let _ = tx.send(ServerMessage::TurnComplete);
+                }
+            })
+            .on_interrupted(move || {
+                let tx = tx_interrupted.clone();
+                async move {
+                    let _ = tx.send(ServerMessage::Interrupted);
+                }
+            })
+            .on_vad_start(move || {
+                let _ = tx_vad_start.send(ServerMessage::VoiceActivityStart);
+            })
+            .on_vad_end(move || {
+                let _ = tx_vad_end.send(ServerMessage::VoiceActivityEnd);
+            })
+            .on_error(move |msg| {
+                let tx = tx_error.clone();
+                async move {
+                    let _ = tx.send(ServerMessage::Error { message: msg });
+                }
+            })
+            .on_disconnected(move |_reason| {
+                let _tx = tx_disconnected.clone();
+                async move {
+                    info!("Playbook session disconnected by server");
+                }
+            })
+            .connect(config)
             .await
             .map_err(|e| AppError::Connection(e.to_string()))?;
 
-        handle.wait_for_phase(SessionPhase::Active).await;
         let _ = tx.send(ServerMessage::Connected);
         send_app_meta(&tx, self);
         info!("Playbook session connected");
 
-        // Send initial phase state.
+        // Send initial phase notification.
         let _ = tx.send(ServerMessage::PhaseChange {
             from: "none".into(),
-            to: initial_phase.name.into(),
+            to: "greet".into(),
             reason: "Session started".into(),
         });
         let _ = tx.send(ServerMessage::StateUpdate {
             key: "phase".into(),
-            value: json!(initial_phase.name),
+            value: json!("greet"),
         });
 
-        // Subscribe to server events.
-        let mut events = handle.subscribe();
+        // Browser -> Gemini loop.
         let b64 = base64::engine::general_purpose::STANDARD;
-
-        // State tracking.
-        let mut current_phase_idx: usize = 0;
-        let mut state: HashMap<String, serde_json::Value> = HashMap::new();
-        let mut conversation = ConversationBuffer::new(20);
-        let mut phase_turn_count: usize = 0;
-
-        loop {
-            tokio::select! {
-                // Client -> Gemini
-                client_msg = rx.recv() => {
-                    match client_msg {
-                        Some(ClientMessage::Audio { data }) => {
-                            match b64.decode(&data) {
-                                Ok(pcm_bytes) => {
-                                    if let Err(e) = handle.send_audio(pcm_bytes).await {
-                                        warn!("Failed to send audio: {e}");
-                                        let _ = tx.send(ServerMessage::Error { message: e.to_string() });
-                                    }
-                                }
-                                Err(e) => {
-                                    warn!("Failed to decode base64 audio: {e}");
-                                }
+        while let Some(msg) = rx.recv().await {
+            match msg {
+                ClientMessage::Audio { data } => {
+                    match b64.decode(&data) {
+                        Ok(pcm_bytes) => {
+                            if let Err(e) = handle.send_audio(pcm_bytes).await {
+                                warn!("Failed to send audio: {e}");
+                                let _ = tx.send(ServerMessage::Error {
+                                    message: e.to_string(),
+                                });
                             }
                         }
-                        Some(ClientMessage::Text { text }) => {
-                            if let Err(e) = handle.send_text(&text).await {
-                                warn!("Failed to send text: {e}");
-                                let _ = tx.send(ServerMessage::Error { message: e.to_string() });
-                            }
+                        Err(e) => {
+                            warn!("Failed to decode base64 audio: {e}");
                         }
-                        Some(ClientMessage::Stop) | None => {
-                            info!("Playbook session stopping");
-                            let _ = handle.disconnect().await;
-                            break;
-                        }
-                        _ => {}
                     }
                 }
-
-                // Gemini -> Client
-                event = recv_event(&mut events) => {
-                    match event {
-                        Some(SessionEvent::AudioData(bytes)) => {
-                            let encoded = b64.encode(&bytes);
-                            let _ = tx.send(ServerMessage::Audio { data: encoded });
-                        }
-                        Some(SessionEvent::InputTranscription(text)) => {
-                            conversation.push(format!("[User] {text}"));
-                            let _ = tx.send(ServerMessage::InputTranscription { text });
-                        }
-                        Some(SessionEvent::OutputTranscription(text)) => {
-                            conversation.push(format!("[Agent] {text}"));
-                            let _ = tx.send(ServerMessage::OutputTranscription { text });
-                        }
-                        Some(SessionEvent::TextDelta(text)) => {
-                            let _ = tx.send(ServerMessage::TextDelta { text });
-                        }
-                        Some(SessionEvent::TextComplete(text)) => {
-                            conversation.push(format!("[Agent] {text}"));
-                            let _ = tx.send(ServerMessage::TextComplete { text });
-                        }
-                        Some(SessionEvent::TurnComplete) => {
-                            phase_turn_count += 1;
-                            let _ = tx.send(ServerMessage::TurnComplete);
-
-                            // --- Analyze conversation for state extraction ---
-                            let recent = conversation.recent_text();
-                            let new_state = extract_state(&recent, &state);
-
-                            // Merge new state and send updates.
-                            for (key, value) in &new_state {
-                                if !state.contains_key(key) || state.get(key) != Some(value) {
-                                    let _ = tx.send(ServerMessage::StateUpdate {
-                                        key: key.clone(),
-                                        value: value.clone(),
-                                    });
-                                }
-                            }
-                            state.extend(new_state);
-
-                            // --- Check phase transition ---
-                            if current_phase_idx < PHASES.len() - 1 {
-                                let current = &PHASES[current_phase_idx];
-                                let all_keys_present = current
-                                    .required_keys
-                                    .iter()
-                                    .all(|k| state.contains_key(*k));
-
-                                if all_keys_present {
-                                    // Evaluate the outgoing phase.
-                                    let (score, notes) = evaluate_phase(
-                                        current.name,
-                                        &state,
-                                        phase_turn_count,
-                                    );
-                                    let _ = tx.send(ServerMessage::Evaluation {
-                                        phase: current.name.into(),
-                                        score,
-                                        notes,
-                                    });
-
-                                    // Transition to next phase.
-                                    let old_name = current.name;
-                                    current_phase_idx += 1;
-                                    let new_phase = &PHASES[current_phase_idx];
-                                    phase_turn_count = 0;
-
-                                    let _ = tx.send(ServerMessage::PhaseChange {
-                                        from: old_name.into(),
-                                        to: new_phase.name.into(),
-                                        reason: format!(
-                                            "All required keys present: {:?}",
-                                            PHASES[current_phase_idx - 1].required_keys
-                                        ),
-                                    });
-                                    let _ = tx.send(ServerMessage::StateUpdate {
-                                        key: "phase".into(),
-                                        value: json!(new_phase.name),
-                                    });
-
-                                    // Build the new instruction with context.
-                                    let customer_name = state
-                                        .get("customer_name")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("the customer");
-                                    let context_instruction = format!(
-                                        "{}\n\nCustomer name: {}. Current state: {}",
-                                        new_phase.instruction,
-                                        customer_name,
-                                        serde_json::to_string(&state).unwrap_or_default()
-                                    );
-
-                                    info!(
-                                        "Phase transition: {} -> {}",
-                                        old_name, new_phase.name
-                                    );
-
-                                    if let Err(e) = handle
-                                        .update_instruction(context_instruction)
-                                        .await
-                                    {
-                                        warn!("Failed to update instruction: {e}");
-                                    }
-                                }
-                            }
-                        }
-                        Some(SessionEvent::Interrupted) => {
-                            let _ = tx.send(ServerMessage::Interrupted);
-                        }
-                        Some(SessionEvent::VoiceActivityStart) => {
-                            let _ = tx.send(ServerMessage::VoiceActivityStart);
-                        }
-                        Some(SessionEvent::VoiceActivityEnd) => {
-                            let _ = tx.send(ServerMessage::VoiceActivityEnd);
-                        }
-                        Some(SessionEvent::Error(msg)) => {
-                            let _ = tx.send(ServerMessage::Error { message: msg });
-                        }
-                        Some(SessionEvent::Disconnected(_)) => {
-                            info!("Playbook session disconnected by server");
-                            break;
-                        }
-                        None => break,
-                        _ => {}
+                ClientMessage::Text { text } => {
+                    if let Err(e) = handle.send_text(&text).await {
+                        warn!("Failed to send text: {e}");
+                        let _ = tx.send(ServerMessage::Error {
+                            message: e.to_string(),
+                        });
                     }
                 }
+                ClientMessage::Stop => {
+                    info!("Playbook session stopping");
+                    let _ = handle.disconnect().await;
+                    break;
+                }
+                _ => {}
             }
         }
 
@@ -511,6 +606,7 @@ impl CookbookApp for Playbook {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::apps::ConversationBuffer;
 
     #[test]
     fn extract_customer_name() {
