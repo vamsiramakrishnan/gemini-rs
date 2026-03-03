@@ -129,6 +129,18 @@ pub fn send_app_meta(tx: &WsSender, app: &dyn CookbookApp) {
     });
 }
 
+/// Resolve a voice name string to the Voice enum.
+pub fn resolve_voice(name: Option<&str>) -> Voice {
+    match name {
+        Some("Aoede") => Voice::Aoede,
+        Some("Charon") => Voice::Charon,
+        Some("Fenrir") => Voice::Fenrir,
+        Some("Kore") => Voice::Kore,
+        Some("Puck") | None => Voice::Puck,
+        Some(other) => Voice::Custom(other.to_string()),
+    }
+}
+
 /// Rolling buffer of recent conversation turns for analysis.
 pub struct ConversationBuffer {
     turns: Vec<String>,
