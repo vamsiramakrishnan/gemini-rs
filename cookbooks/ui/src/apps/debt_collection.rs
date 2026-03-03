@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use base64::Engine;
 use regex::Regex;
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::sync::LazyLock;
 use tokio::sync::mpsc;
@@ -14,6 +14,8 @@ use tracing::{info, warn};
 
 use adk_rs_fluent::prelude::*;
 use rs_adk::llm::{BaseLlm, GeminiLlm, GeminiLlmParams};
+
+use rs_genai::session::SessionEvent;
 
 use crate::app::{AppCategory, AppError, ClientMessage, CookbookApp, ServerMessage, WsSender};
 
@@ -110,7 +112,7 @@ const MOCK_ACCOUNT: &str = r#"{
 // LLM-powered extraction struct
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 struct DebtorState {
     /// "calm", "cooperative", "frustrated", "angry"
     emotional_state: Option<String>,
@@ -351,7 +353,802 @@ impl CookbookApp for DebtCollection {
         tx: WsSender,
         mut rx: mpsc::UnboundedReceiver<ClientMessage>,
     ) -> Result<(), AppError> {
-        todo!("Implemented in Task 6")
+        // 1. Wait for Start, resolve voice, build SessionConfig
+        let start = wait_for_start(&mut rx).await?;
+        let selected_voice = resolve_voice(start.voice.as_deref());
+
+        let config = build_session_config(start.model.as_deref())
+            .map_err(|e| AppError::Connection(e.to_string()))?
+            .response_modalities(vec![Modality::Audio])
+            .voice(selected_voice)
+            .enable_input_transcription()
+            .enable_output_transcription()
+            .system_instruction(DISCLOSURE_INSTRUCTION);
+
+        // 2. Create GeminiLlm for LLM extraction
+        let llm: Arc<dyn rs_adk::llm::BaseLlm> = Arc::new(GeminiLlm::new(GeminiLlmParams {
+            model: Some("gemini-2.5-flash".to_string()),
+            ..Default::default()
+        }));
+
+        // 3. Create RegexExtractor for debt_fields
+        let extractor = Arc::new(RegexExtractor::new("debt_fields", 10, |text, existing| {
+            extract_structured(text, existing)
+        }));
+
+        // 4. Clone tx for all callbacks
+        let b64 = base64::engine::general_purpose::STANDARD;
+
+        let tx_audio = tx.clone();
+        let tx_input = tx.clone();
+        let tx_output = tx.clone();
+        let tx_text = tx.clone();
+        let tx_text_complete = tx.clone();
+        let tx_turn = tx.clone();
+        let tx_interrupted = tx.clone();
+        let tx_vad_start = tx.clone();
+        let tx_vad_end = tx.clone();
+        let tx_error = tx.clone();
+        let tx_disconnected = tx.clone();
+        let tx_go_away = tx.clone();
+        let tx_tool_call = tx.clone();
+
+        // Phase on_enter / on_exit clones
+        let tx_enter_disclosure = tx.clone();
+        let tx_enter_verify = tx.clone();
+        let tx_enter_inform = tx.clone();
+        let tx_enter_negotiate = tx.clone();
+        let tx_enter_arrange = tx.clone();
+        let tx_enter_confirm = tx.clone();
+        let tx_enter_close = tx.clone();
+        let tx_exit_disclosure = tx.clone();
+        let tx_exit_verify = tx.clone();
+
+        // Watcher clones
+        let tx_watcher_willingness = tx.clone();
+        let tx_watcher_sentiment = tx.clone();
+        let tx_watcher_cease = tx.clone();
+        let tx_watcher_identity = tx.clone();
+        let tx_watcher_dispute = tx.clone();
+
+        // Temporal pattern clones
+        let tx_sustained_frustration = tx.clone();
+        let tx_rate_interruptions = tx.clone();
+        let tx_turns_stalled = tx.clone();
+
+        // Interceptor clones
+        let tx_turn_boundary = tx.clone();
+
+        // 5. Build Live::builder() with full pipeline
+        let handle = Live::builder()
+            // --- Regex extractor ---
+            .extractor(extractor)
+            // --- LLM extraction ---
+            .extract_turns::<DebtorState>(
+                llm,
+                "Extract from the debt collection conversation: the debtor's emotional state \
+                 (calm/cooperative/frustrated/angry), willingness to pay (0.0-1.0), \
+                 negotiation intent (full_pay/partial_pay/dispute/refuse/delay), \
+                 whether they requested cease-and-desist, and whether they acknowledged the debt.",
+            )
+            // --- on_extracted: broadcast state to browser ---
+            .on_extracted({
+                let tx = tx.clone();
+                move |name, value| {
+                    let tx = tx.clone();
+                    async move {
+                        // Send the extracted value as a state update
+                        let _ = tx.send(ServerMessage::StateUpdate {
+                            key: name.clone(),
+                            value: value.clone(),
+                        });
+                        // If it's an object, also broadcast individual keys
+                        if let Some(obj) = value.as_object() {
+                            for (key, val) in obj {
+                                let _ = tx.send(ServerMessage::StateUpdate {
+                                    key: format!("{name}.{key}"),
+                                    value: val.clone(),
+                                });
+                            }
+                        }
+                    }
+                }
+            })
+            // --- Computed state ---
+            .computed("sentiment_score", &["DebtorState"], |state| {
+                let debtor: Value = state.get("DebtorState")?;
+                let emotion = debtor.get("emotional_state")?.as_str()?;
+                Some(json!(sentiment_from_emotion(emotion)))
+            })
+            .computed("call_risk_level", &["derived:sentiment_score", "DebtorState"], |state| {
+                let sentiment: f64 = state.get("derived:sentiment_score").unwrap_or(0.5);
+                let debtor: Value = state.get("DebtorState").unwrap_or(json!({}));
+                let cease_desist = debtor.get("cease_desist_requested")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                Some(json!(compute_risk_level(sentiment, cease_desist)))
+            })
+            // --- before_tool_response: PII redaction ---
+            .before_tool_response(move |responses, _state| {
+                async move {
+                    responses.into_iter().map(|mut r| {
+                        r.response = redact_pii(&r.response);
+                        r
+                    }).collect()
+                }
+            })
+            // --- on_turn_boundary: compliance reminders ---
+            .on_turn_boundary(move |state, writer| {
+                let tx = tx_turn_boundary.clone();
+                async move {
+                    let risk: String = state.get("derived:call_risk_level").unwrap_or_default();
+                    let phase: String = state.get("session:phase").unwrap_or_default();
+
+                    // If risk is high/critical and we're past disclosure, inject a reminder
+                    if (risk == "high" || risk == "critical")
+                        && phase != "disclosure"
+                        && phase != "close"
+                    {
+                        let reminder = "[Compliance reminder: The debtor appears distressed. \
+                            Use empathetic language. Do not threaten, harass, or use deceptive tactics. \
+                            If they request cease-and-desist, you must comply immediately.]";
+                        let _ = writer.send_client_content(
+                            vec![Content::user(reminder)],
+                            false,
+                        ).await;
+                        let _ = tx.send(ServerMessage::StateUpdate {
+                            key: "compliance_reminder".into(),
+                            value: json!({"injected": true, "risk": risk, "phase": phase}),
+                        });
+                    }
+                }
+            })
+            // --- 7 Phases ---
+            // Phase 1: Disclosure (Mini-Miranda)
+            .phase("disclosure")
+                .instruction(DISCLOSURE_INSTRUCTION)
+                .transition("verify_identity", |s| {
+                    let fields: Value = s.get("debt_fields").unwrap_or(json!({}));
+                    fields.get("disclosure_given")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false)
+                })
+                // Cease-and-desist can happen at any time
+                .transition("close", |s| {
+                    let debtor: Value = s.get("DebtorState").unwrap_or(json!({}));
+                    debtor.get("cease_desist_requested")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false)
+                })
+                .on_enter(move |_state, _writer| {
+                    let tx = tx_enter_disclosure.clone();
+                    async move {
+                        let _ = tx.send(ServerMessage::PhaseChange {
+                            from: "none".into(),
+                            to: "disclosure".into(),
+                            reason: "Session started — delivering Mini-Miranda disclosure".into(),
+                        });
+                    }
+                })
+                .on_exit(move |_state, _writer| {
+                    let tx = tx_exit_disclosure.clone();
+                    async move {
+                        let _ = tx.send(ServerMessage::StateUpdate {
+                            key: "compliance_event".into(),
+                            value: json!({"event": "disclosure_acknowledged"}),
+                        });
+                    }
+                })
+                .done()
+            // Phase 2: Verify Identity
+            .phase("verify_identity")
+                .instruction(VERIFY_IDENTITY_INSTRUCTION)
+                .guard(|s| {
+                    let fields: Value = s.get("debt_fields").unwrap_or(json!({}));
+                    fields.get("disclosure_given")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false)
+                })
+                .transition("inform_debt", |s| {
+                    s.get::<bool>("identity_verified").unwrap_or(false)
+                })
+                .transition("close", |s| {
+                    let debtor: Value = s.get("DebtorState").unwrap_or(json!({}));
+                    debtor.get("cease_desist_requested")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false)
+                })
+                .on_enter(move |_state, _writer| {
+                    let tx = tx_enter_verify.clone();
+                    async move {
+                        let _ = tx.send(ServerMessage::PhaseChange {
+                            from: "disclosure".into(),
+                            to: "verify_identity".into(),
+                            reason: "Disclosure acknowledged — verifying identity".into(),
+                        });
+                        let _ = tx.send(ServerMessage::StateUpdate {
+                            key: "phase".into(),
+                            value: json!("verify_identity"),
+                        });
+                    }
+                })
+                .on_exit(move |_state, _writer| {
+                    let tx = tx_exit_verify.clone();
+                    async move {
+                        let _ = tx.send(ServerMessage::StateUpdate {
+                            key: "compliance_event".into(),
+                            value: json!({"event": "identity_verified"}),
+                        });
+                    }
+                })
+                .done()
+            // Phase 3: Inform Debt
+            .phase("inform_debt")
+                .instruction(INFORM_DEBT_INSTRUCTION)
+                .guard(|s| {
+                    s.get::<bool>("identity_verified").unwrap_or(false)
+                })
+                .transition("negotiate", |s| {
+                    let debtor: Value = s.get("DebtorState").unwrap_or(json!({}));
+                    debtor.get("debt_acknowledged")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false)
+                })
+                .transition("close", |s| {
+                    // Dispute or cease-and-desist both lead to close
+                    let debtor: Value = s.get("DebtorState").unwrap_or(json!({}));
+                    let cease = debtor.get("cease_desist_requested")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    let dispute = debtor.get("negotiation_intent")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s == "dispute")
+                        .unwrap_or(false);
+                    cease || dispute
+                })
+                .on_enter(move |_state, _writer| {
+                    let tx = tx_enter_inform.clone();
+                    async move {
+                        let _ = tx.send(ServerMessage::PhaseChange {
+                            from: "verify_identity".into(),
+                            to: "inform_debt".into(),
+                            reason: "Identity verified — informing about debt".into(),
+                        });
+                        let _ = tx.send(ServerMessage::StateUpdate {
+                            key: "phase".into(),
+                            value: json!("inform_debt"),
+                        });
+                    }
+                })
+                .done()
+            // Phase 4: Negotiate
+            .phase("negotiate")
+                .instruction(NEGOTIATE_INSTRUCTION)
+                .guard(|s| {
+                    let debtor: Value = s.get("DebtorState").unwrap_or(json!({}));
+                    debtor.get("debt_acknowledged")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false)
+                })
+                .transition("arrange_payment", |s| {
+                    let debtor: Value = s.get("DebtorState").unwrap_or(json!({}));
+                    let intent = debtor.get("negotiation_intent")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    intent == "full_pay" || intent == "partial_pay"
+                })
+                .transition("close", |s| {
+                    let debtor: Value = s.get("DebtorState").unwrap_or(json!({}));
+                    let cease = debtor.get("cease_desist_requested")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    let refuse = debtor.get("negotiation_intent")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s == "refuse")
+                        .unwrap_or(false);
+                    cease || refuse
+                })
+                .on_enter(move |_state, _writer| {
+                    let tx = tx_enter_negotiate.clone();
+                    async move {
+                        let _ = tx.send(ServerMessage::PhaseChange {
+                            from: "inform_debt".into(),
+                            to: "negotiate".into(),
+                            reason: "Debt acknowledged — negotiating payment".into(),
+                        });
+                        let _ = tx.send(ServerMessage::StateUpdate {
+                            key: "phase".into(),
+                            value: json!("negotiate"),
+                        });
+                    }
+                })
+                .done()
+            // Phase 5: Arrange Payment
+            .phase("arrange_payment")
+                .instruction(ARRANGE_PAYMENT_INSTRUCTION)
+                .guard(|s| {
+                    let debtor: Value = s.get("DebtorState").unwrap_or(json!({}));
+                    let intent = debtor.get("negotiation_intent")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    intent == "full_pay" || intent == "partial_pay"
+                })
+                .transition("confirm", |s| {
+                    s.get::<bool>("payment_processed").unwrap_or(false)
+                })
+                .transition("close", |s| {
+                    let debtor: Value = s.get("DebtorState").unwrap_or(json!({}));
+                    debtor.get("cease_desist_requested")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false)
+                })
+                .on_enter(move |_state, _writer| {
+                    let tx = tx_enter_arrange.clone();
+                    async move {
+                        let _ = tx.send(ServerMessage::PhaseChange {
+                            from: "negotiate".into(),
+                            to: "arrange_payment".into(),
+                            reason: "Payment plan agreed — arranging payment".into(),
+                        });
+                        let _ = tx.send(ServerMessage::StateUpdate {
+                            key: "phase".into(),
+                            value: json!("arrange_payment"),
+                        });
+                    }
+                })
+                .done()
+            // Phase 6: Confirm
+            .phase("confirm")
+                .instruction(CONFIRM_INSTRUCTION)
+                .guard(|s| {
+                    s.get::<bool>("payment_processed").unwrap_or(false)
+                })
+                .transition("close", |_s| {
+                    // Close after confirmation summary is delivered
+                    // (model will naturally complete the summary turn)
+                    true
+                })
+                .on_enter(move |_state, _writer| {
+                    let tx = tx_enter_confirm.clone();
+                    async move {
+                        let _ = tx.send(ServerMessage::PhaseChange {
+                            from: "arrange_payment".into(),
+                            to: "confirm".into(),
+                            reason: "Payment processed — confirming agreement".into(),
+                        });
+                        let _ = tx.send(ServerMessage::StateUpdate {
+                            key: "phase".into(),
+                            value: json!("confirm"),
+                        });
+                    }
+                })
+                .done()
+            // Phase 7: Close
+            .phase("close")
+                .instruction(CLOSE_INSTRUCTION)
+                .terminal()
+                .on_enter(move |state, _writer| {
+                    let tx = tx_enter_close.clone();
+                    async move {
+                        let debtor: Value = state.get("DebtorState").unwrap_or(json!({}));
+                        let cease = debtor.get("cease_desist_requested")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+                        let dispute = debtor.get("negotiation_intent")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s == "dispute")
+                            .unwrap_or(false);
+
+                        let reason = if cease {
+                            "Cease-and-desist requested — closing call"
+                        } else if dispute {
+                            "Debt disputed — closing call"
+                        } else {
+                            "Call concluding"
+                        };
+                        let _ = tx.send(ServerMessage::PhaseChange {
+                            from: "previous".into(),
+                            to: "close".into(),
+                            reason: reason.into(),
+                        });
+                        let _ = tx.send(ServerMessage::StateUpdate {
+                            key: "phase".into(),
+                            value: json!("close"),
+                        });
+                    }
+                })
+                .done()
+            .initial_phase("disclosure")
+            // --- Instruction template: state-reactive instructions ---
+            .instruction_template(|state| {
+                let phase: String = state.get("session:phase").unwrap_or_default();
+                let debtor: Value = state.get("DebtorState").unwrap_or(json!({}));
+                let fields: Value = state.get("debt_fields").unwrap_or(json!({}));
+                let risk: String = state.get("derived:call_risk_level").unwrap_or_else(|| "low".to_string());
+
+                let base = match phase.as_str() {
+                    "disclosure" => DISCLOSURE_INSTRUCTION,
+                    "verify_identity" => VERIFY_IDENTITY_INSTRUCTION,
+                    "inform_debt" => INFORM_DEBT_INSTRUCTION,
+                    "negotiate" => NEGOTIATE_INSTRUCTION,
+                    "arrange_payment" => ARRANGE_PAYMENT_INSTRUCTION,
+                    "confirm" => CONFIRM_INSTRUCTION,
+                    "close" => CLOSE_INSTRUCTION,
+                    _ => DISCLOSURE_INSTRUCTION,
+                };
+
+                let mut instruction = base.to_string();
+
+                // Append risk-aware context
+                if risk == "high" || risk == "critical" {
+                    instruction.push_str(
+                        "\n\nIMPORTANT: The caller is showing signs of distress. Use extra empathy. \
+                         Never threaten, harass, or use deceptive language. If they request to stop \
+                         being contacted, immediately comply with cease-and-desist requirements."
+                    );
+                }
+
+                // Append extracted context
+                let emotion = debtor.get("emotional_state")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                let willingness = debtor.get("willingness_to_pay")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.5);
+
+                instruction.push_str(&format!(
+                    "\n\n[Context: Emotional state: {emotion}, Willingness: {willingness:.1}, \
+                     Risk level: {risk}, Extracted fields: {fields}]"
+                ));
+
+                Some(instruction)
+            })
+            // --- Watchers ---
+            // Numeric: willingness crossed above 0.7
+            .watch("DebtorState")
+                .crossed_above(0.7)
+                .then({
+                    let tx = tx_watcher_willingness.clone();
+                    move |_old, new, _state| {
+                        let tx = tx.clone();
+                        async move {
+                            let _ = tx.send(ServerMessage::StateUpdate {
+                                key: "watcher:willingness_high".into(),
+                                value: json!({
+                                    "triggered": true,
+                                    "value": new,
+                                    "action": "Debtor showing strong willingness to pay"
+                                }),
+                            });
+                        }
+                    }
+                })
+            // Numeric: sentiment crossed below 0.3
+            .watch("derived:sentiment_score")
+                .crossed_below(0.3)
+                .then({
+                    let tx = tx_watcher_sentiment.clone();
+                    move |_old, new, _state| {
+                        let tx = tx.clone();
+                        async move {
+                            let _ = tx.send(ServerMessage::Violation {
+                                rule: "low_sentiment".into(),
+                                severity: "warning".into(),
+                                detail: format!("Sentiment dropped below 0.3: {new}"),
+                            });
+                        }
+                    }
+                })
+            // Boolean: cease_desist became true
+            .watch("DebtorState")
+                .changed()
+                .blocking()
+                .then({
+                    let tx = tx_watcher_cease.clone();
+                    move |_old, new, state| {
+                        let tx = tx.clone();
+                        async move {
+                            if let Some(cease) = new.get("cease_desist_requested")
+                                .and_then(|v| v.as_bool())
+                            {
+                                if cease {
+                                    let _ = tx.send(ServerMessage::Violation {
+                                        rule: "cease_and_desist".into(),
+                                        severity: "critical".into(),
+                                        detail: "Debtor requested cease-and-desist — must stop collection".into(),
+                                    });
+                                    state.set("cease_desist_active", true);
+                                }
+                            }
+                        }
+                    }
+                })
+            // Boolean: identity_verified became false (shouldn't happen normally)
+            .watch("identity_verified")
+                .became_false()
+                .then({
+                    let tx = tx_watcher_identity.clone();
+                    move |_old, _new, _state| {
+                        let tx = tx.clone();
+                        async move {
+                            let _ = tx.send(ServerMessage::Violation {
+                                rule: "identity_unverified".into(),
+                                severity: "warning".into(),
+                                detail: "Identity verification revoked".into(),
+                            });
+                        }
+                    }
+                })
+            // Value: negotiation_intent changed to "dispute"
+            .watch("DebtorState")
+                .changed()
+                .then({
+                    let tx = tx_watcher_dispute.clone();
+                    move |_old, new, _state| {
+                        let tx = tx.clone();
+                        async move {
+                            if let Some(intent) = new.get("negotiation_intent")
+                                .and_then(|v| v.as_str())
+                            {
+                                if intent == "dispute" {
+                                    let _ = tx.send(ServerMessage::Violation {
+                                        rule: "debt_disputed".into(),
+                                        severity: "info".into(),
+                                        detail: "Debtor is disputing the debt — must send validation notice".into(),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                })
+            // --- Temporal patterns ---
+            // Sustained frustration for 30 seconds
+            .when_sustained(
+                "sustained_frustration",
+                |s| {
+                    let sentiment: f64 = s.get("derived:sentiment_score").unwrap_or(0.5);
+                    sentiment < 0.4
+                },
+                Duration::from_secs(30),
+                {
+                    let tx = tx_sustained_frustration.clone();
+                    move |_state, writer| {
+                        let tx = tx.clone();
+                        async move {
+                            let _ = tx.send(ServerMessage::Violation {
+                                rule: "sustained_frustration".into(),
+                                severity: "warning".into(),
+                                detail: "Debtor has been frustrated for over 30 seconds".into(),
+                            });
+                            // Inject de-escalation prompt
+                            let _ = writer.send_client_content(
+                                vec![Content::user(
+                                    "[System: The debtor has been frustrated for an extended period. \
+                                     Please pause, acknowledge their feelings, and offer to help \
+                                     find a manageable solution. Consider offering to call back at \
+                                     a better time.]"
+                                )],
+                                false,
+                            ).await;
+                        }
+                    }
+                },
+            )
+            // Rate: 3 turn completes in 60 seconds (rapid-fire exchanges)
+            .when_rate(
+                "rapid_exchanges",
+                |evt| matches!(evt, SessionEvent::TurnComplete),
+                3,
+                Duration::from_secs(60),
+                {
+                    let tx = tx_rate_interruptions.clone();
+                    move |_state, _writer| {
+                        let tx = tx.clone();
+                        async move {
+                            let _ = tx.send(ServerMessage::StateUpdate {
+                                key: "temporal:rapid_exchanges".into(),
+                                value: json!({
+                                    "triggered": true,
+                                    "action": "Conversation pace is very fast — consider slowing down"
+                                }),
+                            });
+                        }
+                    }
+                },
+            )
+            // Turns: stalled negotiation for 5 turns
+            .when_turns(
+                "stalled_negotiation",
+                |s| {
+                    let phase: String = s.get("session:phase").unwrap_or_default();
+                    phase == "negotiate"
+                },
+                5,
+                {
+                    let tx = tx_turns_stalled.clone();
+                    move |_state, writer| {
+                        let tx = tx.clone();
+                        async move {
+                            let _ = tx.send(ServerMessage::StateUpdate {
+                                key: "temporal:stalled_negotiation".into(),
+                                value: json!({
+                                    "triggered": true,
+                                    "action": "Negotiation has stalled for 5 turns"
+                                }),
+                            });
+                            // Inject suggestion to offer alternatives
+                            let _ = writer.send_client_content(
+                                vec![Content::user(
+                                    "[System: Negotiation seems stalled. Consider presenting \
+                                     different payment options, offering a temporary hardship \
+                                     plan, or asking if there are specific concerns preventing \
+                                     agreement.]"
+                                )],
+                                false,
+                            ).await;
+                        }
+                    }
+                },
+            )
+            // --- on_tool_call: mock tool dispatch ---
+            .on_tool_call(move |calls| {
+                let tx = tx_tool_call.clone();
+                async move {
+                    let mut responses = Vec::new();
+                    for call in &calls {
+                        let _ = tx.send(ServerMessage::StateUpdate {
+                            key: "tool_call".into(),
+                            value: json!({
+                                "name": call.name,
+                                "args": call.args,
+                            }),
+                        });
+
+                        let result = execute_tool(&call.name, &call.args);
+
+                        // If verify_identity returned verified=true, set state flag
+                        if call.name == "verify_identity" {
+                            if result.get("verified").and_then(|v| v.as_bool()).unwrap_or(false) {
+                                // We'll communicate this via the response
+                            }
+                        }
+
+                        responses.push(FunctionResponse {
+                            name: call.name.clone(),
+                            response: result,
+                            id: call.id.clone(),
+                        });
+                    }
+                    Some(responses)
+                }
+            })
+            // --- Fast lane callbacks ---
+            .on_audio(move |data| {
+                let encoded = b64.encode(data);
+                let _ = tx_audio.send(ServerMessage::Audio { data: encoded });
+            })
+            .on_input_transcript(move |text, _is_final| {
+                let _ = tx_input.send(ServerMessage::InputTranscription {
+                    text: text.to_string(),
+                });
+            })
+            .on_output_transcript(move |text, _is_final| {
+                let _ = tx_output.send(ServerMessage::OutputTranscription {
+                    text: text.to_string(),
+                });
+            })
+            .on_text(move |t| {
+                let _ = tx_text.send(ServerMessage::TextDelta {
+                    text: t.to_string(),
+                });
+            })
+            .on_text_complete(move |t| {
+                let _ = tx_text_complete.send(ServerMessage::TextComplete {
+                    text: t.to_string(),
+                });
+            })
+            // --- Control lane callbacks ---
+            .on_turn_complete(move || {
+                let tx = tx_turn.clone();
+                async move {
+                    let _ = tx.send(ServerMessage::TurnComplete);
+                }
+            })
+            .on_interrupted(move || {
+                let tx = tx_interrupted.clone();
+                async move {
+                    let _ = tx.send(ServerMessage::Interrupted);
+                }
+            })
+            .on_vad_start(move || {
+                let _ = tx_vad_start.send(ServerMessage::VoiceActivityStart);
+            })
+            .on_vad_end(move || {
+                let _ = tx_vad_end.send(ServerMessage::VoiceActivityEnd);
+            })
+            .on_error(move |msg| {
+                let tx = tx_error.clone();
+                async move {
+                    let _ = tx.send(ServerMessage::Error { message: msg });
+                }
+            })
+            .on_go_away(move |duration| {
+                let tx = tx_go_away.clone();
+                async move {
+                    let _ = tx.send(ServerMessage::StateUpdate {
+                        key: "go_away".into(),
+                        value: json!({
+                            "time_remaining_secs": duration.as_secs(),
+                        }),
+                    });
+                }
+            })
+            .on_disconnected(move |reason| {
+                let _tx = tx_disconnected.clone();
+                async move {
+                    info!("DebtCollection session disconnected: {reason:?}");
+                }
+            })
+            .connect(config)
+            .await
+            .map_err(|e| AppError::Connection(e.to_string()))?;
+
+        // 6. Send Connected + AppMeta + initial state
+        let _ = tx.send(ServerMessage::Connected);
+        send_app_meta(&tx, self);
+        info!("DebtCollection session connected");
+
+        let _ = tx.send(ServerMessage::PhaseChange {
+            from: "none".into(),
+            to: "disclosure".into(),
+            reason: "Session started".into(),
+        });
+        let _ = tx.send(ServerMessage::StateUpdate {
+            key: "phase".into(),
+            value: json!("disclosure"),
+        });
+        let _ = tx.send(ServerMessage::StateUpdate {
+            key: "call_risk_level".into(),
+            value: json!("low"),
+        });
+
+        // 7. Browser -> Gemini recv loop
+        let b64 = base64::engine::general_purpose::STANDARD;
+        while let Some(msg) = rx.recv().await {
+            match msg {
+                ClientMessage::Audio { data } => {
+                    match b64.decode(&data) {
+                        Ok(pcm_bytes) => {
+                            if let Err(e) = handle.send_audio(pcm_bytes).await {
+                                warn!("Failed to send audio: {e}");
+                                let _ = tx.send(ServerMessage::Error {
+                                    message: e.to_string(),
+                                });
+                            }
+                        }
+                        Err(e) => {
+                            warn!("Failed to decode base64 audio: {e}");
+                        }
+                    }
+                }
+                ClientMessage::Text { text } => {
+                    if let Err(e) = handle.send_text(&text).await {
+                        warn!("Failed to send text: {e}");
+                        let _ = tx.send(ServerMessage::Error {
+                            message: e.to_string(),
+                        });
+                    }
+                }
+                ClientMessage::Stop => {
+                    info!("DebtCollection session stopping");
+                    let _ = handle.disconnect().await;
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        Ok(())
     }
 }
 
