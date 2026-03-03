@@ -6,6 +6,9 @@ license.workspace = true
 description = "Raw wire protocol and transport for the Gemini Multimodal Live API"
 keywords = ["gemini", "multimodal", "live", "audio", "realtime"]
 categories = ["api-bindings", "multimedia::audio", "network-programming"]
+repository.workspace = true
+documentation = "https://docs.rs/rs-genai"
+readme = "README.md"
 
 [features]
 default = ["live", "vad", "tracing-support"]
