@@ -13,7 +13,6 @@ tower-http = { version = "0.5", features = ["fs", "cors"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tracing = "0.1"
-tracing-subscriber = "0.3"
 futures = "0.3"
 tokio-stream = "0.1"
 dotenvy = "0.15"
@@ -23,3 +22,9 @@ thiserror = "2"
 regex = "1"
 parking_lot = "0.12"
 schemars = "0.8"
+
+[features]
+default = []
+otel = ["rs-genai/otel", "rs-adk/otel"]
+otel-otlp = ["rs-genai/otel-otlp", "rs-adk/otel-otlp"]
+otel-gcp = ["rs-genai/otel-gcp", "rs-adk/otel-gcp"]

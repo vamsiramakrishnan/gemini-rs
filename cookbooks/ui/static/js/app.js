@@ -194,7 +194,7 @@
   // ------------------------------------------------
   // WebSocket connection
   // ------------------------------------------------
-  function connect() {
+  async function connect() {
     if (ws) {
       // Already connected — disconnect
       disconnect();
@@ -202,7 +202,7 @@
     }
 
     setConnectionState('connecting');
-    audio.initPlayback();
+    await audio.initPlayback();
     devtools.reset();
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';

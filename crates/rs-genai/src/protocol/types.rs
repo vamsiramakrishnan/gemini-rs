@@ -718,6 +718,12 @@ pub struct GenerationConfig {
     /// Random seed for deterministic generation.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub seed: Option<u32>,
+    /// MIME type for structured output (e.g., `"application/json"`, `"text/x.enum"`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_mime_type: Option<String>,
+    /// JSON Schema for structured output. Requires `response_mime_type = "application/json"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_json_schema: Option<serde_json::Value>,
 }
 
 /// API endpoint selector — Google AI (direct), Google AI with OAuth token, or Vertex AI.
@@ -918,15 +924,7 @@ impl SessionConfig {
             model: GeminiModel::default(),
             generation_config: GenerationConfig {
                 response_modalities: Some(vec![Modality::Audio]),
-                speech_config: None,
-                temperature: None,
-                top_p: None,
-                top_k: None,
-                max_output_tokens: None,
-                thinking_config: None,
-                enable_affective_dialog: None,
-                media_resolution: None,
-                seed: None,
+                ..Default::default()
             },
             system_instruction: None,
             tools: Vec::new(),

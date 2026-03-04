@@ -46,7 +46,7 @@ html, body {
   --msg-user-text: #ffffff;
   --msg-model-bg: #f1f3f4;
   --msg-model-text: #202124;
-  --mono: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', 'Droid Sans Mono', 'Source Code Pro', monospace;
+  --mono: 'JetBrains Mono', 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace;
 }
 
 /* ============================================

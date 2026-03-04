@@ -1,5 +1,5 @@
 /**
- * devtools.js — Devtools panel: State, Events, Playbook, Evaluator, Telemetry tabs
+ * devtools.js — Devtools panel: State, Events, Playbook, Evaluator, NFR tabs
  *
  * Exports:
  *   DevtoolsManager — manages devtools panel state and rendering
@@ -38,8 +38,16 @@ class DevtoolsManager {
     // Session start time for relative timestamps
     this.sessionStart = Date.now();
 
+    // Status bar elements
+    this._statusUptimeEl = null;
+    this._statusPhaseEl = null;
+    this._statusTurnsEl = null;
+    this._statusRafId = null;
+
     this._initPanels();
     this._initTabs();
+    this._initStatusBar();
+    this._initResize();
   }
 
   _initPanels() {
@@ -71,19 +79,19 @@ class DevtoolsManager {
     evalPanel.innerHTML = '<div class="events-empty">No evaluations yet</div>';
     this.panels.evaluator = evalPanel;
 
-    // Telemetry panel
-    const telemetryPanel = document.createElement('div');
-    telemetryPanel.className = 'devtools-panel telemetry-panel';
-    telemetryPanel.id = 'panel-telemetry';
-    telemetryPanel.innerHTML = '<div class="events-empty">No telemetry yet</div>';
-    this.panels.telemetry = telemetryPanel;
+    // NFR panel (replaces old Telemetry panel)
+    const nfrPanel = document.createElement('div');
+    nfrPanel.className = 'devtools-panel nfr-panel';
+    nfrPanel.id = 'panel-nfr';
+    nfrPanel.innerHTML = '<div class="events-empty">No metrics yet</div>';
+    this.panels.nfr = nfrPanel;
 
     // Add all to content area
     this.contentArea.appendChild(statePanel);
     this.contentArea.appendChild(eventsPanel);
     this.contentArea.appendChild(playbookPanel);
     this.contentArea.appendChild(evalPanel);
-    this.contentArea.appendChild(telemetryPanel);
+    this.contentArea.appendChild(nfrPanel);
   }
 
   _initTabs() {
@@ -120,7 +128,7 @@ class DevtoolsManager {
       case 'events': return 'Events';
       case 'playbook': return 'Playbook';
       case 'evaluator': return 'Evaluator';
-      case 'telemetry': return 'Telemetry';
+      case 'nfr': return 'NFR';
       default: return tabId;
     }
   }
@@ -182,10 +190,8 @@ class DevtoolsManager {
       this.availableTabs.push('evaluator');
     }
 
-    // Always show telemetry for advanced and showcase apps
-    if (info.category === 'advanced' || info.category === 'showcase') {
-      this.availableTabs.push('telemetry');
-    }
+    // Always show NFR tab
+    this.availableTabs.push('nfr');
 
     this._renderTabs();
 
@@ -213,7 +219,8 @@ class DevtoolsManager {
     this.panels.events.innerHTML = '<div class="events-empty">No events yet</div>';
     this.panels.playbook.innerHTML = '<div class="events-empty">No phase changes yet</div>';
     this.panels.evaluator.innerHTML = '<div class="events-empty">No evaluations yet</div>';
-    this.panels.telemetry.innerHTML = '<div class="events-empty">No telemetry yet</div>';
+    this.panels.nfr.innerHTML = '<div class="events-empty">No metrics yet</div>';
+    this._stopStatusTicker();
   }
 
   // ------------------------------------------------
@@ -279,14 +286,26 @@ class DevtoolsManager {
    */
   handleTelemetry(stats) {
     this.telemetry = stats;
+
+    // Update status bar from telemetry
+    if (stats.current_phase && this._statusPhaseEl) {
+      this._statusPhaseEl.textContent = stats.current_phase;
+    }
+    if (stats.response_count !== undefined && this._statusTurnsEl) {
+      this._statusTurnsEl.textContent = stats.response_count;
+    }
+
+    // Start the uptime ticker on first telemetry
+    if (!this._statusRafId) {
+      this._startStatusTicker();
+    }
+
     // Coalesce rapid telemetry updates into a single rAF frame.
-    // This prevents DOM thrashing when telemetry arrives faster than
-    // the browser can paint (e.g., periodic 2s updates + turn events).
     if (!this._telemetryRafPending) {
       this._telemetryRafPending = true;
       requestAnimationFrame(() => {
         this._telemetryRafPending = false;
-        this._renderTelemetry();
+        this._renderNfr();
       });
     }
   }
@@ -311,7 +330,7 @@ class DevtoolsManager {
       this.telemetry.tool_calls = 0;
     }
     this.telemetry.tool_calls = this.toolCalls.length;
-    this._renderTelemetry();
+    this._renderNfr();
   }
 
   // ------------------------------------------------
@@ -502,206 +521,209 @@ class DevtoolsManager {
     panel.scrollTop = panel.scrollHeight;
   }
 
-  _renderTelemetry() {
-    const panel = this.panels.telemetry;
+  _renderNfr() {
+    const panel = this.panels.nfr;
     const stats = this.telemetry;
 
     if (!stats || Object.keys(stats).length === 0) {
-      panel.innerHTML = '<div class="events-empty">No telemetry yet</div>';
+      panel.innerHTML = '<div class="events-empty">No metrics yet</div>';
       return;
     }
 
-    const elapsed = Date.now() - this.sessionStart;
-    const elapsedDisplay = this._formatElapsed(elapsed);
+    let html = '<div class="nfr-content">';
 
-    let html = '<div class="telemetry-content">';
+    // Hero: Average Response Latency (TTFB)
+    if (stats.response_count > 0) {
+      const avg = Math.round(stats.avg_response_latency_ms || 0);
+      const last = Math.round(stats.last_response_latency_ms || 0);
+      const health = avg < 300 ? 'good' : avg < 600 ? 'ok' : 'warn';
+      const healthLabel = avg < 300 ? 'Healthy' : avg < 600 ? 'Moderate' : 'Degraded';
 
-    // Session duration
-    html += `<div class="telemetry-section">
-      <div class="telemetry-section-title">Session</div>
-      <div class="telemetry-grid">
-        <div class="telemetry-stat">
-          <div class="telemetry-stat-value">${elapsedDisplay}</div>
-          <div class="telemetry-stat-label">Duration</div>
-        </div>`;
+      html += `<div class="nfr-hero nfr-hero-${health}">
+        <div class="nfr-hero-header">
+          <span class="nfr-hero-dot"></span>
+          <span class="nfr-hero-label">Avg Response Latency</span>
+          <span class="nfr-hero-health">${healthLabel}</span>
+        </div>
+        <div class="nfr-hero-value">${avg}<span class="nfr-hero-unit">ms</span></div>
+        <div class="nfr-hero-sub">
+          <span>Last <strong>${last}ms</strong></span>
+          <span class="nfr-hero-sep">&middot;</span>
+          <span>${stats.response_count} responses</span>
+        </div>
+      </div>`;
 
-    if (stats.turn_count !== undefined) {
-      html += `<div class="telemetry-stat">
-          <div class="telemetry-stat-value">${stats.turn_count}</div>
-          <div class="telemetry-stat-label">Turns</div>
-        </div>`;
-    }
+      // Range visualization with positioned markers
+      if (stats.response_count > 1) {
+        const min = Math.round(stats.min_response_latency_ms || 0);
+        const max = Math.round(stats.max_response_latency_ms || 0);
+        const range = max - min;
+        const lastPct = range > 0 ? Math.min(100, Math.max(0, (last - min) / range * 100)) : 50;
+        const avgPct = range > 0 ? Math.min(100, Math.max(0, (avg - min) / range * 100)) : 50;
 
-    if (stats.current_phase) {
-      html += `<div class="telemetry-stat">
-          <div class="telemetry-stat-value phase-badge">${this._esc(stats.current_phase)}</div>
-          <div class="telemetry-stat-label">Phase</div>
-        </div>`;
-    }
-
-    html += '</div></div>';
-
-    // Performance — response latency & audio throughput
-    if (stats.response_count !== undefined || stats.audio_chunks_out !== undefined) {
-      html += `<div class="telemetry-section">
-        <div class="telemetry-section-title">Performance</div>
-        <div class="telemetry-grid">`;
-
-      if (stats.last_response_latency_ms !== undefined && stats.response_count > 0) {
-        const latency = stats.last_response_latency_ms;
-        const cls = latency < 300 ? 'telemetry-stat-good' : latency < 600 ? 'telemetry-stat-ok' : 'telemetry-stat-warn';
-        html += `<div class="telemetry-stat">
-            <div class="telemetry-stat-value ${cls}">${latency}<span class="telemetry-stat-unit">ms</span></div>
-            <div class="telemetry-stat-label">Last RTT</div>
-          </div>`;
-      }
-
-      if (stats.avg_response_latency_ms !== undefined && stats.response_count > 0) {
-        const avg = stats.avg_response_latency_ms;
-        const cls = avg < 300 ? 'telemetry-stat-good' : avg < 600 ? 'telemetry-stat-ok' : 'telemetry-stat-warn';
-        html += `<div class="telemetry-stat">
-            <div class="telemetry-stat-value ${cls}">${avg}<span class="telemetry-stat-unit">ms</span></div>
-            <div class="telemetry-stat-label">Avg RTT</div>
-          </div>`;
-      }
-
-      if (stats.interruptions !== undefined) {
-        html += `<div class="telemetry-stat">
-            <div class="telemetry-stat-value">${stats.interruptions}</div>
-            <div class="telemetry-stat-label">Barge-ins</div>
-          </div>`;
-      }
-
-      html += '</div>';
-
-      // Latency range bar (min / max)
-      if (stats.response_count > 1 && stats.min_response_latency_ms !== undefined) {
-        html += `<div class="telemetry-latency-range">
-          <span class="telemetry-range-label">min</span>
-          <span class="telemetry-range-value">${stats.min_response_latency_ms}ms</span>
-          <span class="telemetry-range-bar"></span>
-          <span class="telemetry-range-value">${stats.max_response_latency_ms}ms</span>
-          <span class="telemetry-range-label">max</span>
-        </div>`;
-      }
-
-      // Audio throughput row
-      if (stats.audio_chunks_out !== undefined) {
-        html += `<div class="telemetry-grid" style="margin-top: 6px;">
-          <div class="telemetry-stat">
-            <div class="telemetry-stat-value">${stats.audio_kbytes_out || 0}<span class="telemetry-stat-unit">KB</span></div>
-            <div class="telemetry-stat-label">Audio Out</div>
+        html += `<div class="nfr-range-vis">
+          <div class="nfr-range-labels">
+            <span>${min}ms</span>
+            <span>${max}ms</span>
           </div>
-          <div class="telemetry-stat">
-            <div class="telemetry-stat-value">${stats.audio_throughput_kbps || 0}<span class="telemetry-stat-unit">KB/s</span></div>
-            <div class="telemetry-stat-label">Throughput</div>
+          <div class="nfr-range-track">
+            <div class="nfr-range-fill" style="width:100%"></div>
+            <div class="nfr-range-marker nfr-range-marker-avg" style="left:${avgPct}%" title="avg ${avg}ms"></div>
+            <div class="nfr-range-marker nfr-range-marker-last" style="left:${lastPct}%" title="last ${last}ms"></div>
           </div>
-          <div class="telemetry-stat">
-            <div class="telemetry-stat-value">${stats.uptime_secs || 0}<span class="telemetry-stat-unit">s</span></div>
-            <div class="telemetry-stat-label">Uptime</div>
+          <div class="nfr-range-legend">
+            <span class="nfr-range-legend-item"><span class="nfr-dot-avg"></span>avg</span>
+            <span class="nfr-range-legend-item"><span class="nfr-dot-last"></span>last</span>
           </div>
         </div>`;
       }
-
-      html += '</div>';
     }
 
-    // State stats
-    const stateKeyCount = Object.keys(this.stateData).length;
-    if (stateKeyCount > 0 || stats.extractor_runs !== undefined) {
-      html += `<div class="telemetry-section">
-        <div class="telemetry-section-title">State</div>
-        <div class="telemetry-grid">
-          <div class="telemetry-stat">
-            <div class="telemetry-stat-value">${stateKeyCount}</div>
-            <div class="telemetry-stat-label">Keys</div>
-          </div>`;
+    // Turn Performance section
+    html += `<div class="nfr-section">
+      <div class="nfr-section-header">
+        <span class="nfr-section-icon turn"></span>
+        <span class="nfr-section-title">Turn Performance</span>
+      </div>
+      <div class="nfr-metric-strip">`;
 
-      if (stats.extractor_runs !== undefined) {
-        html += `<div class="telemetry-stat">
-            <div class="telemetry-stat-value">${stats.extractor_runs}</div>
-            <div class="telemetry-stat-label">Extractions</div>
-          </div>`;
-      }
-
-      if (stats.computed_vars !== undefined) {
-        html += `<div class="telemetry-stat">
-            <div class="telemetry-stat-value">${stats.computed_vars}</div>
-            <div class="telemetry-stat-label">Computed</div>
-          </div>`;
-      }
-
-      html += '</div></div>';
+    if (stats.avg_turn_duration_ms > 0) {
+      const secs = (stats.avg_turn_duration_ms / 1000).toFixed(1);
+      html += `<div class="nfr-metric">
+          <span class="nfr-metric-value">${secs}<span class="nfr-unit">s</span></span>
+          <span class="nfr-metric-label">Avg Turn</span>
+        </div>`;
     }
 
-    // Phase stats
-    if (stats.phase_count !== undefined || this.phases.length > 0) {
-      html += `<div class="telemetry-section">
-        <div class="telemetry-section-title">Phases</div>
-        <div class="telemetry-grid">
-          <div class="telemetry-stat">
-            <div class="telemetry-stat-value">${stats.phase_count || this.phases.length}</div>
-            <div class="telemetry-stat-label">Transitions</div>
-          </div>`;
+    html += `<div class="nfr-metric">
+        <span class="nfr-metric-value">${stats.interruptions || 0}</span>
+        <span class="nfr-metric-label">Interrupts</span>
+      </div>
+    </div></div>`;
 
-      if (stats.current_phase_duration) {
-        html += `<div class="telemetry-stat">
-            <div class="telemetry-stat-value">${stats.current_phase_duration}</div>
-            <div class="telemetry-stat-label">In Phase</div>
-          </div>`;
-      }
-
-      if (stats.avg_turn_duration_ms !== undefined && stats.avg_turn_duration_ms > 0) {
-        const secs = (stats.avg_turn_duration_ms / 1000).toFixed(1);
-        html += `<div class="telemetry-stat">
-            <div class="telemetry-stat-value">${secs}<span class="telemetry-stat-unit">s</span></div>
-            <div class="telemetry-stat-label">Avg Turn</div>
-          </div>`;
-      }
-
-      html += '</div></div>';
-    }
-
-    // Tool calls
-    if (this.toolCalls.length > 0) {
-      html += `<div class="telemetry-section">
-        <div class="telemetry-section-title">Tools</div>
-        <div class="telemetry-grid">
-          <div class="telemetry-stat">
-            <div class="telemetry-stat-value">${this.toolCalls.length}</div>
-            <div class="telemetry-stat-label">Calls</div>
+    // Audio section
+    if (stats.audio_chunks_out > 0) {
+      html += `<div class="nfr-section">
+        <div class="nfr-section-header">
+          <span class="nfr-section-icon audio"></span>
+          <span class="nfr-section-title">Audio</span>
+        </div>
+        <div class="nfr-metric-strip">
+          <div class="nfr-metric">
+            <span class="nfr-metric-value">${stats.audio_kbytes_out || 0}<span class="nfr-unit">KB</span></span>
+            <span class="nfr-metric-label">Total Out</span>
+          </div>
+          <div class="nfr-metric">
+            <span class="nfr-metric-value">${stats.audio_throughput_kbps || 0}<span class="nfr-unit">KB/s</span></span>
+            <span class="nfr-metric-label">Throughput</span>
+          </div>
+          <div class="nfr-metric">
+            <span class="nfr-metric-value">${stats.uptime_secs || 0}<span class="nfr-unit">s</span></span>
+            <span class="nfr-metric-label">Uptime</span>
           </div>
         </div>
-        <div class="telemetry-tool-list">`;
+      </div>`;
+    }
 
-      // Show last 5 tool calls
-      const recentTools = this.toolCalls.slice(-5);
-      recentTools.forEach(tc => {
-        html += `<div class="telemetry-tool-entry">
-          <span class="telemetry-tool-name">${this._esc(tc.name)}</span>
-          <span class="telemetry-tool-args">${this._truncate(tc.args, 40)}</span>
-          <span class="telemetry-tool-result">${this._truncate(tc.result, 40)}</span>
+    // Tool Calls section
+    if (this.toolCalls.length > 0) {
+      html += `<div class="nfr-section">
+        <div class="nfr-section-header">
+          <span class="nfr-section-icon tools"></span>
+          <span class="nfr-section-title">Tool Calls</span>
+          <span class="nfr-section-count">${this.toolCalls.length}</span>
+        </div>
+        <div class="nfr-tool-list">`;
+
+      this.toolCalls.slice(-5).forEach(tc => {
+        html += `<div class="nfr-tool-entry">
+          <span class="nfr-tool-name">${this._esc(tc.name)}</span>
+          <span class="nfr-tool-args">${this._truncate(tc.args, 40)}</span>
         </div>`;
       });
 
       html += '</div></div>';
     }
 
-    // Violations summary
-    if (this.violations.length > 0) {
-      html += `<div class="telemetry-section">
-        <div class="telemetry-section-title">Guardrails</div>
-        <div class="telemetry-grid">
-          <div class="telemetry-stat">
-            <div class="telemetry-stat-value telemetry-stat-warn">${this.violations.length}</div>
-            <div class="telemetry-stat-label">Violations</div>
-          </div>
-        </div>
-      </div>`;
-    }
-
     html += '</div>';
     panel.innerHTML = html;
+
+    // Update health indicator in status bar
+    this._updateHealthIndicator(stats);
+  }
+
+  // --- Status Bar ---
+
+  _initStatusBar() {
+    this._statusUptimeEl = document.getElementById('status-uptime');
+    this._statusPhaseEl = document.getElementById('status-phase');
+    this._statusTurnsEl = document.getElementById('status-turns');
+    this._statusHealthEl = document.getElementById('status-health');
+  }
+
+  _initResize() {
+    const handle = document.getElementById('devtools-resize-handle');
+    if (!handle) return;
+
+    let startX, startWidth;
+
+    const onMouseMove = (e) => {
+      const dx = startX - e.clientX;
+      const newWidth = Math.min(520, Math.max(280, startWidth + dx));
+      this.container.style.width = newWidth + 'px';
+      this.container.style.minWidth = newWidth + 'px';
+      e.preventDefault();
+    };
+
+    const onMouseUp = () => {
+      handle.classList.remove('active');
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    handle.addEventListener('mousedown', (e) => {
+      startX = e.clientX;
+      startWidth = this.container.offsetWidth;
+      handle.classList.add('active');
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp);
+      e.preventDefault();
+    });
+  }
+
+  _updateHealthIndicator(stats) {
+    if (!this._statusHealthEl) return;
+    const avg = stats.avg_response_latency_ms || 0;
+    if (stats.response_count > 0) {
+      const cls = avg < 300 ? 'good' : avg < 600 ? 'ok' : 'warn';
+      this._statusHealthEl.className = 'status-health-dot ' + cls;
+    }
+  }
+
+  _startStatusTicker() {
+    const tick = () => {
+      if (this._statusUptimeEl) {
+        const elapsed = Date.now() - this.sessionStart;
+        this._statusUptimeEl.textContent = this._formatElapsed(elapsed);
+      }
+      this._statusRafId = requestAnimationFrame(tick);
+    };
+    this._statusRafId = requestAnimationFrame(tick);
+  }
+
+  _stopStatusTicker() {
+    if (this._statusRafId) {
+      cancelAnimationFrame(this._statusRafId);
+      this._statusRafId = null;
+    }
+    if (this._statusUptimeEl) this._statusUptimeEl.textContent = '--';
+    if (this._statusPhaseEl) this._statusPhaseEl.textContent = '--';
+    if (this._statusTurnsEl) this._statusTurnsEl.textContent = '0';
+    if (this._statusHealthEl) this._statusHealthEl.className = 'status-health-dot';
   }
 
   // ------------------------------------------------

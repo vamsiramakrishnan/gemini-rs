@@ -285,6 +285,9 @@ impl Middleware for CircuitBreakerMiddleware {
 
 // ── Trace Middleware ──────────────────────────────────────────────────────
 
+/// Middleware that creates tracing spans for agent and tool lifecycle events.
+/// When `tracing-support` is enabled, these spans are picked up by
+/// `tracing-opentelemetry` and exported as OTel spans.
 struct TraceMiddleware;
 
 #[async_trait]
@@ -293,7 +296,40 @@ impl Middleware for TraceMiddleware {
         "trace"
     }
 
-    async fn before_tool(&self, _call: &FunctionCall) -> Result<(), AgentError> {
+    async fn before_agent(
+        &self,
+        ctx: &rs_adk::context::InvocationContext,
+    ) -> Result<(), AgentError> {
+        let sid = ctx.session_id.as_deref().unwrap_or("unknown");
+        rs_adk::telemetry::logging::log_agent_started(sid, 0);
+        Ok(())
+    }
+
+    async fn before_tool(&self, call: &FunctionCall) -> Result<(), AgentError> {
+        rs_adk::telemetry::logging::log_tool_dispatch("fluent", &call.name, "function");
+        Ok(())
+    }
+
+    async fn after_tool(
+        &self,
+        call: &FunctionCall,
+        _result: &serde_json::Value,
+    ) -> Result<(), AgentError> {
+        rs_adk::telemetry::logging::log_tool_result("fluent", &call.name, true, 0.0);
+        Ok(())
+    }
+
+    async fn on_tool_error(
+        &self,
+        call: &FunctionCall,
+        _err: &ToolError,
+    ) -> Result<(), AgentError> {
+        rs_adk::telemetry::logging::log_tool_result("fluent", &call.name, false, 0.0);
+        Ok(())
+    }
+
+    async fn on_error(&self, err: &AgentError) -> Result<(), AgentError> {
+        rs_adk::telemetry::logging::log_agent_error("fluent", &err.to_string());
         Ok(())
     }
 }

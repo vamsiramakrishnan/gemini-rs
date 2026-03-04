@@ -120,6 +120,20 @@ impl GenerateContentConfig {
         self
     }
 
+    /// Set JSON output mode with an optional JSON Schema.
+    ///
+    /// Sets `responseMimeType` to `"application/json"` and, if a schema is
+    /// provided, sets `responseJsonSchema` so the model is constrained to
+    /// produce valid JSON matching the schema.
+    pub fn json_output(mut self, schema: Option<serde_json::Value>) -> Self {
+        let gc = self
+            .generation_config
+            .get_or_insert_with(GenerationConfig::default);
+        gc.response_mime_type = Some("application/json".to_string());
+        gc.response_json_schema = schema;
+        self
+    }
+
     /// Set system instruction from text.
     pub fn system_instruction(mut self, text: impl Into<String>) -> Self {
         self.system_instruction = Some(Content {

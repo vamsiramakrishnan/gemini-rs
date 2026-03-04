@@ -201,6 +201,17 @@ impl BaseLlm for GeminiLlm {
             if let Some(max) = request.max_output_tokens {
                 config = config.max_output_tokens(max);
             }
+            if request.response_mime_type.is_some() || request.response_json_schema.is_some() {
+                let gc = config
+                    .generation_config
+                    .get_or_insert_with(rs_genai::prelude::GenerationConfig::default);
+                if let Some(mime) = request.response_mime_type.take() {
+                    gc.response_mime_type = Some(mime);
+                }
+                if let Some(schema) = request.response_json_schema.take() {
+                    gc.response_json_schema = Some(schema);
+                }
+            }
 
             let response = self.client
                 .generate_content_with(config, None)

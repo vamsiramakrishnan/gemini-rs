@@ -13,6 +13,23 @@ use crate::llm::{BaseLlm, LlmError, LlmRequest};
 
 use super::transcript::TranscriptTurn;
 
+/// Strip markdown code fences from LLM output.
+///
+/// Handles `` ```json\n...\n``` ``, `` ```\n...\n``` ``, and bare JSON.
+fn strip_code_fences(text: &str) -> &str {
+    let trimmed = text.trim();
+    if let Some(rest) = trimmed.strip_prefix("```") {
+        // Skip optional language tag (e.g., "json") on the first line
+        let rest = rest.trim_start_matches(|c: char| c != '\n');
+        let rest = rest.strip_prefix('\n').unwrap_or(rest);
+        // Strip trailing ```
+        let rest = rest.trim_end();
+        rest.strip_suffix("```").unwrap_or(rest).trim()
+    } else {
+        trimmed
+    }
+}
+
 /// Trait for between-turn extraction from transcript windows.
 ///
 /// Implementations receive a window of recent transcript turns and produce
@@ -144,24 +161,28 @@ impl TurnExtractor for LlmExtractor {
     async fn extract(&self, window: &[TranscriptTurn]) -> Result<Value, LlmError> {
         let transcript = Self::format_transcript(window);
 
-        let mut system = self.prompt.clone();
-        if let Some(ref schema_str) = self.schema_str {
-            system.push_str("\n\nRespond with valid JSON matching this schema:\n");
-            system.push_str(schema_str);
-        } else {
-            system.push_str("\n\nRespond with valid JSON only, no markdown fences.");
-        }
-
         let mut request = LlmRequest::from_text(format!(
             "Transcript:\n{transcript}\nExtract the requested information."
         ));
-        request.system_instruction = Some(system);
+        request.system_instruction = Some(self.prompt.clone());
+
+        // Use native JSON mode when a schema is available — the API constrains
+        // the model to produce valid JSON matching the schema, eliminating
+        // markdown fences and malformed output.
+        if let Some(ref schema) = self.schema {
+            request.response_mime_type = Some("application/json".to_string());
+            request.response_json_schema = Some(schema.clone());
+        } else {
+            request.response_mime_type = Some("application/json".to_string());
+        }
 
         let response = self.llm.generate(request).await?;
         let text = response.text();
 
-        // Parse the response as JSON
-        serde_json::from_str(&text).map_err(|e| {
+        // Fallback: strip markdown code fences if the model still wraps output
+        let cleaned = strip_code_fences(&text);
+
+        serde_json::from_str(cleaned).map_err(|e| {
             LlmError::Other(format!(
                 "Failed to parse extraction result as JSON: {e}. Raw: {text}"
             ))
@@ -275,6 +296,26 @@ mod tests {
         assert!(formatted.contains("User: Hello"));
         assert!(formatted.contains("Assistant: Hi there!"));
         assert!(formatted.contains("User: How are you?"));
+    }
+
+    #[tokio::test]
+    async fn llm_extractor_handles_markdown_fenced_json() {
+        let llm = Arc::new(MockLlm {
+            response: "```json\n{\"status\": \"ok\"}\n```".to_string(),
+        });
+
+        let extractor = LlmExtractor::new("Fenced", llm, "Extract", 1);
+        let turns = make_turns(&[("test", "reply")]);
+        let result = extractor.extract(&turns).await.unwrap();
+        assert_eq!(result["status"], "ok");
+    }
+
+    #[test]
+    fn strip_code_fences_variants() {
+        assert_eq!(super::strip_code_fences("```json\n{}\n```"), "{}");
+        assert_eq!(super::strip_code_fences("```\n{}\n```"), "{}");
+        assert_eq!(super::strip_code_fences("  ```json\n{\"a\":1}\n```  "), "{\"a\":1}");
+        assert_eq!(super::strip_code_fences("{\"bare\":true}"), "{\"bare\":true}");
     }
 
     #[test]

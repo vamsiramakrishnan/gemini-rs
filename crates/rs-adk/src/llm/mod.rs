@@ -94,6 +94,12 @@ pub struct LlmRequest {
     /// Maximum output tokens.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_output_tokens: Option<u32>,
+    /// MIME type for structured output (e.g., `"application/json"`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_mime_type: Option<String>,
+    /// JSON Schema for structured output. Requires `response_mime_type = "application/json"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_json_schema: Option<serde_json::Value>,
 }
 
 impl LlmRequest {
