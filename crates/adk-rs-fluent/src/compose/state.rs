@@ -169,6 +169,18 @@ impl S {
     // ── State predicates ───────────────────────────────────────────────────
     // Ergonomic helpers for transition guards and `.when()` predicates.
 
+    /// Returns `true` if the given key exists with any non-null value.
+    ///
+    /// Replaces the common pattern `|s| s.get::<String>("key").is_some()`.
+    ///
+    /// ```ignore
+    /// .transition("next_phase", S::is_set("caller_name"))
+    /// ```
+    pub fn is_set(key: &str) -> impl Fn(&rs_adk::State) -> bool + Send + Sync + 'static {
+        let key = key.to_string();
+        move |s: &rs_adk::State| s.contains(&key)
+    }
+
     /// Returns `true` if the given key holds a truthy boolean.
     ///
     /// ```ignore

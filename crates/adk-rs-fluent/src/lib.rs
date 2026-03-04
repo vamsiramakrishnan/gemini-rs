@@ -72,7 +72,7 @@ macro_rules! let_clone {
 /// Convenience re-exports for common types across all layers.
 pub mod prelude {
     pub use crate::builder::*;
-    pub use crate::compose::{A, C, M, P, S, T};
+    pub use crate::compose::{A, C, Ctx, M, P, S, T};
     pub use crate::live::Live;
     pub use crate::live_builders::*;
     pub use crate::operators::*;

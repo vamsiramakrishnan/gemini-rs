@@ -47,7 +47,10 @@ const CLINICAL_URGENCY: StateKey<f64> = StateKey::new("clinical_urgency");
 const APPOINTMENT_BOOKED: StateKey<bool> = StateKey::new("appointment_booked");
 
 // ---------------------------------------------------------------------------
-// Phase instructions
+// Phase instructions — lean directives for what to do in each phase.
+// Contextual awareness ("where we are, what we know") is provided by
+// the clinic_context() closure via with_context, so the model always
+// has situational bearings without repeating state in the instructions.
 // ---------------------------------------------------------------------------
 
 const SYSTEM_INSTRUCTION: &str = "\
@@ -58,78 +61,159 @@ If symptoms suggest an emergency (chest pain, difficulty breathing, severe bleed
 advise calling 911 immediately.";
 
 const GREETING_INSTRUCTION: &str = "\
-Welcome the patient to Clearview Medical Center. Ask how you can help them today. \
-Determine their intent: are they booking a new appointment, rescheduling an existing one, \
-or have another inquiry? If they mention a name, try looking them up. \
-Be warm and professional.";
+Welcome the patient to Clearview Medical Center. Ask how you can help today. \
+Determine their intent: new appointment, reschedule, or other inquiry. \
+If they mention a name, look them up.";
 
 const SYMPTOM_TRIAGE_INSTRUCTION: &str = "\
-Ask the patient about their symptoms empathetically. Listen carefully and ask \
-follow-up questions to understand the nature, duration, and severity of their symptoms. \
-Do NOT diagnose — you are not a doctor. Assess urgency based on what they describe. \
-If they mention chest pain, difficulty breathing, or severe bleeding, \
-immediately advise calling 911. \
-Once you have a clear picture of the symptoms, suggest an appropriate department.";
+Ask about symptoms empathetically. Understand nature, duration, and severity. \
+Do NOT diagnose. If they mention chest pain, difficulty breathing, or severe bleeding, \
+advise calling 911 immediately.";
 
 const DEPARTMENT_SELECTION_INSTRUCTION: &str = "\
-Based on the patient's symptoms, suggest the most appropriate department. \
-Use the list_departments tool to show available departments. \
-Explain why you're recommending a particular department. \
-Confirm the department selection with the patient before proceeding.";
+Suggest the most appropriate department using list_departments. \
+Explain your recommendation and confirm with the patient before proceeding.";
 
 const DOCTOR_SELECTION_INSTRUCTION: &str = "\
-Show the available doctors in the selected department using the list_doctors tool. \
-Share each doctor's specialty and rating. Let the patient choose, or recommend \
-the best fit based on their symptoms. Use check_doctor_availability to show \
-available time slots once a doctor is selected.";
+Show available doctors using list_doctors. Share specialties and ratings. \
+Let the patient choose or recommend based on their needs. \
+Use check_doctor_availability for time slots.";
 
 const APPOINTMENT_BOOKING_INSTRUCTION: &str = "\
-Book the appointment using the book_appointment tool. \
-If the patient is not in our system, let them know you'll need to register them first. \
-Confirm all details before booking: doctor name, date, and time. \
-Use the lookup_patient tool to check if they are an existing patient.";
+Book the appointment using book_appointment. Confirm all details before booking. \
+Use lookup_patient to check if they are an existing patient. \
+If not in our system, let them know registration is needed first.";
 
 const RESCHEDULING_INSTRUCTION: &str = "\
-Help the patient reschedule or cancel their existing appointment. \
-Look up their current appointment details. Offer new available slots using \
-check_doctor_availability. Use reschedule_appointment or cancel_appointment as needed. \
-Be understanding — patients reschedule for many reasons.";
+Help reschedule or cancel their appointment. Look up current details, \
+offer new slots via check_doctor_availability. \
+Use reschedule_appointment or cancel_appointment as needed.";
 
 const PATIENT_REGISTRATION_INSTRUCTION: &str = "\
-The patient is new to Clearview Medical Center. Collect the following information:\n\
-1. Full name\n\
-2. Date of birth\n\
-3. Phone number\n\
-4. Insurance provider (optional)\n\n\
-Use the register_patient tool to create their profile. \
-Be welcoming — this is their first interaction with us.";
+Collect: full name, date of birth, phone number, and insurance provider (optional). \
+Use register_patient to create their profile. Be welcoming.";
 
 const CONFIRMATION_INSTRUCTION: &str = "\
-Confirm the appointment details with the patient:\n\
-1. Doctor name and specialty\n\
-2. Appointment date and time\n\
-3. Department\n\
-4. Appointment ID\n\n\
-Make sure they have all the information they need.";
+Confirm the appointment details: doctor, date, time, department, and appointment ID. \
+Make sure the patient has everything they need.";
 
 const FAREWELL_INSTRUCTION: &str = "\
-Thank the patient for choosing Clearview Medical Center. \
-Remind them to bring their insurance card and photo ID. \
-If they are a new patient, emphasize the importance of arriving 15 minutes early \
-to complete any remaining paperwork. Wish them well.";
+Thank the patient. Remind them to bring insurance card and photo ID. \
+New patients should arrive 15 minutes early. Wish them well.";
 
 // ---------------------------------------------------------------------------
-// State keys for phase instruction modifiers
+// Geolocation context — natural-language summary of accumulated state.
+// Attached via with_context in phase_defaults so every phase instruction
+// gets situational bearings: where we are, what we know, what's still needed.
 // ---------------------------------------------------------------------------
 
-const CLINIC_STATE_KEYS: &[&str] = &[
-    "symptoms",
-    "department",
-    "doctor_name",
-    "clinical_urgency",
-    "is_new_patient",
-    "derived:suggested_department",
-];
+fn clinic_context(s: &State) -> String {
+    let mut ctx = Vec::new();
+
+    // Patient info
+    let name: Option<String> = s.get("patient_name");
+    let pid: Option<String> = s.get("patient_id");
+    let is_new: Option<bool> = s.get("is_new_patient");
+    match (&name, &pid, is_new) {
+        (Some(n), Some(id), Some(true)) => {
+            ctx.push(format!("Patient: {n} ({id}, new patient)."));
+        }
+        (Some(n), Some(id), _) => {
+            ctx.push(format!("Patient: {n} ({id})."));
+        }
+        (Some(n), None, Some(true)) => {
+            ctx.push(format!("Patient: {n} (new, not yet registered)."));
+        }
+        (Some(n), None, _) => {
+            ctx.push(format!("Patient: {n}."));
+        }
+        (None, _, Some(true)) => {
+            ctx.push("Patient is new (not in our system).".into());
+        }
+        _ => {}
+    }
+
+    // Insurance
+    if let Some(ins) = s.get::<String>("insurance_provider") {
+        if !ins.is_empty() {
+            ctx.push(format!("Insurance: {ins}."));
+        }
+    }
+
+    // Symptoms
+    if let Some(symptoms) = s.get::<String>("symptoms") {
+        if !symptoms.is_empty() {
+            ctx.push(format!("Symptoms: {symptoms}."));
+        }
+    }
+
+    // Urgency
+    let urgency: f64 = s.get("clinical_urgency").unwrap_or(0.0);
+    if urgency > 0.0 {
+        let label = if urgency > 0.9 {
+            "critical"
+        } else if urgency > 0.6 {
+            "elevated"
+        } else {
+            "low"
+        };
+        ctx.push(format!("Urgency: {label} ({urgency:.1})."));
+    }
+
+    // Department
+    let dept: Option<String> = s.get("department");
+    let suggested: Option<String> = s.get("derived:suggested_department");
+    match (&dept, &suggested) {
+        (Some(d), _) => ctx.push(format!("Department: {d} (confirmed).")),
+        (None, Some(d)) => ctx.push(format!("Suggested department: {d} (not yet confirmed).")),
+        _ => {}
+    }
+
+    // Doctor
+    if let Some(doc) = s.get::<String>("doctor_name") {
+        if !doc.is_empty() {
+            ctx.push(format!("Doctor: {doc}."));
+        }
+    }
+
+    // Appointment
+    let date: Option<String> = s.get("appointment_date");
+    let time: Option<String> = s.get("appointment_time");
+    let booked: bool = s.get("appointment_booked").unwrap_or(false);
+    let apt_id: Option<String> = s.get("appointment_id");
+    if booked {
+        if let Some(id) = &apt_id {
+            ctx.push(format!("Appointment {id} booked."));
+        } else {
+            ctx.push("Appointment confirmed.".into());
+        }
+    }
+    match (&date, &time) {
+        (Some(d), Some(t)) => ctx.push(format!("Scheduled: {d} at {t}.")),
+        (Some(d), None) => ctx.push(format!("Date selected: {d}.")),
+        _ => {}
+    }
+
+    // Intent
+    if let Some(intent) = s.get::<String>("intent") {
+        if !intent.is_empty() {
+            let label = match intent.as_str() {
+                "new_appointment" => "booking a new appointment",
+                "reschedule" => "rescheduling an existing appointment",
+                "cancel" => "cancelling an appointment",
+                "inquiry" => "general inquiry",
+                other => other,
+            };
+            ctx.push(format!("Intent: {label}."));
+        }
+    }
+
+    if ctx.is_empty() {
+        String::new()
+    } else {
+        ctx.join(" ")
+    }
+}
 
 const EMERGENCY_WARNING: &str = "\
 URGENT: The patient's symptoms suggest a potential medical emergency. \
@@ -562,9 +646,10 @@ async fn handle_session(
         .add_tool(clinic_tools())
         .system_instruction(SYSTEM_INSTRUCTION);
 
-    // 2. Create GeminiLlm for LLM extraction
+    // 2. Create GeminiLlm for LLM extraction (background agent uses flash-lite at global)
     let llm: Arc<dyn BaseLlm> = Arc::new(GeminiLlm::new(GeminiLlmParams {
-        model: Some("gemini-2.5-flash".to_string()),
+        model: Some("gemini-2.5-flash-lite".to_string()),
+        location: Some("global".to_string()),
         ..Default::default()
     }));
 
@@ -727,14 +812,14 @@ async fn handle_session(
         })
         // --- Phase defaults (inherited by all phases) ---
         .phase_defaults(|d| {
-            d.with_state(CLINIC_STATE_KEYS)
+            d.with_context(clinic_context)
                 .when(urgency_is_critical, EMERGENCY_WARNING)
-                .prompt_on_enter(true)
         })
         // --- 9 Phases ---
         // Phase 1: Greeting
         .phase("greeting")
             .instruction(GREETING_INSTRUCTION)
+            .prompt_on_enter(true)
             .transition("symptom_triage", S::eq("intent", "new_appointment"))
             .transition("rescheduling", S::one_of("intent", &["reschedule", "cancel"]))
             .on_enter(move |_state, _writer| {
@@ -769,7 +854,10 @@ async fn handle_session(
                     });
                 }
             })
-            .enter_prompt("The patient wants to book an appointment. I'll ask about their symptoms.")
+            .enter_prompt_fn(|s, _| {
+                let name: String = s.get("patient_name").unwrap_or_else(|| "the patient".into());
+                format!("{name} wants to book an appointment. I'll ask about their symptoms.")
+            })
             .done()
         // Phase 3: Department Selection
         .phase("department_selection")
@@ -792,7 +880,14 @@ async fn handle_session(
                     });
                 }
             })
-            .enter_prompt("I have a good understanding of the symptoms. Let me suggest the right department.")
+            .enter_prompt_fn(|s, _| {
+                let suggested: String = s.get("derived:suggested_department").unwrap_or_default();
+                if suggested.is_empty() {
+                    "I have a good understanding of the symptoms. Let me suggest the right department.".into()
+                } else {
+                    format!("Based on the symptoms, {suggested} looks like the right fit. Let me confirm with the patient.")
+                }
+            })
             .done()
         // Phase 4: Doctor Selection
         .phase("doctor_selection")
@@ -815,7 +910,10 @@ async fn handle_session(
                     });
                 }
             })
-            .enter_prompt("The department is selected. Let me show the available doctors.")
+            .enter_prompt_fn(|s, _| {
+                let dept: String = s.get("department").unwrap_or_else(|| "the selected department".into());
+                format!("{dept} is confirmed. Let me show the available doctors.")
+            })
             .done()
         // Phase 5: Appointment Booking
         .phase("appointment_booking")
@@ -836,7 +934,10 @@ async fn handle_session(
                     });
                 }
             })
-            .enter_prompt("A doctor has been selected. I'll now book the appointment.")
+            .enter_prompt_fn(|s, _| {
+                let doctor: String = s.get("doctor_name").unwrap_or_else(|| "the selected doctor".into());
+                format!("{doctor} has been selected. I'll now book the appointment.")
+            })
             .done()
         // Phase 6: Rescheduling
         .phase("rescheduling")
@@ -856,7 +957,12 @@ async fn handle_session(
                     });
                 }
             })
-            .enter_prompt("The patient wants to reschedule or cancel. I'll look up their appointment.")
+            .enter_prompt_fn(|s, _| {
+                let name: String = s.get("patient_name").unwrap_or_else(|| "The patient".into());
+                let intent: String = s.get("intent").unwrap_or_else(|| "reschedule".into());
+                let action = if intent == "cancel" { "cancel" } else { "reschedule" };
+                format!("{name} wants to {action} their appointment. I'll look up the details.")
+            })
             .done()
         // Phase 7: Patient Registration
         .phase("patient_registration")
@@ -880,7 +986,14 @@ async fn handle_session(
                     });
                 }
             })
-            .enter_prompt("This is a new patient. I'll collect their registration information.")
+            .enter_prompt_fn(|s, _| {
+                let name: String = s.get("patient_name").unwrap_or_default();
+                if name.is_empty() {
+                    "This is a new patient. I'll collect their registration information.".into()
+                } else {
+                    format!("{name} is new to Clearview Medical Center. I'll get them registered.")
+                }
+            })
             .done()
         // Phase 8: Confirmation
         .phase("confirmation")
@@ -900,7 +1013,15 @@ async fn handle_session(
                     });
                 }
             })
-            .enter_prompt("The appointment is booked. I'll now confirm all the details with the patient.")
+            .enter_prompt_fn(|s, _| {
+                let doctor: String = s.get("doctor_name").unwrap_or_default();
+                let apt_id: String = s.get("appointment_id").unwrap_or_default();
+                if !doctor.is_empty() && !apt_id.is_empty() {
+                    format!("Appointment {apt_id} with {doctor} is booked. I'll confirm all the details.")
+                } else {
+                    "The appointment is processed. I'll confirm the details with the patient.".into()
+                }
+            })
             .done()
         // Phase 9: Farewell
         .phase("farewell")
@@ -927,11 +1048,17 @@ async fn handle_session(
                 }
             })
             .enter_prompt_fn(|state, _tw| {
+                let name: String = state.get("patient_name").unwrap_or_else(|| "the patient".into());
                 let is_new: bool = state.get("is_new_patient").unwrap_or(false);
-                if is_new {
-                    "Thank the patient for registering. Remind them to arrive 15 minutes early with insurance card.".into()
+                let doctor: String = state.get("doctor_name").unwrap_or_default();
+                if is_new && !doctor.is_empty() {
+                    format!("Thank {name} for registering. Their appointment with {doctor} is confirmed. Remind them to arrive 15 minutes early.")
+                } else if is_new {
+                    format!("Thank {name} for registering. Remind them to arrive 15 minutes early with insurance card.")
+                } else if !doctor.is_empty() {
+                    format!("{name}'s appointment with {doctor} is all set. I'll wrap up and wish them well.")
                 } else {
-                    "I'll wrap up the call and wish the patient well.".into()
+                    format!("I'll wrap up the call with {name} and wish them well.")
                 }
             })
             .done()

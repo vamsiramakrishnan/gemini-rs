@@ -59,56 +59,103 @@ Be professional, warm, but appropriately cautious with unknown callers.";
 // Phase instructions
 // ---------------------------------------------------------------------------
 
+// Phase instructions — lean directives for what to do in each phase.
+// Contextual awareness ("where we are, what we know") is provided by
+// the screening_context() closure via with_context, so the model always
+// has situational bearings without repeating state in the instructions.
+
 const GREETING_INSTRUCTION: &str = "\
-You are a professional call screener for Alex Rivera. \
-Greet the caller warmly and ask who is calling and the purpose of their call. \
-Use the check_contact_list tool if the caller provides their name. \
-Be professional and polite, but do not reveal Alex's availability until you know \
-who is calling and why.";
+Greet the caller warmly. Ask who is calling and the purpose of their call. \
+If a name is provided, use check_contact_list. \
+Do not reveal Alex's availability yet.";
 
 const IDENTIFY_CALLER_INSTRUCTION: &str = "\
 Get the caller's full name and organization. \
-Use the check_contact_list tool to verify if they are a known contact. \
-If the caller refuses to identify themselves after being asked multiple times, \
-offer to take a message instead. \
-Be patient but firm — Alex requires knowing who is calling before taking calls.";
+Use check_contact_list to verify if they are a known contact. \
+Be patient but firm — Alex requires knowing who is calling.";
 
 const DETERMINE_PURPOSE_INSTRUCTION: &str = "\
-Ask the caller why they are calling and assess the urgency of the matter. \
-Use the check_calendar tool to see if Alex has availability. \
-Determine whether this call should be transferred, a message taken, or declined. \
-Ask clarifying questions if the purpose is vague. \
-Rate the urgency based on time-sensitivity and importance.";
+Ask why they are calling and assess urgency. \
+Use check_calendar to see if Alex has availability. \
+Ask clarifying questions if the purpose is vague.";
 
 const SCREEN_DECISION_INSTRUCTION: &str = "\
-Based on the caller's identity and purpose, decide the appropriate action:\n\
-1. If the caller is a known contact or the matter is urgent (urgency > 0.8), transfer the call.\n\
-2. If the caller is unknown but the matter is legitimate, take a message.\n\
-3. If the caller is hostile or the call appears to be spam, politely decline.\n\n\
-Use the transfer_call, take_message, or block_caller tool as appropriate. \
-Be decisive but professional.";
+Decide the appropriate action based on what you know:\n\
+- Known contact or urgent matter → transfer the call\n\
+- Unknown but legitimate → take a message\n\
+- Hostile or spam → politely decline\n\n\
+Use the appropriate tool. Be decisive but professional.";
 
 const TAKE_MESSAGE_INSTRUCTION: &str = "\
-Take a detailed message for Alex. Collect:\n\
-1. The caller's name (confirm spelling)\n\
-2. A callback phone number\n\
-3. The message they want to leave\n\n\
-Use the take_message tool to record the message. \
-Confirm the details back to the caller before saving. \
-Let them know Alex will receive the message and an estimated callback time.";
+Collect the caller's name, callback number, and message. \
+Confirm details back before saving. \
+Let them know Alex will receive the message.";
 
 const TRANSFER_INSTRUCTION: &str = "\
-Inform the caller that you are transferring them to Alex now. \
-Use the transfer_call tool to initiate the transfer. \
-Let the caller know the transfer is in progress and to hold briefly. \
-Be warm and reassuring.";
+Inform the caller you are transferring them to Alex. \
+Use transfer_call. Let them know to hold briefly.";
 
 const FAREWELL_INSTRUCTION: &str = "\
-Thank the caller for calling. \
-If a message was taken, confirm it will be delivered. \
-If the call was transferred, wish them a good conversation. \
-If the call was declined, be polite but firm. \
+Thank the caller. Confirm any actions taken \
+(message delivered, call transferred, or call declined). \
 Say goodbye professionally.";
+
+/// Builds a conversational context summary from accumulated state.
+/// This is the "geolocation" — the model always knows where it is,
+/// what it's gathered so far, and what's still needed.
+fn screening_context(s: &State) -> String {
+    let mut ctx = Vec::new();
+
+    // Who is calling?
+    let name: Option<String> = s.get("caller_name");
+    let org: Option<String> = s.get("caller_organization");
+    let known: bool = s.get("is_known_contact").unwrap_or(false);
+
+    match (&name, &org) {
+        (Some(n), Some(o)) => {
+            let tag = if known { "known contact" } else { "not in contacts" };
+            ctx.push(format!("Caller: {n} from {o} ({tag})."));
+        }
+        (Some(n), None) => {
+            let tag = if known { "known contact" } else { "not in contacts" };
+            ctx.push(format!("Caller: {n} ({tag}). Organization unknown."));
+        }
+        _ => {}
+    }
+
+    // Sentiment
+    let sentiment: String = s.get("caller_sentiment").unwrap_or_default();
+    if !sentiment.is_empty() && sentiment != "neutral" {
+        ctx.push(format!("Caller seems {sentiment}."));
+    }
+
+    // Purpose & urgency
+    if let Some(purpose) = s.get::<String>("call_purpose") {
+        ctx.push(format!("Purpose: {purpose}."));
+    }
+    let urgency: f64 = s.get("urgency_level").unwrap_or(0.0);
+    if urgency > 0.0 {
+        let label = if urgency > 0.7 { "high" } else if urgency > 0.4 { "moderate" } else { "low" };
+        ctx.push(format!("Urgency: {label} ({urgency:.1})."));
+    }
+
+    // Actions taken
+    if s.get::<bool>("message_taken").unwrap_or(false) {
+        ctx.push("A message has been recorded.".into());
+    }
+    if s.get::<bool>("call_transferred").unwrap_or(false) {
+        ctx.push("Call transferred to Alex.".into());
+    }
+    if s.get::<bool>("caller_blocked").unwrap_or(false) {
+        ctx.push("Caller has been blocked.".into());
+    }
+
+    if ctx.is_empty() {
+        String::new()
+    } else {
+        ctx.join(" ")
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Per-phase state keys for instruction modifiers
@@ -393,9 +440,10 @@ async fn handle_session(
         .add_tool(call_screening_tools())
         .system_instruction(SYSTEM_INSTRUCTION);
 
-    // 2. Create GeminiLlm for LLM extraction
+    // 2. Create GeminiLlm for LLM extraction (background agent uses flash-lite at global)
     let llm: Arc<dyn BaseLlm> = Arc::new(GeminiLlm::new(GeminiLlmParams {
-        model: Some("gemini-2.5-flash".to_string()),
+        model: Some("gemini-2.5-flash-lite".to_string()),
+        location: Some("global".to_string()),
         ..Default::default()
     }));
 
@@ -560,12 +608,8 @@ async fn handle_session(
         })
         // --- Phase defaults (inherited by all phases) ---
         .phase_defaults(|d| {
-            d.with_state(SCREEN_STATE_KEYS)
+            d.with_context(screening_context)
                 .when(caller_is_hostile, CAUTION_WARNING)
-            // NOTE: prompt_on_enter(true) removed from defaults.
-            // It inflates turn_count (each prompt generates a TurnComplete),
-            // breaking turn-count-based transition guards. Instead, set it
-            // explicitly on phases that need it (e.g. greeting, transfer).
         })
         // --- 7 Phases ---
         // Phase 1: Greeting
@@ -632,8 +676,7 @@ async fn handle_session(
             .instruction(DETERMINE_PURPOSE_INSTRUCTION)
             .tools(vec!["check_calendar".into()])
             .transition("screen_decision", |s: &State| {
-                let purpose: Option<String> = s.get("call_purpose");
-                purpose.is_some()
+                s.get::<String>("call_purpose").is_some()
             })
             .on_enter(move |_state: State, _writer: Arc<dyn SessionWriter>| {
                 let tx = tx_enter_purpose.clone();
@@ -649,7 +692,10 @@ async fn handle_session(
                     });
                 }
             })
-            .enter_prompt("I've identified the caller. Now I'll determine why they are calling.")
+            .enter_prompt_fn(|s, _| {
+                let name: String = s.get("caller_name").unwrap_or_default();
+                format!("I've confirmed the caller is {name}. Now ask them why they're calling.")
+            })
             .done()
         // Phase 4: Screen Decision
         .phase("screen_decision")
@@ -660,15 +706,13 @@ async fn handle_session(
                 "block_caller".into(),
             ])
             .transition("transfer", |s: &State| {
-                let known: bool = s.get("is_known_contact").unwrap_or(false);
-                let urgency: f64 = s.get("urgency_level").unwrap_or(0.0);
-                known || urgency > 0.8
+                s.get::<bool>("is_known_contact").unwrap_or(false)
+                    || s.get::<f64>("urgency_level").unwrap_or(0.0) > 0.8
             })
             .transition("farewell", S::is_true("caller_blocked"))
             .transition("take_message", |s: &State| {
-                let known: bool = s.get("is_known_contact").unwrap_or(false);
-                let urgency: f64 = s.get("urgency_level").unwrap_or(0.0);
-                !known && urgency <= 0.8
+                !s.get::<bool>("is_known_contact").unwrap_or(false)
+                    && s.get::<f64>("urgency_level").unwrap_or(0.0) <= 0.8
             })
             .on_enter(move |_state: State, _writer: Arc<dyn SessionWriter>| {
                 let tx = tx_enter_decision.clone();
@@ -684,7 +728,11 @@ async fn handle_session(
                     });
                 }
             })
-            .enter_prompt("I know who is calling and why. I'll now decide the best course of action.")
+            .enter_prompt_fn(|s, _| {
+                let name: String = s.get("caller_name").unwrap_or_default();
+                let purpose: String = s.get("call_purpose").unwrap_or_default();
+                format!("{name} is calling about: {purpose}. Decide the best course of action.")
+            })
             .done()
         // Phase 5: Take Message
         .phase("take_message")
@@ -705,7 +753,10 @@ async fn handle_session(
                     });
                 }
             })
-            .enter_prompt("I understand Alex is unavailable right now. Ask the caller if they would like to leave a message, and if so, collect their name, callback number, and the message.")
+            .enter_prompt_fn(|s, _| {
+                let name: String = s.get("caller_name").unwrap_or_else(|| "the caller".into());
+                format!("Let {name} know Alex is unavailable. Ask if they'd like to leave a message.")
+            })
             .done()
         // Phase 6: Transfer
         .phase("transfer")

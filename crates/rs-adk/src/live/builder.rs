@@ -167,6 +167,15 @@ impl LiveSessionBuilder {
         let event_rx = session.subscribe();
         let telem_rx = session.subscribe();
 
+        // Store initial phase's `needs` metadata for ContextBuilder.
+        if let Some(ref pm) = self.phase_machine {
+            if let Some(phase) = pm.current_phase() {
+                if !phase.needs.is_empty() {
+                    state.set("session:phase_needs", phase.needs.clone());
+                }
+            }
+        }
+
         let phase_machine_mutex = self.phase_machine.map(tokio::sync::Mutex::new);
         let temporal_arc = self.temporal.map(Arc::new);
         let background_tracker = Arc::new(BackgroundToolTracker::new());

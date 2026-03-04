@@ -695,6 +695,15 @@ async fn handle_turn_complete(
                 transition_result = Some(tr);
             }
             state.session().set("phase", machine.current());
+
+            // Store current phase's `needs` for ContextBuilder to read.
+            if let Some(phase) = machine.current_phase() {
+                if phase.needs.is_empty() {
+                    state.remove("session:phase_needs");
+                } else {
+                    state.set("session:phase_needs", phase.needs.clone());
+                }
+            }
         }
     }
 

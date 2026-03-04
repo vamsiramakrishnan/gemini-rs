@@ -33,60 +33,66 @@ const SPECIAL_OCCASION: StateKey<String> = StateKey::new("special_occasion");
 const RESERVATION_ID: StateKey<String> = StateKey::new("reservation_id");
 const INTENT: StateKey<String> = StateKey::new("intent");
 
+// Silence unused-constant warnings — these exist as documentation and for
+// future typed-state access via `state.get_key(&KEY)`.
+const _: () = {
+    _ = GUEST_NAME;
+    _ = PARTY_SIZE;
+    _ = PREFERRED_DATE;
+    _ = PREFERRED_TIME;
+    _ = PHONE;
+    _ = DIETARY_NEEDS;
+    _ = SPECIAL_OCCASION;
+    _ = RESERVATION_ID;
+    _ = INTENT;
+};
+
 // ---------------------------------------------------------------------------
 // Phase instructions
 // ---------------------------------------------------------------------------
 
+// Phase instructions -- lean directives for what to do in each phase.
+// Contextual awareness ("where we are, what we know") is provided by
+// the reservation_context() closure via with_context, so the model always
+// has situational bearings without repeating state in the instructions.
+
 const GREETING_INSTRUCTION: &str = "\
-Welcome to Bella Vista Italian Restaurant! You are the AI receptionist. \
-Warmly greet the caller and ask how you can help them today. \
-Determine their intent: making a new reservation, modifying an existing one, \
-cancelling a reservation, or asking a question about the restaurant. \
-If they want a new reservation, gather the party size and preferred date/time. \
-Be warm, professional, and conversational.";
+Warmly greet the caller and ask how you can help today. \
+Determine their intent: new reservation, modify, cancel, or inquiry. \
+If they want a new reservation, ask for party size and preferred date.";
 
 const CHECK_AVAILABILITY_INSTRUCTION: &str = "\
-The guest wants to make a reservation. Use the check_availability tool to look up \
-available time slots for their requested date, party size, and optionally preferred time. \
-Present the available options clearly. If they ask about the menu or dietary options, \
-use the check_menu tool. Once the guest selects a preferred time, proceed to booking.";
+Use check_availability to look up open time slots. \
+Present available options clearly. If they ask about the menu, use check_menu. \
+Once the guest picks a time, proceed to booking.";
 
 const BOOKING_INSTRUCTION: &str = "\
-You have availability confirmed. Now collect the remaining details to complete the reservation: \
-the guest's name, phone number, and any dietary needs or special occasions. \
-Once you have the name and phone, use the make_reservation tool to finalize the booking. \
-If the guest mentions dietary restrictions or a special occasion (birthday, anniversary, etc.), \
-note those for special handling.";
+Collect the guest's name, phone number, and any dietary needs or special occasions. \
+Once you have name and phone, use make_reservation to finalize. \
+Note any dietary restrictions or special occasions mentioned.";
 
 const MODIFICATION_INSTRUCTION: &str = "\
-The guest wants to modify an existing reservation. Ask for their reservation ID or the name \
-the reservation is under. Use the modify_reservation tool to make changes. \
-If they need to change the date or time, use check_availability first to confirm \
-the new slot is available. Confirm all changes before applying.";
+Ask for their reservation ID or the name it is under. \
+Use modify_reservation to apply changes. If changing date or time, \
+use check_availability first. Confirm all changes before applying.";
 
 const CANCELLATION_INSTRUCTION: &str = "\
-The guest wants to cancel a reservation. Ask for the reservation ID or the name it is under. \
-Confirm the details of the reservation they want to cancel. Use the cancel_reservation tool \
-to process the cancellation. Express understanding and invite them to dine with us another time.";
+Ask for the reservation ID or name. Confirm the reservation details, \
+then use cancel_reservation. Express understanding and invite them back.";
 
 const SPECIAL_REQUESTS_INSTRUCTION: &str = "\
-The guest has dietary restrictions, allergies, or a special occasion to accommodate. \
-Use the add_special_request tool to record their needs. If they ask about menu options, \
-use check_menu to show items matching their dietary requirements. \
+Use add_special_request to record dietary restrictions, allergies, or occasion details. \
+If they ask about menu options, use check_menu to show matching items. \
 Common accommodations: vegetarian, vegan, gluten-free, nut allergy, \
-birthday cake, anniversary flowers, high chair, wheelchair accessible seating.";
+birthday cake, anniversary flowers, high chair, wheelchair accessible.";
 
 const CONFIRMATION_INSTRUCTION: &str = "\
-Summarize the complete reservation details for the guest: \
-date, time, party size, name, phone number, any special requests or dietary needs, \
-and the reservation ID. Ask if everything looks correct. \
+Summarize the reservation details and ask if everything looks correct. \
 If they confirm, thank them and prepare to say goodbye.";
 
 const FAREWELL_INSTRUCTION: &str = "\
-Thank the guest warmly for choosing Bella Vista Italian Restaurant. \
-Mention their reservation ID for reference. Let them know they can call back \
-anytime to modify or if they have questions. Say you look forward to seeing them. \
-Wish them a wonderful day.";
+Thank the guest warmly. Mention their reservation ID if applicable. \
+Let them know they can call back anytime. Wish them a wonderful day.";
 
 const SYSTEM_INSTRUCTION: &str = "\
 You are the AI receptionist for Bella Vista Italian Restaurant. \
@@ -125,6 +131,74 @@ Extract from the restaurant reservation conversation: \
 guest_name, party_size (number), preferred_date, preferred_time, \
 dietary_restrictions (list), special_occasion (birthday/anniversary/business dinner), \
 intent (new_booking/modify/cancel/inquiry), reservation_id.";
+
+// ---------------------------------------------------------------------------
+// Geolocation context — natural-language summary of accumulated state
+// ---------------------------------------------------------------------------
+
+/// Builds a conversational-context summary so the model knows where it is,
+/// what it knows, and what's still needed — without raw key-value dumps.
+fn reservation_context(s: &State) -> String {
+    let mut ctx = Vec::new();
+
+    // Guest identity
+    let name: Option<String> = s.get("guest_name");
+    let phone: Option<String> = s.get("phone");
+    match (&name, &phone) {
+        (Some(n), Some(p)) => ctx.push(format!("Guest: {n} (phone: {p}).")),
+        (Some(n), None) => ctx.push(format!("Guest: {n}. Phone not yet collected.")),
+        _ => {}
+    }
+
+    // Party size
+    if let Some(size) = s.get::<u32>("party_size") {
+        let large = if size >= 9 { " (large party — requires manager confirmation)" } else { "" };
+        ctx.push(format!("Party size: {size}{large}."));
+    }
+
+    // Date and time
+    let date: Option<String> = s.get("preferred_date");
+    let time: Option<String> = s.get("preferred_time");
+    match (&date, &time) {
+        (Some(d), Some(t)) => ctx.push(format!("Requested: {d} at {t}.")),
+        (Some(d), None) => ctx.push(format!("Date: {d}. Time not yet chosen.")),
+        _ => {}
+    }
+
+    // Dietary needs
+    if let Some(dietary) = s.get::<String>("dietary_needs") {
+        ctx.push(format!("Dietary needs: {dietary}."));
+    }
+
+    // Special occasion
+    if let Some(occasion) = s.get::<String>("special_occasion") {
+        ctx.push(format!("Special occasion: {occasion}."));
+    }
+
+    // Reservation ID (booking confirmed, modified, or pending cancellation)
+    if let Some(res_id) = s.get::<String>("reservation_id") {
+        ctx.push(format!("Reservation ID: {res_id}."));
+    }
+
+    // Intent
+    let intent: String = s.get("intent").unwrap_or_default();
+    if !intent.is_empty() {
+        let label = match intent.as_str() {
+            "new_booking" => "new reservation",
+            "modify" => "modify existing reservation",
+            "cancel" => "cancel reservation",
+            "inquiry" => "general inquiry",
+            other => other,
+        };
+        ctx.push(format!("Intent: {label}."));
+    }
+
+    if ctx.is_empty() {
+        String::new()
+    } else {
+        ctx.join(" ")
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Tool declarations
@@ -668,11 +742,12 @@ async fn handle_session(
             }
         })
         // --- Phase defaults (inherited by all phases) ---
-        .phase_defaults(|d| d.prompt_on_enter(true))
+        .phase_defaults(|d| d.with_context(reservation_context))
         // --- 8 Phases ---
         // Phase 1: Greeting
         .phase("greeting")
             .instruction(GREETING_INSTRUCTION)
+            .prompt_on_enter(true)
             .transition("check_availability", |s| {
                 S::eq("intent", "new_booking")(s)
                     && s.get::<u32>("party_size").is_some()
@@ -710,7 +785,15 @@ async fn handle_session(
                     });
                 }
             })
-            .enter_prompt("The guest wants to make a reservation. I'll check availability for their preferred date and party size.")
+            .enter_prompt_fn(|s, _| {
+                let size: u32 = s.get("party_size").unwrap_or(0);
+                let date: String = s.get("preferred_date").unwrap_or_else(|| "their requested date".into());
+                if size > 0 {
+                    format!("A party of {size} wants to dine on {date}. Check available time slots.")
+                } else {
+                    format!("The guest wants a reservation on {date}. Check availability.")
+                }
+            })
             .done()
         // Phase 3: Booking
         .phase("booking")
@@ -737,7 +820,16 @@ async fn handle_session(
                     });
                 }
             })
-            .enter_prompt("The guest selected a time. I'll now collect their name, phone number, and finalize the reservation.")
+            .enter_prompt_fn(|s, _| {
+                let time: String = s.get("preferred_time").unwrap_or_else(|| "their chosen time".into());
+                let date: String = s.get("preferred_date").unwrap_or_else(|| "the requested date".into());
+                let size: u32 = s.get("party_size").unwrap_or(0);
+                if size > 0 {
+                    format!("Party of {size} selected {time} on {date}. Collect their name and phone to finalize.")
+                } else {
+                    format!("Guest selected {time} on {date}. Collect their name and phone to finalize.")
+                }
+            })
             .done()
         // Phase 4: Modification
         .phase("modification")
@@ -759,7 +851,13 @@ async fn handle_session(
                     });
                 }
             })
-            .enter_prompt("The guest wants to modify an existing reservation. I'll ask for their reservation details.")
+            .enter_prompt_fn(|s, _| {
+                if let Some(res_id) = s.get::<String>("reservation_id") {
+                    format!("The guest wants to modify reservation {res_id}. Ask what they'd like to change.")
+                } else {
+                    "The guest wants to modify a reservation. Ask for the reservation ID or name.".into()
+                }
+            })
             .done()
         // Phase 5: Cancellation
         .phase("cancellation")
@@ -782,14 +880,23 @@ async fn handle_session(
                     });
                 }
             })
-            .enter_prompt("The guest wants to cancel a reservation. I'll confirm which reservation to cancel.")
+            .enter_prompt_fn(|s, _| {
+                if let Some(res_id) = s.get::<String>("reservation_id") {
+                    format!("The guest wants to cancel reservation {res_id}. Confirm the details before proceeding.")
+                } else {
+                    "The guest wants to cancel a reservation. Ask for the reservation ID or name.".into()
+                }
+            })
             .done()
         // Phase 6: Special Requests
         .phase("special_requests")
             .instruction(SPECIAL_REQUESTS_INSTRUCTION)
-            .transition("confirmation", |_s| {
-                // Transition after special requests are handled
-                true
+            .transition("confirmation", |s| {
+                // Proceed once special request has been noted (reservation_id exists)
+                // plus a safety-net turn-count fallback
+                let has_res = s.get::<String>("reservation_id").is_some();
+                let tc: u32 = s.session().get("turn_count").unwrap_or(0);
+                has_res || tc >= 12
             })
             .on_enter(move |_state, _writer| {
                 let tx = tx_enter_special.clone();
@@ -805,14 +912,31 @@ async fn handle_session(
                     });
                 }
             })
-            .enter_prompt("The guest mentioned dietary needs or a special occasion. I'll make sure we accommodate them.")
+            .enter_prompt_fn(|s, _| {
+                let mut parts = Vec::new();
+                if let Some(dietary) = s.get::<String>("dietary_needs") {
+                    parts.push(format!("dietary needs ({dietary})"));
+                }
+                if let Some(occasion) = s.get::<String>("special_occasion") {
+                    parts.push(format!("a {occasion}"));
+                }
+                let res_id: String = s.get("reservation_id").unwrap_or_else(|| "their reservation".into());
+                if parts.is_empty() {
+                    format!("Record any special requests for reservation {res_id}.")
+                } else {
+                    format!("The guest mentioned {}. Record these for reservation {res_id}.", parts.join(" and "))
+                }
+            })
             .done()
         // Phase 7: Confirmation
         .phase("confirmation")
             .instruction(CONFIRMATION_INSTRUCTION)
-            .transition("farewell", |_s| {
-                // Auto-transition to farewell after confirmation summary
-                true
+            .transition("farewell", |s| {
+                // Primary: reservation_id exists (the booking is confirmed).
+                // Safety-net: cumulative turn_count >= 12 to avoid stuck sessions.
+                let has_res = s.get::<String>("reservation_id").is_some();
+                let tc: u32 = s.session().get("turn_count").unwrap_or(0);
+                has_res || tc >= 12
             })
             .on_enter(move |_state, _writer| {
                 let tx = tx_enter_confirmation.clone();
@@ -828,7 +952,11 @@ async fn handle_session(
                     });
                 }
             })
-            .enter_prompt("I'll now summarize the complete reservation details for the guest to confirm.")
+            .enter_prompt_fn(|s, _| {
+                let name: String = s.get("guest_name").unwrap_or_else(|| "the guest".into());
+                let res_id: String = s.get("reservation_id").unwrap_or_else(|| "pending".into());
+                format!("Summarize the reservation for {name} (ID: {res_id}) and ask them to confirm.")
+            })
             .done()
         // Phase 8: Farewell
         .phase("farewell")

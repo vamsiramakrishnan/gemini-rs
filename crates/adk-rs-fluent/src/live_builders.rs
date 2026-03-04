@@ -81,6 +81,27 @@ impl PhaseDefaults {
         self
     }
 
+    /// Append a declarative [`ContextBuilder`] to every phase's instruction.
+    ///
+    /// The builder renders accumulated state as a natural-language summary,
+    /// giving the model situational awareness across all phases.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// .phase_defaults(|d| d.context(
+    ///     Ctx::builder()
+    ///         .section("Caller")
+    ///         .field("caller_name", "Name")
+    ///         .flag("is_known_contact", "Known contact")
+    ///         .build()
+    /// ))
+    /// ```
+    pub fn context(mut self, ctx: rs_adk::live::context_builder::ContextBuilder) -> Self {
+        self.modifiers.push(ctx.into_modifier());
+        self
+    }
+
     /// Enable `prompt_on_enter` for all phases (model responds immediately on entry).
     pub fn prompt_on_enter(mut self, enabled: bool) -> Self {
         self.prompt_on_enter = enabled;
@@ -108,6 +129,7 @@ pub struct PhaseBuilder {
     on_enter_context_fn: Option<Arc<
         dyn Fn(&State, &TranscriptWindow) -> Option<Vec<Content>> + Send + Sync
     >>,
+    needs: Vec<String>,
 }
 
 impl PhaseBuilder {
@@ -125,7 +147,29 @@ impl PhaseBuilder {
             modifiers: Vec::new(),
             prompt_on_enter_flag: false,
             on_enter_context_fn: None,
+            needs: Vec::new(),
         }
+    }
+
+    /// Declare what state keys this phase is responsible for gathering.
+    ///
+    /// Purely informational — does not enforce transitions or block progress.
+    /// The [`ContextBuilder`](rs_adk::live::context_builder::ContextBuilder)
+    /// reads these to append a "[Gathering] key1, key2" line to the instruction,
+    /// so the model knows what to focus on in the current phase.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// .phase("identify_caller")
+    ///     .instruction("Get the caller's name and organization.")
+    ///     .needs(&["caller_name", "caller_organization"])
+    ///     .transition("determine_purpose", S::is_set("caller_name"))
+    ///     .done()
+    /// ```
+    pub fn needs(mut self, keys: &[&str]) -> Self {
+        self.needs = keys.iter().map(|k| k.to_string()).collect();
+        self
     }
 
     /// Set a static instruction for this phase.
@@ -228,6 +272,12 @@ impl PhaseBuilder {
         self
     }
 
+    /// Append a declarative [`ContextBuilder`] to this phase's instruction.
+    pub fn context(mut self, ctx: rs_adk::live::context_builder::ContextBuilder) -> Self {
+        self.modifiers.push(ctx.into_modifier());
+        self
+    }
+
     /// Send `turnComplete: true` after instruction + context on phase entry,
     /// causing the model to generate a response immediately.
     pub fn prompt_on_enter(mut self, enabled: bool) -> Self {
@@ -326,6 +376,7 @@ impl PhaseBuilder {
             modifiers: merged_modifiers,
             prompt_on_enter: prompt,
             on_enter_context: self.on_enter_context_fn,
+            needs: self.needs,
         };
         self.live.add_phase(phase);
         self.live

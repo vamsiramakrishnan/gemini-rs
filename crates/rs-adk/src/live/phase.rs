@@ -164,6 +164,13 @@ pub struct Phase {
         dyn Fn(&State, &TranscriptWindow) -> Option<Vec<rs_genai::prelude::Content>>
             + Send + Sync
     >>,
+    /// State keys this phase is responsible for gathering.
+    ///
+    /// Purely informational — does not affect transitions or enforcement.
+    /// The [`ContextBuilder`](super::context_builder::ContextBuilder) reads
+    /// these from `session:phase_needs` to append a "[Gathering] key1, key2"
+    /// line to the instruction, so the model knows what to focus on.
+    pub needs: Vec<String>,
 }
 
 /// Record of a single phase transition for history/debugging.
@@ -408,6 +415,7 @@ mod tests {
             modifiers: Vec::new(),
             prompt_on_enter: false,
             on_enter_context: None,
+            needs: Vec::new(),
         }
     }
 
@@ -425,6 +433,7 @@ mod tests {
             modifiers: Vec::new(),
             prompt_on_enter: false,
             on_enter_context: None,
+            needs: Vec::new(),
         }
     }
 
@@ -772,6 +781,7 @@ mod tests {
             modifiers: Vec::new(),
             prompt_on_enter: false,
             on_enter_context: None,
+            needs: Vec::new(),
         };
 
         let mut machine = PhaseMachine::new("start");

@@ -46,80 +46,56 @@ const _: () = {
 };
 
 // ---------------------------------------------------------------------------
-// Phase instructions
+// Phase instructions -- lean directives for what to do in each phase.
+// Contextual awareness ("where we are, what we know") is provided by
+// the collection_context() closure via with_context, so the model always
+// has situational bearings without repeating state in the instructions.
 // ---------------------------------------------------------------------------
 
 const DISCLOSURE_INSTRUCTION: &str = "\
-You are a professional debt collection agent. You MUST begin by delivering the Mini-Miranda disclosure exactly as follows:\n\n\
+You are a professional debt collection agent. Deliver the Mini-Miranda disclosure exactly:\n\n\
 \"This is an attempt to collect a debt. Any information obtained will be used for that purpose. \
 This call may be monitored or recorded for quality assurance.\"\n\n\
-After delivering this disclosure, ask the customer to confirm they understand. \
-Once they confirm, let them know you will need to verify their identity before discussing any account details. \
-Be professional and courteous at all times. Do NOT discuss any debt details until the disclosure is acknowledged.";
+Ask the customer to confirm they understand. \
+Do NOT discuss any debt details until the disclosure is acknowledged.";
 
 const VERIFY_IDENTITY_INSTRUCTION: &str = "\
-You need to verify the customer's identity before discussing any account details. \
-Ask for their full name, date of birth, and the last four digits of their Social Security Number. \
-Use the verify_identity tool to confirm their identity. \
-Once you verify inform them that you will get their details to share the exact details of their debt. \
-Be patient and professional. If they are reluctant, explain that this is required for their protection. \
-Do NOT reveal any account information until identity is verified.";
+Verify the customer's identity before discussing account details. \
+Ask for full name, date of birth, and last four digits of SSN. \
+Use verify_identity to confirm. Be patient; explain it's for their protection.";
 
 const INFORM_DEBT_INSTRUCTION: &str = "\
-The customer's identity is verified. Now inform them about the debt:\n\
-1. Use the lookup_account tool to retrieve account details.\n\
-2. State the creditor name, total balance owed, and days past due.\n\
-3. Inform them of their right to dispute the debt within 30 days.\n\
-4. If they acknowledge the debt, explore resolution options.\n\
-5. If they dispute the debt, inform them that a validation notice will be sent and you cannot continue collection.\n\n\
-Be empathetic but clear about the obligation. Never threaten or use abusive language.";
+Use lookup_account to retrieve account details. \
+State creditor, balance, and days past due. \
+Inform them of their right to dispute within 30 days. \
+If they dispute, a validation notice will be sent and collection stops.";
 
 const NEGOTIATE_INSTRUCTION: &str = "\
-The customer has acknowledged the debt. Now work toward a resolution:\n\
-1. Ask about their current financial situation.\n\
-2. Use the calculate_payment_plan tool to generate options.\n\
-3. Present 2-3 payment plan options (e.g., full payment with discount, 3-month plan, 6-month plan).\n\
-4. Be flexible and empathetic. The goal is a mutually agreeable arrangement.\n\
-5. Never pressure, threaten, or use deceptive tactics.\n\n\
-If the customer agrees to a plan, confirm the details before proceeding.";
+Work toward a mutually agreeable resolution. \
+Ask about their financial situation. Use calculate_payment_plan to generate options. \
+Present 2-3 plans (full with discount, 3-month, 6-month). \
+Never pressure or threaten. Confirm details before proceeding.";
 
 const ARRANGE_PAYMENT_INSTRUCTION: &str = "\
-The customer has agreed to a payment plan. Now collect payment details:\n\
-1. Ask for their preferred payment method (bank transfer, credit card, check).\n\
-2. Use the process_payment tool to process the first payment or set up the plan.\n\
-3. Confirm the payment was processed successfully.\n\
-4. Provide the confirmation number.\n\n\
-Handle payment information securely. Never read back full card numbers.";
+Collect payment details: preferred method (bank transfer, credit card, check). \
+Use process_payment to process the first payment or set up the plan. \
+Confirm success and provide the confirmation number. \
+Never read back full card numbers.";
 
 const CONFIRM_INSTRUCTION: &str = "\
-Payment has been processed. Now summarize the agreement:\n\
-1. Confirm the total amount, payment schedule, and first payment.\n\
-2. Inform them a written confirmation will be mailed.\n\
-3. Confirm or ask for their mailing address for the written agreement.\n\
-4. Provide a reference number for future inquiries.\n\n\
-Be warm and reassuring. Thank them for working with you to resolve this.";
+Summarize the agreement: total amount, payment schedule, first payment. \
+Inform them a written confirmation will be mailed. \
+Confirm or ask for mailing address. Provide a reference number.";
 
 const CLOSE_INSTRUCTION: &str = "\
-The call is concluding. Wrap up professionally:\n\
-1. Thank the customer for their time.\n\
-2. Remind them of next steps (first payment date, written confirmation in mail).\n\
-3. Provide a contact number for any future questions.\n\
-4. Wish them well.\n\n\
-If the call ended due to cease-and-desist, acknowledge their request, confirm that \
-all collection activity will stop, and inform them of any remaining legal obligations. \
-If the debt is disputed, confirm that a validation notice will be sent within 5 business days.";
+Wrap up professionally. Thank the customer. \
+Remind them of next steps and provide a contact number. \
+If cease-and-desist: confirm all collection stops, note remaining legal obligations. \
+If disputed: confirm validation notice within 5 business days.";
 
 // ---------------------------------------------------------------------------
 // Per-phase instruction modifiers
 // ---------------------------------------------------------------------------
-
-const DEBT_STATE_KEYS: &[&str] = &[
-    "emotional_state",
-    "willingness_to_pay",
-    "derived:call_risk_level",
-    "identity_verified",
-    "disclosure_given",
-];
 
 const RISK_WARNING: &str = "\
 IMPORTANT: The caller is showing signs of distress. Use extra empathy. \
@@ -131,6 +107,101 @@ fn risk_is_elevated(s: &State) -> bool {
         .get("derived:call_risk_level")
         .unwrap_or_else(|| "low".to_string());
     risk == "high" || risk == "critical"
+}
+
+/// Builds a conversational context summary from accumulated state.
+/// This is the "geolocation" -- the model always knows where it is,
+/// what it has gathered so far, and what is still needed.
+fn collection_context(s: &State) -> String {
+    let mut ctx = Vec::new();
+
+    // Debtor info
+    let name: Option<String> = s.get("debtor_name");
+    let verified: bool = s.get("identity_verified").unwrap_or(false);
+    if let Some(n) = &name {
+        let tag = if verified { "identity verified" } else { "identity NOT verified" };
+        ctx.push(format!("Debtor: {n} ({tag})."));
+    } else if verified {
+        ctx.push("Identity verified but debtor name not yet recorded.".into());
+    }
+
+    // Debt details
+    let creditor: Option<String> = s.get("creditor");
+    let balance: Option<f64> = s.get("balance");
+    let account: Option<String> = s.get("account_id");
+    let days_past_due: Option<u32> = s.get("days_past_due");
+    if let Some(bal) = balance {
+        let mut debt_line = format!("Balance: ${bal:.2}");
+        if let Some(c) = &creditor {
+            debt_line.push_str(&format!(", creditor: {c}"));
+        }
+        if let Some(dpd) = days_past_due {
+            debt_line.push_str(&format!(", {dpd} days past due"));
+        }
+        if let Some(a) = &account {
+            debt_line.push_str(&format!(", account: {a}"));
+        }
+        debt_line.push('.');
+        ctx.push(debt_line);
+    }
+
+    // Compliance state
+    let disclosure: bool = s.get("disclosure_given").unwrap_or(false);
+    let cease: bool = s.get("cease_desist_requested").unwrap_or(false);
+    if !disclosure {
+        ctx.push("Mini-Miranda disclosure NOT yet acknowledged.".into());
+    } else {
+        ctx.push("Disclosure acknowledged.".into());
+    }
+    if cease {
+        ctx.push("CEASE-AND-DESIST requested -- must stop collection.".into());
+    }
+
+    // Negotiation progress
+    let acknowledged: bool = s.get("debt_acknowledged").unwrap_or(false);
+    let intent: Option<String> = s.get("negotiation_intent");
+    let payment_processed: bool = s.get("payment_processed").unwrap_or(false);
+    if acknowledged {
+        ctx.push("Debt acknowledged.".into());
+    }
+    if let Some(i) = &intent {
+        let label = match i.as_str() {
+            "full_pay" => "willing to pay in full",
+            "partial_pay" => "willing to pay partially",
+            "dispute" => "disputing the debt",
+            "refuse" => "refusing to pay",
+            "delay" => "requesting delay",
+            _ => i.as_str(),
+        };
+        ctx.push(format!("Intent: {label}."));
+    }
+    if let Some(amt) = s.get::<String>("dollar_amount") {
+        ctx.push(format!("Amount mentioned: {amt}."));
+    }
+    if payment_processed {
+        ctx.push("Payment processed.".into());
+    }
+
+    // Emotional state & risk
+    let emotion: String = s.get("emotional_state").unwrap_or_default();
+    if !emotion.is_empty() {
+        ctx.push(format!("Debtor seems {emotion}."));
+    }
+    let risk: String = s.get("derived:call_risk_level").unwrap_or_default();
+    if !risk.is_empty() && risk != "low" {
+        ctx.push(format!("Risk level: {risk}."));
+    }
+    let willingness: Option<f64> = s.get("willingness_to_pay");
+    if let Some(w) = willingness {
+        let label = if w >= 0.7 { "high" } else if w >= 0.4 { "moderate" } else { "low" };
+        ctx.push(format!("Willingness to pay: {label} ({w:.1})."));
+    }
+
+    if ctx.is_empty() {
+        String::new()
+    } else {
+        ctx.join(" ")
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -681,14 +752,14 @@ impl CookbookApp for DebtCollection {
             })
             // --- Phase defaults (inherited by all phases) ---
             .phase_defaults(|d| d
-                .with_state(DEBT_STATE_KEYS)
+                .with_context(collection_context)
                 .when(risk_is_elevated, RISK_WARNING)
-                .prompt_on_enter(true)
             )
             // --- 7 Phases ---
             // Phase 1: Disclosure (Mini-Miranda)
             .phase("disclosure")
                 .instruction(DISCLOSURE_INSTRUCTION)
+                .prompt_on_enter(true)
                 .transition("verify_identity", S::is_true("disclosure_given"))
                 .transition("close", S::is_true("cease_desist_requested"))
                 .on_enter(move |_state, _writer| {
@@ -740,7 +811,10 @@ impl CookbookApp for DebtCollection {
                         });
                     }
                 })
-                .enter_prompt("The caller confirmed the disclosure. I'll now verify their identity.")
+                .enter_prompt_fn(|s, _| {
+                    let name: String = s.get("debtor_name").unwrap_or_else(|| "the caller".into());
+                    format!("{name} confirmed the disclosure. I'll now verify their identity.")
+                })
                 .done()
             // Phase 3: Inform Debt
             .phase("inform_debt")
@@ -764,7 +838,10 @@ impl CookbookApp for DebtCollection {
                         });
                     }
                 })
-                .enter_prompt("The caller's identity is verified. I'll now inform them about the debt.")
+                .enter_prompt_fn(|s, _| {
+                    let name: String = s.get("debtor_name").unwrap_or_else(|| "the caller".into());
+                    format!("{name}'s identity is verified. I'll now inform them about the debt.")
+                })
                 .done()
             // Phase 4: Negotiate
             .phase("negotiate")
@@ -788,7 +865,13 @@ impl CookbookApp for DebtCollection {
                         });
                     }
                 })
-                .enter_prompt("The caller acknowledges the debt. I'll now discuss resolution options.")
+                .enter_prompt_fn(|s, _| {
+                    let name: String = s.get("debtor_name").unwrap_or_else(|| "the caller".into());
+                    let balance: String = s.get::<f64>("balance")
+                        .map(|b| format!("${b:.2}"))
+                        .unwrap_or_else(|| "the outstanding balance".into());
+                    format!("{name} acknowledges the {balance} debt. I'll discuss resolution options.")
+                })
                 .done()
             // Phase 5: Arrange Payment
             .phase("arrange_payment")
@@ -810,7 +893,11 @@ impl CookbookApp for DebtCollection {
                         });
                     }
                 })
-                .enter_prompt("We've agreed on a payment arrangement. I'll now collect the payment details.")
+                .enter_prompt_fn(|s, _| {
+                    let intent: String = s.get("negotiation_intent").unwrap_or_default();
+                    let label = if intent == "full_pay" { "full payment" } else { "a payment plan" };
+                    format!("We've agreed on {label}. I'll now collect the payment details.")
+                })
                 .done()
             // Phase 6: Confirm
             .phase("confirm")
@@ -835,7 +922,10 @@ impl CookbookApp for DebtCollection {
                         });
                     }
                 })
-                .enter_prompt("Payment is processed. I'll now confirm the agreement details.")
+                .enter_prompt_fn(|s, _| {
+                    let name: String = s.get("debtor_name").unwrap_or_else(|| "the caller".into());
+                    format!("Payment is processed for {name}. I'll now confirm the agreement details.")
+                })
                 .done()
             // Phase 7: Close
             .phase("close")

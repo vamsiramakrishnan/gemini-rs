@@ -11,6 +11,7 @@ pub mod background_tool;
 pub mod builder;
 pub mod callbacks;
 pub mod computed;
+pub mod context_builder;
 pub mod extractor;
 pub mod handle;
 pub mod phase;
@@ -26,6 +27,7 @@ pub use background_tool::{BackgroundToolTracker, DefaultResultFormatter, ResultF
 pub use builder::LiveSessionBuilder;
 pub use callbacks::{CallbackMode, EventCallbacks};
 pub use computed::{ComputedRegistry, ComputedVar};
+pub use context_builder::ContextBuilder;
 pub use extractor::{LlmExtractor, TurnExtractor};
 pub use handle::LiveHandle;
 pub use phase::{InstructionModifier, Phase, PhaseInstruction, PhaseMachine, PhaseTransition, Transition, TransitionResult, TransitionTrigger};
