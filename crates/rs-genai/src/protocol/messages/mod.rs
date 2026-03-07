@@ -299,12 +299,7 @@ mod tests {
         let msg = ServerMessage::parse(json).unwrap();
         match msg {
             ServerMessage::ServerContent(sc) => {
-                let text = sc
-                    .server_content
-                    .input_transcription
-                    .unwrap()
-                    .text
-                    .unwrap();
+                let text = sc.server_content.input_transcription.unwrap().text.unwrap();
                 assert_eq!(text, "Hello world");
             }
             _ => panic!("Expected ServerContent"),

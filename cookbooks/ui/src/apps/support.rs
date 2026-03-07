@@ -21,7 +21,6 @@ use super::{build_session_config, resolve_voice, send_app_meta, wait_for_start};
 // Agent definitions
 // ---------------------------------------------------------------------------
 
-
 struct AgentPhase {
     #[cfg_attr(not(test), allow(dead_code))]
     name: &'static str,
@@ -90,25 +89,32 @@ const TECHNICAL_PHASES: &[AgentPhase] = &[
 // Pre-compiled regex patterns
 // ---------------------------------------------------------------------------
 
-static NAME_PATTERNS: LazyLock<[Regex; 4]> = LazyLock::new(|| [
-    Regex::new(r"(?i)my name is (\w+)").unwrap(),
-    Regex::new(r"(?i)i'?m (\w+)").unwrap(),
-    Regex::new(r"(?i)this is (\w+)").unwrap(),
-    Regex::new(r"(?i)call me (\w+)").unwrap(),
-]);
+static NAME_PATTERNS: LazyLock<[Regex; 4]> = LazyLock::new(|| {
+    [
+        Regex::new(r"(?i)my name is (\w+)").unwrap(),
+        Regex::new(r"(?i)i'?m (\w+)").unwrap(),
+        Regex::new(r"(?i)this is (\w+)").unwrap(),
+        Regex::new(r"(?i)call me (\w+)").unwrap(),
+    ]
+});
 
 // ---------------------------------------------------------------------------
 // State extraction
 // ---------------------------------------------------------------------------
 
 /// Extract structured state from conversation text using pattern matching.
-fn extract_state(text: &str, existing: &HashMap<String, serde_json::Value>) -> HashMap<String, serde_json::Value> {
+fn extract_state(
+    text: &str,
+    existing: &HashMap<String, serde_json::Value>,
+) -> HashMap<String, serde_json::Value> {
     let mut extracted = HashMap::new();
     let lower = text.to_lowercase();
 
     // Detect customer name.
     if !existing.contains_key("customer_name") {
-        let skip = ["a", "the", "not", "so", "very", "really", "just", "here", "having"];
+        let skip = [
+            "a", "the", "not", "so", "very", "really", "just", "here", "having",
+        ];
         for pat in &*NAME_PATTERNS {
             if let Some(caps) = pat.captures(text) {
                 if let Some(name) = caps.get(1) {
@@ -125,19 +131,51 @@ fn extract_state(text: &str, existing: &HashMap<String, serde_json::Value>) -> H
     // Detect issue type: billing vs technical.
     if !existing.contains_key("issue_type") {
         let technical_keywords = [
-            "not working", "broken", "crash", "error", "bug", "freeze",
-            "slow", "won't load", "can't connect", "wifi", "bluetooth",
-            "screen", "password reset", "login", "install", "update",
-            "device", "connectivity", "troubleshoot",
+            "not working",
+            "broken",
+            "crash",
+            "error",
+            "bug",
+            "freeze",
+            "slow",
+            "won't load",
+            "can't connect",
+            "wifi",
+            "bluetooth",
+            "screen",
+            "password reset",
+            "login",
+            "install",
+            "update",
+            "device",
+            "connectivity",
+            "troubleshoot",
         ];
         let billing_keywords = [
-            "charge", "refund", "bill", "payment", "invoice", "overcharged",
-            "subscription", "cancel", "plan", "pricing", "credit",
-            "charged twice", "double charge", "unexpected charge",
+            "charge",
+            "refund",
+            "bill",
+            "payment",
+            "invoice",
+            "overcharged",
+            "subscription",
+            "cancel",
+            "plan",
+            "pricing",
+            "credit",
+            "charged twice",
+            "double charge",
+            "unexpected charge",
         ];
 
-        let tech_count = technical_keywords.iter().filter(|kw| lower.contains(*kw)).count();
-        let bill_count = billing_keywords.iter().filter(|kw| lower.contains(*kw)).count();
+        let tech_count = technical_keywords
+            .iter()
+            .filter(|kw| lower.contains(*kw))
+            .count();
+        let bill_count = billing_keywords
+            .iter()
+            .filter(|kw| lower.contains(*kw))
+            .count();
 
         if tech_count > 0 || bill_count > 0 {
             if tech_count > bill_count {
@@ -151,8 +189,15 @@ fn extract_state(text: &str, existing: &HashMap<String, serde_json::Value>) -> H
     // Detect billing detail.
     if !existing.contains_key("billing_detail") {
         let billing_detail_keywords = [
-            "refund", "charge", "amount", "dollars", "payment", "credit",
-            "invoice", "receipt", "transaction",
+            "refund",
+            "charge",
+            "amount",
+            "dollars",
+            "payment",
+            "credit",
+            "invoice",
+            "receipt",
+            "transaction",
         ];
         for kw in &billing_detail_keywords {
             if lower.contains(kw) {
@@ -165,8 +210,17 @@ fn extract_state(text: &str, existing: &HashMap<String, serde_json::Value>) -> H
     // Detect resolution confirmed.
     if !existing.contains_key("resolution_confirmed") {
         let confirm_keywords = [
-            "yes", "okay", "ok", "sure", "sounds good", "i agree",
-            "that works", "perfect", "go ahead", "confirmed", "alright",
+            "yes",
+            "okay",
+            "ok",
+            "sure",
+            "sounds good",
+            "i agree",
+            "that works",
+            "perfect",
+            "go ahead",
+            "confirmed",
+            "alright",
         ];
         for kw in &confirm_keywords {
             if lower.contains(kw) {
@@ -179,8 +233,16 @@ fn extract_state(text: &str, existing: &HashMap<String, serde_json::Value>) -> H
     // Detect technical issue description.
     if !existing.contains_key("tech_issue_desc") {
         let tech_issue_keywords = [
-            "not working", "broken", "crash", "error", "bug", "freeze",
-            "slow", "won't load", "can't connect", "problem",
+            "not working",
+            "broken",
+            "crash",
+            "error",
+            "bug",
+            "freeze",
+            "slow",
+            "won't load",
+            "can't connect",
+            "problem",
         ];
         for kw in &tech_issue_keywords {
             if lower.contains(kw) {
@@ -194,19 +256,33 @@ fn extract_state(text: &str, existing: &HashMap<String, serde_json::Value>) -> H
     if !existing.contains_key("tech_category") {
         if lower.contains("wifi") || lower.contains("internet") || lower.contains("connect") {
             extracted.insert("tech_category".into(), json!("connectivity"));
-        } else if lower.contains("screen") || lower.contains("device") || lower.contains("hardware") {
+        } else if lower.contains("screen") || lower.contains("device") || lower.contains("hardware")
+        {
             extracted.insert("tech_category".into(), json!("device"));
         } else if lower.contains("install") || lower.contains("update") || lower.contains("app") {
             extracted.insert("tech_category".into(), json!("software"));
-        } else if lower.contains("login") || lower.contains("password") || lower.contains("account") {
+        } else if lower.contains("login") || lower.contains("password") || lower.contains("account")
+        {
             extracted.insert("tech_category".into(), json!("account-access"));
         }
     }
 
     // Detect troubleshoot result.
     if !existing.contains_key("troubleshoot_result") {
-        let resolved_keywords = ["fixed", "works now", "resolved", "that did it", "working now"];
-        let unresolved_keywords = ["still broken", "didn't work", "same issue", "no luck", "still not"];
+        let resolved_keywords = [
+            "fixed",
+            "works now",
+            "resolved",
+            "that did it",
+            "working now",
+        ];
+        let unresolved_keywords = [
+            "still broken",
+            "didn't work",
+            "same issue",
+            "no luck",
+            "still not",
+        ];
         for kw in &resolved_keywords {
             if lower.contains(kw) {
                 extracted.insert("troubleshoot_result".into(), json!("resolved"));
@@ -227,14 +303,31 @@ fn extract_state(text: &str, existing: &HashMap<String, serde_json::Value>) -> H
     if !existing.contains_key("final_outcome") {
         if lower.contains("escalat") {
             extracted.insert("final_outcome".into(), json!("escalated"));
-        } else if lower.contains("fixed") || lower.contains("resolved") || lower.contains("working") {
+        } else if lower.contains("fixed") || lower.contains("resolved") || lower.contains("working")
+        {
             extracted.insert("final_outcome".into(), json!("resolved"));
         }
     }
 
     // Detect sentiment.
-    let negative = ["angry", "frustrated", "terrible", "awful", "ridiculous", "unacceptable", "furious"];
-    let positive = ["happy", "satisfied", "great", "wonderful", "pleased", "excellent", "thank"];
+    let negative = [
+        "angry",
+        "frustrated",
+        "terrible",
+        "awful",
+        "ridiculous",
+        "unacceptable",
+        "furious",
+    ];
+    let positive = [
+        "happy",
+        "satisfied",
+        "great",
+        "wonderful",
+        "pleased",
+        "excellent",
+        "thank",
+    ];
     for kw in &negative {
         if lower.contains(kw) {
             extracted.insert("sentiment".into(), json!("negative"));
@@ -272,10 +365,16 @@ fn evaluate_phase(
 
     let total_required = phase.required_keys.len();
     if total_required > 0 {
-        let present = phase.required_keys.iter().filter(|k| state.contains_key(**k)).count();
+        let present = phase
+            .required_keys
+            .iter()
+            .filter(|k| state.contains_key(**k))
+            .count();
         let progress = present as f64 / total_required as f64;
         score = 0.3 + (0.7 * progress);
-        notes.push(format!("{present}/{total_required} required keys extracted"));
+        notes.push(format!(
+            "{present}/{total_required} required keys extracted"
+        ));
     }
 
     if turn_count > 6 {
@@ -298,12 +397,12 @@ fn evaluate_phase(
 /// Determine if the conversation indicates a handoff from billing to technical.
 #[cfg(test)]
 fn should_handoff_to_technical(state: &HashMap<String, serde_json::Value>) -> bool {
-    state.get("issue_type")
+    state
+        .get("issue_type")
         .and_then(|v| v.as_str())
         .map(|t| t == "technical")
         .unwrap_or(false)
 }
-
 
 // ---------------------------------------------------------------------------
 // Per-phase context formatter
@@ -389,9 +488,7 @@ impl CookbookApp for SupportAssistant {
             .system_instruction(BILLING_PHASES[0].instruction);
 
         // Create a RegexExtractor wrapping the existing extract_state function.
-        let extractor = Arc::new(RegexExtractor::new("support_state", 10, |text, existing| {
-            extract_state(text, existing)
-        }));
+        let extractor = Arc::new(RegexExtractor::new("support_state", 10, extract_state));
 
         // Build Live session with callbacks, extraction, and phase machine.
         let b64 = base64::engine::general_purpose::STANDARD;
@@ -823,21 +920,19 @@ impl CookbookApp for SupportAssistant {
         let b64 = base64::engine::general_purpose::STANDARD;
         while let Some(msg) = rx.recv().await {
             match msg {
-                ClientMessage::Audio { data } => {
-                    match b64.decode(&data) {
-                        Ok(pcm_bytes) => {
-                            if let Err(e) = handle.send_audio(pcm_bytes).await {
-                                warn!("Failed to send audio: {e}");
-                                let _ = tx.send(ServerMessage::Error {
-                                    message: e.to_string(),
-                                });
-                            }
-                        }
-                        Err(e) => {
-                            warn!("Failed to decode base64 audio: {e}");
+                ClientMessage::Audio { data } => match b64.decode(&data) {
+                    Ok(pcm_bytes) => {
+                        if let Err(e) = handle.send_audio(pcm_bytes).await {
+                            warn!("Failed to send audio: {e}");
+                            let _ = tx.send(ServerMessage::Error {
+                                message: e.to_string(),
+                            });
                         }
                     }
-                }
+                    Err(e) => {
+                        warn!("Failed to decode base64 audio: {e}");
+                    }
+                },
                 ClientMessage::Text { text } => {
                     if let Err(e) = handle.send_text(&text).await {
                         warn!("Failed to send text: {e}");
@@ -862,7 +957,6 @@ impl CookbookApp for SupportAssistant {
 #[cfg(test)]
 mod tests {
     use super::*;
-
 
     #[test]
     fn extract_billing_issue_type() {
@@ -938,7 +1032,10 @@ mod tests {
     fn extract_troubleshoot_unresolved() {
         let state = HashMap::new();
         let result = extract_state("It still broken, same issue persists.", &state);
-        assert_eq!(result.get("troubleshoot_result"), Some(&json!("unresolved")));
+        assert_eq!(
+            result.get("troubleshoot_result"),
+            Some(&json!("unresolved"))
+        );
     }
 
     #[test]

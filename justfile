@@ -14,9 +14,13 @@ setup:
 
 # ─── Quality ─────────────────────────────────────────────────
 
-# Run all quality checks (CI parity)
-check: fmt-check lint doc-check test
-    @echo "All checks passed."
+# Run all quality checks (exact CI parity — run before pushing)
+check: fmt-check lint test
+    @echo ""
+    @echo "✓ All checks passed. Safe to push."
+
+# Pre-commit check (alias for 'check')
+pre-commit: check
 
 # Format all code
 fmt:
@@ -26,23 +30,31 @@ fmt:
 fmt-check:
     cargo fmt --all -- --check
 
-# Run clippy lints
+# Compile check with -D warnings (catches unused imports, dead code, etc.)
+warn-check:
+    RUSTFLAGS="-D warnings" cargo check --workspace --all-targets
+
+# Run clippy lints (includes -D warnings for all targets)
 lint:
-    cargo clippy --workspace -- -D warnings
+    RUSTFLAGS="-D warnings" cargo clippy --workspace --all-targets -- -D warnings
 
 # ─── Testing ─────────────────────────────────────────────────
 
-# Run all workspace tests
+# Run all workspace tests (with warnings as errors, matches CI)
 test:
+    RUSTFLAGS="-D warnings" cargo test --workspace
+
+# Run fast lib-only tests (no doc tests, no -D warnings)
+test-fast:
     cargo test --workspace --lib
 
 # Run tests for a specific crate (e.g. just test-crate rs-genai)
 test-crate crate:
-    cargo test -p {{crate}} --lib
+    RUSTFLAGS="-D warnings" cargo test -p {{crate}}
 
 # Run tests with stdout/stderr visible
 test-verbose:
-    cargo test --workspace --lib -- --nocapture
+    cargo test --workspace -- --nocapture
 
 # ─── Documentation ───────────────────────────────────────────
 
@@ -102,9 +114,10 @@ watch-check:
 
 # ─── CI ──────────────────────────────────────────────────────
 
-# Run the full CI pipeline locally (mirrors GitHub Actions)
+# Run the full CI pipeline locally (exact mirror of GitHub Actions)
 ci: fmt-check lint doc-check test
-    @echo "CI pipeline passed."
+    @echo ""
+    @echo "✓ CI pipeline passed. Matches GitHub Actions exactly."
 
 # ─── Utilities ───────────────────────────────────────────────
 

@@ -237,15 +237,15 @@ impl ServerMessage {
         } else if text.contains("\"toolCall\"") {
             serde_json::from_str::<ToolCallMessage>(text).map(ServerMessage::ToolCall)
         } else if text.contains("\"serverContent\"") {
-            serde_json::from_str::<ServerContentMessage>(text).map(|sc| ServerMessage::ServerContent(Box::new(sc)))
+            serde_json::from_str::<ServerContentMessage>(text)
+                .map(|sc| ServerMessage::ServerContent(Box::new(sc)))
         } else if text.contains("\"goAway\"") {
             serde_json::from_str::<GoAwayMessage>(text).map(ServerMessage::GoAway)
         } else if text.contains("\"sessionResumptionUpdate\"") {
             serde_json::from_str::<SessionResumptionUpdateMessage>(text)
                 .map(ServerMessage::SessionResumptionUpdate)
         } else if text.contains("\"voiceActivity\"") {
-            serde_json::from_str::<VoiceActivityMessage>(text)
-                .map(ServerMessage::VoiceActivity)
+            serde_json::from_str::<VoiceActivityMessage>(text).map(ServerMessage::VoiceActivity)
         } else {
             serde_json::from_str::<serde_json::Value>(text).map(ServerMessage::Unknown)
         }

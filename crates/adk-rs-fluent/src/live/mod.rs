@@ -258,24 +258,24 @@ mod tests {
         let _live = Live::builder()
             .model(GeminiModel::Gemini2_0FlashLive)
             .phase("greeting")
-                .instruction("Welcome the user warmly")
-                .transition("main", |s| s.get::<bool>("greeted").unwrap_or(false))
-                .on_enter(|state, _writer| async move {
-                    state.set("entered_greeting", true);
-                })
-                .done()
+            .instruction("Welcome the user warmly")
+            .transition("main", |s| s.get::<bool>("greeted").unwrap_or(false))
+            .on_enter(|state, _writer| async move {
+                state.set("entered_greeting", true);
+            })
+            .done()
             .phase("main")
-                .dynamic_instruction(|s| {
-                    let topic: String = s.get("topic").unwrap_or_default();
-                    format!("Discuss {topic}")
-                })
-                .tools(vec!["search".into(), "lookup".into()])
-                .transition("farewell", |s| s.get::<bool>("done").unwrap_or(false))
-                .done()
+            .dynamic_instruction(|s| {
+                let topic: String = s.get("topic").unwrap_or_default();
+                format!("Discuss {topic}")
+            })
+            .tools(vec!["search".into(), "lookup".into()])
+            .transition("farewell", |s| s.get::<bool>("done").unwrap_or(false))
+            .done()
             .phase("farewell")
-                .instruction("Say goodbye")
-                .terminal()
-                .done()
+            .instruction("Say goodbye")
+            .terminal()
+            .done()
             .initial_phase("greeting");
     }
 
@@ -284,17 +284,17 @@ mod tests {
         let _live = Live::builder()
             .model(GeminiModel::Gemini2_0FlashLive)
             .phase("start")
-                .instruction("Begin")
-                .transition("secure", |_| true)
-                .done()
+            .instruction("Begin")
+            .transition("secure", |_| true)
+            .done()
             .phase("secure")
-                .instruction("Secure area")
-                .guard(|s| s.get::<bool>("verified").unwrap_or(false))
-                .on_exit(|state, _writer| async move {
-                    state.set("left_secure", true);
-                })
-                .terminal()
-                .done()
+            .instruction("Secure area")
+            .guard(|s| s.get::<bool>("verified").unwrap_or(false))
+            .on_exit(|state, _writer| async move {
+                state.set("left_secure", true);
+            })
+            .terminal()
+            .done()
             .initial_phase("start");
     }
 
@@ -303,21 +303,21 @@ mod tests {
         let _live = Live::builder()
             .model(GeminiModel::Gemini2_0FlashLive)
             .watch("app:score")
-                .crossed_above(0.9)
-                .then(|_old, _new, state| async move {
-                    state.set("high_score_alert", true);
-                })
+            .crossed_above(0.9)
+            .then(|_old, _new, state| async move {
+                state.set("high_score_alert", true);
+            })
             .watch("app:status")
-                .changed_to(serde_json::json!("complete"))
-                .blocking()
-                .then(|_old, _new, _state| async move {
-                    // blocking action
-                })
+            .changed_to(serde_json::json!("complete"))
+            .blocking()
+            .then(|_old, _new, _state| async move {
+                // blocking action
+            })
             .watch("app:flag")
-                .became_true()
-                .then(|_old, _new, _state| async move {
-                    // flag became true
-                });
+            .became_true()
+            .then(|_old, _new, _state| async move {
+                // flag became true
+            });
     }
 
     #[test]
@@ -371,20 +371,20 @@ mod tests {
             })
             // Phases
             .phase("greeting")
-                .instruction("Greet the user")
-                .transition("help", |s| s.get::<bool>("needs_help").unwrap_or(false))
-                .done()
+            .instruction("Greet the user")
+            .transition("help", |s| s.get::<bool>("needs_help").unwrap_or(false))
+            .done()
             .phase("help")
-                .instruction("Help the user")
-                .terminal()
-                .done()
+            .instruction("Help the user")
+            .terminal()
+            .done()
             .initial_phase("greeting")
             // Watchers
             .watch("app:sentiment_score")
-                .crossed_below(0.2)
-                .then(|_old, _new, state| async move {
-                    state.set("alert:low_sentiment", true);
-                })
+            .crossed_below(0.2)
+            .then(|_old, _new, state| async move {
+                state.set("alert:low_sentiment", true);
+            })
             // Temporal
             .when_turns(
                 "repeated_confusion",
@@ -418,10 +418,7 @@ mod tests {
         let _live = Live::builder()
             .model(GeminiModel::Gemini2_0FlashLive)
             .tool_background("search_kb")
-            .tool_background_with_formatter(
-                "analyze_document",
-                Arc::new(DefaultResultFormatter),
-            );
+            .tool_background_with_formatter("analyze_document", Arc::new(DefaultResultFormatter));
     }
 
     #[test]

@@ -73,9 +73,8 @@ pub fn extract_interfaces(source: &str) -> Vec<RawInterface> {
 /// Extract type alias declarations: `export type Foo = ...;`
 pub fn extract_type_aliases(source: &str) -> Vec<(String, String)> {
     let mut results = Vec::new();
-    let type_re = Regex::new(
-        r"(?m)^(?:export\s+)?type\s+(\w+)\s*(?:<[^>]*>)?\s*=\s*([^;]+);"
-    ).unwrap();
+    let type_re =
+        Regex::new(r"(?m)^(?:export\s+)?type\s+(\w+)\s*(?:<[^>]*>)?\s*=\s*([^;]+);").unwrap();
 
     for cap in type_re.captures_iter(source) {
         let name = cap[1].to_string();
@@ -90,9 +89,9 @@ pub fn extract_type_aliases(source: &str) -> Vec<(String, String)> {
 pub fn extract_enums(source: &str) -> Vec<(String, Option<String>, Vec<String>)> {
     let mut results = Vec::new();
 
-    let enum_re = Regex::new(
-        r"(?m)(?:^|\n)\s*(?:export\s+)?(?:declare\s+)?(?:const\s+)?enum\s+(\w+)\s*\{"
-    ).unwrap();
+    let enum_re =
+        Regex::new(r"(?m)(?:^|\n)\s*(?:export\s+)?(?:declare\s+)?(?:const\s+)?enum\s+(\w+)\s*\{")
+            .unwrap();
 
     for cap in enum_re.captures_iter(source) {
         let name = cap[1].to_string();
@@ -128,10 +127,8 @@ pub fn extract_enums(source: &str) -> Vec<(String, Option<String>, Vec<String>)>
 /// Extract `export function name(...)` declarations.
 pub fn extract_helper_functions(source: &str) -> Vec<(String, String)> {
     let mut results = Vec::new();
-    let func_re = Regex::new(
-        r"(?m)^export\s+function\s+(\w+)\s*\(([^)]*)\)\s*:\s*([^\{;]+)",
-    )
-    .unwrap();
+    let func_re =
+        Regex::new(r"(?m)^export\s+function\s+(\w+)\s*\(([^)]*)\)\s*:\s*([^\{;]+)").unwrap();
 
     for cap in func_re.captures_iter(source) {
         let name = cap[1].to_string();
@@ -156,9 +153,7 @@ pub fn parse_fields(body: &str) -> (Vec<FieldDef>, Vec<CallbackDef>) {
     let mut current_jsdoc: Vec<String> = Vec::new();
     let mut in_jsdoc = false;
 
-    let field_re = Regex::new(
-        r"^\s*(?:readonly\s+)?(\w+)(\??):\s*(.+?)\s*;?\s*$"
-    ).unwrap();
+    let field_re = Regex::new(r"^\s*(?:readonly\s+)?(\w+)(\??):\s*(.+?)\s*;?\s*$").unwrap();
 
     for line in &lines {
         let trimmed = line.trim();
@@ -177,7 +172,10 @@ pub fn parse_fields(body: &str) -> (Vec<FieldDef>, Vec<CallbackDef>) {
             if trimmed.ends_with("*/") {
                 in_jsdoc = false;
             } else {
-                let content = trimmed.strip_prefix("* ").or_else(|| trimmed.strip_prefix('*')).unwrap_or(trimmed);
+                let content = trimmed
+                    .strip_prefix("* ")
+                    .or_else(|| trimmed.strip_prefix('*'))
+                    .unwrap_or(trimmed);
                 if !content.starts_with('@')
                     && !content.starts_with("Copyright")
                     && !content.starts_with("SPDX")
@@ -346,11 +344,11 @@ fn is_callback_type(ts_type: &str) -> bool {
 /// Check if a type alias value is a string literal union.
 pub fn is_string_union(value: &str) -> bool {
     let parts: Vec<&str> = value.split('|').map(|s| s.trim()).collect();
-    parts.len() >= 2 && parts.iter().all(|p| {
-        let p = p.trim();
-        (p.starts_with('\'') && p.ends_with('\''))
-            || (p.starts_with('"') && p.ends_with('"'))
-    })
+    parts.len() >= 2
+        && parts.iter().all(|p| {
+            let p = p.trim();
+            (p.starts_with('\'') && p.ends_with('\'')) || (p.starts_with('"') && p.ends_with('"'))
+        })
 }
 
 /// Parse string union variants from a type alias value.
@@ -595,7 +593,11 @@ export interface BaseAgentConfig {
         assert_eq!(interfaces.len(), 1);
         assert_eq!(interfaces[0].name, "BaseAgentConfig");
         assert!(interfaces[0].extends.is_none());
-        assert!(interfaces[0].jsdoc.as_ref().unwrap().contains("config of a base agent"));
+        assert!(interfaces[0]
+            .jsdoc
+            .as_ref()
+            .unwrap()
+            .contains("config of a base agent"));
     }
 
     #[test]
@@ -693,7 +695,10 @@ export enum SessionStatus {
         use std::path::PathBuf;
         let source_dir = PathBuf::from("/tmp/adk-js/core/src");
         assert_eq!(
-            module_from_path(&source_dir, &PathBuf::from("/tmp/adk-js/core/src/events/event.ts")),
+            module_from_path(
+                &source_dir,
+                &PathBuf::from("/tmp/adk-js/core/src/events/event.ts")
+            ),
             "events"
         );
         assert_eq!(

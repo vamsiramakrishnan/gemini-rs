@@ -66,21 +66,27 @@ const PHASES: &[Phase] = &[
 // Pre-compiled regex patterns
 // ---------------------------------------------------------------------------
 
-static NAME_PATTERNS: LazyLock<[Regex; 4]> = LazyLock::new(|| [
-    Regex::new(r"(?i)my name is (\w+)").unwrap(),
-    Regex::new(r"(?i)i'?m (\w+)").unwrap(),
-    Regex::new(r"(?i)this is (\w+)").unwrap(),
-    Regex::new(r"(?i)call me (\w+)").unwrap(),
-]);
+static NAME_PATTERNS: LazyLock<[Regex; 4]> = LazyLock::new(|| {
+    [
+        Regex::new(r"(?i)my name is (\w+)").unwrap(),
+        Regex::new(r"(?i)i'?m (\w+)").unwrap(),
+        Regex::new(r"(?i)this is (\w+)").unwrap(),
+        Regex::new(r"(?i)call me (\w+)").unwrap(),
+    ]
+});
 static ORDER_HASH_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"#(\d{4,})").unwrap());
-static ORDER_WORD_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)order\s+(?:number\s+)?(\d{4,})").unwrap());
+static ORDER_WORD_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)order\s+(?:number\s+)?(\d{4,})").unwrap());
 
 // ---------------------------------------------------------------------------
 // State extraction via keyword/pattern matching
 // ---------------------------------------------------------------------------
 
 /// Extract structured state from conversation text using simple pattern matching.
-fn extract_state(text: &str, existing: &HashMap<String, serde_json::Value>) -> HashMap<String, serde_json::Value> {
+fn extract_state(
+    text: &str,
+    existing: &HashMap<String, serde_json::Value>,
+) -> HashMap<String, serde_json::Value> {
     let mut extracted = HashMap::new();
     let lower = text.to_lowercase();
 
@@ -91,7 +97,9 @@ fn extract_state(text: &str, existing: &HashMap<String, serde_json::Value>) -> H
                 if let Some(name) = caps.get(1) {
                     let name_str = name.as_str();
                     // Skip common false positives.
-                    let skip = ["a", "the", "not", "so", "very", "really", "just", "here", "having"];
+                    let skip = [
+                        "a", "the", "not", "so", "very", "really", "just", "here", "having",
+                    ];
                     if !skip.contains(&name_str.to_lowercase().as_str()) {
                         extracted.insert("customer_name".into(), json!(name_str));
                         break;
@@ -117,9 +125,22 @@ fn extract_state(text: &str, existing: &HashMap<String, serde_json::Value>) -> H
     // Detect issue description: look for problem-indicating keywords.
     if !existing.contains_key("issue_description") {
         let issue_keywords = [
-            "broken", "not working", "defective", "issue", "problem",
-            "damaged", "wrong", "missing", "late", "delayed", "refund",
-            "return", "exchange", "complaint", "error", "failed",
+            "broken",
+            "not working",
+            "defective",
+            "issue",
+            "problem",
+            "damaged",
+            "wrong",
+            "missing",
+            "late",
+            "delayed",
+            "refund",
+            "return",
+            "exchange",
+            "complaint",
+            "error",
+            "failed",
         ];
         for kw in &issue_keywords {
             if lower.contains(kw) {
@@ -132,7 +153,14 @@ fn extract_state(text: &str, existing: &HashMap<String, serde_json::Value>) -> H
 
     // Detect resolution type: refund, replacement, fix, credit.
     if !existing.contains_key("resolution_type") {
-        let resolution_keywords = ["refund", "replacement", "fix", "credit", "exchange", "repair"];
+        let resolution_keywords = [
+            "refund",
+            "replacement",
+            "fix",
+            "credit",
+            "exchange",
+            "repair",
+        ];
         for kw in &resolution_keywords {
             if lower.contains(kw) {
                 extracted.insert("resolution_type".into(), json!(kw));
@@ -144,8 +172,17 @@ fn extract_state(text: &str, existing: &HashMap<String, serde_json::Value>) -> H
     // Detect customer confirmation: yes, okay, sure, confirmed, understand.
     if !existing.contains_key("customer_confirmed") {
         let confirm_keywords = [
-            "yes", "okay", "ok", "sure", "sounds good", "i understand",
-            "that works", "perfect", "agreed", "confirmed", "alright",
+            "yes",
+            "okay",
+            "ok",
+            "sure",
+            "sounds good",
+            "i understand",
+            "that works",
+            "perfect",
+            "agreed",
+            "confirmed",
+            "alright",
         ];
         for kw in &confirm_keywords {
             if lower.contains(kw) {
@@ -158,8 +195,15 @@ fn extract_state(text: &str, existing: &HashMap<String, serde_json::Value>) -> H
     // Detect satisfaction.
     if !existing.contains_key("satisfied") {
         let satisfied_keywords = [
-            "thank you", "thanks", "satisfied", "happy", "great",
-            "no that's all", "nothing else", "that's it", "all good",
+            "thank you",
+            "thanks",
+            "satisfied",
+            "happy",
+            "great",
+            "no that's all",
+            "nothing else",
+            "that's it",
+            "all good",
         ];
         for kw in &satisfied_keywords {
             if lower.contains(kw) {
@@ -170,8 +214,23 @@ fn extract_state(text: &str, existing: &HashMap<String, serde_json::Value>) -> H
     }
 
     // Detect sentiment.
-    let negative = ["angry", "frustrated", "terrible", "awful", "ridiculous", "unacceptable", "furious"];
-    let positive = ["happy", "satisfied", "great", "wonderful", "pleased", "excellent"];
+    let negative = [
+        "angry",
+        "frustrated",
+        "terrible",
+        "awful",
+        "ridiculous",
+        "unacceptable",
+        "furious",
+    ];
+    let positive = [
+        "happy",
+        "satisfied",
+        "great",
+        "wonderful",
+        "pleased",
+        "excellent",
+    ];
 
     for kw in &negative {
         if lower.contains(kw) {
@@ -193,7 +252,11 @@ fn extract_state(text: &str, existing: &HashMap<String, serde_json::Value>) -> H
 
 /// Evaluate phase adherence: simple heuristic scoring.
 #[cfg(test)]
-fn evaluate_phase(phase_name: &str, state: &HashMap<String, serde_json::Value>, turn_count: usize) -> (f64, String) {
+fn evaluate_phase(
+    phase_name: &str,
+    state: &HashMap<String, serde_json::Value>,
+    turn_count: usize,
+) -> (f64, String) {
     let phase = PHASES.iter().find(|p| p.name == phase_name);
     let phase = match phase {
         Some(p) => p,
@@ -206,10 +269,16 @@ fn evaluate_phase(phase_name: &str, state: &HashMap<String, serde_json::Value>, 
     // Check how many required keys are present.
     let total_required = phase.required_keys.len();
     if total_required > 0 {
-        let present = phase.required_keys.iter().filter(|k| state.contains_key(**k)).count();
+        let present = phase
+            .required_keys
+            .iter()
+            .filter(|k| state.contains_key(**k))
+            .count();
         let progress = present as f64 / total_required as f64;
         score = 0.3 + (0.7 * progress); // Base 0.3, up to 1.0 when all keys present.
-        notes.push(format!("{present}/{total_required} required keys extracted"));
+        notes.push(format!(
+            "{present}/{total_required} required keys extracted"
+        ));
     }
 
     // Penalize if too many turns in one phase (more than 6 turns suggests stalling).
@@ -319,9 +388,7 @@ impl CookbookApp for Playbook {
             .system_instruction(PHASES[0].instruction);
 
         // Create a RegexExtractor wrapping the existing extract_state function.
-        let extractor = Arc::new(RegexExtractor::new("playbook_state", 10, |text, existing| {
-            extract_state(text, existing)
-        }));
+        let extractor = Arc::new(RegexExtractor::new("playbook_state", 10, extract_state));
 
         // Build Live session with callbacks, extraction, and phase machine.
         let b64 = base64::engine::general_purpose::STANDARD;
@@ -373,137 +440,155 @@ impl CookbookApp for Playbook {
             // Phase machine: 6 phases with transition guards based on extracted state.
             .phase_defaults(|d| d.navigation())
             .phase("greet")
-                .instruction(PHASES[0].instruction)
-                .transition_with("identify", |s| {
+            .instruction(PHASES[0].instruction)
+            .transition_with(
+                "identify",
+                |s| {
                     s.get::<serde_json::Value>("playbook_state")
                         .and_then(|v| v.get("customer_name").cloned())
                         .is_some()
-                }, "when customer name is provided")
-                .on_enter(move |_state, _writer| {
-                    async move {
-                        // Initial phase — entered at session start, no "from" phase.
-                    }
-                })
-                .with_context(playbook_context)
-                .done()
+                },
+                "when customer name is provided",
+            )
+            .on_enter(move |_state, _writer| {
+                async move {
+                    // Initial phase — entered at session start, no "from" phase.
+                }
+            })
+            .with_context(playbook_context)
+            .done()
             .phase("identify")
-                .instruction(PHASES[1].instruction)
-                .transition_with("investigate", |s| {
+            .instruction(PHASES[1].instruction)
+            .transition_with(
+                "investigate",
+                |s| {
                     s.get::<serde_json::Value>("playbook_state")
                         .and_then(|v| v.get("issue_description").cloned())
                         .is_some()
-                }, "when issue description is provided")
-                .on_enter(move |_state, _writer| {
-                    let tx = tx_enter_identify.clone();
-                    async move {
-                        let _ = tx.send(ServerMessage::PhaseChange {
-                            from: "greet".into(),
-                            to: "identify".into(),
-                            reason: "All required keys present".into(),
-                        });
-                        let _ = tx.send(ServerMessage::StateUpdate {
-                            key: "phase".into(),
-                            value: json!("identify"),
-                        });
-                    }
-                })
-                .with_context(playbook_context)
-                .done()
+                },
+                "when issue description is provided",
+            )
+            .on_enter(move |_state, _writer| {
+                let tx = tx_enter_identify.clone();
+                async move {
+                    let _ = tx.send(ServerMessage::PhaseChange {
+                        from: "greet".into(),
+                        to: "identify".into(),
+                        reason: "All required keys present".into(),
+                    });
+                    let _ = tx.send(ServerMessage::StateUpdate {
+                        key: "phase".into(),
+                        value: json!("identify"),
+                    });
+                }
+            })
+            .with_context(playbook_context)
+            .done()
             .phase("investigate")
-                .instruction(PHASES[2].instruction)
-                .transition_with("explain", |s| {
+            .instruction(PHASES[2].instruction)
+            .transition_with(
+                "explain",
+                |s| {
                     s.get::<serde_json::Value>("playbook_state")
                         .and_then(|v| v.get("resolution_type").cloned())
                         .is_some()
-                }, "when resolution type is determined")
-                .on_enter(move |_state, _writer| {
-                    let tx = tx_enter_investigate.clone();
-                    async move {
-                        let _ = tx.send(ServerMessage::PhaseChange {
-                            from: "identify".into(),
-                            to: "investigate".into(),
-                            reason: "All required keys present".into(),
-                        });
-                        let _ = tx.send(ServerMessage::StateUpdate {
-                            key: "phase".into(),
-                            value: json!("investigate"),
-                        });
-                    }
-                })
-                .with_context(playbook_context)
-                .done()
+                },
+                "when resolution type is determined",
+            )
+            .on_enter(move |_state, _writer| {
+                let tx = tx_enter_investigate.clone();
+                async move {
+                    let _ = tx.send(ServerMessage::PhaseChange {
+                        from: "identify".into(),
+                        to: "investigate".into(),
+                        reason: "All required keys present".into(),
+                    });
+                    let _ = tx.send(ServerMessage::StateUpdate {
+                        key: "phase".into(),
+                        value: json!("investigate"),
+                    });
+                }
+            })
+            .with_context(playbook_context)
+            .done()
             .phase("explain")
-                .instruction(PHASES[3].instruction)
-                .transition_with("resolve", |s| {
+            .instruction(PHASES[3].instruction)
+            .transition_with(
+                "resolve",
+                |s| {
                     s.get::<serde_json::Value>("playbook_state")
                         .and_then(|v| v.get("customer_confirmed").cloned())
                         .is_some()
-                }, "when customer confirms understanding")
-                .on_enter(move |_state, _writer| {
-                    let tx = tx_enter_explain.clone();
-                    async move {
-                        let _ = tx.send(ServerMessage::PhaseChange {
-                            from: "investigate".into(),
-                            to: "explain".into(),
-                            reason: "All required keys present".into(),
-                        });
-                        let _ = tx.send(ServerMessage::StateUpdate {
-                            key: "phase".into(),
-                            value: json!("explain"),
-                        });
-                    }
-                })
-                .with_context(playbook_context)
-                .done()
+                },
+                "when customer confirms understanding",
+            )
+            .on_enter(move |_state, _writer| {
+                let tx = tx_enter_explain.clone();
+                async move {
+                    let _ = tx.send(ServerMessage::PhaseChange {
+                        from: "investigate".into(),
+                        to: "explain".into(),
+                        reason: "All required keys present".into(),
+                    });
+                    let _ = tx.send(ServerMessage::StateUpdate {
+                        key: "phase".into(),
+                        value: json!("explain"),
+                    });
+                }
+            })
+            .with_context(playbook_context)
+            .done()
             .phase("resolve")
-                .instruction(PHASES[4].instruction)
-                .transition_with("close", |s| {
+            .instruction(PHASES[4].instruction)
+            .transition_with(
+                "close",
+                |s| {
                     s.get::<serde_json::Value>("playbook_state")
                         .and_then(|v| v.get("satisfied").cloned())
                         .is_some()
-                }, "when customer is satisfied")
-                .on_enter(move |_state, _writer| {
-                    let tx = tx_enter_resolve.clone();
-                    async move {
-                        let _ = tx.send(ServerMessage::PhaseChange {
-                            from: "explain".into(),
-                            to: "resolve".into(),
-                            reason: "All required keys present".into(),
-                        });
-                        let _ = tx.send(ServerMessage::StateUpdate {
-                            key: "phase".into(),
-                            value: json!("resolve"),
-                        });
-                    }
-                })
-                .with_context(playbook_context)
-                .done()
+                },
+                "when customer is satisfied",
+            )
+            .on_enter(move |_state, _writer| {
+                let tx = tx_enter_resolve.clone();
+                async move {
+                    let _ = tx.send(ServerMessage::PhaseChange {
+                        from: "explain".into(),
+                        to: "resolve".into(),
+                        reason: "All required keys present".into(),
+                    });
+                    let _ = tx.send(ServerMessage::StateUpdate {
+                        key: "phase".into(),
+                        value: json!("resolve"),
+                    });
+                }
+            })
+            .with_context(playbook_context)
+            .done()
             .phase("close")
-                .instruction(PHASES[5].instruction)
-                .terminal()
-                .on_enter(move |_state, _writer| {
-                    let tx = tx_enter_close.clone();
-                    async move {
-                        let _ = tx.send(ServerMessage::PhaseChange {
-                            from: "resolve".into(),
-                            to: "close".into(),
-                            reason: "All required keys present".into(),
-                        });
-                        let _ = tx.send(ServerMessage::StateUpdate {
-                            key: "phase".into(),
-                            value: json!("close"),
-                        });
-                    }
-                })
-                .with_context(playbook_context)
-                .done()
+            .instruction(PHASES[5].instruction)
+            .terminal()
+            .on_enter(move |_state, _writer| {
+                let tx = tx_enter_close.clone();
+                async move {
+                    let _ = tx.send(ServerMessage::PhaseChange {
+                        from: "resolve".into(),
+                        to: "close".into(),
+                        reason: "All required keys present".into(),
+                    });
+                    let _ = tx.send(ServerMessage::StateUpdate {
+                        key: "phase".into(),
+                        value: json!("close"),
+                    });
+                }
+            })
+            .with_context(playbook_context)
+            .done()
             .initial_phase("greet")
             // Turn boundary: increment turn counter.
             .on_turn_boundary({
-                move |state, _writer| {
-                    async move {
-                        let _turn_count: u32 = state.modify("session:turn_count", 0u32, |n| n + 1);
-                    }
+                move |state, _writer| async move {
+                    let _turn_count: u32 = state.modify("session:turn_count", 0u32, |n| n + 1);
                 }
             })
             // Standard voice callbacks.
@@ -598,21 +683,19 @@ impl CookbookApp for Playbook {
         let b64 = base64::engine::general_purpose::STANDARD;
         while let Some(msg) = rx.recv().await {
             match msg {
-                ClientMessage::Audio { data } => {
-                    match b64.decode(&data) {
-                        Ok(pcm_bytes) => {
-                            if let Err(e) = handle.send_audio(pcm_bytes).await {
-                                warn!("Failed to send audio: {e}");
-                                let _ = tx.send(ServerMessage::Error {
-                                    message: e.to_string(),
-                                });
-                            }
-                        }
-                        Err(e) => {
-                            warn!("Failed to decode base64 audio: {e}");
+                ClientMessage::Audio { data } => match b64.decode(&data) {
+                    Ok(pcm_bytes) => {
+                        if let Err(e) = handle.send_audio(pcm_bytes).await {
+                            warn!("Failed to send audio: {e}");
+                            let _ = tx.send(ServerMessage::Error {
+                                message: e.to_string(),
+                            });
                         }
                     }
-                }
+                    Err(e) => {
+                        warn!("Failed to decode base64 audio: {e}");
+                    }
+                },
                 ClientMessage::Text { text } => {
                     if let Err(e) = handle.send_text(&text).await {
                         warn!("Failed to send text: {e}");
@@ -663,7 +746,10 @@ mod tests {
     #[test]
     fn extract_issue_description() {
         let state = HashMap::new();
-        let result = extract_state("The product I received is broken and I want a refund.", &state);
+        let result = extract_state(
+            "The product I received is broken and I want a refund.",
+            &state,
+        );
         assert_eq!(result.get("issue_description"), Some(&json!("broken")));
     }
 
@@ -722,7 +808,10 @@ mod tests {
     fn evaluate_greet_phase_no_keys() {
         let state = HashMap::new();
         let (score, _notes) = evaluate_phase("greet", &state, 2);
-        assert!(score < 1.0, "Score should be below 1.0 without required keys");
+        assert!(
+            score < 1.0,
+            "Score should be below 1.0 without required keys"
+        );
         assert!(score >= 0.3, "Score should have base of 0.3");
     }
 
@@ -731,7 +820,10 @@ mod tests {
         let mut state = HashMap::new();
         state.insert("customer_name".into(), json!("Alice"));
         let (score, _notes) = evaluate_phase("greet", &state, 2);
-        assert!((score - 1.0).abs() < f64::EPSILON, "Score should be 1.0 with all keys");
+        assert!(
+            (score - 1.0).abs() < f64::EPSILON,
+            "Score should be 1.0 with all keys"
+        );
     }
 
     #[test]
@@ -740,7 +832,10 @@ mod tests {
         state.insert("customer_name".into(), json!("Alice"));
         let (score, notes) = evaluate_phase("greet", &state, 10);
         assert!(score < 1.0, "Score should be penalized for long phase");
-        assert!(notes.contains("Extended"), "Notes should mention extended duration");
+        assert!(
+            notes.contains("Extended"),
+            "Notes should mention extended duration"
+        );
     }
 
     #[test]
