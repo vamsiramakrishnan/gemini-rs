@@ -4,15 +4,15 @@
 //! (the ~13 span types defined in the two spans.rs files). All other tracing
 //! output is ignored.
 //!
-//! Performance: uses a bounded channel (256) to avoid backpressure on the
-//! tracing pipeline. If the channel is full, span events are dropped silently
-//! (the primary OTLP export path is unaffected).
+//! Uses a broadcast channel so multiple WebSocket clients can each subscribe
+//! to span events independently. If a subscriber falls behind, it skips
+//! lagged messages (the primary OTLP export path is unaffected).
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
-use tokio::sync::mpsc;
+use tokio::sync::broadcast;
 use tracing::field::{Field, Visit};
 use tracing::span::{Attributes, Id};
 use tracing::Subscriber;
@@ -30,30 +30,36 @@ struct SpanRecord {
     attributes: serde_json::Value,
 }
 
-/// Tracing Layer that forwards span close events to a bounded channel.
+/// Tracing Layer that forwards span close events to a broadcast channel.
 ///
 /// Only captures spans whose target starts with `rs_genai` or `gemini`.
 /// On span close, sends a `ServerMessage::SpanEvent` with the span's name,
 /// duration, and attributes.
 pub struct WebSocketSpanLayer {
-    tx: mpsc::Sender<ServerMessage>,
+    tx: broadcast::Sender<ServerMessage>,
     spans: Mutex<HashMap<u64, SpanRecord>>,
     next_id: AtomicU64,
     epoch: std::time::Instant,
 }
 
 impl WebSocketSpanLayer {
-    /// Create a new span layer that sends span events to the given channel.
+    /// Create a new span layer that broadcasts span events.
     ///
-    /// The channel should have bounded capacity (e.g., 256) to avoid
-    /// backpressure on the tracing pipeline.
-    pub fn new(tx: mpsc::Sender<ServerMessage>) -> Self {
-        Self {
-            tx,
-            spans: Mutex::new(HashMap::new()),
-            next_id: AtomicU64::new(1),
-            epoch: std::time::Instant::now(),
-        }
+    /// `capacity` controls the broadcast channel buffer (e.g., 256).
+    /// Returns the layer and a `broadcast::Sender` that callers can
+    /// `.subscribe()` on to receive span events.
+    pub fn new(capacity: usize) -> (Self, broadcast::Sender<ServerMessage>) {
+        let (tx, _) = broadcast::channel(capacity);
+        let sender = tx.clone();
+        (
+            Self {
+                tx,
+                spans: Mutex::new(HashMap::new()),
+                next_id: AtomicU64::new(1),
+                epoch: std::time::Instant::now(),
+            },
+            sender,
+        )
     }
 }
 
@@ -142,8 +148,8 @@ impl<S: Subscriber> Layer<S> for WebSocketSpanLayer {
                 status: "ok".to_string(),
             };
 
-            // Non-blocking send — drop if channel full
-            let _ = self.tx.try_send(msg);
+            // Non-blocking send — drop if no subscribers or channel full
+            let _ = self.tx.send(msg);
         }
     }
 }

@@ -107,9 +107,61 @@ impl SessionBridge {
             })
     }
 
+    /// Spawn a periodic telemetry sender that emits `Telemetry` and `TurnMetrics`
+    /// messages to the browser every 2 seconds.
+    ///
+    /// Returns the `JoinHandle` so the caller can abort it on disconnect.
+    pub fn spawn_telemetry(&self, handle: &LiveHandle) -> tokio::task::JoinHandle<()> {
+        let telem = handle.telemetry().clone();
+        let tx = self.tx.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));
+            let mut prev_turn_count = 0u64;
+            loop {
+                interval.tick().await;
+                let stats = telem.snapshot();
+
+                // Emit per-turn metrics when the turn count advances
+                if let Some(obj) = stats.as_object() {
+                    let turn_count = obj
+                        .get("turn_count")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    if turn_count > prev_turn_count {
+                        let latency_ms = obj
+                            .get("last_latency_ms")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0) as u32;
+                        let prompt_tokens = obj
+                            .get("prompt_tokens")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0) as u32;
+                        let response_tokens = obj
+                            .get("response_tokens")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0) as u32;
+                        let _ = tx.send(ServerMessage::TurnMetrics {
+                            turn: turn_count as u32,
+                            latency_ms,
+                            prompt_tokens,
+                            response_tokens,
+                        });
+                        prev_turn_count = turn_count;
+                    }
+                }
+
+                if tx.send(ServerMessage::Telemetry { stats }).is_err() {
+                    break;
+                }
+            }
+        })
+    }
+
     /// Run the browser->Gemini forwarding loop.
     ///
     /// Handles Audio, Text, and Stop messages from the browser.
+    /// Also spawns a periodic telemetry sender that emits `Telemetry`
+    /// and `TurnMetrics` messages automatically.
     /// Returns when the client sends Stop or disconnects.
     pub async fn recv_loop(
         &self,
@@ -117,6 +169,8 @@ impl SessionBridge {
         rx: &mut mpsc::UnboundedReceiver<crate::app::ClientMessage>,
     ) {
         use crate::app::ClientMessage;
+
+        let telem_task = self.spawn_telemetry(handle);
 
         let b64 = base64::engine::general_purpose::STANDARD;
         while let Some(msg) = rx.recv().await {
@@ -142,6 +196,8 @@ impl SessionBridge {
                 _ => {}
             }
         }
+
+        telem_task.abort();
     }
 
     /// Get a clone of the sender for custom callbacks.

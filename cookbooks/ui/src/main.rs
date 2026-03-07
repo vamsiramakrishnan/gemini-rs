@@ -7,6 +7,7 @@ use axum::{
     routing::get,
     Router,
 };
+use tokio::sync::broadcast;
 use tower_http::services::ServeDir;
 
 mod app;
@@ -15,20 +16,31 @@ mod bridge;
 mod span_layer;
 mod ws_handler;
 
-use app::AppRegistry;
+use app::{AppRegistry, ServerMessage};
 
-type SharedRegistry = Arc<AppRegistry>;
+/// Shared application state passed to all Axum handlers.
+#[derive(Clone)]
+pub struct AppState {
+    registry: Arc<AppRegistry>,
+    /// Broadcast sender for span events from the tracing layer.
+    /// Each WebSocket handler subscribes to receive span events.
+    span_tx: broadcast::Sender<ServerMessage>,
+}
 
 #[tokio::main]
 async fn main() {
     dotenvy::dotenv().ok();
 
-    // Initialize telemetry (tracing + optional OTel export)
-    let _telemetry_guard = init_telemetry().await;
+    // Initialize telemetry with WebSocketSpanLayer wired in
+    let (_telemetry_guard, span_tx) = init_telemetry().await;
 
     let mut registry = AppRegistry::new();
     apps::register_all(&mut registry);
-    let registry = Arc::new(registry);
+
+    let state = AppState {
+        registry: Arc::new(registry),
+        span_tx,
+    };
 
     let static_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/static");
 
@@ -39,7 +51,7 @@ async fn main() {
         .route("/ws/:name", get(ws_upgrade))
         .nest_service("/static", ServeDir::new(static_dir))
         .layer(middleware::from_fn(cross_origin_isolation))
-        .with_state(registry);
+        .with_state(state);
 
     let addr = "0.0.0.0:25125";
     tracing::info!("Cookbooks UI at http://localhost:25125");
@@ -47,39 +59,30 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
-async fn init_telemetry() -> rs_genai::telemetry::TelemetryGuard {
-    let service_name = std::env::var("OTEL_SERVICE_NAME")
-        .unwrap_or_else(|_| "gemini-live-cookbooks".to_string());
-    let config = rs_genai::telemetry::TelemetryConfig {
-        logging_enabled: true,
-        log_filter: std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()),
-        json_logs: false,
-        otel_traces: true,
-        otel_metrics: true,
-        otel_service_name: service_name,
-        otel_gcp_project: std::env::var("GOOGLE_CLOUD_PROJECT").ok(),
-        ..Default::default()
-    };
+async fn init_telemetry() -> (rs_genai::telemetry::TelemetryGuard, broadcast::Sender<ServerMessage>) {
+    use tracing_subscriber::prelude::*;
+    use tracing_subscriber::EnvFilter;
 
-    // Prefer GCP-native export when the feature is compiled in and a project is available
-    #[cfg(feature = "otel-gcp")]
-    if config.otel_gcp_project.is_some() {
-        return config.init_gcp().await.expect("Failed to initialize GCP telemetry");
-    }
+    // Create the WebSocketSpanLayer (bridges tracing spans → browser)
+    let (ws_layer, span_tx) = span_layer::WebSocketSpanLayer::new(256);
 
-    // Fall back to OTLP (Jaeger, generic collector) or plain logging
-    let mut fallback = config;
-    #[cfg(not(feature = "otel-otlp"))]
-    {
-        fallback.otel_traces = false;
-        fallback.otel_metrics = false;
-    }
-    #[cfg(feature = "otel-otlp")]
-    if std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").is_err() {
-        fallback.otel_traces = false;
-        fallback.otel_metrics = false;
-    }
-    fallback.init().expect("Failed to initialize telemetry")
+    let log_filter = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
+    let filter = EnvFilter::try_new(&log_filter).unwrap_or_else(|_| EnvFilter::new("info"));
+    let fmt_layer = tracing_subscriber::fmt::layer();
+
+    // Build subscriber: fmt + WebSocketSpanLayer
+    let subscriber = tracing_subscriber::registry()
+        .with(filter)
+        .with(fmt_layer)
+        .with(ws_layer);
+
+    tracing::subscriber::set_global_default(subscriber)
+        .expect("Failed to set tracing subscriber");
+
+    // Return a default guard (OTel providers are not set up in this path
+    // since we built the subscriber ourselves; enable otel features separately
+    // if needed)
+    (Default::default(), span_tx)
 }
 
 /// Cross-Origin-Isolation middleware — enables SharedArrayBuffer in AudioWorklet.
@@ -105,26 +108,27 @@ async fn landing_page() -> impl IntoResponse {
 
 async fn app_page(
     Path(name): Path<String>,
-    State(registry): State<SharedRegistry>,
+    State(state): State<AppState>,
 ) -> impl IntoResponse {
-    if registry.get(&name).is_some() {
+    if state.registry.get(&name).is_some() {
         Html(include_str!("../static/app.html")).into_response()
     } else {
         (axum::http::StatusCode::NOT_FOUND, "App not found").into_response()
     }
 }
 
-async fn list_apps(State(registry): State<SharedRegistry>) -> Json<Vec<app::AppInfo>> {
-    Json(registry.list())
+async fn list_apps(State(state): State<AppState>) -> Json<Vec<app::AppInfo>> {
+    Json(state.registry.list())
 }
 
 async fn ws_upgrade(
     Path(name): Path<String>,
-    State(registry): State<SharedRegistry>,
+    State(state): State<AppState>,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
-    if let Some(app) = registry.get(&name) {
-        ws.on_upgrade(move |socket| ws_handler::handle_ws(socket, app))
+    if let Some(app) = state.registry.get(&name) {
+        let span_rx = state.span_tx.subscribe();
+        ws.on_upgrade(move |socket| ws_handler::handle_ws(socket, app, span_rx))
     } else {
         // Return 404 — upgrade and immediately close
         ws.on_upgrade(|socket| async move {

@@ -60,7 +60,7 @@ pub enum ServerMessage {
     Telemetry { stats: serde_json::Value },
     /// Real-time tool call event for devtools visualization.
     ToolCallEvent { name: String, args: String, result: String },
-    /// OTel span lifecycle event bridged from the tracing Layer.
+    /// OTel span lifecycle event bridged from the WebSocketSpanLayer.
     SpanEvent {
         name: String,
         span_id: String,

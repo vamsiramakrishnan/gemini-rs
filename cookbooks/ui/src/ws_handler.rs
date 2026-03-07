@@ -2,17 +2,36 @@ use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket};
 use futures::{SinkExt, StreamExt};
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 
 use crate::app::{ClientMessage, CookbookApp, ServerMessage};
 
 /// Handle a WebSocket connection for a specific app.
-pub async fn handle_ws(socket: WebSocket, app: Arc<dyn CookbookApp>) {
+pub async fn handle_ws(
+    socket: WebSocket,
+    app: Arc<dyn CookbookApp>,
+    mut span_rx: broadcast::Receiver<ServerMessage>,
+) {
     let (mut ws_tx, mut ws_rx) = socket.split();
     let (server_tx, mut server_rx) = mpsc::unbounded_channel::<ServerMessage>();
     let (client_tx, client_rx) = mpsc::unbounded_channel::<ClientMessage>();
 
-    // Forward server messages to WebSocket
+    // Forward server messages + span events to WebSocket
+    let span_server_tx = server_tx.clone();
+    let span_task = tokio::spawn(async move {
+        loop {
+            match span_rx.recv().await {
+                Ok(msg) => {
+                    if span_server_tx.send(msg).is_err() {
+                        break;
+                    }
+                }
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
+
     let send_task = tokio::spawn(async move {
         while let Some(msg) = server_rx.recv().await {
             if let Ok(json) = serde_json::to_string(&msg) {
@@ -44,6 +63,7 @@ pub async fn handle_ws(socket: WebSocket, app: Arc<dyn CookbookApp>) {
     let _ = app.handle_session(server_tx, client_rx).await;
 
     // Clean up
+    span_task.abort();
     send_task.abort();
     recv_task.abort();
 }
