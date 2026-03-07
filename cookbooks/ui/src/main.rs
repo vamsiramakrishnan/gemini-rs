@@ -11,6 +11,7 @@ use tower_http::services::ServeDir;
 
 mod app;
 mod apps;
+mod bridge;
 mod ws_handler;
 
 use app::AppRegistry;

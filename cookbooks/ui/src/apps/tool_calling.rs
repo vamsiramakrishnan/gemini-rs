@@ -1,13 +1,13 @@
 use async_trait::async_trait;
 use serde_json::json;
 use tokio::sync::mpsc;
-use tracing::{info, warn};
+use tracing::info;
 
 use adk_rs_fluent::prelude::*;
 
 use crate::app::{AppCategory, AppError, ClientMessage, CookbookApp, ServerMessage, WsSender};
 
-use super::{build_session_config, send_app_meta, wait_for_start};
+use super::{build_session_config, wait_for_start};
 
 /// Function calling with Gemini Live.
 pub struct ToolCalling;
@@ -217,8 +217,8 @@ impl CookbookApp for ToolCalling {
         mut rx: mpsc::UnboundedReceiver<ClientMessage>,
     ) -> Result<(), AppError> {
         let start = wait_for_start(&mut rx).await?;
+        let bridge = crate::bridge::SessionBridge::new(tx);
 
-        // Build session config for text-only with tools.
         let config = build_session_config(start.model.as_deref())
             .map_err(|e| AppError::Connection(e.to_string()))?
             .text_only()
@@ -231,39 +231,18 @@ impl CookbookApp for ToolCalling {
                 ),
             );
 
-        // Build Live session with callbacks.
-        let tx_text = tx.clone();
-        let tx_text_complete = tx.clone();
-        let tx_turn = tx.clone();
-        let tx_interrupted = tx.clone();
-        let tx_error = tx.clone();
-        let tx_disconnected = tx.clone();
-        let tx_tool = tx.clone();
-
-        let handle = Live::builder()
-            .on_text(move |t| {
-                let _ = tx_text.send(ServerMessage::TextDelta {
-                    text: t.to_string(),
-                });
-            })
-            .on_text_complete(move |t| {
-                let _ = tx_text_complete.send(ServerMessage::TextComplete {
-                    text: t.to_string(),
-                });
-            })
+        let tx_tool = bridge.sender();
+        let handle = bridge.wire_live(Live::builder())
             .on_tool_call(move |calls, _state| {
                 let tx = tx_tool.clone();
                 async move {
                     info!("Tool calls received: {}", calls.len());
-
-                    // Execute each tool call and collect responses.
                     let responses: Vec<FunctionResponse> = calls
                         .iter()
                         .map(|call| {
                             let result = execute_tool(&call.name, &call.args);
                             info!("Tool '{}' -> {}", call.name, result);
 
-                            // Notify the browser about the tool execution.
                             let _ = tx.send(ServerMessage::StateUpdate {
                                 key: format!("tool:{}", call.name),
                                 value: json!({
@@ -290,58 +269,15 @@ impl CookbookApp for ToolCalling {
                     Some(responses)
                 }
             })
-            .on_turn_complete(move || {
-                let tx = tx_turn.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::TurnComplete);
-                }
-            })
-            .on_interrupted(move || {
-                let tx = tx_interrupted.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::Interrupted);
-                }
-            })
-            .on_error(move |msg| {
-                let tx = tx_error.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::Error { message: msg });
-                }
-            })
-            .on_disconnected(move |_reason| {
-                let _tx = tx_disconnected.clone();
-                async move {
-                    info!("ToolCalling session disconnected by server");
-                }
-            })
             .connect(config)
             .await
             .map_err(|e| AppError::Connection(e.to_string()))?;
 
-        let _ = tx.send(ServerMessage::Connected);
-        send_app_meta(&tx, self);
+        bridge.send_connected();
+        bridge.send_meta(self);
         info!("ToolCalling session connected");
 
-        // Browser -> Gemini loop.
-        while let Some(msg) = rx.recv().await {
-            match msg {
-                ClientMessage::Text { text } => {
-                    if let Err(e) = handle.send_text(&text).await {
-                        warn!("Failed to send text: {e}");
-                        let _ = tx.send(ServerMessage::Error {
-                            message: e.to_string(),
-                        });
-                    }
-                }
-                ClientMessage::Stop => {
-                    info!("ToolCalling session stopping");
-                    let _ = handle.disconnect().await;
-                    break;
-                }
-                _ => {} // Ignore audio messages in text mode
-            }
-        }
-
+        bridge.recv_loop(&handle, &mut rx).await;
         Ok(())
     }
 }
