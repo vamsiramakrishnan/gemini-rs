@@ -79,6 +79,17 @@ class DevtoolsManager {
     // Cached scratch element for _esc()
     this._escDiv = document.createElement('div');
 
+    // Phases panel tracking (incremental rendering)
+    this._phasesEmpty = true;
+    this._phaseHeroEl = null;
+    this._phaseEntriesEl = null;
+    this._phaseRenderedCount = 0;
+
+    // Metrics panel tracking (skeleton + targeted updates)
+    this._metricsEmpty = true;
+    this._metricsRefs = null;
+    this._metricsToolCount = 0;
+
     // Render scheduler
     this.scheduler = new RenderScheduler();
 
@@ -1191,18 +1202,21 @@ class DevtoolsManager {
     el.appendChild(lbl);
     var val = document.createElement('div');
     val.className = 'metrics-hero-value';
-    el.appendChild(val);
+    // Separate text node for the number so setting it doesn't destroy unit span
+    var valText = document.createElement('span');
+    val.appendChild(valText);
     if (unit) {
       var unitSpan = document.createElement('span');
       unitSpan.className = 'nfr-unit';
       unitSpan.textContent = unit;
       val.appendChild(unitSpan);
     }
+    el.appendChild(val);
     var sub = document.createElement('div');
     sub.className = 'metrics-hero-sub';
     sub.style.whiteSpace = 'pre-line';
     el.appendChild(sub);
-    return { el: el, value: val, sub: sub };
+    return { el: el, value: valText, sub: sub };
   }
 
   // ------------------------------------------------
@@ -1382,12 +1396,6 @@ class DevtoolsManager {
     return s.substring(0, max) + '...';
   }
 
-  _truncate(str, max) {
-    var s = String(str);
-    if (s.length <= max) return this._esc(s);
-    return this._esc(s.substring(0, max)) + '<span class="truncated">...</span>';
-  }
-
   _formatValue(value) {
     if (value === null || value === undefined) {
       return { display: 'null', className: 'null' };
@@ -1451,11 +1459,11 @@ class DevtoolsManager {
     };
 
     var json = JSON.stringify(otlp, null, 2);
+    var exportBtn = this._metricsRefs && this._metricsRefs.exportBtn;
     navigator.clipboard.writeText(json).then(function () {
-      var btn = document.getElementById('export-otlp-btn');
-      if (btn) {
-        btn.textContent = 'Copied!';
-        setTimeout(function () { btn.textContent = 'Copy Trace as OTLP JSON'; }, 1500);
+      if (exportBtn) {
+        exportBtn.textContent = 'Copied!';
+        setTimeout(function () { exportBtn.textContent = 'Copy Trace as OTLP JSON'; }, 1500);
       }
     });
   }

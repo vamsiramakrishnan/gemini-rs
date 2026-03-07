@@ -351,11 +351,11 @@
         break;
 
       case 'spanEvent':
-        devtools.addEvent(msg);
+        // Already added to timeline via devtools.addEvent(msg) above
         break;
 
       case 'turnMetrics':
-        devtools.addEvent(msg);
+        // Already added to timeline via devtools.addEvent(msg) above
         devtools.handleTurnMetrics(msg);
         break;
     }
