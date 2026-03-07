@@ -1,6 +1,9 @@
 /**
  * Single requestAnimationFrame loop with dirty-flag scheduling.
  * Register named renderers; mark them dirty to batch into the next frame.
+ *
+ * Demand-driven: the rAF loop only runs when something is dirty.
+ * markDirty() kicks the loop; loop stops when nothing is dirty.
  */
 function RenderScheduler() {
   this._renderers = {};      // name -> renderFn
@@ -9,9 +12,6 @@ function RenderScheduler() {
   this._rafId = 0;
   this._stopped = false;
   this._boundTick = this._tick.bind(this);
-
-  // Start the loop immediately
-  this._scheduleLoop();
 }
 
 /**
@@ -23,7 +23,6 @@ RenderScheduler.prototype.register = function (name, renderFn) {
   this._renderers[name] = renderFn;
   if (this._stopped) {
     this._stopped = false;
-    this._scheduleLoop();
   }
 };
 
@@ -34,20 +33,18 @@ RenderScheduler.prototype.register = function (name, renderFn) {
 RenderScheduler.prototype.unregister = function (name) {
   delete this._renderers[name];
   delete this._dirty[name];
-  // Stop loop if no renderers remain
-  if (Object.keys(this._renderers).length === 0) {
-    this._cancelLoop();
-  }
 };
 
 /**
  * Mark a renderer as needing re-render on the next frame.
+ * Kicks the rAF loop if it's idle.
  * @param {string} name
  */
 RenderScheduler.prototype.markDirty = function (name) {
   if (this._renderers[name]) {
     this._dirty[name] = true;
     this._hasDirty = true;
+    this._scheduleLoop();
   }
 };
 
@@ -93,8 +90,9 @@ RenderScheduler.prototype._tick = function () {
     }
   }
 
-  // Keep looping while renderers are registered
-  if (Object.keys(this._renderers).length > 0) {
+  // Only continue if a renderer marked itself dirty during execution
+  if (this._hasDirty) {
     this._scheduleLoop();
   }
+  // Otherwise loop stops — markDirty() will kick it again
 };

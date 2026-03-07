@@ -23,12 +23,16 @@ Sparkline.prototype.render = function () {
   var data = this.data;
   var dpr = window.devicePixelRatio || 1;
 
-  // Scale canvas for devicePixelRatio
+  // Scale canvas for devicePixelRatio (guarded to avoid redundant clears)
   var cssWidth = canvas.clientWidth;
   var cssHeight = canvas.clientHeight;
-  canvas.width = cssWidth * dpr;
-  canvas.height = cssHeight * dpr;
-  ctx.scale(dpr, dpr);
+  var bufW = cssWidth * dpr;
+  var bufH = cssHeight * dpr;
+  if (canvas.width !== bufW || canvas.height !== bufH) {
+    canvas.width = bufW;
+    canvas.height = bufH;
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
   // Clear
   ctx.clearRect(0, 0, cssWidth, cssHeight);

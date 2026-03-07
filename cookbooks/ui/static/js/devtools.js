@@ -76,6 +76,9 @@ class DevtoolsManager {
     this._stateSearchTerm = '';
     this._stateGroupContainer = null;
 
+    // Cached scratch element for _esc()
+    this._escDiv = document.createElement('div');
+
     // Render scheduler
     this.scheduler = new RenderScheduler();
 
@@ -107,6 +110,27 @@ class DevtoolsManager {
     timelinePanel.appendChild(listContainer);
 
     this._timelineContainer = listContainer;
+
+    // Fixed detail panel below the virtual list (not inline — avoids
+    // conflicts with VirtualList's translateY recycling)
+    var detailPanel = document.createElement('div');
+    detailPanel.className = 'tl-detail-panel';
+    detailPanel.style.display = 'none';
+    var detailClose = document.createElement('button');
+    detailClose.className = 'tl-detail-close';
+    detailClose.textContent = '\u00d7';
+    detailClose.addEventListener('click', function () {
+      detailPanel.style.display = 'none';
+      self._expandedIdx = -1;
+    });
+    detailPanel.appendChild(detailClose);
+    var detailContent = document.createElement('pre');
+    detailContent.className = 'tl-detail-content';
+    detailPanel.appendChild(detailContent);
+    timelinePanel.appendChild(detailPanel);
+    this._detailEl = detailPanel;
+    this._detailContent = detailContent;
+
     this.panels.timeline = timelinePanel;
 
     // Initialize VirtualList
@@ -221,7 +245,7 @@ class DevtoolsManager {
     } catch (e) { /* ignore */ }
   }
 
-  _applyFilters() {
+  _applyFilters(newEventOnly) {
     var hidden = this._hiddenTypes;
     var query = this._searchQuery;
     var len = this.events.length;
@@ -229,6 +253,18 @@ class DevtoolsManager {
     if (hidden.size === 0 && !query) {
       this._filteredIndices = null;
       this._timelineVL.setFilter(null);
+      return;
+    }
+
+    // Fast path: when a single event was appended and no search query,
+    // just check the new event instead of rescanning everything
+    if (newEventOnly && !query && this._filteredIndices !== null) {
+      var lastIdx = len - 1;
+      var evt = this.events.get(lastIdx);
+      if (evt && !hidden.has(evt.type)) {
+        this._filteredIndices.push(lastIdx);
+      }
+      this._timelineVL.setFilter(this._filteredIndices);
       return;
     }
 
@@ -378,44 +414,23 @@ class DevtoolsManager {
 
   _toggleDetail(idx) {
     // If clicking same row, collapse
-    if (this._expandedIdx === idx && this._detailEl) {
-      this._detailEl.remove();
-      this._detailEl = null;
+    if (this._expandedIdx === idx) {
+      this._detailEl.style.display = 'none';
       this._expandedIdx = -1;
       return;
-    }
-
-    // Remove previous detail
-    if (this._detailEl) {
-      this._detailEl.remove();
-      this._detailEl = null;
     }
 
     var event = this.events.get(idx);
     if (!event) return;
 
-    // Find the clicked row element
-    var rows = this._timelineContainer.querySelectorAll('.tl-row[data-idx="' + idx + '"]');
-    if (rows.length === 0) return;
-    var row = rows[0];
-
-    // Create detail div
-    var detail = document.createElement('div');
-    detail.className = 'tl-detail';
+    // Update the fixed detail panel content
     try {
-      detail.textContent = JSON.stringify(event.raw, null, 2);
+      this._detailContent.textContent = JSON.stringify(event.raw, null, 2);
     } catch (e) {
-      detail.textContent = String(event.raw);
+      this._detailContent.textContent = String(event.raw);
     }
 
-    // Insert after the row in the container
-    if (row.nextSibling) {
-      this._timelineContainer.insertBefore(detail, row.nextSibling);
-    } else {
-      this._timelineContainer.appendChild(detail);
-    }
-
-    this._detailEl = detail;
+    this._detailEl.style.display = '';
     this._expandedIdx = idx;
   }
 
@@ -491,8 +506,7 @@ class DevtoolsManager {
     this.sessionStart = Date.now();
     this._expandedIdx = -1;
     if (this._detailEl) {
-      this._detailEl.remove();
-      this._detailEl = null;
+      this._detailEl.style.display = 'none';
     }
     this._filteredIndices = null;
     this._searchQuery = '';
@@ -513,7 +527,17 @@ class DevtoolsManager {
     this._stateSearchTerm = '';
     this._initStatePanel();
 
+    // Reset phases panel tracking
+    this._phasesEmpty = true;
+    this._phaseHeroEl = null;
+    this._phaseEntriesEl = null;
+    this._phaseRenderedCount = 0;
     this.panels.phases.innerHTML = '<div class="events-empty">No phase changes yet</div>';
+
+    // Reset metrics panel tracking
+    this._metricsEmpty = true;
+    this._metricsRefs = null;
+    this._metricsToolCount = 0;
     this.panels.metrics.innerHTML = '<div class="events-empty">No metrics yet</div>';
 
     this._traceId = null;
@@ -548,7 +572,7 @@ class DevtoolsManager {
       this.scheduler.markDirty('statusBar');
     }
 
-    this._applyFilters();
+    this._applyFilters(true);
     this.scheduler.markDirty('timeline');
     this.scheduler.markDirty('minimap');
   }
@@ -744,72 +768,143 @@ class DevtoolsManager {
   // ------------------------------------------------
 
   _renderPhases() {
-    var panel = this.panels.phases;
     var hasTimeline = this.phaseTimeline.length > 0;
     var data = hasTimeline ? this.phaseTimeline : this.phases;
-    var self = this;
 
     if (data.length === 0 && !this.telemetry.current_phase) {
-      panel.innerHTML = '<div class="events-empty">No phase changes yet</div>';
+      if (!this._phasesEmpty) {
+        this.panels.phases.innerHTML = '<div class="events-empty">No phase changes yet</div>';
+        this._phasesEmpty = true;
+        this._phaseHeroEl = null;
+        this._phaseEntriesEl = null;
+        this._phaseRenderedCount = 0;
+      }
       return;
     }
 
-    var html = '';
+    var panel = this.panels.phases;
+    var self = this;
 
-    // Current phase hero card
+    // Lazily create hero + entries container
+    if (this._phasesEmpty || !this._phaseHeroEl) {
+      panel.innerHTML = '';
+      this._phasesEmpty = false;
+
+      var hero = document.createElement('div');
+      hero.className = 'phase-hero';
+      var heroLabel = document.createElement('div');
+      heroLabel.className = 'phase-hero-label';
+      heroLabel.textContent = 'Current Phase';
+      hero.appendChild(heroLabel);
+      var heroName = document.createElement('div');
+      heroName.className = 'phase-hero-name';
+      hero.appendChild(heroName);
+      panel.appendChild(hero);
+      this._phaseHeroEl = heroName;
+
+      var entries = document.createElement('div');
+      entries.className = 'phase-entries';
+      panel.appendChild(entries);
+      this._phaseEntriesEl = entries;
+      this._phaseRenderedCount = 0;
+    }
+
+    // Update hero text
     var currentPhase = this.telemetry.current_phase || (data.length > 0 ? data[data.length - 1].to : null);
-    if (currentPhase) {
-      html += '<div class="phase-hero">' +
-        '<div class="phase-hero-label">Current Phase</div>' +
-        '<div class="phase-hero-name">' + this._esc(currentPhase) + '</div>' +
-        '</div>';
-    }
+    this._phaseHeroEl.textContent = currentPhase || '';
 
-    // Phase transition entries with duration bars
+    // Append only new entries (incremental)
     var totalMs = Date.now() - this.sessionStart;
-
-    if (data.length > 0) {
-      html += '<div class="phase-entries">';
-      data.forEach(function (entry, i) {
-        var isTimeline = entry.duration_secs !== undefined;
-        var durationMs = isTimeline ? entry.duration_secs * 1000 : 0;
-        var pct = totalMs > 0 ? Math.min(100, (durationMs / totalMs) * 100) : 0;
-        var durationStr = isTimeline
-          ? (entry.duration_secs < 1 ? (entry.duration_secs * 1000).toFixed(0) + 'ms' : entry.duration_secs.toFixed(1) + 's')
-          : '';
-
-        var isCurrent = i === data.length - 1;
-        var triggerLabel = entry.trigger || entry.reason || '';
-        var triggerClass = triggerLabel.includes('programmatic') ? 'programmatic' : 'guard';
-
-        html += '<div class="phase-entry' + (isCurrent ? ' current' : '') + '">' +
-          '<div class="phase-entry-header">' +
-          '<span class="phase-dot' + (isCurrent ? ' active' : '') + '"></span>' +
-          '<span class="phase-from">' + self._esc(entry.from) + '</span>' +
-          '<span class="phase-arrow">&rarr;</span>' +
-          '<span class="phase-to">' + self._esc(entry.to) + '</span>' +
-          (durationStr ? '<span class="phase-dur">' + durationStr + '</span>' : '') +
-          '</div>';
-
-        if (pct > 0) {
-          html += '<div class="phase-bar-track"><div class="phase-bar-fill" style="width:' + pct + '%"></div></div>';
-        }
-
-        if (triggerLabel) {
-          html += '<div class="phase-entry-trigger"><span class="phase-trigger ' + triggerClass + '">' + self._esc(triggerLabel) + '</span>';
-          if (entry.turn !== undefined) {
-            html += '<span class="phase-turn">turn ' + entry.turn + '</span>';
-          }
-          html += '</div>';
-        }
-
-        html += '</div>';
-      });
-      html += '</div>';
+    for (var i = this._phaseRenderedCount; i < data.length; i++) {
+      var entry = data[i];
+      var el = this._createPhaseEntry(entry, i === data.length - 1, totalMs);
+      this._phaseEntriesEl.appendChild(el);
     }
 
-    panel.innerHTML = html;
+    // Update "current" status on the previous last entry
+    if (this._phaseRenderedCount > 0 && this._phaseRenderedCount < data.length) {
+      var prevLast = this._phaseEntriesEl.children[this._phaseRenderedCount - 1];
+      if (prevLast) {
+        prevLast.classList.remove('current');
+        var prevDot = prevLast.querySelector('.phase-dot');
+        if (prevDot) prevDot.classList.remove('active');
+      }
+    }
+
+    this._phaseRenderedCount = data.length;
     panel.scrollTop = panel.scrollHeight;
+  }
+
+  _createPhaseEntry(entry, isCurrent, totalMs) {
+    var isTimeline = entry.duration_secs !== undefined;
+    var durationMs = isTimeline ? entry.duration_secs * 1000 : 0;
+    var pct = totalMs > 0 ? Math.min(100, (durationMs / totalMs) * 100) : 0;
+    var durationStr = isTimeline
+      ? (entry.duration_secs < 1 ? (entry.duration_secs * 1000).toFixed(0) + 'ms' : entry.duration_secs.toFixed(1) + 's')
+      : '';
+
+    var el = document.createElement('div');
+    el.className = 'phase-entry' + (isCurrent ? ' current' : '');
+
+    var header = document.createElement('div');
+    header.className = 'phase-entry-header';
+
+    var dot = document.createElement('span');
+    dot.className = 'phase-dot' + (isCurrent ? ' active' : '');
+    header.appendChild(dot);
+
+    var from = document.createElement('span');
+    from.className = 'phase-from';
+    from.textContent = entry.from;
+    header.appendChild(from);
+
+    var arrow = document.createElement('span');
+    arrow.className = 'phase-arrow';
+    arrow.innerHTML = '&rarr;';
+    header.appendChild(arrow);
+
+    var to = document.createElement('span');
+    to.className = 'phase-to';
+    to.textContent = entry.to;
+    header.appendChild(to);
+
+    if (durationStr) {
+      var dur = document.createElement('span');
+      dur.className = 'phase-dur';
+      dur.textContent = durationStr;
+      header.appendChild(dur);
+    }
+
+    el.appendChild(header);
+
+    if (pct > 0) {
+      var barTrack = document.createElement('div');
+      barTrack.className = 'phase-bar-track';
+      var barFill = document.createElement('div');
+      barFill.className = 'phase-bar-fill';
+      barFill.style.width = pct + '%';
+      barTrack.appendChild(barFill);
+      el.appendChild(barTrack);
+    }
+
+    var triggerLabel = entry.trigger || entry.reason || '';
+    if (triggerLabel) {
+      var triggerDiv = document.createElement('div');
+      triggerDiv.className = 'phase-entry-trigger';
+      var triggerSpan = document.createElement('span');
+      triggerSpan.className = 'phase-trigger ' + (triggerLabel.includes('programmatic') ? 'programmatic' : 'guard');
+      triggerSpan.textContent = triggerLabel;
+      triggerDiv.appendChild(triggerSpan);
+      if (entry.turn !== undefined) {
+        var turnSpan = document.createElement('span');
+        turnSpan.className = 'phase-turn';
+        turnSpan.textContent = 'turn ' + entry.turn;
+        triggerDiv.appendChild(turnSpan);
+      }
+      el.appendChild(triggerDiv);
+    }
+
+    return el;
   }
 
   // ------------------------------------------------
@@ -817,29 +912,34 @@ class DevtoolsManager {
   // ------------------------------------------------
 
   _renderMetrics() {
-    var panel = this.panels.metrics;
     var stats = this.telemetry;
 
     if (!stats || Object.keys(stats).length === 0) {
-      panel.innerHTML = '<div class="events-empty">No metrics yet</div>';
+      if (!this._metricsEmpty) {
+        this.panels.metrics.innerHTML = '<div class="events-empty">No metrics yet</div>';
+        this._metricsEmpty = true;
+        this._metricsRefs = null;
+      }
       return;
     }
 
+    // Build DOM skeleton on first render, then do targeted text updates
+    if (this._metricsEmpty || !this._metricsRefs) {
+      this._buildMetricsSkeleton();
+      this._metricsEmpty = false;
+    }
+
+    var r = this._metricsRefs;
     var avg = Math.round(stats.avg_response_latency_ms || 0);
     var last = Math.round(stats.last_response_latency_ms || 0);
     var minL = Math.round(stats.min_response_latency_ms || 0);
     var maxL = Math.round(stats.max_response_latency_ms || 0);
     var responses = stats.response_count || 0;
-
-    // Token counts
     var totalTokens = stats.total_token_count || 0;
     var promptTokens = stats.prompt_token_count || 0;
     var responseTokens = stats.response_token_count || 0;
-
-    // Cost estimation (Gemini 2.0 Flash pricing)
     var cost = promptTokens * 0.000000075 + responseTokens * 0.0000003;
 
-    // Uptime formatting
     var uptimeSecs = stats.uptime_secs || 0;
     var uptimeMin = Math.floor(uptimeSecs / 60);
     var uptimeSec = Math.floor(uptimeSecs % 60);
@@ -847,139 +947,262 @@ class DevtoolsManager {
       ? uptimeMin + 'm ' + (uptimeSec < 10 ? '0' : '') + uptimeSec + 's'
       : uptimeSec + 's';
 
-    var html = '<div class="metrics-content">';
+    // Update hero values (text only — no DOM creation)
+    r.latencyValue.textContent = avg;
+    r.latencySub.textContent = 'last ' + last + 'ms' + (responses > 1 ? '\n' + minL + ' \u2013 ' + maxL + 'ms' : '');
+    r.tokensValue.textContent = totalTokens.toLocaleString();
+    r.tokensSub.textContent = promptTokens.toLocaleString() + ' prompt\n' +
+      responseTokens.toLocaleString() + ' response\nest. ~$' + cost.toFixed(6);
+    r.sessionValue.textContent = uptimeStr;
+    var sessionSubText = responses + ' turns\n' + (stats.interruptions || 0) + ' interruptions';
+    if (stats.current_phase) sessionSubText += '\nphase: ' + stats.current_phase;
+    r.sessionSub.textContent = sessionSubText;
 
-    // Three-column hero layout
-    html += '<div class="metrics-heroes">';
-
-    // Latency hero
-    html += '<div class="metrics-hero">' +
-      '<div class="metrics-hero-label">Latency</div>' +
-      '<div class="metrics-hero-value">' + avg + '<span class="nfr-unit">ms</span></div>' +
-      '<div class="metrics-hero-sub">' +
-      'last ' + last + 'ms';
+    // Range visualization
     if (responses > 1) {
-      html += '<br>' + minL + ' &ndash; ' + maxL + 'ms';
-    }
-    html += '</div></div>';
-
-    // Tokens hero
-    html += '<div class="metrics-hero">' +
-      '<div class="metrics-hero-label">Tokens</div>' +
-      '<div class="metrics-hero-value">' + totalTokens.toLocaleString() + '</div>' +
-      '<div class="metrics-hero-sub">' +
-      promptTokens.toLocaleString() + ' prompt<br>' +
-      responseTokens.toLocaleString() + ' response<br>' +
-      'est. ~$' + cost.toFixed(6) +
-      '</div></div>';
-
-    // Session hero
-    html += '<div class="metrics-hero">' +
-      '<div class="metrics-hero-label">Session</div>' +
-      '<div class="metrics-hero-value">' + uptimeStr + '</div>' +
-      '<div class="metrics-hero-sub">' +
-      responses + ' turns<br>' +
-      (stats.interruptions || 0) + ' interruptions';
-    if (stats.current_phase) {
-      html += '<br>phase: ' + this._esc(stats.current_phase);
-    }
-    html += '</div></div>';
-
-    html += '</div>'; // .metrics-heroes
-
-    // Latency range visualization (kept from original)
-    if (responses > 1) {
+      r.rangeVis.style.display = '';
+      r.rangeMin.textContent = minL + 'ms';
+      r.rangeMax.textContent = maxL + 'ms';
       var range = maxL - minL;
-      var lastPct = range > 0 ? Math.min(100, Math.max(0, (last - minL) / range * 100)) : 50;
       var avgPct = range > 0 ? Math.min(100, Math.max(0, (avg - minL) / range * 100)) : 50;
-
-      html += '<div class="nfr-range-vis" style="margin:0 0 4px; border-radius:6px; border:1px solid var(--border-light);">' +
-        '<div class="nfr-range-labels"><span>' + minL + 'ms</span><span>' + maxL + 'ms</span></div>' +
-        '<div class="nfr-range-track">' +
-        '<div class="nfr-range-fill" style="width:100%"></div>' +
-        '<div class="nfr-range-marker nfr-range-marker-avg" style="left:' + avgPct + '%" title="avg ' + avg + 'ms"></div>' +
-        '<div class="nfr-range-marker nfr-range-marker-last" style="left:' + lastPct + '%" title="last ' + last + 'ms"></div>' +
-        '</div>' +
-        '<div class="nfr-range-legend">' +
-        '<span class="nfr-range-legend-item"><span class="nfr-dot-avg"></span>avg</span>' +
-        '<span class="nfr-range-legend-item"><span class="nfr-dot-last"></span>last</span>' +
-        '</div>' +
-        '</div>';
+      var lastPct = range > 0 ? Math.min(100, Math.max(0, (last - minL) / range * 100)) : 50;
+      r.rangeAvgMarker.style.left = avgPct + '%';
+      r.rangeAvgMarker.title = 'avg ' + avg + 'ms';
+      r.rangeLastMarker.style.left = lastPct + '%';
+      r.rangeLastMarker.title = 'last ' + last + 'ms';
+    } else {
+      r.rangeVis.style.display = 'none';
     }
 
-    // Per-turn latency sparkline
+    // Sparkline — update data and re-render (canvas itself persists)
     if (this.turnLatencies.length > 0) {
-      html += '<div class="metrics-sparkline-wrap">' +
-        '<div class="metrics-sparkline-label">Per-Turn Latency</div>' +
-        '<canvas class="metrics-sparkline" id="metrics-sparkline-canvas"></canvas>' +
-        '</div>';
-    }
-
-    // Audio section (kept from original)
-    if (stats.audio_chunks_out > 0) {
-      html += '<div class="nfr-section">' +
-        '<div class="nfr-section-header">' +
-        '<span class="nfr-section-icon audio"></span>' +
-        '<span class="nfr-section-title">Audio</span>' +
-        '</div>' +
-        '<div class="nfr-metric-strip">' +
-        '<div class="nfr-metric">' +
-        '<span class="nfr-metric-value">' + (stats.audio_kbytes_out || 0) + '<span class="nfr-unit">KB</span></span>' +
-        '<span class="nfr-metric-label">Total Out</span>' +
-        '</div>' +
-        '<div class="nfr-metric">' +
-        '<span class="nfr-metric-value">' + (stats.audio_throughput_kbps || 0) + '<span class="nfr-unit">KB/s</span></span>' +
-        '<span class="nfr-metric-label">Throughput</span>' +
-        '</div>' +
-        '</div></div>';
-    }
-
-    // Tool calls section (kept from original)
-    if (this.toolCalls.length > 0) {
-      var self = this;
-      html += '<div class="nfr-section">' +
-        '<div class="nfr-section-header">' +
-        '<span class="nfr-section-icon tools"></span>' +
-        '<span class="nfr-section-title">Tool Calls</span>' +
-        '<span class="nfr-section-count">' + this.toolCalls.length + '</span>' +
-        '</div>' +
-        '<div class="nfr-tool-list">';
-
-      this.toolCalls.slice(-5).forEach(function (tc) {
-        html += '<div class="nfr-tool-entry">' +
-          '<span class="nfr-tool-name">' + self._esc(tc.name) + '</span>' +
-          '<span class="nfr-tool-args">' + self._truncate(tc.args, 60) + '</span>' +
-          (tc.result ? '<span class="nfr-tool-result">' + self._truncate(tc.result, 80) + '</span>' : '') +
-          '</div>';
-      });
-
-      html += '</div></div>';
-    }
-
-    // OTel export button
-    html += '<div class="metrics-export">' +
-      '<button class="export-btn" id="export-otlp-btn">Copy Trace as OTLP JSON</button>' +
-      '</div>';
-
-    html += '</div>'; // .metrics-content
-    panel.innerHTML = html;
-
-    // Wire up export button
-    var exportBtn = panel.querySelector('#export-otlp-btn');
-    if (exportBtn) {
-      var self2 = this;
-      exportBtn.addEventListener('click', function () { self2._exportOtlpJson(); });
-    }
-
-    // Render sparkline after innerHTML update
-    var sparkCanvas = panel.querySelector('#metrics-sparkline-canvas');
-    if (sparkCanvas && this.turnLatencies.length > 0) {
-      this._sparkline = new Sparkline(sparkCanvas);
+      r.sparklineWrap.style.display = '';
+      if (!this._sparkline) {
+        this._sparkline = new Sparkline(r.sparklineCanvas);
+      }
       this._sparkline.setData(this.turnLatencies);
       this._sparkline.render();
+    } else {
+      r.sparklineWrap.style.display = 'none';
+    }
+
+    // Audio section
+    if (stats.audio_chunks_out > 0) {
+      r.audioSection.style.display = '';
+      r.audioKB.textContent = (stats.audio_kbytes_out || 0);
+      r.audioKBPS.textContent = (stats.audio_throughput_kbps || 0);
+    } else {
+      r.audioSection.style.display = 'none';
+    }
+
+    // Tool calls section — rebuild only the list when count changes
+    if (this.toolCalls.length > 0) {
+      r.toolSection.style.display = '';
+      r.toolCount.textContent = this.toolCalls.length;
+      if (this.toolCalls.length !== this._metricsToolCount) {
+        r.toolList.innerHTML = '';
+        var self = this;
+        this.toolCalls.slice(-5).forEach(function (tc) {
+          var div = document.createElement('div');
+          div.className = 'nfr-tool-entry';
+          var nameSpan = document.createElement('span');
+          nameSpan.className = 'nfr-tool-name';
+          nameSpan.textContent = tc.name;
+          div.appendChild(nameSpan);
+          var argsSpan = document.createElement('span');
+          argsSpan.className = 'nfr-tool-args';
+          argsSpan.textContent = self._truncText(tc.args, 60);
+          div.appendChild(argsSpan);
+          if (tc.result) {
+            var resultSpan = document.createElement('span');
+            resultSpan.className = 'nfr-tool-result';
+            resultSpan.textContent = self._truncText(tc.result, 80);
+            div.appendChild(resultSpan);
+          }
+          r.toolList.appendChild(div);
+        });
+        this._metricsToolCount = this.toolCalls.length;
+      }
+    } else {
+      r.toolSection.style.display = 'none';
     }
 
     this._updateHealthIndicator(stats);
+  }
+
+  _buildMetricsSkeleton() {
+    var panel = this.panels.metrics;
+    panel.innerHTML = '';
+    var self = this;
+
+    var content = document.createElement('div');
+    content.className = 'metrics-content';
+
+    // Heroes
+    var heroes = document.createElement('div');
+    heroes.className = 'metrics-heroes';
+
+    var latencyHero = this._createHero('Latency', 'ms');
+    heroes.appendChild(latencyHero.el);
+
+    var tokensHero = this._createHero('Tokens');
+    heroes.appendChild(tokensHero.el);
+
+    var sessionHero = this._createHero('Session');
+    heroes.appendChild(sessionHero.el);
+
+    content.appendChild(heroes);
+
+    // Range visualization (hidden initially)
+    var rangeVis = document.createElement('div');
+    rangeVis.className = 'nfr-range-vis';
+    rangeVis.style.cssText = 'margin:0 0 4px; border-radius:6px; border:1px solid var(--border-light); display:none';
+    var rangeLabels = document.createElement('div');
+    rangeLabels.className = 'nfr-range-labels';
+    var rangeMin = document.createElement('span');
+    var rangeMax = document.createElement('span');
+    rangeLabels.appendChild(rangeMin);
+    rangeLabels.appendChild(rangeMax);
+    rangeVis.appendChild(rangeLabels);
+    var rangeTrack = document.createElement('div');
+    rangeTrack.className = 'nfr-range-track';
+    var rangeFill = document.createElement('div');
+    rangeFill.className = 'nfr-range-fill';
+    rangeFill.style.width = '100%';
+    rangeTrack.appendChild(rangeFill);
+    var rangeAvgMarker = document.createElement('div');
+    rangeAvgMarker.className = 'nfr-range-marker nfr-range-marker-avg';
+    rangeTrack.appendChild(rangeAvgMarker);
+    var rangeLastMarker = document.createElement('div');
+    rangeLastMarker.className = 'nfr-range-marker nfr-range-marker-last';
+    rangeTrack.appendChild(rangeLastMarker);
+    rangeVis.appendChild(rangeTrack);
+    var rangeLegend = document.createElement('div');
+    rangeLegend.className = 'nfr-range-legend';
+    rangeLegend.innerHTML = '<span class="nfr-range-legend-item"><span class="nfr-dot-avg"></span>avg</span>' +
+      '<span class="nfr-range-legend-item"><span class="nfr-dot-last"></span>last</span>';
+    rangeVis.appendChild(rangeLegend);
+    content.appendChild(rangeVis);
+
+    // Sparkline (hidden initially)
+    var sparklineWrap = document.createElement('div');
+    sparklineWrap.className = 'metrics-sparkline-wrap';
+    sparklineWrap.style.display = 'none';
+    var sparklineLabel = document.createElement('div');
+    sparklineLabel.className = 'metrics-sparkline-label';
+    sparklineLabel.textContent = 'Per-Turn Latency';
+    sparklineWrap.appendChild(sparklineLabel);
+    var sparklineCanvas = document.createElement('canvas');
+    sparklineCanvas.className = 'metrics-sparkline';
+    sparklineWrap.appendChild(sparklineCanvas);
+    content.appendChild(sparklineWrap);
+
+    // Audio section (hidden initially)
+    var audioSection = document.createElement('div');
+    audioSection.className = 'nfr-section';
+    audioSection.style.display = 'none';
+    audioSection.innerHTML = '<div class="nfr-section-header"><span class="nfr-section-icon audio"></span><span class="nfr-section-title">Audio</span></div>';
+    var audioStrip = document.createElement('div');
+    audioStrip.className = 'nfr-metric-strip';
+    var audioKBMetric = document.createElement('div');
+    audioKBMetric.className = 'nfr-metric';
+    var audioKBVal = document.createElement('span');
+    audioKBVal.className = 'nfr-metric-value';
+    audioKBMetric.appendChild(audioKBVal);
+    var audioKBLabel = document.createElement('span');
+    audioKBLabel.className = 'nfr-metric-label';
+    audioKBLabel.textContent = 'Total Out (KB)';
+    audioKBMetric.appendChild(audioKBLabel);
+    audioStrip.appendChild(audioKBMetric);
+    var audioKBPSMetric = document.createElement('div');
+    audioKBPSMetric.className = 'nfr-metric';
+    var audioKBPSVal = document.createElement('span');
+    audioKBPSVal.className = 'nfr-metric-value';
+    audioKBPSMetric.appendChild(audioKBPSVal);
+    var audioKBPSLabel = document.createElement('span');
+    audioKBPSLabel.className = 'nfr-metric-label';
+    audioKBPSLabel.textContent = 'Throughput (KB/s)';
+    audioKBPSMetric.appendChild(audioKBPSLabel);
+    audioStrip.appendChild(audioKBPSMetric);
+    audioSection.appendChild(audioStrip);
+    content.appendChild(audioSection);
+
+    // Tool calls section (hidden initially)
+    var toolSection = document.createElement('div');
+    toolSection.className = 'nfr-section';
+    toolSection.style.display = 'none';
+    var toolHeader = document.createElement('div');
+    toolHeader.className = 'nfr-section-header';
+    toolHeader.innerHTML = '<span class="nfr-section-icon tools"></span><span class="nfr-section-title">Tool Calls</span>';
+    var toolCount = document.createElement('span');
+    toolCount.className = 'nfr-section-count';
+    toolHeader.appendChild(toolCount);
+    toolSection.appendChild(toolHeader);
+    var toolList = document.createElement('div');
+    toolList.className = 'nfr-tool-list';
+    toolSection.appendChild(toolList);
+    content.appendChild(toolSection);
+
+    // Export button
+    var exportDiv = document.createElement('div');
+    exportDiv.className = 'metrics-export';
+    var exportBtn = document.createElement('button');
+    exportBtn.className = 'export-btn';
+    exportBtn.textContent = 'Copy Trace as OTLP JSON';
+    exportBtn.addEventListener('click', function () { self._exportOtlpJson(); });
+    exportDiv.appendChild(exportBtn);
+    content.appendChild(exportDiv);
+
+    panel.appendChild(content);
+
+    // Cache all references for targeted updates
+    this._metricsRefs = {
+      latencyValue: latencyHero.value,
+      latencySub: latencyHero.sub,
+      tokensValue: tokensHero.value,
+      tokensSub: tokensHero.sub,
+      sessionValue: sessionHero.value,
+      sessionSub: sessionHero.sub,
+      rangeVis: rangeVis,
+      rangeMin: rangeMin,
+      rangeMax: rangeMax,
+      rangeAvgMarker: rangeAvgMarker,
+      rangeLastMarker: rangeLastMarker,
+      sparklineWrap: sparklineWrap,
+      sparklineCanvas: sparklineCanvas,
+      audioSection: audioSection,
+      audioKB: audioKBVal,
+      audioKBPS: audioKBPSVal,
+      toolSection: toolSection,
+      toolCount: toolCount,
+      toolList: toolList,
+      exportBtn: exportBtn
+    };
+    this._metricsToolCount = 0;
+    this._sparkline = null;
+  }
+
+  _createHero(label, unit) {
+    var el = document.createElement('div');
+    el.className = 'metrics-hero';
+    var lbl = document.createElement('div');
+    lbl.className = 'metrics-hero-label';
+    lbl.textContent = label;
+    el.appendChild(lbl);
+    var val = document.createElement('div');
+    val.className = 'metrics-hero-value';
+    el.appendChild(val);
+    if (unit) {
+      var unitSpan = document.createElement('span');
+      unitSpan.className = 'nfr-unit';
+      unitSpan.textContent = unit;
+      val.appendChild(unitSpan);
+    }
+    var sub = document.createElement('div');
+    sub.className = 'metrics-hero-sub';
+    sub.style.whiteSpace = 'pre-line';
+    el.appendChild(sub);
+    return { el: el, value: val, sub: sub };
   }
 
   // ------------------------------------------------
@@ -1160,9 +1383,9 @@ class DevtoolsManager {
   }
 
   _truncate(str, max) {
-    var escaped = this._esc(String(str));
-    if (escaped.length <= max) return escaped;
-    return escaped.substring(0, max) + '<span class="truncated">...</span>';
+    var s = String(str);
+    if (s.length <= max) return this._esc(s);
+    return this._esc(s.substring(0, max)) + '<span class="truncated">...</span>';
   }
 
   _formatValue(value) {
@@ -1170,7 +1393,7 @@ class DevtoolsManager {
       return { display: 'null', className: 'null' };
     }
     if (typeof value === 'string') {
-      return { display: '"' + this._esc(value) + '"', className: 'string' };
+      return { display: '"' + value + '"', className: 'string' };
     }
     if (typeof value === 'number') {
       return { display: String(value), className: 'number' };
@@ -1180,13 +1403,12 @@ class DevtoolsManager {
     }
     var json = JSON.stringify(value, null, 1);
     var truncated = json.length > 120 ? json.substring(0, 120) + '...' : json;
-    return { display: this._esc(truncated), className: '' };
+    return { display: truncated, className: '' };
   }
 
   _esc(str) {
-    var div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
+    this._escDiv.textContent = str;
+    return this._escDiv.innerHTML;
   }
 
   _exportOtlpJson() {
