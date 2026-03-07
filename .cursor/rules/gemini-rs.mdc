@@ -1,0 +1,59 @@
+---
+description: gemini-rs development guidelines
+globs: **/*.rs
+alwaysApply: true
+---
+
+# gemini-rs Development Rules
+
+## Architecture
+
+Three-crate layered stack for the Gemini Multimodal Live API:
+
+- **rs-genai (L0)**: Wire protocol, transport, auth, types. No business logic.
+- **rs-adk (L1)**: Agent runtime, tools, state, phases, three-lane processor.
+- **adk-rs-fluent (L2)**: Fluent DX, operator algebra, composition.
+
+## Import Rules
+
+- Applications: `use adk_rs_fluent::prelude::*;`
+- Custom processors: `use rs_adk::*;`
+- Raw WebSocket: `use rs_genai::prelude::*;`
+- Never import from internal modules of lower layers when a re-export exists.
+
+## Key Patterns
+
+### State Management
+- Use `State::modify()` for atomic read-modify-write, not separate get+set.
+- Use `StateKey<T>` constants for frequently accessed keys.
+- Use `state.with()` for zero-copy borrows.
+- Prefix namespaces: `session:`, `derived:` (read-only), `turn:` (cleared each turn), `app:`, `bg:`, `user:`, `temp:`.
+
+### Tool Definition
+- Prefer `TypedTool` over `SimpleTool` — auto-generated schemas prevent drift.
+- Register tools via `ToolDispatcher`, not manually.
+- Background tools: use `ToolExecutionMode::Background` with scheduling.
+
+### Three-Lane Processor
+- **Fast lane**: Sync callbacks only. No allocations, no locks, no async. Under 1ms.
+- **Control lane**: Async. Owns TranscriptBuffer. Runs extractors, watchers, phases.
+- **Telemetry lane**: Own broadcast rx. AtomicU64 counters. Debounced 100ms flush.
+
+### Phase System
+- Always end phase builder chains with `.done()`.
+- Always call `.initial_phase("name")`.
+- Don't use `instruction_template` with phases — use `instruction_amendment` or modifiers.
+- Per-phase tools are client-side filtered. Use tool advisory for model awareness.
+
+### Live Sessions
+- `GeminiLive2_5FlashNativeAudio` only supports `Modality::Audio` output.
+- Tool declarations are fixed at connect time — cannot be updated mid-session.
+- Vertex AI: use `aiplatform.googleapis.com` (not `global-`).
+
+## Code Style
+
+- No unnecessary abstractions. Three similar lines > one premature helper.
+- No speculative dead code. If unused, delete it.
+- No `#[allow(dead_code)]` unless there's a documented reason.
+- Prefer `Content::model(format!(...))` for context injection.
+- Minimize `Arc<Mutex<>>` — use atomic types or owned data in lanes.

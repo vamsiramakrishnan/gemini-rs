@@ -2,6 +2,8 @@
 
 > Full Rust SDK for the Gemini Multimodal Live API -- wire protocol, agent runtime, and fluent DX in three layered crates.
 
+[![CI](https://github.com/vamsiramakrishnan/gemini-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/vamsiramakrishnan/gemini-rs/actions/workflows/ci.yml)
+[![Docs](https://github.com/vamsiramakrishnan/gemini-rs/actions/workflows/docs.yml/badge.svg)](https://github.com/vamsiramakrishnan/gemini-rs/actions/workflows/docs.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
 
@@ -238,6 +240,7 @@ let handle = Live::builder()
                 name: call.name.clone(),
                 response: result,
                 id: call.id.clone(),
+                scheduling: None,  // or Some(FunctionResponseScheduling::WhenIdle)
             }
         }).collect();
         Some(responses)
@@ -628,8 +631,46 @@ Live::builder()
 
 ### Prerequisites
 
-- Rust 1.75+ (2021 edition)
-- A Google AI API key or Vertex AI service account
+| Requirement | Version | Purpose |
+|------------|---------|---------|
+| **Rust** | 1.75+ | Language toolchain ([install](https://rustup.rs/)) |
+| **cargo** | (bundled) | Build system and package manager |
+| **pkg-config** | any | Locates system libraries |
+| **OpenSSL** | 1.1+ | TLS for WebSocket connections |
+| **ALSA dev** (Linux) | any | Audio I/O for voice cookbooks |
+
+**Quick setup (Ubuntu/Debian):**
+
+```bash
+# Install Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source $HOME/.cargo/env
+
+# Install system dependencies
+sudo apt-get update
+sudo apt-get install -y pkg-config libssl-dev libasound2-dev build-essential
+```
+
+**Quick setup (macOS):**
+
+```bash
+# Install Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# System deps (OpenSSL via Homebrew)
+brew install openssl pkg-config
+```
+
+**Environment variables:**
+
+```bash
+# Google AI (API key auth)
+export GEMINI_API_KEY="your-api-key"
+
+# Vertex AI (service account auth)
+export GOOGLE_CLOUD_PROJECT="your-project-id"
+export GOOGLE_CLOUD_LOCATION="us-central1"
+```
 
 ### Build
 
@@ -643,11 +684,18 @@ cargo build --workspace
 cargo test --workspace
 ```
 
+### Lint
+
+```bash
+cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --all -- --check
+```
+
 ### Run the UI cookbook
 
 ```bash
 cd cookbooks/ui
-cargo run
+GEMINI_API_KEY="your-key" cargo run
 # Open http://localhost:3000
 ```
 

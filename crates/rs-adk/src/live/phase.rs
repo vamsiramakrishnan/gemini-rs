@@ -272,6 +272,12 @@ impl PhaseMachine {
         &self.history
     }
 
+    /// Mutable access to the transition history (for testing).
+    #[cfg(test)]
+    pub(crate) fn history_mut(&mut self) -> &mut VecDeque<PhaseTransition> {
+        &mut self.history
+    }
+
     /// Generate a structured navigation context block giving the model
     /// awareness of where it is in the conversation flow.
     ///
