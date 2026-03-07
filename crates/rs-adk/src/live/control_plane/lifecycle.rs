@@ -283,14 +283,35 @@ pub(in crate::live) async fn handle_turn_complete(
     }
 
     // 12. SINGLE instruction send (dedup against last sent)
+    //
+    // Behavior depends on SteeringMode:
+    //   - InstructionUpdate / Hybrid: replace the system instruction via
+    //     `update_instruction()`.  This is the default — the model re-processes
+    //     its full context on every phase change (clear persona shift, but
+    //     causes a latency spike).
+    //   - ContextInjection: deliver the phase instruction as a model-role
+    //     context turn via `send_client_content()`.  The system instruction
+    //     set at connect time is never touched again, keeping it lightweight
+    //     and working *with* the model's conversational intelligence.
     if let Some(instruction) = resolved_instruction {
-        let should_update = {
-            let last = shared.last_instruction.lock();
-            last.as_deref() != Some(&instruction)
-        };
-        if should_update {
-            *shared.last_instruction.lock() = Some(instruction.clone());
-            writer.update_instruction(instruction).await.ok();
+        match control_plane.steering_mode {
+            SteeringMode::InstructionUpdate | SteeringMode::Hybrid => {
+                let should_update = {
+                    let last = shared.last_instruction.lock();
+                    last.as_deref() != Some(&instruction)
+                };
+                if should_update {
+                    *shared.last_instruction.lock() = Some(instruction.clone());
+                    writer.update_instruction(instruction).await.ok();
+                }
+            }
+            SteeringMode::ContextInjection => {
+                // Deliver phase instruction as a model-role context turn.
+                // The model sees it as its own prior speech, steering behavior
+                // without replacing the base system instruction.
+                let content = rs_genai::prelude::Content::model(instruction);
+                writer.send_client_content(vec![content], false).await.ok();
+            }
         }
     }
 

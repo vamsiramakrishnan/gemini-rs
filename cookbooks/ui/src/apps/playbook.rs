@@ -397,6 +397,7 @@ impl CookbookApp for Playbook {
         let tx_enter_close = tx.clone();
 
         let handle = Live::builder()
+            .steering_mode(SteeringMode::ContextInjection)
             // Model greets the customer immediately on connect
             .greeting("Begin the conversation. Welcome the customer warmly.")
             .extractor(extractor)

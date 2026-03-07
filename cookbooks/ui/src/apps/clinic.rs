@@ -695,6 +695,7 @@ async fn handle_session(
 
     // 4. Build Live::builder() with full pipeline
     let handle = Live::builder()
+        .steering_mode(SteeringMode::ContextInjection)
         // --- Model-initiated greeting ---
         .greeting("Welcome the patient to Clearview Medical Center and ask how you can help them today.")
         // --- LLM extraction ---

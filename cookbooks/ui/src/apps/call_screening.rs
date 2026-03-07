@@ -487,6 +487,7 @@ async fn handle_session(
 
     // 4. Build Live::builder() with full pipeline
     let handle = Live::builder()
+        .steering_mode(SteeringMode::ContextInjection)
         // --- Model-initiated greeting ---
         .greeting(
             "A new call is coming in. Greet the caller professionally and ask who is calling.",

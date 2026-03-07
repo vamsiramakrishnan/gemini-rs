@@ -494,6 +494,7 @@ impl CookbookApp for SupportAssistant {
         let tx_enter_tech_close = tx.clone();
 
         let handle = Live::builder()
+            .steering_mode(SteeringMode::ContextInjection)
             // Model greets the caller immediately on connect
             .greeting("Greet the caller warmly and ask how you can help them today.")
             .extractor(extractor)

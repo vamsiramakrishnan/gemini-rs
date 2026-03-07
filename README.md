@@ -618,9 +618,32 @@ let handle = Live::builder()
         p.with_state(&["caller_name", "caller_org"])
          .navigation()  // inject phase navigation context
     })
+    // Recommended: set persona once, steer via context injection
+    .steering_mode(SteeringMode::ContextInjection)
     .connect_vertex(project, location, token)
     .await?;
 ```
+
+#### Steering Modes
+
+Control how the SDK delivers phase instructions to the model. This is the most
+impactful configuration choice for multi-phase apps:
+
+| Mode | System Instruction | Phase Instructions | Best For |
+|------|--------------------|--------------------|----------|
+| `ContextInjection` | Set once at connect | Delivered as model-role context turns | Multi-phase apps with stable persona (**recommended**) |
+| `InstructionUpdate` | Replaced on every transition | Baked into system instruction | Agents with radically different personas per phase |
+| `Hybrid` | Replaced on transition | Modifiers as context turns | Persona shifts + per-turn steering |
+
+```rust
+// Recommended: base persona at connect, phase context injected per turn
+Live::builder()
+    .instruction("You are a helpful assistant.")
+    .steering_mode(SteeringMode::ContextInjection)
+```
+
+See the [Steering Modes guide](docs/user-guide/steering-modes.md) for the full
+decision matrix, anti-patterns, and implementation details.
 
 #### Phase Navigation Context
 

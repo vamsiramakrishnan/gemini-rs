@@ -634,6 +634,7 @@ async fn handle_session(
 
     // 4. Build Live::builder() with full pipeline
     let handle = Live::builder()
+        .steering_mode(SteeringMode::ContextInjection)
         // --- Model-initiated greeting ---
         .greeting("Welcome the caller to Bella Vista Italian Restaurant. Ask how you can help them today — whether they'd like to make a new reservation, modify an existing one, cancel, or have a question.")
         // --- LLM extraction ---

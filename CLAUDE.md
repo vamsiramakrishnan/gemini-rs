@@ -318,13 +318,18 @@ Live::builder()
 
 ```rust
 Live::builder()
-    // Default: replace system instruction on phase transition
-    .steering_mode(SteeringMode::InstructionUpdate)
-    // Lighter: inject context via send_client_content (model-role turns)
+    // Recommended: base instruction set once at connect, phase instructions
+    // and modifiers delivered as model-role context turns. Lower latency,
+    // no instruction re-processing spike on phase transitions.
     .steering_mode(SteeringMode::ContextInjection)
-    // Both: instruction on transition, context injection per turn
+    // Default: replace system instruction on phase transition.
+    // Use when phases have radically different personas.
+    .steering_mode(SteeringMode::InstructionUpdate)
+    // Both: instruction on transition, context injection per turn.
     .steering_mode(SteeringMode::Hybrid)
 ```
+
+With `ContextInjection`, step 12 in the processor delivers phase instructions via `send_client_content(Content::model(...))` instead of `update_instruction()`. The system instruction set at connect time is never touched again.
 
 **Soft Turn Detection** — Proactive silence awareness when `proactiveAudio` is enabled:
 

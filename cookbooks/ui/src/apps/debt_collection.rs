@@ -667,6 +667,7 @@ impl CookbookApp for DebtCollection {
 
         // 5. Build Live::builder() with full pipeline
         let handle = Live::builder()
+            .steering_mode(SteeringMode::ContextInjection)
             // --- Model-initiated greeting ---
             // The agent delivers the Mini-Miranda disclosure immediately on connect
             .greeting("Begin the call. Deliver the required Mini-Miranda disclosure now.")

@@ -27,6 +27,26 @@ use rs_adk::*;
 use rs_genai::prelude::*;
 ```
 
+### Use ContextInjection steering for multi-phase voice apps
+
+Most multi-phase voice apps share a stable base persona across phases. Use `SteeringMode::ContextInjection` to set the persona once at connect and deliver phase-specific behavior as lightweight model-role context turns. This avoids the latency spike of system instruction replacement on every phase transition.
+
+```rust,ignore
+// Recommended for most apps
+Live::builder()
+    .instruction("You are a helpful restaurant reservation assistant.")
+    .steering_mode(SteeringMode::ContextInjection)
+    .phase("greeting")
+        .instruction("Welcome the guest and ask how you can help.")
+        .done()
+    .phase("booking")
+        .instruction("Help find an available time slot.")
+        .done()
+    .initial_phase("greeting")
+```
+
+Only use `InstructionUpdate` when phases represent genuinely different agent personas (e.g., switching from a receptionist to a triage nurse). See the [Steering Modes guide](steering-modes.md) for the full decision matrix and anti-patterns.
+
 ### Keep tool callbacks fast — or use background execution
 
 The model waits for standard tool responses before continuing. A slow tool blocks the entire conversation turn. For tools that need to do expensive work (database queries, external API calls, LLM pipelines), you have two options:

@@ -10,16 +10,74 @@ use serde_json::Value;
 use crate::state::State;
 
 /// How the phase machine steers the model's behavior.
+///
+/// Controls two things:
+/// 1. **Phase instruction delivery** — whether the phase instruction is sent as
+///    a system instruction update (`update_instruction`) or as a model-role
+///    context turn (`send_client_content`).
+/// 2. **Per-turn modifier delivery** — whether `with_state`, `when`, and
+///    `with_context` modifiers are baked into the system instruction or
+///    injected as model-role context turns.
+///
+/// # Choosing a mode
+///
+/// | Mode | System instruction | Modifiers | Best for |
+/// |------|--------------------|-----------|----------|
+/// | `InstructionUpdate` | Replaced on every phase transition | Baked into instruction | Agents with radically different personas per phase |
+/// | `ContextInjection` | Set once at connect, never touched | Model-role context turns | Multi-phase apps with stable persona (recommended) |
+/// | `Hybrid` | Replaced on phase transition | Model-role context turns | Persona shifts + lightweight per-turn context |
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use adk_rs_fluent::prelude::*;
+///
+/// // Recommended: base instruction at connect, phase context via injection
+/// let handle = Live::builder()
+///     .instruction("You are a helpful restaurant reservation assistant.")
+///     .steering_mode(SteeringMode::ContextInjection)
+///     .phase("greeting")
+///         .instruction("Welcome the guest and ask how you can help.")
+///         .done()
+///     .phase("booking")
+///         .instruction("Help the guest find an available time slot.")
+///         .done()
+///     .initial_phase("greeting")
+///     .connect_google_ai(api_key)
+///     .await?;
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SteeringMode {
     /// Replace system instruction on phase transition.
-    /// Use for major persona/goal changes.
+    ///
+    /// The model re-processes its full context on every phase change.
+    /// Gives the clearest persona shift but causes a latency spike as the
+    /// model ingests the new instruction.
+    ///
+    /// Per-turn modifiers (`with_state`, `when`, `with_context`) are baked
+    /// into the system instruction text.
     #[default]
     InstructionUpdate,
-    /// Inject steering context via `send_client_content`.
-    /// Lighter weight, works WITH the model's conversational intelligence.
+
+    /// Inject all steering via `send_client_content` (model-role turns).
+    ///
+    /// The system instruction set at connect time is **never updated**.
+    /// Phase instructions and per-turn modifiers are delivered as model-role
+    /// context turns, working *with* the model's conversational intelligence
+    /// rather than overriding it.
+    ///
+    /// Lighter weight, lower latency, avoids instruction re-processing.
+    /// Best for multi-phase apps where the base persona is stable.
     ContextInjection,
-    /// Hybrid: instruction update on phase transition, context injection per turn.
+
+    /// Hybrid: instruction update on phase transition + context injection per turn.
+    ///
+    /// Phase transitions trigger a system instruction replacement (like
+    /// `InstructionUpdate`), but per-turn modifiers are delivered as
+    /// model-role context turns (like `ContextInjection`).
+    ///
+    /// Use when phases represent genuinely different personas but you also
+    /// want lightweight per-turn steering within each phase.
     Hybrid,
 }
 
