@@ -35,6 +35,9 @@ use serde::Serialize;
 use serde_json::Value;
 
 use rs_adk::live::extractor::{ExtractionTrigger, LlmExtractor, TurnExtractor};
+use rs_adk::live::needs::RepairConfig;
+use rs_adk::live::persistence::SessionPersistence;
+use rs_adk::live::steering::SteeringMode;
 use rs_adk::live::{
     CallbackMode, ComputedRegistry, ComputedVar, EventCallbacks, InstructionModifier, LiveHandle,
     LiveSessionBuilder, Phase, PhaseMachine, RateDetector, ResultFormatter, SustainedDetector,
@@ -120,6 +123,13 @@ pub struct Live {
     deferred_agent_tools: Vec<DeferredAgentTool>,
     // LLMs to warm up at connect time.
     warm_up_llms: Vec<Arc<dyn BaseLlm>>,
+    // Control plane configuration.
+    soft_turn_timeout: Option<Duration>,
+    steering_mode: SteeringMode,
+    repair_config: Option<RepairConfig>,
+    persistence: Option<Arc<dyn SessionPersistence>>,
+    session_id: Option<String>,
+    tool_advisory: bool,
 }
 
 impl Live {
@@ -141,6 +151,12 @@ impl Live {
             tool_execution_modes: HashMap::new(),
             deferred_agent_tools: Vec::new(),
             warm_up_llms: Vec::new(),
+            soft_turn_timeout: None,
+            steering_mode: SteeringMode::default(),
+            repair_config: None,
+            persistence: None,
+            session_id: None,
+            tool_advisory: true,
         }
     }
 
@@ -291,7 +307,7 @@ impl Live {
     pub fn tool_background(mut self, tool_name: impl Into<String>) -> Self {
         self.tool_execution_modes.insert(
             tool_name.into(),
-            ToolExecutionMode::Background { formatter: None },
+            ToolExecutionMode::Background { formatter: None, scheduling: None },
         );
         self
     }
@@ -309,6 +325,28 @@ impl Live {
             tool_name.into(),
             ToolExecutionMode::Background {
                 formatter: Some(formatter),
+                scheduling: None,
+            },
+        );
+        self
+    }
+
+    /// Mark a tool for background execution with a specific scheduling mode.
+    ///
+    /// The scheduling mode controls how the model handles async results:
+    /// - `Interrupt`: halts current output, immediately reports the result
+    /// - `WhenIdle`: waits until current output finishes before handling
+    /// - `Silent`: integrates the result without notifying the user
+    pub fn tool_background_with_scheduling(
+        mut self,
+        tool_name: impl Into<String>,
+        scheduling: rs_genai::prelude::FunctionResponseScheduling,
+    ) -> Self {
+        self.tool_execution_modes.insert(
+            tool_name.into(),
+            ToolExecutionMode::Background {
+                formatter: None,
+                scheduling: Some(scheduling),
             },
         );
         self
@@ -380,6 +418,59 @@ impl Live {
         self.config = self.config
             .context_window_compression(target_tokens)
             .context_window_trigger_tokens(trigger_tokens);
+        self
+    }
+
+    // -- Control Plane --
+
+    /// Enable soft turn detection for proactive silence awareness.
+    ///
+    /// When `proactiveAudio` is enabled, the model may choose not to respond.
+    /// After VAD end, if the model stays silent for `timeout`, a lightweight
+    /// "soft turn" updates state and fires watchers without forcing a response.
+    pub fn soft_turn_timeout(mut self, timeout: Duration) -> Self {
+        self.soft_turn_timeout = Some(timeout);
+        self
+    }
+
+    /// Set the steering mode for how the phase machine delivers instructions.
+    ///
+    /// - `InstructionUpdate` (default): Replace system instruction on transition.
+    /// - `ContextInjection`: Inject steering via `send_client_content`.
+    /// - `Hybrid`: Instruction on transition, context injection per turn.
+    pub fn steering_mode(mut self, mode: SteeringMode) -> Self {
+        self.steering_mode = mode;
+        self
+    }
+
+    /// Enable the conversation repair protocol.
+    ///
+    /// Tracks unfulfilled `needs` per phase. After `nudge_after` stalled turns,
+    /// injects a gentle nudge. After `escalate_after` turns, sets
+    /// `repair:escalation` in state for phase guards to handle.
+    pub fn repair(mut self, config: RepairConfig) -> Self {
+        self.repair_config = Some(config);
+        self
+    }
+
+    /// Set a session persistence backend for surviving process restarts.
+    pub fn persistence(mut self, backend: Arc<dyn SessionPersistence>) -> Self {
+        self.persistence = Some(backend);
+        self
+    }
+
+    /// Set the session ID for persistence.
+    pub fn session_id(mut self, id: impl Into<String>) -> Self {
+        self.session_id = Some(id.into());
+        self
+    }
+
+    /// Enable or disable tool availability advisory on phase transitions.
+    ///
+    /// When enabled (default), the SDK injects a model-role context turn
+    /// telling the model which tools are available in the new phase.
+    pub fn tool_advisory(mut self, enabled: bool) -> Self {
+        self.tool_advisory = enabled;
         self
     }
 
@@ -819,6 +910,16 @@ impl Live {
         self
     }
 
+    /// Called when server sends token usage metadata.
+    ///
+    /// Receives a reference to the full [`UsageMetadata`] including prompt,
+    /// response, cached, tool-use, and thoughts token counts plus per-modality
+    /// breakdowns. Fires on the telemetry lane (not the fast lane).
+    pub fn on_usage(mut self, f: impl Fn(&UsageMetadata) + Send + Sync + 'static) -> Self {
+        self.callbacks.on_usage = Some(Box::new(f));
+        self
+    }
+
     // -- Control Lane Callbacks (async, can block) --
 
     /// Called when model is interrupted by barge-in.
@@ -1058,6 +1159,22 @@ impl Live {
         for (name, mode) in self.tool_execution_modes {
             builder = builder.tool_execution_mode(name, mode);
         }
+
+        // Pass control plane configuration
+        if let Some(timeout) = self.soft_turn_timeout {
+            builder = builder.soft_turn_timeout(timeout);
+        }
+        builder = builder.steering_mode(self.steering_mode);
+        if let Some(config) = self.repair_config {
+            builder = builder.repair(config);
+        }
+        if let Some(p) = self.persistence {
+            builder = builder.persistence(p);
+        }
+        if let Some(id) = self.session_id {
+            builder = builder.session_id(id);
+        }
+        builder = builder.tool_advisory(self.tool_advisory);
 
         // Spawn fire-and-forget warm-up tasks for OOB LLMs
         // (pre-establishes TCP+TLS so first extract call is fast)

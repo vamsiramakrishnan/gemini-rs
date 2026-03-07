@@ -272,7 +272,8 @@ impl PhaseMachine {
         &self.history
     }
 
-    /// Mutable access to the transition history (for testing and internal use).
+    /// Mutable access to the transition history (for testing).
+    #[cfg(test)]
     pub(crate) fn history_mut(&mut self) -> &mut VecDeque<PhaseTransition> {
         &mut self.history
     }

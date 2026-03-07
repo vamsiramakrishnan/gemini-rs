@@ -2,6 +2,8 @@
 
 > Full Rust SDK for the Gemini Multimodal Live API -- wire protocol, agent runtime, and fluent DX in three layered crates.
 
+[![CI](https://github.com/vamsiramakrishnan/gemini-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/vamsiramakrishnan/gemini-rs/actions/workflows/ci.yml)
+[![Docs](https://github.com/vamsiramakrishnan/gemini-rs/actions/workflows/docs.yml/badge.svg)](https://github.com/vamsiramakrishnan/gemini-rs/actions/workflows/docs.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
 
@@ -90,37 +92,268 @@ handle.send_text("Hello").await?;
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────────────┐
-│  adk-rs-fluent  (L2 -- Fluent DX)                                   │
-│                                                                      │
-│  Live::builder()  .  AgentBuilder  .  S.C.T.P.M.A operators         │
-│  PhaseBuilder  .  WatchBuilder  .  Temporal patterns                 │
-├──────────────────────────────────────────────────────────────────────┤
-│  rs-adk  (L1 -- Agent Runtime)                                       │
-│                                                                      │
-│  LiveSessionBuilder  .  LiveHandle  .  Three-lane processor          │
-│  State (prefix-scoped)  .  PhaseMachine  .  ToolDispatcher           │
-│  TextAgent combinators  .  Extractors  .  Watchers  .  Telemetry    │
-│  LlmAgent  .  Runner  .  SessionService  .  MCP  .  A2A            │
-├──────────────────────────────────────────────────────────────────────┤
-│  rs-genai  (L0 -- Wire Protocol)                                     │
-│                                                                      │
-│  Transport (WebSocket + Mock)  .  Codec (JSON)  .  Auth providers    │
-│  SessionHandle  .  Protocol types  .  VAD  .  Jitter buffer         │
-│  Telemetry (OTel + Prometheus)  .  REST APIs (feature-gated)         │
-└──────────────────────────────────────────────────────────────────────┘
++----------------------------------------------------------------------+
+|  adk-rs-fluent  (L2 -- Fluent DX)                                    |
+|                                                                      |
+|  Live::builder()  .  AgentBuilder  .  S.C.T.P.M.A operators         |
+|  PhaseBuilder  .  WatchBuilder  .  Temporal patterns                 |
++----------------------------------------------------------------------+
+|  rs-adk  (L1 -- Agent Runtime)                                       |
+|                                                                      |
+|  LiveSessionBuilder  .  LiveHandle  .  Three-lane processor          |
+|  State (prefix-scoped)  .  PhaseMachine  .  ToolDispatcher           |
+|  TextAgent combinators  .  Extractors  .  Watchers  .  Telemetry    |
+|  LlmAgent  .  Runner  .  SessionService  .  MCP  .  A2A            |
++----------------------------------------------------------------------+
+|  rs-genai  (L0 -- Wire Protocol)                                     |
+|                                                                      |
+|  Transport (WebSocket + Mock)  .  Codec (JSON)  .  Auth providers    |
+|  SessionHandle  .  Protocol types  .  VAD  .  Jitter buffer         |
+|  Telemetry (OTel + Prometheus)  .  REST APIs (feature-gated)         |
++----------------------------------------------------------------------+
 ```
 
-### Three-Lane Processor (L1)
+Each layer depends only on the one below it. Application code imports from the
+highest layer it needs (`adk_rs_fluent::prelude::*` re-exports all three).
 
-All Live session events are routed through a zero-copy dispatcher into three
-independent lanes:
+---
 
-| Lane | Handles | Latency target | Sync model |
-|------|---------|----------------|------------|
-| **Fast** | Audio chunks, text deltas, VAD events, transcription | < 1 ms | Sync callbacks, no locks |
-| **Control** | Tool calls, phase transitions, extractors, watchers, turn lifecycle | Async | Owned `TranscriptBuffer`, `join_all` extractors |
-| **Telemetry** | `SessionSignals` + `SessionTelemetry` | Debounced 100 ms | `AtomicU64` counters, CAS latency tracking |
+## Core Concepts & How They Interplay
+
+A gemini-rs voice session is built from six core concepts that work together.
+This section shows what each one does and how they connect.
+
+```
+                         +------------------+
+                         |   Live::builder  |  (L2 Fluent API)
+                         +--------+---------+
+                                  |  configures
+          +-----------+-----------+-----------+-----------+
+          |           |           |           |           |
+     +----v---+  +----v----+  +--v---+  +----v----+  +--v--------+
+     | Phases |  |Extractors| | Tools |  |Watchers |  | Telemetry |
+     +----+---+  +----+----+  +--+---+  +----+----+  +-----+-----+
+          |           |          |           |              |
+          +-----+-----+----+----+-----+-----+              |
+                |          |          |                     |
+          +-----v----------v----------v-----+        +-----v-----+
+          |            State                |        | Signals & |
+          |  (prefix-scoped, concurrent)    |<-------+ Counters  |
+          +---------------------------------+        +-----------+
+```
+
+### 1. State -- The Shared Spine
+
+Everything reads from and writes to `State`. It is the single source of truth
+for a session -- a concurrent, typed key-value store with prefix-scoped
+namespaces.
+
+```
+State
+  |
+  +-- app:caller_name = "Alice"          (application state)
+  +-- session:turn_count = 5             (auto-tracked by SessionSignals)
+  +-- session:total_token_count = 1284   (auto-tracked from UsageMetadata)
+  +-- derived:risk_level = "high"        (computed variable, read-only)
+  +-- turn:transcript = "I need help"    (cleared each turn)
+  +-- bg:verification_status = "pending" (background agent result)
+```
+
+**Why it matters:** Phase transitions check state. Extractors write to state.
+Watchers fire when state changes. Computed variables derive from state.
+Telemetry auto-populates state. Everything converges here.
+
+### 2. Phases -- Conversation Structure
+
+Phases define the *shape* of a conversation: what the model should do, what
+tools are available, and when to move on.
+
+```
+  [greeting] ---> [identify_caller] ---> [handle_request] ---> [farewell]
+       |               |                       |                    |
+   instruction:    instruction:            instruction:         instruction:
+   "Welcome..."   "Get name..."          "Help with..."       "Say goodbye"
+       |               |                       |
+   tools: []       tools: [lookup]         tools: [search, calc]
+       |               |                       |
+   transition:     transition:             transition:
+   caller_name     request_type            resolved == true
+   is_some()       is_some()
+```
+
+Each phase declares:
+- **Instruction**: what the model should do (static or state-driven dynamic)
+- **Tools**: which tools are available in this phase
+- **Transitions**: state predicates that trigger moves to the next phase
+- **Guards**: predicates that must be true before entering a phase
+- **Needs**: state keys still required (drives navigation context)
+- **Lifecycle hooks**: `on_enter` / `on_exit` for side effects
+
+Phases don't micromanage the model. They set guardrails -- the LLM naturally
+asks follow-up questions until the transition predicate becomes true.
+
+### 3. Extractors -- Structured Data from Conversation
+
+Extractors run out-of-band LLM calls to pull structured data from the
+conversation transcript and write it into State.
+
+```
+ Conversation transcript        OOB LLM call           State
+ +-----------------------+     +---------------+     +------------------+
+ | "Hi, I'm Alice from   | --> | Extract with  | --> | caller_name:     |
+ |  Acme Corp, I need    |     | JSON Schema   |     |   "Alice"        |
+ |  help with billing."  |     +---------------+     | caller_org:      |
+ +-----------------------+                           |   "Acme Corp"    |
+                                                     | request_type:    |
+                                                     |   "billing"      |
+                                                     +------------------+
+                                                           |
+                                                    triggers phase
+                                                    transition!
+```
+
+**Extraction triggers** control *when* extractors fire:
+
+| Trigger | When it fires | Use case |
+|---------|--------------|----------|
+| `EveryTurn` | After every TurnComplete | Default, high-frequency extraction |
+| `Interval(n)` | Every N turns | Reduce LLM costs for slow-changing data |
+| `AfterToolCall` | After tool dispatch completes | Extract from tool results |
+| `OnPhaseChange` | When phase transitions fire | Re-extract on context shift |
+
+### 4. Watchers & Temporal Patterns -- Reactive State
+
+Watchers observe state changes and fire callbacks. Temporal patterns detect
+conditions that persist over time or turns.
+
+```
+  State change: app:score = 0.85 --> 0.95
+                    |
+            +-------v--------+
+            | Watcher:       |
+            | crossed_above  |
+            | threshold=0.9  |
+            +-------+--------+
+                    |
+            fires callback:
+            state.set("alert", true)
+
+
+  Condition held for 30s:          3 consecutive turns:
+  +-------------------------+     +-------------------------+
+  | when_sustained:         |     | when_turns:             |
+  | confused == true        |     | repeating == true       |
+  | for 30 seconds          |     | for 3 turns             |
+  | --> offer help          |     | --> break loop           |
+  +-------------------------+     +-------------------------+
+```
+
+### 5. Tools -- Model Actions
+
+Tools give the model the ability to take actions. gemini-rs supports typed
+tools (auto-schema from Rust structs), simple tools (raw JSON), built-in
+tools (Google Search, code execution), and agent-as-tool (text agent pipelines
+callable by the live model).
+
+```
+  Model decides to call tool
+           |
+  +--------v---------+
+  |  ToolDispatcher   |  Routes by function name
+  +--+-----+-----+---+
+     |     |     |
+  +--v-+ +-v--+ +v---------+
+  |get_| |calc| |verify_   |
+  |wx  | |pay | |identity  |
+  +----+ +----+ +----------+
+  Simple  Typed   AgentTool
+  Tool    Tool    (text agent
+                   pipeline)
+
+  Background tools: model continues talking
+  while the tool executes asynchronously.
+```
+
+**Background tool execution** eliminates dead air in voice sessions. Mark
+tools as background and the model receives a "processing" acknowledgment
+immediately, continuing the conversation while the tool runs:
+
+```rust
+Live::builder()
+    .tools(dispatcher)
+    .tool_background("search_kb")  // runs async, no dead air
+```
+
+### 6. Telemetry -- Observability Pipeline
+
+Telemetry flows through two complementary systems, both running on the
+telemetry lane (off the hot path):
+
+```
+  SessionEvent stream
+        |
+  +-----v--------------+     +------------------+
+  | SessionSignals      |     | SessionTelemetry |
+  | (State keys)        |     | (Atomic counters)|
+  +-----+---------------+     +--------+---------+
+        |                              |
+        v                              v
+  session:turn_count          audio_chunks_out: 1482
+  session:total_token_count   avg_latency_ms: 340
+  session:is_speaking         interruptions: 3
+  session:silence_ms          total_token_count: 5280
+        |                              |
+        v                              v
+  Available to phases,         snapshot() --> JSON
+  watchers, extractors,        for devtools UI
+  transition guards
+```
+
+**SessionSignals** writes to State -- so phases, watchers, and extractors can
+react to session-level metrics (e.g., transition after N turns, alert when
+tokens exceed budget).
+
+**SessionTelemetry** tracks lock-free atomic counters (~1ns per operation) for
+performance metrics: audio throughput, response latency (min/avg/max via CAS),
+turn duration, token usage, and interruption counts.
+
+**UsageMetadata** from the Gemini API is automatically tracked at all layers:
+- L0 emits `SessionEvent::Usage(UsageMetadata)` with full token breakdowns
+- L1 records in both SessionSignals (state keys) and SessionTelemetry (atomics)
+- L2 exposes `.on_usage(|metadata| ...)` callback for real-time observation
+
+### How They Work Together
+
+Here's the flow for a single model turn in a phased conversation:
+
+```
+  User speaks: "I'm Alice from Acme Corp"
+       |
+  [1]  v  Fast lane: on_audio, on_input_transcript (sync, <1ms)
+       |
+  [2]  v  Model responds, turn completes
+       |
+  [3]  v  Control lane: TranscriptBuffer records the turn
+       |
+  [4]  v  Extractors run (OOB LLM call)
+       |    --> writes caller_name="Alice", caller_org="Acme Corp" to State
+       |
+  [5]  v  Watchers fire on state changes
+       |    --> crossed_above, became_true, changed_to callbacks
+       |
+  [6]  v  Computed variables recompute
+       |    --> derived:risk_level updates based on new state
+       |
+  [7]  v  Phase machine evaluates transitions
+       |    --> caller_name.is_some() == true
+       |    --> transition: identify_caller --> handle_request
+       |
+  [8]  v  Phase on_exit / on_enter hooks fire
+       |    --> instruction updated, navigation context regenerated
+       |
+  [9]  v  Telemetry lane: SessionSignals + SessionTelemetry update
+            --> session:turn_count++, latency recorded, tokens tracked
+```
 
 ---
 
@@ -213,6 +446,11 @@ let handle = Live::builder()
     .on_output_transcript(|text, _final| println!("[Agent] {text}"))
     .on_interrupted(|| async { speaker.flush().await })
     .on_turn_complete(|| async { println!("--- turn complete ---") })
+    .on_usage(|usage| {
+        if let Some(total) = usage.total_token_count {
+            println!("Tokens used: {total}");
+        }
+    })
     .connect_vertex(project, location, token)
     .await?;
 ```
@@ -238,6 +476,7 @@ let handle = Live::builder()
                 name: call.name.clone(),
                 response: result,
                 id: call.id.clone(),
+                scheduling: None,
             }
         }).collect();
         Some(responses)
@@ -294,7 +533,7 @@ tracked.commit();   // merge into main store
 
 | Prefix | Purpose | Lifetime |
 |--------|---------|----------|
-| `session:` | Auto-tracked signals | Session |
+| `session:` | Auto-tracked signals (turn count, tokens, timing) | Session |
 | `derived:` | Read-only computed variables | Session |
 | `turn:` | Cleared each turn | Turn |
 | `app:` | Application state | Session |
@@ -311,61 +550,84 @@ per-phase tool filtering, instruction composition, and async lifecycle callbacks
 let handle = Live::builder()
     .phase("greeting")
         .instruction("Welcome the user warmly.")
-        .prompt_on_enter(true)   // model speaks immediately on entry
-        .transition("main", |s| s.get::<bool>("greeted").unwrap_or(false))
-        .on_enter(|state, _writer| async move {
-            state.set("entered_greeting", true);
-        })
+        .prompt_on_enter(true)
+        .transition_with("identify", |s| {
+            s.get::<String>("caller_name").is_some()
+        }, "when caller provides their name")
         .done()
-    .phase("main")
+    .phase("identify")
+        .instruction("Confirm the caller's identity.")
+        .needs(&["caller_name", "caller_org"])
+        .tools(vec!["lookup_contact".into()])
+        .transition_with("handle", |s| {
+            s.get::<bool>("verified").unwrap_or(false)
+        }, "when identity is verified")
+        .done()
+    .phase("handle")
         .dynamic_instruction(|s| {
             let topic: String = s.get("topic").unwrap_or_default();
-            format!("Help the user with: {topic}")
+            format!("Help the caller with: {topic}")
         })
-        .tools(vec!["search".into(), "lookup".into()])   // per-phase tool filter
-        .guard(|s| s.get::<bool>("verified").unwrap_or(false))  // entry guard
-        .transition("farewell", |s| s.get::<bool>("done").unwrap_or(false))
+        .tools(vec!["search".into(), "calc".into()])
+        .transition_with("farewell", |s| {
+            s.get::<bool>("resolved").unwrap_or(false)
+        }, "when the request is resolved")
         .done()
     .phase("farewell")
         .instruction("Say goodbye and provide a reference number.")
         .terminal()
         .done()
     .initial_phase("greeting")
+    // Phase defaults inherited by all phases
+    .phase_defaults(|p| {
+        p.with_state(&["caller_name", "caller_org"])
+         .navigation()  // inject phase navigation context
+    })
     .connect_vertex(project, location, token)
     .await?;
 ```
 
-**Phase features at a glance:**
+#### Phase Navigation Context
 
-- Static or dynamic (state-driven) instructions
-- `InstructionModifier` variants: `StateAppend`, `Conditional`, `CustomAppend`
-- Per-phase tool filtering via `tools_enabled`
-- Phase-level entry guards (block entry when predicate fails)
-- `on_enter` / `on_exit` async callbacks with `State` + `SessionWriter`
-- `on_enter_context` -- inject conversational context across transitions
-- `prompt_on_enter` -- trigger model response immediately on phase entry
-- Validated transition graph with history ring buffer (capped at 100 entries)
+The `.navigation()` modifier injects a structured description of the current
+phase graph into the model's instruction, giving it awareness of where it is,
+what it still needs, and where it can go:
+
+```
+[Navigation]
+Current phase: identify -- Confirm the caller's identity.
+Previous: greeting (turn 2)
+Still needed: caller_org
+Possible next:
+  -> handle: when identity is verified
+```
+
+This is auto-generated from `.needs()`, `.transition_with()` descriptions, and
+phase history. The model can use this to guide the conversation naturally.
 
 ### Extraction Pipeline
 
-Run out-of-band LLM calls after each turn to extract structured data from
-the conversation transcript. Schema-guided via `schemars::JsonSchema`.
+Run out-of-band LLM calls to extract structured data from the conversation
+transcript. Schema-guided via `schemars::JsonSchema`.
 
 ```rust
 use schemars::JsonSchema;
 
 #[derive(Deserialize, Serialize, JsonSchema)]
-struct OrderState {
-    phase: String,
-    items: Vec<String>,
-    total: Option<f64>,
+struct CallerInfo {
+    caller_name: Option<String>,
+    caller_org: Option<String>,
+    request_type: Option<String>,
 }
 
 let handle = Live::builder()
-    .instruction("You are a restaurant order assistant.")
-    .extract_turns::<OrderState>(
-        flash_llm,  // Arc<dyn BaseLlm> -- any Gemini model
-        "Extract: items ordered, quantities, order phase, running total",
+    .instruction("You are a receptionist.")
+    // Extract every 2 turns instead of every turn (reduces LLM costs)
+    .extract_turns_triggered::<CallerInfo>(
+        flash_llm,
+        "Extract caller name, organization, and request type",
+        5,  // transcript window size
+        ExtractionTrigger::Interval(2),
     )
     .on_extracted(|name, value| async move {
         println!("Extracted {name}: {value}");
@@ -374,7 +636,7 @@ let handle = Live::builder()
     .await?;
 
 // Read latest extraction at any time
-let order: Option<OrderState> = handle.extracted("OrderState");
+let info: Option<CallerInfo> = handle.extracted("CallerInfo");
 ```
 
 Extractors automatically enable transcription and warm up the OOB LLM
@@ -488,6 +750,18 @@ let prompt = P::role("a customer support agent for Acme Corp")
 let instruction = prompt.render();
 ```
 
+### Callback Modes
+
+Control-lane callbacks support two execution modes:
+
+| Mode | Method suffix | Behavior |
+|------|--------------|----------|
+| **Blocking** | `.on_turn_complete()` | Awaited inline -- event loop waits |
+| **Concurrent** | `.on_turn_complete_concurrent()` | Spawned as detached task -- fire and forget |
+
+Use concurrent mode for logging, analytics, webhook dispatch, or background
+agent triggering where you don't need ordering guarantees.
+
 ### REST APIs (Feature-Gated)
 
 The L0 crate also provides feature-gated access to Gemini REST APIs beyond
@@ -514,6 +788,47 @@ rs-genai = { version = "0.1", features = ["generate", "embed", "files"] }
 
 ---
 
+## Three-Lane Processor Architecture
+
+All Live session events are routed through a zero-copy dispatcher into three
+independent lanes, each optimized for its latency profile:
+
+```
+  SessionEvent (broadcast from L0)
+         |
+    +----+----+
+    |  Router  |   Zero-work dispatcher -- NO state access on hot path
+    +--+--+--+-+
+       |  |  |
+       |  |  +------------------------------+
+       |  +----------------+                 |
+       |                   |                 |
+  +----v---------+   +-----v----------+  +---v--------------+
+  | Fast Lane    |   | Control Lane   |  | Telemetry Lane   |
+  | (sync <1ms)  |   | (async)        |  | (own broadcast)  |
+  +--------------+   +--------------  +  +------------------+
+  | on_audio     |   | on_tool_call   |  | SessionSignals   |
+  | on_text      |   | on_interrupted |  |  (State keys)    |
+  | on_vad_*     |   | Phase trans.   |  | SessionTelemetry |
+  | on_input_    |   | Extractors     |  |  (AtomicU64)     |
+  |   transcript |   |  (concurrent)  |  | on_usage cb      |
+  | on_output_   |   | Watchers       |  | Debounced 100ms  |
+  |   transcript |   | Computed state |  |   flush          |
+  +--------------+   | Temporal ptns  |  +------------------+
+                     | TranscriptBuf  |
+                     |  (owned, no    |
+                     |   mutex)       |
+                     +----------------+
+```
+
+**Design constraints:**
+- Fast lane callbacks must be sync and complete in < 1ms (no allocations, no locks, no async)
+- Control lane owns the `TranscriptBuffer` exclusively (no `Arc<Mutex<>>`)
+- Telemetry lane runs on its own broadcast receiver (never blocks the router)
+- Extractors run concurrently via `futures::future::join_all`
+
+---
+
 ## Cookbook Examples
 
 The `cookbooks/` directory contains runnable examples at increasing complexity:
@@ -531,11 +846,14 @@ The **ui** cookbook includes multiple showcase apps:
 
 | App | Description | Difficulty |
 |-----|-------------|------------|
-| `support-assistant` | Multi-agent handoff (billing + technical) with state extraction, phase tracking, and evaluation | Advanced |
+| `call-screening` | Receptionist with caller identification and routing | Advanced |
+| `clinic` | Medical clinic scheduling with patient intake | Advanced |
+| `restaurant` | Restaurant reservation and ordering system | Advanced |
+| `debt-collection` | Regulated conversation with compliance phases | Advanced |
+| `support-assistant` | Multi-agent handoff (billing + technical) | Advanced |
+| `playbook` | Phase-driven conversational flows | Intermediate |
 | `tool-calling` | Interactive tools (weather, time, calculator) | Beginner |
 | `guardrails` | Content safety and policy enforcement | Intermediate |
-| `playbook` | Phase-driven conversational flows | Intermediate |
-| `debt-collection` | Regulated conversation with compliance phases | Advanced |
 
 ---
 
@@ -628,8 +946,46 @@ Live::builder()
 
 ### Prerequisites
 
-- Rust 1.75+ (2021 edition)
-- A Google AI API key or Vertex AI service account
+| Requirement | Version | Purpose |
+|------------|---------|---------|
+| **Rust** | 1.75+ | Language toolchain ([install](https://rustup.rs/)) |
+| **cargo** | (bundled) | Build system and package manager |
+| **pkg-config** | any | Locates system libraries |
+| **OpenSSL** | 1.1+ | TLS for WebSocket connections |
+| **ALSA dev** (Linux) | any | Audio I/O for voice cookbooks |
+
+**Quick setup (Ubuntu/Debian):**
+
+```bash
+# Install Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source $HOME/.cargo/env
+
+# Install system dependencies
+sudo apt-get update
+sudo apt-get install -y pkg-config libssl-dev libasound2-dev build-essential
+```
+
+**Quick setup (macOS):**
+
+```bash
+# Install Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# System deps (OpenSSL via Homebrew)
+brew install openssl pkg-config
+```
+
+**Environment variables:**
+
+```bash
+# Google AI (API key auth)
+export GEMINI_API_KEY="your-api-key"
+
+# Vertex AI (service account auth)
+export GOOGLE_CLOUD_PROJECT="your-project-id"
+export GOOGLE_CLOUD_LOCATION="us-central1"
+```
 
 ### Build
 
@@ -643,11 +999,18 @@ cargo build --workspace
 cargo test --workspace
 ```
 
+### Lint
+
+```bash
+cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --all -- --check
+```
+
 ### Run the UI cookbook
 
 ```bash
 cd cookbooks/ui
-cargo run
+GEMINI_API_KEY="your-key" cargo run
 # Open http://localhost:3000
 ```
 

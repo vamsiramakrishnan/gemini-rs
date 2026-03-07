@@ -69,6 +69,27 @@ When the guard returns `true`, the machine transitions to the target phase.
 Transitions are evaluated in order -- the first guard that returns `true` wins.
 This means you should order transitions from most specific to most general.
 
+### Transition Descriptions
+
+Use `transition_with()` to add a human-readable description to each transition.
+These descriptions are used by the phase navigation context (see below) to give
+the model awareness of where it can go and why:
+
+```rust,ignore
+.phase("identify_caller")
+    .instruction("Get the caller's full name and organization.")
+    .transition_with("determine_purpose", |s| {
+        s.get::<String>("caller_name").is_some()
+    }, "when caller provides their name")
+    .transition_with("take_message", |s| {
+        let tc: u32 = s.session().get("turn_count").unwrap_or(0);
+        tc >= 12
+    }, "after 12 turns if caller refuses to identify")
+    .done()
+```
+
+The plain `.transition()` method still works and sets `description: None`.
+
 ### S:: Predicates
 
 The `S` module provides ergonomic predicate factories that eliminate boilerplate:
@@ -185,6 +206,56 @@ tools not in the filter are rejected by the processor:
 ```
 
 Omitting `.tools()` means all registered tools are available in that phase.
+
+## Phase Needs
+
+Declare what state keys a phase requires. The SDK uses these to generate the
+navigation context (see below), showing the model what information is still
+missing. This helps guide the conversation without over-constraining the LLM:
+
+```rust,ignore
+.phase("identify_caller")
+    .instruction("Get the caller's full name and organization.")
+    .needs(&["caller_name", "caller_org"])
+    .transition_with("determine_purpose", |s| {
+        s.get::<String>("caller_name").is_some()
+    }, "when caller provides their name")
+    .done()
+```
+
+At runtime, `needs` are filtered against the current state -- only keys not
+yet present are shown as "still needed" in the navigation context.
+
+## Phase Navigation Context
+
+The `.navigation()` modifier (available on both `PhaseBuilder` and
+`phase_defaults`) injects a structured description of the phase graph into the
+model's instruction. This gives the model geolocation awareness:
+
+```
+[Navigation]
+Current phase: identify_caller -- Get the caller's full name and organization.
+Previous: greeting (turn 2)
+Still needed: caller_org
+Possible next:
+  -> determine_purpose: when caller provides their name
+  -> take_message: after 12 turns if caller refuses to identify
+```
+
+This is auto-generated from `.needs()` keys filtered by state, `.transition_with()`
+descriptions, and phase history. Apply it via `phase_defaults` so all phases
+benefit:
+
+```rust,ignore
+Live::builder()
+    .phase_defaults(|d| d
+        .with_state(&["caller_name", "caller_org"])
+        .navigation()  // inject navigation context into every phase
+    )
+```
+
+The navigation context is stored in `session:navigation_context` and regenerated
+on every turn and phase transition.
 
 ## Phase Lifecycle Callbacks
 

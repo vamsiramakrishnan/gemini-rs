@@ -141,6 +141,21 @@ pub enum FunctionCallingBehavior {
     NonBlocking,
 }
 
+/// Scheduling mode for non-blocking function responses.
+///
+/// Controls how the model handles async tool results when
+/// [`FunctionCallingBehavior::NonBlocking`] is used.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum FunctionResponseScheduling {
+    /// Model halts current output and immediately reports the tool result.
+    Interrupt,
+    /// Model waits until it finishes current output before handling the result.
+    WhenIdle,
+    /// Model integrates the result silently without notifying the user.
+    Silent,
+}
+
 
 // ---------------------------------------------------------------------------
 // Content primitives
@@ -180,6 +195,14 @@ pub struct FunctionResponse {
     /// Call ID matching the original `FunctionCall::id`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
+    /// Scheduling mode for non-blocking tool responses.
+    ///
+    /// Only meaningful when the function was declared with
+    /// [`FunctionCallingBehavior::NonBlocking`]. Controls how the model
+    /// processes this result: immediately (interrupt), after finishing
+    /// current output (when_idle), or silently (no user notification).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scheduling: Option<FunctionResponseScheduling>,
 }
 
 /// Executable code returned by the model.
@@ -317,6 +340,7 @@ impl Content {
                     name: name.into(),
                     response,
                     id: None,
+                    scheduling: None,
                 },
             }],
         }
@@ -345,6 +369,13 @@ pub struct FunctionDeclaration {
     /// JSON Schema describing function parameters.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parameters: Option<serde_json::Value>,
+    /// Per-function calling behavior override.
+    ///
+    /// When set to `NonBlocking`, the model continues generating while
+    /// this function executes asynchronously. The response can then include
+    /// a [`FunctionResponseScheduling`] to control how results are delivered.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub behavior: Option<FunctionCallingBehavior>,
 }
 
 /// A tool declaration sent in the setup message.
@@ -618,19 +649,55 @@ pub struct ProactivityConfig {
     pub proactive_audio: Option<bool>,
 }
 
+/// Token count breakdown by modality (text, audio, image, video).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModalityTokenCount {
+    /// The modality (e.g., "TEXT", "AUDIO", "IMAGE", "VIDEO").
+    #[serde(default)]
+    pub modality: Option<String>,
+    /// Token count for this modality.
+    #[serde(default)]
+    pub token_count: Option<u32>,
+}
+
 /// Usage metadata returned by the server on messages.
+///
+/// Contains token counts for the prompt, response, cached content,
+/// tool use, and thinking, with optional per-modality breakdowns.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageMetadata {
     /// Number of tokens in the prompt.
     #[serde(default)]
     pub prompt_token_count: Option<u32>,
-    /// Number of tokens in the response.
+    /// Number of tokens in the cached portion of the prompt.
+    #[serde(default)]
+    pub cached_content_token_count: Option<u32>,
+    /// Total number of tokens across all generated response candidates.
     #[serde(default)]
     pub response_token_count: Option<u32>,
-    /// Total token count.
+    /// Number of tokens present in tool-use prompt(s).
+    #[serde(default)]
+    pub tool_use_prompt_token_count: Option<u32>,
+    /// Number of tokens of thoughts for thinking models.
+    #[serde(default)]
+    pub thoughts_token_count: Option<u32>,
+    /// Total token count for the generation request (prompt + response).
     #[serde(default)]
     pub total_token_count: Option<u32>,
+    /// Per-modality breakdown of prompt tokens.
+    #[serde(default)]
+    pub prompt_tokens_details: Vec<ModalityTokenCount>,
+    /// Per-modality breakdown of cached content tokens.
+    #[serde(default)]
+    pub cache_tokens_details: Vec<ModalityTokenCount>,
+    /// Per-modality breakdown of response tokens.
+    #[serde(default)]
+    pub response_tokens_details: Vec<ModalityTokenCount>,
+    /// Per-modality breakdown of tool-use prompt tokens.
+    #[serde(default)]
+    pub tool_use_prompt_tokens_details: Vec<ModalityTokenCount>,
 }
 
 /// Grounding metadata for server content with search results.
@@ -1593,6 +1660,7 @@ mod tests {
             name: "get_weather".to_string(),
             description: "Get weather".to_string(),
             parameters: None,
+            behavior: None,
         }]);
         let json = serde_json::to_string(&tool).unwrap();
         assert!(json.contains("\"functionDeclarations\""));

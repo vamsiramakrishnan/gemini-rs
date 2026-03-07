@@ -34,16 +34,6 @@ pub struct AppInfo {
     pub try_saying: Vec<String>,
 }
 
-/// A single entry in the phase timeline showing transition history.
-#[derive(Debug, Clone, Serialize)]
-pub struct PhaseTimelineEntry {
-    pub from: String,
-    pub to: String,
-    pub trigger: String,
-    pub duration_secs: f64,
-    pub turn: u32,
-}
-
 /// Messages sent from app to the WebSocket handler to forward to the browser.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -68,8 +58,6 @@ pub enum ServerMessage {
     AppMeta { info: AppInfo },
     /// Live session telemetry stats (turn count, phase durations, tool calls, etc.)
     Telemetry { stats: serde_json::Value },
-    /// Enriched phase transition timeline with durations and trigger types.
-    PhaseTimeline { entries: Vec<PhaseTimelineEntry> },
     /// Real-time tool call event for devtools visualization.
     ToolCallEvent { name: String, args: String, result: String },
 }

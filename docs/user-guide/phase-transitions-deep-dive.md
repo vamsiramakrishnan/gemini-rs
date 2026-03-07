@@ -7,7 +7,7 @@ with visual diagrams.
 ## The Turn-Complete Pipeline
 
 Every model response ends with a `TurnComplete` event from the Gemini Live
-API. This triggers a 17-step pipeline on the control lane:
+API. This triggers a pipeline on the control lane:
 
 ```
   Gemini API                        Control Lane
@@ -16,10 +16,12 @@ API. This triggers a 17-step pipeline on the control lane:
   Model finishes ─── TurnComplete ──>  1. Reset turn state
                                        2. Finalize transcript
                                        3. Snapshot watched keys (before)
-                                       4. Run extractors (concurrent)
+                                       4. Run extractors (filtered by trigger)
                                        5. Recompute derived state
                                        6. Build transcript window
                                        7. Evaluate phase transitions
+                                       7b. Regenerate navigation context
+                                       7c. Run OnPhaseChange extractors (if transitioned)
                                        8. Fire watchers (before vs after)
                                        9. Check temporal patterns
                                       10. Instruction amendment
@@ -36,6 +38,16 @@ API. This triggers a 17-step pipeline on the control lane:
 This means freshly extracted state is available for transition guards.
 Turn count is incremented LAST (step 17), so guards see the current
 turn number, not the next one.
+
+**Extraction triggers**: Step 4 filters extractors by their trigger mode.
+`EveryTurn` extractors always run. `Interval(n)` extractors only run every
+N turns. `AfterToolCall` and `OnPhaseChange` extractors are skipped here
+and fire at their respective points (after tool dispatch and step 7c).
+
+**Navigation context**: Step 7b always regenerates the navigation context
+(stored in `session:navigation_context`), even if no transition fired. This
+keeps the model's awareness of its position in the phase graph up to date.
+Phases using `.navigation()` will include this context in the instruction.
 
 ## State Flow: Conversation to Transition
 

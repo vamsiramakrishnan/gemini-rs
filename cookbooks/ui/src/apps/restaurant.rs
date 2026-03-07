@@ -229,6 +229,7 @@ fn restaurant_tools() -> rs_genai::prelude::Tool {
                 },
                 "required": ["date", "party_size"]
             })),
+            behavior: None,
         },
         FunctionDeclaration {
             name: "make_reservation".into(),
@@ -259,6 +260,7 @@ fn restaurant_tools() -> rs_genai::prelude::Tool {
                 },
                 "required": ["guest_name", "phone", "date", "time", "party_size"]
             })),
+            behavior: None,
         },
         FunctionDeclaration {
             name: "modify_reservation".into(),
@@ -277,6 +279,7 @@ fn restaurant_tools() -> rs_genai::prelude::Tool {
                 },
                 "required": ["reservation_id"]
             })),
+            behavior: None,
         },
         FunctionDeclaration {
             name: "cancel_reservation".into(),
@@ -295,6 +298,7 @@ fn restaurant_tools() -> rs_genai::prelude::Tool {
                 },
                 "required": ["reservation_id"]
             })),
+            behavior: None,
         },
         FunctionDeclaration {
             name: "check_menu".into(),
@@ -308,6 +312,7 @@ fn restaurant_tools() -> rs_genai::prelude::Tool {
                     }
                 }
             })),
+            behavior: None,
         },
         FunctionDeclaration {
             name: "add_special_request".into(),
@@ -330,6 +335,7 @@ fn restaurant_tools() -> rs_genai::prelude::Tool {
                 },
                 "required": ["reservation_id", "request_type", "details"]
             })),
+            behavior: None,
         },
     ])
 }
@@ -736,6 +742,7 @@ async fn handle_session(
                         name: call.name.clone(),
                         response: result,
                         id: call.id.clone(),
+                        scheduling: None,
                     });
                 }
                 Some(responses)

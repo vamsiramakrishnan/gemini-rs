@@ -160,6 +160,7 @@ pub fn to_genai_part(a2a_part: &A2aPart) -> Option<Part> {
                             .cloned()
                             .unwrap_or(serde_json::json!({})),
                         id: data.get("id").and_then(|v| v.as_str()).map(String::from),
+                        scheduling: None,
                     },
                 }),
                 Some(DATA_TYPE_EXECUTABLE_CODE) => Some(Part::ExecutableCode {
@@ -273,6 +274,7 @@ mod tests {
                 name: "get_weather".to_string(),
                 response: serde_json::json!({"temp": 20}),
                 id: Some("call-1".to_string()),
+                scheduling: None,
             },
         };
         let a2a = to_a2a_part(&part, &[]).unwrap();
@@ -520,6 +522,7 @@ mod tests {
                 name: "my_tool".to_string(),
                 response: serde_json::json!({"result": "ok"}),
                 id: Some("id-1".to_string()),
+                scheduling: None,
             },
         };
         let a2a = to_a2a_part(&original, &[]).unwrap();

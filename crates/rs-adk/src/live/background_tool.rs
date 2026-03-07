@@ -131,9 +131,16 @@ pub enum ToolExecutionMode {
     /// An optional [`ResultFormatter`] controls how acknowledgment, result,
     /// and cancellation messages are shaped. When `None`, the
     /// [`DefaultResultFormatter`] is used.
+    ///
+    /// The `scheduling` field controls how the model handles async results:
+    /// - `Interrupt`: halts current output, immediately reports the result
+    /// - `WhenIdle`: waits until current output finishes before handling
+    /// - `Silent`: integrates the result without notifying the user
     Background {
         /// Custom formatter for background tool results, or `None` for the default.
         formatter: Option<Arc<dyn ResultFormatter>>,
+        /// How the model should handle the async result. Defaults to `WhenIdle`.
+        scheduling: Option<rs_genai::prelude::FunctionResponseScheduling>,
     },
 }
 
@@ -141,8 +148,8 @@ impl std::fmt::Debug for ToolExecutionMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Standard => write!(f, "Standard"),
-            Self::Background { formatter } => {
-                write!(f, "Background(formatter={})", formatter.is_some())
+            Self::Background { formatter, scheduling } => {
+                write!(f, "Background(formatter={}, scheduling={:?})", formatter.is_some(), scheduling)
             }
         }
     }
@@ -447,15 +454,16 @@ mod tests {
 
     #[test]
     fn tool_execution_mode_debug_background_none() {
-        let mode = ToolExecutionMode::Background { formatter: None };
-        assert_eq!(format!("{:?}", mode), "Background(formatter=false)");
+        let mode = ToolExecutionMode::Background { formatter: None, scheduling: None };
+        assert_eq!(format!("{:?}", mode), "Background(formatter=false, scheduling=None)");
     }
 
     #[test]
     fn tool_execution_mode_debug_background_some() {
         let mode = ToolExecutionMode::Background {
             formatter: Some(Arc::new(DefaultResultFormatter)),
+            scheduling: None,
         };
-        assert_eq!(format!("{:?}", mode), "Background(formatter=true)");
+        assert_eq!(format!("{:?}", mode), "Background(formatter=true, scheduling=None)");
     }
 }

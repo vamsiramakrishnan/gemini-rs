@@ -221,6 +221,9 @@ pub struct SessionResumptionResult {
 pub struct ServerContentMessage {
     /// The server content payload.
     pub server_content: ServerContentPayload,
+    /// Token usage metadata (present on most server messages).
+    #[serde(default)]
+    pub usage_metadata: Option<UsageMetadata>,
 }
 
 /// Payload for server content.
@@ -637,6 +640,7 @@ mod tests {
                     name: "get_weather".to_string(),
                     response: serde_json::json!({"temp": 22}),
                     id: Some("call-1".to_string()),
+                    scheduling: None,
                 }],
             },
         };

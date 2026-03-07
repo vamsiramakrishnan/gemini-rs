@@ -9,8 +9,8 @@ use tokio::sync::{broadcast, mpsc, watch};
 use crate::protocol::messages::*;
 use crate::protocol::types::*;
 use crate::session::{
-    SessionCommand, SessionError, SessionEvent, SessionHandle, SessionPhase, SessionState,
-    SetupError, WebSocketError,
+    ResumeInfo, SessionCommand, SessionError, SessionEvent, SessionHandle, SessionPhase,
+    SessionState, SetupError, WebSocketError,
 };
 use crate::transport::codec::Codec;
 use crate::transport::ws::{Transport, TungsteniteTransport};
@@ -247,8 +247,12 @@ async fn wait_for_setup<T: Transport, C: Codec>(
                     if let Some(ref resumption) = sc.setup_complete.session_resumption {
                         if let Some(ref handle) = resumption.handle {
                             *state.resume_handle.lock() = Some(handle.clone());
-                            let _ = event_tx.send(SessionEvent::SessionResumeHandle(
-                                handle.clone(),
+                            let _ = event_tx.send(SessionEvent::SessionResumeUpdate(
+                                ResumeInfo {
+                                    handle: handle.clone(),
+                                    resumable: true,
+                                    last_consumed_index: None,
+                                },
                             ));
                         }
                     }
@@ -400,6 +404,16 @@ fn handle_server_msg(
                 }
             }
 
+            // Handle usage metadata (present on most server content messages)
+            if let Some(usage) = sc.usage_metadata {
+                let _ = event_tx.send(SessionEvent::Usage(usage));
+            }
+
+            // Handle generation complete (fires before turn_complete)
+            if content.generation_complete.unwrap_or(false) {
+                let _ = event_tx.send(SessionEvent::GenerationComplete);
+            }
+
             // Handle turn complete
             if content.turn_complete.unwrap_or(false) {
                 if let Some(turn) = state.complete_turn() {
@@ -439,7 +453,11 @@ fn handle_server_msg(
             let payload = sru.session_resumption_update;
             if let Some(ref handle) = payload.new_handle {
                 *state.resume_handle.lock() = Some(handle.clone());
-                let _ = event_tx.send(SessionEvent::SessionResumeHandle(handle.clone()));
+                let _ = event_tx.send(SessionEvent::SessionResumeUpdate(ResumeInfo {
+                    handle: handle.clone(),
+                    resumable: payload.resumable.unwrap_or(true),
+                    last_consumed_index: payload.last_consumed_client_message_index,
+                }));
             }
         }
 

@@ -26,7 +26,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
-use rs_genai::prelude::{FunctionCall, FunctionResponse, SessionPhase};
+use rs_genai::prelude::{FunctionCall, FunctionResponse, SessionPhase, UsageMetadata};
 use rs_genai::session::SessionWriter;
 
 use super::BoxFuture;
@@ -79,6 +79,8 @@ pub struct EventCallbacks {
     pub on_vad_end: Option<Box<dyn Fn() + Send + Sync>>,
     /// Called on session phase transitions.
     pub on_phase: Option<Box<dyn Fn(SessionPhase) + Send + Sync>>,
+    /// Called when server sends token usage metadata.
+    pub on_usage: Option<Box<dyn Fn(&UsageMetadata) + Send + Sync>>,
 
     // -- Control lane (async callbacks) --
 
@@ -190,6 +192,7 @@ impl Default for EventCallbacks {
             on_vad_start: None,
             on_vad_end: None,
             on_phase: None,
+            on_usage: None,
             on_interrupted: None,
             on_tool_call: None,
             on_tool_cancelled: None,
@@ -231,6 +234,7 @@ impl std::fmt::Debug for EventCallbacks {
             .field("on_vad_start", &self.on_vad_start.is_some())
             .field("on_vad_end", &self.on_vad_end.is_some())
             .field("on_phase", &self.on_phase.is_some())
+            .field("on_usage", &self.on_usage.is_some())
             .field("on_interrupted", &self.on_interrupted.is_some())
             .field("on_tool_call", &self.on_tool_call.is_some())
             .field("on_tool_cancelled", &self.on_tool_cancelled.is_some())

@@ -85,6 +85,13 @@ let handle = Live::builder()
     .on_vad_start(|| { /* user started speaking */ })
     .on_vad_end(|| { /* user stopped speaking */ })
 
+    // Telemetry callback (sync, telemetry lane)
+    .on_usage(|usage| {
+        if let Some(total) = usage.total_token_count {
+            println!("Tokens: {total}");
+        }
+    })
+
     // Control-lane callbacks (async)
     .on_tool_call(|calls, state| async move { None })  // None = auto-dispatch
     .on_interrupted(|| async { /* flush playback buffer */ })
@@ -135,6 +142,16 @@ references (not owned values) and cannot be `async`.
 // VAD: voice activity detection events from the server
 .on_vad_start(|| { /* user started talking */ })
 .on_vad_end(|| { /* user stopped talking */ })
+
+// Usage metadata: token counts from the server (fires on telemetry lane)
+.on_usage(|usage: &UsageMetadata| {
+    if let Some(total) = usage.total_token_count {
+        println!("Total tokens: {total}");
+    }
+    // Also available: prompt_token_count, response_token_count,
+    // cached_content_token_count, thoughts_token_count,
+    // tool_use_prompt_token_count, plus per-modality breakdowns
+})
 ```
 
 ### Control Lane (Async)

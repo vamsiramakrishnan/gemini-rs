@@ -44,6 +44,18 @@ pub struct SessionTelemetry {
     last_turn_start_ns: AtomicU64,
     turn_duration_sum_ns: AtomicU64,
     turn_duration_count: AtomicU64,
+
+    // ── Token usage (from UsageMetadata) ──
+    /// Latest total token count from server.
+    total_token_count: AtomicU64,
+    /// Latest prompt token count from server.
+    prompt_token_count: AtomicU64,
+    /// Latest response token count from server.
+    response_token_count: AtomicU64,
+    /// Latest cached content token count from server.
+    cached_content_token_count: AtomicU64,
+    /// Latest thoughts token count (thinking models).
+    thoughts_token_count: AtomicU64,
 }
 
 impl SessionTelemetry {
@@ -64,6 +76,11 @@ impl SessionTelemetry {
             last_turn_start_ns: AtomicU64::new(0),
             turn_duration_sum_ns: AtomicU64::new(0),
             turn_duration_count: AtomicU64::new(0),
+            total_token_count: AtomicU64::new(0),
+            prompt_token_count: AtomicU64::new(0),
+            response_token_count: AtomicU64::new(0),
+            cached_content_token_count: AtomicU64::new(0),
+            thoughts_token_count: AtomicU64::new(0),
         }
     }
 
@@ -144,6 +161,33 @@ impl SessionTelemetry {
         }
     }
 
+    /// Record token usage from a `UsageMetadata` event.
+    #[inline]
+    pub fn record_usage(
+        &self,
+        total: Option<u32>,
+        prompt: Option<u32>,
+        response: Option<u32>,
+        cached: Option<u32>,
+        thoughts: Option<u32>,
+    ) {
+        if let Some(v) = total {
+            self.total_token_count.store(v as u64, Relaxed);
+        }
+        if let Some(v) = prompt {
+            self.prompt_token_count.store(v as u64, Relaxed);
+        }
+        if let Some(v) = response {
+            self.response_token_count.store(v as u64, Relaxed);
+        }
+        if let Some(v) = cached {
+            self.cached_content_token_count.store(v as u64, Relaxed);
+        }
+        if let Some(v) = thoughts {
+            self.thoughts_token_count.store(v as u64, Relaxed);
+        }
+    }
+
     /// Mark the beginning of a new turn (e.g., when model starts responding).
     #[inline]
     pub fn mark_turn_start(&self) {
@@ -193,6 +237,12 @@ impl SessionTelemetry {
             0.0
         };
 
+        let total_tokens = self.total_token_count.load(Relaxed);
+        let prompt_tokens = self.prompt_token_count.load(Relaxed);
+        let response_tokens = self.response_token_count.load(Relaxed);
+        let cached_tokens = self.cached_content_token_count.load(Relaxed);
+        let thoughts_tokens = self.thoughts_token_count.load(Relaxed);
+
         json!({
             "uptime_secs": elapsed.as_secs(),
             "audio_chunks_out": chunks,
@@ -205,6 +255,11 @@ impl SessionTelemetry {
             "max_response_latency_ms": max_latency_ms,
             "response_count": latency_count,
             "avg_turn_duration_ms": avg_turn_ms,
+            "total_token_count": total_tokens,
+            "prompt_token_count": prompt_tokens,
+            "response_token_count": response_tokens,
+            "cached_content_token_count": cached_tokens,
+            "thoughts_token_count": thoughts_tokens,
         })
     }
 

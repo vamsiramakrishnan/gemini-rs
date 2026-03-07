@@ -17,9 +17,13 @@ use super::callbacks::EventCallbacks;
 use super::computed::ComputedRegistry;
 use super::extractor::TurnExtractor;
 use super::handle::LiveHandle;
+use super::needs::{NeedsFulfillment, RepairConfig};
+use super::persistence::SessionPersistence;
 use super::phase::PhaseMachine;
-use super::processor::{spawn_event_processor, spawn_telemetry_lane};
+use super::processor::{spawn_event_processor, spawn_telemetry_lane, ControlPlaneConfig};
 use super::session_signals::SessionSignals;
+use super::soft_turn::SoftTurnDetector;
+use super::steering::SteeringMode;
 use super::telemetry::SessionTelemetry;
 use super::temporal::TemporalRegistry;
 use super::watcher::WatcherRegistry;
@@ -45,6 +49,13 @@ pub struct LiveSessionBuilder {
     greeting: Option<String>,
     state: Option<State>,
     execution_modes: HashMap<String, ToolExecutionMode>,
+    // Control plane configuration
+    soft_turn_timeout: Option<std::time::Duration>,
+    steering_mode: SteeringMode,
+    repair_config: Option<RepairConfig>,
+    persistence: Option<Arc<dyn SessionPersistence>>,
+    session_id: Option<String>,
+    tool_advisory: bool,
 }
 
 impl LiveSessionBuilder {
@@ -62,6 +73,12 @@ impl LiveSessionBuilder {
             greeting: None,
             state: None,
             execution_modes: HashMap::new(),
+            soft_turn_timeout: None,
+            steering_mode: SteeringMode::default(),
+            repair_config: None,
+            persistence: None,
+            session_id: None,
+            tool_advisory: true,
         }
     }
 
@@ -140,6 +157,50 @@ impl LiveSessionBuilder {
         self
     }
 
+    /// Enable soft turn detection for proactive silence awareness.
+    ///
+    /// When `proactiveAudio` is enabled, the model may choose not to respond.
+    /// This sets a timeout after VAD end — if the model stays silent, a
+    /// lightweight "soft turn" fires to keep state updated without forcing
+    /// the model to speak.
+    pub fn soft_turn_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.soft_turn_timeout = Some(timeout);
+        self
+    }
+
+    /// Set the steering mode for how the phase machine delivers instructions.
+    pub fn steering_mode(mut self, mode: SteeringMode) -> Self {
+        self.steering_mode = mode;
+        self
+    }
+
+    /// Enable the conversation repair protocol.
+    ///
+    /// Tracks need fulfillment per phase and nudges the model when the
+    /// conversation stalls on gathering required information.
+    pub fn repair(mut self, config: RepairConfig) -> Self {
+        self.repair_config = Some(config);
+        self
+    }
+
+    /// Set a session persistence backend for surviving process restarts.
+    pub fn persistence(mut self, backend: Arc<dyn SessionPersistence>) -> Self {
+        self.persistence = Some(backend);
+        self
+    }
+
+    /// Set the session ID for persistence.
+    pub fn session_id(mut self, id: impl Into<String>) -> Self {
+        self.session_id = Some(id.into());
+        self
+    }
+
+    /// Enable or disable tool availability advisory on phase transitions.
+    pub fn tool_advisory(mut self, enabled: bool) -> Self {
+        self.tool_advisory = enabled;
+        self
+    }
+
     /// Connect to Gemini and start the three-lane event processor.
     pub async fn connect(self) -> Result<LiveHandle, AgentError> {
         // Build-time validations
@@ -150,8 +211,24 @@ impl LiveSessionBuilder {
             computed.validate().map_err(AgentError::Config)?;
         }
 
+        // Apply NON_BLOCKING behavior to tool declarations for background tools
+        let mut config = self.config;
+        for (tool_name, mode) in &self.execution_modes {
+            if matches!(mode, super::background_tool::ToolExecutionMode::Background { .. }) {
+                for tool in &mut config.tools {
+                    if let Some(ref mut decls) = tool.function_declarations {
+                        for decl in decls {
+                            if decl.name == *tool_name {
+                                decl.behavior = Some(rs_genai::prelude::FunctionCallingBehavior::NonBlocking);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Connect via L0
-        let session = ConnectBuilder::new(self.config)
+        let session = ConnectBuilder::new(config)
             .build()
             .await
             .map_err(AgentError::Session)?;
@@ -159,7 +236,9 @@ impl LiveSessionBuilder {
         // Wait for Active phase
         session.wait_for_phase(SessionPhase::Active).await;
 
-        let callbacks = Arc::new(self.callbacks);
+        let mut callbacks = self.callbacks;
+        let on_usage_cb = callbacks.on_usage.take();
+        let callbacks = Arc::new(callbacks);
         let writer: Arc<dyn SessionWriter> = Arc::new(session.clone());
         let state = self.state.unwrap_or_else(State::new);
 
@@ -191,7 +270,22 @@ impl LiveSessionBuilder {
             session_signals,
             telemetry.clone(),
             telem_cancel.clone(),
+            on_usage_cb,
         );
+
+        // Build control plane config
+        let control_plane = ControlPlaneConfig {
+            soft_turn: self
+                .soft_turn_timeout
+                .map(SoftTurnDetector::new),
+            steering_mode: self.steering_mode,
+            needs_fulfillment: self
+                .repair_config
+                .map(NeedsFulfillment::new),
+            persistence: self.persistence,
+            session_id: self.session_id,
+            tool_advisory: self.tool_advisory,
+        };
 
         // Spawn fast + control lanes (no session_signals, no transcript mutex)
         let greeting_writer = writer.clone();
@@ -208,6 +302,7 @@ impl LiveSessionBuilder {
             temporal_arc,
             Some(background_tracker),
             self.execution_modes,
+            control_plane,
         );
 
         // Send greeting prompt to trigger model-initiated conversation
