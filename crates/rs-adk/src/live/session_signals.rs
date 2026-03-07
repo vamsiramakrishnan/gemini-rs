@@ -154,9 +154,27 @@ impl SessionSignals {
                 }
             }
 
-            SessionEvent::SessionResumeHandle(handle) => {
-                *self.latest_resume_handle.lock() = Some(handle.clone());
-                self.state.session().set("resumable", true);
+            SessionEvent::SessionResumeUpdate(info) => {
+                *self.latest_resume_handle.lock() = Some(info.handle.clone());
+                self.state.session().set("resumable", info.resumable);
+                if let Some(ref idx) = info.last_consumed_index {
+                    self.state
+                        .session()
+                        .set("last_consumed_client_index", idx.clone());
+                }
+            }
+
+            SessionEvent::Usage(usage) => {
+                if let Some(total) = usage.total_token_count {
+                    self.state.session().set("total_token_count", total);
+                }
+                if let Some(prompt) = usage.prompt_token_count {
+                    self.state.session().set("prompt_token_count", prompt);
+                }
+            }
+
+            SessionEvent::GenerationComplete => {
+                // No-op for signals — generation complete is handled by control lane
             }
 
             SessionEvent::InputTranscription(text) => {
@@ -355,7 +373,11 @@ mod tests {
     fn session_resume_handle_stored() {
         let s = signals();
         s.on_event(&SessionEvent::Connected);
-        s.on_event(&SessionEvent::SessionResumeHandle("handle-abc".into()));
+        s.on_event(&SessionEvent::SessionResumeUpdate(rs_genai::session::ResumeInfo {
+            handle: "handle-abc".into(),
+            resumable: true,
+            last_consumed_index: None,
+        }));
         assert_eq!(s.state.session().get::<bool>("resumable"), Some(true));
         assert_eq!(s.latest_resume_handle(), Some("handle-abc".to_string()));
     }
@@ -431,9 +453,17 @@ mod tests {
     #[test]
     fn latest_resume_handle_updates() {
         let s = signals();
-        s.on_event(&SessionEvent::SessionResumeHandle("h1".into()));
+        s.on_event(&SessionEvent::SessionResumeUpdate(rs_genai::session::ResumeInfo {
+            handle: "h1".into(),
+            resumable: true,
+            last_consumed_index: None,
+        }));
         assert_eq!(s.latest_resume_handle(), Some("h1".to_string()));
-        s.on_event(&SessionEvent::SessionResumeHandle("h2".into()));
+        s.on_event(&SessionEvent::SessionResumeUpdate(rs_genai::session::ResumeInfo {
+            handle: "h2".into(),
+            resumable: true,
+            last_consumed_index: Some("5".into()),
+        }));
         assert_eq!(s.latest_resume_handle(), Some("h2".to_string()));
     }
 

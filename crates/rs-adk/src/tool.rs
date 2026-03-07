@@ -239,11 +239,13 @@ impl ToolDispatcher {
                 name: call.name.clone(),
                 response: value,
                 id: call.id.clone(),
+                scheduling: None,
             },
             Err(e) => FunctionResponse {
                 name: call.name.clone(),
                 response: serde_json::json!({"error": e.to_string()}),
                 id: call.id.clone(),
+                scheduling: None,
             },
         }
     }
@@ -299,6 +301,7 @@ impl ToolDispatcher {
                             name: name.to_string(),
                             description: desc.to_string(),
                             parameters: params,
+                            behavior: None,
                         }
                     })
                     .collect();

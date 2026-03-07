@@ -637,6 +637,7 @@ mod tests {
                     name: "get_weather".to_string(),
                     response: serde_json::json!({"temp": 22}),
                     id: Some("call-1".to_string()),
+                    scheduling: None,
                 }],
             },
         };

@@ -271,6 +271,104 @@ Live::builder()
     .agent_tool("calc_payment", "Calculate payment plans", calc_pipeline)
 ```
 
+### Async Function Calling & Scheduling
+
+Per-tool non-blocking behavior and response scheduling modes map directly to the Gemini Live API:
+
+```rust
+// L0: Per-function behavior on the wire
+FunctionDeclaration {
+    name: "search_kb".into(),
+    description: "Search knowledge base".into(),
+    parameters: Some(schema),
+    behavior: Some(FunctionCallingBehavior::NonBlocking),  // model continues while tool runs
+}
+
+// L0: Scheduling on async responses
+FunctionResponse {
+    name: "search_kb".into(),
+    response: json!({"results": [...]}),
+    id: call.id.clone(),
+    scheduling: Some(FunctionResponseScheduling::WhenIdle),  // deliver when model finishes
+}
+```
+
+**Scheduling modes** (on `FunctionResponse`):
+- `Interrupt`: Model halts current output and immediately reports the result
+- `WhenIdle`: Model waits until it finishes current output before handling
+- `Silent`: Model integrates the result without notifying the user
+
+**L1/L2 integration**: `ToolExecutionMode::Background` automatically sets `behavior: NonBlocking` on the wire declaration and passes the scheduling mode through to responses:
+
+```rust
+// L2 fluent API
+Live::builder()
+    .tool_background("search_kb")                                    // default WhenIdle scheduling
+    .tool_background_with_scheduling("log_event", FunctionResponseScheduling::Silent)  // silent
+```
+
+### Control Plane Features
+
+**Steering Modes** — Control how the phase machine delivers instructions to the model:
+
+```rust
+Live::builder()
+    // Default: replace system instruction on phase transition
+    .steering_mode(SteeringMode::InstructionUpdate)
+    // Lighter: inject context via send_client_content (model-role turns)
+    .steering_mode(SteeringMode::ContextInjection)
+    // Both: instruction on transition, context injection per turn
+    .steering_mode(SteeringMode::Hybrid)
+```
+
+**Soft Turn Detection** — Proactive silence awareness when `proactiveAudio` is enabled:
+
+```rust
+Live::builder()
+    .soft_turn_timeout(Duration::from_secs(2))  // Fire soft turn if model stays silent 2s after VAD end
+```
+
+Soft turns run a lightweight pipeline (extractors, watchers, phase transitions) but do NOT prompt the model — respecting its decision to stay silent.
+
+**Conversation Repair** — Nudge the model when required information isn't being gathered:
+
+```rust
+Live::builder()
+    .repair(RepairConfig::default())  // nudge after 3 turns, escalate after 6
+    .repair(RepairConfig::new().nudge_after(2).escalate_after(5))
+    .phase("gather_info")
+        .needs(&["customer_id", "account_number"])
+        .transition("escalation", S::is_true("repair:escalation"))
+        .done()
+```
+
+**Tool Availability Advisory** — Proactively signal available tools on phase transitions:
+
+```rust
+Live::builder()
+    .tool_advisory(true)   // default: enabled
+    .tool_advisory(false)  // disable proactive signaling
+```
+
+**Session Persistence** — Survive process restarts:
+
+```rust
+Live::builder()
+    .persistence(Arc::new(FsPersistence::new("/tmp/sessions")))
+    .session_id("user-123-session-456")
+```
+
+Built-in backends: `FsPersistence` (filesystem), `MemoryPersistence` (in-memory/tests). Implement `SessionPersistence` trait for custom backends (Redis, DynamoDB, etc.).
+
+**Generation Complete Extraction** — Run extractors on generation complete (pre-truncation):
+
+```rust
+Live::builder()
+    .extract_on_generation::<FullIntent>(llm, "Extract model's full intended response")
+```
+
+This captures the model's full output before interruption truncates it.
+
 ## S.C.T.P.M.A Operator Algebra
 
 Six namespaces for composing agent configuration aspects:
@@ -331,6 +429,8 @@ let artifacts = A::json_output("report", "Analysis report")
 | `VadConfig` / `VoiceActivityDetector` | Voice activity detection |
 | `SpscRing` / `AudioJitterBuffer` | Lock-free audio buffers |
 | `ApiEndpoint` | Connection endpoint configuration |
+| `ResumeInfo` | Session resumption info: handle, resumable flag, last consumed index |
+| `UsageInfo` | Token usage metadata: total, prompt, response token counts |
 
 ### L1 (rs-adk) -- Agent Runtime
 
@@ -361,6 +461,13 @@ let artifacts = A::json_output("report", "Analysis report")
 | `BaseLlm` / `GeminiLlm` | LLM abstraction for text agents |
 | `TextAgentTool` | Wraps a TextAgent as a callable tool |
 | `BackgroundAgentDispatcher` | Fire-and-forget agent dispatch |
+| `SoftTurnDetector` | Proactive silence awareness for `proactiveAudio` sessions |
+| `SteeringMode` | How phase machine steers: InstructionUpdate, ContextInjection, Hybrid |
+| `NeedsFulfillment` / `RepairConfig` / `RepairAction` | Conversation repair protocol |
+| `SessionPersistence` / `SessionSnapshot` | Session persistence trait and snapshot type |
+| `FsPersistence` / `MemoryPersistence` | Built-in persistence backends |
+| `ControlPlaneConfig` | Consolidated control plane settings for the processor |
+| `ExtractionTrigger` | When to run extractors: EveryTurn, Interval, AfterToolCall, OnPhaseChange, OnGenerationComplete |
 
 ### L2 (adk-rs-fluent) -- Fluent DX
 
@@ -390,11 +497,17 @@ Fast Lane    Control Lane              Telemetry Lane
 - on_audio   - on_tool_call            - SessionSignals (AtomicU64)
 - on_text    - on_interrupted           - SessionTelemetry (atomic counters)
 - on_vad_*   - Phase transitions        - Debounced 100ms flush
-- on_input_  - Extractors (concurrent)
-  transcript - Watchers
-             - Computed state
+- on_input_  - Extractors (concurrent)  - Usage(UsageInfo)
+  transcript - Watchers                 - GenerationComplete
+             - Computed state           - SessionResumeUpdate(ResumeInfo)
              - Temporal patterns
              - TranscriptBuffer (owned, no mutex)
+             - GenerationComplete extractors
+             - Soft turn detection
+             - Steering (context injection)
+             - Tool advisory signaling
+             - Conversation repair (nudge/escalate)
+             - Session persistence (fire-and-forget)
 ```
 
 ## Development Commands

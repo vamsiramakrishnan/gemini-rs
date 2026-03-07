@@ -213,6 +213,7 @@ impl LlmAgent {
                                     name: call.name.clone(),
                                     response: json!({"status": "streaming"}),
                                     id: call.id.clone(),
+                                    scheduling: None,
                                 });
                             }
                             None => {
@@ -378,6 +379,7 @@ impl LlmAgent {
                 name: yield_tool_name,
                 response: final_response,
                 id: yield_call_id,
+                scheduling: None,
             };
             let _ = agent_session.send_tool_response(vec![resp]).await;
         });

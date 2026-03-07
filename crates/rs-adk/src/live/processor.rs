@@ -24,8 +24,12 @@ use super::background_tool::BackgroundToolTracker;
 use super::callbacks::{CallbackMode, EventCallbacks};
 use super::computed::ComputedRegistry;
 use super::extractor::{ExtractionTrigger, TurnExtractor};
+use super::needs::{NeedsFulfillment, RepairAction};
+use super::persistence::{SessionPersistence, SessionSnapshot};
 use super::phase::{PhaseMachine, TransitionResult};
 use super::session_signals::SessionSignals;
+use super::soft_turn::SoftTurnDetector;
+use super::steering::{self, SteeringMode};
 use super::telemetry::SessionTelemetry;
 use super::temporal::TemporalRegistry;
 use super::transcript::TranscriptBuffer;
@@ -51,10 +55,12 @@ pub(crate) enum ControlEvent {
     ToolCallCancelled(Vec<String>),
     Interrupted,
     TurnComplete,
+    /// Model finished generating (even if interrupted). Fires before TurnComplete.
+    GenerationComplete,
     GoAway(Option<String>),
     Connected,
     Disconnected(Option<String>),
-    SessionResumeHandle(String),
+    SessionResumeUpdate(rs_genai::session::ResumeInfo),
     Error(String),
     /// Transcript accumulation — pushed from router, exclusive to control lane.
     InputTranscript(String),
@@ -75,6 +81,35 @@ pub(crate) struct SharedState {
 ///
 /// Returns JoinHandles for the fast consumer and control processor tasks.
 /// The telemetry lane is spawned separately via [`spawn_telemetry_lane`].
+/// Configuration for the control plane's new capabilities.
+pub(crate) struct ControlPlaneConfig {
+    /// Soft turn detector for proactive silence awareness.
+    pub soft_turn: Option<SoftTurnDetector>,
+    /// Steering mode for phase instruction delivery.
+    pub steering_mode: SteeringMode,
+    /// Conversation repair tracker.
+    pub needs_fulfillment: Option<NeedsFulfillment>,
+    /// Session persistence backend.
+    pub persistence: Option<Arc<dyn SessionPersistence>>,
+    /// Session ID for persistence key.
+    pub session_id: Option<String>,
+    /// Whether to inject tool availability advisory on phase transitions.
+    pub tool_advisory: bool,
+}
+
+impl Default for ControlPlaneConfig {
+    fn default() -> Self {
+        Self {
+            soft_turn: None,
+            steering_mode: SteeringMode::default(),
+            needs_fulfillment: None,
+            persistence: None,
+            session_id: None,
+            tool_advisory: true,
+        }
+    }
+}
+
 pub(crate) fn spawn_event_processor(
     mut event_rx: broadcast::Receiver<SessionEvent>,
     callbacks: Arc<EventCallbacks>,
@@ -88,6 +123,7 @@ pub(crate) fn spawn_event_processor(
     temporal: Option<Arc<TemporalRegistry>>,
     background_tracker: Option<Arc<BackgroundToolTracker>>,
     execution_modes: std::collections::HashMap<String, super::background_tool::ToolExecutionMode>,
+    control_plane: ControlPlaneConfig,
 ) -> (tokio::task::JoinHandle<()>, tokio::task::JoinHandle<()>) {
     let shared = Arc::new(SharedState {
         interrupted: AtomicBool::new(false),
@@ -153,6 +189,7 @@ pub(crate) fn spawn_event_processor(
             temporal,
             background_tracker,
             execution_modes,
+            control_plane,
         )
         .await;
         ctrl_timer_cancel.cancel();
@@ -294,9 +331,12 @@ async fn route_event(
         SessionEvent::PhaseChanged(phase) => {
             let _ = fast_tx.send(FastEvent::Phase(phase)).await;
         }
-        SessionEvent::SessionResumeHandle(handle) => {
-            *shared.resume_handle.lock() = Some(handle.clone());
-            let _ = ctrl_tx.send(ControlEvent::SessionResumeHandle(handle)).await;
+        SessionEvent::SessionResumeUpdate(info) => {
+            *shared.resume_handle.lock() = Some(info.handle.clone());
+            let _ = ctrl_tx.send(ControlEvent::SessionResumeUpdate(info)).await;
+        }
+        SessionEvent::GenerationComplete => {
+            let _ = ctrl_tx.send(ControlEvent::GenerationComplete).await;
         }
 
         // Control lane events
@@ -315,6 +355,8 @@ async fn route_event(
         SessionEvent::TurnComplete => {
             let _ = ctrl_tx.send(ControlEvent::TurnComplete).await;
         }
+        // Usage metadata is handled by the telemetry lane (SessionSignals)
+        SessionEvent::Usage(_) => {}
         SessionEvent::GoAway(time_left) => {
             let _ = ctrl_tx.send(ControlEvent::GoAway(time_left)).await;
         }
@@ -426,6 +468,7 @@ async fn handle_tool_calls(
                             )
                         }),
                         id: call.id.clone(),
+                        scheduling: None,
                     });
                 }
             }
@@ -462,7 +505,7 @@ async fn handle_tool_calls(
                 for call in &allowed_calls {
                     let mode = execution_modes.get(&call.name);
                     match mode {
-                        Some(super::background_tool::ToolExecutionMode::Background { formatter }) => {
+                        Some(super::background_tool::ToolExecutionMode::Background { formatter, scheduling }) => {
                             // Send immediate ack
                             let fmt: &dyn super::background_tool::ResultFormatter = formatter
                                 .as_ref()
@@ -473,6 +516,7 @@ async fn handle_tool_calls(
                                 name: call.name.clone(),
                                 response: ack,
                                 id: call.id.clone(),
+                                scheduling: *scheduling,
                             });
                             bg_spawns.push((call.clone(), formatter.clone()));
                         }
@@ -483,11 +527,13 @@ async fn handle_tool_calls(
                                     name: call.name.clone(),
                                     response: result,
                                     id: call.id.clone(),
+                                    scheduling: None,
                                 }),
                                 Err(e) => results.push(FunctionResponse {
                                     name: call.name.clone(),
                                     response: serde_json::json!({"error": e.to_string()}),
                                     id: call.id.clone(),
+                                    scheduling: None,
                                 }),
                             }
                         }
@@ -554,6 +600,7 @@ async fn handle_tool_calls(
                     name: call.name.clone(),
                     response: formatted,
                     id: call.id.clone(),
+                    scheduling: None,
                 }])
                 .await
                 .ok();
@@ -654,6 +701,73 @@ async fn run_extractors(
     }
 }
 
+/// Run extractors using a window that optionally includes the current in-progress turn.
+///
+/// When `include_current` is true, uses `snapshot_window_with_current` to capture
+/// the model's output before interruption truncation (for GenerationComplete extractors).
+async fn run_extractors_with_window(
+    extractors: &[Arc<dyn TurnExtractor>],
+    transcript_buffer: &mut TranscriptBuffer,
+    state: &State,
+    callbacks: &EventCallbacks,
+    include_current: bool,
+) {
+    if extractors.is_empty() {
+        return;
+    }
+
+    let extraction_futures: Vec<_> = extractors
+        .iter()
+        .filter_map(|extractor| {
+            let window_size = extractor.window_size();
+            let window = if include_current {
+                transcript_buffer.snapshot_window_with_current(window_size).turns().to_vec()
+            } else {
+                transcript_buffer.window(window_size).to_vec()
+            };
+            if window.is_empty() || !extractor.should_extract(&window) {
+                return None;
+            }
+            let ext = extractor.clone();
+            Some(async move {
+                match ext.extract(&window).await {
+                    Ok(value) => Ok((ext.name().to_string(), value)),
+                    Err(e) => {
+                        #[cfg(feature = "tracing-support")]
+                        tracing::warn!(extractor = ext.name(), "Extraction failed: {e}");
+                        Err((ext.name().to_string(), e.to_string()))
+                    }
+                }
+            })
+        })
+        .collect();
+
+    let results = futures::future::join_all(extraction_futures).await;
+    for result in results {
+        match result {
+            Ok((name, value)) => {
+                state.set(&name, &value);
+                if let Some(obj) = value.as_object() {
+                    for (field, val) in obj {
+                        if val.is_null() {
+                            continue;
+                        }
+                        state.set(field, val.clone());
+                    }
+                }
+                if let Some(cb) = &callbacks.on_extracted {
+                    dispatch_callback!(callbacks.on_extracted_mode, cb(name, value));
+                }
+            }
+            Err((name, error)) => {
+                if let Some(cb) = &callbacks.on_extraction_error {
+                    dispatch_callback!(callbacks.on_extraction_error_mode, cb(name, error));
+                }
+            }
+        }
+    }
+}
+
 /// Handle the TurnComplete pipeline: transcript finalization, extraction,
 /// phase evaluation, unified instruction composition, watchers, temporal.
 ///
@@ -672,6 +786,7 @@ async fn handle_turn_complete(
     temporal: &Option<Arc<TemporalRegistry>>,
     transcript_buffer: &mut TranscriptBuffer,
     extraction_turn_tracker: &mut std::collections::HashMap<String, u32>,
+    control_plane: &mut ControlPlaneConfig,
 ) {
     // 1. Reset turn-scoped state
     state.clear_prefix("turn:");
@@ -708,7 +823,9 @@ async fn handle_turn_complete(
                     .unwrap_or(0);
                 current_turn.saturating_sub(last) >= n
             }
-            ExtractionTrigger::AfterToolCall | ExtractionTrigger::OnPhaseChange => false,
+            ExtractionTrigger::AfterToolCall
+            | ExtractionTrigger::OnPhaseChange
+            | ExtractionTrigger::OnGenerationComplete => false,
         })
         .cloned()
         .collect();
@@ -778,6 +895,81 @@ async fn handle_turn_complete(
             .cloned()
             .collect();
         run_extractors(&phase_change_extractors, transcript_buffer, state, callbacks).await;
+    }
+
+    // 7d. Tool availability advisory (Phase 5)
+    // When phase transitions change the tool set, inject a model-role advisory turn
+    if transition_result.is_some() && control_plane.tool_advisory {
+        if let Some(ref pm) = phase_machine {
+            let machine = pm.lock().await;
+            if let Some(tools) = machine.active_tools() {
+                let prev_tools: Option<Vec<String>> =
+                    state.session().get("active_tools");
+                let tools_vec: Vec<String> = tools.iter().map(|s| s.to_string()).collect();
+                let changed = prev_tools.as_ref() != Some(&tools_vec);
+                if changed {
+                    state.session().set("active_tools", tools_vec.clone());
+                    let tool_names = tools_vec.join(", ");
+                    let advisory = rs_genai::prelude::Content::model(format!(
+                        "In this phase, I have access to these tools: {}. \
+                         I should only use these tools.",
+                        tool_names
+                    ));
+                    writer.send_client_content(vec![advisory], false).await.ok();
+                }
+            }
+        }
+    }
+
+    // 7e. Conversation repair (Phase 6)
+    if let Some(ref mut needs_tracker) = control_plane.needs_fulfillment {
+        if let Some(ref pm) = phase_machine {
+            let machine = pm.lock().await;
+            let phase_name = machine.current().to_string();
+            if let Some(phase) = machine.current_phase() {
+                if !phase.needs.is_empty() {
+                    let needs = phase.needs.clone();
+                    drop(machine); // release lock before async work
+                    match needs_tracker.evaluate(&phase_name, &needs, state) {
+                        RepairAction::Nudge { unfulfilled, attempt } => {
+                            let nudge = rs_genai::prelude::Content::model(format!(
+                                "I still need to collect: {}. Let me ask about these.",
+                                unfulfilled.join(", ")
+                            ));
+                            writer.send_client_content(vec![nudge], false).await.ok();
+                            if attempt == 1 {
+                                writer.send_client_content(vec![], true).await.ok();
+                            }
+                        }
+                        RepairAction::Escalate { unfulfilled } => {
+                            state.set("repair:escalation", true);
+                            state.set("repair:unfulfilled", unfulfilled);
+                        }
+                        RepairAction::None => {}
+                    }
+                }
+            }
+        }
+    }
+
+    // 7f. Context injection steering (Phase 4)
+    if matches!(
+        control_plane.steering_mode,
+        SteeringMode::ContextInjection | SteeringMode::Hybrid
+    ) {
+        if let Some(ref pm) = phase_machine {
+            let machine = pm.lock().await;
+            if let Some(phase) = machine.current_phase() {
+                let steering_parts =
+                    steering::build_steering_context(state, &phase.modifiers);
+                if !steering_parts.is_empty() {
+                    let content = rs_genai::prelude::Content::model(
+                        steering_parts.join("\n"),
+                    );
+                    writer.send_client_content(vec![content], false).await.ok();
+                }
+            }
+        }
     }
 
     // 8. Fire watchers (compare pre vs post snapshots)
@@ -876,6 +1068,41 @@ async fn handle_turn_complete(
     // 17. Update session turn count
     let tc: u32 = state.session().get("turn_count").unwrap_or(0);
     state.session().set("turn_count", tc + 1);
+
+    // 18. Persist session state (Phase 7 — fire and forget)
+    if let Some(ref persistence) = control_plane.persistence {
+        let phase_name = if let Some(ref pm) = phase_machine {
+            pm.lock().await.current().to_string()
+        } else {
+            String::new()
+        };
+        let snapshot = SessionSnapshot {
+            state: state.to_hashmap(),
+            phase: phase_name,
+            turn_count: tc + 1,
+            transcript_summary: transcript_buffer.format_window(5),
+            resume_handle: shared.resume_handle.lock().clone(),
+            saved_at: {
+                // Simple ISO 8601 timestamp without chrono dependency
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default();
+                format!("{}s", now.as_secs())
+            },
+        };
+        let p = persistence.clone();
+        let sid = control_plane
+            .session_id
+            .clone()
+            .unwrap_or_else(|| "default".to_string());
+        tokio::spawn(async move {
+            if let Err(e) = p.save(&sid, &snapshot).await {
+                #[cfg(feature = "tracing-support")]
+                tracing::warn!("Session persistence failed: {}", e);
+                let _ = e;
+            }
+        });
+    }
 }
 
 /// Control lane processor — handles lifecycle events, tool dispatch,
@@ -896,6 +1123,7 @@ async fn run_control_lane(
     temporal: Option<Arc<TemporalRegistry>>,
     background_tracker: Option<Arc<BackgroundToolTracker>>,
     execution_modes: std::collections::HashMap<String, super::background_tool::ToolExecutionMode>,
+    mut control_plane: ControlPlaneConfig,
 ) {
     // TranscriptBuffer is exclusively owned by the control lane — no mutex.
     let mut transcript_buffer = TranscriptBuffer::new();
@@ -951,6 +1179,10 @@ async fn run_control_lane(
                 shared.interrupted.store(false, Ordering::Release);
             }
             ControlEvent::TurnComplete => {
+                // Reset soft turn detector — model responded
+                if let Some(ref mut std) = control_plane.soft_turn {
+                    std.on_model_response();
+                }
                 handle_turn_complete(
                     &callbacks,
                     &writer,
@@ -963,6 +1195,7 @@ async fn run_control_lane(
                     &temporal,
                     &mut transcript_buffer,
                     &mut extraction_turn_tracker,
+                    &mut control_plane,
                 )
                 .await;
             }
@@ -986,8 +1219,27 @@ async fn run_control_lane(
                     dispatch_callback!(callbacks.on_disconnected_mode, cb(reason));
                 }
             }
-            ControlEvent::SessionResumeHandle(_handle) => {
+            ControlEvent::SessionResumeUpdate(_info) => {
                 // Already stored in shared state by the router
+            }
+            ControlEvent::GenerationComplete => {
+                // Run OnGenerationComplete extractors with pre-truncation transcript
+                let gen_extractors: Vec<Arc<dyn TurnExtractor>> = extractors
+                    .iter()
+                    .filter(|e| matches!(e.trigger(), ExtractionTrigger::OnGenerationComplete))
+                    .cloned()
+                    .collect();
+                if !gen_extractors.is_empty() {
+                    // Use snapshot_window_with_current to capture model output before truncation
+                    run_extractors_with_window(
+                        &gen_extractors,
+                        &mut transcript_buffer,
+                        &state,
+                        &callbacks,
+                        true, // include current (pre-finalized) turn
+                    )
+                    .await;
+                }
             }
             ControlEvent::Error(err) => {
                 if let Some(cb) = &callbacks.on_error {
@@ -1021,7 +1273,7 @@ mod tests {
             Arc::new(crate::agent_session::NoOpSessionWriter);
 
         let (fast_handle, ctrl_handle) =
-            spawn_event_processor(event_rx, callbacks, None, writer, vec![], State::new(), None, None, None, None, None, std::collections::HashMap::new());
+            spawn_event_processor(event_rx, callbacks, None, writer, vec![], State::new(), None, None, None, None, None, std::collections::HashMap::new(), ControlPlaneConfig::default());
 
         // Send audio events
         let _ = event_tx.send(SessionEvent::AudioData(Bytes::from_static(b"audio1")));
@@ -1056,7 +1308,7 @@ mod tests {
             Arc::new(crate::agent_session::NoOpSessionWriter);
 
         let (fast_handle, ctrl_handle) =
-            spawn_event_processor(event_rx, callbacks, None, writer, vec![], State::new(), None, None, None, None, None, std::collections::HashMap::new());
+            spawn_event_processor(event_rx, callbacks, None, writer, vec![], State::new(), None, None, None, None, None, std::collections::HashMap::new(), ControlPlaneConfig::default());
 
         // Send audio, then interrupt, then more audio
         let _ = event_tx.send(SessionEvent::AudioData(Bytes::from_static(b"before")));
@@ -1095,7 +1347,7 @@ mod tests {
             Arc::new(crate::agent_session::NoOpSessionWriter);
 
         let (fast_handle, ctrl_handle) =
-            spawn_event_processor(event_rx, callbacks, None, writer, vec![], State::new(), None, None, None, None, None, std::collections::HashMap::new());
+            spawn_event_processor(event_rx, callbacks, None, writer, vec![], State::new(), None, None, None, None, None, std::collections::HashMap::new(), ControlPlaneConfig::default());
 
         let _ = event_tx.send(SessionEvent::TurnComplete);
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -1131,6 +1383,7 @@ mod tests {
             None,
             None,
             std::collections::HashMap::new(),
+            ControlPlaneConfig::default(),
         );
 
         // Send transcripts
@@ -1201,6 +1454,7 @@ mod tests {
             None,
             None,
             std::collections::HashMap::new(),
+            ControlPlaneConfig::default(),
         );
 
         // Produce a turn with content
@@ -1274,7 +1528,7 @@ mod tests {
         let mut execution_modes = std::collections::HashMap::new();
         execution_modes.insert(
             "slow_search".to_string(),
-            ToolExecutionMode::Background { formatter: None },
+            ToolExecutionMode::Background { formatter: None, scheduling: None },
         );
 
         let sent = Arc::new(parking_lot::Mutex::new(Vec::<Vec<FunctionResponse>>::new()));
@@ -1321,6 +1575,7 @@ mod tests {
             None,
             Some(tracker.clone()),
             execution_modes,
+            ControlPlaneConfig::default(),
         );
 
         // Send a tool call
@@ -1382,6 +1637,7 @@ mod tests {
         let (fast_handle, ctrl_handle) = spawn_event_processor(
             event_rx, callbacks, None, writer, vec![], State::new(),
             None, None, None, None, None, std::collections::HashMap::new(),
+            ControlPlaneConfig::default(),
         );
 
         let _ = event_tx.send(SessionEvent::TurnComplete);
@@ -1420,6 +1676,7 @@ mod tests {
         let (fast_handle, ctrl_handle) = spawn_event_processor(
             event_rx, callbacks, None, writer, vec![], State::new(),
             None, None, None, None, None, std::collections::HashMap::new(),
+            ControlPlaneConfig::default(),
         );
 
         let _ = event_tx.send(SessionEvent::TurnComplete);

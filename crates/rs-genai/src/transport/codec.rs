@@ -227,6 +227,7 @@ mod tests {
             name: "get_weather".to_string(),
             response: serde_json::json!({"temp": 22}),
             id: Some("call-1".to_string()),
+            scheduling: None,
         }]);
         let bytes = codec.encode_command(&cmd, &config).unwrap();
         let json = String::from_utf8(bytes).unwrap();

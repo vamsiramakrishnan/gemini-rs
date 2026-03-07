@@ -160,8 +160,14 @@ pub enum SessionEvent {
     ToolCall(Vec<FunctionCall>),
     /// Server cancelled pending tool calls.
     ToolCallCancelled(Vec<String>),
-    /// Model turn is complete.
+    /// Model turn is complete (it's the user's turn now).
     TurnComplete,
+    /// Model finished generating its full response.
+    ///
+    /// Fires even if the generation was interrupted — tells you the model's
+    /// internal generation pipeline has stopped. Distinct from `TurnComplete`
+    /// which is the turn-taking signal.
+    GenerationComplete,
     /// Model was interrupted by barge-in.
     Interrupted,
     /// Session phase changed.
@@ -172,12 +178,36 @@ pub enum SessionEvent {
     Disconnected(Option<String>),
     /// Non-fatal error.
     Error(String),
-    /// Session resumption handle received from server.
-    SessionResumeHandle(String),
+    /// Session resumption update with handle, resumability, and consumed index.
+    SessionResumeUpdate(ResumeInfo),
     /// Server-side voice activity detected (user started speaking).
     VoiceActivityStart,
     /// Server-side voice activity ended (user stopped speaking).
     VoiceActivityEnd,
+    /// Token usage metadata from server (for context window tracking).
+    Usage(UsageInfo),
+}
+
+/// Session resumption information from the server.
+#[derive(Debug, Clone)]
+pub struct ResumeInfo {
+    /// Opaque handle for session resumption.
+    pub handle: String,
+    /// Whether the session is currently resumable.
+    pub resumable: bool,
+    /// Index of the last client message consumed by the server.
+    pub last_consumed_index: Option<String>,
+}
+
+/// Token usage information from the server.
+#[derive(Debug, Clone)]
+pub struct UsageInfo {
+    /// Total tokens currently in the context window.
+    pub total_token_count: Option<u32>,
+    /// Tokens used by the prompt/context.
+    pub prompt_token_count: Option<u32>,
+    /// Tokens used by the response.
+    pub response_token_count: Option<u32>,
 }
 
 // ---------------------------------------------------------------------------

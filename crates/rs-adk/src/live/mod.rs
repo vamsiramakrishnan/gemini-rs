@@ -14,9 +14,13 @@ pub mod computed;
 pub mod context_builder;
 pub mod extractor;
 pub mod handle;
+pub mod needs;
+pub mod persistence;
 pub mod phase;
 pub(crate) mod processor;
 pub mod session_signals;
+pub mod soft_turn;
+pub mod steering;
 pub mod telemetry;
 pub mod temporal;
 pub mod transcript;
@@ -30,8 +34,12 @@ pub use computed::{ComputedRegistry, ComputedVar};
 pub use context_builder::ContextBuilder;
 pub use extractor::{ExtractionTrigger, LlmExtractor, TurnExtractor};
 pub use handle::LiveHandle;
+pub use needs::{NeedsFulfillment, RepairAction, RepairConfig};
+pub use persistence::{FsPersistence, MemoryPersistence, SessionPersistence, SessionSnapshot};
 pub use phase::{InstructionModifier, Phase, PhaseInstruction, PhaseMachine, PhaseTransition, Transition, TransitionResult, TransitionTrigger};
 pub use session_signals::{SessionSignals, SessionType};
+pub use soft_turn::SoftTurnDetector;
+pub use steering::SteeringMode;
 pub use telemetry::SessionTelemetry;
 pub use temporal::{
     ConsecutiveFailureDetector, PatternDetector, RateDetector, SustainedDetector,

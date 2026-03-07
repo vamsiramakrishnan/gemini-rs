@@ -28,6 +28,7 @@ fn demo_tools() -> Tool {
                 },
                 "required": ["city"]
             })),
+            behavior: None,
         },
         FunctionDeclaration {
             name: "get_time".into(),
@@ -42,6 +43,7 @@ fn demo_tools() -> Tool {
                 },
                 "required": ["timezone"]
             })),
+            behavior: None,
         },
         FunctionDeclaration {
             name: "calculate".into(),
@@ -56,6 +58,7 @@ fn demo_tools() -> Tool {
                 },
                 "required": ["expression"]
             })),
+            behavior: None,
         },
     ])
 }
@@ -279,6 +282,7 @@ impl CookbookApp for ToolCalling {
                                 name: call.name.clone(),
                                 response: result,
                                 id: call.id.clone(),
+                                scheduling: None,
                             }
                         })
                         .collect();

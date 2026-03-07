@@ -307,6 +307,7 @@ fn clinic_tools() -> rs_genai::prelude::Tool {
                 "properties": {},
                 "required": []
             })),
+            behavior: None,
         },
         FunctionDeclaration {
             name: "list_doctors".into(),
@@ -321,6 +322,7 @@ fn clinic_tools() -> rs_genai::prelude::Tool {
                 },
                 "required": ["department"]
             })),
+            behavior: None,
         },
         FunctionDeclaration {
             name: "check_doctor_availability".into(),
@@ -339,6 +341,7 @@ fn clinic_tools() -> rs_genai::prelude::Tool {
                 },
                 "required": ["doctor_name"]
             })),
+            behavior: None,
         },
         FunctionDeclaration {
             name: "book_appointment".into(),
@@ -365,6 +368,7 @@ fn clinic_tools() -> rs_genai::prelude::Tool {
                 },
                 "required": ["patient_id", "doctor_name", "date", "time"]
             })),
+            behavior: None,
         },
         FunctionDeclaration {
             name: "reschedule_appointment".into(),
@@ -387,6 +391,7 @@ fn clinic_tools() -> rs_genai::prelude::Tool {
                 },
                 "required": ["appointment_id", "new_date", "new_time"]
             })),
+            behavior: None,
         },
         FunctionDeclaration {
             name: "cancel_appointment".into(),
@@ -401,6 +406,7 @@ fn clinic_tools() -> rs_genai::prelude::Tool {
                 },
                 "required": ["appointment_id"]
             })),
+            behavior: None,
         },
         FunctionDeclaration {
             name: "register_patient".into(),
@@ -427,6 +433,7 @@ fn clinic_tools() -> rs_genai::prelude::Tool {
                 },
                 "required": ["name", "date_of_birth", "phone"]
             })),
+            behavior: None,
         },
         FunctionDeclaration {
             name: "lookup_patient".into(),
@@ -445,6 +452,7 @@ fn clinic_tools() -> rs_genai::prelude::Tool {
                 },
                 "required": []
             })),
+            behavior: None,
         },
     ])
 }
@@ -1225,6 +1233,7 @@ async fn handle_session(
                         name: call.name.clone(),
                         response: result,
                         id: call.id.clone(),
+                        scheduling: None,
                     });
                 }
                 Some(responses)

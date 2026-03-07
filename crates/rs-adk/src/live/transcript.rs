@@ -224,6 +224,24 @@ impl TranscriptBuffer {
     pub fn snapshot_window(&mut self, n: usize) -> TranscriptWindow {
         TranscriptWindow::new(self.window(n).to_vec())
     }
+
+    /// Snapshot including the current in-progress turn (not yet finalized).
+    ///
+    /// Used by `GenerationComplete` extractors to see the model's full output
+    /// before interruption truncation clears `current_model`.
+    pub fn snapshot_window_with_current(&mut self, n: usize) -> TranscriptWindow {
+        let mut turns: Vec<TranscriptTurn> = self.window(n).to_vec();
+        if self.has_pending() {
+            turns.push(TranscriptTurn {
+                turn_number: self.turn_count,
+                user: self.current_user.clone(),
+                model: self.current_model.clone(),
+                tool_calls: self.tool_calls_pending.clone(),
+                timestamp: std::time::Instant::now(),
+            });
+        }
+        TranscriptWindow::new(turns)
+    }
 }
 
 /// A read-only snapshot of recent transcript turns for context construction.

@@ -396,6 +396,21 @@ impl State {
             .collect()
     }
 
+    /// Export all state as a HashMap (for persistence/serialization).
+    pub fn to_hashmap(&self) -> std::collections::HashMap<String, serde_json::Value> {
+        self.inner
+            .iter()
+            .map(|entry| (entry.key().clone(), entry.value().clone()))
+            .collect()
+    }
+
+    /// Restore state from a HashMap (for persistence/deserialization).
+    pub fn from_hashmap(&self, map: std::collections::HashMap<String, serde_json::Value>) {
+        for (key, value) in map {
+            self.inner.insert(key, value);
+        }
+    }
+
     /// Remove all keys with the given prefix.
     pub fn clear_prefix(&self, prefix: &str) {
         let keys_to_remove: Vec<String> = self

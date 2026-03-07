@@ -242,6 +242,7 @@ impl CookbookApp for AllConfig {
                                 }
                             }
                         })),
+                        behavior: None,
                     })
                     .collect();
                 config = config.add_tool(Tool::functions(declarations));
@@ -323,6 +324,7 @@ impl CookbookApp for AllConfig {
                                 name: call.name.clone(),
                                 response: result,
                                 id: call.id.clone(),
+                                scheduling: None,
                             }
                         })
                         .collect();

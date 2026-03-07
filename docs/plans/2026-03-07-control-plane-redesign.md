@@ -3,6 +3,46 @@
 **Date**: 2026-03-07
 **Scope**: L0 (rs-genai), L1 (rs-adk), L2 (adk-rs-fluent)
 **Philosophy**: Let the model lead. Let the SDK observe and occasionally intervene.
+**Status**: Implemented (Phases 0, 2–7). Phase 1 (Context Horizon) and Phase 8 (Affect Proxy) deferred.
+
+---
+
+## Implementation Notes
+
+### What Was Implemented
+
+| Phase | Status | Files Changed/Added |
+|-------|--------|---------------------|
+| **0.1** GenerationComplete event | Done | `rs-genai/src/session/mod.rs`, `rs-genai/src/transport/connection.rs` |
+| **0.2** UsageMetadata event | Done | Same as 0.1 (surfaced as `SessionEvent::Usage(UsageInfo)`) |
+| **0.3** ResumeInfo struct | Done | Same as 0.1 (enriched `SessionResumeUpdate(ResumeInfo)`) |
+| **2** Generation Complete extractors | Done | `rs-adk/src/live/extractor.rs`, `rs-adk/src/live/transcript.rs`, `rs-adk/src/live/processor.rs` |
+| **3** Soft Turn Detection | Done | `rs-adk/src/live/soft_turn.rs` (new), `rs-adk/src/live/processor.rs`, `rs-adk/src/live/builder.rs`, `adk-rs-fluent/src/live.rs` |
+| **4** Context Injection Steering | Done | `rs-adk/src/live/steering.rs` (new), `rs-adk/src/live/processor.rs`, `rs-adk/src/live/builder.rs`, `adk-rs-fluent/src/live.rs` |
+| **5** Tool Availability Advisory | Done | `rs-adk/src/live/processor.rs`, `rs-adk/src/live/builder.rs`, `adk-rs-fluent/src/live.rs` |
+| **6** Conversation Repair Protocol | Done | `rs-adk/src/live/needs.rs` (new), `rs-adk/src/live/processor.rs`, `rs-adk/src/live/builder.rs`, `adk-rs-fluent/src/live.rs` |
+| **7** Session Persistence | Done | `rs-adk/src/live/persistence.rs` (new), `rs-adk/src/state.rs`, `rs-adk/src/live/processor.rs`, `rs-adk/src/live/builder.rs`, `adk-rs-fluent/src/live.rs` |
+
+### What Was Deferred
+
+| Phase | Reason |
+|-------|--------|
+| **1** Context Horizon Awareness | Requires heuristic token-per-turn estimation that needs real-world calibration. The `UsageInfo` event is surfaced (Phase 0.2) so this can be built incrementally. |
+| **8** Affect Proxy Extraction | Requires an OOB LLM call with empathy marker detection. The extraction pipeline (`OnGenerationComplete` trigger) is in place to support this when added. |
+
+### Architectural Decisions Made During Implementation
+
+1. **`ControlPlaneConfig` struct**: All control plane settings (soft turn, steering, repair, persistence, tool advisory) were consolidated into a single `ControlPlaneConfig` passed to `spawn_event_processor`. This avoids parameter explosion and makes the processor's control plane configuration explicit.
+
+2. **`Content::model(format!(...))` for context injection**: Tool advisory, nudge, and steering context all use model-role content turns via `send_client_content`. This follows the design plan's philosophy of working with the model's conversational intelligence.
+
+3. **`UsageInfo` vs `UsageMetadata`**: Named `UsageInfo` at the L0 level to avoid confusion with the wire protocol's `UsageMetadata` struct. Contains `total_token_count`, `prompt_token_count`, `response_token_count`.
+
+4. **`ResumeInfo` enrichment**: The bare `String` handle in `SessionResumeHandle` was replaced with `SessionResumeUpdate(ResumeInfo)` containing `handle`, `resumable`, and `last_consumed_index`.
+
+5. **Soft turn detector placement**: Lives in its own module (`soft_turn.rs`) rather than inline in processor.rs, following the existing pattern of `needs.rs`, `steering.rs`, etc.
+
+6. **`State::to_hashmap()` / `from_hashmap()`**: Added for persistence serialization. Uses `serde_json::Value` as the intermediate type to avoid generic serialization complexity.
 
 ---
 

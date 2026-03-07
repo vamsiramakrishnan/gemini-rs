@@ -242,6 +242,7 @@ fn call_screening_tools() -> rs_genai::prelude::Tool {
                 },
                 "required": ["name"]
             })),
+            behavior: None,
         },
         FunctionDeclaration {
             name: "check_calendar".into(),
@@ -256,6 +257,7 @@ fn call_screening_tools() -> rs_genai::prelude::Tool {
                 },
                 "required": []
             })),
+            behavior: None,
         },
         FunctionDeclaration {
             name: "take_message".into(),
@@ -282,6 +284,7 @@ fn call_screening_tools() -> rs_genai::prelude::Tool {
                 },
                 "required": ["from_name", "message"]
             })),
+            behavior: None,
         },
         FunctionDeclaration {
             name: "transfer_call".into(),
@@ -296,6 +299,7 @@ fn call_screening_tools() -> rs_genai::prelude::Tool {
                 },
                 "required": ["reason"]
             })),
+            behavior: None,
         },
         FunctionDeclaration {
             name: "block_caller".into(),
@@ -310,6 +314,7 @@ fn call_screening_tools() -> rs_genai::prelude::Tool {
                 },
                 "required": ["reason"]
             })),
+            behavior: None,
         },
     ])
 }
@@ -602,6 +607,7 @@ async fn handle_session(
                         name: call.name.clone(),
                         response: result,
                         id: call.id.clone(),
+                        scheduling: None,
                     });
                 }
                 Some(responses)

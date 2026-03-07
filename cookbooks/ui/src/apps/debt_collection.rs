@@ -340,6 +340,7 @@ fn debt_collection_tools() -> rs_genai::prelude::Tool {
                 },
                 "required": ["account_id"]
             })),
+            behavior: None,
         },
         FunctionDeclaration {
             name: "verify_identity".into(),
@@ -362,6 +363,7 @@ fn debt_collection_tools() -> rs_genai::prelude::Tool {
                 },
                 "required": ["name", "dob", "last4ssn"]
             })),
+            behavior: None,
         },
         FunctionDeclaration {
             name: "calculate_payment_plan".into(),
@@ -380,6 +382,7 @@ fn debt_collection_tools() -> rs_genai::prelude::Tool {
                 },
                 "required": ["total", "months"]
             })),
+            behavior: None,
         },
         FunctionDeclaration {
             name: "process_payment".into(),
@@ -402,6 +405,7 @@ fn debt_collection_tools() -> rs_genai::prelude::Tool {
                 },
                 "required": ["account_id", "amount", "method"]
             })),
+            behavior: None,
         },
         FunctionDeclaration {
             name: "log_compliance_event".into(),
@@ -420,6 +424,7 @@ fn debt_collection_tools() -> rs_genai::prelude::Tool {
                 },
                 "required": ["event_type", "details"]
             })),
+            behavior: None,
         },
     ])
 }
@@ -1177,6 +1182,7 @@ impl CookbookApp for DebtCollection {
                             name: call.name.clone(),
                             response: result,
                             id: call.id.clone(),
+                            scheduling: None,
                         });
                     }
                     Some(responses)
