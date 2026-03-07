@@ -160,8 +160,6 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use rs_genai::prelude::*;
-
     #[test]
     fn builder_chain_compiles() {
         let _live = Live::builder()
