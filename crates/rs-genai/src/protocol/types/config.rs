@@ -1068,13 +1068,14 @@ mod tests {
     #[test]
     fn vertex_ai_strips_behavior_from_setup() {
         use crate::protocol::types::{FunctionCallingBehavior, FunctionDeclaration, Tool};
-        let config = SessionConfig::from_vertex("proj", "us-central1", "token")
-            .add_tool(Tool::functions(vec![FunctionDeclaration {
+        let config = SessionConfig::from_vertex("proj", "us-central1", "token").add_tool(
+            Tool::functions(vec![FunctionDeclaration {
                 name: "test".into(),
                 description: "test".into(),
                 parameters: None,
                 behavior: Some(FunctionCallingBehavior::NonBlocking),
-            }]));
+            }]),
+        );
         let setup = config.to_setup_message();
         let decl = &setup.setup.tools[0].function_declarations.as_ref().unwrap()[0];
         assert!(decl.behavior.is_none(), "Vertex AI should strip behavior");
@@ -1083,14 +1084,13 @@ mod tests {
     #[test]
     fn google_ai_preserves_behavior_in_setup() {
         use crate::protocol::types::{FunctionCallingBehavior, FunctionDeclaration, Tool};
-        let config = SessionConfig::new("key").add_tool(Tool::functions(vec![
-            FunctionDeclaration {
+        let config =
+            SessionConfig::new("key").add_tool(Tool::functions(vec![FunctionDeclaration {
                 name: "test".into(),
                 description: "test".into(),
                 parameters: None,
                 behavior: Some(FunctionCallingBehavior::NonBlocking),
-            },
-        ]));
+            }]));
         let setup = config.to_setup_message();
         let decl = &setup.setup.tools[0].function_declarations.as_ref().unwrap()[0];
         assert_eq!(

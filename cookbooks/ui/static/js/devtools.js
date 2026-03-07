@@ -341,6 +341,10 @@ var DevtoolsManager = (function () {
     this._metrics.addTurnLatency(data.latency_ms);
   };
 
+  DevtoolsManager.prototype.handleBufferMetrics = function (metrics) {
+    this._metrics.updateBufferMetrics(metrics);
+  };
+
   DevtoolsManager.prototype.handleAppMeta = function (info) {
     this.availableTabs = ['timeline', 'state'];
     var features = (info.features || []).map(function (f) { return f.toLowerCase(); });

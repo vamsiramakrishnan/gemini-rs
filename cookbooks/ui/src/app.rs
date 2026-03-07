@@ -45,9 +45,11 @@ pub enum ServerMessage {
     TextComplete {
         text: String,
     },
+    /// Raw PCM audio bytes. Sent as binary WebSocket frames — never JSON-serialized.
     Audio {
-        data: String,
-    }, // base64
+        #[serde(skip)]
+        data: Vec<u8>,
+    },
     TurnComplete,
     Interrupted,
     Error {
@@ -57,6 +59,10 @@ pub enum ServerMessage {
         text: String,
     },
     OutputTranscription {
+        text: String,
+    },
+    /// Model thought/reasoning summary (when includeThoughts is enabled).
+    Thought {
         text: String,
     },
     VoiceActivityStart,
@@ -136,6 +142,38 @@ pub enum ClientMessage {
 
 /// Sender handle for sending messages to the browser.
 pub type WsSender = mpsc::UnboundedSender<ServerMessage>;
+
+/// Generate CookbookApp metadata methods from a declarative block.
+///
+/// Usage:
+/// ```ignore
+/// cookbook_meta! {
+///     name: "voice-chat",
+///     description: "Native audio voice chat with Gemini Live",
+///     category: Basic,
+///     features: ["voice", "transcription"],
+///     tips: ["Click the microphone button to start speaking"],
+///     try_saying: ["Hello! Tell me a joke."],
+/// }
+/// ```
+#[macro_export]
+macro_rules! cookbook_meta {
+    (
+        name: $name:literal,
+        description: $desc:literal,
+        category: $cat:ident,
+        features: [$($feat:literal),* $(,)?],
+        $(tips: [$($tip:literal),* $(,)?],)?
+        $(try_saying: [$($try:literal),* $(,)?],)?
+    ) => {
+        fn name(&self) -> &str { $name }
+        fn description(&self) -> &str { $desc }
+        fn category(&self) -> $crate::app::AppCategory { $crate::app::AppCategory::$cat }
+        fn features(&self) -> Vec<String> { vec![$($feat.into()),*] }
+        fn tips(&self) -> Vec<String> { vec![$($($tip.into()),*)?] }
+        fn try_saying(&self) -> Vec<String> { vec![$($($try.into()),*)?] }
+    };
+}
 
 /// The trait that all cookbook apps implement.
 #[async_trait]

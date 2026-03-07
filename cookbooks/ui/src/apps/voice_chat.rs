@@ -4,7 +4,8 @@ use tracing::info;
 
 use adk_rs_fluent::prelude::*;
 
-use crate::app::{AppCategory, AppError, ClientMessage, CookbookApp, WsSender};
+use crate::app::{AppError, ClientMessage, CookbookApp, WsSender};
+use crate::cookbook_meta;
 
 use super::{build_session_config, resolve_voice, wait_for_start};
 
@@ -13,36 +14,21 @@ pub struct VoiceChat;
 
 #[async_trait]
 impl CookbookApp for VoiceChat {
-    fn name(&self) -> &str {
-        "voice-chat"
-    }
-
-    fn description(&self) -> &str {
-        "Native audio voice chat with Gemini Live"
-    }
-
-    fn category(&self) -> AppCategory {
-        AppCategory::Basic
-    }
-
-    fn features(&self) -> Vec<String> {
-        vec!["voice".into(), "transcription".into()]
-    }
-
-    fn tips(&self) -> Vec<String> {
-        vec![
-            "Click the microphone button to start speaking".into(),
-            "Transcriptions appear below each message showing what was said".into(),
-            "You can also type text — the model will respond with voice".into(),
-        ]
-    }
-
-    fn try_saying(&self) -> Vec<String> {
-        vec![
-            "Hello! Tell me a joke.".into(),
-            "What's the weather like on Mars?".into(),
-            "Can you sing a short song?".into(),
-        ]
+    cookbook_meta! {
+        name: "voice-chat",
+        description: "Native audio voice chat with Gemini Live",
+        category: Basic,
+        features: ["voice", "transcription"],
+        tips: [
+            "Click the microphone button to start speaking",
+            "Transcriptions appear below each message showing what was said",
+            "You can also type text — the model will respond with voice",
+        ],
+        try_saying: [
+            "Hello! Tell me a joke.",
+            "What's the weather like on Mars?",
+            "Can you sing a short song?",
+        ],
     }
 
     async fn handle_session(

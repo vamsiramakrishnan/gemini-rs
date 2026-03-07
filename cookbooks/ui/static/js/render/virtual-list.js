@@ -161,22 +161,23 @@ VirtualList.prototype._renderVisible = function () {
   var count = this._visibleCount;
 
   // Detect auto-scroll: within 2 rows of end
-  var maxScroll = count * rh - viewHeight;
-  this._wasAtBottom = scrollTop >= maxScroll - rh * 2;
+  var maxScroll = Math.max(0, count * rh - viewHeight);
+  this._wasAtBottom = maxScroll <= 0 || scrollTop >= maxScroll - rh * 2;
 
   // Visible range in virtual space
   var startIdx = Math.max(0, Math.floor(scrollTop / rh));
   var endIdx = Math.min(count, Math.ceil((scrollTop + viewHeight) / rh));
+  var visibleSlots = endIdx - startIdx;
 
   var poolLen = this._pool.length;
 
   for (var p = 0; p < poolLen; p++) {
-    var row = startIdx + p;
     var el = this._pool[p];
-    if (row >= endIdx) {
+    if (p >= visibleSlots) {
       el.style.display = 'none';
       continue;
     }
+    var row = startIdx + p;
     // Map virtual row to logical data index
     var dataIdx = this._filter ? this._filter[row] : row;
     var item = this._getItem(dataIdx);

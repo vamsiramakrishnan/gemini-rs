@@ -52,8 +52,6 @@ impl SessionBridge {
     /// The builder is returned with all callbacks attached — the app can
     /// add additional callbacks (e.g., on_tool_call) before calling `.connect()`.
     pub fn wire_live(&self, builder: Live) -> Live {
-        let b64 = base64::engine::general_purpose::STANDARD;
-
         let tx_audio = self.tx.clone();
         let tx_text = self.tx.clone();
         let tx_text_complete = self.tx.clone();
@@ -65,11 +63,13 @@ impl SessionBridge {
         let tx_disconnected = self.tx.clone();
         let tx_input = self.tx.clone();
         let tx_output = self.tx.clone();
+        let tx_thought = self.tx.clone();
 
         builder
             .on_audio(move |data| {
-                let encoded = b64.encode(data);
-                let _ = tx_audio.send(ServerMessage::Audio { data: encoded });
+                let _ = tx_audio.send(ServerMessage::Audio {
+                    data: data.to_vec(),
+                });
             })
             .on_text(move |t| {
                 let _ = tx_text.send(ServerMessage::TextDelta {
@@ -116,6 +116,11 @@ impl SessionBridge {
             })
             .on_output_transcript(move |text, _is_final| {
                 let _ = tx_output.send(ServerMessage::OutputTranscription {
+                    text: text.to_string(),
+                });
+            })
+            .on_thought(move |text| {
+                let _ = tx_thought.send(ServerMessage::Thought {
                     text: text.to_string(),
                 });
             })

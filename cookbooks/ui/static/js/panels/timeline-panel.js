@@ -13,7 +13,7 @@ var TimelinePanel = (function () {
     textDelta: 'TEXT', textComplete: 'TEXT', audio: 'AUDIO', turnComplete: 'TURN',
     stateUpdate: 'STATE', phaseChange: 'PHASE', toolCallEvent: 'TOOL', violation: 'VIOL',
     evaluation: 'EVAL', spanEvent: 'SPAN', connected: 'SYS', appMeta: 'META',
-    interrupted: 'INT', error: 'ERR', inputTranscription: 'TXIN', outputTranscription: 'TXOUT',
+    interrupted: 'INT', error: 'ERR', inputTranscription: 'TXIN', outputTranscription: 'TXOUT', thought: 'THINK',
     voiceActivityStart: 'VAD', voiceActivityEnd: 'VAD', telemetry: 'TEL',
     phaseTimeline: 'PHASE', turnMetrics: 'TURN'
   };
@@ -148,7 +148,7 @@ var TimelinePanel = (function () {
       'audio', 'voiceActivityStart', 'textDelta', 'textComplete',
       'turnComplete', 'stateUpdate', 'phaseChange', 'toolCallEvent',
       'telemetry', 'evaluation', 'violation', 'interrupted', 'error',
-      'inputTranscription', 'outputTranscription'
+      'inputTranscription', 'outputTranscription', 'thought'
     ];
 
     types.forEach(function (type) {
@@ -197,8 +197,14 @@ var TimelinePanel = (function () {
       return;
     }
 
-    // Fast path: single new event, no search query
-    if (newEventOnly && !query && this._filteredIndices !== null) {
+    // Fast path: single new event, no search query.
+    // Only safe when buffer hasn't wrapped (length < capacity).
+    var canFastPath = newEventOnly && !query && this._filteredIndices !== null;
+    if (canFastPath && this._events._cap && len >= this._events._cap) {
+      // Buffer wrapped — filter indices are stale, fall through to full rebuild
+      canFastPath = false;
+    }
+    if (canFastPath) {
       var lastIdx = len - 1;
       var evt = this._events.get(lastIdx);
       if (evt && !hidden.has(evt.type)) this._filteredIndices.push(lastIdx);
@@ -300,6 +306,7 @@ var TimelinePanel = (function () {
       case 'violation': return '[' + (msg.severity || '') + '] ' + (msg.rule || '');
       case 'inputTranscription': return U.truncText(msg.text, 60);
       case 'outputTranscription': return U.truncText(msg.text, 60);
+      case 'thought': return U.truncText(msg.text, 60);
       case 'voiceActivityStart': return 'Speech detected';
       case 'voiceActivityEnd': return 'Speech ended';
       case 'appMeta': return msg.info ? msg.info.name : '';

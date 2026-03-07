@@ -15,7 +15,8 @@ use rs_adk::state::StateKey;
 
 use rs_genai::session::SessionEvent;
 
-use crate::app::{AppCategory, AppError, ClientMessage, CookbookApp, ServerMessage, WsSender};
+use crate::app::{AppError, ClientMessage, CookbookApp, ServerMessage, WsSender};
+use crate::cookbook_meta;
 
 use super::{build_session_config, resolve_voice, send_app_meta, wait_for_start};
 
@@ -297,7 +298,9 @@ fn suggest_department(symptoms: &str) -> &'static str {
 // ---------------------------------------------------------------------------
 
 fn clinic_tools() -> rs_genai::prelude::Tool {
-    use rs_genai::prelude::{FunctionCallingBehavior, FunctionDeclaration, FunctionResponseScheduling, Tool};
+    use rs_genai::prelude::{
+        FunctionCallingBehavior, FunctionDeclaration, FunctionResponseScheduling, Tool,
+    };
     Tool::functions(vec![
         FunctionDeclaration {
             name: "list_departments".into(),
@@ -591,46 +594,31 @@ pub struct Clinic;
 
 #[async_trait]
 impl CookbookApp for Clinic {
-    fn name(&self) -> &str {
-        "clinic"
-    }
-
-    fn description(&self) -> &str {
-        "Multi-specialty clinic with symptom triage, doctor matching, and patient registration"
-    }
-
-    fn category(&self) -> AppCategory {
-        AppCategory::Showcase
-    }
-
-    fn features(&self) -> Vec<String> {
-        vec![
-            "phase-machine".into(),
-            "llm-extraction".into(),
-            "tool-calling".into(),
-            "watchers".into(),
-            "computed-state".into(),
-            "temporal-patterns".into(),
-            "state-keys".into(),
-            "symptom-triage".into(),
-            "department-routing".into(),
-        ]
-    }
-
-    fn tips(&self) -> Vec<String> {
-        vec![
-            "Describe symptoms like chest pain to see emergency handling".into(),
-            "Try as a new patient to see registration flow".into(),
-            "Ask for a specific department to skip triage".into(),
-        ]
-    }
-
-    fn try_saying(&self) -> Vec<String> {
-        vec![
-            "I need to see a doctor about persistent headaches".into(),
-            "I'd like to reschedule my appointment with Dr. Chen".into(),
-            "My child has had a fever for three days".into(),
-        ]
+    cookbook_meta! {
+        name: "clinic",
+        description: "Multi-specialty clinic with symptom triage, doctor matching, and patient registration",
+        category: Showcase,
+        features: [
+            "phase-machine",
+            "llm-extraction",
+            "tool-calling",
+            "watchers",
+            "computed-state",
+            "temporal-patterns",
+            "state-keys",
+            "symptom-triage",
+            "department-routing",
+        ],
+        tips: [
+            "Describe symptoms like chest pain to see emergency handling",
+            "Try as a new patient to see registration flow",
+            "Ask for a specific department to skip triage",
+        ],
+        try_saying: [
+            "I need to see a doctor about persistent headaches",
+            "I'd like to reschedule my appointment with Dr. Chen",
+            "My child has had a fever for three days",
+        ],
     }
 
     async fn handle_session(
@@ -665,14 +653,12 @@ async fn handle_session(
 
     // 2. Create GeminiLlm for LLM extraction (background agent uses flash-lite at global)
     let llm: Arc<dyn BaseLlm> = Arc::new(GeminiLlm::new(GeminiLlmParams {
-        model: Some("gemini-2.5-flash-lite".to_string()),
+        model: Some("gemini-3.1-flash-lite-preview".to_string()),
         location: Some("global".to_string()),
         ..Default::default()
     }));
 
     // 3. Clone tx for all callbacks
-    let b64 = base64::engine::general_purpose::STANDARD;
-
     let tx_audio = tx.clone();
     let tx_input = tx.clone();
     let tx_output = tx.clone();
@@ -1249,8 +1235,7 @@ async fn handle_session(
         })
         // --- Fast lane callbacks ---
         .on_audio(move |data| {
-            let encoded = b64.encode(data);
-            let _ = tx_audio.send(ServerMessage::Audio { data: encoded });
+                        let _ = tx_audio.send(ServerMessage::Audio { data: data.to_vec() });
         })
         .on_input_transcript(move |text, _is_final| {
             let _ = tx_input.send(ServerMessage::InputTranscription {
@@ -1411,6 +1396,7 @@ async fn handle_session(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::AppCategory;
 
     // -- Mock tools --
 

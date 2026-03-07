@@ -111,6 +111,10 @@ pub fn to_a2a_part(part: &Part, long_running_tool_ids: &[String]) -> Option<A2aP
                 metadata: Some(metadata),
             })
         }
+        Part::Thought { text, .. } => Some(A2aPart::Text {
+            text: text.clone(),
+            metadata: None,
+        }),
     }
 }
 

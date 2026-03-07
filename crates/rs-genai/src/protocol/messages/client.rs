@@ -72,10 +72,18 @@ impl SessionConfig {
                 .collect()
         };
 
+        let generation_config = if self.supports_async_tools() {
+            self.generation_config.clone()
+        } else {
+            let mut gc = self.generation_config.clone();
+            gc.thinking_config = None;
+            gc
+        };
+
         SetupMessage {
             setup: SetupPayload {
                 model: self.model_uri(),
-                generation_config: Some(self.generation_config.clone()),
+                generation_config: Some(generation_config),
                 system_instruction: self.system_instruction.clone(),
                 tools,
                 tool_config: self.tool_config.clone(),

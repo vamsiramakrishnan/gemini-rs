@@ -59,6 +59,9 @@ pub(super) fn handle_server_msg(
                                     .send(SessionEvent::AudioData(bytes::Bytes::from(audio_bytes)));
                             }
                         }
+                        Part::Thought { text, .. } => {
+                            let _ = event_tx.send(SessionEvent::Thought(text.clone()));
+                        }
                         _ => {}
                     }
                 }

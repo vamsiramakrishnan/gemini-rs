@@ -19,7 +19,8 @@ use rs_adk::state::StateKey;
 
 use rs_genai::session::SessionEvent;
 
-use crate::app::{AppCategory, AppError, ClientMessage, CookbookApp, ServerMessage, WsSender};
+use crate::app::{AppError, ClientMessage, CookbookApp, ServerMessage, WsSender};
+use crate::cookbook_meta;
 
 use super::extractors::RegexExtractor;
 use super::{build_session_config, resolve_voice, send_app_meta, wait_for_start};
@@ -336,7 +337,9 @@ fn extract_structured(text: &str, existing: &HashMap<String, Value>) -> HashMap<
 
 /// Build the tool declarations so Gemini knows what functions it can call.
 fn debt_collection_tools() -> rs_genai::prelude::Tool {
-    use rs_genai::prelude::{FunctionCallingBehavior, FunctionDeclaration, FunctionResponseScheduling, Tool};
+    use rs_genai::prelude::{
+        FunctionCallingBehavior, FunctionDeclaration, FunctionResponseScheduling, Tool,
+    };
     Tool::functions(vec![
         FunctionDeclaration {
             name: "lookup_account".into(),
@@ -564,47 +567,32 @@ pub struct DebtCollection;
 
 #[async_trait]
 impl CookbookApp for DebtCollection {
-    fn name(&self) -> &str {
-        "debt-collection"
-    }
-
-    fn description(&self) -> &str {
-        "FDCPA-compliant debt collection with compliance gates, emotional monitoring, and payment negotiation"
-    }
-
-    fn category(&self) -> AppCategory {
-        AppCategory::Showcase
-    }
-
-    fn features(&self) -> Vec<String> {
-        vec![
-            "phase-machine".into(),
-            "compliance-gates".into(),
-            "temporal-patterns".into(),
-            "llm-extraction".into(),
-            "tool-response-redaction".into(),
-            "numeric-watchers".into(),
-            "computed-state".into(),
-            "turn-boundary-injection".into(),
-        ]
-    }
-
-    fn tips(&self) -> Vec<String> {
-        vec![
-            "The agent must deliver a Mini-Miranda disclosure before discussing the debt".into(),
-            "Try saying you refuse to pay or want to dispute the debt to see guardrails".into(),
-            "Express frustration to trigger emotional monitoring and de-escalation".into(),
-            "Ask to stop being contacted to trigger cease-and-desist compliance".into(),
-        ]
-    }
-
-    fn try_saying(&self) -> Vec<String> {
-        vec![
-            "Hello, who is this?".into(),
-            "I don't think I owe that much.".into(),
-            "I'd like to set up a payment plan.".into(),
-            "Stop calling me! I don't want to be contacted anymore.".into(),
-        ]
+    cookbook_meta! {
+        name: "debt-collection",
+        description: "FDCPA-compliant debt collection with compliance gates, emotional monitoring, and payment negotiation",
+        category: Showcase,
+        features: [
+            "phase-machine",
+            "compliance-gates",
+            "temporal-patterns",
+            "llm-extraction",
+            "tool-response-redaction",
+            "numeric-watchers",
+            "computed-state",
+            "turn-boundary-injection",
+        ],
+        tips: [
+            "The agent must deliver a Mini-Miranda disclosure before discussing the debt",
+            "Try saying you refuse to pay or want to dispute the debt to see guardrails",
+            "Express frustration to trigger emotional monitoring and de-escalation",
+            "Ask to stop being contacted to trigger cease-and-desist compliance",
+        ],
+        try_saying: [
+            "Hello, who is this?",
+            "I don't think I owe that much.",
+            "I'd like to set up a payment plan.",
+            "Stop calling me! I don't want to be contacted anymore.",
+        ],
     }
 
     async fn handle_session(
@@ -627,7 +615,7 @@ impl CookbookApp for DebtCollection {
 
         // 2. Create GeminiLlm for LLM extraction
         let llm: Arc<dyn rs_adk::llm::BaseLlm> = Arc::new(GeminiLlm::new(GeminiLlmParams {
-            model: Some("gemini-2.5-flash".to_string()),
+            model: Some("gemini-3.1-flash-lite-preview".to_string()),
             ..Default::default()
         }));
 
@@ -637,8 +625,6 @@ impl CookbookApp for DebtCollection {
         }));
 
         // 4. Clone tx for all callbacks
-        let b64 = base64::engine::general_purpose::STANDARD;
-
         let tx_audio = tx.clone();
         let tx_input = tx.clone();
         let tx_output = tx.clone();
@@ -1227,8 +1213,7 @@ impl CookbookApp for DebtCollection {
             // sent to the browser via the periodic telemetry sender post-connect.
             // --- Fast lane callbacks ---
             .on_audio(move |data| {
-                let encoded = b64.encode(data);
-                let _ = tx_audio.send(ServerMessage::Audio { data: encoded });
+                                let _ = tx_audio.send(ServerMessage::Audio { data: data.to_vec() });
             })
             .on_input_transcript(move |text, _is_final| {
                 let _ = tx_input.send(ServerMessage::InputTranscription {
@@ -1388,6 +1373,7 @@ impl CookbookApp for DebtCollection {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::AppCategory;
 
     // -- Mock tools --
 

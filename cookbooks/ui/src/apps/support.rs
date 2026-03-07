@@ -12,7 +12,8 @@ use tracing::{info, warn};
 
 use adk_rs_fluent::prelude::*;
 
-use crate::app::{AppCategory, AppError, ClientMessage, CookbookApp, ServerMessage, WsSender};
+use crate::app::{AppError, ClientMessage, CookbookApp, ServerMessage, WsSender};
+use crate::cookbook_meta;
 
 use super::extractors::RegexExtractor;
 use super::{build_session_config, resolve_voice, send_app_meta, wait_for_start};
@@ -429,43 +430,21 @@ pub struct SupportAssistant;
 
 #[async_trait]
 impl CookbookApp for SupportAssistant {
-    fn name(&self) -> &str {
-        "support-assistant"
-    }
-
-    fn description(&self) -> &str {
-        "Multi-agent handoff with billing + technical support flows"
-    }
-
-    fn category(&self) -> AppCategory {
-        AppCategory::Showcase
-    }
-
-    fn features(&self) -> Vec<String> {
-        vec![
-            "voice".into(),
-            "transcription".into(),
-            "state-machine".into(),
-            "evaluation".into(),
-            "guardrails".into(),
-            "multi-agent".into(),
-        ]
-    }
-
-    fn tips(&self) -> Vec<String> {
-        vec![
-            "Starts with a billing agent — describe a technical issue to trigger handoff to technical support".into(),
-            "Watch the devtools for agent handoff events and phase tracking across both agents".into(),
-            "The system tracks evaluation scores for each phase and handoff quality".into(),
-        ]
-    }
-
-    fn try_saying(&self) -> Vec<String> {
-        vec![
-            "I'm having trouble with my internet connection.".into(),
-            "I was overcharged $50 on my last bill.".into(),
-            "My device keeps crashing and won't restart.".into(),
-        ]
+    cookbook_meta! {
+        name: "support-assistant",
+        description: "Multi-agent handoff with billing + technical support flows",
+        category: Showcase,
+        features: ["voice", "transcription", "state-machine", "evaluation", "guardrails", "multi-agent"],
+        tips: [
+            "Starts with a billing agent — describe a technical issue to trigger handoff to technical support",
+            "Watch the devtools for agent handoff events and phase tracking across both agents",
+            "The system tracks evaluation scores for each phase and handoff quality",
+        ],
+        try_saying: [
+            "I'm having trouble with my internet connection.",
+            "I was overcharged $50 on my last bill.",
+            "My device keeps crashing and won't restart.",
+        ],
     }
 
     async fn handle_session(
@@ -491,8 +470,6 @@ impl CookbookApp for SupportAssistant {
         let extractor = Arc::new(RegexExtractor::new("support_state", 10, extract_state));
 
         // Build Live session with callbacks, extraction, and phase machine.
-        let b64 = base64::engine::general_purpose::STANDARD;
-
         let tx_audio = tx.clone();
         let tx_input = tx.clone();
         let tx_output = tx.clone();
@@ -826,8 +803,7 @@ impl CookbookApp for SupportAssistant {
             })
             // Standard voice callbacks.
             .on_audio(move |data| {
-                let encoded = b64.encode(data);
-                let _ = tx_audio.send(ServerMessage::Audio { data: encoded });
+                                let _ = tx_audio.send(ServerMessage::Audio { data: data.to_vec() });
             })
             .on_input_transcript(move |text, _is_final| {
                 let _ = tx_input.send(ServerMessage::InputTranscription {
@@ -957,6 +933,7 @@ impl CookbookApp for SupportAssistant {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::AppCategory;
 
     #[test]
     fn extract_billing_issue_type() {

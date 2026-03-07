@@ -221,6 +221,36 @@ impl Live {
         self
     }
 
+    /// Enable thinking/reasoning with a token budget (Gemini 2.5+).
+    ///
+    /// Sets the thinking budget for the Live session. Use with
+    /// `.include_thoughts()` and `.on_thought()` to receive thought summaries.
+    ///
+    /// ```ignore
+    /// Live::builder()
+    ///     .thinking(1024)
+    ///     .include_thoughts()
+    ///     .on_thought(|text| println!("[Thought] {text}"))
+    /// ```
+    ///
+    /// **Platform support:** Google AI only. On Vertex AI, `thinkingConfig`
+    /// is automatically stripped from the setup message.
+    pub fn thinking(mut self, budget: u32) -> Self {
+        self.config = self.config.thinking(budget);
+        self
+    }
+
+    /// Include the model's thought summaries in responses.
+    ///
+    /// When enabled, the model emits `SessionEvent::Thought` events containing
+    /// its reasoning process. Register an `.on_thought()` callback to receive them.
+    ///
+    /// **Platform support:** Google AI only. Stripped on Vertex AI.
+    pub fn include_thoughts(mut self) -> Self {
+        self.config = self.config.include_thoughts();
+        self
+    }
+
     /// Enable affective dialog (emotionally expressive responses).
     pub fn affective_dialog(mut self, enabled: bool) -> Self {
         self.config = self.config.affective_dialog(enabled);

@@ -15,7 +15,8 @@ use rs_adk::state::StateKey;
 
 use rs_genai::session::SessionEvent;
 
-use crate::app::{AppCategory, AppError, ClientMessage, CookbookApp, ServerMessage, WsSender};
+use crate::app::{AppError, ClientMessage, CookbookApp, ServerMessage, WsSender};
+use crate::cookbook_meta;
 
 use super::{build_session_config, resolve_voice, send_app_meta, wait_for_start};
 
@@ -235,7 +236,9 @@ fn compute_screen_decision(known: bool, urgency: f64, sentiment: &str) -> &'stat
 
 /// Build the tool declarations so Gemini knows what functions it can call.
 fn call_screening_tools() -> rs_genai::prelude::Tool {
-    use rs_genai::prelude::{FunctionCallingBehavior, FunctionDeclaration, FunctionResponseScheduling, Tool};
+    use rs_genai::prelude::{
+        FunctionCallingBehavior, FunctionDeclaration, FunctionResponseScheduling, Tool,
+    };
     Tool::functions(vec![
         FunctionDeclaration {
             name: "check_contact_list".into(),
@@ -387,44 +390,29 @@ pub struct CallScreening;
 
 #[async_trait]
 impl CookbookApp for CallScreening {
-    fn name(&self) -> &str {
-        "call-screening"
-    }
-
-    fn description(&self) -> &str {
-        "AI call screening with caller identification, urgency detection, and smart routing"
-    }
-
-    fn category(&self) -> AppCategory {
-        AppCategory::Showcase
-    }
-
-    fn features(&self) -> Vec<String> {
-        vec![
-            "phase-machine".into(),
-            "llm-extraction".into(),
-            "tool-calling".into(),
-            "watchers".into(),
-            "computed-state".into(),
-            "temporal-patterns".into(),
-            "state-keys".into(),
-        ]
-    }
-
-    fn tips(&self) -> Vec<String> {
-        vec![
-            "Try calling as a known contact like 'Jane Smith from Marketing'".into(),
-            "Call with an urgent matter to trigger auto-transfer".into(),
-            "Be hostile to test the decline flow".into(),
-        ]
-    }
-
-    fn try_saying(&self) -> Vec<String> {
-        vec![
-            "Hi, this is Jane Smith from the marketing team. Is Alex available?".into(),
-            "Hello, I'm calling about an urgent delivery issue.".into(),
-            "I'd like to speak to whoever is in charge.".into(),
-        ]
+    cookbook_meta! {
+        name: "call-screening",
+        description: "AI call screening with caller identification, urgency detection, and smart routing",
+        category: Showcase,
+        features: [
+            "phase-machine",
+            "llm-extraction",
+            "tool-calling",
+            "watchers",
+            "computed-state",
+            "temporal-patterns",
+            "state-keys",
+        ],
+        tips: [
+            "Try calling as a known contact like 'Jane Smith from Marketing'",
+            "Call with an urgent matter to trigger auto-transfer",
+            "Be hostile to test the decline flow",
+        ],
+        try_saying: [
+            "Hi, this is Jane Smith from the marketing team. Is Alex available?",
+            "Hello, I'm calling about an urgent delivery issue.",
+            "I'd like to speak to whoever is in charge.",
+        ],
     }
 
     async fn handle_session(
@@ -459,14 +447,12 @@ async fn handle_session(
 
     // 2. Create GeminiLlm for LLM extraction (background agent uses flash-lite at global)
     let llm: Arc<dyn BaseLlm> = Arc::new(GeminiLlm::new(GeminiLlmParams {
-        model: Some("gemini-2.5-flash-lite".to_string()),
+        model: Some("gemini-3.1-flash-lite-preview".to_string()),
         location: Some("global".to_string()),
         ..Default::default()
     }));
 
     // 3. Clone tx for all callbacks
-    let b64 = base64::engine::general_purpose::STANDARD;
-
     let tx_audio = tx.clone();
     let tx_input = tx.clone();
     let tx_output = tx.clone();
@@ -986,8 +972,9 @@ async fn handle_session(
         )
         // --- Fast lane callbacks ---
         .on_audio(move |data| {
-            let encoded = b64.encode(data);
-            let _ = tx_audio.send(ServerMessage::Audio { data: encoded });
+            let _ = tx_audio.send(ServerMessage::Audio {
+                data: data.to_vec(),
+            });
         })
         .on_input_transcript(move |text: &str, _is_final: bool| {
             let _ = tx_input.send(ServerMessage::InputTranscription {
@@ -1146,6 +1133,7 @@ async fn handle_session(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::AppCategory;
 
     // -- Mock tools --
 

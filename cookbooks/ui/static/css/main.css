@@ -377,6 +377,17 @@ html, body {
   color: var(--text-muted);
 }
 
+/* Thought bubbles */
+.thought-bubble {
+  background: #f3f0ff;
+  border-left: 2px solid #8b5cf6 !important;
+  font-style: italic;
+}
+
+.thought-bubble .label {
+  color: #8b5cf6 !important;
+}
+
 /* Speaking indicator */
 .speaking-indicator {
   display: none;

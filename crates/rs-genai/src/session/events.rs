@@ -32,6 +32,8 @@ pub enum SessionEvent {
     InputTranscription(String),
     /// Output transcription from server.
     OutputTranscription(String),
+    /// Thought/reasoning summary from the model (when includeThoughts is enabled).
+    Thought(String),
     /// Model requested tool calls.
     ToolCall(Vec<FunctionCall>),
     /// Server cancelled pending tool calls.

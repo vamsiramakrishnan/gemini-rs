@@ -56,7 +56,7 @@ locations**:
 | Model | Purpose | Location | Endpoint |
 |---|---|---|---|
 | `gemini-live-2.5-flash-native-audio` | Live WebSocket voice session | `us-central1` | `us-central1-aiplatform.googleapis.com` |
-| `gemini-2.5-flash-lite` | Background LLM extraction agent | `global` | `aiplatform.googleapis.com` |
+| `gemini-3.1-flash-lite-preview` | Background LLM extraction agent | `global` | `aiplatform.googleapis.com` |
 
 The Live session model and location come from `.env` (`GEMINI_MODEL` and
 `GOOGLE_CLOUD_LOCATION`). The background LLM model and location are set
@@ -64,14 +64,14 @@ explicitly per-app in code via `GeminiLlmParams`:
 
 ```rust
 let llm: Arc<dyn BaseLlm> = Arc::new(GeminiLlm::new(GeminiLlmParams {
-    model: Some("gemini-2.5-flash-lite".to_string()),
+    model: Some("gemini-3.1-flash-lite-preview".to_string()),
     location: Some("global".to_string()),
     ..Default::default()  // inherits project + vertexai from env
 }));
 ```
 
 This separation is necessary because the native audio model is region-locked to
-`us-central1`, while `gemini-2.5-flash-lite` is available at the `global`
+`us-central1`, while `gemini-3.1-flash-lite-preview` is available at the `global`
 endpoint.
 
 ## OpenTelemetry Export (Optional)

@@ -70,7 +70,10 @@ let handle = Live::builder()
     .tools(dispatcher)
     .transcription(true, true)
     .on_audio(|data| playback_tx.send(data.clone()).ok())
+    .thinking(1024)                    // thinking budget (Google AI only)
+    .include_thoughts()                // receive thought summaries
     .on_text(|t| print!("{t}"))
+    .on_thought(|t| println!("[Thought] {t}"))
     .on_interrupted(|| async { playback.flush().await })
     .on_turn_complete(|| async { println!("Turn done") })
     .connect_vertex("project-id", "us-central1", token)
@@ -498,10 +501,10 @@ Fast Lane    Control Lane              Telemetry Lane
 (sync <1ms)  (async, can block)        (own broadcast rx)
 - on_audio   - on_tool_call            - SessionSignals (AtomicU64)
 - on_text    - on_interrupted           - SessionTelemetry (atomic counters)
-- on_vad_*   - Phase transitions        - Debounced 100ms flush
-- on_input_  - Extractors (concurrent)  - Usage(UsageInfo)
-  transcript - Watchers                 - GenerationComplete
-             - Computed state           - SessionResumeUpdate(ResumeInfo)
+- on_thought - Phase transitions        - Debounced 100ms flush
+- on_vad_*   - Extractors (concurrent)  - Usage(UsageInfo)
+- on_input_  - Watchers                 - GenerationComplete
+  transcript - Computed state           - SessionResumeUpdate(ResumeInfo)
              - Temporal patterns
              - TranscriptBuffer (owned, no mutex)
              - GenerationComplete extractors
@@ -551,7 +554,8 @@ cargo build -p rs-genai --features "vad,generate,tokens"
 - **Vertex AI endpoint**: Use `wss://aiplatform.googleapis.com/...` (NOT `global-aiplatform.googleapis.com`).
 - **API versions**: Google AI = `v1beta`, Vertex AI = `v1beta1` -- handled by `Platform` enum.
 - **Cannot update tool definitions mid-session**: Voice sessions only allow instruction updates. Tool declarations are fixed at connect time.
-- **Fast lane callbacks must be sync and under 1ms**: No allocations, no locks, no async in `on_audio`, `on_text`, `on_vad_*`.
+- **Fast lane callbacks must be sync and under 1ms**: No allocations, no locks, no async in `on_audio`, `on_text`, `on_thought`, `on_vad_*`.
+- **Thinking is Google AI only**: `thinkingConfig` is auto-stripped for Vertex AI. `.on_thought()` won't fire on Vertex.
 - **Forgetting `.done()`**: Phase builder chains must end with `.done()` to return to the `Live` builder.
 - **Forgetting `.initial_phase()`**: Phase machine requires an explicit initial phase name.
 - **Using `instruction_template` with phases**: Template replaces the entire instruction -- use `instruction_amendment` or phase modifiers (`P::with_state`, `P::when`) for additive composition.

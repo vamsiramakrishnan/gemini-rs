@@ -49,6 +49,7 @@ async fn main() {
         .route("/app/:name", get(app_page))
         .route("/api/apps", get(list_apps))
         .route("/ws/:name", get(ws_upgrade))
+        .route("/favicon.ico", get(favicon))
         .nest_service("/static", ServeDir::new(static_dir))
         .layer(middleware::from_fn(no_cache_static))
         .layer(middleware::from_fn(cross_origin_isolation))
@@ -89,10 +90,7 @@ async fn init_telemetry() -> (
 }
 
 /// Disable caching for static files during development.
-async fn no_cache_static(
-    request: axum::http::Request<axum::body::Body>,
-    next: Next,
-) -> Response {
+async fn no_cache_static(request: axum::http::Request<axum::body::Body>, next: Next) -> Response {
     let is_static = request.uri().path().starts_with("/static");
     let mut response = next.run(request).await;
     if is_static {
@@ -119,6 +117,13 @@ async fn cross_origin_isolation(
         "credentialless".parse().unwrap(),
     );
     response
+}
+
+async fn favicon() -> impl IntoResponse {
+    (
+        [(axum::http::header::CONTENT_TYPE, "image/svg+xml")],
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#x1F680;</text></svg>",
+    )
 }
 
 async fn landing_page() -> impl IntoResponse {

@@ -27,6 +27,9 @@ class AudioManager {
     this._generation = 0;
 
     this._workletSupported = typeof AudioWorkletNode !== 'undefined';
+
+    // Jitter buffer metrics callback (set by consumer)
+    this.onBufferMetrics = null;
   }
 
   // --- Playback ---
@@ -40,8 +43,13 @@ class AudioManager {
 
     if (this._workletSupported) {
       try {
-        await this.playbackCtx.addModule('/static/worklets/playback-processor.js');
+        await this.playbackCtx.audioWorklet.addModule('/static/worklets/playback-processor.js');
         this._playbackNode = new AudioWorkletNode(this.playbackCtx, 'playback-processor');
+        this._playbackNode.port.onmessage = (e) => {
+          if (e.data && e.data.metrics && this.onBufferMetrics) {
+            this.onBufferMetrics(e.data.metrics);
+          }
+        };
         this._playbackNode.connect(this.playbackCtx.destination);
       } catch (err) {
         console.warn('Playback worklet failed, using fallback:', err);
@@ -61,6 +69,51 @@ class AudioManager {
       bytes[i] = binaryString.charCodeAt(i);
     }
     const int16 = new Int16Array(bytes.buffer);
+
+    if (this._playbackNode) {
+      // Worklet path: send PCM16 with generation fence (transfer ownership)
+      const copy = new Int16Array(int16);
+      this._playbackNode.port.postMessage(
+        { pcm16: copy, gen: this._generation },
+        [copy.buffer]
+      );
+    } else {
+      // Fallback: schedule AudioBufferSourceNode with cancellation tracking
+      const float32 = new Float32Array(int16.length);
+      for (let i = 0; i < int16.length; i++) {
+        float32[i] = int16[i] / 32768.0;
+      }
+
+      const buffer = this.playbackCtx.createBuffer(1, float32.length, 24000);
+      buffer.getChannelData(0).set(float32);
+
+      const source = this.playbackCtx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(this.playbackCtx.destination);
+
+      if (this._nextPlayTime < this.playbackCtx.currentTime) {
+        this._nextPlayTime = this.playbackCtx.currentTime;
+      }
+      source.start(this._nextPlayTime);
+      this._nextPlayTime += buffer.duration;
+
+      // Track for cancellation on interruption
+      this._activeSources.push(source);
+      source.onended = () => {
+        const idx = this._activeSources.indexOf(source);
+        if (idx !== -1) this._activeSources.splice(idx, 1);
+      };
+    }
+  }
+
+  /**
+   * Play raw PCM audio from an ArrayBuffer (binary WebSocket frame).
+   * Skips base64 decoding entirely — hot path optimization.
+   */
+  playAudioBinary(arrayBuffer) {
+    if (!this.playbackCtx) return;
+
+    const int16 = new Int16Array(arrayBuffer);
 
     if (this._playbackNode) {
       // Worklet path: send PCM16 with generation fence (transfer ownership)
@@ -143,7 +196,7 @@ class AudioManager {
 
     if (this._workletSupported) {
       try {
-        await this.recordCtx.addModule('/static/worklets/capture-processor.js');
+        await this.recordCtx.audioWorklet.addModule('/static/worklets/capture-processor.js');
         this._captureNode = new AudioWorkletNode(this.recordCtx, 'capture-processor');
         this._captureNode.port.onmessage = (e) => {
           if (!this.isRecording || !this.onAudioData) return;

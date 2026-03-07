@@ -12,7 +12,8 @@ use tracing::{info, warn};
 
 use adk_rs_fluent::prelude::*;
 
-use crate::app::{AppCategory, AppError, ClientMessage, CookbookApp, ServerMessage, WsSender};
+use crate::app::{AppError, ClientMessage, CookbookApp, ServerMessage, WsSender};
+use crate::cookbook_meta;
 
 use super::extractors::RegexExtractor;
 use super::{build_session_config, resolve_voice, send_app_meta, wait_for_start};
@@ -331,41 +332,21 @@ pub struct Playbook;
 
 #[async_trait]
 impl CookbookApp for Playbook {
-    fn name(&self) -> &str {
-        "playbook"
-    }
-
-    fn description(&self) -> &str {
-        "State machine + text agent evaluation for customer support playbook"
-    }
-
-    fn category(&self) -> AppCategory {
-        AppCategory::Advanced
-    }
-
-    fn features(&self) -> Vec<String> {
-        vec![
-            "voice".into(),
-            "transcription".into(),
-            "state-machine".into(),
-            "evaluation".into(),
-        ]
-    }
-
-    fn tips(&self) -> Vec<String> {
-        vec![
-            "The agent follows a 6-phase support flow: greet, identify, investigate, explain, resolve, close".into(),
-            "Watch the devtools panel for phase transitions and evaluation scores".into(),
-            "Try giving your name and describing a product issue to trigger state transitions".into(),
-        ]
-    }
-
-    fn try_saying(&self) -> Vec<String> {
-        vec![
-            "Hi, my name is Alex and I need help with my order.".into(),
-            "My order #12345 arrived damaged.".into(),
-            "I'd like a refund please.".into(),
-        ]
+    cookbook_meta! {
+        name: "playbook",
+        description: "State machine + text agent evaluation for customer support playbook",
+        category: Advanced,
+        features: ["voice", "transcription", "state-machine", "evaluation"],
+        tips: [
+            "The agent follows a 6-phase support flow: greet, identify, investigate, explain, resolve, close",
+            "Watch the devtools panel for phase transitions and evaluation scores",
+            "Try giving your name and describing a product issue to trigger state transitions",
+        ],
+        try_saying: [
+            "Hi, my name is Alex and I need help with my order.",
+            "My order #12345 arrived damaged.",
+            "I'd like a refund please.",
+        ],
     }
 
     async fn handle_session(
@@ -391,8 +372,6 @@ impl CookbookApp for Playbook {
         let extractor = Arc::new(RegexExtractor::new("playbook_state", 10, extract_state));
 
         // Build Live session with callbacks, extraction, and phase machine.
-        let b64 = base64::engine::general_purpose::STANDARD;
-
         let tx_audio = tx.clone();
         let tx_input = tx.clone();
         let tx_output = tx.clone();
@@ -593,8 +572,9 @@ impl CookbookApp for Playbook {
             })
             // Standard voice callbacks.
             .on_audio(move |data| {
-                let encoded = b64.encode(data);
-                let _ = tx_audio.send(ServerMessage::Audio { data: encoded });
+                let _ = tx_audio.send(ServerMessage::Audio {
+                    data: data.to_vec(),
+                });
             })
             .on_input_transcript(move |text, _is_final| {
                 let _ = tx_input.send(ServerMessage::InputTranscription {

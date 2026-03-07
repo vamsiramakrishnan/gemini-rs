@@ -7,7 +7,8 @@ use tracing::{info, warn};
 
 use adk_rs_fluent::prelude::*;
 
-use crate::app::{AppCategory, AppError, ClientMessage, CookbookApp, ServerMessage, WsSender};
+use crate::app::{AppError, ClientMessage, CookbookApp, ServerMessage, WsSender};
+use crate::cookbook_meta;
 
 use super::{build_session_config, send_app_meta, wait_for_start};
 
@@ -124,41 +125,21 @@ pub struct AllConfig;
 
 #[async_trait]
 impl CookbookApp for AllConfig {
-    fn name(&self) -> &str {
-        "all-config"
-    }
-
-    fn description(&self) -> &str {
-        "Configuration playground — every Gemini Live option"
-    }
-
-    fn category(&self) -> AppCategory {
-        AppCategory::Showcase
-    }
-
-    fn features(&self) -> Vec<String> {
-        vec![
-            "text".into(),
-            "voice".into(),
-            "tools".into(),
-            "transcription".into(),
-        ]
-    }
-
-    fn tips(&self) -> Vec<String> {
-        vec![
-            "Send JSON as the system instruction to configure: temperature, modality, voice, tools, and more".into(),
-            "Supports text-only, audio-only, and both output modalities".into(),
-            "Try enabling Google Search or code execution via the JSON config".into(),
-        ]
-    }
-
-    fn try_saying(&self) -> Vec<String> {
-        vec![
-            "Hello! (with default audio config)".into(),
-            r#"{"modality": "text", "temperature": 1.5}"#.into(),
-            "Ask it to search the web (if Google Search enabled)".into(),
-        ]
+    cookbook_meta! {
+        name: "all-config",
+        description: "Configuration playground — every Gemini Live option",
+        category: Showcase,
+        features: ["text", "voice", "tools", "transcription"],
+        tips: [
+            "Send JSON as the system instruction to configure: temperature, modality, voice, tools, and more",
+            "Supports text-only, audio-only, and both output modalities",
+            "Try enabling Google Search or code execution via the JSON config",
+        ],
+        try_saying: [
+            "Hello! (with default audio config)",
+            r#"{"modality": "text", "temperature": 1.5}"#,
+            "Ask it to search the web (if Google Search enabled)",
+        ],
     }
 
     async fn handle_session(
@@ -258,8 +239,6 @@ impl CookbookApp for AllConfig {
         }
 
         // Build Live session with all callbacks.
-        let b64 = base64::engine::general_purpose::STANDARD;
-
         let tx_audio = tx.clone();
         let tx_input = tx.clone();
         let tx_output = tx.clone();
@@ -275,8 +254,9 @@ impl CookbookApp for AllConfig {
 
         let handle = Live::builder()
             .on_audio(move |data| {
-                let encoded = b64.encode(data);
-                let _ = tx_audio.send(ServerMessage::Audio { data: encoded });
+                let _ = tx_audio.send(ServerMessage::Audio {
+                    data: data.to_vec(),
+                });
             })
             .on_input_transcript(move |text, _is_final| {
                 let _ = tx_input.send(ServerMessage::InputTranscription {
@@ -440,6 +420,7 @@ impl CookbookApp for AllConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::AppCategory;
 
     #[test]
     fn parse_json_config() {

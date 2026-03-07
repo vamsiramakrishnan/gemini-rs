@@ -32,11 +32,24 @@ pub async fn handle_ws(
         }
     });
 
+    // Forward server messages to WebSocket.
+    // Audio messages are intercepted and sent as Binary frames (raw PCM bytes)
+    // to eliminate JSON + base64 overhead on the browser hot path.
+    // All other messages are serialized to JSON and sent as Text frames.
     let send_task = tokio::spawn(async move {
         while let Some(msg) = server_rx.recv().await {
-            if let Ok(json) = serde_json::to_string(&msg) {
-                if ws_tx.send(Message::Text(json)).await.is_err() {
-                    break;
+            match msg {
+                ServerMessage::Audio { data } => {
+                    if ws_tx.send(Message::Binary(data)).await.is_err() {
+                        break;
+                    }
+                }
+                other => {
+                    if let Ok(json) = serde_json::to_string(&other) {
+                        if ws_tx.send(Message::Text(json)).await.is_err() {
+                            break;
+                        }
+                    }
                 }
             }
         }

@@ -11,7 +11,8 @@ use tracing::{info, warn};
 
 use adk_rs_fluent::prelude::*;
 
-use crate::app::{AppCategory, AppError, ClientMessage, CookbookApp, ServerMessage, WsSender};
+use crate::app::{AppError, ClientMessage, CookbookApp, ServerMessage, WsSender};
+use crate::cookbook_meta;
 
 use super::extractors::RegexExtractor;
 use super::{build_session_config, resolve_voice, send_app_meta, wait_for_start};
@@ -204,36 +205,21 @@ pub struct Guardrails;
 
 #[async_trait]
 impl CookbookApp for Guardrails {
-    fn name(&self) -> &str {
-        "guardrails"
-    }
-
-    fn description(&self) -> &str {
-        "Policy monitoring + corrective injection for live conversations"
-    }
-
-    fn category(&self) -> AppCategory {
-        AppCategory::Advanced
-    }
-
-    fn features(&self) -> Vec<String> {
-        vec!["voice".into(), "transcription".into(), "guardrails".into()]
-    }
-
-    fn tips(&self) -> Vec<String> {
-        vec![
-            "Four active policies: PII detection (SSN/credit card), off-topic detection, sentiment monitoring".into(),
-            "Try triggering a violation — the system will inject corrective instructions in real time".into(),
-            "Watch the devtools Evaluator tab for violation alerts and policy stats".into(),
-        ]
-    }
-
-    fn try_saying(&self) -> Vec<String> {
-        vec![
-            "My SSN is 123-45-6789 (triggers PII detection)".into(),
-            "Did you see the football game last night? (triggers off-topic)".into(),
-            "This is absolutely terrible service! (triggers sentiment alert)".into(),
-        ]
+    cookbook_meta! {
+        name: "guardrails",
+        description: "Policy monitoring + corrective injection for live conversations",
+        category: Advanced,
+        features: ["voice", "transcription", "guardrails"],
+        tips: [
+            "Four active policies: PII detection (SSN/credit card), off-topic detection, sentiment monitoring",
+            "Try triggering a violation — the system will inject corrective instructions in real time",
+            "Watch the devtools Evaluator tab for violation alerts and policy stats",
+        ],
+        try_saying: [
+            "My SSN is 123-45-6789 (triggers PII detection)",
+            "Did you see the football game last night? (triggers off-topic)",
+            "This is absolutely terrible service! (triggers sentiment alert)",
+        ],
     }
 
     async fn handle_session(
@@ -276,8 +262,6 @@ impl CookbookApp for Guardrails {
         ));
 
         // Build Live session with callbacks, extraction, watchers, and instruction template.
-        let b64 = base64::engine::general_purpose::STANDARD;
-
         let tx_audio = tx.clone();
         let tx_input = tx.clone();
         let tx_output = tx.clone();
@@ -379,8 +363,7 @@ impl CookbookApp for Guardrails {
             })
             // Standard voice callbacks.
             .on_audio(move |data| {
-                let encoded = b64.encode(data);
-                let _ = tx_audio.send(ServerMessage::Audio { data: encoded });
+                                let _ = tx_audio.send(ServerMessage::Audio { data: data.to_vec() });
             })
             .on_input_transcript(move |text, _is_final| {
                 let _ = tx_input.send(ServerMessage::InputTranscription {

@@ -15,7 +15,8 @@ use rs_adk::state::StateKey;
 
 use rs_genai::session::SessionEvent;
 
-use crate::app::{AppCategory, AppError, ClientMessage, CookbookApp, ServerMessage, WsSender};
+use crate::app::{AppError, ClientMessage, CookbookApp, ServerMessage, WsSender};
+use crate::cookbook_meta;
 
 use super::{build_session_config, resolve_voice, send_app_meta, wait_for_start};
 
@@ -209,7 +210,9 @@ fn reservation_context(s: &State) -> String {
 // ---------------------------------------------------------------------------
 
 fn restaurant_tools() -> rs_genai::prelude::Tool {
-    use rs_genai::prelude::{FunctionCallingBehavior, FunctionDeclaration, FunctionResponseScheduling, Tool};
+    use rs_genai::prelude::{
+        FunctionCallingBehavior, FunctionDeclaration, FunctionResponseScheduling, Tool,
+    };
     Tool::functions(vec![
         FunctionDeclaration {
             name: "check_availability".into(),
@@ -535,45 +538,29 @@ pub struct Restaurant;
 
 #[async_trait]
 impl CookbookApp for Restaurant {
-    fn name(&self) -> &str {
-        "restaurant"
-    }
-
-    fn description(&self) -> &str {
-        "Restaurant reservation assistant with availability checking, booking management, and dietary accommodations"
-    }
-
-    fn category(&self) -> AppCategory {
-        AppCategory::Showcase
-    }
-
-    fn features(&self) -> Vec<String> {
-        vec![
-            "phase-machine".into(),
-            "llm-extraction".into(),
-            "tool-calling".into(),
-            "watchers".into(),
-            "computed-state".into(),
-            "temporal-patterns".into(),
-            "state-keys".into(),
-        ]
-    }
-
-    fn tips(&self) -> Vec<String> {
-        vec![
-            "Try making a reservation for a large group (9+) to see manager confirmation flow"
-                .into(),
-            "Ask about vegetarian or gluten-free menu options".into(),
-            "Mention it's a birthday or anniversary for special handling".into(),
-        ]
-    }
-
-    fn try_saying(&self) -> Vec<String> {
-        vec![
-            "I'd like to make a reservation for 4 people this Saturday".into(),
-            "I need to modify reservation RES-20260315-001".into(),
-            "Do you have anything available for a large group of 12?".into(),
-        ]
+    cookbook_meta! {
+        name: "restaurant",
+        description: "Restaurant reservation assistant with availability checking, booking management, and dietary accommodations",
+        category: Showcase,
+        features: [
+            "phase-machine",
+            "llm-extraction",
+            "tool-calling",
+            "watchers",
+            "computed-state",
+            "temporal-patterns",
+            "state-keys",
+        ],
+        tips: [
+            "Try making a reservation for a large group (9+) to see manager confirmation flow",
+            "Ask about vegetarian or gluten-free menu options",
+            "Mention it's a birthday or anniversary for special handling",
+        ],
+        try_saying: [
+            "I'd like to make a reservation for 4 people this Saturday",
+            "I need to modify reservation RES-20260315-001",
+            "Do you have anything available for a large group of 12?",
+        ],
     }
 
     async fn handle_session(
@@ -608,13 +595,11 @@ async fn handle_session(
 
     // 2. Create GeminiLlm for LLM extraction
     let llm: Arc<dyn BaseLlm> = Arc::new(GeminiLlm::new(GeminiLlmParams {
-        model: Some("gemini-2.5-flash".to_string()),
+        model: Some("gemini-3.1-flash-lite-preview".to_string()),
         ..Default::default()
     }));
 
     // 3. Clone tx for ALL callbacks
-    let b64 = base64::engine::general_purpose::STANDARD;
-
     let tx_audio = tx.clone();
     let tx_input = tx.clone();
     let tx_output = tx.clone();
@@ -1114,8 +1099,7 @@ async fn handle_session(
         )
         // --- Fast lane callbacks ---
         .on_audio(move |data| {
-            let encoded = b64.encode(data);
-            let _ = tx_audio.send(ServerMessage::Audio { data: encoded });
+                        let _ = tx_audio.send(ServerMessage::Audio { data: data.to_vec() });
         })
         .on_input_transcript(move |text, _is_final| {
             let _ = tx_input.send(ServerMessage::InputTranscription {
@@ -1270,6 +1254,7 @@ async fn handle_session(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::AppCategory;
 
     // -- Mock tools --
 

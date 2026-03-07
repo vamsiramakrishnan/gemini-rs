@@ -181,6 +181,25 @@
   }
 
   // ------------------------------------------------
+  // Thought rendering
+  // ------------------------------------------------
+  function appendThought(text) {
+    hideEmptyState();
+
+    const row = document.createElement('div');
+    row.className = 'transcription-row model thought-row';
+
+    const bubble = document.createElement('div');
+    bubble.className = 'transcription-bubble thought-bubble';
+    bubble.innerHTML = '<span class="label">Thinking</span> <span class="content"></span>';
+    bubble.querySelector('.content').textContent = text;
+
+    row.appendChild(bubble);
+    messagesContainer.appendChild(row);
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+  }
+
+  // ------------------------------------------------
   // Speaking indicator
   // ------------------------------------------------
   function setSpeaking(active) {
@@ -220,7 +239,20 @@
       }));
     };
 
+    ws.binaryType = 'arraybuffer';
+
     ws.onmessage = (event) => {
+      // Binary frame = raw PCM audio (hot path, no JSON overhead)
+      if (event.data instanceof ArrayBuffer) {
+        audio.playAudioBinary(event.data);
+        return;
+      }
+      // Handle Blob (some browsers send binary as Blob without arraybuffer binaryType)
+      if (event.data instanceof Blob) {
+        event.data.arrayBuffer().then(buf => audio.playAudioBinary(buf));
+        return;
+      }
+      // Text frame = JSON
       let msg;
       try {
         msg = JSON.parse(event.data);
@@ -276,10 +308,6 @@
         finalizeModelBubble();
         break;
 
-      case 'audio':
-        audio.playAudio(msg.data);
-        break;
-
       case 'turnComplete':
         finalizeModelBubble();
         break;
@@ -300,6 +328,10 @@
 
       case 'outputTranscription':
         appendTranscription('model', msg.text);
+        break;
+
+      case 'thought':
+        appendThought(msg.text);
         break;
 
       case 'voiceActivityStart':
@@ -395,6 +427,11 @@
     if (connected && ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'audio', data: base64 }));
     }
+  };
+
+  // Jitter buffer metrics → devtools
+  audio.onBufferMetrics = (metrics) => {
+    devtools.handleBufferMetrics(metrics);
   };
 
   // ------------------------------------------------

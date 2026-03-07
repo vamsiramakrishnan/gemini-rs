@@ -4,7 +4,8 @@ use tracing::info;
 
 use adk_rs_fluent::prelude::*;
 
-use crate::app::{AppCategory, AppError, ClientMessage, CookbookApp, WsSender};
+use crate::app::{AppError, ClientMessage, CookbookApp, WsSender};
+use crate::cookbook_meta;
 
 use super::{build_session_config, wait_for_start};
 
@@ -13,35 +14,20 @@ pub struct TextChat;
 
 #[async_trait]
 impl CookbookApp for TextChat {
-    fn name(&self) -> &str {
-        "text-chat"
-    }
-
-    fn description(&self) -> &str {
-        "Minimal text-only Gemini Live session"
-    }
-
-    fn category(&self) -> AppCategory {
-        AppCategory::Basic
-    }
-
-    fn features(&self) -> Vec<String> {
-        vec!["text".into()]
-    }
-
-    fn tips(&self) -> Vec<String> {
-        vec![
-            "Text-only mode — no microphone needed".into(),
-            "Watch the streaming text deltas arrive in real time".into(),
-        ]
-    }
-
-    fn try_saying(&self) -> Vec<String> {
-        vec![
-            "What are three interesting facts about octopuses?".into(),
-            "Explain quantum computing in simple terms".into(),
-            "Write a short poem about Rust programming".into(),
-        ]
+    cookbook_meta! {
+        name: "text-chat",
+        description: "Minimal text-only Gemini Live session",
+        category: Basic,
+        features: ["text"],
+        tips: [
+            "Text-only mode — no microphone needed",
+            "Watch the streaming text deltas arrive in real time",
+        ],
+        try_saying: [
+            "What are three interesting facts about octopuses?",
+            "Explain quantum computing in simple terms",
+            "Write a short poem about Rust programming",
+        ],
     }
 
     async fn handle_session(

@@ -42,6 +42,7 @@ pub(crate) enum FastEvent {
     TextComplete(String),
     InputTranscript(String),
     OutputTranscript(String),
+    Thought(String),
     VadStart,
     VadEnd,
     Phase(SessionPhase),
@@ -322,6 +323,9 @@ async fn route_event(
                 .await;
             let _ = ctrl_tx.send(ControlEvent::OutputTranscript(text)).await;
         }
+        SessionEvent::Thought(text) => {
+            let _ = fast_tx.send(FastEvent::Thought(text)).await;
+        }
         SessionEvent::VoiceActivityStart => {
             let _ = fast_tx.send(FastEvent::VadStart).await;
         }
@@ -409,6 +413,11 @@ async fn run_fast_lane(
                 // Callback only — accumulation happens in control lane
                 if let Some(cb) = &callbacks.on_output_transcript {
                     cb(&text, false);
+                }
+            }
+            FastEvent::Thought(text) => {
+                if let Some(cb) = &callbacks.on_thought {
+                    cb(&text);
                 }
             }
             FastEvent::VadStart => {

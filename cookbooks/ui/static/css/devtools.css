@@ -1423,6 +1423,11 @@
   color: var(--primary-dark, #1967d2);
 }
 
+/* Jitter buffer state colors */
+.nfr-buf-filling { color: var(--warning, #fbbc04); }
+.nfr-buf-playing { color: var(--success, #34a853); }
+.nfr-buf-underrun { color: var(--error, #ea4335); }
+
 .status-trace {
   font-family: var(--mono);
   font-size: 10px;

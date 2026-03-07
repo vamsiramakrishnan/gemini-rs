@@ -26,6 +26,7 @@ var MetricsPanel = (function () {
     this._lastResponseCount = 0;
     this._traceId = null;
     this._sessionStart = Date.now();
+    this._bufferMetrics = null;
   }
 
   MetricsPanel.prototype.create = function (container, scheduler, eventsRef) {
@@ -59,6 +60,11 @@ var MetricsPanel = (function () {
 
   MetricsPanel.prototype.addTurnLatency = function (ms) {
     this._turnLatencies.push(ms);
+    this._scheduler.markDirty('metrics');
+  };
+
+  MetricsPanel.prototype.updateBufferMetrics = function (metrics) {
+    this._bufferMetrics = metrics;
     this._scheduler.markDirty('metrics');
   };
 
@@ -96,6 +102,7 @@ var MetricsPanel = (function () {
     this._empty = true;
     this._traceId = null;
     this._sessionStart = Date.now();
+    this._bufferMetrics = null;
     this._container.innerHTML = '<div class="events-empty">No metrics yet</div>';
   };
 
@@ -175,10 +182,21 @@ var MetricsPanel = (function () {
     }
 
     // Audio section
-    if (stats.audio_chunks_out > 0) {
+    if (stats.audio_chunks_out > 0 || this._bufferMetrics) {
       r.audioSection.style.display = '';
       r.audioKB.textContent = (stats.audio_kbytes_out || 0);
       r.audioKBPS.textContent = (stats.audio_throughput_kbps || 0);
+
+      // Jitter buffer metrics
+      if (this._bufferMetrics && r.bufferDepth) {
+        var bm = this._bufferMetrics;
+        r.bufferStrip.style.display = '';
+        r.bufferDepth.textContent = bm.depthMs + 'ms';
+        r.bufferState.textContent = bm.state;
+        r.bufferState.className = 'nfr-metric-value nfr-buf-' + bm.state;
+        r.bufferJitter.textContent = bm.jitterMs + 'ms';
+        r.bufferUnderruns.textContent = bm.underruns;
+      }
     } else {
       r.audioSection.style.display = 'none';
     }
@@ -212,111 +230,66 @@ var MetricsPanel = (function () {
   };
 
   MetricsPanel.prototype._buildSkeleton = function () {
-    var panel = this._container;
     var self = this;
-    panel.innerHTML = '';
+    this._container.innerHTML =
+      '<div class="metrics-content">' +
+        '<div class="metrics-heroes">' +
+          '<div class="metrics-hero"><div class="metrics-hero-label">Latency</div>' +
+            '<div class="metrics-hero-value"><span data-ref="latencyValue"></span><span class="nfr-unit">ms</span></div>' +
+            '<div class="metrics-hero-sub" style="white-space:pre-line" data-ref="latencySub"></div></div>' +
+          '<div class="metrics-hero"><div class="metrics-hero-label">Tokens</div>' +
+            '<div class="metrics-hero-value"><span data-ref="tokensValue"></span></div>' +
+            '<div class="metrics-hero-sub" style="white-space:pre-line" data-ref="tokensSub"></div></div>' +
+          '<div class="metrics-hero"><div class="metrics-hero-label">Session</div>' +
+            '<div class="metrics-hero-value"><span data-ref="sessionValue"></span></div>' +
+            '<div class="metrics-hero-sub" style="white-space:pre-line" data-ref="sessionSub"></div></div>' +
+        '</div>' +
+        '<div class="nfr-range-vis" style="margin:0 0 4px;border-radius:6px;border:1px solid var(--border-light);display:none" data-ref="rangeVis">' +
+          '<div class="nfr-range-labels"><span data-ref="rangeMin"></span><span data-ref="rangeMax"></span></div>' +
+          '<div class="nfr-range-track">' +
+            '<div class="nfr-range-fill" style="width:100%"></div>' +
+            '<div class="nfr-range-marker nfr-range-marker-avg" data-ref="rangeAvgMarker"></div>' +
+            '<div class="nfr-range-marker nfr-range-marker-last" data-ref="rangeLastMarker"></div>' +
+          '</div>' +
+          '<div class="nfr-range-legend">' +
+            '<span class="nfr-range-legend-item"><span class="nfr-dot-avg"></span>avg</span>' +
+            '<span class="nfr-range-legend-item"><span class="nfr-dot-last"></span>last</span>' +
+          '</div>' +
+        '</div>' +
+        '<div class="metrics-sparkline-wrap" style="display:none" data-ref="sparklineWrap">' +
+          '<div class="metrics-sparkline-label">Per-Turn Latency</div>' +
+          '<canvas class="metrics-sparkline" data-ref="sparklineCanvas"></canvas>' +
+        '</div>' +
+        '<div class="nfr-section" style="display:none" data-ref="audioSection">' +
+          '<div class="nfr-section-header"><span class="nfr-section-icon audio"></span><span class="nfr-section-title">Audio</span></div>' +
+          '<div class="nfr-metric-strip">' +
+            '<div class="nfr-metric"><span class="nfr-metric-value" data-ref="audioKB"></span><span class="nfr-metric-label">Total Out (KB)</span></div>' +
+            '<div class="nfr-metric"><span class="nfr-metric-value" data-ref="audioKBPS"></span><span class="nfr-metric-label">Throughput (KB/s)</span></div>' +
+          '</div>' +
+          '<div class="nfr-metric-strip" style="display:none" data-ref="bufferStrip">' +
+            '<div class="nfr-metric"><span class="nfr-metric-value" data-ref="bufferDepth"></span><span class="nfr-metric-label">Buffer Depth</span></div>' +
+            '<div class="nfr-metric"><span class="nfr-metric-value" data-ref="bufferState"></span><span class="nfr-metric-label">Buffer State</span></div>' +
+            '<div class="nfr-metric"><span class="nfr-metric-value" data-ref="bufferJitter"></span><span class="nfr-metric-label">Jitter</span></div>' +
+            '<div class="nfr-metric"><span class="nfr-metric-value" data-ref="bufferUnderruns"></span><span class="nfr-metric-label">Underruns</span></div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="nfr-section" style="display:none" data-ref="toolSection">' +
+          '<div class="nfr-section-header"><span class="nfr-section-icon tools"></span><span class="nfr-section-title">Tool Calls</span>' +
+            '<span class="nfr-section-count" data-ref="toolCount"></span></div>' +
+          '<div class="nfr-tool-list" data-ref="toolList"></div>' +
+        '</div>' +
+        '<div class="metrics-export"><button class="export-btn" data-ref="exportBtn">Copy Trace as OTLP JSON</button></div>' +
+      '</div>';
 
-    var content = U.el('div', 'metrics-content');
+    // Collect refs from data-ref attributes
+    var refs = {};
+    this._container.querySelectorAll('[data-ref]').forEach(function (el) {
+      refs[el.dataset.ref] = el;
+    });
 
-    // Heroes
-    var heroes = U.el('div', 'metrics-heroes');
-    var latencyHero = _createHero('Latency', 'ms');
-    heroes.appendChild(latencyHero.el);
-    var tokensHero = _createHero('Tokens');
-    heroes.appendChild(tokensHero.el);
-    var sessionHero = _createHero('Session');
-    heroes.appendChild(sessionHero.el);
-    content.appendChild(heroes);
+    refs.exportBtn.addEventListener('click', function () { self._exportOtlpJson(); });
 
-    // Range visualization
-    var rangeVis = U.el('div', 'nfr-range-vis');
-    rangeVis.style.cssText = 'margin:0 0 4px; border-radius:6px; border:1px solid var(--border-light); display:none';
-    var rangeLabels = U.el('div', 'nfr-range-labels');
-    var rangeMin = U.el('span', '');
-    var rangeMax = U.el('span', '');
-    rangeLabels.appendChild(rangeMin);
-    rangeLabels.appendChild(rangeMax);
-    rangeVis.appendChild(rangeLabels);
-    var rangeTrack = U.el('div', 'nfr-range-track');
-    var rangeFill = U.el('div', 'nfr-range-fill');
-    rangeFill.style.width = '100%';
-    rangeTrack.appendChild(rangeFill);
-    var rangeAvgMarker = U.el('div', 'nfr-range-marker nfr-range-marker-avg');
-    rangeTrack.appendChild(rangeAvgMarker);
-    var rangeLastMarker = U.el('div', 'nfr-range-marker nfr-range-marker-last');
-    rangeTrack.appendChild(rangeLastMarker);
-    rangeVis.appendChild(rangeTrack);
-    var rangeLegend = U.el('div', 'nfr-range-legend');
-    rangeLegend.innerHTML = '<span class="nfr-range-legend-item"><span class="nfr-dot-avg"></span>avg</span>' +
-      '<span class="nfr-range-legend-item"><span class="nfr-dot-last"></span>last</span>';
-    rangeVis.appendChild(rangeLegend);
-    content.appendChild(rangeVis);
-
-    // Sparkline
-    var sparklineWrap = U.el('div', 'metrics-sparkline-wrap');
-    sparklineWrap.style.display = 'none';
-    var sparklineLabel = U.el('div', 'metrics-sparkline-label');
-    sparklineLabel.textContent = 'Per-Turn Latency';
-    sparklineWrap.appendChild(sparklineLabel);
-    var sparklineCanvas = U.el('canvas', 'metrics-sparkline');
-    sparklineWrap.appendChild(sparklineCanvas);
-    content.appendChild(sparklineWrap);
-
-    // Audio section
-    var audioSection = U.el('div', 'nfr-section');
-    audioSection.style.display = 'none';
-    audioSection.innerHTML = '<div class="nfr-section-header"><span class="nfr-section-icon audio"></span><span class="nfr-section-title">Audio</span></div>';
-    var audioStrip = U.el('div', 'nfr-metric-strip');
-    var audioKBMetric = U.el('div', 'nfr-metric');
-    var audioKBVal = U.el('span', 'nfr-metric-value');
-    audioKBMetric.appendChild(audioKBVal);
-    var audioKBLabel = U.el('span', 'nfr-metric-label');
-    audioKBLabel.textContent = 'Total Out (KB)';
-    audioKBMetric.appendChild(audioKBLabel);
-    audioStrip.appendChild(audioKBMetric);
-    var audioKBPSMetric = U.el('div', 'nfr-metric');
-    var audioKBPSVal = U.el('span', 'nfr-metric-value');
-    audioKBPSMetric.appendChild(audioKBPSVal);
-    var audioKBPSLabel = U.el('span', 'nfr-metric-label');
-    audioKBPSLabel.textContent = 'Throughput (KB/s)';
-    audioKBPSMetric.appendChild(audioKBPSLabel);
-    audioStrip.appendChild(audioKBPSMetric);
-    audioSection.appendChild(audioStrip);
-    content.appendChild(audioSection);
-
-    // Tool calls section
-    var toolSection = U.el('div', 'nfr-section');
-    toolSection.style.display = 'none';
-    var toolHeader = U.el('div', 'nfr-section-header');
-    toolHeader.innerHTML = '<span class="nfr-section-icon tools"></span><span class="nfr-section-title">Tool Calls</span>';
-    var toolCount = U.el('span', 'nfr-section-count');
-    toolHeader.appendChild(toolCount);
-    toolSection.appendChild(toolHeader);
-    var toolList = U.el('div', 'nfr-tool-list');
-    toolSection.appendChild(toolList);
-    content.appendChild(toolSection);
-
-    // Export button
-    var exportDiv = U.el('div', 'metrics-export');
-    var exportBtn = U.el('button', 'export-btn');
-    exportBtn.textContent = 'Copy Trace as OTLP JSON';
-    exportBtn.addEventListener('click', function () { self._exportOtlpJson(); });
-    exportDiv.appendChild(exportBtn);
-    content.appendChild(exportDiv);
-
-    panel.appendChild(content);
-
-    this._refs = {
-      latencyValue: latencyHero.value, latencySub: latencyHero.sub,
-      tokensValue: tokensHero.value, tokensSub: tokensHero.sub,
-      sessionValue: sessionHero.value, sessionSub: sessionHero.sub,
-      rangeVis: rangeVis, rangeMin: rangeMin, rangeMax: rangeMax,
-      rangeAvgMarker: rangeAvgMarker, rangeLastMarker: rangeLastMarker,
-      sparklineWrap: sparklineWrap, sparklineCanvas: sparklineCanvas,
-      audioSection: audioSection, audioKB: audioKBVal, audioKBPS: audioKBPSVal,
-      toolSection: toolSection, toolCount: toolCount, toolList: toolList,
-      exportBtn: exportBtn
-    };
+    this._refs = refs;
     this._toolRenderedCount = 0;
     this._sparkline = null;
   };
@@ -378,28 +351,6 @@ var MetricsPanel = (function () {
     }).join('');
     return this._traceId;
   };
-
-  // --- Static helper ---
-
-  function _createHero(label, unit) {
-    var el = U.el('div', 'metrics-hero');
-    var lbl = U.el('div', 'metrics-hero-label');
-    lbl.textContent = label;
-    el.appendChild(lbl);
-    var val = U.el('div', 'metrics-hero-value');
-    var valText = U.el('span', '');
-    val.appendChild(valText);
-    if (unit) {
-      var unitSpan = U.el('span', 'nfr-unit');
-      unitSpan.textContent = unit;
-      val.appendChild(unitSpan);
-    }
-    el.appendChild(val);
-    var sub = U.el('div', 'metrics-hero-sub');
-    sub.style.whiteSpace = 'pre-line';
-    el.appendChild(sub);
-    return { el: el, value: valText, sub: sub };
-  }
 
   return MetricsPanel;
 })();

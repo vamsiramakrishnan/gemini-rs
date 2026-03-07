@@ -5,7 +5,8 @@ use tracing::info;
 
 use adk_rs_fluent::prelude::*;
 
-use crate::app::{AppCategory, AppError, ClientMessage, CookbookApp, ServerMessage, WsSender};
+use crate::app::{AppError, ClientMessage, CookbookApp, ServerMessage, WsSender};
+use crate::cookbook_meta;
 
 use super::{build_session_config, wait_for_start};
 
@@ -179,36 +180,21 @@ fn evaluate_simple_expr(expr: &str) -> f64 {
 
 #[async_trait]
 impl CookbookApp for ToolCalling {
-    fn name(&self) -> &str {
-        "tool-calling"
-    }
-
-    fn description(&self) -> &str {
-        "Function calling with Gemini Live"
-    }
-
-    fn category(&self) -> AppCategory {
-        AppCategory::Basic
-    }
-
-    fn features(&self) -> Vec<String> {
-        vec!["text".into(), "tools".into()]
-    }
-
-    fn tips(&self) -> Vec<String> {
-        vec![
-            "Three demo tools available: get_weather, get_time, calculate".into(),
-            "Watch the devtools State tab to see tool call arguments and results".into(),
-            "Tools return mock data — try asking follow-up questions about the results".into(),
-        ]
-    }
-
-    fn try_saying(&self) -> Vec<String> {
-        vec![
-            "What's the weather in San Francisco?".into(),
-            "What time is it in Tokyo?".into(),
-            "Calculate 15 * 7 + 23".into(),
-        ]
+    cookbook_meta! {
+        name: "tool-calling",
+        description: "Function calling with Gemini Live",
+        category: Basic,
+        features: ["text", "tools"],
+        tips: [
+            "Three demo tools available: get_weather, get_time, calculate",
+            "Watch the devtools State tab to see tool call arguments and results",
+            "Tools return mock data — try asking follow-up questions about the results",
+        ],
+        try_saying: [
+            "What's the weather in San Francisco?",
+            "What time is it in Tokyo?",
+            "Calculate 15 * 7 + 23",
+        ],
     }
 
     async fn handle_session(

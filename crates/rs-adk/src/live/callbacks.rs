@@ -72,6 +72,8 @@ pub struct EventCallbacks {
     pub on_input_transcript: Option<Box<dyn Fn(&str, bool) + Send + Sync>>,
     /// Called for output (model speech) transcription updates.
     pub on_output_transcript: Option<Box<dyn Fn(&str, bool) + Send + Sync>>,
+    /// Called when the model emits a thought/reasoning summary (when includeThoughts is enabled).
+    pub on_thought: Option<Box<dyn Fn(&str) + Send + Sync>>,
     /// Called when server-side VAD detects voice activity start.
     pub on_vad_start: Option<Box<dyn Fn() + Send + Sync>>,
     /// Called when server-side VAD detects voice activity end.
@@ -189,6 +191,7 @@ impl Default for EventCallbacks {
             on_text_complete: None,
             on_input_transcript: None,
             on_output_transcript: None,
+            on_thought: None,
             on_vad_start: None,
             on_vad_end: None,
             on_phase: None,
@@ -231,6 +234,7 @@ impl std::fmt::Debug for EventCallbacks {
             .field("on_text_complete", &self.on_text_complete.is_some())
             .field("on_input_transcript", &self.on_input_transcript.is_some())
             .field("on_output_transcript", &self.on_output_transcript.is_some())
+            .field("on_thought", &self.on_thought.is_some())
             .field("on_vad_start", &self.on_vad_start.is_some())
             .field("on_vad_end", &self.on_vad_end.is_some())
             .field("on_phase", &self.on_phase.is_some())

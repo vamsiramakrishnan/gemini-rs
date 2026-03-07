@@ -103,6 +103,15 @@ impl Live {
         self
     }
 
+    /// Called when the model emits a thought/reasoning summary.
+    ///
+    /// Requires `.include_thoughts()` on the session config. Fast lane callback
+    /// (sync, must complete in < 1ms).
+    pub fn on_thought(mut self, f: impl Fn(&str) + Send + Sync + 'static) -> Self {
+        self.callbacks.on_thought = Some(Box::new(f));
+        self
+    }
+
     /// Called when server VAD detects voice activity start.
     pub fn on_vad_start(mut self, f: impl Fn() + Send + Sync + 'static) -> Self {
         self.callbacks.on_vad_start = Some(Box::new(f));

@@ -4,10 +4,61 @@ Runnable examples demonstrating gemini-rs features, organized by difficulty.
 
 ## Getting Started
 
-1. Copy `.env.example` to `.env` and configure your credentials:
-   - **Google AI**: Set `GOOGLE_GENAI_API_KEY`
-   - **Vertex AI**: Set `GOOGLE_GENAI_USE_VERTEXAI=TRUE`, `GOOGLE_CLOUD_PROJECT`, and `GOOGLE_CLOUD_LOCATION`
-2. Optionally set `GEMINI_MODEL` to override the default model.
+```bash
+cp .env.example .env   # then fill in your credentials
+```
+
+### Environment variables
+
+All cookbooks read from a shared `.env` at the workspace root via [`dotenvy`](https://docs.rs/dotenvy). Pick **one** auth method:
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `GEMINI_API_KEY` | **Option A** | Google AI API key ([get one](https://aistudio.google.com/apikey)). Fastest path. |
+| `GOOGLE_GENAI_USE_VERTEXAI` | **Option B** | Set to `TRUE` to use Vertex AI instead of Google AI. |
+| `GOOGLE_CLOUD_PROJECT` | with Vertex | GCP project ID (e.g. `my-project-123`). |
+| `GOOGLE_CLOUD_LOCATION` | with Vertex | Region for the Live endpoint. Defaults to `us-central1`. |
+| `GOOGLE_ACCESS_TOKEN` | optional | Explicit OAuth2 token. Falls back to `gcloud auth print-access-token`. |
+| `GEMINI_MODEL` | optional | Override the default model (see below). |
+
+> **Tip:** The UI cookbook also accepts `GOOGLE_GENAI_API_KEY` as an alias for `GEMINI_API_KEY`.
+
+#### Model string format
+
+Always use the full `models/` prefix — the SDK normalizes it per-platform:
+
+```bash
+# Works on both Google AI and Vertex AI:
+GEMINI_MODEL=models/gemini-2.5-flash-native-audio-preview-12-2025
+
+# Google AI  → sent as-is in the setup message
+# Vertex AI  → stripped to: projects/{project}/locations/{loc}/publishers/google/models/gemini-2.5-flash-native-audio-preview-12-2025
+```
+
+Omit `GEMINI_MODEL` to use the SDK default (`models/gemini-live-2.5-flash-native-audio`).
+
+#### Two-model architecture
+
+Cookbooks use **two separate models** that share the same auth credentials:
+
+| Role | Model | Protocol | Configured via |
+|------|-------|----------|----------------|
+| **Live session** | `gemini-live-2.5-flash-native-audio` | WebSocket | `GEMINI_MODEL` env var |
+| **Text LLM** | `gemini-3.1-flash-lite-preview` | REST | `GeminiLlmParams` in code |
+
+The text LLM powers extractors, agent-as-tool pipelines, and background analysis in advanced cookbooks. It reads the **same auth env vars** — no extra configuration needed.
+
+```rust
+// Text LLM inherits auth from env, model set explicitly in code
+let llm: Arc<dyn BaseLlm> = Arc::new(GeminiLlm::new(GeminiLlmParams {
+    model: Some("gemini-3.1-flash-lite-preview".into()),
+    ..Default::default()  // reads GEMINI_API_KEY / GOOGLE_CLOUD_PROJECT from env
+}));
+```
+
+**Google AI** — single API key covers both. No location concept, no extra setup.
+
+**Vertex AI** — the text LLM may need a different `location` than the Live session. The native audio model is region-locked to `us-central1`, but `gemini-3.1-flash-lite-preview` is available at the `global` endpoint. Cookbooks handle this by passing `location: Some("global".into())` in `GeminiLlmParams`.
 
 ### Standalone cookbooks
 
@@ -191,6 +242,7 @@ All cookbooks work with both **Google AI** (API key) and **Vertex AI** (project/
 |---------|-----------|-----------|
 | Async tool calling (`NonBlocking`) | Supported | Stripped automatically |
 | Response scheduling (`WhenIdle`/`Silent`) | Supported | Stripped automatically |
+| Thinking (`thinkingConfig`) | Supported | Stripped automatically |
 | Audio model | `GeminiLive2_5FlashNativeAudio` | `GeminiLive2_5FlashNativeAudio` |
 | Text model | `Gemini2_0FlashLive` | `Gemini2_0FlashLive` |
 | WebSocket frames | Text | Binary (handled automatically) |

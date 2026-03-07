@@ -440,9 +440,12 @@ let handle = Live::builder()
     .instruction("You are a weather assistant.")
     .greeting("Greet the user and ask how you can help.")
     .transcription(true, true)          // input + output transcription
+    .thinking(1024)                     // enable thinking with token budget
+    .include_thoughts()                 // receive thought summaries
     .affective_dialog(true)             // emotionally expressive responses
     .context_compression(4000, 2000)    // auto-compress context window
     .on_audio(|data| speaker.write(data))
+    .on_thought(|text| println!("[Thought] {text}"))
     .on_input_transcript(|text, _final| println!("[User] {text}"))
     .on_output_transcript(|text, _final| println!("[Agent] {text}"))
     .on_interrupted(|| async { speaker.flush().await })
@@ -457,6 +460,37 @@ let handle = Live::builder()
 ```
 
 **Available voices:** `Aoede`, `Charon`, `Fenrir`, `Kore`, `Puck` (default), or `Voice::Custom("name")`.
+
+### Thinking (Gemini 2.5+)
+
+The `gemini-2.5-flash-native-audio-preview-12-2025` model supports thinking
+capabilities with dynamic thinking enabled by default. Control the thinking
+budget and receive thought summaries in your session:
+
+```rust
+let handle = Live::builder()
+    .model(GeminiModel::Custom(
+        "models/gemini-2.5-flash-native-audio-preview-12-2025".into(),
+    ))
+    .thinking(1024)           // set thinking token budget (0 = disable)
+    .include_thoughts()       // receive thought summaries via on_thought
+    .on_thought(|text| println!("[Thought] {text}"))
+    .on_text(|t| print!("{t}"))
+    .connect_google_ai(api_key)
+    .await?;
+```
+
+**How it works in the three-lane architecture:**
+
+- `thinkingConfig` (`thinkingBudget`, `includeThoughts`) is sent in the setup
+  message's `generationConfig`
+- When `includeThoughts` is true, thought parts arrive as `Part::Thought` in
+  `model_turn` content — emitted as `SessionEvent::Thought(String)`
+- Thought events are routed to the **fast lane** and delivered via the
+  `on_thought` sync callback (< 1ms, no allocations)
+
+**Platform support:** Google AI only. On Vertex AI, `thinkingConfig` is
+automatically stripped from the setup message — no code changes needed.
 
 ### Tool Calling
 
@@ -898,9 +932,12 @@ devtools panel showing real-time state, timeline, transcript, and telemetry.
 ### Platform Support
 
 All cookbooks work with both **Google AI** (API key) and **Vertex AI** (project/location).
-When using Google AI, async tool calling features (`NonBlocking` behavior, `WhenIdle`/`Silent`
-scheduling) are automatically enabled. On Vertex AI, these fields are stripped from the wire
-protocol transparently — no code changes needed.
+The SDK auto-strips unsupported features on Vertex AI — no code changes needed:
+
+| Feature | Google AI | Vertex AI |
+|---------|-----------|-----------|
+| Async tool calling (`NonBlocking`, `WhenIdle`/`Silent`) | Supported | Stripped automatically |
+| Thinking (`thinkingConfig`) | Supported | Stripped automatically |
 
 ---
 
