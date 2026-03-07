@@ -124,3 +124,22 @@ pub fn log_http_request(_: &str, _: &str) {}
 pub fn log_http_response(_: u16, _: f64) {}
 #[cfg(not(feature = "tracing-support"))]
 pub fn log_http_retry(_: &str, _: u32, _: u64) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn noop_log_functions_compile() {
+        // All log functions should compile and not panic as no-ops.
+        log_session_event("sess-1", "greeting", "connected");
+        log_tool_call("sess-1", "get_weather", 1);
+        log_ws_error("sess-1", "connection reset");
+        log_jitter_underrun("sess-1", 50.0);
+        log_reconnection("sess-1", 1, 1000);
+        log_vad_event("sess-1", "speech_start");
+        log_http_request("GET", "https://example.com");
+        log_http_response(200, 42.5);
+        log_http_retry("https://example.com", 2, 2000);
+    }
+}

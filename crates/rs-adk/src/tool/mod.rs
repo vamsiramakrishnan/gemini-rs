@@ -20,6 +20,26 @@ use crate::agent_session::InputEvent;
 use crate::error::ToolError;
 
 /// A regular tool — called once, returns a result.
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// use async_trait::async_trait;
+/// use rs_adk::tool::ToolFunction;
+/// use rs_adk::error::ToolError;
+///
+/// struct MyTool;
+///
+/// #[async_trait]
+/// impl ToolFunction for MyTool {
+///     fn name(&self) -> &str { "my_tool" }
+///     fn description(&self) -> &str { "Does something useful" }
+///     fn parameters(&self) -> Option<serde_json::Value> { None }
+///     async fn call(&self, args: serde_json::Value) -> Result<serde_json::Value, ToolError> {
+///         Ok(serde_json::json!({"status": "ok"}))
+///     }
+/// }
+/// ```
 #[async_trait]
 pub trait ToolFunction: Send + Sync + 'static {
     /// The unique name of this tool.

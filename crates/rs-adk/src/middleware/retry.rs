@@ -12,14 +12,17 @@ use crate::error::AgentError;
 /// [`RetryMiddleware::should_retry`] method the caller can query to decide
 /// whether to re-invoke the agent.
 ///
-/// # Example
+/// # Examples
 ///
-/// ```ignore
+/// ```rust,ignore
+/// use std::sync::Arc;
+/// use rs_adk::middleware::RetryMiddleware;
+///
 /// let retry = Arc::new(RetryMiddleware::new(3));
-/// // ... run agent ...
-/// if retry.should_retry() {
+/// // ... run agent, on_error is called by the middleware chain ...
+/// while retry.should_retry() {
 ///     retry.record_attempt();
-///     // re-run agent
+///     // re-run the agent
 /// }
 /// ```
 pub struct RetryMiddleware {

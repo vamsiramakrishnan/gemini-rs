@@ -19,6 +19,27 @@ use crate::context::InvocationContext;
 use crate::error::{AgentError, ToolError};
 
 /// Middleware hooks — all optional, implement only what you need.
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// use async_trait::async_trait;
+/// use rs_adk::middleware::Middleware;
+/// use rs_adk::error::AgentError;
+/// use rs_genai::prelude::FunctionCall;
+///
+/// struct AuditMiddleware;
+///
+/// #[async_trait]
+/// impl Middleware for AuditMiddleware {
+///     fn name(&self) -> &str { "audit" }
+///
+///     async fn before_tool(&self, call: &FunctionCall) -> Result<(), AgentError> {
+///         println!("Calling tool: {}", call.name);
+///         Ok(())
+///     }
+/// }
+/// ```
 #[async_trait]
 pub trait Middleware: Send + Sync + 'static {
     /// Unique name for this middleware (used in logging/debugging).

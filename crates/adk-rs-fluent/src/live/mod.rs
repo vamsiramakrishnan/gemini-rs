@@ -127,6 +127,45 @@ pub struct Live {
 
 impl Live {
     /// Start building a Live session.
+    ///
+    /// # Examples
+    ///
+    /// Minimal live session setup:
+    ///
+    /// ```rust,ignore
+    /// use adk_rs_fluent::prelude::*;
+    ///
+    /// let handle = Live::builder()
+    ///     .model(GeminiModel::Gemini2_0FlashLive)
+    ///     .voice(Voice::Kore)
+    ///     .instruction("You are a helpful assistant")
+    ///     .greeting("Hello! How can I help?")
+    ///     .on_audio(|data| { /* send to speaker */ })
+    ///     .on_text(|t| print!("{t}"))
+    ///     .connect_google_ai("API_KEY")
+    ///     .await?;
+    ///
+    /// handle.send_text("What is the weather?").await?;
+    /// handle.disconnect().await?;
+    /// ```
+    ///
+    /// With phases and state-based transitions:
+    ///
+    /// ```rust,ignore
+    /// let handle = Live::builder()
+    ///     .model(GeminiModel::Gemini2_0FlashLive)
+    ///     .phase("greeting")
+    ///         .instruction("Welcome the user")
+    ///         .transition("main", S::is_true("greeted"))
+    ///         .done()
+    ///     .phase("main")
+    ///         .instruction("Help the user")
+    ///         .terminal()
+    ///         .done()
+    ///     .initial_phase("greeting")
+    ///     .connect_google_ai("API_KEY")
+    ///     .await?;
+    /// ```
     pub fn builder() -> Self {
         Self {
             config: SessionConfig::from_endpoint(ApiEndpoint::google_ai("")),

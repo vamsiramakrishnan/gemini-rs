@@ -78,6 +78,13 @@ pub struct CodeExecutionResult {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Part {
+    /// A thought/reasoning part from the model (when includeThoughts is enabled).
+    Thought {
+        /// The thought content.
+        text: String,
+        /// Always true for thought parts.
+        thought: bool,
+    },
     /// A text part.
     Text {
         /// The text content.
@@ -117,11 +124,36 @@ pub enum Part {
 
 impl Part {
     /// Create a text part.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rs_genai::protocol::types::Part;
+    ///
+    /// let part = Part::text("Hello, world!");
+    /// ```
     pub fn text(s: impl Into<String>) -> Self {
         Part::Text { text: s.into() }
     }
 
+    /// Create a thought part.
+    pub fn thought(s: impl Into<String>) -> Self {
+        Part::Thought {
+            text: s.into(),
+            thought: true,
+        }
+    }
+
     /// Create an inline data part (e.g. audio or image blob).
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rs_genai::protocol::types::Part;
+    ///
+    /// let audio = Part::inline_data("audio/pcm", "AQIDBA==");
+    /// let image = Part::inline_data("image/jpeg", "/9j/4AAQ...");
+    /// ```
     pub fn inline_data(mime_type: impl Into<String>, data: impl Into<String>) -> Self {
         Part::InlineData {
             inline_data: Blob {
@@ -163,6 +195,16 @@ pub struct Content {
 
 impl Content {
     /// Create a user-role content with a single text part.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rs_genai::protocol::types::{Content, Role};
+    ///
+    /// let msg = Content::user("What is the weather?");
+    /// assert_eq!(msg.role, Some(Role::User));
+    /// assert_eq!(msg.parts.len(), 1);
+    /// ```
     pub fn user(text: impl Into<String>) -> Self {
         Self {
             role: Some(Role::User),
@@ -171,6 +213,15 @@ impl Content {
     }
 
     /// Create a model-role content with a single text part.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rs_genai::protocol::types::{Content, Role};
+    ///
+    /// let msg = Content::model("The weather is sunny.");
+    /// assert_eq!(msg.role, Some(Role::Model));
+    /// ```
     pub fn model(text: impl Into<String>) -> Self {
         Self {
             role: Some(Role::Model),
@@ -194,6 +245,19 @@ impl Content {
     }
 
     /// Create a content from an explicit role and parts list.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rs_genai::protocol::types::{Content, Part, Role};
+    ///
+    /// let parts = vec![
+    ///     Part::text("Hello"),
+    ///     Part::inline_data("audio/pcm", "AQID"),
+    /// ];
+    /// let msg = Content::from_parts(Role::User, parts);
+    /// assert_eq!(msg.parts.len(), 2);
+    /// ```
     pub fn from_parts(role: Role, parts: Vec<Part>) -> Self {
         Self {
             role: Some(role),

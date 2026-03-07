@@ -9,6 +9,24 @@ use super::enums::{FunctionCallingBehavior, FunctionCallingMode};
 // ---------------------------------------------------------------------------
 
 /// Schema for a single function that the model can call.
+///
+/// # Examples
+///
+/// ```rust
+/// use rs_genai::protocol::types::FunctionDeclaration;
+/// use serde_json::json;
+///
+/// let decl = FunctionDeclaration {
+///     name: "get_weather".to_string(),
+///     description: "Get weather for a city".to_string(),
+///     parameters: Some(json!({
+///         "type": "object",
+///         "properties": { "city": { "type": "string" } },
+///         "required": ["city"]
+///     })),
+///     behavior: None,
+/// };
+/// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FunctionDeclaration {
     /// Function name.
@@ -52,6 +70,19 @@ pub struct Tool {
 
 impl Tool {
     /// Create a tool with function declarations.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rs_genai::protocol::types::{Tool, FunctionDeclaration};
+    ///
+    /// let tool = Tool::functions(vec![FunctionDeclaration {
+    ///     name: "search".to_string(),
+    ///     description: "Search the web".to_string(),
+    ///     parameters: None,
+    ///     behavior: None,
+    /// }]);
+    /// ```
     pub fn functions(declarations: Vec<FunctionDeclaration>) -> Self {
         Self {
             function_declarations: Some(declarations),

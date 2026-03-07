@@ -24,6 +24,21 @@ pub struct ToolLatency {
 ///
 /// Stores `ToolLatency` entries that can be retrieved via [`LatencyMiddleware::tool_latencies`].
 /// Thread-safe and suitable for use across async tasks.
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// use rs_adk::middleware::{LatencyMiddleware, Middleware};
+/// use rs_genai::prelude::FunctionCall;
+///
+/// let lat = LatencyMiddleware::new();
+/// // In an async context:
+/// lat.before_tool(&call).await.unwrap();
+/// // ... tool executes ...
+/// lat.after_tool(&call, &result).await.unwrap();
+/// let records = lat.tool_latencies();
+/// println!("Tool {} took {:?}", records[0].name, records[0].elapsed);
+/// ```
 pub struct LatencyMiddleware {
     /// In-flight tool start times, keyed by tool name.
     /// Multiple concurrent calls to the same tool name will overwrite,

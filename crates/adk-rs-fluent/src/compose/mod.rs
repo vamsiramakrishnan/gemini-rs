@@ -1,4 +1,4 @@
-//! Composition modules — S, C, P, M, T, A.
+//! Composition modules -- S, C, P, M, T, A.
 //!
 //! Six namespaces for composing different aspects of agent configuration:
 //!
@@ -10,6 +10,30 @@
 //! | M      | `M::`     | `\|`     | Middleware composition           |
 //! | T      | `T::`     | `\|`     | Tool composition                |
 //! | A      | `A::`     | `+`      | Artifact schemas                |
+//!
+//! # Quick Reference
+//!
+//! ```rust
+//! use adk_rs_fluent::compose::{S, C, P, T, A};
+//! use serde_json::json;
+//! use rs_genai::prelude::Content;
+//!
+//! // S: State transforms — pick, rename, chain with >>
+//! let transform = S::pick(&["a", "b"]) >> S::rename(&[("a", "x")]);
+//!
+//! // C: Context policies — window, filter, chain with +
+//! let context = C::window(10) + C::user_only();
+//!
+//! // P: Prompt sections — role, task, format, chain with +
+//! let prompt = P::role("analyst") + P::task("analyze data") + P::format("JSON");
+//!
+//! // T: Tool composition — built-ins and custom, chain with |
+//! let tools = T::google_search() | T::code_execution();
+//!
+//! // A: Artifact schemas — inputs and outputs, chain with +
+//! let artifacts = A::json_output("report", "Analysis report")
+//!     + A::text_input("source", "Source document");
+//! ```
 
 pub mod artifacts;
 pub mod context;

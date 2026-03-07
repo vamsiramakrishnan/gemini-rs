@@ -270,3 +270,52 @@ impl TelemetryConfig {
             .build()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_config_values() {
+        let config = TelemetryConfig::default();
+        assert!(config.logging_enabled);
+        assert_eq!(config.log_filter, "info");
+        assert!(!config.json_logs);
+        assert!(!config.metrics_enabled);
+        assert!(config.metrics_addr.is_none());
+        assert!(!config.otel_traces);
+        assert!(!config.otel_metrics);
+        assert_eq!(config.otel_service_name, "gemini-live");
+        assert!(config.otel_gcp_project.is_none());
+    }
+
+    #[test]
+    fn config_builder_pattern() {
+        let config = TelemetryConfig {
+            logging_enabled: false,
+            log_filter: "debug".to_string(),
+            json_logs: true,
+            metrics_enabled: true,
+            metrics_addr: Some("0.0.0.0:9090".to_string()),
+            otel_traces: true,
+            otel_metrics: true,
+            otel_service_name: "my-service".to_string(),
+            otel_gcp_project: Some("my-project".to_string()),
+        };
+        assert!(!config.logging_enabled);
+        assert_eq!(config.log_filter, "debug");
+        assert!(config.json_logs);
+        assert!(config.metrics_enabled);
+        assert_eq!(config.metrics_addr.as_deref(), Some("0.0.0.0:9090"));
+        assert!(config.otel_traces);
+        assert!(config.otel_metrics);
+        assert_eq!(config.otel_service_name, "my-service");
+        assert_eq!(config.otel_gcp_project.as_deref(), Some("my-project"));
+    }
+
+    #[test]
+    fn telemetry_guard_default() {
+        let _guard = TelemetryGuard::default();
+        // Verifies that TelemetryGuard::default() compiles and doesn't panic.
+    }
+}

@@ -126,3 +126,25 @@ pub fn record_ws_bytes_received(_: u64) {}
 /// Record an HTTP REST API request (no-op without `metrics` feature).
 #[cfg(not(feature = "metrics"))]
 pub fn record_http_request(_: &str, _: u16, _: f64) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn noop_metric_functions_compile() {
+        // All metric functions should compile and not panic as no-ops.
+        record_session_connected();
+        record_session_disconnected();
+        record_audio_latency(15.0);
+        record_response_latency(200.0);
+        record_jitter_depth(30.0);
+        record_jitter_underrun();
+        record_tool_call("get_weather", 50.0);
+        record_vad_event("speech_start");
+        record_reconnection();
+        record_ws_bytes_sent(1024);
+        record_ws_bytes_received(2048);
+        record_http_request("GET", 200, 42.5);
+    }
+}

@@ -11,6 +11,13 @@ use async_trait::async_trait;
 ///
 /// The default is WebSocket ([`TungsteniteTransport`]); [`MockTransport`] enables
 /// unit testing without a real server.
+///
+/// # Implementors
+///
+/// - [`TungsteniteTransport`] -- Production WebSocket transport using `tokio-tungstenite`.
+///   Handles both Text and Binary frames (Vertex AI sends Binary).
+/// - [`MockTransport`] -- Deterministic test transport. Records sent data and replays
+///   scripted responses. When the queue is empty, `recv()` pends indefinitely.
 #[async_trait]
 pub trait Transport: Send + 'static {
     /// The error type produced by this transport.

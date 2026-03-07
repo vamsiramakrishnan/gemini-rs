@@ -58,15 +58,80 @@ pub trait ToolEntryTrait: Send + Sync + 'static {
 /// Every setter returns a new `AgentBuilder`, leaving the original unchanged.
 /// This makes builders safe to share as templates.
 ///
-/// ```rust,no_run
+/// # Basic Usage
+///
+/// ```rust
+/// use adk_rs_fluent::builder::AgentBuilder;
+/// use rs_genai::prelude::GeminiModel;
+///
+/// let agent = AgentBuilder::new("analyst")
+///     .model(GeminiModel::Gemini2_0FlashLive)
+///     .instruction("Analyze the given topic")
+///     .temperature(0.3);
+///
+/// assert_eq!(agent.name(), "analyst");
+/// assert_eq!(agent.get_temperature(), Some(0.3));
+/// ```
+///
+/// # Copy-on-Write Pattern
+///
+/// Cloning a builder and modifying the clone leaves the original unchanged.
+/// This is useful for creating template builders with shared defaults.
+///
+/// ```rust
 /// use adk_rs_fluent::builder::AgentBuilder;
 ///
 /// let base = AgentBuilder::new("researcher")
-///     .instruction("You are a research assistant.");
+///     .instruction("You are a research assistant.")
+///     .temperature(0.5);
 ///
-/// // Clone-on-write: base is unchanged
-/// let variant_a = base.clone().temperature(0.3);
-/// let variant_b = base.clone().temperature(0.9);
+/// let creative = base.clone().temperature(0.9);
+/// let precise  = base.clone().temperature(0.1);
+///
+/// // Original unchanged
+/// assert_eq!(base.get_temperature(), Some(0.5));
+/// assert_eq!(creative.get_temperature(), Some(0.9));
+/// assert_eq!(precise.get_temperature(), Some(0.1));
+/// ```
+///
+/// # Sampling Parameters
+///
+/// ```rust
+/// use adk_rs_fluent::builder::AgentBuilder;
+///
+/// let agent = AgentBuilder::new("sampler")
+///     .temperature(0.7)
+///     .top_p(0.95)
+///     .top_k(40)
+///     .max_output_tokens(4096);
+///
+/// assert_eq!(agent.get_top_p(), Some(0.95));
+/// assert_eq!(agent.get_top_k(), Some(40));
+/// assert_eq!(agent.get_max_output_tokens(), Some(4096));
+/// ```
+///
+/// # Built-in Tools
+///
+/// ```rust
+/// use adk_rs_fluent::builder::AgentBuilder;
+///
+/// let agent = AgentBuilder::new("searcher")
+///     .google_search()
+///     .code_execution()
+///     .url_context();
+///
+/// assert_eq!(agent.tool_count(), 3);
+/// ```
+///
+/// # Thinking Budget
+///
+/// ```rust
+/// use adk_rs_fluent::builder::AgentBuilder;
+///
+/// let agent = AgentBuilder::new("thinker")
+///     .thinking(2048);
+///
+/// assert_eq!(agent.get_thinking_budget(), Some(2048));
 /// ```
 #[derive(Clone)]
 pub struct AgentBuilder {

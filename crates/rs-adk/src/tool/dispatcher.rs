@@ -23,6 +23,19 @@ pub struct ToolDispatcher {
 
 impl ToolDispatcher {
     /// Create a new empty tool dispatcher with the default 30-second timeout.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// use rs_adk::tool::{ToolDispatcher, SimpleTool};
+    /// use serde_json::json;
+    ///
+    /// let mut dispatcher = ToolDispatcher::new();
+    /// dispatcher.register(SimpleTool::new(
+    ///     "echo", "Echo input", None,
+    ///     |args| async move { Ok(args) },
+    /// ));
+    /// ```
     pub fn new() -> Self {
         Self {
             tools: HashMap::new(),

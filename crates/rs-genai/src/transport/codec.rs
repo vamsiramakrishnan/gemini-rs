@@ -21,6 +21,16 @@ pub enum CodecError {
 }
 
 /// Encodes client commands into wire bytes and decodes server bytes into messages.
+///
+/// The default implementation is [`JsonCodec`], which serializes commands as JSON
+/// and parses server responses via [`ServerMessage::parse`].
+///
+/// # Implementors
+///
+/// - [`JsonCodec`] -- Standard JSON codec. Encodes setup messages, audio (base64),
+///   text, tool responses, and activity signals. Decodes server JSON into
+///   [`ServerMessage`] variants. Handles platform-specific wire stripping
+///   (e.g., removing `scheduling` fields for Vertex AI).
 pub trait Codec: Send + Sync + 'static {
     /// Encode the initial setup message for the given session configuration.
     fn encode_setup(&self, config: &SessionConfig) -> Result<Vec<u8>, CodecError>;
@@ -88,9 +98,7 @@ impl Codec for JsonCodec {
                         .collect()
                 };
                 let msg = ToolResponseMessage {
-                    tool_response: ToolResponsePayload {
-                        function_responses,
-                    },
+                    tool_response: ToolResponsePayload { function_responses },
                 };
                 serde_json::to_vec(&msg).map_err(|e| CodecError::Serialize(e.to_string()))
             }
