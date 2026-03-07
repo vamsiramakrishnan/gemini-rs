@@ -45,7 +45,7 @@ pub struct FunctionResponse {
     /// Scheduling mode for non-blocking tool responses.
     ///
     /// Only meaningful when the function was declared with
-    /// [`FunctionCallingBehavior::NonBlocking`]. Controls how the model
+    /// [`super::FunctionCallingBehavior::NonBlocking`]. Controls how the model
     /// processes this result: immediately (interrupt), after finishing
     /// current output (when_idle), or silently (no user notification).
     #[serde(skip_serializing_if = "Option::is_none")]

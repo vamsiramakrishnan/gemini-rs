@@ -171,7 +171,7 @@ pub struct Phase {
     ///
     /// Purely informational — does not affect transitions or enforcement.
     /// The [`ContextBuilder`](super::context_builder::ContextBuilder) reads
-    /// these from `session:phase_needs` to append a "[Gathering] key1, key2"
+    /// these from `session:phase_needs` to append a "\[Gathering\] key1, key2"
     /// line to the instruction, so the model knows what to focus on.
     pub needs: Vec<String>,
 }

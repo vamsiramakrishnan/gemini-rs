@@ -1,7 +1,7 @@
 //! Declarative state-to-narrative context builder.
 //!
 //! A [`ContextBuilder`] renders session [`State`] into a natural-language summary
-//! that gets appended to the phase instruction via [`InstructionModifier::CustomAppend`].
+//! that gets appended to the phase instruction via [`super::InstructionModifier::CustomAppend`].
 //! It replaces hand-written `fn app_context(s: &State) -> String` closures with a
 //! declarative, composable API.
 //!
@@ -291,7 +291,7 @@ impl ContextBuilder {
         lines.join("\n")
     }
 
-    /// Convert into an [`InstructionModifier`] for use with phase modifiers.
+    /// Convert into an [`super::InstructionModifier`] for use with phase modifiers.
     pub fn into_modifier(self) -> super::InstructionModifier {
         super::InstructionModifier::CustomAppend(Arc::new(move |state: &State| {
             self.render(state)
