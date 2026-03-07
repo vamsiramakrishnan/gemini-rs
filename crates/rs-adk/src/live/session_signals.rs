@@ -171,6 +171,17 @@ impl SessionSignals {
                 if let Some(prompt) = usage.prompt_token_count {
                     self.state.session().set("prompt_token_count", prompt);
                 }
+                if let Some(response) = usage.response_token_count {
+                    self.state.session().set("response_token_count", response);
+                }
+                if let Some(cached) = usage.cached_content_token_count {
+                    self.state
+                        .session()
+                        .set("cached_content_token_count", cached);
+                }
+                if let Some(thoughts) = usage.thoughts_token_count {
+                    self.state.session().set("thoughts_token_count", thoughts);
+                }
             }
 
             SessionEvent::GenerationComplete => {

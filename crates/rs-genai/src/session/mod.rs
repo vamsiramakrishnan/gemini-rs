@@ -8,7 +8,7 @@ pub mod state;
 pub use state::SessionPhase;
 
 use async_trait::async_trait;
-use crate::protocol::{Content, FunctionCall, FunctionResponse};
+use crate::protocol::{Content, FunctionCall, FunctionResponse, UsageMetadata};
 use std::sync::Arc;
 use std::time::Instant;
 use thiserror::Error;
@@ -185,7 +185,10 @@ pub enum SessionEvent {
     /// Server-side voice activity ended (user stopped speaking).
     VoiceActivityEnd,
     /// Token usage metadata from server (for context window tracking).
-    Usage(UsageInfo),
+    ///
+    /// Contains full token breakdown: prompt, response, cached, tool-use,
+    /// thinking tokens, plus per-modality details.
+    Usage(UsageMetadata),
 }
 
 /// Session resumption information from the server.
@@ -197,17 +200,6 @@ pub struct ResumeInfo {
     pub resumable: bool,
     /// Index of the last client message consumed by the server.
     pub last_consumed_index: Option<String>,
-}
-
-/// Token usage information from the server.
-#[derive(Debug, Clone)]
-pub struct UsageInfo {
-    /// Total tokens currently in the context window.
-    pub total_token_count: Option<u32>,
-    /// Tokens used by the prompt/context.
-    pub prompt_token_count: Option<u32>,
-    /// Tokens used by the response.
-    pub response_token_count: Option<u32>,
 }
 
 // ---------------------------------------------------------------------------

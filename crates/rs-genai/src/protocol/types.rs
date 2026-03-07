@@ -649,19 +649,55 @@ pub struct ProactivityConfig {
     pub proactive_audio: Option<bool>,
 }
 
+/// Token count breakdown by modality (text, audio, image, video).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModalityTokenCount {
+    /// The modality (e.g., "TEXT", "AUDIO", "IMAGE", "VIDEO").
+    #[serde(default)]
+    pub modality: Option<String>,
+    /// Token count for this modality.
+    #[serde(default)]
+    pub token_count: Option<u32>,
+}
+
 /// Usage metadata returned by the server on messages.
+///
+/// Contains token counts for the prompt, response, cached content,
+/// tool use, and thinking, with optional per-modality breakdowns.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageMetadata {
     /// Number of tokens in the prompt.
     #[serde(default)]
     pub prompt_token_count: Option<u32>,
-    /// Number of tokens in the response.
+    /// Number of tokens in the cached portion of the prompt.
+    #[serde(default)]
+    pub cached_content_token_count: Option<u32>,
+    /// Total number of tokens across all generated response candidates.
     #[serde(default)]
     pub response_token_count: Option<u32>,
-    /// Total token count.
+    /// Number of tokens present in tool-use prompt(s).
+    #[serde(default)]
+    pub tool_use_prompt_token_count: Option<u32>,
+    /// Number of tokens of thoughts for thinking models.
+    #[serde(default)]
+    pub thoughts_token_count: Option<u32>,
+    /// Total token count for the generation request (prompt + response).
     #[serde(default)]
     pub total_token_count: Option<u32>,
+    /// Per-modality breakdown of prompt tokens.
+    #[serde(default)]
+    pub prompt_tokens_details: Vec<ModalityTokenCount>,
+    /// Per-modality breakdown of cached content tokens.
+    #[serde(default)]
+    pub cache_tokens_details: Vec<ModalityTokenCount>,
+    /// Per-modality breakdown of response tokens.
+    #[serde(default)]
+    pub response_tokens_details: Vec<ModalityTokenCount>,
+    /// Per-modality breakdown of tool-use prompt tokens.
+    #[serde(default)]
+    pub tool_use_prompt_tokens_details: Vec<ModalityTokenCount>,
 }
 
 /// Grounding metadata for server content with search results.

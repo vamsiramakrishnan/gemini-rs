@@ -221,6 +221,9 @@ pub struct SessionResumptionResult {
 pub struct ServerContentMessage {
     /// The server content payload.
     pub server_content: ServerContentPayload,
+    /// Token usage metadata (present on most server messages).
+    #[serde(default)]
+    pub usage_metadata: Option<UsageMetadata>,
 }
 
 /// Payload for server content.

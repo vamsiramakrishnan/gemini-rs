@@ -14,7 +14,7 @@ use bytes::Bytes;
 use tokio::sync::{broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 
-use rs_genai::prelude::{FunctionCall, FunctionResponse, SessionEvent, SessionPhase};
+use rs_genai::prelude::{FunctionCall, FunctionResponse, SessionEvent, SessionPhase, UsageMetadata};
 use rs_genai::session::SessionWriter;
 
 use crate::state::State;
@@ -229,6 +229,7 @@ pub(crate) fn spawn_telemetry_lane(
     signals: SessionSignals,
     telemetry: Arc<SessionTelemetry>,
     cancel: CancellationToken,
+    on_usage: Option<Box<dyn Fn(&UsageMetadata) + Send + Sync>>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut debounce = tokio::time::interval(Duration::from_millis(100));
@@ -256,6 +257,18 @@ pub(crate) fn spawn_telemetry_lane(
                                 }
                                 SessionEvent::VoiceActivityStart => {
                                     telemetry.mark_turn_start();
+                                }
+                                SessionEvent::Usage(ref usage) => {
+                                    telemetry.record_usage(
+                                        usage.total_token_count,
+                                        usage.prompt_token_count,
+                                        usage.response_token_count,
+                                        usage.cached_content_token_count,
+                                        usage.thoughts_token_count,
+                                    );
+                                    if let Some(cb) = &on_usage {
+                                        cb(usage);
+                                    }
                                 }
                                 _ => {}
                             }
@@ -1488,6 +1501,7 @@ mod tests {
             signals,
             telemetry.clone(),
             cancel.clone(),
+            None,
         );
 
         // Send events

@@ -910,6 +910,16 @@ impl Live {
         self
     }
 
+    /// Called when server sends token usage metadata.
+    ///
+    /// Receives a reference to the full [`UsageMetadata`] including prompt,
+    /// response, cached, tool-use, and thoughts token counts plus per-modality
+    /// breakdowns. Fires on the telemetry lane (not the fast lane).
+    pub fn on_usage(mut self, f: impl Fn(&UsageMetadata) + Send + Sync + 'static) -> Self {
+        self.callbacks.on_usage = Some(Box::new(f));
+        self
+    }
+
     // -- Control Lane Callbacks (async, can block) --
 
     /// Called when model is interrupted by barge-in.

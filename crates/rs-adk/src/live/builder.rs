@@ -236,7 +236,9 @@ impl LiveSessionBuilder {
         // Wait for Active phase
         session.wait_for_phase(SessionPhase::Active).await;
 
-        let callbacks = Arc::new(self.callbacks);
+        let mut callbacks = self.callbacks;
+        let on_usage_cb = callbacks.on_usage.take();
+        let callbacks = Arc::new(callbacks);
         let writer: Arc<dyn SessionWriter> = Arc::new(session.clone());
         let state = self.state.unwrap_or_else(State::new);
 
@@ -268,6 +270,7 @@ impl LiveSessionBuilder {
             session_signals,
             telemetry.clone(),
             telem_cancel.clone(),
+            on_usage_cb,
         );
 
         // Build control plane config

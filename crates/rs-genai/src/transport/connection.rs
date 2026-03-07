@@ -404,6 +404,11 @@ fn handle_server_msg(
                 }
             }
 
+            // Handle usage metadata (present on most server content messages)
+            if let Some(usage) = sc.usage_metadata {
+                let _ = event_tx.send(SessionEvent::Usage(usage));
+            }
+
             // Handle generation complete (fires before turn_complete)
             if content.generation_complete.unwrap_or(false) {
                 let _ = event_tx.send(SessionEvent::GenerationComplete);
