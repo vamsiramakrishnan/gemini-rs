@@ -102,6 +102,22 @@ impl PhaseDefaults {
         self
     }
 
+    /// Include phase navigation context in every phase's instruction.
+    ///
+    /// Appends the output of `PhaseMachine::describe_navigation()` to the
+    /// instruction, giving the model awareness of its current position,
+    /// phase history, missing state keys, and possible transitions.
+    pub fn navigation(mut self) -> Self {
+        self.modifiers.push(InstructionModifier::CustomAppend(Arc::new(
+            |state: &State| {
+                state.session()
+                    .get::<String>("navigation_context")
+                    .unwrap_or_default()
+            },
+        )));
+        self
+    }
+
     /// Enable `prompt_on_enter` for all phases (model responds immediately on entry).
     pub fn prompt_on_enter(mut self, enabled: bool) -> Self {
         self.prompt_on_enter = enabled;
@@ -231,6 +247,25 @@ impl PhaseBuilder {
         self.transitions.push(Transition {
             target: target.to_string(),
             guard: Arc::new(guard),
+            description: None,
+        });
+        self
+    }
+
+    /// Add a guard-based transition with a human-readable description.
+    ///
+    /// The description is used by `PhaseMachine::describe_navigation()` to help
+    /// the model understand what paths are available from the current phase.
+    pub fn transition_with(
+        mut self,
+        target: &str,
+        guard: impl Fn(&State) -> bool + Send + Sync + 'static,
+        description: impl Into<String>,
+    ) -> Self {
+        self.transitions.push(Transition {
+            target: target.to_string(),
+            guard: Arc::new(guard),
+            description: Some(description.into()),
         });
         self
     }
@@ -334,6 +369,18 @@ impl PhaseBuilder {
             Some(vec![Content::model(f(state, tw))])
         }));
         self.prompt_on_enter_flag = true;
+        self
+    }
+
+    /// Include phase navigation context in this phase's instruction.
+    pub fn navigation(mut self) -> Self {
+        self.modifiers.push(InstructionModifier::CustomAppend(Arc::new(
+            |state: &State| {
+                state.session()
+                    .get::<String>("navigation_context")
+                    .unwrap_or_default()
+            },
+        )));
         self
     }
 

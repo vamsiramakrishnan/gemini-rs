@@ -449,13 +449,14 @@ impl CookbookApp for SupportAssistant {
                 }
             })
             // --- Billing Phases ---
+            .phase_defaults(|d| d.navigation())
             .phase("billing:greet")
                 .instruction(BILLING_PHASES[0].instruction)
-                .transition("billing:identify", |s| {
+                .transition_with("billing:identify", |s| {
                     s.get::<serde_json::Value>("support_state")
                         .and_then(|v| v.get("customer_name").cloned())
                         .is_some()
-                })
+                }, "when customer name is provided")
                 .on_enter(move |_state, _writer| {
                     async move {
                         // Initial phase — entered at session start, no "from" phase.
@@ -466,19 +467,19 @@ impl CookbookApp for SupportAssistant {
             .phase("billing:identify")
                 .instruction(BILLING_PHASES[1].instruction)
                 // Tech handoff transition FIRST (priority over billing:investigate).
-                .transition("tech:greet", |s| {
+                .transition_with("tech:greet", |s| {
                     s.get::<serde_json::Value>("support_state")
                         .and_then(|v| v.get("issue_type").cloned())
                         .and_then(|v| v.as_str().map(|s| s.to_string()))
                         .map(|t| t == "technical")
                         .unwrap_or(false)
-                })
+                }, "when issue type is technical — handoff to tech support")
                 // Then billing:investigate for any other issue_type.
-                .transition("billing:investigate", |s| {
+                .transition_with("billing:investigate", |s| {
                     s.get::<serde_json::Value>("support_state")
                         .and_then(|v| v.get("issue_type").cloned())
                         .is_some()
-                })
+                }, "when billing issue type is identified")
                 .on_enter(move |_state, _writer| {
                     let tx = tx_enter_billing_identify.clone();
                     async move {
@@ -497,11 +498,11 @@ impl CookbookApp for SupportAssistant {
                 .done()
             .phase("billing:investigate")
                 .instruction(BILLING_PHASES[2].instruction)
-                .transition("billing:resolve", |s| {
+                .transition_with("billing:resolve", |s| {
                     s.get::<serde_json::Value>("support_state")
                         .and_then(|v| v.get("billing_detail").cloned())
                         .is_some()
-                })
+                }, "when billing details are gathered")
                 .on_enter(move |_state, _writer| {
                     let tx = tx_enter_billing_investigate.clone();
                     async move {
@@ -520,11 +521,11 @@ impl CookbookApp for SupportAssistant {
                 .done()
             .phase("billing:resolve")
                 .instruction(BILLING_PHASES[3].instruction)
-                .transition("billing:close", |s| {
+                .transition_with("billing:close", |s| {
                     s.get::<serde_json::Value>("support_state")
                         .and_then(|v| v.get("resolution_confirmed").cloned())
                         .is_some()
-                })
+                }, "when resolution is confirmed by customer")
                 .on_enter(move |_state, _writer| {
                     let tx = tx_enter_billing_resolve.clone();
                     async move {
@@ -563,11 +564,11 @@ impl CookbookApp for SupportAssistant {
             // --- Technical Phases ---
             .phase("tech:greet")
                 .instruction(TECHNICAL_PHASES[0].instruction)
-                .transition("tech:identify", |s| {
+                .transition_with("tech:identify", |s| {
                     s.get::<serde_json::Value>("support_state")
                         .and_then(|v| v.get("tech_issue_desc").cloned())
                         .is_some()
-                })
+                }, "when technical issue is described")
                 .on_enter({
                     let tx = tx_enter_tech_greet.clone();
                     move |_state, _writer| {
@@ -593,11 +594,11 @@ impl CookbookApp for SupportAssistant {
                 .done()
             .phase("tech:identify")
                 .instruction(TECHNICAL_PHASES[1].instruction)
-                .transition("tech:troubleshoot", |s| {
+                .transition_with("tech:troubleshoot", |s| {
                     s.get::<serde_json::Value>("support_state")
                         .and_then(|v| v.get("tech_category").cloned())
                         .is_some()
-                })
+                }, "when tech category is identified")
                 .on_enter(move |_state, _writer| {
                     let tx = tx_enter_tech_identify.clone();
                     async move {
@@ -616,11 +617,11 @@ impl CookbookApp for SupportAssistant {
                 .done()
             .phase("tech:troubleshoot")
                 .instruction(TECHNICAL_PHASES[2].instruction)
-                .transition("tech:resolve", |s| {
+                .transition_with("tech:resolve", |s| {
                     s.get::<serde_json::Value>("support_state")
                         .and_then(|v| v.get("troubleshoot_result").cloned())
                         .is_some()
-                })
+                }, "when troubleshooting result is determined")
                 .on_enter(move |_state, _writer| {
                     let tx = tx_enter_tech_troubleshoot.clone();
                     async move {
@@ -639,11 +640,11 @@ impl CookbookApp for SupportAssistant {
                 .done()
             .phase("tech:resolve")
                 .instruction(TECHNICAL_PHASES[3].instruction)
-                .transition("tech:close", |s| {
+                .transition_with("tech:close", |s| {
                     s.get::<serde_json::Value>("support_state")
                         .and_then(|v| v.get("final_outcome").cloned())
                         .is_some()
-                })
+                }, "when final outcome is reached")
                 .on_enter(move |_state, _writer| {
                     let tx = tx_enter_tech_resolve.clone();
                     async move {

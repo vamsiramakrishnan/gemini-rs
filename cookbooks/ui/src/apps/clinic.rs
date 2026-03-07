@@ -695,7 +695,7 @@ async fn handle_session(
         // --- Model-initiated greeting ---
         .greeting("Welcome the patient to Clearview Medical Center and ask how you can help them today.")
         // --- LLM extraction ---
-        .extract_turns_windowed::<ClinicState>(
+        .extract_turns_triggered::<ClinicState>(
             llm,
             "Extract from the medical clinic conversation: symptoms (list of strings), \
              preferred_department, preferred_doctor, patient_name, patient_id, \
@@ -703,6 +703,7 @@ async fn handle_session(
              intent (new_appointment/reschedule/cancel/inquiry), \
              insurance_mentioned (bool).",
             5,
+            ExtractionTrigger::Interval(2),
         )
         // --- on_extracted: broadcast state to browser (concurrent — fire-and-forget) ---
         .on_extracted_concurrent({
@@ -812,7 +813,8 @@ async fn handle_session(
         })
         // --- Phase defaults (inherited by all phases) ---
         .phase_defaults(|d| {
-            d.with_context(clinic_context)
+            d.navigation()
+                .with_context(clinic_context)
                 .when(urgency_is_critical, EMERGENCY_WARNING)
         })
         // --- 9 Phases ---
@@ -820,8 +822,9 @@ async fn handle_session(
         .phase("greeting")
             .instruction(GREETING_INSTRUCTION)
             .prompt_on_enter(true)
-            .transition("symptom_triage", S::eq("intent", "new_appointment"))
-            .transition("rescheduling", S::one_of("intent", &["reschedule", "cancel"]))
+            .needs(&["intent"])
+            .transition_with("symptom_triage", S::eq("intent", "new_appointment"), "when intent is new_appointment")
+            .transition_with("rescheduling", S::one_of("intent", &["reschedule", "cancel"]), "when intent is reschedule or cancel")
             .on_enter(move |_state, _writer| {
                 let tx = tx_enter_greeting.clone();
                 async move {
@@ -836,10 +839,11 @@ async fn handle_session(
         // Phase 2: Symptom Triage
         .phase("symptom_triage")
             .instruction(SYMPTOM_TRIAGE_INSTRUCTION)
-            .transition("department_selection", |s| {
+            .needs(&["symptoms", "symptom_severity"])
+            .transition_with("department_selection", |s| {
                 let symptoms: String = s.get("symptoms").unwrap_or_default();
                 !symptoms.is_empty()
-            })
+            }, "when symptoms have been described")
             .on_enter(move |_state, _writer| {
                 let tx = tx_enter_triage.clone();
                 async move {
@@ -862,10 +866,11 @@ async fn handle_session(
         // Phase 3: Department Selection
         .phase("department_selection")
             .instruction(DEPARTMENT_SELECTION_INSTRUCTION)
-            .transition("doctor_selection", |s| {
+            .needs(&["department"])
+            .transition_with("doctor_selection", |s| {
                 let dept: String = s.get("department").unwrap_or_default();
                 !dept.is_empty()
-            })
+            }, "when department is selected")
             .on_enter(move |_state, _writer| {
                 let tx = tx_enter_dept.clone();
                 async move {
@@ -892,10 +897,11 @@ async fn handle_session(
         // Phase 4: Doctor Selection
         .phase("doctor_selection")
             .instruction(DOCTOR_SELECTION_INSTRUCTION)
-            .transition("appointment_booking", |s| {
+            .needs(&["doctor_name"])
+            .transition_with("appointment_booking", |s| {
                 let doctor: String = s.get("doctor_name").unwrap_or_default();
                 !doctor.is_empty()
-            })
+            }, "when doctor is chosen")
             .on_enter(move |_state, _writer| {
                 let tx = tx_enter_doctor.clone();
                 async move {
@@ -918,8 +924,9 @@ async fn handle_session(
         // Phase 5: Appointment Booking
         .phase("appointment_booking")
             .instruction(APPOINTMENT_BOOKING_INSTRUCTION)
-            .transition("patient_registration", S::is_true("is_new_patient"))
-            .transition("confirmation", S::is_true("appointment_booked"))
+            .needs(&["appointment_date", "appointment_time"])
+            .transition_with("patient_registration", S::is_true("is_new_patient"), "when patient is new (is_new_patient)")
+            .transition_with("confirmation", S::is_true("appointment_booked"), "when appointment is booked")
             .on_enter(move |_state, _writer| {
                 let tx = tx_enter_booking.clone();
                 async move {
@@ -942,7 +949,7 @@ async fn handle_session(
         // Phase 6: Rescheduling
         .phase("rescheduling")
             .instruction(RESCHEDULING_INSTRUCTION)
-            .transition("confirmation", S::is_true("appointment_booked"))
+            .transition_with("confirmation", S::is_true("appointment_booked"), "when appointment is rescheduled")
             .on_enter(move |_state, _writer| {
                 let tx = tx_enter_reschedule.clone();
                 async move {
@@ -967,11 +974,12 @@ async fn handle_session(
         // Phase 7: Patient Registration
         .phase("patient_registration")
             .instruction(PATIENT_REGISTRATION_INSTRUCTION)
-            .transition("appointment_booking", |s| {
+            .needs(&["patient_name", "insurance_provider"])
+            .transition_with("appointment_booking", |s| {
                 // Loop back once registered (is_new_patient becomes false)
                 let is_new: bool = s.get("is_new_patient").unwrap_or(true);
                 !is_new
-            })
+            }, "when registration is complete")
             .on_enter(move |_state, _writer| {
                 let tx = tx_enter_registration.clone();
                 async move {
@@ -998,7 +1006,7 @@ async fn handle_session(
         // Phase 8: Confirmation
         .phase("confirmation")
             .instruction(CONFIRMATION_INSTRUCTION)
-            .transition("farewell", |_s| true)
+            .transition_with("farewell", |_s| true, "when confirmation is acknowledged")
             .on_enter(move |_state, _writer| {
                 let tx = tx_enter_confirmation.clone();
                 async move {

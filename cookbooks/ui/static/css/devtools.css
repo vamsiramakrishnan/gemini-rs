@@ -198,16 +198,62 @@
 /* ============================================
    Events Tab
    ============================================ */
+.events-panel-wrapper {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.events-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border-light);
+  background: var(--devtools-bg);
+  flex-shrink: 0;
+  font-size: 11px;
+}
+
+.events-filter-label {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.events-filter-toggle {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.events-filter-toggle input[type="checkbox"] {
+  width: 12px;
+  height: 12px;
+  margin: 0;
+  cursor: pointer;
+}
+
+.events-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0;
+}
+
 .events-panel {
   overflow-y: auto;
   padding: 0;
 }
 
-.events-panel::-webkit-scrollbar {
+.events-panel::-webkit-scrollbar,
+.events-list::-webkit-scrollbar {
   width: 5px;
 }
 
-.events-panel::-webkit-scrollbar-thumb {
+.events-panel::-webkit-scrollbar-thumb,
+.events-list::-webkit-scrollbar-thumb {
   background: var(--border);
   border-radius: 3px;
 }
@@ -938,7 +984,8 @@
 
 .nfr-tool-entry {
   display: flex;
-  gap: 6px;
+  flex-wrap: wrap;
+  gap: 4px 6px;
   padding: 5px 8px;
   font-size: 11px;
   font-family: var(--mono);
@@ -961,6 +1008,17 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.nfr-tool-result {
+  width: 100%;
+  color: #2e7d32;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-top: 1px solid var(--border-light);
+  padding-top: 3px;
+  font-size: 10px;
 }
 
 /* Event badges for new message types */

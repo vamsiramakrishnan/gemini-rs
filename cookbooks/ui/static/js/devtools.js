@@ -38,6 +38,9 @@ class DevtoolsManager {
     // Session start time for relative timestamps
     this.sessionStart = Date.now();
 
+    // Event type filters — types to HIDE from the events panel
+    this.hiddenEventTypes = new Set(['audio']);
+
     // Status bar elements
     this._statusUptimeEl = null;
     this._statusPhaseEl = null;
@@ -58,12 +61,50 @@ class DevtoolsManager {
     statePanel.innerHTML = '<div class="state-empty">No state yet</div>';
     this.panels.state = statePanel;
 
-    // Events panel
+    // Events panel (with filter bar + scrollable event list)
     const eventsPanel = document.createElement('div');
-    eventsPanel.className = 'devtools-panel';
+    eventsPanel.className = 'devtools-panel events-panel-wrapper';
     eventsPanel.id = 'panel-events';
-    eventsPanel.innerHTML = '<div class="events-empty">No events yet</div>';
-    this.panels.events = eventsPanel;
+
+    // Filter bar
+    const filterBar = document.createElement('div');
+    filterBar.className = 'events-filter-bar';
+    filterBar.innerHTML = `
+      <span class="events-filter-label">Hide:</span>
+      <label class="events-filter-toggle">
+        <input type="checkbox" data-filter="audio" checked> audio
+      </label>
+      <label class="events-filter-toggle">
+        <input type="checkbox" data-filter="telemetry"> telemetry
+      </label>
+      <label class="events-filter-toggle">
+        <input type="checkbox" data-filter="voiceActivityStart"> vad
+      </label>
+    `;
+    filterBar.addEventListener('change', (e) => {
+      const cb = e.target;
+      if (!cb.dataset.filter) return;
+      const types = cb.dataset.filter.split(',');
+      types.forEach(t => {
+        if (cb.checked) this.hiddenEventTypes.add(t);
+        else this.hiddenEventTypes.delete(t);
+      });
+      // Also hide voiceActivityEnd when vad is hidden
+      if (cb.dataset.filter === 'voiceActivityStart') {
+        if (cb.checked) this.hiddenEventTypes.add('voiceActivityEnd');
+        else this.hiddenEventTypes.delete('voiceActivityEnd');
+      }
+      this._reRenderEvents();
+    });
+    eventsPanel.appendChild(filterBar);
+
+    // Scrollable event list
+    const eventList = document.createElement('div');
+    eventList.className = 'events-list';
+    eventList.innerHTML = '<div class="events-empty">No events yet</div>';
+    eventsPanel.appendChild(eventList);
+    this._eventList = eventList;     // inner scrollable list for rendering
+    this.panels.events = eventsPanel; // wrapper for tab switching
 
     // Playbook panel
     const playbookPanel = document.createElement('div');
@@ -216,7 +257,7 @@ class DevtoolsManager {
     this.sessionStart = Date.now();
 
     this.panels.state.innerHTML = '<div class="state-empty">No state yet</div>';
-    this.panels.events.innerHTML = '<div class="events-empty">No events yet</div>';
+    this._eventList.innerHTML = '<div class="events-empty">No events yet</div>';
     this.panels.playbook.innerHTML = '<div class="events-empty">No phase changes yet</div>';
     this.panels.evaluator.innerHTML = '<div class="events-empty">No evaluations yet</div>';
     this.panels.nfr.innerHTML = '<div class="events-empty">No metrics yet</div>';
@@ -400,26 +441,43 @@ class DevtoolsManager {
   }
 
   _renderEvent(event) {
-    const panel = this.panels.events;
+    const list = this._eventList;
 
     // Remove empty message if present
-    const empty = panel.querySelector('.events-empty');
+    const empty = list.querySelector('.events-empty');
     if (empty) empty.remove();
 
-    panel.classList.add('events-panel');
+    list.classList.add('events-panel');
 
     const entry = document.createElement('div');
     entry.className = 'event-entry';
+    entry.dataset.eventType = event.type;
     entry.innerHTML = `
       <span class="event-time">${event.time}</span>
       <span class="event-type-badge ${event.type}">${event.type}</span>
       <span class="event-content">${event.content}</span>
     `;
 
-    panel.appendChild(entry);
+    // Hide if filtered
+    if (this.hiddenEventTypes.has(event.type)) {
+      entry.style.display = 'none';
+    }
 
-    // Auto-scroll
-    panel.scrollTop = panel.scrollHeight;
+    list.appendChild(entry);
+
+    // Auto-scroll (only if not hidden)
+    if (!this.hiddenEventTypes.has(event.type)) {
+      list.scrollTop = list.scrollHeight;
+    }
+  }
+
+  _reRenderEvents() {
+    const list = this._eventList;
+    const entries = list.querySelectorAll('.event-entry');
+    entries.forEach(entry => {
+      const type = entry.dataset.eventType;
+      entry.style.display = this.hiddenEventTypes.has(type) ? 'none' : '';
+    });
   }
 
   _renderPhases() {
@@ -638,7 +696,8 @@ class DevtoolsManager {
       this.toolCalls.slice(-5).forEach(tc => {
         html += `<div class="nfr-tool-entry">
           <span class="nfr-tool-name">${this._esc(tc.name)}</span>
-          <span class="nfr-tool-args">${this._truncate(tc.args, 40)}</span>
+          <span class="nfr-tool-args">${this._truncate(tc.args, 60)}</span>
+          ${tc.result ? `<span class="nfr-tool-result">${this._truncate(tc.result, 80)}</span>` : ''}
         </div>`;
       });
 

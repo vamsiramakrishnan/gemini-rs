@@ -131,6 +131,9 @@ pub struct Transition {
     pub target: String,
     /// Guard function — transition fires when this returns `true`.
     pub guard: Arc<dyn Fn(&State) -> bool + Send + Sync>,
+    /// Optional human-readable description of when/why this transition fires.
+    /// Used by `describe_navigation()` to tell the model what paths are available.
+    pub description: Option<String>,
 }
 
 /// A conversation phase with instruction, tools, and transitions.
@@ -171,6 +174,26 @@ pub struct Phase {
     /// these from `session:phase_needs` to append a "[Gathering] key1, key2"
     /// line to the instruction, so the model knows what to focus on.
     pub needs: Vec<String>,
+}
+
+impl Phase {
+    /// Create a minimal non-terminal phase with a static instruction and defaults.
+    pub fn new(name: &str, instruction: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            instruction: PhaseInstruction::Static(instruction.to_string()),
+            tools_enabled: None,
+            guard: None,
+            on_enter: None,
+            on_exit: None,
+            transitions: Vec::new(),
+            terminal: false,
+            modifiers: Vec::new(),
+            prompt_on_enter: false,
+            on_enter_context: None,
+            needs: Vec::new(),
+        }
+    }
 }
 
 /// Record of a single phase transition for history/debugging.
@@ -247,6 +270,74 @@ impl PhaseMachine {
     /// The transition history (oldest first, capped at 100 entries).
     pub fn history(&self) -> &VecDeque<PhaseTransition> {
         &self.history
+    }
+
+    /// Mutable access to the transition history (for testing and internal use).
+    pub(crate) fn history_mut(&mut self) -> &mut VecDeque<PhaseTransition> {
+        &mut self.history
+    }
+
+    /// Generate a structured navigation context block giving the model
+    /// awareness of where it is in the conversation flow.
+    ///
+    /// The output includes the current phase and its goal, recent phase
+    /// history, any state keys still needed, and possible transitions.
+    pub fn describe_navigation(&self, state: &State) -> String {
+        let mut lines = Vec::new();
+        lines.push("[Navigation]".to_string());
+
+        // 1. Current phase + goal (first sentence of resolved instruction)
+        if let Some(phase) = self.phases.get(&self.current) {
+            let resolved = phase.instruction.resolve(state);
+            let goal = resolved
+                .split('.')
+                .next()
+                .unwrap_or(&resolved)
+                .trim();
+            lines.push(format!("Current phase: {} — {}", self.current, goal));
+
+            // 2. Phase history (last 3 entries)
+            if !self.history.is_empty() {
+                let recent: Vec<String> = self
+                    .history
+                    .iter()
+                    .rev()
+                    .take(3)
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .map(|h| format!("{} (turn {})", h.from, h.turn))
+                    .collect();
+                lines.push(format!("Previous: {}", recent.join(", ")));
+            }
+
+            // 3. Still needed keys (from phase.needs, filtered by state)
+            let missing: Vec<&str> = phase
+                .needs
+                .iter()
+                .filter(|key| !state.contains(key))
+                .map(|s| s.as_str())
+                .collect();
+            if !missing.is_empty() {
+                lines.push(format!("Still needed: {}", missing.join(", ")));
+            }
+
+            // 4. Possible transitions or terminal
+            if phase.terminal {
+                lines.push("This is the final phase.".to_string());
+            } else if !phase.transitions.is_empty() {
+                lines.push("Possible next:".to_string());
+                for t in &phase.transitions {
+                    if let Some(ref desc) = t.description {
+                        lines.push(format!("  → {}: {}", t.target, desc));
+                    } else {
+                        lines.push(format!("  → {}", t.target));
+                    }
+                }
+            }
+        }
+
+        lines.join("\n")
     }
 
     /// Evaluate transitions from the current phase.
@@ -464,6 +555,7 @@ mod tests {
         greeting.transitions.push(Transition {
             target: "main".to_string(),
             guard: Arc::new(|s: &State| s.get::<bool>("ready").unwrap_or(false)),
+            description: None,
         });
 
         let mut machine = PhaseMachine::new("greeting");
@@ -484,6 +576,7 @@ mod tests {
         greeting.transitions.push(Transition {
             target: "main".to_string(),
             guard: Arc::new(|s: &State| s.get::<bool>("ready").unwrap_or(false)),
+            description: None,
         });
 
         let mut machine = PhaseMachine::new("greeting");
@@ -505,10 +598,12 @@ mod tests {
         greeting.transitions.push(Transition {
             target: "escalated".to_string(),
             guard: Arc::new(|s: &State| s.get::<bool>("escalate").unwrap_or(false)),
+            description: None,
         });
         greeting.transitions.push(Transition {
             target: "farewell".to_string(),
             guard: Arc::new(|s: &State| s.get::<bool>("done").unwrap_or(false)),
+            description: None,
         });
 
         let mut machine = PhaseMachine::new("greeting");
@@ -532,6 +627,7 @@ mod tests {
         term.transitions.push(Transition {
             target: "other".to_string(),
             guard: Arc::new(|_| true),
+            description: None,
         });
 
         let mut machine = PhaseMachine::new("end");
@@ -612,6 +708,7 @@ mod tests {
         greeting.transitions.push(Transition {
             target: "missing_phase".to_string(),
             guard: Arc::new(|_| true),
+            description: None,
         });
 
         let mut machine = PhaseMachine::new("greeting");
@@ -629,6 +726,7 @@ mod tests {
         greeting.transitions.push(Transition {
             target: "main".to_string(),
             guard: Arc::new(|_| true),
+            description: None,
         });
 
         let mut machine = PhaseMachine::new("greeting");
@@ -806,6 +904,7 @@ mod tests {
         greeting.transitions.push(Transition {
             target: "secure".to_string(),
             guard: Arc::new(|s: &State| s.get::<bool>("ready").unwrap_or(false)),
+            description: None,
         });
 
         // Target phase has a guard that requires "verified" to be true.
@@ -833,6 +932,7 @@ mod tests {
         greeting.transitions.push(Transition {
             target: "secure".to_string(),
             guard: Arc::new(|s: &State| s.get::<bool>("ready").unwrap_or(false)),
+            description: None,
         });
 
         // Target phase guard requires "verified" — which IS set.
@@ -860,11 +960,13 @@ mod tests {
         greeting.transitions.push(Transition {
             target: "secure".to_string(),
             guard: Arc::new(|s: &State| s.get::<bool>("ready").unwrap_or(false)),
+            description: None,
         });
         // Second transition → "fallback" (no phase guard)
         greeting.transitions.push(Transition {
             target: "fallback".to_string(),
             guard: Arc::new(|s: &State| s.get::<bool>("ready").unwrap_or(false)),
+            description: None,
         });
 
         let mut secure = simple_phase("secure", "Secure area");
@@ -943,5 +1045,90 @@ mod tests {
         let result = instr.resolve_with_modifiers(&state, &modifiers);
         assert!(result.starts_with("You are helpful."));
         assert!(result.contains("[Context: mood=calm]"));
+    }
+
+    // ── describe_navigation tests ──────────────────────────────────────
+
+    #[test]
+    fn describe_navigation_basic() {
+        let state = State::new();
+        state.set("caller_name", "Vamsi");
+
+        let mut machine = PhaseMachine::new("greeting");
+
+        let mut greeting = Phase::new("greeting", "Greet the caller warmly and ask who is calling.");
+        greeting.transitions.push(Transition {
+            target: "identify".to_string(),
+            guard: Arc::new(|_| false),
+            description: Some("after initial greeting".into()),
+        });
+        machine.add_phase(greeting);
+
+        let mut identify = Phase::new("identify", "Get the caller's name.");
+        identify.needs = vec!["caller_name".into(), "caller_org".into()];
+        identify.transitions.push(Transition {
+            target: "purpose".to_string(),
+            guard: Arc::new(|_| false),
+            description: Some("when caller is identified".into()),
+        });
+        machine.add_phase(identify);
+
+        let nav = machine.describe_navigation(&state);
+        assert!(nav.contains("[Navigation]"));
+        assert!(nav.contains("Current phase: greeting"));
+        assert!(nav.contains("→ identify: after initial greeting"));
+    }
+
+    #[test]
+    fn describe_navigation_with_history_and_needs() {
+        let state = State::new();
+        // caller_name is set, caller_org is NOT set
+        state.set("caller_name", "Vamsi");
+
+        let mut machine = PhaseMachine::new("identify");
+
+        let greeting = Phase::new("greeting", "Greet caller.");
+        machine.add_phase(greeting);
+
+        let mut identify = Phase::new("identify", "Get the caller's name and organization.");
+        identify.needs = vec!["caller_name".into(), "caller_org".into()];
+        identify.transitions.push(Transition {
+            target: "purpose".to_string(),
+            guard: Arc::new(|_| false),
+            description: Some("when caller is identified".into()),
+        });
+        machine.add_phase(identify);
+
+        let purpose = Phase::new("purpose", "Ask why they are calling.");
+        machine.add_phase(purpose);
+
+        // Simulate history: greeting -> identify at turn 2
+        machine.history_mut().push_back(PhaseTransition {
+            from: "greeting".to_string(),
+            to: "identify".to_string(),
+            turn: 2,
+            trigger: TransitionTrigger::Guard { transition_index: 0 },
+            timestamp: std::time::Instant::now(),
+            duration_in_phase: Duration::from_secs(5),
+        });
+
+        let nav = machine.describe_navigation(&state);
+        assert!(nav.contains("Previous:"), "Should show history");
+        assert!(nav.contains("greeting"), "Should mention previous phase");
+        assert!(nav.contains("Still needed: caller_org"), "caller_org should be listed as needed (caller_name is set)");
+        assert!(!nav.contains("caller_name"), "caller_name should NOT be in still-needed (it's set)");
+    }
+
+    #[test]
+    fn describe_navigation_terminal_phase() {
+        let state = State::new();
+        let mut machine = PhaseMachine::new("farewell");
+
+        let mut farewell = Phase::new("farewell", "Say goodbye.");
+        farewell.terminal = true;
+        machine.add_phase(farewell);
+
+        let nav = machine.describe_navigation(&state);
+        assert!(nav.contains("final phase"));
     }
 }

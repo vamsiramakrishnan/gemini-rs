@@ -13,6 +13,24 @@ use crate::llm::{BaseLlm, LlmError, LlmRequest};
 
 use super::transcript::TranscriptTurn;
 
+/// Controls WHEN an extractor runs.
+///
+/// The default is `EveryTurn`, which preserves backward compatibility.
+/// Use `AfterToolCall` when tool calls are the primary state source,
+/// `Interval(n)` to reduce extraction frequency, or `OnPhaseChange`
+/// to extract only when entering a new conversation phase.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExtractionTrigger {
+    /// Run on every TurnComplete event (current default).
+    EveryTurn,
+    /// Run every N TurnComplete events.
+    Interval(u32),
+    /// Run after tool calls complete.
+    AfterToolCall,
+    /// Run when a phase transition occurs.
+    OnPhaseChange,
+}
+
 /// Strip markdown code fences from LLM output.
 ///
 /// Handles `` ```json\n...\n``` ``, `` ```\n...\n``` ``, and bare JSON.
@@ -55,6 +73,13 @@ pub trait TurnExtractor: Send + Sync {
         true
     }
 
+    /// The trigger mode for this extractor.
+    ///
+    /// Controls when the extractor runs. Default is `EveryTurn`.
+    fn trigger(&self) -> ExtractionTrigger {
+        ExtractionTrigger::EveryTurn
+    }
+
     /// Extract structured data from the transcript window.
     async fn extract(&self, window: &[TranscriptTurn]) -> Result<Value, LlmError>;
 }
@@ -71,6 +96,8 @@ pub struct LlmExtractor {
     schema_str: Option<String>,
     /// Minimum word count in the last user utterance to trigger extraction.
     min_words: usize,
+    /// When this extractor should fire.
+    trigger: ExtractionTrigger,
 }
 
 impl LlmExtractor {
@@ -94,6 +121,7 @@ impl LlmExtractor {
             schema: None,
             schema_str: None,
             min_words: 0,
+            trigger: ExtractionTrigger::EveryTurn,
         }
     }
 
@@ -113,6 +141,12 @@ impl LlmExtractor {
     pub fn with_schema(mut self, schema: Value) -> Self {
         self.schema_str = serde_json::to_string_pretty(&schema).ok();
         self.schema = Some(schema);
+        self
+    }
+
+    /// Set the trigger mode for this extractor.
+    pub fn with_trigger(mut self, trigger: ExtractionTrigger) -> Self {
+        self.trigger = trigger;
         self
     }
 
@@ -156,6 +190,10 @@ impl TurnExtractor for LlmExtractor {
             .rev()
             .find(|t| !t.user.is_empty())
             .map_or(false, |t| t.user.split_whitespace().count() >= self.min_words)
+    }
+
+    fn trigger(&self) -> ExtractionTrigger {
+        self.trigger.clone()
     }
 
     async fn extract(&self, window: &[TranscriptTurn]) -> Result<Value, LlmError> {
@@ -326,5 +364,24 @@ mod tests {
         let ext = LlmExtractor::new("TestExtractor", llm, "test", 5);
         assert_eq!(ext.name(), "TestExtractor");
         assert_eq!(ext.window_size(), 5);
+    }
+
+    #[test]
+    fn extractor_default_trigger_is_every_turn() {
+        let llm = Arc::new(MockLlm {
+            response: "{}".to_string(),
+        });
+        let ext = LlmExtractor::new("Test", llm, "test", 5);
+        assert_eq!(ext.trigger(), ExtractionTrigger::EveryTurn);
+    }
+
+    #[test]
+    fn extractor_with_trigger() {
+        let llm = Arc::new(MockLlm {
+            response: "{}".to_string(),
+        });
+        let ext = LlmExtractor::new("Test", llm, "test", 5)
+            .with_trigger(ExtractionTrigger::AfterToolCall);
+        assert_eq!(ext.trigger(), ExtractionTrigger::AfterToolCall);
     }
 }

@@ -487,12 +487,13 @@ async fn handle_session(
         // --- Model-initiated greeting ---
         .greeting("A new call is coming in. Greet the caller professionally and ask who is calling.")
         // --- LLM extraction ---
-        .extract_turns_windowed::<CallerState>(
+        .extract_turns_triggered::<CallerState>(
             llm,
             "Extract from the call screening conversation: caller_name, \
              caller_organization, call_purpose, urgency_level (0.0-1.0), \
              caller_sentiment (friendly/neutral/impatient/hostile).",
             5,
+            ExtractionTrigger::Interval(2),
         )
         // --- on_extracted: broadcast state to browser (concurrent — fire-and-forget) ---
         .on_extracted_concurrent({
@@ -608,7 +609,8 @@ async fn handle_session(
         })
         // --- Phase defaults (inherited by all phases) ---
         .phase_defaults(|d| {
-            d.with_context(screening_context)
+            d.navigation()
+                .with_context(screening_context)
                 .when(caller_is_hostile, CAUTION_WARNING)
         })
         // --- 7 Phases ---
@@ -617,16 +619,10 @@ async fn handle_session(
             .instruction(GREETING_INSTRUCTION)
             .tools(vec!["check_contact_list".into()])
             .prompt_on_enter(true)
-            .transition("identify_caller", |s: &State| {
-                // Transition once the user has spoken (extractor detects input).
-                // We look for a check_contact_list tool call or any indication
-                // the model has engaged with the caller's identity.
-                // Simplest: wait for the model to have completed at least one
-                // real turn after greeting. Use turn_count >= 2 here because
-                // greeting has prompt_on_enter which consumes turn 1.
+            .transition_with("identify_caller", |s: &State| {
                 let tc: u32 = s.session().get("turn_count").unwrap_or(0);
                 tc >= 2
-            })
+            }, "after initial greeting exchange (2+ turns)")
             .on_enter(move |_state: State, _writer: Arc<dyn SessionWriter>| {
                 let tx = tx_enter_greeting.clone();
                 async move {
@@ -642,19 +638,16 @@ async fn handle_session(
         .phase("identify_caller")
             .instruction(IDENTIFY_CALLER_INSTRUCTION)
             .tools(vec!["check_contact_list".into()])
-            .transition("determine_purpose", |s: &State| {
+            .needs(&["caller_name", "caller_organization"])
+            .transition_with("determine_purpose", |s: &State| {
                 let name: Option<String> = s.get("caller_name");
                 name.is_some()
-            })
-            .transition("take_message", |s: &State| {
-                // Safety net only. The model will naturally keep asking for
-                // identity — trust the LLM's conversational ability. This
-                // guard exists solely for the edge case where the caller
-                // genuinely refuses to identify after an extended exchange.
+            }, "when caller name is provided")
+            .transition_with("take_message", |s: &State| {
                 let tc: u32 = s.session().get("turn_count").unwrap_or(0);
                 let name: Option<String> = s.get("caller_name");
                 tc >= 12 && name.is_none()
-            })
+            }, "after 12 turns if caller refuses to identify")
             .on_enter(move |_state: State, _writer: Arc<dyn SessionWriter>| {
                 let tx = tx_enter_identify.clone();
                 async move {
@@ -675,9 +668,10 @@ async fn handle_session(
         .phase("determine_purpose")
             .instruction(DETERMINE_PURPOSE_INSTRUCTION)
             .tools(vec!["check_calendar".into()])
-            .transition("screen_decision", |s: &State| {
+            .needs(&["call_purpose", "urgency_level"])
+            .transition_with("screen_decision", |s: &State| {
                 s.get::<String>("call_purpose").is_some()
-            })
+            }, "when call purpose is established")
             .on_enter(move |_state: State, _writer: Arc<dyn SessionWriter>| {
                 let tx = tx_enter_purpose.clone();
                 async move {
@@ -705,15 +699,16 @@ async fn handle_session(
                 "take_message".into(),
                 "block_caller".into(),
             ])
-            .transition("transfer", |s: &State| {
+            .transition_with("transfer", |s: &State| {
                 s.get::<bool>("is_known_contact").unwrap_or(false)
                     || s.get::<f64>("urgency_level").unwrap_or(0.0) > 0.8
-            })
-            .transition("farewell", S::is_true("caller_blocked"))
-            .transition("take_message", |s: &State| {
+            }, "known contact or high urgency → transfer")
+            .transition_with("farewell", S::is_true("caller_blocked"),
+                "caller blocked → end call")
+            .transition_with("take_message", |s: &State| {
                 !s.get::<bool>("is_known_contact").unwrap_or(false)
                     && s.get::<f64>("urgency_level").unwrap_or(0.0) <= 0.8
-            })
+            }, "unknown caller with low urgency → take message")
             .on_enter(move |_state: State, _writer: Arc<dyn SessionWriter>| {
                 let tx = tx_enter_decision.clone();
                 async move {
@@ -738,7 +733,8 @@ async fn handle_session(
         .phase("take_message")
             .instruction(TAKE_MESSAGE_INSTRUCTION)
             .tools(vec!["take_message".into()])
-            .transition("farewell", S::is_true("message_taken"))
+            .transition_with("farewell", S::is_true("message_taken"),
+                "message has been recorded")
             .on_enter(move |_state: State, _writer: Arc<dyn SessionWriter>| {
                 let tx = tx_enter_take_message.clone();
                 async move {
@@ -762,7 +758,8 @@ async fn handle_session(
         .phase("transfer")
             .instruction(TRANSFER_INSTRUCTION)
             .tools(vec!["transfer_call".into()])
-            .transition("farewell", S::is_true("call_transferred"))
+            .transition_with("farewell", S::is_true("call_transferred"),
+                "call has been transferred")
             .on_enter(move |_state: State, _writer: Arc<dyn SessionWriter>| {
                 let tx = tx_enter_transfer.clone();
                 async move {
