@@ -158,6 +158,13 @@ var DevtoolsManager = (function () {
     Object.keys(this.panels).forEach(function (k) {
       this.panels[k].classList.toggle('active', k === tabId);
     }.bind(this));
+
+    // VirtualList may have rendered while the panel was display:none
+    // (clientHeight=0 → zero visible rows). Force a refresh now that
+    // the panel is visible again.
+    if (tabId === 'timeline' && this._timeline._vl) {
+      this._timeline._vl.refresh();
+    }
   };
 
   DevtoolsManager.prototype.toggleCollapse = function () {

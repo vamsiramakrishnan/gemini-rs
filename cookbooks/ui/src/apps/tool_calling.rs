@@ -28,7 +28,7 @@ fn demo_tools() -> Tool {
                 },
                 "required": ["city"]
             })),
-            behavior: None,
+            behavior: Some(FunctionCallingBehavior::NonBlocking),
         },
         FunctionDeclaration {
             name: "get_time".into(),
@@ -43,7 +43,7 @@ fn demo_tools() -> Tool {
                 },
                 "required": ["timezone"]
             })),
-            behavior: None,
+            behavior: Some(FunctionCallingBehavior::NonBlocking),
         },
         FunctionDeclaration {
             name: "calculate".into(),
@@ -58,7 +58,7 @@ fn demo_tools() -> Tool {
                 },
                 "required": ["expression"]
             })),
-            behavior: None,
+            behavior: Some(FunctionCallingBehavior::NonBlocking),
         },
     ])
 }
@@ -262,7 +262,7 @@ impl CookbookApp for ToolCalling {
                                 name: call.name.clone(),
                                 response: result,
                                 id: call.id.clone(),
-                                scheduling: None,
+                                scheduling: Some(FunctionResponseScheduling::WhenIdle),
                             }
                         })
                         .collect();

@@ -240,7 +240,7 @@ impl CookbookApp for AllConfig {
                                 }
                             }
                         })),
-                        behavior: None,
+                        behavior: Some(FunctionCallingBehavior::NonBlocking),
                     })
                     .collect();
                 config = config.add_tool(Tool::functions(declarations));
@@ -322,7 +322,7 @@ impl CookbookApp for AllConfig {
                                 name: call.name.clone(),
                                 response: result,
                                 id: call.id.clone(),
-                                scheduling: None,
+                                scheduling: Some(FunctionResponseScheduling::WhenIdle),
                             }
                         })
                         .collect();

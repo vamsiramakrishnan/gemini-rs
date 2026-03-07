@@ -51,13 +51,33 @@ pub struct SetupPayload {
 
 impl SessionConfig {
     /// Build the setup message from this configuration.
+    ///
+    /// When targeting Vertex AI, `FunctionCallingBehavior` is stripped from
+    /// tool declarations since Vertex AI does not support async tool calling.
     pub fn to_setup_message(&self) -> SetupMessage {
+        let tools = if self.supports_async_tools() {
+            self.tools.clone()
+        } else {
+            self.tools
+                .iter()
+                .map(|tool| {
+                    let mut t = tool.clone();
+                    if let Some(ref mut decls) = t.function_declarations {
+                        for d in decls.iter_mut() {
+                            d.behavior = None;
+                        }
+                    }
+                    t
+                })
+                .collect()
+        };
+
         SetupMessage {
             setup: SetupPayload {
                 model: self.model_uri(),
                 generation_config: Some(self.generation_config.clone()),
                 system_instruction: self.system_instruction.clone(),
-                tools: self.tools.clone(),
+                tools,
                 tool_config: self.tool_config.clone(),
                 input_audio_transcription: self.input_audio_transcription.clone(),
                 output_audio_transcription: self.output_audio_transcription.clone(),

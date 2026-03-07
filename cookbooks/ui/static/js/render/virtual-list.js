@@ -79,6 +79,8 @@ VirtualList.prototype.setItems = function (items) {
  */
 VirtualList.prototype.setFilter = function (indices) {
   this._filter = indices;
+  // Sync totalCount — the underlying data source may have grown since setItems.
+  if (this._items) this._totalCount = this._items.length;
   this._updateVisibleCount();
   this._syncSentinel();
   this._autoScroll();

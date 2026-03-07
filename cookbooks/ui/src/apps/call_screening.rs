@@ -235,7 +235,7 @@ fn compute_screen_decision(known: bool, urgency: f64, sentiment: &str) -> &'stat
 
 /// Build the tool declarations so Gemini knows what functions it can call.
 fn call_screening_tools() -> rs_genai::prelude::Tool {
-    use rs_genai::prelude::{FunctionDeclaration, Tool};
+    use rs_genai::prelude::{FunctionCallingBehavior, FunctionDeclaration, FunctionResponseScheduling, Tool};
     Tool::functions(vec![
         FunctionDeclaration {
             name: "check_contact_list".into(),
@@ -254,7 +254,7 @@ fn call_screening_tools() -> rs_genai::prelude::Tool {
                 },
                 "required": ["name"]
             })),
-            behavior: None,
+            behavior: Some(FunctionCallingBehavior::NonBlocking),
         },
         FunctionDeclaration {
             name: "check_calendar".into(),
@@ -269,7 +269,7 @@ fn call_screening_tools() -> rs_genai::prelude::Tool {
                 },
                 "required": []
             })),
-            behavior: None,
+            behavior: Some(FunctionCallingBehavior::NonBlocking),
         },
         FunctionDeclaration {
             name: "take_message".into(),
@@ -296,7 +296,7 @@ fn call_screening_tools() -> rs_genai::prelude::Tool {
                 },
                 "required": ["from_name", "message"]
             })),
-            behavior: None,
+            behavior: Some(FunctionCallingBehavior::NonBlocking),
         },
         FunctionDeclaration {
             name: "transfer_call".into(),
@@ -611,7 +611,7 @@ async fn handle_session(
                         name: call.name.clone(),
                         response: result,
                         id: call.id.clone(),
-                        scheduling: None,
+                        scheduling: Some(FunctionResponseScheduling::WhenIdle),
                     });
                 }
                 Some(responses)

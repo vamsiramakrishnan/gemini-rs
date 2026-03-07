@@ -130,6 +130,7 @@
     }
     currentModelBubble = null;
     currentModelTranscription = null;
+    currentUserTranscription = null;
   }
 
   // ------------------------------------------------
@@ -185,7 +186,8 @@
   function setSpeaking(active) {
     if (active) {
       speakingIndicator.classList.add('active');
-      currentUserTranscription = null; // reset for new speech
+      currentUserTranscription = null;
+      currentModelTranscription = null;
     } else {
       speakingIndicator.classList.remove('active');
     }

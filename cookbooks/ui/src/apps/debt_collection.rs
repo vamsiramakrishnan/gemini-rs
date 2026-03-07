@@ -336,7 +336,7 @@ fn extract_structured(text: &str, existing: &HashMap<String, Value>) -> HashMap<
 
 /// Build the tool declarations so Gemini knows what functions it can call.
 fn debt_collection_tools() -> rs_genai::prelude::Tool {
-    use rs_genai::prelude::{FunctionDeclaration, Tool};
+    use rs_genai::prelude::{FunctionCallingBehavior, FunctionDeclaration, FunctionResponseScheduling, Tool};
     Tool::functions(vec![
         FunctionDeclaration {
             name: "lookup_account".into(),
@@ -351,7 +351,7 @@ fn debt_collection_tools() -> rs_genai::prelude::Tool {
                 },
                 "required": ["account_id"]
             })),
-            behavior: None,
+            behavior: Some(FunctionCallingBehavior::NonBlocking),
         },
         FunctionDeclaration {
             name: "verify_identity".into(),
@@ -374,7 +374,7 @@ fn debt_collection_tools() -> rs_genai::prelude::Tool {
                 },
                 "required": ["name", "dob", "last4ssn"]
             })),
-            behavior: None,
+            behavior: Some(FunctionCallingBehavior::NonBlocking),
         },
         FunctionDeclaration {
             name: "calculate_payment_plan".into(),
@@ -393,7 +393,7 @@ fn debt_collection_tools() -> rs_genai::prelude::Tool {
                 },
                 "required": ["total", "months"]
             })),
-            behavior: None,
+            behavior: Some(FunctionCallingBehavior::NonBlocking),
         },
         FunctionDeclaration {
             name: "process_payment".into(),
@@ -416,7 +416,7 @@ fn debt_collection_tools() -> rs_genai::prelude::Tool {
                 },
                 "required": ["account_id", "amount", "method"]
             })),
-            behavior: None,
+            behavior: Some(FunctionCallingBehavior::NonBlocking),
         },
         FunctionDeclaration {
             name: "log_compliance_event".into(),
@@ -435,7 +435,7 @@ fn debt_collection_tools() -> rs_genai::prelude::Tool {
                 },
                 "required": ["event_type", "details"]
             })),
-            behavior: None,
+            behavior: Some(FunctionCallingBehavior::NonBlocking),
         },
     ])
 }
@@ -1207,11 +1207,16 @@ impl CookbookApp for DebtCollection {
                             result: serde_json::to_string(&result).unwrap_or_default(),
                         });
 
+                        let scheduling = if call.name == "log_compliance_event" {
+                            FunctionResponseScheduling::Silent
+                        } else {
+                            FunctionResponseScheduling::WhenIdle
+                        };
                         responses.push(FunctionResponse {
                             name: call.name.clone(),
                             response: result,
                             id: call.id.clone(),
-                            scheduling: None,
+                            scheduling: Some(scheduling),
                         });
                     }
                     Some(responses)

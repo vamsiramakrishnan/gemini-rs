@@ -298,6 +298,8 @@ FunctionResponse {
 - `WhenIdle`: Model waits until it finishes current output before handling
 - `Silent`: Model integrates the result without notifying the user
 
+**Platform support**: Async tool calling (`NonBlocking` behavior + scheduling) is only supported on **Google AI**. On **Vertex AI**, these fields are automatically stripped from the wire — `behavior` is removed from `FunctionDeclaration` in the setup message, and `scheduling` is removed from `FunctionResponse`. This means you can set `NonBlocking` and `WhenIdle` unconditionally in your code; the SDK handles the platform difference. Use `config.supports_async_tools()` to check at runtime.
+
 **L1/L2 integration**: `ToolExecutionMode::Background` automatically sets `behavior: NonBlocking` on the wire declaration and passes the scheduling mode through to responses:
 
 ```rust

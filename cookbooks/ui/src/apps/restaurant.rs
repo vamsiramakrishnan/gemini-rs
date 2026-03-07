@@ -209,7 +209,7 @@ fn reservation_context(s: &State) -> String {
 // ---------------------------------------------------------------------------
 
 fn restaurant_tools() -> rs_genai::prelude::Tool {
-    use rs_genai::prelude::{FunctionDeclaration, Tool};
+    use rs_genai::prelude::{FunctionCallingBehavior, FunctionDeclaration, FunctionResponseScheduling, Tool};
     Tool::functions(vec![
         FunctionDeclaration {
             name: "check_availability".into(),
@@ -233,7 +233,7 @@ fn restaurant_tools() -> rs_genai::prelude::Tool {
                 },
                 "required": ["date", "party_size"]
             })),
-            behavior: None,
+            behavior: Some(FunctionCallingBehavior::NonBlocking),
         },
         FunctionDeclaration {
             name: "make_reservation".into(),
@@ -264,7 +264,7 @@ fn restaurant_tools() -> rs_genai::prelude::Tool {
                 },
                 "required": ["guest_name", "phone", "date", "time", "party_size"]
             })),
-            behavior: None,
+            behavior: Some(FunctionCallingBehavior::NonBlocking),
         },
         FunctionDeclaration {
             name: "modify_reservation".into(),
@@ -283,7 +283,7 @@ fn restaurant_tools() -> rs_genai::prelude::Tool {
                 },
                 "required": ["reservation_id"]
             })),
-            behavior: None,
+            behavior: Some(FunctionCallingBehavior::NonBlocking),
         },
         FunctionDeclaration {
             name: "cancel_reservation".into(),
@@ -302,7 +302,7 @@ fn restaurant_tools() -> rs_genai::prelude::Tool {
                 },
                 "required": ["reservation_id"]
             })),
-            behavior: None,
+            behavior: Some(FunctionCallingBehavior::NonBlocking),
         },
         FunctionDeclaration {
             name: "check_menu".into(),
@@ -316,7 +316,7 @@ fn restaurant_tools() -> rs_genai::prelude::Tool {
                     }
                 }
             })),
-            behavior: None,
+            behavior: Some(FunctionCallingBehavior::NonBlocking),
         },
         FunctionDeclaration {
             name: "add_special_request".into(),
@@ -339,7 +339,7 @@ fn restaurant_tools() -> rs_genai::prelude::Tool {
                 },
                 "required": ["reservation_id", "request_type", "details"]
             })),
-            behavior: None,
+            behavior: Some(FunctionCallingBehavior::NonBlocking),
         },
     ])
 }
@@ -734,7 +734,7 @@ async fn handle_session(
                         name: call.name.clone(),
                         response: result,
                         id: call.id.clone(),
-                        scheduling: None,
+                        scheduling: Some(FunctionResponseScheduling::WhenIdle),
                     });
                 }
                 Some(responses)

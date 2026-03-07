@@ -75,9 +75,21 @@ impl Codec for JsonCodec {
                 serde_json::to_vec(&msg).map_err(|e| CodecError::Serialize(e.to_string()))
             }
             SessionCommand::SendToolResponse(responses) => {
+                let function_responses = if config.supports_async_tools() {
+                    responses.clone()
+                } else {
+                    responses
+                        .iter()
+                        .map(|r| {
+                            let mut r = r.clone();
+                            r.scheduling = None;
+                            r
+                        })
+                        .collect()
+                };
                 let msg = ToolResponseMessage {
                     tool_response: ToolResponsePayload {
-                        function_responses: responses.clone(),
+                        function_responses,
                     },
                 };
                 serde_json::to_vec(&msg).map_err(|e| CodecError::Serialize(e.to_string()))
@@ -247,6 +259,43 @@ mod tests {
         assert!(
             json.contains("get_weather"),
             "should contain the function name"
+        );
+    }
+
+    #[test]
+    fn json_codec_strips_scheduling_for_vertex() {
+        let codec = JsonCodec;
+        let config = SessionConfig::from_vertex("proj", "us-central1", "token")
+            .model(GeminiModel::Gemini2_0FlashLive);
+        let cmd = SessionCommand::SendToolResponse(vec![FunctionResponse {
+            name: "search".to_string(),
+            response: serde_json::json!({"ok": true}),
+            id: Some("call-1".to_string()),
+            scheduling: Some(FunctionResponseScheduling::WhenIdle),
+        }]);
+        let bytes = codec.encode_command(&cmd, &config).unwrap();
+        let json = String::from_utf8(bytes).unwrap();
+        assert!(
+            !json.contains("scheduling"),
+            "Vertex AI should strip scheduling from tool responses"
+        );
+    }
+
+    #[test]
+    fn json_codec_preserves_scheduling_for_google_ai() {
+        let codec = JsonCodec;
+        let config = test_config();
+        let cmd = SessionCommand::SendToolResponse(vec![FunctionResponse {
+            name: "search".to_string(),
+            response: serde_json::json!({"ok": true}),
+            id: Some("call-1".to_string()),
+            scheduling: Some(FunctionResponseScheduling::WhenIdle),
+        }]);
+        let bytes = codec.encode_command(&cmd, &config).unwrap();
+        let json = String::from_utf8(bytes).unwrap();
+        assert!(
+            json.contains("WHEN_IDLE"),
+            "Google AI should preserve scheduling in tool responses"
         );
     }
 

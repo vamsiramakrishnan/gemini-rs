@@ -221,7 +221,19 @@ var TimelinePanel = (function () {
   TimelinePanel.prototype._loadFilters = function () {
     try {
       var stored = localStorage.getItem('devtools-filters');
-      if (stored) return JSON.parse(stored);
+      if (stored) {
+        var parsed = JSON.parse(stored);
+        if (!Array.isArray(parsed)) return DEFAULT_HIDDEN.slice();
+        // Validate: only keep known filter types. Unknown entries
+        // indicate stale localStorage from a previous UI version.
+        var known = new Set(Object.keys(BADGE_LABELS));
+        var valid = parsed.filter(function (t) { return known.has(t); });
+        if (valid.length !== parsed.length) {
+          localStorage.removeItem('devtools-filters');
+          return DEFAULT_HIDDEN.slice();
+        }
+        return valid;
+      }
     } catch (e) { /* ignore */ }
     return DEFAULT_HIDDEN.slice();
   };

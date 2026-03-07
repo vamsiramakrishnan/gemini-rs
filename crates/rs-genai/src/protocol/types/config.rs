@@ -814,6 +814,16 @@ impl SessionConfig {
         matches!(self.endpoint, ApiEndpoint::VertexAI(_))
     }
 
+    /// Returns `true` if the platform supports async (non-blocking) tool calling.
+    ///
+    /// Google AI supports `FunctionCallingBehavior::NonBlocking` on declarations
+    /// and `FunctionResponseScheduling` on responses. Vertex AI does not — these
+    /// fields are automatically stripped from the wire messages when targeting
+    /// Vertex AI so callers can set them unconditionally.
+    pub fn supports_async_tools(&self) -> bool {
+        !self.is_vertex()
+    }
+
     /// Returns `true` if this config uses an access token (either GoogleAIToken or VertexAI).
     pub fn uses_access_token(&self) -> bool {
         matches!(
@@ -1041,5 +1051,52 @@ mod tests {
         assert!(json.contains("2048"));
         assert!(json.contains("\"includeThoughts\""));
         assert!(json.contains("true"));
+    }
+
+    #[test]
+    fn google_ai_supports_async_tools() {
+        let config = SessionConfig::new("key");
+        assert!(config.supports_async_tools());
+    }
+
+    #[test]
+    fn vertex_ai_does_not_support_async_tools() {
+        let config = SessionConfig::from_vertex("proj", "us-central1", "token");
+        assert!(!config.supports_async_tools());
+    }
+
+    #[test]
+    fn vertex_ai_strips_behavior_from_setup() {
+        use crate::protocol::types::{FunctionCallingBehavior, FunctionDeclaration, Tool};
+        let config = SessionConfig::from_vertex("proj", "us-central1", "token")
+            .add_tool(Tool::functions(vec![FunctionDeclaration {
+                name: "test".into(),
+                description: "test".into(),
+                parameters: None,
+                behavior: Some(FunctionCallingBehavior::NonBlocking),
+            }]));
+        let setup = config.to_setup_message();
+        let decl = &setup.setup.tools[0].function_declarations.as_ref().unwrap()[0];
+        assert!(decl.behavior.is_none(), "Vertex AI should strip behavior");
+    }
+
+    #[test]
+    fn google_ai_preserves_behavior_in_setup() {
+        use crate::protocol::types::{FunctionCallingBehavior, FunctionDeclaration, Tool};
+        let config = SessionConfig::new("key").add_tool(Tool::functions(vec![
+            FunctionDeclaration {
+                name: "test".into(),
+                description: "test".into(),
+                parameters: None,
+                behavior: Some(FunctionCallingBehavior::NonBlocking),
+            },
+        ]));
+        let setup = config.to_setup_message();
+        let decl = &setup.setup.tools[0].function_declarations.as_ref().unwrap()[0];
+        assert_eq!(
+            decl.behavior,
+            Some(FunctionCallingBehavior::NonBlocking),
+            "Google AI should preserve behavior"
+        );
     }
 }
