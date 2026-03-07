@@ -69,6 +69,12 @@ class DevtoolsManager {
     this._statusHealthEl = null;
     this._uptimeInterval = null;
 
+    // State panel tracking (Task 5 — targeted updates)
+    this._stateMap = new Map();       // key -> { keyEl, valueEl, row, group }
+    this._stateGroups = {};           // prefix -> { header, tbody, container, collapsed }
+    this._stateSearchTerm = '';
+    this._stateGroupContainer = null;
+
     // Render scheduler
     this.scheduler = new RenderScheduler();
 
@@ -118,12 +124,12 @@ class DevtoolsManager {
       self._toggleDetail(idx);
     });
 
-    // State panel (kept as-is for now — Task 5)
+    // State panel (Task 5 — targeted updates with diff flash)
     var statePanel = document.createElement('div');
     statePanel.className = 'devtools-panel';
     statePanel.id = 'panel-state';
-    statePanel.innerHTML = '<div class="state-empty">No state yet</div>';
     this.panels.state = statePanel;
+    this._initStatePanel();
 
     // Phases panel (renamed from playbook — Task 6)
     var phasesPanel = document.createElement('div');
@@ -500,7 +506,12 @@ class DevtoolsManager {
       this.scheduler.markDirty('minimap');
     }
 
-    this.panels.state.innerHTML = '<div class="state-empty">No state yet</div>';
+    // Reset state panel tracking (Task 5)
+    this._stateMap = new Map();
+    this._stateGroups = {};
+    this._stateSearchTerm = '';
+    this._initStatePanel();
+
     this.panels.phases.innerHTML = '<div class="events-empty">No phase changes yet</div>';
     this.panels.metrics.innerHTML = '<div class="events-empty">No metrics yet</div>';
 
@@ -534,8 +545,39 @@ class DevtoolsManager {
   }
 
   handleStateUpdate(key, value) {
+    var self = this;
+    var prev = this.stateData[key];
     this.stateData[key] = value;
-    this._renderState(key);
+
+    if (this._stateMap.has(key)) {
+      // Update existing cell — no DOM creation
+      var entry = this._stateMap.get(key);
+      var fmt = this._formatValue(value);
+      entry.valueEl.textContent = '';
+      entry.valueEl.textContent = fmt.display;
+      entry.valueEl.className = 'state-value ' + fmt.className;
+
+      // Flash animation
+      entry.row.classList.remove('state-row-flash');
+      void entry.row.offsetWidth; // force reflow for re-animation
+      entry.row.classList.add('state-row-flash');
+
+      // Show previous value for 2 seconds
+      if (prev !== undefined) {
+        var prevStr = typeof prev === 'string' ? '"' + prev + '"' : JSON.stringify(prev);
+        var wasSpan = document.createElement('span');
+        wasSpan.className = 'state-was';
+        wasSpan.textContent = ' was: ' + self._truncText(prevStr, 30);
+        entry.valueEl.appendChild(wasSpan);
+        setTimeout(function () { if (wasSpan.parentNode) wasSpan.remove(); }, 2000);
+      }
+    } else {
+      // New key — create row and add to appropriate group
+      this._addStateRow(key, value);
+    }
+
+    // Apply search filter if active
+    if (this._stateSearchTerm) this._filterState(this._stateSearchTerm);
   }
 
   handlePhaseChange(data) {
@@ -593,68 +635,94 @@ class DevtoolsManager {
   }
 
   // ------------------------------------------------
-  // Rendering — State panel (kept for Task 5)
+  // Rendering — State panel (Task 5 — targeted updates)
   // ------------------------------------------------
 
-  _renderState(flashKey) {
+  _initStatePanel() {
     var panel = this.panels.state;
-    var keys = Object.keys(this.stateData);
+    panel.innerHTML = '';
+    panel.classList.add('state-panel');
 
-    if (keys.length === 0) {
-      panel.innerHTML = '<div class="state-empty">No state yet</div>';
-      return;
-    }
-
-    var groups = {};
-    var ungrouped = [];
-    keys.forEach(function (key) {
-      var colonIdx = key.indexOf(':');
-      if (colonIdx > 0 && colonIdx < key.length - 1) {
-        var prefix = key.substring(0, colonIdx);
-        if (!groups[prefix]) groups[prefix] = [];
-        groups[prefix].push(key);
-      } else {
-        ungrouped.push(key);
-      }
-    });
-
-    var html = '';
     var self = this;
 
-    if (ungrouped.length > 0) {
-      html += this._renderStateGroup(null, ungrouped, flashKey);
-    }
-
-    var groupOrder = Object.keys(groups).sort();
-    groupOrder.forEach(function (prefix) {
-      html += self._renderStateGroup(prefix, groups[prefix].sort(), flashKey);
+    // Search bar
+    var search = document.createElement('input');
+    search.className = 'state-search';
+    search.placeholder = 'Filter keys...';
+    search.addEventListener('input', function () {
+      self._stateSearchTerm = search.value.toLowerCase();
+      self._filterState(self._stateSearchTerm);
     });
+    panel.appendChild(search);
 
-    panel.innerHTML = html;
-    panel.classList.add('state-panel');
+    // Scrollable container for groups
+    var groupContainer = document.createElement('div');
+    groupContainer.className = 'state-groups';
+    panel.appendChild(groupContainer);
+    this._stateGroupContainer = groupContainer;
   }
 
-  _renderStateGroup(prefix, keys, flashKey) {
-    var groupLabel = prefix ? prefix : 'General';
-    var groupClass = prefix ? 'state-group-' + prefix : 'state-group-general';
-    var self = this;
+  _createStateGroup(groupKey, prefix) {
+    var container = document.createElement('div');
+    container.className = 'state-group collapsed'; // start collapsed
 
-    var html = '<div class="state-group ' + groupClass + '">';
-    if (prefix) {
-      html += '<div class="state-group-header">' + this._esc(groupLabel) + '</div>';
-    }
-    html += '<table class="state-table"><tbody>';
-
-    keys.forEach(function (key) {
-      var value = self.stateData[key];
-      var fmt = self._formatValue(value);
-      var flash = key === flashKey ? ' state-row-flash' : '';
-      var displayKey = prefix ? key.substring(prefix.length + 1) : key;
-      html += '<tr class="' + flash + '"><td class="state-key">' + self._esc(displayKey) + '</td><td class="state-value ' + fmt.className + '">' + fmt.display + '</td></tr>';
+    var header = document.createElement('div');
+    header.className = 'state-group-header';
+    header.textContent = prefix || 'General';
+    header.addEventListener('click', function () {
+      container.classList.toggle('collapsed');
     });
+    container.appendChild(header);
 
-    html += '</tbody></table></div>';
-    return html;
+    var table = document.createElement('table');
+    table.className = 'state-table';
+    var tbody = document.createElement('tbody');
+    table.appendChild(tbody);
+    container.appendChild(table);
+
+    this._stateGroupContainer.appendChild(container);
+    this._stateGroups[groupKey] = { header: header, tbody: tbody, container: container, collapsed: true };
+
+    // General group starts expanded
+    if (!prefix) container.classList.remove('collapsed');
+  }
+
+  _addStateRow(key, value) {
+    var colonIdx = key.indexOf(':');
+    var prefix = (colonIdx > 0 && colonIdx < key.length - 1) ? key.substring(0, colonIdx) : null;
+    var displayKey = prefix ? key.substring(colonIdx + 1) : key;
+
+    var groupKey = prefix || '_general';
+    if (!this._stateGroups[groupKey]) {
+      this._createStateGroup(groupKey, prefix);
+    }
+    var group = this._stateGroups[groupKey];
+
+    var row = document.createElement('tr');
+    row.className = 'state-row';
+    row.dataset.key = key;
+
+    var keyCell = document.createElement('td');
+    keyCell.className = 'state-key';
+    keyCell.textContent = displayKey;
+
+    var valCell = document.createElement('td');
+    var fmt = this._formatValue(value);
+    valCell.className = 'state-value ' + fmt.className;
+    valCell.textContent = fmt.display;
+
+    row.appendChild(keyCell);
+    row.appendChild(valCell);
+    group.tbody.appendChild(row);
+
+    this._stateMap.set(key, { keyEl: keyCell, valueEl: valCell, row: row, group: groupKey });
+  }
+
+  _filterState(term) {
+    this._stateMap.forEach(function (entry, key) {
+      var visible = !term || key.toLowerCase().indexOf(term) !== -1;
+      entry.row.style.display = visible ? '' : 'none';
+    });
   }
 
   // ------------------------------------------------

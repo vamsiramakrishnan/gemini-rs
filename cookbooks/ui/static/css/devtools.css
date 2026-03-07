@@ -185,6 +185,19 @@
 .state-value.boolean { color: #b06000; }
 .state-value.null { color: var(--text-muted); font-style: italic; }
 
+/* State search */
+.state-search {
+  width: calc(100% - 16px); margin: 8px; padding: 5px 8px;
+  border: 1px solid var(--border-light); border-radius: 4px;
+  font-size: 11px; font-family: var(--mono); outline: none; background: #fff;
+}
+.state-search:focus { border-color: var(--primary); }
+
+/* State groups container */
+.state-groups {
+  flex: 1; overflow-y: auto;
+}
+
 /* Change highlight */
 .state-row-flash {
   animation: state-flash 1.2s ease-out;
@@ -193,6 +206,17 @@
 @keyframes state-flash {
   0% { background: rgba(251,188,4,0.3); }
   100% { background: transparent; }
+}
+
+/* State "was" indicator */
+.state-was {
+  font-size: 10px; color: var(--text-muted); font-style: italic;
+  animation: state-was-fade 2s ease-out forwards;
+}
+@keyframes state-was-fade {
+  0% { opacity: 1; }
+  70% { opacity: 1; }
+  100% { opacity: 0; }
 }
 
 /* ============================================
@@ -521,7 +545,16 @@
   position: sticky;
   top: 0;
   z-index: 1;
+  cursor: pointer;
+  user-select: none;
 }
+
+.state-group-header::before {
+  content: '\25BC'; margin-right: 6px; font-size: 8px;
+  display: inline-block; transition: transform 0.15s;
+}
+.state-group.collapsed .state-group-header::before { transform: rotate(-90deg); }
+.state-group.collapsed table { display: none; }
 
 .state-group .state-table {
   margin-bottom: 0;
