@@ -1326,3 +1326,58 @@
   height: 32px;
   display: block;
 }
+
+/* ============================================
+   Phase Panel — Hero + Duration Bars (Task 6)
+   ============================================ */
+.phase-hero {
+  padding: 14px 16px;
+  background: var(--primary-light, #e8f0fe);
+  border-bottom: 2px solid var(--primary, #4285f4);
+}
+.phase-hero-label {
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.06em; color: var(--primary-dark, #1967d2); margin-bottom: 2px;
+}
+.phase-hero-name {
+  font-size: 18px; font-weight: 700; color: var(--primary-dark, #1967d2);
+}
+
+.phase-entries { padding: 8px 12px; }
+.phase-entry { margin-bottom: 10px; }
+.phase-entry-header {
+  display: flex; align-items: center; gap: 6px; font-size: 13px; margin-bottom: 4px;
+}
+.phase-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--border, #dadce0); flex-shrink: 0;
+}
+.phase-dot.active {
+  background: var(--primary, #4285f4);
+  box-shadow: 0 0 6px rgba(66,133,244,0.4);
+}
+.phase-from { font-weight: 600; }
+.phase-to { font-weight: 600; color: var(--primary-dark, #1967d2); }
+.phase-dur {
+  margin-left: auto; font-family: var(--mono);
+  font-size: 11px; color: var(--text-secondary, #5f6368);
+}
+
+.phase-bar-track {
+  height: 4px; background: var(--border-light, #f1f3f4); border-radius: 2px;
+  margin: 2px 0 4px 14px; overflow: hidden;
+}
+.phase-bar-fill {
+  height: 100%; background: var(--primary, #4285f4); border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.phase-entry-trigger {
+  display: flex; align-items: center; gap: 8px;
+  margin-left: 14px; font-size: 11px; font-family: var(--mono);
+}
+
+.phase-reason {
+  font-size: 11px; font-family: var(--mono); color: var(--text-secondary, #5f6368);
+  margin-left: 14px;
+}

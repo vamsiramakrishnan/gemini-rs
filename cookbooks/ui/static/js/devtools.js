@@ -735,53 +735,63 @@ class DevtoolsManager {
     var data = hasTimeline ? this.phaseTimeline : this.phases;
     var self = this;
 
-    if (data.length === 0) {
+    if (data.length === 0 && !this.telemetry.current_phase) {
       panel.innerHTML = '<div class="events-empty">No phase changes yet</div>';
       return;
     }
 
     var html = '';
 
-    if (hasTimeline) {
-      html += '<div class="phase-timeline">';
-      this.phaseTimeline.forEach(function (entry, i) {
-        var durationDisplay = entry.duration_secs < 1
-          ? (entry.duration_secs * 1000).toFixed(0) + 'ms'
-          : entry.duration_secs.toFixed(1) + 's';
-        var triggerLabel = entry.trigger || 'guard';
+    // Current phase hero card
+    var currentPhase = this.telemetry.current_phase || (data.length > 0 ? data[data.length - 1].to : null);
+    if (currentPhase) {
+      html += '<div class="phase-hero">' +
+        '<div class="phase-hero-label">Current Phase</div>' +
+        '<div class="phase-hero-name">' + this._esc(currentPhase) + '</div>' +
+        '</div>';
+    }
+
+    // Phase transition entries with duration bars
+    var totalMs = Date.now() - this.sessionStart;
+
+    if (data.length > 0) {
+      html += '<div class="phase-entries">';
+      data.forEach(function (entry, i) {
+        var isTimeline = entry.duration_secs !== undefined;
+        var durationMs = isTimeline ? entry.duration_secs * 1000 : 0;
+        var pct = totalMs > 0 ? Math.min(100, (durationMs / totalMs) * 100) : 0;
+        var durationStr = isTimeline
+          ? (entry.duration_secs < 1 ? (entry.duration_secs * 1000).toFixed(0) + 'ms' : entry.duration_secs.toFixed(1) + 's')
+          : '';
+
+        var isCurrent = i === data.length - 1;
+        var triggerLabel = entry.trigger || entry.reason || '';
         var triggerClass = triggerLabel.includes('programmatic') ? 'programmatic' : 'guard';
 
-        html += '<div class="phase-timeline-entry">' +
-          '<div class="phase-timeline-left">' +
-          '<div class="phase-timeline-dot ' + (i === self.phaseTimeline.length - 1 ? 'current' : '') + '"></div>' +
-          (i < self.phaseTimeline.length - 1 ? '<div class="phase-timeline-line"></div>' : '') +
-          '</div>' +
-          '<div class="phase-timeline-content">' +
-          '<div class="phase-timeline-header">' +
-          '<span class="phase-name">' + self._esc(entry.from) + '</span>' +
+        html += '<div class="phase-entry' + (isCurrent ? ' current' : '') + '">' +
+          '<div class="phase-entry-header">' +
+          '<span class="phase-dot' + (isCurrent ? ' active' : '') + '"></span>' +
+          '<span class="phase-from">' + self._esc(entry.from) + '</span>' +
           '<span class="phase-arrow">&rarr;</span>' +
-          '<span class="phase-name to">' + self._esc(entry.to) + '</span>' +
-          '</div>' +
-          '<div class="phase-timeline-meta">' +
-          '<span class="phase-trigger ' + triggerClass + '">' + self._esc(triggerLabel) + '</span>' +
-          '<span class="phase-duration">' + durationDisplay + '</span>' +
-          '<span class="phase-turn">turn ' + entry.turn + '</span>' +
-          '</div>' +
-          '</div>' +
+          '<span class="phase-to">' + self._esc(entry.to) + '</span>' +
+          (durationStr ? '<span class="phase-dur">' + durationStr + '</span>' : '') +
           '</div>';
+
+        if (pct > 0) {
+          html += '<div class="phase-bar-track"><div class="phase-bar-fill" style="width:' + pct + '%"></div></div>';
+        }
+
+        if (triggerLabel) {
+          html += '<div class="phase-entry-trigger"><span class="phase-trigger ' + triggerClass + '">' + self._esc(triggerLabel) + '</span>';
+          if (entry.turn !== undefined) {
+            html += '<span class="phase-turn">turn ' + entry.turn + '</span>';
+          }
+          html += '</div>';
+        }
+
+        html += '</div>';
       });
       html += '</div>';
-    } else {
-      this.phases.forEach(function (p) {
-        html += '<div class="phase-card">' +
-          '<div class="phase-header">' +
-          '<span class="phase-name">' + self._esc(p.from) + '</span>' +
-          '<span class="phase-arrow">&#8594;</span>' +
-          '<span class="phase-name">' + self._esc(p.to) + '</span>' +
-          '</div>' +
-          '<div class="phase-reason">' + self._esc(p.reason) + '</div>' +
-          '</div>';
-      });
     }
 
     panel.innerHTML = html;
