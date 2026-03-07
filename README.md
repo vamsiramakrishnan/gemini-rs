@@ -832,29 +832,75 @@ independent lanes, each optimized for its latency profile:
 
 ## Cookbook Examples
 
-The `cookbooks/` directory contains runnable examples at increasing complexity:
+The `cookbooks/` directory contains runnable examples organized by complexity.
+Each demonstrates specific SDK features at the layer you need.
 
-| Cookbook | Description | Key features |
-|---------|-------------|--------------|
-| [`voice-chat`](cookbooks/voice-chat) | Minimal voice conversation | Audio I/O, VAD, transcription |
-| [`text-chat`](cookbooks/text-chat) | Text-only conversation | Text streaming, turn lifecycle |
-| [`tool-calling`](cookbooks/tool-calling) | Function calling demo | Tool declarations, dispatch, state tracking |
-| [`transcription`](cookbooks/transcription) | Real-time speech-to-text | Input and output transcript callbacks |
-| [`agents`](cookbooks/agents) | Multi-agent pipelines | Text agent combinators, routing |
-| [`ui`](cookbooks/ui) | Full web UI with devtools | Axum WebSocket, phases, extractors, multi-agent handoff, telemetry |
+### Getting Started
 
-The **ui** cookbook includes multiple showcase apps:
+```bash
+# 1. Configure credentials
+cp .env.example .env
+# Edit .env: set GEMINI_API_KEY (Google AI) or GOOGLE_CLOUD_PROJECT + GOOGLE_CLOUD_LOCATION (Vertex AI)
 
-| App | Description | Difficulty |
-|-----|-------------|------------|
-| `call-screening` | Receptionist with caller identification and routing | Advanced |
-| `clinic` | Medical clinic scheduling with patient intake | Advanced |
-| `restaurant` | Restaurant reservation and ordering system | Advanced |
-| `debt-collection` | Regulated conversation with compliance phases | Advanced |
-| `support-assistant` | Multi-agent handoff (billing + technical) | Advanced |
-| `playbook` | Phase-driven conversational flows | Intermediate |
-| `tool-calling` | Interactive tools (weather, time, calculator) | Beginner |
-| `guardrails` | Content safety and policy enforcement | Intermediate |
+# 2. Run a standalone cookbook
+cargo run -p cookbook-text-chat       # http://127.0.0.1:3001
+cargo run -p cookbook-voice-chat      # http://127.0.0.1:3002
+cargo run -p cookbook-tool-calling    # http://127.0.0.1:3003
+cargo run -p cookbook-transcription   # http://127.0.0.1:3004
+
+# 3. Run the multi-app UI (all apps + devtools panel)
+cargo run -p cookbook-ui              # http://127.0.0.1:3000
+```
+
+### Standalone Cookbooks
+
+These run independently with their own Axum server and minimal UI.
+
+| Cookbook | Port | Layer | What You Learn |
+|---------|------|-------|----------------|
+| [`text-chat`](cookbooks/text-chat) | 3001 | L0 | Wire protocol basics — connect, send text, receive streaming deltas |
+| [`voice-chat`](cookbooks/voice-chat) | 3002 | L0 | Bidirectional audio, voice selection, VAD events, transcription |
+| [`tool-calling`](cookbooks/tool-calling) | 3003 | L1 | `TypedTool` with auto-generated JSON Schema, `ToolDispatcher` routing |
+| [`transcription`](cookbooks/transcription) | 3004 | L0 | Every Gemini Live config option: VAD, activity handling, affective dialog, context compression, session resumption |
+| [`agents`](cookbooks/agents) | CLI | L1/L2 | Text agent combinators (`>>`, `\|`, `/`), `TypedTool`, copy-on-write builders |
+
+### Multi-App UI (`cookbook-ui`)
+
+The UI cookbook bundles all apps below into a single Axum server with a shared
+devtools panel showing real-time state, timeline, transcript, and telemetry.
+
+#### Crawl (Beginner)
+
+| App | What It Demonstrates | Key SDK Features |
+|-----|---------------------|-----------------|
+| **text-chat** | Minimal text-only session — no microphone needed | `Live::builder().text_only()`, text streaming |
+| **voice-chat** | Native audio chat with real-time transcription | `Modality::Audio`, voice selection, input/output transcription |
+| **tool-calling** | Three demo tools: weather, time, calculator | `FunctionDeclaration`, `on_tool_call`, `NonBlocking` behavior, `WhenIdle` scheduling |
+
+#### Walk (Intermediate)
+
+| App | What It Demonstrates | Key SDK Features |
+|-----|---------------------|-----------------|
+| **all-config** | Configuration playground — every Gemini Live option in one app | Dynamic tool creation, modality switching, Google Search, code execution, context compression |
+| **guardrails** | Real-time policy monitoring with corrective injection | `RegexExtractor`, `.watch()` state reactions, `.instruction_amendment()`, PII/off-topic/sentiment detection |
+| **playbook** | 6-phase customer support flow with state extraction | `.phase()` chains, `.transition_with()` guards, `.greeting()`, `.with_context()`, `RegexExtractor` |
+
+#### Run (Advanced)
+
+| App | What It Demonstrates | Key SDK Features |
+|-----|---------------------|-----------------|
+| **support-assistant** | Multi-agent handoff between billing and technical support | Dual state machines (10 phases), `.computed()` derived state, cross-agent transitions, telemetry |
+| **call-screening** | Incoming call screening with sentiment analysis and smart routing | Phase machine, tool calling (`check_contact_list`, `check_calendar`, `take_message`, `transfer_call`, `block_caller`), `NonBlocking` tools |
+| **clinic** | HIPAA-aware telehealth scheduling with clinical triage | 8 tools (`verify_patient`, `check_availability`, `book_appointment`, etc.), patient intake flow, department routing |
+| **restaurant** | Restaurant reservation and ordering system | 6 tools (`check_availability`, `make_reservation`, `get_menu`, etc.), dietary handling, occasion tracking |
+| **debt-collection** | FDCPA-compliant debt collection with compliance gates | `StateKey<T>`, identity verification, payment negotiation, cease-and-desist handling, compliance watchers |
+
+### Platform Support
+
+All cookbooks work with both **Google AI** (API key) and **Vertex AI** (project/location).
+When using Google AI, async tool calling features (`NonBlocking` behavior, `WhenIdle`/`Silent`
+scheduling) are automatically enabled. On Vertex AI, these fields are stripped from the wire
+protocol transparently — no code changes needed.
 
 ---
 
@@ -1045,12 +1091,14 @@ gemini-rs/
     rs-adk/                L1: Agent runtime, state, phases, tools
     adk-rs-fluent/         L2: Fluent builder API, operators
   cookbooks/
-    voice-chat/            Minimal voice conversation
-    text-chat/             Text-only conversation
-    tool-calling/          Function calling example
-    transcription/         Speech-to-text example
-    agents/                Multi-agent pipelines
-    ui/                    Full web UI with devtools
+    text-chat/             Minimal text-only session (L0)
+    voice-chat/            Bidirectional audio chat (L0)
+    tool-calling/          TypedTool + ToolDispatcher (L1)
+    transcription/         Every Gemini Live config option (L0)
+    agents/                Text agent combinators (L1/L2)
+    ui/                    Multi-app UI with devtools (L2)
+      src/apps/            13 showcase apps (see cookbooks/INDEX.md)
+    INDEX.md               Full cookbook reference with per-app docs
   tools/
     adk-transpiler/        Python ADK to Rust transpiler
   Cargo.toml               Workspace root

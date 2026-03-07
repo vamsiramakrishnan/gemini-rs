@@ -28,36 +28,171 @@ All apps listed below are available in the multi-app UI with a shared devtools p
 
 ---
 
-## Index
+## Standalone Cookbooks
+
+### text-chat (L0 Wire)
+
+Minimal text-only Gemini Live session. Connects via WebSocket, sends text, receives streaming deltas. No microphone required.
+
+- **Port:** 3001
+- **Layer:** L0 (`rs_genai::prelude::*`)
+- **Features:** Text I/O, streaming text deltas, turn lifecycle
+
+### voice-chat (L0 Wire)
+
+Native audio voice chat with bidirectional audio streaming. Demonstrates voice selection, VAD events, and real-time transcription.
+
+- **Port:** 3002
+- **Layer:** L0 (`rs_genai::prelude::*`)
+- **Model:** `GeminiLive2_5FlashNativeAudio`
+- **Features:** Bidirectional audio, input/output transcription, VAD events
+- **Voices:** Puck, Charon, Kore, Fenrir, Aoede
+
+### tool-calling (L1 Runtime)
+
+Function calling with `TypedTool` and auto-generated JSON Schema from Rust structs. Shows `ToolDispatcher` routing tool calls by function name.
+
+- **Port:** 3003
+- **Layer:** L1 (`rs_adk::tool::{ToolDispatcher, TypedTool}`)
+- **Features:** TypedTool with `JsonSchema` derive, ToolDispatcher, SessionEvent::ToolCall handling
+- **Tools:** `get_weather(city)`, `calculate(expression)`
+
+### transcription (L0 Wire)
+
+Comprehensive showcase of every Gemini Live API configuration property. The most complete reference for wire-level options.
+
+- **Port:** 3004
+- **Layer:** L0 (`rs_genai::prelude::*`)
+- **Features:** Input/output transcription, activity handling (`StartOfActivityInterrupts`), turn coverage, server VAD with automatic sensitivity, context window compression (2048 tokens), session resumption, affective dialog
+
+### agents (L1/L2 Runtime + Fluent)
+
+CLI-based examples demonstrating text agent combinators and typed tool dispatch.
+
+- **Layer:** L1/L2 (`rs_adk::tool::*`, `adk_rs_fluent::prelude::*`)
+- **Binaries:** `weather-agent` (TypedTool dispatch), `research-pipeline` (agent composition)
+- **Features:** Agent combinators (`>>`, `|`, `/`), copy-on-write builder templates, `S::pick()` / `S::rename()` state transforms, `review_loop()` pattern
+
+---
+
+## Multi-App UI Index
 
 ### Crawl (Beginner)
 
-| App | Description | Features | Crate Level |
-|-----|-------------|----------|-------------|
-| **text-chat** | Minimal text-only Gemini Live session | text | L0 wire |
-| **voice-chat** | Native audio voice chat with Gemini Live | voice, transcription | L0 wire |
-| **tool-calling** | Function calling with Gemini Live | text, tools | L1 runtime |
+#### text-chat
 
-These examples demonstrate the basics: connecting to Gemini Live, sending text or audio, and receiving responses. Start here to understand the wire protocol and session lifecycle.
+Minimal text-only Gemini Live session.
+
+- **SDK Features:** `Live::builder().text_only()`, system instruction, text streaming
+- **Tips:** Text-only mode — no microphone needed. Watch the streaming text deltas arrive in real time.
+- **Try:** "What are three interesting facts about octopuses?" / "Explain quantum computing in simple terms"
+
+#### voice-chat
+
+Native audio voice chat with Gemini Live.
+
+- **SDK Features:** `Modality::Audio`, voice selection, input/output transcription
+- **Tips:** Click the microphone button to start speaking. Transcriptions appear below each message.
+- **Try:** "Hello! Tell me a joke." / "What's the weather like on Mars?"
+
+#### tool-calling
+
+Function calling with three demo tools.
+
+- **SDK Features:** `FunctionDeclaration`, `on_tool_call` callback, `FunctionCallingBehavior::NonBlocking`, `FunctionResponseScheduling::WhenIdle`
+- **Tools:** `get_weather(city)`, `get_time(timezone)`, `calculate(expression)`
+- **Tips:** Watch the devtools State tab to see tool call arguments and results.
+- **Try:** "What's the weather in San Francisco?" / "What time is it in Tokyo?" / "Calculate 15 * 7 + 23"
 
 ### Walk (Intermediate)
 
-| App | Description | Features | Crate Level |
-|-----|-------------|----------|-------------|
-| **transcription** | All configurable Gemini Live API properties | transcription, VAD, affective dialog, context compression | L0 wire |
-| **guardrails** | Policy monitoring + corrective injection for live conversations | voice, transcription, guardrails | L2 fluent |
-| **playbook** | State machine + text agent evaluation for customer support | voice, transcription, state-machine, evaluation | L2 fluent |
-| **all-config** | Configuration playground -- every Gemini Live option | text, voice, tools, transcription | L2 fluent |
+#### all-config
 
-These examples introduce L2 fluent API features: `RegexExtractor` for structured data extraction, `PhaseMachine` for conversation flow, and guardrail policies.
+Configuration playground — every Gemini Live option exposed via JSON config.
+
+- **SDK Features:** Dynamic tool creation, modality switching (text/audio/both), temperature control, Google Search (`.with_google_search()`), code execution (`.with_code_execution()`), context window compression, session resumption
+- **Tips:** Send JSON as the system instruction to configure any option. Supports text-only, audio-only, and both output modalities.
+- **Try:** `{"modality": "text", "temperature": 1.5}` / Enable Google Search and ask it to search the web
+
+#### guardrails
+
+Policy monitoring with real-time corrective injection for live conversations.
+
+- **SDK Features:** `RegexExtractor` for pattern-based violation detection, `.watch()` for state-driven reactions, `.instruction_amendment()` for dynamic instruction modification, `.on_turn_boundary()` for telemetry
+- **Policies Detected:**
+  - PII: SSN patterns (`XXX-XX-XXXX`), credit card numbers (`XXXX-XXXX-XXXX-XXXX`)
+  - Off-topic: sports, movies, politics, recipes keywords
+  - Negative sentiment: angry, frustrated, terrible, awful, etc.
+- **Tips:** Try triggering a violation — the system injects corrective instructions in real time.
+- **Try:** "My SSN is 123-45-6789" (PII) / "Did you see the football game?" (off-topic) / "This is terrible service!" (sentiment)
+
+#### playbook
+
+6-phase customer support state machine with regex-based state extraction.
+
+- **SDK Features:** `.phase()` chains with `.transition_with()` guards, `.greeting()` for model-first speech, `.with_context()` for state-driven instruction injection, `RegexExtractor`, `.watch()` state reactions, `.on_turn_boundary()`
+- **Phases:** greet → identify → investigate → explain → resolve → close
+- **Tips:** The agent follows a structured support flow. Watch the devtools for phase transitions and evaluation scores.
+- **Try:** "Hi, my name is Alex and I need help with my order." / "My order #12345 arrived damaged." / "I'd like a refund please."
 
 ### Run (Advanced)
 
-| App | Description | Features | Crate Level |
-|-----|-------------|----------|-------------|
-| **support-assistant** | Multi-agent handoff with billing + technical support flows | voice, transcription, state-machine, evaluation, guardrails, multi-agent | L2 fluent |
-| **debt-collection** | FDCPA-compliant debt collection with compliance gates, emotional monitoring, and payment negotiation | phase-machine, compliance-gates, temporal-patterns, llm-extraction, tool-response-redaction, numeric-watchers, computed-state, turn-boundary-injection | L2 fluent |
-| **weather-agent** | Standalone agent with typed tool calling | tools | L2 fluent |
-| **research-pipeline** | Multi-agent research pipeline | tools, multi-agent | L2 fluent |
+#### support-assistant
 
-These examples demonstrate the full L2 pipeline: `PhaseMachine` with multiple phases, `ComputedRegistry` for derived state, `WatcherRegistry` for state-change reactions, `TemporalRegistry` for time-based pattern detection, and LLM-based extraction with `TextAgentTool`.
+Multi-agent handoff between billing and technical support with dual state machines.
+
+- **SDK Features:** 10-phase dual state machine (5 billing + 5 technical), `.computed()` for derived state (`active_agent`), `.watch()` for escalation detection, cross-agent transitions, priority-ordered guards, telemetry snapshot polling
+- **Phases:** Billing (greet → identify → investigate → resolve → close) + Technical (greet → identify → troubleshoot → resolve → close). Handoff triggers when `issue_type == "technical"`.
+- **Tips:** Starts with billing — describe a technical issue to trigger handoff to technical support.
+- **Try:** "I'm having trouble with my internet connection." / "I was overcharged $50 on my last bill."
+
+#### call-screening
+
+Intelligent incoming call screening with sentiment analysis and smart routing.
+
+- **SDK Features:** Phase machine, `NonBlocking` tool calling, `WhenIdle` scheduling, sentiment-based routing
+- **Tools:** `check_contact_list(name)`, `check_calendar(date)`, `take_message(caller, message)`, `transfer_call(extension)`, `block_caller(reason)`
+- **State Keys:** `caller_name`, `caller_org`, `call_purpose`, `urgency`, `is_known_contact`, `caller_sentiment`
+- **Try:** "Hi, I'm John from Acme Corp, I need to speak to the manager about our contract."
+
+#### clinic
+
+HIPAA-aware telehealth appointment scheduling with clinical triage.
+
+- **SDK Features:** Phase machine, 8 tools with `NonBlocking` behavior, patient intake workflow, department routing
+- **Tools:** `verify_patient(name, dob)`, `check_availability(department, date)`, `book_appointment(patient_id, department, doctor, date, time)`, `get_doctors(department)`, `check_insurance(provider, member_id)`, `get_patient_history(patient_id)`, `cancel_appointment(appointment_id)`, `send_reminder(patient_id, appointment_id)`
+- **State Keys:** `patient_name`, `patient_id`, `symptoms`, `department`, `doctor_name`, `appointment_date/time`, `is_new_patient`, `insurance_provider`, `clinical_urgency`
+- **Try:** "I need to schedule an appointment. I've been having headaches for the past week."
+
+#### restaurant
+
+Restaurant reservation assistant with menu context and special requests.
+
+- **SDK Features:** Phase machine, 6 tools with `NonBlocking` behavior, occasion and dietary tracking
+- **Tools:** `check_availability(date, time, party_size)`, `make_reservation(guest_name, date, time, party_size, phone)`, `get_menu(category)`, `check_dietary_options(dietary_need)`, `modify_reservation(reservation_id, changes)`, `cancel_reservation(reservation_id)`
+- **State Keys:** `guest_name`, `party_size`, `preferred_date/time`, `phone`, `dietary_needs`, `special_occasion`, `reservation_id`
+- **Try:** "I'd like to make a reservation for 4 people this Saturday at 7pm. It's a birthday dinner."
+
+#### debt-collection
+
+FDCPA-compliant debt collection with compliance gates, identity verification, and payment negotiation.
+
+- **SDK Features:** `StateKey<T>` typed state access, compliance watchers, identity verification flow, cease-and-desist handling, payment processing
+- **State Keys:** `identity_verified`, `disclosure_given`, `cease_desist`, `payment_processed`, `willingness`
+- **Try:** "Hello, who's calling?" / "I can't afford to pay the full amount right now."
+
+---
+
+## Platform Support
+
+All cookbooks work with both **Google AI** (API key) and **Vertex AI** (project/location).
+
+| Feature | Google AI | Vertex AI |
+|---------|-----------|-----------|
+| Async tool calling (`NonBlocking`) | Supported | Stripped automatically |
+| Response scheduling (`WhenIdle`/`Silent`) | Supported | Stripped automatically |
+| Audio model | `GeminiLive2_5FlashNativeAudio` | `GeminiLive2_5FlashNativeAudio` |
+| Text model | `Gemini2_0FlashLive` | `Gemini2_0FlashLive` |
+| WebSocket frames | Text | Binary (handled automatically) |
+
+The SDK detects your authentication method and strips unsupported wire fields transparently — no code changes needed across platforms.
