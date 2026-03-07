@@ -86,7 +86,7 @@ impl BackgroundAgentDispatcher {
                     state.set(&result_key, &result);
                 }
                 Err(e) => {
-                    state.set(&error_key, &format!("{e}"));
+                    state.set(&error_key, format!("{e}"));
                 }
             }
 

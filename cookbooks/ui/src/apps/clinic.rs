@@ -761,7 +761,7 @@ async fn handle_session(
             async move {
                 responses
                     .into_iter()
-                    .map(|r| {
+                    .inspect(|r| {
                         match r.name.as_str() {
                             "book_appointment" => {
                                 if r.response.get("status").and_then(|v| v.as_str())
@@ -814,7 +814,6 @@ async fn handle_session(
                             }
                             _ => {}
                         }
-                        r
                     })
                     .collect()
             }
@@ -1438,7 +1437,7 @@ mod tests {
         );
         let slots = result["available_slots"].as_array().unwrap();
         assert_eq!(slots.len(), 3);
-        assert!(slots[0]["times"].as_array().unwrap().len() > 0);
+        assert!(!slots[0]["times"].as_array().unwrap().is_empty());
     }
 
     #[test]

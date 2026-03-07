@@ -240,7 +240,7 @@ impl LiveSessionBuilder {
         let on_usage_cb = callbacks.on_usage.take();
         let callbacks = Arc::new(callbacks);
         let writer: Arc<dyn SessionWriter> = Arc::new(session.clone());
-        let state = self.state.unwrap_or_else(State::new);
+        let state = self.state.unwrap_or_default();
 
         // Subscribe twice: one for router → fast/ctrl, one for telemetry lane
         let event_rx = session.subscribe();

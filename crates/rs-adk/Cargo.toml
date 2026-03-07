@@ -42,3 +42,6 @@ database-sessions = []
 otel = ["rs-genai/otel", "tracing-support"]
 otel-otlp = ["rs-genai/otel-otlp", "tracing-support"]
 otel-gcp = ["rs-genai/otel-gcp", "tracing-support"]
+
+[lints]
+workspace = true

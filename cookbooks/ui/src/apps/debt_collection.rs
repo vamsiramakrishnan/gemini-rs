@@ -307,10 +307,7 @@ fn extract_structured(text: &str, existing: &HashMap<String, Value>) -> HashMap<
         let lower = text.to_lowercase();
         if (lower.contains("understand") || lower.contains("acknowledge"))
             && DISCLOSURE_ACK_RE.is_match(text)
-        {
-            extracted.insert("disclosure_given".into(), json!(true));
-        } else if DISCLOSURE_ACK_RE.is_match(text)
-            && existing.is_empty()
+            || (DISCLOSURE_ACK_RE.is_match(text) && existing.is_empty())
         {
             extracted.insert("disclosure_given".into(), json!(true));
         }

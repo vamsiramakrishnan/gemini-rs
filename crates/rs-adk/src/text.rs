@@ -820,7 +820,7 @@ impl TextAgent for JoinTextAgent {
             let result = if let Some(timeout) = self.timeout {
                 match tokio::time::timeout(timeout, handle).await {
                     Ok(Ok(Ok(text))) => {
-                        state.set(&format!("_result_{}", task_name), &text);
+                        state.set(format!("_result_{}", task_name), &text);
                         Ok(text)
                     }
                     Ok(Ok(Err(e))) => Err(AgentError::Other(e)),
@@ -830,7 +830,7 @@ impl TextAgent for JoinTextAgent {
             } else {
                 match handle.await {
                     Ok(Ok(text)) => {
-                        state.set(&format!("_result_{}", task_name), &text);
+                        state.set(format!("_result_{}", task_name), &text);
                         Ok(text)
                     }
                     Ok(Err(e)) => Err(AgentError::Other(e)),

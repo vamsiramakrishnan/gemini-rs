@@ -206,9 +206,7 @@ struct CallerState {
 // ---------------------------------------------------------------------------
 
 fn compute_screen_decision(known: bool, urgency: f64, sentiment: &str) -> &'static str {
-    if known {
-        "transfer"
-    } else if urgency > 0.8 {
+    if known || urgency > 0.8 {
         "transfer"
     } else if sentiment == "hostile" {
         "decline"
@@ -542,7 +540,7 @@ async fn handle_session(
             async move {
                 responses
                     .into_iter()
-                    .map(|r| {
+                    .inspect(|r| {
                         match r.name.as_str() {
                             "check_contact_list" => {
                                 if r.response
@@ -576,7 +574,6 @@ async fn handle_session(
                             }
                             _ => {}
                         }
-                        r
                     })
                     .collect()
             }

@@ -210,7 +210,7 @@ impl C {
         f: impl Fn(&Content) -> Content + Send + Sync + 'static,
     ) -> ContextPolicy {
         ContextPolicy::new("map", move |history| {
-            history.iter().map(|c| f(c)).collect()
+            history.iter().map(&f).collect()
         })
     }
 
@@ -294,7 +294,7 @@ impl C {
             }
             let mut result: Vec<Content> = Vec::new();
             for c in history {
-                let dominated = result.last().map_or(false, |prev| {
+                let dominated = result.last().is_some_and(|prev| {
                     let prev_text = extract_text(prev);
                     let curr_text = extract_text(c);
                     prev_text == curr_text && !prev_text.is_empty()

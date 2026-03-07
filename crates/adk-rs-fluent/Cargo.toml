@@ -31,3 +31,6 @@ tracing-support = ["rs-adk/tracing-support"]
 otel = ["rs-adk/otel", "rs-genai/otel"]
 otel-otlp = ["rs-adk/otel-otlp", "rs-genai/otel-otlp"]
 otel-gcp = ["rs-adk/otel-gcp", "rs-genai/otel-gcp"]
+
+[lints]
+workspace = true

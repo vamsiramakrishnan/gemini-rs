@@ -109,3 +109,6 @@ tokio-test = "0.4"
 [[bench]]
 name = "audio_pipeline"
 harness = false
+
+[lints]
+workspace = true

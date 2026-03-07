@@ -194,7 +194,7 @@ impl TurnExtractor for LlmExtractor {
             .iter()
             .rev()
             .find(|t| !t.user.is_empty())
-            .map_or(false, |t| t.user.split_whitespace().count() >= self.min_words)
+            .is_some_and(|t| t.user.split_whitespace().count() >= self.min_words)
     }
 
     fn trigger(&self) -> ExtractionTrigger {

@@ -125,18 +125,13 @@ pub fn to_genai_part(a2a_part: &A2aPart) -> Option<Part> {
     match a2a_part {
         A2aPart::Text { text, .. } => Some(Part::Text { text: text.clone() }),
         A2aPart::File { file, .. } => {
-            // Convert to InlineData if bytes present
-            if let Some(bytes) = &file.bytes {
-                Some(Part::InlineData {
-                    inline_data: Blob {
-                        mime_type: file.mime_type.clone().unwrap_or_default(),
-                        data: bytes.clone(),
-                    },
-                })
-            } else {
-                // URI-based files can't be directly represented as GenAI Parts
-                None
-            }
+            // Convert to InlineData if bytes present; URI-based files can't be represented
+            file.bytes.as_ref().map(|bytes| Part::InlineData {
+                inline_data: Blob {
+                    mime_type: file.mime_type.clone().unwrap_or_default(),
+                    data: bytes.clone(),
+                },
+            })
         }
         A2aPart::Data { data, metadata } => {
             let adk_type = metadata

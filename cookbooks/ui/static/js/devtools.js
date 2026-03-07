@@ -36,6 +36,8 @@ class DevtoolsManager {
     this.phases = [];
     this.telemetry = {};
     this.turnLatencies = [];
+    this._lastResponseCount = 0;
+    this._sparkline = null;
     this.toolCalls = [];
     this.phaseTimeline = [];
     this.sessionStart = Date.now();
@@ -279,6 +281,7 @@ class DevtoolsManager {
     var self = this;
     this.scheduler.register('timeline', function () { self._timelineVL.refresh(); });
     this.scheduler.register('statusBar', function () { self._renderStatusBar(); });
+    this.scheduler.register('metrics', function () { self._renderMetrics(); });
   }
 
   // ------------------------------------------------
@@ -443,6 +446,8 @@ class DevtoolsManager {
     this.phases = [];
     this.telemetry = {};
     this.turnLatencies = [];
+    this._lastResponseCount = 0;
+    this._sparkline = null;
     this.toolCalls = [];
     this.phaseTimeline = [];
     this.sessionStart = Date.now();
@@ -512,9 +517,11 @@ class DevtoolsManager {
   handleTelemetry(stats) {
     this.telemetry = stats;
 
-    // Track per-turn latencies for sparkline
-    if (stats.last_response_latency_ms > 0) {
+    // Track per-turn latencies for sparkline — only when response_count increases
+    var rc = stats.response_count || 0;
+    if (rc > this._lastResponseCount && stats.last_response_latency_ms > 0) {
       this.turnLatencies.push(stats.last_response_latency_ms);
+      this._lastResponseCount = rc;
     }
 
     // Update status bar from telemetry
@@ -531,7 +538,7 @@ class DevtoolsManager {
     }
 
     this.scheduler.markDirty('statusBar');
-    this._renderNfr();
+    this.scheduler.markDirty('metrics');
   }
 
   handlePhaseTimeline(entries) {
@@ -545,7 +552,7 @@ class DevtoolsManager {
       this.telemetry.tool_calls = 0;
     }
     this.telemetry.tool_calls = this.toolCalls.length;
-    this._renderNfr();
+    this.scheduler.markDirty('metrics');
   }
 
   // ------------------------------------------------

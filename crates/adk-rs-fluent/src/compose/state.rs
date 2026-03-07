@@ -219,8 +219,7 @@ impl S {
         let values: Vec<String> = values.iter().map(|v| v.to_string()).collect();
         move |s: &rs_adk::State| {
             s.get::<String>(&key)
-                .map(|v| values.iter().any(|expected| *expected == v))
-                .unwrap_or(false)
+                .is_some_and(|v| values.contains(&v))
         }
     }
 

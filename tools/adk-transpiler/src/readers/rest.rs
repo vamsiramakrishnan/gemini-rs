@@ -50,7 +50,7 @@ pub fn read_rest_modules(source_dir: &Path) -> Result<Vec<RestModuleDef>, String
             let module_name = class_name.to_lowercase();
 
             // Skip modules we don't have mappings for
-            if service_endpoint_map().get(module_name.as_str()).is_none() {
+            if !service_endpoint_map().contains_key(module_name.as_str()) {
                 continue;
             }
 

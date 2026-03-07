@@ -139,10 +139,9 @@ impl SessionSignals {
                 self.state.session().set("go_away_received", true);
                 if let Some(ref tl) = time_left {
                     self.state.session().set("go_away_time_left", tl.clone());
-                    if let Some(secs) = tl
+                    if let Ok(secs) = tl
                         .trim_end_matches('s')
                         .parse::<u64>()
-                        .ok()
                     {
                         let deadline =
                             Instant::now() + std::time::Duration::from_secs(secs);

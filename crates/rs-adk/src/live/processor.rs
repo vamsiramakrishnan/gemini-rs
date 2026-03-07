@@ -316,9 +316,7 @@ async fn route_event(
     match event {
         // Fast lane events
         SessionEvent::AudioData(data) => {
-            if fast_tx.send(FastEvent::Audio(data)).await.is_err() {
-                return; // channel closed
-            }
+            let _ = fast_tx.send(FastEvent::Audio(data)).await;
         }
         SessionEvent::TextDelta(text) => {
             let _ = fast_tx.send(FastEvent::Text(text)).await;

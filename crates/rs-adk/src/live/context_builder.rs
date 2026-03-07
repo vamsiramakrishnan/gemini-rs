@@ -249,7 +249,7 @@ impl SectionBuilder {
 ///         .build()
 /// ))
 /// ```
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct ContextBuilder {
     sections: Vec<Section>,
 }
@@ -299,13 +299,6 @@ impl ContextBuilder {
     }
 }
 
-impl Default for ContextBuilder {
-    fn default() -> Self {
-        Self {
-            sections: Vec::new(),
-        }
-    }
-}
 
 // ── Compose with + ─────────────────────────────────────────────────────────
 

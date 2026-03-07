@@ -3,21 +3,17 @@
 use serde::{Deserialize, Serialize};
 
 /// How the agent communicates with clients.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StreamingMode {
     /// No streaming — single request/response.
     None,
     /// Server-sent events (unidirectional streaming).
     SSE,
     /// Bidirectional streaming (e.g., WebSocket).
+    #[default]
     Bidi,
 }
 
-impl Default for StreamingMode {
-    fn default() -> Self {
-        Self::Bidi
-    }
-}
 
 /// Configuration for an agent execution run.
 #[derive(Debug, Clone)]

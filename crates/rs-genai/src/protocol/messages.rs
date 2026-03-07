@@ -389,7 +389,7 @@ pub enum ServerMessage {
     /// Setup handshake completed successfully.
     SetupComplete(SetupCompleteMessage),
     /// Model output content (text, audio, transcription, etc.).
-    ServerContent(ServerContentMessage),
+    ServerContent(Box<ServerContentMessage>),
     /// Model requested one or more tool/function calls.
     ToolCall(ToolCallMessage),
     /// Server cancelled previously requested tool calls.
@@ -419,7 +419,7 @@ impl ServerMessage {
         } else if text.contains("\"toolCall\"") {
             serde_json::from_str::<ToolCallMessage>(text).map(ServerMessage::ToolCall)
         } else if text.contains("\"serverContent\"") {
-            serde_json::from_str::<ServerContentMessage>(text).map(ServerMessage::ServerContent)
+            serde_json::from_str::<ServerContentMessage>(text).map(|sc| ServerMessage::ServerContent(Box::new(sc)))
         } else if text.contains("\"goAway\"") {
             serde_json::from_str::<GoAwayMessage>(text).map(ServerMessage::GoAway)
         } else if text.contains("\"sessionResumptionUpdate\"") {

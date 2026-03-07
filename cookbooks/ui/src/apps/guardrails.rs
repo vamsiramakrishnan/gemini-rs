@@ -159,7 +159,6 @@ impl ViolationTracker {
 // Conversation buffer
 // ---------------------------------------------------------------------------
 
-/// Rolling conversation buffer that keeps the last N turns.
 // ConversationBuffer is imported from super (apps/mod.rs)
 
 // ---------------------------------------------------------------------------

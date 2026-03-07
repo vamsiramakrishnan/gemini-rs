@@ -29,3 +29,6 @@ default = []
 otel = ["rs-genai/otel", "rs-adk/otel"]
 otel-otlp = ["rs-genai/otel-otlp", "rs-adk/otel-otlp"]
 otel-gcp = ["rs-genai/otel-gcp", "rs-adk/otel-gcp"]
+
+[lints]
+workspace = true

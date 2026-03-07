@@ -16,7 +16,7 @@ pub async fn handle_ws(socket: WebSocket, app: Arc<dyn CookbookApp>) {
     let send_task = tokio::spawn(async move {
         while let Some(msg) = server_rx.recv().await {
             if let Ok(json) = serde_json::to_string(&msg) {
-                if ws_tx.send(Message::Text(json.into())).await.is_err() {
+                if ws_tx.send(Message::Text(json)).await.is_err() {
                     break;
                 }
             }

@@ -52,6 +52,7 @@ impl Default for TelemetryConfig {
 
 /// Guard that keeps telemetry systems alive while held.
 /// Drop this to flush and shutdown OTel exporters.
+#[derive(Default)]
 pub struct TelemetryGuard {
     #[cfg(feature = "otel-base")]
     _tracer_provider: Option<opentelemetry_sdk::trace::SdkTracerProvider>,
@@ -59,19 +60,6 @@ pub struct TelemetryGuard {
     _meter_provider: Option<opentelemetry_sdk::metrics::SdkMeterProvider>,
     #[cfg(not(feature = "otel-base"))]
     _private: (),
-}
-
-impl Default for TelemetryGuard {
-    fn default() -> Self {
-        Self {
-            #[cfg(feature = "otel-base")]
-            _tracer_provider: None,
-            #[cfg(feature = "otel-base")]
-            _meter_provider: None,
-            #[cfg(not(feature = "otel-base"))]
-            _private: (),
-        }
-    }
 }
 
 impl TelemetryConfig {

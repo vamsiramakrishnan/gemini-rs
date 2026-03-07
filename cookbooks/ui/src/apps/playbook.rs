@@ -235,7 +235,6 @@ fn evaluate_phase(phase_name: &str, state: &HashMap<String, serde_json::Value>, 
 // Conversation buffer
 // ---------------------------------------------------------------------------
 
-/// Rolling conversation buffer that keeps the last N turns.
 // ConversationBuffer is imported from super (apps/mod.rs)
 
 // ---------------------------------------------------------------------------
