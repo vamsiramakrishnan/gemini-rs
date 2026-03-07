@@ -1,9 +1,17 @@
-//! Session phase finite state machine with validated transitions.
+//! Session phase finite state machine and shared session state.
+//!
+//! [`SessionPhase`] — lifecycle phase enum with validated transitions.
+//! [`SessionState`] — shared state struct (phase, turns, resume handle).
 //!
 //! Invalid transitions return `Err(SessionError::InvalidTransition)`.
 //! The phase is observable via a `watch::Receiver<SessionPhase>` channel.
 
 use std::fmt;
+use std::time::Instant;
+use tokio::sync::{broadcast, watch};
+
+use super::errors::SessionError;
+use super::events::{SessionEvent, Turn};
 
 /// The lifecycle phase of a Gemini Live session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -85,6 +93,126 @@ impl SessionPhase {
                 // Force-disconnect from any state
                 | (_, SessionPhase::Disconnected)
         )
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Session state (shared, read-mostly)
+// ---------------------------------------------------------------------------
+
+/// Shared session state, accessible from the SessionHandle.
+#[derive(Debug)]
+pub struct SessionState {
+    /// Current phase (updated atomically via watch channel).
+    phase_tx: watch::Sender<SessionPhase>,
+    /// Optional broadcast sender to emit `PhaseChanged` events on transitions.
+    event_tx: Option<broadcast::Sender<SessionEvent>>,
+    /// Session ID.
+    pub session_id: String,
+    /// Session resume handle from server.
+    pub resume_handle: parking_lot::Mutex<Option<String>>,
+    /// Turn history.
+    pub turns: parking_lot::Mutex<Vec<Turn>>,
+    /// Current in-progress turn.
+    pub current_turn: parking_lot::Mutex<Option<Turn>>,
+}
+
+impl SessionState {
+    /// Create new session state (no `PhaseChanged` event emission).
+    pub fn new(phase_tx: watch::Sender<SessionPhase>) -> Self {
+        Self {
+            phase_tx,
+            event_tx: None,
+            session_id: uuid::Uuid::new_v4().to_string(),
+            resume_handle: parking_lot::Mutex::new(None),
+            turns: parking_lot::Mutex::new(Vec::new()),
+            current_turn: parking_lot::Mutex::new(None),
+        }
+    }
+
+    /// Create new session state that emits `PhaseChanged` events on transitions.
+    pub fn with_events(
+        phase_tx: watch::Sender<SessionPhase>,
+        event_tx: broadcast::Sender<SessionEvent>,
+    ) -> Self {
+        Self {
+            phase_tx,
+            event_tx: Some(event_tx),
+            session_id: uuid::Uuid::new_v4().to_string(),
+            resume_handle: parking_lot::Mutex::new(None),
+            turns: parking_lot::Mutex::new(Vec::new()),
+            current_turn: parking_lot::Mutex::new(None),
+        }
+    }
+
+    /// Get the current phase.
+    pub fn phase(&self) -> SessionPhase {
+        *self.phase_tx.borrow()
+    }
+
+    /// Attempt a validated phase transition.
+    ///
+    /// If an `event_tx` was provided via [`with_events`](Self::with_events),
+    /// a [`SessionEvent::PhaseChanged`] is broadcast after a successful transition.
+    pub fn transition_to(&self, to: SessionPhase) -> Result<SessionPhase, SessionError> {
+        let from = self.phase();
+        if !from.can_transition_to(&to) {
+            return Err(SessionError::InvalidTransition { from, to });
+        }
+        self.phase_tx.send_replace(to);
+        if let Some(ref tx) = self.event_tx {
+            let _ = tx.send(SessionEvent::PhaseChanged(to));
+        }
+        Ok(to)
+    }
+
+    /// Force transition (bypasses validation — use only for disconnect).
+    pub fn force_phase(&self, phase: SessionPhase) {
+        self.phase_tx.send_replace(phase);
+    }
+
+    /// Start a new turn.
+    pub fn start_turn(&self) {
+        let mut current = self.current_turn.lock();
+        if let Some(prev) = current.take() {
+            self.turns.lock().push(prev);
+        }
+        *current = Some(Turn::new());
+    }
+
+    /// Append text to the current turn.
+    pub fn append_text(&self, text: &str) {
+        if let Some(turn) = self.current_turn.lock().as_mut() {
+            turn.text.push_str(text);
+        }
+    }
+
+    /// Mark audio received in the current turn.
+    pub fn mark_audio(&self) {
+        if let Some(turn) = self.current_turn.lock().as_mut() {
+            turn.has_audio = true;
+        }
+    }
+
+    /// Complete the current turn.
+    pub fn complete_turn(&self) -> Option<Turn> {
+        let mut current = self.current_turn.lock();
+        if let Some(turn) = current.as_mut() {
+            turn.completed_at = Some(Instant::now());
+        }
+        let completed = current.take();
+        if let Some(ref t) = completed {
+            self.turns.lock().push(t.clone());
+        }
+        completed
+    }
+
+    /// Mark the current turn as interrupted.
+    pub fn interrupt_turn(&self) {
+        if let Some(turn) = self.current_turn.lock().as_mut() {
+            turn.interrupted = true;
+            turn.completed_at = Some(Instant::now());
+        }
     }
 }
 
