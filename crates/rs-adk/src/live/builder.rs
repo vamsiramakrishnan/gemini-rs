@@ -58,6 +58,7 @@ pub struct LiveSessionBuilder {
     persistence: Option<Arc<dyn SessionPersistence>>,
     session_id: Option<String>,
     tool_advisory: bool,
+    telemetry_interval: Option<std::time::Duration>,
 }
 
 impl LiveSessionBuilder {
@@ -82,6 +83,7 @@ impl LiveSessionBuilder {
             persistence: None,
             session_id: None,
             tool_advisory: true,
+            telemetry_interval: None,
         }
     }
 
@@ -213,6 +215,15 @@ impl LiveSessionBuilder {
         self
     }
 
+    /// Set the periodic telemetry emission interval.
+    ///
+    /// When set, the processor periodically emits `LiveEvent::Telemetry`
+    /// and `LiveEvent::TurnMetrics` to the event stream.
+    pub fn telemetry_interval(mut self, interval: std::time::Duration) -> Self {
+        self.telemetry_interval = Some(interval);
+        self
+    }
+
     /// Connect to Gemini and start the three-lane event processor.
     pub async fn connect(self) -> Result<LiveHandle, AgentError> {
         // Build-time validations
@@ -316,6 +327,11 @@ impl LiveSessionBuilder {
             (raw_writer.clone(), raw_writer)
         };
 
+        // Create LiveEvent broadcast channel
+        use super::events::LiveEvent;
+        use tokio::sync::broadcast;
+        let (live_event_tx, _) = broadcast::channel::<LiveEvent>(4096);
+
         // Spawn fast + control lanes (no session_signals, no transcript mutex)
         let greeting_writer = user_writer.clone();
         let (fast_handle, ctrl_handle) = spawn_event_processor(
@@ -332,7 +348,49 @@ impl LiveSessionBuilder {
             Some(background_tracker),
             self.execution_modes,
             control_plane,
+            live_event_tx.clone(),
         );
+
+        // Spawn periodic telemetry emitter if interval is set
+        if let Some(interval) = self.telemetry_interval {
+            let telem_tx = live_event_tx.clone();
+            let telem_ref = telemetry.clone();
+            tokio::spawn(async move {
+                let mut tick = tokio::time::interval(interval);
+                let mut prev_turns = 0u64;
+                loop {
+                    tick.tick().await;
+                    let snap = telem_ref.snapshot();
+                    if let Some(obj) = snap.as_object() {
+                        let tc = obj.get("turn_count").and_then(|v| v.as_u64()).unwrap_or(0);
+                        if tc > prev_turns {
+                            let latency = obj
+                                .get("last_latency_ms")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or(0) as u32;
+                            let prompt = obj
+                                .get("prompt_tokens")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or(0) as u32;
+                            let response = obj
+                                .get("response_tokens")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or(0) as u32;
+                            let _ = telem_tx.send(LiveEvent::TurnMetrics {
+                                turn: tc as u32,
+                                latency_ms: latency,
+                                prompt_tokens: prompt,
+                                response_tokens: response,
+                            });
+                            prev_turns = tc;
+                        }
+                    }
+                    if telem_tx.send(LiveEvent::Telemetry(snap)).is_err() {
+                        break;
+                    }
+                }
+            });
+        }
 
         // Send greeting prompt to trigger model-initiated conversation
         if let Some(greeting) = self.greeting {
@@ -349,6 +407,7 @@ impl LiveSessionBuilder {
             ctrl_handle,
             state,
             telemetry,
+            live_event_tx,
         ))
     }
 }

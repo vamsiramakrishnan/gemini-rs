@@ -9,6 +9,7 @@ use crate::state::State;
 
 use crate::live::callbacks::EventCallbacks;
 use crate::live::computed::ComputedRegistry;
+use crate::live::events::LiveEvent;
 use crate::live::extractor::{ExtractionTrigger, TurnExtractor};
 use crate::live::needs::RepairAction;
 use crate::live::phase::{PhaseMachine, TransitionResult};
@@ -46,6 +47,7 @@ pub(in crate::live) async fn handle_turn_complete(
     transcript_buffer: &mut TranscriptBuffer,
     extraction_turn_tracker: &mut std::collections::HashMap<String, u32>,
     control_plane: &mut ControlPlaneConfig,
+    event_tx: &tokio::sync::broadcast::Sender<LiveEvent>,
 ) {
     // 1. Reset turn-scoped state
     state.clear_prefix("turn:");
@@ -86,7 +88,14 @@ pub(in crate::live) async fn handle_turn_complete(
         .cloned()
         .collect();
 
-    run_extractors(&turn_extractors, transcript_buffer, state, callbacks).await;
+    run_extractors(
+        &turn_extractors,
+        transcript_buffer,
+        state,
+        callbacks,
+        event_tx,
+    )
+    .await;
 
     // Update interval trackers for extractors that ran
     for ext in &turn_extractors {
@@ -108,6 +117,8 @@ pub(in crate::live) async fn handle_turn_complete(
     // into resolved_instruction and send ONCE at the end.
     let mut resolved_instruction: Option<String> = None;
     let mut transition_result: Option<TransitionResult> = None;
+    let mut transition_from: Option<String> = None;
+    let mut transition_to: Option<String> = None;
 
     // Batched context buffer: all model-role context turns are accumulated here
     // and sent as a SINGLE send_client_content call, eliminating the burst of
@@ -124,6 +135,7 @@ pub(in crate::live) async fn handle_turn_complete(
         if let Some((target, transition_index)) =
             machine.evaluate(state).map(|(s, i)| (s.to_string(), i))
         {
+            let from_phase = machine.current().to_string();
             let turn = state.session().get::<u32>("turn_count").unwrap_or(0);
             let trigger = crate::live::phase::TransitionTrigger::Guard { transition_index };
             let result = machine
@@ -131,6 +143,8 @@ pub(in crate::live) async fn handle_turn_complete(
                 .await;
             if let Some(tr) = result {
                 resolved_instruction = Some(tr.instruction.clone());
+                transition_from = Some(from_phase);
+                transition_to = Some(target.clone());
                 transition_result = Some(tr);
             }
             state.session().set("phase", machine.current());
@@ -150,7 +164,19 @@ pub(in crate::live) async fn handle_turn_complete(
         state.session().set("navigation_context", nav);
     }
 
-    // 7c. Run OnPhaseChange extractors (if a transition fired)
+    // 7c. Emit PhaseTransition LiveEvent (if a transition fired)
+    if let (Some(ref from), Some(ref to)) = (&transition_from, &transition_to) {
+        let _ = event_tx.send(LiveEvent::PhaseTransition {
+            from: from.clone(),
+            to: to.clone(),
+            reason: format!(
+                "guard at turn {}",
+                state.session().get::<u32>("turn_count").unwrap_or(0)
+            ),
+        });
+    }
+
+    // 7d. Run OnPhaseChange extractors (if a transition fired)
     if transition_result.is_some() {
         let phase_change_extractors: Vec<Arc<dyn TurnExtractor>> = extractors
             .iter()
@@ -162,6 +188,7 @@ pub(in crate::live) async fn handle_turn_complete(
             transcript_buffer,
             state,
             callbacks,
+            event_tx,
         )
         .await;
     }

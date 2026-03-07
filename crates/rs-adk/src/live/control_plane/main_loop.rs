@@ -13,6 +13,7 @@ use crate::tool::ToolDispatcher;
 use crate::live::background_tool::BackgroundToolTracker;
 use crate::live::callbacks::EventCallbacks;
 use crate::live::computed::ComputedRegistry;
+use crate::live::events::LiveEvent;
 use crate::live::extractor::{ExtractionTrigger, TurnExtractor};
 use crate::live::phase::PhaseMachine;
 use crate::live::processor::{ControlEvent, ControlPlaneConfig, SharedState};
@@ -47,6 +48,7 @@ pub(in crate::live) async fn run_control_lane(
         crate::live::background_tool::ToolExecutionMode,
     >,
     mut control_plane: ControlPlaneConfig,
+    event_tx: tokio::sync::broadcast::Sender<LiveEvent>,
 ) {
     // TranscriptBuffer is exclusively owned by the control lane -- no mutex.
     let mut transcript_buffer = TranscriptBuffer::new();
@@ -77,6 +79,7 @@ pub(in crate::live) async fn run_control_lane(
                     &execution_modes,
                     &background_tracker,
                     &extractors,
+                    &event_tx,
                 )
                 .await;
             }
@@ -100,6 +103,7 @@ pub(in crate::live) async fn run_control_lane(
                 }
                 // Resume audio forwarding after interrupt callback completes
                 shared.interrupted.store(false, Ordering::Release);
+                let _ = event_tx.send(LiveEvent::Interrupted);
             }
             ControlEvent::TurnComplete => {
                 // Reset soft turn detector -- model responded
@@ -119,8 +123,10 @@ pub(in crate::live) async fn run_control_lane(
                     &mut transcript_buffer,
                     &mut extraction_turn_tracker,
                     &mut control_plane,
+                    &event_tx,
                 )
                 .await;
+                let _ = event_tx.send(LiveEvent::TurnComplete);
             }
             ControlEvent::GoAway(time_left) => {
                 let duration = time_left
@@ -131,13 +137,20 @@ pub(in crate::live) async fn run_control_lane(
                 if let Some(cb) = &callbacks.on_go_away {
                     dispatch_callback!(callbacks.on_go_away_mode, cb(duration));
                 }
+                let _ = event_tx.send(LiveEvent::GoAway {
+                    time_left: duration,
+                });
             }
             ControlEvent::Connected => {
                 if let Some(cb) = &callbacks.on_connected {
                     dispatch_callback!(callbacks.on_connected_mode, cb(writer.clone()));
                 }
+                let _ = event_tx.send(LiveEvent::Connected);
             }
             ControlEvent::Disconnected(reason) => {
+                let _ = event_tx.send(LiveEvent::Disconnected {
+                    reason: reason.clone(),
+                });
                 if let Some(cb) = &callbacks.on_disconnected {
                     dispatch_callback!(callbacks.on_disconnected_mode, cb(reason));
                 }
@@ -160,11 +173,13 @@ pub(in crate::live) async fn run_control_lane(
                         &state,
                         &callbacks,
                         true, // include current (pre-finalized) turn
+                        &event_tx,
                     )
                     .await;
                 }
             }
             ControlEvent::Error(err) => {
+                let _ = event_tx.send(LiveEvent::Error(err.clone()));
                 if let Some(cb) = &callbacks.on_error {
                     dispatch_callback!(callbacks.on_error_mode, cb(err));
                 }

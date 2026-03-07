@@ -31,6 +31,7 @@ pub struct LiveHandle {
     _ctrl_task: Arc<JoinHandle<()>>,
     state: State,
     telemetry: Arc<SessionTelemetry>,
+    event_tx: broadcast::Sender<super::events::LiveEvent>,
 }
 
 impl LiveHandle {
@@ -41,6 +42,7 @@ impl LiveHandle {
         ctrl_task: JoinHandle<()>,
         state: State,
         telemetry: Arc<SessionTelemetry>,
+        event_tx: broadcast::Sender<super::events::LiveEvent>,
     ) -> Self {
         Self {
             session,
@@ -49,6 +51,7 @@ impl LiveHandle {
             _ctrl_task: Arc::new(ctrl_task),
             state,
             telemetry,
+            event_tx,
         }
     }
 
@@ -141,6 +144,14 @@ impl LiveHandle {
     /// Use `telemetry().snapshot()` to get a JSON snapshot of all metrics.
     pub fn telemetry(&self) -> &Arc<SessionTelemetry> {
         &self.telemetry
+    }
+
+    /// Subscribe to semantic events from the processor.
+    ///
+    /// Returns a broadcast receiver. Call multiple times for independent
+    /// subscribers. Zero-cost when no subscribers exist.
+    pub fn events(&self) -> broadcast::Receiver<super::events::LiveEvent> {
+        self.event_tx.subscribe()
     }
 
     /// Convenience: get the latest extraction result by extractor name.

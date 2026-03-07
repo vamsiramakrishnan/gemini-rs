@@ -82,7 +82,7 @@ pub mod prelude {
     pub use rs_adk::agent_session::*;
     pub use rs_adk::live::{
         CallbackMode, ContextDelivery, DefaultResultFormatter, DeferredWriter, EventCallbacks,
-        ExtractionTrigger, FsPersistence, LiveHandle, LiveSessionBuilder, LlmExtractor,
+        ExtractionTrigger, FsPersistence, LiveEvent, LiveHandle, LiveSessionBuilder, LlmExtractor,
         MemoryPersistence, NeedsFulfillment, PendingContext, RepairAction, RepairConfig,
         ResultFormatter, SessionPersistence, SessionSnapshot, SoftTurnDetector, SteeringMode,
         ToolExecutionMode, TranscriptBuffer, TranscriptTurn, TurnExtractor,

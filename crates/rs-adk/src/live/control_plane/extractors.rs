@@ -4,7 +4,10 @@ use std::sync::Arc;
 
 use crate::state::State;
 
+use tokio::sync::broadcast;
+
 use crate::live::callbacks::EventCallbacks;
+use crate::live::events::LiveEvent;
 use crate::live::extractor::TurnExtractor;
 use crate::live::transcript::TranscriptBuffer;
 
@@ -19,6 +22,7 @@ pub(in crate::live) async fn run_extractors(
     transcript_buffer: &mut TranscriptBuffer,
     state: &State,
     callbacks: &EventCallbacks,
+    event_tx: &broadcast::Sender<LiveEvent>,
 ) {
     if extractors.is_empty() {
         return;
@@ -55,6 +59,11 @@ pub(in crate::live) async fn run_extractors(
         match result {
             Ok((name, value)) => {
                 state.set(&name, &value);
+                // Emit top-level extraction event
+                let _ = event_tx.send(LiveEvent::Extraction {
+                    name: name.clone(),
+                    value: value.clone(),
+                });
                 // Auto-flatten: promote each top-level field.
                 // Accumulative merge: null extraction values do NOT overwrite
                 // previously extracted non-null values.  This prevents the
@@ -67,6 +76,10 @@ pub(in crate::live) async fn run_extractors(
                             continue;
                         }
                         state.set(field, val.clone());
+                        let _ = event_tx.send(LiveEvent::Extraction {
+                            name: format!("{name}.{field}"),
+                            value: val.clone(),
+                        });
                     }
                 }
                 if let Some(cb) = &callbacks.on_extracted {
@@ -74,6 +87,10 @@ pub(in crate::live) async fn run_extractors(
                 }
             }
             Err((name, error)) => {
+                let _ = event_tx.send(LiveEvent::ExtractionError {
+                    name: name.clone(),
+                    error: error.clone(),
+                });
                 if let Some(cb) = &callbacks.on_extraction_error {
                     dispatch_callback!(callbacks.on_extraction_error_mode, cb(name, error));
                 }
@@ -92,6 +109,7 @@ pub(in crate::live) async fn run_extractors_with_window(
     state: &State,
     callbacks: &EventCallbacks,
     include_current: bool,
+    event_tx: &broadcast::Sender<LiveEvent>,
 ) {
     if extractors.is_empty() {
         return;
@@ -131,12 +149,20 @@ pub(in crate::live) async fn run_extractors_with_window(
         match result {
             Ok((name, value)) => {
                 state.set(&name, &value);
+                let _ = event_tx.send(LiveEvent::Extraction {
+                    name: name.clone(),
+                    value: value.clone(),
+                });
                 if let Some(obj) = value.as_object() {
                     for (field, val) in obj {
                         if val.is_null() {
                             continue;
                         }
                         state.set(field, val.clone());
+                        let _ = event_tx.send(LiveEvent::Extraction {
+                            name: format!("{name}.{field}"),
+                            value: val.clone(),
+                        });
                     }
                 }
                 if let Some(cb) = &callbacks.on_extracted {
@@ -144,6 +170,10 @@ pub(in crate::live) async fn run_extractors_with_window(
                 }
             }
             Err((name, error)) => {
+                let _ = event_tx.send(LiveEvent::ExtractionError {
+                    name: name.clone(),
+                    error: error.clone(),
+                });
                 if let Some(cb) = &callbacks.on_extraction_error {
                     dispatch_callback!(callbacks.on_extraction_error_mode, cb(name, error));
                 }

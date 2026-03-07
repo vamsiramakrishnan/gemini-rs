@@ -103,6 +103,9 @@ impl Live {
             builder = builder.session_id(id);
         }
         builder = builder.tool_advisory(self.tool_advisory);
+        if let Some(interval) = self.telemetry_interval {
+            builder = builder.telemetry_interval(interval);
+        }
 
         // Spawn fire-and-forget warm-up tasks for OOB LLMs
         // (pre-establishes TCP+TLS so first extract call is fast)

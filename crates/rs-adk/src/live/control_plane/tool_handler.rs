@@ -12,6 +12,7 @@ use crate::tool::ToolDispatcher;
 
 use crate::live::background_tool::BackgroundToolTracker;
 use crate::live::callbacks::EventCallbacks;
+use crate::live::events::LiveEvent;
 use crate::live::extractor::{ExtractionTrigger, TurnExtractor};
 use crate::live::phase::PhaseMachine;
 use crate::live::transcript::TranscriptBuffer;
@@ -33,6 +34,7 @@ pub(in crate::live) async fn handle_tool_calls(
     >,
     background_tracker: &Option<Arc<BackgroundToolTracker>>,
     extractors: &[Arc<dyn TurnExtractor>],
+    event_tx: &tokio::sync::broadcast::Sender<LiveEvent>,
 ) {
     // 0. Phase-scoped tool filtering: reject calls not in phase's allowed list
     let (allowed_calls, rejected_responses) = if let Some(ref pm) = phase_machine {
@@ -148,7 +150,7 @@ pub(in crate::live) async fn handle_tool_calls(
         responses
     };
 
-    // 4. Record tool call summaries in transcript buffer (no mutex)
+    // 4. Record tool call summaries in transcript buffer (no mutex) + emit LiveEvents
     for resp in &responses {
         let args = allowed_calls
             .iter()
@@ -156,6 +158,11 @@ pub(in crate::live) async fn handle_tool_calls(
             .map(|c| &c.args)
             .unwrap_or(&serde_json::Value::Null);
         transcript_buffer.push_tool_call(resp.name.clone(), args, &resp.response);
+        let _ = event_tx.send(LiveEvent::ToolExecution {
+            name: resp.name.clone(),
+            args: args.clone(),
+            result: resp.response.clone(),
+        });
     }
 
     // 5. Send tool responses (standard + ack) back to Gemini
@@ -217,5 +224,12 @@ pub(in crate::live) async fn handle_tool_calls(
         .filter(|e| matches!(e.trigger(), ExtractionTrigger::AfterToolCall))
         .cloned()
         .collect();
-    run_extractors(&after_tool_extractors, transcript_buffer, state, callbacks).await;
+    run_extractors(
+        &after_tool_extractors,
+        transcript_buffer,
+        state,
+        callbacks,
+        event_tx,
+    )
+    .await;
 }

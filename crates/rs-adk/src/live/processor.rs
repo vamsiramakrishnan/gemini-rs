@@ -25,6 +25,7 @@ use super::callbacks::EventCallbacks;
 use super::computed::ComputedRegistry;
 use super::context_writer::PendingContext;
 use super::control_plane::run_control_lane;
+use super::events::LiveEvent;
 use super::extractor::TurnExtractor;
 use super::needs::NeedsFulfillment;
 use super::persistence::SessionPersistence;
@@ -131,6 +132,7 @@ pub(crate) fn spawn_event_processor(
     background_tracker: Option<Arc<BackgroundToolTracker>>,
     execution_modes: std::collections::HashMap<String, super::background_tool::ToolExecutionMode>,
     control_plane: ControlPlaneConfig,
+    live_event_tx: broadcast::Sender<LiveEvent>,
 ) -> (tokio::task::JoinHandle<()>, tokio::task::JoinHandle<()>) {
     let pending_context = if control_plane.context_delivery == ContextDelivery::Deferred {
         Some(Arc::new(PendingContext::new()))
@@ -174,8 +176,9 @@ pub(crate) fn spawn_event_processor(
     // Spawn fast consumer (no transcript buffer — transcripts are in control lane)
     let fast_callbacks = callbacks.clone();
     let fast_shared = shared.clone();
+    let fast_event_tx = live_event_tx.clone();
     let fast_handle = tokio::spawn(async move {
-        run_fast_lane(fast_rx, fast_callbacks, fast_shared).await;
+        run_fast_lane(fast_rx, fast_callbacks, fast_shared, fast_event_tx).await;
     });
 
     // Clone for the timer task (before moving into ctrl spawn)
@@ -203,6 +206,7 @@ pub(crate) fn spawn_event_processor(
             background_tracker,
             execution_modes,
             control_plane,
+            live_event_tx,
         )
         .await;
         ctrl_timer_cancel.cancel();
@@ -394,6 +398,7 @@ async fn run_fast_lane(
     mut rx: mpsc::Receiver<FastEvent>,
     callbacks: Arc<EventCallbacks>,
     shared: Arc<SharedState>,
+    event_tx: broadcast::Sender<LiveEvent>,
 ) {
     while let Some(event) = rx.recv().await {
         match event {
@@ -403,52 +408,68 @@ async fn run_fast_lane(
                     if let Some(cb) = &callbacks.on_audio {
                         cb(&data);
                     }
+                    let _ = event_tx.send(LiveEvent::Audio(data));
                 }
             }
             FastEvent::Text(delta) => {
                 if let Some(cb) = &callbacks.on_text {
                     cb(&delta);
                 }
+                let _ = event_tx.send(LiveEvent::TextDelta(delta));
             }
             FastEvent::TextComplete(text) => {
                 if let Some(cb) = &callbacks.on_text_complete {
                     cb(&text);
                 }
+                let _ = event_tx.send(LiveEvent::TextComplete(text));
             }
             FastEvent::InputTranscript(text) => {
                 // Callback only — accumulation happens in control lane
                 if let Some(cb) = &callbacks.on_input_transcript {
                     cb(&text, false);
                 }
+                let _ = event_tx.send(LiveEvent::InputTranscript {
+                    text,
+                    is_final: false,
+                });
             }
             FastEvent::OutputTranscript(text) => {
                 // Callback only — accumulation happens in control lane
                 if let Some(cb) = &callbacks.on_output_transcript {
                     cb(&text, false);
                 }
+                let _ = event_tx.send(LiveEvent::OutputTranscript {
+                    text,
+                    is_final: false,
+                });
             }
             FastEvent::Thought(text) => {
                 if let Some(cb) = &callbacks.on_thought {
                     cb(&text);
                 }
+                let _ = event_tx.send(LiveEvent::Thought(text));
             }
             FastEvent::VadStart => {
                 if let Some(cb) = &callbacks.on_vad_start {
                     cb();
                 }
+                let _ = event_tx.send(LiveEvent::VadStart);
             }
             FastEvent::VadEnd => {
                 if let Some(cb) = &callbacks.on_vad_end {
                     cb();
                 }
+                let _ = event_tx.send(LiveEvent::VadEnd);
             }
             FastEvent::Phase(phase) => {
                 if let Some(cb) = &callbacks.on_phase {
                     cb(phase);
                 }
+                // Phase is L0-level wire event, not emitted as LiveEvent
             }
             FastEvent::Interrupted => {
                 // Audio already suppressed via shared.interrupted flag
+                // Interrupted LiveEvent is emitted from control lane
             }
         }
     }
@@ -459,7 +480,12 @@ mod tests {
     use super::*;
     use std::sync::atomic::AtomicUsize;
 
+    use crate::live::events::LiveEvent;
     use rs_genai::prelude::FunctionResponse;
+
+    fn dummy_event_tx() -> broadcast::Sender<LiveEvent> {
+        broadcast::channel::<LiveEvent>(16).0
+    }
 
     #[tokio::test]
     async fn fast_lane_routes_audio() {
@@ -491,6 +517,7 @@ mod tests {
             None,
             std::collections::HashMap::new(),
             ControlPlaneConfig::default(),
+            dummy_event_tx(),
         );
 
         // Send audio events
@@ -538,6 +565,7 @@ mod tests {
             None,
             std::collections::HashMap::new(),
             ControlPlaneConfig::default(),
+            dummy_event_tx(),
         );
 
         // Send audio, then interrupt, then more audio
@@ -589,6 +617,7 @@ mod tests {
             None,
             std::collections::HashMap::new(),
             ControlPlaneConfig::default(),
+            dummy_event_tx(),
         );
 
         let _ = event_tx.send(SessionEvent::TurnComplete);
@@ -625,6 +654,7 @@ mod tests {
             None,
             std::collections::HashMap::new(),
             ControlPlaneConfig::default(),
+            dummy_event_tx(),
         );
 
         // Send transcripts
@@ -695,6 +725,7 @@ mod tests {
             None,
             std::collections::HashMap::new(),
             ControlPlaneConfig::default(),
+            dummy_event_tx(),
         );
 
         // Produce a turn with content
@@ -850,6 +881,7 @@ mod tests {
             Some(tracker.clone()),
             execution_modes,
             ControlPlaneConfig::default(),
+            dummy_event_tx(),
         );
 
         // Send a tool call
@@ -927,6 +959,7 @@ mod tests {
             None,
             std::collections::HashMap::new(),
             ControlPlaneConfig::default(),
+            dummy_event_tx(),
         );
 
         let _ = event_tx.send(SessionEvent::TurnComplete);
@@ -977,6 +1010,7 @@ mod tests {
             None,
             std::collections::HashMap::new(),
             ControlPlaneConfig::default(),
+            dummy_event_tx(),
         );
 
         let _ = event_tx.send(SessionEvent::TurnComplete);

@@ -124,6 +124,7 @@ pub struct Live {
     pub(crate) persistence: Option<Arc<dyn SessionPersistence>>,
     pub(crate) session_id: Option<String>,
     pub(crate) tool_advisory: bool,
+    pub(crate) telemetry_interval: Option<Duration>,
 }
 
 impl Live {
@@ -191,7 +192,17 @@ impl Live {
             persistence: None,
             session_id: None,
             tool_advisory: true,
+            telemetry_interval: None,
         }
+    }
+
+    /// Set the periodic telemetry emission interval.
+    ///
+    /// When set, the processor emits `LiveEvent::Telemetry` snapshots
+    /// and `LiveEvent::TurnMetrics` at this rate.
+    pub fn telemetry_interval(mut self, interval: Duration) -> Self {
+        self.telemetry_interval = Some(interval);
+        self
     }
 }
 
