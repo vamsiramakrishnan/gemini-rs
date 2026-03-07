@@ -653,13 +653,14 @@ impl CookbookApp for DebtCollection {
             // --- Regex extractor ---
             .extractor(extractor)
             // --- LLM extraction (windowed, min 5 words to skip "uh huh" / "ok") ---
-            .extract_turns_windowed::<DebtorState>(
+            .extract_turns_triggered::<DebtorState>(
                 llm,
                 "Extract from the debt collection conversation: the debtor's emotional state \
                  (calm/cooperative/frustrated/angry), willingness to pay (0.0-1.0), \
                  negotiation intent (full_pay/partial_pay/dispute/refuse/delay), \
                  whether they requested cease-and-desist, and whether they acknowledged the debt.",
                 5,
+                ExtractionTrigger::Interval(2),
             )
             // --- on_extraction_error: log failures (concurrent — fire-and-forget) ---
             .on_extraction_error_concurrent(|name, err| async move {
@@ -752,6 +753,7 @@ impl CookbookApp for DebtCollection {
             })
             // --- Phase defaults (inherited by all phases) ---
             .phase_defaults(|d| d
+                .navigation()
                 .with_context(collection_context)
                 .when(risk_is_elevated, RISK_WARNING)
             )
@@ -759,9 +761,10 @@ impl CookbookApp for DebtCollection {
             // Phase 1: Disclosure (Mini-Miranda)
             .phase("disclosure")
                 .instruction(DISCLOSURE_INSTRUCTION)
+                .needs(&["disclosure_given"])
                 .prompt_on_enter(true)
-                .transition("verify_identity", S::is_true("disclosure_given"))
-                .transition("close", S::is_true("cease_desist_requested"))
+                .transition_with("verify_identity", S::is_true("disclosure_given"), "when disclosure has been given")
+                .transition_with("close", S::is_true("cease_desist_requested"), "when debtor requests cease and desist")
                 .on_enter(move |_state, _writer| {
                     let tx = tx_enter_disclosure.clone();
                     async move {
@@ -785,9 +788,10 @@ impl CookbookApp for DebtCollection {
             // Phase 2: Verify Identity
             .phase("verify_identity")
                 .instruction(VERIFY_IDENTITY_INSTRUCTION)
+                .needs(&["identity_verified"])
                 .guard(S::is_true("disclosure_given"))
-                .transition("inform_debt", S::is_true("identity_verified"))
-                .transition("close", S::is_true("cease_desist_requested"))
+                .transition_with("inform_debt", S::is_true("identity_verified"), "when identity is verified")
+                .transition_with("close", S::is_true("cease_desist_requested"), "when debtor requests cease and desist")
                 .on_enter(move |_state, _writer| {
                     let tx = tx_enter_verify.clone();
                     async move {
@@ -819,11 +823,12 @@ impl CookbookApp for DebtCollection {
             // Phase 3: Inform Debt
             .phase("inform_debt")
                 .instruction(INFORM_DEBT_INSTRUCTION)
+                .needs(&["debt_acknowledged"])
                 .guard(S::is_true("identity_verified"))
-                .transition("negotiate", S::is_true("debt_acknowledged"))
-                .transition("close", |s| {
+                .transition_with("negotiate", S::is_true("debt_acknowledged"), "when debt is acknowledged")
+                .transition_with("close", |s| {
                     S::is_true("cease_desist_requested")(s) || S::eq("negotiation_intent", "dispute")(s)
-                })
+                }, "when debtor disputes or requests cease and desist")
                 .on_enter(move |_state, _writer| {
                     let tx = tx_enter_inform.clone();
                     async move {
@@ -846,11 +851,12 @@ impl CookbookApp for DebtCollection {
             // Phase 4: Negotiate
             .phase("negotiate")
                 .instruction(NEGOTIATE_INSTRUCTION)
+                .needs(&["negotiation_intent", "willingness_to_pay"])
                 .guard(S::is_true("debt_acknowledged"))
-                .transition("arrange_payment", S::one_of("negotiation_intent", &["full_pay", "partial_pay"]))
-                .transition("close", |s| {
+                .transition_with("arrange_payment", S::one_of("negotiation_intent", &["full_pay", "partial_pay"]), "when debtor agrees to full or partial payment")
+                .transition_with("close", |s| {
                     S::is_true("cease_desist_requested")(s) || S::eq("negotiation_intent", "refuse")(s)
-                })
+                }, "when debtor refuses to pay or requests cease and desist")
                 .on_enter(move |_state, _writer| {
                     let tx = tx_enter_negotiate.clone();
                     async move {
@@ -876,9 +882,10 @@ impl CookbookApp for DebtCollection {
             // Phase 5: Arrange Payment
             .phase("arrange_payment")
                 .instruction(ARRANGE_PAYMENT_INSTRUCTION)
+                .needs(&["payment_processed"])
                 .guard(S::one_of("negotiation_intent", &["full_pay", "partial_pay"]))
-                .transition("confirm", S::is_true("payment_processed"))
-                .transition("close", S::is_true("cease_desist_requested"))
+                .transition_with("confirm", S::is_true("payment_processed"), "when payment is processed")
+                .transition_with("close", S::is_true("cease_desist_requested"), "when debtor requests cease and desist")
                 .on_enter(move |_state, _writer| {
                     let tx = tx_enter_arrange.clone();
                     async move {
@@ -903,11 +910,11 @@ impl CookbookApp for DebtCollection {
             .phase("confirm")
                 .instruction(CONFIRM_INSTRUCTION)
                 .guard(S::is_true("payment_processed"))
-                .transition("close", |_s| {
+                .transition_with("close", |_s| {
                     // Close after confirmation summary is delivered
                     // (model will naturally complete the summary turn)
                     true
-                })
+                }, "after confirmation is complete")
                 .on_enter(move |_state, _writer| {
                     let tx = tx_enter_confirm.clone();
                     async move {

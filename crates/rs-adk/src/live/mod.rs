@@ -28,7 +28,7 @@ pub use builder::LiveSessionBuilder;
 pub use callbacks::{CallbackMode, EventCallbacks};
 pub use computed::{ComputedRegistry, ComputedVar};
 pub use context_builder::ContextBuilder;
-pub use extractor::{LlmExtractor, TurnExtractor};
+pub use extractor::{ExtractionTrigger, LlmExtractor, TurnExtractor};
 pub use handle::LiveHandle;
 pub use phase::{InstructionModifier, Phase, PhaseInstruction, PhaseMachine, PhaseTransition, Transition, TransitionResult, TransitionTrigger};
 pub use session_signals::{SessionSignals, SessionType};

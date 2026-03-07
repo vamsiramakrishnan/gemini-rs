@@ -23,7 +23,7 @@ use crate::tool::ToolDispatcher;
 use super::background_tool::BackgroundToolTracker;
 use super::callbacks::{CallbackMode, EventCallbacks};
 use super::computed::ComputedRegistry;
-use super::extractor::TurnExtractor;
+use super::extractor::{ExtractionTrigger, TurnExtractor};
 use super::phase::{PhaseMachine, TransitionResult};
 use super::session_signals::SessionSignals;
 use super::telemetry::SessionTelemetry;
@@ -402,6 +402,7 @@ async fn handle_tool_calls(
     transcript_buffer: &mut TranscriptBuffer,
     execution_modes: &std::collections::HashMap<String, super::background_tool::ToolExecutionMode>,
     background_tracker: &Option<Arc<BackgroundToolTracker>>,
+    extractors: &[Arc<dyn TurnExtractor>],
 ) {
     // 0. Phase-scoped tool filtering: reject calls not in phase's allowed list
     let (allowed_calls, rejected_responses) = if let Some(ref pm) = phase_machine {
@@ -568,6 +569,89 @@ async fn handle_tool_calls(
             t.spawn(call_id, handle, cancel);
         }
     }
+
+    // 7. Run AfterToolCall extractors
+    let after_tool_extractors: Vec<Arc<dyn TurnExtractor>> = extractors
+        .iter()
+        .filter(|e| matches!(e.trigger(), ExtractionTrigger::AfterToolCall))
+        .cloned()
+        .collect();
+    run_extractors(&after_tool_extractors, transcript_buffer, state, callbacks).await;
+}
+
+/// Run a subset of extractors concurrently and merge results into state.
+///
+/// Shared between handle_turn_complete (EveryTurn/Interval),
+/// handle_tool_calls (AfterToolCall), and phase transitions (OnPhaseChange).
+async fn run_extractors(
+    extractors: &[Arc<dyn TurnExtractor>],
+    transcript_buffer: &mut TranscriptBuffer,
+    state: &State,
+    callbacks: &EventCallbacks,
+) {
+    if extractors.is_empty() {
+        return;
+    }
+
+    let extraction_futures: Vec<_> = extractors
+        .iter()
+        .filter_map(|extractor| {
+            let window_size = extractor.window_size();
+            let window: Vec<_> = transcript_buffer.window(window_size).to_vec();
+            if window.is_empty() {
+                return None;
+            }
+            // Check should_extract before launching async work
+            if !extractor.should_extract(&window) {
+                return None;
+            }
+            let ext = extractor.clone();
+            Some(async move {
+                match ext.extract(&window).await {
+                    Ok(value) => Ok((ext.name().to_string(), value)),
+                    Err(e) => {
+                        #[cfg(feature = "tracing-support")]
+                        tracing::warn!(
+                            extractor = ext.name(),
+                            "Extraction failed: {e}"
+                        );
+                        Err((ext.name().to_string(), e.to_string()))
+                    }
+                }
+            })
+        })
+        .collect();
+
+    let results = futures::future::join_all(extraction_futures).await;
+    for result in results {
+        match result {
+            Ok((name, value)) => {
+                state.set(&name, &value);
+                // Auto-flatten: promote each top-level field.
+                // Accumulative merge: null extraction values do NOT overwrite
+                // previously extracted non-null values.  This prevents the
+                // LLM from "forgetting" information gathered in earlier turns
+                // when the current window lacks that data.
+                if let Some(obj) = value.as_object() {
+                    for (field, val) in obj {
+                        if val.is_null() {
+                            // Skip — don't erase previously extracted data
+                            continue;
+                        }
+                        state.set(field, val.clone());
+                    }
+                }
+                if let Some(cb) = &callbacks.on_extracted {
+                    dispatch_callback!(callbacks.on_extracted_mode, cb(name, value));
+                }
+            }
+            Err((name, error)) => {
+                if let Some(cb) = &callbacks.on_extraction_error {
+                    dispatch_callback!(callbacks.on_extraction_error_mode, cb(name, error));
+                }
+            }
+        }
+    }
 }
 
 /// Handle the TurnComplete pipeline: transcript finalization, extraction,
@@ -587,6 +671,7 @@ async fn handle_turn_complete(
     watchers: &Option<WatcherRegistry>,
     temporal: &Option<Arc<TemporalRegistry>>,
     transcript_buffer: &mut TranscriptBuffer,
+    extraction_turn_tracker: &mut std::collections::HashMap<String, u32>,
 ) {
     // 1. Reset turn-scoped state
     state.clear_prefix("turn:");
@@ -610,58 +695,30 @@ async fn handle_turn_complete(
         )
     });
 
-    // 4. Run extractors CONCURRENTLY
-    if !extractors.is_empty() {
-        let extraction_futures: Vec<_> = extractors
-            .iter()
-            .filter_map(|extractor| {
-                let window_size = extractor.window_size();
-                let window: Vec<_> = transcript_buffer.window(window_size).to_vec();
-                if window.is_empty() {
-                    return None;
-                }
-                // Check should_extract before launching async work
-                if !extractor.should_extract(&window) {
-                    return None;
-                }
-                let ext = extractor.clone();
-                Some(async move {
-                    match ext.extract(&window).await {
-                        Ok(value) => Ok((ext.name().to_string(), value)),
-                        Err(e) => {
-                            #[cfg(feature = "tracing-support")]
-                            tracing::warn!(
-                                extractor = ext.name(),
-                                "Extraction failed: {e}"
-                            );
-                            Err((ext.name().to_string(), e.to_string()))
-                        }
-                    }
-                })
-            })
-            .collect();
-
-        let results = futures::future::join_all(extraction_futures).await;
-        for result in results {
-            match result {
-                Ok((name, value)) => {
-                    state.set(&name, &value);
-                    // Auto-flatten: promote each top-level field
-                    if let Some(obj) = value.as_object() {
-                        for (field, val) in obj {
-                            state.set(field, val.clone());
-                        }
-                    }
-                    if let Some(cb) = &callbacks.on_extracted {
-                        dispatch_callback!(callbacks.on_extracted_mode, cb(name, value));
-                    }
-                }
-                Err((name, error)) => {
-                    if let Some(cb) = &callbacks.on_extraction_error {
-                        dispatch_callback!(callbacks.on_extraction_error_mode, cb(name, error));
-                    }
-                }
+    // 4. Run extractors matching EveryTurn or Interval triggers
+    let current_turn = state.session().get::<u32>("turn_count").unwrap_or(0);
+    let turn_extractors: Vec<Arc<dyn TurnExtractor>> = extractors
+        .iter()
+        .filter(|e| match e.trigger() {
+            ExtractionTrigger::EveryTurn => true,
+            ExtractionTrigger::Interval(n) => {
+                let last = extraction_turn_tracker
+                    .get(e.name())
+                    .copied()
+                    .unwrap_or(0);
+                current_turn.saturating_sub(last) >= n
             }
+            ExtractionTrigger::AfterToolCall | ExtractionTrigger::OnPhaseChange => false,
+        })
+        .cloned()
+        .collect();
+
+    run_extractors(&turn_extractors, transcript_buffer, state, callbacks).await;
+
+    // Update interval trackers for extractors that ran
+    for ext in &turn_extractors {
+        if matches!(ext.trigger(), ExtractionTrigger::Interval(_)) {
+            extraction_turn_tracker.insert(ext.name().to_string(), current_turn);
         }
     }
 
@@ -679,9 +736,11 @@ async fn handle_turn_complete(
     let mut resolved_instruction: Option<String> = None;
     let mut transition_result: Option<TransitionResult> = None;
 
-    // 7. Evaluate phase transitions
+    // 7. Evaluate phase transitions + compute navigation context
     if let Some(ref pm) = phase_machine {
         let mut machine = pm.lock().await;
+
+        // 7a. Evaluate transitions
         if let Some((target, transition_index)) =
             machine.evaluate(state).map(|(s, i)| (s.to_string(), i))
         {
@@ -705,6 +764,20 @@ async fn handle_turn_complete(
                 }
             }
         }
+
+        // 7b. Always compute and store navigation context
+        let nav = machine.describe_navigation(state);
+        state.session().set("navigation_context", nav);
+    }
+
+    // 7c. Run OnPhaseChange extractors (if a transition fired)
+    if transition_result.is_some() {
+        let phase_change_extractors: Vec<Arc<dyn TurnExtractor>> = extractors
+            .iter()
+            .filter(|e| matches!(e.trigger(), ExtractionTrigger::OnPhaseChange))
+            .cloned()
+            .collect();
+        run_extractors(&phase_change_extractors, transcript_buffer, state, callbacks).await;
     }
 
     // 8. Fire watchers (compare pre vs post snapshots)
@@ -827,6 +900,10 @@ async fn run_control_lane(
     // TranscriptBuffer is exclusively owned by the control lane — no mutex.
     let mut transcript_buffer = TranscriptBuffer::new();
 
+    // Track which turn each interval-based extractor last ran on.
+    let mut extraction_turn_tracker: std::collections::HashMap<String, u32> =
+        std::collections::HashMap::new();
+
     while let Some(event) = rx.recv().await {
         match event {
             // ── Transcript accumulation (exclusive to control lane) ──
@@ -848,6 +925,7 @@ async fn run_control_lane(
                     &mut transcript_buffer,
                     &execution_modes,
                     &background_tracker,
+                    &extractors,
                 )
                 .await;
             }
@@ -884,6 +962,7 @@ async fn run_control_lane(
                     &watchers,
                     &temporal,
                     &mut transcript_buffer,
+                    &mut extraction_turn_tracker,
                 )
                 .await;
             }

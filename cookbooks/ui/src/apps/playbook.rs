@@ -372,13 +372,14 @@ impl CookbookApp for Playbook {
                 }
             })
             // Phase machine: 6 phases with transition guards based on extracted state.
+            .phase_defaults(|d| d.navigation())
             .phase("greet")
                 .instruction(PHASES[0].instruction)
-                .transition("identify", |s| {
+                .transition_with("identify", |s| {
                     s.get::<serde_json::Value>("playbook_state")
                         .and_then(|v| v.get("customer_name").cloned())
                         .is_some()
-                })
+                }, "when customer name is provided")
                 .on_enter(move |_state, _writer| {
                     async move {
                         // Initial phase — entered at session start, no "from" phase.
@@ -388,11 +389,11 @@ impl CookbookApp for Playbook {
                 .done()
             .phase("identify")
                 .instruction(PHASES[1].instruction)
-                .transition("investigate", |s| {
+                .transition_with("investigate", |s| {
                     s.get::<serde_json::Value>("playbook_state")
                         .and_then(|v| v.get("issue_description").cloned())
                         .is_some()
-                })
+                }, "when issue description is provided")
                 .on_enter(move |_state, _writer| {
                     let tx = tx_enter_identify.clone();
                     async move {
@@ -411,11 +412,11 @@ impl CookbookApp for Playbook {
                 .done()
             .phase("investigate")
                 .instruction(PHASES[2].instruction)
-                .transition("explain", |s| {
+                .transition_with("explain", |s| {
                     s.get::<serde_json::Value>("playbook_state")
                         .and_then(|v| v.get("resolution_type").cloned())
                         .is_some()
-                })
+                }, "when resolution type is determined")
                 .on_enter(move |_state, _writer| {
                     let tx = tx_enter_investigate.clone();
                     async move {
@@ -434,11 +435,11 @@ impl CookbookApp for Playbook {
                 .done()
             .phase("explain")
                 .instruction(PHASES[3].instruction)
-                .transition("resolve", |s| {
+                .transition_with("resolve", |s| {
                     s.get::<serde_json::Value>("playbook_state")
                         .and_then(|v| v.get("customer_confirmed").cloned())
                         .is_some()
-                })
+                }, "when customer confirms understanding")
                 .on_enter(move |_state, _writer| {
                     let tx = tx_enter_explain.clone();
                     async move {
@@ -457,11 +458,11 @@ impl CookbookApp for Playbook {
                 .done()
             .phase("resolve")
                 .instruction(PHASES[4].instruction)
-                .transition("close", |s| {
+                .transition_with("close", |s| {
                     s.get::<serde_json::Value>("playbook_state")
                         .and_then(|v| v.get("satisfied").cloned())
                         .is_some()
-                })
+                }, "when customer is satisfied")
                 .on_enter(move |_state, _writer| {
                     let tx = tx_enter_resolve.clone();
                     async move {

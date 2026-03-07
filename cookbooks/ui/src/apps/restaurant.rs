@@ -654,7 +654,7 @@ async fn handle_session(
         // --- Model-initiated greeting ---
         .greeting("Welcome the caller to Bella Vista Italian Restaurant. Ask how you can help them today — whether they'd like to make a new reservation, modify an existing one, cancel, or have a question.")
         // --- LLM extraction ---
-        .extract_turns_windowed::<ReservationState>(llm, EXTRACTION_PROMPT, 5)
+        .extract_turns_triggered::<ReservationState>(llm, EXTRACTION_PROMPT, 5, ExtractionTrigger::Interval(2))
         // --- on_extracted: broadcast state to browser (concurrent — fire-and-forget) ---
         .on_extracted_concurrent({
             let tx = tx.clone();
@@ -742,18 +742,19 @@ async fn handle_session(
             }
         })
         // --- Phase defaults (inherited by all phases) ---
-        .phase_defaults(|d| d.with_context(reservation_context))
+        .phase_defaults(|d| d.navigation().with_context(reservation_context))
         // --- 8 Phases ---
         // Phase 1: Greeting
         .phase("greeting")
             .instruction(GREETING_INSTRUCTION)
             .prompt_on_enter(true)
-            .transition("check_availability", |s| {
+            .needs(&["guest_name", "party_size", "intent"])
+            .transition_with("check_availability", |s| {
                 S::eq("intent", "new_booking")(s)
                     && s.get::<u32>("party_size").is_some()
-            })
-            .transition("modification", S::eq("intent", "modify"))
-            .transition("cancellation", S::eq("intent", "cancel"))
+            }, "when guest name and party size are provided")
+            .transition_with("modification", S::eq("intent", "modify"), "when intent is modify")
+            .transition_with("cancellation", S::eq("intent", "cancel"), "when intent is cancel")
             .on_enter(move |_state, _writer| {
                 let tx = tx_enter_greeting.clone();
                 async move {
@@ -768,9 +769,10 @@ async fn handle_session(
         // Phase 2: Check Availability
         .phase("check_availability")
             .instruction(CHECK_AVAILABILITY_INSTRUCTION)
-            .transition("booking", |s| {
+            .needs(&["preferred_date", "preferred_time"])
+            .transition_with("booking", |s| {
                 s.get::<String>("preferred_time").is_some()
-            })
+            }, "when availability is confirmed")
             .on_enter(move |_state, _writer| {
                 let tx = tx_enter_check.clone();
                 async move {
@@ -798,14 +800,15 @@ async fn handle_session(
         // Phase 3: Booking
         .phase("booking")
             .instruction(BOOKING_INSTRUCTION)
-            .transition("special_requests", |s| {
+            .needs(&["phone"])
+            .transition_with("special_requests", |s| {
                 s.get::<String>("reservation_id").is_some()
                     && (s.get::<String>("dietary_needs").is_some()
                         || s.get::<String>("special_occasion").is_some())
-            })
-            .transition("confirmation", |s| {
+            }, "when booking details are confirmed")
+            .transition_with("confirmation", |s| {
                 s.get::<String>("reservation_id").is_some()
-            })
+            }, "when booking is complete")
             .on_enter(move |_state, _writer| {
                 let tx = tx_enter_booking.clone();
                 async move {
@@ -834,9 +837,10 @@ async fn handle_session(
         // Phase 4: Modification
         .phase("modification")
             .instruction(MODIFICATION_INSTRUCTION)
-            .transition("confirmation", |s| {
+            .needs(&["reservation_id"])
+            .transition_with("confirmation", |s| {
                 s.get::<String>("reservation_id").is_some()
-            })
+            }, "when modification is complete")
             .on_enter(move |_state, _writer| {
                 let tx = tx_enter_modification.clone();
                 async move {
@@ -862,10 +866,11 @@ async fn handle_session(
         // Phase 5: Cancellation
         .phase("cancellation")
             .instruction(CANCELLATION_INSTRUCTION)
-            .transition("farewell", |s| {
+            .needs(&["reservation_id"])
+            .transition_with("farewell", |s| {
                 // Move to farewell after cancellation is processed
                 s.get::<String>("reservation_id").is_some()
-            })
+            }, "when cancellation is processed")
             .on_enter(move |_state, _writer| {
                 let tx = tx_enter_cancellation.clone();
                 async move {
@@ -891,13 +896,14 @@ async fn handle_session(
         // Phase 6: Special Requests
         .phase("special_requests")
             .instruction(SPECIAL_REQUESTS_INSTRUCTION)
-            .transition("confirmation", |s| {
+            .needs(&["dietary_needs", "special_occasion"])
+            .transition_with("confirmation", |s| {
                 // Proceed once special request has been noted (reservation_id exists)
                 // plus a safety-net turn-count fallback
                 let has_res = s.get::<String>("reservation_id").is_some();
                 let tc: u32 = s.session().get("turn_count").unwrap_or(0);
                 has_res || tc >= 12
-            })
+            }, "when special requests are noted")
             .on_enter(move |_state, _writer| {
                 let tx = tx_enter_special.clone();
                 async move {
@@ -931,13 +937,13 @@ async fn handle_session(
         // Phase 7: Confirmation
         .phase("confirmation")
             .instruction(CONFIRMATION_INSTRUCTION)
-            .transition("farewell", |s| {
+            .transition_with("farewell", |s| {
                 // Primary: reservation_id exists (the booking is confirmed).
                 // Safety-net: cumulative turn_count >= 12 to avoid stuck sessions.
                 let has_res = s.get::<String>("reservation_id").is_some();
                 let tc: u32 = s.session().get("turn_count").unwrap_or(0);
                 has_res || tc >= 12
-            })
+            }, "when reservation is confirmed")
             .on_enter(move |_state, _writer| {
                 let tx = tx_enter_confirmation.clone();
                 async move {

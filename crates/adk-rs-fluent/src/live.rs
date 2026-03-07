@@ -34,7 +34,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
 
-use rs_adk::live::extractor::{LlmExtractor, TurnExtractor};
+use rs_adk::live::extractor::{ExtractionTrigger, LlmExtractor, TurnExtractor};
 use rs_adk::live::{
     CallbackMode, ComputedRegistry, ComputedVar, EventCallbacks, InstructionModifier, LiveHandle,
     LiveSessionBuilder, Phase, PhaseMachine, RateDetector, ResultFormatter, SustainedDetector,
@@ -432,7 +432,49 @@ impl Live {
         // Auto-register LLM for connection warming
         self.warm_up_llms.push(llm.clone());
 
-        let extractor = LlmExtractor::new(name, llm, prompt, window_size).with_schema(schema);
+        let extractor = LlmExtractor::new(name, llm, prompt, window_size)
+            .with_schema(schema)
+            .with_min_words(3);
+        self.extractors.push(Arc::new(extractor));
+        self
+    }
+
+    /// Like `extract_turns_windowed` but with a custom extraction trigger.
+    ///
+    /// Use `ExtractionTrigger::AfterToolCall` when tool calls are the primary
+    /// state source, `ExtractionTrigger::Interval(n)` to reduce extraction
+    /// frequency, or `ExtractionTrigger::OnPhaseChange` for phase-entry extraction.
+    pub fn extract_turns_triggered<T>(
+        mut self,
+        llm: Arc<dyn BaseLlm>,
+        prompt: impl Into<String>,
+        window_size: usize,
+        trigger: ExtractionTrigger,
+    ) -> Self
+    where
+        T: DeserializeOwned + Serialize + schemars::JsonSchema + Send + Sync + 'static,
+    {
+        // Auto-enable transcription
+        self.config = self
+            .config
+            .enable_input_transcription()
+            .enable_output_transcription();
+
+        let name = std::any::type_name::<T>()
+            .rsplit("::")
+            .next()
+            .unwrap_or("Extraction")
+            .to_string();
+
+        let root_schema = schemars::schema_for!(T);
+        let schema = serde_json::to_value(root_schema).unwrap_or(serde_json::Value::Null);
+
+        self.warm_up_llms.push(llm.clone());
+
+        let extractor = LlmExtractor::new(name, llm, prompt, window_size)
+            .with_schema(schema)
+            .with_min_words(3)
+            .with_trigger(trigger);
         self.extractors.push(Arc::new(extractor));
         self
     }
