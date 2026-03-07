@@ -99,6 +99,8 @@
           </button>
         </div>
 
+        <canvas class="minimap-canvas" id="minimap-canvas" height="24"></canvas>
+
         <!-- Session status bar -->
         <div class="devtools-status-bar" id="devtools-status-bar">
           <span class="status-health-dot" id="status-health"></span>
@@ -126,6 +128,9 @@
 
   <!-- Scripts -->
   <script src="/static/js/audio.js"></script>
+  <script src="/static/js/render/ring-buffer.js"></script>
+  <script src="/static/js/render/virtual-list.js"></script>
+  <script src="/static/js/render/render-scheduler.js"></script>
   <script src="/static/js/devtools.js"></script>
   <script src="/static/js/app.js"></script>
 

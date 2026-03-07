@@ -1,9 +1,25 @@
 /**
- * devtools.js — Devtools panel: State, Events, Playbook, Evaluator, NFR tabs
+ * devtools.js — Unified timeline panel with VirtualList rendering
  *
  * Exports:
  *   DevtoolsManager — manages devtools panel state and rendering
  */
+
+var BADGE_LABELS = {
+  textDelta: 'TEXT', textComplete: 'TEXT',
+  audio: 'AUDIO', turnComplete: 'TURN',
+  stateUpdate: 'STATE', phaseChange: 'PHASE',
+  toolCallEvent: 'TOOL', violation: 'VIOL',
+  evaluation: 'EVAL', spanEvent: 'SPAN',
+  connected: 'SYS', appMeta: 'META',
+  interrupted: 'INT', error: 'ERR',
+  inputTranscription: 'TXIN', outputTranscription: 'TXOUT',
+  voiceActivityStart: 'VAD', voiceActivityEnd: 'VAD',
+  telemetry: 'TEL', phaseTimeline: 'PHASE',
+  turnMetrics: 'TURN'
+};
+
+var DEFAULT_HIDDEN_TYPES = ['audio', 'voiceActivityStart', 'voiceActivityEnd'];
 
 class DevtoolsManager {
   /**
@@ -14,319 +30,492 @@ class DevtoolsManager {
     this.tabBar = container.querySelector('.devtools-tabs');
     this.contentArea = container.querySelector('.devtools-content');
 
-    // State
+    // Data storage — bounded ring buffer for events
+    this.events = new RingBuffer(10000);
     this.stateData = {};
-    this.events = [];
     this.phases = [];
-    this.evaluations = [];
-    this.violations = [];
     this.telemetry = {};
-    this.phaseTimeline = [];
+    this.turnLatencies = [];
     this.toolCalls = [];
-    this._telemetryRafPending = false;
+    this.phaseTimeline = [];
+    this.sessionStart = Date.now();
 
     // Current tab
-    this.activeTab = 'state';
+    this.activeTab = 'timeline';
 
     // Available tabs (updated when appMeta arrives)
-    this.availableTabs = ['state', 'events'];
+    this.availableTabs = ['timeline', 'state', 'metrics'];
 
     // DOM references
     this.panels = {};
     this.tabButtons = {};
 
-    // Session start time for relative timestamps
-    this.sessionStart = Date.now();
+    // Filter system
+    this._hiddenTypes = new Set(this._loadFilters());
+    this._searchQuery = '';
+    this._searchTimer = null;
+    this._filteredIndices = null; // null = show all (after type filter)
 
-    // Event type filters — types to HIDE from the events panel
-    this.hiddenEventTypes = new Set(['audio']);
+    // Expanded row tracking
+    this._expandedIdx = -1;
+    this._detailEl = null;
 
     // Status bar elements
     this._statusUptimeEl = null;
     this._statusPhaseEl = null;
     this._statusTurnsEl = null;
-    this._statusRafId = null;
+    this._statusHealthEl = null;
+    this._uptimeInterval = null;
+
+    // Render scheduler
+    this.scheduler = new RenderScheduler();
 
     this._initPanels();
     this._initTabs();
     this._initStatusBar();
     this._initResize();
+    this._initScheduler();
   }
 
   _initPanels() {
-    // State panel
-    const statePanel = document.createElement('div');
-    statePanel.className = 'devtools-panel active';
+    var self = this;
+
+    // Timeline panel (new — replaces events)
+    var timelinePanel = document.createElement('div');
+    timelinePanel.className = 'devtools-panel timeline-panel active';
+    timelinePanel.id = 'panel-timeline';
+
+    // Filter toolbar
+    var filterBar = document.createElement('div');
+    filterBar.className = 'tl-filters';
+    this._filterBar = filterBar;
+    this._buildFilterBar();
+    timelinePanel.appendChild(filterBar);
+
+    // Virtual list container
+    var listContainer = document.createElement('div');
+    listContainer.className = 'timeline-list-container';
+    timelinePanel.appendChild(listContainer);
+
+    this._timelineContainer = listContainer;
+    this.panels.timeline = timelinePanel;
+
+    // Initialize VirtualList
+    this._timelineVL = new VirtualList(listContainer, {
+      rowHeight: 28,
+      poolSize: 80,
+      render: function (el, event, idx) { self._renderTimelineRow(el, event, idx); }
+    });
+
+    // Click handler for expand/collapse
+    listContainer.addEventListener('click', function (e) {
+      var row = e.target.closest('.tl-row');
+      if (!row) return;
+      var idx = parseInt(row.dataset.idx, 10);
+      if (isNaN(idx)) return;
+      self._toggleDetail(idx);
+    });
+
+    // State panel (kept as-is for now — Task 5)
+    var statePanel = document.createElement('div');
+    statePanel.className = 'devtools-panel';
     statePanel.id = 'panel-state';
     statePanel.innerHTML = '<div class="state-empty">No state yet</div>';
     this.panels.state = statePanel;
 
-    // Events panel (with filter bar + scrollable event list)
-    const eventsPanel = document.createElement('div');
-    eventsPanel.className = 'devtools-panel events-panel-wrapper';
-    eventsPanel.id = 'panel-events';
+    // Phases panel (renamed from playbook — Task 6)
+    var phasesPanel = document.createElement('div');
+    phasesPanel.className = 'devtools-panel playbook-panel';
+    phasesPanel.id = 'panel-phases';
+    phasesPanel.innerHTML = '<div class="events-empty">No phase changes yet</div>';
+    this.panels.phases = phasesPanel;
 
-    // Filter bar
-    const filterBar = document.createElement('div');
-    filterBar.className = 'events-filter-bar';
-    filterBar.innerHTML = `
-      <span class="events-filter-label">Hide:</span>
-      <label class="events-filter-toggle">
-        <input type="checkbox" data-filter="audio" checked> audio
-      </label>
-      <label class="events-filter-toggle">
-        <input type="checkbox" data-filter="telemetry"> telemetry
-      </label>
-      <label class="events-filter-toggle">
-        <input type="checkbox" data-filter="voiceActivityStart"> vad
-      </label>
-    `;
-    filterBar.addEventListener('change', (e) => {
-      const cb = e.target;
-      if (!cb.dataset.filter) return;
-      const types = cb.dataset.filter.split(',');
-      types.forEach(t => {
-        if (cb.checked) this.hiddenEventTypes.add(t);
-        else this.hiddenEventTypes.delete(t);
-      });
-      // Also hide voiceActivityEnd when vad is hidden
-      if (cb.dataset.filter === 'voiceActivityStart') {
-        if (cb.checked) this.hiddenEventTypes.add('voiceActivityEnd');
-        else this.hiddenEventTypes.delete('voiceActivityEnd');
-      }
-      this._reRenderEvents();
-    });
-    eventsPanel.appendChild(filterBar);
-
-    // Scrollable event list
-    const eventList = document.createElement('div');
-    eventList.className = 'events-list';
-    eventList.innerHTML = '<div class="events-empty">No events yet</div>';
-    eventsPanel.appendChild(eventList);
-    this._eventList = eventList;     // inner scrollable list for rendering
-    this.panels.events = eventsPanel; // wrapper for tab switching
-
-    // Playbook panel
-    const playbookPanel = document.createElement('div');
-    playbookPanel.className = 'devtools-panel playbook-panel';
-    playbookPanel.id = 'panel-playbook';
-    playbookPanel.innerHTML = '<div class="events-empty">No phase changes yet</div>';
-    this.panels.playbook = playbookPanel;
-
-    // Evaluator panel
-    const evalPanel = document.createElement('div');
-    evalPanel.className = 'devtools-panel evaluator-panel';
-    evalPanel.id = 'panel-evaluator';
-    evalPanel.innerHTML = '<div class="events-empty">No evaluations yet</div>';
-    this.panels.evaluator = evalPanel;
-
-    // NFR panel (replaces old Telemetry panel)
-    const nfrPanel = document.createElement('div');
-    nfrPanel.className = 'devtools-panel nfr-panel';
-    nfrPanel.id = 'panel-nfr';
-    nfrPanel.innerHTML = '<div class="events-empty">No metrics yet</div>';
-    this.panels.nfr = nfrPanel;
+    // Metrics panel (renamed from NFR — Task 4)
+    var metricsPanel = document.createElement('div');
+    metricsPanel.className = 'devtools-panel nfr-panel';
+    metricsPanel.id = 'panel-metrics';
+    metricsPanel.innerHTML = '<div class="events-empty">No metrics yet</div>';
+    this.panels.metrics = metricsPanel;
 
     // Add all to content area
+    this.contentArea.appendChild(timelinePanel);
     this.contentArea.appendChild(statePanel);
-    this.contentArea.appendChild(eventsPanel);
-    this.contentArea.appendChild(playbookPanel);
-    this.contentArea.appendChild(evalPanel);
-    this.contentArea.appendChild(nfrPanel);
+    this.contentArea.appendChild(phasesPanel);
+    this.contentArea.appendChild(metricsPanel);
+  }
+
+  _buildFilterBar() {
+    var self = this;
+    var bar = this._filterBar;
+    bar.innerHTML = '';
+
+    // Collect known event types for toggle buttons
+    var types = [
+      'audio', 'voiceActivityStart', 'textDelta', 'textComplete',
+      'turnComplete', 'stateUpdate', 'phaseChange', 'toolCallEvent',
+      'telemetry', 'evaluation', 'violation', 'interrupted', 'error',
+      'inputTranscription', 'outputTranscription'
+    ];
+
+    types.forEach(function (type) {
+      var btn = document.createElement('button');
+      btn.className = 'tl-filter-btn';
+      if (self._hiddenTypes.has(type)) btn.classList.add('hidden');
+      btn.textContent = BADGE_LABELS[type] || type;
+      btn.title = type;
+      btn.addEventListener('click', function () {
+        if (self._hiddenTypes.has(type)) {
+          self._hiddenTypes.delete(type);
+          // Also show voiceActivityEnd when showing VAD start
+          if (type === 'voiceActivityStart') self._hiddenTypes.delete('voiceActivityEnd');
+          btn.classList.remove('hidden');
+        } else {
+          self._hiddenTypes.add(type);
+          if (type === 'voiceActivityStart') self._hiddenTypes.add('voiceActivityEnd');
+          btn.classList.add('hidden');
+        }
+        self._saveFilters();
+        self._applyFilters();
+        self.scheduler.markDirty('timeline');
+      });
+      bar.appendChild(btn);
+    });
+
+    // Search input
+    var search = document.createElement('input');
+    search.type = 'text';
+    search.className = 'tl-search';
+    search.placeholder = 'Search...';
+    search.addEventListener('input', function () {
+      clearTimeout(self._searchTimer);
+      self._searchTimer = setTimeout(function () {
+        self._searchQuery = search.value.trim().toLowerCase();
+        self._applyFilters();
+        self.scheduler.markDirty('timeline');
+      }, 150);
+    });
+    bar.appendChild(search);
+    this._searchInput = search;
+  }
+
+  _loadFilters() {
+    try {
+      var stored = localStorage.getItem('devtools-filters');
+      if (stored) return JSON.parse(stored);
+    } catch (e) { /* ignore */ }
+    return DEFAULT_HIDDEN_TYPES.slice();
+  }
+
+  _saveFilters() {
+    try {
+      localStorage.setItem('devtools-filters', JSON.stringify(Array.from(this._hiddenTypes)));
+    } catch (e) { /* ignore */ }
+  }
+
+  _applyFilters() {
+    var hidden = this._hiddenTypes;
+    var query = this._searchQuery;
+    var len = this.events.length;
+
+    if (hidden.size === 0 && !query) {
+      this._filteredIndices = null;
+      this._timelineVL.setFilter(null);
+      return;
+    }
+
+    var indices = [];
+    for (var i = 0; i < len; i++) {
+      var evt = this.events.get(i);
+      if (!evt) continue;
+      if (hidden.has(evt.type)) continue;
+      if (query && evt.summary.toLowerCase().indexOf(query) === -1) continue;
+      indices.push(i);
+    }
+    this._filteredIndices = indices;
+    this._timelineVL.setFilter(indices);
   }
 
   _initTabs() {
     this._renderTabs();
 
     // Collapse button
-    const collapseBtn = this.tabBar.querySelector('.devtools-collapse-btn');
+    var self = this;
+    var collapseBtn = this.tabBar.querySelector('.devtools-collapse-btn');
     if (collapseBtn) {
-      collapseBtn.addEventListener('click', () => this.toggleCollapse());
+      collapseBtn.addEventListener('click', function () { self.toggleCollapse(); });
     }
   }
 
   _renderTabs() {
     // Clear existing tab buttons but keep the spacer and collapse btn
-    const existing = this.tabBar.querySelectorAll('.devtools-tab');
-    existing.forEach(t => t.remove());
+    var existing = this.tabBar.querySelectorAll('.devtools-tab');
+    existing.forEach(function (t) { t.remove(); });
 
-    const spacer = this.tabBar.querySelector('.devtools-tab-spacer');
+    var spacer = this.tabBar.querySelector('.devtools-tab-spacer');
+    var self = this;
 
-    this.availableTabs.forEach(tabId => {
-      const btn = document.createElement('button');
-      btn.className = 'devtools-tab' + (tabId === this.activeTab ? ' active' : '');
-      btn.textContent = this._tabLabel(tabId);
+    this.availableTabs.forEach(function (tabId) {
+      var btn = document.createElement('button');
+      btn.className = 'devtools-tab' + (tabId === self.activeTab ? ' active' : '');
+      btn.textContent = self._tabLabel(tabId);
       btn.dataset.tab = tabId;
-      btn.addEventListener('click', () => this.switchTab(tabId));
-      this.tabButtons[tabId] = btn;
-      this.tabBar.insertBefore(btn, spacer);
+      btn.addEventListener('click', function () { self.switchTab(tabId); });
+      self.tabButtons[tabId] = btn;
+      self.tabBar.insertBefore(btn, spacer);
     });
   }
 
   _tabLabel(tabId) {
     switch (tabId) {
+      case 'timeline': return 'Timeline';
       case 'state': return 'State';
-      case 'events': return 'Events';
-      case 'playbook': return 'Playbook';
-      case 'evaluator': return 'Evaluator';
-      case 'nfr': return 'NFR';
+      case 'phases': return 'Phases';
+      case 'metrics': return 'Metrics';
       default: return tabId;
     }
   }
 
-  /**
-   * Switch to a tab.
-   * @param {string} tabId
-   */
+  _initScheduler() {
+    var self = this;
+    this.scheduler.register('timeline', function () { self._timelineVL.refresh(); });
+    this.scheduler.register('statusBar', function () { self._renderStatusBar(); });
+  }
+
+  // ------------------------------------------------
+  // Timeline row rendering
+  // ------------------------------------------------
+
+  _renderTimelineRow(el, event, idx) {
+    // Reuse or create child spans
+    if (!el._tlInit) {
+      el.className = 'tl-row';
+      el.innerHTML = '';
+
+      var timeSpan = document.createElement('span');
+      timeSpan.className = 'tl-time';
+      el.appendChild(timeSpan);
+      el._tlTime = timeSpan;
+
+      var badgeSpan = document.createElement('span');
+      badgeSpan.className = 'tl-badge';
+      el.appendChild(badgeSpan);
+      el._tlBadge = badgeSpan;
+
+      var contentSpan = document.createElement('span');
+      contentSpan.className = 'tl-content';
+      el.appendChild(contentSpan);
+      el._tlContent = contentSpan;
+
+      var durationSpan = document.createElement('span');
+      durationSpan.className = 'tl-duration';
+      el.appendChild(durationSpan);
+      el._tlDuration = durationSpan;
+
+      el._tlInit = true;
+    }
+
+    el.dataset.idx = idx;
+    el._tlTime.textContent = '[' + event.time + ']';
+
+    // Badge
+    var label = BADGE_LABELS[event.type] || event.type.toUpperCase();
+    el._tlBadge.textContent = label;
+    el._tlBadge.className = 'tl-badge tl-badge-' + event.type;
+
+    // Content
+    el._tlContent.textContent = event.summary;
+
+    // Duration
+    if (event.duration) {
+      el._tlDuration.textContent = event.duration;
+      el._tlDuration.style.display = '';
+    } else {
+      el._tlDuration.textContent = '';
+      el._tlDuration.style.display = 'none';
+    }
+  }
+
+  _toggleDetail(idx) {
+    // If clicking same row, collapse
+    if (this._expandedIdx === idx && this._detailEl) {
+      this._detailEl.remove();
+      this._detailEl = null;
+      this._expandedIdx = -1;
+      return;
+    }
+
+    // Remove previous detail
+    if (this._detailEl) {
+      this._detailEl.remove();
+      this._detailEl = null;
+    }
+
+    var event = this.events.get(idx);
+    if (!event) return;
+
+    // Find the clicked row element
+    var rows = this._timelineContainer.querySelectorAll('.tl-row[data-idx="' + idx + '"]');
+    if (rows.length === 0) return;
+    var row = rows[0];
+
+    // Create detail div
+    var detail = document.createElement('div');
+    detail.className = 'tl-detail';
+    try {
+      detail.textContent = JSON.stringify(event.raw, null, 2);
+    } catch (e) {
+      detail.textContent = String(event.raw);
+    }
+
+    // Insert after the row in the container
+    if (row.nextSibling) {
+      this._timelineContainer.insertBefore(detail, row.nextSibling);
+    } else {
+      this._timelineContainer.appendChild(detail);
+    }
+
+    this._detailEl = detail;
+    this._expandedIdx = idx;
+  }
+
+  // ------------------------------------------------
+  // Tab switching
+  // ------------------------------------------------
+
   switchTab(tabId) {
     this.activeTab = tabId;
 
-    // Update tab buttons
-    Object.entries(this.tabButtons).forEach(([id, btn]) => {
-      btn.classList.toggle('active', id === tabId);
+    Object.entries(this.tabButtons).forEach(function (entry) {
+      entry[1].classList.toggle('active', entry[0] === tabId);
     });
 
-    // Update panels
-    Object.entries(this.panels).forEach(([id, panel]) => {
-      panel.classList.toggle('active', id === tabId);
+    Object.entries(this.panels).forEach(function (entry) {
+      entry[1].classList.toggle('active', entry[0] === tabId);
     });
   }
 
-  /**
-   * Toggle devtools collapsed state.
-   */
   toggleCollapse() {
-    const isCollapsed = this.container.classList.toggle('collapsed');
-    const expandBtn = document.querySelector('.devtools-expand-btn');
+    var isCollapsed = this.container.classList.toggle('collapsed');
+    var expandBtn = document.querySelector('.devtools-expand-btn');
     if (expandBtn) {
       expandBtn.classList.toggle('visible', isCollapsed);
     }
   }
 
-  /**
-   * Expand devtools if collapsed.
-   */
   expand() {
     this.container.classList.remove('collapsed');
-    const expandBtn = document.querySelector('.devtools-expand-btn');
+    var expandBtn = document.querySelector('.devtools-expand-btn');
     if (expandBtn) {
       expandBtn.classList.remove('visible');
     }
   }
 
-  /**
-   * Handle appMeta to configure which tabs are visible.
-   * @param {object} info  AppInfo from server
-   */
+  // ------------------------------------------------
+  // handleAppMeta — configures visible tabs
+  // ------------------------------------------------
+
   handleAppMeta(info) {
-    this.availableTabs = ['state', 'events'];
+    this.availableTabs = ['timeline', 'state'];
 
-    const features = (info.features || []).map(f => f.toLowerCase());
+    var features = (info.features || []).map(function (f) { return f.toLowerCase(); });
 
-    if (features.includes('state-machine') || info.category === 'advanced') {
-      this.availableTabs.push('playbook');
+    if (features.includes('state-machine') || info.category === 'advanced' || info.category === 'showcase') {
+      this.availableTabs.push('phases');
     }
 
-    if (features.includes('evaluation') || features.includes('guardrails') || info.category === 'showcase') {
-      this.availableTabs.push('evaluator');
-    }
-
-    // Always show NFR tab
-    this.availableTabs.push('nfr');
+    // Always show metrics
+    this.availableTabs.push('metrics');
 
     this._renderTabs();
 
-    // If current tab is not available, switch to state
     if (!this.availableTabs.includes(this.activeTab)) {
-      this.switchTab('state');
+      this.switchTab('timeline');
     }
   }
 
-  /**
-   * Reset devtools state for a new session.
-   */
+  // ------------------------------------------------
+  // Reset for new session
+  // ------------------------------------------------
+
   reset() {
+    this.events = new RingBuffer(10000);
     this.stateData = {};
-    this.events = [];
     this.phases = [];
-    this.evaluations = [];
-    this.violations = [];
     this.telemetry = {};
-    this.phaseTimeline = [];
+    this.turnLatencies = [];
     this.toolCalls = [];
+    this.phaseTimeline = [];
     this.sessionStart = Date.now();
+    this._expandedIdx = -1;
+    if (this._detailEl) {
+      this._detailEl.remove();
+      this._detailEl = null;
+    }
+    this._filteredIndices = null;
+    this._searchQuery = '';
+    if (this._searchInput) this._searchInput.value = '';
+
+    // Re-bind VirtualList to the new RingBuffer
+    this._timelineVL.setItems(this.events);
+    this._timelineVL.setFilter(null);
 
     this.panels.state.innerHTML = '<div class="state-empty">No state yet</div>';
-    this._eventList.innerHTML = '<div class="events-empty">No events yet</div>';
-    this.panels.playbook.innerHTML = '<div class="events-empty">No phase changes yet</div>';
-    this.panels.evaluator.innerHTML = '<div class="events-empty">No evaluations yet</div>';
-    this.panels.nfr.innerHTML = '<div class="events-empty">No metrics yet</div>';
+    this.panels.phases.innerHTML = '<div class="events-empty">No phase changes yet</div>';
+    this.panels.metrics.innerHTML = '<div class="events-empty">No metrics yet</div>';
+
     this._stopStatusTicker();
   }
 
   // ------------------------------------------------
-  // Event handlers for ServerMessage types
+  // Event handlers (API surface — called by app.js)
   // ------------------------------------------------
 
-  /**
-   * Handle any server message as a devtools event.
-   * @param {object} msg  The parsed ServerMessage
-   */
   addEvent(msg) {
-    const elapsed = Date.now() - this.sessionStart;
-    const timeStr = this._formatElapsed(elapsed);
-    const content = this._eventContent(msg);
-
-    const event = { type: msg.type, time: timeStr, content, raw: msg };
+    var elapsed = Date.now() - this.sessionStart;
+    var event = {
+      type: msg.type,
+      time: this._fmtTime(elapsed),
+      timeMs: elapsed,
+      summary: this._summarize(msg),
+      duration: this._extractDuration(msg),
+      raw: msg
+    };
     this.events.push(event);
 
-    this._renderEvent(event);
+    // Re-bind items on first push (VirtualList needs the reference)
+    if (this.events.length === 1) {
+      this._timelineVL.setItems(this.events);
+    }
+
+    this._applyFilters();
+    this.scheduler.markDirty('timeline');
   }
 
-  /**
-   * Handle stateUpdate message.
-   * @param {string} key
-   * @param {*} value
-   */
   handleStateUpdate(key, value) {
     this.stateData[key] = value;
     this._renderState(key);
   }
 
-  /**
-   * Handle phaseChange message.
-   * @param {object} data  { from, to, reason }
-   */
   handlePhaseChange(data) {
     this.phases.push(data);
     this._renderPhases();
   }
 
-  /**
-   * Handle evaluation message.
-   * @param {object} data  { phase, score, notes }
-   */
   handleEvaluation(data) {
-    this.evaluations.push(data);
-    this._renderEvaluator();
+    // Evaluations go into the timeline — no separate panel
   }
 
-  /**
-   * Handle violation message.
-   * @param {object} data  { rule, severity, detail }
-   */
   handleViolation(data) {
-    this.violations.push(data);
-    this._renderEvaluator();
+    // Violations go into the timeline — no separate panel
   }
 
-  /**
-   * Handle telemetry message with session stats.
-   * Uses requestAnimationFrame to avoid competing with audio playback.
-   * @param {object} stats
-   */
   handleTelemetry(stats) {
     this.telemetry = stats;
+
+    // Track per-turn latencies for sparkline
+    if (stats.last_response_latency_ms > 0) {
+      this.turnLatencies.push(stats.last_response_latency_ms);
+    }
 
     // Update status bar from telemetry
     if (stats.current_phase && this._statusPhaseEl) {
@@ -337,36 +526,21 @@ class DevtoolsManager {
     }
 
     // Start the uptime ticker on first telemetry
-    if (!this._statusRafId) {
+    if (!this._uptimeInterval) {
       this._startStatusTicker();
     }
 
-    // Coalesce rapid telemetry updates into a single rAF frame.
-    if (!this._telemetryRafPending) {
-      this._telemetryRafPending = true;
-      requestAnimationFrame(() => {
-        this._telemetryRafPending = false;
-        this._renderNfr();
-      });
-    }
+    this.scheduler.markDirty('statusBar');
+    this._renderNfr();
   }
 
-  /**
-   * Handle phaseTimeline message with enriched phase history.
-   * @param {Array} entries
-   */
   handlePhaseTimeline(entries) {
     this.phaseTimeline = entries;
     this._renderPhases();
   }
 
-  /**
-   * Handle toolCallEvent message.
-   * @param {object} data  { name, args, result }
-   */
   handleToolCallEvent(data) {
     this.toolCalls.push(data);
-    // Tool calls are also reflected in telemetry
     if (!this.telemetry.tool_calls) {
       this.telemetry.tool_calls = 0;
     }
@@ -375,25 +549,24 @@ class DevtoolsManager {
   }
 
   // ------------------------------------------------
-  // Rendering
+  // Rendering — State panel (kept for Task 5)
   // ------------------------------------------------
 
   _renderState(flashKey) {
-    const panel = this.panels.state;
-    const keys = Object.keys(this.stateData);
+    var panel = this.panels.state;
+    var keys = Object.keys(this.stateData);
 
     if (keys.length === 0) {
       panel.innerHTML = '<div class="state-empty">No state yet</div>';
       return;
     }
 
-    // Group keys by prefix
-    const groups = {};
-    const ungrouped = [];
-    keys.forEach(key => {
-      const colonIdx = key.indexOf(':');
+    var groups = {};
+    var ungrouped = [];
+    keys.forEach(function (key) {
+      var colonIdx = key.indexOf(':');
       if (colonIdx > 0 && colonIdx < key.length - 1) {
-        const prefix = key.substring(0, colonIdx);
+        var prefix = key.substring(0, colonIdx);
         if (!groups[prefix]) groups[prefix] = [];
         groups[prefix].push(key);
       } else {
@@ -401,17 +574,16 @@ class DevtoolsManager {
       }
     });
 
-    let html = '';
+    var html = '';
+    var self = this;
 
-    // Render ungrouped keys first
     if (ungrouped.length > 0) {
       html += this._renderStateGroup(null, ungrouped, flashKey);
     }
 
-    // Render grouped keys with collapsible sections
-    const groupOrder = Object.keys(groups).sort();
-    groupOrder.forEach(prefix => {
-      html += this._renderStateGroup(prefix, groups[prefix].sort(), flashKey);
+    var groupOrder = Object.keys(groups).sort();
+    groupOrder.forEach(function (prefix) {
+      html += self._renderStateGroup(prefix, groups[prefix].sort(), flashKey);
     });
 
     panel.innerHTML = html;
@@ -419,122 +591,84 @@ class DevtoolsManager {
   }
 
   _renderStateGroup(prefix, keys, flashKey) {
-    const groupLabel = prefix ? prefix : 'General';
-    const groupClass = prefix ? `state-group-${prefix}` : 'state-group-general';
+    var groupLabel = prefix ? prefix : 'General';
+    var groupClass = prefix ? 'state-group-' + prefix : 'state-group-general';
+    var self = this;
 
-    let html = `<div class="state-group ${groupClass}">`;
+    var html = '<div class="state-group ' + groupClass + '">';
     if (prefix) {
-      html += `<div class="state-group-header">${this._esc(groupLabel)}</div>`;
+      html += '<div class="state-group-header">' + this._esc(groupLabel) + '</div>';
     }
     html += '<table class="state-table"><tbody>';
 
-    keys.forEach(key => {
-      const value = this.stateData[key];
-      const { display, className } = this._formatValue(value);
-      const flash = key === flashKey ? ' state-row-flash' : '';
-      const displayKey = prefix ? key.substring(prefix.length + 1) : key;
-      html += `<tr class="${flash}"><td class="state-key">${this._esc(displayKey)}</td><td class="state-value ${className}">${display}</td></tr>`;
+    keys.forEach(function (key) {
+      var value = self.stateData[key];
+      var fmt = self._formatValue(value);
+      var flash = key === flashKey ? ' state-row-flash' : '';
+      var displayKey = prefix ? key.substring(prefix.length + 1) : key;
+      html += '<tr class="' + flash + '"><td class="state-key">' + self._esc(displayKey) + '</td><td class="state-value ' + fmt.className + '">' + fmt.display + '</td></tr>';
     });
 
     html += '</tbody></table></div>';
     return html;
   }
 
-  _renderEvent(event) {
-    const list = this._eventList;
-
-    // Remove empty message if present
-    const empty = list.querySelector('.events-empty');
-    if (empty) empty.remove();
-
-    list.classList.add('events-panel');
-
-    const entry = document.createElement('div');
-    entry.className = 'event-entry';
-    entry.dataset.eventType = event.type;
-    entry.innerHTML = `
-      <span class="event-time">${event.time}</span>
-      <span class="event-type-badge ${event.type}">${event.type}</span>
-      <span class="event-content">${event.content}</span>
-    `;
-
-    // Hide if filtered
-    if (this.hiddenEventTypes.has(event.type)) {
-      entry.style.display = 'none';
-    }
-
-    list.appendChild(entry);
-
-    // Auto-scroll (only if not hidden)
-    if (!this.hiddenEventTypes.has(event.type)) {
-      list.scrollTop = list.scrollHeight;
-    }
-  }
-
-  _reRenderEvents() {
-    const list = this._eventList;
-    const entries = list.querySelectorAll('.event-entry');
-    entries.forEach(entry => {
-      const type = entry.dataset.eventType;
-      entry.style.display = this.hiddenEventTypes.has(type) ? 'none' : '';
-    });
-  }
+  // ------------------------------------------------
+  // Rendering — Phases panel (kept for Task 6)
+  // ------------------------------------------------
 
   _renderPhases() {
-    const panel = this.panels.playbook;
-
-    // Use enriched timeline if available, otherwise fall back to basic phases
-    const hasTimeline = this.phaseTimeline.length > 0;
-    const data = hasTimeline ? this.phaseTimeline : this.phases;
+    var panel = this.panels.phases;
+    var hasTimeline = this.phaseTimeline.length > 0;
+    var data = hasTimeline ? this.phaseTimeline : this.phases;
+    var self = this;
 
     if (data.length === 0) {
       panel.innerHTML = '<div class="events-empty">No phase changes yet</div>';
       return;
     }
 
-    let html = '';
+    var html = '';
 
     if (hasTimeline) {
-      // Render enriched timeline with durations and triggers
       html += '<div class="phase-timeline">';
-      this.phaseTimeline.forEach((entry, i) => {
-        const durationDisplay = entry.duration_secs < 1
-          ? `${(entry.duration_secs * 1000).toFixed(0)}ms`
-          : `${entry.duration_secs.toFixed(1)}s`;
-        const triggerLabel = entry.trigger || 'guard';
-        const triggerClass = triggerLabel.includes('programmatic') ? 'programmatic' : 'guard';
+      this.phaseTimeline.forEach(function (entry, i) {
+        var durationDisplay = entry.duration_secs < 1
+          ? (entry.duration_secs * 1000).toFixed(0) + 'ms'
+          : entry.duration_secs.toFixed(1) + 's';
+        var triggerLabel = entry.trigger || 'guard';
+        var triggerClass = triggerLabel.includes('programmatic') ? 'programmatic' : 'guard';
 
-        html += `<div class="phase-timeline-entry">
-          <div class="phase-timeline-left">
-            <div class="phase-timeline-dot ${i === this.phaseTimeline.length - 1 ? 'current' : ''}"></div>
-            ${i < this.phaseTimeline.length - 1 ? '<div class="phase-timeline-line"></div>' : ''}
-          </div>
-          <div class="phase-timeline-content">
-            <div class="phase-timeline-header">
-              <span class="phase-name">${this._esc(entry.from)}</span>
-              <span class="phase-arrow">&rarr;</span>
-              <span class="phase-name to">${this._esc(entry.to)}</span>
-            </div>
-            <div class="phase-timeline-meta">
-              <span class="phase-trigger ${triggerClass}">${this._esc(triggerLabel)}</span>
-              <span class="phase-duration">${durationDisplay}</span>
-              <span class="phase-turn">turn ${entry.turn}</span>
-            </div>
-          </div>
-        </div>`;
+        html += '<div class="phase-timeline-entry">' +
+          '<div class="phase-timeline-left">' +
+          '<div class="phase-timeline-dot ' + (i === self.phaseTimeline.length - 1 ? 'current' : '') + '"></div>' +
+          (i < self.phaseTimeline.length - 1 ? '<div class="phase-timeline-line"></div>' : '') +
+          '</div>' +
+          '<div class="phase-timeline-content">' +
+          '<div class="phase-timeline-header">' +
+          '<span class="phase-name">' + self._esc(entry.from) + '</span>' +
+          '<span class="phase-arrow">&rarr;</span>' +
+          '<span class="phase-name to">' + self._esc(entry.to) + '</span>' +
+          '</div>' +
+          '<div class="phase-timeline-meta">' +
+          '<span class="phase-trigger ' + triggerClass + '">' + self._esc(triggerLabel) + '</span>' +
+          '<span class="phase-duration">' + durationDisplay + '</span>' +
+          '<span class="phase-turn">turn ' + entry.turn + '</span>' +
+          '</div>' +
+          '</div>' +
+          '</div>';
       });
       html += '</div>';
     } else {
-      // Basic phase cards (original behavior)
-      this.phases.forEach(p => {
-        html += `<div class="phase-card">
-          <div class="phase-header">
-            <span class="phase-name">${this._esc(p.from)}</span>
-            <span class="phase-arrow">&#8594;</span>
-            <span class="phase-name">${this._esc(p.to)}</span>
-          </div>
-          <div class="phase-reason">${this._esc(p.reason)}</div>
-        </div>`;
+      this.phases.forEach(function (p) {
+        html += '<div class="phase-card">' +
+          '<div class="phase-header">' +
+          '<span class="phase-name">' + self._esc(p.from) + '</span>' +
+          '<span class="phase-arrow">&#8594;</span>' +
+          '<span class="phase-name">' + self._esc(p.to) + '</span>' +
+          '</div>' +
+          '<div class="phase-reason">' + self._esc(p.reason) + '</div>' +
+          '</div>';
       });
     }
 
@@ -542,163 +676,122 @@ class DevtoolsManager {
     panel.scrollTop = panel.scrollHeight;
   }
 
-  _renderEvaluator() {
-    const panel = this.panels.evaluator;
-    let html = '';
-
-    // Violations first
-    this.violations.forEach(v => {
-      const sevClass = v.severity === 'warning' ? 'warning' : '';
-      html += `<div class="violation-card">
-        <div class="violation-header">
-          <span class="violation-rule">${this._esc(v.rule)}</span>
-          <span class="violation-severity ${sevClass}">${this._esc(v.severity)}</span>
-        </div>
-        <div class="violation-detail">${this._esc(v.detail)}</div>
-      </div>`;
-    });
-
-    // Evaluations
-    this.evaluations.forEach(e => {
-      const scoreClass = e.score >= 0.8 ? 'high' : e.score >= 0.5 ? 'medium' : 'low';
-      const scoreDisplay = (e.score * 100).toFixed(0) + '%';
-      html += `<div class="eval-card">
-        <div class="eval-header">
-          <span class="eval-phase">${this._esc(e.phase)}</span>
-          <span class="eval-score ${scoreClass}">${scoreDisplay}</span>
-        </div>
-        <div class="eval-notes">${this._esc(e.notes)}</div>
-      </div>`;
-    });
-
-    if (html === '') {
-      html = '<div class="events-empty">No evaluations yet</div>';
-    }
-
-    panel.innerHTML = html;
-    panel.scrollTop = panel.scrollHeight;
-  }
+  // ------------------------------------------------
+  // Rendering — Metrics/NFR panel (kept for Task 4)
+  // ------------------------------------------------
 
   _renderNfr() {
-    const panel = this.panels.nfr;
-    const stats = this.telemetry;
+    var panel = this.panels.metrics;
+    var stats = this.telemetry;
 
     if (!stats || Object.keys(stats).length === 0) {
       panel.innerHTML = '<div class="events-empty">No metrics yet</div>';
       return;
     }
 
-    let html = '<div class="nfr-content">';
+    var html = '<div class="nfr-content">';
 
-    // Hero: Average Response Latency (TTFB)
     if (stats.response_count > 0) {
-      const avg = Math.round(stats.avg_response_latency_ms || 0);
-      const last = Math.round(stats.last_response_latency_ms || 0);
-      const health = avg < 300 ? 'good' : avg < 600 ? 'ok' : 'warn';
-      const healthLabel = avg < 300 ? 'Healthy' : avg < 600 ? 'Moderate' : 'Degraded';
+      var avg = Math.round(stats.avg_response_latency_ms || 0);
+      var last = Math.round(stats.last_response_latency_ms || 0);
+      var health = avg < 300 ? 'good' : avg < 600 ? 'ok' : 'warn';
+      var healthLabel = avg < 300 ? 'Healthy' : avg < 600 ? 'Moderate' : 'Degraded';
 
-      html += `<div class="nfr-hero nfr-hero-${health}">
-        <div class="nfr-hero-header">
-          <span class="nfr-hero-dot"></span>
-          <span class="nfr-hero-label">Avg Response Latency</span>
-          <span class="nfr-hero-health">${healthLabel}</span>
-        </div>
-        <div class="nfr-hero-value">${avg}<span class="nfr-hero-unit">ms</span></div>
-        <div class="nfr-hero-sub">
-          <span>Last <strong>${last}ms</strong></span>
-          <span class="nfr-hero-sep">&middot;</span>
-          <span>${stats.response_count} responses</span>
-        </div>
-      </div>`;
+      html += '<div class="nfr-hero nfr-hero-' + health + '">' +
+        '<div class="nfr-hero-header">' +
+        '<span class="nfr-hero-dot"></span>' +
+        '<span class="nfr-hero-label">Avg Response Latency</span>' +
+        '<span class="nfr-hero-health">' + healthLabel + '</span>' +
+        '</div>' +
+        '<div class="nfr-hero-value">' + avg + '<span class="nfr-hero-unit">ms</span></div>' +
+        '<div class="nfr-hero-sub">' +
+        '<span>Last <strong>' + last + 'ms</strong></span>' +
+        '<span class="nfr-hero-sep">&middot;</span>' +
+        '<span>' + stats.response_count + ' responses</span>' +
+        '</div>' +
+        '</div>';
 
-      // Range visualization with positioned markers
       if (stats.response_count > 1) {
-        const min = Math.round(stats.min_response_latency_ms || 0);
-        const max = Math.round(stats.max_response_latency_ms || 0);
-        const range = max - min;
-        const lastPct = range > 0 ? Math.min(100, Math.max(0, (last - min) / range * 100)) : 50;
-        const avgPct = range > 0 ? Math.min(100, Math.max(0, (avg - min) / range * 100)) : 50;
+        var min = Math.round(stats.min_response_latency_ms || 0);
+        var max = Math.round(stats.max_response_latency_ms || 0);
+        var range = max - min;
+        var lastPct = range > 0 ? Math.min(100, Math.max(0, (last - min) / range * 100)) : 50;
+        var avgPct = range > 0 ? Math.min(100, Math.max(0, (avg - min) / range * 100)) : 50;
 
-        html += `<div class="nfr-range-vis">
-          <div class="nfr-range-labels">
-            <span>${min}ms</span>
-            <span>${max}ms</span>
-          </div>
-          <div class="nfr-range-track">
-            <div class="nfr-range-fill" style="width:100%"></div>
-            <div class="nfr-range-marker nfr-range-marker-avg" style="left:${avgPct}%" title="avg ${avg}ms"></div>
-            <div class="nfr-range-marker nfr-range-marker-last" style="left:${lastPct}%" title="last ${last}ms"></div>
-          </div>
-          <div class="nfr-range-legend">
-            <span class="nfr-range-legend-item"><span class="nfr-dot-avg"></span>avg</span>
-            <span class="nfr-range-legend-item"><span class="nfr-dot-last"></span>last</span>
-          </div>
-        </div>`;
+        html += '<div class="nfr-range-vis">' +
+          '<div class="nfr-range-labels"><span>' + min + 'ms</span><span>' + max + 'ms</span></div>' +
+          '<div class="nfr-range-track">' +
+          '<div class="nfr-range-fill" style="width:100%"></div>' +
+          '<div class="nfr-range-marker nfr-range-marker-avg" style="left:' + avgPct + '%" title="avg ' + avg + 'ms"></div>' +
+          '<div class="nfr-range-marker nfr-range-marker-last" style="left:' + lastPct + '%" title="last ' + last + 'ms"></div>' +
+          '</div>' +
+          '<div class="nfr-range-legend">' +
+          '<span class="nfr-range-legend-item"><span class="nfr-dot-avg"></span>avg</span>' +
+          '<span class="nfr-range-legend-item"><span class="nfr-dot-last"></span>last</span>' +
+          '</div>' +
+          '</div>';
       }
     }
 
-    // Turn Performance section
-    html += `<div class="nfr-section">
-      <div class="nfr-section-header">
-        <span class="nfr-section-icon turn"></span>
-        <span class="nfr-section-title">Turn Performance</span>
-      </div>
-      <div class="nfr-metric-strip">`;
+    html += '<div class="nfr-section">' +
+      '<div class="nfr-section-header">' +
+      '<span class="nfr-section-icon turn"></span>' +
+      '<span class="nfr-section-title">Turn Performance</span>' +
+      '</div>' +
+      '<div class="nfr-metric-strip">';
 
     if (stats.avg_turn_duration_ms > 0) {
-      const secs = (stats.avg_turn_duration_ms / 1000).toFixed(1);
-      html += `<div class="nfr-metric">
-          <span class="nfr-metric-value">${secs}<span class="nfr-unit">s</span></span>
-          <span class="nfr-metric-label">Avg Turn</span>
-        </div>`;
+      var secs = (stats.avg_turn_duration_ms / 1000).toFixed(1);
+      html += '<div class="nfr-metric">' +
+        '<span class="nfr-metric-value">' + secs + '<span class="nfr-unit">s</span></span>' +
+        '<span class="nfr-metric-label">Avg Turn</span>' +
+        '</div>';
     }
 
-    html += `<div class="nfr-metric">
-        <span class="nfr-metric-value">${stats.interruptions || 0}</span>
-        <span class="nfr-metric-label">Interrupts</span>
-      </div>
-    </div></div>`;
+    html += '<div class="nfr-metric">' +
+      '<span class="nfr-metric-value">' + (stats.interruptions || 0) + '</span>' +
+      '<span class="nfr-metric-label">Interrupts</span>' +
+      '</div>' +
+      '</div></div>';
 
-    // Audio section
     if (stats.audio_chunks_out > 0) {
-      html += `<div class="nfr-section">
-        <div class="nfr-section-header">
-          <span class="nfr-section-icon audio"></span>
-          <span class="nfr-section-title">Audio</span>
-        </div>
-        <div class="nfr-metric-strip">
-          <div class="nfr-metric">
-            <span class="nfr-metric-value">${stats.audio_kbytes_out || 0}<span class="nfr-unit">KB</span></span>
-            <span class="nfr-metric-label">Total Out</span>
-          </div>
-          <div class="nfr-metric">
-            <span class="nfr-metric-value">${stats.audio_throughput_kbps || 0}<span class="nfr-unit">KB/s</span></span>
-            <span class="nfr-metric-label">Throughput</span>
-          </div>
-          <div class="nfr-metric">
-            <span class="nfr-metric-value">${stats.uptime_secs || 0}<span class="nfr-unit">s</span></span>
-            <span class="nfr-metric-label">Uptime</span>
-          </div>
-        </div>
-      </div>`;
+      html += '<div class="nfr-section">' +
+        '<div class="nfr-section-header">' +
+        '<span class="nfr-section-icon audio"></span>' +
+        '<span class="nfr-section-title">Audio</span>' +
+        '</div>' +
+        '<div class="nfr-metric-strip">' +
+        '<div class="nfr-metric">' +
+        '<span class="nfr-metric-value">' + (stats.audio_kbytes_out || 0) + '<span class="nfr-unit">KB</span></span>' +
+        '<span class="nfr-metric-label">Total Out</span>' +
+        '</div>' +
+        '<div class="nfr-metric">' +
+        '<span class="nfr-metric-value">' + (stats.audio_throughput_kbps || 0) + '<span class="nfr-unit">KB/s</span></span>' +
+        '<span class="nfr-metric-label">Throughput</span>' +
+        '</div>' +
+        '<div class="nfr-metric">' +
+        '<span class="nfr-metric-value">' + (stats.uptime_secs || 0) + '<span class="nfr-unit">s</span></span>' +
+        '<span class="nfr-metric-label">Uptime</span>' +
+        '</div>' +
+        '</div></div>';
     }
 
-    // Tool Calls section
     if (this.toolCalls.length > 0) {
-      html += `<div class="nfr-section">
-        <div class="nfr-section-header">
-          <span class="nfr-section-icon tools"></span>
-          <span class="nfr-section-title">Tool Calls</span>
-          <span class="nfr-section-count">${this.toolCalls.length}</span>
-        </div>
-        <div class="nfr-tool-list">`;
+      var self = this;
+      html += '<div class="nfr-section">' +
+        '<div class="nfr-section-header">' +
+        '<span class="nfr-section-icon tools"></span>' +
+        '<span class="nfr-section-title">Tool Calls</span>' +
+        '<span class="nfr-section-count">' + this.toolCalls.length + '</span>' +
+        '</div>' +
+        '<div class="nfr-tool-list">';
 
-      this.toolCalls.slice(-5).forEach(tc => {
-        html += `<div class="nfr-tool-entry">
-          <span class="nfr-tool-name">${this._esc(tc.name)}</span>
-          <span class="nfr-tool-args">${this._truncate(tc.args, 60)}</span>
-          ${tc.result ? `<span class="nfr-tool-result">${this._truncate(tc.result, 80)}</span>` : ''}
-        </div>`;
+      this.toolCalls.slice(-5).forEach(function (tc) {
+        html += '<div class="nfr-tool-entry">' +
+          '<span class="nfr-tool-name">' + self._esc(tc.name) + '</span>' +
+          '<span class="nfr-tool-args">' + self._truncate(tc.args, 60) + '</span>' +
+          (tc.result ? '<span class="nfr-tool-result">' + self._truncate(tc.result, 80) + '</span>' : '') +
+          '</div>';
       });
 
       html += '</div></div>';
@@ -707,11 +800,12 @@ class DevtoolsManager {
     html += '</div>';
     panel.innerHTML = html;
 
-    // Update health indicator in status bar
     this._updateHealthIndicator(stats);
   }
 
-  // --- Status Bar ---
+  // ------------------------------------------------
+  // Status bar
+  // ------------------------------------------------
 
   _initStatusBar() {
     this._statusUptimeEl = document.getElementById('status-uptime');
@@ -720,21 +814,58 @@ class DevtoolsManager {
     this._statusHealthEl = document.getElementById('status-health');
   }
 
+  _renderStatusBar() {
+    // Called by scheduler — updates uptime from telemetry
+    if (this._statusUptimeEl) {
+      var elapsed = Date.now() - this.sessionStart;
+      this._statusUptimeEl.textContent = this._fmtTime(elapsed);
+    }
+  }
+
+  _startStatusTicker() {
+    var self = this;
+    // Update every second via setInterval (not rAF — it's just text)
+    this._uptimeInterval = setInterval(function () {
+      self.scheduler.markDirty('statusBar');
+    }, 1000);
+  }
+
+  _stopStatusTicker() {
+    if (this._uptimeInterval) {
+      clearInterval(this._uptimeInterval);
+      this._uptimeInterval = null;
+    }
+    if (this._statusUptimeEl) this._statusUptimeEl.textContent = '--';
+    if (this._statusPhaseEl) this._statusPhaseEl.textContent = '--';
+    if (this._statusTurnsEl) this._statusTurnsEl.textContent = '0';
+    if (this._statusHealthEl) this._statusHealthEl.className = 'status-health-dot';
+  }
+
+  _updateHealthIndicator(stats) {
+    if (!this._statusHealthEl) return;
+    var avg = stats.avg_response_latency_ms || 0;
+    if (stats.response_count > 0) {
+      var cls = avg < 300 ? 'good' : avg < 600 ? 'ok' : 'warn';
+      this._statusHealthEl.className = 'status-health-dot ' + cls;
+    }
+  }
+
   _initResize() {
-    const handle = document.getElementById('devtools-resize-handle');
+    var self = this;
+    var handle = document.getElementById('devtools-resize-handle');
     if (!handle) return;
 
-    let startX, startWidth;
+    var startX, startWidth;
 
-    const onMouseMove = (e) => {
-      const dx = startX - e.clientX;
-      const newWidth = Math.min(520, Math.max(280, startWidth + dx));
-      this.container.style.width = newWidth + 'px';
-      this.container.style.minWidth = newWidth + 'px';
+    var onMouseMove = function (e) {
+      var dx = startX - e.clientX;
+      var newWidth = Math.min(520, Math.max(280, startWidth + dx));
+      self.container.style.width = newWidth + 'px';
+      self.container.style.minWidth = newWidth + 'px';
       e.preventDefault();
     };
 
-    const onMouseUp = () => {
+    var onMouseUp = function () {
       handle.classList.remove('active');
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
@@ -742,9 +873,9 @@ class DevtoolsManager {
       document.body.style.userSelect = '';
     };
 
-    handle.addEventListener('mousedown', (e) => {
+    handle.addEventListener('mousedown', function (e) {
       startX = e.clientX;
-      startWidth = this.container.offsetWidth;
+      startWidth = self.container.offsetWidth;
       handle.classList.add('active');
       document.body.style.cursor = 'col-resize';
       document.body.style.userSelect = 'none';
@@ -754,50 +885,88 @@ class DevtoolsManager {
     });
   }
 
-  _updateHealthIndicator(stats) {
-    if (!this._statusHealthEl) return;
-    const avg = stats.avg_response_latency_ms || 0;
-    if (stats.response_count > 0) {
-      const cls = avg < 300 ? 'good' : avg < 600 ? 'ok' : 'warn';
-      this._statusHealthEl.className = 'status-health-dot ' + cls;
-    }
-  }
-
-  _startStatusTicker() {
-    const tick = () => {
-      if (this._statusUptimeEl) {
-        const elapsed = Date.now() - this.sessionStart;
-        this._statusUptimeEl.textContent = this._formatElapsed(elapsed);
-      }
-      this._statusRafId = requestAnimationFrame(tick);
-    };
-    this._statusRafId = requestAnimationFrame(tick);
-  }
-
-  _stopStatusTicker() {
-    if (this._statusRafId) {
-      cancelAnimationFrame(this._statusRafId);
-      this._statusRafId = null;
-    }
-    if (this._statusUptimeEl) this._statusUptimeEl.textContent = '--';
-    if (this._statusPhaseEl) this._statusPhaseEl.textContent = '--';
-    if (this._statusTurnsEl) this._statusTurnsEl.textContent = '0';
-    if (this._statusHealthEl) this._statusHealthEl.className = 'status-health-dot';
-  }
-
   // ------------------------------------------------
   // Helpers
   // ------------------------------------------------
 
-  _formatElapsed(ms) {
-    const totalSec = Math.floor(ms / 1000);
-    const min = Math.floor(totalSec / 60);
-    const sec = totalSec % 60;
-    const frac = Math.floor((ms % 1000) / 100);
-    if (min > 0) {
-      return `${min}:${sec.toString().padStart(2, '0')}.${frac}`;
+  _fmtTime(ms) {
+    var totalSec = ms / 1000;
+    if (totalSec < 60) {
+      return 'T+' + totalSec.toFixed(1) + 's';
     }
-    return `${sec}.${frac}s`;
+    var min = Math.floor(totalSec / 60);
+    var sec = (totalSec % 60).toFixed(0).padStart(2, '0');
+    return 'T+' + min + ':' + sec;
+  }
+
+  _summarize(msg) {
+    switch (msg.type) {
+      case 'textDelta':
+        return this._truncText(msg.text, 80);
+      case 'textComplete':
+        return this._truncText(msg.text, 80);
+      case 'audio':
+        var len = msg.data ? msg.data.length : 0;
+        return len + ' bytes base64';
+      case 'turnComplete':
+        return 'Turn complete';
+      case 'connected':
+        return 'Session established';
+      case 'interrupted':
+        return 'Model interrupted';
+      case 'error':
+        return msg.message || 'Unknown error';
+      case 'stateUpdate':
+        return msg.key + ' = ' + this._truncText(JSON.stringify(msg.value), 60);
+      case 'phaseChange':
+        return (msg.from || '?') + ' -> ' + (msg.to || '?');
+      case 'evaluation':
+        return (msg.phase || '') + ': ' + ((msg.score || 0) * 100).toFixed(0) + '%';
+      case 'violation':
+        return '[' + (msg.severity || '') + '] ' + (msg.rule || '');
+      case 'inputTranscription':
+        return this._truncText(msg.text, 60);
+      case 'outputTranscription':
+        return this._truncText(msg.text, 60);
+      case 'voiceActivityStart':
+        return 'Speech detected';
+      case 'voiceActivityEnd':
+        return 'Speech ended';
+      case 'appMeta':
+        return msg.info ? msg.info.name : '';
+      case 'telemetry':
+        return 'turns: ' + ((msg.stats && msg.stats.turn_count) || 0);
+      case 'phaseTimeline':
+        return ((msg.entries || []).length) + ' transitions';
+      case 'toolCallEvent':
+        return (msg.name || '') + '(' + this._truncText(msg.args, 30) + ')';
+      default:
+        return this._truncText(JSON.stringify(msg), 80);
+    }
+  }
+
+  _extractDuration(msg) {
+    if (msg.type === 'telemetry' && msg.stats) {
+      var up = msg.stats.uptime_secs;
+      if (up) return up.toFixed(1) + 's';
+    }
+    if (msg.type === 'toolCallEvent' && msg.duration_ms) {
+      return msg.duration_ms + 'ms';
+    }
+    return null;
+  }
+
+  _truncText(str, max) {
+    if (str === null || str === undefined) return '';
+    var s = String(str);
+    if (s.length <= max) return s;
+    return s.substring(0, max) + '...';
+  }
+
+  _truncate(str, max) {
+    var escaped = this._esc(String(str));
+    if (escaped.length <= max) return escaped;
+    return escaped.substring(0, max) + '<span class="truncated">...</span>';
   }
 
   _formatValue(value) {
@@ -805,7 +974,7 @@ class DevtoolsManager {
       return { display: 'null', className: 'null' };
     }
     if (typeof value === 'string') {
-      return { display: `"${this._esc(value)}"`, className: 'string' };
+      return { display: '"' + this._esc(value) + '"', className: 'string' };
     }
     if (typeof value === 'number') {
       return { display: String(value), className: 'number' };
@@ -813,66 +982,13 @@ class DevtoolsManager {
     if (typeof value === 'boolean') {
       return { display: String(value), className: 'boolean' };
     }
-    // Object / array
-    const json = JSON.stringify(value, null, 1);
-    const truncated = json.length > 120 ? json.substring(0, 120) + '...' : json;
+    var json = JSON.stringify(value, null, 1);
+    var truncated = json.length > 120 ? json.substring(0, 120) + '...' : json;
     return { display: this._esc(truncated), className: '' };
   }
 
-  _eventContent(msg) {
-    switch (msg.type) {
-      case 'textDelta':
-        return this._truncate(msg.text, 80);
-      case 'textComplete':
-        return this._truncate(msg.text, 80);
-      case 'audio':
-        const len = msg.data ? msg.data.length : 0;
-        return `<span class="truncated">${len} bytes base64</span>`;
-      case 'turnComplete':
-        return '';
-      case 'connected':
-        return 'Session established';
-      case 'interrupted':
-        return 'Model interrupted';
-      case 'error':
-        return this._esc(msg.message || '');
-      case 'stateUpdate':
-        return `${this._esc(msg.key)} = ${this._truncate(JSON.stringify(msg.value), 60)}`;
-      case 'phaseChange':
-        return `${this._esc(msg.from)} -> ${this._esc(msg.to)}`;
-      case 'evaluation':
-        return `${this._esc(msg.phase)}: ${(msg.score * 100).toFixed(0)}%`;
-      case 'violation':
-        return `[${this._esc(msg.severity)}] ${this._esc(msg.rule)}`;
-      case 'inputTranscription':
-        return this._truncate(msg.text, 60);
-      case 'outputTranscription':
-        return this._truncate(msg.text, 60);
-      case 'voiceActivityStart':
-        return 'Speech detected';
-      case 'voiceActivityEnd':
-        return 'Speech ended';
-      case 'appMeta':
-        return this._esc(msg.info ? msg.info.name : '');
-      case 'telemetry':
-        return `turns: ${msg.stats.turn_count || 0}`;
-      case 'phaseTimeline':
-        return `${(msg.entries || []).length} transitions`;
-      case 'toolCallEvent':
-        return `${this._esc(msg.name)}(${this._truncate(msg.args, 30)})`;
-      default:
-        return this._truncate(JSON.stringify(msg), 80);
-    }
-  }
-
-  _truncate(str, max) {
-    const escaped = this._esc(String(str));
-    if (escaped.length <= max) return escaped;
-    return escaped.substring(0, max) + '<span class="truncated">...</span>';
-  }
-
   _esc(str) {
-    const div = document.createElement('div');
+    var div = document.createElement('div');
     div.textContent = str;
     return div.innerHTML;
   }
