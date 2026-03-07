@@ -27,6 +27,12 @@ use super::extractors::run_extractors;
 /// Unified instruction composition: steps 6/9/10 accumulate into a single
 /// `resolved_instruction` that is sent once at the end, eliminating the
 /// double-send bug.
+///
+/// Batched context delivery: all model-role context turns (tool advisory,
+/// repair nudge, steering context, phase instruction, on_enter_context) are
+/// accumulated into a single `context_buffer` and sent as ONE
+/// `send_client_content` call, eliminating the burst of separate WebSocket
+/// frames that can confuse the model or clash with concurrent user input.
 pub(in crate::live) async fn handle_turn_complete(
     callbacks: &EventCallbacks,
     writer: &Arc<dyn SessionWriter>,
@@ -103,6 +109,13 @@ pub(in crate::live) async fn handle_turn_complete(
     let mut resolved_instruction: Option<String> = None;
     let mut transition_result: Option<TransitionResult> = None;
 
+    // Batched context buffer: all model-role context turns are accumulated here
+    // and sent as a SINGLE send_client_content call, eliminating the burst of
+    // separate WebSocket frames that can confuse the model or clash with user input.
+    let mut context_buffer: Vec<rs_genai::prelude::Content> = Vec::new();
+    // Whether to prompt the model after sending the batched context.
+    let mut should_prompt = false;
+
     // 7. Evaluate phase transitions + compute navigation context
     if let Some(ref pm) = phase_machine {
         let mut machine = pm.lock().await;
@@ -154,7 +167,7 @@ pub(in crate::live) async fn handle_turn_complete(
     }
 
     // 7d. Tool availability advisory (Phase 5)
-    // When phase transitions change the tool set, inject a model-role advisory turn
+    // When phase transitions change the tool set, add advisory to context buffer
     if transition_result.is_some() && control_plane.tool_advisory {
         if let Some(ref pm) = phase_machine {
             let machine = pm.lock().await;
@@ -165,12 +178,11 @@ pub(in crate::live) async fn handle_turn_complete(
                 if changed {
                     state.session().set("active_tools", tools_vec.clone());
                     let tool_names = tools_vec.join(", ");
-                    let advisory = rs_genai::prelude::Content::model(format!(
+                    context_buffer.push(rs_genai::prelude::Content::model(format!(
                         "In this phase, I have access to these tools: {}. \
                          I should only use these tools.",
                         tool_names
-                    ));
-                    writer.send_client_content(vec![advisory], false).await.ok();
+                    )));
                 }
             }
         }
@@ -190,13 +202,12 @@ pub(in crate::live) async fn handle_turn_complete(
                             unfulfilled,
                             attempt,
                         } => {
-                            let nudge = rs_genai::prelude::Content::model(format!(
+                            context_buffer.push(rs_genai::prelude::Content::model(format!(
                                 "I still need to collect: {}. Let me ask about these.",
                                 unfulfilled.join(", ")
-                            ));
-                            writer.send_client_content(vec![nudge], false).await.ok();
+                            )));
                             if attempt == 1 {
-                                writer.send_client_content(vec![], true).await.ok();
+                                should_prompt = true;
                             }
                         }
                         RepairAction::Escalate { unfulfilled } => {
@@ -220,8 +231,8 @@ pub(in crate::live) async fn handle_turn_complete(
             if let Some(phase) = machine.current_phase() {
                 let steering_parts = steering::build_steering_context(state, &phase.modifiers);
                 if !steering_parts.is_empty() {
-                    let content = rs_genai::prelude::Content::model(steering_parts.join("\n"));
-                    writer.send_client_content(vec![content], false).await.ok();
+                    context_buffer
+                        .push(rs_genai::prelude::Content::model(steering_parts.join("\n")));
                 }
             }
         }
@@ -282,17 +293,12 @@ pub(in crate::live) async fn handle_turn_complete(
         }
     }
 
-    // 12. SINGLE instruction send (dedup against last sent)
+    // 12. Instruction delivery (dedup against last sent)
     //
     // Behavior depends on SteeringMode:
     //   - InstructionUpdate / Hybrid: replace the system instruction via
-    //     `update_instruction()`.  This is the default — the model re-processes
-    //     its full context on every phase change (clear persona shift, but
-    //     causes a latency spike).
-    //   - ContextInjection: deliver the phase instruction as a model-role
-    //     context turn via `send_client_content()`.  The system instruction
-    //     set at connect time is never touched again, keeping it lightweight
-    //     and working *with* the model's conversational intelligence.
+    //     `update_instruction()`.  Sent immediately (different wire message type).
+    //   - ContextInjection: accumulate into context_buffer for batched delivery.
     if let Some(instruction) = resolved_instruction {
         match control_plane.steering_mode {
             SteeringMode::InstructionUpdate | SteeringMode::Hybrid => {
@@ -306,29 +312,32 @@ pub(in crate::live) async fn handle_turn_complete(
                 }
             }
             SteeringMode::ContextInjection => {
-                // Deliver phase instruction as a model-role context turn.
-                // The model sees it as its own prior speech, steering behavior
-                // without replacing the base system instruction.
-                let content = rs_genai::prelude::Content::model(instruction);
-                writer.send_client_content(vec![content], false).await.ok();
+                context_buffer.push(rs_genai::prelude::Content::model(instruction));
             }
         }
     }
 
-    // 13. Send on_enter_context content (if phase transition produced context)
+    // 13. Add on_enter_context content to batch (if phase transition produced context)
     if let Some(ref tr) = transition_result {
         if let Some(ref contents) = tr.context {
-            if !contents.is_empty() {
-                writer
-                    .send_client_content(contents.clone(), false)
-                    .await
-                    .ok();
-            }
+            context_buffer.extend(contents.iter().cloned());
         }
-        // 14. Send turnComplete:true if prompt_on_enter (triggers model response)
         if tr.prompt_on_enter {
-            writer.send_client_content(vec![], true).await.ok();
+            should_prompt = true;
         }
+    }
+
+    // 14. SINGLE batched context send
+    //
+    // All model-role context turns from steps 7d/7e/7f/12/13 are sent as one
+    // atomic WebSocket frame.  This eliminates the burst of separate messages
+    // that can confuse the model or clash with concurrent user input.
+    if !context_buffer.is_empty() {
+        writer.send_client_content(context_buffer, false).await.ok();
+    }
+    // 14b. Prompt trigger (separate frame — turnComplete:true must be its own message)
+    if should_prompt {
+        writer.send_client_content(vec![], true).await.ok();
     }
 
     // 15. Turn boundary hook

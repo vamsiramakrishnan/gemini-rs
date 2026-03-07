@@ -185,16 +185,20 @@ The three-lane processor evaluates steering at two points in the turn lifecycle:
   [Step 7]  Phase machine evaluates transitions
        |    --> if transition fires, resolved_instruction is set
        |
-  [Step 7f] Context injection (ContextInjection / Hybrid modes)
-       |    --> per-turn modifiers sent as model-role Content::model() turns
+  [Steps 7d/7e/7f/12/13] Context accumulation
+       |    --> tool advisory, repair nudge, steering modifiers,
+       |        phase instruction, on_enter_context all push into
+       |        a single context_buffer (Vec<Content>)
        |
-  [Step 12] Instruction delivery (gated by SteeringMode)
-       |    --> InstructionUpdate/Hybrid: writer.update_instruction()
-       |    --> ContextInjection: writer.send_client_content()
+  [Step 14] Batched context send
+       |    --> ONE send_client_content(context_buffer, false)
+       |    --> eliminates burst of separate WebSocket frames
        |
-  [Step 13] on_enter_context (phase transition context)
-  [Step 14] prompt_on_enter (triggers model response)
+  [Step 14b] prompt_on_enter (triggers model response)
+       |    --> send_client_content([], true) — separate frame
 ```
+
+**Batched delivery:** All model-role context turns are accumulated into a single `Vec<Content>` and sent as one atomic WebSocket frame. This eliminates the burst of 3-5 separate `send_client_content` calls that could confuse the model or clash with concurrent user input.
 
 The key insight: with `ContextInjection`, step 12 sends the phase instruction as `Content::model(instruction_text)`. The model sees it as its own prior speech, which naturally steers its behavior without the overhead of system instruction replacement.
 
