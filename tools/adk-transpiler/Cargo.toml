@@ -2,6 +2,7 @@
 name = "adk-transpiler"
 version = "0.1.0"
 edition = "2021"
+publish = false
 description = "Extracts agent definitions from ADK-JS TypeScript source for Rust codegen"
 
 [[bin]]

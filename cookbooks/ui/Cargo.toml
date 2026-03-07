@@ -2,6 +2,7 @@
 name = "rs-genai-ui"
 version = "0.1.0"
 edition.workspace = true
+publish = false
 
 [dependencies]
 rs-genai = { path = "../../crates/rs-genai" }
