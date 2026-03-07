@@ -5,10 +5,10 @@
 //!
 //! # Callback Modes
 //!
-//! Control-lane callbacks support two execution modes via [`CallbackMode`]:
+//! Control-lane callbacks support two execution modes via [`rs_adk::live::CallbackMode`]:
 //!
-//! - **Default methods** (e.g., `.on_turn_complete()`) → [`CallbackMode::Blocking`]
-//! - **`_concurrent` methods** (e.g., `.on_turn_complete_concurrent()`) → [`CallbackMode::Concurrent`]
+//! - **Default methods** (e.g., `.on_turn_complete()`) → [`rs_adk::live::CallbackMode::Blocking`]
+//! - **`_concurrent` methods** (e.g., `.on_turn_complete_concurrent()`) → [`rs_adk::live::CallbackMode::Concurrent`]
 //!
 //! Use concurrent mode for fire-and-forget work (logging, analytics, webhook dispatch).
 //!

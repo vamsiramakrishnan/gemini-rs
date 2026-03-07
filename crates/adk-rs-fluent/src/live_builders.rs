@@ -81,7 +81,7 @@ impl PhaseDefaults {
         self
     }
 
-    /// Append a declarative [`ContextBuilder`] to every phase's instruction.
+    /// Append a declarative [`rs_adk::live::context_builder::ContextBuilder`] to every phase's instruction.
     ///
     /// The builder renders accumulated state as a natural-language summary,
     /// giving the model situational awareness across all phases.
@@ -171,7 +171,7 @@ impl PhaseBuilder {
     ///
     /// Purely informational — does not enforce transitions or block progress.
     /// The [`ContextBuilder`](rs_adk::live::context_builder::ContextBuilder)
-    /// reads these to append a "[Gathering] key1, key2" line to the instruction,
+    /// reads these to append a "\[Gathering\] key1, key2" line to the instruction,
     /// so the model knows what to focus on in the current phase.
     ///
     /// # Example
@@ -307,7 +307,7 @@ impl PhaseBuilder {
         self
     }
 
-    /// Append a declarative [`ContextBuilder`] to this phase's instruction.
+    /// Append a declarative [`rs_adk::live::context_builder::ContextBuilder`] to this phase's instruction.
     pub fn context(mut self, ctx: rs_adk::live::context_builder::ContextBuilder) -> Self {
         self.modifiers.push(ctx.into_modifier());
         self
