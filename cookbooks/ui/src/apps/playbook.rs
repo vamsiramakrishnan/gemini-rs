@@ -1,22 +1,21 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::LazyLock;
-use std::time::Duration;
 
 use async_trait::async_trait;
-use base64::Engine;
 use regex::Regex;
 use serde_json::json;
 use tokio::sync::mpsc;
-use tracing::{info, warn};
+use tracing::info;
 
 use adk_rs_fluent::prelude::*;
 
-use crate::app::{AppError, ClientMessage, CookbookApp, ServerMessage, WsSender};
+use crate::app::{AppError, ClientMessage, CookbookApp, WsSender};
+use crate::bridge::SessionBridge;
 use crate::cookbook_meta;
 
 use super::extractors::RegexExtractor;
-use super::{build_session_config, resolve_voice, send_app_meta, wait_for_start};
+use super::resolve_voice;
 
 // ---------------------------------------------------------------------------
 // Phase definitions for the customer support state machine
@@ -354,347 +353,140 @@ impl CookbookApp for Playbook {
         tx: WsSender,
         mut rx: mpsc::UnboundedReceiver<ClientMessage>,
     ) -> Result<(), AppError> {
-        let start = wait_for_start(&mut rx).await?;
+        info!("Playbook session starting");
 
-        // Resolve voice selection (default to Puck).
-        let selected_voice = resolve_voice(start.voice.as_deref());
-
-        // Build session config for voice mode with the initial phase instruction.
-        let config = build_session_config(start.model.as_deref())
-            .map_err(|e| AppError::Connection(e.to_string()))?
-            .response_modalities(vec![Modality::Audio])
-            .voice(selected_voice)
-            .enable_input_transcription()
-            .enable_output_transcription()
-            .system_instruction(PHASES[0].instruction);
-
-        // Create a RegexExtractor wrapping the existing extract_state function.
         let extractor = Arc::new(RegexExtractor::new("playbook_state", 10, extract_state));
 
-        // Build Live session with callbacks, extraction, and phase machine.
-        let tx_audio = tx.clone();
-        let tx_input = tx.clone();
-        let tx_output = tx.clone();
-        let tx_text = tx.clone();
-        let tx_text_complete = tx.clone();
-        let tx_turn = tx.clone();
-        let tx_interrupted = tx.clone();
-        let tx_vad_start = tx.clone();
-        let tx_vad_end = tx.clone();
-        let tx_error = tx.clone();
-        let tx_disconnected = tx.clone();
+        SessionBridge::new(tx)
+            .run(self, &mut rx, |live, start| {
+                let voice = resolve_voice(start.voice.as_deref());
 
-        // Phase on_enter callbacks: send PhaseChange + StateUpdate to the browser.
-        // greet -> identify
-        let tx_enter_identify = tx.clone();
-        // identify -> investigate
-        let tx_enter_investigate = tx.clone();
-        // investigate -> explain
-        let tx_enter_explain = tx.clone();
-        // explain -> resolve
-        let tx_enter_resolve = tx.clone();
-        // resolve -> close
-        let tx_enter_close = tx.clone();
-
-        let handle = Live::builder()
-            .steering_mode(SteeringMode::ContextInjection)
-            // Model greets the customer immediately on connect
-            .greeting("Begin the conversation. Welcome the customer warmly.")
-            .extractor(extractor)
-            .on_extracted({
-                let tx = tx.clone();
-                move |_name, value| {
-                    let tx = tx.clone();
-                    async move {
-                        if let Some(obj) = value.as_object() {
-                            for (key, val) in obj {
-                                let _ = tx.send(ServerMessage::StateUpdate {
-                                    key: key.clone(),
-                                    value: val.clone(),
-                                });
-                            }
-                        }
-                    }
-                }
+                // =================================================================
+                // DESIGN DISSECTION: Why this app is built the way it is
+                // =================================================================
+                //
+                // Steering Mode: ContextInjection
+                //   The support agent persona is consistent across all 6 phases.
+                //   Each phase changes focus (greet, identify, investigate,
+                //   explain, resolve, close) but the personality stays the same.
+                //   ContextInjection avoids the overhead of replacing the system
+                //   instruction 6 times.
+                //
+                // greeting("..."):
+                //   The model starts the conversation with a warm welcome. This
+                //   fires once at connect — before any phase evaluation runs.
+                //
+                // NO prompt_on_enter on any phase:
+                //   All transitions are customer-driven. The customer gives their
+                //   name (→ identify), describes the issue (→ investigate),
+                //   mentions a resolution type (→ explain), confirms (→ resolve),
+                //   expresses satisfaction (→ close). The model responds naturally
+                //   at each step without needing an explicit prompt.
+                //
+                // NO enter_prompt on any phase:
+                //   This is the simplest correct pattern — the model has enough
+                //   context from with_context(playbook_context) to maintain
+                //   continuity. enter_prompt would be useful if transitions felt
+                //   abrupt, but with ContextInjection the phase instruction
+                //   itself provides sufficient direction.
+                //
+                // RegexExtractor for state extraction:
+                //   Uses pattern matching (not LLM extraction) to detect customer
+                //   name, issue type, resolution preferences, etc. This is faster
+                //   and cheaper than LLM extraction, appropriate for structured
+                //   data that follows predictable patterns.
+                //
+                // State-based transitions only:
+                //   Pure state guards with no turn-count fallbacks. The 6-phase
+                //   flow relies entirely on the LLM's natural conversational
+                //   ability to gather the required info.
+                // =================================================================
+                live.model(GeminiModel::Gemini2_0FlashLive)
+                    .voice(voice)
+                    .transcription(true, true)
+                    .steering_mode(SteeringMode::ContextInjection)
+                    // Model greets the customer immediately on connect
+                    .greeting("Begin the conversation. Welcome the customer warmly.")
+                    .extractor(extractor)
+                    // Phase machine: 6 phases with transition guards based on extracted state.
+                    .phase_defaults(|d| d.navigation())
+                    .phase("greet")
+                    .instruction(PHASES[0].instruction)
+                    .transition_with(
+                        "identify",
+                        |s| {
+                            s.get::<serde_json::Value>("playbook_state")
+                                .and_then(|v| v.get("customer_name").cloned())
+                                .is_some()
+                        },
+                        "when customer name is provided",
+                    )
+                    .with_context(playbook_context)
+                    .done()
+                    .phase("identify")
+                    .instruction(PHASES[1].instruction)
+                    .transition_with(
+                        "investigate",
+                        |s| {
+                            s.get::<serde_json::Value>("playbook_state")
+                                .and_then(|v| v.get("issue_description").cloned())
+                                .is_some()
+                        },
+                        "when issue description is provided",
+                    )
+                    .with_context(playbook_context)
+                    .done()
+                    .phase("investigate")
+                    .instruction(PHASES[2].instruction)
+                    .transition_with(
+                        "explain",
+                        |s| {
+                            s.get::<serde_json::Value>("playbook_state")
+                                .and_then(|v| v.get("resolution_type").cloned())
+                                .is_some()
+                        },
+                        "when resolution type is determined",
+                    )
+                    .with_context(playbook_context)
+                    .done()
+                    .phase("explain")
+                    .instruction(PHASES[3].instruction)
+                    .transition_with(
+                        "resolve",
+                        |s| {
+                            s.get::<serde_json::Value>("playbook_state")
+                                .and_then(|v| v.get("customer_confirmed").cloned())
+                                .is_some()
+                        },
+                        "when customer confirms understanding",
+                    )
+                    .with_context(playbook_context)
+                    .done()
+                    .phase("resolve")
+                    .instruction(PHASES[4].instruction)
+                    .transition_with(
+                        "close",
+                        |s| {
+                            s.get::<serde_json::Value>("playbook_state")
+                                .and_then(|v| v.get("satisfied").cloned())
+                                .is_some()
+                        },
+                        "when customer is satisfied",
+                    )
+                    .with_context(playbook_context)
+                    .done()
+                    .phase("close")
+                    .instruction(PHASES[5].instruction)
+                    .terminal()
+                    .with_context(playbook_context)
+                    .done()
+                    .initial_phase("greet")
+                    // Turn boundary: increment turn counter.
+                    .on_turn_boundary(move |state, _writer| async move {
+                        let _turn_count: u32 = state.modify("session:turn_count", 0u32, |n| n + 1);
+                    })
             })
-            // Phase machine: 6 phases with transition guards based on extracted state.
-            .phase_defaults(|d| d.navigation())
-            .phase("greet")
-            .instruction(PHASES[0].instruction)
-            .transition_with(
-                "identify",
-                |s| {
-                    s.get::<serde_json::Value>("playbook_state")
-                        .and_then(|v| v.get("customer_name").cloned())
-                        .is_some()
-                },
-                "when customer name is provided",
-            )
-            .on_enter(move |_state, _writer| {
-                async move {
-                    // Initial phase — entered at session start, no "from" phase.
-                }
-            })
-            .with_context(playbook_context)
-            .done()
-            .phase("identify")
-            .instruction(PHASES[1].instruction)
-            .transition_with(
-                "investigate",
-                |s| {
-                    s.get::<serde_json::Value>("playbook_state")
-                        .and_then(|v| v.get("issue_description").cloned())
-                        .is_some()
-                },
-                "when issue description is provided",
-            )
-            .on_enter(move |_state, _writer| {
-                let tx = tx_enter_identify.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::PhaseChange {
-                        from: "greet".into(),
-                        to: "identify".into(),
-                        reason: "All required keys present".into(),
-                    });
-                    let _ = tx.send(ServerMessage::StateUpdate {
-                        key: "phase".into(),
-                        value: json!("identify"),
-                    });
-                }
-            })
-            .with_context(playbook_context)
-            .done()
-            .phase("investigate")
-            .instruction(PHASES[2].instruction)
-            .transition_with(
-                "explain",
-                |s| {
-                    s.get::<serde_json::Value>("playbook_state")
-                        .and_then(|v| v.get("resolution_type").cloned())
-                        .is_some()
-                },
-                "when resolution type is determined",
-            )
-            .on_enter(move |_state, _writer| {
-                let tx = tx_enter_investigate.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::PhaseChange {
-                        from: "identify".into(),
-                        to: "investigate".into(),
-                        reason: "All required keys present".into(),
-                    });
-                    let _ = tx.send(ServerMessage::StateUpdate {
-                        key: "phase".into(),
-                        value: json!("investigate"),
-                    });
-                }
-            })
-            .with_context(playbook_context)
-            .done()
-            .phase("explain")
-            .instruction(PHASES[3].instruction)
-            .transition_with(
-                "resolve",
-                |s| {
-                    s.get::<serde_json::Value>("playbook_state")
-                        .and_then(|v| v.get("customer_confirmed").cloned())
-                        .is_some()
-                },
-                "when customer confirms understanding",
-            )
-            .on_enter(move |_state, _writer| {
-                let tx = tx_enter_explain.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::PhaseChange {
-                        from: "investigate".into(),
-                        to: "explain".into(),
-                        reason: "All required keys present".into(),
-                    });
-                    let _ = tx.send(ServerMessage::StateUpdate {
-                        key: "phase".into(),
-                        value: json!("explain"),
-                    });
-                }
-            })
-            .with_context(playbook_context)
-            .done()
-            .phase("resolve")
-            .instruction(PHASES[4].instruction)
-            .transition_with(
-                "close",
-                |s| {
-                    s.get::<serde_json::Value>("playbook_state")
-                        .and_then(|v| v.get("satisfied").cloned())
-                        .is_some()
-                },
-                "when customer is satisfied",
-            )
-            .on_enter(move |_state, _writer| {
-                let tx = tx_enter_resolve.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::PhaseChange {
-                        from: "explain".into(),
-                        to: "resolve".into(),
-                        reason: "All required keys present".into(),
-                    });
-                    let _ = tx.send(ServerMessage::StateUpdate {
-                        key: "phase".into(),
-                        value: json!("resolve"),
-                    });
-                }
-            })
-            .with_context(playbook_context)
-            .done()
-            .phase("close")
-            .instruction(PHASES[5].instruction)
-            .terminal()
-            .on_enter(move |_state, _writer| {
-                let tx = tx_enter_close.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::PhaseChange {
-                        from: "resolve".into(),
-                        to: "close".into(),
-                        reason: "All required keys present".into(),
-                    });
-                    let _ = tx.send(ServerMessage::StateUpdate {
-                        key: "phase".into(),
-                        value: json!("close"),
-                    });
-                }
-            })
-            .with_context(playbook_context)
-            .done()
-            .initial_phase("greet")
-            // Turn boundary: increment turn counter.
-            .on_turn_boundary({
-                move |state, _writer| async move {
-                    let _turn_count: u32 = state.modify("session:turn_count", 0u32, |n| n + 1);
-                }
-            })
-            // Standard voice callbacks.
-            .on_audio(move |data| {
-                let _ = tx_audio.send(ServerMessage::Audio {
-                    data: data.to_vec(),
-                });
-            })
-            .on_input_transcript(move |text, _is_final| {
-                let _ = tx_input.send(ServerMessage::InputTranscription {
-                    text: text.to_string(),
-                });
-            })
-            .on_output_transcript(move |text, _is_final| {
-                let _ = tx_output.send(ServerMessage::OutputTranscription {
-                    text: text.to_string(),
-                });
-            })
-            .on_text(move |t| {
-                let _ = tx_text.send(ServerMessage::TextDelta {
-                    text: t.to_string(),
-                });
-            })
-            .on_text_complete(move |t| {
-                let _ = tx_text_complete.send(ServerMessage::TextComplete {
-                    text: t.to_string(),
-                });
-            })
-            .on_turn_complete(move || {
-                let tx = tx_turn.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::TurnComplete);
-                }
-            })
-            .on_interrupted(move || {
-                let tx = tx_interrupted.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::Interrupted);
-                }
-            })
-            .on_vad_start(move || {
-                let _ = tx_vad_start.send(ServerMessage::VoiceActivityStart);
-            })
-            .on_vad_end(move || {
-                let _ = tx_vad_end.send(ServerMessage::VoiceActivityEnd);
-            })
-            .on_error(move |msg| {
-                let tx = tx_error.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::Error { message: msg });
-                }
-            })
-            .on_disconnected(move |_reason| {
-                let _tx = tx_disconnected.clone();
-                async move {
-                    info!("Playbook session disconnected by server");
-                }
-            })
-            .connect(config)
             .await
-            .map_err(|e| AppError::Connection(e.to_string()))?;
-
-        let _ = tx.send(ServerMessage::Connected);
-        send_app_meta(&tx, self);
-        info!("Playbook session connected");
-
-        // Periodic telemetry sender (auto-collected by SDK telemetry lane)
-        let telem = handle.telemetry().clone();
-        let tx_telem = tx.clone();
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(2));
-            loop {
-                interval.tick().await;
-                let stats = telem.snapshot();
-                if tx_telem.send(ServerMessage::Telemetry { stats }).is_err() {
-                    break;
-                }
-            }
-        });
-
-        // Send initial phase notification.
-        let _ = tx.send(ServerMessage::PhaseChange {
-            from: "none".into(),
-            to: "greet".into(),
-            reason: "Session started".into(),
-        });
-        let _ = tx.send(ServerMessage::StateUpdate {
-            key: "phase".into(),
-            value: json!("greet"),
-        });
-
-        // Browser -> Gemini loop.
-        let b64 = base64::engine::general_purpose::STANDARD;
-        while let Some(msg) = rx.recv().await {
-            match msg {
-                ClientMessage::Audio { data } => match b64.decode(&data) {
-                    Ok(pcm_bytes) => {
-                        if let Err(e) = handle.send_audio(pcm_bytes).await {
-                            warn!("Failed to send audio: {e}");
-                            let _ = tx.send(ServerMessage::Error {
-                                message: e.to_string(),
-                            });
-                        }
-                    }
-                    Err(e) => {
-                        warn!("Failed to decode base64 audio: {e}");
-                    }
-                },
-                ClientMessage::Text { text } => {
-                    if let Err(e) = handle.send_text(&text).await {
-                        warn!("Failed to send text: {e}");
-                        let _ = tx.send(ServerMessage::Error {
-                            message: e.to_string(),
-                        });
-                    }
-                }
-                ClientMessage::Stop => {
-                    info!("Playbook session stopping");
-                    let _ = handle.disconnect().await;
-                    break;
-                }
-                _ => {}
-            }
-        }
-
-        Ok(())
     }
 }
 

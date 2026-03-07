@@ -2,23 +2,21 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use base64::Engine;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::json;
 use tokio::sync::mpsc;
-use tracing::{info, warn};
+use tracing::info;
 
 use adk_rs_fluent::prelude::*;
 use rs_adk::llm::{BaseLlm, GeminiLlm, GeminiLlmParams};
 use rs_adk::state::StateKey;
 
-use rs_genai::session::SessionEvent;
-
-use crate::app::{AppError, ClientMessage, CookbookApp, ServerMessage, WsSender};
+use crate::app::{AppError, ClientMessage, CookbookApp, WsSender};
+use crate::bridge::SessionBridge;
 use crate::cookbook_meta;
 
-use super::{build_session_config, resolve_voice, send_app_meta, wait_for_start};
+use super::resolve_voice;
 
 // ---------------------------------------------------------------------------
 // Typed state keys
@@ -298,9 +296,7 @@ fn suggest_department(symptoms: &str) -> &'static str {
 // ---------------------------------------------------------------------------
 
 fn clinic_tools() -> rs_genai::prelude::Tool {
-    use rs_genai::prelude::{
-        FunctionCallingBehavior, FunctionDeclaration, FunctionResponseScheduling, Tool,
-    };
+    use rs_genai::prelude::{FunctionCallingBehavior, FunctionDeclaration, Tool};
     Tool::functions(vec![
         FunctionDeclaration {
             name: "list_departments".into(),
@@ -464,7 +460,7 @@ fn clinic_tools() -> rs_genai::prelude::Tool {
 // Mock tool execution
 // ---------------------------------------------------------------------------
 
-fn execute_tool(name: &str, args: &Value) -> Value {
+fn execute_tool(name: &str, args: &serde_json::Value) -> serde_json::Value {
     match name {
         "list_departments" => json!({
             "departments": [
@@ -626,772 +622,326 @@ impl CookbookApp for Clinic {
         tx: WsSender,
         mut rx: mpsc::UnboundedReceiver<ClientMessage>,
     ) -> Result<(), AppError> {
-        handle_session(tx, rx).await
-    }
-}
+        info!("Clinic session starting");
+        SessionBridge::new(tx)
+            .run(self, &mut rx, |live, start| {
+                let voice = resolve_voice(start.voice.as_deref());
 
-// ---------------------------------------------------------------------------
-// Session handler
-// ---------------------------------------------------------------------------
+                // Create GeminiLlm for LLM extraction
+                let llm: Arc<dyn BaseLlm> = Arc::new(GeminiLlm::new(GeminiLlmParams {
+                    model: Some("gemini-3.1-flash-lite-preview".to_string()),
+                    location: Some("global".to_string()),
+                    ..Default::default()
+                }));
 
-async fn handle_session(
-    tx: WsSender,
-    mut rx: mpsc::UnboundedReceiver<ClientMessage>,
-) -> Result<(), AppError> {
-    // 1. Wait for Start, resolve voice, build SessionConfig
-    let start = wait_for_start(&mut rx).await?;
-    let selected_voice = resolve_voice(start.voice.as_deref());
-
-    let config = build_session_config(start.model.as_deref())
-        .map_err(|e| AppError::Connection(e.to_string()))?
-        .response_modalities(vec![Modality::Audio])
-        .voice(selected_voice)
-        .enable_input_transcription()
-        .enable_output_transcription()
-        .add_tool(clinic_tools())
-        .system_instruction(SYSTEM_INSTRUCTION);
-
-    // 2. Create GeminiLlm for LLM extraction (background agent uses flash-lite at global)
-    let llm: Arc<dyn BaseLlm> = Arc::new(GeminiLlm::new(GeminiLlmParams {
-        model: Some("gemini-3.1-flash-lite-preview".to_string()),
-        location: Some("global".to_string()),
-        ..Default::default()
-    }));
-
-    // 3. Clone tx for all callbacks
-    let tx_audio = tx.clone();
-    let tx_input = tx.clone();
-    let tx_output = tx.clone();
-    let tx_text = tx.clone();
-    let tx_text_complete = tx.clone();
-    let tx_turn = tx.clone();
-    let tx_interrupted = tx.clone();
-    let tx_vad_start = tx.clone();
-    let tx_vad_end = tx.clone();
-    let tx_error = tx.clone();
-    let tx_disconnected = tx.clone();
-    let tx_go_away = tx.clone();
-    let tx_tool_call = tx.clone();
-
-    // Phase on_enter clones
-    let tx_enter_greeting = tx.clone();
-    let tx_enter_triage = tx.clone();
-    let tx_enter_dept = tx.clone();
-    let tx_enter_doctor = tx.clone();
-    let tx_enter_booking = tx.clone();
-    let tx_enter_reschedule = tx.clone();
-    let tx_enter_registration = tx.clone();
-    let tx_enter_confirmation = tx.clone();
-    let tx_enter_farewell = tx.clone();
-
-    // Watcher clones
-    let tx_watcher_urgency = tx.clone();
-    let tx_watcher_new_patient = tx.clone();
-    let tx_watcher_dept_changed = tx.clone();
-
-    // Temporal pattern clones
-    let tx_triage_stalled = tx.clone();
-    let tx_patient_anxious = tx.clone();
-
-    // 4. Build Live::builder() with full pipeline
-    let handle = Live::builder()
-        .steering_mode(SteeringMode::ContextInjection)
-        // --- Model-initiated greeting ---
-        .greeting("Welcome the patient to Clearview Medical Center and ask how you can help them today.")
-        // --- LLM extraction ---
-        .extract_turns_triggered::<ClinicState>(
-            llm,
-            "Extract from the medical clinic conversation: symptoms (list of strings), \
-             preferred_department, preferred_doctor, patient_name, patient_id, \
-             urgency (0.0=routine to 1.0=emergency, >0.9 if chest pain/breathing difficulty/severe bleeding), \
-             intent (new_appointment/reschedule/cancel/inquiry), \
-             insurance_mentioned (bool).",
-            5,
-            ExtractionTrigger::Interval(2),
-        )
-        // --- on_extracted: broadcast state to browser (concurrent — fire-and-forget) ---
-        .on_extracted_concurrent({
-            let tx = tx.clone();
-            move |name, value| {
-                let tx = tx.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::StateUpdate {
-                        key: name.clone(),
-                        value: value.clone(),
-                    });
-                    if let Some(obj) = value.as_object() {
-                        for (key, val) in obj {
-                            let _ = tx.send(ServerMessage::StateUpdate {
-                                key: format!("{name}.{key}"),
-                                value: val.clone(),
-                            });
+                live.model(GeminiModel::Gemini2_0FlashLive)
+                    .voice(voice)
+                    .instruction(
+                        start
+                            .system_instruction
+                            .as_deref()
+                            .unwrap_or(SYSTEM_INSTRUCTION),
+                    )
+                    .transcription(true, true)
+                    .add_tool(clinic_tools())
+                    .steering_mode(SteeringMode::ContextInjection)
+                    .context_delivery(ContextDelivery::Deferred)
+                    // --- Model-initiated greeting ---
+                    .greeting("Welcome the patient to Clearview Medical Center and ask how you can help them today.")
+                    // --- LLM extraction ---
+                    .extract_turns_triggered::<ClinicState>(
+                        llm,
+                        "Extract from the medical clinic conversation: symptoms (list of strings), \
+                         preferred_department, preferred_doctor, patient_name, patient_id, \
+                         urgency (0.0=routine to 1.0=emergency, >0.9 if chest pain/breathing difficulty/severe bleeding), \
+                         intent (new_appointment/reschedule/cancel/inquiry), \
+                         insurance_mentioned (bool).",
+                        5,
+                        ExtractionTrigger::Interval(2),
+                    )
+                    // --- Computed state: symptom-to-department mapping ---
+                    .computed("suggested_department", &["symptoms"], |state| {
+                        let symptoms: String = state.get("symptoms").unwrap_or_default();
+                        if symptoms.is_empty() {
+                            return None;
                         }
-                    }
-                }
-            }
-        })
-        // --- on_extraction_error (concurrent — fire-and-forget) ---
-        .on_extraction_error_concurrent({
-            let tx = tx.clone();
-            move |name, error| {
-                let tx = tx.clone();
-                async move {
-                    warn!("Extraction error for {name}: {error}");
-                    let _ = tx.send(ServerMessage::StateUpdate {
-                        key: "extraction_error".into(),
-                        value: json!({ "extractor": name, "error": error }),
-                    });
-                }
-            }
-        })
-        // --- Computed state: symptom-to-department mapping ---
-        .computed("suggested_department", &["symptoms"], |state| {
-            let symptoms: String = state.get("symptoms").unwrap_or_default();
-            if symptoms.is_empty() {
-                return None;
-            }
-            Some(json!(suggest_department(&symptoms)))
-        })
-        // --- before_tool_response: state promotion from tool results ---
-        .before_tool_response(move |responses, state| {
-            async move {
-                responses
-                    .into_iter()
-                    .inspect(|r| {
-                        match r.name.as_str() {
-                            "book_appointment" => {
-                                if r.response.get("status").and_then(|v| v.as_str())
-                                    == Some("confirmed")
-                                {
-                                    state.set("appointment_booked", true);
-                                    if let Some(apt_id) =
-                                        r.response.get("appointment_id").and_then(|v| v.as_str())
-                                    {
-                                        state.set(
-                                            "appointment_id",
-                                            apt_id.to_string(),
-                                        );
+                        Some(json!(suggest_department(&symptoms)))
+                    })
+                    // --- before_tool_response: state promotion from tool results ---
+                    .before_tool_response(move |responses, state| {
+                        async move {
+                            responses
+                                .into_iter()
+                                .inspect(|r| {
+                                    match r.name.as_str() {
+                                        "book_appointment" => {
+                                            if r.response.get("status").and_then(|v| v.as_str())
+                                                == Some("confirmed")
+                                            {
+                                                state.set("appointment_booked", true);
+                                                if let Some(apt_id) =
+                                                    r.response.get("appointment_id").and_then(|v| v.as_str())
+                                                {
+                                                    state.set(
+                                                        "appointment_id",
+                                                        apt_id.to_string(),
+                                                    );
+                                                }
+                                            }
+                                        }
+                                        "register_patient" => {
+                                            if r.response.get("status").and_then(|v| v.as_str())
+                                                == Some("registered")
+                                            {
+                                                if let Some(pid) =
+                                                    r.response.get("patient_id").and_then(|v| v.as_str())
+                                                {
+                                                    state.set("patient_id", pid.to_string());
+                                                    state.set("is_new_patient", false);
+                                                }
+                                            }
+                                        }
+                                        "lookup_patient" => {
+                                            let found = r
+                                                .response
+                                                .get("found")
+                                                .and_then(|v| v.as_bool())
+                                                .unwrap_or(false);
+                                            if found {
+                                                if let Some(pid) =
+                                                    r.response.get("patient_id").and_then(|v| v.as_str())
+                                                {
+                                                    state.set("patient_id", pid.to_string());
+                                                }
+                                                state.set("is_new_patient", false);
+                                            } else {
+                                                state.set("is_new_patient", true);
+                                            }
+                                        }
+                                        "reschedule_appointment" | "cancel_appointment" => {
+                                            if r.response.get("status").is_some() {
+                                                state.set("appointment_booked", true);
+                                            }
+                                        }
+                                        _ => {}
                                     }
-                                }
-                            }
-                            "register_patient" => {
-                                if r.response.get("status").and_then(|v| v.as_str())
-                                    == Some("registered")
-                                {
-                                    if let Some(pid) =
-                                        r.response.get("patient_id").and_then(|v| v.as_str())
-                                    {
-                                        state.set("patient_id", pid.to_string());
-                                        state.set("is_new_patient", false);
-                                    }
-                                }
-                            }
-                            "lookup_patient" => {
-                                let found = r
-                                    .response
-                                    .get("found")
-                                    .and_then(|v| v.as_bool())
-                                    .unwrap_or(false);
-                                if found {
-                                    if let Some(pid) =
-                                        r.response.get("patient_id").and_then(|v| v.as_str())
-                                    {
-                                        state.set("patient_id", pid.to_string());
-                                    }
-                                    state.set("is_new_patient", false);
-                                } else {
-                                    state.set("is_new_patient", true);
-                                }
-                            }
-                            "reschedule_appointment" | "cancel_appointment" => {
-                                if r.response.get("status").is_some() {
-                                    state.set("appointment_booked", true);
-                                }
-                            }
-                            _ => {}
+                                })
+                                .collect()
                         }
                     })
-                    .collect()
-            }
-        })
-        // --- Phase defaults (inherited by all phases) ---
-        .phase_defaults(|d| {
-            d.navigation()
-                .with_context(clinic_context)
-                .when(urgency_is_critical, EMERGENCY_WARNING)
-        })
-        // --- 9 Phases ---
-        // Phase 1: Greeting
-        .phase("greeting")
-            .instruction(GREETING_INSTRUCTION)
-            .prompt_on_enter(true)
-            .needs(&["intent"])
-            .transition_with("symptom_triage", S::eq("intent", "new_appointment"), "when intent is new_appointment")
-            .transition_with("rescheduling", S::one_of("intent", &["reschedule", "cancel"]), "when intent is reschedule or cancel")
-            .on_enter(move |_state, _writer| {
-                let tx = tx_enter_greeting.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::PhaseChange {
-                        from: "none".into(),
-                        to: "greeting".into(),
-                        reason: "Session started — greeting patient".into(),
-                    });
-                }
+                    // --- Phase defaults (inherited by all phases) ---
+                    .phase_defaults(|d| {
+                        d.navigation()
+                            .with_context(clinic_context)
+                            .when(urgency_is_critical, EMERGENCY_WARNING)
+                    })
+                    // --- 9 Phases ---
+                    // Phase 1: Greeting
+                    .phase("greeting")
+                        .instruction(GREETING_INSTRUCTION)
+                        .prompt_on_enter(true)
+                        .needs(&["intent"])
+                        .transition_with("symptom_triage", S::eq("intent", "new_appointment"), "when intent is new_appointment")
+                        .transition_with("rescheduling", S::one_of("intent", &["reschedule", "cancel"]), "when intent is reschedule or cancel")
+                        .done()
+                    // Phase 2: Symptom Triage
+                    .phase("symptom_triage")
+                        .instruction(SYMPTOM_TRIAGE_INSTRUCTION)
+                        .needs(&["symptoms", "symptom_severity"])
+                        .transition_with("department_selection", |s| {
+                            let symptoms: String = s.get("symptoms").unwrap_or_default();
+                            !symptoms.is_empty()
+                        }, "when symptoms have been described")
+                        .enter_prompt_fn(|s, _| {
+                            let name: String = s.get("patient_name").unwrap_or_else(|| "the patient".into());
+                            format!("{name} wants to book an appointment. I'll ask about their symptoms.")
+                        })
+                        .done()
+                    // Phase 3: Department Selection
+                    .phase("department_selection")
+                        .instruction(DEPARTMENT_SELECTION_INSTRUCTION)
+                        .needs(&["department"])
+                        .transition_with("doctor_selection", |s| {
+                            let dept: String = s.get("department").unwrap_or_default();
+                            !dept.is_empty()
+                        }, "when department is selected")
+                        .enter_prompt_fn(|s, _| {
+                            let suggested: String = s.get("derived:suggested_department").unwrap_or_default();
+                            if suggested.is_empty() {
+                                "I have a good understanding of the symptoms. Let me suggest the right department.".into()
+                            } else {
+                                format!("Based on the symptoms, {suggested} looks like the right fit. Let me confirm with the patient.")
+                            }
+                        })
+                        .done()
+                    // Phase 4: Doctor Selection
+                    .phase("doctor_selection")
+                        .instruction(DOCTOR_SELECTION_INSTRUCTION)
+                        .needs(&["doctor_name"])
+                        .transition_with("appointment_booking", |s| {
+                            let doctor: String = s.get("doctor_name").unwrap_or_default();
+                            !doctor.is_empty()
+                        }, "when doctor is chosen")
+                        .enter_prompt_fn(|s, _| {
+                            let dept: String = s.get("department").unwrap_or_else(|| "the selected department".into());
+                            format!("{dept} is confirmed. Let me show the available doctors.")
+                        })
+                        .done()
+                    // Phase 5: Appointment Booking
+                    .phase("appointment_booking")
+                        .instruction(APPOINTMENT_BOOKING_INSTRUCTION)
+                        .needs(&["appointment_date", "appointment_time"])
+                        .transition_with("patient_registration", S::is_true("is_new_patient"), "when patient is new (is_new_patient)")
+                        .transition_with("confirmation", S::is_true("appointment_booked"), "when appointment is booked")
+                        .enter_prompt_fn(|s, _| {
+                            let doctor: String = s.get("doctor_name").unwrap_or_else(|| "the selected doctor".into());
+                            format!("{doctor} has been selected. I'll now book the appointment.")
+                        })
+                        .done()
+                    // Phase 6: Rescheduling
+                    .phase("rescheduling")
+                        .instruction(RESCHEDULING_INSTRUCTION)
+                        .transition_with("confirmation", S::is_true("appointment_booked"), "when appointment is rescheduled")
+                        .enter_prompt_fn(|s, _| {
+                            let name: String = s.get("patient_name").unwrap_or_else(|| "The patient".into());
+                            let intent: String = s.get("intent").unwrap_or_else(|| "reschedule".into());
+                            let action = if intent == "cancel" { "cancel" } else { "reschedule" };
+                            format!("{name} wants to {action} their appointment. I'll look up the details.")
+                        })
+                        .done()
+                    // Phase 7: Patient Registration
+                    .phase("patient_registration")
+                        .instruction(PATIENT_REGISTRATION_INSTRUCTION)
+                        .needs(&["patient_name", "insurance_provider"])
+                        .transition_with("appointment_booking", |s| {
+                            // Loop back once registered (is_new_patient becomes false)
+                            let is_new: bool = s.get("is_new_patient").unwrap_or(true);
+                            !is_new
+                        }, "when registration is complete")
+                        .enter_prompt_fn(|s, _| {
+                            let name: String = s.get("patient_name").unwrap_or_default();
+                            if name.is_empty() {
+                                "This is a new patient. I'll collect their registration information.".into()
+                            } else {
+                                format!("{name} is new to Clearview Medical Center. I'll get them registered.")
+                            }
+                        })
+                        .done()
+                    // Phase 8: Confirmation
+                    .phase("confirmation")
+                        .instruction(CONFIRMATION_INSTRUCTION)
+                        .transition_with("farewell", |_s| true, "when confirmation is acknowledged")
+                        .enter_prompt_fn(|s, _| {
+                            let doctor: String = s.get("doctor_name").unwrap_or_default();
+                            let apt_id: String = s.get("appointment_id").unwrap_or_default();
+                            if !doctor.is_empty() && !apt_id.is_empty() {
+                                format!("Appointment {apt_id} with {doctor} is booked. I'll confirm all the details.")
+                            } else {
+                                "The appointment is processed. I'll confirm the details with the patient.".into()
+                            }
+                        })
+                        .done()
+                    // Phase 9: Farewell
+                    .phase("farewell")
+                        .instruction(FAREWELL_INSTRUCTION)
+                        .terminal()
+                        .enter_prompt_fn(|state, _tw| {
+                            let name: String = state.get("patient_name").unwrap_or_else(|| "the patient".into());
+                            let is_new: bool = state.get("is_new_patient").unwrap_or(false);
+                            let doctor: String = state.get("doctor_name").unwrap_or_default();
+                            if is_new && !doctor.is_empty() {
+                                format!("Thank {name} for registering. Their appointment with {doctor} is confirmed. Remind them to arrive 15 minutes early.")
+                            } else if is_new {
+                                format!("Thank {name} for registering. Remind them to arrive 15 minutes early with insurance card.")
+                            } else if !doctor.is_empty() {
+                                format!("{name}'s appointment with {doctor} is all set. I'll wrap up and wish them well.")
+                            } else {
+                                format!("I'll wrap up the call with {name} and wish them well.")
+                            }
+                        })
+                        .done()
+                    .initial_phase("greeting")
+                    // --- Watchers ---
+                    // Emergency: clinical urgency crossed above 0.9
+                    .watch("clinical_urgency")
+                        .crossed_above(0.9)
+                        .blocking()
+                        .then(move |_old, _new, state| {
+                            async move {
+                                state.set("emergency_detected", true);
+                            }
+                        })
+                    // --- Temporal patterns ---
+                    // Turns: triage stalled for 3 turns with no symptoms extracted
+                    .when_turns(
+                        "triage_stalled",
+                        |s| {
+                            let phase: String = s.get("session:phase").unwrap_or_default();
+                            let symptoms: String = s.get("symptoms").unwrap_or_default();
+                            phase == "symptom_triage" && symptoms.is_empty()
+                        },
+                        3,
+                        move |_state, writer| {
+                            async move {
+                                let _ = writer
+                                    .send_client_content(
+                                        vec![Content::user(
+                                            "[System: The patient hasn't described specific symptoms yet. \
+                                             Ask more directed questions: Where does it hurt? How long has \
+                                             this been going on? Is it getting worse? Any other symptoms?]",
+                                        )],
+                                        false,
+                                    )
+                                    .await;
+                            }
+                        },
+                    )
+                    // Sustained: patient showing anxiety for 20 seconds
+                    .when_sustained(
+                        "patient_anxious",
+                        |s| {
+                            let urgency: f64 = s.get("clinical_urgency").unwrap_or(0.0);
+                            urgency > 0.6
+                        },
+                        Duration::from_secs(20),
+                        move |_state, writer| {
+                            async move {
+                                let _ = writer
+                                    .send_client_content(
+                                        vec![Content::user(
+                                            "[System: The patient seems anxious about their health. \
+                                             Please reassure them that they are in good hands. \
+                                             Clearview Medical Center has experienced specialists \
+                                             who will take excellent care of them. Help them feel \
+                                             comfortable and heard.]",
+                                        )],
+                                        false,
+                                    )
+                                    .await;
+                            }
+                        },
+                    )
+                    // --- on_tool_call: mock tool dispatch ---
+                    .on_tool_call(|calls, _state| {
+                        async move {
+                            let responses: Vec<FunctionResponse> = calls
+                                .iter()
+                                .map(|call| {
+                                    let result = execute_tool(&call.name, &call.args);
+                                    FunctionResponse {
+                                        name: call.name.clone(),
+                                        response: result,
+                                        id: call.id.clone(),
+                                        scheduling: Some(FunctionResponseScheduling::WhenIdle),
+                                    }
+                                })
+                                .collect();
+                            Some(responses)
+                        }
+                    })
             })
-            .done()
-        // Phase 2: Symptom Triage
-        .phase("symptom_triage")
-            .instruction(SYMPTOM_TRIAGE_INSTRUCTION)
-            .needs(&["symptoms", "symptom_severity"])
-            .transition_with("department_selection", |s| {
-                let symptoms: String = s.get("symptoms").unwrap_or_default();
-                !symptoms.is_empty()
-            }, "when symptoms have been described")
-            .on_enter(move |_state, _writer| {
-                let tx = tx_enter_triage.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::PhaseChange {
-                        from: "greeting".into(),
-                        to: "symptom_triage".into(),
-                        reason: "Patient wants an appointment — triaging symptoms".into(),
-                    });
-                    let _ = tx.send(ServerMessage::StateUpdate {
-                        key: "phase".into(),
-                        value: json!("symptom_triage"),
-                    });
-                }
-            })
-            .enter_prompt_fn(|s, _| {
-                let name: String = s.get("patient_name").unwrap_or_else(|| "the patient".into());
-                format!("{name} wants to book an appointment. I'll ask about their symptoms.")
-            })
-            .done()
-        // Phase 3: Department Selection
-        .phase("department_selection")
-            .instruction(DEPARTMENT_SELECTION_INSTRUCTION)
-            .needs(&["department"])
-            .transition_with("doctor_selection", |s| {
-                let dept: String = s.get("department").unwrap_or_default();
-                !dept.is_empty()
-            }, "when department is selected")
-            .on_enter(move |_state, _writer| {
-                let tx = tx_enter_dept.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::PhaseChange {
-                        from: "symptom_triage".into(),
-                        to: "department_selection".into(),
-                        reason: "Symptoms collected — selecting department".into(),
-                    });
-                    let _ = tx.send(ServerMessage::StateUpdate {
-                        key: "phase".into(),
-                        value: json!("department_selection"),
-                    });
-                }
-            })
-            .enter_prompt_fn(|s, _| {
-                let suggested: String = s.get("derived:suggested_department").unwrap_or_default();
-                if suggested.is_empty() {
-                    "I have a good understanding of the symptoms. Let me suggest the right department.".into()
-                } else {
-                    format!("Based on the symptoms, {suggested} looks like the right fit. Let me confirm with the patient.")
-                }
-            })
-            .done()
-        // Phase 4: Doctor Selection
-        .phase("doctor_selection")
-            .instruction(DOCTOR_SELECTION_INSTRUCTION)
-            .needs(&["doctor_name"])
-            .transition_with("appointment_booking", |s| {
-                let doctor: String = s.get("doctor_name").unwrap_or_default();
-                !doctor.is_empty()
-            }, "when doctor is chosen")
-            .on_enter(move |_state, _writer| {
-                let tx = tx_enter_doctor.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::PhaseChange {
-                        from: "department_selection".into(),
-                        to: "doctor_selection".into(),
-                        reason: "Department confirmed — selecting doctor".into(),
-                    });
-                    let _ = tx.send(ServerMessage::StateUpdate {
-                        key: "phase".into(),
-                        value: json!("doctor_selection"),
-                    });
-                }
-            })
-            .enter_prompt_fn(|s, _| {
-                let dept: String = s.get("department").unwrap_or_else(|| "the selected department".into());
-                format!("{dept} is confirmed. Let me show the available doctors.")
-            })
-            .done()
-        // Phase 5: Appointment Booking
-        .phase("appointment_booking")
-            .instruction(APPOINTMENT_BOOKING_INSTRUCTION)
-            .needs(&["appointment_date", "appointment_time"])
-            .transition_with("patient_registration", S::is_true("is_new_patient"), "when patient is new (is_new_patient)")
-            .transition_with("confirmation", S::is_true("appointment_booked"), "when appointment is booked")
-            .on_enter(move |_state, _writer| {
-                let tx = tx_enter_booking.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::PhaseChange {
-                        from: "doctor_selection".into(),
-                        to: "appointment_booking".into(),
-                        reason: "Doctor selected — booking appointment".into(),
-                    });
-                    let _ = tx.send(ServerMessage::StateUpdate {
-                        key: "phase".into(),
-                        value: json!("appointment_booking"),
-                    });
-                }
-            })
-            .enter_prompt_fn(|s, _| {
-                let doctor: String = s.get("doctor_name").unwrap_or_else(|| "the selected doctor".into());
-                format!("{doctor} has been selected. I'll now book the appointment.")
-            })
-            .done()
-        // Phase 6: Rescheduling
-        .phase("rescheduling")
-            .instruction(RESCHEDULING_INSTRUCTION)
-            .transition_with("confirmation", S::is_true("appointment_booked"), "when appointment is rescheduled")
-            .on_enter(move |_state, _writer| {
-                let tx = tx_enter_reschedule.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::PhaseChange {
-                        from: "greeting".into(),
-                        to: "rescheduling".into(),
-                        reason: "Patient wants to reschedule or cancel".into(),
-                    });
-                    let _ = tx.send(ServerMessage::StateUpdate {
-                        key: "phase".into(),
-                        value: json!("rescheduling"),
-                    });
-                }
-            })
-            .enter_prompt_fn(|s, _| {
-                let name: String = s.get("patient_name").unwrap_or_else(|| "The patient".into());
-                let intent: String = s.get("intent").unwrap_or_else(|| "reschedule".into());
-                let action = if intent == "cancel" { "cancel" } else { "reschedule" };
-                format!("{name} wants to {action} their appointment. I'll look up the details.")
-            })
-            .done()
-        // Phase 7: Patient Registration
-        .phase("patient_registration")
-            .instruction(PATIENT_REGISTRATION_INSTRUCTION)
-            .needs(&["patient_name", "insurance_provider"])
-            .transition_with("appointment_booking", |s| {
-                // Loop back once registered (is_new_patient becomes false)
-                let is_new: bool = s.get("is_new_patient").unwrap_or(true);
-                !is_new
-            }, "when registration is complete")
-            .on_enter(move |_state, _writer| {
-                let tx = tx_enter_registration.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::PhaseChange {
-                        from: "appointment_booking".into(),
-                        to: "patient_registration".into(),
-                        reason: "New patient — collecting registration info".into(),
-                    });
-                    let _ = tx.send(ServerMessage::StateUpdate {
-                        key: "phase".into(),
-                        value: json!("patient_registration"),
-                    });
-                }
-            })
-            .enter_prompt_fn(|s, _| {
-                let name: String = s.get("patient_name").unwrap_or_default();
-                if name.is_empty() {
-                    "This is a new patient. I'll collect their registration information.".into()
-                } else {
-                    format!("{name} is new to Clearview Medical Center. I'll get them registered.")
-                }
-            })
-            .done()
-        // Phase 8: Confirmation
-        .phase("confirmation")
-            .instruction(CONFIRMATION_INSTRUCTION)
-            .transition_with("farewell", |_s| true, "when confirmation is acknowledged")
-            .on_enter(move |_state, _writer| {
-                let tx = tx_enter_confirmation.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::PhaseChange {
-                        from: "previous".into(),
-                        to: "confirmation".into(),
-                        reason: "Appointment processed — confirming details".into(),
-                    });
-                    let _ = tx.send(ServerMessage::StateUpdate {
-                        key: "phase".into(),
-                        value: json!("confirmation"),
-                    });
-                }
-            })
-            .enter_prompt_fn(|s, _| {
-                let doctor: String = s.get("doctor_name").unwrap_or_default();
-                let apt_id: String = s.get("appointment_id").unwrap_or_default();
-                if !doctor.is_empty() && !apt_id.is_empty() {
-                    format!("Appointment {apt_id} with {doctor} is booked. I'll confirm all the details.")
-                } else {
-                    "The appointment is processed. I'll confirm the details with the patient.".into()
-                }
-            })
-            .done()
-        // Phase 9: Farewell
-        .phase("farewell")
-            .instruction(FAREWELL_INSTRUCTION)
-            .terminal()
-            .on_enter(move |state, _writer| {
-                let tx = tx_enter_farewell.clone();
-                async move {
-                    let is_new: bool = state.get("is_new_patient").unwrap_or(false);
-                    let reason = if is_new {
-                        "New patient registered — wrapping up with extra reminders"
-                    } else {
-                        "Appointment confirmed — saying goodbye"
-                    };
-                    let _ = tx.send(ServerMessage::PhaseChange {
-                        from: "confirmation".into(),
-                        to: "farewell".into(),
-                        reason: reason.into(),
-                    });
-                    let _ = tx.send(ServerMessage::StateUpdate {
-                        key: "phase".into(),
-                        value: json!("farewell"),
-                    });
-                }
-            })
-            .enter_prompt_fn(|state, _tw| {
-                let name: String = state.get("patient_name").unwrap_or_else(|| "the patient".into());
-                let is_new: bool = state.get("is_new_patient").unwrap_or(false);
-                let doctor: String = state.get("doctor_name").unwrap_or_default();
-                if is_new && !doctor.is_empty() {
-                    format!("Thank {name} for registering. Their appointment with {doctor} is confirmed. Remind them to arrive 15 minutes early.")
-                } else if is_new {
-                    format!("Thank {name} for registering. Remind them to arrive 15 minutes early with insurance card.")
-                } else if !doctor.is_empty() {
-                    format!("{name}'s appointment with {doctor} is all set. I'll wrap up and wish them well.")
-                } else {
-                    format!("I'll wrap up the call with {name} and wish them well.")
-                }
-            })
-            .done()
-        .initial_phase("greeting")
-        // --- Watchers ---
-        // Emergency: clinical urgency crossed above 0.9
-        .watch("clinical_urgency")
-            .crossed_above(0.9)
-            .blocking()
-            .then({
-                let tx = tx_watcher_urgency.clone();
-                move |_old, _new, state| {
-                    let tx = tx.clone();
-                    async move {
-                        let _ = tx.send(ServerMessage::Violation {
-                            rule: "emergency_urgency".into(),
-                            severity: "critical".into(),
-                            detail: "Patient symptoms suggest a medical emergency — advise calling 911".into(),
-                        });
-                        state.set("emergency_detected", true);
-                    }
-                }
-            })
-        // Boolean: is_new_patient became true
-        .watch("is_new_patient")
-            .became_true()
-            .then({
-                let tx = tx_watcher_new_patient.clone();
-                move |_old, _new, _state| {
-                    let tx = tx.clone();
-                    async move {
-                        let _ = tx.send(ServerMessage::StateUpdate {
-                            key: "watcher:new_patient".into(),
-                            value: json!({
-                                "triggered": true,
-                                "action": "Patient not found in system — registration required"
-                            }),
-                        });
-                    }
-                }
-            })
-        // Value: suggested_department changed
-        .watch("derived:suggested_department")
-            .changed()
-            .then({
-                let tx = tx_watcher_dept_changed.clone();
-                move |_old, new, _state| {
-                    let tx = tx.clone();
-                    async move {
-                        let _ = tx.send(ServerMessage::StateUpdate {
-                            key: "watcher:suggested_department".into(),
-                            value: json!({
-                                "triggered": true,
-                                "new_department": new,
-                                "action": "Symptom analysis suggests a department"
-                            }),
-                        });
-                    }
-                }
-            })
-        // --- Temporal patterns ---
-        // Turns: triage stalled for 3 turns with no symptoms extracted
-        .when_turns(
-            "triage_stalled",
-            |s| {
-                let phase: String = s.get("session:phase").unwrap_or_default();
-                let symptoms: String = s.get("symptoms").unwrap_or_default();
-                phase == "symptom_triage" && symptoms.is_empty()
-            },
-            3,
-            {
-                let tx = tx_triage_stalled.clone();
-                move |_state, writer| {
-                    let tx = tx.clone();
-                    async move {
-                        let _ = tx.send(ServerMessage::StateUpdate {
-                            key: "temporal:triage_stalled".into(),
-                            value: json!({
-                                "triggered": true,
-                                "action": "Triage stalled for 3 turns — asking more directed questions"
-                            }),
-                        });
-                        let _ = writer
-                            .send_client_content(
-                                vec![Content::user(
-                                    "[System: The patient hasn't described specific symptoms yet. \
-                                     Ask more directed questions: Where does it hurt? How long has \
-                                     this been going on? Is it getting worse? Any other symptoms?]",
-                                )],
-                                false,
-                            )
-                            .await;
-                    }
-                }
-            },
-        )
-        // Sustained: patient showing anxiety for 20 seconds
-        .when_sustained(
-            "patient_anxious",
-            |s| {
-                let urgency: f64 = s.get("clinical_urgency").unwrap_or(0.0);
-                urgency > 0.6
-            },
-            Duration::from_secs(20),
-            {
-                let tx = tx_patient_anxious.clone();
-                move |_state, writer| {
-                    let tx = tx.clone();
-                    async move {
-                        let _ = tx.send(ServerMessage::StateUpdate {
-                            key: "temporal:patient_anxious".into(),
-                            value: json!({
-                                "triggered": true,
-                                "action": "Patient has been anxious for over 20 seconds — injecting reassurance"
-                            }),
-                        });
-                        let _ = writer
-                            .send_client_content(
-                                vec![Content::user(
-                                    "[System: The patient seems anxious about their health. \
-                                     Please reassure them that they are in good hands. \
-                                     Clearview Medical Center has experienced specialists \
-                                     who will take excellent care of them. Help them feel \
-                                     comfortable and heard.]",
-                                )],
-                                false,
-                            )
-                            .await;
-                    }
-                }
-            },
-        )
-        // --- on_tool_call: mock tool dispatch ---
-        .on_tool_call(move |calls, _state| {
-            let tx = tx_tool_call.clone();
-            async move {
-                let mut responses = Vec::new();
-                for call in &calls {
-                    let _ = tx.send(ServerMessage::StateUpdate {
-                        key: "tool_call".into(),
-                        value: json!({
-                            "name": call.name,
-                            "args": call.args,
-                        }),
-                    });
-
-                    let result = execute_tool(&call.name, &call.args);
-
-                    let _ = tx.send(ServerMessage::ToolCallEvent {
-                        name: call.name.clone(),
-                        args: serde_json::to_string(&call.args).unwrap_or_default(),
-                        result: serde_json::to_string(&result).unwrap_or_default(),
-                    });
-
-                    responses.push(FunctionResponse {
-                        name: call.name.clone(),
-                        response: result,
-                        id: call.id.clone(),
-                        scheduling: Some(FunctionResponseScheduling::WhenIdle),
-                    });
-                }
-                Some(responses)
-            }
-        })
-        // --- Fast lane callbacks ---
-        .on_audio(move |data| {
-                        let _ = tx_audio.send(ServerMessage::Audio { data: data.to_vec() });
-        })
-        .on_input_transcript(move |text, _is_final| {
-            let _ = tx_input.send(ServerMessage::InputTranscription {
-                text: text.to_string(),
-            });
-        })
-        .on_output_transcript(move |text, _is_final| {
-            let _ = tx_output.send(ServerMessage::OutputTranscription {
-                text: text.to_string(),
-            });
-        })
-        .on_text(move |t| {
-            let _ = tx_text.send(ServerMessage::TextDelta {
-                text: t.to_string(),
-            });
-        })
-        .on_text_complete(move |t| {
-            let _ = tx_text_complete.send(ServerMessage::TextComplete {
-                text: t.to_string(),
-            });
-        })
-        // --- Control lane callbacks ---
-        .on_turn_complete({
-            let tx = tx_turn.clone();
-            move || {
-                let tx = tx.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::TurnComplete);
-                }
-            }
-        })
-        .on_interrupted({
-            let tx = tx_interrupted.clone();
-            move || {
-                let tx = tx.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::Interrupted);
-                }
-            }
-        })
-        .on_vad_start(move || {
-            let _ = tx_vad_start.send(ServerMessage::VoiceActivityStart);
-        })
-        .on_vad_end(move || {
-            let _ = tx_vad_end.send(ServerMessage::VoiceActivityEnd);
-        })
-        .on_error_concurrent(move |msg| {
-            let tx = tx_error.clone();
-            async move {
-                let _ = tx.send(ServerMessage::Error { message: msg });
-            }
-        })
-        .on_go_away_concurrent(move |duration| {
-            let tx = tx_go_away.clone();
-            async move {
-                let _ = tx.send(ServerMessage::StateUpdate {
-                    key: "go_away".into(),
-                    value: json!({
-                        "time_remaining_secs": duration.as_secs(),
-                    }),
-                });
-            }
-        })
-        .on_disconnected_concurrent(move |reason| {
-            let _tx = tx_disconnected.clone();
-            async move {
-                info!("Clinic session disconnected: {reason:?}");
-            }
-        })
-        .connect(config)
-        .await
-        .map_err(|e| AppError::Connection(e.to_string()))?;
-
-    // 5. Send Connected + AppMeta + initial state
-    let _ = tx.send(ServerMessage::Connected);
-    let clinic = Clinic;
-    send_app_meta(&tx, &clinic);
-    info!("Clinic session connected");
-
-    // Periodic telemetry sender
-    let telem = handle.telemetry().clone();
-    let telem_state = handle.state().clone();
-    let tx_telem = tx.clone();
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(2));
-        loop {
-            interval.tick().await;
-            let mut stats = telem.snapshot();
-            if let Some(obj) = stats.as_object_mut() {
-                let phase: String = telem_state.get("session:phase").unwrap_or_default();
-                let urgency: f64 = telem_state.get("clinical_urgency").unwrap_or(0.0);
-                let dept: String = telem_state
-                    .get("derived:suggested_department")
-                    .unwrap_or_default();
-                let tc: u32 = telem_state.session().get("turn_count").unwrap_or(0);
-                obj.insert("current_phase".into(), json!(phase));
-                obj.insert("clinical_urgency".into(), json!(urgency));
-                obj.insert("suggested_department".into(), json!(dept));
-                obj.insert("turn_count".into(), json!(tc));
-            }
-            if tx_telem.send(ServerMessage::Telemetry { stats }).is_err() {
-                break;
-            }
-        }
-    });
-
-    let _ = tx.send(ServerMessage::PhaseChange {
-        from: "none".into(),
-        to: "greeting".into(),
-        reason: "Session started".into(),
-    });
-    let _ = tx.send(ServerMessage::StateUpdate {
-        key: "phase".into(),
-        value: json!("greeting"),
-    });
-    let _ = tx.send(ServerMessage::StateUpdate {
-        key: "clinical_urgency".into(),
-        value: json!(0.0),
-    });
-
-    // 6. Browser -> Gemini recv loop
-    let b64 = base64::engine::general_purpose::STANDARD;
-    while let Some(msg) = rx.recv().await {
-        match msg {
-            ClientMessage::Audio { data } => match b64.decode(&data) {
-                Ok(pcm_bytes) => {
-                    if let Err(e) = handle.send_audio(pcm_bytes).await {
-                        warn!("Failed to send audio: {e}");
-                        let _ = tx.send(ServerMessage::Error {
-                            message: e.to_string(),
-                        });
-                    }
-                }
-                Err(e) => {
-                    warn!("Failed to decode base64 audio: {e}");
-                }
-            },
-            ClientMessage::Text { text } => {
-                if let Err(e) = handle.send_text(&text).await {
-                    warn!("Failed to send text: {e}");
-                    let _ = tx.send(ServerMessage::Error {
-                        message: e.to_string(),
-                    });
-                }
-            }
-            ClientMessage::Stop => {
-                info!("Clinic session stopping");
-                let _ = handle.disconnect().await;
-                break;
-            }
-            _ => {}
-        }
+            .await
     }
-
-    Ok(())
 }
 
 #[cfg(test)]

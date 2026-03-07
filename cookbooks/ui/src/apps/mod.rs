@@ -133,6 +133,7 @@ pub fn build_session_config(model: Option<&str>) -> Result<SessionConfig, String
 }
 
 /// Send appMeta message to the browser so devtools can configure tabs.
+#[allow(dead_code)]
 pub fn send_app_meta(tx: &WsSender, app: &dyn CookbookApp) {
     let _ = tx.send(ServerMessage::AppMeta {
         info: AppInfo {

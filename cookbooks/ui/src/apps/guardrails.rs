@@ -3,31 +3,19 @@ use std::sync::Arc;
 use std::sync::LazyLock;
 
 use async_trait::async_trait;
-use base64::Engine;
 use regex::Regex;
 use serde_json::json;
 use tokio::sync::mpsc;
-use tracing::{info, warn};
+use tracing::info;
 
 use adk_rs_fluent::prelude::*;
 
 use crate::app::{AppError, ClientMessage, CookbookApp, ServerMessage, WsSender};
+use crate::bridge::SessionBridge;
 use crate::cookbook_meta;
 
 use super::extractors::RegexExtractor;
-use super::{build_session_config, resolve_voice, send_app_meta, wait_for_start};
-
-// ---------------------------------------------------------------------------
-// Policy rules
-// ---------------------------------------------------------------------------
-
-/// Policy names for the active_policies state message.
-const POLICY_NAMES: &[&str] = &[
-    "pii_ssn",
-    "pii_credit_card",
-    "off_topic",
-    "negative_sentiment",
-];
+use super::resolve_voice;
 
 // ---------------------------------------------------------------------------
 // Violation detection
@@ -227,19 +215,7 @@ impl CookbookApp for Guardrails {
         tx: WsSender,
         mut rx: mpsc::UnboundedReceiver<ClientMessage>,
     ) -> Result<(), AppError> {
-        let start = wait_for_start(&mut rx).await?;
-
-        // Resolve voice selection (default to Puck).
-        let selected_voice = resolve_voice(start.voice.as_deref());
-
-        // Build session config for voice mode with base instruction.
-        let config = build_session_config(start.model.as_deref())
-            .map_err(|e| AppError::Connection(e.to_string()))?
-            .response_modalities(vec![Modality::Audio])
-            .voice(selected_voice)
-            .enable_input_transcription()
-            .enable_output_transcription()
-            .system_instruction(BASE_INSTRUCTION);
+        info!("Guardrails session starting");
 
         // Create a ViolationExtractor wrapping check_violations.
         // Guardrails violations are stateless — re-detect each turn, don't accumulate.
@@ -261,228 +237,74 @@ impl CookbookApp for Guardrails {
             },
         ));
 
-        // Build Live session with callbacks, extraction, watchers, and instruction template.
-        let tx_audio = tx.clone();
-        let tx_input = tx.clone();
-        let tx_output = tx.clone();
-        let tx_text = tx.clone();
-        let tx_text_complete = tx.clone();
-        let tx_turn = tx.clone();
-        let tx_interrupted = tx.clone();
-        let tx_vad_start = tx.clone();
-        let tx_vad_end = tx.clone();
-        let tx_error = tx.clone();
-        let tx_disconnected = tx.clone();
+        let tx_violation = tx.clone();
 
-        let handle = Live::builder()
-            .extractor(extractor)
-            .on_extracted({
-                let tx = tx.clone();
-                move |_name, value| {
-                    let tx = tx.clone();
-                    async move {
-                        if let Some(obj) = value.as_object() {
-                            for (key, val) in obj {
-                                let _ = tx.send(ServerMessage::StateUpdate {
-                                    key: key.clone(),
-                                    value: val.clone(),
-                                });
-                            }
-                        }
-                    }
-                }
-            })
-            // Watcher: detect violations and send to browser.
-            .watch("guardrails_state")
-                .changed()
-                .blocking()
-                .then({
-                    let tx = tx.clone();
-                    move |_old, new, _state| {
-                        let tx = tx.clone();
-                        async move {
-                            if let Some(obj) = new.as_object() {
-                                for (key, val) in obj {
-                                    if key.starts_with("violation:") && key != "violation_count" {
-                                        let rule = key.strip_prefix("violation:").unwrap_or(key);
-                                        let severity = val.get("severity").and_then(|v| v.as_str()).unwrap_or("medium");
-                                        let detail = val.get("detail").and_then(|v| v.as_str()).unwrap_or("");
-                                        let _ = tx.send(ServerMessage::Violation {
-                                            rule: rule.to_string(),
-                                            severity: severity.to_string(),
-                                            detail: detail.to_string(),
-                                        });
+        SessionBridge::new(tx)
+            .run(self, &mut rx, |live, start| {
+                let voice = resolve_voice(start.voice.as_deref());
+
+                live.model(GeminiModel::Gemini2_0FlashLive)
+                    .voice(voice)
+                    .instruction(BASE_INSTRUCTION)
+                    .transcription(true, true)
+                    .extractor(extractor)
+                    // Watcher: detect violations and send to browser.
+                    .watch("guardrails_state")
+                        .changed()
+                        .blocking()
+                        .then(move |_old, new, _state| {
+                            let tx = tx_violation.clone();
+                            async move {
+                                if let Some(obj) = new.as_object() {
+                                    for (key, val) in obj {
+                                        if key.starts_with("violation:") && key != "violation_count" {
+                                            let rule = key.strip_prefix("violation:").unwrap_or(key);
+                                            let severity = val.get("severity").and_then(|v| v.as_str()).unwrap_or("medium");
+                                            let detail = val.get("detail").and_then(|v| v.as_str()).unwrap_or("");
+                                            let _ = tx.send(ServerMessage::Violation {
+                                                rule: rule.to_string(),
+                                                severity: severity.to_string(),
+                                                detail: detail.to_string(),
+                                            });
+                                        }
                                     }
                                 }
                             }
+                        })
+                    // Instruction amendment: additively appends corrective instructions based on violations.
+                    .instruction_amendment(|state| {
+                        let extracted: serde_json::Value = state.get("guardrails_state").unwrap_or(json!({}));
+                        let obj = match extracted.as_object() {
+                            Some(o) => o,
+                            None => return None,
+                        };
+
+                        let has_violations = obj.keys().any(|k| k.starts_with("violation:"));
+                        if !has_violations {
+                            return None;
                         }
-                    }
-                })
-            // Instruction amendment: additively appends corrective instructions based on violations.
-            .instruction_amendment(|state| {
-                let extracted: serde_json::Value = state.get("guardrails_state").unwrap_or(json!({}));
-                let obj = match extracted.as_object() {
-                    Some(o) => o,
-                    None => return None,
-                };
 
-                let has_violations = obj.keys().any(|k| k.starts_with("violation:"));
-                if !has_violations {
-                    return None;
-                }
+                        let mut amendment = String::new();
 
-                let mut amendment = String::new();
+                        if obj.contains_key("violation:pii_ssn") || obj.contains_key("violation:pii_credit_card") {
+                            amendment.push_str("CRITICAL: The user just shared sensitive PII. Do NOT repeat, acknowledge, or reference any SSNs, credit card numbers, or other sensitive data. Respond helpfully without echoing the sensitive information.\n\n");
+                        }
+                        if obj.contains_key("violation:off_topic") {
+                            amendment.push_str("NOTE: The conversation has gone off-topic. Gently redirect back to the main topic. Stay focused and professional.\n\n");
+                        }
+                        if obj.contains_key("violation:negative_sentiment") {
+                            amendment.push_str("NOTE: The user is expressing frustration. Show extra empathy and understanding. Acknowledge their feelings before addressing their concern.\n\n");
+                        }
 
-                if obj.contains_key("violation:pii_ssn") || obj.contains_key("violation:pii_credit_card") {
-                    amendment.push_str("CRITICAL: The user just shared sensitive PII. Do NOT repeat, acknowledge, or reference any SSNs, credit card numbers, or other sensitive data. Respond helpfully without echoing the sensitive information.\n\n");
-                }
-                if obj.contains_key("violation:off_topic") {
-                    amendment.push_str("NOTE: The conversation has gone off-topic. Gently redirect back to the main topic. Stay focused and professional.\n\n");
-                }
-                if obj.contains_key("violation:negative_sentiment") {
-                    amendment.push_str("NOTE: The user is expressing frustration. Show extra empathy and understanding. Acknowledge their feelings before addressing their concern.\n\n");
-                }
-
-                if amendment.is_empty() { None } else { Some(amendment.trim().to_string()) }
+                        if amendment.is_empty() { None } else { Some(amendment.trim().to_string()) }
+                    })
+                    .on_turn_boundary(move |state, _writer| {
+                        async move {
+                            let _turn_count: u32 = state.modify("session:turn_count", 0u32, |n| n + 1);
+                        }
+                    })
             })
-            .on_turn_boundary({
-                let tx = tx.clone();
-                move |state, _writer| {
-                    let tx = tx.clone();
-                    async move {
-                        let turn_count: u32 = state.modify("session:turn_count", 0u32, |n| n + 1);
-                        let violation_count: u32 = state.get("violation_count").unwrap_or(0);
-                        let _ = tx.send(ServerMessage::Telemetry {
-                            stats: json!({
-                                "turn_count": turn_count,
-                                "violation_count": violation_count,
-                            }),
-                        });
-                    }
-                }
-            })
-            // Standard voice callbacks.
-            .on_audio(move |data| {
-                                let _ = tx_audio.send(ServerMessage::Audio { data: data.to_vec() });
-            })
-            .on_input_transcript(move |text, _is_final| {
-                let _ = tx_input.send(ServerMessage::InputTranscription {
-                    text: text.to_string(),
-                });
-            })
-            .on_output_transcript(move |text, _is_final| {
-                let _ = tx_output.send(ServerMessage::OutputTranscription {
-                    text: text.to_string(),
-                });
-            })
-            .on_text(move |t| {
-                let _ = tx_text.send(ServerMessage::TextDelta {
-                    text: t.to_string(),
-                });
-            })
-            .on_text_complete(move |t| {
-                let _ = tx_text_complete.send(ServerMessage::TextComplete {
-                    text: t.to_string(),
-                });
-            })
-            .on_turn_complete(move || {
-                let tx = tx_turn.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::TurnComplete);
-                }
-            })
-            .on_interrupted(move || {
-                let tx = tx_interrupted.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::Interrupted);
-                }
-            })
-            .on_vad_start(move || {
-                let _ = tx_vad_start.send(ServerMessage::VoiceActivityStart);
-            })
-            .on_vad_end(move || {
-                let _ = tx_vad_end.send(ServerMessage::VoiceActivityEnd);
-            })
-            .on_error(move |msg| {
-                let tx = tx_error.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::Error { message: msg });
-                }
-            })
-            .on_disconnected(move |_reason| {
-                let _tx = tx_disconnected.clone();
-                async move {
-                    info!("Guardrails session disconnected by server");
-                }
-            })
-            .connect(config)
             .await
-            .map_err(|e| AppError::Connection(e.to_string()))?;
-
-        let _ = tx.send(ServerMessage::Connected);
-        send_app_meta(&tx, self);
-        info!("Guardrails session connected");
-
-        // Send initial state.
-        let _ = tx.send(ServerMessage::StateUpdate {
-            key: "active_policies".into(),
-            value: json!(POLICY_NAMES),
-        });
-        let _ = tx.send(ServerMessage::StateUpdate {
-            key: "violations".into(),
-            value: json!({"total_violations": 0, "by_rule": {}}),
-        });
-
-        // Periodic telemetry
-        let telem = handle.telemetry().clone();
-        let tx_telem = tx.clone();
-        let telem_task = tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));
-            loop {
-                interval.tick().await;
-                let stats = telem.snapshot();
-                if tx_telem.send(ServerMessage::Telemetry { stats }).is_err() {
-                    break;
-                }
-            }
-        });
-
-        // Browser -> Gemini loop.
-        let b64 = base64::engine::general_purpose::STANDARD;
-        while let Some(msg) = rx.recv().await {
-            match msg {
-                ClientMessage::Audio { data } => match b64.decode(&data) {
-                    Ok(pcm_bytes) => {
-                        if let Err(e) = handle.send_audio(pcm_bytes).await {
-                            warn!("Failed to send audio: {e}");
-                            let _ = tx.send(ServerMessage::Error {
-                                message: e.to_string(),
-                            });
-                        }
-                    }
-                    Err(e) => {
-                        warn!("Failed to decode base64 audio: {e}");
-                    }
-                },
-                ClientMessage::Text { text } => {
-                    if let Err(e) = handle.send_text(&text).await {
-                        warn!("Failed to send text: {e}");
-                        let _ = tx.send(ServerMessage::Error {
-                            message: e.to_string(),
-                        });
-                    }
-                }
-                ClientMessage::Stop => {
-                    info!("Guardrails session stopping");
-                    telem_task.abort();
-                    let _ = handle.disconnect().await;
-                    break;
-                }
-                _ => {}
-            }
-        }
-
-        Ok(())
     }
 }
 

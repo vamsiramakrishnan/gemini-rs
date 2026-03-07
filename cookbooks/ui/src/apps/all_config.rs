@@ -8,9 +8,10 @@ use tracing::{info, warn};
 use adk_rs_fluent::prelude::*;
 
 use crate::app::{AppError, ClientMessage, CookbookApp, ServerMessage, WsSender};
+use crate::bridge::SessionBridge;
 use crate::cookbook_meta;
 
-use super::{build_session_config, send_app_meta, wait_for_start};
+use super::{build_session_config, resolve_voice, wait_for_start};
 
 // ---------------------------------------------------------------------------
 // Extended configuration parsed from the Start message
@@ -78,18 +79,6 @@ fn parse_config(raw: Option<&str>, voice_override: Option<&str>) -> AllConfigOpt
     config
 }
 
-/// Resolve a voice string to the Voice enum.
-fn resolve_voice(name: Option<&str>) -> Voice {
-    match name {
-        Some("Aoede") => Voice::Aoede,
-        Some("Charon") => Voice::Charon,
-        Some("Fenrir") => Voice::Fenrir,
-        Some("Kore") => Voice::Kore,
-        Some("Puck") | None => Voice::Puck,
-        Some(other) => Voice::Custom(other.to_string()),
-    }
-}
-
 /// Build a summary of the active configuration for sending to the client.
 fn config_summary(opts: &AllConfigOptions) -> serde_json::Value {
     json!({
@@ -147,24 +136,28 @@ impl CookbookApp for AllConfig {
         tx: WsSender,
         mut rx: mpsc::UnboundedReceiver<ClientMessage>,
     ) -> Result<(), AppError> {
+        let bridge = SessionBridge::new(tx.clone());
+
+        // 1. Wait for Start message from the browser.
         let start = wait_for_start(&mut rx).await?;
 
-        // Parse extended config from system_instruction JSON (or plain text fallback).
+        // 2. Parse extended config from system_instruction JSON (or plain text fallback).
         let opts = parse_config(start.system_instruction.as_deref(), start.voice.as_deref());
 
-        // Build session config with all specified options.
-        let mut config = build_session_config(start.model.as_deref())
+        // 3. Build session config (auth, endpoint, model).
+        let config = build_session_config(start.model.as_deref())
             .map_err(|e| AppError::Connection(e.to_string()))?;
 
-        // System instruction.
+        // 4. Configure Live builder — wire_live attaches all 12 observation callbacks.
         let instruction = opts.system_instruction.as_deref().unwrap_or(
             "You are a helpful assistant. This session was started via the all-config playground.",
         );
-        config = config.system_instruction(instruction);
+
+        let mut live = bridge.wire_live(Live::builder()).instruction(instruction);
 
         // Temperature.
         if let Some(temp) = opts.temperature {
-            config = config.temperature(temp);
+            live = live.temperature(temp);
         }
 
         // Modality and voice.
@@ -174,34 +167,27 @@ impl CookbookApp for AllConfig {
 
         match modality_str {
             "text" => {
-                config = config.text_only();
-            }
-            "both" => {
-                config = config.response_modalities(vec![Modality::Audio, Modality::Text]);
-                config = config.voice(resolve_voice(opts.voice.as_deref()));
+                live = live.text_only();
             }
             _ => {
-                // Default: audio only.
-                config = config.response_modalities(vec![Modality::Audio]);
-                config = config.voice(resolve_voice(opts.voice.as_deref()));
+                // "audio" or "both" — set voice.
+                live = live.voice(resolve_voice(opts.voice.as_deref()));
             }
         }
 
         // Transcription (enabled by default for audio modes).
         if opts.enable_transcription.unwrap_or(is_audio) {
-            config = config
-                .enable_input_transcription()
-                .enable_output_transcription();
+            live = live.transcription(true, true);
         }
 
         // Google Search.
         if opts.enable_google_search.unwrap_or(false) {
-            config = config.with_google_search();
+            live = live.google_search();
         }
 
         // Code execution.
         if opts.enable_code_execution.unwrap_or(false) {
-            config = config.with_code_execution();
+            live = live.code_execution();
         }
 
         // Custom tools.
@@ -224,131 +210,66 @@ impl CookbookApp for AllConfig {
                         behavior: Some(FunctionCallingBehavior::NonBlocking),
                     })
                     .collect();
-                config = config.add_tool(Tool::functions(declarations));
+                live = live.add_tool(Tool::functions(declarations));
             }
         }
 
         // Context window compression.
         if let Some(target_tokens) = opts.context_window_compression {
-            config = config.context_window_compression(target_tokens);
+            live = live.context_compression(target_tokens, target_tokens);
         }
 
         // Session resumption.
         if opts.enable_session_resumption.unwrap_or(false) {
-            config = config.session_resumption(None);
+            live = live.session_resume(true);
         }
 
-        // Build Live session with all callbacks.
-        let tx_audio = tx.clone();
-        let tx_input = tx.clone();
-        let tx_output = tx.clone();
-        let tx_text = tx.clone();
-        let tx_text_complete = tx.clone();
-        let tx_turn = tx.clone();
-        let tx_interrupted = tx.clone();
-        let tx_vad_start = tx.clone();
-        let tx_vad_end = tx.clone();
-        let tx_error = tx.clone();
-        let tx_disconnected = tx.clone();
+        // Tool call handler for mock tools (ACTION callback — not covered by wire_live).
         let tx_tool = tx.clone();
+        live = live.on_tool_call(move |calls, _state| {
+            let tx = tx_tool.clone();
+            async move {
+                info!("Tool calls received: {}", calls.len());
 
-        let handle = Live::builder()
-            .on_audio(move |data| {
-                let _ = tx_audio.send(ServerMessage::Audio {
-                    data: data.to_vec(),
-                });
-            })
-            .on_input_transcript(move |text, _is_final| {
-                let _ = tx_input.send(ServerMessage::InputTranscription {
-                    text: text.to_string(),
-                });
-            })
-            .on_output_transcript(move |text, _is_final| {
-                let _ = tx_output.send(ServerMessage::OutputTranscription {
-                    text: text.to_string(),
-                });
-            })
-            .on_text(move |t| {
-                let _ = tx_text.send(ServerMessage::TextDelta {
-                    text: t.to_string(),
-                });
-            })
-            .on_text_complete(move |t| {
-                let _ = tx_text_complete.send(ServerMessage::TextComplete {
-                    text: t.to_string(),
-                });
-            })
-            .on_tool_call(move |calls, _state| {
-                let tx = tx_tool.clone();
-                async move {
-                    info!("Tool calls received: {}", calls.len());
+                let responses: Vec<FunctionResponse> = calls
+                    .iter()
+                    .map(|call| {
+                        let result = execute_mock_tool(&call.name, &call.args);
+                        info!("Mock tool '{}' -> {}", call.name, result);
 
-                    let responses: Vec<FunctionResponse> = calls
-                        .iter()
-                        .map(|call| {
-                            let result = execute_mock_tool(&call.name, &call.args);
-                            info!("Mock tool '{}' -> {}", call.name, result);
+                        let _ = tx.send(ServerMessage::StateUpdate {
+                            key: format!("tool:{}", call.name),
+                            value: json!({
+                                "name": call.name,
+                                "args": call.args,
+                                "result": result,
+                            }),
+                        });
 
-                            let _ = tx.send(ServerMessage::StateUpdate {
-                                key: format!("tool:{}", call.name),
-                                value: json!({
-                                    "name": call.name,
-                                    "args": call.args,
-                                    "result": result,
-                                }),
-                            });
+                        FunctionResponse {
+                            name: call.name.clone(),
+                            response: result,
+                            id: call.id.clone(),
+                            scheduling: Some(FunctionResponseScheduling::WhenIdle),
+                        }
+                    })
+                    .collect();
 
-                            FunctionResponse {
-                                name: call.name.clone(),
-                                response: result,
-                                id: call.id.clone(),
-                                scheduling: Some(FunctionResponseScheduling::WhenIdle),
-                            }
-                        })
-                        .collect();
+                Some(responses)
+            }
+        });
 
-                    Some(responses)
-                }
-            })
-            .on_turn_complete(move || {
-                let tx = tx_turn.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::TurnComplete);
-                }
-            })
-            .on_interrupted(move || {
-                let tx = tx_interrupted.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::Interrupted);
-                }
-            })
-            .on_vad_start(move || {
-                let _ = tx_vad_start.send(ServerMessage::VoiceActivityStart);
-            })
-            .on_vad_end(move || {
-                let _ = tx_vad_end.send(ServerMessage::VoiceActivityEnd);
-            })
-            .on_error(move |msg| {
-                let tx = tx_error.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::Error { message: msg });
-                }
-            })
-            .on_disconnected(move |_reason| {
-                let _tx = tx_disconnected.clone();
-                async move {
-                    info!("AllConfig session disconnected by server");
-                }
-            })
+        // 5. Connect with manually-built config.
+        let handle = live
             .connect(config)
             .await
             .map_err(|e| AppError::Connection(e.to_string()))?;
 
-        let _ = tx.send(ServerMessage::Connected);
-        send_app_meta(&tx, self);
-        info!("AllConfig session connected");
+        // 6. Signal browser.
+        bridge.send_connected();
+        bridge.send_meta(self);
 
-        // Send active configuration to the client.
+        // 7. Send active configuration to the client.
         let _ = tx.send(ServerMessage::StateUpdate {
             key: "config".into(),
             value: config_summary(&opts),
@@ -358,60 +279,41 @@ impl CookbookApp for AllConfig {
             value: json!(modality_str),
         });
 
-        // Periodic telemetry
-        let telem = handle.telemetry().clone();
-        let tx_telem = tx.clone();
-        let telem_task = tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));
-            loop {
-                interval.tick().await;
-                let stats = telem.snapshot();
-                if tx_telem.send(ServerMessage::Telemetry { stats }).is_err() {
-                    break;
-                }
-            }
-        });
+        // 8. Spawn telemetry sender.
+        let telem_task = bridge.spawn_telemetry(&handle);
 
-        // Browser -> Gemini loop.
+        // 9. Custom recv loop — only forward audio/text matching the configured modality.
         let b64 = base64::engine::general_purpose::STANDARD;
         while let Some(msg) = rx.recv().await {
             match msg {
-                ClientMessage::Audio { data } => {
-                    if is_audio {
-                        match b64.decode(&data) {
-                            Ok(pcm_bytes) => {
-                                if let Err(e) = handle.send_audio(pcm_bytes).await {
-                                    warn!("Failed to send audio: {e}");
-                                    let _ = tx.send(ServerMessage::Error {
-                                        message: e.to_string(),
-                                    });
-                                }
-                            }
-                            Err(e) => {
-                                warn!("Failed to decode base64 audio: {e}");
-                            }
-                        }
-                    }
-                }
-                ClientMessage::Text { text } => {
-                    if is_text || is_audio {
-                        if let Err(e) = handle.send_text(&text).await {
-                            warn!("Failed to send text: {e}");
+                ClientMessage::Audio { data } if is_audio => {
+                    if let Ok(pcm_bytes) = b64.decode(&data) {
+                        if let Err(e) = handle.send_audio(pcm_bytes).await {
+                            warn!("Failed to send audio: {e}");
                             let _ = tx.send(ServerMessage::Error {
                                 message: e.to_string(),
                             });
                         }
                     }
                 }
+                ClientMessage::Text { text } if is_text => {
+                    if let Err(e) = handle.send_text(&text).await {
+                        warn!("Failed to send text: {e}");
+                        let _ = tx.send(ServerMessage::Error {
+                            message: e.to_string(),
+                        });
+                    }
+                }
                 ClientMessage::Stop => {
-                    info!("AllConfig session stopping");
-                    telem_task.abort();
                     let _ = handle.disconnect().await;
                     break;
                 }
                 _ => {}
             }
         }
+
+        // 10. Cleanup.
+        telem_task.abort();
 
         Ok(())
     }

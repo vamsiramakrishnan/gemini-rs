@@ -2,23 +2,21 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use base64::Engine;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
-use tracing::{info, warn};
+use tracing::info;
 
 use adk_rs_fluent::prelude::*;
 use rs_adk::llm::{BaseLlm, GeminiLlm, GeminiLlmParams};
 use rs_adk::state::StateKey;
 
-use rs_genai::session::SessionEvent;
-
-use crate::app::{AppError, ClientMessage, CookbookApp, ServerMessage, WsSender};
+use crate::app::{AppError, ClientMessage, CookbookApp, WsSender};
+use crate::bridge::SessionBridge;
 use crate::cookbook_meta;
 
-use super::{build_session_config, resolve_voice, send_app_meta, wait_for_start};
+use super::resolve_voice;
 
 // ---------------------------------------------------------------------------
 // StateKey constants
@@ -210,9 +208,7 @@ fn reservation_context(s: &State) -> String {
 // ---------------------------------------------------------------------------
 
 fn restaurant_tools() -> rs_genai::prelude::Tool {
-    use rs_genai::prelude::{
-        FunctionCallingBehavior, FunctionDeclaration, FunctionResponseScheduling, Tool,
-    };
+    use rs_genai::prelude::{FunctionCallingBehavior, FunctionDeclaration, Tool};
     Tool::functions(vec![
         FunctionDeclaration {
             name: "check_availability".into(),
@@ -568,688 +564,313 @@ impl CookbookApp for Restaurant {
         tx: WsSender,
         mut rx: mpsc::UnboundedReceiver<ClientMessage>,
     ) -> Result<(), AppError> {
-        handle_session(tx, rx).await
-    }
-}
+        info!("Restaurant session starting");
+        SessionBridge::new(tx)
+            .run(self, &mut rx, |live, start| {
+                let selected_voice = resolve_voice(start.voice.as_deref());
 
-// ---------------------------------------------------------------------------
-// handle_session
-// ---------------------------------------------------------------------------
+                // Create GeminiLlm for LLM extraction
+                let llm: Arc<dyn BaseLlm> = Arc::new(GeminiLlm::new(GeminiLlmParams {
+                    model: Some("gemini-3.1-flash-lite-preview".to_string()),
+                    ..Default::default()
+                }));
 
-async fn handle_session(
-    tx: WsSender,
-    mut rx: mpsc::UnboundedReceiver<ClientMessage>,
-) -> Result<(), AppError> {
-    // 1. Wait for Start, resolve voice, build SessionConfig
-    let start = wait_for_start(&mut rx).await?;
-    let selected_voice = resolve_voice(start.voice.as_deref());
+                // =================================================================
+                // DESIGN DISSECTION: Why this app is built the way it is
+                // =================================================================
+                //
+                // Steering Mode: ContextInjection
+                //   The restaurant host persona is stable across all phases (greeting,
+                //   intent detection, reservation flow, etc.). Phase instructions are
+                //   delivered as model-role context turns, keeping the base persona
+                //   ("You are a host at Bella Vista...") locked in as the system
+                //   instruction. This avoids the latency spike of system instruction
+                //   replacement on each of the 8+ phase transitions.
+                //
+                // greeting("..."):
+                //   The model must speak first — a restaurant host initiates with
+                //   "Welcome to Bella Vista!" rather than waiting silently. This sends
+                //   text via send_text once at connect, before any phase logic runs.
+                //
+                // prompt_on_enter(true) on greeting ONLY:
+                //   Only the greeting phase uses prompt_on_enter because it's the
+                //   initial phase where the model needs to speak proactively. All
+                //   other phase transitions are user-driven (the user provides info
+                //   that triggers the transition), so the model responds naturally
+                //   without needing an extra prompt.
+                //
+                // enter_prompt_fn on non-greeting phases:
+                //   Each subsequent phase uses enter_prompt_fn to inject a model-role
+                //   bridge message with state context (e.g., "I have the guest's name:
+                //   Alice. Now I'll ask about party size."). This gives the model
+                //   continuity — it "remembers" what happened in the prior phase
+                //   without needing prompt_on_enter to force speech. The model will
+                //   continue naturally when the user speaks next.
+                //
+                // State-based transitions (no turn-count fallbacks):
+                //   Every transition fires when specific state keys become available
+                //   (guest_name, party_size, etc.). The LLM naturally asks for this
+                //   info — no need for turn-count safety nets in a restaurant flow
+                //   where callers are motivated to provide details.
+                //
+                // with_context(reservation_context):
+                //   Every phase gets a context formatter that summarizes the current
+                //   reservation state. This keeps the model aware of what's been
+                //   collected without baking volatile state into the instruction.
+                // =================================================================
 
-    let config = build_session_config(start.model.as_deref())
-        .map_err(|e| AppError::Connection(e.to_string()))?
-        .response_modalities(vec![Modality::Audio])
-        .voice(selected_voice)
-        .enable_input_transcription()
-        .enable_output_transcription()
-        .add_tool(restaurant_tools())
-        .system_instruction(SYSTEM_INSTRUCTION);
-
-    // 2. Create GeminiLlm for LLM extraction
-    let llm: Arc<dyn BaseLlm> = Arc::new(GeminiLlm::new(GeminiLlmParams {
-        model: Some("gemini-3.1-flash-lite-preview".to_string()),
-        ..Default::default()
-    }));
-
-    // 3. Clone tx for ALL callbacks
-    let tx_audio = tx.clone();
-    let tx_input = tx.clone();
-    let tx_output = tx.clone();
-    let tx_text = tx.clone();
-    let tx_text_complete = tx.clone();
-    let tx_turn = tx.clone();
-    let tx_interrupted = tx.clone();
-    let tx_vad_start = tx.clone();
-    let tx_vad_end = tx.clone();
-    let tx_error = tx.clone();
-    let tx_disconnected = tx.clone();
-    let tx_go_away = tx.clone();
-    let tx_tool_call = tx.clone();
-
-    // Phase on_enter clones
-    let tx_enter_greeting = tx.clone();
-    let tx_enter_check = tx.clone();
-    let tx_enter_booking = tx.clone();
-    let tx_enter_modification = tx.clone();
-    let tx_enter_cancellation = tx.clone();
-    let tx_enter_special = tx.clone();
-    let tx_enter_confirmation = tx.clone();
-    let tx_enter_farewell = tx.clone();
-
-    // Watcher clones
-    let tx_watcher_large_party = tx.clone();
-    let tx_watcher_readiness = tx.clone();
-
-    // Temporal pattern clones
-    let tx_sustained_undecided = tx.clone();
-    let tx_turns_stalled = tx.clone();
-
-    // 4. Build Live::builder() with full pipeline
-    let handle = Live::builder()
-        .steering_mode(SteeringMode::ContextInjection)
-        // --- Model-initiated greeting ---
-        .greeting("Welcome the caller to Bella Vista Italian Restaurant. Ask how you can help them today — whether they'd like to make a new reservation, modify an existing one, cancel, or have a question.")
-        // --- LLM extraction ---
-        .extract_turns_triggered::<ReservationState>(llm, EXTRACTION_PROMPT, 5, ExtractionTrigger::Interval(2))
-        // --- on_extracted: broadcast state to browser (concurrent — fire-and-forget) ---
-        .on_extracted_concurrent({
-            let tx = tx.clone();
-            move |name, value| {
-                let tx = tx.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::StateUpdate {
-                        key: name.clone(),
-                        value: value.clone(),
-                    });
-                    if let Some(obj) = value.as_object() {
-                        for (key, val) in obj {
-                            let _ = tx.send(ServerMessage::StateUpdate {
-                                key: format!("{name}.{key}"),
-                                value: val.clone(),
+                live.voice(selected_voice)
+                    .instruction(SYSTEM_INSTRUCTION)
+                    .transcription(true, true)
+                    .add_tool(restaurant_tools())
+                    .steering_mode(SteeringMode::ContextInjection)
+                    .context_delivery(ContextDelivery::Deferred)
+                    // --- Model-initiated greeting ---
+                    .greeting("Welcome the caller to Bella Vista Italian Restaurant. Ask how you can help them today — whether they'd like to make a new reservation, modify an existing one, cancel, or have a question.")
+                    // --- LLM extraction ---
+                    .extract_turns_triggered::<ReservationState>(llm, EXTRACTION_PROMPT, 5, ExtractionTrigger::Interval(2))
+                    // --- Computed state ---
+                    // is_large_party: party_size >= 9
+                    .computed("is_large_party", &["party_size"], |state| {
+                        let size: u32 = state.get("party_size").unwrap_or(0);
+                        Some(json!(size >= 9))
+                    })
+                    // booking_readiness: fraction of required fields present
+                    .computed(
+                        "booking_readiness",
+                        &["party_size", "preferred_date", "guest_name"],
+                        |state| {
+                            let has = [
+                                state.get::<u32>("party_size").is_some(),
+                                state.get::<String>("preferred_date").is_some(),
+                                state.get::<String>("guest_name").is_some(),
+                            ];
+                            let score = has.iter().filter(|&&b| b).count() as f64 / 3.0;
+                            Some(json!(score))
+                        },
+                    )
+                    // --- on_tool_call: mock tool dispatch ---
+                    .on_tool_call(|calls, _state| async move {
+                        let mut responses = Vec::new();
+                        for call in &calls {
+                            let result = execute_tool(&call.name, &call.args);
+                            responses.push(FunctionResponse {
+                                name: call.name.clone(),
+                                response: result,
+                                id: call.id.clone(),
+                                scheduling: Some(FunctionResponseScheduling::WhenIdle),
                             });
                         }
-                    }
-                }
-            }
-        })
-        // --- on_extraction_error (concurrent — fire-and-forget) ---
-        .on_extraction_error_concurrent({
-            let tx = tx.clone();
-            move |name, error| {
-                let tx = tx.clone();
-                async move {
-                    warn!("Extraction error for {name}: {error}");
-                    let _ = tx.send(ServerMessage::StateUpdate {
-                        key: format!("extraction_error.{name}"),
-                        value: json!({"error": error}),
-                    });
-                }
-            }
-        })
-        // --- Computed state ---
-        // is_large_party: party_size >= 9
-        .computed("is_large_party", &["party_size"], |state| {
-            let size: u32 = state.get("party_size").unwrap_or(0);
-            Some(json!(size >= 9))
-        })
-        // booking_readiness: fraction of required fields present
-        .computed(
-            "booking_readiness",
-            &["party_size", "preferred_date", "guest_name"],
-            |state| {
-                let has = [
-                    state.get::<u32>("party_size").is_some(),
-                    state.get::<String>("preferred_date").is_some(),
-                    state.get::<String>("guest_name").is_some(),
-                ];
-                let score = has.iter().filter(|&&b| b).count() as f64 / 3.0;
-                Some(json!(score))
-            },
-        )
-        // --- on_tool_call: mock tool dispatch ---
-        .on_tool_call(move |calls, _state| {
-            let tx = tx_tool_call.clone();
-            async move {
-                let mut responses = Vec::new();
-                for call in &calls {
-                    let _ = tx.send(ServerMessage::StateUpdate {
-                        key: "tool_call".into(),
-                        value: json!({
-                            "name": call.name,
-                            "args": call.args,
-                        }),
-                    });
-
-                    let result = execute_tool(&call.name, &call.args);
-
-                    let _ = tx.send(ServerMessage::ToolCallEvent {
-                        name: call.name.clone(),
-                        args: serde_json::to_string(&call.args).unwrap_or_default(),
-                        result: serde_json::to_string(&result).unwrap_or_default(),
-                    });
-
-                    responses.push(FunctionResponse {
-                        name: call.name.clone(),
-                        response: result,
-                        id: call.id.clone(),
-                        scheduling: Some(FunctionResponseScheduling::WhenIdle),
-                    });
-                }
-                Some(responses)
-            }
-        })
-        // --- Phase defaults (inherited by all phases) ---
-        .phase_defaults(|d| d.navigation().with_context(reservation_context))
-        // --- 8 Phases ---
-        // Phase 1: Greeting
-        .phase("greeting")
-            .instruction(GREETING_INSTRUCTION)
-            .prompt_on_enter(true)
-            .needs(&["guest_name", "party_size", "intent"])
-            .transition_with("check_availability", |s| {
-                S::eq("intent", "new_booking")(s)
-                    && s.get::<u32>("party_size").is_some()
-            }, "when guest name and party size are provided")
-            .transition_with("modification", S::eq("intent", "modify"), "when intent is modify")
-            .transition_with("cancellation", S::eq("intent", "cancel"), "when intent is cancel")
-            .on_enter(move |_state, _writer| {
-                let tx = tx_enter_greeting.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::PhaseChange {
-                        from: "none".into(),
-                        to: "greeting".into(),
-                        reason: "Session started — welcoming guest".into(),
-                    });
-                }
-            })
-            .done()
-        // Phase 2: Check Availability
-        .phase("check_availability")
-            .instruction(CHECK_AVAILABILITY_INSTRUCTION)
-            .needs(&["preferred_date", "preferred_time"])
-            .transition_with("booking", |s| {
-                s.get::<String>("preferred_time").is_some()
-            }, "when availability is confirmed")
-            .on_enter(move |_state, _writer| {
-                let tx = tx_enter_check.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::PhaseChange {
-                        from: "greeting".into(),
-                        to: "check_availability".into(),
-                        reason: "Guest wants a reservation — checking availability".into(),
-                    });
-                    let _ = tx.send(ServerMessage::StateUpdate {
-                        key: "phase".into(),
-                        value: json!("check_availability"),
-                    });
-                }
-            })
-            .enter_prompt_fn(|s, _| {
-                let size: u32 = s.get("party_size").unwrap_or(0);
-                let date: String = s.get("preferred_date").unwrap_or_else(|| "their requested date".into());
-                if size > 0 {
-                    format!("A party of {size} wants to dine on {date}. Check available time slots.")
-                } else {
-                    format!("The guest wants a reservation on {date}. Check availability.")
-                }
-            })
-            .done()
-        // Phase 3: Booking
-        .phase("booking")
-            .instruction(BOOKING_INSTRUCTION)
-            .needs(&["phone"])
-            .transition_with("special_requests", |s| {
-                s.get::<String>("reservation_id").is_some()
-                    && (s.get::<String>("dietary_needs").is_some()
-                        || s.get::<String>("special_occasion").is_some())
-            }, "when booking details are confirmed")
-            .transition_with("confirmation", |s| {
-                s.get::<String>("reservation_id").is_some()
-            }, "when booking is complete")
-            .on_enter(move |_state, _writer| {
-                let tx = tx_enter_booking.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::PhaseChange {
-                        from: "check_availability".into(),
-                        to: "booking".into(),
-                        reason: "Time slot selected — collecting booking details".into(),
-                    });
-                    let _ = tx.send(ServerMessage::StateUpdate {
-                        key: "phase".into(),
-                        value: json!("booking"),
-                    });
-                }
-            })
-            .enter_prompt_fn(|s, _| {
-                let time: String = s.get("preferred_time").unwrap_or_else(|| "their chosen time".into());
-                let date: String = s.get("preferred_date").unwrap_or_else(|| "the requested date".into());
-                let size: u32 = s.get("party_size").unwrap_or(0);
-                if size > 0 {
-                    format!("Party of {size} selected {time} on {date}. Collect their name and phone to finalize.")
-                } else {
-                    format!("Guest selected {time} on {date}. Collect their name and phone to finalize.")
-                }
-            })
-            .done()
-        // Phase 4: Modification
-        .phase("modification")
-            .instruction(MODIFICATION_INSTRUCTION)
-            .needs(&["reservation_id"])
-            .transition_with("confirmation", |s| {
-                s.get::<String>("reservation_id").is_some()
-            }, "when modification is complete")
-            .on_enter(move |_state, _writer| {
-                let tx = tx_enter_modification.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::PhaseChange {
-                        from: "greeting".into(),
-                        to: "modification".into(),
-                        reason: "Guest wants to modify a reservation".into(),
-                    });
-                    let _ = tx.send(ServerMessage::StateUpdate {
-                        key: "phase".into(),
-                        value: json!("modification"),
-                    });
-                }
-            })
-            .enter_prompt_fn(|s, _| {
-                if let Some(res_id) = s.get::<String>("reservation_id") {
-                    format!("The guest wants to modify reservation {res_id}. Ask what they'd like to change.")
-                } else {
-                    "The guest wants to modify a reservation. Ask for the reservation ID or name.".into()
-                }
-            })
-            .done()
-        // Phase 5: Cancellation
-        .phase("cancellation")
-            .instruction(CANCELLATION_INSTRUCTION)
-            .needs(&["reservation_id"])
-            .transition_with("farewell", |s| {
-                // Move to farewell after cancellation is processed
-                s.get::<String>("reservation_id").is_some()
-            }, "when cancellation is processed")
-            .on_enter(move |_state, _writer| {
-                let tx = tx_enter_cancellation.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::PhaseChange {
-                        from: "greeting".into(),
-                        to: "cancellation".into(),
-                        reason: "Guest wants to cancel a reservation".into(),
-                    });
-                    let _ = tx.send(ServerMessage::StateUpdate {
-                        key: "phase".into(),
-                        value: json!("cancellation"),
-                    });
-                }
-            })
-            .enter_prompt_fn(|s, _| {
-                if let Some(res_id) = s.get::<String>("reservation_id") {
-                    format!("The guest wants to cancel reservation {res_id}. Confirm the details before proceeding.")
-                } else {
-                    "The guest wants to cancel a reservation. Ask for the reservation ID or name.".into()
-                }
-            })
-            .done()
-        // Phase 6: Special Requests
-        .phase("special_requests")
-            .instruction(SPECIAL_REQUESTS_INSTRUCTION)
-            .needs(&["dietary_needs", "special_occasion"])
-            .transition_with("confirmation", |s| {
-                // Proceed once special request has been noted (reservation_id exists)
-                // plus a safety-net turn-count fallback
-                let has_res = s.get::<String>("reservation_id").is_some();
-                let tc: u32 = s.session().get("turn_count").unwrap_or(0);
-                has_res || tc >= 12
-            }, "when special requests are noted")
-            .on_enter(move |_state, _writer| {
-                let tx = tx_enter_special.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::PhaseChange {
-                        from: "booking".into(),
-                        to: "special_requests".into(),
-                        reason: "Guest has dietary needs or special occasion — handling requests".into(),
-                    });
-                    let _ = tx.send(ServerMessage::StateUpdate {
-                        key: "phase".into(),
-                        value: json!("special_requests"),
-                    });
-                }
-            })
-            .enter_prompt_fn(|s, _| {
-                let mut parts = Vec::new();
-                if let Some(dietary) = s.get::<String>("dietary_needs") {
-                    parts.push(format!("dietary needs ({dietary})"));
-                }
-                if let Some(occasion) = s.get::<String>("special_occasion") {
-                    parts.push(format!("a {occasion}"));
-                }
-                let res_id: String = s.get("reservation_id").unwrap_or_else(|| "their reservation".into());
-                if parts.is_empty() {
-                    format!("Record any special requests for reservation {res_id}.")
-                } else {
-                    format!("The guest mentioned {}. Record these for reservation {res_id}.", parts.join(" and "))
-                }
-            })
-            .done()
-        // Phase 7: Confirmation
-        .phase("confirmation")
-            .instruction(CONFIRMATION_INSTRUCTION)
-            .transition_with("farewell", |s| {
-                // Primary: reservation_id exists (the booking is confirmed).
-                // Safety-net: cumulative turn_count >= 12 to avoid stuck sessions.
-                let has_res = s.get::<String>("reservation_id").is_some();
-                let tc: u32 = s.session().get("turn_count").unwrap_or(0);
-                has_res || tc >= 12
-            }, "when reservation is confirmed")
-            .on_enter(move |_state, _writer| {
-                let tx = tx_enter_confirmation.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::PhaseChange {
-                        from: "previous".into(),
-                        to: "confirmation".into(),
-                        reason: "Summarizing reservation details".into(),
-                    });
-                    let _ = tx.send(ServerMessage::StateUpdate {
-                        key: "phase".into(),
-                        value: json!("confirmation"),
-                    });
-                }
-            })
-            .enter_prompt_fn(|s, _| {
-                let name: String = s.get("guest_name").unwrap_or_else(|| "the guest".into());
-                let res_id: String = s.get("reservation_id").unwrap_or_else(|| "pending".into());
-                format!("Summarize the reservation for {name} (ID: {res_id}) and ask them to confirm.")
-            })
-            .done()
-        // Phase 8: Farewell
-        .phase("farewell")
-            .instruction(FAREWELL_INSTRUCTION)
-            .terminal()
-            .on_enter(move |state, _writer| {
-                let tx = tx_enter_farewell.clone();
-                async move {
-                    let res_id: String = state
-                        .get("reservation_id")
-                        .unwrap_or_else(|| "none".to_string());
-                    let _ = tx.send(ServerMessage::PhaseChange {
-                        from: "previous".into(),
-                        to: "farewell".into(),
-                        reason: "Call concluding — thanking guest".into(),
-                    });
-                    let _ = tx.send(ServerMessage::StateUpdate {
-                        key: "phase".into(),
-                        value: json!("farewell"),
-                    });
-                    let _ = tx.send(ServerMessage::StateUpdate {
-                        key: "final_reservation_id".into(),
-                        value: json!(res_id),
-                    });
-                }
-            })
-            .enter_prompt_fn(|state, _tw| {
-                let res_id: String = state
-                    .get("reservation_id")
-                    .unwrap_or_else(|| "none".to_string());
-                if res_id != "none" {
-                    format!(
-                        "Everything is set. Reservation ID is {}. I'll thank the guest and wrap up.",
-                        res_id
+                        Some(responses)
+                    })
+                    // --- Phase defaults (inherited by all phases) ---
+                    .phase_defaults(|d| d.navigation().with_context(reservation_context))
+                    // --- 8 Phases ---
+                    // Phase 1: Greeting
+                    .phase("greeting")
+                        .instruction(GREETING_INSTRUCTION)
+                        .prompt_on_enter(true)
+                        .needs(&["guest_name", "party_size", "intent"])
+                        .transition_with("check_availability", |s| {
+                            S::eq("intent", "new_booking")(s)
+                                && s.get::<u32>("party_size").is_some()
+                        }, "when guest name and party size are provided")
+                        .transition_with("modification", S::eq("intent", "modify"), "when intent is modify")
+                        .transition_with("cancellation", S::eq("intent", "cancel"), "when intent is cancel")
+                        .done()
+                    // Phase 2: Check Availability
+                    .phase("check_availability")
+                        .instruction(CHECK_AVAILABILITY_INSTRUCTION)
+                        .needs(&["preferred_date", "preferred_time"])
+                        .transition_with("booking", |s| {
+                            s.get::<String>("preferred_time").is_some()
+                        }, "when availability is confirmed")
+                        .enter_prompt_fn(|s, _| {
+                            let size: u32 = s.get("party_size").unwrap_or(0);
+                            let date: String = s.get("preferred_date").unwrap_or_else(|| "their requested date".into());
+                            if size > 0 {
+                                format!("A party of {size} wants to dine on {date}. Check available time slots.")
+                            } else {
+                                format!("The guest wants a reservation on {date}. Check availability.")
+                            }
+                        })
+                        .done()
+                    // Phase 3: Booking
+                    .phase("booking")
+                        .instruction(BOOKING_INSTRUCTION)
+                        .needs(&["phone"])
+                        .transition_with("special_requests", |s| {
+                            s.get::<String>("reservation_id").is_some()
+                                && (s.get::<String>("dietary_needs").is_some()
+                                    || s.get::<String>("special_occasion").is_some())
+                        }, "when booking details are confirmed")
+                        .transition_with("confirmation", |s| {
+                            s.get::<String>("reservation_id").is_some()
+                        }, "when booking is complete")
+                        .enter_prompt_fn(|s, _| {
+                            let time: String = s.get("preferred_time").unwrap_or_else(|| "their chosen time".into());
+                            let date: String = s.get("preferred_date").unwrap_or_else(|| "the requested date".into());
+                            let size: u32 = s.get("party_size").unwrap_or(0);
+                            if size > 0 {
+                                format!("Party of {size} selected {time} on {date}. Collect their name and phone to finalize.")
+                            } else {
+                                format!("Guest selected {time} on {date}. Collect their name and phone to finalize.")
+                            }
+                        })
+                        .done()
+                    // Phase 4: Modification
+                    .phase("modification")
+                        .instruction(MODIFICATION_INSTRUCTION)
+                        .needs(&["reservation_id"])
+                        .transition_with("confirmation", |s| {
+                            s.get::<String>("reservation_id").is_some()
+                        }, "when modification is complete")
+                        .enter_prompt_fn(|s, _| {
+                            if let Some(res_id) = s.get::<String>("reservation_id") {
+                                format!("The guest wants to modify reservation {res_id}. Ask what they'd like to change.")
+                            } else {
+                                "The guest wants to modify a reservation. Ask for the reservation ID or name.".into()
+                            }
+                        })
+                        .done()
+                    // Phase 5: Cancellation
+                    .phase("cancellation")
+                        .instruction(CANCELLATION_INSTRUCTION)
+                        .needs(&["reservation_id"])
+                        .transition_with("farewell", |s| {
+                            // Move to farewell after cancellation is processed
+                            s.get::<String>("reservation_id").is_some()
+                        }, "when cancellation is processed")
+                        .enter_prompt_fn(|s, _| {
+                            if let Some(res_id) = s.get::<String>("reservation_id") {
+                                format!("The guest wants to cancel reservation {res_id}. Confirm the details before proceeding.")
+                            } else {
+                                "The guest wants to cancel a reservation. Ask for the reservation ID or name.".into()
+                            }
+                        })
+                        .done()
+                    // Phase 6: Special Requests
+                    .phase("special_requests")
+                        .instruction(SPECIAL_REQUESTS_INSTRUCTION)
+                        .needs(&["dietary_needs", "special_occasion"])
+                        .transition_with("confirmation", |s| {
+                            // Proceed once special request has been noted (reservation_id exists)
+                            // plus a safety-net turn-count fallback
+                            let has_res = s.get::<String>("reservation_id").is_some();
+                            let tc: u32 = s.session().get("turn_count").unwrap_or(0);
+                            has_res || tc >= 12
+                        }, "when special requests are noted")
+                        .enter_prompt_fn(|s, _| {
+                            let mut parts = Vec::new();
+                            if let Some(dietary) = s.get::<String>("dietary_needs") {
+                                parts.push(format!("dietary needs ({dietary})"));
+                            }
+                            if let Some(occasion) = s.get::<String>("special_occasion") {
+                                parts.push(format!("a {occasion}"));
+                            }
+                            let res_id: String = s.get("reservation_id").unwrap_or_else(|| "their reservation".into());
+                            if parts.is_empty() {
+                                format!("Record any special requests for reservation {res_id}.")
+                            } else {
+                                format!("The guest mentioned {}. Record these for reservation {res_id}.", parts.join(" and "))
+                            }
+                        })
+                        .done()
+                    // Phase 7: Confirmation
+                    .phase("confirmation")
+                        .instruction(CONFIRMATION_INSTRUCTION)
+                        .transition_with("farewell", |s| {
+                            // Primary: reservation_id exists (the booking is confirmed).
+                            // Safety-net: cumulative turn_count >= 12 to avoid stuck sessions.
+                            let has_res = s.get::<String>("reservation_id").is_some();
+                            let tc: u32 = s.session().get("turn_count").unwrap_or(0);
+                            has_res || tc >= 12
+                        }, "when reservation is confirmed")
+                        .enter_prompt_fn(|s, _| {
+                            let name: String = s.get("guest_name").unwrap_or_else(|| "the guest".into());
+                            let res_id: String = s.get("reservation_id").unwrap_or_else(|| "pending".into());
+                            format!("Summarize the reservation for {name} (ID: {res_id}) and ask them to confirm.")
+                        })
+                        .done()
+                    // Phase 8: Farewell
+                    .phase("farewell")
+                        .instruction(FAREWELL_INSTRUCTION)
+                        .terminal()
+                        .enter_prompt_fn(|state, _tw| {
+                            let res_id: String = state
+                                .get("reservation_id")
+                                .unwrap_or_else(|| "none".to_string());
+                            if res_id != "none" {
+                                format!(
+                                    "Everything is set. Reservation ID is {}. I'll thank the guest and wrap up.",
+                                    res_id
+                                )
+                            } else {
+                                "I'll thank the guest for calling and wish them a wonderful day.".into()
+                            }
+                        })
+                        .done()
+                    .initial_phase("greeting")
+                    // --- Watchers ---
+                    // Large party: party_size crossed above 8
+                    .watch("party_size")
+                        .crossed_above(8.0)
+                        .then(|_old, _new, state| async move {
+                            state.set("watcher:large_party_triggered", true);
+                        })
+                    // Booking readiness crossed above 0.9 — all info collected
+                    .watch("derived:booking_readiness")
+                        .crossed_above(0.9)
+                        .then(|_old, _new, state| async move {
+                            state.set("watcher:booking_ready", true);
+                        })
+                    // --- Temporal patterns ---
+                    // Sustained: guest undecided for 25 seconds — suggest popular time
+                    .when_sustained(
+                        "guest_undecided",
+                        |s| {
+                            let phase: String = s.get("session:phase").unwrap_or_default();
+                            let has_time = s.get::<String>("preferred_time").is_some();
+                            phase == "check_availability" && !has_time
+                        },
+                        Duration::from_secs(25),
+                        |_state, writer| async move {
+                            let _ = writer
+                                .send_client_content(
+                                    vec![Content::user(
+                                        "[System: The guest seems undecided about a time. \
+                                         Our most popular seating is 7:00 PM — gently suggest it \
+                                         as a great option if they haven't decided yet.]",
+                                    )],
+                                    false,
+                                )
+                                .await;
+                        },
                     )
-                } else {
-                    "I'll thank the guest for calling and wish them a wonderful day.".into()
-                }
+                    // Turns: booking stalled for 4 turns — re-ask for name
+                    .when_turns(
+                        "booking_stalled",
+                        |s| {
+                            let phase: String = s.get("session:phase").unwrap_or_default();
+                            let has_name = s.get::<String>("guest_name").is_some();
+                            phase == "booking" && !has_name
+                        },
+                        4,
+                        |_state, writer| async move {
+                            let _ = writer
+                                .send_client_content(
+                                    vec![Content::user(
+                                        "[System: We still need the guest's name to complete \
+                                         the reservation. Please gently ask for their name again.]",
+                                    )],
+                                    false,
+                                )
+                                .await;
+                        },
+                    )
             })
-            .done()
-        .initial_phase("greeting")
-        // --- Watchers ---
-        // Large party: party_size crossed above 8
-        .watch("party_size")
-            .crossed_above(8.0)
-            .then({
-                let tx = tx_watcher_large_party.clone();
-                move |_old, new, _state| {
-                    let tx = tx.clone();
-                    async move {
-                        let _ = tx.send(ServerMessage::StateUpdate {
-                            key: "watcher:large_party".into(),
-                            value: json!({
-                                "triggered": true,
-                                "party_size": new,
-                                "action": "Large party notice: 9+ guests require manager confirmation"
-                            }),
-                        });
-                    }
-                }
-            })
-        // Booking readiness crossed above 0.9 — all info collected
-        .watch("derived:booking_readiness")
-            .crossed_above(0.9)
-            .then({
-                let tx = tx_watcher_readiness.clone();
-                move |_old, new, _state| {
-                    let tx = tx.clone();
-                    async move {
-                        let _ = tx.send(ServerMessage::StateUpdate {
-                            key: "watcher:booking_ready".into(),
-                            value: json!({
-                                "triggered": true,
-                                "readiness": new,
-                                "action": "All required booking information collected"
-                            }),
-                        });
-                    }
-                }
-            })
-        // --- Temporal patterns ---
-        // Sustained: guest undecided for 25 seconds — suggest popular time
-        .when_sustained(
-            "guest_undecided",
-            |s| {
-                let phase: String = s.get("session:phase").unwrap_or_default();
-                let has_time = s.get::<String>("preferred_time").is_some();
-                phase == "check_availability" && !has_time
-            },
-            Duration::from_secs(25),
-            {
-                let tx = tx_sustained_undecided.clone();
-                move |_state, writer| {
-                    let tx = tx.clone();
-                    async move {
-                        let _ = tx.send(ServerMessage::StateUpdate {
-                            key: "temporal:guest_undecided".into(),
-                            value: json!({
-                                "triggered": true,
-                                "action": "Suggesting popular 7:00 PM time slot"
-                            }),
-                        });
-                        let _ = writer
-                            .send_client_content(
-                                vec![Content::user(
-                                    "[System: The guest seems undecided about a time. \
-                                     Our most popular seating is 7:00 PM — gently suggest it \
-                                     as a great option if they haven't decided yet.]",
-                                )],
-                                false,
-                            )
-                            .await;
-                    }
-                }
-            },
-        )
-        // Turns: booking stalled for 4 turns — re-ask for name
-        .when_turns(
-            "booking_stalled",
-            |s| {
-                let phase: String = s.get("session:phase").unwrap_or_default();
-                let has_name = s.get::<String>("guest_name").is_some();
-                phase == "booking" && !has_name
-            },
-            4,
-            {
-                let tx = tx_turns_stalled.clone();
-                move |_state, writer| {
-                    let tx = tx.clone();
-                    async move {
-                        let _ = tx.send(ServerMessage::StateUpdate {
-                            key: "temporal:booking_stalled".into(),
-                            value: json!({
-                                "triggered": true,
-                                "action": "Gently re-asking for guest name"
-                            }),
-                        });
-                        let _ = writer
-                            .send_client_content(
-                                vec![Content::user(
-                                    "[System: We still need the guest's name to complete \
-                                     the reservation. Please gently ask for their name again.]",
-                                )],
-                                false,
-                            )
-                            .await;
-                    }
-                }
-            },
-        )
-        // --- Fast lane callbacks ---
-        .on_audio(move |data| {
-                        let _ = tx_audio.send(ServerMessage::Audio { data: data.to_vec() });
-        })
-        .on_input_transcript(move |text, _is_final| {
-            let _ = tx_input.send(ServerMessage::InputTranscription {
-                text: text.to_string(),
-            });
-        })
-        .on_output_transcript(move |text, _is_final| {
-            let _ = tx_output.send(ServerMessage::OutputTranscription {
-                text: text.to_string(),
-            });
-        })
-        .on_text(move |t| {
-            let _ = tx_text.send(ServerMessage::TextDelta {
-                text: t.to_string(),
-            });
-        })
-        .on_text_complete(move |t| {
-            let _ = tx_text_complete.send(ServerMessage::TextComplete {
-                text: t.to_string(),
-            });
-        })
-        // --- Control lane callbacks ---
-        .on_turn_complete({
-            let tx = tx_turn.clone();
-            move || {
-                let tx = tx.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::TurnComplete);
-                }
-            }
-        })
-        .on_interrupted({
-            let tx = tx_interrupted.clone();
-            move || {
-                let tx = tx.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::Interrupted);
-                }
-            }
-        })
-        .on_vad_start(move || {
-            let _ = tx_vad_start.send(ServerMessage::VoiceActivityStart);
-        })
-        .on_vad_end(move || {
-            let _ = tx_vad_end.send(ServerMessage::VoiceActivityEnd);
-        })
-        .on_error_concurrent(move |msg| {
-            let tx = tx_error.clone();
-            async move {
-                let _ = tx.send(ServerMessage::Error { message: msg });
-            }
-        })
-        .on_go_away_concurrent(move |duration| {
-            let tx = tx_go_away.clone();
-            async move {
-                let _ = tx.send(ServerMessage::StateUpdate {
-                    key: "go_away".into(),
-                    value: json!({
-                        "time_remaining_secs": duration.as_secs(),
-                    }),
-                });
-            }
-        })
-        .on_disconnected_concurrent(move |reason| {
-            let _tx = tx_disconnected.clone();
-            async move {
-                info!("Restaurant session disconnected: {reason:?}");
-            }
-        })
-        .connect(config)
-        .await
-        .map_err(|e| AppError::Connection(e.to_string()))?;
-
-    // 5. Send Connected + AppMeta
-    let _ = tx.send(ServerMessage::Connected);
-    let app = Restaurant;
-    send_app_meta(&tx, &app);
-    info!("Restaurant session connected");
-
-    // Periodic telemetry sender
-    let telem = handle.telemetry().clone();
-    let telem_state = handle.state().clone();
-    let tx_telem = tx.clone();
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(2));
-        loop {
-            interval.tick().await;
-            let mut stats = telem.snapshot();
-            if let Some(obj) = stats.as_object_mut() {
-                let phase: String = telem_state.get("session:phase").unwrap_or_default();
-                let party_size: u32 = telem_state.get("party_size").unwrap_or(0);
-                let readiness: f64 = telem_state.get("derived:booking_readiness").unwrap_or(0.0);
-                let tc: u32 = telem_state.session().get("turn_count").unwrap_or(0);
-                obj.insert("current_phase".into(), json!(phase));
-                obj.insert("party_size".into(), json!(party_size));
-                obj.insert("booking_readiness".into(), json!(readiness));
-                obj.insert("turn_count".into(), json!(tc));
-            }
-            if tx_telem.send(ServerMessage::Telemetry { stats }).is_err() {
-                break;
-            }
-        }
-    });
-
-    let _ = tx.send(ServerMessage::PhaseChange {
-        from: "none".into(),
-        to: "greeting".into(),
-        reason: "Session started".into(),
-    });
-    let _ = tx.send(ServerMessage::StateUpdate {
-        key: "phase".into(),
-        value: json!("greeting"),
-    });
-
-    // 6. Browser -> Gemini recv loop
-    let b64 = base64::engine::general_purpose::STANDARD;
-    while let Some(msg) = rx.recv().await {
-        match msg {
-            ClientMessage::Audio { data } => match b64.decode(&data) {
-                Ok(pcm_bytes) => {
-                    if let Err(e) = handle.send_audio(pcm_bytes).await {
-                        warn!("Failed to send audio: {e}");
-                        let _ = tx.send(ServerMessage::Error {
-                            message: e.to_string(),
-                        });
-                    }
-                }
-                Err(e) => {
-                    warn!("Failed to decode base64 audio: {e}");
-                }
-            },
-            ClientMessage::Text { text } => {
-                if let Err(e) = handle.send_text(&text).await {
-                    warn!("Failed to send text: {e}");
-                    let _ = tx.send(ServerMessage::Error {
-                        message: e.to_string(),
-                    });
-                }
-            }
-            ClientMessage::Stop => {
-                info!("Restaurant session stopping");
-                let _ = handle.disconnect().await;
-                break;
-            }
-            _ => {}
-        }
+            .await
     }
-
-    Ok(())
 }
 
 #[cfg(test)]
