@@ -123,6 +123,47 @@ The type name (`DebtorState`) becomes the extractor name and State key.
 `extract_turns` auto-enables transcription, generates the JSON schema, and
 defaults to a 3-turn window. Use `extract_turns_windowed` for custom sizes.
 
+## Extraction Triggers
+
+By default, extractors run on every `TurnComplete` event. For many use cases
+this is wasteful -- trivial utterances ("yeah", "ok") rarely contain extractable
+data, and each extraction is an OOB LLM call. Extraction triggers control
+*when* extractors fire:
+
+```rust,ignore
+use rs_adk::live::extractor::ExtractionTrigger;
+
+Live::builder()
+    // Extract every 2 turns instead of every turn (reduces LLM costs by ~50%)
+    .extract_turns_triggered::<DebtorState>(
+        llm,
+        "Extract debtor emotional state and negotiation intent",
+        5,  // transcript window size
+        ExtractionTrigger::Interval(2),
+    )
+    .connect(config).await?;
+```
+
+| Trigger | When it fires | Use case |
+|---------|--------------|----------|
+| `EveryTurn` | After every TurnComplete | Default — high-frequency extraction |
+| `Interval(n)` | Every N turns | Reduce LLM costs for slow-changing data |
+| `AfterToolCall` | After tool dispatch completes | Extract from tool results |
+| `OnPhaseChange` | When phase transitions fire | Re-extract on context shift |
+
+The `TurnExtractor` trait also has a `trigger()` method with a default
+implementation returning `EveryTurn`, so custom extractors get the old
+behavior for free:
+
+```rust,ignore
+impl TurnExtractor for MyExtractor {
+    fn trigger(&self) -> ExtractionTrigger {
+        ExtractionTrigger::AfterToolCall
+    }
+    // ...
+}
+```
+
 ## Transcript Window
 
 Extractors receive a slice of `TranscriptTurn` values:

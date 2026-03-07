@@ -230,6 +230,11 @@ prefix. You never need to set these manually:
 | `session:go_away_received`        | `bool`   | GoAway from server          |
 | `session:go_away_time_left_ms`    | `u64`    | GoAway with time left       |
 | `session:resumable`               | `bool`   | SessionResumeHandle         |
+| `session:total_token_count`       | `u32`    | Each UsageMetadata event    |
+| `session:prompt_token_count`      | `u32`    | Each UsageMetadata event    |
+| `session:response_token_count`    | `u32`    | Each UsageMetadata event    |
+| `session:cached_content_token_count`| `u32`  | Each UsageMetadata event    |
+| `session:thoughts_token_count`    | `u32`    | Each UsageMetadata event    |
 | `session:last_input_transcription`| `String` | Each input transcription    |
 | `session:last_output_transcription`| `String`| Each output transcription   |
 | `session:phase`                   | `String` | PhaseChanged                |

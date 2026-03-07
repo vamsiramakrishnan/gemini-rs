@@ -169,9 +169,14 @@ runs extractors concurrently via `join_all`.
 ### Telemetry Lane (async, debounced)
 
 Runs on its own broadcast receiver. Collects `SessionSignals` (activity
-timestamps, timing) and `SessionTelemetry` (atomic counters for audio
-chunks, tool calls, interruptions, latency tracking). Flushes periodically
-(100ms debounce) with zero overhead on the hot path.
+timestamps, timing, token usage) and `SessionTelemetry` (atomic counters for
+audio chunks, tool calls, interruptions, latency tracking, token counts).
+Flushes periodically (100ms debounce) with zero overhead on the hot path.
+
+The telemetry lane also handles `UsageMetadata` events from the Gemini API,
+recording prompt/response/cached/thoughts token counts in both SessionSignals
+(as `session:` state keys) and SessionTelemetry (as atomic counters). The
+`.on_usage()` callback fires here for real-time token observation.
 
 ### The Router
 
