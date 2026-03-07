@@ -14,7 +14,6 @@ pub enum StreamingMode {
     Bidi,
 }
 
-
 /// Configuration for an agent execution run.
 #[derive(Debug, Clone)]
 pub struct RunConfig {

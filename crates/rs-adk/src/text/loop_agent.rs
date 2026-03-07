@@ -26,10 +26,7 @@ impl LoopTextAgent {
     }
 
     /// Add a predicate — loop breaks when predicate returns true.
-    pub fn until(
-        mut self,
-        pred: impl Fn(&State) -> bool + Send + Sync + 'static,
-    ) -> Self {
+    pub fn until(mut self, pred: impl Fn(&State) -> bool + Send + Sync + 'static) -> Self {
         self.until = Some(Arc::new(pred));
         self
     }

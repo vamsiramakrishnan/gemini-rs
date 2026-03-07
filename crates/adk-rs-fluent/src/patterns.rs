@@ -72,10 +72,7 @@ pub fn supervised(
         body: Box::new(inner),
         max: max_revisions,
         until: Some(LoopPredicate::new(move |state| {
-            state
-                .get(&key)
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false)
+            state.get(&key).and_then(|v| v.as_bool()).unwrap_or(false)
         })),
     })
 }
@@ -84,10 +81,7 @@ pub fn supervised(
 ///
 /// Returns a `MapOver` composable that stores the agent template and concurrency limit.
 pub fn map_over(agent: AgentBuilder, concurrency: usize) -> MapOver {
-    MapOver {
-        agent,
-        concurrency,
-    }
+    MapOver { agent, concurrency }
 }
 
 /// A map-over workflow node — applies one agent to many items.
@@ -109,13 +103,7 @@ mod tests {
 
     #[test]
     fn review_loop_creates_loop_with_pipeline() {
-        let result = review_loop(
-            agent("writer"),
-            agent("reviewer"),
-            "quality",
-            "good",
-            3,
-        );
+        let result = review_loop(agent("writer"), agent("reviewer"), "quality", "good", 3);
         match &result {
             Composable::Loop(l) => {
                 assert_eq!(l.max, 3);

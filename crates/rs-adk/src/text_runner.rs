@@ -79,19 +79,17 @@ impl InMemoryRunner {
     ) -> Result<String, AgentError> {
         // 1. Create or load session
         let session = match session_id {
-            Some(id) => {
-                self.session_service
-                    .get_session(id)
-                    .await
-                    .map_err(|e| AgentError::Other(format!("Session error: {e}")))?
-                    .ok_or_else(|| AgentError::Other(format!("Session not found: {id}")))?
-            }
-            None => {
-                self.session_service
-                    .create_session(&self.app_name, user_id)
-                    .await
-                    .map_err(|e| AgentError::Other(format!("Session create error: {e}")))?
-            }
+            Some(id) => self
+                .session_service
+                .get_session(id)
+                .await
+                .map_err(|e| AgentError::Other(format!("Session error: {e}")))?
+                .ok_or_else(|| AgentError::Other(format!("Session not found: {id}")))?,
+            None => self
+                .session_service
+                .create_session(&self.app_name, user_id)
+                .await
+                .map_err(|e| AgentError::Other(format!("Session create error: {e}")))?,
         };
 
         // 2. Build state and set input
@@ -213,7 +211,10 @@ mod tests {
         let session_id = &sessions[0].id;
 
         // Resume with the same session
-        let result2 = runner.run("Second", "user-1", Some(session_id)).await.unwrap();
+        let result2 = runner
+            .run("Second", "user-1", Some(session_id))
+            .await
+            .unwrap();
         assert_eq!(result2, "Echo: Second");
 
         // Should have 4 events total (2 per run)
@@ -236,8 +237,7 @@ mod tests {
     #[tokio::test]
     async fn custom_session_service() {
         let custom_svc = Arc::new(InMemorySessionService::new());
-        let runner = InMemoryRunner::new(echo_agent(), "app")
-            .session_service(custom_svc.clone());
+        let runner = InMemoryRunner::new(echo_agent(), "app").session_service(custom_svc.clone());
 
         runner.run("Hi", "u1", None).await.unwrap();
 

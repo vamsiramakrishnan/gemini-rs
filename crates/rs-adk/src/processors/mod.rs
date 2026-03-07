@@ -23,10 +23,7 @@ pub trait RequestProcessor: Send + Sync {
     fn name(&self) -> &str;
 
     /// Process the request, potentially modifying it.
-    async fn process_request(
-        &self,
-        request: LlmRequest,
-    ) -> Result<LlmRequest, ProcessorError>;
+    async fn process_request(&self, request: LlmRequest) -> Result<LlmRequest, ProcessorError>;
 }
 
 /// Trait for processing LLM responses after they are received.
@@ -36,10 +33,7 @@ pub trait ResponseProcessor: Send + Sync {
     fn name(&self) -> &str;
 
     /// Process the response, potentially modifying it.
-    async fn process_response(
-        &self,
-        response: LlmResponse,
-    ) -> Result<LlmResponse, ProcessorError>;
+    async fn process_response(&self, response: LlmResponse) -> Result<LlmResponse, ProcessorError>;
 }
 
 /// Processor that prepends a system instruction to every request.
@@ -62,10 +56,7 @@ impl RequestProcessor for InstructionInserter {
         "instruction_inserter"
     }
 
-    async fn process_request(
-        &self,
-        mut request: LlmRequest,
-    ) -> Result<LlmRequest, ProcessorError> {
+    async fn process_request(&self, mut request: LlmRequest) -> Result<LlmRequest, ProcessorError> {
         match &mut request.system_instruction {
             Some(existing) => {
                 existing.push('\n');
@@ -98,15 +89,12 @@ impl RequestProcessor for ContentFilter {
         "content_filter"
     }
 
-    async fn process_request(
-        &self,
-        mut request: LlmRequest,
-    ) -> Result<LlmRequest, ProcessorError> {
+    async fn process_request(&self, mut request: LlmRequest) -> Result<LlmRequest, ProcessorError> {
         if self.text_only {
             for content in &mut request.contents {
-                content.parts.retain(|p| {
-                    matches!(p, rs_genai::prelude::Part::Text { .. })
-                });
+                content
+                    .parts
+                    .retain(|p| matches!(p, rs_genai::prelude::Part::Text { .. }));
             }
         }
         Ok(request)
@@ -167,10 +155,7 @@ impl ResponseProcessorChain {
     }
 
     /// Process a response through all processors in order.
-    pub async fn process(
-        &self,
-        mut response: LlmResponse,
-    ) -> Result<LlmResponse, ProcessorError> {
+    pub async fn process(&self, mut response: LlmResponse) -> Result<LlmResponse, ProcessorError> {
         for processor in &self.processors {
             response = processor.process_response(response).await?;
         }
@@ -247,10 +232,7 @@ mod tests {
         };
         let processed = filter.process_request(req).await.unwrap();
         assert_eq!(processed.contents[0].parts.len(), 1);
-        assert!(matches!(
-            &processed.contents[0].parts[0],
-            Part::Text { .. }
-        ));
+        assert!(matches!(&processed.contents[0].parts[0], Part::Text { .. }));
     }
 
     #[tokio::test]
@@ -261,10 +243,7 @@ mod tests {
 
         let req = LlmRequest::from_text("Hello");
         let processed = chain.process(req).await.unwrap();
-        assert_eq!(
-            processed.system_instruction,
-            Some("Rule 1\nRule 2".into())
-        );
+        assert_eq!(processed.system_instruction, Some("Rule 1\nRule 2".into()));
     }
 
     #[test]

@@ -5,12 +5,10 @@
 
 use std::sync::Arc;
 
-use rs_genai::prelude::{
-    GeminiModel, Modality, Tool, Voice,
-};
 use rs_adk::llm::BaseLlm;
 use rs_adk::text::{LlmTextAgent, TextAgent};
 use rs_adk::tool::{ToolDispatcher, ToolKind};
+use rs_genai::prelude::{GeminiModel, Modality, Tool, Voice};
 
 /// Inner state of an AgentBuilder — shared via Arc for copy-on-write.
 #[derive(Clone)]
@@ -469,7 +467,9 @@ mod tests {
             Ok(LlmResponse {
                 content: Content {
                     role: Some(Role::Model),
-                    parts: vec![Part::Text { text: self.0.clone() }],
+                    parts: vec![Part::Text {
+                        text: self.0.clone(),
+                    }],
                 },
                 finish_reason: Some("STOP".into()),
                 usage: None,
@@ -538,9 +538,7 @@ mod tests {
 
     #[test]
     fn writes_and_reads_keys() {
-        let b = AgentBuilder::new("data")
-            .writes("output")
-            .reads("input");
+        let b = AgentBuilder::new("data").writes("output").reads("input");
         assert_eq!(b.get_writes(), &["output"]);
         assert_eq!(b.get_reads(), &["input"]);
     }
@@ -587,8 +585,8 @@ mod tests {
 
     #[test]
     fn stop_sequences_sets_value() {
-        let b = AgentBuilder::new("agent")
-            .stop_sequences(vec!["END".to_string(), "STOP".to_string()]);
+        let b =
+            AgentBuilder::new("agent").stop_sequences(vec!["END".to_string(), "STOP".to_string()]);
         assert_eq!(b.get_stop_sequences().len(), 2);
     }
 
@@ -658,10 +656,7 @@ mod tests {
         let agent = AgentBuilder::new("test").build(llm);
         let state = rs_adk::State::new();
         agent.run(&state).await.unwrap();
-        assert_eq!(
-            state.get::<String>("output"),
-            Some("state output".into())
-        );
+        assert_eq!(state.get::<String>("output"), Some("state output".into()));
     }
 
     #[tokio::test]
@@ -672,15 +667,25 @@ mod tests {
         struct EchoLlm;
         #[async_trait]
         impl BaseLlm for EchoLlm {
-            fn model_id(&self) -> &str { "echo" }
+            fn model_id(&self) -> &str {
+                "echo"
+            }
             async fn generate(&self, req: LlmRequest) -> Result<LlmResponse, LlmError> {
-                let text: String = req.contents.iter()
+                let text: String = req
+                    .contents
+                    .iter()
                     .flat_map(|c| &c.parts)
-                    .filter_map(|p| match p { Part::Text { text } => Some(text.as_str()), _ => None })
+                    .filter_map(|p| match p {
+                        Part::Text { text } => Some(text.as_str()),
+                        _ => None,
+                    })
                     .collect::<Vec<_>>()
                     .join("");
                 Ok(LlmResponse {
-                    content: Content { role: Some(Role::Model), parts: vec![Part::Text { text }] },
+                    content: Content {
+                        role: Some(Role::Model),
+                        parts: vec![Part::Text { text }],
+                    },
                     finish_reason: Some("STOP".into()),
                     usage: None,
                 })

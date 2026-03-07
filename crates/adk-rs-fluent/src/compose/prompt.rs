@@ -191,9 +191,7 @@ impl P {
     /// let modifiers = P::with_state(&["emotional_state", "willingness_to_pay"]);
     /// ```
     pub fn with_state(keys: &[&str]) -> rs_adk::live::InstructionModifier {
-        rs_adk::live::InstructionModifier::StateAppend(
-            keys.iter().map(|k| k.to_string()).collect(),
-        )
+        rs_adk::live::InstructionModifier::StateAppend(keys.iter().map(|k| k.to_string()).collect())
     }
 
     /// Create a conditional modifier that appends text when the predicate is true.

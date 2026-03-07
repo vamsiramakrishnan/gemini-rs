@@ -45,11 +45,7 @@ impl Plugin for LoggingPlugin {
         PluginResult::Continue
     }
 
-    async fn before_tool(
-        &self,
-        call: &FunctionCall,
-        _ctx: &InvocationContext,
-    ) -> PluginResult {
+    async fn before_tool(&self, call: &FunctionCall, _ctx: &InvocationContext) -> PluginResult {
         let _ = call;
         #[cfg(feature = "tracing-support")]
         {

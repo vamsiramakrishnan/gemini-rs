@@ -232,7 +232,8 @@ impl CookbookApp for ToolCalling {
             );
 
         let tx_tool = bridge.sender();
-        let handle = bridge.wire_live(Live::builder())
+        let handle = bridge
+            .wire_live(Live::builder())
             .on_tool_call(move |calls, _state| {
                 let tx = tx_tool.clone();
                 async move {

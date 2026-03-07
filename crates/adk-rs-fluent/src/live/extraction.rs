@@ -55,8 +55,7 @@ impl Live {
 
         // Generate JSON schema from the type
         let root_schema = schemars::schema_for!(T);
-        let schema =
-            serde_json::to_value(root_schema).unwrap_or(serde_json::Value::Null);
+        let schema = serde_json::to_value(root_schema).unwrap_or(serde_json::Value::Null);
 
         // Auto-register LLM for connection warming
         self.warm_up_llms.push(llm.clone());
@@ -127,8 +126,7 @@ impl Live {
         F: Fn(String, serde_json::Value) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = ()> + Send + 'static,
     {
-        self.callbacks.on_extracted =
-            Some(Arc::new(move |name, value| Box::pin(f(name, value))));
+        self.callbacks.on_extracted = Some(Arc::new(move |name, value| Box::pin(f(name, value))));
         self
     }
 

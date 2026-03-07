@@ -127,7 +127,10 @@ mod tests {
     async fn register_and_call_function_tool() {
         let mut dispatcher = ToolDispatcher::new();
         dispatcher.register_function(Arc::new(MockTool));
-        let result = dispatcher.call_function("mock_tool", json!({})).await.unwrap();
+        let result = dispatcher
+            .call_function("mock_tool", json!({}))
+            .await
+            .unwrap();
         assert_eq!(result["result"], "ok");
     }
 
@@ -202,7 +205,9 @@ mod tests {
         let tool = SimpleTool::new(
             "add",
             "Add two numbers",
-            Some(json!({"type": "object", "properties": {"a": {"type": "number"}, "b": {"type": "number"}}})),
+            Some(
+                json!({"type": "object", "properties": {"a": {"type": "number"}, "b": {"type": "number"}}}),
+            ),
             |args| async move {
                 let a = args["a"].as_f64().unwrap_or(0.0);
                 let b = args["b"].as_f64().unwrap_or(0.0);
@@ -260,10 +265,7 @@ mod tests {
             .as_array()
             .expect("should have required array");
         let required_names: Vec<&str> = required.iter().filter_map(|v| v.as_str()).collect();
-        assert!(
-            required_names.contains(&"city"),
-            "city should be required"
-        );
+        assert!(required_names.contains(&"city"), "city should be required");
     }
 
     #[tokio::test]
@@ -312,9 +314,7 @@ mod tests {
         }
 
         // Wrong type for "city" (number instead of string)
-        let result = tool
-            .call(json!({"city": 12345}))
-            .await;
+        let result = tool.call(json!({"city": 12345})).await;
         assert!(result.is_err(), "should fail with wrong type");
     }
 
@@ -323,9 +323,7 @@ mod tests {
         let tool = TypedTool::new(
             "get_weather",
             "Get current weather for a city",
-            |args: WeatherArgs| async move {
-                Ok(json!({"city": args.city}))
-            },
+            |args: WeatherArgs| async move { Ok(json!({"city": args.city})) },
         );
 
         let mut dispatcher = ToolDispatcher::new();

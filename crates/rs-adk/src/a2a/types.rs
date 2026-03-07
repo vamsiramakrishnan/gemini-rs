@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// An A2A message exchanged between agents.
 #[derive(Debug, Clone, Serialize, Deserialize)]

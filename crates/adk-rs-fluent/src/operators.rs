@@ -590,9 +590,13 @@ mod tests {
 
         #[async_trait]
         impl BaseLlm for NameEchoLlm {
-            fn model_id(&self) -> &str { "name-echo" }
+            fn model_id(&self) -> &str {
+                "name-echo"
+            }
             async fn generate(&self, req: LlmRequest) -> Result<LlmResponse, LlmError> {
-                let text = req.system_instruction.unwrap_or_else(|| "no-instruction".into());
+                let text = req
+                    .system_instruction
+                    .unwrap_or_else(|| "no-instruction".into());
                 Ok(LlmResponse {
                     content: Content {
                         role: Some(Role::Model),
@@ -610,9 +614,7 @@ mod tests {
 
         #[tokio::test]
         async fn compile_single_agent() {
-            let composable = Composable::Agent(
-                AgentBuilder::new("solo").instruction("hello"),
-            );
+            let composable = Composable::Agent(AgentBuilder::new("solo").instruction("hello"));
             let agent = composable.compile(llm());
             let state = rs_adk::State::new();
             let result = agent.run(&state).await.unwrap();
@@ -621,8 +623,7 @@ mod tests {
 
         #[tokio::test]
         async fn compile_pipeline() {
-            let pipeline = agent("a").instruction("step-a")
-                >> agent("b").instruction("step-b");
+            let pipeline = agent("a").instruction("step-a") >> agent("b").instruction("step-b");
             let compiled = pipeline.compile(llm());
             let state = rs_adk::State::new();
             let result = compiled.run(&state).await.unwrap();
@@ -667,12 +668,16 @@ mod tests {
 
             #[async_trait]
             impl BaseLlm for IncrementLlm {
-                fn model_id(&self) -> &str { "incr" }
+                fn model_id(&self) -> &str {
+                    "incr"
+                }
                 async fn generate(&self, _req: LlmRequest) -> Result<LlmResponse, LlmError> {
                     Ok(LlmResponse {
                         content: Content {
                             role: Some(Role::Model),
-                            parts: vec![Part::Text { text: "done".into() }],
+                            parts: vec![Part::Text {
+                                text: "done".into(),
+                            }],
                         },
                         finish_reason: Some("STOP".into()),
                         usage: None,
@@ -682,9 +687,7 @@ mod tests {
 
             // Build a FnTextAgent-driven loop instead to test predicate.
             // We'll test via the operators directly.
-            let pred = until(|v| {
-                v.get("n").and_then(|v| v.as_i64()).unwrap_or(0) >= 3
-            });
+            let pred = until(|v| v.get("n").and_then(|v| v.as_i64()).unwrap_or(0) >= 3);
             let body = agent("incr").instruction("increment");
             let looped = body * pred;
 

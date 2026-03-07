@@ -222,9 +222,8 @@ mod tests {
 
     #[test]
     fn session_error_websocket_display() {
-        let err = SessionError::WebSocket(WebSocketError::ConnectionRefused(
-            "host unreachable".into(),
-        ));
+        let err =
+            SessionError::WebSocket(WebSocketError::ConnectionRefused("host unreachable".into()));
         assert_eq!(
             err.to_string(),
             "WebSocket error: Connection refused: host unreachable"
@@ -302,7 +301,10 @@ mod tests {
             from: SessionPhase::Active,
             to: SessionPhase::SetupSent,
         };
-        assert_eq!(err.to_string(), "Invalid transition from Active to SetupSent");
+        assert_eq!(
+            err.to_string(),
+            "Invalid transition from Active to SetupSent"
+        );
     }
 
     // -----------------------------------------------------------------------

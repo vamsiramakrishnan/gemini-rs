@@ -273,7 +273,11 @@ impl TranscriptWindow {
                 let _ = writeln!(out, "User: {}", turn.user.trim());
             }
             for tc in &turn.tool_calls {
-                let _ = writeln!(out, "[Tool: {}({}) \u{2192} {}]", tc.name, tc.args_summary, tc.result_summary);
+                let _ = writeln!(
+                    out,
+                    "[Tool: {}({}) \u{2192} {}]",
+                    tc.name, tc.args_summary, tc.result_summary
+                );
             }
             if !turn.model.is_empty() {
                 let _ = writeln!(out, "Assistant: {}", turn.model.trim());
@@ -285,14 +289,18 @@ impl TranscriptWindow {
 
     /// Last user utterance, if any.
     pub fn last_user(&self) -> Option<&str> {
-        self.turns.iter().rev()
+        self.turns
+            .iter()
+            .rev()
             .find(|t| !t.user.is_empty())
             .map(|t| t.user.as_str())
     }
 
     /// Last model utterance, if any.
     pub fn last_model(&self) -> Option<&str> {
-        self.turns.iter().rev()
+        self.turns
+            .iter()
+            .rev()
             .find(|t| !t.model.is_empty())
             .map(|t| t.model.as_str())
     }
@@ -520,7 +528,9 @@ mod tests {
             &serde_json::json!({"pong": true}),
         );
         assert!(buf.has_pending());
-        let turn = buf.end_turn().expect("tool-call-only turn should be created");
+        let turn = buf
+            .end_turn()
+            .expect("tool-call-only turn should be created");
         assert_eq!(turn.tool_calls.len(), 1);
         assert_eq!(turn.user, "");
         assert_eq!(turn.model, "");

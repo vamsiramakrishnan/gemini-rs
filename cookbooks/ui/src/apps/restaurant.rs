@@ -152,7 +152,11 @@ fn reservation_context(s: &State) -> String {
 
     // Party size
     if let Some(size) = s.get::<u32>("party_size") {
-        let large = if size >= 9 { " (large party — requires manager confirmation)" } else { "" };
+        let large = if size >= 9 {
+            " (large party — requires manager confirmation)"
+        } else {
+            ""
+        };
         ctx.push(format!("Party size: {size}{large}."));
     }
 
@@ -351,10 +355,7 @@ fn execute_tool(name: &str, args: &Value) -> Value {
                 .get("date")
                 .and_then(|v| v.as_str())
                 .unwrap_or("2026-03-15");
-            let party_size = args
-                .get("party_size")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(2) as u32;
+            let party_size = args.get("party_size").and_then(|v| v.as_u64()).unwrap_or(2) as u32;
             let is_large = party_size >= 9;
 
             json!({
@@ -398,10 +399,7 @@ fn execute_tool(name: &str, args: &Value) -> Value {
                 .get("time")
                 .and_then(|v| v.as_str())
                 .unwrap_or("7:00 PM");
-            let party_size = args
-                .get("party_size")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(2);
+            let party_size = args.get("party_size").and_then(|v| v.as_u64()).unwrap_or(2);
             let phone = args
                 .get("phone")
                 .and_then(|v| v.as_str())
@@ -429,10 +427,7 @@ fn execute_tool(name: &str, args: &Value) -> Value {
                 .get("reservation_id")
                 .and_then(|v| v.as_str())
                 .unwrap_or("RES-UNKNOWN");
-            let changes = args
-                .get("changes")
-                .cloned()
-                .unwrap_or_else(|| json!({}));
+            let changes = args.get("changes").cloned().unwrap_or_else(|| json!({}));
 
             json!({
                 "reservation_id": reservation_id,
@@ -513,10 +508,7 @@ fn execute_tool(name: &str, args: &Value) -> Value {
                 .get("request_type")
                 .and_then(|v| v.as_str())
                 .unwrap_or("general");
-            let details = args
-                .get("details")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            let details = args.get("details").and_then(|v| v.as_str()).unwrap_or("");
 
             json!({
                 "reservation_id": reservation_id,
@@ -1215,19 +1207,14 @@ async fn handle_session(
             if let Some(obj) = stats.as_object_mut() {
                 let phase: String = telem_state.get("session:phase").unwrap_or_default();
                 let party_size: u32 = telem_state.get("party_size").unwrap_or(0);
-                let readiness: f64 = telem_state
-                    .get("derived:booking_readiness")
-                    .unwrap_or(0.0);
+                let readiness: f64 = telem_state.get("derived:booking_readiness").unwrap_or(0.0);
                 let tc: u32 = telem_state.session().get("turn_count").unwrap_or(0);
                 obj.insert("current_phase".into(), json!(phase));
                 obj.insert("party_size".into(), json!(party_size));
                 obj.insert("booking_readiness".into(), json!(readiness));
                 obj.insert("turn_count".into(), json!(tc));
             }
-            if tx_telem
-                .send(ServerMessage::Telemetry { stats })
-                .is_err()
-            {
+            if tx_telem.send(ServerMessage::Telemetry { stats }).is_err() {
                 break;
             }
         }
@@ -1359,16 +1346,10 @@ mod tests {
 
     #[test]
     fn check_menu_vegetarian() {
-        let result = execute_tool(
-            "check_menu",
-            &json!({"dietary_restriction": "vegetarian"}),
-        );
+        let result = execute_tool("check_menu", &json!({"dietary_restriction": "vegetarian"}));
         let items = result["items"].as_array().unwrap();
         assert!(!items.is_empty());
-        let names: Vec<&str> = items
-            .iter()
-            .filter_map(|i| i["name"].as_str())
-            .collect();
+        let names: Vec<&str> = items.iter().filter_map(|i| i["name"].as_str()).collect();
         assert!(names.contains(&"Mushroom Risotto"));
         assert!(names.contains(&"Eggplant Parmigiana"));
     }
@@ -1378,25 +1359,16 @@ mod tests {
         let result = execute_tool("check_menu", &json!({"dietary_restriction": "vegan"}));
         let items = result["items"].as_array().unwrap();
         assert!(!items.is_empty());
-        let names: Vec<&str> = items
-            .iter()
-            .filter_map(|i| i["name"].as_str())
-            .collect();
+        let names: Vec<&str> = items.iter().filter_map(|i| i["name"].as_str()).collect();
         assert!(names.contains(&"Pasta Primavera"));
     }
 
     #[test]
     fn check_menu_gluten_free() {
-        let result = execute_tool(
-            "check_menu",
-            &json!({"dietary_restriction": "gluten-free"}),
-        );
+        let result = execute_tool("check_menu", &json!({"dietary_restriction": "gluten-free"}));
         let items = result["items"].as_array().unwrap();
         assert!(!items.is_empty());
-        let names: Vec<&str> = items
-            .iter()
-            .filter_map(|i| i["name"].as_str())
-            .collect();
+        let names: Vec<&str> = items.iter().filter_map(|i| i["name"].as_str()).collect();
         assert!(names.contains(&"Grilled Salmon"));
     }
 
@@ -1442,9 +1414,7 @@ mod tests {
         assert!(app.features().contains(&"tool-calling".to_string()));
         assert!(app.features().contains(&"watchers".to_string()));
         assert!(app.features().contains(&"computed-state".to_string()));
-        assert!(app
-            .features()
-            .contains(&"temporal-patterns".to_string()));
+        assert!(app.features().contains(&"temporal-patterns".to_string()));
         assert!(app.features().contains(&"state-keys".to_string()));
     }
 

@@ -187,10 +187,7 @@ impl Client {
     }
 
     /// Register external files by URI (Vertex AI only).
-    pub async fn register_files(
-        &self,
-        sources: Vec<FileSource>,
-    ) -> Result<Vec<File>, FilesError> {
+    pub async fn register_files(&self, sources: Vec<FileSource>) -> Result<Vec<File>, FilesError> {
         let url = self.rest_url(ServiceEndpoint::Files);
         let headers = self
             .auth_headers()
@@ -205,7 +202,10 @@ impl Client {
                     "mimeType": source.mime_type,
                 }
             });
-            let json = self.http_client().post_json(&url, headers.clone(), &body).await?;
+            let json = self
+                .http_client()
+                .post_json(&url, headers.clone(), &body)
+                .await?;
             files.push(serde_json::from_value(json)?);
         }
         Ok(files)
@@ -262,14 +262,8 @@ mod tests {
             serde_json::to_value(FileState::Processing).unwrap(),
             "PROCESSING"
         );
-        assert_eq!(
-            serde_json::to_value(FileState::Active).unwrap(),
-            "ACTIVE"
-        );
-        assert_eq!(
-            serde_json::to_value(FileState::Failed).unwrap(),
-            "FAILED"
-        );
+        assert_eq!(serde_json::to_value(FileState::Active).unwrap(), "ACTIVE");
+        assert_eq!(serde_json::to_value(FileState::Failed).unwrap(), "FAILED");
     }
 
     #[test]

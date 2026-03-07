@@ -70,10 +70,7 @@ pub(in crate::live) async fn handle_turn_complete(
         .filter(|e| match e.trigger() {
             ExtractionTrigger::EveryTurn => true,
             ExtractionTrigger::Interval(n) => {
-                let last = extraction_turn_tracker
-                    .get(e.name())
-                    .copied()
-                    .unwrap_or(0);
+                let last = extraction_turn_tracker.get(e.name()).copied().unwrap_or(0);
                 current_turn.saturating_sub(last) >= n
             }
             ExtractionTrigger::AfterToolCall
@@ -147,7 +144,13 @@ pub(in crate::live) async fn handle_turn_complete(
             .filter(|e| matches!(e.trigger(), ExtractionTrigger::OnPhaseChange))
             .cloned()
             .collect();
-        run_extractors(&phase_change_extractors, transcript_buffer, state, callbacks).await;
+        run_extractors(
+            &phase_change_extractors,
+            transcript_buffer,
+            state,
+            callbacks,
+        )
+        .await;
     }
 
     // 7d. Tool availability advisory (Phase 5)
@@ -156,8 +159,7 @@ pub(in crate::live) async fn handle_turn_complete(
         if let Some(ref pm) = phase_machine {
             let machine = pm.lock().await;
             if let Some(tools) = machine.active_tools() {
-                let prev_tools: Option<Vec<String>> =
-                    state.session().get("active_tools");
+                let prev_tools: Option<Vec<String>> = state.session().get("active_tools");
                 let tools_vec: Vec<String> = tools.iter().map(|s| s.to_string()).collect();
                 let changed = prev_tools.as_ref() != Some(&tools_vec);
                 if changed {
@@ -184,7 +186,10 @@ pub(in crate::live) async fn handle_turn_complete(
                     let needs = phase.needs.clone();
                     drop(machine); // release lock before async work
                     match needs_tracker.evaluate(&phase_name, &needs, state) {
-                        RepairAction::Nudge { unfulfilled, attempt } => {
+                        RepairAction::Nudge {
+                            unfulfilled,
+                            attempt,
+                        } => {
                             let nudge = rs_genai::prelude::Content::model(format!(
                                 "I still need to collect: {}. Let me ask about these.",
                                 unfulfilled.join(", ")
@@ -213,12 +218,9 @@ pub(in crate::live) async fn handle_turn_complete(
         if let Some(ref pm) = phase_machine {
             let machine = pm.lock().await;
             if let Some(phase) = machine.current_phase() {
-                let steering_parts =
-                    steering::build_steering_context(state, &phase.modifiers);
+                let steering_parts = steering::build_steering_context(state, &phase.modifiers);
                 if !steering_parts.is_empty() {
-                    let content = rs_genai::prelude::Content::model(
-                        steering_parts.join("\n"),
-                    );
+                    let content = rs_genai::prelude::Content::model(steering_parts.join("\n"));
                     writer.send_client_content(vec![content], false).await.ok();
                 }
             }

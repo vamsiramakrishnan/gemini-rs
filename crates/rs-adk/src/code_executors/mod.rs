@@ -1,17 +1,17 @@
 //! Code execution infrastructure — sandboxed code execution for agents.
 
-/// Types used by code executors (input, output, files).
-pub mod types;
 /// Base trait and error types for code execution.
 pub mod base;
 /// Built-in code executor using Gemini's native code execution.
 pub mod built_in;
+/// Types used by code executors (input, output, files).
+pub mod types;
 /// Utility functions for extracting code blocks and building parts.
 pub mod utils;
 
-pub use types::{CodeExecutionInput, CodeExecutionResult, CodeFile};
 pub use base::{CodeExecutor, CodeExecutorError};
 pub use built_in::BuiltInCodeExecutor;
+pub use types::{CodeExecutionInput, CodeExecutionResult, CodeFile};
 
 #[cfg(test)]
 mod tests {
@@ -105,7 +105,10 @@ mod tests {
         let exec = StubExecutor;
         let delims = exec.code_block_delimiters();
         assert_eq!(delims.len(), 2);
-        assert_eq!(delims[0], ("```tool_code\n".to_string(), "\n```".to_string()));
+        assert_eq!(
+            delims[0],
+            ("```tool_code\n".to_string(), "\n```".to_string())
+        );
         assert_eq!(delims[1], ("```python\n".to_string(), "\n```".to_string()));
     }
 

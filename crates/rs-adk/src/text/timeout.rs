@@ -16,11 +16,7 @@ pub struct TimeoutTextAgent {
 
 impl TimeoutTextAgent {
     /// Create a new timeout agent wrapping an inner agent with a time limit.
-    pub fn new(
-        name: impl Into<String>,
-        inner: Arc<dyn TextAgent>,
-        timeout: Duration,
-    ) -> Self {
+    pub fn new(name: impl Into<String>, inner: Arc<dyn TextAgent>, timeout: Duration) -> Self {
         Self {
             name: name.into(),
             inner,

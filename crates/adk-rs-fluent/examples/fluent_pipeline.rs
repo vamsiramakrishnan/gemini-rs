@@ -56,9 +56,7 @@ fn main() {
     let _fallback = researcher.clone() / fast_researcher.clone();
 
     // Complex composition
-    let _deep_research = researcher.clone()
-        >> writer.clone()
-        >> (reviewer.clone() * 3);
+    let _deep_research = researcher.clone() >> writer.clone() >> (reviewer.clone() * 3);
 
     println!("Operators: >>, |, *, / all working");
 
@@ -85,40 +83,19 @@ fn main() {
 
     // ── 5. Pre-built patterns ──
 
-    let _review = review_loop(
-        writer.clone(),
-        reviewer.clone(),
-        "quality",
-        "excellent",
-        5,
-    );
+    let _review = review_loop(writer.clone(), reviewer.clone(), "quality", "excellent", 5);
 
-    let _cascade = cascade(vec![
-        researcher.clone(),
-        fast_researcher.clone(),
-    ]);
+    let _cascade = cascade(vec![researcher.clone(), fast_researcher.clone()]);
 
-    let _parallel = fan_out_merge(vec![
-        researcher.clone(),
-        creative_writer.clone(),
-    ]);
+    let _parallel = fan_out_merge(vec![researcher.clone(), creative_writer.clone()]);
 
-    let _supervised = supervised(
-        writer.clone(),
-        reviewer.clone(),
-        "approved",
-        3,
-    );
+    let _supervised = supervised(writer.clone(), reviewer.clone(), "approved", 3);
 
     println!("Patterns: review_loop, cascade, fan_out_merge, supervised all working");
 
     // ── 6. Contract validation ──
 
-    let violations = check_contracts(&[
-        researcher.clone(),
-        writer.clone(),
-        reviewer.clone(),
-    ]);
+    let violations = check_contracts(&[researcher.clone(), writer.clone(), reviewer.clone()]);
 
     println!("\nContract validation ({} violations):", violations.len());
     for v in &violations {

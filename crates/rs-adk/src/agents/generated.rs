@@ -4,10 +4,10 @@
 
 #![allow(dead_code, unused_imports, clippy::type_complexity)]
 
-use std::sync::Arc;
-use async_trait::async_trait;
-use crate::{Agent, AgentError, InvocationContext, ToolFunction};
 use crate::context::AgentEvent;
+use crate::{Agent, AgentError, InvocationContext, ToolFunction};
+use async_trait::async_trait;
+use std::sync::Arc;
 
 // BaseAgent — base class, fields merged into child agents via inheritance.
 
@@ -189,7 +189,9 @@ impl LlmAgentBuilder {
     }
 
     pub fn build(self) -> LlmAgent {
-        LlmAgent { config: self.config }
+        LlmAgent {
+            config: self.config,
+        }
     }
 }
 
@@ -198,7 +200,6 @@ pub struct LlmAgent {
 }
 
 // Agent trait impl for LlmAgent should be provided by the application.
-
 
 // ---- LoopAgent ----
 
@@ -262,7 +263,9 @@ impl LoopAgentBuilder {
     }
 
     pub fn build(self) -> LoopAgent {
-        LoopAgent { config: self.config }
+        LoopAgent {
+            config: self.config,
+        }
     }
 }
 
@@ -290,7 +293,6 @@ impl Agent for LoopAgent {
     }
 }
 
-
 // ---- ActiveStreamingToolParams ----
 
 /// The parameters for creating an ActiveStreamingTool.
@@ -299,7 +301,6 @@ pub struct ActiveStreamingToolParams {
     pub task: Option<serde_json::Value>,
     pub stream: Option<serde_json::Value>,
 }
-
 
 // ---- AgentTool ----
 
@@ -311,7 +312,6 @@ pub struct AgentTool {
     /// Whether to skip summarization of the agent output.
     pub skip_summarization: Option<bool>,
 }
-
 
 // ---- Auth ----
 
@@ -328,7 +328,6 @@ pub struct Auth {
     pub credential_key: String,
 }
 
-
 // ---- BaseToolParams ----
 
 /// Parameters for the BaseTool constructor.
@@ -339,7 +338,6 @@ pub struct BaseToolParams {
     pub is_long_running: Option<bool>,
 }
 
-
 // ---- RunAsyncToolRequest ----
 
 /// The parameters for `runAsync`.
@@ -348,7 +346,6 @@ pub struct RunAsyncToolRequest {
     pub args: serde_json::Value,
     pub tool_context: serde_json::Value,
 }
-
 
 // ---- ToolProcessLlmRequest ----
 
@@ -359,7 +356,6 @@ pub struct ToolProcessLlmRequest {
     pub llm_request: serde_json::Value,
 }
 
-
 // ---- TraceMergedToolCallsParams ----
 
 #[derive(Debug, Clone, Default)]
@@ -367,7 +363,6 @@ pub struct TraceMergedToolCallsParams {
     pub response_event_id: String,
     pub function_response_event: serde_json::Value,
 }
-
 
 // ---- TraceToolCallParams ----
 
@@ -377,7 +372,6 @@ pub struct TraceToolCallParams {
     pub args: serde_json::Value,
     pub function_response_event: serde_json::Value,
 }
-
 
 // ============================================================
 // General type definitions extracted from ADK-JS source
@@ -396,7 +390,6 @@ pub enum A2AMetadataKeys {
     THOUGHT,
 }
 
-
 // ---- ActivityEvent (module: events) ----
 
 /// Represents a generic activity or status update.
@@ -406,7 +399,6 @@ pub struct ActivityEvent {
     pub kind: String,
     pub detail: serde_json::Value,
 }
-
 
 // ---- ApigeeLlmParams (module: models) ----
 
@@ -420,7 +412,6 @@ pub struct ApigeeLlmParams {
     pub api_key: Option<String>,
 }
 
-
 // ---- AppendEventRequest (module: sessions) ----
 
 /// The parameters for `appendEvent`.
@@ -431,7 +422,6 @@ pub struct AppendEventRequest {
     /// The event to append.
     pub event: serde_json::Value,
 }
-
 
 // ---- ArtifactVersion (module: artifacts) ----
 
@@ -448,7 +438,6 @@ pub struct ArtifactVersion {
     pub mime_type: Option<String>,
 }
 
-
 // ---- AuthCredential (module: auth) ----
 
 /// Data class representing an authentication credential. To exchange for the actual credential, please use CredentialExchanger.exchangeCredential(). @example // API Key Auth const authCredential: AuthCredential = {   authType: AuthCredentialTypes.API_KEY,   apiKey: "your_api_key", }; @example // HTTP Auth const authCredential: AuthCredential = {   authType: AuthCredentialTypes.HTTP,   http: {     scheme: "basic",     credentials: {       username: "user",       password: "password",     },   } } @example // OAuth2 Bearer Token in HTTP Header const authCredential: AuthCredential = {   authType: AuthCredentialTypes.HTTP,   http: {     scheme: "bearer",     credentials: {       token: "your_access_token",     },   } } @example // OAuth2 Auth with Authorization Code Flow const authCredential: AuthCredential = {   authType: AuthCredentialTypes.OAUTH2,   oauth2: {     clientId: "your_client_id",     clientSecret: "your_client_secret",   } } @example: // Open ID Connect Auth const authCredential: AuthCredential = {   authType: AuthCredentialTypes.OPEN_ID_CONNECT,   oauth2: {     clientId: "1234",     clientSecret: "secret",     redirectUri: "https://example.com",     scopes: ["scope1", "scope2"],   } } @example: // Auth with resource reference const authCredential: AuthCredential = {   authType: AuthCredentialTypes.API_KEY,   resourceRef: "projects/1234/locations/us-central1/resources/resource1" }
@@ -463,7 +452,6 @@ pub struct AuthCredential {
     pub oauth2: Option<serde_json::Value>,
 }
 
-
 // ---- AuthToolArguments (module: auth) ----
 
 /// The arguments for the special long running function tool that is used to request end user credentials.
@@ -472,7 +460,6 @@ pub struct AuthToolArguments {
     pub function_call_id: String,
     pub auth_config: serde_json::Value,
 }
-
 
 // ---- BaseArtifactService (module: artifacts) ----
 
@@ -483,7 +470,6 @@ pub struct BaseArtifactService {
     pub request: serde_json::Value,
 }
 
-
 // ---- BaseCredentialExchanger (module: auth) ----
 
 /// Base interface for credential exchangers. Credential exchangers are responsible for exchanging credentials from one format or scheme to another.
@@ -492,7 +478,6 @@ pub struct BaseCredentialExchanger {
     pub auth_credential: serde_json::Value,
     pub auth_scheme: Option<serde_json::Value>,
 }
-
 
 // ---- BaseCredentialService (module: auth) ----
 
@@ -503,29 +488,22 @@ pub struct BaseCredentialService {
     pub tool_context: serde_json::Value,
 }
 
-
 // ---- BaseLlmConnection (module: models) ----
 
 /// The base class for a live model connection.
 #[derive(Debug, Clone, Default)]
-pub struct BaseLlmConnection {
-}
-
+pub struct BaseLlmConnection {}
 
 // ---- BaseMemoryService (module: memory) ----
 
 /// Base interface for memory services. The service provides functionalities to ingest sessions into memory so that the memory can be used for user queries.
 #[derive(Debug, Clone, Default)]
-pub struct BaseMemoryService {
-}
-
+pub struct BaseMemoryService {}
 
 // ---- BasePolicyEngine (module: plugins) ----
 
 #[derive(Debug, Clone, Default)]
-pub struct BasePolicyEngine {
-}
-
+pub struct BasePolicyEngine {}
 
 // ---- CallCodeEvent (module: events) ----
 
@@ -535,7 +513,6 @@ pub struct CallCodeEvent {
     pub r#type: serde_json::Value,
     pub code: rs_genai::prelude::ExecutableCode,
 }
-
 
 // ---- CodeExecutionInput (module: code_executors) ----
 
@@ -550,7 +527,6 @@ pub struct CodeExecutionInput {
     pub execution_id: Option<String>,
 }
 
-
 // ---- CodeExecutionResult (module: code_executors) ----
 
 #[derive(Debug, Clone, Default)]
@@ -561,7 +537,6 @@ pub struct CodeExecutionResult {
     pub timestamp: f64,
 }
 
-
 // ---- CodeGroupMatch (module: code_executors) ----
 
 #[derive(Debug, Clone, Default)]
@@ -570,7 +545,6 @@ pub struct CodeGroupMatch {
     pub index: Option<f64>,
     pub length: Option<f64>,
 }
-
 
 // ---- CodeResultEvent (module: events) ----
 
@@ -581,7 +555,6 @@ pub struct CodeResultEvent {
     pub result: rs_genai::prelude::CodeExecutionResult,
 }
 
-
 // ---- ContentEvent (module: events) ----
 
 /// Represents partial content (text delta) intended for the user.
@@ -590,7 +563,6 @@ pub struct ContentEvent {
     pub r#type: serde_json::Value,
     pub content: String,
 }
-
 
 // ---- CreateSessionRequest (module: sessions) ----
 
@@ -607,7 +579,6 @@ pub struct CreateSessionRequest {
     pub session_id: Option<String>,
 }
 
-
 // ---- DataPartType (module: a2a) ----
 
 /// The types of data parts.
@@ -618,7 +589,6 @@ pub enum DataPartType {
     CodeExecResult,
     CodeExecutableCode,
 }
-
 
 // ---- DeleteArtifactRequest (module: artifacts) ----
 
@@ -635,7 +605,6 @@ pub struct DeleteArtifactRequest {
     pub filename: String,
 }
 
-
 // ---- DeleteSessionRequest (module: sessions) ----
 
 /// The parameters for `deleteSession`.
@@ -649,7 +618,6 @@ pub struct DeleteSessionRequest {
     pub session_id: String,
 }
 
-
 // ---- ErrorEvent (module: events) ----
 
 /// Represents a runtime error.
@@ -658,7 +626,6 @@ pub struct ErrorEvent {
     pub r#type: serde_json::Value,
     pub error: serde_json::Value,
 }
-
 
 // ---- Event (module: events) ----
 
@@ -681,7 +648,6 @@ pub struct Event {
     pub timestamp: f64,
 }
 
-
 // ---- EventActions (module: events) ----
 
 /// Represents the actions attached to an event.
@@ -690,19 +656,18 @@ pub struct EventActions {
     /// If true, it won't call model to summarize function response. Only used for function_response event.
     pub skip_summarization: Option<bool>,
     /// Indicates that the event is updating the state with the given delta.
-    pub state_delta: /* {[key: string]: unknown} */ String,
+    pub state_delta: String,
     /// Indicates that the event is updating an artifact. key is the filename, value is the version.
-    pub artifact_delta: /* {[key: string]: number} */ String,
+    pub artifact_delta: String,
     /// If set, the event transfers to the specified agent.
     pub transfer_to_agent: Option<String>,
     /// The agent is escalating to a higher level agent.
     pub escalate: Option<bool>,
     /// Authentication configurations requested by tool responses. This field will only be set by a tool response event indicating tool request auth credential. - Keys: The function call id. Since one function response event could contain multiple function responses that correspond to multiple function calls. Each function call could request different auth configs. This id is used to identify the function call. - Values: The requested auth config.
-    pub requested_auth_configs: /* {[key: string]: AuthConfig} */ String,
+    pub requested_auth_configs: String,
     /// A dict of tool confirmation requested by this event, keyed by the function call id.
-    pub requested_tool_confirmations: /* {[key: string]: ToolConfirmation} */ String,
+    pub requested_tool_confirmations: String,
 }
-
 
 // ---- EventType (module: events) ----
 
@@ -721,7 +686,6 @@ pub enum EventType {
     FINISHED,
 }
 
-
 // ---- Example (module: examples) ----
 
 /// A few-shot example.
@@ -733,7 +697,6 @@ pub struct Example {
     pub output: Vec<rs_genai::prelude::Content>,
 }
 
-
 // ---- ExecuteCodeParams (module: code_executors) ----
 
 /// The parameters for executing code. */
@@ -744,7 +707,6 @@ pub struct ExecuteCodeParams {
     /// The input of the code execution.
     pub code_execution_input: serde_json::Value,
 }
-
 
 // ---- ExecutorContext (module: a2a) ----
 
@@ -760,7 +722,6 @@ pub struct ExecutorContext {
     pub request_context: serde_json::Value,
 }
 
-
 // ---- File (module: code_executors) ----
 
 /// A structure that contains a file name and its content
@@ -774,7 +735,6 @@ pub struct File {
     pub mime_type: String,
 }
 
-
 // ---- FileArtifactVersion (module: artifacts) ----
 
 /// Metadata for a file artifact version.
@@ -782,7 +742,6 @@ pub struct File {
 pub struct FileArtifactVersion {
     pub file_name: Option<String>,
 }
-
 
 // ---- FinishedEvent (module: events) ----
 
@@ -792,7 +751,6 @@ pub struct FinishedEvent {
     pub r#type: serde_json::Value,
     pub output: Option<serde_json::Value>,
 }
-
 
 // ---- GeminiParams (module: models) ----
 
@@ -813,7 +771,6 @@ pub struct GeminiParams {
     pub headers: Option<serde_json::Value>,
 }
 
-
 // ---- GetSessionConfig (module: sessions) ----
 
 /// The configuration of getting a session.
@@ -824,7 +781,6 @@ pub struct GetSessionConfig {
     /// Retrieve events after this timestamp.
     pub after_timestamp: Option<f64>,
 }
-
 
 // ---- GetSessionRequest (module: sessions) ----
 
@@ -841,7 +797,6 @@ pub struct GetSessionRequest {
     pub config: Option<serde_json::Value>,
 }
 
-
 // ---- HttpAuth (module: auth) ----
 
 /// The credentials and metadata for HTTP authentication.
@@ -852,7 +807,6 @@ pub struct HttpAuth {
     pub credentials: serde_json::Value,
 }
 
-
 // ---- HttpCredentials (module: auth) ----
 
 /// Represents the secret token value for HTTP authentication, like user name, password, oauth token, etc.
@@ -862,7 +816,6 @@ pub struct HttpCredentials {
     pub password: Option<String>,
     pub token: Option<String>,
 }
-
 
 // ---- InvocationContextParams (module: agents) ----
 
@@ -886,7 +839,6 @@ pub struct InvocationContextParams {
     pub plugin_manager: serde_json::Value,
 }
 
-
 // ---- ListArtifactKeysRequest (module: artifacts) ----
 
 /// The parameters for `listArtifactKeys`.
@@ -900,7 +852,6 @@ pub struct ListArtifactKeysRequest {
     pub session_id: String,
 }
 
-
 // ---- ListSessionsRequest (module: sessions) ----
 
 /// The parameters for `listSessions`.
@@ -912,7 +863,6 @@ pub struct ListSessionsRequest {
     pub user_id: String,
 }
 
-
 // ---- ListSessionsResponse (module: sessions) ----
 
 /// The response of listing sessions. The events and states are not set within each Session object.
@@ -921,7 +871,6 @@ pub struct ListSessionsResponse {
     /// A list of sessions.
     pub sessions: Vec<serde_json::Value>,
 }
-
 
 // ---- ListVersionsRequest (module: artifacts) ----
 
@@ -937,7 +886,6 @@ pub struct ListVersionsRequest {
     /// The filename of the artifact.
     pub filename: String,
 }
-
 
 // ---- LiveRequest (module: agents) ----
 
@@ -956,7 +904,6 @@ pub struct LiveRequest {
     pub close: Option<bool>,
 }
 
-
 // ---- LlmRequest (module: models) ----
 
 /// LLM request class that allows passing in tools, output schema and system instructions to the model.
@@ -970,9 +917,8 @@ pub struct LlmRequest {
     pub config: Option<serde_json::Value>,
     pub live_connect_config: serde_json::Value,
     /// The tools dictionary. Excluded from JSON serialization.
-    pub tools_dict: /* {[key: string]: BaseTool} */ String,
+    pub tools_dict: String,
 }
-
 
 // ---- LlmResponse (module: models) ----
 
@@ -1007,7 +953,6 @@ pub struct LlmResponse {
     pub output_transcription: Option<rs_genai::prelude::TranscriptionPayload>,
 }
 
-
 // ---- LoadArtifactRequest (module: artifacts) ----
 
 /// The parameters for `loadArtifact`.
@@ -1025,7 +970,6 @@ pub struct LoadArtifactRequest {
     pub version: Option<f64>,
 }
 
-
 // ---- LogLevel (module: utils) ----
 
 /// Log levels for the logger.
@@ -1037,14 +981,11 @@ pub enum LogLevel {
     ERROR,
 }
 
-
 // ---- Logger (module: utils) ----
 
 /// Logger interface for ADK.
 #[derive(Debug, Clone, Default)]
-pub struct Logger {
-}
-
+pub struct Logger {}
 
 // ---- MemoryEntry (module: memory) ----
 
@@ -1059,7 +1000,6 @@ pub struct MemoryEntry {
     pub timestamp: Option<String>,
 }
 
-
 // ---- MetadataKeys (module: a2a) ----
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1068,7 +1008,6 @@ pub enum MetadataKeys {
     LongRunning,
     THOUGHT,
 }
-
 
 // ---- OAuth2Auth (module: auth) ----
 
@@ -1090,7 +1029,6 @@ pub struct OAuth2Auth {
     pub expires_in: Option<f64>,
 }
 
-
 // ---- OAuthGrantType (module: auth) ----
 
 /// Represents the OAuth2 flow (or grant type).
@@ -1102,7 +1040,6 @@ pub enum OAuthGrantType {
     PASSWORD,
 }
 
-
 // ---- OTelHooks (module: telemetry) ----
 
 /// Configuration hooks for OpenTelemetry setup. This interface defines the structure for configuring OpenTelemetry components including span processors, metric readers, and log record processors.
@@ -1113,7 +1050,6 @@ pub struct OTelHooks {
     pub log_record_processors: Option<Vec<serde_json::Value>>,
 }
 
-
 // ---- OtelExportersConfig (module: telemetry) ----
 
 #[derive(Debug, Clone, Default)]
@@ -1122,7 +1058,6 @@ pub struct OtelExportersConfig {
     pub enable_metrics: Option<bool>,
     pub enable_logging: Option<bool>,
 }
-
 
 // ---- ParsedVersion (module: utils) ----
 
@@ -1134,7 +1069,6 @@ pub struct ParsedVersion {
     pub patch: f64,
 }
 
-
 // ---- PolicyCheckResult (module: plugins) ----
 
 #[derive(Debug, Clone, Default)]
@@ -1142,7 +1076,6 @@ pub struct PolicyCheckResult {
     pub outcome: String,
     pub reason: Option<String>,
 }
-
 
 // ---- RunConfig (module: agents) ----
 
@@ -1175,7 +1108,6 @@ pub struct RunConfig {
     pub pause_on_tool_calls: Option<bool>,
 }
 
-
 // ---- RunnerConfig (module: runner) ----
 
 /// The configuration parameters for the Runner.
@@ -1191,7 +1123,6 @@ pub struct RunnerConfig {
     pub memory_service: Option<serde_json::Value>,
     pub credential_service: Option<serde_json::Value>,
 }
-
 
 // ---- SaveArtifactRequest (module: artifacts) ----
 
@@ -1212,7 +1143,6 @@ pub struct SaveArtifactRequest {
     pub custom_metadata: Option<serde_json::Value>,
 }
 
-
 // ---- SearchMemoryRequest (module: memory) ----
 
 /// The parameters for `searchMemory`.
@@ -1223,7 +1153,6 @@ pub struct SearchMemoryRequest {
     pub query: String,
 }
 
-
 // ---- SearchMemoryResponse (module: memory) ----
 
 /// Represents the response from a memory search.
@@ -1232,7 +1161,6 @@ pub struct SearchMemoryResponse {
     /// A list of memory entries that are related to the search query.
     pub memories: Vec<serde_json::Value>,
 }
-
 
 // ---- ServiceAccount (module: auth) ----
 
@@ -1244,14 +1172,13 @@ pub struct ServiceAccount {
     pub use_default_credential: Option<bool>,
 }
 
-
 // ---- ServiceAccountCredential (module: auth) ----
 
 /// Represents Google Service Account configuration. @example config = {   type: "service_account",   projectId: "your_project_id",   privateKeyId: "your_private_key_id",   privateKey: "-----BEGIN PRIVATE KEY-----...",   clientEmail: "...@....iam.gserviceaccount.com",   clientId: "your_client_id",   authUri: "https://accounts.google.com/o/oauth2/auth",   tokenUri: "https://oauth2.googleapis.com/token",   authProviderX509CertUrl: "https://www.googleapis.com/oauth2/v1/certs",   clientX509CertUrl: "https://www.googleapis.com/robot/v1/metadata/x509/...",   universeDomain: "googleapis.com", }
 #[derive(Debug, Clone, Default)]
 pub struct ServiceAccountCredential {
     /// The type should be 'service_account'.
-    pub r#type: /* 'service_account' */ String,
+    pub r#type: String,
     /// The project ID of the Google Cloud project.
     pub project_id: String,
     /// The ID of the private key.
@@ -1274,7 +1201,6 @@ pub struct ServiceAccountCredential {
     pub universe_domain: String,
 }
 
-
 // ---- Session (module: sessions) ----
 
 /// Represents a session in a conversation between agents and users.
@@ -1294,24 +1220,22 @@ pub struct Session {
     pub last_update_time: f64,
 }
 
-
 // ---- StdioConnectionParams (module: tools) ----
 
 /// Defines the parameters for establishing a connection to an MCP server using standard input/output (stdio). This is typically used for running MCP servers as local child processes.
 #[derive(Debug, Clone, Default)]
 pub struct StdioConnectionParams {
-    pub r#type: /* 'StdioConnectionParams' */ String,
+    pub r#type: String,
     pub server_params: serde_json::Value,
     pub timeout: Option<f64>,
 }
-
 
 // ---- StreamableHTTPConnectionParams (module: tools) ----
 
 /// Defines the parameters for establishing a connection to an MCP server over HTTP using Server-Sent Events (SSE) for streaming. Usage:  const connectionParams: StreamableHTTPConnectionParams = {    type: 'StreamableHTTPConnectionParams',    url: 'http://localhost:8788/mcp'  };
 #[derive(Debug, Clone, Default)]
 pub struct StreamableHTTPConnectionParams {
-    pub r#type: /* 'StreamableHTTPConnectionParams' */ String,
+    pub r#type: String,
     pub url: String,
     /// Use transportOptions.requestInit.headers instead. This field will be ignored if transportOptions is provided even if no headers are specified in transportOptions.
     pub header: Option<serde_json::Value>,
@@ -1320,7 +1244,6 @@ pub struct StreamableHTTPConnectionParams {
     pub terminate_on_close: Option<bool>,
     pub transport_options: Option<serde_json::Value>,
 }
-
 
 // ---- StreamingMode (module: agents) ----
 
@@ -1332,7 +1255,6 @@ pub enum StreamingMode {
     BIDI,
 }
 
-
 // ---- ThoughtEvent (module: events) ----
 
 /// Represents a reasoning trace (thought) from the agent.
@@ -1341,7 +1263,6 @@ pub struct ThoughtEvent {
     pub r#type: serde_json::Value,
     pub content: String,
 }
-
 
 // ---- ToolCallEvent (module: events) ----
 
@@ -1352,7 +1273,6 @@ pub struct ToolCallEvent {
     pub call: rs_genai::prelude::FunctionCall,
 }
 
-
 // ---- ToolCallPolicyContext (module: plugins) ----
 
 // Cannot derive Clone or Default
@@ -1360,7 +1280,6 @@ pub struct ToolCallPolicyContext {
     pub tool: Arc<dyn ToolFunction>,
     pub tool_args: serde_json::Value,
 }
-
 
 // ---- ToolConfirmationEvent (module: events) ----
 
@@ -1371,7 +1290,6 @@ pub struct ToolConfirmationEvent {
     pub confirmations: serde_json::Value,
 }
 
-
 // ---- ToolResultEvent (module: events) ----
 
 /// Represents the result of a tool execution.
@@ -1381,7 +1299,6 @@ pub struct ToolResultEvent {
     pub result: rs_genai::prelude::FunctionResponse,
 }
 
-
 // ---- TraceAgentInvocationParams (module: telemetry) ----
 
 // Cannot derive Clone or Default
@@ -1389,7 +1306,6 @@ pub struct TraceAgentInvocationParams {
     pub agent: Arc<dyn Agent>,
     pub invocation_context: serde_json::Value,
 }
-
 
 // ---- TraceCallLlmParams (module: telemetry) ----
 
@@ -1400,7 +1316,6 @@ pub struct TraceCallLlmParams {
     pub llm_request: serde_json::Value,
     pub llm_response: serde_json::Value,
 }
-
 
 // ---- TraceSendDataParams (module: telemetry) ----
 
@@ -1414,7 +1329,6 @@ pub struct TraceSendDataParams {
     pub data: Vec<rs_genai::prelude::Content>,
 }
 
-
 // ---- TranscriptionEntry (module: agents) ----
 
 /// Store the data that can be used for transcription.
@@ -1424,7 +1338,6 @@ pub struct TranscriptionEntry {
     pub role: Option<String>,
     pub data: rs_genai::prelude::Blob,
 }
-
 
 // ---- UpdateCodeExecutionResultParams (module: code_executors) ----
 
@@ -1436,5 +1349,3 @@ pub struct UpdateCodeExecutionResultParams {
     pub result_stdout: String,
     pub result_stderr: String,
 }
-
-

@@ -53,11 +53,10 @@ pub(super) fn handle_server_msg(
                         Part::InlineData { inline_data } => {
                             state.mark_audio();
                             if let Ok(audio_bytes) =
-                                base64::engine::general_purpose::STANDARD
-                                    .decode(&inline_data.data)
+                                base64::engine::general_purpose::STANDARD.decode(&inline_data.data)
                             {
-                                let _ =
-                                    event_tx.send(SessionEvent::AudioData(bytes::Bytes::from(audio_bytes)));
+                                let _ = event_tx
+                                    .send(SessionEvent::AudioData(bytes::Bytes::from(audio_bytes)));
                             }
                         }
                         _ => {}

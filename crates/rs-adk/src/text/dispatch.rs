@@ -11,7 +11,8 @@ use crate::state::State;
 /// Shared registry for dispatched background tasks.
 #[derive(Clone, Default)]
 pub struct TaskRegistry {
-    pub(crate) inner: Arc<tokio::sync::Mutex<HashMap<String, tokio::task::JoinHandle<Result<String, String>>>>>,
+    pub(crate) inner:
+        Arc<tokio::sync::Mutex<HashMap<String, tokio::task::JoinHandle<Result<String, String>>>>>,
 }
 
 impl TaskRegistry {

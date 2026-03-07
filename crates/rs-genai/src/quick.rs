@@ -45,12 +45,8 @@ use crate::transport::{connect, TransportConfig};
 ///
 /// Uses sensible defaults: [`TransportConfig::default()`], audio output modality.
 /// For advanced configuration, use [`SessionConfig`] + [`connect()`] directly.
-pub async fn quick_connect(
-    api_key: &str,
-    model: &str,
-) -> Result<SessionHandle, SessionError> {
-    let config = SessionConfig::new(api_key)
-        .model(GeminiModel::Custom(model.to_string()));
+pub async fn quick_connect(api_key: &str, model: &str) -> Result<SessionHandle, SessionError> {
+    let config = SessionConfig::new(api_key).model(GeminiModel::Custom(model.to_string()));
     connect(config, TransportConfig::default()).await
 }
 
@@ -72,10 +68,10 @@ pub async fn quick_connect_vertex(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transport::ws::MockTransport;
+    use crate::session::SessionPhase;
     use crate::transport::codec::JsonCodec;
     use crate::transport::connect_with;
-    use crate::session::SessionPhase;
+    use crate::transport::ws::MockTransport;
 
     /// Verify that `quick_connect` builds a valid SessionConfig internally.
     ///
@@ -87,7 +83,10 @@ mod tests {
             .model(GeminiModel::Custom("gemini-2.0-flash-live-001".to_string()));
 
         // Verify the config fields
-        assert_eq!(config.model, GeminiModel::Custom("gemini-2.0-flash-live-001".to_string()));
+        assert_eq!(
+            config.model,
+            GeminiModel::Custom("gemini-2.0-flash-live-001".to_string())
+        );
 
         // Verify it connects successfully with a mock transport
         let mut transport = MockTransport::new();
@@ -113,17 +112,29 @@ mod tests {
             .model(GeminiModel::Custom("gemini-2.0-flash-live-001".to_string()));
 
         // Verify model
-        assert_eq!(config.model, GeminiModel::Custom("gemini-2.0-flash-live-001".to_string()));
+        assert_eq!(
+            config.model,
+            GeminiModel::Custom("gemini-2.0-flash-live-001".to_string())
+        );
 
         // Verify Vertex AI endpoint
         assert!(config.is_vertex(), "should target Vertex AI");
         let url = config.ws_url();
-        assert!(url.contains("aiplatform.googleapis.com"), "URL should use Vertex AI endpoint");
+        assert!(
+            url.contains("aiplatform.googleapis.com"),
+            "URL should use Vertex AI endpoint"
+        );
 
         // Verify model URI contains project and location
         let model_uri = config.model_uri();
-        assert!(model_uri.contains("my-project"), "model URI should contain project ID");
-        assert!(model_uri.contains("us-central1"), "model URI should contain location");
+        assert!(
+            model_uri.contains("my-project"),
+            "model URI should contain project ID"
+        );
+        assert!(
+            model_uri.contains("us-central1"),
+            "model URI should contain location"
+        );
 
         // Verify bearer token is set
         assert_eq!(config.bearer_token(), Some("ya29.TOKEN"));

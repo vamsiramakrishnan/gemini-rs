@@ -260,16 +260,12 @@ impl ComputedRegistry {
                 .filter(|&i| in_degree[i] > 0)
                 .map(|i| self.vars[i].key.as_str())
                 .collect();
-            panic!(
-                "Cycle detected among computed variables: {:?}",
-                cycle_vars
-            );
+            panic!("Cycle detected among computed variables: {:?}", cycle_vars);
         }
 
         // Reorder vars according to topological sort.
         // Use Option wrapping for safe index-based extraction.
-        let mut slots: Vec<Option<ComputedVar>> =
-            self.vars.drain(..).map(Some).collect();
+        let mut slots: Vec<Option<ComputedVar>> = self.vars.drain(..).map(Some).collect();
         for &idx in &order {
             if let Some(var) = slots[idx].take() {
                 self.vars.push(var);
@@ -282,10 +278,7 @@ impl ComputedRegistry {
         self.dep_index.clear();
         for (i, var) in self.vars.iter().enumerate() {
             for dep in &var.dependencies {
-                self.dep_index
-                    .entry(dep.clone())
-                    .or_default()
-                    .push(i);
+                self.dep_index.entry(dep.clone()).or_default().push(i);
             }
         }
     }
@@ -406,7 +399,10 @@ mod tests {
         state.set("app:score", 0.2);
         let changed = registry.recompute(&state);
         assert_eq!(changed, vec!["level"]);
-        assert_eq!(state.get::<String>("derived:level"), Some("low".to_string()));
+        assert_eq!(
+            state.get::<String>("derived:level"),
+            Some("low".to_string())
+        );
     }
 
     // ── 5. recompute_affected only recomputes affected vars ────────────

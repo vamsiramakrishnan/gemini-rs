@@ -81,12 +81,8 @@ mod tests {
     #[test]
     fn names_list() {
         let mut registry = AgentRegistry::new();
-        registry.register(Arc::new(DummyAgent {
-            name: "a".into(),
-        }));
-        registry.register(Arc::new(DummyAgent {
-            name: "b".into(),
-        }));
+        registry.register(Arc::new(DummyAgent { name: "a".into() }));
+        registry.register(Arc::new(DummyAgent { name: "b".into() }));
         let mut names = registry.names();
         names.sort();
         assert_eq!(names, vec!["a", "b"]);

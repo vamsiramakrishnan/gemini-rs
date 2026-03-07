@@ -210,9 +210,7 @@ mod tests {
         let dir = std::env::temp_dir().join("gemini_rs_test_persistence");
         let p = FsPersistence::new(&dir);
         let snapshot = SessionSnapshot {
-            state: [("key".into(), Value::from(42))]
-                .into_iter()
-                .collect(),
+            state: [("key".into(), Value::from(42))].into_iter().collect(),
             phase: "main".into(),
             turn_count: 3,
             transcript_summary: "test".into(),

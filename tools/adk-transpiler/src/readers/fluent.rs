@@ -18,7 +18,10 @@ use super::typescript as ts;
 /// Read the adk-fluent Python source directory and extract a FluentSchema.
 pub fn read_fluent_source(source_dir: &Path) -> Result<FluentSchema, String> {
     if !source_dir.exists() {
-        return Err(format!("Source directory does not exist: {}", source_dir.display()));
+        return Err(format!(
+            "Source directory does not exist: {}",
+            source_dir.display()
+        ));
     }
 
     let mut builder_methods = Vec::new();
@@ -96,8 +99,7 @@ pub fn read_fluent_source(source_dir: &Path) -> Result<FluentSchema, String> {
 }
 
 fn read_file(path: &Path) -> Result<String, String> {
-    std::fs::read_to_string(path)
-        .map_err(|e| format!("Failed to read {}: {}", path.display(), e))
+    std::fs::read_to_string(path).map_err(|e| format!("Failed to read {}: {}", path.display(), e))
 }
 
 /// Extract builder methods from agent.py or agent.pyi.
@@ -115,10 +117,8 @@ fn extract_builder_methods(content: &str) -> Vec<FluentMethodDef> {
     .unwrap();
 
     // Also capture methods with no params (just self)
-    let re_no_param = Regex::new(
-        r#"def\s+(\w+)\s*\(\s*self\s*\)\s*->\s*(?:Self|"[^"]*")"#,
-    )
-    .unwrap();
+    let re_no_param =
+        Regex::new(r#"def\s+(\w+)\s*\(\s*self\s*\)\s*->\s*(?:Self|"[^"]*")"#).unwrap();
 
     let mut current_docstring: Option<String> = None;
     let lines: Vec<&str> = content.lines().collect();
@@ -198,15 +198,10 @@ fn extract_factories(content: &str, module: FluentModule) -> Vec<FluentFactoryDe
     let mut factories = Vec::new();
 
     // Pattern: def func_name(param: type = default, ...) -> ReturnType:
-    let re = Regex::new(
-        r#"def\s+(\w+)\s*\(([^)]*)\)\s*->\s*(?:"([^"]+)"|(\w[\w\[\], |]*))\s*:"#,
-    )
-    .unwrap();
+    let re = Regex::new(r#"def\s+(\w+)\s*\(([^)]*)\)\s*->\s*(?:"([^"]+)"|(\w[\w\[\], |]*))\s*:"#)
+        .unwrap();
 
-    let param_re = Regex::new(
-        r#"(\w+)\s*:\s*([^=,]+?)(?:\s*=\s*([^,]+))?\s*(?:,|$)"#,
-    )
-    .unwrap();
+    let param_re = Regex::new(r#"(\w+)\s*:\s*([^=,]+?)(?:\s*=\s*([^,]+))?\s*(?:,|$)"#).unwrap();
 
     let lines: Vec<&str> = content.lines().collect();
     let mut current_docstring: Option<String> = None;
@@ -319,7 +314,10 @@ fn extract_workflows(content: &str) -> Vec<FluentWorkflowDef> {
             if let Some(caps) = method_re.captures(trimmed) {
                 let name = caps[1].to_string();
                 if !name.starts_with('_') {
-                    let param_type = caps.get(3).map(|m| m.as_str().trim().to_string()).unwrap_or_default();
+                    let param_type = caps
+                        .get(3)
+                        .map(|m| m.as_str().trim().to_string())
+                        .unwrap_or_default();
                     let rust_type = if param_type.is_empty() {
                         String::new()
                     } else {

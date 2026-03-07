@@ -69,18 +69,12 @@ impl ArtifactComposite {
 
     /// All input schemas across all transforms.
     pub fn all_inputs(&self) -> Vec<&ArtifactSchema> {
-        self.transforms
-            .iter()
-            .flat_map(|t| &t.inputs)
-            .collect()
+        self.transforms.iter().flat_map(|t| &t.inputs).collect()
     }
 
     /// All output schemas across all transforms.
     pub fn all_outputs(&self) -> Vec<&ArtifactSchema> {
-        self.transforms
-            .iter()
-            .flat_map(|t| &t.outputs)
-            .collect()
+        self.transforms.iter().flat_map(|t| &t.outputs).collect()
     }
 
     /// Total number of transforms.
@@ -114,13 +108,11 @@ impl A {
         mime_type: impl Into<String>,
         description: impl Into<String>,
     ) -> ArtifactComposite {
-        ArtifactComposite::from_transform(ArtifactTransform::produces(vec![
-            ArtifactSchema {
-                name: name.into(),
-                mime_type: mime_type.into(),
-                description: description.into(),
-            },
-        ]))
+        ArtifactComposite::from_transform(ArtifactTransform::produces(vec![ArtifactSchema {
+            name: name.into(),
+            mime_type: mime_type.into(),
+            description: description.into(),
+        }]))
     }
 
     /// Declare an artifact that this agent consumes.
@@ -129,13 +121,11 @@ impl A {
         mime_type: impl Into<String>,
         description: impl Into<String>,
     ) -> ArtifactComposite {
-        ArtifactComposite::from_transform(ArtifactTransform::consumes(vec![
-            ArtifactSchema {
-                name: name.into(),
-                mime_type: mime_type.into(),
-                description: description.into(),
-            },
-        ]))
+        ArtifactComposite::from_transform(ArtifactTransform::consumes(vec![ArtifactSchema {
+            name: name.into(),
+            mime_type: mime_type.into(),
+            description: description.into(),
+        }]))
     }
 
     /// Declare a JSON artifact output.
@@ -237,9 +227,7 @@ mod tests {
 
     #[test]
     fn empty_composite() {
-        let comp = ArtifactComposite {
-            transforms: vec![],
-        };
+        let comp = ArtifactComposite { transforms: vec![] };
         assert!(comp.is_empty());
         assert_eq!(comp.len(), 0);
     }

@@ -13,10 +13,7 @@ pub struct TapTextAgent {
 
 impl TapTextAgent {
     /// Create a new tap agent for read-only observation.
-    pub fn new(
-        name: impl Into<String>,
-        f: impl Fn(&State) + Send + Sync + 'static,
-    ) -> Self {
+    pub fn new(name: impl Into<String>, f: impl Fn(&State) + Send + Sync + 'static) -> Self {
         Self {
             name: name.into(),
             func: Box::new(f),

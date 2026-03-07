@@ -153,7 +153,10 @@ mod tests {
         let thought = StructuredEvent::Thought { text: "hmm".into() };
         assert_eq!(thought.event_type(), EventType::Thought);
 
-        let content = StructuredEvent::Content { text: "hi".into(), author: "model".into() };
+        let content = StructuredEvent::Content {
+            text: "hi".into(),
+            author: "model".into(),
+        };
         assert_eq!(content.event_type(), EventType::Content);
 
         assert_eq!(StructuredEvent::Finished.event_type(), EventType::Finished);
@@ -207,7 +210,10 @@ mod tests {
     #[test]
     fn convert_event_with_tool_result_in_state_delta() {
         let mut delta = HashMap::new();
-        delta.insert("tool:result:get_weather".to_string(), serde_json::json!({"temp": 22}));
+        delta.insert(
+            "tool:result:get_weather".to_string(),
+            serde_json::json!({"temp": 22}),
+        );
         let actions = EventActions::state_delta(delta);
         let event = Event::new("model", None).with_actions(actions);
         let structured = to_structured_events(&event);

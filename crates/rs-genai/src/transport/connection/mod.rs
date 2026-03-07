@@ -23,7 +23,13 @@ pub async fn connect(
     config: SessionConfig,
     transport_config: TransportConfig,
 ) -> Result<SessionHandle, crate::session::SessionError> {
-    connect_with(config, transport_config, TungsteniteTransport::new(), JsonCodec).await
+    connect_with(
+        config,
+        transport_config,
+        TungsteniteTransport::new(),
+        JsonCodec,
+    )
+    .await
 }
 
 /// Connect with a custom transport and codec.
@@ -47,15 +53,19 @@ where
 
     let state = Arc::new(SessionState::with_events(phase_tx, event_tx.clone()));
 
-    let handle = SessionHandle::new(
-        command_tx,
-        event_tx.clone(),
-        state.clone(),
-        phase_rx,
-    );
+    let handle = SessionHandle::new(command_tx, event_tx.clone(), state.clone(), phase_rx);
 
     let task = tokio::spawn(async move {
-        session_loop::generic_connection_loop(config, transport_config, state, command_rx, event_tx, transport, codec).await;
+        session_loop::generic_connection_loop(
+            config,
+            transport_config,
+            state,
+            command_rx,
+            event_tx,
+            transport,
+            codec,
+        )
+        .await;
     });
     handle.set_task(task);
 
@@ -64,16 +74,16 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::message_handler::{handle_server_msg, MessageAction};
     use super::reconnect::reconnect_delay;
+    use super::*;
 
     use std::time::Duration;
 
     use crate::protocol::messages::ServerMessage;
     use crate::session::{SessionEvent, SessionPhase, SessionState};
-    use crate::transport::ws::MockTransport;
     use crate::transport::codec::JsonCodec;
+    use crate::transport::ws::MockTransport;
 
     /// TransportConfig that disables reconnection for mock tests.
     fn no_reconnect_config() -> TransportConfig {
@@ -96,8 +106,7 @@ mod tests {
                 .to_vec(),
         );
 
-        let config =
-            SessionConfig::new("test-key").model(GeminiModel::Gemini2_0FlashLive);
+        let config = SessionConfig::new("test-key").model(GeminiModel::Gemini2_0FlashLive);
 
         let handle = connect_with(config, no_reconnect_config(), transport, JsonCodec)
             .await
@@ -117,8 +126,7 @@ mod tests {
                 .to_vec(),
         );
 
-        let config =
-            SessionConfig::new("test-key").model(GeminiModel::Gemini2_0FlashLive);
+        let config = SessionConfig::new("test-key").model(GeminiModel::Gemini2_0FlashLive);
         let handle = connect_with(config, no_reconnect_config(), transport, JsonCodec)
             .await
             .unwrap();
@@ -167,8 +175,7 @@ mod tests {
                 .to_vec(),
         );
 
-        let config =
-            SessionConfig::new("test-key").model(GeminiModel::Gemini2_0FlashLive);
+        let config = SessionConfig::new("test-key").model(GeminiModel::Gemini2_0FlashLive);
         let handle = connect_with(config, no_reconnect_config(), transport, JsonCodec)
             .await
             .unwrap();
@@ -205,8 +212,7 @@ mod tests {
                 .to_vec(),
         );
 
-        let config =
-            SessionConfig::new("test-key").model(GeminiModel::Gemini2_0FlashLive);
+        let config = SessionConfig::new("test-key").model(GeminiModel::Gemini2_0FlashLive);
         let handle = connect_with(config, no_reconnect_config(), transport, JsonCodec)
             .await
             .unwrap();
@@ -275,8 +281,7 @@ mod tests {
         let mut transport = MockTransport::new();
         transport.script_recv(br#"{"setupComplete":{}}"#.to_vec());
 
-        let config =
-            SessionConfig::new("test-key").model(GeminiModel::Gemini2_0FlashLive);
+        let config = SessionConfig::new("test-key").model(GeminiModel::Gemini2_0FlashLive);
         let handle = connect_with(config, no_reconnect_config(), transport, JsonCodec)
             .await
             .unwrap();
@@ -297,8 +302,7 @@ mod tests {
         let mut transport = MockTransport::new();
         transport.script_recv(br#"{"setupComplete":{}}"#.to_vec());
 
-        let config =
-            SessionConfig::new("test-key").model(GeminiModel::Gemini2_0FlashLive);
+        let config = SessionConfig::new("test-key").model(GeminiModel::Gemini2_0FlashLive);
         let handle = connect_with(config, no_reconnect_config(), transport, JsonCodec)
             .await
             .unwrap();
@@ -329,8 +333,7 @@ mod tests {
         // Should not exceed max
         let d_large = reconnect_delay(100, &config);
         let max_with_jitter = Duration::from_millis(
-            config.reconnect_max_delay_ms as u64
-                + config.reconnect_max_delay_ms as u64 / 4,
+            config.reconnect_max_delay_ms as u64 + config.reconnect_max_delay_ms as u64 / 4,
         );
         assert!(d_large <= max_with_jitter);
     }

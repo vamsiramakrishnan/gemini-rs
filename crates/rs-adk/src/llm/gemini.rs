@@ -11,9 +11,12 @@ use async_trait::async_trait;
 use once_cell::sync::Lazy;
 use regex::Regex;
 
-use crate::llm::{BaseLlm, GcloudTokenProvider, LlmError, LlmRequest, LlmResponse, TokenProvider, EnvTokenProvider};
 #[cfg(feature = "gemini-llm")]
 use crate::llm::TokenUsage;
+use crate::llm::{
+    BaseLlm, EnvTokenProvider, GcloudTokenProvider, LlmError, LlmRequest, LlmResponse,
+    TokenProvider,
+};
 use crate::utils::variant::{get_google_llm_variant, GoogleLlmVariant};
 
 /// Parameters for constructing a [`GeminiLlm`].
@@ -105,12 +108,12 @@ impl GeminiLlm {
         // Default to GcloudTokenProvider (env var -> gcloud CLI fallback) for VertexAI,
         // matching the auth resolution in build_session_config(). For GeminiApi, use
         // EnvTokenProvider since API key auth doesn't need token refresh.
-        let token_provider: Arc<dyn TokenProvider> = params
-            .token_provider
-            .take()
-            .unwrap_or_else(|| {
+        let token_provider: Arc<dyn TokenProvider> =
+            params.token_provider.take().unwrap_or_else(|| {
                 if variant == GoogleLlmVariant::VertexAi {
-                    Arc::new(GcloudTokenProvider::new(std::time::Duration::from_secs(45 * 60)))
+                    Arc::new(GcloudTokenProvider::new(std::time::Duration::from_secs(
+                        45 * 60,
+                    )))
                 } else {
                     Arc::new(EnvTokenProvider)
                 }
@@ -126,12 +129,15 @@ impl GeminiLlm {
             match variant {
                 GoogleLlmVariant::GeminiApi => {
                     let api_key = params.api_key.as_deref().unwrap_or("");
-                    Client::from_api_key(api_key)
-                        .model(GeminiModel::Custom(model.clone()))
+                    Client::from_api_key(api_key).model(GeminiModel::Custom(model.clone()))
                 }
                 GoogleLlmVariant::VertexAi => {
                     let project = params.project.as_deref().unwrap_or("").to_string();
-                    let location = params.location.as_deref().unwrap_or("us-central1").to_string();
+                    let location = params
+                        .location
+                        .as_deref()
+                        .unwrap_or("us-central1")
+                        .to_string();
                     let tp = token_provider.clone();
                     Client::from_vertex_refreshable(project, location, move || tp.token())
                         .model(GeminiModel::Custom(model.clone()))
@@ -213,7 +219,8 @@ impl BaseLlm for GeminiLlm {
                 }
             }
 
-            let response = self.client
+            let response = self
+                .client
                 .generate_content_with(config, None)
                 .await
                 .map_err(|e| LlmError::RequestFailed(e.to_string()))?;
@@ -267,8 +274,7 @@ impl BaseLlm for GeminiLlm {
         #[cfg(feature = "gemini-llm")]
         {
             use rs_genai::generate::GenerateContentConfig;
-            let config = GenerateContentConfig::from_text(".")
-                .max_output_tokens(1);
+            let config = GenerateContentConfig::from_text(".").max_output_tokens(1);
             let _ = self.client.generate_content_with(config, None).await;
         }
         Ok(())

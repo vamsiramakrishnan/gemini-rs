@@ -118,10 +118,8 @@ impl LlmAgent {
                                     result: value.clone(),
                                     duration: std::time::Duration::ZERO,
                                 });
-                                responses.push(ToolDispatcher::build_response(
-                                    call,
-                                    Ok(value.clone()),
-                                ));
+                                responses
+                                    .push(ToolDispatcher::build_response(call, Ok(value.clone())));
                                 continue;
                             }
                             PluginResult::Continue => {}
@@ -133,13 +131,10 @@ impl LlmAgent {
                         match tool_class {
                             Some(ToolClass::Regular) => {
                                 crate::telemetry::logging::log_tool_dispatch(
-                                    agent_name,
-                                    &call.name,
-                                    "function",
+                                    agent_name, &call.name, "function",
                                 );
                                 crate::telemetry::metrics::record_agent_tool_dispatched(
-                                    agent_name,
-                                    &call.name,
+                                    agent_name, &call.name,
                                 );
 
                                 let result = self
@@ -177,8 +172,7 @@ impl LlmAgent {
                                         );
                                     }
                                     Err(e) => {
-                                        let _ =
-                                            ctx.middleware.run_on_tool_error(call, e).await;
+                                        let _ = ctx.middleware.run_on_tool_error(call, e).await;
                                         ctx.emit(AgentEvent::ToolCallFailed {
                                             name: call.name.clone(),
                                             error: e.to_string(),
@@ -195,16 +189,13 @@ impl LlmAgent {
                                 responses.push(ToolDispatcher::build_response(call, result));
                             }
                             Some(ToolClass::Streaming) | Some(ToolClass::InputStream) => {
-                                let class_str =
-                                    if tool_class == Some(ToolClass::Streaming) {
-                                        "streaming"
-                                    } else {
-                                        "input_stream"
-                                    };
+                                let class_str = if tool_class == Some(ToolClass::Streaming) {
+                                    "streaming"
+                                } else {
+                                    "input_stream"
+                                };
                                 crate::telemetry::logging::log_tool_dispatch(
-                                    agent_name,
-                                    &call.name,
-                                    class_str,
+                                    agent_name, &call.name, class_str,
                                 );
 
                                 self.spawn_streaming_tool(call, ctx, agent_name).await;
@@ -314,9 +305,7 @@ impl LlmAgent {
                     task: tool_task,
                     cancel,
                 };
-                let id = call_id
-                    .clone()
-                    .unwrap_or_else(|| tool_name.clone());
+                let id = call_id.clone().unwrap_or_else(|| tool_name.clone());
                 self.dispatcher.store_active(id, active).await;
             }
             ToolKind::InputStream(tool) => {
@@ -344,9 +333,7 @@ impl LlmAgent {
                     task: tool_task,
                     cancel,
                 };
-                let id = call_id
-                    .clone()
-                    .unwrap_or_else(|| tool_name.clone());
+                let id = call_id.clone().unwrap_or_else(|| tool_name.clone());
                 self.dispatcher.store_active(id, active).await;
             }
             ToolKind::Function(_) => {} // shouldn't reach here
@@ -474,9 +461,10 @@ impl LlmAgentBuilder {
         }
 
         // Prepend TelemetryMiddleware so it runs first
-        self.middleware.prepend(Arc::new(
-            crate::telemetry::TelemetryMiddleware::new(&self.name),
-        ));
+        self.middleware
+            .prepend(Arc::new(crate::telemetry::TelemetryMiddleware::new(
+                &self.name,
+            )));
 
         LlmAgent {
             name: self.name,
@@ -528,10 +516,7 @@ impl Agent for LlmAgent {
             name: agent_name.clone(),
         });
         crate::telemetry::logging::log_agent_completed(&agent_name, elapsed.as_millis() as f64);
-        crate::telemetry::metrics::record_agent_completed(
-            &agent_name,
-            elapsed.as_millis() as f64,
-        );
+        crate::telemetry::metrics::record_agent_completed(&agent_name, elapsed.as_millis() as f64);
 
         result
     }
@@ -609,7 +594,10 @@ mod tests {
 
     /// Create a mock AgentSession backed by MockWriter, returning the session
     /// and the event sender so tests can inject SessionEvents.
-    fn mock_agent_session() -> (crate::agent_session::AgentSession, broadcast::Sender<SessionEvent>) {
+    fn mock_agent_session() -> (
+        crate::agent_session::AgentSession,
+        broadcast::Sender<SessionEvent>,
+    ) {
         let (evt_tx, _) = broadcast::channel(64);
         let writer: Arc<dyn SessionWriter> = Arc::new(MockWriter);
         let session = crate::agent_session::AgentSession::from_writer(writer, evt_tx.clone());
@@ -807,7 +795,10 @@ mod tests {
                 }
             }
         }
-        assert!(saw_tool_failed, "should have emitted ToolCallFailed for unknown tool");
+        assert!(
+            saw_tool_failed,
+            "should have emitted ToolCallFailed for unknown tool"
+        );
     }
 
     #[tokio::test]

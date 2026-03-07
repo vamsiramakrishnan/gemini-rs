@@ -157,10 +157,7 @@ mod tests {
         let inner = Arc::new(MockInnerTool);
         let tool = LongRunningFunctionTool::new(inner);
 
-        let expected = format!(
-            "Performs a slow operation\n{}",
-            LONG_RUNNING_INSTRUCTION
-        );
+        let expected = format!("Performs a slow operation\n{}", LONG_RUNNING_INSTRUCTION);
         assert_eq!(tool.description(), expected);
     }
 }

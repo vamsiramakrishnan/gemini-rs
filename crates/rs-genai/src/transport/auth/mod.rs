@@ -7,8 +7,8 @@
 //! and REST API endpoints from the same auth provider.
 
 pub mod google_ai;
-pub mod vertex;
 pub(crate) mod url_builders;
+pub mod vertex;
 
 pub use google_ai::*;
 pub use vertex::*;

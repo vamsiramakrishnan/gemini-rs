@@ -42,7 +42,10 @@ pub(in crate::live) async fn run_control_lane(
     watchers: Option<WatcherRegistry>,
     temporal: Option<Arc<TemporalRegistry>>,
     background_tracker: Option<Arc<BackgroundToolTracker>>,
-    execution_modes: std::collections::HashMap<String, crate::live::background_tool::ToolExecutionMode>,
+    execution_modes: std::collections::HashMap<
+        String,
+        crate::live::background_tool::ToolExecutionMode,
+    >,
     mut control_plane: ControlPlaneConfig,
 ) {
     // TranscriptBuffer is exclusively owned by the control lane -- no mutex.

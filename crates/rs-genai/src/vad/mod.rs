@@ -146,8 +146,6 @@ impl VoiceActivityDetector {
 
         let is_above_stop = energy_above_noise > self.config.stop_threshold_db;
 
-        
-
         match self.state {
             VadState::Silence => {
                 // Update noise floor during confirmed silence
@@ -403,7 +401,9 @@ mod tests {
     #[test]
     fn zcr_calculation() {
         // Alternating signal → high ZCR
-        let alternating: Vec<i16> = (0..100).map(|i| if i % 2 == 0 { 1000 } else { -1000 }).collect();
+        let alternating: Vec<i16> = (0..100)
+            .map(|i| if i % 2 == 0 { 1000 } else { -1000 })
+            .collect();
         let zcr = compute_zcr(&alternating);
         assert!(zcr > 0.9);
 

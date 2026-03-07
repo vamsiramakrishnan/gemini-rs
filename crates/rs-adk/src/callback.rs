@@ -39,9 +39,7 @@ pub struct ToolCallResult {
 /// Receives the function call about to be executed and returns a decision
 /// about whether to proceed.
 pub type BeforeToolCallback = Arc<
-    dyn Fn(
-            &FunctionCall,
-        ) -> Pin<Box<dyn Future<Output = BeforeToolResult> + Send + '_>>
+    dyn Fn(&FunctionCall) -> Pin<Box<dyn Future<Output = BeforeToolResult> + Send + '_>>
         + Send
         + Sync,
 >;
@@ -50,11 +48,8 @@ pub type BeforeToolCallback = Arc<
 ///
 /// Receives the tool call result for observation/logging purposes.
 /// Cannot modify the result.
-pub type AfterToolCallback = Arc<
-    dyn Fn(&ToolCallResult) -> Pin<Box<dyn Future<Output = ()> + Send + '_>>
-        + Send
-        + Sync,
->;
+pub type AfterToolCallback =
+    Arc<dyn Fn(&ToolCallResult) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> + Send + Sync>;
 
 #[cfg(test)]
 mod tests {

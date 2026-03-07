@@ -42,10 +42,7 @@ pub(in crate::live) async fn run_extractors(
                     Ok(value) => Ok((ext.name().to_string(), value)),
                     Err(e) => {
                         #[cfg(feature = "tracing-support")]
-                        tracing::warn!(
-                            extractor = ext.name(),
-                            "Extraction failed: {e}"
-                        );
+                        tracing::warn!(extractor = ext.name(), "Extraction failed: {e}");
                         Err((ext.name().to_string(), e.to_string()))
                     }
                 }
@@ -105,7 +102,10 @@ pub(in crate::live) async fn run_extractors_with_window(
         .filter_map(|extractor| {
             let window_size = extractor.window_size();
             let window = if include_current {
-                transcript_buffer.snapshot_window_with_current(window_size).turns().to_vec()
+                transcript_buffer
+                    .snapshot_window_with_current(window_size)
+                    .turns()
+                    .to_vec()
             } else {
                 transcript_buffer.window(window_size).to_vec()
             };

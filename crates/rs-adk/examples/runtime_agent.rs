@@ -12,7 +12,7 @@ use rs_adk::agent::Agent;
 use rs_adk::context::InvocationContext;
 use rs_adk::error::AgentError;
 use rs_adk::router::AgentRegistry;
-use rs_adk::tool::{TypedTool, ToolDispatcher};
+use rs_adk::tool::{ToolDispatcher, TypedTool};
 
 use async_trait::async_trait;
 use schemars::JsonSchema;
@@ -49,8 +49,7 @@ impl WeatherAgent {
 
         // ToolDispatcher::with_timeout sets the default timeout for all tool
         // calls. Individual calls can still override via call_function_with_timeout().
-        let mut dispatcher = ToolDispatcher::new()
-            .with_timeout(std::time::Duration::from_secs(10));
+        let mut dispatcher = ToolDispatcher::new().with_timeout(std::time::Duration::from_secs(10));
         dispatcher.register_function(Arc::new(weather_tool));
 
         Self { dispatcher }
@@ -69,7 +68,8 @@ impl Agent for WeatherAgent {
         // 2. When a FunctionCall arrives, dispatch to self.dispatcher
         // 3. Send tool responses back via ctx.agent_session
         // 4. Emit AgentEvents for observability
-        println!("WeatherAgent running with {} tools (default timeout: {:?})",
+        println!(
+            "WeatherAgent running with {} tools (default timeout: {:?})",
             self.dispatcher.len(),
             self.dispatcher.default_timeout(),
         );
@@ -106,6 +106,10 @@ fn main() {
 
     // Resolve by name (used for agent transfer)
     if let Some(agent) = registry.resolve("weather") {
-        println!("Resolved '{}' with {} tools", agent.name(), agent.tools().len());
+        println!(
+            "Resolved '{}' with {} tools",
+            agent.name(),
+            agent.tools().len()
+        );
     }
 }

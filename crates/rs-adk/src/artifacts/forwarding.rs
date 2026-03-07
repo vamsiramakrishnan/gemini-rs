@@ -29,11 +29,7 @@ impl ArtifactService for ForwardingArtifactService {
         self.inner.save(session_id, artifact).await
     }
 
-    async fn load(
-        &self,
-        session_id: &str,
-        name: &str,
-    ) -> Result<Option<Artifact>, ArtifactError> {
+    async fn load(&self, session_id: &str, name: &str) -> Result<Option<Artifact>, ArtifactError> {
         self.inner.load(session_id, name).await
     }
 
@@ -46,18 +42,11 @@ impl ArtifactService for ForwardingArtifactService {
         self.inner.load_version(session_id, name, version).await
     }
 
-    async fn list(
-        &self,
-        session_id: &str,
-    ) -> Result<Vec<ArtifactMetadata>, ArtifactError> {
+    async fn list(&self, session_id: &str) -> Result<Vec<ArtifactMetadata>, ArtifactError> {
         self.inner.list(session_id).await
     }
 
-    async fn delete(
-        &self,
-        session_id: &str,
-        name: &str,
-    ) -> Result<(), ArtifactError> {
+    async fn delete(&self, session_id: &str, name: &str) -> Result<(), ArtifactError> {
         self.inner.delete(session_id, name).await
     }
 }
@@ -98,14 +87,8 @@ mod tests {
     #[tokio::test]
     async fn forwarding_load_version_delegates() {
         let inner = Arc::new(InMemoryArtifactService::new());
-        inner
-            .save("s1", Artifact::text("doc", "v1"))
-            .await
-            .unwrap();
-        inner
-            .save("s1", Artifact::text("doc", "v2"))
-            .await
-            .unwrap();
+        inner.save("s1", Artifact::text("doc", "v1")).await.unwrap();
+        inner.save("s1", Artifact::text("doc", "v2")).await.unwrap();
 
         let fwd = ForwardingArtifactService::new(inner);
         let v1 = fwd.load_version("s1", "doc", 1).await.unwrap().unwrap();
@@ -117,14 +100,8 @@ mod tests {
     #[tokio::test]
     async fn forwarding_list_delegates() {
         let inner = Arc::new(InMemoryArtifactService::new());
-        inner
-            .save("s1", Artifact::text("a", "data"))
-            .await
-            .unwrap();
-        inner
-            .save("s1", Artifact::text("b", "data"))
-            .await
-            .unwrap();
+        inner.save("s1", Artifact::text("a", "data")).await.unwrap();
+        inner.save("s1", Artifact::text("b", "data")).await.unwrap();
 
         let fwd = ForwardingArtifactService::new(inner);
         let list = fwd.list("s1").await.unwrap();

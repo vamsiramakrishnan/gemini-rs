@@ -27,7 +27,10 @@ pub(in crate::live) async fn handle_tool_calls(
     state: &State,
     phase_machine: &Option<tokio::sync::Mutex<PhaseMachine>>,
     transcript_buffer: &mut TranscriptBuffer,
-    execution_modes: &std::collections::HashMap<String, crate::live::background_tool::ToolExecutionMode>,
+    execution_modes: &std::collections::HashMap<
+        String,
+        crate::live::background_tool::ToolExecutionMode,
+    >,
     background_tracker: &Option<Arc<BackgroundToolTracker>>,
     extractors: &[Arc<dyn TurnExtractor>],
 ) {
@@ -84,13 +87,19 @@ pub(in crate::live) async fn handle_tool_calls(
         Some(r) => (r, Vec::new()),
         None => {
             let mut results: Vec<FunctionResponse> = rejected_responses;
-            let mut bg_spawns: Vec<(rs_genai::prelude::FunctionCall, Option<Arc<dyn crate::live::background_tool::ResultFormatter>>)> = Vec::new();
+            let mut bg_spawns: Vec<(
+                rs_genai::prelude::FunctionCall,
+                Option<Arc<dyn crate::live::background_tool::ResultFormatter>>,
+            )> = Vec::new();
 
             if let Some(ref disp) = dispatcher {
                 for call in &allowed_calls {
                     let mode = execution_modes.get(&call.name);
                     match mode {
-                        Some(crate::live::background_tool::ToolExecutionMode::Background { formatter, scheduling }) => {
+                        Some(crate::live::background_tool::ToolExecutionMode::Background {
+                            formatter,
+                            scheduling,
+                        }) => {
                             // Send immediate ack
                             let fmt: &dyn crate::live::background_tool::ResultFormatter = formatter
                                 .as_ref()

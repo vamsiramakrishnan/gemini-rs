@@ -43,7 +43,10 @@ impl RegexExtractor {
     pub fn new(
         name: impl Into<String>,
         window_size: usize,
-        extract_fn: impl Fn(&str, &HashMap<String, Value>) -> HashMap<String, Value> + Send + Sync + 'static,
+        extract_fn: impl Fn(&str, &HashMap<String, Value>) -> HashMap<String, Value>
+            + Send
+            + Sync
+            + 'static,
     ) -> Self {
         Self {
             name: name.into(),
@@ -161,18 +164,12 @@ mod tests {
 
             let name_re = Regex::new(r"my name is (\w+)").unwrap();
             if let Some(caps) = name_re.captures(text) {
-                result.insert(
-                    "name".to_string(),
-                    json!(caps.get(1).unwrap().as_str()),
-                );
+                result.insert("name".to_string(), json!(caps.get(1).unwrap().as_str()));
             }
 
             let email_re = Regex::new(r"email is (\S+@\S+)").unwrap();
             if let Some(caps) = email_re.captures(text) {
-                result.insert(
-                    "email".to_string(),
-                    json!(caps.get(1).unwrap().as_str()),
-                );
+                result.insert("email".to_string(), json!(caps.get(1).unwrap().as_str()));
             }
 
             result
@@ -201,20 +198,14 @@ mod tests {
             if !existing.contains_key("topic") {
                 let re = Regex::new(r"topic is (\w+)").unwrap();
                 if let Some(caps) = re.captures(text) {
-                    result.insert(
-                        "topic".to_string(),
-                        json!(caps.get(1).unwrap().as_str()),
-                    );
+                    result.insert("topic".to_string(), json!(caps.get(1).unwrap().as_str()));
                 }
             }
 
             // Always extract "mood" (updates each turn)
             let re = Regex::new(r"feeling (\w+)").unwrap();
             if let Some(caps) = re.captures(text) {
-                result.insert(
-                    "mood".to_string(),
-                    json!(caps.get(1).unwrap().as_str()),
-                );
+                result.insert("mood".to_string(), json!(caps.get(1).unwrap().as_str()));
             }
 
             result

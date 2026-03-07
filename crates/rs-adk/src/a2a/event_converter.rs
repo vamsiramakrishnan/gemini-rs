@@ -1,7 +1,7 @@
 //! Bidirectional Event <-> A2A Message conversion.
 
-use crate::events::Event;
 use super::types::{A2aMessage, A2aPart};
+use crate::events::Event;
 
 /// Convert an ADK Event to an A2A Message.
 pub fn to_a2a_message(event: &Event) -> Option<A2aMessage> {

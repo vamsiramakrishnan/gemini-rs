@@ -53,38 +53,19 @@ pub enum MemoryError {
 #[async_trait]
 pub trait MemoryService: Send + Sync {
     /// Store a memory entry for a session.
-    async fn store(
-        &self,
-        session_id: &str,
-        entry: MemoryEntry,
-    ) -> Result<(), MemoryError>;
+    async fn store(&self, session_id: &str, entry: MemoryEntry) -> Result<(), MemoryError>;
 
     /// Retrieve a memory entry by key.
-    async fn get(
-        &self,
-        session_id: &str,
-        key: &str,
-    ) -> Result<Option<MemoryEntry>, MemoryError>;
+    async fn get(&self, session_id: &str, key: &str) -> Result<Option<MemoryEntry>, MemoryError>;
 
     /// List all memory entries for a session.
-    async fn list(
-        &self,
-        session_id: &str,
-    ) -> Result<Vec<MemoryEntry>, MemoryError>;
+    async fn list(&self, session_id: &str) -> Result<Vec<MemoryEntry>, MemoryError>;
 
     /// Search memory entries by a query string (simple substring match in default impl).
-    async fn search(
-        &self,
-        session_id: &str,
-        query: &str,
-    ) -> Result<Vec<MemoryEntry>, MemoryError>;
+    async fn search(&self, session_id: &str, query: &str) -> Result<Vec<MemoryEntry>, MemoryError>;
 
     /// Delete a memory entry.
-    async fn delete(
-        &self,
-        session_id: &str,
-        key: &str,
-    ) -> Result<(), MemoryError>;
+    async fn delete(&self, session_id: &str, key: &str) -> Result<(), MemoryError>;
 
     /// Clear all memory for a session.
     async fn clear(&self, session_id: &str) -> Result<(), MemoryError>;
@@ -152,12 +133,18 @@ mod tests {
     #[tokio::test]
     async fn search_entries() {
         let svc = InMemoryMemoryService::new();
-        svc.store("s1", MemoryEntry::new("rust_topic", serde_json::json!("Rust programming")))
-            .await
-            .unwrap();
-        svc.store("s1", MemoryEntry::new("python_topic", serde_json::json!("Python scripting")))
-            .await
-            .unwrap();
+        svc.store(
+            "s1",
+            MemoryEntry::new("rust_topic", serde_json::json!("Rust programming")),
+        )
+        .await
+        .unwrap();
+        svc.store(
+            "s1",
+            MemoryEntry::new("python_topic", serde_json::json!("Python scripting")),
+        )
+        .await
+        .unwrap();
 
         let results = svc.search("s1", "rust").await.unwrap();
         assert_eq!(results.len(), 1);

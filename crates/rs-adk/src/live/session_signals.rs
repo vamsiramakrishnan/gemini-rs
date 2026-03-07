@@ -110,27 +110,21 @@ impl SessionSignals {
             }
 
             SessionEvent::Interrupted => {
-                let count: u64 = self
-                    .state
-                    .session()
-                    .get("interrupt_count")
-                    .unwrap_or(0);
+                let count: u64 = self.state.session().get("interrupt_count").unwrap_or(0);
                 self.state.session().set("interrupt_count", count + 1);
                 self.touch_activity();
             }
 
             SessionEvent::Error(msg) => {
-                let count: u64 =
-                    self.state.session().get("error_count").unwrap_or(0);
+                let count: u64 = self.state.session().get("error_count").unwrap_or(0);
                 self.state.session().set("error_count", count + 1);
                 self.state.session().set("last_error", msg.clone());
             }
 
             SessionEvent::PhaseChanged(phase) => {
-                self.state.session().set(
-                    "is_model_speaking",
-                    *phase == SessionPhase::ModelSpeaking,
-                );
+                self.state
+                    .session()
+                    .set("is_model_speaking", *phase == SessionPhase::ModelSpeaking);
                 self.state.session().set("phase", phase.to_string());
                 self.touch_activity();
             }
@@ -139,12 +133,8 @@ impl SessionSignals {
                 self.state.session().set("go_away_received", true);
                 if let Some(ref tl) = time_left {
                     self.state.session().set("go_away_time_left", tl.clone());
-                    if let Ok(secs) = tl
-                        .trim_end_matches('s')
-                        .parse::<u64>()
-                    {
-                        let deadline =
-                            Instant::now() + std::time::Duration::from_secs(secs);
+                    if let Ok(secs) = tl.trim_end_matches('s').parse::<u64>() {
+                        let deadline = Instant::now() + std::time::Duration::from_secs(secs);
                         *self.go_away_at.lock() = Some(deadline);
                         self.state
                             .session()
@@ -301,9 +291,18 @@ mod tests {
         assert_eq!(s.state.session().get::<u64>("connected_at_ms"), Some(0));
         assert_eq!(s.state.session().get::<u64>("interrupt_count"), Some(0));
         assert_eq!(s.state.session().get::<u64>("error_count"), Some(0));
-        assert_eq!(s.state.session().get::<bool>("is_user_speaking"), Some(false));
-        assert_eq!(s.state.session().get::<bool>("is_model_speaking"), Some(false));
-        assert_eq!(s.state.session().get::<bool>("go_away_received"), Some(false));
+        assert_eq!(
+            s.state.session().get::<bool>("is_user_speaking"),
+            Some(false)
+        );
+        assert_eq!(
+            s.state.session().get::<bool>("is_model_speaking"),
+            Some(false)
+        );
+        assert_eq!(
+            s.state.session().get::<bool>("go_away_received"),
+            Some(false)
+        );
         assert_eq!(s.state.session().get::<bool>("resumable"), Some(false));
         assert_eq!(
             s.state.session().get::<String>("session_type"),
@@ -317,9 +316,15 @@ mod tests {
         let s = signals();
         s.on_event(&SessionEvent::Connected);
         s.on_event(&SessionEvent::VoiceActivityStart);
-        assert_eq!(s.state.session().get::<bool>("is_user_speaking"), Some(true));
+        assert_eq!(
+            s.state.session().get::<bool>("is_user_speaking"),
+            Some(true)
+        );
         s.on_event(&SessionEvent::VoiceActivityEnd);
-        assert_eq!(s.state.session().get::<bool>("is_user_speaking"), Some(false));
+        assert_eq!(
+            s.state.session().get::<bool>("is_user_speaking"),
+            Some(false)
+        );
     }
 
     #[test]
@@ -340,10 +345,16 @@ mod tests {
         s.on_event(&SessionEvent::Connected);
         s.on_event(&SessionEvent::Error("oops".into()));
         assert_eq!(s.state.session().get::<u64>("error_count"), Some(1));
-        assert_eq!(s.state.session().get::<String>("last_error"), Some("oops".into()));
+        assert_eq!(
+            s.state.session().get::<String>("last_error"),
+            Some("oops".into())
+        );
         s.on_event(&SessionEvent::Error("oops2".into()));
         assert_eq!(s.state.session().get::<u64>("error_count"), Some(2));
-        assert_eq!(s.state.session().get::<String>("last_error"), Some("oops2".into()));
+        assert_eq!(
+            s.state.session().get::<String>("last_error"),
+            Some("oops2".into())
+        );
     }
 
     #[test]
@@ -351,11 +362,23 @@ mod tests {
         let s = signals();
         s.on_event(&SessionEvent::Connected);
         s.on_event(&SessionEvent::PhaseChanged(SessionPhase::ModelSpeaking));
-        assert_eq!(s.state.session().get::<bool>("is_model_speaking"), Some(true));
-        assert_eq!(s.state.session().get::<String>("phase"), Some("ModelSpeaking".into()));
+        assert_eq!(
+            s.state.session().get::<bool>("is_model_speaking"),
+            Some(true)
+        );
+        assert_eq!(
+            s.state.session().get::<String>("phase"),
+            Some("ModelSpeaking".into())
+        );
         s.on_event(&SessionEvent::PhaseChanged(SessionPhase::Active));
-        assert_eq!(s.state.session().get::<bool>("is_model_speaking"), Some(false));
-        assert_eq!(s.state.session().get::<String>("phase"), Some("Active".into()));
+        assert_eq!(
+            s.state.session().get::<bool>("is_model_speaking"),
+            Some(false)
+        );
+        assert_eq!(
+            s.state.session().get::<String>("phase"),
+            Some("Active".into())
+        );
     }
 
     #[test]
@@ -363,9 +386,18 @@ mod tests {
         let s = signals();
         s.on_event(&SessionEvent::Connected);
         s.on_event(&SessionEvent::GoAway(Some("60s".into())));
-        assert_eq!(s.state.session().get::<bool>("go_away_received"), Some(true));
-        assert_eq!(s.state.session().get::<String>("go_away_time_left"), Some("60s".into()));
-        assert_eq!(s.state.session().get::<u64>("go_away_time_left_ms"), Some(60_000));
+        assert_eq!(
+            s.state.session().get::<bool>("go_away_received"),
+            Some(true)
+        );
+        assert_eq!(
+            s.state.session().get::<String>("go_away_time_left"),
+            Some("60s".into())
+        );
+        assert_eq!(
+            s.state.session().get::<u64>("go_away_time_left_ms"),
+            Some(60_000)
+        );
         assert!(s.go_away_at.lock().is_some());
     }
 
@@ -374,7 +406,10 @@ mod tests {
         let s = signals();
         s.on_event(&SessionEvent::Connected);
         s.on_event(&SessionEvent::GoAway(None));
-        assert_eq!(s.state.session().get::<bool>("go_away_received"), Some(true));
+        assert_eq!(
+            s.state.session().get::<bool>("go_away_received"),
+            Some(true)
+        );
         assert_eq!(s.state.session().get::<String>("go_away_time_left"), None);
         assert!(s.go_away_at.lock().is_none());
     }
@@ -383,11 +418,13 @@ mod tests {
     fn session_resume_handle_stored() {
         let s = signals();
         s.on_event(&SessionEvent::Connected);
-        s.on_event(&SessionEvent::SessionResumeUpdate(rs_genai::session::ResumeInfo {
-            handle: "handle-abc".into(),
-            resumable: true,
-            last_consumed_index: None,
-        }));
+        s.on_event(&SessionEvent::SessionResumeUpdate(
+            rs_genai::session::ResumeInfo {
+                handle: "handle-abc".into(),
+                resumable: true,
+                last_consumed_index: None,
+            },
+        ));
         assert_eq!(s.state.session().get::<bool>("resumable"), Some(true));
         assert_eq!(s.latest_resume_handle(), Some("handle-abc".to_string()));
     }
@@ -397,11 +434,20 @@ mod tests {
         let s = signals();
         s.on_event(&SessionEvent::Connected);
         s.on_event(&SessionEvent::InputTranscription("hello".into()));
-        assert_eq!(s.state.session().get::<String>("last_input_transcription"), Some("hello".into()));
+        assert_eq!(
+            s.state.session().get::<String>("last_input_transcription"),
+            Some("hello".into())
+        );
         s.on_event(&SessionEvent::OutputTranscription("hi there".into()));
-        assert_eq!(s.state.session().get::<String>("last_output_transcription"), Some("hi there".into()));
+        assert_eq!(
+            s.state.session().get::<String>("last_output_transcription"),
+            Some("hi there".into())
+        );
         s.on_event(&SessionEvent::InputTranscription("bye".into()));
-        assert_eq!(s.state.session().get::<String>("last_input_transcription"), Some("bye".into()));
+        assert_eq!(
+            s.state.session().get::<String>("last_input_transcription"),
+            Some("bye".into())
+        );
     }
 
     #[test]
@@ -417,7 +463,10 @@ mod tests {
         assert_eq!(s.session_type(), SessionType::AudioOnly);
         s.mark_video_sent();
         assert_eq!(s.session_type(), SessionType::AudioVideo);
-        assert_eq!(s.state.session().get::<String>("session_type"), Some("audio_video".into()));
+        assert_eq!(
+            s.state.session().get::<String>("session_type"),
+            Some("audio_video".into())
+        );
     }
 
     #[test]
@@ -438,7 +487,10 @@ mod tests {
         assert!(elapsed < 100, "elapsed should be near zero, got {elapsed}");
         let remaining: u64 = s.state.session().get("remaining_budget_ms").unwrap();
         let limit = 15 * 60 * 1000u64;
-        assert!(remaining > limit - 1000, "remaining should be near limit, got {remaining}");
+        assert!(
+            remaining > limit - 1000,
+            "remaining should be near limit, got {remaining}"
+        );
     }
 
     #[test]
@@ -451,7 +503,10 @@ mod tests {
         s.mark_video_sent();
         s.flush_timing();
         let remaining_video: u64 = s.state.session().get("remaining_budget_ms").unwrap();
-        assert!(remaining_video <= 2 * 60 * 1000, "video remaining should be <= 120_000, got {remaining_video}");
+        assert!(
+            remaining_video <= 2 * 60 * 1000,
+            "video remaining should be <= 120_000, got {remaining_video}"
+        );
     }
 
     #[test]
@@ -463,17 +518,21 @@ mod tests {
     #[test]
     fn latest_resume_handle_updates() {
         let s = signals();
-        s.on_event(&SessionEvent::SessionResumeUpdate(rs_genai::session::ResumeInfo {
-            handle: "h1".into(),
-            resumable: true,
-            last_consumed_index: None,
-        }));
+        s.on_event(&SessionEvent::SessionResumeUpdate(
+            rs_genai::session::ResumeInfo {
+                handle: "h1".into(),
+                resumable: true,
+                last_consumed_index: None,
+            },
+        ));
         assert_eq!(s.latest_resume_handle(), Some("h1".to_string()));
-        s.on_event(&SessionEvent::SessionResumeUpdate(rs_genai::session::ResumeInfo {
-            handle: "h2".into(),
-            resumable: true,
-            last_consumed_index: Some("5".into()),
-        }));
+        s.on_event(&SessionEvent::SessionResumeUpdate(
+            rs_genai::session::ResumeInfo {
+                handle: "h2".into(),
+                resumable: true,
+                last_consumed_index: Some("5".into()),
+            },
+        ));
         assert_eq!(s.latest_resume_handle(), Some("h2".to_string()));
     }
 

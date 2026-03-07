@@ -74,8 +74,7 @@ mod tests {
     /// Helper: create a test InvocationContext with a no-op session.
     fn test_ctx() -> InvocationContext {
         let (event_tx, _) = broadcast::channel(16);
-        let writer: Arc<dyn rs_genai::session::SessionWriter> =
-            Arc::new(NoOpSessionWriter);
+        let writer: Arc<dyn rs_genai::session::SessionWriter> = Arc::new(NoOpSessionWriter);
         let agent_session = AgentSession::from_writer(writer, event_tx);
         InvocationContext::new(agent_session)
     }

@@ -3,11 +3,11 @@
 //! [`SessionWriter`] — write-side: send commands without owning the full handle.
 //! [`SessionReader`] — read-side: subscribe to events and observe phase.
 
-use async_trait::async_trait;
-use crate::protocol::{Content, FunctionResponse};
 use super::errors::SessionError;
 use super::events::SessionEvent;
 use super::state::SessionPhase;
+use crate::protocol::{Content, FunctionResponse};
+use async_trait::async_trait;
 use tokio::sync::broadcast;
 
 /// Write-side of a session — send commands without owning the full handle.
@@ -18,9 +18,16 @@ pub trait SessionWriter: Send + Sync + 'static {
     /// Send a text message.
     async fn send_text(&self, text: String) -> Result<(), SessionError>;
     /// Send tool/function call responses back to the model.
-    async fn send_tool_response(&self, responses: Vec<FunctionResponse>) -> Result<(), SessionError>;
+    async fn send_tool_response(
+        &self,
+        responses: Vec<FunctionResponse>,
+    ) -> Result<(), SessionError>;
     /// Send client content (conversation history or context).
-    async fn send_client_content(&self, turns: Vec<Content>, turn_complete: bool) -> Result<(), SessionError>;
+    async fn send_client_content(
+        &self,
+        turns: Vec<Content>,
+        turn_complete: bool,
+    ) -> Result<(), SessionError>;
     /// Send a video/image frame (raw JPEG bytes).
     async fn send_video(&self, jpeg_data: Vec<u8>) -> Result<(), SessionError>;
     /// Update the system instruction mid-session.
@@ -45,8 +52,8 @@ pub trait SessionReader: Send + Sync + 'static {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::handle::SessionHandle;
+    use super::*;
 
     #[test]
     fn session_handle_implements_session_writer() {

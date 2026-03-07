@@ -46,11 +46,7 @@ pub struct Artifact {
 
 impl Artifact {
     /// Create a new artifact.
-    pub fn new(
-        name: impl Into<String>,
-        mime_type: impl Into<String>,
-        data: Vec<u8>,
-    ) -> Self {
+    pub fn new(name: impl Into<String>, mime_type: impl Into<String>, data: Vec<u8>) -> Self {
         let now = now_secs();
         let size = data.len();
         Self {
@@ -111,11 +107,7 @@ pub trait ArtifactService: Send + Sync {
     ) -> Result<ArtifactMetadata, ArtifactError>;
 
     /// Load the latest version of an artifact.
-    async fn load(
-        &self,
-        session_id: &str,
-        name: &str,
-    ) -> Result<Option<Artifact>, ArtifactError>;
+    async fn load(&self, session_id: &str, name: &str) -> Result<Option<Artifact>, ArtifactError>;
 
     /// Load a specific version of an artifact.
     async fn load_version(
@@ -126,17 +118,10 @@ pub trait ArtifactService: Send + Sync {
     ) -> Result<Option<Artifact>, ArtifactError>;
 
     /// List all artifact metadata for a session.
-    async fn list(
-        &self,
-        session_id: &str,
-    ) -> Result<Vec<ArtifactMetadata>, ArtifactError>;
+    async fn list(&self, session_id: &str) -> Result<Vec<ArtifactMetadata>, ArtifactError>;
 
     /// Delete all versions of an artifact.
-    async fn delete(
-        &self,
-        session_id: &str,
-        name: &str,
-    ) -> Result<(), ArtifactError>;
+    async fn delete(&self, session_id: &str, name: &str) -> Result<(), ArtifactError>;
 }
 
 pub(crate) fn now_secs() -> u64 {
@@ -235,7 +220,9 @@ mod tests {
     #[tokio::test]
     async fn delete_artifact() {
         let svc = InMemoryArtifactService::new();
-        svc.save("s1", Artifact::text("notes", "data")).await.unwrap();
+        svc.save("s1", Artifact::text("notes", "data"))
+            .await
+            .unwrap();
         svc.delete("s1", "notes").await.unwrap();
         let result = svc.load("s1", "notes").await.unwrap();
         assert!(result.is_none());

@@ -219,7 +219,11 @@ impl SessionTelemetry {
 
         let min_latency_ms = {
             let v = self.min_latency_ns.load(Relaxed);
-            if v == u64::MAX { 0 } else { v / 1_000_000 }
+            if v == u64::MAX {
+                0
+            } else {
+                v / 1_000_000
+            }
         };
         let max_latency_ms = self.max_latency_ns.load(Relaxed) / 1_000_000;
 

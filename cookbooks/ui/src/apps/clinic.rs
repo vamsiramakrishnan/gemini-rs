@@ -474,7 +474,10 @@ fn execute_tool(name: &str, args: &Value) -> Value {
             ]
         }),
         "list_doctors" => {
-            let dept = args.get("department").and_then(|v| v.as_str()).unwrap_or("");
+            let dept = args
+                .get("department")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             let doctors = match dept.to_lowercase().as_str() {
                 s if s.contains("general") => json!([
                     { "name": "Dr. Sarah Chen", "specialty": "Internal Medicine", "rating": 4.8 },
@@ -513,7 +516,10 @@ fn execute_tool(name: &str, args: &Value) -> Value {
             })
         }
         "book_appointment" => {
-            let doctor = args.get("doctor_name").and_then(|v| v.as_str()).unwrap_or("Unknown");
+            let doctor = args
+                .get("doctor_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Unknown");
             let date = args.get("date").and_then(|v| v.as_str()).unwrap_or("");
             let time = args.get("time").and_then(|v| v.as_str()).unwrap_or("");
             json!({
@@ -553,7 +559,10 @@ fn execute_tool(name: &str, args: &Value) -> Value {
         }
         "lookup_patient" => {
             let name = args.get("name").and_then(|v| v.as_str()).unwrap_or("");
-            let pid = args.get("patient_id").and_then(|v| v.as_str()).unwrap_or("");
+            let pid = args
+                .get("patient_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             if name.to_lowercase().contains("maria garcia") || pid == "PAT-10042" {
                 json!({
                     "found": true,
@@ -1600,9 +1609,7 @@ mod tests {
         assert!(app.features().contains(&"phase-machine".to_string()));
         assert!(app.features().contains(&"llm-extraction".to_string()));
         assert!(app.features().contains(&"symptom-triage".to_string()));
-        assert!(app
-            .features()
-            .contains(&"department-routing".to_string()));
+        assert!(app.features().contains(&"department-routing".to_string()));
     }
 
     #[test]

@@ -16,8 +16,15 @@ pub(super) use main_loop::run_control_lane;
 macro_rules! dispatch_callback {
     ($mode:expr, $cb:expr) => {
         match $mode {
-            $crate::live::callbacks::CallbackMode::Blocking => { $cb.await; }
-            $crate::live::callbacks::CallbackMode::Concurrent => { let f = $cb; tokio::spawn(async move { f.await; }); }
+            $crate::live::callbacks::CallbackMode::Blocking => {
+                $cb.await;
+            }
+            $crate::live::callbacks::CallbackMode::Concurrent => {
+                let f = $cb;
+                tokio::spawn(async move {
+                    f.await;
+                });
+            }
         }
     };
 }

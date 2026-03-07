@@ -27,10 +27,7 @@ pub fn generate_genai_modules(schema: &GenaiSchema) -> GenaiModuleOutput {
 
     for t in &schema.types {
         if !t.has_wire_equivalent {
-            by_category
-                .entry(t.category.clone())
-                .or_default()
-                .push(t);
+            by_category.entry(t.category.clone()).or_default().push(t);
         }
     }
 
@@ -59,10 +56,7 @@ pub fn generate_genai_modules(schema: &GenaiSchema) -> GenaiModuleOutput {
         mod_rs.push_str(&format!("pub use {}::*;\n", name));
     }
 
-    GenaiModuleOutput {
-        modules,
-        mod_rs,
-    }
+    GenaiModuleOutput { modules, mod_rs }
 }
 
 /// Write the generated modules to an output directory.
@@ -229,16 +223,14 @@ mod tests {
                 name: "GenerateContentResponse".to_string(),
                 category: GenaiTypeCategory::Generate,
                 description: Some("Response from generateContent".to_string()),
-                fields: vec![
-                    FieldDef {
-                        name: "candidates".to_string(),
-                        ts_type: "Candidate[]".to_string(),
-                        rust_type: "Vec<Candidate>".to_string(),
-                        optional: true,
-                        default_value: None,
-                        description: None,
-                    },
-                ],
+                fields: vec![FieldDef {
+                    name: "candidates".to_string(),
+                    ts_type: "Candidate[]".to_string(),
+                    rust_type: "Vec<Candidate>".to_string(),
+                    optional: true,
+                    default_value: None,
+                    description: None,
+                }],
                 extends: None,
                 wire_type: None,
                 has_wire_equivalent: false,
@@ -258,34 +250,46 @@ mod tests {
 
         assert!(output.modules.contains_key("generate"));
         assert!(output.modules.contains_key("embed"));
-        assert!(output.modules.get("generate").unwrap().contains("GenerateContentResponse"));
-        assert!(output.modules.get("embed").unwrap().contains("EmbedContentRequest"));
+        assert!(output
+            .modules
+            .get("generate")
+            .unwrap()
+            .contains("GenerateContentResponse"));
+        assert!(output
+            .modules
+            .get("embed")
+            .unwrap()
+            .contains("EmbedContentRequest"));
         assert!(output.mod_rs.contains("pub mod generate;"));
         assert!(output.mod_rs.contains("pub mod embed;"));
     }
 
     #[test]
     fn skips_types_with_wire_equivalent() {
-        let types = vec![
-            GenaiTypeDef {
-                name: "Content".to_string(),
-                category: GenaiTypeCategory::Content,
-                description: None,
-                fields: vec![],
-                extends: None,
-                wire_type: Some("rs_genai::prelude::Content".to_string()),
-                has_wire_equivalent: true,
-            },
-        ];
+        let types = vec![GenaiTypeDef {
+            name: "Content".to_string(),
+            category: GenaiTypeCategory::Content,
+            description: None,
+            fields: vec![],
+            extends: None,
+            wire_type: Some("rs_genai::prelude::Content".to_string()),
+            has_wire_equivalent: true,
+        }];
 
         let output = generate_genai_modules(&make_genai_schema(types));
-        assert!(output.modules.is_empty(), "Should skip types with wire equivalents");
+        assert!(
+            output.modules.is_empty(),
+            "Should skip types with wire equivalents"
+        );
     }
 
     #[test]
     fn to_snake_case_works() {
         assert_eq!(to_snake_case("fooBar"), "foo_bar");
-        assert_eq!(to_snake_case("generateContentConfig"), "generate_content_config");
+        assert_eq!(
+            to_snake_case("generateContentConfig"),
+            "generate_content_config"
+        );
         assert_eq!(to_snake_case("name"), "name");
     }
 }

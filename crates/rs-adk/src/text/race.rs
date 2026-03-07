@@ -54,9 +54,10 @@ impl TextAgent for RaceTextAgent {
         }
         drop(tx); // Close our sender so rx completes when all are done.
 
-        let result = rx.recv().await.unwrap_or(Err(AgentError::Other(
-            "All race agents failed".into(),
-        )));
+        let result = rx
+            .recv()
+            .await
+            .unwrap_or(Err(AgentError::Other("All race agents failed".into())));
 
         // Cancel remaining agents.
         cancel.cancel();

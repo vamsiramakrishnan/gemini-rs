@@ -169,20 +169,16 @@ impl CookbookApp for AllConfig {
         let start = wait_for_start(&mut rx).await?;
 
         // Parse extended config from system_instruction JSON (or plain text fallback).
-        let opts = parse_config(
-            start.system_instruction.as_deref(),
-            start.voice.as_deref(),
-        );
+        let opts = parse_config(start.system_instruction.as_deref(), start.voice.as_deref());
 
         // Build session config with all specified options.
         let mut config = build_session_config(start.model.as_deref())
             .map_err(|e| AppError::Connection(e.to_string()))?;
 
         // System instruction.
-        let instruction = opts
-            .system_instruction
-            .as_deref()
-            .unwrap_or("You are a helpful assistant. This session was started via the all-config playground.");
+        let instruction = opts.system_instruction.as_deref().unwrap_or(
+            "You are a helpful assistant. This session was started via the all-config playground.",
+        );
         config = config.system_instruction(instruction);
 
         // Temperature.
@@ -212,7 +208,9 @@ impl CookbookApp for AllConfig {
 
         // Transcription (enabled by default for audio modes).
         if opts.enable_transcription.unwrap_or(is_audio) {
-            config = config.enable_input_transcription().enable_output_transcription();
+            config = config
+                .enable_input_transcription()
+                .enable_output_transcription();
         }
 
         // Google Search.
@@ -430,7 +428,8 @@ mod tests {
 
     #[test]
     fn parse_json_config() {
-        let json = r#"{"system_instruction": "Be helpful", "temperature": 0.9, "modality": "text"}"#;
+        let json =
+            r#"{"system_instruction": "Be helpful", "temperature": 0.9, "modality": "text"}"#;
         let config = parse_config(Some(json), None);
         assert_eq!(config.system_instruction.as_deref(), Some("Be helpful"));
         assert_eq!(config.temperature, Some(0.9));

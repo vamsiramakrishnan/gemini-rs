@@ -107,8 +107,7 @@ impl ToolFunction for AgentTool {
 
         // 1. Create isolated context with NoOpSessionWriter
         let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
-        let noop_writer: Arc<dyn rs_genai::session::SessionWriter> =
-            Arc::new(NoOpSessionWriter);
+        let noop_writer: Arc<dyn rs_genai::session::SessionWriter> = Arc::new(NoOpSessionWriter);
         let isolated_session = AgentSession::from_writer(noop_writer, event_tx);
 
         // 2. Inject args into state

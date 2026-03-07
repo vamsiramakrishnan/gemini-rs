@@ -56,11 +56,14 @@ impl CookbookApp for TextChat {
             .map_err(|e| AppError::Connection(e.to_string()))?
             .text_only()
             .system_instruction(
-                start.system_instruction.as_deref()
+                start
+                    .system_instruction
+                    .as_deref()
                     .unwrap_or("You are a helpful assistant."),
             );
 
-        let handle = bridge.wire_live(Live::builder())
+        let handle = bridge
+            .wire_live(Live::builder())
             .connect(config)
             .await
             .map_err(|e| AppError::Connection(e.to_string()))?;

@@ -18,7 +18,9 @@ mod voice_chat;
 use rs_genai::prelude::*;
 use tokio::sync::mpsc;
 
-use crate::app::{AppError, AppInfo, AppRegistry, ClientMessage, CookbookApp, ServerMessage, WsSender};
+use crate::app::{
+    AppError, AppInfo, AppRegistry, ClientMessage, CookbookApp, ServerMessage, WsSender,
+};
 
 /// Register all basic cookbook apps.
 pub fn register_all(registry: &mut AppRegistry) {
@@ -59,7 +61,9 @@ pub async fn wait_for_start(
             voice,
         }),
         Some(_) => Err(AppError::Session("Expected Start message".into())),
-        None => Err(AppError::Connection("Client disconnected before start".into())),
+        None => Err(AppError::Connection(
+            "Client disconnected before start".into(),
+        )),
     }
 }
 
@@ -77,8 +81,8 @@ pub fn build_session_config(model: Option<&str>) -> Result<SessionConfig, String
     let mut config = if use_vertex {
         let project = std::env::var("GOOGLE_CLOUD_PROJECT")
             .map_err(|_| "GOOGLE_CLOUD_PROJECT env var not set".to_string())?;
-        let location = std::env::var("GOOGLE_CLOUD_LOCATION")
-            .unwrap_or_else(|_| "us-central1".to_string());
+        let location =
+            std::env::var("GOOGLE_CLOUD_LOCATION").unwrap_or_else(|_| "us-central1".to_string());
 
         // Try to get access token from env var first, then fall back to gcloud CLI.
         let access_token = std::env::var("GOOGLE_ACCESS_TOKEN")

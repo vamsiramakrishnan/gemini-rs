@@ -25,10 +25,7 @@ pub struct LlmTextAgent {
 
 impl LlmTextAgent {
     /// Create a new LLM text agent.
-    pub fn new(
-        name: impl Into<String>,
-        llm: Arc<dyn BaseLlm>,
-    ) -> Self {
+    pub fn new(name: impl Into<String>, llm: Arc<dyn BaseLlm>) -> Self {
         Self {
             name: name.into(),
             llm,
@@ -78,10 +75,7 @@ impl LlmTextAgent {
     }
 
     /// Dispatch function calls and return function responses.
-    async fn dispatch_tools(
-        &self,
-        calls: &[FunctionCall],
-    ) -> Vec<FunctionResponse> {
+    async fn dispatch_tools(&self, calls: &[FunctionCall]) -> Vec<FunctionResponse> {
         let dispatcher = match &self.dispatcher {
             Some(d) => d,
             None => return Vec::new(),
@@ -89,7 +83,9 @@ impl LlmTextAgent {
 
         let mut responses = Vec::with_capacity(calls.len());
         for call in calls {
-            let result = dispatcher.call_function(&call.name, call.args.clone()).await;
+            let result = dispatcher
+                .call_function(&call.name, call.args.clone())
+                .await;
             responses.push(ToolDispatcher::build_response(call, result));
         }
         responses
@@ -104,9 +100,7 @@ impl TextAgent for LlmTextAgent {
 
     async fn run(&self, state: &State) -> Result<String, AgentError> {
         // Build initial contents from state "input" key, or empty user message.
-        let input = state
-            .get::<String>("input")
-            .unwrap_or_default();
+        let input = state.get::<String>("input").unwrap_or_default();
 
         let mut contents = vec![Content::user(&input)];
 
@@ -118,11 +112,7 @@ impl TextAgent for LlmTextAgent {
                 .await
                 .map_err(|e| AgentError::Other(format!("LLM error: {e}")))?;
 
-            let calls: Vec<FunctionCall> = response
-                .function_calls()
-                .into_iter()
-                .cloned()
-                .collect();
+            let calls: Vec<FunctionCall> = response.function_calls().into_iter().cloned().collect();
 
             if calls.is_empty() {
                 // No tool calls — we have a final text response.

@@ -243,7 +243,10 @@ mod tests {
         ctx.state().set("key", "value");
 
         let cb_ctx = CallbackContext::new(&ctx);
-        assert_eq!(cb_ctx.state().get::<String>("key"), Some("value".to_string()));
+        assert_eq!(
+            cb_ctx.state().get::<String>("key"),
+            Some("value".to_string())
+        );
     }
 
     #[test]
@@ -275,8 +278,8 @@ mod tests {
         let session = crate::agent_session::AgentSession::from_writer(writer, evt_tx);
         let ctx = InvocationContext::new(session);
 
-        let tool_ctx = ToolContext::new(&ctx, None)
-            .with_confirmation(ToolConfirmation::confirmed());
+        let tool_ctx =
+            ToolContext::new(&ctx, None).with_confirmation(ToolConfirmation::confirmed());
         assert!(tool_ctx.confirmation.as_ref().unwrap().confirmed);
     }
 }

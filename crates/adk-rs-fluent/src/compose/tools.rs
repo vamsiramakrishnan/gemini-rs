@@ -5,8 +5,8 @@
 use std::future::Future;
 use std::sync::Arc;
 
-use rs_genai::prelude::Tool;
 use rs_adk::tool::{SimpleTool, ToolFunction};
+use rs_genai::prelude::Tool;
 
 /// A tool composite — one or more tool entries.
 #[derive(Clone)]
@@ -151,18 +151,14 @@ mod tests {
 
     #[test]
     fn toolset_combines_functions() {
-        let tool_a: Arc<dyn ToolFunction> = Arc::new(SimpleTool::new(
-            "a",
-            "tool a",
-            None,
-            |_| async { Ok(serde_json::json!(null)) },
-        ));
-        let tool_b: Arc<dyn ToolFunction> = Arc::new(SimpleTool::new(
-            "b",
-            "tool b",
-            None,
-            |_| async { Ok(serde_json::json!(null)) },
-        ));
+        let tool_a: Arc<dyn ToolFunction> =
+            Arc::new(SimpleTool::new("a", "tool a", None, |_| async {
+                Ok(serde_json::json!(null))
+            }));
+        let tool_b: Arc<dyn ToolFunction> =
+            Arc::new(SimpleTool::new("b", "tool b", None, |_| async {
+                Ok(serde_json::json!(null))
+            }));
         let t = T::toolset(vec![tool_a, tool_b]);
         assert_eq!(t.len(), 2);
     }

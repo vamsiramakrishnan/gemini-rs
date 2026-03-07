@@ -3,12 +3,12 @@
 //! Cheaply cloneable (wraps `Arc`). Provides methods to send commands,
 //! subscribe to events, and observe session state.
 
-use async_trait::async_trait;
-use crate::protocol::{Content, FunctionResponse};
 use super::errors::SessionError;
 use super::events::{SessionCommand, SessionEvent};
 use super::state::{SessionPhase, SessionState};
 use super::traits::{SessionReader, SessionWriter};
+use crate::protocol::{Content, FunctionResponse};
+use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio::task::JoinHandle;
@@ -130,12 +130,17 @@ impl SessionHandle {
 
     /// Send a video/image frame (raw JPEG bytes).
     pub async fn send_video(&self, jpeg_data: Vec<u8>) -> Result<(), SessionError> {
-        self.send_command(SessionCommand::SendVideo(jpeg_data)).await
+        self.send_command(SessionCommand::SendVideo(jpeg_data))
+            .await
     }
 
     /// Update the system instruction mid-session.
-    pub async fn update_instruction(&self, instruction: impl Into<String>) -> Result<(), SessionError> {
-        self.send_command(SessionCommand::UpdateInstruction(instruction.into())).await
+    pub async fn update_instruction(
+        &self,
+        instruction: impl Into<String>,
+    ) -> Result<(), SessionError> {
+        self.send_command(SessionCommand::UpdateInstruction(instruction.into()))
+            .await
     }
 
     /// Signal activity start (user started speaking).
@@ -155,8 +160,11 @@ impl SessionHandle {
         turns: Vec<Content>,
         turn_complete: bool,
     ) -> Result<(), SessionError> {
-        self.send_command(SessionCommand::SendClientContent { turns, turn_complete })
-            .await
+        self.send_command(SessionCommand::SendClientContent {
+            turns,
+            turn_complete,
+        })
+        .await
     }
 
     /// Gracefully disconnect the session.
@@ -196,22 +204,34 @@ impl SessionWriter for SessionHandle {
         self.send_command(SessionCommand::SendText(text)).await
     }
 
-    async fn send_tool_response(&self, responses: Vec<FunctionResponse>) -> Result<(), SessionError> {
+    async fn send_tool_response(
+        &self,
+        responses: Vec<FunctionResponse>,
+    ) -> Result<(), SessionError> {
         self.send_command(SessionCommand::SendToolResponse(responses))
             .await
     }
 
-    async fn send_client_content(&self, turns: Vec<Content>, turn_complete: bool) -> Result<(), SessionError> {
-        self.send_command(SessionCommand::SendClientContent { turns, turn_complete })
-            .await
+    async fn send_client_content(
+        &self,
+        turns: Vec<Content>,
+        turn_complete: bool,
+    ) -> Result<(), SessionError> {
+        self.send_command(SessionCommand::SendClientContent {
+            turns,
+            turn_complete,
+        })
+        .await
     }
 
     async fn send_video(&self, jpeg_data: Vec<u8>) -> Result<(), SessionError> {
-        self.send_command(SessionCommand::SendVideo(jpeg_data)).await
+        self.send_command(SessionCommand::SendVideo(jpeg_data))
+            .await
     }
 
     async fn update_instruction(&self, instruction: String) -> Result<(), SessionError> {
-        self.send_command(SessionCommand::UpdateInstruction(instruction)).await
+        self.send_command(SessionCommand::UpdateInstruction(instruction))
+            .await
     }
 
     async fn signal_activity_start(&self) -> Result<(), SessionError> {
@@ -260,7 +280,10 @@ mod tests {
 
         // join() should return Ok(())
         let result = handle.join().await;
-        assert!(result.is_ok(), "join() should return Ok after task completes");
+        assert!(
+            result.is_ok(),
+            "join() should return Ok after task completes"
+        );
     }
 
     #[tokio::test]

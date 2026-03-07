@@ -45,7 +45,9 @@ impl Platform {
             Platform::GoogleAI => model.to_string(), // "models/..."
             Platform::VertexAI { project, location } => {
                 let model_id = model.to_string().trim_start_matches("models/").to_string();
-                format!("projects/{project}/locations/{location}/publishers/google/models/{model_id}")
+                format!(
+                    "projects/{project}/locations/{location}/publishers/google/models/{model_id}"
+                )
             }
         }
     }
@@ -53,8 +55,12 @@ impl Platform {
     /// The WebSocket service path.
     pub fn ws_path(&self) -> &str {
         match self {
-            Platform::GoogleAI => "google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent",
-            Platform::VertexAI { .. } => "google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent",
+            Platform::GoogleAI => {
+                "google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
+            }
+            Platform::VertexAI { .. } => {
+                "google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent"
+            }
         }
     }
 }
@@ -66,7 +72,10 @@ mod tests {
 
     #[test]
     fn google_ai_base_host() {
-        assert_eq!(Platform::GoogleAI.base_host(), "generativelanguage.googleapis.com");
+        assert_eq!(
+            Platform::GoogleAI.base_host(),
+            "generativelanguage.googleapis.com"
+        );
     }
 
     #[test]
@@ -76,19 +85,28 @@ mod tests {
 
     #[test]
     fn vertex_ai_api_version() {
-        let p = Platform::VertexAI { project: "p".into(), location: "us-central1".into() };
+        let p = Platform::VertexAI {
+            project: "p".into(),
+            location: "us-central1".into(),
+        };
         assert_eq!(p.api_version(), "v1beta1");
     }
 
     #[test]
     fn vertex_ai_base_host_regional() {
-        let p = Platform::VertexAI { project: "p".into(), location: "us-central1".into() };
+        let p = Platform::VertexAI {
+            project: "p".into(),
+            location: "us-central1".into(),
+        };
         assert_eq!(p.base_host(), "us-central1-aiplatform.googleapis.com");
     }
 
     #[test]
     fn vertex_ai_base_host_global() {
-        let p = Platform::VertexAI { project: "p".into(), location: "global".into() };
+        let p = Platform::VertexAI {
+            project: "p".into(),
+            location: "global".into(),
+        };
         assert_eq!(p.base_host(), "aiplatform.googleapis.com");
     }
 
@@ -100,7 +118,10 @@ mod tests {
 
     #[test]
     fn vertex_ai_model_uri() {
-        let p = Platform::VertexAI { project: "my-proj".into(), location: "us-central1".into() };
+        let p = Platform::VertexAI {
+            project: "my-proj".into(),
+            location: "us-central1".into(),
+        };
         let uri = p.model_uri(&GeminiModel::Gemini2_0FlashLive);
         assert!(uri.contains("projects/my-proj/locations/us-central1/publishers/google/models/gemini-2.0-flash-live-001"));
     }
@@ -112,7 +133,10 @@ mod tests {
 
     #[test]
     fn vertex_ai_ws_path() {
-        let p = Platform::VertexAI { project: "p".into(), location: "x".into() };
+        let p = Platform::VertexAI {
+            project: "p".into(),
+            location: "x".into(),
+        };
         assert!(p.ws_path().contains("LlmBidiService"));
     }
 

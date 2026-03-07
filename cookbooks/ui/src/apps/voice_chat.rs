@@ -65,7 +65,8 @@ impl CookbookApp for VoiceChat {
                     .unwrap_or("You are a helpful voice assistant. Keep your responses concise and conversational."),
             );
 
-        let handle = bridge.wire_live(Live::builder())
+        let handle = bridge
+            .wire_live(Live::builder())
             .connect(config)
             .await
             .map_err(|e| AppError::Connection(e.to_string()))?;

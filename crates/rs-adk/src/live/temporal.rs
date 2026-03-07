@@ -181,10 +181,7 @@ impl SustainedDetector {
     ///
     /// - `condition`: evaluated against the current state.
     /// - `duration`: how long the condition must remain true before firing.
-    pub fn new(
-        condition: Arc<dyn Fn(&State) -> bool + Send + Sync>,
-        duration: Duration,
-    ) -> Self {
+    pub fn new(condition: Arc<dyn Fn(&State) -> bool + Send + Sync>, duration: Duration) -> Self {
         Self {
             condition,
             duration,
@@ -303,10 +300,7 @@ impl TurnCountDetector {
     ///
     /// - `condition`: evaluated against the current state each turn.
     /// - `required`: number of consecutive true results before firing.
-    pub fn new(
-        condition: Arc<dyn Fn(&State) -> bool + Send + Sync>,
-        required: u32,
-    ) -> Self {
+    pub fn new(condition: Arc<dyn Fn(&State) -> bool + Send + Sync>, required: u32) -> Self {
         Self {
             condition,
             required,
@@ -786,10 +780,7 @@ mod tests {
 
         registry.add(TemporalPattern::new(
             "turn-count",
-            Box::new(TurnCountDetector::new(
-                Arc::new(|_: &State| true),
-                3,
-            )),
+            Box::new(TurnCountDetector::new(Arc::new(|_: &State| true), 3)),
             counting_action(counter.clone()),
             None,
         ));
@@ -888,10 +879,7 @@ mod tests {
 
     #[test]
     fn sustained_detector_needs_timer() {
-        let detector = SustainedDetector::new(
-            Arc::new(|_: &State| true),
-            Duration::from_secs(5),
-        );
+        let detector = SustainedDetector::new(Arc::new(|_: &State| true), Duration::from_secs(5));
         assert!(detector.needs_timer());
     }
 
@@ -911,10 +899,7 @@ mod tests {
 
     #[test]
     fn turn_count_detector_does_not_need_timer() {
-        let detector = TurnCountDetector::new(
-            Arc::new(|_: &State| true),
-            3,
-        );
+        let detector = TurnCountDetector::new(Arc::new(|_: &State| true), 3);
         assert!(!detector.needs_timer());
     }
 
@@ -940,12 +925,7 @@ mod tests {
         let t0 = Instant::now();
 
         for i in 0..5u32 {
-            let fut = pattern.try_fire(
-                &state,
-                None,
-                &writer,
-                t0 + Duration::from_millis(i as u64),
-            );
+            let fut = pattern.try_fire(&state, None, &writer, t0 + Duration::from_millis(i as u64));
             assert!(fut.is_some(), "should fire on iteration {i}");
             fut.unwrap().await;
         }

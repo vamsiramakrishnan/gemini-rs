@@ -40,10 +40,7 @@ pub fn read_source_dir(source_dir: &Path) -> Result<AdkSchema, String> {
         let content = fs::read_to_string(path)
             .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
 
-        let file_stem = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("");
+        let file_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
 
         let module = ts::module_from_path(source_dir, path);
 
@@ -135,19 +132,29 @@ fn classify_agent(iface_name: &str, file_stem: &str) -> Option<AgentKind> {
     let name_lower = iface_name.to_lowercase();
     let stem_lower = file_stem.to_lowercase();
 
-    if name_lower == "baseagentconfig" || stem_lower == "base_agent" && name_lower.contains("config") {
+    if name_lower == "baseagentconfig"
+        || stem_lower == "base_agent" && name_lower.contains("config")
+    {
         return Some(AgentKind::Base);
     }
-    if name_lower == "llmagentconfig" || (stem_lower == "llm_agent" && name_lower.contains("config")) {
+    if name_lower == "llmagentconfig"
+        || (stem_lower == "llm_agent" && name_lower.contains("config"))
+    {
         return Some(AgentKind::Llm);
     }
-    if name_lower == "sequentialagentconfig" || stem_lower == "sequential_agent" && name_lower.contains("config") {
+    if name_lower == "sequentialagentconfig"
+        || stem_lower == "sequential_agent" && name_lower.contains("config")
+    {
         return Some(AgentKind::Sequential);
     }
-    if name_lower == "parallelagentconfig" || stem_lower == "parallel_agent" && name_lower.contains("config") {
+    if name_lower == "parallelagentconfig"
+        || stem_lower == "parallel_agent" && name_lower.contains("config")
+    {
         return Some(AgentKind::Parallel);
     }
-    if name_lower == "loopagentconfig" || (stem_lower == "loop_agent" && name_lower.contains("config")) {
+    if name_lower == "loopagentconfig"
+        || (stem_lower == "loop_agent" && name_lower.contains("config"))
+    {
         return Some(AgentKind::Loop);
     }
 
@@ -162,7 +169,11 @@ fn is_tool_interface(iface_name: &str, file_stem: &str) -> bool {
     let name_lower = iface_name.to_lowercase();
     let stem_lower = file_stem.to_lowercase();
 
-    if name_lower.contains("tool") && (name_lower.contains("param") || name_lower.contains("config") || name_lower.contains("option")) {
+    if name_lower.contains("tool")
+        && (name_lower.contains("param")
+            || name_lower.contains("config")
+            || name_lower.contains("option"))
+    {
         return true;
     }
     if stem_lower.contains("tool")
@@ -225,9 +236,18 @@ mod tests {
 
     #[test]
     fn test_classify_agent() {
-        assert_eq!(classify_agent("BaseAgentConfig", "base_agent"), Some(AgentKind::Base));
-        assert_eq!(classify_agent("LlmAgentConfig", "llm_agent"), Some(AgentKind::Llm));
-        assert_eq!(classify_agent("LoopAgentConfig", "loop_agent"), Some(AgentKind::Loop));
+        assert_eq!(
+            classify_agent("BaseAgentConfig", "base_agent"),
+            Some(AgentKind::Base)
+        );
+        assert_eq!(
+            classify_agent("LlmAgentConfig", "llm_agent"),
+            Some(AgentKind::Llm)
+        );
+        assert_eq!(
+            classify_agent("LoopAgentConfig", "loop_agent"),
+            Some(AgentKind::Loop)
+        );
         assert!(classify_agent("SomeRandomInterface", "utils").is_none());
     }
 

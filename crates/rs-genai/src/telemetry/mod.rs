@@ -175,19 +175,16 @@ impl TelemetryConfig {
             };
 
             let mut metrics_cfg = GCPMetricsExporterConfig::default();
-            metrics_cfg.prefix =
-                format!("custom.googleapis.com/{}", self.otel_service_name);
+            metrics_cfg.prefix = format!("custom.googleapis.com/{}", self.otel_service_name);
             if let Some(ref project_id) = self.otel_gcp_project {
                 metrics_cfg.project_id = Some(project_id.clone());
             }
             let metrics_exporter = GCPMetricsExporter::init(metrics_cfg).await?;
 
             use opentelemetry_sdk::metrics::periodic_reader_with_async_runtime::PeriodicReader;
-            let reader = PeriodicReader::builder(
-                metrics_exporter,
-                opentelemetry_sdk::runtime::Tokio,
-            )
-            .build();
+            let reader =
+                PeriodicReader::builder(metrics_exporter, opentelemetry_sdk::runtime::Tokio)
+                    .build();
 
             let meter_provider = opentelemetry_sdk::metrics::SdkMeterProvider::builder()
                 .with_resource(self.otel_resource())
@@ -228,8 +225,8 @@ impl TelemetryConfig {
         use tracing_subscriber::prelude::*;
         use tracing_subscriber::EnvFilter;
 
-        let filter = EnvFilter::try_new(&self.log_filter)
-            .unwrap_or_else(|_| EnvFilter::new("info"));
+        let filter =
+            EnvFilter::try_new(&self.log_filter).unwrap_or_else(|_| EnvFilter::new("info"));
 
         let fmt_layer = if self.json_logs {
             tracing_subscriber::fmt::layer().json().boxed()

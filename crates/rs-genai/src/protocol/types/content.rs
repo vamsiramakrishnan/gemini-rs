@@ -256,9 +256,18 @@ mod tests {
 
     #[test]
     fn role_deserializes_lowercase() {
-        assert_eq!(serde_json::from_str::<Role>("\"user\"").unwrap(), Role::User);
-        assert_eq!(serde_json::from_str::<Role>("\"model\"").unwrap(), Role::Model);
-        assert_eq!(serde_json::from_str::<Role>("\"system\"").unwrap(), Role::System);
+        assert_eq!(
+            serde_json::from_str::<Role>("\"user\"").unwrap(),
+            Role::User
+        );
+        assert_eq!(
+            serde_json::from_str::<Role>("\"model\"").unwrap(),
+            Role::Model
+        );
+        assert_eq!(
+            serde_json::from_str::<Role>("\"system\"").unwrap(),
+            Role::System
+        );
     }
 
     #[test]
@@ -316,7 +325,12 @@ mod tests {
     #[test]
     fn part_text_builder() {
         let p = Part::text("hello");
-        assert_eq!(p, Part::Text { text: "hello".to_string() });
+        assert_eq!(
+            p,
+            Part::Text {
+                text: "hello".to_string()
+            }
+        );
     }
 
     #[test]
@@ -341,7 +355,12 @@ mod tests {
             id: None,
         };
         let p = Part::function_call(call.clone());
-        assert_eq!(p, Part::FunctionCall { function_call: call });
+        assert_eq!(
+            p,
+            Part::FunctionCall {
+                function_call: call
+            }
+        );
     }
 
     // ── Content serialization round-trip with Role ──

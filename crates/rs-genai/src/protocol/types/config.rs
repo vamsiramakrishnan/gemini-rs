@@ -641,10 +641,12 @@ impl SessionConfig {
 
     /// Configure context window compression for long sessions.
     pub fn context_window_compression(mut self, target_tokens: u32) -> Self {
-        let mut cwc = self.context_window_compression.unwrap_or(ContextWindowCompressionConfig {
-            sliding_window: None,
-            trigger_tokens: None,
-        });
+        let mut cwc = self
+            .context_window_compression
+            .unwrap_or(ContextWindowCompressionConfig {
+                sliding_window: None,
+                trigger_tokens: None,
+            });
         cwc.sliding_window = Some(SlidingWindow {
             target_tokens: Some(target_tokens),
         });
@@ -654,10 +656,12 @@ impl SessionConfig {
 
     /// Set the token threshold that triggers context window compression.
     pub fn context_window_trigger_tokens(mut self, tokens: u32) -> Self {
-        let mut cwc = self.context_window_compression.unwrap_or(ContextWindowCompressionConfig {
-            sliding_window: None,
-            trigger_tokens: None,
-        });
+        let mut cwc = self
+            .context_window_compression
+            .unwrap_or(ContextWindowCompressionConfig {
+                sliding_window: None,
+                trigger_tokens: None,
+            });
         cwc.trigger_tokens = Some(tokens);
         self.context_window_compression = Some(cwc);
         self
@@ -673,10 +677,13 @@ impl SessionConfig {
 
     /// Enable thinking/reasoning with a token budget (Gemini 2.5+).
     pub fn thinking(mut self, budget: u32) -> Self {
-        let mut tc = self.generation_config.thinking_config.unwrap_or(ThinkingConfig {
-            thinking_budget: None,
-            include_thoughts: None,
-        });
+        let mut tc = self
+            .generation_config
+            .thinking_config
+            .unwrap_or(ThinkingConfig {
+                thinking_budget: None,
+                include_thoughts: None,
+            });
         tc.thinking_budget = Some(budget);
         self.generation_config.thinking_config = Some(tc);
         self
@@ -684,10 +691,13 @@ impl SessionConfig {
 
     /// Include the model's thought process in responses.
     pub fn include_thoughts(mut self) -> Self {
-        let mut tc = self.generation_config.thinking_config.unwrap_or(ThinkingConfig {
-            thinking_budget: None,
-            include_thoughts: None,
-        });
+        let mut tc = self
+            .generation_config
+            .thinking_config
+            .unwrap_or(ThinkingConfig {
+                thinking_budget: None,
+                include_thoughts: None,
+            });
         tc.include_thoughts = Some(true);
         self.generation_config.thinking_config = Some(tc);
         self
@@ -746,10 +756,7 @@ impl SessionConfig {
                 access_token
             ),
             ApiEndpoint::VertexAI(v) => {
-                let host = v
-                    .api_host
-                    .as_deref()
-                    .unwrap_or("");
+                let host = v.api_host.as_deref().unwrap_or("");
                 let host = if host.is_empty() {
                     // "global" uses `aiplatform.googleapis.com` (no prefix),
                     // regional uses `{location}-aiplatform.googleapis.com`.
@@ -827,7 +834,9 @@ mod tests {
             .system_instruction("Be helpful.")
             .temperature(0.7);
 
-        assert!(matches!(config.endpoint, ApiEndpoint::GoogleAI { ref api_key } if api_key == "test-key"));
+        assert!(
+            matches!(config.endpoint, ApiEndpoint::GoogleAI { ref api_key } if api_key == "test-key")
+        );
         assert_eq!(config.model, GeminiModel::Gemini2_0FlashLive);
         assert!(config.system_instruction.is_some());
         assert_eq!(config.generation_config.temperature, Some(0.7));
@@ -908,8 +917,9 @@ mod tests {
 
     #[test]
     fn vertex_model_uri_custom_model() {
-        let config = SessionConfig::from_vertex("proj", "asia-southeast1", "tok")
-            .model(GeminiModel::Custom("gemini-live-2.5-flash-native-audio".to_string()));
+        let config = SessionConfig::from_vertex("proj", "asia-southeast1", "tok").model(
+            GeminiModel::Custom("gemini-live-2.5-flash-native-audio".to_string()),
+        );
         assert_eq!(
             config.model_uri(),
             "projects/proj/locations/asia-southeast1/publishers/google/models/gemini-live-2.5-flash-native-audio"
@@ -1025,9 +1035,7 @@ mod tests {
 
     #[test]
     fn thinking_config_with_include_thoughts() {
-        let config = SessionConfig::new("key")
-            .thinking(2048)
-            .include_thoughts();
+        let config = SessionConfig::new("key").thinking(2048).include_thoughts();
         let json = config.to_setup_json();
         assert!(json.contains("\"thinkingBudget\""));
         assert!(json.contains("2048"));

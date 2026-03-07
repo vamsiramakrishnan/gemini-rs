@@ -5,8 +5,8 @@
 //! [`Turn`] — tracking for a single model response turn.
 //! [`recv_event`] — broadcast lag-tolerant event receiver.
 
-use crate::protocol::{Content, FunctionCall, FunctionResponse, UsageMetadata};
 use super::state::SessionPhase;
+use crate::protocol::{Content, FunctionCall, FunctionResponse, UsageMetadata};
 use std::time::Instant;
 use tokio::sync::broadcast;
 

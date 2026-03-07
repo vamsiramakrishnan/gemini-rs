@@ -139,7 +139,10 @@ mod tests {
 
         let parsed: AuthScheme = serde_json::from_value(json).unwrap();
         match parsed {
-            AuthScheme::Http { scheme, bearer_format } => {
+            AuthScheme::Http {
+                scheme,
+                bearer_format,
+            } => {
                 assert_eq!(scheme, "bearer");
                 assert_eq!(bearer_format.as_deref(), Some("JWT"));
             }
@@ -180,7 +183,9 @@ mod tests {
 
         let parsed: AuthScheme = serde_json::from_value(json).unwrap();
         match parsed {
-            AuthScheme::OAuth2 { grant_type, scopes, .. } => {
+            AuthScheme::OAuth2 {
+                grant_type, scopes, ..
+            } => {
                 assert_eq!(grant_type, Some(OAuthGrantType::AuthorizationCode));
                 assert_eq!(scopes.as_ref().unwrap().len(), 2);
             }
@@ -221,7 +226,9 @@ mod tests {
 
         let parsed: AuthScheme = serde_json::from_value(json).unwrap();
         match parsed {
-            AuthScheme::OpenIdConnect { open_id_connect_url } => {
+            AuthScheme::OpenIdConnect {
+                open_id_connect_url,
+            } => {
                 assert_eq!(
                     open_id_connect_url,
                     "https://example.com/.well-known/openid-configuration"

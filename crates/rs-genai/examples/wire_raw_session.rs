@@ -23,8 +23,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     while let Some(event) = recv_event(&mut events).await {
         match event {
             SessionEvent::TextDelta(text) => print!("{text}"),
-            SessionEvent::TurnComplete => { println!("\n[Turn complete]"); break; }
-            SessionEvent::Error(e) => { eprintln!("Error: {e}"); break; }
+            SessionEvent::TurnComplete => {
+                println!("\n[Turn complete]");
+                break;
+            }
+            SessionEvent::Error(e) => {
+                eprintln!("Error: {e}");
+                break;
+            }
             _ => {}
         }
     }

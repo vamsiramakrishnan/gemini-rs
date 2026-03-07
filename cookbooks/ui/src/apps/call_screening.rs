@@ -113,11 +113,19 @@ fn screening_context(s: &State) -> String {
 
     match (&name, &org) {
         (Some(n), Some(o)) => {
-            let tag = if known { "known contact" } else { "not in contacts" };
+            let tag = if known {
+                "known contact"
+            } else {
+                "not in contacts"
+            };
             ctx.push(format!("Caller: {n} from {o} ({tag})."));
         }
         (Some(n), None) => {
-            let tag = if known { "known contact" } else { "not in contacts" };
+            let tag = if known {
+                "known contact"
+            } else {
+                "not in contacts"
+            };
             ctx.push(format!("Caller: {n} ({tag}). Organization unknown."));
         }
         _ => {}
@@ -135,7 +143,13 @@ fn screening_context(s: &State) -> String {
     }
     let urgency: f64 = s.get("urgency_level").unwrap_or(0.0);
     if urgency > 0.0 {
-        let label = if urgency > 0.7 { "high" } else if urgency > 0.4 { "moderate" } else { "low" };
+        let label = if urgency > 0.7 {
+            "high"
+        } else if urgency > 0.4 {
+            "moderate"
+        } else {
+            "low"
+        };
         ctx.push(format!("Urgency: {label} ({urgency:.1})."));
     }
 
@@ -488,7 +502,9 @@ async fn handle_session(
     // 4. Build Live::builder() with full pipeline
     let handle = Live::builder()
         // --- Model-initiated greeting ---
-        .greeting("A new call is coming in. Greet the caller professionally and ask who is calling.")
+        .greeting(
+            "A new call is coming in. Greet the caller professionally and ask who is calling.",
+        )
         // --- LLM extraction ---
         .extract_turns_triggered::<CallerState>(
             llm,
@@ -536,47 +552,38 @@ async fn handle_session(
             },
         )
         // --- before_tool_response: state promotion from tool results ---
-        .before_tool_response(move |responses, state| {
-            async move {
-                responses
-                    .into_iter()
-                    .inspect(|r| {
-                        match r.name.as_str() {
-                            "check_contact_list" => {
-                                if r.response
-                                    .get("found")
-                                    .and_then(|v| v.as_bool())
-                                    .unwrap_or(false)
-                                {
-                                    state.set("is_known_contact", true);
-                                }
-                            }
-                            "take_message" => {
-                                if r.response.get("status").and_then(|v| v.as_str())
-                                    == Some("recorded")
-                                {
-                                    state.set("message_taken", true);
-                                }
-                            }
-                            "transfer_call" => {
-                                if r.response.get("status").and_then(|v| v.as_str())
-                                    == Some("transferring")
-                                {
-                                    state.set("call_transferred", true);
-                                }
-                            }
-                            "block_caller" => {
-                                if r.response.get("status").and_then(|v| v.as_str())
-                                    == Some("blocked")
-                                {
-                                    state.set("caller_blocked", true);
-                                }
-                            }
-                            _ => {}
+        .before_tool_response(move |responses, state| async move {
+            responses
+                .into_iter()
+                .inspect(|r| match r.name.as_str() {
+                    "check_contact_list" => {
+                        if r.response
+                            .get("found")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false)
+                        {
+                            state.set("is_known_contact", true);
                         }
-                    })
-                    .collect()
-            }
+                    }
+                    "take_message" => {
+                        if r.response.get("status").and_then(|v| v.as_str()) == Some("recorded") {
+                            state.set("message_taken", true);
+                        }
+                    }
+                    "transfer_call" => {
+                        if r.response.get("status").and_then(|v| v.as_str()) == Some("transferring")
+                        {
+                            state.set("call_transferred", true);
+                        }
+                    }
+                    "block_caller" => {
+                        if r.response.get("status").and_then(|v| v.as_str()) == Some("blocked") {
+                            state.set("caller_blocked", true);
+                        }
+                    }
+                    _ => {}
+                })
+                .collect()
         })
         // --- on_tool_call: mock tool dispatch ---
         .on_tool_call(move |calls, _state| {
@@ -619,264 +626,295 @@ async fn handle_session(
         // --- 7 Phases ---
         // Phase 1: Greeting
         .phase("greeting")
-            .instruction(GREETING_INSTRUCTION)
-            .tools(vec!["check_contact_list".into()])
-            .prompt_on_enter(true)
-            .transition_with("identify_caller", |s: &State| {
+        .instruction(GREETING_INSTRUCTION)
+        .tools(vec!["check_contact_list".into()])
+        .prompt_on_enter(true)
+        .transition_with(
+            "identify_caller",
+            |s: &State| {
                 let tc: u32 = s.session().get("turn_count").unwrap_or(0);
                 tc >= 2
-            }, "after initial greeting exchange (2+ turns)")
-            .on_enter(move |_state: State, _writer: Arc<dyn SessionWriter>| {
-                let tx = tx_enter_greeting.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::PhaseChange {
-                        from: "none".into(),
-                        to: "greeting".into(),
-                        reason: "Incoming call — greeting caller".into(),
-                    });
-                }
-            })
-            .done()
+            },
+            "after initial greeting exchange (2+ turns)",
+        )
+        .on_enter(move |_state: State, _writer: Arc<dyn SessionWriter>| {
+            let tx = tx_enter_greeting.clone();
+            async move {
+                let _ = tx.send(ServerMessage::PhaseChange {
+                    from: "none".into(),
+                    to: "greeting".into(),
+                    reason: "Incoming call — greeting caller".into(),
+                });
+            }
+        })
+        .done()
         // Phase 2: Identify Caller
         .phase("identify_caller")
-            .instruction(IDENTIFY_CALLER_INSTRUCTION)
-            .tools(vec!["check_contact_list".into()])
-            .needs(&["caller_name", "caller_organization"])
-            .transition_with("determine_purpose", |s: &State| {
+        .instruction(IDENTIFY_CALLER_INSTRUCTION)
+        .tools(vec!["check_contact_list".into()])
+        .needs(&["caller_name", "caller_organization"])
+        .transition_with(
+            "determine_purpose",
+            |s: &State| {
                 let name: Option<String> = s.get("caller_name");
                 name.is_some()
-            }, "when caller name is provided")
-            .transition_with("take_message", |s: &State| {
+            },
+            "when caller name is provided",
+        )
+        .transition_with(
+            "take_message",
+            |s: &State| {
                 let tc: u32 = s.session().get("turn_count").unwrap_or(0);
                 let name: Option<String> = s.get("caller_name");
                 tc >= 12 && name.is_none()
-            }, "after 12 turns if caller refuses to identify")
-            .on_enter(move |_state: State, _writer: Arc<dyn SessionWriter>| {
-                let tx = tx_enter_identify.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::PhaseChange {
-                        from: "greeting".into(),
-                        to: "identify_caller".into(),
-                        reason: "Initial greeting done — identifying caller".into(),
-                    });
-                    let _ = tx.send(ServerMessage::StateUpdate {
-                        key: "phase".into(),
-                        value: json!("identify_caller"),
-                    });
-                }
-            })
-            .enter_prompt("Ask the caller for their full name and organization.")
-            .done()
+            },
+            "after 12 turns if caller refuses to identify",
+        )
+        .on_enter(move |_state: State, _writer: Arc<dyn SessionWriter>| {
+            let tx = tx_enter_identify.clone();
+            async move {
+                let _ = tx.send(ServerMessage::PhaseChange {
+                    from: "greeting".into(),
+                    to: "identify_caller".into(),
+                    reason: "Initial greeting done — identifying caller".into(),
+                });
+                let _ = tx.send(ServerMessage::StateUpdate {
+                    key: "phase".into(),
+                    value: json!("identify_caller"),
+                });
+            }
+        })
+        .enter_prompt("Ask the caller for their full name and organization.")
+        .done()
         // Phase 3: Determine Purpose
         .phase("determine_purpose")
-            .instruction(DETERMINE_PURPOSE_INSTRUCTION)
-            .tools(vec!["check_calendar".into()])
-            .needs(&["call_purpose", "urgency_level"])
-            .transition_with("screen_decision", |s: &State| {
-                s.get::<String>("call_purpose").is_some()
-            }, "when call purpose is established")
-            .on_enter(move |_state: State, _writer: Arc<dyn SessionWriter>| {
-                let tx = tx_enter_purpose.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::PhaseChange {
-                        from: "identify_caller".into(),
-                        to: "determine_purpose".into(),
-                        reason: "Caller identified — determining call purpose".into(),
-                    });
-                    let _ = tx.send(ServerMessage::StateUpdate {
-                        key: "phase".into(),
-                        value: json!("determine_purpose"),
-                    });
-                }
-            })
-            .enter_prompt_fn(|s, _| {
-                let name: String = s.get("caller_name").unwrap_or_default();
-                format!("I've confirmed the caller is {name}. Now ask them why they're calling.")
-            })
-            .done()
+        .instruction(DETERMINE_PURPOSE_INSTRUCTION)
+        .tools(vec!["check_calendar".into()])
+        .needs(&["call_purpose", "urgency_level"])
+        .transition_with(
+            "screen_decision",
+            |s: &State| s.get::<String>("call_purpose").is_some(),
+            "when call purpose is established",
+        )
+        .on_enter(move |_state: State, _writer: Arc<dyn SessionWriter>| {
+            let tx = tx_enter_purpose.clone();
+            async move {
+                let _ = tx.send(ServerMessage::PhaseChange {
+                    from: "identify_caller".into(),
+                    to: "determine_purpose".into(),
+                    reason: "Caller identified — determining call purpose".into(),
+                });
+                let _ = tx.send(ServerMessage::StateUpdate {
+                    key: "phase".into(),
+                    value: json!("determine_purpose"),
+                });
+            }
+        })
+        .enter_prompt_fn(|s, _| {
+            let name: String = s.get("caller_name").unwrap_or_default();
+            format!("I've confirmed the caller is {name}. Now ask them why they're calling.")
+        })
+        .done()
         // Phase 4: Screen Decision
         .phase("screen_decision")
-            .instruction(SCREEN_DECISION_INSTRUCTION)
-            .tools(vec![
-                "transfer_call".into(),
-                "take_message".into(),
-                "block_caller".into(),
-            ])
-            .transition_with("transfer", |s: &State| {
+        .instruction(SCREEN_DECISION_INSTRUCTION)
+        .tools(vec![
+            "transfer_call".into(),
+            "take_message".into(),
+            "block_caller".into(),
+        ])
+        .transition_with(
+            "transfer",
+            |s: &State| {
                 s.get::<bool>("is_known_contact").unwrap_or(false)
                     || s.get::<f64>("urgency_level").unwrap_or(0.0) > 0.8
-            }, "known contact or high urgency → transfer")
-            .transition_with("farewell", S::is_true("caller_blocked"),
-                "caller blocked → end call")
-            .transition_with("take_message", |s: &State| {
+            },
+            "known contact or high urgency → transfer",
+        )
+        .transition_with(
+            "farewell",
+            S::is_true("caller_blocked"),
+            "caller blocked → end call",
+        )
+        .transition_with(
+            "take_message",
+            |s: &State| {
                 !s.get::<bool>("is_known_contact").unwrap_or(false)
                     && s.get::<f64>("urgency_level").unwrap_or(0.0) <= 0.8
-            }, "unknown caller with low urgency → take message")
-            .on_enter(move |_state: State, _writer: Arc<dyn SessionWriter>| {
-                let tx = tx_enter_decision.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::PhaseChange {
-                        from: "determine_purpose".into(),
-                        to: "screen_decision".into(),
-                        reason: "Purpose determined — making screening decision".into(),
-                    });
-                    let _ = tx.send(ServerMessage::StateUpdate {
-                        key: "phase".into(),
-                        value: json!("screen_decision"),
-                    });
-                }
-            })
-            .enter_prompt_fn(|s, _| {
-                let name: String = s.get("caller_name").unwrap_or_default();
-                let purpose: String = s.get("call_purpose").unwrap_or_default();
-                format!("{name} is calling about: {purpose}. Decide the best course of action.")
-            })
-            .done()
+            },
+            "unknown caller with low urgency → take message",
+        )
+        .on_enter(move |_state: State, _writer: Arc<dyn SessionWriter>| {
+            let tx = tx_enter_decision.clone();
+            async move {
+                let _ = tx.send(ServerMessage::PhaseChange {
+                    from: "determine_purpose".into(),
+                    to: "screen_decision".into(),
+                    reason: "Purpose determined — making screening decision".into(),
+                });
+                let _ = tx.send(ServerMessage::StateUpdate {
+                    key: "phase".into(),
+                    value: json!("screen_decision"),
+                });
+            }
+        })
+        .enter_prompt_fn(|s, _| {
+            let name: String = s.get("caller_name").unwrap_or_default();
+            let purpose: String = s.get("call_purpose").unwrap_or_default();
+            format!("{name} is calling about: {purpose}. Decide the best course of action.")
+        })
+        .done()
         // Phase 5: Take Message
         .phase("take_message")
-            .instruction(TAKE_MESSAGE_INSTRUCTION)
-            .tools(vec!["take_message".into()])
-            .transition_with("farewell", S::is_true("message_taken"),
-                "message has been recorded")
-            .on_enter(move |_state: State, _writer: Arc<dyn SessionWriter>| {
-                let tx = tx_enter_take_message.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::PhaseChange {
-                        from: "previous".into(),
-                        to: "take_message".into(),
-                        reason: "Taking a message for Alex".into(),
-                    });
-                    let _ = tx.send(ServerMessage::StateUpdate {
-                        key: "phase".into(),
-                        value: json!("take_message"),
-                    });
-                }
-            })
-            .enter_prompt_fn(|s, _| {
-                let name: String = s.get("caller_name").unwrap_or_else(|| "the caller".into());
-                format!("Let {name} know Alex is unavailable. Ask if they'd like to leave a message.")
-            })
-            .done()
+        .instruction(TAKE_MESSAGE_INSTRUCTION)
+        .tools(vec!["take_message".into()])
+        .transition_with(
+            "farewell",
+            S::is_true("message_taken"),
+            "message has been recorded",
+        )
+        .on_enter(move |_state: State, _writer: Arc<dyn SessionWriter>| {
+            let tx = tx_enter_take_message.clone();
+            async move {
+                let _ = tx.send(ServerMessage::PhaseChange {
+                    from: "previous".into(),
+                    to: "take_message".into(),
+                    reason: "Taking a message for Alex".into(),
+                });
+                let _ = tx.send(ServerMessage::StateUpdate {
+                    key: "phase".into(),
+                    value: json!("take_message"),
+                });
+            }
+        })
+        .enter_prompt_fn(|s, _| {
+            let name: String = s.get("caller_name").unwrap_or_else(|| "the caller".into());
+            format!("Let {name} know Alex is unavailable. Ask if they'd like to leave a message.")
+        })
+        .done()
         // Phase 6: Transfer
         .phase("transfer")
-            .instruction(TRANSFER_INSTRUCTION)
-            .tools(vec!["transfer_call".into()])
-            .transition_with("farewell", S::is_true("call_transferred"),
-                "call has been transferred")
-            .on_enter(move |_state: State, _writer: Arc<dyn SessionWriter>| {
-                let tx = tx_enter_transfer.clone();
-                async move {
-                    let _ = tx.send(ServerMessage::PhaseChange {
-                        from: "previous".into(),
-                        to: "transfer".into(),
-                        reason: "Transferring call to Alex".into(),
-                    });
-                    let _ = tx.send(ServerMessage::StateUpdate {
-                        key: "phase".into(),
-                        value: json!("transfer"),
-                    });
-                }
-            })
-            .enter_prompt("I'll transfer the caller to Alex now.")
-            .done()
+        .instruction(TRANSFER_INSTRUCTION)
+        .tools(vec!["transfer_call".into()])
+        .transition_with(
+            "farewell",
+            S::is_true("call_transferred"),
+            "call has been transferred",
+        )
+        .on_enter(move |_state: State, _writer: Arc<dyn SessionWriter>| {
+            let tx = tx_enter_transfer.clone();
+            async move {
+                let _ = tx.send(ServerMessage::PhaseChange {
+                    from: "previous".into(),
+                    to: "transfer".into(),
+                    reason: "Transferring call to Alex".into(),
+                });
+                let _ = tx.send(ServerMessage::StateUpdate {
+                    key: "phase".into(),
+                    value: json!("transfer"),
+                });
+            }
+        })
+        .enter_prompt("I'll transfer the caller to Alex now.")
+        .done()
         // Phase 7: Farewell (terminal)
         .phase("farewell")
-            .instruction(FAREWELL_INSTRUCTION)
-            .terminal()
-            .on_enter(move |state: State, _writer: Arc<dyn SessionWriter>| {
-                let tx = tx_enter_farewell.clone();
-                async move {
-                    let transferred: bool = state.get("call_transferred").unwrap_or(false);
-                    let message_taken: bool = state.get("message_taken").unwrap_or(false);
-                    let blocked: bool = state.get("caller_blocked").unwrap_or(false);
+        .instruction(FAREWELL_INSTRUCTION)
+        .terminal()
+        .on_enter(move |state: State, _writer: Arc<dyn SessionWriter>| {
+            let tx = tx_enter_farewell.clone();
+            async move {
+                let transferred: bool = state.get("call_transferred").unwrap_or(false);
+                let message_taken: bool = state.get("message_taken").unwrap_or(false);
+                let blocked: bool = state.get("caller_blocked").unwrap_or(false);
 
-                    let reason = if transferred {
-                        "Call transferred — saying goodbye"
-                    } else if message_taken {
-                        "Message recorded — saying goodbye"
-                    } else if blocked {
-                        "Caller blocked — ending call"
-                    } else {
-                        "Call concluding"
-                    };
-                    let _ = tx.send(ServerMessage::PhaseChange {
-                        from: "previous".into(),
-                        to: "farewell".into(),
-                        reason: reason.into(),
-                    });
-                    let _ = tx.send(ServerMessage::StateUpdate {
-                        key: "phase".into(),
-                        value: json!("farewell"),
-                    });
-                }
-            })
-            .enter_prompt_fn(|state, _tw| {
-                if S::is_true("call_transferred")(state) {
-                    "The call has been transferred. I'll say goodbye now.".into()
-                } else if S::is_true("message_taken")(state) {
-                    "The message has been recorded. I'll wrap up the call.".into()
-                } else if S::is_true("caller_blocked")(state) {
-                    "The caller has been blocked. I'll end the call politely.".into()
+                let reason = if transferred {
+                    "Call transferred — saying goodbye"
+                } else if message_taken {
+                    "Message recorded — saying goodbye"
+                } else if blocked {
+                    "Caller blocked — ending call"
                 } else {
-                    "I'll wrap up the call now.".into()
-                }
-            })
-            .done()
+                    "Call concluding"
+                };
+                let _ = tx.send(ServerMessage::PhaseChange {
+                    from: "previous".into(),
+                    to: "farewell".into(),
+                    reason: reason.into(),
+                });
+                let _ = tx.send(ServerMessage::StateUpdate {
+                    key: "phase".into(),
+                    value: json!("farewell"),
+                });
+            }
+        })
+        .enter_prompt_fn(|state, _tw| {
+            if S::is_true("call_transferred")(state) {
+                "The call has been transferred. I'll say goodbye now.".into()
+            } else if S::is_true("message_taken")(state) {
+                "The message has been recorded. I'll wrap up the call.".into()
+            } else if S::is_true("caller_blocked")(state) {
+                "The caller has been blocked. I'll end the call politely.".into()
+            } else {
+                "I'll wrap up the call now.".into()
+            }
+        })
+        .done()
         .initial_phase("greeting")
         // --- Watchers ---
         // Numeric: urgency crossed above 0.8
         .watch("urgency_level")
-            .crossed_above(0.8)
-            .then({
-                let tx = tx_watcher_urgency.clone();
-                move |_old, new, _state| {
-                    let tx = tx.clone();
-                    async move {
-                        let _ = tx.send(ServerMessage::StateUpdate {
-                            key: "watcher:urgency_high".into(),
-                            value: json!({
-                                "triggered": true,
-                                "value": new,
-                                "action": "High urgency detected — consider immediate transfer"
-                            }),
-                        });
-                    }
+        .crossed_above(0.8)
+        .then({
+            let tx = tx_watcher_urgency.clone();
+            move |_old, new, _state| {
+                let tx = tx.clone();
+                async move {
+                    let _ = tx.send(ServerMessage::StateUpdate {
+                        key: "watcher:urgency_high".into(),
+                        value: json!({
+                            "triggered": true,
+                            "value": new,
+                            "action": "High urgency detected — consider immediate transfer"
+                        }),
+                    });
                 }
-            })
+            }
+        })
         // Boolean: is_known_contact became true
         .watch("is_known_contact")
-            .became_true()
-            .then({
-                let tx = tx_watcher_known.clone();
-                move |_old, _new, _state| {
-                    let tx = tx.clone();
-                    async move {
-                        let _ = tx.send(ServerMessage::StateUpdate {
-                            key: "watcher:known_contact".into(),
-                            value: json!({
-                                "triggered": true,
-                                "action": "Known contact identified — prioritize call"
-                            }),
-                        });
-                    }
+        .became_true()
+        .then({
+            let tx = tx_watcher_known.clone();
+            move |_old, _new, _state| {
+                let tx = tx.clone();
+                async move {
+                    let _ = tx.send(ServerMessage::StateUpdate {
+                        key: "watcher:known_contact".into(),
+                        value: json!({
+                            "triggered": true,
+                            "action": "Known contact identified — prioritize call"
+                        }),
+                    });
                 }
-            })
+            }
+        })
         // Value: caller_sentiment changed to "hostile"
         .watch("caller_sentiment")
-            .changed_to(json!("hostile"))
-            .then({
-                let tx = tx_watcher_hostile.clone();
-                move |_old, _new, _state| {
-                    let tx = tx.clone();
-                    async move {
-                        let _ = tx.send(ServerMessage::Violation {
-                            rule: "hostile_caller".into(),
-                            severity: "warning".into(),
-                            detail: "Caller sentiment is hostile — exercise caution".into(),
-                        });
-                    }
+        .changed_to(json!("hostile"))
+        .then({
+            let tx = tx_watcher_hostile.clone();
+            move |_old, _new, _state| {
+                let tx = tx.clone();
+                async move {
+                    let _ = tx.send(ServerMessage::Violation {
+                        rule: "hostile_caller".into(),
+                        severity: "warning".into(),
+                        detail: "Caller sentiment is hostile — exercise caution".into(),
+                    });
                 }
-            })
+            }
+        })
         // --- Temporal patterns ---
         // Sustained: caller impatient for 20 seconds
         .when_sustained(
@@ -1197,7 +1235,10 @@ mod tests {
 
     #[test]
     fn screen_decision_normal() {
-        assert_eq!(compute_screen_decision(false, 0.5, "neutral"), "take_message");
+        assert_eq!(
+            compute_screen_decision(false, 0.5, "neutral"),
+            "take_message"
+        );
     }
 
     #[test]

@@ -214,12 +214,16 @@ impl LiveSessionBuilder {
         // Apply NON_BLOCKING behavior to tool declarations for background tools
         let mut config = self.config;
         for (tool_name, mode) in &self.execution_modes {
-            if matches!(mode, super::background_tool::ToolExecutionMode::Background { .. }) {
+            if matches!(
+                mode,
+                super::background_tool::ToolExecutionMode::Background { .. }
+            ) {
                 for tool in &mut config.tools {
                     if let Some(ref mut decls) = tool.function_declarations {
                         for decl in decls {
                             if decl.name == *tool_name {
-                                decl.behavior = Some(rs_genai::prelude::FunctionCallingBehavior::NonBlocking);
+                                decl.behavior =
+                                    Some(rs_genai::prelude::FunctionCallingBehavior::NonBlocking);
                             }
                         }
                     }
@@ -275,13 +279,9 @@ impl LiveSessionBuilder {
 
         // Build control plane config
         let control_plane = ControlPlaneConfig {
-            soft_turn: self
-                .soft_turn_timeout
-                .map(SoftTurnDetector::new),
+            soft_turn: self.soft_turn_timeout.map(SoftTurnDetector::new),
             steering_mode: self.steering_mode,
-            needs_fulfillment: self
-                .repair_config
-                .map(NeedsFulfillment::new),
+            needs_fulfillment: self.repair_config.map(NeedsFulfillment::new),
             persistence: self.persistence,
             session_id: self.session_id,
             tool_advisory: self.tool_advisory,
@@ -307,10 +307,19 @@ impl LiveSessionBuilder {
 
         // Send greeting prompt to trigger model-initiated conversation
         if let Some(greeting) = self.greeting {
-            greeting_writer.send_text(greeting).await.map_err(AgentError::Session)?;
+            greeting_writer
+                .send_text(greeting)
+                .await
+                .map_err(AgentError::Session)?;
         }
 
-        Ok(LiveHandle::new(session, fast_handle, ctrl_handle, state, telemetry))
+        Ok(LiveHandle::new(
+            session,
+            fast_handle,
+            ctrl_handle,
+            state,
+            telemetry,
+        ))
     }
 }
 

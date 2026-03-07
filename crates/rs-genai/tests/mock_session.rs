@@ -45,9 +45,12 @@ async fn connect_and_receive_text() {
     let mut events = handle.subscribe();
 
     // Wait for session to become active (setup handshake complete).
-    tokio::time::timeout(Duration::from_secs(5), handle.wait_for_phase(SessionPhase::Active))
-        .await
-        .expect("should reach Active phase");
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        handle.wait_for_phase(SessionPhase::Active),
+    )
+    .await
+    .expect("should reach Active phase");
 
     // Collect events until we see TurnComplete.
     let mut got_text_delta = false;
@@ -69,7 +72,10 @@ async fn connect_and_receive_text() {
         }
     }
 
-    assert!(got_text_delta, "should have received TextDelta(\"hello world\")");
+    assert!(
+        got_text_delta,
+        "should have received TextDelta(\"hello world\")"
+    );
     assert!(got_turn_complete, "should have received TurnComplete");
 }
 
@@ -89,9 +95,12 @@ async fn connect_and_send_text() {
         .expect("connect_with should succeed");
 
     // Wait for active.
-    tokio::time::timeout(Duration::from_secs(5), handle.wait_for_phase(SessionPhase::Active))
-        .await
-        .expect("should reach Active phase");
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        handle.wait_for_phase(SessionPhase::Active),
+    )
+    .await
+    .expect("should reach Active phase");
 
     // send_text should succeed without error (the mock transport accepts any send).
     handle
@@ -121,9 +130,12 @@ async fn tool_call_event() {
 
     let mut events = handle.subscribe();
 
-    tokio::time::timeout(Duration::from_secs(5), handle.wait_for_phase(SessionPhase::Active))
-        .await
-        .expect("should reach Active phase");
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        handle.wait_for_phase(SessionPhase::Active),
+    )
+    .await
+    .expect("should reach Active phase");
 
     // Look for the ToolCall event.
     let mut got_tool_call = false;
@@ -143,7 +155,10 @@ async fn tool_call_event() {
         }
     }
 
-    assert!(got_tool_call, "should have received ToolCall with function name 'get_weather'");
+    assert!(
+        got_tool_call,
+        "should have received ToolCall with function name 'get_weather'"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -166,9 +181,12 @@ async fn phase_changes_on_connect() {
     // The session should pass through several phases:
     // Disconnected -> Connecting -> SetupSent -> Active
     // We verify it reaches Active.
-    tokio::time::timeout(Duration::from_secs(5), handle.wait_for_phase(SessionPhase::Active))
-        .await
-        .expect("should reach Active phase");
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        handle.wait_for_phase(SessionPhase::Active),
+    )
+    .await
+    .expect("should reach Active phase");
 
     assert_eq!(handle.phase(), SessionPhase::Active);
 

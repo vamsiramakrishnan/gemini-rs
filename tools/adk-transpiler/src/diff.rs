@@ -26,9 +26,9 @@ pub struct EntityChange {
 
 #[derive(Debug)]
 pub enum FieldChange {
-    Added(String, String),           // (name, type)
-    Removed(String, String),         // (name, type)
-    TypeChanged(String, String, String), // (name, old_type, new_type)
+    Added(String, String),                  // (name, type)
+    Removed(String, String),                // (name, type)
+    TypeChanged(String, String, String),    // (name, old_type, new_type)
     OptionalityChanged(String, bool, bool), // (name, old_optional, new_optional)
 }
 
@@ -65,11 +65,7 @@ impl fmt::Display for SchemaDiff {
                             writeln!(f, "      ~ field '{}': {} -> {}", name, old, new)?;
                         }
                         FieldChange::OptionalityChanged(name, old, new) => {
-                            writeln!(
-                                f,
-                                "      ~ field '{}': optional {} -> {}",
-                                name, old, new
-                            )?;
+                            writeln!(f, "      ~ field '{}': optional {} -> {}", name, old, new)?;
                         }
                     }
                 }
@@ -100,11 +96,7 @@ impl fmt::Display for SchemaDiff {
                             writeln!(f, "      ~ field '{}': {} -> {}", name, old, new)?;
                         }
                         FieldChange::OptionalityChanged(name, old, new) => {
-                            writeln!(
-                                f,
-                                "      ~ field '{}': optional {} -> {}",
-                                name, old, new
-                            )?;
+                            writeln!(f, "      ~ field '{}': optional {} -> {}", name, old, new)?;
                         }
                     }
                 }
@@ -135,11 +127,7 @@ impl fmt::Display for SchemaDiff {
                             writeln!(f, "      ~ field '{}': {} -> {}", name, old, new)?;
                         }
                         FieldChange::OptionalityChanged(name, old, new) => {
-                            writeln!(
-                                f,
-                                "      ~ field '{}': optional {} -> {}",
-                                name, old, new
-                            )?;
+                            writeln!(f, "      ~ field '{}': optional {} -> {}", name, old, new)?;
                         }
                     }
                 }
@@ -295,10 +283,7 @@ fn diff_fields(old: &[FieldDef], new: &[FieldDef]) -> Vec<FieldChange> {
     // Added fields
     for (name, field) in &new_map {
         if !old_map.contains_key(name) {
-            changes.push(FieldChange::Added(
-                name.to_string(),
-                field.ts_type.clone(),
-            ));
+            changes.push(FieldChange::Added(name.to_string(), field.ts_type.clone()));
         }
     }
 

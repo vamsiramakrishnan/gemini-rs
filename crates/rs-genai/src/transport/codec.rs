@@ -133,7 +133,9 @@ impl Codec for JsonCodec {
                     client_content: ClientContentPayload {
                         turns: vec![Content {
                             role: Some(Role::System),
-                            parts: vec![Part::Text { text: instruction.clone() }],
+                            parts: vec![Part::Text {
+                                text: instruction.clone(),
+                            }],
                         }],
                         turn_complete: Some(false),
                     },
@@ -216,7 +218,10 @@ mod tests {
             "should contain the audio mime type"
         );
         // base64 of [1,2,3,4] is "AQIDBA=="
-        assert!(json.contains("AQIDBA=="), "should contain base64-encoded data");
+        assert!(
+            json.contains("AQIDBA=="),
+            "should contain base64-encoded data"
+        );
     }
 
     #[test]

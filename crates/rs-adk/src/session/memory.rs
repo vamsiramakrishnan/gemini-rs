@@ -33,11 +33,7 @@ impl Default for InMemorySessionService {
 
 #[async_trait]
 impl SessionService for InMemorySessionService {
-    async fn create_session(
-        &self,
-        app_name: &str,
-        user_id: &str,
-    ) -> Result<Session, SessionError> {
+    async fn create_session(&self, app_name: &str, user_id: &str) -> Result<Session, SessionError> {
         let session = Session::new(app_name, user_id);
         let id = session.id.as_str().to_string();
         self.sessions.insert(id.clone(), session.clone());

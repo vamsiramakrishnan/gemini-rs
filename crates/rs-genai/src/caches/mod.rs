@@ -176,7 +176,10 @@ impl Client {
             .auth_headers()
             .await
             .map_err(|e| CachesError::Auth(e.to_string()))?;
-        let json = self.http_client().patch_json(&url, headers, &updates).await?;
+        let json = self
+            .http_client()
+            .patch_json(&url, headers, &updates)
+            .await?;
         Ok(serde_json::from_value(json)?)
     }
 

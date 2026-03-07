@@ -113,9 +113,7 @@ impl C {
     }
 
     /// Apply a custom filter function.
-    pub fn custom(
-        f: impl Fn(&[Content]) -> Vec<Content> + Send + Sync + 'static,
-    ) -> ContextPolicy {
+    pub fn custom(f: impl Fn(&[Content]) -> Vec<Content> + Send + Sync + 'static) -> ContextPolicy {
         ContextPolicy::new("custom", f)
     }
 
@@ -197,21 +195,15 @@ impl C {
     }
 
     /// Filter messages by a predicate on Content.
-    pub fn filter(
-        f: impl Fn(&Content) -> bool + Send + Sync + 'static,
-    ) -> ContextPolicy {
+    pub fn filter(f: impl Fn(&Content) -> bool + Send + Sync + 'static) -> ContextPolicy {
         ContextPolicy::new("filter", move |history| {
             history.iter().filter(|c| f(c)).cloned().collect()
         })
     }
 
     /// Map/transform each message in the context.
-    pub fn map(
-        f: impl Fn(&Content) -> Content + Send + Sync + 'static,
-    ) -> ContextPolicy {
-        ContextPolicy::new("map", move |history| {
-            history.iter().map(&f).collect()
-        })
+    pub fn map(f: impl Fn(&Content) -> Content + Send + Sync + 'static) -> ContextPolicy {
+        ContextPolicy::new("map", move |history| history.iter().map(&f).collect())
     }
 
     /// Truncate context to approximately `max_chars` total characters of text.
@@ -315,11 +307,7 @@ mod tests {
 
     #[test]
     fn window_limits_messages() {
-        let history = vec![
-            Content::user("a"),
-            Content::model("b"),
-            Content::user("c"),
-        ];
+        let history = vec![Content::user("a"), Content::model("b"), Content::user("c")];
         let result = C::window(2).apply(&history);
         assert_eq!(result.len(), 2);
     }
@@ -333,11 +321,7 @@ mod tests {
 
     #[test]
     fn user_only_filters() {
-        let history = vec![
-            Content::user("a"),
-            Content::model("b"),
-            Content::user("c"),
-        ];
+        let history = vec![Content::user("a"), Content::model("b"), Content::user("c")];
         let result = C::user_only().apply(&history);
         assert_eq!(result.len(), 2);
     }
@@ -356,22 +340,14 @@ mod tests {
 
     #[test]
     fn model_only_filters() {
-        let history = vec![
-            Content::user("a"),
-            Content::model("b"),
-            Content::user("c"),
-        ];
+        let history = vec![Content::user("a"), Content::model("b"), Content::user("c")];
         let result = C::model_only().apply(&history);
         assert_eq!(result.len(), 1);
     }
 
     #[test]
     fn head_keeps_first_n() {
-        let history = vec![
-            Content::user("a"),
-            Content::model("b"),
-            Content::user("c"),
-        ];
+        let history = vec![Content::user("a"), Content::model("b"), Content::user("c")];
         let result = C::head(2).apply(&history);
         assert_eq!(result.len(), 2);
     }
@@ -397,11 +373,7 @@ mod tests {
 
     #[test]
     fn last_is_alias_for_window() {
-        let history = vec![
-            Content::user("a"),
-            Content::model("b"),
-            Content::user("c"),
-        ];
+        let history = vec![Content::user("a"), Content::model("b"), Content::user("c")];
         let result = C::last(1).apply(&history);
         assert_eq!(result.len(), 1);
     }

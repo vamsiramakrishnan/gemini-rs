@@ -1,8 +1,6 @@
 //! Request configuration for generateContent.
 
-use crate::protocol::types::{
-    Content, GenerationConfig, Part, SafetySetting, Tool, ToolConfig,
-};
+use crate::protocol::types::{Content, GenerationConfig, Part, SafetySetting, Tool, ToolConfig};
 
 /// Configuration for a generateContent request.
 ///
@@ -154,7 +152,8 @@ impl GenerateContentConfig {
         }
 
         if !self.safety_settings.is_empty() {
-            body["safetySettings"] = serde_json::to_value(&self.safety_settings).unwrap_or_default();
+            body["safetySettings"] =
+                serde_json::to_value(&self.safety_settings).unwrap_or_default();
         }
 
         if !self.tools.is_empty() {
@@ -205,13 +204,16 @@ mod tests {
         });
         let body = config.to_request_body();
         assert!(body["safetySettings"].is_array());
-        assert_eq!(body["safetySettings"][0]["category"], "HARM_CATEGORY_HARASSMENT");
+        assert_eq!(
+            body["safetySettings"][0]["category"],
+            "HARM_CATEGORY_HARASSMENT"
+        );
     }
 
     #[test]
     fn with_system_instruction() {
-        let config = GenerateContentConfig::from_text("Hello")
-            .system_instruction("You are helpful");
+        let config =
+            GenerateContentConfig::from_text("Hello").system_instruction("You are helpful");
         let body = config.to_request_body();
         let si = &body["systemInstruction"];
         assert!(si["parts"][0]["text"].as_str().unwrap().contains("helpful"));

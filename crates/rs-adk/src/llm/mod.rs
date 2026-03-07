@@ -108,9 +108,7 @@ impl LlmRequest {
         Self {
             contents: vec![Content {
                 role: Some(rs_genai::prelude::Role::User),
-                parts: vec![Part::Text {
-                    text: text.into(),
-                }],
+                parts: vec![Part::Text { text: text.into() }],
             }],
             ..Default::default()
         }

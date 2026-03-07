@@ -83,7 +83,10 @@ impl AgentSession {
             let _ = self.input_broadcast.send(InputEvent::Audio(data.clone()));
         }
         // Forward directly to Layer 0 (ONE hop to WebSocket)
-        self.writer.send_audio(data).await.map_err(AgentError::Session)
+        self.writer
+            .send_audio(data)
+            .await
+            .map_err(AgentError::Session)
     }
 
     /// Send a text message.
@@ -120,12 +123,21 @@ impl AgentSession {
 
     /// Send video/image data (raw JPEG bytes).
     pub async fn send_video(&self, jpeg_data: Vec<u8>) -> Result<(), AgentError> {
-        self.writer.send_video(jpeg_data).await.map_err(AgentError::Session)
+        self.writer
+            .send_video(jpeg_data)
+            .await
+            .map_err(AgentError::Session)
     }
 
     /// Update the system instruction mid-session.
-    pub async fn update_instruction(&self, instruction: impl Into<String>) -> Result<(), AgentError> {
-        self.writer.update_instruction(instruction.into()).await.map_err(AgentError::Session)
+    pub async fn update_instruction(
+        &self,
+        instruction: impl Into<String>,
+    ) -> Result<(), AgentError> {
+        self.writer
+            .update_instruction(instruction.into())
+            .await
+            .map_err(AgentError::Session)
     }
 
     /// Signal activity start (user started speaking).

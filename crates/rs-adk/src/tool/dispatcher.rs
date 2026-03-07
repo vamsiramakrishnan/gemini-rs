@@ -10,9 +10,7 @@ use rs_genai::prelude::{FunctionCall, FunctionDeclaration, FunctionResponse, Too
 
 use crate::error::ToolError;
 
-use super::{
-    ActiveStreamingTool, ToolClass, ToolFunction, ToolKind, DEFAULT_TOOL_TIMEOUT,
-};
+use super::{ActiveStreamingTool, ToolClass, ToolFunction, ToolKind, DEFAULT_TOOL_TIMEOUT};
 
 /// Routes function calls to the right tool implementation.
 pub struct ToolDispatcher {
@@ -204,15 +202,9 @@ impl ToolDispatcher {
                     .values()
                     .map(|t| {
                         let (name, desc, params) = match t {
-                            ToolKind::Function(f) => {
-                                (f.name(), f.description(), f.parameters())
-                            }
-                            ToolKind::Streaming(s) => {
-                                (s.name(), s.description(), s.parameters())
-                            }
-                            ToolKind::InputStream(i) => {
-                                (i.name(), i.description(), i.parameters())
-                            }
+                            ToolKind::Function(f) => (f.name(), f.description(), f.parameters()),
+                            ToolKind::Streaming(s) => (s.name(), s.description(), s.parameters()),
+                            ToolKind::InputStream(i) => (i.name(), i.description(), i.parameters()),
                         };
                         FunctionDeclaration {
                             name: name.to_string(),

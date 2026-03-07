@@ -70,8 +70,7 @@ impl RetryMiddleware {
     pub fn reset(&self) {
         self.error_count
             .store(0, std::sync::atomic::Ordering::SeqCst);
-        self.attempt
-            .store(0, std::sync::atomic::Ordering::SeqCst);
+        self.attempt.store(0, std::sync::atomic::Ordering::SeqCst);
     }
 }
 

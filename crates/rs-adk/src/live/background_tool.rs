@@ -148,8 +148,16 @@ impl std::fmt::Debug for ToolExecutionMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Standard => write!(f, "Standard"),
-            Self::Background { formatter, scheduling } => {
-                write!(f, "Background(formatter={}, scheduling={:?})", formatter.is_some(), scheduling)
+            Self::Background {
+                formatter,
+                scheduling,
+            } => {
+                write!(
+                    f,
+                    "Background(formatter={}, scheduling={:?})",
+                    formatter.is_some(),
+                    scheduling
+                )
             }
         }
     }
@@ -424,7 +432,10 @@ mod tests {
 
         assert_eq!(result["status"], "error");
         assert_eq!(result["tool"], "search");
-        assert!(result["error"].as_str().unwrap().contains("connection timeout"));
+        assert!(result["error"]
+            .as_str()
+            .unwrap()
+            .contains("connection timeout"));
     }
 
     #[test]
@@ -454,8 +465,14 @@ mod tests {
 
     #[test]
     fn tool_execution_mode_debug_background_none() {
-        let mode = ToolExecutionMode::Background { formatter: None, scheduling: None };
-        assert_eq!(format!("{:?}", mode), "Background(formatter=false, scheduling=None)");
+        let mode = ToolExecutionMode::Background {
+            formatter: None,
+            scheduling: None,
+        };
+        assert_eq!(
+            format!("{:?}", mode),
+            "Background(formatter=false, scheduling=None)"
+        );
     }
 
     #[test]
@@ -464,6 +481,9 @@ mod tests {
             formatter: Some(Arc::new(DefaultResultFormatter)),
             scheduling: None,
         };
-        assert_eq!(format!("{:?}", mode), "Background(formatter=true, scheduling=None)");
+        assert_eq!(
+            format!("{:?}", mode),
+            "Background(formatter=true, scheduling=None)"
+        );
     }
 }

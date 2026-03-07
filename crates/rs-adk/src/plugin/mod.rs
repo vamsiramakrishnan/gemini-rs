@@ -68,11 +68,7 @@ pub trait Plugin: Send + Sync + 'static {
     }
 
     /// Called before a tool is executed. Return `Deny` to prevent execution.
-    async fn before_tool(
-        &self,
-        _call: &FunctionCall,
-        _ctx: &InvocationContext,
-    ) -> PluginResult {
+    async fn before_tool(&self, _call: &FunctionCall, _ctx: &InvocationContext) -> PluginResult {
         PluginResult::Continue
     }
 
@@ -224,11 +220,7 @@ impl PluginManager {
     }
 
     /// Run on_event hooks. Returns first non-Continue result, or Continue.
-    pub async fn run_on_event(
-        &self,
-        event: &Event,
-        ctx: &InvocationContext,
-    ) -> PluginResult {
+    pub async fn run_on_event(&self, event: &Event, ctx: &InvocationContext) -> PluginResult {
         for plugin in &self.plugins {
             let result = plugin.on_event(event, ctx).await;
             if !result.is_continue() {
@@ -306,11 +298,7 @@ impl PluginManager {
     }
 
     /// Run on_model_error hooks.
-    pub async fn run_on_model_error(
-        &self,
-        error: &str,
-        ctx: &InvocationContext,
-    ) -> PluginResult {
+    pub async fn run_on_model_error(&self, error: &str, ctx: &InvocationContext) -> PluginResult {
         for plugin in &self.plugins {
             let result = plugin.on_model_error(error, ctx).await;
             if !result.is_continue() {
@@ -406,8 +394,7 @@ mod tests {
             _call: &FunctionCall,
             _ctx: &InvocationContext,
         ) -> PluginResult {
-            self.count
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             PluginResult::Continue
         }
     }
@@ -423,8 +410,7 @@ mod tests {
         let (evt_tx, _) = broadcast::channel(16);
         let writer: Arc<dyn rs_genai::session::SessionWriter> =
             Arc::new(crate::test_helpers::MockWriter);
-        let session =
-            crate::agent_session::AgentSession::from_writer(writer, evt_tx);
+        let session = crate::agent_session::AgentSession::from_writer(writer, evt_tx);
         let ctx = InvocationContext::new(session);
 
         assert!(pm.run_before_run(&ctx).await.is_continue());
@@ -449,7 +435,9 @@ mod tests {
 
     #[async_trait]
     impl Plugin for ModelBlockerPlugin {
-        fn name(&self) -> &str { "model-blocker" }
+        fn name(&self) -> &str {
+            "model-blocker"
+        }
 
         async fn before_model(
             &self,
@@ -470,8 +458,7 @@ mod tests {
         let (evt_tx, _) = broadcast::channel(16);
         let writer: Arc<dyn rs_genai::session::SessionWriter> =
             Arc::new(crate::test_helpers::MockWriter);
-        let session =
-            crate::agent_session::AgentSession::from_writer(writer, evt_tx);
+        let session = crate::agent_session::AgentSession::from_writer(writer, evt_tx);
         let ctx = InvocationContext::new(session);
 
         let req = crate::llm::LlmRequest::from_text("test");
@@ -496,8 +483,7 @@ mod tests {
         let (evt_tx, _) = broadcast::channel(16);
         let writer: Arc<dyn rs_genai::session::SessionWriter> =
             Arc::new(crate::test_helpers::MockWriter);
-        let session =
-            crate::agent_session::AgentSession::from_writer(writer, evt_tx);
+        let session = crate::agent_session::AgentSession::from_writer(writer, evt_tx);
         let ctx = InvocationContext::new(session);
 
         let call = FunctionCall {

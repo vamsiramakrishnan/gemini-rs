@@ -62,7 +62,6 @@ pub enum CallbackMode {
 /// - **Control lane** (async): Awaited on a dedicated task. For tool calls, lifecycle, interruptions.
 pub struct EventCallbacks {
     // -- Fast lane (sync callbacks) --
-
     /// Called for each audio chunk from the model (PCM16 24kHz).
     pub on_audio: Option<Box<dyn Fn(&Bytes) + Send + Sync>>,
     /// Called for each incremental text delta from the model.
@@ -83,14 +82,18 @@ pub struct EventCallbacks {
     pub on_usage: Option<Box<dyn Fn(&UsageMetadata) + Send + Sync>>,
 
     // -- Control lane (async callbacks) --
-
     /// Called when the model is interrupted by barge-in.
     pub on_interrupted: Option<Arc<dyn Fn() -> BoxFuture<()> + Send + Sync>>,
     /// Called when model requests tool execution.
     /// Return `None` to use auto-dispatch (ToolDispatcher), `Some` to override.
     /// Receives State for natural state promotion from tool results.
-    pub on_tool_call:
-        Option<Arc<dyn Fn(Vec<FunctionCall>, State) -> BoxFuture<Option<Vec<FunctionResponse>>> + Send + Sync>>,
+    pub on_tool_call: Option<
+        Arc<
+            dyn Fn(Vec<FunctionCall>, State) -> BoxFuture<Option<Vec<FunctionResponse>>>
+                + Send
+                + Sync,
+        >,
+    >,
     /// Called when server cancels pending tool calls.
     pub on_tool_cancelled: Option<Arc<dyn Fn(Vec<String>) -> BoxFuture<()> + Send + Sync>>,
     /// Called when the model completes its turn.
@@ -110,17 +113,14 @@ pub struct EventCallbacks {
     /// Called when agent transfer occurs (from, to).
     pub on_transfer: Option<Arc<dyn Fn(String, String) -> BoxFuture<()> + Send + Sync>>,
     /// Called when a TurnExtractor produces a result (extractor_name, value).
-    pub on_extracted:
-        Option<Arc<dyn Fn(String, serde_json::Value) -> BoxFuture<()> + Send + Sync>>,
+    pub on_extracted: Option<Arc<dyn Fn(String, serde_json::Value) -> BoxFuture<()> + Send + Sync>>,
     /// Called when a TurnExtractor fails (extractor_name, error_message).
     ///
     /// By default, extraction failures are logged via `tracing::warn!`.
     /// Register this callback to implement custom error handling (retry, alert, etc.).
-    pub on_extraction_error:
-        Option<Arc<dyn Fn(String, String) -> BoxFuture<()> + Send + Sync>>,
+    pub on_extraction_error: Option<Arc<dyn Fn(String, String) -> BoxFuture<()> + Send + Sync>>,
 
     // -- Callback modes (control-lane only) --
-
     /// Execution mode for [`on_turn_complete`](Self::on_turn_complete).
     pub on_turn_complete_mode: CallbackMode,
     /// Execution mode for [`on_connected`](Self::on_connected).
@@ -143,14 +143,14 @@ pub struct EventCallbacks {
     pub on_resumed_mode: CallbackMode,
 
     // -- Outbound interceptors (transform data going to Gemini) --
-
     /// Intercept tool responses before sending to Gemini.
     ///
     /// Receives the tool responses and shared State. Returns (potentially modified)
     /// responses. Use this to rewrite, augment, or filter tool results based on
     /// conversation state.
-    pub before_tool_response:
-        Option<Arc<dyn Fn(Vec<FunctionResponse>, State) -> BoxFuture<Vec<FunctionResponse>> + Send + Sync>>,
+    pub before_tool_response: Option<
+        Arc<dyn Fn(Vec<FunctionResponse>, State) -> BoxFuture<Vec<FunctionResponse>> + Send + Sync>,
+    >,
 
     /// Called at turn boundaries (after extractors, before `on_turn_complete`).
     ///
@@ -260,7 +260,10 @@ impl std::fmt::Debug for EventCallbacks {
             .field("before_tool_response", &self.before_tool_response.is_some())
             .field("on_turn_boundary", &self.on_turn_boundary.is_some())
             .field("instruction_template", &self.instruction_template.is_some())
-            .field("instruction_amendment", &self.instruction_amendment.is_some())
+            .field(
+                "instruction_amendment",
+                &self.instruction_amendment.is_some(),
+            )
             .finish()
     }
 }

@@ -157,7 +157,10 @@ async fn full_tool_call_roundtrip() {
                 saw_tool_started = true;
             }
             AgentEvent::ToolCallCompleted {
-                name, result, duration, ..
+                name,
+                result,
+                duration,
+                ..
             } if name == "get_weather" => {
                 saw_tool_completed = true;
                 completed_result = Some(result);

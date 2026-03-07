@@ -7,8 +7,7 @@ use serde::{Deserialize, Serialize};
 // ---------------------------------------------------------------------------
 
 /// Gemini models that support the Multimodal Live API.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum GeminiModel {
     /// Gemini 2.0 Flash Live (gemini-2.0-flash-live-001).
     #[serde(rename = "models/gemini-2.0-flash-live-001")]
@@ -21,7 +20,6 @@ pub enum GeminiModel {
     #[serde(untagged)]
     Custom(String),
 }
-
 
 impl std::fmt::Display for GeminiModel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -36,8 +34,7 @@ impl std::fmt::Display for GeminiModel {
 }
 
 /// Available voice presets for Gemini Live audio output.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum Voice {
     /// Aoede voice preset.
     Aoede,
@@ -55,7 +52,6 @@ pub enum Voice {
     Custom(String),
 }
 
-
 // ---------------------------------------------------------------------------
 // Audio format
 // ---------------------------------------------------------------------------
@@ -71,7 +67,6 @@ pub enum AudioFormat {
     /// Opus-encoded audio.
     Opus,
 }
-
 
 impl AudioFormat {
     /// MIME type string for this format.
@@ -113,7 +108,6 @@ pub enum Sensitivity {
     Automatic,
 }
 
-
 /// How the model should decide when to execute tool calls.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -127,7 +121,6 @@ pub enum FunctionCallingMode {
     /// Model never calls functions.
     None,
 }
-
 
 /// Whether tool calls block model output or run concurrently.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

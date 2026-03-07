@@ -1,5 +1,5 @@
-use async_trait::async_trait;
 use super::types::{CodeExecutionInput, CodeExecutionResult};
+use async_trait::async_trait;
 
 /// Errors from code executor operations.
 #[derive(Debug, thiserror::Error)]

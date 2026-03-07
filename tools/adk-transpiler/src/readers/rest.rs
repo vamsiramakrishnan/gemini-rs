@@ -12,12 +12,7 @@ use crate::schema::genai::{HttpMethod, RestMethodDef, RestModuleDef};
 
 /// Which TypeScript files to scan for REST modules.
 #[allow(dead_code)]
-const REST_MODULE_FILES: &[&str] = &[
-    "files.ts",
-    "caches.ts",
-    "batches.ts",
-    "models.ts",
-];
+const REST_MODULE_FILES: &[&str] = &["files.ts", "caches.ts", "batches.ts", "models.ts"];
 
 // Note: tunings.ts doesn't exist in js-genai; it's called tunings in the module
 // but the actual TS methods are in a file we detect via class name pattern.
@@ -30,11 +25,7 @@ pub fn read_rest_modules(source_dir: &Path) -> Result<Vec<RestModuleDef>, String
     let entries: Vec<_> = std::fs::read_dir(source_dir)
         .map_err(|e| format!("Failed to read source dir: {e}"))?
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.path()
-                .extension()
-                .is_some_and(|ext| ext == "ts")
-        })
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "ts"))
         .collect();
 
     let class_re = Regex::new(r"export\s+class\s+(\w+)\s+extends\s+BaseModule")
@@ -86,16 +77,14 @@ fn extract_methods(content: &str, module_name: &str) -> Result<Vec<RestMethodDef
     // Pattern A: arrow async methods
     //   list = async (\n    params: types.ListFilesParameters = {},\n  ): Promise<Pager<types.File>> =>
     //   create = async (\n    params: types.CreateBatchJobParameters,\n  ): Promise<types.BatchJob> =>
-    let arrow_re = Regex::new(
-        r"(?m)^\s+(\w+)\s*=\s*async\s*\("
-    ).map_err(|e| format!("Regex error: {e}"))?;
+    let arrow_re =
+        Regex::new(r"(?m)^\s+(\w+)\s*=\s*async\s*\(").map_err(|e| format!("Regex error: {e}"))?;
 
     // Pattern B: regular async methods
     //   async get(params: types.GetFileParameters): Promise<types.File>
     //   async delete(\n    params: types.DeleteFileParameters,\n  ): Promise<types.DeleteFileResponse>
-    let async_re = Regex::new(
-        r"(?m)^\s+async\s+(\w+)\s*\("
-    ).map_err(|e| format!("Regex error: {e}"))?;
+    let async_re =
+        Regex::new(r"(?m)^\s+async\s+(\w+)\s*\(").map_err(|e| format!("Regex error: {e}"))?;
 
     let mut seen = std::collections::HashSet::new();
     let mut methods = Vec::new();
@@ -109,7 +98,9 @@ fn extract_methods(content: &str, module_name: &str) -> Result<Vec<RestMethodDef
         if ts_name.starts_with('_') || is_private_method(&ts_name, content) {
             continue;
         }
-        if let Some(method) = build_method_def(&ts_name, module_name, &method_names, &method_http, content) {
+        if let Some(method) =
+            build_method_def(&ts_name, module_name, &method_names, &method_http, content)
+        {
             methods.push(method);
         }
     }
@@ -123,7 +114,9 @@ fn extract_methods(content: &str, module_name: &str) -> Result<Vec<RestMethodDef
         if ts_name.starts_with('_') || is_private_method(&ts_name, content) {
             continue;
         }
-        if let Some(method) = build_method_def(&ts_name, module_name, &method_names, &method_http, content) {
+        if let Some(method) =
+            build_method_def(&ts_name, module_name, &method_names, &method_http, content)
+        {
             methods.push(method);
         }
     }
@@ -154,10 +147,11 @@ fn build_method_def(
         .map(|s| s.to_string())
         .unwrap_or_else(|| format!("{}_{}", ts_name, singular(module_name)));
 
-    let (http_method, returns_void, is_special) = method_http
-        .get(&key)
-        .copied()
-        .unwrap_or((HttpMethod::Get, false, false));
+    let (http_method, returns_void, is_special) =
+        method_http
+            .get(&key)
+            .copied()
+            .unwrap_or((HttpMethod::Get, false, false));
 
     // Extract JSDoc for this method
     let description = extract_jsdoc_for_method(ts_name, content);
@@ -271,33 +265,36 @@ fn method_name_map() -> HashMap<(&'static str, &'static str), &'static str> {
 fn method_http_map() -> HashMap<(&'static str, &'static str), (HttpMethod, bool, bool)> {
     let mut m = HashMap::new();
     // Files
-    m.insert(("files", "list"),            (HttpMethod::Get, false, false));
-    m.insert(("files", "get"),             (HttpMethod::Get, false, false));
-    m.insert(("files", "delete"),          (HttpMethod::Delete, true, false));
-    m.insert(("files", "upload"),          (HttpMethod::Post, false, true));
-    m.insert(("files", "download"),        (HttpMethod::Get, false, true));
-    m.insert(("files", "registerFiles"),   (HttpMethod::Post, false, true));
+    m.insert(("files", "list"), (HttpMethod::Get, false, false));
+    m.insert(("files", "get"), (HttpMethod::Get, false, false));
+    m.insert(("files", "delete"), (HttpMethod::Delete, true, false));
+    m.insert(("files", "upload"), (HttpMethod::Post, false, true));
+    m.insert(("files", "download"), (HttpMethod::Get, false, true));
+    m.insert(("files", "registerFiles"), (HttpMethod::Post, false, true));
     // Caches
-    m.insert(("caches", "list"),           (HttpMethod::Get, false, false));
-    m.insert(("caches", "get"),            (HttpMethod::Get, false, false));
-    m.insert(("caches", "create"),         (HttpMethod::Post, false, false));
-    m.insert(("caches", "update"),         (HttpMethod::Patch, false, false));
-    m.insert(("caches", "delete"),         (HttpMethod::Delete, true, false));
+    m.insert(("caches", "list"), (HttpMethod::Get, false, false));
+    m.insert(("caches", "get"), (HttpMethod::Get, false, false));
+    m.insert(("caches", "create"), (HttpMethod::Post, false, false));
+    m.insert(("caches", "update"), (HttpMethod::Patch, false, false));
+    m.insert(("caches", "delete"), (HttpMethod::Delete, true, false));
     // Batches
-    m.insert(("batches", "list"),          (HttpMethod::Get, false, false));
-    m.insert(("batches", "get"),           (HttpMethod::Get, false, false));
-    m.insert(("batches", "create"),        (HttpMethod::Post, false, false));
-    m.insert(("batches", "createEmbeddings"), (HttpMethod::Post, false, false));
-    m.insert(("batches", "cancel"),        (HttpMethod::Post, true, false));
-    m.insert(("batches", "delete"),        (HttpMethod::Delete, true, false));
+    m.insert(("batches", "list"), (HttpMethod::Get, false, false));
+    m.insert(("batches", "get"), (HttpMethod::Get, false, false));
+    m.insert(("batches", "create"), (HttpMethod::Post, false, false));
+    m.insert(
+        ("batches", "createEmbeddings"),
+        (HttpMethod::Post, false, false),
+    );
+    m.insert(("batches", "cancel"), (HttpMethod::Post, true, false));
+    m.insert(("batches", "delete"), (HttpMethod::Delete, true, false));
     // Tunings
-    m.insert(("tunings", "list"),          (HttpMethod::Get, false, false));
-    m.insert(("tunings", "get"),           (HttpMethod::Get, false, false));
-    m.insert(("tunings", "tune"),          (HttpMethod::Post, false, false));
-    m.insert(("tunings", "cancel"),        (HttpMethod::Post, true, false));
+    m.insert(("tunings", "list"), (HttpMethod::Get, false, false));
+    m.insert(("tunings", "get"), (HttpMethod::Get, false, false));
+    m.insert(("tunings", "tune"), (HttpMethod::Post, false, false));
+    m.insert(("tunings", "cancel"), (HttpMethod::Post, true, false));
     // Models
-    m.insert(("models", "list"),           (HttpMethod::Get, false, false));
-    m.insert(("models", "get"),            (HttpMethod::Get, false, false));
+    m.insert(("models", "list"), (HttpMethod::Get, false, false));
+    m.insert(("models", "get"), (HttpMethod::Get, false, false));
     m
 }
 
@@ -399,11 +396,25 @@ export class Files extends BaseModule {
         let names: Vec<&str> = methods.iter().map(|m| m.ts_name.as_str()).collect();
         assert!(names.contains(&"list"), "Should contain list: {:?}", names);
         assert!(names.contains(&"get"), "Should contain get: {:?}", names);
-        assert!(names.contains(&"delete"), "Should contain delete: {:?}", names);
-        assert!(names.contains(&"upload"), "Should contain upload: {:?}", names);
+        assert!(
+            names.contains(&"delete"),
+            "Should contain delete: {:?}",
+            names
+        );
+        assert!(
+            names.contains(&"upload"),
+            "Should contain upload: {:?}",
+            names
+        );
         // Should NOT contain private methods
-        assert!(!names.contains(&"listInternal"), "Should not contain listInternal");
-        assert!(!names.contains(&"createInternal"), "Should not contain createInternal");
+        assert!(
+            !names.contains(&"listInternal"),
+            "Should not contain listInternal"
+        );
+        assert!(
+            !names.contains(&"createInternal"),
+            "Should not contain createInternal"
+        );
     }
 
     #[test]

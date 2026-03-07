@@ -29,8 +29,8 @@ impl Default for JitterConfig {
         Self {
             sample_rate: 24000,
             min_depth_samples: 24000 / 5, // 200ms at 24kHz
-            max_depth_samples: 24000 * 2,  // 2 seconds
-            jitter_alpha: 0.125,           // RFC 6298 default
+            max_depth_samples: 24000 * 2, // 2 seconds
+            jitter_alpha: 0.125,          // RFC 6298 default
             target_jitter_multiple: 2.0,
         }
     }

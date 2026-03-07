@@ -18,7 +18,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.93.1"
+          components: clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace
       - run: cargo clippy --workspace --all-targets -- -D warnings
@@ -30,7 +33,9 @@ jobs:
     environment: crates-io
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.93.1"
       - uses: Swatinem/rust-cache@v2
 
       # Publish in dependency order: L0 -> L1 -> L2

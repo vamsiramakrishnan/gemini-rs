@@ -81,10 +81,7 @@ impl AuthProvider for VertexAIAuth {
         } else {
             format!("{}-aiplatform.googleapis.com", self.location)
         };
-        let model_id = model
-            .to_string()
-            .trim_start_matches("models/")
-            .to_string();
+        let model_id = model.to_string().trim_start_matches("models/").to_string();
         format!(
             "wss://{host}/ws/google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent\
              ?alt=json\

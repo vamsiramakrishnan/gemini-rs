@@ -28,8 +28,7 @@ struct ForecastArgs {
 }
 
 fn create_dispatcher() -> ToolDispatcher {
-    let mut dispatcher = ToolDispatcher::new()
-        .with_timeout(std::time::Duration::from_secs(10));
+    let mut dispatcher = ToolDispatcher::new().with_timeout(std::time::Duration::from_secs(10));
 
     dispatcher.register_function(Arc::new(TypedTool::new(
         "get_weather",
@@ -75,9 +74,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let base_config = if use_vertex {
         let project = std::env::var("GOOGLE_CLOUD_PROJECT")
             .expect("GOOGLE_CLOUD_PROJECT required for Vertex AI");
-        let location = std::env::var("GOOGLE_CLOUD_LOCATION")
-            .unwrap_or_else(|_| "us-central1".to_string());
-        println!("Using Vertex AI (project: {}, location: {})", project, location);
+        let location =
+            std::env::var("GOOGLE_CLOUD_LOCATION").unwrap_or_else(|_| "us-central1".to_string());
+        println!(
+            "Using Vertex AI (project: {}, location: {})",
+            project, location
+        );
         let token = String::from_utf8(
             std::process::Command::new("gcloud")
                 .args(["auth", "print-access-token"])
@@ -89,8 +91,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .to_string();
         SessionConfig::from_vertex(&project, &location, token)
     } else {
-        let api_key = std::env::var("GEMINI_API_KEY")
-            .expect("Set GEMINI_API_KEY or enable Vertex AI");
+        let api_key =
+            std::env::var("GEMINI_API_KEY").expect("Set GEMINI_API_KEY or enable Vertex AI");
         println!("Using Google AI Studio");
         SessionConfig::new(api_key)
     };
@@ -142,7 +144,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let mut responses = Vec::new();
                 for call in &calls {
                     println!("  Calling {}({})", call.name, call.args);
-                    let result = dispatcher.call_function(&call.name, call.args.clone()).await;
+                    let result = dispatcher
+                        .call_function(&call.name, call.args.clone())
+                        .await;
                     let response = ToolDispatcher::build_response(call, result);
                     println!("  Result: {}", response.response);
                     responses.push(response);

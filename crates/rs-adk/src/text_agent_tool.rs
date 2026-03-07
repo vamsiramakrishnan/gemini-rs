@@ -266,9 +266,8 @@ mod tests {
                 "limit": { "type": "integer" }
             }
         });
-        let tool =
-            TextAgentTool::new("custom", "Custom params", EchoTextAgent, state)
-                .with_parameters(params.clone());
+        let tool = TextAgentTool::new("custom", "Custom params", EchoTextAgent, state)
+            .with_parameters(params.clone());
 
         assert_eq!(tool.parameters().unwrap(), params);
     }

@@ -83,20 +83,13 @@ impl ArtifactService for GcsArtifactService {
         ))
     }
 
-    async fn list(
-        &self,
-        _session_id: &str,
-    ) -> Result<Vec<ArtifactMetadata>, ArtifactError> {
+    async fn list(&self, _session_id: &str) -> Result<Vec<ArtifactMetadata>, ArtifactError> {
         Err(ArtifactError::Storage(
             "GCS artifact service not yet fully implemented".into(),
         ))
     }
 
-    async fn delete(
-        &self,
-        _session_id: &str,
-        _name: &str,
-    ) -> Result<(), ArtifactError> {
+    async fn delete(&self, _session_id: &str, _name: &str) -> Result<(), ArtifactError> {
         Err(ArtifactError::Storage(
             "GCS artifact service not yet fully implemented".into(),
         ))
@@ -117,7 +110,10 @@ mod tests {
     #[test]
     fn object_path_format() {
         let svc = GcsArtifactService::new("bucket", "app");
-        assert_eq!(svc.object_path("sess1", "file.bin", 3), "app/sess1/file.bin/v3");
+        assert_eq!(
+            svc.object_path("sess1", "file.bin", 3),
+            "app/sess1/file.bin/v3"
+        );
     }
 
     #[test]

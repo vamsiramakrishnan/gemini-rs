@@ -37,11 +37,7 @@ pub enum SessionError {
 #[async_trait]
 pub trait SessionService: Send + Sync {
     /// Create a new session.
-    async fn create_session(
-        &self,
-        app_name: &str,
-        user_id: &str,
-    ) -> Result<Session, SessionError>;
+    async fn create_session(&self, app_name: &str, user_id: &str) -> Result<Session, SessionError>;
 
     /// Get a session by ID.
     async fn get_session(&self, id: &SessionId) -> Result<Option<Session>, SessionError>;

@@ -46,9 +46,23 @@ fn main() {
         .writes("final_article");
 
     println!("Defined 4 agents:");
-    println!("  - {} (temp={:?}, tools={})", researcher.name(), researcher.get_temperature(), researcher.tool_count());
-    println!("  - {} (temp={:?}, text_only={})", writer.name(), writer.get_temperature(), writer.is_text_only());
-    println!("  - {} (thinking={:?})", reviewer.name(), reviewer.get_thinking_budget());
+    println!(
+        "  - {} (temp={:?}, tools={})",
+        researcher.name(),
+        researcher.get_temperature(),
+        researcher.tool_count()
+    );
+    println!(
+        "  - {} (temp={:?}, text_only={})",
+        writer.name(),
+        writer.get_temperature(),
+        writer.is_text_only()
+    );
+    println!(
+        "  - {} (thinking={:?})",
+        reviewer.name(),
+        reviewer.get_thinking_budget()
+    );
     println!("  - {} (reads feedback)", editor.name());
 
     // ── Step 2: Template reuse (copy-on-write) ──
@@ -66,13 +80,7 @@ fn main() {
     let _simple = researcher.clone() >> writer.clone();
 
     // Review loop: write → review → repeat up to 3 times
-    let write_review = review_loop(
-        writer.clone(),
-        reviewer.clone(),
-        "quality",
-        "good",
-        3,
-    );
+    let write_review = review_loop(writer.clone(), reviewer.clone(), "quality", "good", 3);
 
     // Full pipeline: research → write/review loop → edit
     let _full_pipeline = researcher.clone() >> write_review >> editor.clone();
@@ -103,7 +111,10 @@ fn main() {
             "Topic: Error handling",
             "# Error Handling in Rust\n\nRust's error handling...",
         );
-    println!("\nComposed prompt ({} sections):", system_prompt.sections.len());
+    println!(
+        "\nComposed prompt ({} sections):",
+        system_prompt.sections.len()
+    );
     println!("{}", system_prompt.render());
 
     // M — Middleware
@@ -116,24 +127,13 @@ fn main() {
 
     // ── Step 5: Pre-built patterns ──
 
-    let _cascade = cascade(vec![
-        researcher.clone(),
-        fast_researcher.clone(),
-    ]);
+    let _cascade = cascade(vec![researcher.clone(), fast_researcher.clone()]);
     println!("\nCascade: try researcher, then fast_researcher");
 
-    let _fan_out = fan_out_merge(vec![
-        researcher.clone(),
-        fast_researcher.clone(),
-    ]);
+    let _fan_out = fan_out_merge(vec![researcher.clone(), fast_researcher.clone()]);
     println!("Fan-out: run both researchers in parallel");
 
-    let _supervised = supervised(
-        writer.clone(),
-        reviewer.clone(),
-        "approved",
-        5,
-    );
+    let _supervised = supervised(writer.clone(), reviewer.clone(), "approved", 5);
     println!("Supervised: writer supervised by reviewer (max 5 revisions)");
 
     let _map = map_over(writer.clone(), 4);

@@ -249,7 +249,10 @@ mod tests {
 
         assert_eq!(parsed.auth_type, AuthCredentialType::ServiceAccount);
         let sa = parsed.service_account.unwrap();
-        assert_eq!(sa.service_account_key_file.as_deref(), Some("/path/to/key.json"));
+        assert_eq!(
+            sa.service_account_key_file.as_deref(),
+            Some("/path/to/key.json")
+        );
         assert_eq!(sa.use_default_credential, Some(true));
         assert_eq!(sa.project_id.as_deref(), Some("my-project"));
     }

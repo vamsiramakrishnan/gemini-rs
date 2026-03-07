@@ -91,10 +91,7 @@ impl Client {
     }
 
     /// Get metadata for a specific model.
-    pub async fn get_model(
-        &self,
-        model: &GeminiModel,
-    ) -> Result<ModelInfo, ModelsError> {
+    pub async fn get_model(&self, model: &GeminiModel) -> Result<ModelInfo, ModelsError> {
         let url = self.rest_url_for(ServiceEndpoint::GetModel, model);
         let headers = self
             .auth_headers()

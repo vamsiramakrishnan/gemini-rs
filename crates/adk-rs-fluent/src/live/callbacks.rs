@@ -36,8 +36,9 @@ impl Live {
         F: Fn(Vec<FunctionResponse>, rs_adk::State) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Vec<FunctionResponse>> + Send + 'static,
     {
-        self.callbacks.before_tool_response =
-            Some(Arc::new(move |responses, state| Box::pin(f(responses, state))));
+        self.callbacks.before_tool_response = Some(Arc::new(move |responses, state| {
+            Box::pin(f(responses, state))
+        }));
         self
     }
 

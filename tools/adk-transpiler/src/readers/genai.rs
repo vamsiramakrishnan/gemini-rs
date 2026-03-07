@@ -31,15 +31,24 @@ fn wire_type_map() -> HashMap<&'static str, &'static str> {
     m.insert("Blob", "rs_genai::prelude::Blob");
     m.insert("FileData", "rs_genai::prelude::FileData");
     m.insert("ExecutableCode", "rs_genai::prelude::ExecutableCode");
-    m.insert("CodeExecutionResult", "rs_genai::prelude::CodeExecutionResult");
+    m.insert(
+        "CodeExecutionResult",
+        "rs_genai::prelude::CodeExecutionResult",
+    );
 
     // Function calling
     m.insert("FunctionCall", "rs_genai::prelude::FunctionCall");
     m.insert("FunctionResponse", "rs_genai::prelude::FunctionResponse");
-    m.insert("FunctionDeclaration", "rs_genai::prelude::FunctionDeclaration");
+    m.insert(
+        "FunctionDeclaration",
+        "rs_genai::prelude::FunctionDeclaration",
+    );
     m.insert("Tool", "rs_genai::prelude::Tool");
     m.insert("ToolConfig", "rs_genai::prelude::ToolConfig");
-    m.insert("FunctionCallingConfig", "rs_genai::prelude::FunctionCallingConfig");
+    m.insert(
+        "FunctionCallingConfig",
+        "rs_genai::prelude::FunctionCallingConfig",
+    );
 
     // Enums
     m.insert("Modality", "rs_genai::prelude::Modality");
@@ -49,33 +58,78 @@ fn wire_type_map() -> HashMap<&'static str, &'static str> {
     m.insert("GenerationConfig", "rs_genai::prelude::GenerationConfig");
     m.insert("SpeechConfig", "rs_genai::prelude::SpeechConfig");
     m.insert("VoiceConfig", "rs_genai::prelude::VoiceConfig");
-    m.insert("PrebuiltVoiceConfig", "rs_genai::prelude::PrebuiltVoiceConfig");
+    m.insert(
+        "PrebuiltVoiceConfig",
+        "rs_genai::prelude::PrebuiltVoiceConfig",
+    );
     m.insert("ThinkingConfig", "rs_genai::prelude::ThinkingConfig");
-    m.insert("RealtimeInputConfig", "rs_genai::prelude::RealtimeInputConfig");
-    m.insert("AutomaticActivityDetection", "rs_genai::prelude::AutomaticActivityDetection");
-    m.insert("SessionResumptionConfig", "rs_genai::prelude::SessionResumptionConfig");
-    m.insert("ContextWindowCompressionConfig", "rs_genai::prelude::ContextWindowCompressionConfig");
+    m.insert(
+        "RealtimeInputConfig",
+        "rs_genai::prelude::RealtimeInputConfig",
+    );
+    m.insert(
+        "AutomaticActivityDetection",
+        "rs_genai::prelude::AutomaticActivityDetection",
+    );
+    m.insert(
+        "SessionResumptionConfig",
+        "rs_genai::prelude::SessionResumptionConfig",
+    );
+    m.insert(
+        "ContextWindowCompressionConfig",
+        "rs_genai::prelude::ContextWindowCompressionConfig",
+    );
     m.insert("SlidingWindow", "rs_genai::prelude::SlidingWindow");
     m.insert("ProactivityConfig", "rs_genai::prelude::ProactivityConfig");
-    m.insert("InputAudioTranscription", "rs_genai::prelude::InputAudioTranscription");
-    m.insert("OutputAudioTranscription", "rs_genai::prelude::OutputAudioTranscription");
+    m.insert(
+        "InputAudioTranscription",
+        "rs_genai::prelude::InputAudioTranscription",
+    );
+    m.insert(
+        "OutputAudioTranscription",
+        "rs_genai::prelude::OutputAudioTranscription",
+    );
 
     // Metadata
     m.insert("UsageMetadata", "rs_genai::prelude::UsageMetadata");
     m.insert("GroundingMetadata", "rs_genai::prelude::GroundingMetadata");
-    m.insert("UrlContextMetadata", "rs_genai::prelude::UrlContextMetadata");
+    m.insert(
+        "UrlContextMetadata",
+        "rs_genai::prelude::UrlContextMetadata",
+    );
 
     // Session/Live API messages
     m.insert("LiveServerMessage", "rs_genai::prelude::ServerMessage");
-    m.insert("LiveServerSetupComplete", "rs_genai::prelude::SetupCompletePayload");
-    m.insert("LiveServerContent", "rs_genai::prelude::ServerContentPayload");
+    m.insert(
+        "LiveServerSetupComplete",
+        "rs_genai::prelude::SetupCompletePayload",
+    );
+    m.insert(
+        "LiveServerContent",
+        "rs_genai::prelude::ServerContentPayload",
+    );
     m.insert("LiveServerToolCall", "rs_genai::prelude::ToolCallPayload");
-    m.insert("LiveServerToolCallCancellation", "rs_genai::prelude::ToolCallCancellationPayload");
+    m.insert(
+        "LiveServerToolCallCancellation",
+        "rs_genai::prelude::ToolCallCancellationPayload",
+    );
     m.insert("LiveServerGoAway", "rs_genai::prelude::GoAwayPayload");
-    m.insert("LiveServerSessionResumptionUpdate", "rs_genai::prelude::SessionResumptionUpdatePayload");
-    m.insert("LiveClientContent", "rs_genai::prelude::ClientContentPayload");
-    m.insert("LiveClientRealtimeInput", "rs_genai::prelude::RealtimeInputPayload");
-    m.insert("LiveClientToolResponse", "rs_genai::prelude::ToolResponsePayload");
+    m.insert(
+        "LiveServerSessionResumptionUpdate",
+        "rs_genai::prelude::SessionResumptionUpdatePayload",
+    );
+    m.insert(
+        "LiveClientContent",
+        "rs_genai::prelude::ClientContentPayload",
+    );
+    m.insert(
+        "LiveClientRealtimeInput",
+        "rs_genai::prelude::RealtimeInputPayload",
+    );
+    m.insert(
+        "LiveClientToolResponse",
+        "rs_genai::prelude::ToolResponsePayload",
+    );
     m.insert("LiveClientSetup", "rs_genai::prelude::SetupPayload");
     m.insert("ActivityStart", "rs_genai::prelude::ActivityStart");
     m.insert("ActivityEnd", "rs_genai::prelude::ActivityEnd");
@@ -97,7 +151,10 @@ fn helper_map() -> HashMap<&'static str, &'static str> {
     m.insert("createPartFromFunctionCall", "Part::function_call");
     m.insert("createUserContent", "Content::user");
     m.insert("createModelContent", "Content::model");
-    m.insert("createPartFromFunctionResponse", "Content::function_response");
+    m.insert(
+        "createPartFromFunctionResponse",
+        "Content::function_response",
+    );
     m
 }
 
@@ -157,9 +214,7 @@ fn classify_genai_type(name: &str) -> GenaiTypeCategory {
         }
 
         // Cached content types
-        n if n.starts_with("CachedContent") || n.starts_with("Cache") => {
-            GenaiTypeCategory::Caches
-        }
+        n if n.starts_with("CachedContent") || n.starts_with("Cache") => GenaiTypeCategory::Caches,
 
         // Tuning types
         n if n.starts_with("Tuning") || n.starts_with("TunedModel") || n == "Hyperparameters" => {
@@ -338,10 +393,7 @@ pub fn build_type_lookup(schema: &GenaiSchema) -> HashMap<String, String> {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn map_genai_alias_to_rust(
-    ts_def: &str,
-    wire_types: &HashMap<&str, &str>,
-) -> String {
+fn map_genai_alias_to_rust(ts_def: &str, wire_types: &HashMap<&str, &str>) -> String {
     let trimmed = ts_def.trim();
 
     if trimmed.contains('|') {
@@ -422,23 +474,44 @@ mod tests {
 
     #[test]
     fn classify_live_api_types() {
-        assert_eq!(classify_genai_type("LiveConnectConfig"), GenaiTypeCategory::LiveApi);
+        assert_eq!(
+            classify_genai_type("LiveConnectConfig"),
+            GenaiTypeCategory::LiveApi
+        );
         assert_eq!(classify_genai_type("Session"), GenaiTypeCategory::LiveApi);
     }
 
     #[test]
     fn classify_generate_types() {
-        assert_eq!(classify_genai_type("GenerateContentResponse"), GenaiTypeCategory::Generate);
-        assert_eq!(classify_genai_type("Candidate"), GenaiTypeCategory::Generate);
+        assert_eq!(
+            classify_genai_type("GenerateContentResponse"),
+            GenaiTypeCategory::Generate
+        );
+        assert_eq!(
+            classify_genai_type("Candidate"),
+            GenaiTypeCategory::Generate
+        );
     }
 
     #[test]
     fn classify_new_api_categories() {
-        assert_eq!(classify_genai_type("EmbedContentRequest"), GenaiTypeCategory::Embed);
-        assert_eq!(classify_genai_type("FileUploadResponse"), GenaiTypeCategory::Files);
+        assert_eq!(
+            classify_genai_type("EmbedContentRequest"),
+            GenaiTypeCategory::Embed
+        );
+        assert_eq!(
+            classify_genai_type("FileUploadResponse"),
+            GenaiTypeCategory::Files
+        );
         assert_eq!(classify_genai_type("ModelInfo"), GenaiTypeCategory::Models);
-        assert_eq!(classify_genai_type("CountTokensRequest"), GenaiTypeCategory::Tokens);
-        assert_eq!(classify_genai_type("CachedContentConfig"), GenaiTypeCategory::Caches);
+        assert_eq!(
+            classify_genai_type("CountTokensRequest"),
+            GenaiTypeCategory::Tokens
+        );
+        assert_eq!(
+            classify_genai_type("CachedContentConfig"),
+            GenaiTypeCategory::Caches
+        );
         assert_eq!(classify_genai_type("TuningJob"), GenaiTypeCategory::Tunings);
         assert_eq!(classify_genai_type("BatchJob"), GenaiTypeCategory::Batches);
         assert_eq!(classify_genai_type("ChatSession"), GenaiTypeCategory::Chats);

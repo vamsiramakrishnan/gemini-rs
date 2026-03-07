@@ -94,7 +94,8 @@ impl HttpClient {
         auth_headers: Vec<(String, String)>,
         body: &impl serde::Serialize,
     ) -> Result<serde_json::Value, HttpError> {
-        self.request_with_retry("POST", url, auth_headers, Some(body)).await
+        self.request_with_retry("POST", url, auth_headers, Some(body))
+            .await
     }
 
     /// PATCH JSON to a URL and return the parsed response.
@@ -104,7 +105,8 @@ impl HttpClient {
         auth_headers: Vec<(String, String)>,
         body: &impl serde::Serialize,
     ) -> Result<serde_json::Value, HttpError> {
-        self.request_with_retry("PATCH", url, auth_headers, Some(body)).await
+        self.request_with_retry("PATCH", url, auth_headers, Some(body))
+            .await
     }
 
     /// PUT JSON to a URL and return the parsed response.
@@ -114,7 +116,8 @@ impl HttpClient {
         auth_headers: Vec<(String, String)>,
         body: &impl serde::Serialize,
     ) -> Result<serde_json::Value, HttpError> {
-        self.request_with_retry("PUT", url, auth_headers, Some(body)).await
+        self.request_with_retry("PUT", url, auth_headers, Some(body))
+            .await
     }
 
     /// GET a URL and return the parsed response.
@@ -123,7 +126,8 @@ impl HttpClient {
         url: &str,
         auth_headers: Vec<(String, String)>,
     ) -> Result<serde_json::Value, HttpError> {
-        self.request_with_retry::<()>("GET", url, auth_headers, None).await
+        self.request_with_retry::<()>("GET", url, auth_headers, None)
+            .await
     }
 
     /// DELETE a URL and return the parsed response.
@@ -132,7 +136,8 @@ impl HttpClient {
         url: &str,
         auth_headers: Vec<(String, String)>,
     ) -> Result<serde_json::Value, HttpError> {
-        self.request_with_retry::<()>("DELETE", url, auth_headers, None).await
+        self.request_with_retry::<()>("DELETE", url, auth_headers, None)
+            .await
     }
 
     /// Execute an HTTP request with exponential backoff retry on transient errors.
@@ -230,7 +235,9 @@ impl HttpClient {
             "DELETE" => self.inner.delete(url),
             "PATCH" => self.inner.patch(url),
             "PUT" => self.inner.put(url),
-            _ => self.inner.request(reqwest::Method::from_bytes(method.as_bytes()).unwrap(), url),
+            _ => self
+                .inner
+                .request(reqwest::Method::from_bytes(method.as_bytes()).unwrap(), url),
         };
 
         for (key, value) in auth_headers {

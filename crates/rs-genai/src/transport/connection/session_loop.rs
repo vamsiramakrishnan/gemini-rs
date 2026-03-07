@@ -64,16 +64,13 @@ pub(super) async fn generic_connection_loop<T: Transport, C: Codec>(
                 let setup_bytes = match codec.encode_setup(&config) {
                     Ok(b) => b,
                     Err(e) => {
-                        let _ = event_tx.send(SessionEvent::Error(format!(
-                            "Setup encode error: {e}"
-                        )));
+                        let _ =
+                            event_tx.send(SessionEvent::Error(format!("Setup encode error: {e}")));
                         break;
                     }
                 };
                 if let Err(e) = transport.send(setup_bytes).await {
-                    let _ = event_tx.send(SessionEvent::Error(format!(
-                        "Setup send error: {e}"
-                    )));
+                    let _ = event_tx.send(SessionEvent::Error(format!("Setup send error: {e}")));
                     // Fall through to reconnect
                     attempt += 1;
                     if attempt > transport_config.max_reconnect_attempts {
@@ -98,7 +95,7 @@ pub(super) async fn generic_connection_loop<T: Transport, C: Codec>(
                 match setup_result {
                     Ok(Ok(())) => {
                         attempt = 0; // Reset backoff on successful setup
-                        // Run main session loop
+                                     // Run main session loop
                         let reason = generic_run_session(
                             &config,
                             &mut transport,
@@ -133,9 +130,7 @@ pub(super) async fn generic_connection_loop<T: Transport, C: Codec>(
                         }
                     }
                     Ok(Err(e)) => {
-                        let _ = event_tx.send(SessionEvent::Error(format!(
-                            "Setup failed: {e}"
-                        )));
+                        let _ = event_tx.send(SessionEvent::Error(format!("Setup failed: {e}")));
                     }
                     Err(_) => {
                         let _ = event_tx.send(SessionEvent::Error("Setup timeout".into()));
@@ -143,9 +138,7 @@ pub(super) async fn generic_connection_loop<T: Transport, C: Codec>(
                 }
             }
             Ok(Err(e)) => {
-                let _ = event_tx.send(SessionEvent::Error(format!(
-                    "Connection failed: {e}"
-                )));
+                let _ = event_tx.send(SessionEvent::Error(format!("Connection failed: {e}")));
             }
             Err(_) => {
                 let _ = event_tx.send(SessionEvent::Error("Connect timeout".into()));
@@ -186,13 +179,11 @@ async fn wait_for_setup<T: Transport, C: Codec>(
                     if let Some(ref resumption) = sc.setup_complete.session_resumption {
                         if let Some(ref handle) = resumption.handle {
                             *state.resume_handle.lock() = Some(handle.clone());
-                            let _ = event_tx.send(SessionEvent::SessionResumeUpdate(
-                                ResumeInfo {
-                                    handle: handle.clone(),
-                                    resumable: true,
-                                    last_consumed_index: None,
-                                },
-                            ));
+                            let _ = event_tx.send(SessionEvent::SessionResumeUpdate(ResumeInfo {
+                                handle: handle.clone(),
+                                resumable: true,
+                                last_consumed_index: None,
+                            }));
                         }
                     }
                     let _ = state.transition_to(SessionPhase::Active);

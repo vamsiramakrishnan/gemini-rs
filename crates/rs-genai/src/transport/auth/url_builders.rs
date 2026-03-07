@@ -32,9 +32,7 @@ pub(crate) fn build_vertex_rest_url(
     endpoint: ServiceEndpoint,
     model: Option<&GeminiModel>,
 ) -> String {
-    let base = format!(
-        "https://{host}/v1beta1/projects/{project}/locations/{location}",
-    );
+    let base = format!("https://{host}/v1beta1/projects/{project}/locations/{location}",);
     match endpoint {
         ServiceEndpoint::LiveWs => {
             // LiveWs should use ws_url(), not rest_url()

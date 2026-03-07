@@ -39,27 +39,62 @@ pub struct AppInfo {
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum ServerMessage {
     Connected,
-    TextDelta { text: String },
-    TextComplete { text: String },
-    Audio { data: String }, // base64
+    TextDelta {
+        text: String,
+    },
+    TextComplete {
+        text: String,
+    },
+    Audio {
+        data: String,
+    }, // base64
     TurnComplete,
     Interrupted,
-    Error { message: String },
-    InputTranscription { text: String },
-    OutputTranscription { text: String },
+    Error {
+        message: String,
+    },
+    InputTranscription {
+        text: String,
+    },
+    OutputTranscription {
+        text: String,
+    },
     VoiceActivityStart,
     VoiceActivityEnd,
     // Devtools messages
-    StateUpdate { key: String, value: serde_json::Value },
-    PhaseChange { from: String, to: String, reason: String },
+    StateUpdate {
+        key: String,
+        value: serde_json::Value,
+    },
+    PhaseChange {
+        from: String,
+        to: String,
+        reason: String,
+    },
     #[allow(dead_code)]
-    Evaluation { phase: String, score: f64, notes: String },
-    Violation { rule: String, severity: String, detail: String },
-    AppMeta { info: AppInfo },
+    Evaluation {
+        phase: String,
+        score: f64,
+        notes: String,
+    },
+    Violation {
+        rule: String,
+        severity: String,
+        detail: String,
+    },
+    AppMeta {
+        info: AppInfo,
+    },
     /// Live session telemetry stats (turn count, phase durations, tool calls, etc.)
-    Telemetry { stats: serde_json::Value },
+    Telemetry {
+        stats: serde_json::Value,
+    },
     /// Real-time tool call event for devtools visualization.
-    ToolCallEvent { name: String, args: String, result: String },
+    ToolCallEvent {
+        name: String,
+        args: String,
+        result: String,
+    },
     /// OTel span lifecycle event bridged from the WebSocketSpanLayer.
     SpanEvent {
         name: String,
@@ -90,8 +125,12 @@ pub enum ClientMessage {
         #[serde(default)]
         voice: Option<String>,
     },
-    Text { text: String },
-    Audio { data: String }, // base64
+    Text {
+        text: String,
+    },
+    Audio {
+        data: String,
+    }, // base64
     Stop,
 }
 
@@ -105,8 +144,12 @@ pub trait CookbookApp: Send + Sync {
     fn description(&self) -> &str;
     fn category(&self) -> AppCategory;
     fn features(&self) -> Vec<String>;
-    fn tips(&self) -> Vec<String> { Vec::new() }
-    fn try_saying(&self) -> Vec<String> { Vec::new() }
+    fn tips(&self) -> Vec<String> {
+        Vec::new()
+    }
+    fn try_saying(&self) -> Vec<String> {
+        Vec::new()
+    }
 
     /// Handle a full WebSocket session. Called when a client connects to `/ws/{name}`.
     /// The app receives client messages via rx and sends server messages via tx.

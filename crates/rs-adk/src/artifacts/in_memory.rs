@@ -36,14 +36,9 @@ impl ArtifactService for InMemoryArtifactService {
         session_id: &str,
         mut artifact: Artifact,
     ) -> Result<ArtifactMetadata, ArtifactError> {
-        let session = self
-            .store
-            .entry(session_id.to_string())
-            .or_default();
+        let session = self.store.entry(session_id.to_string()).or_default();
 
-        let mut versions = session
-            .entry(artifact.metadata.name.clone())
-            .or_default();
+        let mut versions = session.entry(artifact.metadata.name.clone()).or_default();
 
         let version = versions.len() as u32 + 1;
         artifact.metadata.version = version;
@@ -57,19 +52,12 @@ impl ArtifactService for InMemoryArtifactService {
         Ok(metadata)
     }
 
-    async fn load(
-        &self,
-        session_id: &str,
-        name: &str,
-    ) -> Result<Option<Artifact>, ArtifactError> {
-        let result = self
-            .store
-            .get(session_id)
-            .and_then(|session| {
-                session
-                    .get(name)
-                    .and_then(|versions| versions.last().cloned())
-            });
+    async fn load(&self, session_id: &str, name: &str) -> Result<Option<Artifact>, ArtifactError> {
+        let result = self.store.get(session_id).and_then(|session| {
+            session
+                .get(name)
+                .and_then(|versions| versions.last().cloned())
+        });
         Ok(result)
     }
 
@@ -79,25 +67,19 @@ impl ArtifactService for InMemoryArtifactService {
         name: &str,
         version: u32,
     ) -> Result<Option<Artifact>, ArtifactError> {
-        let result = self
-            .store
-            .get(session_id)
-            .and_then(|session| {
-                session.get(name).and_then(|versions| {
-                    if version == 0 || version as usize > versions.len() {
-                        None
-                    } else {
-                        Some(versions[(version - 1) as usize].clone())
-                    }
-                })
-            });
+        let result = self.store.get(session_id).and_then(|session| {
+            session.get(name).and_then(|versions| {
+                if version == 0 || version as usize > versions.len() {
+                    None
+                } else {
+                    Some(versions[(version - 1) as usize].clone())
+                }
+            })
+        });
         Ok(result)
     }
 
-    async fn list(
-        &self,
-        session_id: &str,
-    ) -> Result<Vec<ArtifactMetadata>, ArtifactError> {
+    async fn list(&self, session_id: &str) -> Result<Vec<ArtifactMetadata>, ArtifactError> {
         let result = self
             .store
             .get(session_id)
@@ -111,11 +93,7 @@ impl ArtifactService for InMemoryArtifactService {
         Ok(result)
     }
 
-    async fn delete(
-        &self,
-        session_id: &str,
-        name: &str,
-    ) -> Result<(), ArtifactError> {
+    async fn delete(&self, session_id: &str, name: &str) -> Result<(), ArtifactError> {
         if let Some(session) = self.store.get(session_id) {
             session.remove(name);
         }

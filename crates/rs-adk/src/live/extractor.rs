@@ -309,8 +309,8 @@ mod tests {
             }
         });
 
-        let extractor = LlmExtractor::new("Sentiment", llm, "Rate sentiment", 1)
-            .with_schema(schema);
+        let extractor =
+            LlmExtractor::new("Sentiment", llm, "Rate sentiment", 1).with_schema(schema);
 
         let turns = make_turns(&[("This is great!", "Glad you think so!")]);
         let result = extractor.extract(&turns).await.unwrap();
@@ -331,10 +331,7 @@ mod tests {
 
     #[test]
     fn format_transcript_readable() {
-        let turns = make_turns(&[
-            ("Hello", "Hi there!"),
-            ("How are you?", "I'm doing well"),
-        ]);
+        let turns = make_turns(&[("Hello", "Hi there!"), ("How are you?", "I'm doing well")]);
         let formatted = LlmExtractor::format_transcript(&turns);
         assert!(formatted.contains("User: Hello"));
         assert!(formatted.contains("Assistant: Hi there!"));
@@ -357,8 +354,14 @@ mod tests {
     fn strip_code_fences_variants() {
         assert_eq!(super::strip_code_fences("```json\n{}\n```"), "{}");
         assert_eq!(super::strip_code_fences("```\n{}\n```"), "{}");
-        assert_eq!(super::strip_code_fences("  ```json\n{\"a\":1}\n```  "), "{\"a\":1}");
-        assert_eq!(super::strip_code_fences("{\"bare\":true}"), "{\"bare\":true}");
+        assert_eq!(
+            super::strip_code_fences("  ```json\n{\"a\":1}\n```  "),
+            "{\"a\":1}"
+        );
+        assert_eq!(
+            super::strip_code_fences("{\"bare\":true}"),
+            "{\"bare\":true}"
+        );
     }
 
     #[test]

@@ -27,31 +27,31 @@ use async_trait::async_trait;
 use crate::error::AgentError;
 use crate::state::State;
 
-mod llm;
-mod fn_agent;
-mod sequential;
-mod parallel;
-mod loop_agent;
-mod fallback;
-mod route;
-mod race;
-mod timeout;
-mod map_over;
-mod tap;
 mod dispatch;
+mod fallback;
+mod fn_agent;
+mod llm;
+mod loop_agent;
+mod map_over;
+mod parallel;
+mod race;
+mod route;
+mod sequential;
+mod tap;
+mod timeout;
 
-pub use llm::LlmTextAgent;
-pub use fn_agent::FnTextAgent;
-pub use sequential::SequentialTextAgent;
-pub use parallel::ParallelTextAgent;
-pub use loop_agent::LoopTextAgent;
+pub use dispatch::{DispatchTextAgent, JoinTextAgent, TaskRegistry};
 pub use fallback::FallbackTextAgent;
-pub use route::{RouteRule, RouteTextAgent};
-pub use race::RaceTextAgent;
-pub use timeout::TimeoutTextAgent;
+pub use fn_agent::FnTextAgent;
+pub use llm::LlmTextAgent;
+pub use loop_agent::LoopTextAgent;
 pub use map_over::MapOverTextAgent;
+pub use parallel::ParallelTextAgent;
+pub use race::RaceTextAgent;
+pub use route::{RouteRule, RouteTextAgent};
+pub use sequential::SequentialTextAgent;
 pub use tap::TapTextAgent;
-pub use dispatch::{TaskRegistry, DispatchTextAgent, JoinTextAgent};
+pub use timeout::TimeoutTextAgent;
 
 // ── TextAgent trait ────────────────────────────────────────────────────────
 
@@ -78,10 +78,10 @@ const _: () = {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
-    use std::time::Duration;
     use crate::llm::{BaseLlm, LlmError, LlmRequest, LlmResponse};
     use rs_genai::prelude::{Content, FunctionCall, Part, Role};
+    use std::sync::Arc;
+    use std::time::Duration;
 
     /// A mock LLM that returns a fixed response.
     struct FixedLlm {
@@ -329,13 +329,19 @@ mod tests {
     #[tokio::test]
     async fn sequential_stops_on_error() {
         let children: Vec<Arc<dyn TextAgent>> = vec![
-            Arc::new(LlmTextAgent::new("ok", Arc::new(FixedLlm {
-                response: "fine".into(),
-            }))),
+            Arc::new(LlmTextAgent::new(
+                "ok",
+                Arc::new(FixedLlm {
+                    response: "fine".into(),
+                }),
+            )),
             Arc::new(LlmTextAgent::new("fail", Arc::new(FailLlm))),
-            Arc::new(LlmTextAgent::new("never", Arc::new(FixedLlm {
-                response: "unreachable".into(),
-            }))),
+            Arc::new(LlmTextAgent::new(
+                "never",
+                Arc::new(FixedLlm {
+                    response: "unreachable".into(),
+                }),
+            )),
         ];
 
         let pipeline = SequentialTextAgent::new("pipeline", children);
@@ -415,9 +421,8 @@ mod tests {
             Ok(format!("n={}", n + 1))
         }));
 
-        let loop_agent = LoopTextAgent::new("loop", body, 100).until(|state: &State| {
-            state.get::<i32>("n").unwrap_or(0) >= 3
-        });
+        let loop_agent = LoopTextAgent::new("loop", body, 100)
+            .until(|state: &State| state.get::<i32>("n").unwrap_or(0) >= 3);
 
         let state = State::new();
         loop_agent.run(&state).await.unwrap();
@@ -470,18 +475,22 @@ mod tests {
 
     #[tokio::test]
     async fn route_dispatches_matching_rule() {
-        let agent_a: Arc<dyn TextAgent> =
-            Arc::new(FnTextAgent::new("a", |_| Ok("route_a".into())));
-        let agent_b: Arc<dyn TextAgent> =
-            Arc::new(FnTextAgent::new("b", |_| Ok("route_b".into())));
+        let agent_a: Arc<dyn TextAgent> = Arc::new(FnTextAgent::new("a", |_| Ok("route_a".into())));
+        let agent_b: Arc<dyn TextAgent> = Arc::new(FnTextAgent::new("b", |_| Ok("route_b".into())));
         let default: Arc<dyn TextAgent> =
             Arc::new(FnTextAgent::new("default", |_| Ok("default".into())));
 
         let router = RouteTextAgent::new(
             "router",
             vec![
-                RouteRule::new(|s: &State| s.get::<String>("mode") == Some("a".into()), agent_a),
-                RouteRule::new(|s: &State| s.get::<String>("mode") == Some("b".into()), agent_b),
+                RouteRule::new(
+                    |s: &State| s.get::<String>("mode") == Some("a".into()),
+                    agent_a,
+                ),
+                RouteRule::new(
+                    |s: &State| s.get::<String>("mode") == Some("b".into()),
+                    agent_b,
+                ),
             ],
             default,
         );
@@ -531,8 +540,7 @@ mod tests {
     #[tokio::test]
     async fn race_returns_first_to_complete() {
         // Fast agent completes immediately, slow agent sleeps async.
-        let fast: Arc<dyn TextAgent> =
-            Arc::new(FnTextAgent::new("fast", |_| Ok("winner".into())));
+        let fast: Arc<dyn TextAgent> = Arc::new(FnTextAgent::new("fast", |_| Ok("winner".into())));
         let slow: Arc<dyn TextAgent> = Arc::new(AsyncSleepAgent {
             delay: Duration::from_millis(500),
         });
@@ -554,8 +562,7 @@ mod tests {
 
     #[tokio::test]
     async fn timeout_returns_result_within_limit() {
-        let fast: Arc<dyn TextAgent> =
-            Arc::new(FnTextAgent::new("fast", |_| Ok("done".into())));
+        let fast: Arc<dyn TextAgent> = Arc::new(FnTextAgent::new("fast", |_| Ok("done".into())));
         let timeout = TimeoutTextAgent::new("timeout", fast, Duration::from_secs(5));
         let state = State::new();
         let result = timeout.run(&state).await.unwrap();
@@ -648,10 +655,7 @@ mod tests {
 
         let dispatch = DispatchTextAgent::new(
             "dispatch",
-            vec![
-                ("task_a".into(), agent_a),
-                ("task_b".into(), agent_b),
-            ],
+            vec![("task_a".into(), agent_a), ("task_b".into(), agent_b)],
             registry.clone(),
             budget,
         );
@@ -672,9 +676,18 @@ mod tests {
         let budget = Arc::new(tokio::sync::Semaphore::new(10));
 
         let children: Vec<(String, Arc<dyn TextAgent>)> = vec![
-            ("x".into(), Arc::new(FnTextAgent::new("x", |_| Ok("rx".into())))),
-            ("y".into(), Arc::new(FnTextAgent::new("y", |_| Ok("ry".into())))),
-            ("z".into(), Arc::new(FnTextAgent::new("z", |_| Ok("rz".into())))),
+            (
+                "x".into(),
+                Arc::new(FnTextAgent::new("x", |_| Ok("rx".into()))),
+            ),
+            (
+                "y".into(),
+                Arc::new(FnTextAgent::new("y", |_| Ok("ry".into()))),
+            ),
+            (
+                "z".into(),
+                Arc::new(FnTextAgent::new("z", |_| Ok("rz".into()))),
+            ),
         ];
 
         let dispatch = DispatchTextAgent::new("dispatch", children, registry.clone(), budget);
@@ -682,8 +695,8 @@ mod tests {
         dispatch.run(&state).await.unwrap();
 
         // Only join x and z
-        let join = JoinTextAgent::new("joiner", registry.clone())
-            .targets(vec!["x".into(), "z".into()]);
+        let join =
+            JoinTextAgent::new("joiner", registry.clone()).targets(vec!["x".into(), "z".into()]);
         let result = join.run(&state).await.unwrap();
         assert!(result.contains("rx"));
         assert!(result.contains("rz"));
@@ -711,8 +724,7 @@ mod tests {
         let state = State::new();
         dispatch.run(&state).await.unwrap();
 
-        let join = JoinTextAgent::new("joiner", registry)
-            .timeout(Duration::from_millis(50));
+        let join = JoinTextAgent::new("joiner", registry).timeout(Duration::from_millis(50));
         let err = join.run(&state).await.unwrap_err();
         assert!(matches!(err, AgentError::Timeout));
     }

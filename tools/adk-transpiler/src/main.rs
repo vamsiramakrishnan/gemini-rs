@@ -244,9 +244,17 @@ fn run_read_genai(source: &Path, output: &Path) {
 
     match readers::read_genai_source(source) {
         Ok(schema) => {
-            let with_wire = schema.types.iter().filter(|t| t.has_wire_equivalent).count();
+            let with_wire = schema
+                .types
+                .iter()
+                .filter(|t| t.has_wire_equivalent)
+                .count();
             let total_types = schema.types.len();
-            let with_wire_enums = schema.enums.iter().filter(|e| e.has_wire_equivalent).count();
+            let with_wire_enums = schema
+                .enums
+                .iter()
+                .filter(|e| e.has_wire_equivalent)
+                .count();
             let total_enums = schema.enums.len();
 
             eprintln!(
@@ -257,8 +265,7 @@ fn run_read_genai(source: &Path, output: &Path) {
                 schema.helpers.len()
             );
 
-            let json =
-                serde_json::to_string_pretty(&schema).expect("Failed to serialize schema");
+            let json = serde_json::to_string_pretty(&schema).expect("Failed to serialize schema");
 
             if let Some(parent) = output.parent() {
                 std::fs::create_dir_all(parent).ok();
@@ -291,7 +298,10 @@ fn run_read_genai(source: &Path, output: &Path) {
             }
 
             println!();
-            println!("Types without wire equivalent ({}):", total_types - with_wire);
+            println!(
+                "Types without wire equivalent ({}):",
+                total_types - with_wire
+            );
             for t in &schema.types {
                 if !t.has_wire_equivalent {
                     println!(
@@ -381,10 +391,7 @@ fn run_transpile(source: &Path, output: &Path, genai_source: Option<&Path>) {
     eprintln!("Transpiling ADK-JS source from: {}", source.display());
 
     let genai_lookup = if let Some(genai_path) = genai_source {
-        eprintln!(
-            "Reading js-genai types from: {}",
-            genai_path.display()
-        );
+        eprintln!("Reading js-genai types from: {}", genai_path.display());
         match readers::read_genai_source(genai_path) {
             Ok(genai_schema) => {
                 let lookup = readers::build_type_lookup(&genai_schema);
@@ -450,10 +457,7 @@ fn run_transpile(source: &Path, output: &Path, genai_source: Option<&Path>) {
 }
 
 fn run_transpile_genai(source: &Path, output_dir: &Path) {
-    eprintln!(
-        "Transpiling js-genai types from: {}",
-        source.display()
-    );
+    eprintln!("Transpiling js-genai types from: {}", source.display());
 
     let schema = match readers::read_genai_source(source) {
         Ok(s) => s,
@@ -463,7 +467,11 @@ fn run_transpile_genai(source: &Path, output_dir: &Path) {
         }
     };
 
-    let with_wire = schema.types.iter().filter(|t| t.has_wire_equivalent).count();
+    let with_wire = schema
+        .types
+        .iter()
+        .filter(|t| t.has_wire_equivalent)
+        .count();
     let without_wire = schema.types.len() - with_wire;
 
     eprintln!(
@@ -544,8 +552,7 @@ fn run_read_fluent(source: &Path, output: &Path) {
                 schema.workflows.len(),
             );
 
-            let json =
-                serde_json::to_string_pretty(&schema).expect("Failed to serialize schema");
+            let json = serde_json::to_string_pretty(&schema).expect("Failed to serialize schema");
 
             if let Some(parent) = output.parent() {
                 std::fs::create_dir_all(parent).ok();
@@ -562,10 +569,7 @@ fn run_read_fluent(source: &Path, output: &Path) {
 
             println!("Builder Methods ({}):", schema.builder_methods.len());
             for m in &schema.builder_methods {
-                println!(
-                    "  - {}({}) -> {}",
-                    m.name, m.param_type, m.rust_type
-                );
+                println!("  - {}({}) -> {}", m.name, m.param_type, m.rust_type);
             }
 
             println!();
@@ -593,27 +597,25 @@ fn run_read_fluent(source: &Path, output: &Path) {
                             }
                         })
                         .collect();
-                    println!("    - {}({}) -> {}", f.name, params.join(", "), f.return_type);
+                    println!(
+                        "    - {}({}) -> {}",
+                        f.name,
+                        params.join(", "),
+                        f.return_type
+                    );
                 }
             }
 
             println!();
             println!("Operators ({}):", schema.operators.len());
             for op in &schema.operators {
-                println!(
-                    "  - {} {} {} -> {}",
-                    op.lhs, op.operator, op.rhs, op.output
-                );
+                println!("  - {} {} {} -> {}", op.lhs, op.operator, op.rhs, op.output);
             }
 
             println!();
             println!("Workflows ({}):", schema.workflows.len());
             for w in &schema.workflows {
-                println!(
-                    "  - {} [{} methods]",
-                    w.name,
-                    w.methods.len()
-                );
+                println!("  - {} [{} methods]", w.name, w.methods.len());
             }
         }
         Err(e) => {

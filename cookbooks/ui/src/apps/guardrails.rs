@@ -21,7 +21,12 @@ use super::{build_session_config, resolve_voice, send_app_meta, wait_for_start};
 // ---------------------------------------------------------------------------
 
 /// Policy names for the active_policies state message.
-const POLICY_NAMES: &[&str] = &["pii_ssn", "pii_credit_card", "off_topic", "negative_sentiment"];
+const POLICY_NAMES: &[&str] = &[
+    "pii_ssn",
+    "pii_credit_card",
+    "off_topic",
+    "negative_sentiment",
+];
 
 // ---------------------------------------------------------------------------
 // Violation detection
@@ -35,8 +40,10 @@ struct DetectedViolation {
 }
 
 // Pre-compiled regex patterns for violation detection.
-static SSN_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b\d{3}[-.]?\d{2}[-.]?\d{4}\b").unwrap());
-static CC_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b").unwrap());
+static SSN_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\b\d{3}[-.]?\d{2}[-.]?\d{4}\b").unwrap());
+static CC_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b").unwrap());
 
 /// Check text for policy violations. Returns all detected violations.
 fn check_violations(text: &str) -> Vec<DetectedViolation> {
@@ -70,10 +77,22 @@ fn check_violations(text: &str) -> Vec<DetectedViolation> {
     // Off-topic detection: keywords outside normal support context.
     let lower = text.to_lowercase();
     let off_topic_keywords = [
-        "sports", "football", "basketball", "baseball", "soccer",
-        "weather forecast", "movie", "film", "tv show", "netflix",
-        "politics", "election", "president", "congress",
-        "recipe", "cooking tip",
+        "sports",
+        "football",
+        "basketball",
+        "baseball",
+        "soccer",
+        "weather forecast",
+        "movie",
+        "film",
+        "tv show",
+        "netflix",
+        "politics",
+        "election",
+        "president",
+        "congress",
+        "recipe",
+        "cooking tip",
     ];
     for kw in &off_topic_keywords {
         if lower.contains(kw) {
@@ -88,9 +107,18 @@ fn check_violations(text: &str) -> Vec<DetectedViolation> {
 
     // Sentiment monitoring: frustrated/angry customer.
     let negative_keywords = [
-        "angry", "frustrated", "terrible", "awful", "ridiculous",
-        "unacceptable", "furious", "worst", "horrible", "disgusting",
-        "incompetent", "useless",
+        "angry",
+        "frustrated",
+        "terrible",
+        "awful",
+        "ridiculous",
+        "unacceptable",
+        "furious",
+        "worst",
+        "horrible",
+        "disgusting",
+        "incompetent",
+        "useless",
     ];
     for kw in &negative_keywords {
         if lower.contains(kw) {
@@ -143,7 +171,8 @@ impl ViolationTracker {
     fn record(&mut self, rule_name: &str, current_turn: usize) {
         self.total_count += 1;
         *self.by_rule.entry(rule_name.to_string()).or_insert(0) += 1;
-        self.last_fired_turn.insert(rule_name.to_string(), current_turn);
+        self.last_fired_turn
+            .insert(rule_name.to_string(), current_turn);
     }
 
     /// Generate a JSON summary of violation stats.
@@ -188,11 +217,7 @@ impl CookbookApp for Guardrails {
     }
 
     fn features(&self) -> Vec<String> {
-        vec![
-            "voice".into(),
-            "transcription".into(),
-            "guardrails".into(),
-        ]
+        vec!["voice".into(), "transcription".into(), "guardrails".into()]
     }
 
     fn tips(&self) -> Vec<String> {
@@ -232,19 +257,23 @@ impl CookbookApp for Guardrails {
 
         // Create a ViolationExtractor wrapping check_violations.
         // Guardrails violations are stateless — re-detect each turn, don't accumulate.
-        let extractor = Arc::new(RegexExtractor::new("guardrails_state", 10, |text, _existing| {
-            let violations = check_violations(text);
-            let mut result = HashMap::new();
-            for v in &violations {
-                result.insert(
-                    format!("violation:{}", v.rule_name),
-                    json!({"severity": v.severity, "detail": v.detail}),
-                );
-            }
-            // Track active violation count
-            result.insert("violation_count".into(), json!(violations.len()));
-            result
-        }));
+        let extractor = Arc::new(RegexExtractor::new(
+            "guardrails_state",
+            10,
+            |text, _existing| {
+                let violations = check_violations(text);
+                let mut result = HashMap::new();
+                for v in &violations {
+                    result.insert(
+                        format!("violation:{}", v.rule_name),
+                        json!({"severity": v.severity, "detail": v.detail}),
+                    );
+                }
+                // Track active violation count
+                result.insert("violation_count".into(), json!(violations.len()));
+                result
+            },
+        ));
 
         // Build Live session with callbacks, extraction, watchers, and instruction template.
         let b64 = base64::engine::general_purpose::STANDARD;
@@ -425,21 +454,19 @@ impl CookbookApp for Guardrails {
         let b64 = base64::engine::general_purpose::STANDARD;
         while let Some(msg) = rx.recv().await {
             match msg {
-                ClientMessage::Audio { data } => {
-                    match b64.decode(&data) {
-                        Ok(pcm_bytes) => {
-                            if let Err(e) = handle.send_audio(pcm_bytes).await {
-                                warn!("Failed to send audio: {e}");
-                                let _ = tx.send(ServerMessage::Error {
-                                    message: e.to_string(),
-                                });
-                            }
-                        }
-                        Err(e) => {
-                            warn!("Failed to decode base64 audio: {e}");
+                ClientMessage::Audio { data } => match b64.decode(&data) {
+                    Ok(pcm_bytes) => {
+                        if let Err(e) = handle.send_audio(pcm_bytes).await {
+                            warn!("Failed to send audio: {e}");
+                            let _ = tx.send(ServerMessage::Error {
+                                message: e.to_string(),
+                            });
                         }
                     }
-                }
+                    Err(e) => {
+                        warn!("Failed to decode base64 audio: {e}");
+                    }
+                },
                 ClientMessage::Text { text } => {
                     if let Err(e) = handle.send_text(&text).await {
                         warn!("Failed to send text: {e}");
@@ -505,7 +532,9 @@ mod tests {
     #[test]
     fn detect_negative_sentiment() {
         let violations = check_violations("This is absolutely terrible service!");
-        assert!(violations.iter().any(|v| v.rule_name == "negative_sentiment"));
+        assert!(violations
+            .iter()
+            .any(|v| v.rule_name == "negative_sentiment"));
     }
 
     #[test]

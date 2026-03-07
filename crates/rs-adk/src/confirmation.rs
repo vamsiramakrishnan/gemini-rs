@@ -60,16 +60,16 @@ mod tests {
 
     #[test]
     fn with_payload() {
-        let c = ToolConfirmation::confirmed()
-            .with_payload(serde_json::json!({"reason": "approved"}));
+        let c =
+            ToolConfirmation::confirmed().with_payload(serde_json::json!({"reason": "approved"}));
         assert!(c.confirmed);
         assert_eq!(c.payload.unwrap()["reason"], "approved");
     }
 
     #[test]
     fn serde_roundtrip() {
-        let c = ToolConfirmation::denied("risky")
-            .with_payload(serde_json::json!({"level": "high"}));
+        let c =
+            ToolConfirmation::denied("risky").with_payload(serde_json::json!({"level": "high"}));
         let json = serde_json::to_string(&c).unwrap();
         let parsed: ToolConfirmation = serde_json::from_str(&json).unwrap();
         assert!(!parsed.confirmed);

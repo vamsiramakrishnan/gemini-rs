@@ -1,7 +1,9 @@
 //! Bidirectional GenAI <-> A2A Part conversion.
 
-use rs_genai::prelude::{Blob, CodeExecutionResult, ExecutableCode, FunctionCall, FunctionResponse, Part};
 use super::types::{A2aFileContent, A2aPart};
+use rs_genai::prelude::{
+    Blob, CodeExecutionResult, ExecutableCode, FunctionCall, FunctionResponse, Part,
+};
 use std::collections::HashMap;
 
 /// Metadata key identifying the ADK type of a data part.
@@ -52,10 +54,7 @@ pub fn to_a2a_part(part: &Part, long_running_tool_ids: &[String]) -> Option<A2aP
             );
             if let Some(id) = &function_call.id {
                 if long_running_tool_ids.contains(id) {
-                    metadata.insert(
-                        ADK_IS_LONG_RUNNING_KEY.to_string(),
-                        serde_json::json!(true),
-                    );
+                    metadata.insert(ADK_IS_LONG_RUNNING_KEY.to_string(), serde_json::json!(true));
                 }
             }
             Some(A2aPart::Data {
@@ -418,7 +417,10 @@ mod tests {
         match part {
             Part::FunctionResponse { function_response } => {
                 assert_eq!(function_response.name, "search");
-                assert_eq!(function_response.response["results"], serde_json::json!([1, 2, 3]));
+                assert_eq!(
+                    function_response.response["results"],
+                    serde_json::json!([1, 2, 3])
+                );
                 assert_eq!(function_response.id.as_deref(), Some("fc-1"));
             }
             _ => panic!("Expected FunctionResponse part"),

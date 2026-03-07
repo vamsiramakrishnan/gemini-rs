@@ -119,7 +119,11 @@ fn collection_context(s: &State) -> String {
     let name: Option<String> = s.get("debtor_name");
     let verified: bool = s.get("identity_verified").unwrap_or(false);
     if let Some(n) = &name {
-        let tag = if verified { "identity verified" } else { "identity NOT verified" };
+        let tag = if verified {
+            "identity verified"
+        } else {
+            "identity NOT verified"
+        };
         ctx.push(format!("Debtor: {n} ({tag})."));
     } else if verified {
         ctx.push("Identity verified but debtor name not yet recorded.".into());
@@ -193,7 +197,13 @@ fn collection_context(s: &State) -> String {
     }
     let willingness: Option<f64> = s.get("willingness_to_pay");
     if let Some(w) = willingness {
-        let label = if w >= 0.7 { "high" } else if w >= 0.4 { "moderate" } else { "low" };
+        let label = if w >= 0.7 {
+            "high"
+        } else if w >= 0.4 {
+            "moderate"
+        } else {
+            "low"
+        };
         ctx.push(format!("Willingness to pay: {label} ({w:.1})."));
     }
 
@@ -261,18 +271,22 @@ fn sentiment_from_emotion(emotion: &str) -> f64 {
 }
 
 fn compute_risk_level(sentiment: f64, cease_desist: bool) -> &'static str {
-    if cease_desist { "critical" }
-    else if sentiment < 0.3 { "high" }
-    else if sentiment < 0.5 { "medium" }
-    else { "low" }
+    if cease_desist {
+        "critical"
+    } else if sentiment < 0.3 {
+        "high"
+    } else if sentiment < 0.5 {
+        "medium"
+    } else {
+        "low"
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Regex-based structured field extraction
 // ---------------------------------------------------------------------------
 
-static DOLLAR_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\$[\d,]+\.?\d*").unwrap());
+static DOLLAR_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\$[\d,]+\.?\d*").unwrap());
 static PHONE_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\b\d{3}[-.]?\d{3}[-.]?\d{4}\b").unwrap());
 static DATE_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -432,9 +446,7 @@ fn debt_collection_tools() -> rs_genai::prelude::Tool {
 
 fn execute_tool(name: &str, args: &Value) -> Value {
     match name {
-        "lookup_account" => {
-            serde_json::from_str(MOCK_ACCOUNT).unwrap()
-        }
+        "lookup_account" => serde_json::from_str(MOCK_ACCOUNT).unwrap(),
         "verify_identity" => {
             let name = args.get("name").and_then(|v| v.as_str()).unwrap_or("");
             let dob = args.get("dob").and_then(|v| v.as_str()).unwrap_or("");
@@ -454,9 +466,15 @@ fn execute_tool(name: &str, args: &Value) -> Value {
                 "Identity confirmed".to_string()
             } else {
                 let mut mismatches = Vec::new();
-                if !name_match { mismatches.push("name"); }
-                if !dob_match { mismatches.push("date of birth"); }
-                if !ssn_match { mismatches.push("SSN last 4"); }
+                if !name_match {
+                    mismatches.push("name");
+                }
+                if !dob_match {
+                    mismatches.push("date of birth");
+                }
+                if !ssn_match {
+                    mismatches.push("SSN last 4");
+                }
                 format!("Mismatch: {}", mismatches.join(", "))
             };
 
@@ -479,7 +497,10 @@ fn execute_tool(name: &str, args: &Value) -> Value {
         }
         "process_payment" => {
             let amount = args.get("amount").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            let method = args.get("method").and_then(|v| v.as_str()).unwrap_or("unknown");
+            let method = args
+                .get("method")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
 
             json!({
                 "confirmation_id": format!("PAY-{:06}", (amount * 1000.0) as u64 % 999999),
@@ -490,7 +511,10 @@ fn execute_tool(name: &str, args: &Value) -> Value {
             })
         }
         "log_compliance_event" => {
-            let event_type = args.get("event_type").and_then(|v| v.as_str()).unwrap_or("unknown");
+            let event_type = args
+                .get("event_type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
             let details = args.get("details").and_then(|v| v.as_str()).unwrap_or("");
             info!("Compliance event: {event_type} — {details}");
             json!({"logged": true, "event_id": format!("EVT-{event_type}")})
@@ -506,13 +530,21 @@ fn execute_tool(name: &str, args: &Value) -> Value {
 fn redact_pii(value: &Value) -> Value {
     let mut redacted = value.clone();
     if let Some(obj) = redacted.as_object_mut() {
-        if let Some(ssn) = obj.get("ssn").and_then(|v| v.as_str()).map(|s| s.to_string()) {
+        if let Some(ssn) = obj
+            .get("ssn")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+        {
             if ssn.len() >= 4 {
                 let last4 = &ssn[ssn.len() - 4..];
                 obj.insert("ssn".into(), json!(format!("***-**-{last4}")));
             }
         }
-        if let Some(acct) = obj.get("account_id").and_then(|v| v.as_str()).map(|s| s.to_string()) {
+        if let Some(acct) = obj
+            .get("account_id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+        {
             if acct.len() >= 4 {
                 let last4 = &acct[acct.len() - 4..];
                 obj.insert("account_id".into(), json!(format!("****{last4}")));
@@ -1282,7 +1314,9 @@ impl CookbookApp for DebtCollection {
                 // Merge app-specific stats
                 if let Some(obj) = stats.as_object_mut() {
                     let phase: String = telem_state.get("session:phase").unwrap_or_default();
-                    let risk: String = telem_state.get("derived:call_risk_level").unwrap_or_else(|| "low".to_string());
+                    let risk: String = telem_state
+                        .get("derived:call_risk_level")
+                        .unwrap_or_else(|| "low".to_string());
                     let tc: u32 = telem_state.session().get("turn_count").unwrap_or(0);
                     obj.insert("current_phase".into(), json!(phase));
                     obj.insert("risk_level".into(), json!(risk));
@@ -1312,21 +1346,19 @@ impl CookbookApp for DebtCollection {
         let b64 = base64::engine::general_purpose::STANDARD;
         while let Some(msg) = rx.recv().await {
             match msg {
-                ClientMessage::Audio { data } => {
-                    match b64.decode(&data) {
-                        Ok(pcm_bytes) => {
-                            if let Err(e) = handle.send_audio(pcm_bytes).await {
-                                warn!("Failed to send audio: {e}");
-                                let _ = tx.send(ServerMessage::Error {
-                                    message: e.to_string(),
-                                });
-                            }
-                        }
-                        Err(e) => {
-                            warn!("Failed to decode base64 audio: {e}");
+                ClientMessage::Audio { data } => match b64.decode(&data) {
+                    Ok(pcm_bytes) => {
+                        if let Err(e) = handle.send_audio(pcm_bytes).await {
+                            warn!("Failed to send audio: {e}");
+                            let _ = tx.send(ServerMessage::Error {
+                                message: e.to_string(),
+                            });
                         }
                     }
-                }
+                    Err(e) => {
+                        warn!("Failed to decode base64 audio: {e}");
+                    }
+                },
                 ClientMessage::Text { text } => {
                     if let Err(e) = handle.send_text(&text).await {
                         warn!("Failed to send text: {e}");
@@ -1396,7 +1428,10 @@ mod tests {
             &json!({"account_id": "78234561", "amount": 708.33, "method": "bank_transfer"}),
         );
         assert_eq!(result["status"], "processed");
-        assert!(result["confirmation_id"].as_str().unwrap().starts_with("PAY-"));
+        assert!(result["confirmation_id"]
+            .as_str()
+            .unwrap()
+            .starts_with("PAY-"));
     }
 
     #[test]

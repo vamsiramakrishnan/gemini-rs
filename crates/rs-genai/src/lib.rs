@@ -14,61 +14,64 @@
 //! - **Flow**: Barge-in detection and turn detection (`flow/`)
 //! - **Telemetry**: OTel spans, structured logging, Prometheus metrics (`telemetry/`)
 
-pub mod protocol;
-pub mod transport;
+#[cfg(feature = "batches")]
+pub mod batches;
 pub mod buffer;
-#[cfg(feature = "vad")]
-pub mod vad;
-pub mod session;
-pub mod flow;
-pub mod telemetry;
-pub mod quick;
+#[cfg(feature = "caches")]
+pub mod caches;
+#[cfg(feature = "chats")]
+pub mod chats;
 pub mod client;
-#[cfg(feature = "generate")]
-pub mod generate;
-#[cfg(feature = "tokens")]
-pub mod tokens;
-#[cfg(feature = "models")]
-pub mod models;
 #[cfg(feature = "embed")]
 pub mod embed;
 #[cfg(feature = "files")]
 pub mod files;
-#[cfg(feature = "caches")]
-pub mod caches;
+pub mod flow;
+#[cfg(feature = "generate")]
+pub mod generate;
+#[cfg(feature = "models")]
+pub mod models;
+pub mod protocol;
+pub mod quick;
+pub mod session;
+pub mod telemetry;
+#[cfg(feature = "tokens")]
+pub mod tokens;
+pub mod transport;
 #[cfg(feature = "tunings")]
 pub mod tunings;
-#[cfg(feature = "batches")]
-pub mod batches;
-#[cfg(feature = "chats")]
-pub mod chats;
+#[cfg(feature = "vad")]
+pub mod vad;
 
 // Top-level re-exports for convenience.
-pub use quick::{quick_connect, quick_connect_vertex};
 pub use client::Client;
+pub use quick::{quick_connect, quick_connect_vertex};
 
 /// Convenient re-exports for wire-level usage.
 pub mod prelude {
     // Protocol types
-    pub use crate::protocol::types::*;
     pub use crate::protocol::messages::*;
+    pub use crate::protocol::types::*;
     pub use crate::protocol::Platform;
 
     // Transport
-    pub use crate::transport::{connect, connect_with, Codec, CodecError, ConnectBuilder, JsonCodec, TransportConfig};
-    pub use crate::transport::auth::{AuthProvider, GoogleAIAuth, GoogleAITokenAuth, ServiceEndpoint, VertexAIAuth};
-    pub use crate::transport::ws::{Transport, TungsteniteTransport, MockTransport};
+    pub use crate::transport::auth::{
+        AuthProvider, GoogleAIAuth, GoogleAITokenAuth, ServiceEndpoint, VertexAIAuth,
+    };
+    pub use crate::transport::ws::{MockTransport, Transport, TungsteniteTransport};
+    pub use crate::transport::{
+        connect, connect_with, Codec, CodecError, ConnectBuilder, JsonCodec, TransportConfig,
+    };
 
     // Session
     pub use crate::session::{
         recv_event, AuthError, ResumeInfo, SessionCommand, SessionError, SessionEvent,
-        SessionHandle, SessionPhase, SessionReader, SessionWriter, SetupError,
-        WebSocketError,
+        SessionHandle, SessionPhase, SessionReader, SessionWriter, SetupError, WebSocketError,
     };
 
     // Buffers
-    pub use crate::buffer::{AudioJitterBuffer, JitterConfig, SpscRing};
     pub use crate::buffer::{bytes_to_i16, i16_to_bytes, into_shared};
+    pub use crate::buffer::{AudioJitterBuffer, JitterConfig, SpscRing};
 
     // VAD
     #[cfg(feature = "vad")]
@@ -76,8 +79,8 @@ pub mod prelude {
 
     // Flow
     pub use crate::flow::{
-        BargeInAction, BargeInConfig, BargeInDetector,
-        TurnDetectionConfig, TurnDetectionEvent, TurnDetector,
+        BargeInAction, BargeInConfig, BargeInDetector, TurnDetectionConfig, TurnDetectionEvent,
+        TurnDetector,
     };
 
     // Telemetry
@@ -85,14 +88,14 @@ pub mod prelude {
 
     // Safety types (shared across all APIs)
     pub use crate::protocol::types::{
-        CitationMetadata, CitationSource, FileData, FinishReason, HarmBlockThreshold,
-        HarmCategory, HarmProbability, SafetyRating, SafetySetting,
+        CitationMetadata, CitationSource, FileData, FinishReason, HarmBlockThreshold, HarmCategory,
+        HarmProbability, SafetyRating, SafetySetting,
     };
 
     // Client
-    pub use crate::client::Client;
     #[cfg(feature = "http")]
     pub use crate::client::http::{HttpClient, HttpConfig, HttpError};
+    pub use crate::client::Client;
 
     // Generate API
     #[cfg(feature = "generate")]

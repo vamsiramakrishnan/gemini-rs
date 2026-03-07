@@ -41,9 +41,8 @@ use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message;
 
-type WsStream = tokio_tungstenite::WebSocketStream<
-    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
->;
+type WsStream =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
 /// WebSocket transport using `tokio-tungstenite`.
 pub struct TungsteniteTransport {
@@ -97,16 +96,18 @@ impl Transport for TungsteniteTransport {
             .map_err(|e| TungsteniteError::Request(e.to_string()))?;
 
         for (name, value) in headers {
-            let header_name: tokio_tungstenite::tungstenite::http::HeaderName = name
-                .parse()
-                .map_err(|e: tokio_tungstenite::tungstenite::http::header::InvalidHeaderName| {
-                    TungsteniteError::Request(format!("invalid header name: {e}"))
-                })?;
-            let header_value: tokio_tungstenite::tungstenite::http::HeaderValue = value
-                .parse()
-                .map_err(|e: tokio_tungstenite::tungstenite::http::header::InvalidHeaderValue| {
-                    TungsteniteError::Request(format!("invalid header value: {e}"))
-                })?;
+            let header_name: tokio_tungstenite::tungstenite::http::HeaderName =
+                name.parse().map_err(
+                    |e: tokio_tungstenite::tungstenite::http::header::InvalidHeaderName| {
+                        TungsteniteError::Request(format!("invalid header name: {e}"))
+                    },
+                )?;
+            let header_value: tokio_tungstenite::tungstenite::http::HeaderValue =
+                value.parse().map_err(
+                    |e: tokio_tungstenite::tungstenite::http::header::InvalidHeaderValue| {
+                        TungsteniteError::Request(format!("invalid header value: {e}"))
+                    },
+                )?;
             request.headers_mut().insert(header_name, header_value);
         }
 
@@ -118,7 +119,10 @@ impl Transport for TungsteniteTransport {
     }
 
     async fn send(&mut self, data: Vec<u8>) -> Result<(), Self::Error> {
-        let ws_write = self.ws_write.as_mut().ok_or(TungsteniteError::NotConnected)?;
+        let ws_write = self
+            .ws_write
+            .as_mut()
+            .ok_or(TungsteniteError::NotConnected)?;
         // Convert bytes to a UTF-8 text frame. The wire protocol sends JSON as text.
         let text = String::from_utf8(data)
             .map_err(|e| TungsteniteError::Request(format!("invalid UTF-8: {e}")))?;
@@ -127,7 +131,10 @@ impl Transport for TungsteniteTransport {
     }
 
     async fn recv(&mut self) -> Result<Option<Vec<u8>>, Self::Error> {
-        let ws_read = self.ws_read.as_mut().ok_or(TungsteniteError::NotConnected)?;
+        let ws_read = self
+            .ws_read
+            .as_mut()
+            .ok_or(TungsteniteError::NotConnected)?;
         loop {
             match ws_read.next().await {
                 Some(Ok(Message::Text(t))) => return Ok(Some(t.into_bytes())),
@@ -302,11 +309,8 @@ mod tests {
             .await
             .unwrap();
         // recv() should pend when queue is empty (simulating idle transport)
-        let result = tokio::time::timeout(
-            std::time::Duration::from_millis(50),
-            transport.recv(),
-        )
-        .await;
+        let result =
+            tokio::time::timeout(std::time::Duration::from_millis(50), transport.recv()).await;
         assert!(result.is_err(), "recv should pend when queue is empty");
     }
 

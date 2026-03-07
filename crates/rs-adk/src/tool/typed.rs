@@ -43,8 +43,11 @@ pub struct TypedTool<T: DeserializeOwned + JsonSchema + Send + Sync + 'static> {
     schema: serde_json::Value,
     #[allow(clippy::type_complexity)]
     handler: Box<
-        dyn Fn(T) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<serde_json::Value, ToolError>> + Send>>
-            + Send
+        dyn Fn(
+                T,
+            ) -> std::pin::Pin<
+                Box<dyn std::future::Future<Output = Result<serde_json::Value, ToolError>> + Send>,
+            > + Send
             + Sync,
     >,
     _phantom: PhantomData<T>,
@@ -55,18 +58,14 @@ impl<T: DeserializeOwned + JsonSchema + Send + Sync + 'static> TypedTool<T> {
     ///
     /// The JSON Schema is derived from `T`'s [`JsonSchema`] implementation,
     /// including any doc-comment descriptions on fields.
-    pub fn new<F, Fut>(
-        name: impl Into<String>,
-        description: impl Into<String>,
-        handler: F,
-    ) -> Self
+    pub fn new<F, Fut>(name: impl Into<String>, description: impl Into<String>, handler: F) -> Self
     where
         F: Fn(T) -> Fut + Send + Sync + 'static,
         Fut: std::future::Future<Output = Result<serde_json::Value, ToolError>> + Send + 'static,
     {
         let root_schema = schemars::schema_for!(T);
-        let schema = serde_json::to_value(root_schema)
-            .expect("schemars schema should serialize to JSON");
+        let schema =
+            serde_json::to_value(root_schema).expect("schemars schema should serialize to JSON");
 
         Self {
             name: name.into(),
@@ -93,9 +92,8 @@ impl<T: DeserializeOwned + JsonSchema + Send + Sync + 'static> ToolFunction for 
     }
 
     async fn call(&self, args: serde_json::Value) -> Result<serde_json::Value, ToolError> {
-        let typed_args: T = serde_json::from_value(args).map_err(|e| {
-            ToolError::InvalidArgs(format!("Failed to deserialize arguments: {e}"))
-        })?;
+        let typed_args: T = serde_json::from_value(args)
+            .map_err(|e| ToolError::InvalidArgs(format!("Failed to deserialize arguments: {e}")))?;
         (self.handler)(typed_args).await
     }
 }

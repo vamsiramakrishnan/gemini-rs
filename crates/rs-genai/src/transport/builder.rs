@@ -73,7 +73,13 @@ impl<T: Transport, C: Codec> ConnectBuilder<T, C> {
 
     /// Build the connection and return a SessionHandle.
     pub async fn build(self) -> Result<SessionHandle, SessionError> {
-        connect_with(self.config, self.transport_config, self.transport, self.codec).await
+        connect_with(
+            self.config,
+            self.transport_config,
+            self.transport,
+            self.codec,
+        )
+        .await
     }
 }
 

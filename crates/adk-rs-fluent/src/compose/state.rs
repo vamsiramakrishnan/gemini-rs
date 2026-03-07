@@ -12,10 +12,7 @@ pub struct StateTransform {
 }
 
 impl StateTransform {
-    fn new(
-        name: &'static str,
-        f: impl Fn(&mut serde_json::Value) + Send + Sync + 'static,
-    ) -> Self {
+    fn new(name: &'static str, f: impl Fn(&mut serde_json::Value) + Send + Sync + 'static) -> Self {
         Self {
             name,
             transform: Arc::new(f),
@@ -196,7 +193,10 @@ impl S {
     /// ```ignore
     /// .transition("tech:greet", S::eq("issue_type", "technical"))
     /// ```
-    pub fn eq(key: &str, expected: &str) -> impl Fn(&rs_adk::State) -> bool + Send + Sync + 'static {
+    pub fn eq(
+        key: &str,
+        expected: &str,
+    ) -> impl Fn(&rs_adk::State) -> bool + Send + Sync + 'static {
         let key = key.to_string();
         let expected = expected.to_string();
         move |s: &rs_adk::State| {
@@ -217,10 +217,7 @@ impl S {
     ) -> impl Fn(&rs_adk::State) -> bool + Send + Sync + 'static {
         let key = key.to_string();
         let values: Vec<String> = values.iter().map(|v| v.to_string()).collect();
-        move |s: &rs_adk::State| {
-            s.get::<String>(&key)
-                .is_some_and(|v| values.contains(&v))
-        }
+        move |s: &rs_adk::State| s.get::<String>(&key).is_some_and(|v| values.contains(&v))
     }
 
     /// Drop the specified keys.

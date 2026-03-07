@@ -205,8 +205,8 @@ mod tests {
             args: vec![],
             timeout: None,
         }));
-        let toolset = McpToolset::new(manager)
-            .with_filter(vec!["tool_a".to_string(), "tool_b".to_string()]);
+        let toolset =
+            McpToolset::new(manager).with_filter(vec!["tool_a".to_string(), "tool_b".to_string()]);
 
         let filter = toolset.filter().unwrap();
         assert_eq!(filter.len(), 2);

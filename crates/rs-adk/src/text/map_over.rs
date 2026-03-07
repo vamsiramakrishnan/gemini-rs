@@ -53,9 +53,7 @@ impl TextAgent for MapOverTextAgent {
     }
 
     async fn run(&self, state: &State) -> Result<String, AgentError> {
-        let items: Vec<serde_json::Value> = state
-            .get(&self.list_key)
-            .unwrap_or_default();
+        let items: Vec<serde_json::Value> = state.get(&self.list_key).unwrap_or_default();
 
         let mut results = Vec::with_capacity(items.len());
 

@@ -59,7 +59,10 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
-async fn init_telemetry() -> (rs_genai::telemetry::TelemetryGuard, broadcast::Sender<ServerMessage>) {
+async fn init_telemetry() -> (
+    rs_genai::telemetry::TelemetryGuard,
+    broadcast::Sender<ServerMessage>,
+) {
     use tracing_subscriber::prelude::*;
     use tracing_subscriber::EnvFilter;
 
@@ -76,8 +79,7 @@ async fn init_telemetry() -> (rs_genai::telemetry::TelemetryGuard, broadcast::Se
         .with(fmt_layer)
         .with(ws_layer);
 
-    tracing::subscriber::set_global_default(subscriber)
-        .expect("Failed to set tracing subscriber");
+    tracing::subscriber::set_global_default(subscriber).expect("Failed to set tracing subscriber");
 
     // Return a default guard (OTel providers are not set up in this path
     // since we built the subscriber ourselves; enable otel features separately
@@ -106,10 +108,7 @@ async fn landing_page() -> impl IntoResponse {
     Html(include_str!("../static/index.html"))
 }
 
-async fn app_page(
-    Path(name): Path<String>,
-    State(state): State<AppState>,
-) -> impl IntoResponse {
+async fn app_page(Path(name): Path<String>, State(state): State<AppState>) -> impl IntoResponse {
     if state.registry.get(&name).is_some() {
         Html(include_str!("../static/app.html")).into_response()
     } else {

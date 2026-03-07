@@ -24,7 +24,9 @@ impl BuiltInCodeExecutor {
                 model
             )));
         }
-        request.tools.push(rs_genai::prelude::Tool::code_execution());
+        request
+            .tools
+            .push(rs_genai::prelude::Tool::code_execution());
         Ok(())
     }
 }

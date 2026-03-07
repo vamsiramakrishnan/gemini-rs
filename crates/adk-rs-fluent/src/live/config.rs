@@ -160,7 +160,10 @@ impl Live {
     pub fn tool_background(mut self, tool_name: impl Into<String>) -> Self {
         self.tool_execution_modes.insert(
             tool_name.into(),
-            ToolExecutionMode::Background { formatter: None, scheduling: None },
+            ToolExecutionMode::Background {
+                formatter: None,
+                scheduling: None,
+            },
         );
         self
     }
@@ -268,7 +271,8 @@ impl Live {
 
     /// Enable context window compression.
     pub fn context_compression(mut self, trigger_tokens: u32, target_tokens: u32) -> Self {
-        self.config = self.config
+        self.config = self
+            .config
             .context_window_compression(target_tokens)
             .context_window_trigger_tokens(trigger_tokens);
         self

@@ -13,8 +13,11 @@ pub struct SimpleTool {
     parameters: Option<serde_json::Value>,
     #[allow(clippy::type_complexity)]
     handler: Box<
-        dyn Fn(serde_json::Value) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<serde_json::Value, ToolError>> + Send>>
-            + Send
+        dyn Fn(
+                serde_json::Value,
+            ) -> std::pin::Pin<
+                Box<dyn std::future::Future<Output = Result<serde_json::Value, ToolError>> + Send>,
+            > + Send
             + Sync,
     >,
 }

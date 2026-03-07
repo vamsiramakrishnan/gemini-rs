@@ -37,11 +37,7 @@ impl Client {
         &self,
         text: impl Into<String>,
     ) -> Result<CountTokensResponse, TokensError> {
-        self.count_tokens_for(
-            vec![Content::user(text)],
-            None,
-        )
-        .await
+        self.count_tokens_for(vec![Content::user(text)], None).await
     }
 
     /// Count tokens for content with optional model override.

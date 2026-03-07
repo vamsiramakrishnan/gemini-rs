@@ -94,13 +94,16 @@ async fn main() {
     let auth = if use_vertex {
         let project = std::env::var("GOOGLE_CLOUD_PROJECT")
             .expect("GOOGLE_CLOUD_PROJECT required for Vertex AI");
-        let location = std::env::var("GOOGLE_CLOUD_LOCATION")
-            .unwrap_or_else(|_| "us-central1".to_string());
-        info!("Using Vertex AI (project: {}, location: {})", project, location);
+        let location =
+            std::env::var("GOOGLE_CLOUD_LOCATION").unwrap_or_else(|_| "us-central1".to_string());
+        info!(
+            "Using Vertex AI (project: {}, location: {})",
+            project, location
+        );
         AuthConfig::VertexAI { project, location }
     } else {
-        let api_key = std::env::var("GEMINI_API_KEY")
-            .expect("Set GEMINI_API_KEY or enable Vertex AI");
+        let api_key =
+            std::env::var("GEMINI_API_KEY").expect("Set GEMINI_API_KEY or enable Vertex AI");
         info!("Using Google AI Studio");
         AuthConfig::GoogleAI { api_key }
     };
@@ -156,9 +159,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                         info!("Starting text-only session");
 
                         let base_config = match &state.auth {
-                            AuthConfig::GoogleAI { api_key } => {
-                                SessionConfig::new(api_key)
-                            }
+                            AuthConfig::GoogleAI { api_key } => SessionConfig::new(api_key),
                             AuthConfig::VertexAI { project, location } => {
                                 let token = String::from_utf8(
                                     std::process::Command::new("gcloud")
@@ -236,12 +237,10 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                                                     .await;
                                             }
                                             SessionEvent::TurnComplete => {
-                                                let _ =
-                                                    tx.send(ServerMessage::TurnComplete).await;
+                                                let _ = tx.send(ServerMessage::TurnComplete).await;
                                             }
                                             SessionEvent::Interrupted => {
-                                                let _ =
-                                                    tx.send(ServerMessage::Interrupted).await;
+                                                let _ = tx.send(ServerMessage::Interrupted).await;
                                             }
                                             SessionEvent::Error(e) => {
                                                 error!("Session error: {}", e);

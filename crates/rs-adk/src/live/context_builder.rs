@@ -293,12 +293,9 @@ impl ContextBuilder {
 
     /// Convert into an [`super::InstructionModifier`] for use with phase modifiers.
     pub fn into_modifier(self) -> super::InstructionModifier {
-        super::InstructionModifier::CustomAppend(Arc::new(move |state: &State| {
-            self.render(state)
-        }))
+        super::InstructionModifier::CustomAppend(Arc::new(move |state: &State| self.render(state)))
     }
 }
-
 
 // ── Compose with + ─────────────────────────────────────────────────────────
 
@@ -466,15 +463,9 @@ mod tests {
 
     #[test]
     fn compose_with_add() {
-        let a = ContextBuilder::new()
-            .section("A")
-            .field("x", "X")
-            .build();
+        let a = ContextBuilder::new().section("A").field("x", "X").build();
 
-        let b = ContextBuilder::new()
-            .section("B")
-            .field("y", "Y")
-            .build();
+        let b = ContextBuilder::new().section("B").field("y", "Y").build();
 
         let combined = a + b;
 

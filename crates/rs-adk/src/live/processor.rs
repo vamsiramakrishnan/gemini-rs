@@ -317,7 +317,9 @@ async fn route_event(
             let _ = ctrl_tx.send(ControlEvent::InputTranscript(text)).await;
         }
         SessionEvent::OutputTranscription(text) => {
-            let _ = fast_tx.send(FastEvent::OutputTranscript(text.clone())).await;
+            let _ = fast_tx
+                .send(FastEvent::OutputTranscript(text.clone()))
+                .await;
             let _ = ctrl_tx.send(ControlEvent::OutputTranscript(text)).await;
         }
         SessionEvent::VoiceActivityStart => {
@@ -452,11 +454,23 @@ mod tests {
         let (event_tx, _) = broadcast::channel(16);
         let event_rx = event_tx.subscribe();
 
-        let writer: Arc<dyn SessionWriter> =
-            Arc::new(crate::agent_session::NoOpSessionWriter);
+        let writer: Arc<dyn SessionWriter> = Arc::new(crate::agent_session::NoOpSessionWriter);
 
-        let (fast_handle, ctrl_handle) =
-            spawn_event_processor(event_rx, callbacks, None, writer, vec![], State::new(), None, None, None, None, None, std::collections::HashMap::new(), ControlPlaneConfig::default());
+        let (fast_handle, ctrl_handle) = spawn_event_processor(
+            event_rx,
+            callbacks,
+            None,
+            writer,
+            vec![],
+            State::new(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            std::collections::HashMap::new(),
+            ControlPlaneConfig::default(),
+        );
 
         // Send audio events
         let _ = event_tx.send(SessionEvent::AudioData(Bytes::from_static(b"audio1")));
@@ -487,11 +501,23 @@ mod tests {
         let (event_tx, _) = broadcast::channel(16);
         let event_rx = event_tx.subscribe();
 
-        let writer: Arc<dyn SessionWriter> =
-            Arc::new(crate::agent_session::NoOpSessionWriter);
+        let writer: Arc<dyn SessionWriter> = Arc::new(crate::agent_session::NoOpSessionWriter);
 
-        let (fast_handle, ctrl_handle) =
-            spawn_event_processor(event_rx, callbacks, None, writer, vec![], State::new(), None, None, None, None, None, std::collections::HashMap::new(), ControlPlaneConfig::default());
+        let (fast_handle, ctrl_handle) = spawn_event_processor(
+            event_rx,
+            callbacks,
+            None,
+            writer,
+            vec![],
+            State::new(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            std::collections::HashMap::new(),
+            ControlPlaneConfig::default(),
+        );
 
         // Send audio, then interrupt, then more audio
         let _ = event_tx.send(SessionEvent::AudioData(Bytes::from_static(b"before")));
@@ -526,11 +552,23 @@ mod tests {
         let (event_tx, _) = broadcast::channel(16);
         let event_rx = event_tx.subscribe();
 
-        let writer: Arc<dyn SessionWriter> =
-            Arc::new(crate::agent_session::NoOpSessionWriter);
+        let writer: Arc<dyn SessionWriter> = Arc::new(crate::agent_session::NoOpSessionWriter);
 
-        let (fast_handle, ctrl_handle) =
-            spawn_event_processor(event_rx, callbacks, None, writer, vec![], State::new(), None, None, None, None, None, std::collections::HashMap::new(), ControlPlaneConfig::default());
+        let (fast_handle, ctrl_handle) = spawn_event_processor(
+            event_rx,
+            callbacks,
+            None,
+            writer,
+            vec![],
+            State::new(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            std::collections::HashMap::new(),
+            ControlPlaneConfig::default(),
+        );
 
         let _ = event_tx.send(SessionEvent::TurnComplete);
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -549,8 +587,7 @@ mod tests {
         let (event_tx, _) = broadcast::channel(16);
         let event_rx = event_tx.subscribe();
 
-        let writer: Arc<dyn SessionWriter> =
-            Arc::new(crate::agent_session::NoOpSessionWriter);
+        let writer: Arc<dyn SessionWriter> = Arc::new(crate::agent_session::NoOpSessionWriter);
 
         let state = State::new();
         let (fast_handle, ctrl_handle) = spawn_event_processor(
@@ -590,9 +627,9 @@ mod tests {
 
     #[tokio::test]
     async fn extractor_runs_on_turn_complete() {
-        use crate::llm::LlmError;
         use crate::live::extractor::TurnExtractor;
         use crate::live::transcript::TranscriptTurn;
+        use crate::llm::LlmError;
 
         struct FixedExtractor;
 
@@ -617,8 +654,7 @@ mod tests {
         let (event_tx, _) = broadcast::channel(16);
         let event_rx = event_tx.subscribe();
 
-        let writer: Arc<dyn SessionWriter> =
-            Arc::new(crate::agent_session::NoOpSessionWriter);
+        let writer: Arc<dyn SessionWriter> = Arc::new(crate::agent_session::NoOpSessionWriter);
 
         let state = State::new();
 
@@ -666,13 +702,8 @@ mod tests {
         let signals = SessionSignals::new(State::new());
         let cancel = CancellationToken::new();
 
-        let telem_handle = spawn_telemetry_lane(
-            telem_rx,
-            signals,
-            telemetry.clone(),
-            cancel.clone(),
-            None,
-        );
+        let telem_handle =
+            spawn_telemetry_lane(telem_rx, signals, telemetry.clone(), cancel.clone(), None);
 
         // Send events
         let _ = event_tx.send(SessionEvent::AudioData(Bytes::from_static(b"chunk1")));
@@ -692,8 +723,8 @@ mod tests {
 
     #[tokio::test]
     async fn background_tool_sends_ack_immediately() {
-        use crate::tool::{ToolDispatcher, SimpleTool};
         use crate::live::background_tool::{BackgroundToolTracker, ToolExecutionMode};
+        use crate::tool::{SimpleTool, ToolDispatcher};
 
         // Create a slow tool
         let tool = SimpleTool::new(
@@ -712,7 +743,10 @@ mod tests {
         let mut execution_modes = std::collections::HashMap::new();
         execution_modes.insert(
             "slow_search".to_string(),
-            ToolExecutionMode::Background { formatter: None, scheduling: None },
+            ToolExecutionMode::Background {
+                formatter: None,
+                scheduling: None,
+            },
         );
 
         let sent = Arc::new(parking_lot::Mutex::new(Vec::<Vec<FunctionResponse>>::new()));
@@ -725,18 +759,53 @@ mod tests {
 
         #[async_trait::async_trait]
         impl SessionWriter for RecordingWriter {
-            async fn send_audio(&self, _data: Vec<u8>) -> Result<(), rs_genai::session::SessionError> { Ok(()) }
-            async fn send_text(&self, _text: String) -> Result<(), rs_genai::session::SessionError> { Ok(()) }
-            async fn send_video(&self, _data: Vec<u8>) -> Result<(), rs_genai::session::SessionError> { Ok(()) }
-            async fn send_tool_response(&self, responses: Vec<FunctionResponse>) -> Result<(), rs_genai::session::SessionError> {
+            async fn send_audio(
+                &self,
+                _data: Vec<u8>,
+            ) -> Result<(), rs_genai::session::SessionError> {
+                Ok(())
+            }
+            async fn send_text(
+                &self,
+                _text: String,
+            ) -> Result<(), rs_genai::session::SessionError> {
+                Ok(())
+            }
+            async fn send_video(
+                &self,
+                _data: Vec<u8>,
+            ) -> Result<(), rs_genai::session::SessionError> {
+                Ok(())
+            }
+            async fn send_tool_response(
+                &self,
+                responses: Vec<FunctionResponse>,
+            ) -> Result<(), rs_genai::session::SessionError> {
                 self.sent.lock().push(responses);
                 Ok(())
             }
-            async fn update_instruction(&self, _instruction: String) -> Result<(), rs_genai::session::SessionError> { Ok(()) }
-            async fn send_client_content(&self, _content: Vec<rs_genai::prelude::Content>, _turn_complete: bool) -> Result<(), rs_genai::session::SessionError> { Ok(()) }
-            async fn signal_activity_start(&self) -> Result<(), rs_genai::session::SessionError> { Ok(()) }
-            async fn signal_activity_end(&self) -> Result<(), rs_genai::session::SessionError> { Ok(()) }
-            async fn disconnect(&self) -> Result<(), rs_genai::session::SessionError> { Ok(()) }
+            async fn update_instruction(
+                &self,
+                _instruction: String,
+            ) -> Result<(), rs_genai::session::SessionError> {
+                Ok(())
+            }
+            async fn send_client_content(
+                &self,
+                _content: Vec<rs_genai::prelude::Content>,
+                _turn_complete: bool,
+            ) -> Result<(), rs_genai::session::SessionError> {
+                Ok(())
+            }
+            async fn signal_activity_start(&self) -> Result<(), rs_genai::session::SessionError> {
+                Ok(())
+            }
+            async fn signal_activity_end(&self) -> Result<(), rs_genai::session::SessionError> {
+                Ok(())
+            }
+            async fn disconnect(&self) -> Result<(), rs_genai::session::SessionError> {
+                Ok(())
+            }
         }
 
         let writer: Arc<dyn SessionWriter> = Arc::new(RecordingWriter { sent: sent_clone });
@@ -763,11 +832,13 @@ mod tests {
         );
 
         // Send a tool call
-        let _ = event_tx.send(SessionEvent::ToolCall(vec![rs_genai::prelude::FunctionCall {
-            name: "slow_search".to_string(),
-            args: serde_json::json!({"q": "test"}),
-            id: Some("fc_1".to_string()),
-        }]));
+        let _ = event_tx.send(SessionEvent::ToolCall(vec![
+            rs_genai::prelude::FunctionCall {
+                name: "slow_search".to_string(),
+                args: serde_json::json!({"q": "test"}),
+                id: Some("fc_1".to_string()),
+            },
+        ]));
 
         // Wait just enough for the ack (but not the full tool)
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -784,7 +855,10 @@ mod tests {
 
         let responses = sent.lock();
         // Second batch should be the completed result
-        assert!(responses.len() >= 2, "Should have sent result after completion");
+        assert!(
+            responses.len() >= 2,
+            "Should have sent result after completion"
+        );
         assert_eq!(responses[1][0].response["status"], "completed");
 
         drop(event_tx);
@@ -794,8 +868,8 @@ mod tests {
 
     #[tokio::test]
     async fn callback_mode_blocking_awaits_inline() {
-        use std::sync::atomic::AtomicU32;
         use crate::live::callbacks::CallbackMode;
+        use std::sync::atomic::AtomicU32;
 
         let order = Arc::new(AtomicU32::new(0));
         let order_clone = order.clone();
@@ -816,12 +890,21 @@ mod tests {
         let (event_tx, _) = broadcast::channel(16);
         let event_rx = event_tx.subscribe();
 
-        let writer: Arc<dyn SessionWriter> =
-            Arc::new(crate::agent_session::NoOpSessionWriter);
+        let writer: Arc<dyn SessionWriter> = Arc::new(crate::agent_session::NoOpSessionWriter);
 
         let (fast_handle, ctrl_handle) = spawn_event_processor(
-            event_rx, callbacks, None, writer, vec![], State::new(),
-            None, None, None, None, None, std::collections::HashMap::new(),
+            event_rx,
+            callbacks,
+            None,
+            writer,
+            vec![],
+            State::new(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            std::collections::HashMap::new(),
             ControlPlaneConfig::default(),
         );
 
@@ -857,12 +940,21 @@ mod tests {
         let (event_tx, _) = broadcast::channel(16);
         let event_rx = event_tx.subscribe();
 
-        let writer: Arc<dyn SessionWriter> =
-            Arc::new(crate::agent_session::NoOpSessionWriter);
+        let writer: Arc<dyn SessionWriter> = Arc::new(crate::agent_session::NoOpSessionWriter);
 
         let (fast_handle, ctrl_handle) = spawn_event_processor(
-            event_rx, callbacks, None, writer, vec![], State::new(),
-            None, None, None, None, None, std::collections::HashMap::new(),
+            event_rx,
+            callbacks,
+            None,
+            writer,
+            vec![],
+            State::new(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            std::collections::HashMap::new(),
             ControlPlaneConfig::default(),
         );
 

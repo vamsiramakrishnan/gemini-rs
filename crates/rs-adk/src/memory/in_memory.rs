@@ -31,23 +31,13 @@ impl Default for InMemoryMemoryService {
 
 #[async_trait]
 impl MemoryService for InMemoryMemoryService {
-    async fn store(
-        &self,
-        session_id: &str,
-        entry: MemoryEntry,
-    ) -> Result<(), MemoryError> {
-        let session = self.store
-            .entry(session_id.to_string())
-            .or_default();
+    async fn store(&self, session_id: &str, entry: MemoryEntry) -> Result<(), MemoryError> {
+        let session = self.store.entry(session_id.to_string()).or_default();
         session.insert(entry.key.clone(), entry);
         Ok(())
     }
 
-    async fn get(
-        &self,
-        session_id: &str,
-        key: &str,
-    ) -> Result<Option<MemoryEntry>, MemoryError> {
+    async fn get(&self, session_id: &str, key: &str) -> Result<Option<MemoryEntry>, MemoryError> {
         let result = self
             .store
             .get(session_id)
@@ -55,25 +45,16 @@ impl MemoryService for InMemoryMemoryService {
         Ok(result)
     }
 
-    async fn list(
-        &self,
-        session_id: &str,
-    ) -> Result<Vec<MemoryEntry>, MemoryError> {
+    async fn list(&self, session_id: &str) -> Result<Vec<MemoryEntry>, MemoryError> {
         let entries = self
             .store
             .get(session_id)
-            .map(|session| {
-                session.iter().map(|e| e.value().clone()).collect()
-            })
+            .map(|session| session.iter().map(|e| e.value().clone()).collect())
             .unwrap_or_default();
         Ok(entries)
     }
 
-    async fn search(
-        &self,
-        session_id: &str,
-        query: &str,
-    ) -> Result<Vec<MemoryEntry>, MemoryError> {
+    async fn search(&self, session_id: &str, query: &str) -> Result<Vec<MemoryEntry>, MemoryError> {
         let query_lower = query.to_lowercase();
         let entries = self
             .store
@@ -96,11 +77,7 @@ impl MemoryService for InMemoryMemoryService {
         Ok(entries)
     }
 
-    async fn delete(
-        &self,
-        session_id: &str,
-        key: &str,
-    ) -> Result<(), MemoryError> {
+    async fn delete(&self, session_id: &str, key: &str) -> Result<(), MemoryError> {
         if let Some(session) = self.store.get(session_id) {
             session.remove(key);
         }

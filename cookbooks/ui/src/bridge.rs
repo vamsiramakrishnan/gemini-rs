@@ -72,18 +72,26 @@ impl SessionBridge {
                 let _ = tx_audio.send(ServerMessage::Audio { data: encoded });
             })
             .on_text(move |t| {
-                let _ = tx_text.send(ServerMessage::TextDelta { text: t.to_string() });
+                let _ = tx_text.send(ServerMessage::TextDelta {
+                    text: t.to_string(),
+                });
             })
             .on_text_complete(move |t| {
-                let _ = tx_text_complete.send(ServerMessage::TextComplete { text: t.to_string() });
+                let _ = tx_text_complete.send(ServerMessage::TextComplete {
+                    text: t.to_string(),
+                });
             })
             .on_turn_complete(move || {
                 let tx = tx_turn.clone();
-                async move { let _ = tx.send(ServerMessage::TurnComplete); }
+                async move {
+                    let _ = tx.send(ServerMessage::TurnComplete);
+                }
             })
             .on_interrupted(move || {
                 let tx = tx_interrupted.clone();
-                async move { let _ = tx.send(ServerMessage::Interrupted); }
+                async move {
+                    let _ = tx.send(ServerMessage::Interrupted);
+                }
             })
             .on_vad_start(move || {
                 let _ = tx_vad_start.send(ServerMessage::VoiceActivityStart);
@@ -93,17 +101,23 @@ impl SessionBridge {
             })
             .on_error(move |msg| {
                 let tx = tx_error.clone();
-                async move { let _ = tx.send(ServerMessage::Error { message: msg }); }
+                async move {
+                    let _ = tx.send(ServerMessage::Error { message: msg });
+                }
             })
             .on_disconnected(move |_reason| {
                 let _tx = tx_disconnected.clone();
                 async move {}
             })
             .on_input_transcript(move |text, _is_final| {
-                let _ = tx_input.send(ServerMessage::InputTranscription { text: text.to_string() });
+                let _ = tx_input.send(ServerMessage::InputTranscription {
+                    text: text.to_string(),
+                });
             })
             .on_output_transcript(move |text, _is_final| {
-                let _ = tx_output.send(ServerMessage::OutputTranscription { text: text.to_string() });
+                let _ = tx_output.send(ServerMessage::OutputTranscription {
+                    text: text.to_string(),
+                });
             })
     }
 
@@ -123,10 +137,7 @@ impl SessionBridge {
 
                 // Emit per-turn metrics when the turn count advances
                 if let Some(obj) = stats.as_object() {
-                    let turn_count = obj
-                        .get("turn_count")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0);
+                    let turn_count = obj.get("turn_count").and_then(|v| v.as_u64()).unwrap_or(0);
                     if turn_count > prev_turn_count {
                         let latency_ms = obj
                             .get("last_latency_ms")
@@ -179,14 +190,18 @@ impl SessionBridge {
                     if let Ok(pcm_bytes) = b64.decode(&data) {
                         if let Err(e) = handle.send_audio(pcm_bytes).await {
                             warn!("Failed to send audio: {e}");
-                            let _ = self.tx.send(ServerMessage::Error { message: e.to_string() });
+                            let _ = self.tx.send(ServerMessage::Error {
+                                message: e.to_string(),
+                            });
                         }
                     }
                 }
                 ClientMessage::Text { text } => {
                     if let Err(e) = handle.send_text(&text).await {
                         warn!("Failed to send text: {e}");
-                        let _ = self.tx.send(ServerMessage::Error { message: e.to_string() });
+                        let _ = self.tx.send(ServerMessage::Error {
+                            message: e.to_string(),
+                        });
                     }
                 }
                 ClientMessage::Stop => {

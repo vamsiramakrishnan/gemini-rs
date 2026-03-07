@@ -52,7 +52,11 @@ impl PhaseInstruction {
     }
 
     /// Resolve the instruction and apply modifiers, returning the composed instruction.
-    pub fn resolve_with_modifiers(&self, state: &State, modifiers: &[InstructionModifier]) -> String {
+    pub fn resolve_with_modifiers(
+        &self,
+        state: &State,
+        modifiers: &[InstructionModifier],
+    ) -> String {
         let mut instruction = self.resolve(state);
         for modifier in modifiers {
             modifier.apply(&mut instruction, state);
@@ -95,8 +99,12 @@ impl InstructionModifier {
                         .unwrap_or(key);
                     if let Some(val) = state.get::<serde_json::Value>(key) {
                         match val {
-                            serde_json::Value::String(s) => pairs.push(format!("{display_key}={s}")),
-                            serde_json::Value::Number(n) => pairs.push(format!("{display_key}={n}")),
+                            serde_json::Value::String(s) => {
+                                pairs.push(format!("{display_key}={s}"))
+                            }
+                            serde_json::Value::Number(n) => {
+                                pairs.push(format!("{display_key}={n}"))
+                            }
                             serde_json::Value::Bool(b) => pairs.push(format!("{display_key}={b}")),
                             other => pairs.push(format!("{display_key}={other}")),
                         }
@@ -163,10 +171,13 @@ pub struct Phase {
     /// Optional context injection on phase entry.
     /// Returns Content to send as `client_content` (turnComplete: false).
     /// Gives the model conversational continuity across phase transitions.
-    pub on_enter_context: Option<Arc<
-        dyn Fn(&State, &TranscriptWindow) -> Option<Vec<rs_genai::prelude::Content>>
-            + Send + Sync
-    >>,
+    pub on_enter_context: Option<
+        Arc<
+            dyn Fn(&State, &TranscriptWindow) -> Option<Vec<rs_genai::prelude::Content>>
+                + Send
+                + Sync,
+        >,
+    >,
     /// State keys this phase is responsible for gathering.
     ///
     /// Purely informational — does not affect transitions or enforcement.
@@ -290,11 +301,7 @@ impl PhaseMachine {
         // 1. Current phase + goal (first sentence of resolved instruction)
         if let Some(phase) = self.phases.get(&self.current) {
             let resolved = phase.instruction.resolve(state);
-            let goal = resolved
-                .split('.')
-                .next()
-                .unwrap_or(&resolved)
-                .trim();
+            let goal = resolved.split('.').next().unwrap_or(&resolved).trim();
             lines.push(format!("Current phase: {} — {}", self.current, goal));
 
             // 2. Phase history (last 3 entries)
@@ -427,8 +434,11 @@ impl PhaseMachine {
 
         // Build transition result from the new phase.
         let phase = self.phases.get(target)?;
-        let instruction = phase.instruction.resolve_with_modifiers(state, &phase.modifiers);
-        let context = phase.on_enter_context
+        let instruction = phase
+            .instruction
+            .resolve_with_modifiers(state, &phase.modifiers);
+        let context = phase
+            .on_enter_context
             .as_ref()
             .and_then(|f| f(state, transcript_window));
         let prompt_on_enter = phase.prompt_on_enter;
@@ -649,10 +659,17 @@ mod tests {
         machine.add_phase(simple_phase("greeting", "Say hello"));
         machine.add_phase(simple_phase("main", "Main phase instruction"));
 
-        let trigger = TransitionTrigger::Guard { transition_index: 0 };
+        let trigger = TransitionTrigger::Guard {
+            transition_index: 0,
+        };
         let tw = empty_tw();
-        let result = machine.transition("main", &state, &writer, 1, trigger, &tw).await;
-        assert_eq!(result.as_ref().map(|r| r.instruction.as_str()), Some("Main phase instruction"));
+        let result = machine
+            .transition("main", &state, &writer, 1, trigger, &tw)
+            .await;
+        assert_eq!(
+            result.as_ref().map(|r| r.instruction.as_str()),
+            Some("Main phase instruction")
+        );
         assert_eq!(machine.current(), "main");
         assert_eq!(machine.history().len(), 1);
         assert_eq!(machine.history()[0].from, "greeting");
@@ -660,7 +677,9 @@ mod tests {
         assert_eq!(machine.history()[0].turn, 1);
         assert!(matches!(
             machine.history()[0].trigger,
-            TransitionTrigger::Guard { transition_index: 0 }
+            TransitionTrigger::Guard {
+                transition_index: 0
+            }
         ));
     }
 
@@ -782,7 +801,9 @@ mod tests {
 
         let trigger = TransitionTrigger::Programmatic { source: "test" };
         let tw = empty_tw();
-        let result = machine.transition("no_such_phase", &state, &writer, 0, trigger, &tw).await;
+        let result = machine
+            .transition("no_such_phase", &state, &writer, 0, trigger, &tw)
+            .await;
         assert!(result.is_none());
         // Current phase should remain unchanged.
         assert_eq!(machine.current(), "greeting");
@@ -815,7 +836,9 @@ mod tests {
 
         let trigger = TransitionTrigger::Programmatic { source: "test" };
         let tw = empty_tw();
-        machine.transition("main", &state, &writer, 1, trigger, &tw).await;
+        machine
+            .transition("main", &state, &writer, 1, trigger, &tw)
+            .await;
 
         assert_eq!(state.get::<bool>("exited_greeting"), Some(true));
         assert_eq!(state.get::<bool>("entered_main"), Some(true));
@@ -833,11 +856,17 @@ mod tests {
         machine.add_phase(simple_phase("b", "Phase B"));
         machine.add_phase(simple_phase("c", "Phase C"));
 
-        let trigger1 = TransitionTrigger::Guard { transition_index: 0 };
+        let trigger1 = TransitionTrigger::Guard {
+            transition_index: 0,
+        };
         let tw = empty_tw();
-        machine.transition("b", &state, &writer, 1, trigger1, &tw).await;
+        machine
+            .transition("b", &state, &writer, 1, trigger1, &tw)
+            .await;
         let trigger2 = TransitionTrigger::Programmatic { source: "test" };
-        machine.transition("c", &state, &writer, 3, trigger2, &tw).await;
+        machine
+            .transition("c", &state, &writer, 3, trigger2, &tw)
+            .await;
 
         assert_eq!(machine.current(), "c");
         assert_eq!(machine.history().len(), 2);
@@ -846,7 +875,9 @@ mod tests {
         assert_eq!(machine.history()[0].turn, 1);
         assert!(matches!(
             machine.history()[0].trigger,
-            TransitionTrigger::Guard { transition_index: 0 }
+            TransitionTrigger::Guard {
+                transition_index: 0
+            }
         ));
         assert_eq!(machine.history()[1].from, "b");
         assert_eq!(machine.history()[1].to, "c");
@@ -889,8 +920,13 @@ mod tests {
 
         let trigger = TransitionTrigger::Programmatic { source: "test" };
         let tw = empty_tw();
-        let result = machine.transition("dynamic", &state, &writer, 1, trigger, &tw).await;
-        assert_eq!(result.as_ref().map(|r| r.instruction.as_str()), Some("Discuss weather."));
+        let result = machine
+            .transition("dynamic", &state, &writer, 1, trigger, &tw)
+            .await;
+        assert_eq!(
+            result.as_ref().map(|r| r.instruction.as_str()),
+            Some("Discuss weather.")
+        );
     }
 
     // ── phase-level guard blocks transition into guarded phase ─────────
@@ -993,10 +1029,8 @@ mod tests {
         state.set("emotion", "happy");
         state.set("score", 0.8f64);
 
-        let modifier = InstructionModifier::StateAppend(vec![
-            "emotion".to_string(),
-            "score".to_string(),
-        ]);
+        let modifier =
+            InstructionModifier::StateAppend(vec!["emotion".to_string(), "score".to_string()]);
         let mut base = "You are an assistant.".to_string();
         modifier.apply(&mut base, &state);
         assert!(base.contains("[Context: emotion=happy, score=0.8]"));
@@ -1008,9 +1042,7 @@ mod tests {
         state.set("risk", "high");
 
         let modifier = InstructionModifier::Conditional {
-            predicate: Arc::new(|s: &State| {
-                s.get::<String>("risk").unwrap_or_default() == "high"
-            }),
+            predicate: Arc::new(|s: &State| s.get::<String>("risk").unwrap_or_default() == "high"),
             text: "IMPORTANT: Use extra empathy.".to_string(),
         };
         let mut base = "Base instruction.".to_string();
@@ -1024,9 +1056,7 @@ mod tests {
         state.set("risk", "low");
 
         let modifier = InstructionModifier::Conditional {
-            predicate: Arc::new(|s: &State| {
-                s.get::<String>("risk").unwrap_or_default() == "high"
-            }),
+            predicate: Arc::new(|s: &State| s.get::<String>("risk").unwrap_or_default() == "high"),
             text: "IMPORTANT: Use extra empathy.".to_string(),
         };
         let mut base = "Base instruction.".to_string();
@@ -1040,9 +1070,7 @@ mod tests {
         state.set("mood", "calm");
 
         let instr = PhaseInstruction::Static("You are helpful.".to_string());
-        let modifiers = vec![
-            InstructionModifier::StateAppend(vec!["mood".to_string()]),
-        ];
+        let modifiers = vec![InstructionModifier::StateAppend(vec!["mood".to_string()])];
         let result = instr.resolve_with_modifiers(&state, &modifiers);
         assert!(result.starts_with("You are helpful."));
         assert!(result.contains("[Context: mood=calm]"));
@@ -1057,7 +1085,10 @@ mod tests {
 
         let mut machine = PhaseMachine::new("greeting");
 
-        let mut greeting = Phase::new("greeting", "Greet the caller warmly and ask who is calling.");
+        let mut greeting = Phase::new(
+            "greeting",
+            "Greet the caller warmly and ask who is calling.",
+        );
         greeting.transitions.push(Transition {
             target: "identify".to_string(),
             guard: Arc::new(|_| false),
@@ -1108,7 +1139,9 @@ mod tests {
             from: "greeting".to_string(),
             to: "identify".to_string(),
             turn: 2,
-            trigger: TransitionTrigger::Guard { transition_index: 0 },
+            trigger: TransitionTrigger::Guard {
+                transition_index: 0,
+            },
             timestamp: std::time::Instant::now(),
             duration_in_phase: Duration::from_secs(5),
         });
@@ -1116,8 +1149,14 @@ mod tests {
         let nav = machine.describe_navigation(&state);
         assert!(nav.contains("Previous:"), "Should show history");
         assert!(nav.contains("greeting"), "Should mention previous phase");
-        assert!(nav.contains("Still needed: caller_org"), "caller_org should be listed as needed (caller_name is set)");
-        assert!(!nav.contains("caller_name"), "caller_name should NOT be in still-needed (it's set)");
+        assert!(
+            nav.contains("Still needed: caller_org"),
+            "caller_org should be listed as needed (caller_name is set)"
+        );
+        assert!(
+            !nav.contains("caller_name"),
+            "caller_name should NOT be in still-needed (it's set)"
+        );
     }
 
     #[test]

@@ -58,12 +58,18 @@ impl LiveHandle {
     }
 
     /// Update the system instruction mid-session.
-    pub async fn update_instruction(&self, instruction: impl Into<String>) -> Result<(), SessionError> {
+    pub async fn update_instruction(
+        &self,
+        instruction: impl Into<String>,
+    ) -> Result<(), SessionError> {
         SessionWriter::update_instruction(&self.session, instruction.into()).await
     }
 
     /// Send tool responses manually (if not using auto-dispatch).
-    pub async fn send_tool_response(&self, responses: Vec<FunctionResponse>) -> Result<(), SessionError> {
+    pub async fn send_tool_response(
+        &self,
+        responses: Vec<FunctionResponse>,
+    ) -> Result<(), SessionError> {
         self.session.send_tool_response(responses).await
     }
 
@@ -84,7 +90,10 @@ impl LiveHandle {
 
     /// Wait for the session to end (disconnect, GoAway, or error).
     pub async fn done(&self) -> Result<(), SessionError> {
-        self.session.join().await.map_err(|_| SessionError::ChannelClosed)
+        self.session
+            .join()
+            .await
+            .map_err(|_| SessionError::ChannelClosed)
     }
 
     /// Get the underlying SessionHandle for advanced usage.

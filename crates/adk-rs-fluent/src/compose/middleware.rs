@@ -75,15 +75,13 @@ impl M {
 
     /// Add retry middleware — tracks errors and advises on retry.
     pub fn retry(max_retries: u32) -> MiddlewareComposite {
-        MiddlewareComposite::new(Arc::new(
-            rs_adk::middleware::RetryMiddleware::new(max_retries),
-        ))
+        MiddlewareComposite::new(Arc::new(rs_adk::middleware::RetryMiddleware::new(
+            max_retries,
+        )))
     }
 
     /// Add a custom event observer — called on every agent event.
-    pub fn tap(
-        f: impl Fn(&AgentEvent) + Send + Sync + 'static,
-    ) -> MiddlewareComposite {
+    pub fn tap(f: impl Fn(&AgentEvent) + Send + Sync + 'static) -> MiddlewareComposite {
         MiddlewareComposite::new(Arc::new(TapMiddleware {
             handler: Arc::new(f),
         }))
@@ -319,11 +317,7 @@ impl Middleware for TraceMiddleware {
         Ok(())
     }
 
-    async fn on_tool_error(
-        &self,
-        call: &FunctionCall,
-        _err: &ToolError,
-    ) -> Result<(), AgentError> {
+    async fn on_tool_error(&self, call: &FunctionCall, _err: &ToolError) -> Result<(), AgentError> {
         rs_adk::telemetry::logging::log_tool_result("fluent", &call.name, false, 0.0);
         Ok(())
     }
@@ -390,11 +384,7 @@ impl Middleware for AuditMiddleware {
         Ok(())
     }
 
-    async fn on_tool_error(
-        &self,
-        call: &FunctionCall,
-        _err: &ToolError,
-    ) -> Result<(), AgentError> {
+    async fn on_tool_error(&self, call: &FunctionCall, _err: &ToolError) -> Result<(), AgentError> {
         let mut log = self.log.lock();
         if let Some(entry) = log.iter_mut().rev().find(|e| e.tool_name == call.name) {
             entry.success = Some(false);
@@ -417,9 +407,7 @@ impl Middleware for ValidateMiddleware {
     }
 
     async fn before_tool(&self, call: &FunctionCall) -> Result<(), AgentError> {
-        (self.validator)(call).map_err(|e| {
-            AgentError::Tool(ToolError::InvalidArgs(e))
-        })
+        (self.validator)(call).map_err(|e| AgentError::Tool(ToolError::InvalidArgs(e)))
     }
 }
 

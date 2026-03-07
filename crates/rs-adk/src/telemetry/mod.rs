@@ -73,11 +73,7 @@ impl Middleware for TelemetryMiddleware {
         Ok(())
     }
 
-    async fn on_tool_error(
-        &self,
-        call: &FunctionCall,
-        _err: &ToolError,
-    ) -> Result<(), AgentError> {
+    async fn on_tool_error(&self, call: &FunctionCall, _err: &ToolError) -> Result<(), AgentError> {
         logging::log_tool_result(&self.agent_name, &call.name, false, 0.0);
         Ok(())
     }

@@ -7,9 +7,7 @@ static MODEL_PATH_RE: Lazy<Regex> = Lazy::new(|| {
 
 /// Regex to extract the major version digit from a gemini model name.
 /// Matches "gemini-" followed by one or more digits (the major version).
-static GEMINI_VERSION_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^gemini-(\d+)").unwrap()
-});
+static GEMINI_VERSION_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^gemini-(\d+)").unwrap());
 
 /// Extract simple model name from a fully-qualified resource path.
 ///
@@ -86,9 +84,7 @@ mod tests {
     #[test]
     fn extract_preserves_suffixes() {
         assert_eq!(
-            extract_model_name(
-                "projects/p/locations/l/publishers/pub/models/gemini-1.5-pro-002"
-            ),
+            extract_model_name("projects/p/locations/l/publishers/pub/models/gemini-1.5-pro-002"),
             "gemini-1.5-pro-002"
         );
     }
@@ -96,9 +92,7 @@ mod tests {
     #[test]
     fn extract_non_gemini_full_path() {
         assert_eq!(
-            extract_model_name(
-                "projects/p/locations/l/publishers/pub/models/custom-model"
-            ),
+            extract_model_name("projects/p/locations/l/publishers/pub/models/custom-model"),
             "custom-model"
         );
     }

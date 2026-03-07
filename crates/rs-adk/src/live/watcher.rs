@@ -62,24 +62,16 @@ impl WatchPredicate {
             WatchPredicate::Changed => true,
             WatchPredicate::ChangedTo(val) => new == val,
             WatchPredicate::ChangedFrom(val) => old == val,
-            WatchPredicate::CrossedAbove(threshold) => {
-                match (as_f64(old), as_f64(new)) {
-                    (Some(o), Some(n)) => o < *threshold && n >= *threshold,
-                    _ => false,
-                }
-            }
-            WatchPredicate::CrossedBelow(threshold) => {
-                match (as_f64(old), as_f64(new)) {
-                    (Some(o), Some(n)) => o >= *threshold && n < *threshold,
-                    _ => false,
-                }
-            }
-            WatchPredicate::BecameTrue => {
-                old != &Value::Bool(true) && new == &Value::Bool(true)
-            }
-            WatchPredicate::BecameFalse => {
-                old == &Value::Bool(true) && new != &Value::Bool(true)
-            }
+            WatchPredicate::CrossedAbove(threshold) => match (as_f64(old), as_f64(new)) {
+                (Some(o), Some(n)) => o < *threshold && n >= *threshold,
+                _ => false,
+            },
+            WatchPredicate::CrossedBelow(threshold) => match (as_f64(old), as_f64(new)) {
+                (Some(o), Some(n)) => o >= *threshold && n < *threshold,
+                _ => false,
+            },
+            WatchPredicate::BecameTrue => old != &Value::Bool(true) && new == &Value::Bool(true),
+            WatchPredicate::BecameFalse => old == &Value::Bool(true) && new != &Value::Bool(true),
             WatchPredicate::Custom(f) => f(old, new),
         }
     }
@@ -220,11 +212,7 @@ mod tests {
     }
 
     /// Helper: create a watcher that stores old+new values into state.
-    fn recording_watcher(
-        key: &str,
-        predicate: WatchPredicate,
-        blocking: bool,
-    ) -> Watcher {
+    fn recording_watcher(key: &str, predicate: WatchPredicate, blocking: bool) -> Watcher {
         Watcher {
             key: key.to_string(),
             predicate,
@@ -244,7 +232,12 @@ mod tests {
     async fn changed_fires_on_any_diff() {
         let counter = Arc::new(AtomicU32::new(0));
         let mut registry = WatcherRegistry::new();
-        registry.add(counting_watcher("x", WatchPredicate::Changed, counter.clone(), false));
+        registry.add(counting_watcher(
+            "x",
+            WatchPredicate::Changed,
+            counter.clone(),
+            false,
+        ));
 
         let state = State::new();
         let diffs = vec![("x".to_string(), json!(1), json!(2))];
@@ -551,7 +544,12 @@ mod tests {
     fn evaluate_with_no_matching_diffs_returns_empty() {
         let counter = Arc::new(AtomicU32::new(0));
         let mut registry = WatcherRegistry::new();
-        registry.add(counting_watcher("x", WatchPredicate::Changed, counter.clone(), false));
+        registry.add(counting_watcher(
+            "x",
+            WatchPredicate::Changed,
+            counter.clone(),
+            false,
+        ));
 
         let state = State::new();
         // Diff is for key "y", but watcher observes "x"
@@ -571,9 +569,24 @@ mod tests {
 
         assert!(registry.observed_keys().is_empty());
 
-        registry.add(counting_watcher("alpha", WatchPredicate::Changed, counter.clone(), false));
-        registry.add(counting_watcher("beta", WatchPredicate::Changed, counter.clone(), false));
-        registry.add(counting_watcher("alpha", WatchPredicate::BecameTrue, counter.clone(), true));
+        registry.add(counting_watcher(
+            "alpha",
+            WatchPredicate::Changed,
+            counter.clone(),
+            false,
+        ));
+        registry.add(counting_watcher(
+            "beta",
+            WatchPredicate::Changed,
+            counter.clone(),
+            false,
+        ));
+        registry.add(counting_watcher(
+            "alpha",
+            WatchPredicate::BecameTrue,
+            counter.clone(),
+            true,
+        ));
 
         let keys = registry.observed_keys();
         assert_eq!(keys.len(), 2);
@@ -590,7 +603,12 @@ mod tests {
         let mut registry = WatcherRegistry::new();
 
         // Watcher A: fires on any change
-        registry.add(counting_watcher("x", WatchPredicate::Changed, counter_a.clone(), false));
+        registry.add(counting_watcher(
+            "x",
+            WatchPredicate::Changed,
+            counter_a.clone(),
+            false,
+        ));
 
         // Watcher B: fires only when new == 42
         registry.add(counting_watcher(
@@ -689,7 +707,12 @@ mod tests {
     fn empty_diffs_produce_no_futures() {
         let counter = Arc::new(AtomicU32::new(0));
         let mut registry = WatcherRegistry::new();
-        registry.add(counting_watcher("x", WatchPredicate::Changed, counter.clone(), false));
+        registry.add(counting_watcher(
+            "x",
+            WatchPredicate::Changed,
+            counter.clone(),
+            false,
+        ));
 
         let state = State::new();
         let diffs: Vec<(String, Value, Value)> = vec![];

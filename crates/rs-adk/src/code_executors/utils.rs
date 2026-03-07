@@ -1,6 +1,4 @@
-use rs_genai::prelude::{
-    CodeExecutionResult as GenaiCodeExecResult, ExecutableCode, Part,
-};
+use rs_genai::prelude::{CodeExecutionResult as GenaiCodeExecResult, ExecutableCode, Part};
 
 /// Extract the first code block from text content using the given delimiters.
 ///

@@ -77,9 +77,7 @@ impl ArtifactService for FileArtifactService {
         session_id: &str,
         artifact: Artifact,
     ) -> Result<ArtifactMetadata, ArtifactError> {
-        let version = self
-            .next_version(session_id, &artifact.metadata.name)
-            .await;
+        let version = self.next_version(session_id, &artifact.metadata.name).await;
         let ver_dir = self.version_dir(session_id, &artifact.metadata.name, version);
         fs::create_dir_all(&ver_dir)
             .await
@@ -107,11 +105,7 @@ impl ArtifactService for FileArtifactService {
         Ok(metadata)
     }
 
-    async fn load(
-        &self,
-        session_id: &str,
-        name: &str,
-    ) -> Result<Option<Artifact>, ArtifactError> {
+    async fn load(&self, session_id: &str, name: &str) -> Result<Option<Artifact>, ArtifactError> {
         let latest = self.next_version(session_id, name).await;
         if latest == 1 {
             return Ok(None);
@@ -142,13 +136,8 @@ impl ArtifactService for FileArtifactService {
         Ok(Some(Artifact { metadata, data }))
     }
 
-    async fn list(
-        &self,
-        session_id: &str,
-    ) -> Result<Vec<ArtifactMetadata>, ArtifactError> {
-        let session_dir = self
-            .root_dir
-            .join(sanitize_path_component(session_id));
+    async fn list(&self, session_id: &str) -> Result<Vec<ArtifactMetadata>, ArtifactError> {
+        let session_dir = self.root_dir.join(sanitize_path_component(session_id));
         if !session_dir.exists() {
             return Ok(vec![]);
         }
@@ -163,12 +152,7 @@ impl ArtifactService for FileArtifactService {
             .await
             .map_err(|e| ArtifactError::Storage(e.to_string()))?
         {
-            if entry
-                .file_type()
-                .await
-                .map(|t| t.is_dir())
-                .unwrap_or(false)
-            {
+            if entry.file_type().await.map(|t| t.is_dir()).unwrap_or(false) {
                 let name = entry.file_name().to_string_lossy().to_string();
                 // Load latest version metadata
                 if let Ok(Some(artifact)) = self.load(session_id, &name).await {
@@ -179,11 +163,7 @@ impl ArtifactService for FileArtifactService {
         Ok(result)
     }
 
-    async fn delete(
-        &self,
-        session_id: &str,
-        name: &str,
-    ) -> Result<(), ArtifactError> {
+    async fn delete(&self, session_id: &str, name: &str) -> Result<(), ArtifactError> {
         let dir = self.artifact_dir(session_id, name);
         if dir.exists() {
             fs::remove_dir_all(&dir)
@@ -205,11 +185,7 @@ mod tests {
         let id = COUNTER.fetch_add(1, Ordering::SeqCst);
         let dir = std::env::temp_dir()
             .join("rs_adk_file_artifact_tests")
-            .join(format!(
-                "test_{}_{}",
-                std::process::id(),
-                id
-            ));
+            .join(format!("test_{}_{}", std::process::id(), id));
         // Clean up any leftovers from previous runs
         let _ = std::fs::remove_dir_all(&dir);
         dir
@@ -259,10 +235,7 @@ mod tests {
         // load() should return latest (v3)
         let latest = svc.load("s1", "doc").await.unwrap().unwrap();
         assert_eq!(latest.metadata.version, 3);
-        assert_eq!(
-            std::str::from_utf8(&latest.data).unwrap(),
-            "version 3"
-        );
+        assert_eq!(std::str::from_utf8(&latest.data).unwrap(), "version 3");
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -336,9 +309,7 @@ mod tests {
         svc.save("s1", Artifact::text("notes", "data"))
             .await
             .unwrap();
-        svc.save("s1", Artifact::text("notes", "v2"))
-            .await
-            .unwrap();
+        svc.save("s1", Artifact::text("notes", "v2")).await.unwrap();
 
         svc.delete("s1", "notes").await.unwrap();
 
@@ -383,10 +354,7 @@ mod tests {
         assert!(!sanitized_name.contains('.'));
 
         // Should be able to load with the original (unsanitized) names
-        let loaded = svc
-            .load("../../hack", "../../../etc/passwd")
-            .await
-            .unwrap();
+        let loaded = svc.load("../../hack", "../../../etc/passwd").await.unwrap();
         assert!(loaded.is_some());
         assert_eq!(
             std::str::from_utf8(&loaded.unwrap().data).unwrap(),

@@ -92,11 +92,7 @@ impl Middleware for LatencyMiddleware {
         Ok(())
     }
 
-    async fn on_tool_error(
-        &self,
-        call: &FunctionCall,
-        _err: &ToolError,
-    ) -> Result<(), AgentError> {
+    async fn on_tool_error(&self, call: &FunctionCall, _err: &ToolError) -> Result<(), AgentError> {
         let elapsed = self
             .in_flight
             .lock()

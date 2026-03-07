@@ -226,9 +226,8 @@ impl State {
         if !self.track_delta || self.delta.is_empty() {
             return self.inner.iter().map(|r| r.key().clone()).collect();
         }
-        let mut seen = std::collections::HashSet::with_capacity(
-            self.inner.len() + self.delta.len(),
-        );
+        let mut seen =
+            std::collections::HashSet::with_capacity(self.inner.len() + self.delta.len());
         let mut keys = Vec::with_capacity(self.inner.len() + self.delta.len());
         for entry in self.inner.iter() {
             let key = entry.key().clone();
@@ -258,7 +257,8 @@ impl State {
     /// Merge another state into this one (other's values overwrite on conflict).
     pub fn merge(&self, other: &State) {
         for entry in other.inner.iter() {
-            self.inner.insert(entry.key().clone(), entry.value().clone());
+            self.inner
+                .insert(entry.key().clone(), entry.value().clone());
         }
     }
 
@@ -614,7 +614,10 @@ mod tests {
         tracked.set("new_key", "new_value");
 
         // New key visible through tracked state
-        assert_eq!(tracked.get::<String>("new_key"), Some("new_value".to_string()));
+        assert_eq!(
+            tracked.get::<String>("new_key"),
+            Some("new_value".to_string())
+        );
         // But NOT visible in original (non-delta) state's inner
         assert!(!state.contains("new_key"));
         // Committed key still visible through tracked state
@@ -710,7 +713,10 @@ mod tests {
     fn prefix_user_set_and_get() {
         let state = State::new();
         state.user().set("name", "Alice");
-        assert_eq!(state.user().get::<String>("name"), Some("Alice".to_string()));
+        assert_eq!(
+            state.user().get::<String>("name"),
+            Some("Alice".to_string())
+        );
         assert_eq!(state.get::<String>("user:name"), Some("Alice".to_string()));
     }
 
@@ -959,7 +965,7 @@ mod tests {
         let snap = state.snapshot_values(&["a", "b", "c"]);
 
         state.set("a", 10); // changed
-        // b unchanged
+                            // b unchanged
         state.set("c", 3); // new
 
         let diffs = state.diff_values(&snap, &["a", "b", "c"]);

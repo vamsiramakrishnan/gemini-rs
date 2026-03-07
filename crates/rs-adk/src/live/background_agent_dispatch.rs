@@ -61,12 +61,7 @@ impl BackgroundAgentDispatcher {
     /// Errors are written to `{task_name}:error`.
     ///
     /// If the budget is exhausted, the task will wait for a permit.
-    pub fn dispatch(
-        &self,
-        task_name: impl Into<String>,
-        agent: Arc<dyn TextAgent>,
-        state: State,
-    ) {
+    pub fn dispatch(&self, task_name: impl Into<String>, agent: Arc<dyn TextAgent>, state: State) {
         let name = task_name.into();
         let budget = self.budget.clone();
         let tasks = self.tasks.clone();

@@ -139,10 +139,8 @@ impl Runner {
             agent_session.state().merge(&runner_state);
 
             // Create invocation context with runner's middleware
-            let mut ctx = InvocationContext::with_middleware(
-                agent_session.clone(),
-                self.middleware.clone(),
-            );
+            let mut ctx =
+                InvocationContext::with_middleware(agent_session.clone(), self.middleware.clone());
 
             // Run before_run plugins
             self.plugins.run_before_run(&ctx).await;
@@ -158,9 +156,10 @@ impl Runner {
                 }
                 Err(AgentError::TransferRequested(target_name)) => {
                     // Resolve target agent
-                    let target = self.registry.resolve(&target_name).ok_or_else(|| {
-                        AgentError::UnknownAgent(target_name.clone())
-                    })?;
+                    let target = self
+                        .registry
+                        .resolve(&target_name)
+                        .ok_or_else(|| AgentError::UnknownAgent(target_name.clone()))?;
 
                     crate::telemetry::logging::log_agent_transfer(
                         current_agent.name(),
@@ -218,7 +217,9 @@ mod tests {
 
     #[async_trait]
     impl Agent for NoopAgent {
-        fn name(&self) -> &str { &self.name }
+        fn name(&self) -> &str {
+            &self.name
+        }
         async fn run_live(&self, _ctx: &mut InvocationContext) -> Result<(), AgentError> {
             Ok(())
         }
@@ -232,11 +233,15 @@ mod tests {
 
     #[async_trait]
     impl Agent for TransferAgent {
-        fn name(&self) -> &str { &self.name }
+        fn name(&self) -> &str {
+            &self.name
+        }
         async fn run_live(&self, _ctx: &mut InvocationContext) -> Result<(), AgentError> {
             Err(AgentError::TransferRequested(self.target.clone()))
         }
-        fn sub_agents(&self) -> Vec<Arc<dyn Agent>> { vec![] }
+        fn sub_agents(&self) -> Vec<Arc<dyn Agent>> {
+            vec![]
+        }
     }
 
     // Mock agent that reads state
@@ -248,7 +253,9 @@ mod tests {
 
     #[async_trait]
     impl Agent for StateReaderAgent {
-        fn name(&self) -> &str { &self.name }
+        fn name(&self) -> &str {
+            &self.name
+        }
         async fn run_live(&self, ctx: &mut InvocationContext) -> Result<(), AgentError> {
             let val = ctx.state().get::<String>(&self.key);
             assert_eq!(val.as_deref(), Some(self.expected.as_str()));
@@ -261,7 +268,9 @@ mod tests {
 
     #[async_trait]
     impl Agent for FailingAgent {
-        fn name(&self) -> &str { "failing" }
+        fn name(&self) -> &str {
+            "failing"
+        }
         async fn run_live(&self, _ctx: &mut InvocationContext) -> Result<(), AgentError> {
             Err(AgentError::Other("boom".to_string()))
         }
@@ -281,12 +290,14 @@ mod tests {
 
     #[tokio::test]
     async fn runner_runs_single_agent() {
-        let agent = NoopAgent { name: "root".to_string() };
+        let agent = NoopAgent {
+            name: "root".to_string(),
+        };
         let runner = Runner::new(agent);
 
-        let result = runner.run(|_agent| async {
-            Ok(mock_agent_session())
-        }).await;
+        let result = runner
+            .run(|_agent| async { Ok(mock_agent_session()) })
+            .await;
 
         assert!(result.is_ok());
     }
@@ -294,7 +305,9 @@ mod tests {
     #[tokio::test]
     async fn runner_handles_transfer() {
         // Root agent transfers to "target"
-        let target = Arc::new(NoopAgent { name: "target".to_string() });
+        let target = Arc::new(NoopAgent {
+            name: "target".to_string(),
+        });
         let root = TransferAgent {
             name: "root".to_string(),
             target: "target".to_string(),
@@ -307,13 +320,15 @@ mod tests {
         let connect_count = Arc::new(AtomicU32::new(0));
         let count = connect_count.clone();
 
-        let result = runner.run(move |_agent| {
-            let c = count.clone();
-            async move {
-                c.fetch_add(1, Ordering::SeqCst);
-                Ok(mock_agent_session())
-            }
-        }).await;
+        let result = runner
+            .run(move |_agent| {
+                let c = count.clone();
+                async move {
+                    c.fetch_add(1, Ordering::SeqCst);
+                    Ok(mock_agent_session())
+                }
+            })
+            .await;
 
         assert!(result.is_ok());
         // Should have connected twice: once for root, once for target
@@ -333,7 +348,9 @@ mod tests {
         struct SetAndTransferAgent;
         #[async_trait]
         impl Agent for SetAndTransferAgent {
-            fn name(&self) -> &str { "agent_a" }
+            fn name(&self) -> &str {
+                "agent_a"
+            }
             async fn run_live(&self, ctx: &mut InvocationContext) -> Result<(), AgentError> {
                 ctx.state().set("greeting", "hello from A");
                 Err(AgentError::TransferRequested("agent_b".to_string()))
@@ -343,9 +360,9 @@ mod tests {
         let mut runner = Runner::new(SetAndTransferAgent);
         runner.register(agent_b);
 
-        let result = runner.run(|_agent| async {
-            Ok(mock_agent_session())
-        }).await;
+        let result = runner
+            .run(|_agent| async { Ok(mock_agent_session()) })
+            .await;
 
         assert!(result.is_ok());
     }
@@ -359,9 +376,9 @@ mod tests {
 
         let runner = Runner::new(root);
 
-        let result = runner.run(|_agent| async {
-            Ok(mock_agent_session())
-        }).await;
+        let result = runner
+            .run(|_agent| async { Ok(mock_agent_session()) })
+            .await;
 
         match result {
             Err(AgentError::UnknownAgent(name)) => assert_eq!(name, "nonexistent"),
@@ -373,9 +390,9 @@ mod tests {
     async fn runner_propagates_errors() {
         let runner = Runner::new(FailingAgent);
 
-        let result = runner.run(|_agent| async {
-            Ok(mock_agent_session())
-        }).await;
+        let result = runner
+            .run(|_agent| async { Ok(mock_agent_session()) })
+            .await;
 
         match result {
             Err(AgentError::Other(msg)) => assert_eq!(msg, "boom"),
@@ -388,7 +405,9 @@ mod tests {
         struct StateCheckAgent;
         #[async_trait]
         impl Agent for StateCheckAgent {
-            fn name(&self) -> &str { "checker" }
+            fn name(&self) -> &str {
+                "checker"
+            }
             async fn run_live(&self, ctx: &mut InvocationContext) -> Result<(), AgentError> {
                 let val = ctx.state().get::<String>("initial_key");
                 assert_eq!(val.as_deref(), Some("initial_value"));
@@ -401,9 +420,9 @@ mod tests {
 
         let runner = Runner::new(StateCheckAgent).with_state(initial_state);
 
-        let result = runner.run(|_agent| async {
-            Ok(mock_agent_session())
-        }).await;
+        let result = runner
+            .run(|_agent| async { Ok(mock_agent_session()) })
+            .await;
 
         assert!(result.is_ok());
     }
@@ -413,14 +432,20 @@ mod tests {
         struct ParentAgent;
         #[async_trait]
         impl Agent for ParentAgent {
-            fn name(&self) -> &str { "parent" }
+            fn name(&self) -> &str {
+                "parent"
+            }
             async fn run_live(&self, _ctx: &mut InvocationContext) -> Result<(), AgentError> {
                 Ok(())
             }
             fn sub_agents(&self) -> Vec<Arc<dyn Agent>> {
                 vec![
-                    Arc::new(NoopAgent { name: "child_a".to_string() }),
-                    Arc::new(NoopAgent { name: "child_b".to_string() }),
+                    Arc::new(NoopAgent {
+                        name: "child_a".to_string(),
+                    }),
+                    Arc::new(NoopAgent {
+                        name: "child_b".to_string(),
+                    }),
                 ]
             }
         }

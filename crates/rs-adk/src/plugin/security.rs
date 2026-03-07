@@ -52,11 +52,7 @@ impl Plugin for SecurityPlugin {
         "security"
     }
 
-    async fn before_tool(
-        &self,
-        call: &FunctionCall,
-        _ctx: &InvocationContext,
-    ) -> PluginResult {
+    async fn before_tool(&self, call: &FunctionCall, _ctx: &InvocationContext) -> PluginResult {
         match self.engine.evaluate(&call.name, &call.args) {
             PolicyOutcome::Allow => {
                 #[cfg(feature = "tracing-support")]
@@ -143,8 +139,7 @@ mod tests {
         let (evt_tx, _) = broadcast::channel(16);
         let writer: std::sync::Arc<dyn rs_genai::session::SessionWriter> =
             std::sync::Arc::new(crate::test_helpers::MockWriter);
-        let session =
-            crate::agent_session::AgentSession::from_writer(writer, evt_tx);
+        let session = crate::agent_session::AgentSession::from_writer(writer, evt_tx);
         let ctx = InvocationContext::new(session);
 
         let call = FunctionCall {
@@ -167,8 +162,7 @@ mod tests {
         let (evt_tx, _) = broadcast::channel(16);
         let writer: std::sync::Arc<dyn rs_genai::session::SessionWriter> =
             std::sync::Arc::new(crate::test_helpers::MockWriter);
-        let session =
-            crate::agent_session::AgentSession::from_writer(writer, evt_tx);
+        let session = crate::agent_session::AgentSession::from_writer(writer, evt_tx);
         let ctx = InvocationContext::new(session);
 
         let call = FunctionCall {

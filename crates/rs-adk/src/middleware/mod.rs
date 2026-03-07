@@ -340,10 +340,7 @@ mod tests {
 
         // Now at max — should not retry even with new error.
         retry.on_error(&err).await.unwrap();
-        assert!(
-            !retry.should_retry(),
-            "at max retries, should not retry"
-        );
+        assert!(!retry.should_retry(), "at max retries, should not retry");
     }
 
     #[test]
@@ -352,9 +349,7 @@ mod tests {
         retry
             .error_count
             .store(1, std::sync::atomic::Ordering::SeqCst);
-        retry
-            .attempt
-            .store(1, std::sync::atomic::Ordering::SeqCst);
+        retry.attempt.store(1, std::sync::atomic::Ordering::SeqCst);
         retry.reset();
         assert_eq!(retry.attempts(), 0);
         assert!(!retry.should_retry());

@@ -66,11 +66,7 @@ impl Middleware for LogMiddleware {
         Ok(())
     }
 
-    async fn on_tool_error(
-        &self,
-        call: &FunctionCall,
-        err: &ToolError,
-    ) -> Result<(), AgentError> {
+    async fn on_tool_error(&self, call: &FunctionCall, err: &ToolError) -> Result<(), AgentError> {
         let _ = (call, err);
         #[cfg(feature = "tracing-support")]
         tracing::warn!(tool = %call.name, error = %err, "Tool call failed");

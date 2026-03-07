@@ -55,11 +55,7 @@ pub fn log_agent_transfer(from: &str, to: &str) {
 /// Log an agent error (warn level).
 #[cfg(feature = "tracing-support")]
 pub fn log_agent_error(agent_name: &str, error: &str) {
-    tracing::warn!(
-        agent_name = agent_name,
-        error = error,
-        "Agent error"
-    );
+    tracing::warn!(agent_name = agent_name, error = error, "Agent error");
 }
 
 /// Log an agent-as-tool dispatch.

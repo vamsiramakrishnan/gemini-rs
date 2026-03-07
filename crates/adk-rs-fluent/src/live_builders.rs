@@ -24,7 +24,7 @@ use std::sync::Arc;
 use serde_json::Value;
 
 use rs_adk::live::{
-    BoxFuture, InstructionModifier, Phase, PhaseInstruction, Transition, TranscriptWindow,
+    BoxFuture, InstructionModifier, Phase, PhaseInstruction, TranscriptWindow, Transition,
     WatchPredicate, Watcher,
 };
 use rs_adk::State;
@@ -73,11 +73,9 @@ impl PhaseDefaults {
     }
 
     /// Append custom formatted context to every phase's instruction.
-    pub fn with_context(
-        mut self,
-        f: impl Fn(&State) -> String + Send + Sync + 'static,
-    ) -> Self {
-        self.modifiers.push(InstructionModifier::CustomAppend(Arc::new(f)));
+    pub fn with_context(mut self, f: impl Fn(&State) -> String + Send + Sync + 'static) -> Self {
+        self.modifiers
+            .push(InstructionModifier::CustomAppend(Arc::new(f)));
         self
     }
 
@@ -108,13 +106,15 @@ impl PhaseDefaults {
     /// instruction, giving the model awareness of its current position,
     /// phase history, missing state keys, and possible transitions.
     pub fn navigation(mut self) -> Self {
-        self.modifiers.push(InstructionModifier::CustomAppend(Arc::new(
-            |state: &State| {
-                state.session()
-                    .get::<String>("navigation_context")
-                    .unwrap_or_default()
-            },
-        )));
+        self.modifiers
+            .push(InstructionModifier::CustomAppend(Arc::new(
+                |state: &State| {
+                    state
+                        .session()
+                        .get::<String>("navigation_context")
+                        .unwrap_or_default()
+                },
+            )));
         self
     }
 
@@ -142,9 +142,8 @@ pub struct PhaseBuilder {
     terminal: bool,
     modifiers: Vec<InstructionModifier>,
     prompt_on_enter_flag: bool,
-    on_enter_context_fn: Option<Arc<
-        dyn Fn(&State, &TranscriptWindow) -> Option<Vec<Content>> + Send + Sync
-    >>,
+    on_enter_context_fn:
+        Option<Arc<dyn Fn(&State, &TranscriptWindow) -> Option<Vec<Content>> + Send + Sync>>,
     needs: Vec<String>,
 }
 
@@ -299,11 +298,9 @@ impl PhaseBuilder {
     }
 
     /// Append the result of a custom formatter to the instruction.
-    pub fn with_context(
-        mut self,
-        f: impl Fn(&State) -> String + Send + Sync + 'static,
-    ) -> Self {
-        self.modifiers.push(InstructionModifier::CustomAppend(Arc::new(f)));
+    pub fn with_context(mut self, f: impl Fn(&State) -> String + Send + Sync + 'static) -> Self {
+        self.modifiers
+            .push(InstructionModifier::CustomAppend(Arc::new(f)));
         self
     }
 
@@ -374,13 +371,15 @@ impl PhaseBuilder {
 
     /// Include phase navigation context in this phase's instruction.
     pub fn navigation(mut self) -> Self {
-        self.modifiers.push(InstructionModifier::CustomAppend(Arc::new(
-            |state: &State| {
-                state.session()
-                    .get::<String>("navigation_context")
-                    .unwrap_or_default()
-            },
-        )));
+        self.modifiers
+            .push(InstructionModifier::CustomAppend(Arc::new(
+                |state: &State| {
+                    state
+                        .session()
+                        .get::<String>("navigation_context")
+                        .unwrap_or_default()
+                },
+            )));
         self
     }
 

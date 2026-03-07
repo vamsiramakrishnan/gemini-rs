@@ -34,10 +34,7 @@ pub enum CredentialError {
 #[async_trait]
 pub trait CredentialService: Send + Sync {
     /// Load a credential by key. Returns `None` if not found.
-    async fn load_credential(
-        &self,
-        key: &str,
-    ) -> Result<Option<AuthCredential>, CredentialError>;
+    async fn load_credential(&self, key: &str) -> Result<Option<AuthCredential>, CredentialError>;
 
     /// Save a credential under the given key.
     async fn save_credential(
@@ -72,10 +69,7 @@ impl Default for InMemoryCredentialService {
 
 #[async_trait]
 impl CredentialService for InMemoryCredentialService {
-    async fn load_credential(
-        &self,
-        key: &str,
-    ) -> Result<Option<AuthCredential>, CredentialError> {
+    async fn load_credential(&self, key: &str) -> Result<Option<AuthCredential>, CredentialError> {
         Ok(self.inner.get(key).map(|entry| entry.value().clone()))
     }
 
@@ -131,7 +125,9 @@ mod tests {
     #[tokio::test]
     async fn delete_credential() {
         let svc = InMemoryCredentialService::new();
-        svc.save_credential("key", sample_credential()).await.unwrap();
+        svc.save_credential("key", sample_credential())
+            .await
+            .unwrap();
         svc.delete_credential("key").await.unwrap();
 
         let loaded = svc.load_credential("key").await.unwrap();
@@ -141,7 +137,9 @@ mod tests {
     #[tokio::test]
     async fn overwrite_credential() {
         let svc = InMemoryCredentialService::new();
-        svc.save_credential("key", sample_credential()).await.unwrap();
+        svc.save_credential("key", sample_credential())
+            .await
+            .unwrap();
 
         let updated = AuthCredential {
             credential_type: "api_key".to_string(),

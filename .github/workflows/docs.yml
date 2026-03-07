@@ -21,7 +21,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.93.1"
       - uses: Swatinem/rust-cache@v2
       - name: Check rustdoc builds with no warnings
         env:
@@ -43,7 +45,9 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.93.1"
       - uses: Swatinem/rust-cache@v2
       - name: Install mdBook
         uses: peaceiris/actions-mdbook@v2

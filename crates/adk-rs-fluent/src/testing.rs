@@ -125,9 +125,9 @@ mod tests {
         let a = AgentBuilder::new("a").writes("shared");
         let b = AgentBuilder::new("b").writes("shared").reads("shared");
         let violations = check_contracts(&[a, b]);
-        assert!(violations
-            .iter()
-            .any(|v| matches!(v, ContractViolation::DuplicateWrite { key, .. } if key == "shared")));
+        assert!(violations.iter().any(
+            |v| matches!(v, ContractViolation::DuplicateWrite { key, .. } if key == "shared")
+        ));
     }
 
     #[test]
