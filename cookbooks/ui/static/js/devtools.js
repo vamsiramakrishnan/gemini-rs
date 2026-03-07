@@ -41,6 +41,7 @@ class DevtoolsManager {
     this.toolCalls = [];
     this.phaseTimeline = [];
     this.sessionStart = Date.now();
+    this._traceId = null;
 
     // Current tab
     this.activeTab = 'timeline';
@@ -515,6 +516,8 @@ class DevtoolsManager {
     this.panels.phases.innerHTML = '<div class="events-empty">No phase changes yet</div>';
     this.panels.metrics.innerHTML = '<div class="events-empty">No metrics yet</div>';
 
+    this._traceId = null;
+
     this._stopStatusTicker();
   }
 
@@ -537,6 +540,12 @@ class DevtoolsManager {
     // Re-bind items on first push (VirtualList needs the reference)
     if (this.events.length === 1) {
       this._timelineVL.setItems(this.events);
+    }
+
+    // Track trace ID from session span
+    if (msg.type === 'spanEvent' && msg.name === 'rs_genai.session') {
+      this._traceId = msg.span_id;
+      this.scheduler.markDirty('statusBar');
     }
 
     this._applyFilters();
@@ -947,8 +956,20 @@ class DevtoolsManager {
       html += '</div></div>';
     }
 
+    // OTel export button
+    html += '<div class="metrics-export">' +
+      '<button class="export-btn" id="export-otlp-btn">Copy Trace as OTLP JSON</button>' +
+      '</div>';
+
     html += '</div>'; // .metrics-content
     panel.innerHTML = html;
+
+    // Wire up export button
+    var exportBtn = panel.querySelector('#export-otlp-btn');
+    if (exportBtn) {
+      var self2 = this;
+      exportBtn.addEventListener('click', function () { self2._exportOtlpJson(); });
+    }
 
     // Render sparkline after innerHTML update
     var sparkCanvas = panel.querySelector('#metrics-sparkline-canvas');
@@ -977,6 +998,16 @@ class DevtoolsManager {
     if (this._statusUptimeEl) {
       var elapsed = Date.now() - this.sessionStart;
       this._statusUptimeEl.textContent = this._fmtTime(elapsed);
+    }
+
+    // Show trace ID badge if available
+    var traceEl = document.getElementById('status-trace');
+    if (traceEl && this._traceId) {
+      traceEl.textContent = this._traceId.substring(0, 8);
+      traceEl.title = 'Trace ID: ' + this._traceId;
+      traceEl.style.display = '';
+    } else if (traceEl) {
+      traceEl.style.display = 'none';
     }
   }
 
@@ -1156,5 +1187,63 @@ class DevtoolsManager {
     var div = document.createElement('div');
     div.textContent = str;
     return div.innerHTML;
+  }
+
+  _exportOtlpJson() {
+    var self = this;
+    // Collect all span events from the ring buffer
+    var spans = [];
+    this.events.forEach(function (e) {
+      if (e.type === 'spanEvent') spans.push(e);
+    });
+
+    // Format as OTLP-compatible JSON
+    var traceId = this._traceId || this._generateTraceId();
+    var otlp = {
+      resourceSpans: [{
+        resource: {
+          attributes: [
+            { key: 'service.name', value: { stringValue: 'gemini-live-cookbooks' } },
+            { key: 'session.start', value: { stringValue: new Date(self.sessionStart).toISOString() } }
+          ]
+        },
+        scopeSpans: [{
+          scope: { name: 'rs-genai-ui', version: '0.1.0' },
+          spans: spans.map(function (s) {
+            return {
+              traceId: traceId,
+              spanId: s.raw.span_id || '',
+              parentSpanId: s.raw.parent_id || '',
+              name: s.raw.name || '',
+              kind: 1, // SPAN_KIND_INTERNAL
+              startTimeUnixNano: String((self.sessionStart + s.timeMs) * 1000000),
+              endTimeUnixNano: String((self.sessionStart + s.timeMs + ((s.raw.duration_us || 0) / 1000)) * 1000000),
+              attributes: Object.keys(s.raw.attributes || {}).map(function (k) {
+                return { key: k, value: { stringValue: String(s.raw.attributes[k]) } };
+              }),
+              status: { code: s.raw.status === 'ok' ? 1 : 2 }
+            };
+          })
+        }]
+      }]
+    };
+
+    var json = JSON.stringify(otlp, null, 2);
+    navigator.clipboard.writeText(json).then(function () {
+      var btn = document.getElementById('export-otlp-btn');
+      if (btn) {
+        btn.textContent = 'Copied!';
+        setTimeout(function () { btn.textContent = 'Copy Trace as OTLP JSON'; }, 1500);
+      }
+    });
+  }
+
+  _generateTraceId() {
+    var arr = new Uint8Array(16);
+    crypto.getRandomValues(arr);
+    this._traceId = Array.from(arr).map(function (b) {
+      return b.toString(16).padStart(2, '0');
+    }).join('');
+    return this._traceId;
   }
 }

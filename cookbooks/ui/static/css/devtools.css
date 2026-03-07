@@ -1381,3 +1381,40 @@
   font-size: 11px; font-family: var(--mono); color: var(--text-secondary, #5f6368);
   margin-left: 14px;
 }
+
+/* ============================================
+   OTel Export (Task 10)
+   ============================================ */
+.metrics-export {
+  padding: 8px 0;
+  border-top: 1px solid var(--border-light);
+  margin-top: 4px;
+}
+.export-btn {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  transition: background 0.15s, border-color 0.15s;
+}
+.export-btn:hover {
+  background: var(--primary-light, #e8f0fe);
+  border-color: var(--primary, #4285f4);
+  color: var(--primary-dark, #1967d2);
+}
+
+.status-trace {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: #00695c;
+  background: #e0f7fa;
+  padding: 1px 5px;
+  border-radius: 3px;
+  cursor: default;
+}
