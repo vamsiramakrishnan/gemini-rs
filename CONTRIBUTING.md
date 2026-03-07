@@ -35,8 +35,8 @@ The workspace follows a layered architecture where each crate has a single respo
 | Crate | Layer | Purpose | Key Directories |
 |-------|-------|---------|-----------------|
 | `rs-genai` | L0 (Wire) | Protocol types, WebSocket transport, auth, VAD, audio buffers | `src/protocol/`, `src/transport/`, `src/session/`, `src/vad/`, `src/buffer/` |
-| `rs-adk` | L1 (Runtime) | Agent lifecycle, tools, state, phases, extractors, live sessions | `src/live/`, `src/tool.rs`, `src/state.rs`, `src/agents/`, `src/session/` |
-| `adk-rs-fluent` | L2 (DX) | Fluent builder API, operator algebra, composition primitives | `src/builder.rs`, `src/compose/`, `src/live.rs`, `src/live_builders.rs` |
+| `rs-adk` | L1 (Runtime) | Agent lifecycle, tools, state, phases, extractors, live sessions | `src/live/`, `src/tool/`, `src/state.rs`, `src/agents/`, `src/session/` |
+| `adk-rs-fluent` | L2 (DX) | Fluent builder API, operator algebra, composition primitives | `src/builder.rs`, `src/compose/`, `src/live/`, `src/live_builders.rs` |
 
 Additionally:
 
@@ -88,7 +88,7 @@ The router (`crates/rs-adk/src/live/mod.rs`) is a zero-work dispatcher that neve
 |-------|----------|---------|
 | `Transport` | `crates/rs-genai/src/transport/ws.rs` | WebSocket send/recv abstraction (`TungsteniteTransport`, `MockTransport`) |
 | `Codec` | `crates/rs-genai/src/transport/codec.rs` | Message serialization (`JsonCodec`) |
-| `AuthProvider` | `crates/rs-genai/src/transport/auth.rs` | Authentication (`GoogleAIAuth`, `VertexAIAuth`) |
+| `AuthProvider` | `crates/rs-genai/src/transport/auth/` | Authentication (`GoogleAIAuth`, `VertexAIAuth`) |
 | `SessionWriter` / `SessionReader` | `crates/rs-genai/src/session/mod.rs` | Session I/O abstraction |
 | `Agent` | `crates/rs-adk/src/agent.rs` | Agent trait for composition |
 | `CookbookApp` | `cookbooks/ui/src/app.rs` | Trait for UI demo apps |

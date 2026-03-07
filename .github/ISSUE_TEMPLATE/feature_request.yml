@@ -1,0 +1,37 @@
+name: Feature Request
+description: Suggest a new feature or improvement
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for your feature suggestion!
+  - type: dropdown
+    id: crate
+    attributes:
+      label: Target Crate
+      options:
+        - rs-genai (L0 — wire protocol)
+        - rs-adk (L1 — agent runtime)
+        - adk-rs-fluent (L2 — fluent DX)
+        - cookbooks
+        - New crate / cross-cutting
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement
+      description: What problem does this feature solve?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: How you'd like it to work. Code examples welcome.
+      render: rust
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Other approaches you've considered.

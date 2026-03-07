@@ -1,0 +1,67 @@
+name: Bug Report
+description: Report a bug in gemini-rs
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for reporting a bug! Please fill out the sections below.
+  - type: dropdown
+    id: crate
+    attributes:
+      label: Affected Crate
+      options:
+        - rs-genai (L0 — wire protocol)
+        - rs-adk (L1 — agent runtime)
+        - adk-rs-fluent (L2 — fluent DX)
+        - cookbooks/ui
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear description of the bug.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to Reproduce
+      description: Minimal code or steps to reproduce the issue.
+      render: rust
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happened. Include error messages or logs.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "Output of `cargo pkgid rs-genai` or the version in Cargo.toml"
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Google AI (API key)
+        - Vertex AI (Bearer token)
+        - Both
+        - N/A
+    validations:
+      required: true
