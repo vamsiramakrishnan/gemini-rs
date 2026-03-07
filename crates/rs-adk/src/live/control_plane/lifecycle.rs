@@ -327,17 +327,31 @@ pub(in crate::live) async fn handle_turn_complete(
         }
     }
 
-    // 14. SINGLE batched context send
+    // 14. Context delivery — Immediate or Deferred
     //
-    // All model-role context turns from steps 7d/7e/7f/12/13 are sent as one
-    // atomic WebSocket frame.  This eliminates the burst of separate messages
-    // that can confuse the model or clash with concurrent user input.
-    if !context_buffer.is_empty() {
-        writer.send_client_content(context_buffer, false).await.ok();
-    }
-    // 14b. Prompt trigger (separate frame — turnComplete:true must be its own message)
-    if should_prompt {
-        writer.send_client_content(vec![], true).await.ok();
+    // Immediate: all context turns sent as one atomic WebSocket frame now.
+    // Deferred:  pushed to PendingContext, flushed by DeferredWriter before
+    //            the next user send (send_audio/send_text/send_video).
+    //
+    // Exception: when should_prompt is true, we MUST send immediately —
+    // the prompt triggers a model response and the context must precede it.
+    if !context_buffer.is_empty() || should_prompt {
+        let force_immediate = should_prompt;
+        match (&shared.pending_context, force_immediate) {
+            (Some(pending), false) => {
+                // Deferred: queue for delivery with next user content
+                pending.extend(context_buffer);
+            }
+            _ => {
+                // Immediate (or forced by prompt): send now
+                if !context_buffer.is_empty() {
+                    writer.send_client_content(context_buffer, false).await.ok();
+                }
+                if should_prompt {
+                    writer.send_client_content(vec![], true).await.ok();
+                }
+            }
+        }
     }
 
     // 15. Turn boundary hook

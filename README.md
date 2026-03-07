@@ -642,6 +642,24 @@ Live::builder()
     .steering_mode(SteeringMode::ContextInjection)
 ```
 
+#### Context Delivery Timing
+
+Control when model-role context turns hit the wire:
+
+| Mode | Behavior | Best For |
+|------|----------|----------|
+| `Immediate` (default) | Send as single batched frame during TurnComplete | Low-latency, text-only apps |
+| `Deferred` | Queue until next user send (audio/text/video) | Voice apps — eliminates mid-silence frames |
+
+```rust
+// Voice app: flush context alongside user audio, not during silence
+Live::builder()
+    .steering_mode(SteeringMode::ContextInjection)
+    .context_delivery(ContextDelivery::Deferred)
+```
+
+With `Deferred`, the `DeferredWriter` wraps the session writer and drains pending context before each `send_audio`/`send_text`/`send_video`. Context that requires a prompt (e.g. `prompt_on_enter`) is always sent immediately.
+
 See the [Steering Modes guide](docs/user-guide/steering-modes.md) for the full
 decision matrix, anti-patterns, and implementation details.
 

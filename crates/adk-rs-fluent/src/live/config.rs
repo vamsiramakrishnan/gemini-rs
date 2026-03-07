@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use rs_adk::live::needs::RepairConfig;
 use rs_adk::live::persistence::SessionPersistence;
-use rs_adk::live::steering::SteeringMode;
+use rs_adk::live::steering::{ContextDelivery, SteeringMode};
 use rs_adk::live::{ResultFormatter, ToolExecutionMode};
 use rs_adk::tool::ToolDispatcher;
 use rs_genai::prelude::*;
@@ -327,6 +327,28 @@ impl Live {
     /// - `Hybrid`: Instruction on transition, context injection per turn.
     pub fn steering_mode(mut self, mode: SteeringMode) -> Self {
         self.steering_mode = mode;
+        self
+    }
+
+    /// Set when model-role context turns are delivered to the wire.
+    ///
+    /// - `Immediate` (default): Send as a single batched frame during
+    ///   TurnComplete processing.
+    /// - `Deferred`: Queue context and flush before the next user send
+    ///   (`send_audio`/`send_text`/`send_video`).  Eliminates isolated
+    ///   WebSocket frames during silence that can confuse the model.
+    ///
+    /// ```ignore
+    /// Live::builder()
+    ///     .steering_mode(SteeringMode::ContextInjection)
+    ///     .context_delivery(ContextDelivery::Deferred)
+    ///     .phase("greeting")
+    ///         .instruction("Welcome the guest")
+    ///         .done()
+    ///     .initial_phase("greeting")
+    /// ```
+    pub fn context_delivery(mut self, mode: ContextDelivery) -> Self {
+        self.context_delivery = mode;
         self
     }
 

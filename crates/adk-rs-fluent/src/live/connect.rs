@@ -92,6 +92,7 @@ impl Live {
             builder = builder.soft_turn_timeout(timeout);
         }
         builder = builder.steering_mode(self.steering_mode);
+        builder = builder.context_delivery(self.context_delivery);
         if let Some(config) = self.repair_config {
             builder = builder.repair(config);
         }

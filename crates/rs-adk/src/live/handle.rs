@@ -16,9 +16,17 @@ use super::telemetry::SessionTelemetry;
 ///
 /// Provides send methods for audio/text/video, system instruction updates,
 /// event subscription, state access, telemetry, and graceful shutdown.
+///
+/// When [`ContextDelivery::Deferred`](super::steering::ContextDelivery::Deferred) is
+/// enabled, `send_audio`, `send_text`, and `send_video` automatically flush
+/// any pending context turns before forwarding the user content.
 #[derive(Clone)]
 pub struct LiveHandle {
     session: SessionHandle,
+    /// Writer used for user-facing sends.  When deferred context delivery is
+    /// enabled, this is a `DeferredWriter` that flushes pending context.
+    /// Otherwise it's the raw `SessionHandle`.
+    writer: Arc<dyn SessionWriter>,
     _fast_task: Arc<JoinHandle<()>>,
     _ctrl_task: Arc<JoinHandle<()>>,
     state: State,
@@ -28,6 +36,7 @@ pub struct LiveHandle {
 impl LiveHandle {
     pub(crate) fn new(
         session: SessionHandle,
+        writer: Arc<dyn SessionWriter>,
         fast_task: JoinHandle<()>,
         ctrl_task: JoinHandle<()>,
         state: State,
@@ -35,6 +44,7 @@ impl LiveHandle {
     ) -> Self {
         Self {
             session,
+            writer,
             _fast_task: Arc::new(fast_task),
             _ctrl_task: Arc::new(ctrl_task),
             state,
@@ -43,18 +53,27 @@ impl LiveHandle {
     }
 
     /// Send audio data (raw PCM16 16kHz bytes).
+    ///
+    /// When deferred context delivery is enabled, any pending model-role
+    /// context turns are flushed to the wire before the audio frame.
     pub async fn send_audio(&self, data: Vec<u8>) -> Result<(), SessionError> {
-        self.session.send_audio(data).await
+        self.writer.send_audio(data).await
     }
 
     /// Send a text message.
+    ///
+    /// When deferred context delivery is enabled, any pending model-role
+    /// context turns are flushed to the wire before the text message.
     pub async fn send_text(&self, text: impl Into<String>) -> Result<(), SessionError> {
-        self.session.send_text(text.into()).await
+        self.writer.send_text(text.into()).await
     }
 
     /// Send a video/image frame (raw JPEG bytes).
+    ///
+    /// When deferred context delivery is enabled, any pending model-role
+    /// context turns are flushed to the wire before the video frame.
     pub async fn send_video(&self, jpeg_data: Vec<u8>) -> Result<(), SessionError> {
-        SessionWriter::send_video(&self.session, jpeg_data).await
+        self.writer.send_video(jpeg_data).await
     }
 
     /// Update the system instruction mid-session.
@@ -71,6 +90,14 @@ impl LiveHandle {
         responses: Vec<FunctionResponse>,
     ) -> Result<(), SessionError> {
         self.session.send_tool_response(responses).await
+    }
+
+    /// Get the user-facing session writer.
+    ///
+    /// When deferred context delivery is enabled, this returns the
+    /// `DeferredWriter` that flushes pending context before sends.
+    pub fn writer(&self) -> Arc<dyn SessionWriter> {
+        self.writer.clone()
     }
 
     /// Subscribe to raw session events (for custom processing).

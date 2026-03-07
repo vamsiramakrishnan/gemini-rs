@@ -23,6 +23,7 @@ use crate::tool::ToolDispatcher;
 use super::background_tool::BackgroundToolTracker;
 use super::callbacks::EventCallbacks;
 use super::computed::ComputedRegistry;
+use super::context_writer::PendingContext;
 use super::control_plane::run_control_lane;
 use super::extractor::TurnExtractor;
 use super::needs::NeedsFulfillment;
@@ -30,7 +31,7 @@ use super::persistence::SessionPersistence;
 use super::phase::PhaseMachine;
 use super::session_signals::SessionSignals;
 use super::soft_turn::SoftTurnDetector;
-use super::steering::SteeringMode;
+use super::steering::{ContextDelivery, SteeringMode};
 use super::telemetry::SessionTelemetry;
 use super::temporal::TemporalRegistry;
 use super::watcher::WatcherRegistry;
@@ -76,6 +77,8 @@ pub(crate) struct SharedState {
     pub resume_handle: parking_lot::Mutex<Option<String>>,
     /// Last instruction sent via instruction_template (for dedup).
     pub last_instruction: parking_lot::Mutex<Option<String>>,
+    /// Pending context buffer for deferred delivery (None when Immediate mode).
+    pub pending_context: Option<Arc<PendingContext>>,
 }
 
 /// Runs the three-lane event processor.
@@ -88,6 +91,8 @@ pub(crate) struct ControlPlaneConfig {
     pub soft_turn: Option<SoftTurnDetector>,
     /// Steering mode for phase instruction delivery.
     pub steering_mode: SteeringMode,
+    /// When to deliver context turns to the wire.
+    pub context_delivery: ContextDelivery,
     /// Conversation repair tracker.
     pub needs_fulfillment: Option<NeedsFulfillment>,
     /// Session persistence backend.
@@ -103,6 +108,7 @@ impl Default for ControlPlaneConfig {
         Self {
             soft_turn: None,
             steering_mode: SteeringMode::default(),
+            context_delivery: ContextDelivery::default(),
             needs_fulfillment: None,
             persistence: None,
             session_id: None,
@@ -126,10 +132,16 @@ pub(crate) fn spawn_event_processor(
     execution_modes: std::collections::HashMap<String, super::background_tool::ToolExecutionMode>,
     control_plane: ControlPlaneConfig,
 ) -> (tokio::task::JoinHandle<()>, tokio::task::JoinHandle<()>) {
+    let pending_context = if control_plane.context_delivery == ContextDelivery::Deferred {
+        Some(Arc::new(PendingContext::new()))
+    } else {
+        None
+    };
     let shared = Arc::new(SharedState {
         interrupted: AtomicBool::new(false),
         resume_handle: parking_lot::Mutex::new(None),
         last_instruction: parking_lot::Mutex::new(None),
+        pending_context,
     });
 
     let timer_cancel = CancellationToken::new();

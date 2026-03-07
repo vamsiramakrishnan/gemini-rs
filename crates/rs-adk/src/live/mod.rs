@@ -12,7 +12,9 @@ pub mod builder;
 pub mod callbacks;
 pub mod computed;
 pub mod context_builder;
+pub mod context_writer;
 pub(crate) mod control_plane;
+pub mod events;
 pub mod extractor;
 pub mod handle;
 pub mod needs;
@@ -35,6 +37,8 @@ pub use builder::LiveSessionBuilder;
 pub use callbacks::{CallbackMode, EventCallbacks};
 pub use computed::{ComputedRegistry, ComputedVar};
 pub use context_builder::ContextBuilder;
+pub use context_writer::{DeferredWriter, PendingContext};
+pub use events::LiveEvent;
 pub use extractor::{ExtractionTrigger, LlmExtractor, TurnExtractor};
 pub use handle::LiveHandle;
 pub use needs::{NeedsFulfillment, RepairAction, RepairConfig};
@@ -45,7 +49,7 @@ pub use phase::{
 };
 pub use session_signals::{SessionSignals, SessionType};
 pub use soft_turn::SoftTurnDetector;
-pub use steering::SteeringMode;
+pub use steering::{ContextDelivery, SteeringMode};
 pub use telemetry::SessionTelemetry;
 pub use temporal::{
     ConsecutiveFailureDetector, PatternDetector, RateDetector, SustainedDetector, TemporalPattern,

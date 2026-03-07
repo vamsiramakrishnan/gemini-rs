@@ -127,6 +127,50 @@ pub fn build_steering_context(
     parts
 }
 
+/// When to deliver model-role context turns to the wire.
+///
+/// Controls timing of context injection (tool advisory, repair nudge,
+/// steering modifiers, phase instructions, on_enter_context).
+///
+/// | Mode | Behavior | Best for |
+/// |------|----------|----------|
+/// | `Immediate` | Send as single batched frame during TurnComplete | Low-latency apps, text-only |
+/// | `Deferred` | Queue until next user send (audio/text/video) | Voice apps where mid-silence sends cause glitches |
+///
+/// # Example
+///
+/// ```rust,ignore
+/// Live::builder()
+///     .steering_mode(SteeringMode::ContextInjection)
+///     .context_delivery(ContextDelivery::Deferred)  // flush with next user audio
+///     .phase("greeting")
+///         .instruction("Welcome the guest")
+///         .done()
+///     .initial_phase("greeting")
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ContextDelivery {
+    /// Send batched context immediately during TurnComplete processing.
+    ///
+    /// All context turns are accumulated into a single `send_client_content`
+    /// call and sent as one WebSocket frame.  The model receives the context
+    /// as soon as the turn completes, before the next user interaction.
+    #[default]
+    Immediate,
+
+    /// Queue context and flush before the next user send.
+    ///
+    /// Context turns are pushed into a [`PendingContext`](super::context_writer::PendingContext)
+    /// buffer.  The [`DeferredWriter`](super::context_writer::DeferredWriter)
+    /// drains this buffer before forwarding `send_audio`, `send_text`, or
+    /// `send_video` — ensuring context arrives in the same burst as user content.
+    ///
+    /// This eliminates the "extraneous message" problem where isolated context
+    /// frames sent during silence can cause the model to interrupt or produce
+    /// unexpected responses.
+    Deferred,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

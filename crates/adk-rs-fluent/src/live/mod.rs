@@ -37,7 +37,7 @@ use std::time::Duration;
 use rs_adk::live::extractor::TurnExtractor;
 use rs_adk::live::needs::RepairConfig;
 use rs_adk::live::persistence::SessionPersistence;
-use rs_adk::live::steering::SteeringMode;
+use rs_adk::live::steering::{ContextDelivery, SteeringMode};
 use rs_adk::live::{
     ComputedRegistry, EventCallbacks, InstructionModifier, Phase, TemporalRegistry,
     ToolExecutionMode, WatcherRegistry,
@@ -119,6 +119,7 @@ pub struct Live {
     // Control plane configuration.
     pub(crate) soft_turn_timeout: Option<Duration>,
     pub(crate) steering_mode: SteeringMode,
+    pub(crate) context_delivery: ContextDelivery,
     pub(crate) repair_config: Option<RepairConfig>,
     pub(crate) persistence: Option<Arc<dyn SessionPersistence>>,
     pub(crate) session_id: Option<String>,
@@ -185,6 +186,7 @@ impl Live {
             warm_up_llms: Vec::new(),
             soft_turn_timeout: None,
             steering_mode: SteeringMode::default(),
+            context_delivery: ContextDelivery::default(),
             repair_config: None,
             persistence: None,
             session_id: None,

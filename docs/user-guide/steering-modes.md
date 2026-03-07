@@ -202,6 +202,47 @@ The three-lane processor evaluates steering at two points in the turn lifecycle:
 
 The key insight: with `ContextInjection`, step 12 sends the phase instruction as `Content::model(instruction_text)`. The model sees it as its own prior speech, which naturally steers its behavior without the overhead of system instruction replacement.
 
+## Context Delivery Timing
+
+By default, the batched context frame is sent immediately during TurnComplete processing (`ContextDelivery::Immediate`). For voice apps where isolated WebSocket frames during silence can cause glitches, use `ContextDelivery::Deferred`:
+
+```rust,ignore
+Live::builder()
+    .steering_mode(SteeringMode::ContextInjection)
+    .context_delivery(ContextDelivery::Deferred)
+    .phase("greeting")
+        .instruction("Welcome the guest")
+        .done()
+    .initial_phase("greeting")
+```
+
+**How deferred delivery works:**
+
+1. During TurnComplete, context turns are pushed into a `PendingContext` buffer (instead of sent)
+2. The `DeferredWriter` wraps the session writer at the `LiveHandle` level
+3. When user code calls `handle.send_audio()`, `send_text()`, or `send_video()`, the writer drains the buffer and sends the context immediately before the user content
+4. The context arrives in the same burst as user input — no isolated frames during silence
+
+**When context is sent immediately regardless:**
+
+If a prompt is needed (`prompt_on_enter: true` or a repair nudge on the first attempt), the context is sent immediately — you can't defer a prompt because the model needs to respond now.
+
+```text
+  Deferred delivery:                    Immediate delivery:
+
+  TurnComplete                          TurnComplete
+       |                                     |
+  [context → PendingContext]            [context → wire now]
+       |                                     |
+  ... silence ...                       ... silence ...
+       |                                     |
+  User speaks                           User speaks
+       |                                     |
+  DeferredWriter.send_audio()           SessionHandle.send_audio()
+  1. flush PendingContext               1. send audio
+  2. send audio
+```
+
 ## Interaction with Other Features
 
 | Feature | InstructionUpdate | ContextInjection | Hybrid |

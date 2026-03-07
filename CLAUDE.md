@@ -331,6 +331,19 @@ Live::builder()
 
 With `ContextInjection`, step 12 in the processor delivers phase instructions via `send_client_content(Content::model(...))` instead of `update_instruction()`. The system instruction set at connect time is never touched again.
 
+**Context Delivery** — Control when model-role context turns hit the wire:
+
+```rust
+Live::builder()
+    .steering_mode(SteeringMode::ContextInjection)
+    // Default: send batched context immediately during TurnComplete
+    .context_delivery(ContextDelivery::Immediate)
+    // Voice apps: queue context, flush before next user send (audio/text/video)
+    .context_delivery(ContextDelivery::Deferred)
+```
+
+With `Deferred`, the `DeferredWriter` wraps the session writer. It queues context turns in a `PendingContext` buffer and drains them before forwarding `send_audio`/`send_text`/`send_video`. This eliminates isolated WebSocket frames during silence that can cause glitches. When a prompt is needed (`prompt_on_enter`, repair nudge), context is sent immediately — you can't defer a prompt.
+
 **Soft Turn Detection** — Proactive silence awareness when `proactiveAudio` is enabled:
 
 ```rust
@@ -473,6 +486,8 @@ let artifacts = A::json_output("report", "Analysis report")
 | `BackgroundAgentDispatcher` | Fire-and-forget agent dispatch |
 | `SoftTurnDetector` | Proactive silence awareness for `proactiveAudio` sessions |
 | `SteeringMode` | How phase machine steers: InstructionUpdate, ContextInjection, Hybrid |
+| `ContextDelivery` | When context hits wire: Immediate (during TurnComplete) or Deferred (with next user send) |
+| `PendingContext` / `DeferredWriter` | Deferred context buffer + SessionWriter wrapper |
 | `NeedsFulfillment` / `RepairConfig` / `RepairAction` | Conversation repair protocol |
 | `SessionPersistence` / `SessionSnapshot` | Session persistence trait and snapshot type |
 | `FsPersistence` / `MemoryPersistence` | Built-in persistence backends |

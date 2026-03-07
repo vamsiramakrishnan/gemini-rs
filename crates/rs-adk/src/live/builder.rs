@@ -15,6 +15,7 @@ use crate::tool::ToolDispatcher;
 use super::background_tool::{BackgroundToolTracker, ToolExecutionMode};
 use super::callbacks::EventCallbacks;
 use super::computed::ComputedRegistry;
+use super::context_writer::{DeferredWriter, PendingContext};
 use super::extractor::TurnExtractor;
 use super::handle::LiveHandle;
 use super::needs::{NeedsFulfillment, RepairConfig};
@@ -23,7 +24,7 @@ use super::phase::PhaseMachine;
 use super::processor::{spawn_event_processor, spawn_telemetry_lane, ControlPlaneConfig};
 use super::session_signals::SessionSignals;
 use super::soft_turn::SoftTurnDetector;
-use super::steering::SteeringMode;
+use super::steering::{ContextDelivery, SteeringMode};
 use super::telemetry::SessionTelemetry;
 use super::temporal::TemporalRegistry;
 use super::watcher::WatcherRegistry;
@@ -52,6 +53,7 @@ pub struct LiveSessionBuilder {
     // Control plane configuration
     soft_turn_timeout: Option<std::time::Duration>,
     steering_mode: SteeringMode,
+    context_delivery: ContextDelivery,
     repair_config: Option<RepairConfig>,
     persistence: Option<Arc<dyn SessionPersistence>>,
     session_id: Option<String>,
@@ -75,6 +77,7 @@ impl LiveSessionBuilder {
             execution_modes: HashMap::new(),
             soft_turn_timeout: None,
             steering_mode: SteeringMode::default(),
+            context_delivery: ContextDelivery::default(),
             repair_config: None,
             persistence: None,
             session_id: None,
@@ -174,6 +177,15 @@ impl LiveSessionBuilder {
         self
     }
 
+    /// Set the context delivery timing.
+    ///
+    /// - `Immediate` (default): send batched context during TurnComplete.
+    /// - `Deferred`: queue context and flush with next user send.
+    pub fn context_delivery(mut self, mode: ContextDelivery) -> Self {
+        self.context_delivery = mode;
+        self
+    }
+
     /// Enable the conversation repair protocol.
     ///
     /// Tracks need fulfillment per phase and nudges the model when the
@@ -243,7 +255,7 @@ impl LiveSessionBuilder {
         let mut callbacks = self.callbacks;
         let on_usage_cb = callbacks.on_usage.take();
         let callbacks = Arc::new(callbacks);
-        let writer: Arc<dyn SessionWriter> = Arc::new(session.clone());
+        let raw_writer: Arc<dyn SessionWriter> = Arc::new(session.clone());
         let state = self.state.unwrap_or_default();
 
         // Subscribe twice: one for router → fast/ctrl, one for telemetry lane
@@ -281,14 +293,31 @@ impl LiveSessionBuilder {
         let control_plane = ControlPlaneConfig {
             soft_turn: self.soft_turn_timeout.map(SoftTurnDetector::new),
             steering_mode: self.steering_mode,
+            context_delivery: self.context_delivery,
             needs_fulfillment: self.repair_config.map(NeedsFulfillment::new),
             persistence: self.persistence,
             session_id: self.session_id,
             tool_advisory: self.tool_advisory,
         };
 
+        // Wrap writer in DeferredWriter if deferred context delivery is enabled.
+        // The DeferredWriter flushes pending context before user sends.
+        // The raw_writer goes to the processor (for internal sends);
+        // the user_writer goes to LiveHandle (intercepts user sends).
+        let (writer, user_writer) = if self.context_delivery == ContextDelivery::Deferred {
+            let pending = Arc::new(PendingContext::new());
+            let deferred: Arc<dyn SessionWriter> =
+                Arc::new(DeferredWriter::new(raw_writer.clone(), pending));
+            // Processor uses raw_writer for internal sends (lifecycle context
+            // goes through PendingContext, not through the writer directly).
+            // User-facing LiveHandle uses the DeferredWriter.
+            (raw_writer, deferred)
+        } else {
+            (raw_writer.clone(), raw_writer)
+        };
+
         // Spawn fast + control lanes (no session_signals, no transcript mutex)
-        let greeting_writer = writer.clone();
+        let greeting_writer = user_writer.clone();
         let (fast_handle, ctrl_handle) = spawn_event_processor(
             event_rx,
             callbacks,
@@ -315,6 +344,7 @@ impl LiveSessionBuilder {
 
         Ok(LiveHandle::new(
             session,
+            user_writer,
             fast_handle,
             ctrl_handle,
             state,

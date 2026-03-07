@@ -47,6 +47,23 @@ Live::builder()
 
 Only use `InstructionUpdate` when phases represent genuinely different agent personas (e.g., switching from a receptionist to a triage nurse). See the [Steering Modes guide](steering-modes.md) for the full decision matrix and anti-patterns.
 
+### Use deferred context delivery for voice apps
+
+When using `ContextInjection`, context turns sent during silence (between user speech) can cause audio glitches or confuse the model. Use `ContextDelivery::Deferred` to queue context and flush it alongside the next user interaction:
+
+```rust,ignore
+// Voice app: context arrives with user audio, not during silence
+Live::builder()
+    .steering_mode(SteeringMode::ContextInjection)
+    .context_delivery(ContextDelivery::Deferred)
+    .phase("greeting")
+        .instruction("Welcome the guest")
+        .done()
+    .initial_phase("greeting")
+```
+
+The `DeferredWriter` wraps the session writer at the `LiveHandle` level. When `handle.send_audio()` is called, it drains any pending context first — two back-to-back frames with no gap. For text-only apps, `Immediate` (the default) is fine since there's no audio pipeline to disrupt.
+
 ### Keep tool callbacks fast — or use background execution
 
 The model waits for standard tool responses before continuing. A slow tool blocks the entire conversation turn. For tools that need to do expensive work (database queries, external API calls, LLM pipelines), you have two options:
