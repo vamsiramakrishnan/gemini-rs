@@ -81,6 +81,7 @@ VirtualList.prototype.setFilter = function (indices) {
   this._filter = indices;
   this._updateVisibleCount();
   this._syncSentinel();
+  this._autoScroll();
   this._scheduleRender();
 };
 

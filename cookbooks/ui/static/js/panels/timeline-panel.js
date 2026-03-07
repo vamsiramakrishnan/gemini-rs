@@ -85,7 +85,8 @@ var TimelinePanel = (function () {
     this._detailPanel = detailPanel;
     this._detailContent = detailContent;
 
-    scheduler.register('timeline', function () { self._vl.refresh(); });
+    // VirtualList self-renders via setFilter → _scheduleRender.
+    // No scheduler registration needed — avoids double-render flicker.
   };
 
   TimelinePanel.prototype.setMinimap = function (minimap) {
@@ -118,7 +119,7 @@ var TimelinePanel = (function () {
     if (this._events.length === 1) this._vl.setItems(this._events);
 
     this._applyFilters(true);
-    this._scheduler.markDirty('timeline');
+
     this._scheduler.markDirty('minimap');
 
     return event;
@@ -167,7 +168,6 @@ var TimelinePanel = (function () {
         }
         self._saveFilters();
         self._applyFilters(false);
-        self._scheduler.markDirty('timeline');
       });
       bar.appendChild(btn);
     });
@@ -180,7 +180,6 @@ var TimelinePanel = (function () {
       self._searchTimer = setTimeout(function () {
         self._searchQuery = search.value.trim().toLowerCase();
         self._applyFilters(false);
-        self._scheduler.markDirty('timeline');
       }, 150);
     });
     bar.appendChild(search);
