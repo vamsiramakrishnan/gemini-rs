@@ -282,6 +282,37 @@ class DevtoolsManager {
     this.scheduler.register('timeline', function () { self._timelineVL.refresh(); });
     this.scheduler.register('statusBar', function () { self._renderStatusBar(); });
     this.scheduler.register('metrics', function () { self._renderMetrics(); });
+
+    // Minimap
+    var minimapCanvas = document.getElementById('minimap-canvas');
+    if (minimapCanvas) {
+      this._minimap = new Minimap(minimapCanvas, {
+        onClick: function (ratio) {
+          var container = self._timelineContainer;
+          var totalH = self.events.length * 28;
+          container.scrollTop = ratio * totalH;
+        }
+      });
+      this._minimap.setEvents(this.events);
+      this.scheduler.register('minimap', function () {
+        self._minimap.setSessionDuration(Date.now() - self.sessionStart);
+        self._minimap.render();
+      });
+
+      // Track timeline scroll position for viewport overlay
+      this._timelineContainer.addEventListener('scroll', function () {
+        var ct = self._timelineContainer;
+        var totalH = self.events.length * 28;
+        if (totalH <= 0) return;
+        var startRatio = ct.scrollTop / totalH;
+        var endRatio = (ct.scrollTop + ct.clientHeight) / totalH;
+        self._minimap.setViewport(
+          Math.max(0, Math.min(1, startRatio)),
+          Math.max(0, Math.min(1, endRatio))
+        );
+        self.scheduler.markDirty('minimap');
+      }, { passive: true });
+    }
   }
 
   // ------------------------------------------------
@@ -460,9 +491,14 @@ class DevtoolsManager {
     this._searchQuery = '';
     if (this._searchInput) this._searchInput.value = '';
 
-    // Re-bind VirtualList to the new RingBuffer
+    // Re-bind VirtualList and minimap to the new RingBuffer
     this._timelineVL.setItems(this.events);
     this._timelineVL.setFilter(null);
+    if (this._minimap) {
+      this._minimap.setEvents(this.events);
+      this._minimap.setViewport(0, 1);
+      this.scheduler.markDirty('minimap');
+    }
 
     this.panels.state.innerHTML = '<div class="state-empty">No state yet</div>';
     this.panels.phases.innerHTML = '<div class="events-empty">No phase changes yet</div>';
@@ -494,6 +530,7 @@ class DevtoolsManager {
 
     this._applyFilters();
     this.scheduler.markDirty('timeline');
+    this.scheduler.markDirty('minimap');
   }
 
   handleStateUpdate(key, value) {
