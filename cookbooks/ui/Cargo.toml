@@ -23,6 +23,7 @@ thiserror = "2"
 regex = "1"
 parking_lot = "0.12"
 schemars = "0.8"
+tracing-subscriber = { version = "0.3", features = ["registry"] }
 
 [features]
 default = []
