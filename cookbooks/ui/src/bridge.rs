@@ -19,6 +19,7 @@ pub struct SessionBridge {
     tx: WsSender,
 }
 
+#[allow(dead_code)]
 impl SessionBridge {
     pub fn new(tx: WsSender) -> Self {
         Self { tx }
@@ -223,5 +224,163 @@ impl SessionBridge {
     /// Get a clone of the sender for custom callbacks.
     pub fn sender(&self) -> WsSender {
         self.tx.clone()
+    }
+
+    /// Run a complete cookbook session with LiveEvent stream.
+    ///
+    /// Waits for Start -> builds config -> lets the app configure domain logic ->
+    /// connects -> subscribes to LiveEvent stream -> forwards events to browser ->
+    /// forwards browser input to session -> cleans up.
+    ///
+    /// The closure receives a `Live` builder (with telemetry pre-configured) and
+    /// the `StartParams`. Add domain config (instruction, tools, phases, extraction)
+    /// and return the builder. Everything else is handled.
+    pub async fn run<F>(
+        &self,
+        app: &dyn CookbookApp,
+        rx: &mut mpsc::UnboundedReceiver<crate::app::ClientMessage>,
+        configure: F,
+    ) -> Result<(), crate::app::AppError>
+    where
+        F: FnOnce(Live, &crate::apps::StartParams) -> Live,
+    {
+        use crate::app::AppError;
+        use tokio::sync::broadcast;
+
+        // 1. Wait for Start
+        let start = crate::apps::wait_for_start(rx).await?;
+
+        // 2. Build config
+        let config = crate::apps::build_session_config(start.model.as_deref())
+            .map_err(|e| AppError::Connection(e.to_string()))?;
+
+        // 3. Let app configure builder (DOMAIN ONLY)
+        let builder = configure(
+            Live::builder().telemetry_interval(std::time::Duration::from_secs(2)),
+            &start,
+        );
+
+        // 4. Connect
+        let handle = builder
+            .connect(config)
+            .await
+            .map_err(|e| AppError::Connection(e.to_string()))?;
+
+        // 5. Signal browser
+        self.send_connected();
+        self.send_meta(app);
+
+        // 6. Spawn event forwarder (LiveEvent -> ServerMessage -> WebSocket)
+        let mut events = handle.events();
+        let tx = self.tx.clone();
+        let event_task = tokio::spawn(async move {
+            loop {
+                match events.recv().await {
+                    Ok(event) => {
+                        if let Some(msg) = map_event(event) {
+                            if tx.send(msg).is_err() {
+                                break;
+                            }
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
+
+        // 7. Forward browser -> Gemini (existing recv_loop, but without telemetry spawn)
+        self.recv_loop_no_telemetry(&handle, rx).await;
+
+        // 8. Cleanup
+        event_task.abort();
+        Ok(())
+    }
+
+    /// Browser->Gemini forwarding loop without spawning telemetry
+    /// (telemetry is handled by the LiveEvent stream in `run()`).
+    async fn recv_loop_no_telemetry(
+        &self,
+        handle: &LiveHandle,
+        rx: &mut mpsc::UnboundedReceiver<crate::app::ClientMessage>,
+    ) {
+        use crate::app::ClientMessage;
+
+        let b64 = base64::engine::general_purpose::STANDARD;
+        while let Some(msg) = rx.recv().await {
+            match msg {
+                ClientMessage::Audio { data } => {
+                    if let Ok(pcm_bytes) = b64.decode(&data) {
+                        if let Err(e) = handle.send_audio(pcm_bytes).await {
+                            warn!("Failed to send audio: {e}");
+                            let _ = self.tx.send(ServerMessage::Error {
+                                message: e.to_string(),
+                            });
+                        }
+                    }
+                }
+                ClientMessage::Text { text } => {
+                    if let Err(e) = handle.send_text(&text).await {
+                        warn!("Failed to send text: {e}");
+                        let _ = self.tx.send(ServerMessage::Error {
+                            message: e.to_string(),
+                        });
+                    }
+                }
+                ClientMessage::Stop => {
+                    let _ = handle.disconnect().await;
+                    break;
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+/// Map a LiveEvent to a ServerMessage for the cookbook WebSocket transport.
+///
+/// Written once, used by all cookbook apps via `SessionBridge::run()`.
+fn map_event(event: LiveEvent) -> Option<ServerMessage> {
+    match event {
+        LiveEvent::Audio(data) => Some(ServerMessage::Audio {
+            data: data.to_vec(),
+        }),
+        LiveEvent::TextDelta(text) => Some(ServerMessage::TextDelta { text }),
+        LiveEvent::TextComplete(text) => Some(ServerMessage::TextComplete { text }),
+        LiveEvent::InputTranscript { text, .. } => Some(ServerMessage::InputTranscription { text }),
+        LiveEvent::OutputTranscript { text, .. } => {
+            Some(ServerMessage::OutputTranscription { text })
+        }
+        LiveEvent::Thought(text) => Some(ServerMessage::Thought { text }),
+        LiveEvent::VadStart => Some(ServerMessage::VoiceActivityStart),
+        LiveEvent::VadEnd => Some(ServerMessage::VoiceActivityEnd),
+        LiveEvent::TurnComplete => Some(ServerMessage::TurnComplete),
+        LiveEvent::Interrupted => Some(ServerMessage::Interrupted),
+        LiveEvent::Error(message) => Some(ServerMessage::Error { message }),
+        LiveEvent::Extraction { name, value } => {
+            Some(ServerMessage::StateUpdate { key: name, value })
+        }
+        LiveEvent::ExtractionError { .. } => None,
+        LiveEvent::PhaseTransition { from, to, reason } => {
+            Some(ServerMessage::PhaseChange { from, to, reason })
+        }
+        LiveEvent::ToolExecution { name, args, result } => Some(ServerMessage::ToolCallEvent {
+            name,
+            args: args.to_string(),
+            result: result.to_string(),
+        }),
+        LiveEvent::Telemetry(stats) => Some(ServerMessage::Telemetry { stats }),
+        LiveEvent::TurnMetrics {
+            turn,
+            latency_ms,
+            prompt_tokens,
+            response_tokens,
+        } => Some(ServerMessage::TurnMetrics {
+            turn,
+            latency_ms,
+            prompt_tokens,
+            response_tokens,
+        }),
+        _ => None,
     }
 }

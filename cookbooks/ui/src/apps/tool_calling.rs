@@ -5,10 +5,9 @@ use tracing::info;
 
 use adk_rs_fluent::prelude::*;
 
-use crate::app::{AppError, ClientMessage, CookbookApp, ServerMessage, WsSender};
+use crate::app::{AppError, ClientMessage, CookbookApp, WsSender};
+use crate::bridge::SessionBridge;
 use crate::cookbook_meta;
-
-use super::{build_session_config, wait_for_start};
 
 /// Function calling with Gemini Live.
 pub struct ToolCalling;
@@ -72,7 +71,6 @@ fn execute_tool(name: &str, args: &serde_json::Value) -> serde_json::Value {
                 .get("city")
                 .and_then(|v| v.as_str())
                 .unwrap_or("Unknown");
-            // Return mock weather data.
             json!({
                 "city": city,
                 "temperature_f": 72,
@@ -87,7 +85,6 @@ fn execute_tool(name: &str, args: &serde_json::Value) -> serde_json::Value {
                 .get("timezone")
                 .and_then(|v| v.as_str())
                 .unwrap_or("UTC");
-            // Return current time as Unix timestamp (real impl would use the timezone).
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default();
@@ -102,7 +99,6 @@ fn execute_tool(name: &str, args: &serde_json::Value) -> serde_json::Value {
                 .get("expression")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            // Very simple evaluator for demo purposes — parse basic arithmetic.
             let result = evaluate_simple_expr(expression);
             json!({
                 "expression": expression,
@@ -118,7 +114,6 @@ fn execute_tool(name: &str, args: &serde_json::Value) -> serde_json::Value {
 /// Very basic arithmetic expression evaluator for demo purposes.
 /// Supports +, -, *, / with integers and floats. No parentheses.
 fn evaluate_simple_expr(expr: &str) -> f64 {
-    // Tokenize into numbers and operators.
     let mut nums: Vec<f64> = Vec::new();
     let mut ops: Vec<char> = Vec::new();
     let mut current = String::new();
@@ -202,70 +197,38 @@ impl CookbookApp for ToolCalling {
         tx: WsSender,
         mut rx: mpsc::UnboundedReceiver<ClientMessage>,
     ) -> Result<(), AppError> {
-        let start = wait_for_start(&mut rx).await?;
-        let bridge = crate::bridge::SessionBridge::new(tx);
-
-        let config = build_session_config(start.model.as_deref())
-            .map_err(|e| AppError::Connection(e.to_string()))?
-            .text_only()
-            .add_tool(demo_tools())
-            .system_instruction(
-                start.system_instruction.as_deref().unwrap_or(
-                    "You are a helpful assistant with access to tools. \
-                     You can check the weather, get the current time, and calculate arithmetic expressions. \
-                     Use the available tools when appropriate.",
-                ),
-            );
-
-        let tx_tool = bridge.sender();
-        let handle = bridge
-            .wire_live(Live::builder())
-            .on_tool_call(move |calls, _state| {
-                let tx = tx_tool.clone();
-                async move {
-                    info!("Tool calls received: {}", calls.len());
-                    let responses: Vec<FunctionResponse> = calls
-                        .iter()
-                        .map(|call| {
-                            let result = execute_tool(&call.name, &call.args);
-                            info!("Tool '{}' -> {}", call.name, result);
-
-                            let _ = tx.send(ServerMessage::StateUpdate {
-                                key: format!("tool:{}", call.name),
-                                value: json!({
-                                    "name": call.name,
-                                    "args": call.args,
-                                    "result": result,
-                                }),
-                            });
-                            let _ = tx.send(ServerMessage::ToolCallEvent {
-                                name: call.name.clone(),
-                                args: serde_json::to_string(&call.args).unwrap_or_default(),
-                                result: serde_json::to_string(&result).unwrap_or_default(),
-                            });
-
-                            FunctionResponse {
-                                name: call.name.clone(),
-                                response: result,
-                                id: call.id.clone(),
-                                scheduling: Some(FunctionResponseScheduling::WhenIdle),
-                            }
-                        })
-                        .collect();
-
-                    Some(responses)
-                }
+        info!("ToolCalling session starting");
+        SessionBridge::new(tx)
+            .run(self, &mut rx, |live, start| {
+                live.model(GeminiModel::Gemini2_0FlashLive)
+                    .text_only()
+                    .add_tool(demo_tools())
+                    .instruction(
+                        start.system_instruction.as_deref().unwrap_or(
+                            "You are a helpful assistant with access to tools. \
+                             You can check the weather, get the current time, and calculate arithmetic expressions. \
+                             Use the available tools when appropriate.",
+                        ),
+                    )
+                    .on_tool_call(|calls, _state| async move {
+                        info!("Tool calls received: {}", calls.len());
+                        let responses: Vec<FunctionResponse> = calls
+                            .iter()
+                            .map(|call| {
+                                let result = execute_tool(&call.name, &call.args);
+                                info!("Tool '{}' -> {}", call.name, result);
+                                FunctionResponse {
+                                    name: call.name.clone(),
+                                    response: result,
+                                    id: call.id.clone(),
+                                    scheduling: Some(FunctionResponseScheduling::WhenIdle),
+                                }
+                            })
+                            .collect();
+                        Some(responses)
+                    })
             })
-            .connect(config)
             .await
-            .map_err(|e| AppError::Connection(e.to_string()))?;
-
-        bridge.send_connected();
-        bridge.send_meta(self);
-        info!("ToolCalling session connected");
-
-        bridge.recv_loop(&handle, &mut rx).await;
-        Ok(())
     }
 }
 

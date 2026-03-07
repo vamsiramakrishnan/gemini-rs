@@ -33,6 +33,24 @@ impl Live {
         self
     }
 
+    /// Switch to text-only mode (no audio output).
+    ///
+    /// Sets response modality to `Text` and disables speech config.
+    /// Use with `GeminiModel::Gemini2_0FlashLive` for text-only conversations.
+    pub fn text_only(mut self) -> Self {
+        self.config = self.config.text_only();
+        self
+    }
+
+    /// Add a raw `Tool` declaration to the session configuration.
+    ///
+    /// Use this for tools that aren't registered through the `ToolDispatcher`
+    /// (e.g., raw `FunctionDeclaration` lists, Google Search, code execution).
+    pub fn add_tool(mut self, tool: Tool) -> Self {
+        self.config = self.config.add_tool(tool);
+        self
+    }
+
     /// Set a greeting prompt to trigger the model to initiate the conversation.
     ///
     /// When set, this text is sent immediately after the session connects,
