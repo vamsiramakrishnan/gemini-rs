@@ -622,6 +622,38 @@ impl CookbookApp for Clinic {
         tx: WsSender,
         mut rx: mpsc::UnboundedReceiver<ClientMessage>,
     ) -> Result<(), AppError> {
+        // DESIGN DISSECTION: Why this app is built the way it is
+        //
+        // Steering Mode: ContextInjection
+        //   The clinic receptionist persona is stable across all phases — intake,
+        //   triage, scheduling, confirmation. Only the *focus* shifts, not the
+        //   identity. ContextInjection avoids replacing the system instruction on
+        //   every transition, reducing latency.
+        //
+        // Context Delivery: Deferred
+        //   Queues context turns until the next user audio chunk. Prevents
+        //   isolated WebSocket frames during silence that can cause audio glitches.
+        //
+        // greeting (not prompt_on_enter):
+        //   `.greeting()` fires once at session start via send_text. The model
+        //   initiates "Welcome to Clearview Medical Center..." without needing
+        //   prompt_on_enter on the initial phase.
+        //
+        // No prompt_on_enter on any phase:
+        //   After the initial greeting, the patient drives the conversation.
+        //   Phase transitions happen in response to patient statements, and the
+        //   model naturally continues without needing a turn prompt.
+        //
+        // with_context for clinical state:
+        //   Symptoms, urgency, and department are injected as model-role context
+        //   turns. This lets the model reference clinical details without baking
+        //   volatile state into the system instruction.
+        //
+        // State-based transitions:
+        //   Transitions fire on extracted state (urgency > 0.8, symptoms present,
+        //   patient_id set). The LLM naturally gathers this information through
+        //   conversation — no turn-count fallbacks needed.
+
         info!("Clinic session starting");
         SessionBridge::new(tx)
             .run(self, &mut rx, |live, start| {

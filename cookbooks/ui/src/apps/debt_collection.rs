@@ -625,6 +625,39 @@ impl CookbookApp for DebtCollection {
         // Turn boundary tx clone
         let tx_turn_boundary = tx.clone();
 
+        // DESIGN DISSECTION: Why this app is built the way it is
+        //
+        // Steering Mode: ContextInjection
+        //   The collector persona is constant — FDCPA-compliant, empathetic,
+        //   professional. Phases (disclosure → verify → negotiate → payment)
+        //   represent stages in the same conversation, not persona shifts.
+        //   ContextInjection keeps the base persona stable.
+        //
+        // Context Delivery: Deferred
+        //   Queues context turns until the next user audio chunk, preventing
+        //   isolated frames during debtor silence.
+        //
+        // greeting + prompt_on_enter on disclosure:
+        //   `.greeting()` fires the Mini-Miranda disclosure at session start.
+        //   The disclosure phase also uses `prompt_on_enter(true)` because the
+        //   agent must speak first — the debtor didn't initiate this call.
+        //
+        // enter_prompt on verify_identity:
+        //   "The caller confirmed the disclosure. I'll now verify their identity."
+        //   This Content::model() injection gives the model continuity across the
+        //   disclosure→verify transition. Without it, the model loses context
+        //   about what just happened and says "how can I help?"
+        //
+        // Compliance watchers:
+        //   cease_desist, identity_verified, and willingness watchers react to
+        //   extracted state. cease_desist triggers an immediate halt. These are
+        //   legal requirements, not optional UX polish.
+        //
+        // .repair() for identity verification:
+        //   If the debtor avoids giving their name/DOB for 3+ turns, the repair
+        //   system nudges the model. After 6 turns, it escalates. This prevents
+        //   infinite loops without over-constraining the LLM.
+
         SessionBridge::new(tx)
             .run(self, &mut rx, |live, start| {
                 let voice = resolve_voice(start.voice.as_deref());
