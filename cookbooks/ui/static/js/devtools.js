@@ -721,10 +721,10 @@ class DevtoolsManager {
   }
 
   // ------------------------------------------------
-  // Rendering — Metrics/NFR panel (kept for Task 4)
+  // Rendering — Metrics panel (Task 4)
   // ------------------------------------------------
 
-  _renderNfr() {
+  _renderMetrics() {
     var panel = this.panels.metrics;
     var stats = this.telemetry;
 
@@ -733,71 +733,97 @@ class DevtoolsManager {
       return;
     }
 
-    var html = '<div class="nfr-content">';
+    var avg = Math.round(stats.avg_response_latency_ms || 0);
+    var last = Math.round(stats.last_response_latency_ms || 0);
+    var minL = Math.round(stats.min_response_latency_ms || 0);
+    var maxL = Math.round(stats.max_response_latency_ms || 0);
+    var responses = stats.response_count || 0;
 
-    if (stats.response_count > 0) {
-      var avg = Math.round(stats.avg_response_latency_ms || 0);
-      var last = Math.round(stats.last_response_latency_ms || 0);
-      var health = avg < 300 ? 'good' : avg < 600 ? 'ok' : 'warn';
-      var healthLabel = avg < 300 ? 'Healthy' : avg < 600 ? 'Moderate' : 'Degraded';
+    // Token counts
+    var totalTokens = stats.total_token_count || 0;
+    var promptTokens = stats.prompt_token_count || 0;
+    var responseTokens = stats.response_token_count || 0;
 
-      html += '<div class="nfr-hero nfr-hero-' + health + '">' +
-        '<div class="nfr-hero-header">' +
-        '<span class="nfr-hero-dot"></span>' +
-        '<span class="nfr-hero-label">Avg Response Latency</span>' +
-        '<span class="nfr-hero-health">' + healthLabel + '</span>' +
-        '</div>' +
-        '<div class="nfr-hero-value">' + avg + '<span class="nfr-hero-unit">ms</span></div>' +
-        '<div class="nfr-hero-sub">' +
-        '<span>Last <strong>' + last + 'ms</strong></span>' +
-        '<span class="nfr-hero-sep">&middot;</span>' +
-        '<span>' + stats.response_count + ' responses</span>' +
-        '</div>' +
-        '</div>';
+    // Cost estimation (Gemini 2.0 Flash pricing)
+    var cost = promptTokens * 0.000000075 + responseTokens * 0.0000003;
 
-      if (stats.response_count > 1) {
-        var min = Math.round(stats.min_response_latency_ms || 0);
-        var max = Math.round(stats.max_response_latency_ms || 0);
-        var range = max - min;
-        var lastPct = range > 0 ? Math.min(100, Math.max(0, (last - min) / range * 100)) : 50;
-        var avgPct = range > 0 ? Math.min(100, Math.max(0, (avg - min) / range * 100)) : 50;
+    // Uptime formatting
+    var uptimeSecs = stats.uptime_secs || 0;
+    var uptimeMin = Math.floor(uptimeSecs / 60);
+    var uptimeSec = Math.floor(uptimeSecs % 60);
+    var uptimeStr = uptimeMin > 0
+      ? uptimeMin + 'm ' + (uptimeSec < 10 ? '0' : '') + uptimeSec + 's'
+      : uptimeSec + 's';
 
-        html += '<div class="nfr-range-vis">' +
-          '<div class="nfr-range-labels"><span>' + min + 'ms</span><span>' + max + 'ms</span></div>' +
-          '<div class="nfr-range-track">' +
-          '<div class="nfr-range-fill" style="width:100%"></div>' +
-          '<div class="nfr-range-marker nfr-range-marker-avg" style="left:' + avgPct + '%" title="avg ' + avg + 'ms"></div>' +
-          '<div class="nfr-range-marker nfr-range-marker-last" style="left:' + lastPct + '%" title="last ' + last + 'ms"></div>' +
-          '</div>' +
-          '<div class="nfr-range-legend">' +
-          '<span class="nfr-range-legend-item"><span class="nfr-dot-avg"></span>avg</span>' +
-          '<span class="nfr-range-legend-item"><span class="nfr-dot-last"></span>last</span>' +
-          '</div>' +
-          '</div>';
-      }
+    var html = '<div class="metrics-content">';
+
+    // Three-column hero layout
+    html += '<div class="metrics-heroes">';
+
+    // Latency hero
+    html += '<div class="metrics-hero">' +
+      '<div class="metrics-hero-label">Latency</div>' +
+      '<div class="metrics-hero-value">' + avg + '<span class="nfr-unit">ms</span></div>' +
+      '<div class="metrics-hero-sub">' +
+      'last ' + last + 'ms';
+    if (responses > 1) {
+      html += '<br>' + minL + ' &ndash; ' + maxL + 'ms';
     }
+    html += '</div></div>';
 
-    html += '<div class="nfr-section">' +
-      '<div class="nfr-section-header">' +
-      '<span class="nfr-section-icon turn"></span>' +
-      '<span class="nfr-section-title">Turn Performance</span>' +
-      '</div>' +
-      '<div class="nfr-metric-strip">';
-
-    if (stats.avg_turn_duration_ms > 0) {
-      var secs = (stats.avg_turn_duration_ms / 1000).toFixed(1);
-      html += '<div class="nfr-metric">' +
-        '<span class="nfr-metric-value">' + secs + '<span class="nfr-unit">s</span></span>' +
-        '<span class="nfr-metric-label">Avg Turn</span>' +
-        '</div>';
-    }
-
-    html += '<div class="nfr-metric">' +
-      '<span class="nfr-metric-value">' + (stats.interruptions || 0) + '</span>' +
-      '<span class="nfr-metric-label">Interrupts</span>' +
-      '</div>' +
+    // Tokens hero
+    html += '<div class="metrics-hero">' +
+      '<div class="metrics-hero-label">Tokens</div>' +
+      '<div class="metrics-hero-value">' + totalTokens.toLocaleString() + '</div>' +
+      '<div class="metrics-hero-sub">' +
+      promptTokens.toLocaleString() + ' prompt<br>' +
+      responseTokens.toLocaleString() + ' response<br>' +
+      'est. ~$' + cost.toFixed(6) +
       '</div></div>';
 
+    // Session hero
+    html += '<div class="metrics-hero">' +
+      '<div class="metrics-hero-label">Session</div>' +
+      '<div class="metrics-hero-value">' + uptimeStr + '</div>' +
+      '<div class="metrics-hero-sub">' +
+      responses + ' turns<br>' +
+      (stats.interruptions || 0) + ' interruptions';
+    if (stats.current_phase) {
+      html += '<br>phase: ' + this._esc(stats.current_phase);
+    }
+    html += '</div></div>';
+
+    html += '</div>'; // .metrics-heroes
+
+    // Latency range visualization (kept from original)
+    if (responses > 1) {
+      var range = maxL - minL;
+      var lastPct = range > 0 ? Math.min(100, Math.max(0, (last - minL) / range * 100)) : 50;
+      var avgPct = range > 0 ? Math.min(100, Math.max(0, (avg - minL) / range * 100)) : 50;
+
+      html += '<div class="nfr-range-vis" style="margin:0 0 4px; border-radius:6px; border:1px solid var(--border-light);">' +
+        '<div class="nfr-range-labels"><span>' + minL + 'ms</span><span>' + maxL + 'ms</span></div>' +
+        '<div class="nfr-range-track">' +
+        '<div class="nfr-range-fill" style="width:100%"></div>' +
+        '<div class="nfr-range-marker nfr-range-marker-avg" style="left:' + avgPct + '%" title="avg ' + avg + 'ms"></div>' +
+        '<div class="nfr-range-marker nfr-range-marker-last" style="left:' + lastPct + '%" title="last ' + last + 'ms"></div>' +
+        '</div>' +
+        '<div class="nfr-range-legend">' +
+        '<span class="nfr-range-legend-item"><span class="nfr-dot-avg"></span>avg</span>' +
+        '<span class="nfr-range-legend-item"><span class="nfr-dot-last"></span>last</span>' +
+        '</div>' +
+        '</div>';
+    }
+
+    // Per-turn latency sparkline
+    if (this.turnLatencies.length > 0) {
+      html += '<div class="metrics-sparkline-wrap">' +
+        '<div class="metrics-sparkline-label">Per-Turn Latency</div>' +
+        '<canvas class="metrics-sparkline" id="metrics-sparkline-canvas"></canvas>' +
+        '</div>';
+    }
+
+    // Audio section (kept from original)
     if (stats.audio_chunks_out > 0) {
       html += '<div class="nfr-section">' +
         '<div class="nfr-section-header">' +
@@ -813,13 +839,10 @@ class DevtoolsManager {
         '<span class="nfr-metric-value">' + (stats.audio_throughput_kbps || 0) + '<span class="nfr-unit">KB/s</span></span>' +
         '<span class="nfr-metric-label">Throughput</span>' +
         '</div>' +
-        '<div class="nfr-metric">' +
-        '<span class="nfr-metric-value">' + (stats.uptime_secs || 0) + '<span class="nfr-unit">s</span></span>' +
-        '<span class="nfr-metric-label">Uptime</span>' +
-        '</div>' +
         '</div></div>';
     }
 
+    // Tool calls section (kept from original)
     if (this.toolCalls.length > 0) {
       var self = this;
       html += '<div class="nfr-section">' +
@@ -841,8 +864,16 @@ class DevtoolsManager {
       html += '</div></div>';
     }
 
-    html += '</div>';
+    html += '</div>'; // .metrics-content
     panel.innerHTML = html;
+
+    // Render sparkline after innerHTML update
+    var sparkCanvas = panel.querySelector('#metrics-sparkline-canvas');
+    if (sparkCanvas && this.turnLatencies.length > 0) {
+      this._sparkline = new Sparkline(sparkCanvas);
+      this._sparkline.setData(this.turnLatencies);
+      this._sparkline.render();
+    }
 
     this._updateHealthIndicator(stats);
   }

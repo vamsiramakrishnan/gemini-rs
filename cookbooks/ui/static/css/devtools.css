@@ -1223,3 +1223,73 @@
 .devtools-expand-btn.visible {
   display: flex;
 }
+
+/* ============================================
+   Metrics Panel (Task 4)
+   ============================================ */
+.metrics-content {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.metrics-heroes {
+  display: flex;
+  gap: 8px;
+}
+
+.metrics-hero {
+  flex: 1;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-light);
+  background: #fff;
+}
+
+.metrics-hero-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.metrics-hero-value {
+  font-size: 24px;
+  font-weight: 700;
+  font-family: var(--mono);
+  color: var(--text-primary);
+  line-height: 1.1;
+  margin-bottom: 4px;
+}
+
+.metrics-hero-sub {
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.metrics-sparkline-wrap {
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.metrics-sparkline-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  padding: 6px 8px 2px;
+}
+
+.metrics-sparkline {
+  width: 100%;
+  height: 32px;
+  display: block;
+}
