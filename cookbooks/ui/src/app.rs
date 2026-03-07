@@ -60,6 +60,22 @@ pub enum ServerMessage {
     Telemetry { stats: serde_json::Value },
     /// Real-time tool call event for devtools visualization.
     ToolCallEvent { name: String, args: String, result: String },
+    /// OTel span lifecycle event bridged from the tracing Layer.
+    SpanEvent {
+        name: String,
+        span_id: String,
+        parent_id: Option<String>,
+        duration_us: u64,
+        attributes: serde_json::Value,
+        status: String,
+    },
+    /// Per-turn metrics for sparkline visualization.
+    TurnMetrics {
+        turn: u32,
+        latency_ms: u32,
+        prompt_tokens: u32,
+        response_tokens: u32,
+    },
 }
 
 /// Messages received from the browser.

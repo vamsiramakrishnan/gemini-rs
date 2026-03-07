@@ -349,6 +349,15 @@
           addMessage('Try: ' + hints, 'system');
         }
         break;
+
+      case 'spanEvent':
+        devtools.addEvent(msg);
+        break;
+
+      case 'turnMetrics':
+        devtools.addEvent(msg);
+        devtools.handleTurnMetrics(msg);
+        break;
     }
   }
 

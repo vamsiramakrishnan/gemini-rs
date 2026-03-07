@@ -634,6 +634,11 @@ class DevtoolsManager {
     this.scheduler.markDirty('metrics');
   }
 
+  handleTurnMetrics(data) {
+    this.turnLatencies.push(data.latency_ms);
+    this.scheduler.markDirty('metrics');
+  }
+
   // ------------------------------------------------
   // Rendering — State panel (Task 5 — targeted updates)
   // ------------------------------------------------
@@ -1093,6 +1098,13 @@ class DevtoolsManager {
         return ((msg.entries || []).length) + ' transitions';
       case 'toolCallEvent':
         return (msg.name || '') + '(' + this._truncText(msg.args, 30) + ')';
+      case 'spanEvent':
+        var durDisplay = msg.duration_us > 1000
+          ? (msg.duration_us / 1000).toFixed(1) + 'ms'
+          : msg.duration_us + 'us';
+        return (msg.name || '') + '  ' + (msg.status || '') + '  ' + durDisplay;
+      case 'turnMetrics':
+        return 'turn ' + msg.turn + '  ' + msg.latency_ms + 'ms  ' + msg.prompt_tokens + '/' + msg.response_tokens + ' tokens';
       default:
         return this._truncText(JSON.stringify(msg), 80);
     }
