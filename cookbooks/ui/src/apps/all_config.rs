@@ -378,6 +378,20 @@ impl CookbookApp for AllConfig {
             value: json!(modality_str),
         });
 
+        // Periodic telemetry
+        let telem = handle.telemetry().clone();
+        let tx_telem = tx.clone();
+        let telem_task = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));
+            loop {
+                interval.tick().await;
+                let stats = telem.snapshot();
+                if tx_telem.send(ServerMessage::Telemetry { stats }).is_err() {
+                    break;
+                }
+            }
+        });
+
         // Browser -> Gemini loop.
         let b64 = base64::engine::general_purpose::STANDARD;
         while let Some(msg) = rx.recv().await {
@@ -411,6 +425,7 @@ impl CookbookApp for AllConfig {
                 }
                 ClientMessage::Stop => {
                     info!("AllConfig session stopping");
+                    telem_task.abort();
                     let _ = handle.disconnect().await;
                     break;
                 }

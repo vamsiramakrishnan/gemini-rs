@@ -50,6 +50,7 @@ async fn main() {
         .route("/api/apps", get(list_apps))
         .route("/ws/:name", get(ws_upgrade))
         .nest_service("/static", ServeDir::new(static_dir))
+        .layer(middleware::from_fn(no_cache_static))
         .layer(middleware::from_fn(cross_origin_isolation))
         .with_state(state);
 
@@ -85,6 +86,22 @@ async fn init_telemetry() -> (
     // since we built the subscriber ourselves; enable otel features separately
     // if needed)
     (Default::default(), span_tx)
+}
+
+/// Disable caching for static files during development.
+async fn no_cache_static(
+    request: axum::http::Request<axum::body::Body>,
+    next: Next,
+) -> Response {
+    let is_static = request.uri().path().starts_with("/static");
+    let mut response = next.run(request).await;
+    if is_static {
+        response.headers_mut().insert(
+            "cache-control",
+            "no-cache, no-store, must-revalidate".parse().unwrap(),
+        );
+    }
+    response
 }
 
 /// Cross-Origin-Isolation middleware — enables SharedArrayBuffer in AudioWorklet.

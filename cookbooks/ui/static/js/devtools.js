@@ -49,6 +49,7 @@ var DevtoolsManager = (function () {
     this._statusHealthEl = null;
     this._uptimeInterval = null;
     this._traceId = null;
+    this._currentPhase = null;
 
     this._initPanels();
     this._initTabs();
@@ -159,11 +160,13 @@ var DevtoolsManager = (function () {
       this.panels[k].classList.toggle('active', k === tabId);
     }.bind(this));
 
-    // VirtualList may have rendered while the panel was display:none
-    // (clientHeight=0 → zero visible rows). Force a refresh now that
-    // the panel is visible again.
+    // Panels rendered while display:none have zero clientHeight — force
+    // a refresh now that the panel is visible again.
     if (tabId === 'timeline' && this._timeline._vl) {
       this._timeline._vl.refresh();
+    }
+    if (tabId === 'metrics') {
+      this.scheduler.markDirty('metrics');
     }
   };
 
@@ -288,7 +291,12 @@ var DevtoolsManager = (function () {
   };
 
   DevtoolsManager.prototype.handlePhaseChange = function (data) {
+    this._currentPhase = data.to || data.phase || null;
     this._phases.addPhase(data);
+    if (this._statusPhaseEl && this._currentPhase) {
+      this._statusPhaseEl.textContent = this._currentPhase;
+    }
+    this.scheduler.markDirty('statusBar');
   };
 
   DevtoolsManager.prototype.handleEvaluation = function (data) {
@@ -300,6 +308,11 @@ var DevtoolsManager = (function () {
   };
 
   DevtoolsManager.prototype.handleTelemetry = function (stats) {
+    // Inject current phase from PhaseChange events (not in SessionTelemetry snapshot)
+    if (this._currentPhase) {
+      stats.current_phase = this._currentPhase;
+    }
+
     this._metrics.updateTelemetry(stats);
 
     // Update status bar fields
@@ -335,10 +348,10 @@ var DevtoolsManager = (function () {
       this.availableTabs.push('phases');
     }
     this.availableTabs.push('metrics');
+    this.tabButtons = {};
     this._renderTabs();
-    if (!this.availableTabs.includes(this.activeTab)) {
-      this.switchTab('timeline');
-    }
+    // Always re-apply active tab to guarantee panel visibility is correct
+    this.switchTab(this.availableTabs.includes(this.activeTab) ? this.activeTab : 'timeline');
   };
 
   // ------------------------------------------------
@@ -349,6 +362,7 @@ var DevtoolsManager = (function () {
     this.events = new RingBuffer(10000);
     this.sessionStart = Date.now();
     this._traceId = null;
+    this._currentPhase = null;
 
     // Reset all panels
     this._timeline.reset(this.events);
