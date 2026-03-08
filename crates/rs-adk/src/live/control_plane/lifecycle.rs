@@ -357,16 +357,24 @@ pub(in crate::live) async fn handle_turn_complete(
     // 14. Context delivery — Immediate or Deferred
     //
     // Immediate: all context turns sent as one atomic WebSocket frame now.
-    // Deferred:  pushed to PendingContext, flushed by DeferredWriter before
-    //            the next user send (send_audio/send_text/send_video).
+    // Deferred:  pushed to PendingContext, synchronized with user activity —
+    //            the DeferredWriter drains and sends context immediately before
+    //            the next user send (send_audio/send_text/send_video), so context
+    //            arrives in the same burst as user speech rather than as isolated
+    //            frames during silence.
     //
     // Exception: when should_prompt is true, we MUST send immediately —
     // the prompt triggers a model response and the context must precede it.
     if !context_buffer.is_empty() || should_prompt {
         let force_immediate = should_prompt;
-        match (&shared.pending_context, force_immediate) {
-            (Some(pending), false) => {
-                // Deferred: queue for delivery with next user content
+        use crate::live::steering::ContextDelivery;
+        match (
+            &control_plane.context_delivery,
+            &shared.pending_context,
+            force_immediate,
+        ) {
+            (ContextDelivery::Deferred, Some(pending), false) => {
+                // Deferred: queue for synchronized delivery with next user activity
                 pending.extend(context_buffer);
             }
             _ => {

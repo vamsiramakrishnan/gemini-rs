@@ -32,7 +32,7 @@ use super::persistence::SessionPersistence;
 use super::phase::PhaseMachine;
 use super::session_signals::SessionSignals;
 use super::soft_turn::SoftTurnDetector;
-use super::steering::SteeringMode;
+use super::steering::{ContextDelivery, SteeringMode};
 use super::telemetry::SessionTelemetry;
 use super::temporal::TemporalRegistry;
 use super::watcher::WatcherRegistry;
@@ -92,6 +92,10 @@ pub(crate) struct ControlPlaneConfig {
     pub soft_turn: Option<SoftTurnDetector>,
     /// Steering mode for phase instruction delivery.
     pub steering_mode: SteeringMode,
+    /// When to deliver context turns to the wire.
+    /// Deferred = synchronize with user activity (speech, interruption);
+    /// Immediate = send during TurnComplete processing.
+    pub context_delivery: ContextDelivery,
     /// Conversation repair tracker.
     pub needs_fulfillment: Option<NeedsFulfillment>,
     /// Session persistence backend.
@@ -111,6 +115,7 @@ impl Default for ControlPlaneConfig {
         Self {
             soft_turn: None,
             steering_mode: SteeringMode::default(),
+            context_delivery: ContextDelivery::default(),
             needs_fulfillment: None,
             persistence: None,
             session_id: None,

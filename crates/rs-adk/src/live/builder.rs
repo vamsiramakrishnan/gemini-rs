@@ -304,6 +304,7 @@ impl LiveSessionBuilder {
         let mut control_plane = ControlPlaneConfig {
             soft_turn: self.soft_turn_timeout.map(SoftTurnDetector::new),
             steering_mode: self.steering_mode,
+            context_delivery: self.context_delivery,
             needs_fulfillment: self.repair_config.map(NeedsFulfillment::new),
             persistence: self.persistence,
             session_id: self.session_id,
