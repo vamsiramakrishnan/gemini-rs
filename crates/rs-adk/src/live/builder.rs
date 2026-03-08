@@ -301,24 +301,30 @@ impl LiveSessionBuilder {
         );
 
         // Build control plane config
-        let control_plane = ControlPlaneConfig {
+        let mut control_plane = ControlPlaneConfig {
             soft_turn: self.soft_turn_timeout.map(SoftTurnDetector::new),
             steering_mode: self.steering_mode,
-            context_delivery: self.context_delivery,
             needs_fulfillment: self.repair_config.map(NeedsFulfillment::new),
             persistence: self.persistence,
             session_id: self.session_id,
             tool_advisory: self.tool_advisory,
+            pending_context: None, // set after PendingContext is created below
+        };
+
+        // Create shared PendingContext for deferred delivery.
+        // The SAME Arc is given to both the DeferredWriter (which drains it before
+        // user sends) and the ControlPlaneConfig (which the processor uses to push
+        // context turns from the control lane).
+        let pending_context = if self.context_delivery == ContextDelivery::Deferred {
+            Some(Arc::new(PendingContext::new()))
+        } else {
+            None
         };
 
         // Wrap writer in DeferredWriter if deferred context delivery is enabled.
-        // The DeferredWriter flushes pending context before user sends.
-        // The raw_writer goes to the processor (for internal sends);
-        // the user_writer goes to LiveHandle (intercepts user sends).
-        let (writer, user_writer) = if self.context_delivery == ContextDelivery::Deferred {
-            let pending = Arc::new(PendingContext::new());
+        let (writer, user_writer) = if let Some(ref pending) = pending_context {
             let deferred: Arc<dyn SessionWriter> =
-                Arc::new(DeferredWriter::new(raw_writer.clone(), pending));
+                Arc::new(DeferredWriter::new(raw_writer.clone(), pending.clone()));
             // Processor uses raw_writer for internal sends (lifecycle context
             // goes through PendingContext, not through the writer directly).
             // User-facing LiveHandle uses the DeferredWriter.
@@ -326,6 +332,9 @@ impl LiveSessionBuilder {
         } else {
             (raw_writer.clone(), raw_writer)
         };
+
+        // Pass shared pending context to control plane config
+        control_plane.pending_context = pending_context;
 
         // Create LiveEvent broadcast channel
         use super::events::LiveEvent;

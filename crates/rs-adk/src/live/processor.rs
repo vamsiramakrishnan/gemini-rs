@@ -32,7 +32,7 @@ use super::persistence::SessionPersistence;
 use super::phase::PhaseMachine;
 use super::session_signals::SessionSignals;
 use super::soft_turn::SoftTurnDetector;
-use super::steering::{ContextDelivery, SteeringMode};
+use super::steering::SteeringMode;
 use super::telemetry::SessionTelemetry;
 use super::temporal::TemporalRegistry;
 use super::watcher::WatcherRegistry;
@@ -92,8 +92,6 @@ pub(crate) struct ControlPlaneConfig {
     pub soft_turn: Option<SoftTurnDetector>,
     /// Steering mode for phase instruction delivery.
     pub steering_mode: SteeringMode,
-    /// When to deliver context turns to the wire.
-    pub context_delivery: ContextDelivery,
     /// Conversation repair tracker.
     pub needs_fulfillment: Option<NeedsFulfillment>,
     /// Session persistence backend.
@@ -102,6 +100,10 @@ pub(crate) struct ControlPlaneConfig {
     pub session_id: Option<String>,
     /// Whether to inject tool availability advisory on phase transitions.
     pub tool_advisory: bool,
+    /// Shared pending context buffer for deferred delivery (None when Immediate).
+    /// Must be the same Arc given to the DeferredWriter so the control lane
+    /// can push context and the DeferredWriter can drain it.
+    pub pending_context: Option<Arc<PendingContext>>,
 }
 
 impl Default for ControlPlaneConfig {
@@ -109,11 +111,11 @@ impl Default for ControlPlaneConfig {
         Self {
             soft_turn: None,
             steering_mode: SteeringMode::default(),
-            context_delivery: ContextDelivery::default(),
             needs_fulfillment: None,
             persistence: None,
             session_id: None,
             tool_advisory: true,
+            pending_context: None,
         }
     }
 }
@@ -134,16 +136,11 @@ pub(crate) fn spawn_event_processor(
     control_plane: ControlPlaneConfig,
     live_event_tx: broadcast::Sender<LiveEvent>,
 ) -> (tokio::task::JoinHandle<()>, tokio::task::JoinHandle<()>) {
-    let pending_context = if control_plane.context_delivery == ContextDelivery::Deferred {
-        Some(Arc::new(PendingContext::new()))
-    } else {
-        None
-    };
     let shared = Arc::new(SharedState {
         interrupted: AtomicBool::new(false),
         resume_handle: parking_lot::Mutex::new(None),
         last_instruction: parking_lot::Mutex::new(None),
-        pending_context,
+        pending_context: control_plane.pending_context.clone(),
     });
 
     let timer_cancel = CancellationToken::new();

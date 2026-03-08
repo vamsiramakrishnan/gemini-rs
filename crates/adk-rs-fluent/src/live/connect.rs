@@ -27,12 +27,18 @@ impl Live {
         self.build_and_connect().await
     }
 
-    /// Connect using a pre-configured SessionConfig (advanced).
+    /// Connect using a pre-configured SessionConfig for auth and model.
+    ///
+    /// Merges the provided config's `endpoint` and `model` into the builder's
+    /// config, preserving system instruction, tools, voice, transcription, and
+    /// all other settings configured via the fluent API.
     pub async fn connect(
         mut self,
         config: SessionConfig,
     ) -> Result<LiveHandle, rs_adk::error::AgentError> {
-        self.config = config;
+        // Merge auth/model from external config, keep everything else from builder.
+        self.config.endpoint = config.endpoint;
+        self.config.model = config.model;
         self.build_and_connect().await
     }
 
