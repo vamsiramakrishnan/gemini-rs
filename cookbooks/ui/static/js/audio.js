@@ -41,6 +41,12 @@ class AudioManager {
       sampleRate: 24000,
     });
 
+    // Chrome's autoplay policy starts AudioContext in 'suspended' state.
+    // Resume it here (initPlayback is called from a user click handler).
+    if (this.playbackCtx.state === 'suspended') {
+      await this.playbackCtx.resume();
+    }
+
     if (this._workletSupported) {
       try {
         await this.playbackCtx.audioWorklet.addModule('/static/worklets/playback-processor.js');
@@ -60,6 +66,10 @@ class AudioManager {
 
   playAudio(base64Data) {
     if (!this.playbackCtx) return;
+
+    if (this.playbackCtx.state === 'suspended') {
+      this.playbackCtx.resume();
+    }
 
     // Decode base64 -> binary -> Int16Array
     const binaryString = atob(base64Data);
@@ -112,6 +122,11 @@ class AudioManager {
    */
   playAudioBinary(arrayBuffer) {
     if (!this.playbackCtx) return;
+
+    // Safety net: resume if still suspended (e.g. race with initPlayback)
+    if (this.playbackCtx.state === 'suspended') {
+      this.playbackCtx.resume();
+    }
 
     const int16 = new Int16Array(arrayBuffer);
 
