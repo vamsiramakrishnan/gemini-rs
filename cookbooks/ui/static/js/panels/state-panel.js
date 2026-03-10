@@ -20,7 +20,7 @@ var StatePanel = (function () {
 
   StatePanel.prototype.create = function (container) {
     this._container = container;
-    container.className = 'devtools-panel';
+    container.className = 'devtools-panel state-panel';
     this._build();
   };
 

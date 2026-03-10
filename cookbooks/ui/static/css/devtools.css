@@ -8,6 +8,7 @@
   flex-direction: column;
   width: 380px;
   min-width: 380px;
+  min-height: 0;             /* allow flex children to scroll instead of overflowing */
   background: var(--devtools-bg);
   border-left: 1px solid var(--devtools-border);
   position: relative;
@@ -94,19 +95,23 @@
    ============================================ */
 .devtools-content {
   flex: 1;
+  min-height: 0;           /* allow flex child to shrink below content */
   overflow: hidden;
   position: relative;
+  display: flex;            /* make panels stretch without height: 100% */
+  flex-direction: column;
 }
 
 .devtools-panel {
   display: none;
   flex-direction: column;
-  height: 100%;
+  min-height: 0;            /* allow inner flex children to scroll */
   overflow: hidden;
 }
 
 .devtools-panel.active {
   display: flex;
+  flex: 1;                  /* fill content area */
 }
 
 /* ============================================
@@ -1177,12 +1182,13 @@
 
 /* Timeline panel wrapper */
 .timeline-panel {
-  display: flex; flex-direction: column; overflow: hidden;
+  display: flex; flex-direction: column; overflow: hidden; min-height: 0;
 }
 .timeline-panel .tl-filters { flex-shrink: 0; }
 .timeline-list-container {
   flex: 1; overflow-y: auto; position: relative;
-  contain: strict;
+  min-height: 0;
+  contain: layout paint;    /* strict includes size containment which breaks flex sizing */
 }
 
 /* ============================================
