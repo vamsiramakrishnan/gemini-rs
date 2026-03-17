@@ -4,6 +4,7 @@ members = [
     "crates/rs-genai",
     "crates/rs-adk",
     "crates/adk-rs-fluent",
+    "apps/adk-server-core",
     "apps/adk-web",
     "apps/adk-api-server",
     "examples/agents",
