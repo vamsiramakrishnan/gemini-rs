@@ -354,7 +354,7 @@ impl C {
                         })
                         .collect();
                     Content {
-                        role: c.role.clone(),
+                        role: c.role,
                         parts,
                     }
                 })
