@@ -1,6 +1,6 @@
 //! Semantic events emitted by the L1 processor.
 //!
-//! Subscribe via [`LiveHandle::events()`]. Zero-cost when no subscribers.
+//! Subscribe via `LiveHandle::events()`. Zero-cost when no subscribers.
 
 use std::time::Duration;
 

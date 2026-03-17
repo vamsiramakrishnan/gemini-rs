@@ -4,6 +4,7 @@
 //! persistence with an in-memory default implementation.
 
 mod memory;
+mod sqlite;
 mod types;
 
 #[cfg(feature = "database-sessions")]
@@ -14,6 +15,7 @@ pub use database::DatabaseSessionService;
 pub mod db_schema;
 
 pub use memory::InMemorySessionService;
+pub use sqlite::{SqliteSessionConfig, SqliteSessionService};
 pub use types::{Session, SessionId};
 
 use async_trait::async_trait;

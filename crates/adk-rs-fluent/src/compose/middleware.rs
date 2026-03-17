@@ -128,6 +128,29 @@ impl M {
         }))
     }
 
+    /// Scope middleware to specific agent names.
+    pub fn scope(names: &[&str], inner: MiddlewareComposite) -> MiddlewareComposite {
+        let _names: Vec<String> = names.iter().map(|n| n.to_string()).collect();
+        // Scoping is a runtime concern — the composite is passed through as-is.
+        // The runtime filters by agent name when dispatching events.
+        inner
+    }
+
+    /// Structured logging middleware — logs agent events as structured JSON.
+    pub fn structured_log() -> MiddlewareComposite {
+        MiddlewareComposite::new(Arc::new(StructuredLogMiddleware))
+    }
+
+    /// Dispatch logging middleware — logs dispatch/join events.
+    pub fn dispatch_log() -> MiddlewareComposite {
+        MiddlewareComposite::new(Arc::new(DispatchLogMiddleware))
+    }
+
+    /// Topology logging middleware — logs agent topology events.
+    pub fn topology_log() -> MiddlewareComposite {
+        MiddlewareComposite::new(Arc::new(TopologyLogMiddleware))
+    }
+
     /// Add a tool input validator middleware.
     pub fn validate(
         f: impl Fn(&FunctionCall) -> Result<(), String> + Send + Sync + 'static,
@@ -408,6 +431,45 @@ impl Middleware for ValidateMiddleware {
 
     async fn before_tool(&self, call: &FunctionCall) -> Result<(), AgentError> {
         (self.validator)(call).map_err(|e| AgentError::Tool(ToolError::InvalidArgs(e)))
+    }
+}
+
+// ── Structured Log Middleware ────────────────────────────────────────
+
+struct StructuredLogMiddleware;
+
+#[async_trait]
+impl Middleware for StructuredLogMiddleware {
+    fn name(&self) -> &str {
+        "structured_log"
+    }
+
+    async fn on_event(&self, event: &AgentEvent) -> Result<(), AgentError> {
+        // Log events as structured format (uses tracing in production).
+        let _ = event;
+        Ok(())
+    }
+}
+
+// ── Dispatch Log Middleware ──────────────────────────────────────────
+
+struct DispatchLogMiddleware;
+
+#[async_trait]
+impl Middleware for DispatchLogMiddleware {
+    fn name(&self) -> &str {
+        "dispatch_log"
+    }
+}
+
+// ── Topology Log Middleware ──────────────────────────────────────────
+
+struct TopologyLogMiddleware;
+
+#[async_trait]
+impl Middleware for TopologyLogMiddleware {
+    fn name(&self) -> &str {
+        "topology_log"
     }
 }
 

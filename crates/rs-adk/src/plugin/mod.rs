@@ -5,10 +5,16 @@
 //! response, or simply continue. The `PluginManager` runs plugins in order
 //! and respects the first non-Continue result.
 
+mod context_filter;
+mod global_instruction;
 mod logging;
+mod reflect_retry;
 mod security;
 
+pub use context_filter::ContextFilterPlugin;
+pub use global_instruction::GlobalInstructionPlugin;
 pub use logging::LoggingPlugin;
+pub use reflect_retry::ReflectRetryToolPlugin;
 pub use security::{AllowAllPolicy, DenyListPolicy, PolicyEngine, PolicyOutcome, SecurityPlugin};
 
 use std::sync::Arc;

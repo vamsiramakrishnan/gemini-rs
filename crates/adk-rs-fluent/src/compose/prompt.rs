@@ -80,6 +80,41 @@ impl PromptComposite {
     }
 }
 
+impl PromptComposite {
+    /// Keep only sections of specified kinds.
+    pub fn only(self, kinds: &[PromptSectionKind]) -> Self {
+        Self {
+            sections: self
+                .sections
+                .into_iter()
+                .filter(|s| kinds.contains(&s.kind))
+                .collect(),
+        }
+    }
+
+    /// Remove sections of specified kinds.
+    pub fn without(self, kinds: &[PromptSectionKind]) -> Self {
+        Self {
+            sections: self
+                .sections
+                .into_iter()
+                .filter(|s| !kinds.contains(&s.kind))
+                .collect(),
+        }
+    }
+
+    /// Reorder sections by kind priority.
+    pub fn reorder(mut self, order: &[PromptSectionKind]) -> Self {
+        self.sections.sort_by_key(|s| {
+            order
+                .iter()
+                .position(|k| k == &s.kind)
+                .unwrap_or(usize::MAX)
+        });
+        self
+    }
+}
+
 impl From<PromptComposite> for String {
     fn from(p: PromptComposite) -> String {
         p.render()
@@ -179,6 +214,22 @@ impl P {
         PromptSection {
             kind: PromptSectionKind::Guidelines,
             content: format!("Guidelines:\n{content}"),
+        }
+    }
+
+    /// Add a named section (flexible section kind).
+    pub fn section(name: &str, text: &str) -> PromptSection {
+        PromptSection {
+            kind: PromptSectionKind::Text,
+            content: format!("## {}\n{}", name, text),
+        }
+    }
+
+    /// Template with `{key}` placeholders — rendered with state values at runtime.
+    pub fn template(tpl: &str) -> PromptSection {
+        PromptSection {
+            kind: PromptSectionKind::Text,
+            content: tpl.to_string(),
         }
     }
 

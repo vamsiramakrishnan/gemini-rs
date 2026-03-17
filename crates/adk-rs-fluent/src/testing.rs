@@ -94,6 +94,117 @@ pub fn check_contracts(agents: &[AgentBuilder]) -> Vec<ContractViolation> {
     violations
 }
 
+/// Infer data flow between agents based on reads/writes declarations.
+///
+/// Returns a list of `(producer, consumer, key)` tuples representing data dependencies.
+pub fn infer_data_flow(agents: &[AgentBuilder]) -> Vec<DataFlowEdge> {
+    let mut edges = Vec::new();
+
+    for producer in agents {
+        for consumer in agents {
+            if producer.name() == consumer.name() {
+                continue;
+            }
+            for write_key in producer.get_writes() {
+                if consumer.get_reads().contains(write_key) {
+                    edges.push(DataFlowEdge {
+                        producer: producer.name().to_string(),
+                        consumer: consumer.name().to_string(),
+                        key: write_key.clone(),
+                    });
+                }
+            }
+        }
+    }
+
+    edges
+}
+
+/// A data flow edge between two agents.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DataFlowEdge {
+    /// The agent that writes the key.
+    pub producer: String,
+    /// The agent that reads the key.
+    pub consumer: String,
+    /// The state key.
+    pub key: String,
+}
+
+/// A test harness for running agents with controlled inputs.
+pub struct AgentHarness {
+    state: rs_adk::State,
+}
+
+impl AgentHarness {
+    /// Create a new harness with empty state.
+    pub fn new() -> Self {
+        Self {
+            state: rs_adk::State::new(),
+        }
+    }
+
+    /// Set a state value before running.
+    pub fn set<V: serde::Serialize>(self, key: &str, value: V) -> Self {
+        self.state.set(key, value);
+        self
+    }
+
+    /// Get the underlying state.
+    pub fn state(&self) -> &rs_adk::State {
+        &self.state
+    }
+
+    /// Run a text agent against this harness state.
+    pub async fn run(
+        &self,
+        agent: &dyn rs_adk::text::TextAgent,
+    ) -> Result<String, rs_adk::error::AgentError> {
+        agent.run(&self.state).await
+    }
+}
+
+impl Default for AgentHarness {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Diagnostic utility — returns a summary of an agent builder's configuration.
+pub fn diagnose(agent: &AgentBuilder) -> String {
+    let mut lines = Vec::new();
+    lines.push(format!("Agent: {}", agent.name()));
+
+    if let Some(model) = agent.get_model() {
+        lines.push(format!("  Model: {:?}", model));
+    }
+    if let Some(inst) = agent.get_instruction() {
+        let truncated = if inst.len() > 80 {
+            format!("{}...", &inst[..80])
+        } else {
+            inst.to_string()
+        };
+        lines.push(format!("  Instruction: {}", truncated));
+    }
+    if let Some(t) = agent.get_temperature() {
+        lines.push(format!("  Temperature: {}", t));
+    }
+    if agent.tool_count() > 0 {
+        lines.push(format!("  Tools: {}", agent.tool_count()));
+    }
+    if !agent.get_writes().is_empty() {
+        lines.push(format!("  Writes: {:?}", agent.get_writes()));
+    }
+    if !agent.get_reads().is_empty() {
+        lines.push(format!("  Reads: {:?}", agent.get_reads()));
+    }
+    if !agent.get_sub_agents().is_empty() {
+        lines.push(format!("  Sub-agents: {}", agent.get_sub_agents().len()));
+    }
+
+    lines.join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,6 +267,43 @@ mod tests {
     fn empty_agents_no_violations() {
         let violations = check_contracts(&[]);
         assert!(violations.is_empty());
+    }
+
+    #[test]
+    fn infer_data_flow_finds_edges() {
+        let writer = AgentBuilder::new("writer").writes("output");
+        let reader = AgentBuilder::new("reader").reads("output");
+        let edges = infer_data_flow(&[writer, reader]);
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].producer, "writer");
+        assert_eq!(edges[0].consumer, "reader");
+        assert_eq!(edges[0].key, "output");
+    }
+
+    #[test]
+    fn infer_data_flow_no_self_edges() {
+        let agent = AgentBuilder::new("self").writes("key").reads("key");
+        let edges = infer_data_flow(&[agent]);
+        assert!(edges.is_empty());
+    }
+
+    #[test]
+    fn diagnose_basic() {
+        let agent = AgentBuilder::new("test")
+            .instruction("Be helpful")
+            .temperature(0.5)
+            .writes("output");
+        let diag = diagnose(&agent);
+        assert!(diag.contains("test"));
+        assert!(diag.contains("Be helpful"));
+        assert!(diag.contains("0.5"));
+    }
+
+    #[test]
+    fn harness_sets_state() {
+        let harness = AgentHarness::new().set("key", "value");
+        let val: Option<String> = harness.state().get("key");
+        assert_eq!(val, Some("value".into()));
     }
 
     #[test]

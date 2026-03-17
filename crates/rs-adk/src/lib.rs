@@ -17,6 +17,7 @@ pub mod confirmation;
 pub mod context;
 pub mod credentials;
 pub mod error;
+pub mod evaluation;
 pub mod events;
 pub mod instruction;
 pub mod live;
@@ -24,6 +25,8 @@ pub mod llm;
 pub mod llm_agent;
 pub mod memory;
 pub mod middleware;
+pub mod optimization;
+pub mod planners;
 pub mod plugin;
 pub mod processors;
 pub mod router;
@@ -43,7 +46,7 @@ pub mod utils;
 #[cfg(test)]
 pub(crate) mod test_helpers;
 
-// Ergonomic re-exports
+// Ergonomic re-exports — existing
 pub use a2a::{to_a2a_message, to_a2a_parts, to_adk_event, to_genai_parts, A2aMessage, A2aPart};
 pub use agent::Agent;
 pub use agent_tool::AgentTool;
@@ -102,6 +105,52 @@ pub use tools::GoogleSearchTool;
 pub use toolset::{StaticToolset, Toolset};
 pub use utils::model_name::{extract_model_name, is_gemini2_or_above, is_gemini_model};
 pub use utils::variant::{get_google_llm_variant, GoogleLlmVariant};
+
+// New re-exports — A2A
+pub use a2a::{AgentCard, AgentSkill, RemoteA2aAgent, RemoteA2aAgentConfig};
+
+// New re-exports — Evaluation
+pub use evaluation::{
+    EvalCase, EvalMetric, EvalResult, EvalSet, Evaluator, Invocation, LlmAsJudge,
+    PerInvocationResult, ResponseEvaluator, TrajectoryEvaluator,
+};
+
+// New re-exports — Planners
+pub use planners::{BuiltInPlanner, PlanReActPlanner, Planner, PlannerError};
+
+// New re-exports — Optimization
+pub use optimization::{
+    AgentOptimizer, EvalSample, OptimizerError, OptimizerResult, Sampler, SimplePromptOptimizer,
+    SimplePromptOptimizerConfig,
+};
+
+// New re-exports — Code Executors
+pub use code_executors::{
+    ContainerCodeExecutor, ContainerCodeExecutorConfig, UnsafeLocalCodeExecutor,
+    VertexAiCodeExecutor, VertexAiCodeExecutorConfig,
+};
+
+// New re-exports — Plugins
+pub use plugin::{ContextFilterPlugin, GlobalInstructionPlugin, ReflectRetryToolPlugin};
+
+// New re-exports — Memory
+pub use memory::{
+    VertexAiMemoryBankConfig, VertexAiMemoryBankService, VertexAiRagMemoryConfig,
+    VertexAiRagMemoryService,
+};
+
+// New re-exports — Sessions
+pub use session::{SqliteSessionConfig, SqliteSessionService};
+
+// New re-exports — Tools
+pub use tools::retrieval::{
+    BaseRetrievalTool, FilesRetrievalTool, RetrievalResult, VertexAiRagRetrievalTool,
+};
+pub use tools::{
+    BashToolPolicy, DiscoveryEngineSearchTool, Example, ExampleTool, ExecuteBashTool, ExitLoopTool,
+    GetUserChoiceTool, LoadMemoryTool, PreloadMemoryTool, TransferToAgentTool, UrlContextTool,
+    VertexAiSearchConfig, VertexAiSearchTool,
+};
 
 // Wire re-export
 pub use rs_genai;
