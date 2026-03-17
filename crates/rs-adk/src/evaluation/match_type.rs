@@ -3,9 +3,10 @@
 use serde::{Deserialize, Serialize};
 
 /// How to compare actual vs. expected tool call trajectories.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TrajectoryMatchType {
     /// Exact match: same tools in the same order, same count.
+    #[default]
     Exact,
     /// In-order match: expected tools appear in order within the actual sequence
     /// (extra actual calls are allowed).
@@ -13,12 +14,6 @@ pub enum TrajectoryMatchType {
     /// Any-order match: all expected tools appear somewhere in the actual sequence,
     /// regardless of ordering.
     AnyOrder,
-}
-
-impl Default for TrajectoryMatchType {
-    fn default() -> Self {
-        Self::Exact
-    }
 }
 
 impl TrajectoryMatchType {

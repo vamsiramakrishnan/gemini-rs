@@ -154,7 +154,7 @@ pub async fn run(
     );
 
     if print_detailed_results {
-        println!("\n{:<20} {:<8} {:<8} {}", "CASE", "PASS", "SCORE", "OUTPUT");
+        println!("\n{:<20} {:<8} {:<8} OUTPUT", "CASE", "PASS", "SCORE");
         println!("{}", "-".repeat(80));
         for r in &results {
             let status = if r.passed { "PASS" } else { "FAIL" };
