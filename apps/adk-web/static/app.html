@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>App &mdash; Cookbooks</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#x1F680;</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" crossorigin="anonymous">
+  <link rel="stylesheet" href="/static/css/main.css">
+  <link rel="stylesheet" href="/static/css/devtools.css">
+</head>
+<body>
+
+  <div class="app-container">
+
+    <!-- Header -->
+    <header class="app-header">
+      <a href="/" class="back-link">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="19" y1="12" x2="5" y2="12"/>
+          <polyline points="12 19 5 12 12 5"/>
+        </svg>
+        Back
+      </a>
+      <div class="header-divider"></div>
+      <span class="app-title" id="app-title">App</span>
+      <div class="header-spacer"></div>
+
+      <div class="connection-badge disconnected" id="connection-badge">
+        <span class="dot"></span>
+        <span class="label">Disconnected</span>
+      </div>
+
+      <button class="connect-btn" id="connect-btn">Connect</button>
+    </header>
+
+    <!-- Main body: conversation + devtools -->
+    <div class="app-body">
+
+      <!-- Left: Conversation Pane -->
+      <div class="conversation-pane">
+
+        <div class="messages-container" id="messages">
+          <!-- Empty state -->
+          <div class="empty-state" id="empty-state">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+            </svg>
+            <div class="title">No messages yet</div>
+            <div class="subtitle">Click Connect to start a session</div>
+          </div>
+        </div>
+
+        <!-- Speaking indicator -->
+        <div class="speaking-indicator" id="speaking-indicator">
+          <div class="speaking-dots">
+            <span></span><span></span><span></span>
+          </div>
+          Listening...
+        </div>
+
+        <!-- Input bar -->
+        <div class="input-bar">
+          <button class="mic-btn" id="mic-btn" disabled title="Toggle microphone">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+              <line x1="12" y1="19" x2="12" y2="23"/>
+              <line x1="8" y1="23" x2="16" y2="23"/>
+            </svg>
+          </button>
+
+          <input type="text" class="text-input" id="text-input"
+                 placeholder="Type a message..." disabled
+                 autocomplete="off" spellcheck="false">
+
+          <button class="send-btn" id="send-btn" disabled title="Send message">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="22" y1="2" x2="11" y2="13"/>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Right: Devtools Pane -->
+      <div class="devtools-pane" id="devtools-pane">
+        <div class="devtools-resize-handle" id="devtools-resize-handle"></div>
+
+        <!-- Tab bar -->
+        <div class="devtools-tabs">
+          <!-- Tabs are rendered dynamically by devtools.js -->
+          <div class="devtools-tab-spacer"></div>
+          <button class="devtools-collapse-btn" title="Collapse devtools">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="9 18 15 12 9 6"/>
+            </svg>
+          </button>
+        </div>
+
+        <canvas class="minimap-canvas" id="minimap-canvas" height="24"></canvas>
+
+        <!-- Session status bar -->
+        <div class="devtools-status-bar" id="devtools-status-bar">
+          <span class="status-health-dot" id="status-health"></span>
+          <span class="status-trace" id="status-trace" style="display:none"></span>
+          <span class="status-item status-uptime" id="status-uptime">--</span>
+          <span class="status-separator">|</span>
+          <span class="status-item">Phase: <span class="status-phase" id="status-phase">--</span></span>
+          <span class="status-separator">|</span>
+          <span class="status-item">Turns: <span class="status-turns" id="status-turns">0</span></span>
+        </div>
+
+        <!-- Content area (panels rendered by devtools.js) -->
+        <div class="devtools-content"></div>
+
+      </div>
+
+      <!-- Expand button (shown when devtools collapsed) -->
+      <button class="devtools-expand-btn" id="devtools-expand-btn" title="Show devtools">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="15 18 9 12 15 6"/>
+        </svg>
+      </button>
+
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="/static/js/audio.js"></script>
+  <script src="/static/js/render/ring-buffer.js"></script>
+  <script src="/static/js/render/virtual-list.js"></script>
+  <script src="/static/js/render/render-scheduler.js"></script>
+  <script src="/static/js/render/minimap.js"></script>
+  <script src="/static/js/render/sparkline.js"></script>
+  <!-- Panel modules (loaded before coordinator) -->
+  <script src="/static/js/panels/utils.js"></script>
+  <script src="/static/js/panels/timeline-panel.js"></script>
+  <script src="/static/js/panels/state-panel.js"></script>
+  <script src="/static/js/panels/phases-panel.js"></script>
+  <script src="/static/js/panels/metrics-panel.js"></script>
+  <script src="/static/js/panels/trace-panel.js"></script>
+  <script src="/static/js/panels/eval-panel.js"></script>
+  <script src="/static/js/panels/artifact-panel.js"></script>
+  <script src="/static/js/panels/event-inspector-panel.js"></script>
+  <!-- Coordinator (depends on all panels) -->
+  <script src="/static/js/devtools.js"></script>
+  <script src="/static/js/app.js"></script>
+
+</body>
+</html>

@@ -99,3 +99,58 @@ pub fn log_agent_tool_dispatch(_: &str, _: &str) {}
 /// Log event loop lag (no-op without `tracing-support` feature).
 #[cfg(not(feature = "tracing-support"))]
 pub fn log_event_loop_lag(_: &str, _: u64) {}
+
+/// Log an LLM call.
+#[cfg(feature = "tracing-support")]
+pub fn log_llm_call(model_id: &str, agent_name: &str, prompt_tokens: u32, completion_tokens: u32, duration_ms: f64) {
+    tracing::info!(
+        model_id = model_id,
+        agent_name = agent_name,
+        prompt_tokens = prompt_tokens,
+        completion_tokens = completion_tokens,
+        duration_ms = duration_ms,
+        "LLM call completed"
+    );
+}
+
+/// Log a phase transition.
+#[cfg(feature = "tracing-support")]
+pub fn log_phase_transition(from: &str, to: &str) {
+    tracing::info!(from = from, to = to, "Phase transition");
+}
+
+/// Log an extraction result.
+#[cfg(feature = "tracing-support")]
+pub fn log_extraction_result(extractor: &str, success: bool, duration_ms: f64) {
+    tracing::info!(
+        extractor = extractor,
+        success = success,
+        duration_ms = duration_ms,
+        "Extraction completed"
+    );
+}
+
+/// Log session persistence.
+#[cfg(feature = "tracing-support")]
+pub fn log_session_persisted(session_id: &str, backend: &str, duration_ms: f64) {
+    tracing::info!(
+        session_id = session_id,
+        backend = backend,
+        duration_ms = duration_ms,
+        "Session persisted"
+    );
+}
+
+// No-op stubs for new logging functions when tracing is disabled.
+/// Log an LLM call (no-op without `tracing-support` feature).
+#[cfg(not(feature = "tracing-support"))]
+pub fn log_llm_call(_: &str, _: &str, _: u32, _: u32, _: f64) {}
+/// Log a phase transition (no-op without `tracing-support` feature).
+#[cfg(not(feature = "tracing-support"))]
+pub fn log_phase_transition(_: &str, _: &str) {}
+/// Log an extraction result (no-op without `tracing-support` feature).
+#[cfg(not(feature = "tracing-support"))]
+pub fn log_extraction_result(_: &str, _: bool, _: f64) {}
+/// Log session persistence (no-op without `tracing-support` feature).
+#[cfg(not(feature = "tracing-support"))]
+pub fn log_session_persisted(_: &str, _: &str, _: f64) {}

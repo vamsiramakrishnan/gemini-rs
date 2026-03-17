@@ -1,0 +1,37 @@
+[package]
+name = "adk-web"
+version = "0.3.0"
+description = "Interactive web UI for ADK agent development and debugging — mirrors upstream `adk web`"
+edition.workspace = true
+publish = false
+
+[dependencies]
+rs-genai = { path = "../../crates/rs-genai" }
+rs-adk = { path = "../../crates/rs-adk", features = ["gemini-llm"] }
+adk-rs-fluent = { path = "../../crates/adk-rs-fluent", features = ["gemini-llm"] }
+tokio = { version = "1.0", features = ["full"] }
+axum = { version = "0.7", features = ["ws", "macros"] }
+uuid = { version = "1", features = ["v4"] }
+tower-http = { version = "0.5", features = ["fs", "cors"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = "0.1"
+futures = "0.3"
+tokio-stream = "0.1"
+dotenvy = "0.15"
+base64 = "0.22"
+async-trait = "0.1"
+thiserror = "2"
+regex = "1"
+parking_lot = "0.12"
+schemars = "0.8"
+tracing-subscriber = { version = "0.3", features = ["registry"] }
+
+[features]
+default = []
+otel = ["rs-genai/otel", "rs-adk/otel"]
+otel-otlp = ["rs-genai/otel-otlp", "rs-adk/otel-otlp"]
+otel-gcp = ["rs-genai/otel-gcp", "rs-adk/otel-gcp"]
+
+[lints]
+workspace = true

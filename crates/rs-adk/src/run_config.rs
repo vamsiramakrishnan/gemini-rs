@@ -27,6 +27,11 @@ pub struct RunConfig {
     pub support_cfc: bool,
     /// Whether to pause execution on tool calls (for confirmation UX).
     pub pause_on_tool_calls: bool,
+    /// If set, the agent's final text response is automatically saved to this state key.
+    pub output_key: Option<String>,
+    /// JSON Schema for structured output. When set, the LLM is instructed
+    /// to produce JSON output conforming to this schema.
+    pub output_schema: Option<serde_json::Value>,
 }
 
 impl Default for RunConfig {
@@ -37,6 +42,8 @@ impl Default for RunConfig {
             save_input_blobs_as_artifacts: false,
             support_cfc: false,
             pause_on_tool_calls: false,
+            output_key: None,
+            output_schema: None,
         }
     }
 }
@@ -68,6 +75,8 @@ mod tests {
             save_input_blobs_as_artifacts: true,
             support_cfc: true,
             pause_on_tool_calls: true,
+            output_key: Some("result".to_string()),
+            output_schema: Some(serde_json::json!({"type": "object"})),
         };
         let cloned = config.clone();
         assert_eq!(cloned.max_llm_calls, 100);

@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::events::Event;
+
 /// Unique identifier for a session.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SessionId(String);
@@ -50,6 +52,9 @@ pub struct Session {
     pub created_at: String,
     /// When the session was last updated (ISO 8601).
     pub updated_at: String,
+    /// Events in this session (populated when loaded with events).
+    #[serde(default)]
+    pub events: Vec<Event>,
 }
 
 impl Session {
@@ -63,6 +68,46 @@ impl Session {
             state: std::collections::HashMap::new(),
             created_at: now.clone(),
             updated_at: now,
+            events: Vec::new(),
+        }
+    }
+
+    /// Export session to a JSON-serializable format.
+    ///
+    /// Produces a complete snapshot of the session including metadata,
+    /// state, and all events. Suitable for backup, migration, or
+    /// transfer between session service backends.
+    pub fn export(&self) -> serde_json::Value {
+        serde_json::to_value(self).unwrap_or_else(|_| serde_json::json!({}))
+    }
+
+    /// Import a session from an exported JSON value.
+    ///
+    /// Reconstructs a [`Session`] from a value previously produced by
+    /// [`export`](Self::export). Returns an error if the JSON structure
+    /// does not match the expected session format.
+    pub fn import(value: &serde_json::Value) -> Result<Self, super::SessionError> {
+        serde_json::from_value(value.clone())
+            .map_err(|e| super::SessionError::Storage(format!("Import failed: {e}")))
+    }
+
+    /// Rewind the session to a previous invocation state.
+    /// All events after the given invocation ID are removed.
+    /// Returns the number of events removed.
+    pub fn rewind_to_invocation(&mut self, invocation_id: &str) -> usize {
+        // Find the last event index that belongs to the target invocation.
+        let cutoff = self
+            .events
+            .iter()
+            .rposition(|e| e.invocation_id == invocation_id);
+
+        match cutoff {
+            Some(idx) => {
+                let removed = self.events.len() - (idx + 1);
+                self.events.truncate(idx + 1);
+                removed
+            }
+            None => 0, // Invocation ID not found — no change.
         }
     }
 }

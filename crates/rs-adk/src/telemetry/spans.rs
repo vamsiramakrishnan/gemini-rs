@@ -67,3 +67,59 @@ pub fn agent_tool_span(_: &str, _: &str) {}
 /// Create a span for the top-level runner (no-op without `tracing-support` feature).
 #[cfg(not(feature = "tracing-support"))]
 pub fn runner_span(_: &str) {}
+
+/// Create a span for an LLM generate call.
+#[cfg(feature = "tracing-support")]
+pub fn call_llm_span(model_id: &str, agent_name: &str, session_id: &str) -> tracing::Span {
+    tracing::info_span!(
+        "gemini.agent.call_llm",
+        model_id = model_id,
+        agent_name = agent_name,
+        session_id = session_id,
+    )
+}
+
+/// Create a span for a full invocation (top-level).
+#[cfg(feature = "tracing-support")]
+pub fn invocation_span(invocation_id: &str, root_agent: &str) -> tracing::Span {
+    tracing::info_span!(
+        "gemini.agent.invocation",
+        invocation_id = invocation_id,
+        root_agent = root_agent,
+    )
+}
+
+/// Create a span for a phase transition.
+#[cfg(feature = "tracing-support")]
+pub fn phase_transition_span(from_phase: &str, to_phase: &str, session_id: &str) -> tracing::Span {
+    tracing::info_span!(
+        "gemini.agent.phase_transition",
+        from_phase = from_phase,
+        to_phase = to_phase,
+        session_id = session_id,
+    )
+}
+
+/// Create a span for an extraction operation.
+#[cfg(feature = "tracing-support")]
+pub fn extraction_span(extractor_name: &str, session_id: &str) -> tracing::Span {
+    tracing::info_span!(
+        "gemini.agent.extraction",
+        extractor_name = extractor_name,
+        session_id = session_id,
+    )
+}
+
+// No-op stubs for new spans when tracing is disabled.
+/// Create a span for an LLM generate call (no-op without `tracing-support` feature).
+#[cfg(not(feature = "tracing-support"))]
+pub fn call_llm_span(_: &str, _: &str, _: &str) {}
+/// Create a span for a full invocation (no-op without `tracing-support` feature).
+#[cfg(not(feature = "tracing-support"))]
+pub fn invocation_span(_: &str, _: &str) {}
+/// Create a span for a phase transition (no-op without `tracing-support` feature).
+#[cfg(not(feature = "tracing-support"))]
+pub fn phase_transition_span(_: &str, _: &str, _: &str) {}
+/// Create a span for an extraction operation (no-op without `tracing-support` feature).
+#[cfg(not(feature = "tracing-support"))]
+pub fn extraction_span(_: &str, _: &str) {}

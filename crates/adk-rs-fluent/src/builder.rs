@@ -37,6 +37,7 @@ struct AgentBuilderInner {
     stay: bool,
     description: Option<String>,
     output_schema: Option<serde_json::Value>,
+    output_key: Option<String>,
     transfer_to_agent: Option<String>,
 }
 
@@ -170,6 +171,7 @@ impl AgentBuilder {
                 stay: false,
                 description: None,
                 output_schema: None,
+                output_key: None,
                 transfer_to_agent: None,
             }),
         }
@@ -286,6 +288,11 @@ impl AgentBuilder {
     /// Configured output schema, if any.
     pub fn get_output_schema(&self) -> Option<&serde_json::Value> {
         self.inner.output_schema.as_ref()
+    }
+
+    /// Get the configured output key.
+    pub fn get_output_key(&self) -> Option<&str> {
+        self.inner.output_key.as_deref()
     }
 
     /// Configured transfer target agent, if any.
@@ -439,6 +446,13 @@ impl AgentBuilder {
     pub fn output_schema(self, schema: serde_json::Value) -> Self {
         let mut inner = self.mutate();
         inner.output_schema = Some(schema);
+        Self::with(inner)
+    }
+
+    /// Set the output key — agent's final text response is auto-saved to this state key.
+    pub fn output_key(self, key: impl Into<String>) -> Self {
+        let mut inner = self.mutate();
+        inner.output_key = Some(key.into());
         Self::with(inner)
     }
 

@@ -17,6 +17,7 @@ use rs_genai::prelude::FunctionCall;
 use crate::context::AgentEvent;
 use crate::context::InvocationContext;
 use crate::error::{AgentError, ToolError};
+use crate::llm::{LlmRequest, LlmResponse};
 
 /// Middleware hooks — all optional, implement only what you need.
 ///
@@ -83,6 +84,18 @@ pub trait Middleware: Send + Sync + 'static {
     /// Called when an agent error occurs.
     async fn on_error(&self, _err: &AgentError) -> Result<(), AgentError> {
         Ok(())
+    }
+
+    /// Called before an LLM model call is made. Return `Some(LlmResponse)` to skip the LLM call
+    /// and use the returned response instead (e.g., for caching, guardrails). Return `None` to proceed.
+    async fn before_model(&self, _request: &LlmRequest) -> Result<Option<LlmResponse>, AgentError> {
+        Ok(None)
+    }
+
+    /// Called after an LLM model call completes. Return `Some(LlmResponse)` to replace the model's
+    /// response (e.g., for output filtering, safety). Return `None` to use the original response.
+    async fn after_model(&self, _request: &LlmRequest, _response: &LlmResponse) -> Result<Option<LlmResponse>, AgentError> {
+        Ok(None)
     }
 }
 
@@ -170,6 +183,26 @@ impl MiddlewareChain {
             m.on_error(err).await?;
         }
         Ok(())
+    }
+
+    /// Run all `before_model` hooks in order. Returns the first non-None override response.
+    pub async fn run_before_model(&self, request: &LlmRequest) -> Result<Option<LlmResponse>, AgentError> {
+        for m in &self.layers {
+            if let Some(response) = m.before_model(request).await? {
+                return Ok(Some(response));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Run all `after_model` hooks in reverse order. Returns the first non-None override response.
+    pub async fn run_after_model(&self, request: &LlmRequest, response: &LlmResponse) -> Result<Option<LlmResponse>, AgentError> {
+        for m in self.layers.iter().rev() {
+            if let Some(replacement) = m.after_model(request, response).await? {
+                return Ok(Some(replacement));
+            }
+        }
+        Ok(None)
     }
 
     /// Whether the chain has no middleware layers.

@@ -1,0 +1,33 @@
+[package]
+name = "adk-api-server"
+version = "0.3.0"
+edition.workspace = true
+publish = false
+description = "Standalone REST API server for ADK agents — mirrors upstream `adk api_server`"
+
+[[bin]]
+name = "adk-api-server"
+path = "src/main.rs"
+
+[dependencies]
+rs-genai = { path = "../../crates/rs-genai" }
+rs-adk = { path = "../../crates/rs-adk", features = ["gemini-llm"] }
+adk-rs-fluent = { path = "../../crates/adk-rs-fluent", features = ["gemini-llm"] }
+tokio = { version = "1.0", features = ["full"] }
+axum = { version = "0.7", features = ["macros"] }
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["registry", "env-filter"] }
+futures = "0.3"
+uuid = { version = "1", features = ["v4"] }
+parking_lot = "0.12"
+dotenvy = "0.15"
+
+[features]
+default = []
+otel = ["rs-genai/otel", "rs-adk/otel"]
+
+[lints]
+workspace = true

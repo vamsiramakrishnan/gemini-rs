@@ -1,0 +1,27 @@
+[package]
+name = "example-agents"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[[bin]]
+name = "weather-agent"
+path = "src/weather_agent.rs"
+
+[[bin]]
+name = "research-pipeline"
+path = "src/research_pipeline.rs"
+
+[dependencies]
+adk-rs-fluent = { path = "../../crates/adk-rs-fluent" }
+rs-adk = { path = "../../crates/rs-adk" }
+rs-genai = { path = "../../crates/rs-genai" }
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+schemars = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dotenvy = "0.15"
+
+[lints]
+workspace = true
