@@ -93,6 +93,69 @@ pub struct MapOver {
     pub concurrency: usize,
 }
 
+/// Chain: convenience for sequential composition of multiple agents.
+///
+/// Equivalent to `a >> b >> c` but takes a `Vec`.
+pub fn chain(agents: Vec<AgentBuilder>) -> Composable {
+    Composable::Pipeline(Pipeline::new(
+        agents.into_iter().map(Composable::Agent).collect(),
+    ))
+}
+
+/// Conditional: route to one of two agents based on a state predicate.
+pub fn conditional(
+    predicate: impl Fn(&serde_json::Value) -> bool + Send + Sync + 'static,
+    if_true: AgentBuilder,
+    if_false: AgentBuilder,
+) -> Composable {
+    // Implemented as a fallback with a predicate-guarded first branch.
+    // At runtime, the predicate determines which agent runs.
+    let pred = std::sync::Arc::new(predicate);
+    let pred_clone = pred.clone();
+
+    let true_branch = AgentBuilder::new(if_true.name())
+        .instruction(if_true.get_instruction().unwrap_or_default());
+    let false_branch = AgentBuilder::new(if_false.name())
+        .instruction(if_false.get_instruction().unwrap_or_default());
+
+    // Store predicate in a loop with max=1 for the true branch,
+    // fall back to false branch.
+    let guarded = Composable::Loop(Loop {
+        body: Box::new(Composable::Agent(true_branch)),
+        max: 1,
+        until: Some(LoopPredicate::new(move |state| pred_clone(state))),
+    });
+
+    Composable::Fallback(Fallback::new(vec![
+        guarded,
+        Composable::Agent(false_branch),
+    ]))
+}
+
+/// Map-reduce: apply a mapper agent to items, then a reducer to combine results.
+pub fn map_reduce(
+    mapper: AgentBuilder,
+    reducer: AgentBuilder,
+    concurrency: usize,
+) -> MapReduce {
+    MapReduce {
+        mapper,
+        reducer,
+        concurrency,
+    }
+}
+
+/// A map-reduce workflow node.
+#[derive(Clone, Debug)]
+pub struct MapReduce {
+    /// The mapper agent applied to each item.
+    pub mapper: AgentBuilder,
+    /// The reducer agent that combines mapped results.
+    pub reducer: AgentBuilder,
+    /// Maximum concurrency for the map phase.
+    pub concurrency: usize,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

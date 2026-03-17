@@ -35,6 +35,7 @@
 //! - **`rs-adk`** (L1): Agent runtime, tools, sessions — re-exported via [`rs_adk`]
 //! - **`adk-rs-fluent`** (L2): This crate — ergonomic builder API and composition
 
+pub mod a2a;
 pub mod builder;
 pub mod compose;
 pub mod live;
@@ -71,14 +72,17 @@ macro_rules! let_clone {
 
 /// Convenience re-exports for common types across all layers.
 pub mod prelude {
+    pub use crate::a2a::{A2AServer, AgentRegistry, RemoteAgent, SkillDeclaration};
     pub use crate::builder::*;
-    pub use crate::compose::{Ctx, A, C, M, P, S, T};
+    pub use crate::compose::{Ctx, A, C, E, G, M, P, S, T};
     pub use crate::live::Live;
     pub use crate::live_builders::*;
     pub use crate::operators::*;
     pub use crate::patterns::*;
     pub use crate::testing::*;
-    pub use rs_adk::agent::*;
+    // Note: rs_adk::agent::Agent trait is NOT re-exported here because
+    // it conflicts with the L2 Agent type alias (= AgentBuilder).
+    // Use rs_adk::agent::Agent directly if you need the L1 trait.
     pub use rs_adk::agent_session::*;
     pub use rs_adk::live::{
         CallbackMode, ContextDelivery, DefaultResultFormatter, DeferredWriter, EventCallbacks,

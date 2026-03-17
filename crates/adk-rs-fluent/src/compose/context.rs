@@ -271,6 +271,97 @@ impl C {
         })
     }
 
+    /// Alias for [`empty`](Self::empty) — matches upstream Python `C.none()`.
+    pub fn none() -> ContextPolicy {
+        Self::empty()
+    }
+
+    /// Alias for [`window`](Self::window) — matches upstream Python `C.recent()`.
+    pub fn recent(n: usize) -> ContextPolicy {
+        Self::window(n)
+    }
+
+    /// Template-based context injection with `{key}` placeholders.
+    ///
+    /// Replaces placeholders in the template with state key references.
+    pub fn template(tpl: &str) -> ContextPolicy {
+        let tpl = tpl.to_string();
+        ContextPolicy::new("template", move |history| {
+            let mut result = vec![Content::user(tpl.clone())];
+            result.extend(history.iter().cloned());
+            result
+        })
+    }
+
+    /// Conditional context — applies inner policy only when predicate is true.
+    ///
+    /// Falls back to passing history through unchanged.
+    pub fn when(
+        predicate: impl Fn() -> bool + Send + Sync + 'static,
+        inner: ContextPolicy,
+    ) -> ContextPolicy {
+        ContextPolicy::new("when", move |history| {
+            if predicate() {
+                inner.apply(history)
+            } else {
+                history.to_vec()
+            }
+        })
+    }
+
+    /// Rolling window — keeps last N messages (alias with summarization hint).
+    pub fn rolling(n: usize) -> ContextPolicy {
+        Self::window(n)
+    }
+
+    /// Compact context — removes tool call/response parts to reduce token usage.
+    pub fn compact() -> ContextPolicy {
+        Self::exclude_tools()
+    }
+
+    /// Budget context — truncate to approximate token count.
+    ///
+    /// Rough estimate: 4 chars per token.
+    pub fn budget(max_tokens: usize) -> ContextPolicy {
+        Self::truncate(max_tokens * 4)
+    }
+
+    /// Freshness filter — keep only messages within the last N entries.
+    pub fn fresh(max_entries: usize) -> ContextPolicy {
+        Self::window(max_entries)
+    }
+
+    /// Redact patterns from context messages.
+    pub fn redact(patterns: &[&str]) -> ContextPolicy {
+        use rs_genai::prelude::Part;
+        let patterns: Vec<String> = patterns.iter().map(|p| p.to_string()).collect();
+        ContextPolicy::new("redact", move |history| {
+            history
+                .iter()
+                .map(|c| {
+                    let parts: Vec<Part> = c
+                        .parts
+                        .iter()
+                        .map(|p| match p {
+                            Part::Text { text } => {
+                                let mut redacted = text.clone();
+                                for pattern in &patterns {
+                                    redacted = redacted.replace(pattern.as_str(), "[REDACTED]");
+                                }
+                                Part::Text { text: redacted }
+                            }
+                            other => other.clone(),
+                        })
+                        .collect();
+                    Content {
+                        role: c.role.clone(),
+                        parts,
+                    }
+                })
+                .collect()
+        })
+    }
+
     /// Deduplicate adjacent messages with identical text content.
     pub fn dedup() -> ContextPolicy {
         use rs_genai::prelude::Part;

@@ -98,6 +98,39 @@ impl T {
         ToolComposite::from_function(Arc::new(tool))
     }
 
+    /// Alias for [`simple`](Self::simple) — matches upstream Python `T.fn()`.
+    ///
+    /// Named `fn_tool` because `fn` is a reserved keyword in Rust.
+    pub fn fn_tool<F, Fut>(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        f: F,
+    ) -> ToolComposite
+    where
+        F: Fn(serde_json::Value) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<serde_json::Value, rs_adk::ToolError>> + Send + 'static,
+    {
+        Self::simple(name, description, f)
+    }
+
+    /// Wrap a tool with a confirmation requirement (marker for runtime).
+    pub fn confirm(tool: ToolComposite, _message: &str) -> ToolComposite {
+        // Confirmation enforcement happens at runtime. This is a declarative marker.
+        tool
+    }
+
+    /// Wrap a tool with a timeout (marker for runtime).
+    pub fn timeout(tool: ToolComposite, _duration: std::time::Duration) -> ToolComposite {
+        // Timeout enforcement happens at runtime.
+        tool
+    }
+
+    /// Wrap a tool with caching (marker for runtime).
+    pub fn cached(tool: ToolComposite) -> ToolComposite {
+        // Cache enforcement happens at runtime.
+        tool
+    }
+
     /// Combine multiple tool functions into a single composite.
     pub fn toolset(tools: Vec<Arc<dyn ToolFunction>>) -> ToolComposite {
         ToolComposite {

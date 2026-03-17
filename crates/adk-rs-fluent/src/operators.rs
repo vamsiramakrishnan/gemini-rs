@@ -220,6 +220,34 @@ impl Pipeline {
         Self { steps }
     }
 
+    /// Create an empty named pipeline (fluent builder entry point).
+    ///
+    /// ```ignore
+    /// Pipeline::builder("etl")
+    ///     .step(extract_agent)
+    ///     .step(transform_agent)
+    ///     .step(load_agent)
+    /// ```
+    pub fn builder(_name: &str) -> Self {
+        Self { steps: Vec::new() }
+    }
+
+    /// Add a sequential step to this pipeline (fluent builder).
+    pub fn step(mut self, agent: impl Into<Composable>) -> Self {
+        self.steps.push(agent.into());
+        self
+    }
+
+    /// Add a sub-agent step (alias for `step` — matches upstream naming).
+    pub fn sub_agent(self, agent: AgentBuilder) -> Self {
+        self.step(agent)
+    }
+
+    /// Set a description (metadata, not used at runtime).
+    pub fn describe(self, _desc: &str) -> Self {
+        self
+    }
+
     /// Flatten: if a step is itself a Pipeline, inline its steps.
     fn push_flat(&mut self, step: Composable) {
         match step {
@@ -233,6 +261,35 @@ impl FanOut {
     /// Create a fan-out from the given branches.
     pub fn new(branches: Vec<Composable>) -> Self {
         Self { branches }
+    }
+
+    /// Create an empty named fan-out (fluent builder entry point).
+    ///
+    /// ```ignore
+    /// FanOut::builder("research")
+    ///     .branch(web_agent)
+    ///     .branch(db_agent)
+    /// ```
+    pub fn builder(_name: &str) -> Self {
+        Self {
+            branches: Vec::new(),
+        }
+    }
+
+    /// Add a parallel branch (fluent builder).
+    pub fn branch(mut self, agent: impl Into<Composable>) -> Self {
+        self.branches.push(agent.into());
+        self
+    }
+
+    /// Add a sub-agent branch (alias for `branch` — matches upstream naming).
+    pub fn sub_agent(self, agent: AgentBuilder) -> Self {
+        self.branch(agent)
+    }
+
+    /// Set a description (metadata, not used at runtime).
+    pub fn describe(self, _desc: &str) -> Self {
+        self
     }
 
     fn push_flat(&mut self, branch: Composable) {
@@ -452,9 +509,41 @@ impl std::ops::Div for Composable {
 // ── Loop builder method (for chaining max on until-loops) ──
 
 impl Loop {
+    /// Create a loop builder with a body agent and default max iterations.
+    ///
+    /// ```ignore
+    /// Loop::builder("refine")
+    ///     .step(refine_agent)
+    ///     .max_iterations(5)
+    /// ```
+    pub fn builder(_name: &str) -> Self {
+        Self {
+            body: Box::new(Composable::Pipeline(Pipeline::new(Vec::new()))),
+            max: 10,
+            until: None,
+        }
+    }
+
+    /// Set the body composable to loop over.
+    pub fn step(mut self, agent: impl Into<Composable>) -> Self {
+        self.body = Box::new(agent.into());
+        self
+    }
+
+    /// Set a maximum number of iterations.
+    pub fn max_iterations(mut self, n: u32) -> Self {
+        self.max = n;
+        self
+    }
+
     /// Set a maximum number of iterations for a conditional loop.
     pub fn max(mut self, max: u32) -> Self {
         self.max = max;
+        self
+    }
+
+    /// Set a description (metadata, not used at runtime).
+    pub fn describe(self, _desc: &str) -> Self {
         self
     }
 }

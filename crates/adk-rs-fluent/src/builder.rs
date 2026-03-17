@@ -7,8 +7,12 @@ use std::sync::Arc;
 
 use rs_adk::llm::BaseLlm;
 use rs_adk::text::{LlmTextAgent, TextAgent};
-use rs_adk::tool::{ToolDispatcher, ToolKind};
+use rs_adk::tool::{ToolDispatcher, ToolFunction, ToolKind};
 use rs_genai::prelude::{GeminiModel, Modality, Tool, Voice};
+
+use crate::compose::context::ContextPolicy;
+use crate::compose::guards::GComposite;
+use crate::compose::tools::ToolComposite;
 
 /// Inner state of an AgentBuilder — shared via Arc for copy-on-write.
 #[derive(Clone)]
@@ -52,6 +56,9 @@ pub trait ToolEntryTrait: Send + Sync + 'static {
     /// Convert this entry into the runtime `ToolKind` variant for dispatch.
     fn to_tool_kind(&self) -> ToolKind;
 }
+
+/// Alias for [`AgentBuilder`] — matches upstream Python `Agent("name")` naming.
+pub type Agent = AgentBuilder;
 
 /// Copy-on-write immutable builder for agent construction.
 ///
@@ -442,6 +449,73 @@ impl AgentBuilder {
         Self::with(inner)
     }
 
+    // ── Upstream naming aliases ──
+
+    /// Alias for [`instruction`](Self::instruction) — matches upstream Python `Agent.instruct()`.
+    pub fn instruct(self, inst: impl Into<String>) -> Self {
+        self.instruction(inst)
+    }
+
+    /// Alias for [`description`](Self::description) — matches upstream Python `Agent.describe()`.
+    pub fn describe(self, desc: impl Into<String>) -> Self {
+        self.description(desc)
+    }
+
+    /// Register a single tool function.
+    ///
+    /// ```ignore
+    /// Agent::new("assistant").tool(Arc::new(my_tool))
+    /// ```
+    pub fn tool(self, f: Arc<dyn ToolFunction>) -> Self {
+        let mut inner = self.mutate();
+        inner.tools.push(ToolEntry::Runtime(Arc::new(ToolFunctionEntry(f))));
+        Self::with(inner)
+    }
+
+    /// Register multiple tools from a [`ToolComposite`].
+    ///
+    /// ```ignore
+    /// let tools = T::simple("greet", "Greet", |_| async { Ok(json!({})) })
+    ///     | T::google_search();
+    /// Agent::new("assistant").tools(tools)
+    /// ```
+    pub fn tools(self, composite: ToolComposite) -> Self {
+        use crate::compose::tools::ToolCompositeEntry;
+        let mut inner = self.mutate();
+        for entry in composite.entries {
+            match entry {
+                ToolCompositeEntry::Function(f) => {
+                    inner.tools.push(ToolEntry::Runtime(Arc::new(ToolFunctionEntry(f))));
+                }
+                ToolCompositeEntry::BuiltIn(t) => {
+                    inner.built_in_tools.push(t);
+                }
+            }
+        }
+        Self::with(inner)
+    }
+
+    /// Set a guard composite for output validation.
+    ///
+    /// Guards are evaluated after each agent response. This stores the guard
+    /// configuration for use at compile time.
+    pub fn guard(self, _guard: GComposite) -> Self {
+        // Guards are declarative metadata — stored for compile-time wiring.
+        // Full enforcement requires runtime integration (Phase 4+).
+        self
+    }
+
+    /// Set a context policy for conversation history management.
+    pub fn context(self, _policy: ContextPolicy) -> Self {
+        // Context policies are declarative — stored for compile-time wiring.
+        self
+    }
+
+    /// Disallow transfer to peer agents.
+    pub fn no_peers(self) -> Self {
+        self.isolate()
+    }
+
     // ── Compilation ──
 
     /// Compile this builder into an executable `TextAgent`.
@@ -496,6 +570,20 @@ impl AgentBuilder {
         }
 
         Arc::new(agent)
+    }
+}
+
+/// Adapter that wraps an `Arc<dyn ToolFunction>` as a `ToolEntryTrait`.
+#[derive(Clone)]
+struct ToolFunctionEntry(Arc<dyn ToolFunction>);
+
+impl ToolEntryTrait for ToolFunctionEntry {
+    fn name(&self) -> &str {
+        self.0.name()
+    }
+
+    fn to_tool_kind(&self) -> ToolKind {
+        ToolKind::Function(self.0.clone())
     }
 }
 

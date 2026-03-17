@@ -220,6 +220,111 @@ impl S {
         move |s: &rs_adk::State| s.get::<String>(&key).is_some_and(|v| values.contains(&v))
     }
 
+    /// Transform a single key's value with a function.
+    pub fn transform(
+        key: &str,
+        f: impl Fn(serde_json::Value) -> serde_json::Value + Send + Sync + 'static,
+    ) -> StateTransform {
+        let key = key.to_string();
+        StateTransform::new("transform", move |state| {
+            if let Some(obj) = state.as_object_mut() {
+                if let Some(val) = obj.remove(&key) {
+                    obj.insert(key.clone(), f(val));
+                }
+            }
+        })
+    }
+
+    /// Guard — assert a condition on state, panic with message if false.
+    pub fn guard(
+        predicate: impl Fn(&serde_json::Value) -> bool + Send + Sync + 'static,
+        msg: &str,
+    ) -> StateTransform {
+        let msg = msg.to_string();
+        StateTransform::new("guard", move |state| {
+            assert!(predicate(state), "{}", msg);
+        })
+    }
+
+    /// Compute derived values from state.
+    pub fn compute(
+        key: &str,
+        f: impl Fn(&serde_json::Value) -> serde_json::Value + Send + Sync + 'static,
+    ) -> StateTransform {
+        let key = key.to_string();
+        StateTransform::new("compute", move |state| {
+            let val = f(state);
+            if let Some(obj) = state.as_object_mut() {
+                obj.insert(key.clone(), val);
+            }
+        })
+    }
+
+    /// Accumulate values into a list under a target key.
+    pub fn accumulate(source_key: &str, into: &str) -> StateTransform {
+        let source = source_key.to_string();
+        let into = into.to_string();
+        StateTransform::new("accumulate", move |state| {
+            if let Some(obj) = state.as_object_mut() {
+                if let Some(val) = obj.get(&source).cloned() {
+                    let arr = obj
+                        .entry(into.clone())
+                        .or_insert_with(|| serde_json::Value::Array(Vec::new()));
+                    if let Some(arr) = arr.as_array_mut() {
+                        arr.push(val);
+                    }
+                }
+            }
+        })
+    }
+
+    /// Increment a counter key by a step.
+    pub fn counter(key: &str, step: i64) -> StateTransform {
+        let key = key.to_string();
+        StateTransform::new("counter", move |state| {
+            if let Some(obj) = state.as_object_mut() {
+                let current = obj
+                    .get(&key)
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
+                obj.insert(key.clone(), serde_json::json!(current + step));
+            }
+        })
+    }
+
+    /// Require that specified keys exist.
+    pub fn require(keys: &[&str]) -> StateTransform {
+        let keys: Vec<String> = keys.iter().map(|k| k.to_string()).collect();
+        StateTransform::new("require", move |state| {
+            if let Some(obj) = state.as_object() {
+                for key in &keys {
+                    assert!(
+                        obj.contains_key(key),
+                        "Required key '{}' missing from state",
+                        key
+                    );
+                }
+            }
+        })
+    }
+
+    /// Identity transform — no-op passthrough.
+    pub fn identity() -> StateTransform {
+        StateTransform::new("identity", |_| {})
+    }
+
+    /// Conditional transform — applies inner transform only when predicate is true.
+    pub fn when(
+        predicate: impl Fn(&serde_json::Value) -> bool + Send + Sync + 'static,
+        inner: StateTransform,
+    ) -> StateTransform {
+        StateTransform::new("when", move |state| {
+            if predicate(state) {
+                inner.apply(state);
+            }
+        })
+    }
+
     /// Drop the specified keys.
     pub fn drop(keys: &[&str]) -> StateTransform {
         let keys: Vec<String> = keys.iter().map(|k| k.to_string()).collect();
