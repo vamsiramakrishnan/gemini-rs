@@ -18,6 +18,7 @@ pub struct EvalSetFile {
 
 /// A single evaluation case.
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct EvalCase {
     /// Identifier for this case.
     pub id: String,
@@ -37,6 +38,7 @@ pub struct EvalCase {
 
 /// Scoring configuration loaded from `test_config.json`.
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct TestConfig {
     /// Minimum passing score (0.0 - 1.0).
     #[serde(default = "default_threshold")]
@@ -51,6 +53,7 @@ fn default_threshold() -> f64 {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct Criterion {
     pub name: String,
     pub weight: f64,

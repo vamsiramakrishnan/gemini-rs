@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use adk_server_core::{AgentRegistry, ServerState};
 
 /// Configuration for the API server command.
+#[allow(dead_code)]
 pub struct ApiConfig {
     pub agent_dir: String,
     pub host: String,

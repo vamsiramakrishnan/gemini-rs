@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 /// Agent manifest loaded from `agent.toml`.
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
 pub struct AgentManifest {
     /// Agent name (used as identifier).
     pub name: String,
@@ -32,6 +33,7 @@ fn default_model() -> String {
 /// Looks for:
 ///   - `<dir>/agent.toml`               (single agent)
 ///   - `<dir>/<subdir>/agent.toml`       (multi-agent project)
+#[allow(dead_code)]
 pub fn discover_agents(dir: &Path) -> Vec<(PathBuf, AgentManifest)> {
     let mut agents = Vec::new();
 

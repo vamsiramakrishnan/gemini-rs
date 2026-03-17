@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use adk_server_core::{AgentRegistry, ServerState};
 
 /// Configuration for the web dev server command.
+#[allow(dead_code)]
 pub struct WebConfig {
     pub agent_dir: String,
     pub host: String,

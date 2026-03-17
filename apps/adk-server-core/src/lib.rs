@@ -24,7 +24,7 @@ use std::sync::Arc;
 
 /// Shared server state — passed to all Axum handlers.
 ///
-/// Construct via [`ServerState::new`] or [`ServerStateBuilder`].
+/// Construct via [`ServerState::new`] and chain with [`ServerState::with_session_store`].
 #[derive(Clone)]
 pub struct ServerState {
     /// Registered agents.
