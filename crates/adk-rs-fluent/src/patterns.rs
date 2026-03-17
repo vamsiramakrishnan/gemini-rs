@@ -133,11 +133,7 @@ pub fn conditional(
 }
 
 /// Map-reduce: apply a mapper agent to items, then a reducer to combine results.
-pub fn map_reduce(
-    mapper: AgentBuilder,
-    reducer: AgentBuilder,
-    concurrency: usize,
-) -> MapReduce {
+pub fn map_reduce(mapper: AgentBuilder, reducer: AgentBuilder, concurrency: usize) -> MapReduce {
     MapReduce {
         mapper,
         reducer,

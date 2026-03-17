@@ -13,10 +13,7 @@ pub struct ECriterion {
 }
 
 impl ECriterion {
-    fn new(
-        name: &'static str,
-        f: impl Fn(&str, &str) -> f64 + Send + Sync + 'static,
-    ) -> Self {
+    fn new(name: &'static str, f: impl Fn(&str, &str) -> f64 + Send + Sync + 'static) -> Self {
         Self {
             name,
             checker: Arc::new(f),
@@ -242,13 +239,16 @@ mod tests {
 
     #[test]
     fn custom_criterion() {
-        let c = E::custom("length", |output, _expected| {
-            if output.len() > 10 {
-                1.0
-            } else {
-                0.0
-            }
-        });
+        let c = E::custom(
+            "length",
+            |output, _expected| {
+                if output.len() > 10 {
+                    1.0
+                } else {
+                    0.0
+                }
+            },
+        );
         assert_eq!(c.score("short", ""), 0.0);
         assert_eq!(c.score("a long enough output", ""), 1.0);
     }

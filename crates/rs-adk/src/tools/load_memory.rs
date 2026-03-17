@@ -47,10 +47,7 @@ impl ToolFunction for LoadMemoryTool {
     }
 
     async fn call(&self, args: serde_json::Value) -> Result<serde_json::Value, ToolError> {
-        let query = args
-            .get("query")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
 
         // The actual memory search is performed by the runtime context.
         // This tool returns a placeholder indicating the query was received.

@@ -76,9 +76,7 @@ impl CodeExecutor for ContainerCodeExecutor {
         input: CodeExecutionInput,
     ) -> Result<CodeExecutionResult, CodeExecutorError> {
         let mut cmd = tokio::process::Command::new("docker");
-        cmd.arg("run")
-            .arg("--rm")
-            .arg("--read-only");
+        cmd.arg("run").arg("--rm").arg("--read-only");
 
         if let Some(ref mem) = self.config.memory_limit {
             cmd.arg("--memory").arg(mem);
@@ -101,9 +99,7 @@ impl CodeExecutor for ContainerCodeExecutor {
         )
         .await
         .map_err(|_| CodeExecutorError::Timeout(self.config.timeout_secs))?
-        .map_err(|e| {
-            CodeExecutorError::ExecutionFailed(format!("Docker execution failed: {e}"))
-        })?;
+        .map_err(|e| CodeExecutorError::ExecutionFailed(format!("Docker execution failed: {e}")))?;
 
         Ok(CodeExecutionResult {
             stdout: String::from_utf8_lossy(&output.stdout).to_string(),

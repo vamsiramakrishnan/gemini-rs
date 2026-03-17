@@ -105,7 +105,9 @@ mod tests {
             id: None,
         };
 
-        let result = plugin.on_tool_error(&call, "connection timeout", &ctx).await;
+        let result = plugin
+            .on_tool_error(&call, "connection timeout", &ctx)
+            .await;
         assert!(result.is_short_circuit());
     }
 }

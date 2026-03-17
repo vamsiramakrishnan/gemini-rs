@@ -468,7 +468,9 @@ impl AgentBuilder {
     /// ```
     pub fn tool(self, f: Arc<dyn ToolFunction>) -> Self {
         let mut inner = self.mutate();
-        inner.tools.push(ToolEntry::Runtime(Arc::new(ToolFunctionEntry(f))));
+        inner
+            .tools
+            .push(ToolEntry::Runtime(Arc::new(ToolFunctionEntry(f))));
         Self::with(inner)
     }
 
@@ -485,7 +487,9 @@ impl AgentBuilder {
         for entry in composite.entries {
             match entry {
                 ToolCompositeEntry::Function(f) => {
-                    inner.tools.push(ToolEntry::Runtime(Arc::new(ToolFunctionEntry(f))));
+                    inner
+                        .tools
+                        .push(ToolEntry::Runtime(Arc::new(ToolFunctionEntry(f))));
                 }
                 ToolCompositeEntry::BuiltIn(t) => {
                     inner.built_in_tools.push(t);

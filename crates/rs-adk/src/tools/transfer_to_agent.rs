@@ -97,10 +97,7 @@ mod tests {
     #[tokio::test]
     async fn valid_transfer() {
         let tool = TransferToAgentTool::new(vec!["support".into(), "billing".into()]);
-        let result = tool
-            .call(json!({"agent_name": "support"}))
-            .await
-            .unwrap();
+        let result = tool.call(json!({"agent_name": "support"})).await.unwrap();
         assert_eq!(result["status"], "transferred");
         assert_eq!(result["agent_name"], "support");
     }

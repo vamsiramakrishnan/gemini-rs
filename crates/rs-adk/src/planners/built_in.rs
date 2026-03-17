@@ -43,11 +43,9 @@ impl Planner for BuiltInPlanner {
         &self,
         _request: &LlmRequest,
     ) -> Result<Option<String>, PlannerError> {
-        Ok(Some(
-            self.custom_instruction
-                .clone()
-                .unwrap_or_else(|| DEFAULT_PLANNING_INSTRUCTION.to_string()),
-        ))
+        Ok(Some(self.custom_instruction.clone().unwrap_or_else(|| {
+            DEFAULT_PLANNING_INSTRUCTION.to_string()
+        })))
     }
 
     fn process_planning_response(

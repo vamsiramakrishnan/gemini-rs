@@ -99,10 +99,7 @@ impl AgentOptimizer for SimplePromptOptimizer {
         let mut score_history = Vec::new();
 
         // Score baseline
-        let training_batch = self
-            .sampler
-            .sample_training(self.config.batch_size)
-            .await?;
+        let training_batch = self.sampler.sample_training(self.config.batch_size).await?;
         let mut best_score = self
             .sampler
             .score(&best_instruction, model_id, &training_batch.cases)
@@ -115,10 +112,7 @@ impl AgentOptimizer for SimplePromptOptimizer {
                 .generate_candidate(&best_instruction, best_score)
                 .await?;
 
-            let training_batch = self
-                .sampler
-                .sample_training(self.config.batch_size)
-                .await?;
+            let training_batch = self.sampler.sample_training(self.config.batch_size).await?;
             let candidate_score = self
                 .sampler
                 .score(&candidate, model_id, &training_batch.cases)

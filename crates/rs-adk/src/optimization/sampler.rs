@@ -20,8 +20,7 @@ pub struct EvalSample {
 #[async_trait]
 pub trait Sampler: Send + Sync {
     /// Sample a batch of training examples.
-    async fn sample_training(&self, batch_size: usize)
-        -> Result<EvalSample, OptimizerError>;
+    async fn sample_training(&self, batch_size: usize) -> Result<EvalSample, OptimizerError>;
 
     /// Get the full validation set.
     async fn validation_set(&self) -> Result<EvalSample, OptimizerError>;

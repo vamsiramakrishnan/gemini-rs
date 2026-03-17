@@ -7,7 +7,7 @@ use crate::llm::LlmRequest;
 
 /// Tool that preloads relevant memories into the LLM request context.
 ///
-/// Unlike [`LoadMemoryTool`] which is called by the model, this tool
+/// Unlike [`crate::tools::LoadMemoryTool`] which is called by the model, this tool
 /// automatically injects memories into the system instruction or context
 /// before the model generates a response.
 #[derive(Debug, Clone, Default)]

@@ -120,8 +120,8 @@ pub use planners::{BuiltInPlanner, PlanReActPlanner, Planner, PlannerError};
 
 // New re-exports — Optimization
 pub use optimization::{
-    AgentOptimizer, EvalSample, OptimizerError, OptimizerResult, Sampler,
-    SimplePromptOptimizer, SimplePromptOptimizerConfig,
+    AgentOptimizer, EvalSample, OptimizerError, OptimizerResult, Sampler, SimplePromptOptimizer,
+    SimplePromptOptimizerConfig,
 };
 
 // New re-exports — Code Executors
@@ -143,13 +143,13 @@ pub use memory::{
 pub use session::{SqliteSessionConfig, SqliteSessionService};
 
 // New re-exports — Tools
-pub use tools::{
-    BashToolPolicy, DiscoveryEngineSearchTool, Example, ExampleTool, ExecuteBashTool,
-    ExitLoopTool, GetUserChoiceTool, LoadMemoryTool, PreloadMemoryTool, TransferToAgentTool,
-    UrlContextTool, VertexAiSearchConfig, VertexAiSearchTool,
-};
 pub use tools::retrieval::{
     BaseRetrievalTool, FilesRetrievalTool, RetrievalResult, VertexAiRagRetrievalTool,
+};
+pub use tools::{
+    BashToolPolicy, DiscoveryEngineSearchTool, Example, ExampleTool, ExecuteBashTool, ExitLoopTool,
+    GetUserChoiceTool, LoadMemoryTool, PreloadMemoryTool, TransferToAgentTool, UrlContextTool,
+    VertexAiSearchConfig, VertexAiSearchTool,
 };
 
 // Wire re-export

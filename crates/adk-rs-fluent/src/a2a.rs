@@ -203,10 +203,7 @@ mod tests {
             .streaming(true);
 
         assert_eq!(agent.name(), "verifier");
-        assert_eq!(
-            agent.get_endpoint(),
-            Some("https://agent.example.com")
-        );
+        assert_eq!(agent.get_endpoint(), Some("https://agent.example.com"));
         assert_eq!(agent.get_timeout(), Some(Duration::from_secs(30)));
     }
 

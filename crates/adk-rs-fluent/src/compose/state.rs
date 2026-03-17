@@ -283,10 +283,7 @@ impl S {
         let key = key.to_string();
         StateTransform::new("counter", move |state| {
             if let Some(obj) = state.as_object_mut() {
-                let current = obj
-                    .get(&key)
-                    .and_then(|v| v.as_i64())
-                    .unwrap_or(0);
+                let current = obj.get(&key).and_then(|v| v.as_i64()).unwrap_or(0);
                 obj.insert(key.clone(), serde_json::json!(current + step));
             }
         })

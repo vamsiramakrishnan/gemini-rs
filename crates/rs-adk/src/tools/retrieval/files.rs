@@ -72,18 +72,14 @@ impl BaseRetrievalTool for FilesRetrievalTool {
         "files_retrieval"
     }
 
-    async fn retrieve(
-        &self,
-        query: &str,
-        top_k: usize,
-    ) -> Result<Vec<RetrievalResult>, ToolError> {
+    async fn retrieve(&self, query: &str, top_k: usize) -> Result<Vec<RetrievalResult>, ToolError> {
         let query_lower = query.to_lowercase();
         let mut all_results = Vec::new();
 
         for path in &self.files {
-            let content = tokio::fs::read_to_string(path)
-                .await
-                .map_err(|e| ToolError::ExecutionFailed(format!("Failed to read {}: {e}", path.display())))?;
+            let content = tokio::fs::read_to_string(path).await.map_err(|e| {
+                ToolError::ExecutionFailed(format!("Failed to read {}: {e}", path.display()))
+            })?;
 
             let chunks = self.chunk_text(&content);
             let source = path.display().to_string();
@@ -92,10 +88,7 @@ impl BaseRetrievalTool for FilesRetrievalTool {
                 let chunk_lower = chunk.to_lowercase();
                 // Simple relevance scoring: count query term occurrences
                 let words: Vec<&str> = query_lower.split_whitespace().collect();
-                let matches = words
-                    .iter()
-                    .filter(|w| chunk_lower.contains(*w))
-                    .count();
+                let matches = words.iter().filter(|w| chunk_lower.contains(*w)).count();
 
                 if matches > 0 {
                     let score = matches as f64 / words.len().max(1) as f64;
@@ -110,7 +103,11 @@ impl BaseRetrievalTool for FilesRetrievalTool {
         }
 
         // Sort by score descending and take top_k
-        all_results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        all_results.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         all_results.truncate(top_k);
 
         Ok(all_results)

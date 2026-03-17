@@ -29,11 +29,7 @@ pub trait BaseRetrievalTool: Send + Sync {
     fn name(&self) -> &str;
 
     /// Search the corpus with a query and return ranked results.
-    async fn retrieve(
-        &self,
-        query: &str,
-        top_k: usize,
-    ) -> Result<Vec<RetrievalResult>, ToolError>;
+    async fn retrieve(&self, query: &str, top_k: usize) -> Result<Vec<RetrievalResult>, ToolError>;
 }
 
 #[cfg(test)]
