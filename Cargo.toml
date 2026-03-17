@@ -4,13 +4,16 @@ members = [
     "crates/rs-genai",
     "crates/rs-adk",
     "crates/adk-rs-fluent",
-    "cookbooks/ui",
-    "cookbooks/agents",
-    "cookbooks/text-chat",
-    "cookbooks/voice-chat",
-    "cookbooks/tool-calling",
-    "cookbooks/transcription",
+    "apps/adk-server-core",
+    "apps/adk-web",
+    "apps/adk-api-server",
+    "examples/agents",
+    "examples/text-chat",
+    "examples/voice-chat",
+    "examples/tool-calling",
+    "examples/transcription",
     "tools/adk-transpiler",
+    "tools/adk-cli",
 ]
 
 [workspace.package]

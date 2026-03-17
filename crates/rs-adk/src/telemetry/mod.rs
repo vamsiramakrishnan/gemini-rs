@@ -11,11 +11,15 @@ use rs_genai::prelude::FunctionCall;
 
 use crate::context::InvocationContext;
 use crate::error::{AgentError, ToolError};
+use crate::llm::{LlmRequest, LlmResponse};
 use crate::middleware::Middleware;
 
 pub mod logging;
 pub mod metrics;
+pub mod setup;
 pub mod spans;
+
+pub use setup::TelemetrySetup;
 
 /// Auto-registered middleware that calls telemetry functions.
 /// Zero-overhead when `tracing-support` and `metrics` features are disabled
@@ -82,6 +86,22 @@ impl Middleware for TelemetryMiddleware {
         metrics::record_agent_error(&self.agent_name, &err.to_string());
         logging::log_agent_error(&self.agent_name, &err.to_string());
         Ok(())
+    }
+
+    async fn before_model(&self, _request: &LlmRequest) -> Result<Option<LlmResponse>, AgentError> {
+        logging::log_tool_dispatch(&self.agent_name, "llm", "model_call");
+        Ok(None)
+    }
+
+    async fn after_model(
+        &self,
+        _request: &LlmRequest,
+        _response: &LlmResponse,
+    ) -> Result<Option<LlmResponse>, AgentError> {
+        if let Some(_usage) = &_response.usage {
+            metrics::record_agent_completed(&self.agent_name, 0.0); // Duration tracked elsewhere
+        }
+        Ok(None)
     }
 }
 

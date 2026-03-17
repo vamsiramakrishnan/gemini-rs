@@ -17,6 +17,12 @@ pub enum EvalError {
     /// Invalid input.
     #[error("Invalid input: {0}")]
     InvalidInput(String),
+    /// I/O error (file read/write).
+    #[error("IO error: {0}")]
+    Io(String),
+    /// Parse error (JSON, config, evalset).
+    #[error("Parse error: {0}")]
+    Parse(String),
 }
 
 /// Trait for evaluating agent invocations against expected results.

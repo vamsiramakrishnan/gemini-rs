@@ -80,27 +80,33 @@ build-release:
 check-compile:
     cargo check --workspace
 
-# ─── Cookbooks ───────────────────────────────────────────────
+# ─── Apps ────────────────────────────────────────────────────
 
-# Run the UI cookbook server (Axum + WebSocket)
-run-ui:
-    cargo run -p rs-genai-ui
+# Run the web UI (mirrors `adk web`)
+run-web:
+    cargo run -p adk-web
 
-# Run the text-chat cookbook
+# Run the REST API server (mirrors `adk api_server`)
+run-api:
+    cargo run -p adk-api-server
+
+# ─── Examples ────────────────────────────────────────────────
+
+# Run the text-chat example
 run-text-chat:
-    cargo run -p cookbook-text-chat
+    cargo run -p example-text-chat
 
-# Run the voice-chat cookbook
+# Run the voice-chat example
 run-voice-chat:
-    cargo run -p cookbook-voice-chat
+    cargo run -p example-voice-chat
 
-# Run the tool-calling cookbook
+# Run the tool-calling example
 run-tool-calling:
-    cargo run -p cookbook-tool-calling
+    cargo run -p example-tool-calling
 
-# Run the transcription cookbook
+# Run the transcription example
 run-transcription:
-    cargo run -p cookbook-transcription
+    cargo run -p example-transcription
 
 # ─── Watch Mode ──────────────────────────────────────────────
 

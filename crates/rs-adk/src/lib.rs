@@ -6,6 +6,7 @@
 
 pub mod a2a;
 pub mod agent;
+pub mod agent_config;
 pub mod agent_session;
 pub mod agent_tool;
 pub mod agents;
@@ -140,7 +141,10 @@ pub use memory::{
 };
 
 // New re-exports — Sessions
+#[cfg(feature = "postgres-sessions")]
+pub use session::{PostgresSessionConfig, PostgresSessionService};
 pub use session::{SqliteSessionConfig, SqliteSessionService};
+pub use session::{VertexAiSessionConfig, VertexAiSessionService};
 
 // New re-exports — Tools
 pub use tools::retrieval::{
@@ -150,6 +154,11 @@ pub use tools::{
     BashToolPolicy, DiscoveryEngineSearchTool, Example, ExampleTool, ExecuteBashTool, ExitLoopTool,
     GetUserChoiceTool, LoadMemoryTool, PreloadMemoryTool, TransferToAgentTool, UrlContextTool,
     VertexAiSearchConfig, VertexAiSearchTool,
+};
+
+// New re-exports — Agent Config
+pub use agent_config::{
+    discover_agent_configs, AgentConfig, AgentConfigError, ToolConfig as AgentToolConfig,
 };
 
 // Wire re-export

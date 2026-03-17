@@ -4,8 +4,11 @@
 //! persistence with an in-memory default implementation.
 
 mod memory;
+#[cfg(feature = "postgres-sessions")]
+mod postgres;
 mod sqlite;
 mod types;
+mod vertex_ai;
 
 #[cfg(feature = "database-sessions")]
 mod database;
@@ -15,8 +18,11 @@ pub use database::DatabaseSessionService;
 pub mod db_schema;
 
 pub use memory::InMemorySessionService;
+#[cfg(feature = "postgres-sessions")]
+pub use postgres::{PostgresSessionConfig, PostgresSessionService};
 pub use sqlite::{SqliteSessionConfig, SqliteSessionService};
 pub use types::{Session, SessionId};
+pub use vertex_ai::{VertexAiSessionConfig, VertexAiSessionService};
 
 use async_trait::async_trait;
 

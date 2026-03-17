@@ -24,7 +24,7 @@ Three-crate layered stack for the Gemini Multimodal Live API:
                     +--------------------------+
 ```
 
-Plus `cookbooks/ui` (Axum WebSocket UI), `cookbooks/agents`, `cookbooks/voice-chat`, `cookbooks/tool-calling`, `cookbooks/transcription`, `cookbooks/text-chat`, and `tools/adk-transpiler`.
+Plus `apps/adk-web` (Axum Web UI), `apps/adk-api-server` (REST API server), `examples/agents`, `examples/voice-chat`, `examples/tool-calling`, `examples/transcription`, `examples/text-chat`, and `tools/adk-transpiler`.
 
 ## Import Guidance
 
@@ -545,7 +545,7 @@ cargo build --workspace
 cargo test --workspace
 
 # Run a specific cookbook
-cargo run -p ui
+cargo run -p adk-web
 
 # Check without building
 cargo check --workspace
@@ -588,13 +588,16 @@ crates/
   rs-genai/          L0 wire protocol (rs_genai)
   rs-adk/            L1 agent runtime (rs_adk)
   adk-rs-fluent/     L2 fluent DX (adk_rs_fluent)
-cookbooks/
-  ui/                Axum WebSocket tester with browser UI
+apps/
+  adk-web/           Interactive web UI for agent development (adk web)
+  adk-api-server/    Standalone REST API server (adk api_server)
+examples/
   agents/            Agent composition examples
-  voice-chat/        Voice chat cookbook
-  tool-calling/      Tool calling cookbook
-  transcription/     Transcription cookbook
-  text-chat/         Text chat cookbook
+  voice-chat/        Voice chat example
+  tool-calling/      Tool calling example
+  transcription/     Transcription example
+  text-chat/         Text chat example
 tools/
+  adk-cli/           CLI tool (adk create/run/web/eval/deploy)
   adk-transpiler/    Code transpilation utilities
 ```

@@ -3,6 +3,8 @@
 //! Also provides `CallbackContext` and `ToolContext` wrappers for richer
 //! access patterns in callbacks and tool execution.
 
+use std::sync::Arc;
+
 use tokio::sync::broadcast;
 
 use crate::agent_session::AgentSession;
@@ -93,6 +95,13 @@ pub struct InvocationContext {
 
     /// Session ID for session-aware runs.
     pub session_id: Option<String>,
+
+    /// Optional artifact service for this invocation.
+    pub artifact_service: Option<Arc<dyn crate::artifacts::ArtifactService>>,
+    /// Optional memory service for this invocation.
+    pub memory_service: Option<Arc<dyn crate::memory::MemoryService>>,
+    /// Optional session service for this invocation.
+    pub session_service: Option<Arc<dyn crate::session::SessionService>>,
 }
 
 impl InvocationContext {
@@ -105,6 +114,9 @@ impl InvocationContext {
             middleware: MiddlewareChain::new(),
             run_config: RunConfig::default(),
             session_id: None,
+            artifact_service: None,
+            memory_service: None,
+            session_service: None,
         }
     }
 
@@ -117,6 +129,9 @@ impl InvocationContext {
             middleware,
             run_config: RunConfig::default(),
             session_id: None,
+            artifact_service: None,
+            memory_service: None,
+            session_service: None,
         }
     }
 
@@ -133,6 +148,30 @@ impl InvocationContext {
     /// Convenience: access the state container.
     pub fn state(&self) -> &crate::state::State {
         self.agent_session.state()
+    }
+
+    /// Set the artifact service for this invocation.
+    pub fn with_artifact_service(
+        mut self,
+        service: Arc<dyn crate::artifacts::ArtifactService>,
+    ) -> Self {
+        self.artifact_service = Some(service);
+        self
+    }
+
+    /// Set the memory service for this invocation.
+    pub fn with_memory_service(mut self, service: Arc<dyn crate::memory::MemoryService>) -> Self {
+        self.memory_service = Some(service);
+        self
+    }
+
+    /// Set the session service for this invocation.
+    pub fn with_session_service(
+        mut self,
+        service: Arc<dyn crate::session::SessionService>,
+    ) -> Self {
+        self.session_service = Some(service);
+        self
     }
 }
 
