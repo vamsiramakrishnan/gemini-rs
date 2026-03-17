@@ -120,8 +120,7 @@ impl TelemetrySetup {
         {
             let config = rs_genai::telemetry::TelemetryConfig {
                 logging_enabled: true,
-                log_filter: std::env::var("RUST_LOG")
-                    .unwrap_or_else(|_| "info".to_string()),
+                log_filter: std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()),
                 json_logs: false,
                 metrics_enabled: false,
                 metrics_addr: None,
@@ -174,7 +173,10 @@ mod tests {
             .with_content_capture(true);
 
         assert_eq!(setup.service_name, "my-service");
-        assert_eq!(setup.otlp_endpoint.as_deref(), Some("http://localhost:4317"));
+        assert_eq!(
+            setup.otlp_endpoint.as_deref(),
+            Some("http://localhost:4317")
+        );
         assert!(setup.cloud_trace);
         assert!(setup.capture_content);
     }

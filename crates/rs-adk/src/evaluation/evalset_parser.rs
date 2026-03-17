@@ -92,7 +92,10 @@ pub struct ToolUseRecord {
 /// `EvalError::Parse` if the JSON is invalid.
 pub fn parse_evalset(path: &Path) -> Result<EvalSetFile, EvalError> {
     let contents = std::fs::read_to_string(path).map_err(|e| {
-        EvalError::Io(format!("Failed to read evalset file {}: {e}", path.display()))
+        EvalError::Io(format!(
+            "Failed to read evalset file {}: {e}",
+            path.display()
+        ))
     })?;
     parse_evalset_str(&contents)
 }
@@ -325,8 +328,17 @@ mod tests {
             }]
         }"#;
         let evalset = parse_evalset_str(json).unwrap();
-        assert_eq!(evalset.eval_cases[0].conversation[0].expected_tool_use.len(), 0);
-        assert!(evalset.eval_cases[0].conversation[0].expected_response.is_none());
-        assert!(evalset.eval_cases[0].conversation[0].intermediate_data.is_none());
+        assert_eq!(
+            evalset.eval_cases[0].conversation[0]
+                .expected_tool_use
+                .len(),
+            0
+        );
+        assert!(evalset.eval_cases[0].conversation[0]
+            .expected_response
+            .is_none());
+        assert!(evalset.eval_cases[0].conversation[0]
+            .intermediate_data
+            .is_none());
     }
 }

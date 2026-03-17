@@ -122,7 +122,10 @@ impl SessionService for VertexAiSessionService {
         // }
         //
         // Response: { "name": "...sessions/{id}", "userId": "...", ... }
-        let _ttl_body = self.config.ttl_seconds.map(|t| format!("\"ttl\": \"{t}s\""));
+        let _ttl_body = self
+            .config
+            .ttl_seconds
+            .map(|t| format!("\"ttl\": \"{t}s\""));
 
         todo!("POST to {_url} to create Vertex AI session for user={_user}")
     }
@@ -168,8 +171,8 @@ impl SessionService for VertexAiSessionService {
 
     async fn append_event(&self, id: &SessionId, event: Event) -> Result<(), SessionError> {
         let _url = self.config.events_url("default", id.as_str());
-        let _event_json = serde_json::to_value(&event)
-            .map_err(|e| SessionError::Storage(e.to_string()))?;
+        let _event_json =
+            serde_json::to_value(&event).map_err(|e| SessionError::Storage(e.to_string()))?;
 
         // Real implementation would:
         // POST {events_url}
@@ -223,9 +226,15 @@ mod tests {
             config.base_url(),
             "https://us-central1-aiplatform.googleapis.com/v1beta1/projects/my-project/locations/us-central1"
         );
-        assert!(config.sessions_url("engine-1").contains("reasoningEngines/engine-1/sessions"));
-        assert!(config.session_url("engine-1", "sess-1").contains("sessions/sess-1"));
-        assert!(config.events_url("engine-1", "sess-1").contains("sessions/sess-1/events"));
+        assert!(config
+            .sessions_url("engine-1")
+            .contains("reasoningEngines/engine-1/sessions"));
+        assert!(config
+            .session_url("engine-1", "sess-1")
+            .contains("sessions/sess-1"));
+        assert!(config
+            .events_url("engine-1", "sess-1")
+            .contains("sessions/sess-1/events"));
     }
 
     #[test]

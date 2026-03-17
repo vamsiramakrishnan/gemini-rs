@@ -22,8 +22,8 @@ mod user_simulator_evaluator;
 pub use eval_case::{EvalCase, EvalSet, Invocation, InvocationTurn};
 pub use eval_result::{EvalMetric, EvalResult, PerInvocationResult};
 pub use evalset_parser::{
-    parse_evalset, parse_evalset_str, EvalCaseFile, EvalSetFile, ExpectedToolUse,
-    IntermediateData, InvocationFile, ToolUseRecord,
+    parse_evalset, parse_evalset_str, EvalCaseFile, EvalSetFile, ExpectedToolUse, IntermediateData,
+    InvocationFile, ToolUseRecord,
 };
 pub use evaluator::{EvalError, Evaluator};
 pub use hallucination_evaluator::HallucinationEvaluator;

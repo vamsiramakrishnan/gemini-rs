@@ -1,6 +1,6 @@
 //! Pluggable session store trait + in-memory default implementation.
 
-use crate::types::{SessionData, now_iso8601};
+use crate::types::{now_iso8601, SessionData};
 use std::collections::HashMap;
 
 /// Trait for session storage backends.
@@ -134,11 +134,10 @@ impl SessionStore for InMemorySessionStore {
             return 0;
         };
 
-        let cutoff = session.events.iter().rposition(|e| {
-            e.get("invocation_id")
-                .and_then(|v| v.as_str())
-                == Some(invocation_id)
-        });
+        let cutoff = session
+            .events
+            .iter()
+            .rposition(|e| e.get("invocation_id").and_then(|v| v.as_str()) == Some(invocation_id));
 
         match cutoff {
             Some(idx) => {

@@ -218,10 +218,7 @@ impl AgentConfig {
 
     /// Check if this is a workflow agent (non-LLM).
     pub fn is_workflow(&self) -> bool {
-        matches!(
-            self.agent_type.as_str(),
-            "sequential" | "parallel" | "loop"
-        )
+        matches!(self.agent_type.as_str(), "sequential" | "parallel" | "loop")
     }
 }
 
@@ -230,11 +227,7 @@ impl AgentConfig {
 /// Scans for files named `agent.yaml`, `agent.json`, `agent.toml`,
 /// `root_agent.yaml`, or `root_agent.json`.
 pub fn discover_agent_configs(dir: &Path) -> Result<Vec<AgentConfig>, AgentConfigError> {
-    let candidates = [
-        "agent.json",
-        "root_agent.json",
-        "agent.toml",
-    ];
+    let candidates = ["agent.json", "root_agent.json", "agent.toml"];
 
     let mut configs = Vec::new();
     for candidate in &candidates {
@@ -325,24 +318,20 @@ mod tests {
 
     #[test]
     fn validate_bad_temperature_fails() {
-        let config =
-            AgentConfig::from_json(r#"{"name": "test", "temperature": 3.0}"#).unwrap();
+        let config = AgentConfig::from_json(r#"{"name": "test", "temperature": 3.0}"#).unwrap();
         assert!(config.validate().is_err());
     }
 
     #[test]
     fn validate_good_config_passes() {
-        let config =
-            AgentConfig::from_json(r#"{"name": "test", "temperature": 0.7}"#).unwrap();
+        let config = AgentConfig::from_json(r#"{"name": "test", "temperature": 0.7}"#).unwrap();
         assert!(config.validate().is_ok());
     }
 
     #[test]
     fn is_workflow_detection() {
-        let sequential = AgentConfig::from_json(
-            r#"{"name": "seq", "agent_type": "sequential"}"#,
-        )
-        .unwrap();
+        let sequential =
+            AgentConfig::from_json(r#"{"name": "seq", "agent_type": "sequential"}"#).unwrap();
         assert!(sequential.is_workflow());
 
         let llm = AgentConfig::from_json(r#"{"name": "llm"}"#).unwrap();

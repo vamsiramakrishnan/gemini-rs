@@ -93,7 +93,11 @@ impl Middleware for TelemetryMiddleware {
         Ok(None)
     }
 
-    async fn after_model(&self, _request: &LlmRequest, _response: &LlmResponse) -> Result<Option<LlmResponse>, AgentError> {
+    async fn after_model(
+        &self,
+        _request: &LlmRequest,
+        _response: &LlmResponse,
+    ) -> Result<Option<LlmResponse>, AgentError> {
         if let Some(_usage) = &_response.usage {
             metrics::record_agent_completed(&self.agent_name, 0.0); // Duration tracked elsewhere
         }

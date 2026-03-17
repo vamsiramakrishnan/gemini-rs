@@ -81,10 +81,7 @@ spec:
 pub fn run(config: DeployConfig) -> Result<(), Box<dyn std::error::Error>> {
     let dir = Path::new(&config.agent_dir);
     let agent = manifest::load_manifest(&dir.join("agent.toml"))?;
-    let service_name = config
-        .service_name
-        .as_deref()
-        .unwrap_or(&agent.name);
+    let service_name = config.service_name.as_deref().unwrap_or(&agent.name);
 
     match config.target {
         Target::CloudRun => deploy_cloud_run(&config, &agent, service_name),
@@ -146,10 +143,7 @@ fn deploy_gke(
         .as_deref()
         .ok_or("--project is required for GKE deployment")?;
 
-    let image = format!(
-        "gcr.io/{}/{}:latest",
-        project, service_name
-    );
+    let image = format!("gcr.io/{}/{}:latest", project, service_name);
 
     println!("Deploying agent '{}' to GKE", agent.name);
     println!("  Project: {}", project);

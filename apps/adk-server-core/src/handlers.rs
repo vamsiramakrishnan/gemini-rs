@@ -1,5 +1,6 @@
 //! REST endpoint handlers — single implementation used by all server surfaces.
 
+use crate::{agents::AgentEntry, types::*, ServerState};
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -8,7 +9,6 @@ use axum::{
         IntoResponse, Json,
     },
 };
-use crate::{agents::AgentEntry, types::*, ServerState};
 
 // ── Agent Execution ─────────────────────────────────────────────
 

@@ -89,7 +89,13 @@ pub fn record_event_loop_lag(_: &str, _: u64) {}
 
 /// Record LLM call with duration and token counts.
 #[cfg(feature = "metrics")]
-pub fn record_llm_call(model_id: &str, agent_name: &str, duration_ms: f64, prompt_tokens: u32, completion_tokens: u32) {
+pub fn record_llm_call(
+    model_id: &str,
+    agent_name: &str,
+    duration_ms: f64,
+    prompt_tokens: u32,
+    completion_tokens: u32,
+) {
     metrics::counter!("gemini_llm_calls_total", "model" => model_id.to_string(), "agent" => agent_name.to_string())
         .increment(1);
     metrics::histogram!("gemini_llm_call_duration_ms", "model" => model_id.to_string(), "agent" => agent_name.to_string())

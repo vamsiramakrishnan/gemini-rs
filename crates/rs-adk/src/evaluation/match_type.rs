@@ -79,7 +79,10 @@ impl TrajectoryMatchType {
                 let score = found as f64 / expected_set.len() as f64;
                 (
                     score,
-                    format!("Any-order: {found}/{} expected tools found", expected_set.len()),
+                    format!(
+                        "Any-order: {found}/{} expected tools found",
+                        expected_set.len()
+                    ),
                 )
             }
         }
@@ -155,15 +158,14 @@ mod tests {
 
     #[test]
     fn any_order_full() {
-        let (score, _) = TrajectoryMatchType::AnyOrder
-            .score(&names(&["c", "a", "b"]), &names(&["a", "b", "c"]));
+        let (score, _) =
+            TrajectoryMatchType::AnyOrder.score(&names(&["c", "a", "b"]), &names(&["a", "b", "c"]));
         assert!((score - 1.0).abs() < f64::EPSILON);
     }
 
     #[test]
     fn any_order_partial() {
-        let (score, _) =
-            TrajectoryMatchType::AnyOrder.score(&names(&["a"]), &names(&["a", "b"]));
+        let (score, _) = TrajectoryMatchType::AnyOrder.score(&names(&["a"]), &names(&["a", "b"]));
         assert!((score - 0.5).abs() < f64::EPSILON);
     }
 

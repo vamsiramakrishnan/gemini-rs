@@ -91,7 +91,10 @@ impl HallucinationEvaluator {
             model_turns.into_iter().map(String::from).collect()
         } else {
             // Only the last model response
-            model_turns.last().map(|s| vec![s.to_string()]).unwrap_or_default()
+            model_turns
+                .last()
+                .map(|s| vec![s.to_string()])
+                .unwrap_or_default()
         }
     }
 
@@ -134,7 +137,10 @@ impl HallucinationEvaluator {
             }
         }
 
-        (0.0, format!("Failed to parse hallucination judge response: {text}"))
+        (
+            0.0,
+            format!("Failed to parse hallucination judge response: {text}"),
+        )
     }
 }
 

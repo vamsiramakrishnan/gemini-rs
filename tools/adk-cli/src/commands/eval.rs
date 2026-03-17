@@ -145,7 +145,10 @@ pub async fn run(
 
     // Print summary
     let total = results.len();
-    println!("\nResults: {passed}/{total} passed ({:.0}%)", (passed as f64 / total as f64) * 100.0);
+    println!(
+        "\nResults: {passed}/{total} passed ({:.0}%)",
+        (passed as f64 / total as f64) * 100.0
+    );
 
     if print_detailed_results {
         println!("\n{:<20} {:<8} {:<8} {}", "CASE", "PASS", "SCORE", "OUTPUT");
@@ -153,7 +156,10 @@ pub async fn run(
         for r in &results {
             let status = if r.passed { "PASS" } else { "FAIL" };
             let output_preview: String = r.agent_output.chars().take(40).collect();
-            println!("{:<20} {:<8} {:<8.2} {}", r.id, status, r.score, output_preview);
+            println!(
+                "{:<20} {:<8} {:<8.2} {}",
+                r.id, status, r.score, output_preview
+            );
         }
     }
 

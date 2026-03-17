@@ -58,10 +58,7 @@ impl TestConfig {
     /// Check whether all criteria pass for a set of metric scores.
     ///
     /// Returns a map of criterion name -> (passed, score, threshold).
-    pub fn check_all(
-        &self,
-        scores: &HashMap<String, f64>,
-    ) -> HashMap<String, (bool, f64, f64)> {
+    pub fn check_all(&self, scores: &HashMap<String, f64>) -> HashMap<String, (bool, f64, f64)> {
         self.criteria
             .iter()
             .map(|(name, config)| {
@@ -75,7 +72,9 @@ impl TestConfig {
 
     /// Returns `true` if all criteria pass.
     pub fn all_pass(&self, scores: &HashMap<String, f64>) -> bool {
-        self.check_all(scores).values().all(|(passed, _, _)| *passed)
+        self.check_all(scores)
+            .values()
+            .all(|(passed, _, _)| *passed)
     }
 }
 

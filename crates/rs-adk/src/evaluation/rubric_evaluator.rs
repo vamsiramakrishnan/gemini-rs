@@ -106,7 +106,10 @@ impl RubricEvaluator {
         for turn in &actual.turns {
             prompt.push_str(&format!("[{}]: {}\n", turn.role, turn.content));
             if !turn.tool_calls.is_empty() {
-                prompt.push_str(&format!("  Tool calls: {}\n", serde_json::json!(turn.tool_calls)));
+                prompt.push_str(&format!(
+                    "  Tool calls: {}\n",
+                    serde_json::json!(turn.tool_calls)
+                ));
             }
             if !turn.tool_results.is_empty() {
                 prompt.push_str(&format!(
@@ -159,7 +162,10 @@ impl RubricEvaluator {
 
         // Fallback: try to find individual scores
         let _ = num_rubrics; // Used in full implementation
-        (0.0, format!("Failed to parse rubric judge response: {text}"))
+        (
+            0.0,
+            format!("Failed to parse rubric judge response: {text}"),
+        )
     }
 }
 
@@ -196,10 +202,12 @@ impl Evaluator for RubricEvaluator {
         actual: &[Invocation],
         expected: Option<&[Invocation]>,
     ) -> Result<EvalResult, EvalError> {
-        let llm = self
-            .llm
-            .as_ref()
-            .ok_or_else(|| EvalError::Llm("RubricEvaluator requires an LLM instance — call .with_llm() before evaluating".into()))?;
+        let llm = self.llm.as_ref().ok_or_else(|| {
+            EvalError::Llm(
+                "RubricEvaluator requires an LLM instance — call .with_llm() before evaluating"
+                    .into(),
+            )
+        })?;
 
         let mut per_invocation = Vec::new();
         let mut total_score = 0.0;
@@ -321,8 +329,7 @@ mod tests {
 
     #[test]
     fn with_judge_model() {
-        let eval = RubricEvaluator::new(vec!["test".into()])
-            .with_judge_model("gemini-2.0-flash");
+        let eval = RubricEvaluator::new(vec!["test".into()]).with_judge_model("gemini-2.0-flash");
         assert_eq!(eval.judge_model.as_deref(), Some("gemini-2.0-flash"));
     }
 

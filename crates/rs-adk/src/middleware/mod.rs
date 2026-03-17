@@ -94,7 +94,11 @@ pub trait Middleware: Send + Sync + 'static {
 
     /// Called after an LLM model call completes. Return `Some(LlmResponse)` to replace the model's
     /// response (e.g., for output filtering, safety). Return `None` to use the original response.
-    async fn after_model(&self, _request: &LlmRequest, _response: &LlmResponse) -> Result<Option<LlmResponse>, AgentError> {
+    async fn after_model(
+        &self,
+        _request: &LlmRequest,
+        _response: &LlmResponse,
+    ) -> Result<Option<LlmResponse>, AgentError> {
         Ok(None)
     }
 }
@@ -186,7 +190,10 @@ impl MiddlewareChain {
     }
 
     /// Run all `before_model` hooks in order. Returns the first non-None override response.
-    pub async fn run_before_model(&self, request: &LlmRequest) -> Result<Option<LlmResponse>, AgentError> {
+    pub async fn run_before_model(
+        &self,
+        request: &LlmRequest,
+    ) -> Result<Option<LlmResponse>, AgentError> {
         for m in &self.layers {
             if let Some(response) = m.before_model(request).await? {
                 return Ok(Some(response));
@@ -196,7 +203,11 @@ impl MiddlewareChain {
     }
 
     /// Run all `after_model` hooks in reverse order. Returns the first non-None override response.
-    pub async fn run_after_model(&self, request: &LlmRequest, response: &LlmResponse) -> Result<Option<LlmResponse>, AgentError> {
+    pub async fn run_after_model(
+        &self,
+        request: &LlmRequest,
+        response: &LlmResponse,
+    ) -> Result<Option<LlmResponse>, AgentError> {
         for m in self.layers.iter().rev() {
             if let Some(replacement) = m.after_model(request, response).await? {
                 return Ok(Some(replacement));

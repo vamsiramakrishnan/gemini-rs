@@ -151,7 +151,10 @@ impl InvocationContext {
     }
 
     /// Set the artifact service for this invocation.
-    pub fn with_artifact_service(mut self, service: Arc<dyn crate::artifacts::ArtifactService>) -> Self {
+    pub fn with_artifact_service(
+        mut self,
+        service: Arc<dyn crate::artifacts::ArtifactService>,
+    ) -> Self {
         self.artifact_service = Some(service);
         self
     }
@@ -163,7 +166,10 @@ impl InvocationContext {
     }
 
     /// Set the session service for this invocation.
-    pub fn with_session_service(mut self, service: Arc<dyn crate::session::SessionService>) -> Self {
+    pub fn with_session_service(
+        mut self,
+        service: Arc<dyn crate::session::SessionService>,
+    ) -> Self {
         self.session_service = Some(service);
         self
     }

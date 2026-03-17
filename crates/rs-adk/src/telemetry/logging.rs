@@ -102,7 +102,13 @@ pub fn log_event_loop_lag(_: &str, _: u64) {}
 
 /// Log an LLM call.
 #[cfg(feature = "tracing-support")]
-pub fn log_llm_call(model_id: &str, agent_name: &str, prompt_tokens: u32, completion_tokens: u32, duration_ms: f64) {
+pub fn log_llm_call(
+    model_id: &str,
+    agent_name: &str,
+    prompt_tokens: u32,
+    completion_tokens: u32,
+    duration_ms: f64,
+) {
     tracing::info!(
         model_id = model_id,
         agent_name = agent_name,

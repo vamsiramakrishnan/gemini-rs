@@ -111,7 +111,10 @@ impl UserSimulatorEvaluator {
             }
         }
 
-        (0.0, format!("Failed to parse simulator judge response: {text}"))
+        (
+            0.0,
+            format!("Failed to parse simulator judge response: {text}"),
+        )
     }
 
     /// Perform heuristic scoring without an LLM.
@@ -165,7 +168,9 @@ impl UserSimulatorEvaluator {
         }
         if alternation_violations > 0 {
             score -= 0.1 * alternation_violations as f64;
-            issues.push(format!("{alternation_violations} turn alternation violations"));
+            issues.push(format!(
+                "{alternation_violations} turn alternation violations"
+            ));
         }
 
         // Check stop signal usage if configured
