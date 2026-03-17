@@ -1,3 +1,7 @@
+use std::path::PathBuf;
+
+use adk_server_core::{AgentRegistry, ServerState};
+
 /// Configuration for the web dev server command.
 pub struct WebConfig {
     pub agent_dir: String,
@@ -12,39 +16,42 @@ pub struct WebConfig {
     pub artifact_storage_uri: Option<String>,
 }
 
-/// Start the development web server with UI.
-pub fn run(config: WebConfig) -> Result<(), Box<dyn std::error::Error>> {
-    println!(
-        "Starting ADK web server on http://{}:{}",
-        config.host, config.port
-    );
-    println!("  Agent directory: {}", config.agent_dir);
-    println!("  Log level: {}", config.log_level);
-    if config.reload {
-        println!("  Auto-reload: enabled");
-    }
-    if config.a2a {
-        println!("  A2A protocol: enabled");
-    }
-    if config.trace_to_cloud {
-        println!("  Cloud Trace: enabled");
-    }
-    if let Some(ref origins) = config.allow_origins {
-        println!("  CORS origins: {}", origins);
-    }
-    if let Some(ref uri) = config.session_service_uri {
-        println!("  Session service: {}", uri);
-    }
-    if let Some(ref uri) = config.artifact_storage_uri {
-        println!("  Artifact storage: {}", uri);
+/// Start the web dev server — serves the REST API (use `adk-web` crate for full UI).
+///
+/// The CLI `adk web` command provides the same REST API as `adk api` but on a
+/// different default port. For the full interactive web UI with devtools,
+/// run `adk-web` directly.
+pub async fn run(config: WebConfig) -> Result<(), Box<dyn std::error::Error>> {
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(&config.log_level));
+    tracing_subscriber::fmt()
+        .with_env_filter(env_filter)
+        .init();
+
+    dotenvy::dotenv().ok();
+
+    // Discover agents via unified registry
+    let dir = PathBuf::from(&config.agent_dir);
+    let mut registry = AgentRegistry::new();
+    let count = registry.discover(&dir);
+
+    if count == 0 {
+        return Err(format!(
+            "No agents found in '{}'. Place an agent.toml or agent.json in the directory.",
+            config.agent_dir
+        )
+        .into());
     }
 
-    // TODO: Implement full web server with embedded UI assets.
-    // This will serve an Axum application with:
-    //   - Static file serving for the web UI
-    //   - WebSocket endpoint for real-time agent interaction
-    //   - All API endpoints from the `api` command
-    println!("\nWeb server implementation pending — use `adk api` for headless mode.");
+    let state = ServerState::new(registry);
+    let app = adk_server_core::build_api_router(state);
+
+    let addr = format!("{}:{}", config.host, config.port);
+    tracing::info!("ADK web server listening on http://{addr}");
+    tracing::info!("For the full interactive UI with devtools, run: cargo run -p adk-web");
+
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
+    axum::serve(listener, app).await?;
 
     Ok(())
 }

@@ -9,9 +9,9 @@ publish = false
 rs-genai = { path = "../../crates/rs-genai" }
 rs-adk = { path = "../../crates/rs-adk", features = ["gemini-llm"] }
 adk-rs-fluent = { path = "../../crates/adk-rs-fluent", features = ["gemini-llm"] }
+adk-server-core = { path = "../adk-server-core" }
 tokio = { version = "1.0", features = ["full"] }
 axum = { version = "0.7", features = ["ws", "macros"] }
-uuid = { version = "1", features = ["v4"] }
 tower-http = { version = "0.5", features = ["fs", "cors"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

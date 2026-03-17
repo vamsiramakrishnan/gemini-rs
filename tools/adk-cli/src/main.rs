@@ -187,18 +187,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             trace_to_cloud,
             session_service_uri,
             artifact_storage_uri,
-        } => commands::web::run(commands::web::WebConfig {
-            agent_dir,
-            host,
-            port,
-            allow_origins,
-            log_level,
-            reload,
-            a2a,
-            trace_to_cloud,
-            session_service_uri,
-            artifact_storage_uri,
-        })?,
+        } => {
+            commands::web::run(commands::web::WebConfig {
+                agent_dir,
+                host,
+                port,
+                allow_origins,
+                log_level,
+                reload,
+                a2a,
+                trace_to_cloud,
+                session_service_uri,
+                artifact_storage_uri,
+            })
+            .await?
+        }
 
         Command::Api {
             agent_dir,

@@ -43,7 +43,16 @@ async fn main() {
         span_tx,
     };
 
+    // Discover agents from working directory for the REST API
+    let mut agent_registry = adk_server_core::AgentRegistry::new();
+    let dir = std::env::current_dir().unwrap_or_default();
+    agent_registry.discover(&dir);
+    let server_state = adk_server_core::ServerState::new(agent_registry);
+
     let static_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/static");
+
+    // Build the API router first (has its own state baked in)
+    let api = api::api_router(server_state);
 
     let app = Router::new()
         .route("/", get(landing_page))
@@ -51,14 +60,14 @@ async fn main() {
         .route("/api/apps", get(list_apps))
         .route("/ws/:name", get(ws_upgrade))
         .route("/favicon.ico", get(favicon))
-        .merge(api::api_router())
+        .with_state(state)
+        .merge(api)
         .nest_service("/static", ServeDir::new(static_dir))
         .layer(middleware::from_fn(no_cache_static))
-        .layer(middleware::from_fn(cross_origin_isolation))
-        .with_state(state);
+        .layer(middleware::from_fn(cross_origin_isolation));
 
     let addr = "0.0.0.0:25125";
-    tracing::info!("Cookbooks UI at http://localhost:25125");
+    tracing::info!("ADK Web UI at http://localhost:25125");
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
@@ -85,9 +94,6 @@ async fn init_telemetry() -> (
 
     tracing::subscriber::set_global_default(subscriber).expect("Failed to set tracing subscriber");
 
-    // Return a default guard (OTel providers are not set up in this path
-    // since we built the subscriber ourselves; enable otel features separately
-    // if needed)
     (Default::default(), span_tx)
 }
 
