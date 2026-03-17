@@ -4,8 +4,12 @@
 //! searching memory entries (key-value) with an in-memory default.
 
 mod in_memory;
+mod vertex_ai_memory_bank;
+mod vertex_ai_rag;
 
 pub use in_memory::InMemoryMemoryService;
+pub use vertex_ai_memory_bank::{VertexAiMemoryBankConfig, VertexAiMemoryBankService};
+pub use vertex_ai_rag::{VertexAiRagMemoryConfig, VertexAiRagMemoryService};
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};

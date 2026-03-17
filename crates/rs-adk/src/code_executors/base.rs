@@ -10,6 +10,9 @@ pub enum CodeExecutorError {
     /// The requested model does not support code execution.
     #[error("Unsupported model: {0}")]
     UnsupportedModel(String),
+    /// The execution timed out.
+    #[error("Execution timed out after {0}s")]
+    Timeout(u64),
     /// A catch-all for other code executor errors.
     #[error("{0}")]
     Other(String),

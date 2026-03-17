@@ -4,14 +4,23 @@
 pub mod base;
 /// Built-in code executor using Gemini's native code execution.
 pub mod built_in;
+/// Container-based code executor using Docker.
+pub mod container;
 /// Types used by code executors (input, output, files).
 pub mod types;
+/// Unsafe local code executor (no sandboxing).
+pub mod unsafe_local;
 /// Utility functions for extracting code blocks and building parts.
 pub mod utils;
+/// Vertex AI managed code executor.
+pub mod vertex_ai;
 
 pub use base::{CodeExecutor, CodeExecutorError};
 pub use built_in::BuiltInCodeExecutor;
+pub use container::{ContainerCodeExecutor, ContainerCodeExecutorConfig};
 pub use types::{CodeExecutionInput, CodeExecutionResult, CodeFile};
+pub use unsafe_local::UnsafeLocalCodeExecutor;
+pub use vertex_ai::{VertexAiCodeExecutor, VertexAiCodeExecutorConfig};
 
 #[cfg(test)]
 mod tests {
