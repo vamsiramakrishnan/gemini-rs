@@ -1,6 +1,6 @@
 [package]
 name = "adk-web"
-version = "0.4.0"
+version = "0.5.0"
 description = "Interactive web UI for ADK agent development and debugging — mirrors upstream `adk web`"
 edition.workspace = true
 publish = false

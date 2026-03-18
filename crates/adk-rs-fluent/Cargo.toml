@@ -1,6 +1,6 @@
 [package]
 name = "adk-rs-fluent"
-version = "0.4.0"
+version = "0.5.0"
 edition.workspace = true
 license.workspace = true
 description = "Fluent DX for Gemini Live — builder API, operator algebra, composition modules"
@@ -11,8 +11,8 @@ documentation = "https://docs.rs/adk-rs-fluent"
 readme = "README.md"
 
 [dependencies]
-rs-genai = { path = "../rs-genai", version = "0.4.0" }
-rs-adk = { path = "../rs-adk", version = "0.4.0" }
+rs-genai = { path = "../rs-genai", version = "0.5.0" }
+rs-adk = { path = "../rs-adk", version = "0.5.0" }
 bytes = "1"
 tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"
