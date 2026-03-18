@@ -5,8 +5,8 @@ edition.workspace = true
 publish = false
 
 [dependencies]
-rs-genai = { path = "../../crates/rs-genai" }
-rs-adk = { path = "../../crates/rs-adk" }
+rs-genai = { workspace = true }
+rs-adk = { workspace = true }
 tokio = { version = "1", features = ["full"] }
 axum = { version = "0.7", features = ["ws"] }
 tower-http = { version = "0.5", features = ["fs", "cors"] }
