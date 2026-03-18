@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-03-18
+
+### Added
+- **Namespace parity**: ~70 new methods across G, T, M, P, C, S, E, A composition namespaces
+  - Guards (`G::`): `rate_limit`, `toxicity`, `grounded`, `hallucination`, `llm_judge`
+  - Tools (`T::`): `agent`, `mcp`, `a2a`, `mock`, `openapi`, `search`, `schema`, `transform`
+  - Middleware (`M::`): `fallback_model`, `cache`, `dedup`, `metrics`, agent/model hooks
+  - Prompt (`P::`): `reorder`, `only`, `without`, `compress`, `adapt`, `scaffolded`, `versioned`
+  - Context (`C::`): `summarize`, `relevant`, `extract`, `distill`, `priority`, `fit`, `project`
+  - State (`S::`): `log`, `unflatten`, `zip`, `group_by`, `history`, `validate`, `branch`
+  - Eval (`E::`): `from_file`, `persona`
+  - Artifacts (`A::`): `publish`, `save`, `load`, `list`, `delete`, `version`
+- **30 cookbook examples**: Progressive Crawl (01–10), Walk (11–20), Run (21–30) learning path
+- **Web UI redesign**: Design system with 80+ CSS tokens, dark/light mode, animated hero, architecture diagrams, cookbook browser, glassmorphism navigation
+- Cookbook browser panel in DevTools UI
+
+### Changed
+- All crate versions bumped from `0.4.0` → `0.5.0`
+- Cookbook-to-example renaming across docs, configs, and source files
+
+### Fixed
+- `cargo fmt` violations across cookbook examples and compose modules
+
 ## [0.4.0] - 2026-03-18
 
 ### Added
