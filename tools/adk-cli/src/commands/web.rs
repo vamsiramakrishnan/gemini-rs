@@ -187,10 +187,7 @@ pub async fn run(config: WebConfig) -> Result<(), Box<dyn std::error::Error>> {
     for name in &agent_names {
         println!("  │  Agent: {:<36} │", name);
     }
-    println!(
-        "  │  URL:   {:<36} │",
-        format!("http://{}", addr)
-    );
+    println!("  │  URL:   {:<36} │", format!("http://{}", addr));
     println!("  │                                              │");
     println!("  │  Press Ctrl+C to stop.                       │");
     println!("  └─────────────────────────────────────────────┘");
@@ -234,11 +231,15 @@ async fn list_apps(AxumState(state): AxumState<Arc<WebState>>) -> Json<Vec<AppIn
         .agents
         .iter()
         .map(|(name, m)| {
-            let features = m.tools.iter().map(|t| match t.as_str() {
-                "google_search" => "Google Search".into(),
-                "code_execution" => "Code Execution".into(),
-                other => other.to_string(),
-            }).collect();
+            let features = m
+                .tools
+                .iter()
+                .map(|t| match t.as_str() {
+                    "google_search" => "Google Search".into(),
+                    "code_execution" => "Code Execution".into(),
+                    other => other.to_string(),
+                })
+                .collect();
 
             AppInfo {
                 name: name.clone(),
@@ -322,9 +323,9 @@ async fn run_session(
     let send_task = tokio::spawn(async move {
         while let Some(msg) = out_rx.recv().await {
             let result = match msg {
-                WsOut::Binary(data) => ws_tx.send(Message::Binary(data.into())).await,
+                WsOut::Binary(data) => ws_tx.send(Message::Binary(data)).await,
                 WsOut::Json(server_msg) => match serde_json::to_string(&server_msg) {
-                    Ok(json) => ws_tx.send(Message::Text(json.into())).await,
+                    Ok(json) => ws_tx.send(Message::Text(json)).await,
                     Err(_) => continue,
                 },
             };
@@ -483,7 +484,7 @@ async fn run_session(
                             &base64::engine::general_purpose::STANDARD,
                             &data,
                         ) {
-                            if let Err(e) = handle.send_audio(decoded.into()).await {
+                            if let Err(e) = handle.send_audio(decoded).await {
                                 tracing::warn!("send_audio error: {}", e);
                             }
                         }
@@ -494,7 +495,7 @@ async fn run_session(
             }
             Ok(Message::Binary(data)) => {
                 // Raw audio binary frame from browser
-                if let Err(e) = handle.send_audio(data.to_vec().into()).await {
+                if let Err(e) = handle.send_audio(data.to_vec()).await {
                     tracing::warn!("send_audio error: {}", e);
                 }
             }

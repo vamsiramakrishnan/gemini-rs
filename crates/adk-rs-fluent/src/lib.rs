@@ -84,6 +84,7 @@ pub mod prelude {
     // it conflicts with the L2 Agent type alias (= AgentBuilder).
     // Use rs_adk::agent::Agent directly if you need the L1 trait.
     pub use rs_adk::agent_session::*;
+    pub use rs_adk::error::{AgentError, ToolError};
     pub use rs_adk::live::{
         CallbackMode, ContextDelivery, DefaultResultFormatter, DeferredWriter, EventCallbacks,
         ExtractionTrigger, FsPersistence, LiveEvent, LiveHandle, LiveSessionBuilder, LlmExtractor,
@@ -91,7 +92,6 @@ pub mod prelude {
         ResultFormatter, SessionPersistence, SessionSnapshot, SoftTurnDetector, SteeringMode,
         ToolExecutionMode, TranscriptBuffer, TranscriptTurn, TurnExtractor,
     };
-    pub use rs_adk::error::{AgentError, ToolError};
     pub use rs_adk::llm::{BaseLlm, GeminiLlm, GeminiLlmParams, LlmRequest, LlmResponse};
     pub use rs_adk::state::{State, StateKey};
     pub use rs_adk::text::{

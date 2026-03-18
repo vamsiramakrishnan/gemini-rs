@@ -28,9 +28,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         Some(key_name) => println!("set ({})", key_name),
         None => {
             println!("NOT SET");
-            issues.push(
-                "Set one of: GOOGLE_GENAI_API_KEY, GEMINI_API_KEY, or GOOGLE_API_KEY".into(),
-            );
+            issues
+                .push("Set one of: GOOGLE_GENAI_API_KEY, GEMINI_API_KEY, or GOOGLE_API_KEY".into());
         }
     }
 

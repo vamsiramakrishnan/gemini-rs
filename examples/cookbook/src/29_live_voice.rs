@@ -13,7 +13,6 @@
 
 use adk_rs_fluent::prelude::*;
 use serde_json::json;
-use std::time::Duration;
 
 fn main() {
     println!("=== Cookbook #29: Live Voice Session ===\n");
@@ -70,32 +69,47 @@ fn main() {
     // ── 3. Tool composition for live sessions ──
     println!("\n--- 3. Live Session Tools ---\n");
 
-    let tools = T::simple("lookup_account", "Look up customer account details", |args| async move {
-        let id = args.get("account_id").and_then(|v| v.as_str()).unwrap_or("unknown");
-        Ok(json!({
-            "account_id": id,
-            "name": "Alice Johnson",
-            "balance": 1250.00,
-            "status": "active"
-        }))
-    })
-    | T::simple("process_refund", "Process a refund for the customer", |args| async move {
-        let amount = args.get("amount").and_then(|v| v.as_f64()).unwrap_or(0.0);
-        Ok(json!({
-            "refund_id": "REF-12345",
-            "amount": amount,
-            "status": "processed"
-        }))
-    })
-    | T::simple("check_order_status", "Check the status of an order", |args| async move {
-        let order_id = args.get("order_id").and_then(|v| v.as_str()).unwrap_or("unknown");
-        Ok(json!({
-            "order_id": order_id,
-            "status": "shipped",
-            "eta": "2024-03-20"
-        }))
-    })
-    | T::google_search();
+    let tools = T::simple(
+        "lookup_account",
+        "Look up customer account details",
+        |args| async move {
+            let id = args
+                .get("account_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            Ok(json!({
+                "account_id": id,
+                "name": "Alice Johnson",
+                "balance": 1250.00,
+                "status": "active"
+            }))
+        },
+    ) | T::simple(
+        "process_refund",
+        "Process a refund for the customer",
+        |args| async move {
+            let amount = args.get("amount").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            Ok(json!({
+                "refund_id": "REF-12345",
+                "amount": amount,
+                "status": "processed"
+            }))
+        },
+    ) | T::simple(
+        "check_order_status",
+        "Check the status of an order",
+        |args| async move {
+            let order_id = args
+                .get("order_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            Ok(json!({
+                "order_id": order_id,
+                "status": "shipped",
+                "eta": "2024-03-20"
+            }))
+        },
+    ) | T::google_search();
 
     println!("Live session tools: {} total", tools.len());
     println!("  - lookup_account (custom)");
@@ -120,8 +134,14 @@ fn main() {
         + P::constraint("Never share internal policy details")
         + P::format("Explain each step clearly to the customer");
 
-    println!("Greeting prompt: {} sections", greeting_prompt.sections.len());
-    println!("Resolution prompt: {} sections", resolution_prompt.sections.len());
+    println!(
+        "Greeting prompt: {} sections",
+        greeting_prompt.sections.len()
+    );
+    println!(
+        "Resolution prompt: {} sections",
+        resolution_prompt.sections.len()
+    );
 
     // ── 5. State predicates for transitions ──
     println!("\n--- 5. State Predicates ---\n");
@@ -141,11 +161,26 @@ fn main() {
     let is_billing = S::eq("issue_type", "billing");
 
     println!("Current state:");
-    println!("  greeted:    {} (transition to identification)", greeted_check(&state));
-    println!("  customer_id set: {} (guard for identification)", has_customer(&state));
-    println!("  verified:   {} (transition to resolution)", verified_check(&state));
-    println!("  is_billing: {} (determines resolution path)", is_billing(&state));
-    println!("  resolved:   {} (transition to farewell)", resolved_check(&state));
+    println!(
+        "  greeted:    {} (transition to identification)",
+        greeted_check(&state)
+    );
+    println!(
+        "  customer_id set: {} (guard for identification)",
+        has_customer(&state)
+    );
+    println!(
+        "  verified:   {} (transition to resolution)",
+        verified_check(&state)
+    );
+    println!(
+        "  is_billing: {} (determines resolution path)",
+        is_billing(&state)
+    );
+    println!(
+        "  resolved:   {} (transition to farewell)",
+        resolved_check(&state)
+    );
 
     // ── 6. Extraction schema ──
     println!("\n--- 6. Turn Extraction ---\n");
@@ -175,7 +210,10 @@ fn main() {
             }
         }
     });
-    println!("{}", serde_json::to_string_pretty(&extraction_schema).unwrap());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&extraction_schema).unwrap()
+    );
 
     // ── 7. Watchers and temporal patterns ──
     println!("\n--- 7. Watchers & Temporal Patterns ---\n");

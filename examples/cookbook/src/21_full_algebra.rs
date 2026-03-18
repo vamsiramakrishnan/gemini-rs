@@ -1,11 +1,11 @@
 //! Cookbook #21 — Full Composition Algebra
 //!
 //! Demonstrates every operator in the composition algebra in a single pipeline:
-//!   >>  Sequential pipeline
-//!   |   Parallel fan-out
-//!   *   Fixed loop
-//!   /   Fallback chain
-//!   * until(pred)  Conditional loop
+//! - `>>` Sequential pipeline
+//! - `|` Parallel fan-out
+//! - `*` Fixed loop
+//! - `/` Fallback chain
+//! - `* until(pred)` Conditional loop
 //!
 //! Also shows how these compose with S, C, P, T, A, E, G modules.
 
@@ -58,9 +58,8 @@ fn main() {
     // Research flows into analysis
     let research_then_analyze = researcher.clone() >> analyst.clone();
     println!("1. Sequential (>>): researcher >> analyst");
-    match &research_then_analyze {
-        Composable::Pipeline(p) => println!("   Pipeline with {} steps", p.steps.len()),
-        _ => {}
+    if let Composable::Pipeline(p) = &research_then_analyze {
+        println!("   Pipeline with {} steps", p.steps.len());
     }
 
     // ── 2. Parallel fan-out (|) ──
@@ -68,27 +67,24 @@ fn main() {
     let fast_researcher = researcher.clone().temperature(0.1);
     let parallel_research = researcher.clone() | fast_researcher.clone();
     println!("2. Fan-out (|): researcher | fast_researcher");
-    match &parallel_research {
-        Composable::FanOut(f) => println!("   FanOut with {} branches", f.branches.len()),
-        _ => {}
+    if let Composable::FanOut(f) = &parallel_research {
+        println!("   FanOut with {} branches", f.branches.len());
     }
 
     // ── 3. Fixed loop (*) ──
     // Polish the draft 3 times
     let polished = editor.clone() * 3;
     println!("3. Fixed loop (* 3): editor runs 3 times");
-    match &polished {
-        Composable::Loop(l) => println!("   Loop max={}, has_predicate={}", l.max, l.until.is_some()),
-        _ => {}
+    if let Composable::Loop(l) = &polished {
+        println!("   Loop max={}, has_predicate={}", l.max, l.until.is_some());
     }
 
     // ── 4. Fallback chain (/) ──
     // Try main writer, fall back to simpler writer
     let robust_writer = writer.clone() / fallback_writer.clone();
     println!("4. Fallback (/): writer / fallback_writer");
-    match &robust_writer {
-        Composable::Fallback(f) => println!("   Fallback with {} candidates", f.candidates.len()),
-        _ => {}
+    if let Composable::Fallback(f) = &robust_writer {
+        println!("   Fallback with {} candidates", f.candidates.len());
     }
 
     // ── 5. Conditional loop (* until) ──
@@ -101,9 +97,8 @@ fn main() {
                 .unwrap_or(false)
         });
     println!("5. Conditional loop (* until): write >> review, until approved=true");
-    match &review_cycle {
-        Composable::Loop(l) => println!("   Loop max={}, has_predicate={}", l.max, l.until.is_some()),
-        _ => {}
+    if let Composable::Loop(l) = &review_cycle {
+        println!("   Loop max={}, has_predicate={}", l.max, l.until.is_some());
     }
 
     // ── 6. Combine all operators in one mega-pipeline ──
@@ -117,16 +112,15 @@ fn main() {
     //
     let full_pipeline = (researcher.clone() | fast_researcher.clone())  // fan-out
         >> analyst.clone()                                                // sequential
-        >> ((writer.clone() / fallback_writer.clone())                   // fallback writer
+        >> (((writer.clone() / fallback_writer.clone())                   // fallback writer
             >> reviewer.clone())                                         // then review
-            * until(|s| s.get("approved").and_then(|v| v.as_bool()).unwrap_or(false))  // loop
-        >> (editor.clone() * 3);                                         // polish loop
+            * until(|s| s.get("approved").and_then(|v| v.as_bool()).unwrap_or(false)))  // loop
+        >> (editor.clone() * 3); // polish loop
 
     println!("\n6. Full pipeline combining all operators:");
     println!("   (researcher | fast_researcher) >> analyst >> (writer/fallback >> reviewer)*until >> editor*3");
-    match &full_pipeline {
-        Composable::Pipeline(p) => println!("   Top-level pipeline with {} steps", p.steps.len()),
-        _ => {}
+    if let Composable::Pipeline(p) = &full_pipeline {
+        println!("   Top-level pipeline with {} steps", p.steps.len());
     }
 
     // ── 7. S module: State transforms ──
@@ -143,20 +137,33 @@ fn main() {
         "noise": "should be removed"
     });
     transform.apply(&mut state);
-    println!("   After transform: {}", serde_json::to_string_pretty(&state).unwrap());
+    println!(
+        "   After transform: {}",
+        serde_json::to_string_pretty(&state).unwrap()
+    );
 
     // Advanced state transforms
     let advanced = S::merge(&["research_data", "analysis"], "combined")
         >> S::compute("word_count", |s| {
-            let text = s.get("combined").and_then(|v| v.as_object())
-                .map(|o| o.values().filter_map(|v| v.as_str()).collect::<Vec<_>>().join(" "))
+            let text = s
+                .get("combined")
+                .and_then(|v| v.as_object())
+                .map(|o| {
+                    o.values()
+                        .filter_map(|v| v.as_str())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                })
                 .unwrap_or_default();
             json!(text.split_whitespace().count())
         })
         >> S::counter("iteration", 1);
 
     advanced.apply(&mut state);
-    println!("   After advanced: {}", serde_json::to_string_pretty(&state).unwrap());
+    println!(
+        "   After advanced: {}",
+        serde_json::to_string_pretty(&state).unwrap()
+    );
 
     // ── 8. P module: Prompt composition ──
     println!("\n--- P Module: Prompt Composition ---");
@@ -187,7 +194,10 @@ fn main() {
         | T::code_execution()
         | T::url_context()
         | T::simple("summarize", "Summarize a document", |args| async move {
-            let url = args.get("url").and_then(|v| v.as_str()).unwrap_or("unknown");
+            let url = args
+                .get("url")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
             Ok(json!({"summary": format!("Summary of {}", url)}))
         })
         | T::mock("calculator", "Perform calculations", json!({"result": 42}));
@@ -197,11 +207,15 @@ fn main() {
     // ── 10. C module: Context engineering ──
     println!("\n--- C Module: Context Engineering ---");
     let context = C::window(10) + C::user_only();
-    println!("   Context policy: window(10) + user_only ({} policies)", context.policies.len());
+    println!(
+        "   Context policy: window(10) + user_only ({} policies)",
+        context.policies.len()
+    );
 
     // ── 11. G module: Guards ──
     println!("\n--- G Module: Guard Composition ---");
-    let guards = G::length(10, 5000) | G::json() | G::pii() | G::topic(&["classified", "restricted"]);
+    let guards =
+        G::length(10, 5000) | G::json() | G::pii() | G::topic(&["classified", "restricted"]);
     println!("   Composed {} guards", guards.len());
 
     // Test guard validation
@@ -211,7 +225,11 @@ fn main() {
 
     let bad_output = "This classified email@test.com data is restricted";
     let violations = guards.check_all(bad_output);
-    println!("   Bad output violations: {} ({:?})", violations.len(), violations);
+    println!(
+        "   Bad output violations: {} ({:?})",
+        violations.len(),
+        violations
+    );
 
     // ── 12. E module: Evaluation ──
     println!("\n--- E Module: Evaluation Criteria ---");
@@ -226,9 +244,16 @@ fn main() {
     let suite = E::suite()
         .case("What is 2+2?", "4")
         .case("Capital of France?", "Paris")
-        .case("Summarize quantum computing", "Quantum computing uses qubits")
+        .case(
+            "Summarize quantum computing",
+            "Quantum computing uses qubits",
+        )
         .criteria(&["response_match", "contains_match", "safety"]);
-    println!("   Eval suite: {} cases, {} criteria", suite.len(), suite.criteria_names.len());
+    println!(
+        "   Eval suite: {} cases, {} criteria",
+        suite.len(),
+        suite.criteria_names.len()
+    );
 
     // ── 13. A module: Artifact schemas ──
     println!("\n--- A Module: Artifact Schemas ---");
@@ -292,8 +317,13 @@ fn main() {
     // ── 15. Contract validation on the full pipeline ──
     println!("\n--- Contract Validation ---");
     let all_agents = [
-        researcher, analyst, writer, reviewer, editor,
-        fallback_writer, fast_researcher,
+        researcher,
+        analyst,
+        writer,
+        reviewer,
+        editor,
+        fallback_writer,
+        fast_researcher,
     ];
 
     let violations = check_contracts(&all_agents);
@@ -301,13 +331,19 @@ fn main() {
     for v in &violations {
         match v {
             ContractViolation::UnproducedKey { consumer, key } => {
-                println!("     UNPRODUCED: '{}' reads '{}' -- nobody writes it", consumer, key);
+                println!(
+                    "     UNPRODUCED: '{}' reads '{}' -- nobody writes it",
+                    consumer, key
+                );
             }
             ContractViolation::DuplicateWrite { agents, key } => {
                 println!("     DUPLICATE: '{}' written by {:?}", key, agents);
             }
             ContractViolation::OrphanedOutput { producer, key } => {
-                println!("     ORPHANED: '{}' writes '{}' -- nobody reads it", producer, key);
+                println!(
+                    "     ORPHANED: '{}' writes '{}' -- nobody reads it",
+                    producer, key
+                );
             }
         }
     }
@@ -316,7 +352,10 @@ fn main() {
     let edges = infer_data_flow(&all_agents);
     println!("\n   Data flow edges:");
     for edge in &edges {
-        println!("     {} --[{}]--> {}", edge.producer, edge.key, edge.consumer);
+        println!(
+            "     {} --[{}]--> {}",
+            edge.producer, edge.key, edge.consumer
+        );
     }
 
     println!("\nAll algebra examples completed successfully!");

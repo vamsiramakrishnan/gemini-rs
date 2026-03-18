@@ -25,7 +25,9 @@ struct MockLlm;
 
 #[async_trait::async_trait]
 impl BaseLlm for MockLlm {
-    fn model_id(&self) -> &str { "mock-production" }
+    fn model_id(&self) -> &str {
+        "mock-production"
+    }
     async fn generate(
         &self,
         req: rs_adk::llm::LlmRequest,
@@ -37,7 +39,8 @@ impl BaseLlm for MockLlm {
                 "risk_level": "medium",
                 "factors": ["income_ratio", "credit_history"],
                 "approved": true
-            }).to_string()
+            })
+            .to_string()
         } else if instruction.contains("compliance") {
             "COMPLIANT: All regulatory requirements met.".to_string()
         } else {
@@ -90,9 +93,7 @@ async fn main() {
             json!((loan / income * 100.0).round() / 100.0)
         })
         >> S::branch(
-            |s| {
-                s.get("loan_amount").and_then(|v| v.as_f64()).unwrap_or(0.0) > 100_000.0
-            },
+            |s| s.get("loan_amount").and_then(|v| v.as_f64()).unwrap_or(0.0) > 100_000.0,
             S::set("requires_manual_review", json!(true)),
             S::set("requires_manual_review", json!(false)),
         );
@@ -120,7 +121,7 @@ async fn main() {
         .instruction(
             "Assess the loan application risk. Consider: credit score, \
              debt-to-income ratio, employment history, and loan amount. \
-             Output a risk score (0-1), risk level, and key risk factors."
+             Output a risk score (0-1), risk level, and key risk factors.",
         )
         .model(GeminiModel::Gemini2_0FlashLive)
         .temperature(0.1)
@@ -148,7 +149,7 @@ async fn main() {
     let compliance_checker = AgentBuilder::new("compliance-checker")
         .instruction(
             "Check the loan application against regulatory compliance rules: \
-             KYC, AML, fair lending, and consumer protection regulations."
+             KYC, AML, fair lending, and consumer protection regulations.",
         )
         .model(GeminiModel::Gemini2_0FlashLive)
         .temperature(0.0)
@@ -162,7 +163,7 @@ async fn main() {
     let fraud_detector = AgentBuilder::new("fraud-detector")
         .instruction(
             "Analyze the application for fraud indicators. Check for: \
-             identity inconsistencies, suspicious patterns, and known fraud signals."
+             identity inconsistencies, suspicious patterns, and known fraud signals.",
         )
         .temperature(0.0)
         .reads("applicant_name")
@@ -176,7 +177,7 @@ async fn main() {
         .instruction(
             "Make a final loan decision based on risk assessment, compliance check, \
              and fraud detection results. Set approved=true if all checks pass \
-             and risk is acceptable."
+             and risk is acceptable.",
         )
         .temperature(0.2)
         .reads("risk_score")
@@ -193,7 +194,7 @@ async fn main() {
     let communicator = AgentBuilder::new("communicator")
         .instruction(
             "Draft a professional notification to the applicant about the loan decision. \
-             Be clear about the outcome, any conditions, and next steps."
+             Be clear about the outcome, any conditions, and next steps.",
         )
         .temperature(0.5)
         .reads("applicant_name")
@@ -221,9 +222,8 @@ async fn main() {
     println!("=== STAGE 3: Pipeline Composition ===\n");
 
     // Parallel assessment: risk + compliance + fraud
-    let assessment_fanout = risk_assessor.clone()
-        | compliance_checker.clone()
-        | fraud_detector.clone();
+    let _assessment_fanout =
+        risk_assessor.clone() | compliance_checker.clone() | fraud_detector.clone();
 
     println!("Assessment fan-out: 3 parallel branches");
 
@@ -246,13 +246,11 @@ async fn main() {
         .writes("decision")
         .writes("approved");
 
-    let full_pipeline = assessment_merge
-        >> (communicator.clone() / fallback_decision.clone());
+    let full_pipeline = assessment_merge >> (communicator.clone() / fallback_decision.clone());
 
     println!("Full pipeline: assessment_merge >> (communicator / manual_review)");
-    match &full_pipeline {
-        Composable::Pipeline(p) => println!("  Top-level: {} steps\n", p.steps.len()),
-        _ => {}
+    if let Composable::Pipeline(p) = &full_pipeline {
+        println!("  Top-level: {} steps\n", p.steps.len());
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -267,8 +265,11 @@ async fn main() {
         | G::custom(|output| {
             // Ensure decision contains approval status
             let lower = output.to_lowercase();
-            if lower.contains("approved") || lower.contains("denied")
-                || lower.contains("pending") || lower.contains("review") {
+            if lower.contains("approved")
+                || lower.contains("denied")
+                || lower.contains("pending")
+                || lower.contains("review")
+            {
                 Ok(())
             } else {
                 Err("Decision output must contain approval status".into())
@@ -283,7 +284,10 @@ async fn main() {
                         maintain employment and provide updated income documentation in 6 months.";
     let bad_output = "user@email.com denied because of race";
 
-    println!("  Good output: {} violations", output_guards.check_all(good_output).len());
+    println!(
+        "  Good output: {} violations",
+        output_guards.check_all(good_output).len()
+    );
     let bad_violations = output_guards.check_all(bad_output);
     println!("  Bad output: {} violations", bad_violations.len());
     for v in &bad_violations {
@@ -298,13 +302,20 @@ async fn main() {
 
     let eval_criteria = E::custom("decision_present", |output, _| {
         let lower = output.to_lowercase();
-        if lower.contains("approved") || lower.contains("denied") { 1.0 } else { 0.0 }
+        if lower.contains("approved") || lower.contains("denied") {
+            1.0
+        } else {
+            0.0
+        }
     }) | E::custom("professional_tone", |output, _| {
         let formal_words = ["application", "conditions", "documentation", "review"];
-        let count = formal_words.iter().filter(|w| output.to_lowercase().contains(*w)).count();
+        let count = formal_words
+            .iter()
+            .filter(|w| output.to_lowercase().contains(*w))
+            .count();
         (count as f64 / formal_words.len() as f64).min(1.0)
     }) | E::safety()
-       | E::contains_match();
+        | E::contains_match();
 
     let eval_suite = E::suite()
         .case("Low risk, good credit application", "approved")
@@ -312,7 +323,11 @@ async fn main() {
         .case("Borderline application", "pending review")
         .criteria(&["decision_present", "professional_tone", "safety"]);
 
-    println!("Eval suite: {} cases, {} criteria", eval_suite.len(), eval_suite.criteria_names.len());
+    println!(
+        "Eval suite: {} cases, {} criteria",
+        eval_suite.len(),
+        eval_suite.criteria_names.len()
+    );
 
     // Score a sample output
     let sample = "After careful review, your loan application has been approved. \
@@ -338,18 +353,18 @@ async fn main() {
     ];
 
     let violations = check_contracts(&full_agents);
-    let by_type: std::collections::HashMap<&str, Vec<_>> = violations.iter().fold(
-        std::collections::HashMap::new(),
-        |mut acc, v| {
-            let key = match v {
-                ContractViolation::UnproducedKey { .. } => "unproduced",
-                ContractViolation::DuplicateWrite { .. } => "duplicate",
-                ContractViolation::OrphanedOutput { .. } => "orphaned",
-            };
-            acc.entry(key).or_default().push(v);
-            acc
-        },
-    );
+    let by_type: std::collections::HashMap<&str, Vec<_>> =
+        violations
+            .iter()
+            .fold(std::collections::HashMap::new(), |mut acc, v| {
+                let key = match v {
+                    ContractViolation::UnproducedKey { .. } => "unproduced",
+                    ContractViolation::DuplicateWrite { .. } => "duplicate",
+                    ContractViolation::OrphanedOutput { .. } => "orphaned",
+                };
+                acc.entry(key).or_default().push(v);
+                acc
+            });
 
     println!("Contract analysis:");
     println!("  Total violations: {}", violations.len());
@@ -391,11 +406,17 @@ async fn main() {
     println!("Pipeline artifacts:");
     println!("  Inputs:");
     for input in artifacts.all_inputs() {
-        println!("    - {} ({}): {}", input.name, input.mime_type, input.description);
+        println!(
+            "    - {} ({}): {}",
+            input.name, input.mime_type, input.description
+        );
     }
     println!("  Outputs:");
     for output in artifacts.all_outputs() {
-        println!("    - {} ({}): {}", output.name, output.mime_type, output.description);
+        println!(
+            "    - {} ({}): {}",
+            output.name, output.mime_type, output.description
+        );
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -446,8 +467,15 @@ async fn main() {
     println!("\n=== STAGE 9: Post-Run State ===\n");
 
     // Inspect state after pipeline run
-    let keys = ["applicant_name", "income", "loan_amount", "credit_score",
-                "debt_to_income", "requires_manual_review", "output"];
+    let keys = [
+        "applicant_name",
+        "income",
+        "loan_amount",
+        "credit_score",
+        "debt_to_income",
+        "requires_manual_review",
+        "output",
+    ];
 
     for key in keys {
         if let Some(val) = state.get_raw(key) {
@@ -485,7 +513,10 @@ async fn main() {
             "APPROVED with conditions: maintain employment, income reverification at 6 months",
         );
 
-    println!("Production prompt ({} sections):", production_prompt.sections.len());
+    println!(
+        "Production prompt ({} sections):",
+        production_prompt.sections.len()
+    );
     println!("{}", production_prompt.render());
 
     println!("\n=== Production Pipeline Complete ===");
