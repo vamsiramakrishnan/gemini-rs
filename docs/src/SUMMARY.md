@@ -29,7 +29,11 @@
 
 # Examples
 
-- [Examples](./cookbooks.md)
+- [Cookbook Examples & ADK Web Apps](./cookbooks.md)
+
+# ADK Web UI
+
+- [Design System, DevTools & Dark Mode](./web-ui.md)
 
 # Reference
 
