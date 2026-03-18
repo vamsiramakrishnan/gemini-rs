@@ -1,4 +1,4 @@
-# v0.5.0 — Namespace Parity, 30 Cookbook Examples & Web UI Redesign
+# Release v0.5.0
 
 > **gemini-rs** — A Rust SDK for the Gemini Multimodal Live API
 
@@ -23,13 +23,41 @@ All eight composition namespaces now match upstream ADK capabilities:
 | `E::` Eval | — | `from_file`, `persona` |
 | `A::` Artifacts | `+` | `publish`, `save`, `load`, `list`, `delete`, `version`, JSON/text ops |
 
+#### Example: Full namespace composition
+
+```rust
+use adk_rs_fluent::prelude::*;
+
+let agent = AgentBuilder::new("analyst")
+    .model(GeminiModel::Gemini2_0Flash)
+    .instruction(
+        P::role("senior analyst")
+            + P::task("Analyze the dataset and produce a report")
+            + P::constraint("Use only verified sources")
+            + P::format("JSON")
+    )
+    .state_transform(S::pick(&["dataset", "config"]) >> S::defaults(&[("format", "json")]))
+    .context(C::window(10) + C::user_only() + C::exclude_tools())
+    .with_tools(
+        T::simple("query_db", "Query the database", |args| async move {
+            Ok(json!({"rows": 42}))
+        })
+        | T::google_search()
+        | T::code_execution()
+    )
+    .build(llm);
+```
+
+---
+
 ### 30 Cookbook Examples
 
-A progressive **Crawl / Walk / Run** learning path covering the full SDK surface:
+A progressive **Crawl / Walk / Run** learning path covering the full SDK surface area.
 
-**Crawl (01–10)** — Foundations
-| # | Example | Concept |
-|---|---------|---------|
+#### Crawl (01–10) — Foundations
+
+| # | Example | What You Learn |
+|---|---------|----------------|
 | 01 | `simple_agent` | Minimal agent with a system instruction |
 | 02 | `agent_with_tools` | `SimpleTool` and `TypedTool` registration |
 | 03 | `callbacks` | Event callbacks (`on_text`, `on_audio`, lifecycle) |
@@ -41,9 +69,10 @@ A progressive **Crawl / Walk / Run** learning path covering the full SDK surface
 | 09 | `tool_composition` | `T::simple \| T::google_search \| T::code_execution` |
 | 10 | `guards` | `G::rate_limit`, `G::toxicity`, input/output validation |
 
-**Walk (11–20)** — Multi-Agent Patterns
-| # | Example | Concept |
-|---|---------|---------|
+#### Walk (11–20) — Multi-Agent Patterns
+
+| # | Example | What You Learn |
+|---|---------|----------------|
 | 11 | `route_branching` | Conditional routing with `RouteTextAgent` |
 | 12 | `fallback_chain` | `/` operator for graceful degradation |
 | 13 | `review_loop` | Reviewer agent with revision cycles |
@@ -55,9 +84,10 @@ A progressive **Crawl / Walk / Run** learning path covering the full SDK surface
 | 19 | `agent_tool` | Nested agents as callable tools |
 | 20 | `supervised` | Human-in-the-loop approval workflows |
 
-**Run (21–30)** — Production Patterns
-| # | Example | Concept |
-|---|---------|---------|
+#### Run (21–30) — Production Patterns
+
+| # | Example | What You Learn |
+|---|---------|----------------|
 | 21 | `full_algebra` | All six namespaces composed together |
 | 22 | `contract_testing` | Schema validation and contract tests |
 | 23 | `deep_research` | Multi-source research with synthesis |
@@ -69,26 +99,36 @@ A progressive **Crawl / Walk / Run** learning path covering the full SDK surface
 | 29 | `live_voice` | Live voice session with phases and extraction |
 | 30 | `production_pipeline` | Full production pipeline with telemetry |
 
+```bash
+# Run any example
+cargo run -p example-cookbook --example 01_simple_agent
+cargo run -p example-cookbook --example 17_evaluation_suite
+cargo run -p example-cookbook --example 30_production_pipeline
+```
+
+---
+
 ### Web UI Redesign
 
-- **Design system**: 80+ CSS custom properties, `Inter` + `JetBrains Mono` typography
-- **Dark / light mode**: Theme toggle persisted via `localStorage`
-- **Landing page**: Animated gradient orbs, pipeline visualization, live stats counters
-- **Architecture diagram**: Three-layer crate stack with processor lane visualization
-- **Cookbook browser**: Filterable example gallery with difficulty tiers and code previews
-- **Operator algebra showcase**: Interactive S.C.T.P.M.A composition examples
-- **Glassmorphism nav**: Frosted-glass navigation bar with scroll-aware behavior
+The `adk-web` landing page and application shell have been rebuilt from scratch:
+
+- **Design system** — 80+ CSS custom properties for colors, spacing, typography, shadows, and radii. Fonts: `Inter` for UI, `JetBrains Mono` for code.
+- **Dark / light mode** — Full theme support with a toggle persisted to `localStorage`. All components respect `[data-theme]` attribute.
+- **Landing page** — Animated gradient orbs, three-layer architecture diagram, operator algebra showcase, live stats counters, and a cookbook browser.
+- **Cookbook browser** — Filterable example gallery with Crawl/Walk/Run difficulty tiers, syntax-highlighted code previews, and direct links to source files.
+- **Glassmorphism navigation** — Frosted-glass nav bar with scroll-aware opacity, backdrop blur, and smooth transitions.
+- **DevTools** — New cookbook panel alongside existing state, transcript, metrics, and phase panels.
 
 ---
 
 ## Crates
 
-| Crate | Version | Install |
-|-------|---------|---------|
-| [`rs-genai`](https://crates.io/crates/rs-genai) | 0.5.0 | `cargo add rs-genai` |
-| [`rs-adk`](https://crates.io/crates/rs-adk) | 0.5.0 | `cargo add rs-adk` |
-| [`adk-rs-fluent`](https://crates.io/crates/adk-rs-fluent) | 0.5.0 | `cargo add adk-rs-fluent` |
-| [`adk-cli`](https://crates.io/crates/adk-cli) | 0.5.0 | `cargo install adk-cli` |
+| Crate | Version | crates.io |
+|-------|---------|-----------|
+| `rs-genai` | 0.5.0 | [crates.io/crates/rs-genai](https://crates.io/crates/rs-genai) |
+| `rs-adk` | 0.5.0 | [crates.io/crates/rs-adk](https://crates.io/crates/rs-adk) |
+| `adk-rs-fluent` | 0.5.0 | [crates.io/crates/adk-rs-fluent](https://crates.io/crates/adk-rs-fluent) |
+| `adk-cli` | 0.5.0 | [crates.io/crates/adk-cli](https://crates.io/crates/adk-cli) |
 
 ## Install
 
@@ -116,8 +156,10 @@ adk-rs-fluent = "0.5.0"
 
 ## CI Improvements
 
-- Release workflow now checks crates.io before each publish step and skips crates whose version is already live, making tag re-runs and partial failure recovery safe.
+- Release workflow now checks crates.io before each publish step and skips crates whose version is already live. This makes tag re-runs and partial failure recovery safe — no more "already exists" errors.
 
 ---
 
-**Full Changelog**: See [CHANGELOG.md](./CHANGELOG.md)
+## Full Changelog
+
+See [CHANGELOG.md](./CHANGELOG.md) for the complete changelog.
