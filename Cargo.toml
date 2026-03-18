@@ -12,6 +12,7 @@ members = [
     "examples/voice-chat",
     "examples/tool-calling",
     "examples/transcription",
+    "examples/cookbook",
     "tools/adk-transpiler",
     "tools/adk-cli",
 ]

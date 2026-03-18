@@ -4,12 +4,12 @@ use axum::extract::ws::{Message, WebSocket};
 use futures::{SinkExt, StreamExt};
 use tokio::sync::{broadcast, mpsc};
 
-use crate::app::{ClientMessage, CookbookApp, ServerMessage};
+use crate::app::{ClientMessage, DemoApp, ServerMessage};
 
 /// Handle a WebSocket connection for a specific app.
 pub async fn handle_ws(
     socket: WebSocket,
-    app: Arc<dyn CookbookApp>,
+    app: Arc<dyn DemoApp>,
     mut span_rx: broadcast::Receiver<ServerMessage>,
 ) {
     let (mut ws_tx, mut ws_rx) = socket.split();

@@ -10,9 +10,9 @@ use tracing::info;
 
 use adk_rs_fluent::prelude::*;
 
-use crate::app::{AppError, ClientMessage, CookbookApp, ServerMessage, WsSender};
+use crate::app::{AppError, ClientMessage, DemoApp, ServerMessage, WsSender};
 use crate::bridge::SessionBridge;
-use crate::cookbook_meta;
+use crate::demo_meta;
 
 use super::extractors::RegexExtractor;
 use super::resolve_voice;
@@ -428,8 +428,8 @@ fn support_context(s: &State) -> String {
 pub struct SupportAssistant;
 
 #[async_trait]
-impl CookbookApp for SupportAssistant {
-    cookbook_meta! {
+impl DemoApp for SupportAssistant {
+    demo_meta! {
         name: "support-assistant",
         description: "Multi-agent handoff with billing + technical support flows",
         category: Showcase,

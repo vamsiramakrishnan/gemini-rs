@@ -33,7 +33,7 @@
   // ------------------------------------------------
   const displayName = appName.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
   if (appTitle) appTitle.textContent = displayName;
-  document.title = displayName + ' \u2014 Cookbooks';
+  document.title = displayName + ' \u2014 ADK Web UI';
 
   // ------------------------------------------------
   // Managers
@@ -376,7 +376,7 @@
         if (msg.info && msg.info.name) {
           const name = msg.info.name.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
           appTitle.textContent = name;
-          document.title = name + ' \u2014 Cookbooks';
+          document.title = name + ' \u2014 ADK Web UI';
         }
         if (msg.info && msg.info.try_saying && msg.info.try_saying.length > 0) {
           const hints = msg.info.try_saying.slice(0, 3).map(p => '\u201c' + p + '\u201d').join('  \u00b7  ');

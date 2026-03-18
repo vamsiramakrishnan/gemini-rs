@@ -12,9 +12,9 @@ use adk_rs_fluent::prelude::*;
 use rs_adk::llm::{BaseLlm, GeminiLlm, GeminiLlmParams};
 use rs_adk::state::StateKey;
 
-use crate::app::{AppError, ClientMessage, CookbookApp, WsSender};
+use crate::app::{AppError, ClientMessage, DemoApp, WsSender};
 use crate::bridge::SessionBridge;
-use crate::cookbook_meta;
+use crate::demo_meta;
 
 use super::resolve_voice;
 
@@ -589,8 +589,8 @@ fn execute_tool(name: &str, args: &serde_json::Value) -> serde_json::Value {
 pub struct Clinic;
 
 #[async_trait]
-impl CookbookApp for Clinic {
-    cookbook_meta! {
+impl DemoApp for Clinic {
+    demo_meta! {
         name: "clinic",
         description: "Multi-specialty clinic with symptom triage, doctor matching, and patient registration",
         category: Showcase,

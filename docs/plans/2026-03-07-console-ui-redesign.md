@@ -2,11 +2,11 @@
 
 **Date**: 2026-03-07
 **Status**: Approved
-**Scope**: `cookbooks/ui/` — frontend (HTML/CSS/JS) + server-side message types + session bridge
+**Scope**: `apps/adk-web/` — frontend (HTML/CSS/JS) + server-side message types + session bridge
 
 ## Problem
 
-The current cookbooks UI devtools panel has three structural problems:
+The current Web UI devtools panel has three structural problems:
 
 1. **Events tab is a firehose.** Hundreds of events scroll past with no way to find what matters. No search, no grouping, unbounded DOM nodes cause memory growth and scroll jank.
 
@@ -167,7 +167,7 @@ ServerMessage::SpanEvent {
 
 ### 9. Server-Side: SessionBridge
 
-Every cookbook app currently has ~15 `tx.clone()` lines to wire up callbacks. Replace with a shared helper:
+Every demo app currently has ~15 `tx.clone()` lines to wire up callbacks. Replace with a shared helper:
 
 ```rust
 pub struct SessionBridge {
@@ -189,7 +189,7 @@ impl SessionBridge {
 }
 ```
 
-This reduces each cookbook app's `handle_session` to ~20 lines: create bridge, build config, wire callbacks, enter recv loop.
+This reduces each demo app's `handle_session` to ~20 lines: create bridge, build config, wire callbacks, enter recv loop.
 
 ### 10. New ServerMessage Variants
 
@@ -273,7 +273,7 @@ static/
 - **Landing page** (`index.html`, `landing.css`): untouched
 - **Audio pipeline** (`audio.js`, worklets): untouched
 - **App HTML structure** (`app.html`): minor — tab names change, minimap canvas added
-- **Cookbook app trait** (`CookbookApp`): untouched
+- **Demo app trait** (`CookbookApp`): untouched
 - **WebSocket handler** (`ws_handler.rs`): untouched
 - **Audio worklets**: untouched
 

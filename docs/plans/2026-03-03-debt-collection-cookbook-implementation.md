@@ -1,8 +1,8 @@
-# Debt Collection Cookbook Implementation Plan
+# Debt Collection Demo Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Build an FDCPA-compliant debt collection voice agent cookbook that exercises 15 previously-unused L2 fluent API features.
+**Goal:** Build an FDCPA-compliant debt collection voice agent demo that exercises 15 previously-unused L2 fluent API features.
 
 **Architecture:** Single-agent, 7-phase conversation flow (`disclosure → verify_identity → inform_debt → negotiate → arrange_payment → confirm → close`) with compliance-gated transitions, emotional monitoring via LLM + regex hybrid extraction, temporal escalation patterns, tool response redaction, and turn boundary compliance injection.
 
@@ -15,13 +15,13 @@
 ### Task 1: Register the module + add schemars dependency
 
 **Files:**
-- Modify: `cookbooks/ui/src/apps/mod.rs`
-- Modify: `cookbooks/ui/Cargo.toml`
-- Create: `cookbooks/ui/src/apps/debt_collection.rs`
+- Modify: `apps/adk-web/src/apps/mod.rs`
+- Modify: `apps/adk-web/Cargo.toml`
+- Create: `apps/adk-web/src/apps/debt_collection.rs`
 
 **Step 1: Add `schemars` dependency to Cargo.toml**
 
-In `cookbooks/ui/Cargo.toml`, add to `[dependencies]`:
+In `apps/adk-web/Cargo.toml`, add to `[dependencies]`:
 
 ```toml
 schemars = "0.8"
@@ -31,7 +31,7 @@ This is needed for `#[derive(JsonSchema)]` on the LLM extraction struct (`Debtor
 
 **Step 2: Create the skeleton file**
 
-Create `cookbooks/ui/src/apps/debt_collection.rs`:
+Create `apps/adk-web/src/apps/debt_collection.rs`:
 
 ```rust
 use std::collections::HashMap;
@@ -116,7 +116,7 @@ impl CookbookApp for DebtCollection {
 
 **Step 3: Register in mod.rs**
 
-In `cookbooks/ui/src/apps/mod.rs`, add the module declaration:
+In `apps/adk-web/src/apps/mod.rs`, add the module declaration:
 
 ```rust
 mod debt_collection;
@@ -136,8 +136,8 @@ Expected: Compiles (with warnings about unused imports — that's fine).
 **Step 5: Commit**
 
 ```bash
-git add cookbooks/ui/Cargo.toml cookbooks/ui/src/apps/mod.rs cookbooks/ui/src/apps/debt_collection.rs
-git commit -m "feat(cookbooks): scaffold debt-collection app with CookbookApp impl"
+git add apps/adk-web/Cargo.toml apps/adk-web/src/apps/mod.rs apps/adk-web/src/apps/debt_collection.rs
+git commit -m "feat(examples): scaffold debt-collection app with CookbookApp impl"
 ```
 
 ---
@@ -145,7 +145,7 @@ git commit -m "feat(cookbooks): scaffold debt-collection app with CookbookApp im
 ### Task 2: Phase instructions and constants
 
 **Files:**
-- Modify: `cookbooks/ui/src/apps/debt_collection.rs`
+- Modify: `apps/adk-web/src/apps/debt_collection.rs`
 
 **Step 1: Add all phase instruction constants**
 
@@ -247,8 +247,8 @@ Expected: Compiles (constants are unused for now — that's fine).
 **Step 3: Commit**
 
 ```bash
-git add cookbooks/ui/src/apps/debt_collection.rs
-git commit -m "feat(cookbooks): add debt-collection phase instructions and mock data"
+git add apps/adk-web/src/apps/debt_collection.rs
+git commit -m "feat(examples): add debt-collection phase instructions and mock data"
 ```
 
 ---
@@ -256,7 +256,7 @@ git commit -m "feat(cookbooks): add debt-collection phase instructions and mock 
 ### Task 3: Mock tools and PII redaction
 
 **Files:**
-- Modify: `cookbooks/ui/src/apps/debt_collection.rs`
+- Modify: `apps/adk-web/src/apps/debt_collection.rs`
 
 **Step 1: Write tests for the mock tools and redaction**
 
@@ -475,8 +475,8 @@ Expected: All 10 tests PASS.
 **Step 5: Commit**
 
 ```bash
-git add cookbooks/ui/src/apps/debt_collection.rs
-git commit -m "feat(cookbooks): add debt-collection mock tools and PII redaction"
+git add apps/adk-web/src/apps/debt_collection.rs
+git commit -m "feat(examples): add debt-collection mock tools and PII redaction"
 ```
 
 ---
@@ -484,7 +484,7 @@ git commit -m "feat(cookbooks): add debt-collection mock tools and PII redaction
 ### Task 4: Regex extractor for structured fields
 
 **Files:**
-- Modify: `cookbooks/ui/src/apps/debt_collection.rs`
+- Modify: `apps/adk-web/src/apps/debt_collection.rs`
 
 **Step 1: Write tests for regex extraction**
 
@@ -613,8 +613,8 @@ Expected: All 16 tests PASS.
 **Step 5: Commit**
 
 ```bash
-git add cookbooks/ui/src/apps/debt_collection.rs
-git commit -m "feat(cookbooks): add debt-collection regex extraction for structured fields"
+git add apps/adk-web/src/apps/debt_collection.rs
+git commit -m "feat(examples): add debt-collection regex extraction for structured fields"
 ```
 
 ---
@@ -622,7 +622,7 @@ git commit -m "feat(cookbooks): add debt-collection regex extraction for structu
 ### Task 5: LLM extraction struct and computed state derivation
 
 **Files:**
-- Modify: `cookbooks/ui/src/apps/debt_collection.rs`
+- Modify: `apps/adk-web/src/apps/debt_collection.rs`
 
 **Step 1: Write tests for computed state**
 
@@ -735,8 +735,8 @@ Expected: All 22 tests PASS.
 **Step 5: Commit**
 
 ```bash
-git add cookbooks/ui/src/apps/debt_collection.rs
-git commit -m "feat(cookbooks): add DebtorState LLM extraction struct and computed helpers"
+git add apps/adk-web/src/apps/debt_collection.rs
+git commit -m "feat(examples): add DebtorState LLM extraction struct and computed helpers"
 ```
 
 ---
@@ -746,7 +746,7 @@ git commit -m "feat(cookbooks): add DebtorState LLM extraction struct and comput
 This is the core task. It wires up everything: callbacks, phases, watchers, temporal patterns, extractors, interceptors, and the browser recv loop.
 
 **Files:**
-- Modify: `cookbooks/ui/src/apps/debt_collection.rs`
+- Modify: `apps/adk-web/src/apps/debt_collection.rs`
 
 **Step 1: Replace the `todo!()` in `handle_session` with the full implementation**
 
@@ -1360,8 +1360,8 @@ Expected: All existing 67 tests + all new debt_collection tests PASS.
 **Step 4: Commit**
 
 ```bash
-git add cookbooks/ui/src/apps/debt_collection.rs
-git commit -m "feat(cookbooks): implement debt-collection handle_session with full L2 pipeline
+git add apps/adk-web/src/apps/debt_collection.rs
+git commit -m "feat(examples): implement debt-collection handle_session with full L2 pipeline
 
 Exercises 15 previously-unused L2 features: phase guards, on_exit,
 temporal patterns (when_sustained, when_rate, when_turns), numeric
@@ -1375,7 +1375,7 @@ on_turn_boundary, extract_turns::<T>(), on_go_away, and computed state."
 ### Task 7: Final verification and cleanup
 
 **Files:**
-- Possibly modify: `cookbooks/ui/src/apps/debt_collection.rs` (fix any warnings)
+- Possibly modify: `apps/adk-web/src/apps/debt_collection.rs` (fix any warnings)
 
 **Step 1: Full workspace check**
 
@@ -1398,7 +1398,7 @@ If there are unused import warnings, fix them. If there are dead_code warnings o
 
 ```bash
 git add -u
-git commit -m "refactor(cookbooks): clean up debt-collection warnings"
+git commit -m "refactor(examples): clean up debt-collection warnings"
 ```
 
 **Step 5: Push to remote**

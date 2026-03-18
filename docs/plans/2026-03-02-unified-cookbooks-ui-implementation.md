@@ -1,8 +1,8 @@
-# Unified Cookbooks UI — Implementation Plan
+# Unified Web UI — Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Single-binary router-based cookbook hub consolidating existing demos and adding advanced apps showcasing out-of-band control driven by Live API events.
+**Goal:** Single-binary router-based demo hub consolidating existing demos and adding advanced apps showcasing out-of-band control driven by Live API events.
 
 **Architecture:** Axum server with `CookbookApp` trait, `AppRegistry`, route-based app selection. Each app is a module implementing `handle_session()`. Frontend: landing page with app cards + per-app screen with conversation pane and collapsible devtools panel.
 
@@ -17,9 +17,9 @@
 ### Task 1: CookbookApp trait + AppRegistry
 
 **Files:**
-- Create: `cookbooks/ui/src/app.rs`
-- Modify: `cookbooks/ui/src/main.rs`
-- Modify: `cookbooks/ui/Cargo.toml`
+- Create: `apps/adk-web/src/app.rs`
+- Modify: `apps/adk-web/src/main.rs`
+- Modify: `apps/adk-web/Cargo.toml`
 
 **Step 1: Create `app.rs`**
 
@@ -57,7 +57,7 @@ pub struct AppConfig {
 /// Sender half for pushing JSON messages to the browser WebSocket.
 pub type WsSender = mpsc::Sender<serde_json::Value>;
 
-/// Each cookbook app implements this trait.
+/// Each demo app implements this trait.
 #[async_trait::async_trait]
 pub trait CookbookApp: Send + Sync {
     fn meta(&self) -> AppMeta;
@@ -108,7 +108,7 @@ Run: `cargo check -p rs-genai-ui`
 ### Task 2: Refactor main.rs — Router + shared WS handler
 
 **Files:**
-- Modify: `cookbooks/ui/src/main.rs`
+- Modify: `apps/adk-web/src/main.rs`
 
 Replace the single `/ws` route with `/ws/{name}` and add `/api/apps` endpoint. Keep existing `AuthConfig` and move message types into a shared module.
 
@@ -218,8 +218,8 @@ Run: `cargo check -p rs-genai-ui`
 ### Task 3: Voice Chat app (port existing main.rs logic)
 
 **Files:**
-- Create: `cookbooks/ui/src/apps/mod.rs`
-- Create: `cookbooks/ui/src/apps/voice_chat.rs`
+- Create: `apps/adk-web/src/apps/mod.rs`
+- Create: `apps/adk-web/src/apps/voice_chat.rs`
 
 This ports the existing `handle_socket` logic into a `CookbookApp` implementation.
 
@@ -434,10 +434,10 @@ Run: `cargo check -p rs-genai-ui`
 ### Task 4: Text Chat + Tool Calling apps
 
 **Files:**
-- Create: `cookbooks/ui/src/apps/text_chat.rs`
-- Create: `cookbooks/ui/src/apps/tool_calling.rs`
-- Modify: `cookbooks/ui/src/apps/mod.rs`
-- Modify: `cookbooks/ui/src/main.rs` (register apps)
+- Create: `apps/adk-web/src/apps/text_chat.rs`
+- Create: `apps/adk-web/src/apps/tool_calling.rs`
+- Modify: `apps/adk-web/src/apps/mod.rs`
+- Modify: `apps/adk-web/src/main.rs` (register apps)
 
 **Step 1: Create `text_chat.rs`**
 
@@ -507,9 +507,9 @@ Run: `cargo check -p rs-genai-ui`
 ### Task 5: Landing page
 
 **Files:**
-- Rewrite: `cookbooks/ui/static/index.html`
-- Create: `cookbooks/ui/static/css/main.css`
-- Create: `cookbooks/ui/static/css/landing.css`
+- Rewrite: `apps/adk-web/static/index.html`
+- Create: `apps/adk-web/static/css/main.css`
+- Create: `apps/adk-web/static/css/landing.css`
 
 **Step 1: Rewrite `index.html` as landing page**
 
@@ -521,7 +521,7 @@ Grid of app cards grouped by category. Fetches `/api/apps` on load.
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gemini Live RS — Cookbooks</title>
+    <title>Gemini Live RS — Examples</title>
     <link rel="stylesheet" href="/css/main.css">
     <link rel="stylesheet" href="/css/landing.css">
 </head>
@@ -529,7 +529,7 @@ Grid of app cards grouped by category. Fetches `/api/apps` on load.
     <div class="landing">
         <header class="landing-header">
             <h1>Gemini Live RS</h1>
-            <p>Interactive cookbook demos for speech-to-speech AI</p>
+            <p>Interactive demos for speech-to-speech AI</p>
         </header>
         <div id="app-grid" class="app-grid"></div>
     </div>
@@ -583,9 +583,9 @@ Grid layout, card styles, badges, responsive.
 ### Task 6: App screen — conversation pane
 
 **Files:**
-- Create: `cookbooks/ui/static/app.html`
-- Create: `cookbooks/ui/static/js/app.js`
-- Create: `cookbooks/ui/static/js/audio.js`
+- Create: `apps/adk-web/static/app.html`
+- Create: `apps/adk-web/static/js/app.js`
+- Create: `apps/adk-web/static/js/audio.js`
 
 **Step 1: Create `app.html`**
 
@@ -654,8 +654,8 @@ Port existing style.css conversation styles into app-specific stylesheet.
 ### Task 7: Devtools panel
 
 **Files:**
-- Create: `cookbooks/ui/static/js/devtools.js`
-- Create: `cookbooks/ui/static/css/devtools.css`
+- Create: `apps/adk-web/static/js/devtools.js`
+- Create: `apps/adk-web/static/css/devtools.css`
 
 **Step 1: Create `js/devtools.js`**
 
@@ -718,9 +718,9 @@ devtools.handleMessage(msg);
 ### Task 8: Playbook Agent app
 
 **Files:**
-- Create: `cookbooks/ui/src/apps/playbook.rs`
-- Modify: `cookbooks/ui/src/apps/mod.rs`
-- Modify: `cookbooks/ui/src/main.rs`
+- Create: `apps/adk-web/src/apps/playbook.rs`
+- Modify: `apps/adk-web/src/apps/mod.rs`
+- Modify: `apps/adk-web/src/main.rs`
 
 This is the core advanced app. Uses `Live::builder()` with `extract_turns()`, `instruction_template()`, and `on_extracted()` to implement a state machine that controls a voice agent following a customer support playbook.
 
@@ -878,9 +878,9 @@ Run: `cargo check -p rs-genai-ui`
 ### Task 9: Guardrails Agent app
 
 **Files:**
-- Create: `cookbooks/ui/src/apps/guardrails.rs`
-- Modify: `cookbooks/ui/src/apps/mod.rs`
-- Modify: `cookbooks/ui/src/main.rs`
+- Create: `apps/adk-web/src/apps/guardrails.rs`
+- Modify: `apps/adk-web/src/apps/mod.rs`
+- Modify: `apps/adk-web/src/main.rs`
 
 Same architecture as playbook but monitors for policy violations instead of phase transitions.
 
@@ -920,9 +920,9 @@ struct PolicyRule {
 ### Task 10: Support Assistant app (multi-agent)
 
 **Files:**
-- Create: `cookbooks/ui/src/apps/support.rs`
-- Modify: `cookbooks/ui/src/apps/mod.rs`
-- Modify: `cookbooks/ui/src/main.rs`
+- Create: `apps/adk-web/src/apps/support.rs`
+- Modify: `apps/adk-web/src/apps/mod.rs`
+- Modify: `apps/adk-web/src/main.rs`
 
 **Step 1: Define multi-agent flow**
 
@@ -939,9 +939,9 @@ Two instruction sets (billing flow, technical flow). Handoff detected via extrac
 ### Task 11: All Config app
 
 **Files:**
-- Create: `cookbooks/ui/src/apps/all_config.rs`
-- Modify: `cookbooks/ui/src/apps/mod.rs`
-- Modify: `cookbooks/ui/src/main.rs`
+- Create: `apps/adk-web/src/apps/all_config.rs`
+- Modify: `apps/adk-web/src/apps/mod.rs`
+- Modify: `apps/adk-web/src/main.rs`
 
 Showcase app exposing every Gemini Live config option in the UI. Extended start message includes all config fields. Frontend shows additional controls.
 
@@ -952,8 +952,8 @@ Showcase app exposing every Gemini Live config option in the UI. Extended start 
 ### Task 12: Wire everything together + test all apps
 
 **Files:**
-- Modify: `cookbooks/ui/src/main.rs` (final registration)
-- Modify: `cookbooks/ui/static/js/devtools.js` (tab visibility per category)
+- Modify: `apps/adk-web/src/main.rs` (final registration)
+- Modify: `apps/adk-web/static/js/devtools.js` (tab visibility per category)
 
 **Step 1: Final app registration in main.rs**
 
@@ -997,7 +997,7 @@ Run: `cargo build -p rs-genai-ui`
 - Modify: `README.md`
 
 Update to reflect:
-- New unified cookbooks UI (`cargo run -p rs-genai-ui`)
+- New unified Web UI (`cargo run -p rs-genai-ui`)
 - App descriptions and categories
 - Screenshot placeholder for landing page
 - Out-of-band control pattern explanation
@@ -1017,26 +1017,26 @@ Update to reflect:
 
 | File | Action | What |
 |------|--------|------|
-| `cookbooks/ui/src/app.rs` | CREATE | CookbookApp trait, AppRegistry, AppConfig |
-| `cookbooks/ui/src/apps/mod.rs` | CREATE | App module exports |
-| `cookbooks/ui/src/apps/voice_chat.rs` | CREATE | Voice chat using Live::builder() |
-| `cookbooks/ui/src/apps/text_chat.rs` | CREATE | Text-only chat |
-| `cookbooks/ui/src/apps/tool_calling.rs` | CREATE | TypedTool demo |
-| `cookbooks/ui/src/apps/playbook.rs` | CREATE | State machine + extraction |
-| `cookbooks/ui/src/apps/guardrails.rs` | CREATE | Policy monitoring |
-| `cookbooks/ui/src/apps/support.rs` | CREATE | Multi-agent handoff |
-| `cookbooks/ui/src/apps/all_config.rs` | CREATE | Every config option |
-| `cookbooks/ui/src/main.rs` | MODIFY | Router, registry, handle_app_socket |
-| `cookbooks/ui/Cargo.toml` | MODIFY | Add adk-rs-fluent, rs-adk, async-trait, schemars |
-| `cookbooks/ui/static/index.html` | REWRITE | Landing page with app cards |
-| `cookbooks/ui/static/app.html` | CREATE | App screen with devtools |
-| `cookbooks/ui/static/css/main.css` | CREATE | Shared styles |
-| `cookbooks/ui/static/css/landing.css` | CREATE | Landing page styles |
-| `cookbooks/ui/static/css/app.css` | CREATE | App screen styles |
-| `cookbooks/ui/static/css/devtools.css` | CREATE | Devtools panel styles |
-| `cookbooks/ui/static/js/app.js` | CREATE | Conversation logic |
-| `cookbooks/ui/static/js/audio.js` | CREATE | Audio recording/playback |
-| `cookbooks/ui/static/js/devtools.js` | CREATE | Devtools panel logic |
+| `apps/adk-web/src/app.rs` | CREATE | CookbookApp trait, AppRegistry, AppConfig |
+| `apps/adk-web/src/apps/mod.rs` | CREATE | App module exports |
+| `apps/adk-web/src/apps/voice_chat.rs` | CREATE | Voice chat using Live::builder() |
+| `apps/adk-web/src/apps/text_chat.rs` | CREATE | Text-only chat |
+| `apps/adk-web/src/apps/tool_calling.rs` | CREATE | TypedTool demo |
+| `apps/adk-web/src/apps/playbook.rs` | CREATE | State machine + extraction |
+| `apps/adk-web/src/apps/guardrails.rs` | CREATE | Policy monitoring |
+| `apps/adk-web/src/apps/support.rs` | CREATE | Multi-agent handoff |
+| `apps/adk-web/src/apps/all_config.rs` | CREATE | Every config option |
+| `apps/adk-web/src/main.rs` | MODIFY | Router, registry, handle_app_socket |
+| `apps/adk-web/Cargo.toml` | MODIFY | Add adk-rs-fluent, rs-adk, async-trait, schemars |
+| `apps/adk-web/static/index.html` | REWRITE | Landing page with app cards |
+| `apps/adk-web/static/app.html` | CREATE | App screen with devtools |
+| `apps/adk-web/static/css/main.css` | CREATE | Shared styles |
+| `apps/adk-web/static/css/landing.css` | CREATE | Landing page styles |
+| `apps/adk-web/static/css/app.css` | CREATE | App screen styles |
+| `apps/adk-web/static/css/devtools.css` | CREATE | Devtools panel styles |
+| `apps/adk-web/static/js/app.js` | CREATE | Conversation logic |
+| `apps/adk-web/static/js/audio.js` | CREATE | Audio recording/playback |
+| `apps/adk-web/static/js/devtools.js` | CREATE | Devtools panel logic |
 | `README.md` | MODIFY | Updated project docs |
 
 ## Estimated Total: ~2,500 LoC across 13 tasks

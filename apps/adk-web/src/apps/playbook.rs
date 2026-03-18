@@ -10,9 +10,9 @@ use tracing::info;
 
 use adk_rs_fluent::prelude::*;
 
-use crate::app::{AppError, ClientMessage, CookbookApp, WsSender};
+use crate::app::{AppError, ClientMessage, DemoApp, WsSender};
 use crate::bridge::SessionBridge;
-use crate::cookbook_meta;
+use crate::demo_meta;
 
 use super::extractors::RegexExtractor;
 use super::resolve_voice;
@@ -330,8 +330,8 @@ fn playbook_context(s: &State) -> String {
 pub struct Playbook;
 
 #[async_trait]
-impl CookbookApp for Playbook {
-    cookbook_meta! {
+impl DemoApp for Playbook {
+    demo_meta! {
         name: "playbook",
         description: "State machine + text agent evaluation for customer support playbook",
         category: Advanced,

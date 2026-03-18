@@ -49,6 +49,7 @@ var DevtoolsManager = (function () {
     this._eval = new EvalPanel();
     this._artifacts = new ArtifactPanel();
     this._eventInspector = new EventInspectorPanel();
+    this._cookbook = new CookbookPanel();
 
     // Status bar
     this._statusUptimeEl = null;
@@ -120,6 +121,12 @@ var DevtoolsManager = (function () {
     ce.appendChild(eiEl);
     this._eventInspector.create(eiEl);
     this.panels.events = eiEl;
+
+    // Cookbook
+    var cbEl = U.el('div', '');
+    ce.appendChild(cbEl);
+    this._cookbook.create(cbEl);
+    this.panels.cookbook = cbEl;
 
     // Register status bar refresh
     var self = this;
@@ -400,6 +407,8 @@ var DevtoolsManager = (function () {
       this.availableTabs.push('eval');
     }
     this.availableTabs.push('artifacts');
+    this.availableTabs.push('cookbook');
+    this._cookbook.setAppMeta(info);
     this.tabButtons = {};
     this._renderTabs();
     // Always re-apply active tab to guarantee panel visibility is correct
@@ -428,6 +437,7 @@ var DevtoolsManager = (function () {
     this._artifacts.reset();
     this._eventInspector.reset();
     this._eventInspector.setSessionStart(this.sessionStart);
+    this._cookbook.reset();
 
     // Re-bind minimap
     if (this._minimap) {
@@ -453,6 +463,7 @@ var DevtoolsManager = (function () {
       case 'eval': return 'Eval';
       case 'artifacts': return 'Artifacts';
       case 'events': return 'Events';
+      case 'cookbook': return 'Cookbook';
       default: return tabId;
     }
   }

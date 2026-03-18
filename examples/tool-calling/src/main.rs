@@ -1,10 +1,10 @@
-//! Tool Calling cookbook — agent with typed function calling.
+//! Tool Calling example — agent with typed function calling.
 //!
 //! Demonstrates TypedTool with auto-generated JSON Schema and
 //! automatic tool dispatch in a Gemini Live session.
 //!
 //! Usage:
-//!   cargo run -p cookbook-tool-calling
+//!   cargo run -p example-tool-calling
 //!   # then open http://127.0.0.1:3003
 
 use std::sync::Arc;
@@ -276,7 +276,7 @@ async fn main() {
 
     let state = AppState { auth };
 
-    let static_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../cookbooks/ui/static");
+    let static_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../apps/adk-web/static");
 
     let app = Router::new()
         .fallback_service(
@@ -289,7 +289,7 @@ async fn main() {
 
     let addr = "127.0.0.1:3003";
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    println!("Tool Calling cookbook running at http://{}", addr);
+    println!("Tool Calling example running at http://{}", addr);
 
     axum::serve(listener, app).await.unwrap();
 }

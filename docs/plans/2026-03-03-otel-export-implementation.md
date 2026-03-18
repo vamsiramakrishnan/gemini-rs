@@ -326,15 +326,15 @@ git commit -m "feat(adk): forward otel feature flag through rs-adk and adk-rs-fl
 
 ---
 
-### Task 4: Add otel feature to cookbook UI and document usage
+### Task 4: Add otel feature to Web UI and document usage
 
 **Files:**
-- Modify: `cookbooks/ui/Cargo.toml`
-- Modify: `cookbooks/ui/README.md`
+- Modify: `apps/adk-web/Cargo.toml`
+- Modify: `apps/adk-web/README.md`
 
-**Step 1: Add optional otel feature to cookbook UI**
+**Step 1: Add optional otel feature to Web UI**
 
-In `cookbooks/ui/Cargo.toml`, add a `[features]` section at the end:
+In `apps/adk-web/Cargo.toml`, add a `[features]` section at the end:
 
 ```toml
 [features]
@@ -344,12 +344,12 @@ otel = ["rs-genai/otel", "rs-adk/otel"]
 
 **Step 2: Update README with OTel instructions**
 
-In `cookbooks/ui/README.md`, add a new section after the "Model Routing" section documenting:
+In `apps/adk-web/README.md`, add a new section after the "Model Routing" section documenting:
 
 ```markdown
 ## OpenTelemetry Export (Optional)
 
-The cookbook supports exporting traces and metrics to any OTLP-compatible backend (Google Cloud Trace, Jaeger, etc.) via the `otel` feature flag.
+The demo supports exporting traces and metrics to any OTLP-compatible backend (Google Cloud Trace, Jaeger, etc.) via the `otel` feature flag.
 
 ### Build with OTel
 
@@ -366,7 +366,7 @@ Set standard OTel environment variables in `.env`:
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 
 # Service name for trace/metric resource identification
-OTEL_SERVICE_NAME=gemini-live-cookbooks
+OTEL_SERVICE_NAME=gemini-rs
 ```
 
 ### Google Cloud Trace
@@ -399,16 +399,16 @@ Expected: Both compile.
 **Step 4: Commit**
 
 ```bash
-git add cookbooks/ui/Cargo.toml cookbooks/ui/README.md
+git add apps/adk-web/Cargo.toml apps/adk-web/README.md
 git commit -m "feat(ui): add optional otel feature flag with documentation"
 ```
 
 ---
 
-### Task 5: Wire OTel init into cookbook UI main.rs
+### Task 5: Wire OTel init into Web UI main.rs
 
 **Files:**
-- Modify: `cookbooks/ui/src/main.rs`
+- Modify: `apps/adk-web/src/main.rs`
 
 **Step 1: Read current main.rs to understand init flow**
 
@@ -430,7 +430,7 @@ let _telemetry_guard = rs_genai::telemetry::TelemetryConfig {
     otel_traces: otel_enabled,
     otel_metrics: otel_enabled,
     otel_service_name: std::env::var("OTEL_SERVICE_NAME")
-        .unwrap_or_else(|_| "gemini-live-cookbooks".to_string()),
+        .unwrap_or_else(|_| "gemini-rs".to_string()),
     ..Default::default()
 }
 .init()
@@ -455,7 +455,7 @@ Expected: All tests pass (149 UI tests + all crate tests).
 **Step 5: Commit**
 
 ```bash
-git add cookbooks/ui/src/main.rs
+git add apps/adk-web/src/main.rs
 git commit -m "feat(ui): wire TelemetryConfig with optional OTel into main.rs"
 ```
 

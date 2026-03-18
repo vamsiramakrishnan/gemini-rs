@@ -967,8 +967,8 @@ Each phase should include:
 
 1. **Unit tests**: For new structs (ContextHorizon, SoftTurnDetector, NeedsFulfillment, SessionSnapshot serialization)
 2. **Integration tests**: Using `MockTransport` to simulate server behavior (GenerationComplete events, UsageMetadata, proactive silence)
-3. **Cookbook validation**: Run existing cookbooks (debt-collection, voice-chat) to verify no regression
-4. **New cookbook**: `cookbooks/long-conversation/` — a multi-phase, hour-long conversation that exercises context compression, session resumption, and conversation repair
+3. **Example validation**: Run existing demos (debt-collection, voice-chat) to verify no regression
+4. **New example**: `examples/long-conversation/` — a multi-phase, hour-long conversation that exercises context compression, session resumption, and conversation repair
 
 ---
 

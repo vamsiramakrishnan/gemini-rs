@@ -27,9 +27,9 @@
 - [S·C·T·P·M·A Operator Algebra](./user-guide/composition.md)
 - [Middleware & Processors](./user-guide/middleware.md)
 
-# Cookbooks
+# Examples
 
-- [Cookbook Examples](./cookbooks.md)
+- [Examples](./cookbooks.md)
 
 # Reference
 

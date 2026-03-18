@@ -1,6 +1,6 @@
-//! Transcription cookbook — demonstrates ALL configurable Gemini Live API properties.
+//! Transcription example — demonstrates ALL configurable Gemini Live API properties.
 //!
-//! This cookbook showcases every session configuration option including:
+//! This example showcases every session configuration option including:
 //! - Input/output transcription
 //! - Voice activity detection (VAD) settings
 //! - Activity handling (barge-in behavior)
@@ -10,7 +10,7 @@
 //! - Affective dialog
 //!
 //! Usage:
-//!   cargo run -p cookbook-transcription
+//!   cargo run -p example-transcription
 //!   # then open http://127.0.0.1:3004
 
 use axum::{
@@ -146,7 +146,7 @@ async fn main() {
     let state = AppState { auth };
 
     // Serve static files from the shared UI directory
-    let static_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../cookbooks/ui/static");
+    let static_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../apps/adk-web/static");
 
     let app = Router::new()
         .fallback_service(
@@ -159,7 +159,7 @@ async fn main() {
 
     let addr = "127.0.0.1:3004";
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    println!("Transcription cookbook running at http://{}", addr);
+    println!("Transcription example running at http://{}", addr);
 
     axum::serve(listener, app).await.unwrap();
 }
@@ -233,7 +233,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                             .model(GeminiModel::GeminiLive2_5FlashNativeAudio)
                             // Voice
                             .voice(voice_enum)
-                            // Transcription — the focus of this cookbook
+                            // Transcription — the focus of this example
                             .enable_input_transcription()
                             .enable_output_transcription()
                             // System instruction

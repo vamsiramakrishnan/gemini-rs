@@ -1,8 +1,8 @@
-# Cookbook L2 Migration Implementation Plan
+# Demo App L2 Migration Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Migrate all 7 cookbook/ui apps from raw L0 `ConnectBuilder` to L2 `Live::builder()` fluent API.
+**Goal:** Migrate all 7 demo/ui apps from raw L0 `ConnectBuilder` to L2 `Live::builder()` fluent API.
 
 **Architecture:** Each app's `handle_session` keeps the same signature (`tx: WsSender, rx: Receiver<ClientMessage>`) but replaces the manual `tokio::select!` event loop with L2 callbacks for Gemini->browser and a simple recv loop for browser->Gemini. Advanced apps replace hand-coded state machines with `PhaseMachine`, regex-based state extraction moves into a `TurnExtractor` implementation, and violation detection moves to watchers.
 
@@ -15,12 +15,12 @@
 ### Task 1: Add adk-rs-fluent dependency and shared helpers
 
 **Files:**
-- Modify: `cookbooks/ui/Cargo.toml`
-- Modify: `cookbooks/ui/src/apps/mod.rs`
+- Modify: `apps/adk-web/Cargo.toml`
+- Modify: `apps/adk-web/src/apps/mod.rs`
 
 **Step 1: Add adk-rs-fluent to Cargo.toml**
 
-In `cookbooks/ui/Cargo.toml`, add after the `rs-adk` line:
+In `apps/adk-web/Cargo.toml`, add after the `rs-adk` line:
 
 ```toml
 adk-rs-fluent = { path = "../../crates/adk-rs-fluent" }
@@ -28,7 +28,7 @@ adk-rs-fluent = { path = "../../crates/adk-rs-fluent" }
 
 **Step 2: Add resolve_voice to shared mod.rs**
 
-In `cookbooks/ui/src/apps/mod.rs`, add a shared `resolve_voice` function (currently duplicated in voice_chat, playbook, guardrails, support, all_config). Add this after the `ConversationBuffer` impl:
+In `apps/adk-web/src/apps/mod.rs`, add a shared `resolve_voice` function (currently duplicated in voice_chat, playbook, guardrails, support, all_config). Add this after the `ConversationBuffer` impl:
 
 ```rust
 use rs_genai::prelude::Voice;
@@ -54,7 +54,7 @@ Expected: Compiles with unused import warnings (OK for now)
 **Step 4: Commit**
 
 ```
-feat(cookbooks): add adk-rs-fluent dependency and shared resolve_voice
+feat(examples): add adk-rs-fluent dependency and shared resolve_voice
 ```
 
 ---
@@ -62,7 +62,7 @@ feat(cookbooks): add adk-rs-fluent dependency and shared resolve_voice
 ### Task 2: Migrate text_chat.rs (simplest app, validates pattern)
 
 **Files:**
-- Modify: `cookbooks/ui/src/apps/text_chat.rs`
+- Modify: `apps/adk-web/src/apps/text_chat.rs`
 
 **Step 1: Rewrite text_chat.rs**
 
@@ -180,7 +180,7 @@ Expected: All tests pass (text_chat has no tests but other app tests should not 
 **Step 4: Commit**
 
 ```
-refactor(cookbooks): migrate text_chat to L2 Live::builder()
+refactor(examples): migrate text_chat to L2 Live::builder()
 ```
 
 ---
@@ -188,7 +188,7 @@ refactor(cookbooks): migrate text_chat to L2 Live::builder()
 ### Task 3: Migrate voice_chat.rs
 
 **Files:**
-- Modify: `cookbooks/ui/src/apps/voice_chat.rs`
+- Modify: `apps/adk-web/src/apps/voice_chat.rs`
 
 **Step 1: Rewrite voice_chat.rs**
 
@@ -335,7 +335,7 @@ Expected: Compiles and all tests pass
 **Step 3: Commit**
 
 ```
-refactor(cookbooks): migrate voice_chat to L2 Live::builder()
+refactor(examples): migrate voice_chat to L2 Live::builder()
 ```
 
 ---
@@ -343,7 +343,7 @@ refactor(cookbooks): migrate voice_chat to L2 Live::builder()
 ### Task 4: Migrate tool_calling.rs
 
 **Files:**
-- Modify: `cookbooks/ui/src/apps/tool_calling.rs`
+- Modify: `apps/adk-web/src/apps/tool_calling.rs`
 
 **Step 1: Rewrite tool_calling.rs**
 
@@ -446,7 +446,7 @@ Expected: Compiles; all 4 `evaluate_simple_expr` tests pass
 **Step 3: Commit**
 
 ```
-refactor(cookbooks): migrate tool_calling to L2 Live::builder()
+refactor(examples): migrate tool_calling to L2 Live::builder()
 ```
 
 ---
@@ -454,7 +454,7 @@ refactor(cookbooks): migrate tool_calling to L2 Live::builder()
 ### Task 5: Migrate all_config.rs
 
 **Files:**
-- Modify: `cookbooks/ui/src/apps/all_config.rs`
+- Modify: `apps/adk-web/src/apps/all_config.rs`
 
 **Step 1: Rewrite handle_session**
 
@@ -626,7 +626,7 @@ Expected: Compiles; all 8 all_config tests pass
 **Step 3: Commit**
 
 ```
-refactor(cookbooks): migrate all_config to L2 Live::builder()
+refactor(examples): migrate all_config to L2 Live::builder()
 ```
 
 ---
@@ -634,15 +634,15 @@ refactor(cookbooks): migrate all_config to L2 Live::builder()
 ### Task 6: Create RegexExtractor for custom TurnExtractor
 
 **Files:**
-- Create: `cookbooks/ui/src/apps/extractors.rs`
-- Modify: `cookbooks/ui/src/apps/mod.rs` (add `pub mod extractors;`)
+- Create: `apps/adk-web/src/apps/extractors.rs`
+- Modify: `apps/adk-web/src/apps/mod.rs` (add `pub mod extractors;`)
 
 **Step 1: Create extractors.rs**
 
 This module provides a `RegexExtractor` that wraps a regex-based extraction function into the `TurnExtractor` trait. The extraction function receives the formatted transcript text and returns key-value pairs to merge into State.
 
 ```rust
-//! Custom TurnExtractor implementations for cookbook apps.
+//! Custom TurnExtractor implementations for demo apps.
 //!
 //! Wraps regex-based extraction functions into the TurnExtractor trait
 //! so they integrate with the L1 extraction pipeline.
@@ -827,7 +827,7 @@ mod tests {
 
 **Step 2: Add module declaration**
 
-In `cookbooks/ui/src/apps/mod.rs`, add after the existing module declarations:
+In `apps/adk-web/src/apps/mod.rs`, add after the existing module declarations:
 
 ```rust
 pub mod extractors;
@@ -841,7 +841,7 @@ Expected: Compiles; all 4 new extractor tests + all existing tests pass
 **Step 4: Commit**
 
 ```
-feat(cookbooks): add RegexExtractor for TurnExtractor-based state extraction
+feat(examples): add RegexExtractor for TurnExtractor-based state extraction
 ```
 
 ---
@@ -849,7 +849,7 @@ feat(cookbooks): add RegexExtractor for TurnExtractor-based state extraction
 ### Task 7: Migrate playbook.rs
 
 **Files:**
-- Modify: `cookbooks/ui/src/apps/playbook.rs`
+- Modify: `apps/adk-web/src/apps/playbook.rs`
 
 **Step 1: Rewrite playbook.rs**
 
@@ -894,7 +894,7 @@ Expected: Compiles; all 14 existing playbook tests pass (they test free function
 **Step 3: Commit**
 
 ```
-refactor(cookbooks): migrate playbook to L2 PhaseMachine + RegexExtractor
+refactor(examples): migrate playbook to L2 PhaseMachine + RegexExtractor
 ```
 
 ---
@@ -902,7 +902,7 @@ refactor(cookbooks): migrate playbook to L2 PhaseMachine + RegexExtractor
 ### Task 8: Migrate guardrails.rs
 
 **Files:**
-- Modify: `cookbooks/ui/src/apps/guardrails.rs`
+- Modify: `apps/adk-web/src/apps/guardrails.rs`
 
 **Step 1: Rewrite guardrails.rs**
 
@@ -937,7 +937,7 @@ Expected: Compiles; all 11 existing guardrails tests pass
 **Step 3: Commit**
 
 ```
-refactor(cookbooks): migrate guardrails to L2 watchers + RegexExtractor
+refactor(examples): migrate guardrails to L2 watchers + RegexExtractor
 ```
 
 ---
@@ -945,7 +945,7 @@ refactor(cookbooks): migrate guardrails to L2 watchers + RegexExtractor
 ### Task 9: Migrate support.rs
 
 **Files:**
-- Modify: `cookbooks/ui/src/apps/support.rs`
+- Modify: `apps/adk-web/src/apps/support.rs`
 
 **Step 1: Rewrite support.rs**
 
@@ -992,7 +992,7 @@ Expected: Compiles; all 20 existing support tests pass
 **Step 3: Commit**
 
 ```
-refactor(cookbooks): migrate support to L2 PhaseMachine + computed + watchers
+refactor(examples): migrate support to L2 PhaseMachine + computed + watchers
 ```
 
 ---
@@ -1000,11 +1000,11 @@ refactor(cookbooks): migrate support to L2 PhaseMachine + computed + watchers
 ### Task 10: Cleanup and final verification
 
 **Files:**
-- Modify: `cookbooks/ui/src/apps/mod.rs` (potentially remove ConversationBuffer if unused)
+- Modify: `apps/adk-web/src/apps/mod.rs` (potentially remove ConversationBuffer if unused)
 
 **Step 1: Check if ConversationBuffer is still used**
 
-Search for `ConversationBuffer` in `cookbooks/ui/src/apps/`. If no app imports it anymore, remove the struct from `mod.rs`. Note: the playbook test `conversation_buffer_limits_turns` and guardrails test `conversation_buffer_limits` test this struct directly, so check if those tests still exist.
+Search for `ConversationBuffer` in `apps/adk-web/src/apps/`. If no app imports it anymore, remove the struct from `mod.rs`. Note: the playbook test `conversation_buffer_limits_turns` and guardrails test `conversation_buffer_limits` test this struct directly, so check if those tests still exist.
 
 If the existing tests still reference `ConversationBuffer`, keep it. If all advanced app test suites were preserved (which they should be — we didn't modify tests), `ConversationBuffer` tests may still reference it. In that case, keep the struct.
 
@@ -1023,5 +1023,5 @@ Expected: All 1,100+ workspace tests pass
 **Step 4: Commit**
 
 ```
-chore(cookbooks): cleanup unused imports after L2 migration
+chore(examples): cleanup unused imports after L2 migration
 ```

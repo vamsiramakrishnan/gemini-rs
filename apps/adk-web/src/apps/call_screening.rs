@@ -12,9 +12,9 @@ use adk_rs_fluent::prelude::*;
 use rs_adk::llm::{BaseLlm, GeminiLlm, GeminiLlmParams};
 use rs_adk::state::StateKey;
 
-use crate::app::{AppError, ClientMessage, CookbookApp, WsSender};
+use crate::app::{AppError, ClientMessage, DemoApp, WsSender};
 use crate::bridge::SessionBridge;
-use crate::cookbook_meta;
+use crate::demo_meta;
 
 use super::resolve_voice;
 
@@ -385,8 +385,8 @@ fn execute_tool(name: &str, args: &serde_json::Value) -> serde_json::Value {
 pub struct CallScreening;
 
 #[async_trait]
-impl CookbookApp for CallScreening {
-    cookbook_meta! {
+impl DemoApp for CallScreening {
+    demo_meta! {
         name: "call-screening",
         description: "AI call screening with caller identification, urgency detection, and smart routing",
         category: Showcase,

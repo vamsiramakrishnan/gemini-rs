@@ -395,7 +395,7 @@ This is the core server. It serves the embedded UI, lists agents via JSON, and h
 
 **Step 1: Create `crates/adk-devtools/src/server.rs`**
 
-Reference the existing cookbook patterns from `cookbooks/ui/src/main.rs` and `cookbooks/ui/src/ws_handler.rs`, but with the binary protocol.
+Reference the existing demo patterns from `apps/adk-web/src/main.rs` and `apps/adk-web/src/ws_handler.rs`, but with the binary protocol.
 
 ```rust
 //! Axum-based dev server with embedded UI and binary WebSocket protocol.
@@ -1099,11 +1099,11 @@ git commit -m "feat(adk-devtools): add interactive text REPL (adk run)"
 This is the biggest task. The UI has three panels: agent sidebar, conversation, and devtools.
 
 **Reference files:**
-- `cookbooks/ui/static/js/app.js` — reuse WebSocket lifecycle, upgrade to binary protocol
-- `cookbooks/ui/static/js/audio.js` — reuse recording/playback, upgrade to AudioWorklet + binary frames
-- `cookbooks/ui/static/js/devtools.js` — reuse state grouping, event logging, telemetry
+- `apps/adk-web/static/js/app.js` — reuse WebSocket lifecycle, upgrade to binary protocol
+- `apps/adk-web/static/js/audio.js` — reuse recording/playback, upgrade to AudioWorklet + binary frames
+- `apps/adk-web/static/js/devtools.js` — reuse state grouping, event logging, telemetry
 
-**Key differences from cookbook UI:**
+**Key differences from Web UI:**
 
 1. **Agent sidebar** — new panel listing agents from `/api/agents`, click to connect
 2. **Binary audio** — `ws.send(arrayBuffer)` with channel prefix instead of base64 JSON
@@ -1140,7 +1140,7 @@ Main app class:
 
 **Step 6: Create `ui/devtools.js`**
 
-Devtools panel manager — reuse and refactor from `cookbooks/ui/static/js/devtools.js`:
+Devtools panel manager — reuse and refactor from `apps/adk-web/static/js/devtools.js`:
 - State tab: grouped by prefix, highlights on change
 - Events tab: chronological log
 - Phases tab: timeline visualization

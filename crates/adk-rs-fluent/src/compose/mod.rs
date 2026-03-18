@@ -54,7 +54,7 @@ pub mod prompt;
 pub mod state;
 pub mod tools;
 
-pub use artifacts::A;
+pub use artifacts::{A, ArtifactOp};
 pub use context::C;
 pub use ctx::Ctx;
 pub use eval::E;

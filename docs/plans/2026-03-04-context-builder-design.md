@@ -5,7 +5,7 @@
 
 ## Problem
 
-Every cookbook hand-writes 40+ line `fn app_context(s: &State) -> String` closures
+Every demo hand-writes 40+ line `fn app_context(s: &State) -> String` closures
 that all follow the same pattern: check key, format label, skip if missing, join.
 These closures are phase-blind — the same context renders in every phase regardless
 of what matters right now.

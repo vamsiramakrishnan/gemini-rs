@@ -38,7 +38,7 @@ This book is organized into five sections:
 - **Voice & Live Sessions** — Building real-time voice agents with phases, state, and watchers
 - **Tools & Extraction** — Tool system and structured data extraction from conversations
 - **Composition & Patterns** — Text agent combinators, S·C·T·P·M·A operators, middleware
-- **Cookbooks** — 13+ runnable examples from minimal text chat to FDCPA-compliant debt collection
+- **Examples** — 13+ runnable demos from minimal text chat to FDCPA-compliant debt collection
 
 ## API Reference
 

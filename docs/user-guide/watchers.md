@@ -302,7 +302,7 @@ Live::builder()
 
 ## Real-World Example: Debt Collection Escalation
 
-The debt collection cookbook (`cookbooks/ui/src/apps/debt_collection.rs`) combines
+The debt collection demo (`apps/adk-web/src/apps/debt_collection.rs`) combines
 all reactive primitives in a single builder chain:
 
 1. **Computed chain**: `emotional_state` (from extractor) -> `sentiment_score` -> `call_risk_level`

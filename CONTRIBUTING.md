@@ -42,12 +42,12 @@ Additionally:
 
 | Path | Purpose |
 |------|---------|
-| `cookbooks/ui/` | Axum WebSocket tester with browser frontend and multiple demo apps |
-| `cookbooks/agents/` | Standalone agent examples |
-| `cookbooks/text-chat/` | Text-only chat example |
-| `cookbooks/voice-chat/` | Voice chat example |
-| `cookbooks/tool-calling/` | Tool calling example |
-| `cookbooks/transcription/` | Audio transcription example |
+| `apps/adk-web/` | Axum WebSocket tester with browser frontend and multiple demo apps |
+| `examples/agents/` | Standalone agent examples |
+| `examples/text-chat/` | Text-only chat example |
+| `examples/voice-chat/` | Voice chat example |
+| `examples/tool-calling/` | Tool calling example |
+| `examples/transcription/` | Audio transcription example |
 | `tools/adk-transpiler/` | Code generator that transpiles ADK-JS type definitions to Rust |
 
 ### Dependency Flow
@@ -60,7 +60,7 @@ adk-rs-fluent (L2)
               +---> rs-genai (L0)
 ```
 
-Cookbooks depend on `adk-rs-fluent` (L2) and get the entire stack transitively.
+Examples depend on `adk-rs-fluent` (L2) and get the entire stack transitively.
 
 ### Hand-Written vs Generated Code
 
@@ -91,7 +91,7 @@ The router (`crates/rs-adk/src/live/mod.rs`) is a zero-work dispatcher that neve
 | `AuthProvider` | `crates/rs-genai/src/transport/auth/` | Authentication (`GoogleAIAuth`, `VertexAIAuth`) |
 | `SessionWriter` / `SessionReader` | `crates/rs-genai/src/session/mod.rs` | Session I/O abstraction |
 | `Agent` | `crates/rs-adk/src/agent.rs` | Agent trait for composition |
-| `CookbookApp` | `cookbooks/ui/src/app.rs` | Trait for UI demo apps |
+| `CookbookApp` | `apps/adk-web/src/app.rs` | Trait for UI demo apps |
 
 ## Getting Started
 
@@ -104,7 +104,7 @@ cd gemini-rs
 just setup          # Build workspace
 just test           # Run library tests (no credentials needed)
 just docs           # Build and open documentation
-just run-ui         # Run the cookbook UI (requires .env with credentials)
+just run-ui         # Run the ADK Web UI (requires .env with credentials)
 just check          # Run full quality check (fmt + lint + docs + tests)
 ```
 
@@ -132,13 +132,13 @@ cargo doc --no-deps --workspace --open
 1. Write a design doc in `docs/plans/YYYY-MM-DD-feature-name.md` (see existing docs for format)
 2. Create a branch: `git checkout -b feat/description`
 3. Implement with tests
-4. Update the relevant cookbook if the feature is user-facing
+4. Update the relevant example if the feature is user-facing
 5. Verify: `cargo test --workspace --lib`
 6. Submit a PR
 
-### Adding a Cookbook Example
+### Adding a Web UI Demo App
 
-1. Create a new file in `cookbooks/ui/src/apps/` (e.g., `my_example.rs`)
+1. Create a new file in `apps/adk-web/src/apps/` (e.g., `my_example.rs`)
 2. Implement the `CookbookApp` trait:
 
 ```rust
@@ -167,9 +167,9 @@ impl CookbookApp for MyExample {
 }
 ```
 
-3. Add the module to `cookbooks/ui/src/apps/mod.rs`
-4. Register it in `cookbooks/ui/src/apps/mod.rs` inside `register_all()`
-5. Test with `cargo run -p cookbook-ui`
+3. Add the module to `apps/adk-web/src/apps/mod.rs`
+4. Register it in `apps/adk-web/src/apps/mod.rs` inside `register_all()`
+5. Test with `cargo run -p adk-web`
 
 ## Code Style
 
@@ -230,7 +230,7 @@ test(rs-adk): add extractor concurrency tests
 ci: add clippy to PR checks
 ```
 
-The scope should be the crate name (`rs-genai`, `rs-adk`, `adk-rs-fluent`) or a top-level area (`cookbooks`, `ci`, `docs`).
+The scope should be the crate name (`rs-genai`, `rs-adk`, `adk-rs-fluent`) or a top-level area (`examples`, `ci`, `docs`).
 
 ## Design Documents
 
@@ -252,7 +252,7 @@ Existing design docs cover the full architecture and can be referenced for conte
      && cargo test --workspace --lib
    ```
 2. Add or update tests for your changes
-3. If the change is user-facing, update the relevant cookbook example
+3. If the change is user-facing, update the relevant example
 4. Write a clear PR description explaining **what** changed and **why**
 5. Request review
 

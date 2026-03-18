@@ -13,7 +13,7 @@ body:
         - rs-genai (L0 — wire protocol)
         - rs-adk (L1 — agent runtime)
         - adk-rs-fluent (L2 — fluent DX)
-        - cookbooks/ui
+        - apps/adk-web
         - Other
     validations:
       required: true

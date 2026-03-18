@@ -5,7 +5,7 @@
 
 ## Problem
 
-Every cookbook repeats ~100 lines of boilerplate: SessionConfig setup, event loop matching, tool dispatch + response, error handling. The Live API's full-duplex WebSocket session has no fluent surface — developers work with raw L0 primitives.
+Every demo repeats ~100 lines of boilerplate: SessionConfig setup, event loop matching, tool dispatch + response, error handling. The Live API's full-duplex WebSocket session has no fluent surface — developers work with raw L0 primitives.
 
 ## Constraints (Gemini Live API)
 

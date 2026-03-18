@@ -1,20 +1,20 @@
-# Cookbook UI Migration to L2 Fluent API
+# Web UI Migration to L2 Fluent API
 
 **Date**: 2026-03-02
 **Status**: Design
-**Scope**: Migrate all 7 cookbook/ui apps from raw L0 `ConnectBuilder` to L2 `Live::builder()` fluent API
+**Scope**: Migrate all 7 demo/ui apps from raw L0 `ConnectBuilder` to L2 `Live::builder()` fluent API
 
 ## Context
 
-The cookbooks/ui currently implements 7 apps using low-level L0 `ConnectBuilder::new(config).build()`. Each app has a hand-coded `tokio::select!` event loop, and the three advanced apps (playbook, guardrails, support) manually implement state machines, regex extraction, phase tracking, violation detection, and instruction updates.
+The apps/adk-web currently implements 7 apps using low-level L0 `ConnectBuilder::new(config).build()`. Each app has a hand-coded `tokio::select!` event loop, and the three advanced apps (playbook, guardrails, support) manually implement state machines, regex extraction, phase tracking, violation detection, and instruction updates.
 
 We now have L1 modules (PhaseMachine, WatcherRegistry, ComputedRegistry, TemporalRegistry, SessionSignals, BackgroundToolTracker) and the L2 `Live::builder()` fluent API that automates all of this.
 
 ## Architecture Decision
 
-**Use L2 `adk-rs-fluent::Live::builder()`** for all cookbook apps.
+**Use L2 `adk-rs-fluent::Live::builder()`** for all demo apps.
 
-Rationale: Cookbooks exist to showcase best DX. The L2 API is the intended public API. Using it in cookbooks both validates the API design and serves as documentation.
+Rationale: Examples exist to showcase best DX. The L2 API is the intended public API. Using it in demos validates the API design and serves as documentation.
 
 ### Connection Pattern
 
@@ -257,7 +257,7 @@ Live::builder()
 
 ## New Files
 
-### `cookbooks/ui/src/apps/extractors.rs`
+### `apps/adk-web/src/apps/extractors.rs`
 
 Custom `TurnExtractor` implementations wrapping the existing regex extraction functions:
 
@@ -282,7 +282,7 @@ The existing `extract_state()` functions from playbook.rs, guardrails.rs, and su
 
 ## Dependency Changes
 
-### `cookbooks/ui/Cargo.toml`
+### `apps/adk-web/Cargo.toml`
 
 Add:
 ```toml

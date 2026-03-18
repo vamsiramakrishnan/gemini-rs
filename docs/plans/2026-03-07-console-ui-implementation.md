@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Rebuild the cookbooks/ui devtools panel into an OTel-native trace explorer with virtualized rendering, unified timeline, canvas minimap, token/usage metrics, and a SessionBridge to eliminate app boilerplate.
+**Goal:** Rebuild the apps/adk-web devtools panel into an OTel-native trace explorer with virtualized rendering, unified timeline, canvas minimap, token/usage metrics, and a SessionBridge to eliminate app boilerplate.
 
 **Architecture:** Frontend-first (Tasks 1-6 are pure JS/CSS, no Rust changes). Then backend (Tasks 7-10 add Rust types + OTel bridging). Frontend gracefully handles missing new message types so both halves are independently deployable.
 
@@ -13,9 +13,9 @@
 ### Task 1: Rendering Primitives — RingBuffer, VirtualList, RenderScheduler
 
 **Files:**
-- Create: `cookbooks/ui/static/js/render/ring-buffer.js`
-- Create: `cookbooks/ui/static/js/render/virtual-list.js`
-- Create: `cookbooks/ui/static/js/render/render-scheduler.js`
+- Create: `apps/adk-web/static/js/render/ring-buffer.js`
+- Create: `apps/adk-web/static/js/render/virtual-list.js`
+- Create: `apps/adk-web/static/js/render/render-scheduler.js`
 
 These three modules are the performance foundation. Everything else builds on them.
 
@@ -301,7 +301,7 @@ Run: Open browser devtools console, load the app page, verify no JS errors from 
 **Step 5: Commit**
 
 ```bash
-git add cookbooks/ui/static/js/render/
+git add apps/adk-web/static/js/render/
 git commit -m "feat(ui): add rendering primitives — RingBuffer, VirtualList, RenderScheduler"
 ```
 
@@ -310,9 +310,9 @@ git commit -m "feat(ui): add rendering primitives — RingBuffer, VirtualList, R
 ### Task 2: Timeline Panel — Replace Events Tab
 
 **Files:**
-- Modify: `cookbooks/ui/static/app.html` — add `<script>` tags for render modules, add minimap canvas placeholder
-- Rewrite: `cookbooks/ui/static/js/devtools.js` — new `DevtoolsManager` using rendering primitives
-- Modify: `cookbooks/ui/static/css/devtools.css` — new timeline row styles
+- Modify: `apps/adk-web/static/app.html` — add `<script>` tags for render modules, add minimap canvas placeholder
+- Rewrite: `apps/adk-web/static/js/devtools.js` — new `DevtoolsManager` using rendering primitives
+- Modify: `apps/adk-web/static/css/devtools.css` — new timeline row styles
 
 This is the largest task. The entire `DevtoolsManager` class is rewritten to use `RingBuffer` + `VirtualList` for the timeline, with the new tab structure: Timeline | State | Phases | Metrics.
 
@@ -526,7 +526,7 @@ Run: `cargo run -p rs-genai-ui` and connect to a text-chat or tool-calling app. 
 **Step 6: Commit**
 
 ```bash
-git add cookbooks/ui/static/js/devtools.js cookbooks/ui/static/app.html cookbooks/ui/static/css/devtools.css
+git add apps/adk-web/static/js/devtools.js apps/adk-web/static/app.html apps/adk-web/static/css/devtools.css
 git commit -m "feat(ui): unified timeline panel with VirtualList rendering"
 ```
 
@@ -535,9 +535,9 @@ git commit -m "feat(ui): unified timeline panel with VirtualList rendering"
 ### Task 3: Canvas Minimap
 
 **Files:**
-- Create: `cookbooks/ui/static/js/render/minimap.js`
-- Modify: `cookbooks/ui/static/js/devtools.js` — integrate minimap
-- Modify: `cookbooks/ui/static/css/devtools.css` — minimap container styles
+- Create: `apps/adk-web/static/js/render/minimap.js`
+- Modify: `apps/adk-web/static/js/devtools.js` — integrate minimap
+- Modify: `apps/adk-web/static/css/devtools.css` — minimap container styles
 
 **Step 1: Create `minimap.js`**
 
@@ -681,7 +681,7 @@ this.scheduler.markDirty('minimap');
 **Step 5: Commit**
 
 ```bash
-git add cookbooks/ui/static/js/render/minimap.js cookbooks/ui/static/js/devtools.js cookbooks/ui/static/css/devtools.css
+git add apps/adk-web/static/js/render/minimap.js apps/adk-web/static/js/devtools.js apps/adk-web/static/css/devtools.css
 git commit -m "feat(ui): canvas minimap with click-to-scroll and viewport overlay"
 ```
 
@@ -690,9 +690,9 @@ git commit -m "feat(ui): canvas minimap with click-to-scroll and viewport overla
 ### Task 4: Metrics Panel — Tokens, Cost, Sparkline
 
 **Files:**
-- Create: `cookbooks/ui/static/js/render/sparkline.js`
-- Modify: `cookbooks/ui/static/js/devtools.js` — new `_renderMetrics()` method
-- Modify: `cookbooks/ui/static/css/devtools.css` — metrics panel styles
+- Create: `apps/adk-web/static/js/render/sparkline.js`
+- Modify: `apps/adk-web/static/js/devtools.js` — new `_renderMetrics()` method
+- Modify: `apps/adk-web/static/css/devtools.css` — metrics panel styles
 
 **Step 1: Create `sparkline.js`**
 
@@ -846,7 +846,7 @@ handleTelemetry(stats) {
 **Step 5: Commit**
 
 ```bash
-git add cookbooks/ui/static/js/render/sparkline.js cookbooks/ui/static/js/devtools.js cookbooks/ui/static/css/devtools.css
+git add apps/adk-web/static/js/render/sparkline.js apps/adk-web/static/js/devtools.js apps/adk-web/static/css/devtools.css
 git commit -m "feat(ui): metrics panel with token counts, cost estimation, and latency sparkline"
 ```
 
@@ -855,8 +855,8 @@ git commit -m "feat(ui): metrics panel with token counts, cost estimation, and l
 ### Task 5: State Panel — Targeted Updates, Diff Flash, Search
 
 **Files:**
-- Modify: `cookbooks/ui/static/js/devtools.js` — new state panel with `Map<key, DOMElement>` tracking
-- Modify: `cookbooks/ui/static/css/devtools.css` — diff flash + search styles
+- Modify: `apps/adk-web/static/js/devtools.js` — new state panel with `Map<key, DOMElement>` tracking
+- Modify: `apps/adk-web/static/css/devtools.css` — diff flash + search styles
 
 **Step 1: Rewrite state panel rendering in `devtools.js`**
 
@@ -1007,7 +1007,7 @@ _addStateRow(key, value) {
 **Step 5: Commit**
 
 ```bash
-git add cookbooks/ui/static/js/devtools.js cookbooks/ui/static/css/devtools.css
+git add apps/adk-web/static/js/devtools.js apps/adk-web/static/css/devtools.css
 git commit -m "feat(ui): state panel with targeted DOM updates, diff flash, and search"
 ```
 
@@ -1016,8 +1016,8 @@ git commit -m "feat(ui): state panel with targeted DOM updates, diff flash, and 
 ### Task 6: Phases Panel — Current Phase Hero, Duration Bars
 
 **Files:**
-- Modify: `cookbooks/ui/static/js/devtools.js` — new `_renderPhases()` method
-- Modify: `cookbooks/ui/static/css/devtools.css` — phase hero and duration bar styles
+- Modify: `apps/adk-web/static/js/devtools.js` — new `_renderPhases()` method
+- Modify: `apps/adk-web/static/css/devtools.css` — phase hero and duration bar styles
 
 **Step 1: Implement `_renderPhases()`**
 
@@ -1126,7 +1126,7 @@ _renderPhases() {
 **Step 4: Commit**
 
 ```bash
-git add cookbooks/ui/static/js/devtools.js cookbooks/ui/static/css/devtools.css
+git add apps/adk-web/static/js/devtools.js apps/adk-web/static/css/devtools.css
 git commit -m "feat(ui): phases panel with current phase hero and duration bars"
 ```
 
@@ -1135,16 +1135,16 @@ git commit -m "feat(ui): phases panel with current phase hero and duration bars"
 ### Task 7: Server — SessionBridge
 
 **Files:**
-- Create: `cookbooks/ui/src/bridge.rs`
-- Modify: `cookbooks/ui/src/main.rs` — add `mod bridge;`
-- Modify: `cookbooks/ui/src/apps/voice_chat.rs` — migrate to SessionBridge
-- Modify: `cookbooks/ui/src/apps/tool_calling.rs` — migrate to SessionBridge
-- Modify: `cookbooks/ui/src/apps/text_chat.rs` — migrate to SessionBridge
+- Create: `apps/adk-web/src/bridge.rs`
+- Modify: `apps/adk-web/src/main.rs` — add `mod bridge;`
+- Modify: `apps/adk-web/src/apps/voice_chat.rs` — migrate to SessionBridge
+- Modify: `apps/adk-web/src/apps/tool_calling.rs` — migrate to SessionBridge
+- Modify: `apps/adk-web/src/apps/text_chat.rs` — migrate to SessionBridge
 
 **Step 1: Create `bridge.rs`**
 
 ```rust
-//! SessionBridge — eliminates callback boilerplate in cookbook apps.
+//! SessionBridge — eliminates callback boilerplate in demo apps.
 //!
 //! Wires all standard event callbacks (audio, text, turn, interrupt, VAD, error,
 //! transcription, telemetry) onto a Live builder in one call.
@@ -1158,7 +1158,7 @@ use adk_rs_fluent::prelude::*;
 
 use crate::app::{AppInfo, CookbookApp, ServerMessage, WsSender};
 
-/// Bridge between a cookbook app's WebSocket sender and a Live session builder.
+/// Bridge between a demo app's WebSocket sender and a Live session builder.
 ///
 /// Call `bridge.wire_live(builder)` to attach all standard callbacks,
 /// then `bridge.recv_loop(handle, rx)` to run the browser->Gemini forwarding loop.
@@ -1382,8 +1382,8 @@ Verify: identical behavior to before migration.
 **Step 8: Commit**
 
 ```bash
-git add cookbooks/ui/src/bridge.rs cookbooks/ui/src/main.rs cookbooks/ui/src/apps/voice_chat.rs cookbooks/ui/src/apps/text_chat.rs cookbooks/ui/src/apps/tool_calling.rs
-git commit -m "feat(ui): SessionBridge eliminates callback boilerplate in cookbook apps"
+git add apps/adk-web/src/bridge.rs apps/adk-web/src/main.rs apps/adk-web/src/apps/voice_chat.rs apps/adk-web/src/apps/text_chat.rs apps/adk-web/src/apps/tool_calling.rs
+git commit -m "feat(ui): SessionBridge eliminates callback boilerplate in demo apps"
 ```
 
 ---
@@ -1391,11 +1391,11 @@ git commit -m "feat(ui): SessionBridge eliminates callback boilerplate in cookbo
 ### Task 8: Server — New ServerMessage Variants
 
 **Files:**
-- Modify: `cookbooks/ui/src/app.rs` — add `SpanEvent` and `TurnMetrics` variants to `ServerMessage`
+- Modify: `apps/adk-web/src/app.rs` — add `SpanEvent` and `TurnMetrics` variants to `ServerMessage`
 
 **Step 1: Add new variants to `ServerMessage` enum**
 
-In `cookbooks/ui/src/app.rs`, add after the `ToolCallEvent` variant:
+In `apps/adk-web/src/app.rs`, add after the `ToolCallEvent` variant:
 
 ```rust
 /// OTel span lifecycle event bridged from the tracing Layer.
@@ -1451,7 +1451,7 @@ Expected: clean compile. New variants are defined but not yet sent by any app (t
 **Step 4: Commit**
 
 ```bash
-git add cookbooks/ui/src/app.rs cookbooks/ui/static/js/devtools.js cookbooks/ui/static/js/app.js
+git add apps/adk-web/src/app.rs apps/adk-web/static/js/devtools.js apps/adk-web/static/js/app.js
 git commit -m "feat(ui): add SpanEvent and TurnMetrics server message variants"
 ```
 
@@ -1460,14 +1460,14 @@ git commit -m "feat(ui): add SpanEvent and TurnMetrics server message variants"
 ### Task 9: Server — WebSocketSpanLayer (OTel Span Bridge)
 
 **Files:**
-- Create: `cookbooks/ui/src/span_layer.rs`
-- Modify: `cookbooks/ui/src/main.rs` — add `mod span_layer;`
-- Modify: `cookbooks/ui/src/bridge.rs` — integrate span layer into session lifecycle
-- Modify: `cookbooks/ui/Cargo.toml` — add `tracing-subscriber` dependency
+- Create: `apps/adk-web/src/span_layer.rs`
+- Modify: `apps/adk-web/src/main.rs` — add `mod span_layer;`
+- Modify: `apps/adk-web/src/bridge.rs` — integrate span layer into session lifecycle
+- Modify: `apps/adk-web/Cargo.toml` — add `tracing-subscriber` dependency
 
 **Step 1: Add dependency**
 
-In `cookbooks/ui/Cargo.toml`, add:
+In `apps/adk-web/Cargo.toml`, add:
 ```toml
 tracing-subscriber = { version = "0.3", features = ["registry", "env-filter"] }
 ```
@@ -1625,7 +1625,7 @@ Run: `cargo check -p rs-genai-ui`
 **Step 5: Commit**
 
 ```bash
-git add cookbooks/ui/src/span_layer.rs cookbooks/ui/src/main.rs cookbooks/ui/src/bridge.rs cookbooks/ui/Cargo.toml
+git add apps/adk-web/src/span_layer.rs apps/adk-web/src/main.rs apps/adk-web/src/bridge.rs apps/adk-web/Cargo.toml
 git commit -m "feat(ui): WebSocketSpanLayer bridges tracing spans to browser timeline"
 ```
 
@@ -1634,8 +1634,8 @@ git commit -m "feat(ui): WebSocketSpanLayer bridges tracing spans to browser tim
 ### Task 10: OTel Export — Copy as OTLP JSON + Trace ID Badge
 
 **Files:**
-- Modify: `cookbooks/ui/static/js/devtools.js` — add export button and OTLP JSON serialization
-- Modify: `cookbooks/ui/static/css/devtools.css` — export button styles
+- Modify: `apps/adk-web/static/js/devtools.js` — add export button and OTLP JSON serialization
+- Modify: `apps/adk-web/static/css/devtools.css` — export button styles
 
 **Step 1: Add export functionality to `devtools.js`**
 
@@ -1666,7 +1666,7 @@ _exportOtlpJson() {
     resourceSpans: [{
       resource: {
         attributes: [
-          { key: 'service.name', value: { stringValue: 'gemini-live-cookbooks' } },
+          { key: 'service.name', value: { stringValue: 'gemini-rs' } },
           { key: 'session.start', value: { stringValue: new Date(this.sessionStart).toISOString() } },
         ]
       },
@@ -1763,7 +1763,7 @@ if (this._traceId) {
 **Step 5: Commit**
 
 ```bash
-git add cookbooks/ui/static/js/devtools.js cookbooks/ui/static/css/devtools.css
+git add apps/adk-web/static/js/devtools.js apps/adk-web/static/css/devtools.css
 git commit -m "feat(ui): OTel export — copy trace as OTLP JSON with trace ID badge"
 ```
 

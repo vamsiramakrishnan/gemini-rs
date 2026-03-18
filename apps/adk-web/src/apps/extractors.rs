@@ -1,4 +1,4 @@
-//! Custom TurnExtractor implementations for cookbook apps.
+//! Custom TurnExtractor implementations for demo apps.
 //!
 //! Wraps regex-based extraction functions into the TurnExtractor trait
 //! so they integrate with the L1 extraction pipeline.

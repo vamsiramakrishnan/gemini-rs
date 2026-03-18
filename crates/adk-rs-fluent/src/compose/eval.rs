@@ -192,6 +192,54 @@ impl E {
     ) -> ECriterion {
         ECriterion::new(name, f)
     }
+
+    /// Load eval cases from a file path.
+    ///
+    /// The file should contain one case per pair of consecutive lines:
+    /// odd lines are prompts, even lines are expected responses.
+    /// Lines starting with `#` are comments and blank lines are skipped.
+    pub fn from_file(path: &str) -> EvalSuite {
+        let content = std::fs::read_to_string(path).unwrap_or_default();
+        let lines: Vec<&str> = content
+            .lines()
+            .map(|l| l.trim())
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+            .collect();
+
+        let mut cases = Vec::new();
+        let mut i = 0;
+        while i + 1 < lines.len() {
+            cases.push(EvalCase {
+                prompt: lines[i].to_string(),
+                expected: lines[i + 1].to_string(),
+            });
+            i += 2;
+        }
+
+        EvalSuite {
+            cases,
+            criteria_names: Vec::new(),
+        }
+    }
+
+    /// Create a persona-based evaluator for user simulation.
+    ///
+    /// The persona describes a simulated user with a given name and description,
+    /// which can be used to generate realistic test interactions.
+    pub fn persona(name: &'static str, description: &'static str) -> ECriterion {
+        ECriterion::new(name, move |output, _expected| {
+            // Persona evaluator checks that the agent's output is appropriate
+            // for the described persona. Placeholder scoring: returns 0.5
+            // indicating neutral — real implementation requires an LLM judge
+            // parameterized with the persona description.
+            let _ = description;
+            if output.is_empty() {
+                0.0
+            } else {
+                0.5
+            }
+        })
+    }
 }
 
 #[cfg(test)]
@@ -235,6 +283,38 @@ mod tests {
         assert_eq!(scores.len(), 2);
         assert_eq!(scores[0].0, "response_match");
         assert_eq!(scores[1].0, "contains_match");
+    }
+
+    #[test]
+    fn from_file_missing() {
+        let suite = E::from_file("/nonexistent/path.txt");
+        assert!(suite.is_empty());
+    }
+
+    #[test]
+    fn from_file_parses_cases() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("eval_test_cases.txt");
+        std::fs::write(
+            &path,
+            "# comment\nWhat is 2+2?\n4\n\nHello\nHi\n",
+        )
+        .unwrap();
+        let suite = E::from_file(path.to_str().unwrap());
+        assert_eq!(suite.len(), 2);
+        assert_eq!(suite.cases[0].prompt, "What is 2+2?");
+        assert_eq!(suite.cases[0].expected, "4");
+        assert_eq!(suite.cases[1].prompt, "Hello");
+        assert_eq!(suite.cases[1].expected, "Hi");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn persona_criterion() {
+        let c = E::persona("impatient_user", "A user who is in a hurry and wants quick answers");
+        assert_eq!(c.name(), "impatient_user");
+        assert_eq!(c.score("Here is your answer", ""), 0.5);
+        assert_eq!(c.score("", ""), 0.0);
     }
 
     #[test]
