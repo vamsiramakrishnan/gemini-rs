@@ -1,6 +1,6 @@
 [package]
 name = "adk-cli"
-version = "0.5.0"
+version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "CLI tool for ADK agent development — create, run, web, eval, deploy, api_server"
@@ -9,10 +9,10 @@ categories = ["command-line-utilities", "development-tools"]
 repository.workspace = true
 
 [dependencies]
-rs-genai = { path = "../../crates/rs-genai" }
-rs-adk = { path = "../../crates/rs-adk", features = ["gemini-llm"] }
-adk-rs-fluent = { path = "../../crates/adk-rs-fluent", features = ["gemini-llm"] }
-adk-server-core = { path = "../../apps/adk-server-core" }
+rs-genai        = { workspace = true }
+rs-adk          = { workspace = true, features = ["gemini-llm"] }
+adk-rs-fluent   = { workspace = true, features = ["gemini-llm"] }
+adk-server-core = { workspace = true }
 axum = "0.7"
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }

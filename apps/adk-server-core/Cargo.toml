@@ -1,12 +1,15 @@
 [package]
 name = "adk-server-core"
-version = "0.5.0"
+version.workspace = true
 edition.workspace = true
-publish = false
+license.workspace = true
+repository.workspace = true
 description = "Shared server core for adk-web, adk-api-server, and adk-cli — agent loading, REST handlers, session management"
+keywords = ["gemini", "agents", "adk", "server", "axum"]
+categories = ["api-bindings", "asynchronous", "web-programming::http-server"]
 
 [dependencies]
-rs-adk = { path = "../../crates/rs-adk", features = ["gemini-llm"] }
+rs-adk = { workspace = true, features = ["gemini-llm"] }
 axum = { version = "0.7", features = ["macros"] }
 tower-http = { version = "0.5", features = ["cors"] }
 serde = { version = "1.0", features = ["derive"] }

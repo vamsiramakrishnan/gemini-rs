@@ -18,9 +18,18 @@ members = [
 ]
 
 [workspace.package]
+version = "0.5.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/vamsiramakrishnan/gemini-rs"
+
+# Internal workspace crates — version mirrors [workspace.package].version above.
+# Update ONLY [workspace.package].version when releasing; release.sh handles the rest.
+[workspace.dependencies]
+rs-genai        = { path = "crates/rs-genai",        version = "0.5.0" }
+rs-adk          = { path = "crates/rs-adk",          version = "0.5.0" }
+adk-rs-fluent   = { path = "crates/adk-rs-fluent",   version = "0.5.0" }
+adk-server-core = { path = "apps/adk-server-core",   version = "0.5.0" }
 
 [workspace.lints.clippy]
 type_complexity = "allow"

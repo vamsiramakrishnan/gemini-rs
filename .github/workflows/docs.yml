@@ -16,53 +16,61 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  check-docs:
-    name: Check documentation
+  build:
+    name: Build documentation
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.93.1"
       - uses: Swatinem/rust-cache@v2
-      - name: Check rustdoc builds with no warnings
-        env:
-          RUSTDOCFLAGS: "-D warnings"
-        run: cargo doc --no-deps --workspace
+
+      # ── mdBook + plugins ────────────────────────────────────────────────────
       - name: Install mdBook
         uses: peaceiris/actions-mdbook@v2
         with:
-          mdbook-version: 'latest'
-      - name: Check mdBook builds
+          mdbook-version: "0.4.40"
+
+      - name: Install mdBook plugins
+        run: |
+          cargo install mdbook-pagetoc --locked --version "^0.2"
+
+      # ── Build ───────────────────────────────────────────────────────────────
+      - name: Build mdBook user guide
         run: mdbook build docs
 
+      - name: Check rustdoc (no warnings)
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+        run: cargo doc --no-deps --workspace
+
+      # ── Upload artifact (main branch only) ──────────────────────────────────
+      - name: Build rustdoc API reference
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: cargo doc --no-deps --workspace
+
+      - name: Merge rustdoc into mdBook output
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          cp -r target/doc target/book/api
+          printf '<meta http-equiv="refresh" content="0; url=api/rs_genai/index.html">' \
+            > target/book/api/index.html
+
+      - uses: actions/upload-pages-artifact@v3
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          path: target/book
+
   deploy:
+    name: Deploy to GitHub Pages
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: check-docs
+    needs: build
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: "1.93.1"
-      - uses: Swatinem/rust-cache@v2
-      - name: Install mdBook
-        uses: peaceiris/actions-mdbook@v2
-        with:
-          mdbook-version: 'latest'
-      - name: Build mdBook user guide
-        run: mdbook build docs
-      - name: Build rustdoc API reference
-        run: cargo doc --no-deps --workspace
-      - name: Merge rustdoc into mdBook output
-        run: |
-          cp -r target/doc target/book/api
-          echo '<meta http-equiv="refresh" content="0; url=api/rs_genai/index.html">' > target/book/api/index.html
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: target/book
       - id: deployment
         uses: actions/deploy-pages@v4

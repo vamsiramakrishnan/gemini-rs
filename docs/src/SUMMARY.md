@@ -2,6 +2,8 @@
 
 [Introduction](./introduction.md)
 
+---
+
 # Getting Started
 
 - [Architecture Overview](./user-guide/architecture.md)

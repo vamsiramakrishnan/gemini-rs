@@ -1,6 +1,6 @@
 [package]
 name = "rs-genai"
-version = "0.5.0"
+version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "Raw wire protocol and transport for the Gemini Multimodal Live API"

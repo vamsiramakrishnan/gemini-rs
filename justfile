@@ -125,6 +125,24 @@ ci: fmt-check lint doc-check test
     @echo ""
     @echo "✓ CI pipeline passed. Matches GitHub Actions exactly."
 
+# ─── Release ─────────────────────────────────────────────────
+
+# Release a new version. Runs full suite, generates changelog, bumps
+# workspace version, commits, tags, and pushes. CI handles crates.io + GitHub Release.
+# Usage: just release 0.6.0
+release version:
+    @bash scripts/release.sh {{version}}
+
+# Dry-run: preview what `just release` would do without any changes.
+release-dry version:
+    @bash scripts/release.sh {{version}} --dry-run
+
+# Preview commits since last tag (changelog preview before release).
+release-preview:
+    @PREV=$(git tag --sort=-version:refname | head -1 2>/dev/null || echo ""); \
+     if [ -z "$$PREV" ]; then git log --oneline HEAD; \
+     else echo "Changes since $$PREV:"; git log --oneline --no-decorate "$$PREV..HEAD"; fi
+
 # ─── Utilities ───────────────────────────────────────────────
 
 # Show workspace dependency tree
