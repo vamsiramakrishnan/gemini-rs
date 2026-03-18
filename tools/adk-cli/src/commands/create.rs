@@ -19,6 +19,13 @@ model = "{model}"
 instruction = "You are a helpful assistant. Be concise and informative."
 tools = ["google_search"]
 sub_agents = []
+
+# ── Optional settings ────────────────────────────────────────────
+# temperature = 0.7          # Sampling temperature (0.0–2.0)
+# thinking = 2048            # Enable extended thinking with token budget
+# greeting = "Hello! How can I help you today?"  # Model speaks first (Live sessions)
+# voice = "Kore"             # Voice for Live sessions: Kore, Puck, Charon, Fenrir, Aoede
+# output_modality = "audio"  # Live output: "text", "audio", or "text_and_audio"
 "#
         ),
     )?;

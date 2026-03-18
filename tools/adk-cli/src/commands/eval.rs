@@ -90,10 +90,19 @@ pub async fn run(
     let llm: Arc<dyn BaseLlm> = Arc::new(GeminiLlm::new(params));
 
     let mut builder = AgentBuilder::new(&m.name).instruction(&m.instruction);
+
+    if let Some(temp) = m.temperature {
+        builder = builder.temperature(temp);
+    }
+    if let Some(budget) = m.thinking {
+        builder = builder.thinking(budget);
+    }
+
     for tool in &m.tools {
         builder = match tool.as_str() {
             "google_search" => builder.google_search(),
             "code_execution" => builder.code_execution(),
+            "url_context" => builder.url_context(),
             _ => builder,
         };
     }

@@ -375,10 +375,19 @@ async fn run_session(
     let tx_out_transcript = out_tx.clone();
     let tx_thought = out_tx.clone();
 
+    // Resolve voice from manifest or default to Kore
+    let voice = match manifest.voice.as_deref() {
+        Some("Puck") | Some("puck") => Voice::Puck,
+        Some("Charon") | Some("charon") => Voice::Charon,
+        Some("Fenrir") | Some("fenrir") => Voice::Fenrir,
+        Some("Aoede") | Some("aoede") => Voice::Aoede,
+        _ => Voice::Kore,
+    };
+
     let mut builder = Live::builder()
         .model(GeminiModel::Gemini2_0FlashLive)
         .instruction(&manifest.instruction)
-        .voice(Voice::Kore)
+        .voice(voice)
         .transcription(true, true)
         .on_audio(move |data| {
             tx_audio.send(WsOut::Binary(data.to_vec())).ok();
@@ -428,11 +437,20 @@ async fn run_session(
                 .ok();
         });
 
+    // Wire optional Live features from manifest
+    if let Some(ref greeting) = manifest.greeting {
+        builder = builder.greeting(greeting);
+    }
+    if let Some(budget) = manifest.thinking {
+        builder = builder.thinking(budget);
+    }
+
     // Wire built-in tools
     for tool in &manifest.tools {
         builder = match tool.as_str() {
             "google_search" => builder.google_search(),
             "code_execution" => builder.code_execution(),
+            "url_context" => builder.url_context(),
             _ => builder,
         };
     }
