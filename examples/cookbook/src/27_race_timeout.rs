@@ -18,7 +18,9 @@ struct DelayLlm {
 
 #[async_trait::async_trait]
 impl BaseLlm for DelayLlm {
-    fn model_id(&self) -> &str { &self.name }
+    fn model_id(&self) -> &str {
+        &self.name
+    }
     async fn generate(
         &self,
         _req: rs_adk::llm::LlmRequest,
@@ -64,10 +66,7 @@ async fn main() {
         .instruction("Detailed response")
         .build(slow_llm.clone());
 
-    let race = RaceTextAgent::new(
-        "speed-race",
-        vec![fast_agent.clone(), slow_agent.clone()],
-    );
+    let race = RaceTextAgent::new("speed-race", vec![fast_agent.clone(), slow_agent.clone()]);
 
     let state = State::new();
     let start = std::time::Instant::now();
@@ -75,8 +74,14 @@ async fn main() {
     let elapsed = start.elapsed();
 
     println!("Race result: '{}'", result);
-    println!("Completed in {:?} (fast agent won, slow cancelled)", elapsed);
-    assert!(elapsed < Duration::from_millis(150), "Fast agent should win");
+    println!(
+        "Completed in {:?} (fast agent won, slow cancelled)",
+        elapsed
+    );
+    assert!(
+        elapsed < Duration::from_millis(150),
+        "Fast agent should win"
+    );
 
     // ── 2. Race with multiple providers (model selection) ──
     println!("\n--- 2. Multi-Provider Race ---\n");
@@ -99,14 +104,17 @@ async fn main() {
         response: "Provider C: Detailed market report with forecasts".into(),
     });
 
-    let agent_a = AgentBuilder::new("provider-a").instruction("Analyze").build(provider_a);
-    let agent_b = AgentBuilder::new("provider-b").instruction("Analyze").build(provider_b);
-    let agent_c = AgentBuilder::new("provider-c").instruction("Analyze").build(provider_c);
+    let agent_a = AgentBuilder::new("provider-a")
+        .instruction("Analyze")
+        .build(provider_a);
+    let agent_b = AgentBuilder::new("provider-b")
+        .instruction("Analyze")
+        .build(provider_b);
+    let agent_c = AgentBuilder::new("provider-c")
+        .instruction("Analyze")
+        .build(provider_c);
 
-    let multi_race = RaceTextAgent::new(
-        "provider-race",
-        vec![agent_a, agent_b, agent_c],
-    );
+    let multi_race = RaceTextAgent::new("provider-race", vec![agent_a, agent_b, agent_c]);
 
     let result = multi_race.run(&state).await.unwrap();
     println!("Multi-provider race winner: '{}'", result);
@@ -130,7 +138,10 @@ async fn main() {
     );
 
     let result = tight_timeout.run(&state).await;
-    println!("Slow agent with 50ms timeout: {:?} (expected timeout)", result.is_err());
+    println!(
+        "Slow agent with 50ms timeout: {:?} (expected timeout)",
+        result.is_err()
+    );
     if let Err(ref e) = result {
         println!("  Error: {}", e);
     }
@@ -158,23 +169,20 @@ async fn main() {
     println!("\n--- 5. Production Resilience Pattern ---\n");
 
     // In production: race multiple providers, each with individual timeouts
-    let create_provider = |name: &str, delay_ms: u64, response: &str, timeout_ms: u64|
-        -> Arc<dyn TextAgent>
-    {
-        let llm: Arc<dyn BaseLlm> = Arc::new(DelayLlm {
-            name: name.into(),
-            delay: Duration::from_millis(delay_ms),
-            response: response.into(),
-        });
-        let agent = AgentBuilder::new(name)
-            .instruction("Respond")
-            .build(llm);
-        Arc::new(TimeoutTextAgent::new(
-            format!("{}-timeout", name),
-            agent,
-            Duration::from_millis(timeout_ms),
-        ))
-    };
+    let create_provider =
+        |name: &str, delay_ms: u64, response: &str, timeout_ms: u64| -> Arc<dyn TextAgent> {
+            let llm: Arc<dyn BaseLlm> = Arc::new(DelayLlm {
+                name: name.into(),
+                delay: Duration::from_millis(delay_ms),
+                response: response.into(),
+            });
+            let agent = AgentBuilder::new(name).instruction("Respond").build(llm);
+            Arc::new(TimeoutTextAgent::new(
+                format!("{}-timeout", name),
+                agent,
+                Duration::from_millis(timeout_ms),
+            ))
+        };
 
     // Provider 1: fast but may be down (simulated by timeout)
     let p1 = create_provider("primary", 40, "Primary: fast response", 200);
@@ -196,7 +204,9 @@ async fn main() {
     // Try fast first (tight timeout), then medium (more time), then slow (generous)
     let fast_try: Arc<dyn TextAgent> = Arc::new(TimeoutTextAgent::new(
         "fast-try",
-        AgentBuilder::new("fast").instruction("Quick").build(fast_llm.clone()),
+        AgentBuilder::new("fast")
+            .instruction("Quick")
+            .build(fast_llm.clone()),
         Duration::from_millis(30),
     ));
 
@@ -207,20 +217,21 @@ async fn main() {
     });
     let medium_try: Arc<dyn TextAgent> = Arc::new(TimeoutTextAgent::new(
         "medium-try",
-        AgentBuilder::new("medium").instruction("Moderate").build(medium_llm),
+        AgentBuilder::new("medium")
+            .instruction("Moderate")
+            .build(medium_llm),
         Duration::from_millis(200),
     ));
 
     let slow_try: Arc<dyn TextAgent> = Arc::new(TimeoutTextAgent::new(
         "slow-try",
-        AgentBuilder::new("slow").instruction("Thorough").build(slow_llm.clone()),
+        AgentBuilder::new("slow")
+            .instruction("Thorough")
+            .build(slow_llm.clone()),
         Duration::from_millis(500),
     ));
 
-    let cascade = FallbackTextAgent::new(
-        "cascading-timeout",
-        vec![fast_try, medium_try, slow_try],
-    );
+    let cascade = FallbackTextAgent::new("cascading-timeout", vec![fast_try, medium_try, slow_try]);
 
     let result = cascade.run(&state).await.unwrap();
     println!("Cascading timeout result: '{}'", result);
@@ -266,15 +277,13 @@ async fn main() {
     let pipeline = research.clone() >> analyze.clone();
 
     // Fallback: try pipeline, fall back to quick response
-    let quick = AgentBuilder::new("quick")
-        .instruction("Provide a quick answer");
+    let quick = AgentBuilder::new("quick").instruction("Provide a quick answer");
 
     let robust = pipeline / quick;
 
     println!("Composed: (research >> analyze) / quick");
-    match &robust {
-        Composable::Fallback(f) => println!("  Fallback with {} candidates", f.candidates.len()),
-        _ => {}
+    if let Composable::Fallback(f) = &robust {
+        println!("  Fallback with {} candidates", f.candidates.len());
     }
 
     println!("\nRace/Timeout pipeline example completed successfully!");

@@ -20,7 +20,7 @@ fn main() {
     let web_researcher = AgentBuilder::new("web-researcher")
         .instruction(
             "Search the web for recent news, blog posts, and articles on the given topic. \
-             Focus on developments from the last 6 months. Cite all sources with URLs."
+             Focus on developments from the last 6 months. Cite all sources with URLs.",
         )
         .google_search()
         .url_context()
@@ -31,7 +31,7 @@ fn main() {
         .instruction(
             "Search for academic papers, preprints, and technical reports on the topic. \
              Focus on methodology, experimental results, and citations. \
-             Note any consensus or disagreement in the field."
+             Note any consensus or disagreement in the field.",
         )
         .google_search()
         .temperature(0.1)
@@ -41,7 +41,7 @@ fn main() {
     let industry_analyst = AgentBuilder::new("industry-analyst")
         .instruction(
             "Analyze industry trends, market data, and competitive landscape for the topic. \
-             Include market size estimates, key players, and growth projections."
+             Include market size estimates, key players, and growth projections.",
         )
         .google_search()
         .temperature(0.3)
@@ -61,7 +61,7 @@ fn main() {
              1) Key findings that appear across multiple sources \
              2) Unique insights from each source \
              3) Contradictions or gaps in the research \
-             4) Confidence level (high/medium/low) for each finding"
+             4) Confidence level (high/medium/low) for each finding",
         )
         .temperature(0.4)
         .thinking(4096)
@@ -71,7 +71,10 @@ fn main() {
         .writes("synthesis");
 
     println!("\nPhase 2: Synthesizer agent");
-    println!("  - {} (reads all 3 sources, thinking=4096)", synthesizer.name());
+    println!(
+        "  - {} (reads all 3 sources, thinking=4096)",
+        synthesizer.name()
+    );
 
     // ── Phase 3: Quality reviewer with iterative loop ──
 
@@ -83,7 +86,7 @@ fn main() {
              3) Completeness -- are key aspects of the topic covered? \
              4) Balance -- are multiple perspectives represented? \
              Set quality to 'excellent' when all criteria are met. \
-             Otherwise, set quality to 'needs_improvement' with specific feedback."
+             Otherwise, set quality to 'needs_improvement' with specific feedback.",
         )
         .thinking(2048)
         .reads("synthesis")
@@ -94,7 +97,7 @@ fn main() {
         .instruction(
             "Revise the synthesis based on the reviewer's feedback. \
              Address each point of feedback explicitly. \
-             Maintain the structured format and all citations."
+             Maintain the structured format and all citations.",
         )
         .reads("synthesis")
         .reads("review_feedback")
@@ -133,7 +136,7 @@ fn main() {
     let formatter = AgentBuilder::new("formatter")
         .instruction(
             "Format the research synthesis into a structured research report. \
-             Follow the output schema exactly. Be concise but thorough."
+             Follow the output schema exactly. Be concise but thorough.",
         )
         .output_schema(report_schema.clone())
         .reads("synthesis")
@@ -146,9 +149,8 @@ fn main() {
     println!("\n--- Pipeline Composition ---\n");
 
     // Step 1: Parallel research fan-out
-    let research_fanout = web_researcher.clone()
-        | academic_researcher.clone()
-        | industry_analyst.clone();
+    let research_fanout =
+        web_researcher.clone() | academic_researcher.clone() | industry_analyst.clone();
 
     println!("Step 1: Parallel research (3 branches)");
 
@@ -169,17 +171,11 @@ fn main() {
     println!("Step 4: Structured formatting");
 
     // Full pipeline: fanout >> synthesize >> review loop >> format
-    let full_pipeline = research_fanout
-        >> synthesizer.clone()
-        >> review
-        >> formatter.clone();
+    let full_pipeline = research_fanout >> synthesizer.clone() >> review >> formatter.clone();
 
     println!("\nFull pipeline assembled:");
-    match &full_pipeline {
-        Composable::Pipeline(p) => {
-            println!("  Top-level pipeline: {} steps", p.steps.len());
-        }
-        _ => {}
+    if let Composable::Pipeline(p) = &full_pipeline {
+        println!("  Top-level pipeline: {} steps", p.steps.len());
     }
 
     // ── Prompt engineering for the synthesizer ──
@@ -199,7 +195,10 @@ fn main() {
         ])
         + P::context("This research will inform a board-level strategic decision");
 
-    println!("Synthesizer prompt ({} sections):", synth_prompt.sections.len());
+    println!(
+        "Synthesizer prompt ({} sections):",
+        synth_prompt.sections.len()
+    );
     println!("{}", synth_prompt.render());
 
     // ── State transforms for data flow ──
@@ -222,7 +221,10 @@ fn main() {
 
     // Post-review transform: compute quality metrics
     let post_review = S::compute("review_count", |s| {
-        let feedback = s.get("review_feedback").and_then(|v| v.as_str()).unwrap_or("");
+        let feedback = s
+            .get("review_feedback")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         json!(feedback.lines().count())
     }) >> S::history("quality", 5);
 
@@ -276,7 +278,8 @@ fn main() {
         + A::json_output("report", "Structured research report")
         + A::text_output("executive_summary", "One-page executive summary");
 
-    println!("Artifacts: {} inputs, {} outputs",
+    println!(
+        "Artifacts: {} inputs, {} outputs",
         artifacts.all_inputs().len(),
         artifacts.all_outputs().len()
     );
@@ -295,8 +298,11 @@ fn main() {
         )
         .criteria(&["contains_match", "safety", "semantic_match"]);
 
-    println!("Built eval suite: {} cases, {} criteria",
-        eval.len(), eval.criteria_names.len());
+    println!(
+        "Built eval suite: {} cases, {} criteria",
+        eval.len(),
+        eval.criteria_names.len()
+    );
 
     println!("\nDeep research pipeline example completed successfully!");
 }

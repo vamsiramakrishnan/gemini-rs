@@ -9,7 +9,6 @@
 //!   3. JoinTextAgent collects results when needed (with optional timeout)
 
 use adk_rs_fluent::prelude::*;
-use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -18,12 +17,16 @@ struct EchoLlm;
 
 #[async_trait::async_trait]
 impl BaseLlm for EchoLlm {
-    fn model_id(&self) -> &str { "echo" }
+    fn model_id(&self) -> &str {
+        "echo"
+    }
     async fn generate(
         &self,
         req: rs_adk::llm::LlmRequest,
     ) -> Result<rs_adk::llm::LlmResponse, rs_adk::llm::LlmError> {
-        let text = req.system_instruction.unwrap_or_else(|| "no-instruction".into());
+        let text = req
+            .system_instruction
+            .unwrap_or_else(|| "no-instruction".into());
         // Simulate some work
         tokio::time::sleep(Duration::from_millis(50)).await;
         Ok(rs_adk::llm::LlmResponse {
@@ -88,8 +91,8 @@ async fn main() {
 
     // ── 3. Create join agent ──
 
-    let joiner = JoinTextAgent::new("result-collector", registry.clone())
-        .timeout(Duration::from_secs(5));
+    let joiner =
+        JoinTextAgent::new("result-collector", registry.clone()).timeout(Duration::from_secs(5));
 
     println!("Joiner created with 5s timeout");
 
@@ -104,7 +107,10 @@ async fn main() {
     println!("Dispatching background tasks...");
     let dispatch_result = dispatcher.run(&state).await.unwrap();
     println!("  Dispatch returned immediately: '{}'", dispatch_result);
-    println!("  Dispatch status: {:?}", state.get::<serde_json::Value>("_dispatch_status"));
+    println!(
+        "  Dispatch status: {:?}",
+        state.get::<serde_json::Value>("_dispatch_status")
+    );
 
     // Main pipeline work happens here while background tasks run
     println!("\n  [Main pipeline continues while tasks run in background]");
@@ -117,10 +123,16 @@ async fn main() {
     // Individual results are stored in state
     println!("\n  Individual results in state:");
     if let Some(email_result) = state.get::<String>("_result_email") {
-        println!("    email: {}...", &email_result[..email_result.len().min(60)]);
+        println!(
+            "    email: {}...",
+            &email_result[..email_result.len().min(60)]
+        );
     }
     if let Some(audit_result) = state.get::<String>("_result_audit") {
-        println!("    audit: {}...", &audit_result[..audit_result.len().min(60)]);
+        println!(
+            "    audit: {}...",
+            &audit_result[..audit_result.len().min(60)]
+        );
     }
 
     // ── 5. Selective join (wait for specific tasks only) ──
@@ -157,7 +169,10 @@ async fn main() {
     println!("Dispatched 2 tasks, joining only 'critical'...");
 
     let critical_result = critical_joiner.run(&state2).await.unwrap();
-    println!("  Critical task result: {}...", &critical_result[..critical_result.len().min(50)]);
+    println!(
+        "  Critical task result: {}...",
+        &critical_result[..critical_result.len().min(50)]
+    );
     println!("  Background task still running (not joined)");
 
     // ── 6. Compose dispatch/join in a sequential pipeline ──
@@ -192,8 +207,10 @@ async fn main() {
 
     let tap = TapTextAgent::new("observer", |state: &State| {
         let output: Option<String> = state.get("output");
-        println!("  [TAP] Current output length: {}",
-            output.map(|s| s.len()).unwrap_or(0));
+        println!(
+            "  [TAP] Current output length: {}",
+            output.map(|s| s.len()).unwrap_or(0)
+        );
     });
 
     let state3 = State::new();
@@ -205,13 +222,13 @@ async fn main() {
     println!("\n--- Budget Management ---\n");
 
     // Demonstrate how the semaphore limits concurrency
-    let tight_budget = Arc::new(tokio::sync::Semaphore::new(1)); // Only 1 at a time
+    let _tight_budget = Arc::new(tokio::sync::Semaphore::new(1)); // Only 1 at a time
     println!("  Budget of 1: tasks execute one at a time (serialized)");
 
-    let generous_budget = Arc::new(tokio::sync::Semaphore::new(100)); // Practically unlimited
+    let _generous_budget = Arc::new(tokio::sync::Semaphore::new(100)); // Practically unlimited
     println!("  Budget of 100: tasks execute concurrently (fire-and-forget)");
 
-    let production_budget = Arc::new(tokio::sync::Semaphore::new(5));
+    let _production_budget = Arc::new(tokio::sync::Semaphore::new(5));
     println!("  Budget of 5: balanced concurrency for production use");
 
     println!("\nDispatch/Join pipeline example completed successfully!");

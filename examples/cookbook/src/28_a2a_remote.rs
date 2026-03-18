@@ -48,22 +48,29 @@ fn main() {
         .describe("Real-time fraud scoring and transaction risk assessment");
 
     println!("\nRemote agent: {}", fraud_detector.name());
-    println!("  Timeout: {:?} (fast -- real-time scoring)", fraud_detector.get_timeout());
+    println!(
+        "  Timeout: {:?} (fast -- real-time scoring)",
+        fraud_detector.get_timeout()
+    );
 
     // ── 2. Define skill declarations ──
     println!("\n--- 2. Skill Declarations ---\n");
 
-    let verify_skill = SkillDeclaration::new("verify_identity", "Identity Verification")
-        .describe("Verify caller identity through knowledge-based authentication. \
-                   Requires customer_id and returns verification_status.");
+    let verify_skill = SkillDeclaration::new("verify_identity", "Identity Verification").describe(
+        "Verify caller identity through knowledge-based authentication. \
+                   Requires customer_id and returns verification_status.",
+    );
 
-    let payment_skill = SkillDeclaration::new("process_payment", "Payment Processing")
-        .describe("Process payments, refunds, and payment plans. \
-                   Supports credit card, ACH, and wire transfer.");
+    let payment_skill = SkillDeclaration::new("process_payment", "Payment Processing").describe(
+        "Process payments, refunds, and payment plans. \
+                   Supports credit card, ACH, and wire transfer.",
+    );
 
     let fraud_skill = SkillDeclaration::new("score_transaction", "Transaction Risk Scoring")
-        .describe("Score a transaction for fraud risk on a 0-100 scale. \
-                   Returns risk_score, risk_factors, and recommendation.");
+        .describe(
+            "Score a transaction for fraud risk on a 0-100 scale. \
+                   Returns risk_score, risk_factors, and recommendation.",
+        );
 
     println!("Skill: {} -- {}", verify_skill.id, verify_skill.name);
     println!("  {:?}", verify_skill.description);
@@ -90,8 +97,12 @@ fn main() {
         .health_check("/health")
         .streaming(true);
 
-    println!("Server: {} on {}:{}", support_server.agent_name(),
-        support_server.get_host(), support_server.get_port());
+    println!(
+        "Server: {} on {}:{}",
+        support_server.agent_name(),
+        support_server.get_host(),
+        support_server.get_port()
+    );
 
     // Multiple servers for a microservices architecture
     let billing_server = A2AServer::new("billing-service")
@@ -105,9 +116,21 @@ fn main() {
         .health_check("/health");
 
     println!("\nMicroservice architecture:");
-    println!("  {} -> :{}", support_server.agent_name(), support_server.get_port());
-    println!("  {} -> :{}", billing_server.agent_name(), billing_server.get_port());
-    println!("  {} -> :{}", notification_server.agent_name(), notification_server.get_port());
+    println!(
+        "  {} -> :{}",
+        support_server.agent_name(),
+        support_server.get_port()
+    );
+    println!(
+        "  {} -> :{}",
+        billing_server.agent_name(),
+        billing_server.get_port()
+    );
+    println!(
+        "  {} -> :{}",
+        notification_server.agent_name(),
+        notification_server.get_port()
+    );
 
     // ── 5. T::a2a: Remote agents as tools ──
     println!("\n--- 5. Remote Agents as Tools ---\n");
@@ -116,18 +139,28 @@ fn main() {
     let tools = T::a2a("https://verify.agents.example.com/a2a", "verify_identity")
         | T::a2a("https://payments.agents.example.com/a2a", "process_payment")
         | T::a2a("https://fraud.agents.example.com/a2a", "score_transaction")
-        | T::simple("lookup_account", "Look up account details", |args| async move {
-            let id = args.get("account_id").and_then(|v| v.as_str()).unwrap_or("unknown");
-            Ok(json!({
-                "account_id": id,
-                "name": "Alice Johnson",
-                "status": "active",
-                "tier": "premium"
-            }))
-        })
+        | T::simple(
+            "lookup_account",
+            "Look up account details",
+            |args| async move {
+                let id = args
+                    .get("account_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                Ok(json!({
+                    "account_id": id,
+                    "name": "Alice Johnson",
+                    "status": "active",
+                    "tier": "premium"
+                }))
+            },
+        )
         | T::google_search();
 
-    println!("Tool composite: {} tools (3 remote A2A + 1 local + 1 built-in)", tools.len());
+    println!(
+        "Tool composite: {} tools (3 remote A2A + 1 local + 1 built-in)",
+        tools.len()
+    );
 
     // Use in an agent builder
     let orchestrator = AgentBuilder::new("orchestrator")
@@ -137,7 +170,7 @@ fn main() {
              2. Verify their identity \
              3. Score the transaction for fraud \
              4. Process any payments or refunds \
-             Route issues to the appropriate specialist service."
+             Route issues to the appropriate specialist service.",
         )
         .tools(tools)
         .temperature(0.2);
@@ -186,9 +219,8 @@ fn main() {
         >> notifier.clone();
 
     println!("A2A pipeline: intake >> (verify | fraud) >> resolve >> notify");
-    match &a2a_pipeline {
-        Composable::Pipeline(p) => println!("  {} steps", p.steps.len()),
-        _ => {}
+    if let Composable::Pipeline(p) = &a2a_pipeline {
+        println!("  {} steps", p.steps.len());
     }
 
     // Contract validation
@@ -198,7 +230,10 @@ fn main() {
     for v in &violations {
         match v {
             ContractViolation::OrphanedOutput { producer, key } => {
-                println!("  ORPHANED: {} writes '{}' (OK -- consumed externally)", producer, key);
+                println!(
+                    "  ORPHANED: {} writes '{}' (OK -- consumed externally)",
+                    producer, key
+                );
             }
             _ => {
                 println!("  {:?}", v);

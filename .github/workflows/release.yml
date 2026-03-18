@@ -78,7 +78,7 @@ jobs:
 
           # Check if already published
           HTTP=$(curl -sI -o /dev/null -w "%{http_code}" \
-            "https://static.crates.io/index/$CRATE/$CRATE-${VERSION}.crate" 2>/dev/null || echo 000)
+            "https://static.crates.io/crates/$CRATE/$CRATE-${VERSION}.crate" 2>/dev/null || echo 000)
           if [ "$HTTP" = "200" ]; then
             echo "✓ $CRATE@$VERSION already on crates.io — skipping"
             echo "::endgroup::"
@@ -88,20 +88,20 @@ jobs:
           echo "Publishing $CRATE@$VERSION ..."
           cargo publish -p "$CRATE" --no-verify
 
-          # Poll sparse index until the crate appears (max 180 s)
-          echo "Waiting for $CRATE@$VERSION to appear in the sparse index..."
+          # Poll until the crate appears on static.crates.io (max 180 s)
+          echo "Waiting for $CRATE@$VERSION to appear on crates.io..."
           for i in $(seq 1 36); do
             sleep 5
             HTTP=$(curl -sI -o /dev/null -w "%{http_code}" \
-              "https://static.crates.io/index/$CRATE/$CRATE-${VERSION}.crate" 2>/dev/null || echo 000)
+              "https://static.crates.io/crates/$CRATE/$CRATE-${VERSION}.crate" 2>/dev/null || echo 000)
             if [ "$HTTP" = "200" ]; then
-              echo "✓ $CRATE@$VERSION confirmed in index (${i}×5 s)"
+              echo "✓ $CRATE@$VERSION confirmed available (${i}×5 s)"
               echo "::endgroup::"
               exit 0
             fi
             echo "  …still waiting ($((i * 5)) s elapsed)"
           done
-          echo "::warning::Timed out waiting for $CRATE@$VERSION in sparse index after 180 s"
+          echo "::warning::Timed out waiting for $CRATE@$VERSION after 180 s"
           echo "::endgroup::"
           HELPER
           chmod +x /tmp/publish.sh

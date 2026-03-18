@@ -1,7 +1,11 @@
 use std::fs;
 use std::path::Path;
 
-pub fn run(name: &str, model: &str, api_key: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(
+    name: &str,
+    model: &str,
+    api_key: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let dir = Path::new(name);
     if dir.exists() {
         return Err(format!("Directory '{}' already exists", name).into());

@@ -9,9 +9,8 @@ src         = "src"
 build-dir = "../target/book"
 
 [output.html]
-theme                   = "ayu"
-preferred-dark-theme    = "ayu"
 default-theme           = "light"
+preferred-dark-theme    = "ayu"
 git-repository-url      = "https://github.com/vamsiramakrishnan/gemini-rs"
 git-repository-icon     = "fa-github"
 edit-url-template       = "https://github.com/vamsiramakrishnan/gemini-rs/edit/main/docs/{path}"

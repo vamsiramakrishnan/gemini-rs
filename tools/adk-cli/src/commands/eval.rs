@@ -169,12 +169,20 @@ pub async fn run(
         results.iter().map(|r| r.score).sum::<f64>() / results.len() as f64
     };
 
-    println!("\n  Results: {}/{} passed ({:.0}%)", passed_count, total, avg_score * 100.0);
+    println!(
+        "\n  Results: {}/{} passed ({:.0}%)",
+        passed_count,
+        total,
+        avg_score * 100.0
+    );
     println!("  Threshold: {:.0}%\n", config.pass_threshold * 100.0);
 
     // ── Detailed results ─────────────────────────────────────────────
     if print_detailed_results {
-        println!("  {:<16} {:<6} {:<8} {}", "CASE", "PASS", "SCORE", "OUTPUT (truncated)");
+        println!(
+            "  {:<16} {:<6} {:<8} OUTPUT (truncated)",
+            "CASE", "PASS", "SCORE"
+        );
         println!("  {}", "-".repeat(72));
         for r in &results {
             let status = if r.passed { "yes" } else { "NO" };
@@ -241,7 +249,11 @@ async fn score_case(
                 .unwrap_or_else(|_| {
                     // Try to find a float pattern in the response
                     text.split_whitespace()
-                        .find_map(|w| w.trim_matches(|c: char| !c.is_ascii_digit() && c != '.').parse::<f64>().ok())
+                        .find_map(|w| {
+                            w.trim_matches(|c: char| !c.is_ascii_digit() && c != '.')
+                                .parse::<f64>()
+                                .ok()
+                        })
                         .unwrap_or(0.0)
                 })
                 .clamp(0.0, 1.0)

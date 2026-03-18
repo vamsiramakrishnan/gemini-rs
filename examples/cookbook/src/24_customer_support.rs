@@ -11,7 +11,6 @@
 
 use adk_rs_fluent::prelude::*;
 use serde_json::json;
-use std::sync::Arc;
 
 fn main() {
     println!("=== Cookbook #24: Customer Support Pipeline ===\n");
@@ -22,7 +21,7 @@ fn main() {
         .instruction(
             "You are the intake agent. Collect the customer's name, account ID, \
              and issue description. Classify the issue as: billing, technical, \
-             account, or general. Set the category and urgency (low/medium/high)."
+             account, or general. Set the category and urgency (low/medium/high).",
         )
         .temperature(0.2)
         .writes("customer_name")
@@ -34,7 +33,7 @@ fn main() {
         .instruction(
             "You are a billing specialist. Handle billing disputes, payment issues, \
              refund requests, and subscription changes. Always verify the account \
-             before making changes. Be empathetic but follow policy."
+             before making changes. Be empathetic but follow policy.",
         )
         .temperature(0.3)
         .reads("account_id")
@@ -46,7 +45,7 @@ fn main() {
         .instruction(
             "You are a technical support specialist. Diagnose technical issues, \
              provide step-by-step troubleshooting, and escalate hardware failures. \
-             Ask for error codes and system information."
+             Ask for error codes and system information.",
         )
         .temperature(0.2)
         .thinking(2048)
@@ -59,7 +58,7 @@ fn main() {
         .instruction(
             "You are an account specialist. Handle account access issues, \
              profile updates, security concerns, and account closures. \
-             Verify identity before making any account changes."
+             Verify identity before making any account changes.",
         )
         .temperature(0.2)
         .reads("account_id")
@@ -71,7 +70,7 @@ fn main() {
         .instruction(
             "You are a general support agent. Handle inquiries that don't fit \
              specific categories. Provide helpful information and escalate \
-             if the issue requires specialist attention."
+             if the issue requires specialist attention.",
         )
         .temperature(0.5)
         .reads("issue_category")
@@ -81,7 +80,7 @@ fn main() {
         .instruction(
             "You are the escalation handler. This issue requires supervisor review. \
              Summarize the situation, document what has been tried, and create \
-             an escalation ticket with all relevant context."
+             an escalation ticket with all relevant context.",
         )
         .temperature(0.2)
         .reads("customer_name")
@@ -94,7 +93,7 @@ fn main() {
     let closer = AgentBuilder::new("closer")
         .instruction(
             "Summarize the resolution for the customer. Generate a follow-up plan \
-             if needed. Ask for a satisfaction rating."
+             if needed. Ask for a satisfaction rating.",
         )
         .temperature(0.5)
         .reads("customer_name")
@@ -103,9 +102,17 @@ fn main() {
         .writes("follow_up");
 
     println!("Defined {} agents:", 7);
-    for agent in &[&intake, &billing_specialist, &tech_specialist,
-                   &account_specialist, &general_agent, &escalation_agent, &closer] {
-        println!("  - {} (temp={:?}, reads={:?}, writes={:?})",
+    for agent in &[
+        &intake,
+        &billing_specialist,
+        &tech_specialist,
+        &account_specialist,
+        &general_agent,
+        &escalation_agent,
+        &closer,
+    ] {
+        println!(
+            "  - {} (temp={:?}, reads={:?}, writes={:?})",
             agent.name(),
             agent.get_temperature(),
             agent.get_reads(),
@@ -134,14 +141,11 @@ fn main() {
     // Route based on category
     // In production, this would use RouteTextAgent with an LLM.
     // Here we show the pipeline structure declaratively.
-    let billing_pipeline = billing_specialist.clone()
-        / escalation_agent.clone();  // Fall back to escalation
+    let billing_pipeline = billing_specialist.clone() / escalation_agent.clone(); // Fall back to escalation
 
-    let tech_pipeline = tech_specialist.clone()
-        / escalation_agent.clone();
+    let tech_pipeline = tech_specialist.clone() / escalation_agent.clone();
 
-    let account_pipeline = account_specialist.clone()
-        / escalation_agent.clone();
+    let account_pipeline = account_specialist.clone() / escalation_agent.clone();
 
     println!("Specialist pipelines with escalation fallback:");
     println!("  billing  -> billing_specialist / escalation");
@@ -151,14 +155,15 @@ fn main() {
 
     // Full support pipeline
     let support_pipeline = intake.clone()
-        >> (billing_pipeline | tech_pipeline | account_pipeline
+        >> (billing_pipeline
+            | tech_pipeline
+            | account_pipeline
             | (general_agent.clone() / escalation_agent.clone()))
         >> closer.clone();
 
     println!("\nFull pipeline: intake >> specialist_fanout >> closer");
-    match &support_pipeline {
-        Composable::Pipeline(p) => println!("  {} top-level steps", p.steps.len()),
-        _ => {}
+    if let Composable::Pipeline(p) = &support_pipeline {
+        println!("  {} top-level steps", p.steps.len());
     }
 
     // ── 3. State transforms for routing ──
@@ -190,16 +195,25 @@ fn main() {
 
     // Post-resolution transforms
     let post_resolve = S::compute("resolution_summary", |s| {
-        let category = s.get("issue_category").and_then(|v| v.as_str()).unwrap_or("unknown");
-        let resolution = s.get("resolution").and_then(|v| v.as_str()).unwrap_or("pending");
+        let category = s
+            .get("issue_category")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        let resolution = s
+            .get("resolution")
+            .and_then(|v| v.as_str())
+            .unwrap_or("pending");
         json!(format!("[{}] {}", category.to_uppercase(), resolution))
     }) >> S::counter("total_tickets", 1)
-       >> S::history("resolution", 10);
+        >> S::history("resolution", 10);
 
     state["resolution"] = json!("Refund of $50 processed to original payment method");
     post_resolve.apply(&mut state);
     println!("\nPost-resolution:");
-    println!("  resolution_summary: {:?}", state.get("resolution_summary"));
+    println!(
+        "  resolution_summary: {:?}",
+        state.get("resolution_summary")
+    );
     println!("  total_tickets: {:?}", state.get("total_tickets"));
 
     // ── 4. Guards for output safety ──
@@ -210,8 +224,11 @@ fn main() {
         | G::topic(&["competitor_pricing", "internal_policy", "employee_names"])
         | G::custom(|output| {
             // Ensure resolution contains an action
-            if output.contains("resolution") || output.contains("resolved")
-                || output.contains("will") || output.contains("has been") {
+            if output.contains("resolution")
+                || output.contains("resolved")
+                || output.contains("will")
+                || output.contains("has been")
+            {
                 Ok(())
             } else {
                 Err("Response should indicate an action taken or planned".into())
@@ -220,7 +237,8 @@ fn main() {
 
     println!("Support guards: {} validators", support_guards.len());
 
-    let safe_response = "Your refund of $50 has been processed and will appear in 3-5 business days.";
+    let safe_response =
+        "Your refund of $50 has been processed and will appear in 3-5 business days.";
     let violations = support_guards.check_all(safe_response);
     println!("  Safe response: {} violations", violations.len());
 
@@ -238,10 +256,12 @@ fn main() {
     ];
 
     let violations = check_contracts(&all_agents);
-    let unproduced: Vec<_> = violations.iter()
+    let unproduced: Vec<_> = violations
+        .iter()
         .filter(|v| matches!(v, ContractViolation::UnproducedKey { .. }))
         .collect();
-    let duplicates: Vec<_> = violations.iter()
+    let duplicates: Vec<_> = violations
+        .iter()
         .filter(|v| matches!(v, ContractViolation::DuplicateWrite { .. }))
         .collect();
 
@@ -281,15 +301,22 @@ fn main() {
         )
         .criteria(&["contains_match", "safety"]);
 
-    println!("Eval suite: {} test cases, {} criteria",
-        eval_suite.len(), eval_suite.criteria_names.len());
+    println!(
+        "Eval suite: {} test cases, {} criteria",
+        eval_suite.len(),
+        eval_suite.criteria_names.len()
+    );
 
     let eval_criteria = E::contains_match() | E::safety();
     for case in &eval_suite.cases {
         let scores = eval_criteria.score_all(&case.expected, &case.expected);
-        println!("  Case '{}...' -> scores: {:?}",
+        println!(
+            "  Case '{}...' -> scores: {:?}",
             &case.prompt[..case.prompt.len().min(40)],
-            scores.iter().map(|(n, s)| format!("{}={:.1}", n, s)).collect::<Vec<_>>()
+            scores
+                .iter()
+                .map(|(n, s)| format!("{}={:.1}", n, s))
+                .collect::<Vec<_>>()
         );
     }
 

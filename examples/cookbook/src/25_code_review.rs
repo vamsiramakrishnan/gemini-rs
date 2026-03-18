@@ -21,7 +21,7 @@ fn main() {
         .instruction(
             "Analyze the code for style violations, naming conventions, \
              and formatting issues. Report each issue with file, line, and severity. \
-             Severity levels: error, warning, info."
+             Severity levels: error, warning, info.",
         )
         .temperature(0.1)
         .code_execution()
@@ -34,7 +34,7 @@ fn main() {
              1) Missing test cases for new code paths \
              2) Test assertions that are too weak \
              3) Missing edge case coverage \
-             4) Test naming and organization"
+             4) Test naming and organization",
         )
         .temperature(0.1)
         .thinking(2048)
@@ -48,7 +48,7 @@ fn main() {
              2) Performance issues (N+1 queries, memory leaks, blocking calls) \
              3) Architecture concerns (coupling, SOLID violations) \
              4) Error handling completeness \
-             Rate overall quality on a 1-10 scale."
+             Rate overall quality on a 1-10 scale.",
         )
         .temperature(0.2)
         .thinking(4096)
@@ -59,7 +59,7 @@ fn main() {
         .instruction(
             "Perform a focused security audit. Check for: \
              SQL injection, XSS, CSRF, insecure deserialization, \
-             hardcoded secrets, and dependency vulnerabilities."
+             hardcoded secrets, and dependency vulnerabilities.",
         )
         .temperature(0.0)
         .writes("security_findings")
@@ -81,7 +81,7 @@ fn main() {
              2) Suggestions (should fix but not blocking) \
              3) Nits (minor style/preference issues) \
              4) Overall verdict: APPROVE, REQUEST_CHANGES, or BLOCK \
-             Set approved=true only if there are zero critical issues."
+             Set approved=true only if there are zero critical issues.",
         )
         .temperature(0.3)
         .reads("lint_results")
@@ -100,7 +100,7 @@ fn main() {
         .instruction(
             "Based on the review report and verdict, generate specific, actionable \
              revision instructions for the developer. Group by file and priority. \
-             Include code snippets where helpful."
+             Include code snippets where helpful.",
         )
         .reads("review_report")
         .reads("verdict")
@@ -108,21 +108,25 @@ fn main() {
 
     println!("Decision agents:");
     println!("  - {} (reads all results)", merge_agent.name());
-    println!("  - {} (generates fix instructions)", revision_advisor.name());
+    println!(
+        "  - {} (generates fix instructions)",
+        revision_advisor.name()
+    );
 
     // ── 3. Compose the fan-out pipeline ──
     println!("\n--- Pipeline Composition ---\n");
 
     // Fan-out: all reviewers run in parallel
-    let review_fanout = linter.clone()
-        | test_analyzer.clone()
-        | code_reviewer.clone()
-        | security_scanner.clone();
+    let review_fanout =
+        linter.clone() | test_analyzer.clone() | code_reviewer.clone() | security_scanner.clone();
 
-    println!("Fan-out: {} parallel branches", match &review_fanout {
-        Composable::FanOut(f) => f.branches.len(),
-        _ => 0,
-    });
+    println!(
+        "Fan-out: {} parallel branches",
+        match &review_fanout {
+            Composable::FanOut(f) => f.branches.len(),
+            _ => 0,
+        }
+    );
 
     // Fan-out merge pattern
     let review_with_merge = fan_out_merge(
@@ -138,17 +142,12 @@ fn main() {
     println!("Fan-out-merge: 4 reviewers >> merge");
 
     // Supervised review loop: revise until approved
-    let review_loop = supervised(
-        revision_advisor.clone(),
-        merge_agent.clone(),
-        3,
-    );
+    let review_loop = supervised(revision_advisor.clone(), merge_agent.clone(), 3);
 
     println!("Supervised loop: revision_advisor supervised by merge_reviewer (max 3)");
 
     // Full pipeline
-    let full_pipeline = review_with_merge
-        >> review_loop;
+    let _full_pipeline = review_with_merge >> review_loop;
 
     println!("\nFull pipeline: fan_out_merge >> supervised_loop");
 
@@ -157,9 +156,18 @@ fn main() {
 
     let compute_aggregate = S::compute("aggregate_score", |s| {
         let lint = s.get("lint_score").and_then(|v| v.as_f64()).unwrap_or(0.0);
-        let coverage = s.get("coverage_score").and_then(|v| v.as_f64()).unwrap_or(0.0);
-        let quality = s.get("quality_score").and_then(|v| v.as_f64()).unwrap_or(0.0);
-        let security = s.get("security_score").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let coverage = s
+            .get("coverage_score")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+        let quality = s
+            .get("quality_score")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+        let security = s
+            .get("security_score")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
 
         // Weighted average: security most important
         let weighted = (lint * 0.15 + coverage * 0.20 + quality * 0.30 + security * 0.35) * 10.0;
@@ -183,9 +191,13 @@ fn main() {
     });
     compute_aggregate.apply(&mut state);
     println!("Score aggregation:");
-    println!("  lint={}, coverage={}, quality={}, security={}",
-        state["lint_score"], state["coverage_score"],
-        state["quality_score"], state["security_score"]);
+    println!(
+        "  lint={}, coverage={}, quality={}, security={}",
+        state["lint_score"],
+        state["coverage_score"],
+        state["quality_score"],
+        state["security_score"]
+    );
     println!("  aggregate_score: {:.2}", state["aggregate_score"]);
     println!("  auto_verdict: {}", state["auto_verdict"]);
 
@@ -207,8 +219,10 @@ fn main() {
     let review_guards = G::length(50, 10000)
         | G::custom(|output| {
             // Must contain a verdict
-            if output.contains("APPROVE") || output.contains("REQUEST_CHANGES")
-                || output.contains("BLOCK") {
+            if output.contains("APPROVE")
+                || output.contains("REQUEST_CHANGES")
+                || output.contains("BLOCK")
+            {
                 Ok(())
             } else {
                 Err("Review must contain a verdict: APPROVE, REQUEST_CHANGES, or BLOCK".into())
@@ -218,10 +232,17 @@ fn main() {
 
     println!("Review guards: {} validators", review_guards.len());
 
-    let good_review = "After thorough analysis, the code is well-structured. APPROVE with minor nits.";
+    let good_review =
+        "After thorough analysis, the code is well-structured. APPROVE with minor nits.";
     let bad_review = "This is terrible code.";
-    println!("  Good review: {} violations", review_guards.check_all(good_review).len());
-    println!("  Bad review: {} violations", review_guards.check_all(bad_review).len());
+    println!(
+        "  Good review: {} violations",
+        review_guards.check_all(good_review).len()
+    );
+    println!(
+        "  Bad review: {} violations",
+        review_guards.check_all(bad_review).len()
+    );
 
     // ── 6. Contract validation ──
     println!("\n--- Contract Validation ---\n");
@@ -244,7 +265,10 @@ fn main() {
             }
             ContractViolation::DuplicateWrite { agents, key } => {
                 // Expected: multiple reviewers write scores
-                println!("  DUPLICATE: '{}' written by {:?} (expected for parallel reviewers)", key, agents);
+                println!(
+                    "  DUPLICATE: '{}' written by {:?} (expected for parallel reviewers)",
+                    key, agents
+                );
             }
             ContractViolation::OrphanedOutput { producer, key } => {
                 println!("  ORPHANED: '{}' writes '{}'", producer, key);
@@ -263,16 +287,25 @@ fn main() {
     println!("\n--- Evaluation ---\n");
 
     let eval = E::custom("verdict_present", |output, _expected| {
-        if output.contains("APPROVE") || output.contains("REQUEST_CHANGES") || output.contains("BLOCK") {
+        if output.contains("APPROVE")
+            || output.contains("REQUEST_CHANGES")
+            || output.contains("BLOCK")
+        {
             1.0
         } else {
             0.0
         }
     }) | E::custom("actionable", |output, _expected| {
         // Check that review contains specific file references or code suggestions
-        let has_specifics = output.contains("line") || output.contains("file")
-            || output.contains("function") || output.contains("```");
-        if has_specifics { 1.0 } else { 0.5 }
+        let has_specifics = output.contains("line")
+            || output.contains("file")
+            || output.contains("function")
+            || output.contains("```");
+        if has_specifics {
+            1.0
+        } else {
+            0.5
+        }
     }) | E::safety();
 
     let test_review = "In file main.rs, line 42: function `process` should handle the error case. \
