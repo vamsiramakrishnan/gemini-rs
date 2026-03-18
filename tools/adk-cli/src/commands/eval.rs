@@ -1,80 +1,49 @@
 use crate::manifest;
+use adk_rs_fluent::prelude::*;
+use rs_adk::{BaseLlm, GeminiLlm, GeminiLlmParams, LlmRequest};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::sync::Arc;
 
-// ---------------------------------------------------------------------------
-// Eval set file format
-// ---------------------------------------------------------------------------
+// ── Types ────────────────────────────────────────────────────────────────────
 
-/// Top-level structure of a `.evalset.json` file.
-#[derive(Debug, Deserialize)]
-pub struct EvalSetFile {
-    /// Human-readable name for this evaluation set.
-    #[serde(default)]
-    pub name: String,
-    /// The evaluation cases to run.
-    pub cases: Vec<EvalCase>,
+#[derive(Deserialize)]
+struct EvalSetFile {
+    #[allow(dead_code)]
+    name: String,
+    cases: Vec<EvalCase>,
 }
 
-/// A single evaluation case.
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-pub struct EvalCase {
-    /// Identifier for this case.
-    pub id: String,
-    /// User input(s) to send to the agent.
-    pub inputs: Vec<String>,
-    /// Expected outputs or reference answers.
+#[derive(Deserialize)]
+struct EvalCase {
+    id: String,
+    inputs: Vec<String>,
     #[serde(default)]
-    pub expected: Vec<String>,
-    /// Per-case metadata/tags.
+    expected: Vec<String>,
     #[serde(default)]
-    pub tags: Vec<String>,
+    #[allow(dead_code)]
+    tags: Vec<String>,
 }
 
-// ---------------------------------------------------------------------------
-// Test config format
-// ---------------------------------------------------------------------------
-
-/// Scoring configuration loaded from `test_config.json`.
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-pub struct TestConfig {
-    /// Minimum passing score (0.0 - 1.0).
+#[derive(Deserialize)]
+struct TestConfig {
     #[serde(default = "default_threshold")]
-    pub pass_threshold: f64,
-    /// Evaluator criteria.
+    pass_threshold: f64,
     #[serde(default)]
-    pub criteria: Vec<Criterion>,
+    criteria: Vec<Criterion>,
 }
 
 fn default_threshold() -> f64 {
     0.7
 }
 
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-pub struct Criterion {
-    pub name: String,
-    pub weight: f64,
-    #[serde(default)]
-    pub description: String,
+#[derive(Deserialize, Clone)]
+struct Criterion {
+    name: String,
+    weight: f64,
+    description: String,
 }
 
-impl Default for TestConfig {
-    fn default() -> Self {
-        Self {
-            pass_threshold: default_threshold(),
-            criteria: Vec::new(),
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Result types
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
 struct CaseResult {
     id: String,
     passed: bool,
@@ -83,11 +52,8 @@ struct CaseResult {
     expected: Vec<String>,
 }
 
-// ---------------------------------------------------------------------------
-// Entry point
-// ---------------------------------------------------------------------------
+// ── Entry point ──────────────────────────────────────────────────────────────
 
-/// Run evaluations from an eval set against the agent.
 pub async fn run(
     agent_dir: &str,
     evalset_path: &str,
@@ -96,99 +62,193 @@ pub async fn run(
 ) -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
 
-    // Load agent manifest
-    let dir = Path::new(agent_dir);
-    let agent = manifest::load_manifest(&dir.join("agent.toml"))?;
-    println!("Evaluating agent: {} (model: {})", agent.name, agent.model);
+    // Load manifest
+    let dir = std::path::Path::new(agent_dir);
+    let m = manifest::load_manifest(&dir.join("agent.toml"))?;
+    println!("\n  Evaluating: {} ({})\n", m.name, m.model);
 
-    // Load eval set
-    let evalset_content = std::fs::read_to_string(evalset_path)?;
-    let evalset: EvalSetFile = serde_json::from_str(&evalset_content)?;
-    println!(
-        "Eval set: {} ({} cases)",
-        if evalset.name.is_empty() {
-            evalset_path
-        } else {
-            &evalset.name
-        },
-        evalset.cases.len()
-    );
+    // Load evalset
+    let evalset_str = std::fs::read_to_string(evalset_path)?;
+    let evalset: EvalSetFile = serde_json::from_str(&evalset_str)?;
 
     // Load test config
-    let config = if let Some(path) = config_file {
-        let content = std::fs::read_to_string(path)?;
-        serde_json::from_str::<TestConfig>(&content)?
+    let config = if let Some(cf) = config_file {
+        let s = std::fs::read_to_string(cf)?;
+        serde_json::from_str(&s)?
     } else {
-        TestConfig::default()
+        TestConfig {
+            pass_threshold: 0.7,
+            criteria: vec![],
+        }
     };
 
-    println!("Pass threshold: {:.0}%", config.pass_threshold * 100.0);
-    println!("---");
+    // ── Create LLM + agent ───────────────────────────────────────────
+    let params = GeminiLlmParams {
+        model: Some(m.model.clone()),
+        ..Default::default()
+    };
+    let llm: Arc<dyn BaseLlm> = Arc::new(GeminiLlm::new(params));
 
-    // Run each case
-    let mut results: Vec<CaseResult> = Vec::new();
-    let mut passed = 0usize;
+    let mut builder = AgentBuilder::new(&m.name).instruction(&m.instruction);
+    for tool in &m.tools {
+        builder = match tool.as_str() {
+            "google_search" => builder.google_search(),
+            "code_execution" => builder.code_execution(),
+            _ => builder,
+        };
+    }
+    let agent = builder.build(llm.clone());
 
-    for case in &evalset.cases {
-        let agent_output = run_eval_case(&agent, case).await;
-        let score = score_case(&config, case, &agent_output);
-        let case_passed = score >= config.pass_threshold;
-        if case_passed {
-            passed += 1;
+    // ── Create judge LLM (same model, used for scoring) ─────────────
+    let judge_params = GeminiLlmParams {
+        model: Some("gemini-2.5-flash".into()),
+        ..Default::default()
+    };
+    let judge: Arc<dyn BaseLlm> = Arc::new(GeminiLlm::new(judge_params));
+
+    // ── Run evaluations ──────────────────────────────────────────────
+    let total = evalset.cases.len();
+    let mut results: Vec<CaseResult> = Vec::with_capacity(total);
+
+    for (i, case) in evalset.cases.iter().enumerate() {
+        print!("  [{}/{}] {} ... ", i + 1, total, case.id);
+
+        // Run agent
+        let state = State::new();
+        let combined_input = case.inputs.join("\n");
+        state.set("input", &combined_input);
+
+        let agent_output = match agent.run(&state).await {
+            Ok(output) => output,
+            Err(e) => {
+                println!("ERROR: {}", e);
+                results.push(CaseResult {
+                    id: case.id.clone(),
+                    passed: false,
+                    score: 0.0,
+                    agent_output: format!("Error: {}", e),
+                    expected: case.expected.clone(),
+                });
+                continue;
+            }
+        };
+
+        // Score with LLM judge
+        let score = score_case(&judge, &agent_output, &case.expected, &config.criteria).await;
+        let passed = score >= config.pass_threshold;
+
+        if passed {
+            println!("PASS ({:.0}%)", score * 100.0);
+        } else {
+            println!("FAIL ({:.0}%)", score * 100.0);
         }
 
         results.push(CaseResult {
             id: case.id.clone(),
-            passed: case_passed,
+            passed,
             score,
             agent_output,
             expected: case.expected.clone(),
         });
     }
 
-    // Print summary
-    let total = results.len();
-    println!(
-        "\nResults: {passed}/{total} passed ({:.0}%)",
-        (passed as f64 / total as f64) * 100.0
-    );
+    // ── Summary ──────────────────────────────────────────────────────
+    let passed_count = results.iter().filter(|r| r.passed).count();
+    let avg_score: f64 = if results.is_empty() {
+        0.0
+    } else {
+        results.iter().map(|r| r.score).sum::<f64>() / results.len() as f64
+    };
 
+    println!("\n  Results: {}/{} passed ({:.0}%)", passed_count, total, avg_score * 100.0);
+    println!("  Threshold: {:.0}%\n", config.pass_threshold * 100.0);
+
+    // ── Detailed results ─────────────────────────────────────────────
     if print_detailed_results {
-        println!("\n{:<20} {:<8} {:<8} OUTPUT", "CASE", "PASS", "SCORE");
-        println!("{}", "-".repeat(80));
+        println!("  {:<16} {:<6} {:<8} {}", "CASE", "PASS", "SCORE", "OUTPUT (truncated)");
+        println!("  {}", "-".repeat(72));
         for r in &results {
-            let status = if r.passed { "PASS" } else { "FAIL" };
-            let output_preview: String = r.agent_output.chars().take(40).collect();
+            let status = if r.passed { "yes" } else { "NO" };
+            let truncated: String = r.agent_output.chars().take(40).collect();
+            let truncated = truncated.replace('\n', " ");
             println!(
-                "{:<20} {:<8} {:<8.2} {}",
-                r.id, status, r.score, output_preview
+                "  {:<16} {:<6} {:<8.0}% {}",
+                r.id,
+                status,
+                r.score * 100.0,
+                truncated
             );
         }
+        println!();
     }
 
-    if passed < total {
+    // ── Exit code ────────────────────────────────────────────────────
+    if passed_count < total {
         std::process::exit(1);
     }
 
     Ok(())
 }
 
-/// Execute all inputs for a single eval case and return the final agent output.
-async fn run_eval_case(agent: &manifest::AgentManifest, case: &EvalCase) -> String {
-    // TODO: Wire up actual LLM call through the agent runtime.
-    // For now return a placeholder.
-    let _ = (agent, case);
-    "(placeholder — LLM integration pending)".to_string()
-}
+// ── LLM judge scoring ────────────────────────────────────────────────────────
 
-/// Score a case result against the expected outputs using the test config criteria.
-fn score_case(_config: &TestConfig, case: &EvalCase, _agent_output: &str) -> f64 {
-    // TODO: Implement scoring evaluators (exact match, LLM judge, semantic similarity, etc.)
-    if case.expected.is_empty() {
-        // No expected output defined — auto-pass
-        1.0
+async fn score_case(
+    judge: &Arc<dyn BaseLlm>,
+    output: &str,
+    expected: &[String],
+    criteria: &[Criterion],
+) -> f64 {
+    // No expectations = auto-pass
+    if expected.is_empty() && criteria.is_empty() {
+        return 1.0;
+    }
+
+    let criteria_text = if criteria.is_empty() {
+        "The output should mention or address the expected keywords/phrases.".to_string()
     } else {
-        // Placeholder: always return 0 when there are expected outputs
-        0.0
+        criteria
+            .iter()
+            .map(|c| format!("- {} (weight {:.1}): {}", c.name, c.weight, c.description))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    let prompt = format!(
+        "You are an evaluation judge. Score the agent's output on a scale of 0.0 to 1.0.\n\n\
+        AGENT OUTPUT:\n{output}\n\n\
+        EXPECTED (keywords/phrases that should appear):\n{expected}\n\n\
+        CRITERIA:\n{criteria_text}\n\n\
+        Respond with ONLY a single decimal number between 0.0 and 1.0. Nothing else.",
+        expected = expected.join(", "),
+    );
+
+    let request = LlmRequest::from_text(prompt);
+    match judge.generate(request).await {
+        Ok(response) => {
+            let text = response.text();
+            // Extract the first float from the response
+            text.trim()
+                .parse::<f64>()
+                .unwrap_or_else(|_| {
+                    // Try to find a float pattern in the response
+                    text.split_whitespace()
+                        .find_map(|w| w.trim_matches(|c: char| !c.is_ascii_digit() && c != '.').parse::<f64>().ok())
+                        .unwrap_or(0.0)
+                })
+                .clamp(0.0, 1.0)
+        }
+        Err(e) => {
+            eprintln!("  Judge error: {}", e);
+            // Fallback: simple keyword matching
+            if expected.is_empty() {
+                return 1.0;
+            }
+            let output_lower = output.to_lowercase();
+            let matches = expected
+                .iter()
+                .filter(|e| output_lower.contains(&e.to_lowercase()))
+                .count();
+            matches as f64 / expected.len() as f64
+        }
     }
 }

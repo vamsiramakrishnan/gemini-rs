@@ -1,95 +1,105 @@
 use crate::manifest;
+use rs_adk::{BaseLlm, GeminiLlm, GeminiLlmParams};
+use adk_rs_fluent::prelude::*;
 use std::io::{self, BufRead, Write};
-use std::path::Path;
+use std::sync::Arc;
 
-/// Run an interactive terminal REPL for the agent.
 pub async fn run(
     agent_dir: &str,
     save_session: Option<&str>,
-    session_id: Option<&str>,
+    _session_id: Option<&str>,
     replay: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
 
-    let dir = Path::new(agent_dir);
-    let manifest_path = dir.join("agent.toml");
-    let agent = manifest::load_manifest(&manifest_path)?;
+    let dir = std::path::Path::new(agent_dir);
+    let m = manifest::load_manifest(&dir.join("agent.toml"))?;
 
-    println!("Agent: {} (model: {})", agent.name, agent.model);
-    if !agent.instruction.is_empty() {
-        println!("Instruction: {}", agent.instruction);
-    }
-    if let Some(sid) = session_id {
-        println!("Session ID: {}", sid);
-    }
-    println!("---");
+    println!("\n  Agent: {} — {}", m.name, m.description);
+    println!("  Model: {}\n", m.model);
 
-    // Transcript accumulator for --save_session
+    // ── Create LLM (auto-detects auth from env) ──────────────────────
+    let params = GeminiLlmParams {
+        model: Some(m.model.clone()),
+        ..Default::default()
+    };
+    let llm: Arc<dyn BaseLlm> = Arc::new(GeminiLlm::new(params));
+
+    // ── Build agent from manifest ────────────────────────────────────
+    let mut builder = AgentBuilder::new(&m.name).instruction(&m.instruction);
+
+    for tool in &m.tools {
+        builder = match tool.as_str() {
+            "google_search" => builder.google_search(),
+            "code_execution" => builder.code_execution(),
+            other => {
+                eprintln!("  Warning: unknown built-in tool '{}' — skipping", other);
+                builder
+            }
+        };
+    }
+
+    let agent = builder.build(llm);
+    let state = State::new();
     let mut transcript: Vec<serde_json::Value> = Vec::new();
 
+    // ── Replay mode ──────────────────────────────────────────────────
     if let Some(replay_path) = replay {
-        // Replay mode: read lines from file instead of stdin
-        let content = std::fs::read_to_string(replay_path)?;
-        let messages: Vec<serde_json::Value> = serde_json::from_str(&content)?;
-        for msg in &messages {
-            if let Some(user_text) = msg.get("user").and_then(|v| v.as_str()) {
-                println!("> {}", user_text);
-                let response = run_agent_turn(&agent, user_text).await;
-                println!("{}", response);
-                transcript.push(serde_json::json!({
-                    "user": user_text,
-                    "agent": response,
-                }));
+        let data = std::fs::read_to_string(replay_path)?;
+        let turns: Vec<serde_json::Value> = serde_json::from_str(&data)?;
+        for turn in &turns {
+            if let Some(user_input) = turn["user"].as_str() {
+                println!("> {}", user_input);
+                state.set("input", user_input);
+                match agent.run(&state).await {
+                    Ok(output) => println!("\n{}\n", output),
+                    Err(e) => eprintln!("\nError: {}\n", e),
+                }
             }
         }
-    } else {
-        // Interactive REPL
-        let stdin = io::stdin();
-        let mut reader = stdin.lock();
-        loop {
-            print!("> ");
-            io::stdout().flush()?;
-            let mut line = String::new();
-            let bytes = reader.read_line(&mut line)?;
-            if bytes == 0 {
-                // EOF
-                break;
-            }
-            let input = line.trim();
-            if input.is_empty() {
-                continue;
-            }
-            if input == "/quit" || input == "/exit" {
-                break;
-            }
+        return Ok(());
+    }
 
-            let response = run_agent_turn(&agent, input).await;
-            println!("{}", response);
-            transcript.push(serde_json::json!({
-                "user": input,
-                "agent": response,
-            }));
+    // ── Interactive REPL ─────────────────────────────────────────────
+    let stdin = io::stdin();
+    println!("  Type /quit to exit.\n");
+
+    loop {
+        print!("> ");
+        io::stdout().flush()?;
+
+        let mut input = String::new();
+        stdin.lock().read_line(&mut input)?;
+        let input = input.trim();
+
+        if input.is_empty() {
+            continue;
+        }
+
+        match input {
+            "/quit" | "/exit" => break,
+            _ => {}
+        }
+
+        state.set("input", input);
+        match agent.run(&state).await {
+            Ok(output) => {
+                println!("\n{}\n", output);
+                transcript.push(serde_json::json!({
+                    "user": input,
+                    "agent": output,
+                }));
+            }
+            Err(e) => eprintln!("\nError: {}\n", e),
         }
     }
 
-    // Save session if requested
+    // ── Save session ─────────────────────────────────────────────────
     if let Some(path) = save_session {
         let json = serde_json::to_string_pretty(&transcript)?;
         std::fs::write(path, json)?;
-        println!("\nSession saved to {}", path);
+        println!("  Session saved to {}", path);
     }
 
     Ok(())
-}
-
-/// Execute a single conversational turn.
-///
-/// In a full implementation this would invoke the LLM via the agent runtime.
-async fn run_agent_turn(agent: &manifest::AgentManifest, _input: &str) -> String {
-    // TODO: Wire up actual LLM call through rs-adk / adk-rs-fluent.
-    // For now, return a placeholder to keep the REPL functional.
-    format!(
-        "[{}] (placeholder response — LLM integration pending)",
-        agent.name
-    )
 }

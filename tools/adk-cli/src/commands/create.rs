@@ -1,12 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-/// Scaffold a new agent project directory.
-pub fn run(
-    name: &str,
-    model: &str,
-    api_key: Option<&str>,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(name: &str, model: &str, api_key: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
     let dir = Path::new(name);
     if dir.exists() {
         return Err(format!("Directory '{}' already exists", name).into());
@@ -14,67 +9,142 @@ pub fn run(
 
     fs::create_dir_all(dir.join("src"))?;
 
-    // agent.toml
-    let agent_toml = format!(
-        r#"name = "{name}"
+    // ── agent.toml ───────────────────────────────────────────────────
+    fs::write(
+        dir.join("agent.toml"),
+        format!(
+            r#"name = "{name}"
 description = "A new ADK agent"
 model = "{model}"
-instruction = "You are a helpful assistant."
-tools = []
+instruction = "You are a helpful assistant. Be concise and informative."
+tools = ["google_search"]
 sub_agents = []
 "#
-    );
-    fs::write(dir.join("agent.toml"), agent_toml)?;
+        ),
+    )?;
 
-    // Cargo.toml
-    let cargo_toml = format!(
-        r#"[package]
+    // ── Cargo.toml ───────────────────────────────────────────────────
+    fs::write(
+        dir.join("Cargo.toml"),
+        format!(
+            r#"[package]
 name = "{name}"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-adk-rs-fluent = {{ git = "https://github.com/vamsiramakrishnan/gemini-rs", features = ["gemini-llm"] }}
+adk-rs-fluent = {{ version = "0.5", features = ["gemini-llm"] }}
+rs-adk = {{ version = "0.5", features = ["gemini-llm"] }}
+rs-genai = "0.5"
 tokio = {{ version = "1", features = ["full"] }}
+serde = {{ version = "1", features = ["derive"] }}
 serde_json = "1"
+schemars = "0.8"
 dotenvy = "0.15"
 "#
-    );
-    fs::write(dir.join("Cargo.toml"), cargo_toml)?;
+        ),
+    )?;
 
-    // src/main.rs
-    let main_rs = r#"use adk_rs_fluent::prelude::*;
+    // ── src/main.rs — working agent that compiles and runs ───────────
+    fs::write(
+        dir.join("src/main.rs"),
+        format!(
+            r#"//! {name} — built with the Gemini ADK for Rust.
+//!
+//! Run with: adk run .
+//! Or directly: cargo run
+
+use adk_rs_fluent::prelude::*;
+use std::io::{{self, Write}};
+use std::sync::Arc;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {{
     dotenvy::dotenv().ok();
 
-    // TODO: Load agent.toml and run the agent
-    println!("Agent ready. Implement your logic here.");
+    // Create LLM — auto-detects credentials from environment.
+    // Set GOOGLE_GENAI_API_KEY, GEMINI_API_KEY, or GOOGLE_API_KEY.
+    let llm: Arc<dyn BaseLlm> = Arc::new(GeminiLlm::new(GeminiLlmParams::default()));
+
+    // Build your agent with instruction and tools.
+    let agent = AgentBuilder::new("{name}")
+        .instruction("You are a helpful assistant. Be concise and informative.")
+        .google_search()
+        .temperature(0.7)
+        .build(llm);
+
+    // Interactive REPL.
+    let state = State::new();
+    println!("{name} ready. Type /quit to exit.\n");
+
+    loop {{
+        print!("> ");
+        io::stdout().flush()?;
+
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        let input = input.trim();
+
+        if input.is_empty() {{ continue; }}
+        if input == "/quit" || input == "/exit" {{ break; }}
+
+        state.set("input", input);
+        match agent.run(&state).await {{
+            Ok(output) => println!("\n{{output}}\n"),
+            Err(e) => eprintln!("\nError: {{e}}\n"),
+        }}
+    }}
+
     Ok(())
-}
-"#;
-    fs::write(dir.join("src/main.rs"), main_rs)?;
+}}
+"#
+        ),
+    )?;
 
-    // .env
-    let env_content = format!(
-        "GOOGLE_API_KEY={}\n",
-        api_key.unwrap_or("YOUR_API_KEY_HERE")
-    );
-    fs::write(dir.join(".env"), env_content)?;
+    // ── .env ─────────────────────────────────────────────────────────
+    let key_line = api_key.unwrap_or("your-api-key-here");
+    fs::write(
+        dir.join(".env"),
+        format!("GOOGLE_GENAI_API_KEY={key_line}\n"),
+    )?;
 
-    // .gitignore
+    // ── .gitignore ───────────────────────────────────────────────────
     fs::write(dir.join(".gitignore"), "/target\n.env\n")?;
 
-    println!("Created agent project '{name}' with model '{model}'");
-    println!("  {}/agent.toml", name);
-    println!("  {}/Cargo.toml", name);
-    println!("  {}/src/main.rs", name);
-    println!("  {}/.env", name);
-    println!("\nNext steps:");
-    println!("  1. Set your API key in {}/.env", name);
-    println!("  2. Edit {}/agent.toml to configure your agent", name);
-    println!("  3. Run: adk run {}", name);
+    // ── Sample evalset ───────────────────────────────────────────────
+    fs::write(
+        dir.join("tests.evalset.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "name": format!("{name} evaluation"),
+            "cases": [
+                {
+                    "id": "greeting",
+                    "inputs": ["Hello, who are you?"],
+                    "expected": ["assistant", "helpful"],
+                    "tags": ["basic"]
+                },
+                {
+                    "id": "factual",
+                    "inputs": ["What is the capital of France?"],
+                    "expected": ["Paris"],
+                    "tags": ["knowledge"]
+                }
+            ]
+        }))?,
+    )?;
+
+    // ── Success message ──────────────────────────────────────────────
+    println!("\n  Created agent project: {name}/\n");
+    println!("  Next steps:\n");
+    println!("    cd {name}");
+    if api_key.is_none() {
+        println!("    echo 'GOOGLE_GENAI_API_KEY=...' > .env   # add your API key");
+    }
+    println!("    adk run .                              # interactive REPL");
+    println!("    adk web .                              # full devtools UI");
+    println!("    adk eval . tests.evalset.json          # run evaluations");
+    println!("    cargo run                              # run your custom main.rs");
+    println!();
 
     Ok(())
 }
