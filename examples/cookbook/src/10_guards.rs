@@ -22,58 +22,106 @@ fn main() {
     // ── G::json — output must be valid JSON ──
     let json_guard = G::json();
     println!("G::json():");
-    println!("  Valid JSON:   {:?}", json_guard.check(r#"{"key": "value"}"#));
+    println!(
+        "  Valid JSON:   {:?}",
+        json_guard.check(r#"{"key": "value"}"#)
+    );
     println!("  Invalid JSON: {:?}", json_guard.check("not json at all"));
 
     // ── G::length — output must be within bounds ──
     let length_guard = G::length(10, 100);
     println!("\nG::length(10, 100):");
     println!("  'hello':             {:?}", length_guard.check("hello"));
-    println!("  50 chars:            {:?}", length_guard.check(&"x".repeat(50)));
-    println!("  200 chars:           {:?}", length_guard.check(&"x".repeat(200)));
+    println!(
+        "  50 chars:            {:?}",
+        length_guard.check(&"x".repeat(50))
+    );
+    println!(
+        "  200 chars:           {:?}",
+        length_guard.check(&"x".repeat(200))
+    );
 
     // ── G::pii — detect potential PII ──
     let pii_guard = G::pii();
     println!("\nG::pii():");
-    println!("  Clean text:          {:?}", pii_guard.check("The weather is nice today."));
-    println!("  With email:          {:?}", pii_guard.check("Contact user@example.com for details."));
+    println!(
+        "  Clean text:          {:?}",
+        pii_guard.check("The weather is nice today.")
+    );
+    println!(
+        "  With email:          {:?}",
+        pii_guard.check("Contact user@example.com for details.")
+    );
 
     // ── G::topic — block denied topics ──
     let topic_guard = G::topic(&["violence", "gambling", "drugs"]);
     println!("\nG::topic([violence, gambling, drugs]):");
-    println!("  Safe text:           {:?}", topic_guard.check("A beautiful day in the park."));
-    println!("  Mentions violence:   {:?}", topic_guard.check("The scene depicted violence."));
-    println!("  Mentions gambling:   {:?}", topic_guard.check("He went gambling at the casino."));
+    println!(
+        "  Safe text:           {:?}",
+        topic_guard.check("A beautiful day in the park.")
+    );
+    println!(
+        "  Mentions violence:   {:?}",
+        topic_guard.check("The scene depicted violence.")
+    );
+    println!(
+        "  Mentions gambling:   {:?}",
+        topic_guard.check("He went gambling at the casino.")
+    );
 
     // ── G::budget — estimated token budget ──
     let budget_guard = G::budget(50);
     println!("\nG::budget(50):");
-    println!("  Short text:          {:?}", budget_guard.check("Brief answer."));
-    println!("  Long text:           {:?}", budget_guard.check(&"word ".repeat(100)));
+    println!(
+        "  Short text:          {:?}",
+        budget_guard.check("Brief answer.")
+    );
+    println!(
+        "  Long text:           {:?}",
+        budget_guard.check(&"word ".repeat(100))
+    );
 
     // ── G::regex — block forbidden patterns ──
     let regex_guard = G::regex("password");
     println!("\nG::regex('password'):");
-    println!("  Clean:               {:?}", regex_guard.check("Your account is active."));
-    println!("  Contains 'password': {:?}", regex_guard.check("Your password is 12345."));
+    println!(
+        "  Clean:               {:?}",
+        regex_guard.check("Your account is active.")
+    );
+    println!(
+        "  Contains 'password': {:?}",
+        regex_guard.check("Your password is 12345.")
+    );
 
     // ── G::custom — arbitrary validation ──
     let custom_guard = G::custom(|output| {
         if output.lines().count() > 5 {
-            Err(format!("Output has {} lines, max 5 allowed", output.lines().count()))
+            Err(format!(
+                "Output has {} lines, max 5 allowed",
+                output.lines().count()
+            ))
         } else {
             Ok(())
         }
     });
     println!("\nG::custom (max 5 lines):");
-    println!("  3 lines:             {:?}", custom_guard.check("line1\nline2\nline3"));
-    println!("  7 lines:             {:?}", custom_guard.check("1\n2\n3\n4\n5\n6\n7"));
+    println!(
+        "  3 lines:             {:?}",
+        custom_guard.check("line1\nline2\nline3")
+    );
+    println!(
+        "  7 lines:             {:?}",
+        custom_guard.check("1\n2\n3\n4\n5\n6\n7")
+    );
 
     // ── Composing guards with | ──
     // When composed, all guards must pass. check_all() returns all violations.
     println!("\n--- Composed guards ---");
     let composite = G::json() | G::length(1, 500) | G::pii();
-    println!("Composite: json | length(1,500) | pii = {} guards", composite.len());
+    println!(
+        "Composite: json | length(1,500) | pii = {} guards",
+        composite.len()
+    );
 
     // Test against valid JSON, correct length, no PII.
     let good_output = r#"{"analysis": "Revenue grew 15% in Q3."}"#;
@@ -101,9 +149,14 @@ fn main() {
         });
 
     println!("\nSafety guardrails: {} guards", safety.len());
-    println!("  Normal text:  {} violations", safety.check_all("A helpful response.").len());
-    println!("  Risky text:   {} violations",
-        safety.check_all("Contact me about illegal drugs at user@evil.com for violence tips.")
+    println!(
+        "  Normal text:  {} violations",
+        safety.check_all("A helpful response.").len()
+    );
+    println!(
+        "  Risky text:   {} violations",
+        safety
+            .check_all("Contact me about illegal drugs at user@evil.com for violence tips.")
             .len()
     );
 

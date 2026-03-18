@@ -87,7 +87,10 @@ fn main() {
 
     let _cascade = cascade(vec![researcher.clone(), fast_researcher.clone()]);
 
-    let _parallel = fan_out_merge(vec![researcher.clone(), creative_writer.clone()], writer.clone());
+    let _parallel = fan_out_merge(
+        vec![researcher.clone(), creative_writer.clone()],
+        writer.clone(),
+    );
 
     let _supervised = supervised(writer.clone(), reviewer.clone(), 3);
 

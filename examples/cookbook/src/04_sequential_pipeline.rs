@@ -68,9 +68,8 @@ fn main() {
         .writes("quality")
         .writes("feedback");
 
-    let reviewed_pipeline = researcher.clone()
-        >> review_loop(writer.clone(), reviewer.clone(), 3)
-        >> editor.clone();
+    let reviewed_pipeline =
+        researcher.clone() >> review_loop(writer.clone(), reviewer.clone(), 3) >> editor.clone();
 
     println!("\nReview pipeline: researcher >> review_loop(writer, reviewer, 3) >> editor");
     if let Composable::Pipeline(p) = &reviewed_pipeline {
@@ -85,13 +84,19 @@ fn main() {
     for v in &violations {
         match v {
             ContractViolation::UnproducedKey { consumer, key } => {
-                println!("  UNPRODUCED: '{}' reads '{}' but nobody writes it", consumer, key);
+                println!(
+                    "  UNPRODUCED: '{}' reads '{}' but nobody writes it",
+                    consumer, key
+                );
             }
             ContractViolation::DuplicateWrite { agents, key } => {
                 println!("  DUPLICATE: '{}' written by {:?}", key, agents);
             }
             ContractViolation::OrphanedOutput { producer, key } => {
-                println!("  ORPHANED: '{}' writes '{}' but nobody reads it", producer, key);
+                println!(
+                    "  ORPHANED: '{}' writes '{}' but nobody reads it",
+                    producer, key
+                );
             }
         }
     }

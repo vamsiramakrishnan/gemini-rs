@@ -314,9 +314,11 @@ impl T {
             dyn Fn(serde_json::Value) -> Pin<Box<dyn Future<Output = serde_json::Value> + Send>>
                 + Send
                 + Sync,
-        > = Arc::new(move |v: serde_json::Value| -> Pin<Box<dyn Future<Output = serde_json::Value> + Send>> {
-            Box::pin(f(v))
-        });
+        > = Arc::new(
+            move |v: serde_json::Value| -> Pin<Box<dyn Future<Output = serde_json::Value> + Send>> {
+                Box::pin(f(v))
+            },
+        );
         ToolComposite {
             entries: tool
                 .entries

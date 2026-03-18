@@ -69,7 +69,10 @@ fn main() {
                 }
                 _ => return Ok(json!({ "error": "unknown operation" })),
             };
-            println!("  [calculate] {} {} {} = {}", args.a, args.operation, args.b, result);
+            println!(
+                "  [calculate] {} {} {} = {}",
+                args.a, args.operation, args.b, result
+            );
             Ok(json!({ "result": result }))
         },
     );
@@ -77,7 +80,10 @@ fn main() {
     println!("\nTypedTool created:");
     println!("  name:        {}", calc_tool.name());
     println!("  description: {}", calc_tool.description());
-    println!("  schema:      {}", serde_json::to_string_pretty(&calc_tool.parameters().unwrap()).unwrap());
+    println!(
+        "  schema:      {}",
+        serde_json::to_string_pretty(&calc_tool.parameters().unwrap()).unwrap()
+    );
 
     // ── Registering tools with ToolDispatcher ──
     // ToolDispatcher routes function calls to the correct tool by name.
@@ -95,7 +101,8 @@ fn main() {
         .code_execution()
         .url_context();
 
-    println!("\nAgent '{}' has {} built-in tools attached",
+    println!(
+        "\nAgent '{}' has {} built-in tools attached",
         search_agent.name(),
         search_agent.tool_count(),
     );

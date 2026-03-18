@@ -184,16 +184,12 @@ impl G {
     }
 
     /// Output guard — validates model output content via a predicate function.
-    pub fn output(
-        f: impl Fn(&str) -> Result<(), String> + Send + Sync + 'static,
-    ) -> GGuard {
+    pub fn output(f: impl Fn(&str) -> Result<(), String> + Send + Sync + 'static) -> GGuard {
         GGuard::new("output", f)
     }
 
     /// Input guard — validates user input content via a predicate function.
-    pub fn input(
-        f: impl Fn(&str) -> Result<(), String> + Send + Sync + 'static,
-    ) -> GGuard {
+    pub fn input(f: impl Fn(&str) -> Result<(), String> + Send + Sync + 'static) -> GGuard {
         GGuard::new("input", f)
     }
 
@@ -231,10 +227,7 @@ impl G {
     }
 
     /// Conditional guard — only applies `inner` when `predicate` returns true.
-    pub fn when(
-        predicate: impl Fn(&str) -> bool + Send + Sync + 'static,
-        inner: GGuard,
-    ) -> GGuard {
+    pub fn when(predicate: impl Fn(&str) -> bool + Send + Sync + 'static, inner: GGuard) -> GGuard {
         GGuard::new("when", move |output| {
             if predicate(output) {
                 inner.check(output)

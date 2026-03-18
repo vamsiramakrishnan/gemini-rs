@@ -98,28 +98,22 @@ async fn main() {
     }));
 
     let analyzer: Arc<dyn TextAgent> = Arc::new(FnTextAgent::new("analyzer", |state| {
-        let findings = state
-            .get::<String>("research_findings")
-            .unwrap_or_default();
+        let findings = state.get::<String>("research_findings").unwrap_or_default();
         let analysis = format!("Analysis: {findings} -- Key insight: topic is well-studied.");
         state.set("analysis_result", &analysis);
         Ok(analysis)
     }));
 
     let recommender: Arc<dyn TextAgent> = Arc::new(FnTextAgent::new("recommender", |state| {
-        let analysis = state
-            .get::<String>("analysis_result")
-            .unwrap_or_default();
+        let analysis = state.get::<String>("analysis_result").unwrap_or_default();
         Ok(format!(
             "Recommendation based on: {analysis}\n\
              -> Proceed with implementation using established patterns."
         ))
     }));
 
-    let pipeline = SequentialTextAgent::new(
-        "research_pipeline",
-        vec![researcher, analyzer, recommender],
-    );
+    let pipeline =
+        SequentialTextAgent::new("research_pipeline", vec![researcher, analyzer, recommender]);
 
     // Wrap the entire pipeline as a tool
     let pipeline_state = State::new();
@@ -230,10 +224,7 @@ async fn main() {
                 .get("query")
                 .and_then(|q| q.as_str())
                 .unwrap_or("no query");
-            let limit = args
-                .get("limit")
-                .and_then(|l| l.as_u64())
-                .unwrap_or(5);
+            let limit = args.get("limit").and_then(|l| l.as_u64()).unwrap_or(5);
             Ok(format!("Found {limit} results for: {query}"))
         }),
         State::new(),

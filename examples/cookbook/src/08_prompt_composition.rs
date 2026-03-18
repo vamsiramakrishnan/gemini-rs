@@ -73,7 +73,7 @@ fn main() {
     let instruction: String = (P::role("analyst")
         + P::task("Analyze quarterly revenue data")
         + P::format("JSON with fields: trend, growth_rate, summary"))
-        .into();
+    .into();
 
     let _agent = AgentBuilder::new("revenue-analyst")
         .instruction(&instruction)
@@ -96,7 +96,8 @@ fn main() {
     println!("{}", minimal.render());
 
     // Reorder: put format first.
-    let reordered = full_prompt.reorder_by_name(&["format", "role", "task", "constraint", "context"]);
+    let reordered =
+        full_prompt.reorder_by_name(&["format", "role", "task", "constraint", "context"]);
     println!("\n--- Reordered prompt (format first) ---");
     for s in &reordered.sections {
         println!("  [{:?}] {}", s.name, s.render());

@@ -36,28 +36,50 @@ fn main() {
     // ── Custom tool with T::simple ──
     // T::simple creates a tool from a name, description, and async closure.
     // The closure receives serde_json::Value args and returns a Result.
-    let custom_tools = T::simple("get_weather", "Get weather for a location", |args| async move {
-        let city = args.get("city").and_then(|v| v.as_str()).unwrap_or("Unknown");
-        Ok(json!({ "temp_c": 22, "condition": "sunny", "city": city }))
-    }) | T::simple("get_time", "Get current time in a timezone", |args| async move {
-        let tz = args.get("timezone").and_then(|v| v.as_str()).unwrap_or("UTC");
-        Ok(json!({ "time": "14:30", "timezone": tz }))
-    });
+    let custom_tools = T::simple(
+        "get_weather",
+        "Get weather for a location",
+        |args| async move {
+            let city = args
+                .get("city")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Unknown");
+            Ok(json!({ "temp_c": 22, "condition": "sunny", "city": city }))
+        },
+    ) | T::simple(
+        "get_time",
+        "Get current time in a timezone",
+        |args| async move {
+            let tz = args
+                .get("timezone")
+                .and_then(|v| v.as_str())
+                .unwrap_or("UTC");
+            Ok(json!({ "time": "14:30", "timezone": tz }))
+        },
+    );
 
     println!("\nCustom tools: {} entries", custom_tools.len());
 
     // ── Mock tools for testing ──
     // T::mock returns a fixed response — useful for testing without real APIs.
-    let mock_tools = T::mock("search_kb", "Search knowledge base", json!({
-        "results": [
-            {"title": "Getting Started", "relevance": 0.95},
-            {"title": "FAQ", "relevance": 0.82}
-        ]
-    })) | T::mock("get_account", "Fetch account details", json!({
-        "id": "ACC-123",
-        "name": "Test Account",
-        "balance": 1000.00
-    }));
+    let mock_tools = T::mock(
+        "search_kb",
+        "Search knowledge base",
+        json!({
+            "results": [
+                {"title": "Getting Started", "relevance": 0.95},
+                {"title": "FAQ", "relevance": 0.82}
+            ]
+        }),
+    ) | T::mock(
+        "get_account",
+        "Fetch account details",
+        json!({
+            "id": "ACC-123",
+            "name": "Test Account",
+            "balance": 1000.00
+        }),
+    );
 
     println!("Mock tools: {} entries", mock_tools.len());
 
@@ -65,7 +87,10 @@ fn main() {
     let all_tools = T::google_search()
         | T::code_execution()
         | T::simple("calculate", "Do math", |args| async move {
-            let expr = args.get("expression").and_then(|v| v.as_str()).unwrap_or("0");
+            let expr = args
+                .get("expression")
+                .and_then(|v| v.as_str())
+                .unwrap_or("0");
             Ok(json!({ "result": expr, "note": "evaluation placeholder" }))
         })
         | T::mock("lookup", "Look up data", json!({"found": true}));
@@ -73,9 +98,7 @@ fn main() {
     println!("\nFull tool composite: {} entries", all_tools.len());
     for (i, entry) in all_tools.entries.iter().enumerate() {
         let name = match entry {
-            adk_rs_fluent::compose::tools::ToolCompositeEntry::Function(f) => {
-                f.name().to_string()
-            }
+            adk_rs_fluent::compose::tools::ToolCompositeEntry::Function(f) => f.name().to_string(),
             adk_rs_fluent::compose::tools::ToolCompositeEntry::BuiltIn(_) => {
                 "(built-in)".to_string()
             }

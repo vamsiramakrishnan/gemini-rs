@@ -51,32 +51,19 @@ fn main() {
 
     println!("\n--- Part 2: Composing Middleware ---");
 
-    let production_stack = M::log()
-        | M::latency()
-        | M::retry(3)
-        | M::cost()
-        | M::circuit_breaker(5);
+    let production_stack =
+        M::log() | M::latency() | M::retry(3) | M::cost() | M::circuit_breaker(5);
 
-    println!(
-        "  Production stack: {} layers",
-        production_stack.len()
-    );
+    println!("  Production stack: {} layers", production_stack.len());
 
     // ── Part 3: Observability Stack ──────────────────────────────────────
     // Combine tracing, metrics, and structured logging for production.
 
     println!("\n--- Part 3: Observability Stack ---");
 
-    let observability = M::trace()
-        | M::metrics()
-        | M::structured_log()
-        | M::latency()
-        | M::audit();
+    let observability = M::trace() | M::metrics() | M::structured_log() | M::latency() | M::audit();
 
-    println!(
-        "  Observability stack: {} layers",
-        observability.len()
-    );
+    println!("  Observability stack: {} layers", observability.len());
 
     // ── Part 4: Safety & Validation Stack ────────────────────────────────
     // Middleware that validates inputs and provides guardrails.
@@ -202,7 +189,11 @@ fn main() {
 
     println!(
         "  {} stack: {} layers",
-        if is_production { "Production" } else { "Development" },
+        if is_production {
+            "Production"
+        } else {
+            "Development"
+        },
         stack.len()
     );
 
@@ -210,9 +201,7 @@ fn main() {
 
     println!("\n--- Part 9: Fallback Model ---");
 
-    let resilient = M::fallback_model("gemini-1.5-flash")
-        | M::retry(2)
-        | M::circuit_breaker(5);
+    let resilient = M::fallback_model("gemini-1.5-flash") | M::retry(2) | M::circuit_breaker(5);
 
     println!(
         "  Resilient stack with model fallback: {} layers",

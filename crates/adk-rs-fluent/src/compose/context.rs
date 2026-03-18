@@ -375,10 +375,7 @@ impl C {
     pub fn summarize(prompt: &str) -> ContextPolicy {
         let prompt = prompt.to_string();
         ContextPolicy::new("summarize", move |history| {
-            let mut result = vec![Content::user(format!(
-                "[Summarize context: {}]",
-                prompt
-            ))];
+            let mut result = vec![Content::user(format!("[Summarize context: {}]", prompt))];
             result.extend(history.iter().cloned());
             result
         })
@@ -438,10 +435,7 @@ impl C {
     pub fn distill(instruction: &str) -> ContextPolicy {
         let instruction = instruction.to_string();
         ContextPolicy::new("distill", move |history| {
-            let mut result = vec![Content::user(format!(
-                "[Distill context: {}]",
-                instruction
-            ))];
+            let mut result = vec![Content::user(format!("[Distill context: {}]", instruction))];
             result.extend(history.iter().cloned());
             result
         })
@@ -458,20 +452,15 @@ impl C {
     /// C::priority(&[("user", 1.0), ("model", 0.5), ("tool", 0.2)])
     /// ```
     pub fn priority(weights: &[(&str, f64)]) -> ContextPolicy {
-        let owned_weights: Vec<(String, f64)> = weights
-            .iter()
-            .map(|(k, v)| (k.to_string(), *v))
-            .collect();
+        let owned_weights: Vec<(String, f64)> =
+            weights.iter().map(|(k, v)| (k.to_string(), *v)).collect();
         ContextPolicy::new("priority", move |history| {
             let weight_str = owned_weights
                 .iter()
                 .map(|(k, v)| format!("{}={}", k, v))
                 .collect::<Vec<_>>()
                 .join(", ");
-            let mut result = vec![Content::user(format!(
-                "[Priority weights: {}]",
-                weight_str
-            ))];
+            let mut result = vec![Content::user(format!("[Priority weights: {}]", weight_str))];
             result.extend(history.iter().cloned());
             result
         })
@@ -545,9 +534,7 @@ impl C {
     ///
     /// Similar to [`filter`](Self::filter) but with select semantics: entries
     /// matching the predicate are included (positive selection).
-    pub fn select(
-        predicate: impl Fn(&Content) -> bool + Send + Sync + 'static,
-    ) -> ContextPolicy {
+    pub fn select(predicate: impl Fn(&Content) -> bool + Send + Sync + 'static) -> ContextPolicy {
         ContextPolicy::new("select", move |history| {
             history.iter().filter(|c| predicate(c)).cloned().collect()
         })
@@ -933,7 +920,11 @@ mod tests {
     #[test]
     fn select_filters_matching() {
         use rs_genai::prelude::Role;
-        let history = vec![Content::user("keep"), Content::model("skip"), Content::user("also keep")];
+        let history = vec![
+            Content::user("keep"),
+            Content::model("skip"),
+            Content::user("also keep"),
+        ];
         let result = C::select(|c| c.role == Some(Role::User)).apply(&history);
         assert_eq!(result.len(), 2);
     }

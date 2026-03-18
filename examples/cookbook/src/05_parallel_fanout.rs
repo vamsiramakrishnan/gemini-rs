@@ -37,9 +37,8 @@ fn main() {
     println!("Two-way fan-out: technical | market");
 
     // ── Three-way fan-out ──
-    let fan_out = technical_researcher.clone()
-        | market_researcher.clone()
-        | social_researcher.clone();
+    let fan_out =
+        technical_researcher.clone() | market_researcher.clone() | social_researcher.clone();
 
     println!("Three-way fan-out: technical | market | social");
 
@@ -66,10 +65,9 @@ fn main() {
         .reads("social_findings")
         .writes("report");
 
-    let research_pipeline = (technical_researcher.clone()
-        | market_researcher.clone()
-        | social_researcher.clone())
-        >> synthesizer.clone();
+    let research_pipeline =
+        (technical_researcher.clone() | market_researcher.clone() | social_researcher.clone())
+            >> synthesizer.clone();
 
     println!("\nFan-out >> reduce: (tech | market | social) >> synthesizer");
     if let Composable::Pipeline(p) = &research_pipeline {

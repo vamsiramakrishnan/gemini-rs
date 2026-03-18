@@ -130,7 +130,10 @@ fn main() {
     let _cascade = cascade(vec![researcher.clone(), fast_researcher.clone()]);
     println!("\nCascade: try researcher, then fast_researcher");
 
-    let _fan_out = fan_out_merge(vec![researcher.clone(), fast_researcher.clone()], editor.clone());
+    let _fan_out = fan_out_merge(
+        vec![researcher.clone(), fast_researcher.clone()],
+        editor.clone(),
+    );
     println!("Fan-out: run both researchers in parallel");
 
     let _supervised = supervised(writer.clone(), reviewer.clone(), 5);

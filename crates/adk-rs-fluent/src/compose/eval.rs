@@ -295,11 +295,7 @@ mod tests {
     fn from_file_parses_cases() {
         let dir = std::env::temp_dir();
         let path = dir.join("eval_test_cases.txt");
-        std::fs::write(
-            &path,
-            "# comment\nWhat is 2+2?\n4\n\nHello\nHi\n",
-        )
-        .unwrap();
+        std::fs::write(&path, "# comment\nWhat is 2+2?\n4\n\nHello\nHi\n").unwrap();
         let suite = E::from_file(path.to_str().unwrap());
         assert_eq!(suite.len(), 2);
         assert_eq!(suite.cases[0].prompt, "What is 2+2?");
@@ -311,7 +307,10 @@ mod tests {
 
     #[test]
     fn persona_criterion() {
-        let c = E::persona("impatient_user", "A user who is in a hurry and wants quick answers");
+        let c = E::persona(
+            "impatient_user",
+            "A user who is in a hurry and wants quick answers",
+        );
         assert_eq!(c.name(), "impatient_user");
         assert_eq!(c.score("Here is your answer", ""), 0.5);
         assert_eq!(c.score("", ""), 0.0);

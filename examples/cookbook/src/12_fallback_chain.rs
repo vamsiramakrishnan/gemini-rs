@@ -116,12 +116,9 @@ async fn main() {
 
     println!("\n--- Part 3: Operator Algebra ---");
 
-    let chain = AgentBuilder::new("gpt4_equivalent")
-        .instruction("Premium response")
-        / AgentBuilder::new("gpt35_equivalent")
-            .instruction("Standard response")
-        / AgentBuilder::new("rule_based")
-            .instruction("Template response");
+    let chain = AgentBuilder::new("gpt4_equivalent").instruction("Premium response")
+        / AgentBuilder::new("gpt35_equivalent").instruction("Standard response")
+        / AgentBuilder::new("rule_based").instruction("Template response");
 
     match &chain {
         Composable::Fallback(f) => {

@@ -45,19 +45,19 @@ async fn main() {
     // Reviewer agent: evaluates the draft and either approves or gives feedback
     let reviewer: Arc<dyn TextAgent> = Arc::new(FnTextAgent::new("reviewer", |state| {
         let draft_count: u32 = state.get("draft_count").unwrap_or(0);
-        let _draft = state
-            .get::<String>("current_draft")
-            .unwrap_or_default();
+        let _draft = state.get::<String>("current_draft").unwrap_or_default();
 
         // Simulate improving quality — approve after 3 iterations
         if draft_count >= 3 {
             state.set("approved", true);
-            let review = format!("APPROVED: Draft meets quality standards after {draft_count} revisions.");
+            let review =
+                format!("APPROVED: Draft meets quality standards after {draft_count} revisions.");
             println!("  Reviewer: {review}");
             Ok(review)
         } else {
             state.set("approved", false);
-            let feedback = format!("Needs more detail on borrowing rules (iteration {draft_count})");
+            let feedback =
+                format!("Needs more detail on borrowing rules (iteration {draft_count})");
             state.set("feedback", &feedback);
             let review = format!("REVISION NEEDED: {feedback}");
             println!("  Reviewer: {review}");
@@ -68,9 +68,8 @@ async fn main() {
     // Create a loop that runs author >> reviewer until approved
     let pipeline = SequentialTextAgent::new("author_reviewer", vec![author, reviewer]);
 
-    let loop_agent = LoopTextAgent::new("review_loop", Arc::new(pipeline), 5).until(|state| {
-        state.get::<bool>("approved").unwrap_or(false)
-    });
+    let loop_agent = LoopTextAgent::new("review_loop", Arc::new(pipeline), 5)
+        .until(|state| state.get::<bool>("approved").unwrap_or(false));
 
     let state = State::new();
     let result = loop_agent.run(&state).await.unwrap();
@@ -135,9 +134,8 @@ async fn main() {
 
     let keyed_workflow = review_loop_keyed(
         AgentBuilder::new("coder").instruction("Write a sorting algorithm"),
-        AgentBuilder::new("qa_engineer").instruction(
-            "Review the code. Set quality='production' when ready.",
-        ),
+        AgentBuilder::new("qa_engineer")
+            .instruction("Review the code. Set quality='production' when ready."),
         "quality",    // custom state key
         "production", // target value
         5,
@@ -161,12 +159,13 @@ async fn main() {
     println!("\n--- Part 4: * Operator with until() ---");
 
     let refiner = AgentBuilder::new("refiner").instruction("Polish the text");
-    let converge = refiner * until(|v| {
-        v.get("score")
-            .and_then(|s| s.as_f64())
-            .map(|s| s >= 0.95)
-            .unwrap_or(false)
-    });
+    let converge = refiner
+        * until(|v| {
+            v.get("score")
+                .and_then(|s| s.as_f64())
+                .map(|s| s >= 0.95)
+                .unwrap_or(false)
+        });
 
     match &converge {
         Composable::Loop(l) => {

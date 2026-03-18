@@ -638,7 +638,9 @@ impl Middleware for DedupMiddleware {
         let mut last = self.last_request_hash.lock();
         if *last == Some(hash) {
             // Duplicate consecutive request — signal skip by returning empty response.
-            return Err(AgentError::Other("Duplicate consecutive request".to_string()));
+            return Err(AgentError::Other(
+                "Duplicate consecutive request".to_string(),
+            ));
         }
         *last = Some(hash);
         Ok(None)
@@ -687,8 +689,7 @@ pub struct MetricsMiddleware {
 impl MetricsMiddleware {
     /// Returns the total number of requests observed.
     pub fn request_count(&self) -> u64 {
-        self.request_count
-            .load(std::sync::atomic::Ordering::SeqCst)
+        self.request_count.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Returns the total number of errors observed.

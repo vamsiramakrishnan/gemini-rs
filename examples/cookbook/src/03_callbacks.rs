@@ -88,11 +88,11 @@ fn main() {
 
     // ── Scoped middleware ──
     // Apply middleware only to specific agents by name.
-    let scoped = M::scope(
-        &["researcher", "writer"],
-        M::log() | M::latency(),
+    let scoped = M::scope(&["researcher", "writer"], M::log() | M::latency());
+    println!(
+        "Scoped middleware: {} layers (applied to researcher, writer only)",
+        scoped.len()
     );
-    println!("Scoped middleware: {} layers (applied to researcher, writer only)", scoped.len());
 
     // ── Agent lifecycle hooks ──
     let lifecycle = M::before_agent(|ctx| {

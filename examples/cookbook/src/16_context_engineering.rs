@@ -44,7 +44,11 @@ fn main() {
 
     println!("--- C::window(4) — Last 4 Messages ---");
     let windowed = C::window(4).apply(&history);
-    println!("  Kept {} messages (from {} total)", windowed.len(), history.len());
+    println!(
+        "  Kept {} messages (from {} total)",
+        windowed.len(),
+        history.len()
+    );
     for msg in &windowed {
         print_content(msg);
     }
@@ -67,7 +71,8 @@ fn main() {
     // ── C::from_state — Inject State as Context ──────────────────────────
 
     println!("\n--- C::from_state() ---");
-    let with_state = C::from_state(&["user:name", "app:account_balance", "derived:risk"]).apply(&history);
+    let with_state =
+        C::from_state(&["user:name", "app:account_balance", "derived:risk"]).apply(&history);
     println!("  Total messages after injection: {}", with_state.len());
     print_content(&with_state[0]); // The injected context message
 
@@ -75,15 +80,13 @@ fn main() {
 
     println!("\n--- C::budget(50) — ~50 Token Budget ---");
     let budgeted = C::budget(50).apply(&history);
-    println!(
-        "  Kept {} messages within ~50 token budget",
-        budgeted.len()
-    );
+    println!("  Kept {} messages within ~50 token budget", budgeted.len());
 
     // ── C::redact — Mask Sensitive Data ──────────────────────────────────
 
     println!("\n--- C::redact() — PII Masking ---");
-    let redacted = C::redact(&["alice@example.com", "bob@example.com", "ACC-12345"]).apply(&history);
+    let redacted =
+        C::redact(&["alice@example.com", "bob@example.com", "ACC-12345"]).apply(&history);
     println!("  Redacted {} messages:", redacted.len());
     for msg in &redacted {
         print_content(msg);
@@ -131,10 +134,7 @@ fn main() {
 
     println!("\n--- C::empty() — Isolated Agent ---");
     let empty = C::empty().apply(&history);
-    println!(
-        "  {} messages (agent sees no history)",
-        empty.len()
-    );
+    println!("  {} messages (agent sees no history)", empty.len());
 
     // ── C::exclude_tools — Strip Tool Noise ──────────────────────────────
 
@@ -155,7 +155,10 @@ fn main() {
 
     // Apply the composed policy (each policy runs independently)
     let result = production_policy.apply(&history);
-    println!("  Result: {} messages total from all policies", result.len());
+    println!(
+        "  Result: {} messages total from all policies",
+        result.len()
+    );
 
     // ── Advanced: LLM-Powered Context Markers ────────────────────────────
     // These policies prepend markers that the runtime interprets.
@@ -194,16 +197,10 @@ fn main() {
     ];
 
     let research_only = C::from_agents(&["researcher"]).apply(&agent_history);
-    println!(
-        "  From 'researcher' only: {} messages",
-        research_only.len()
-    );
+    println!("  From 'researcher' only: {} messages", research_only.len());
 
     let no_logger = C::exclude_agents(&["logger"]).apply(&agent_history);
-    println!(
-        "  Excluding 'logger': {} messages",
-        no_logger.len()
-    );
+    println!("  Excluding 'logger': {} messages", no_logger.len());
 
     // ── C::notes — Scratchpad ────────────────────────────────────────────
 

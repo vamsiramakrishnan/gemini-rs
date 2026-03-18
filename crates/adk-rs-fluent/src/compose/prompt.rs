@@ -21,7 +21,10 @@ impl std::fmt::Debug for PromptSection {
             .field("kind", &self.kind)
             .field("content", &self.content)
             .field("name", &self.name)
-            .field("adapter", &self.adapter.as_ref().map(|_| "Fn(&str) -> String"))
+            .field(
+                "adapter",
+                &self.adapter.as_ref().map(|_| "Fn(&str) -> String"),
+            )
             .finish()
     }
 }
@@ -651,7 +654,10 @@ mod tests {
         let prompt = P::role("analyst") + P::task("analyze") + P::format("JSON");
         let filtered = prompt.without_by_name(&["format"]);
         assert_eq!(filtered.sections.len(), 2);
-        assert!(filtered.sections.iter().all(|s| s.name.as_deref() != Some("format")));
+        assert!(filtered
+            .sections
+            .iter()
+            .all(|s| s.name.as_deref() != Some("format")));
     }
 
     #[test]

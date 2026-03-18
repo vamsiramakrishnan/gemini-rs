@@ -30,7 +30,8 @@ fn main() {
     println!("--- Part 1: Schema Declarations ---");
 
     // JSON output artifact
-    let report_schema = A::json_output("analysis_report", "Detailed analysis report in JSON format");
+    let report_schema =
+        A::json_output("analysis_report", "Detailed analysis report in JSON format");
     println!("  JSON output:");
     for output in report_schema.all_outputs() {
         println!(
@@ -52,7 +53,10 @@ fn main() {
     // Custom MIME type
     let csv_schema = A::output("data_export", "text/csv", "Exported data in CSV format");
     for output in csv_schema.all_outputs() {
-        println!("  Custom output: name={}, mime={}", output.name, output.mime_type);
+        println!(
+            "  Custom output: name={}, mime={}",
+            output.name, output.mime_type
+        );
     }
 
     // ── Part 2: Composing Artifact Schemas with `+` ──────────────────────
@@ -83,14 +87,14 @@ fn main() {
 
     println!("\n--- Part 3: Pipeline Contracts ---");
 
-    let extractor_artifacts =
-        A::text_input("document", "Raw document") + A::json_output("extracted_data", "Structured data");
+    let extractor_artifacts = A::text_input("document", "Raw document")
+        + A::json_output("extracted_data", "Structured data");
 
     let transformer_artifacts = A::json_input("extracted_data", "Data from extractor")
         + A::json_output("transformed_data", "Cleaned and normalized data");
 
-    let loader_artifacts =
-        A::json_input("transformed_data", "Data to load") + A::text_output("load_report", "Load status");
+    let loader_artifacts = A::json_input("transformed_data", "Data to load")
+        + A::text_output("load_report", "Load status");
 
     // Combine all pipeline artifacts
     let pipeline_artifacts = extractor_artifacts + transformer_artifacts + loader_artifacts;
@@ -99,10 +103,7 @@ fn main() {
         "  ETL pipeline: {} artifact transforms",
         pipeline_artifacts.len()
     );
-    println!(
-        "  Total inputs:  {}",
-        pipeline_artifacts.all_inputs().len()
-    );
+    println!("  Total inputs:  {}", pipeline_artifacts.all_inputs().len());
     println!(
         "  Total outputs: {}",
         pipeline_artifacts.all_outputs().len()
@@ -153,7 +154,10 @@ fn main() {
 
     println!("\n--- Part 6: Creating Artifacts ---");
 
-    let json_op = A::from_json("config", r#"{"model": "gemini-2.0-flash", "temperature": 0.7}"#);
+    let json_op = A::from_json(
+        "config",
+        r#"{"model": "gemini-2.0-flash", "temperature": 0.7}"#,
+    );
     let text_op = A::from_text("readme", "# My Agent\n\nThis agent does amazing things.");
 
     println!("  From JSON: name={:?}", json_op.name());
@@ -192,16 +196,26 @@ fn main() {
         + A::json_output("findings", "Research findings with citations")
         + A::json_output("confidence", "Confidence scores per finding")
         + A::text_output("summary", "Executive summary")
-        + A::output("bibliography", "text/x-bibtex", "Bibliography in BibTeX format");
+        + A::output(
+            "bibliography",
+            "text/x-bibtex",
+            "Bibliography in BibTeX format",
+        );
 
     println!("  Research agent artifact specification:");
     println!("    Inputs:");
     for input in research_agent_spec.all_inputs() {
-        println!("      - {} ({}): {}", input.name, input.mime_type, input.description);
+        println!(
+            "      - {} ({}): {}",
+            input.name, input.mime_type, input.description
+        );
     }
     println!("    Outputs:");
     for output in research_agent_spec.all_outputs() {
-        println!("      - {} ({}): {}", output.name, output.mime_type, output.description);
+        println!(
+            "      - {} ({}): {}",
+            output.name, output.mime_type, output.description
+        );
     }
 
     // ── Part 9: Operation Pipeline for Batch Processing ──────────────────

@@ -697,10 +697,7 @@ mod tests {
     fn zip_combines_arrays() {
         let mut state = json!({"names": ["a", "b", "c"], "scores": [10, 20, 30]});
         S::zip(&["names", "scores"], "zipped").apply(&mut state);
-        assert_eq!(
-            state["zipped"],
-            json!([["a", 10], ["b", 20], ["c", 30]])
-        );
+        assert_eq!(state["zipped"], json!([["a", 10], ["b", 20], ["c", 30]]));
     }
 
     #[test]

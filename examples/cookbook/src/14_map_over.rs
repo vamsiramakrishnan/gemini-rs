@@ -99,8 +99,7 @@ async fn main() {
     }));
 
     let map_summarize =
-        MapOverTextAgent::new("section_summarizer", summarizer, "sections")
-            .output_key("summaries");
+        MapOverTextAgent::new("section_summarizer", summarizer, "sections").output_key("summaries");
 
     // Step 3: Combine summaries
     let combiner: Arc<dyn TextAgent> = Arc::new(FnTextAgent::new("combiner", |state| {
@@ -139,18 +138,14 @@ async fn main() {
 
     println!("  Agent: {}", map_workflow.agent.name());
     println!("  Concurrency: {}", map_workflow.concurrency);
-    println!(
-        "  Instruction: {:?}",
-        map_workflow.agent.get_instruction()
-    );
+    println!("  Instruction: {:?}", map_workflow.agent.get_instruction());
 
     // ── Part 4: map_reduce() Pattern ─────────────────────────────────────
 
     println!("\n--- Part 4: map_reduce() Pattern ---");
 
     let mr_workflow = map_reduce(
-        AgentBuilder::new("chunk_analyzer")
-            .instruction("Analyze this data chunk for anomalies"),
+        AgentBuilder::new("chunk_analyzer").instruction("Analyze this data chunk for anomalies"),
         AgentBuilder::new("anomaly_aggregator")
             .instruction("Combine anomaly reports into a summary"),
         8, // concurrency limit for map phase

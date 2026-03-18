@@ -40,11 +40,13 @@ fn main() {
         .text_only()
         .writes("converged");
 
-    let converging = iterator.clone() * until(|state| {
-        state.get("converged")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false)
-    });
+    let converging = iterator.clone()
+        * until(|state| {
+            state
+                .get("converged")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+        });
     println!("\nConditional loop: iterator * until(converged == true)");
 
     if let Composable::Loop(l) = &converging {

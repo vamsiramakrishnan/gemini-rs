@@ -36,7 +36,8 @@ fn main() {
     assert_eq!(agent.get_temperature(), Some(0.3)); // original unchanged
     assert_eq!(creative.get_temperature(), Some(0.95));
     assert_eq!(precise.get_temperature(), Some(0.1));
-    println!("\nCopy-on-write verified: original temp={:?}, creative={:?}, precise={:?}",
+    println!(
+        "\nCopy-on-write verified: original temp={:?}, creative={:?}, precise={:?}",
         agent.get_temperature(),
         creative.get_temperature(),
         precise.get_temperature(),
@@ -55,7 +56,10 @@ fn main() {
     println!("\nDetailed agent:");
     println!("  top_p:             {:?}", detailed.get_top_p());
     println!("  top_k:             {:?}", detailed.get_top_k());
-    println!("  max_output_tokens: {:?}", detailed.get_max_output_tokens());
+    println!(
+        "  max_output_tokens: {:?}",
+        detailed.get_max_output_tokens()
+    );
     println!("  thinking_budget:   {:?}", detailed.get_thinking_budget());
 
     // ── Text-only mode ──

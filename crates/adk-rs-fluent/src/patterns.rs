@@ -254,11 +254,7 @@ pub fn conditional(
 ///     5,
 /// );
 /// ```
-pub fn supervised(
-    worker: AgentBuilder,
-    supervisor: AgentBuilder,
-    max_rounds: usize,
-) -> Composable {
+pub fn supervised(worker: AgentBuilder, supervisor: AgentBuilder, max_rounds: usize) -> Composable {
     let inner = Composable::Pipeline(Pipeline::new(vec![
         Composable::Agent(worker),
         Composable::Agent(supervisor),
@@ -397,10 +393,7 @@ mod tests {
 
     #[test]
     fn fan_out_merge_creates_pipeline_with_fan_out_then_merger() {
-        let result = fan_out_merge(
-            vec![agent("a"), agent("b")],
-            agent("merger"),
-        );
+        let result = fan_out_merge(vec![agent("a"), agent("b")], agent("merger"));
         match &result {
             Composable::Pipeline(p) => {
                 assert_eq!(p.steps.len(), 2);
@@ -423,12 +416,7 @@ mod tests {
     #[test]
     fn conditional_creates_fallback_with_guard() {
         let result = conditional(
-            |state| {
-                state
-                    .get("flag")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false)
-            },
+            |state| state.get("flag").and_then(|v| v.as_bool()).unwrap_or(false),
             agent("yes").instruction("true branch"),
             agent("no").instruction("false branch"),
         );

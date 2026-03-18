@@ -18,9 +18,7 @@ mod voice_chat;
 use rs_genai::prelude::*;
 use tokio::sync::mpsc;
 
-use crate::app::{
-    AppError, AppInfo, AppRegistry, ClientMessage, DemoApp, ServerMessage, WsSender,
-};
+use crate::app::{AppError, AppInfo, AppRegistry, ClientMessage, DemoApp, ServerMessage, WsSender};
 
 /// Register all demo apps.
 pub fn register_all(registry: &mut AppRegistry) {

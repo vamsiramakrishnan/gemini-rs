@@ -23,7 +23,8 @@ fn main() {
     println!("=== 07: State Transforms (S::) ===\n");
 
     // ── S::pick — keep only selected keys ──
-    let mut state = json!({"name": "Alice", "age": 30, "email": "alice@example.com", "noise": "ignore"});
+    let mut state =
+        json!({"name": "Alice", "age": 30, "email": "alice@example.com", "noise": "ignore"});
     println!("Original state: {}", state);
 
     S::pick(&["name", "age"]).apply(&mut state);
@@ -39,7 +40,10 @@ fn main() {
     // ── S::merge — combine keys into a nested object ──
     let mut state = json!({"city": "NYC", "zip": "10001", "country": "US", "other": "data"});
     S::merge(&["city", "zip", "country"], "address").apply(&mut state);
-    println!("\nAfter S::merge([city, zip, country] -> address): {}", state);
+    println!(
+        "\nAfter S::merge([city, zip, country] -> address): {}",
+        state
+    );
 
     // ── S::compute — derive new values ──
     let mut state = json!({"price": 100, "quantity": 5});
@@ -47,7 +51,8 @@ fn main() {
         let price = s.get("price").and_then(|v| v.as_f64()).unwrap_or(0.0);
         let qty = s.get("quantity").and_then(|v| v.as_f64()).unwrap_or(0.0);
         json!(price * qty)
-    }).apply(&mut state);
+    })
+    .apply(&mut state);
     println!("\nAfter S::compute(total = price * quantity): {}", state);
     assert_eq!(state["total"], json!(500.0));
 
@@ -73,9 +78,9 @@ fn main() {
     let mut state = json!({"name": "Dave"});
     S::defaults(json!({"name": "default", "role": "viewer", "theme": "dark"})).apply(&mut state);
     println!("\nAfter S::defaults: {}", state);
-    assert_eq!(state["name"], "Dave");     // not overwritten
-    assert_eq!(state["role"], "viewer");    // filled in
-    assert_eq!(state["theme"], "dark");     // filled in
+    assert_eq!(state["name"], "Dave"); // not overwritten
+    assert_eq!(state["role"], "viewer"); // filled in
+    assert_eq!(state["theme"], "dark"); // filled in
 
     // ── Chaining with >> ──
     println!("\n--- Chained transforms ---");
@@ -83,9 +88,13 @@ fn main() {
         >> S::rename(&[("findings", "research")])
         >> S::compute("grade", |s| {
             let score = s.get("score").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            if score >= 90.0 { json!("A") }
-            else if score >= 80.0 { json!("B") }
-            else { json!("C") }
+            if score >= 90.0 {
+                json!("A")
+            } else if score >= 80.0 {
+                json!("B")
+            } else {
+                json!("C")
+            }
         })
         >> S::set("reviewed", json!(true));
 
@@ -101,9 +110,14 @@ fn main() {
     // ── S::map — custom transform ──
     let mut state = json!({"items": ["a", "b", "c"]});
     S::map(|s| {
-        let count = s.get("items").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
+        let count = s
+            .get("items")
+            .and_then(|v| v.as_array())
+            .map(|a| a.len())
+            .unwrap_or(0);
         s["item_count"] = json!(count);
-    }).apply(&mut state);
+    })
+    .apply(&mut state);
     println!("\nAfter S::map (count items): {}", state);
     assert_eq!(state["item_count"], 3);
 

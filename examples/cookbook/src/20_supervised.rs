@@ -58,9 +58,7 @@ async fn main() {
     // Supervisor: reviews code and either approves or requests changes
     let lead: Arc<dyn TextAgent> = Arc::new(FnTextAgent::new("tech_lead", |state| {
         let revision: u32 = state.get("revision").unwrap_or(0);
-        let _code = state
-            .get::<String>("submitted_code")
-            .unwrap_or_default();
+        let _code = state.get::<String>("submitted_code").unwrap_or_default();
 
         // Simulate progressive quality improvement
         if revision >= 3 {
@@ -157,8 +155,7 @@ async fn main() {
     println!("\n--- Part 3: supervised_keyed() ---");
 
     let qa_loop = supervised_keyed(
-        AgentBuilder::new("test_writer")
-            .instruction("Write unit tests for the sorting module"),
+        AgentBuilder::new("test_writer").instruction("Write unit tests for the sorting module"),
         AgentBuilder::new("qa_manager")
             .instruction("Review test coverage. Set qa_approved=true when coverage is adequate."),
         "qa_approved", // custom approval key
@@ -212,7 +209,10 @@ async fn main() {
         Composable::Pipeline(p) => {
             println!("  Team pipeline: {} steps", p.steps.len());
             if let Composable::FanOut(f) = &p.steps[0] {
-                println!("  Step 1: FanOut with {} parallel workers", f.branches.len());
+                println!(
+                    "  Step 1: FanOut with {} parallel workers",
+                    f.branches.len()
+                );
             }
             if let Composable::Agent(a) = &p.steps[1] {
                 println!("  Step 2: Supervisor '{}'", a.name());
@@ -228,18 +228,17 @@ async fn main() {
     println!("\n--- Part 5: Hierarchical Supervision ---");
 
     let inner_loop = supervised(
-        AgentBuilder::new("junior_dev")
-            .instruction("Implement the assigned task"),
+        AgentBuilder::new("junior_dev").instruction("Implement the assigned task"),
         AgentBuilder::new("senior_dev")
             .instruction("Review junior dev's work. Set approved=true when acceptable."),
         3,
     );
 
     let outer_loop = supervised(
-        AgentBuilder::new("team")
-            .instruction("Complete the sprint tasks"),
-        AgentBuilder::new("engineering_manager")
-            .instruction("Review sprint deliverables. Set approved=true when sprint goals are met."),
+        AgentBuilder::new("team").instruction("Complete the sprint tasks"),
+        AgentBuilder::new("engineering_manager").instruction(
+            "Review sprint deliverables. Set approved=true when sprint goals are met.",
+        ),
         2,
     );
 
@@ -293,10 +292,7 @@ async fn main() {
         "  is_high_quality:  {}",
         is_high_quality(&supervision_state)
     );
-    println!(
-        "  is_actionable:    {}",
-        is_actionable(&supervision_state)
-    );
+    println!("  is_actionable:    {}", is_actionable(&supervision_state));
 
     // Update state and re-check
     supervision_state.set("approved", true);

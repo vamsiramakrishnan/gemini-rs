@@ -28,9 +28,18 @@ fn main() {
 
     // Exact match — output must equal expected exactly
     let exact = E::response_match();
-    println!("  response_match('hello', 'hello'): {}", exact.score("hello", "hello"));
-    println!("  response_match('hello', 'world'): {}", exact.score("hello", "world"));
-    println!("  response_match(' hello ', 'hello'): {}", exact.score(" hello ", "hello"));
+    println!(
+        "  response_match('hello', 'hello'): {}",
+        exact.score("hello", "hello")
+    );
+    println!(
+        "  response_match('hello', 'world'): {}",
+        exact.score("hello", "world")
+    );
+    println!(
+        "  response_match(' hello ', 'hello'): {}",
+        exact.score(" hello ", "hello")
+    );
 
     // Contains match — output must contain expected as substring
     let contains = E::contains_match();
@@ -89,16 +98,20 @@ fn main() {
     );
     println!(
         "  word_count('this is a reasonably long output with many words in it and more', ''): {}",
-        word_count.score("this is a reasonably long output with many words in it and more", "")
+        word_count.score(
+            "this is a reasonably long output with many words in it and more",
+            ""
+        )
     );
 
     // JSON validity criterion
-    let json_valid = E::custom("json_valid", |output, _expected| {
-        match serde_json::from_str::<serde_json::Value>(output) {
+    let json_valid = E::custom(
+        "json_valid",
+        |output, _expected| match serde_json::from_str::<serde_json::Value>(output) {
             Ok(_) => 1.0,
             Err(_) => 0.0,
-        }
-    });
+        },
+    );
     println!(
         "  json_valid('{{\"key\": 1}}', ''): {}",
         json_valid.score(r#"{"key": 1}"#, "")
@@ -162,7 +175,12 @@ fn main() {
     println!("  Criteria: {:?}", suite.criteria_names);
 
     // Run the suite against simulated agent outputs
-    let simulated_outputs = ["4", "Paris, France", "Yes, Rust is memory safe", "The sky is Blue"];
+    let simulated_outputs = [
+        "4",
+        "Paris, France",
+        "Yes, Rust is memory safe",
+        "The sky is Blue",
+    ];
 
     let criteria = E::response_match() | E::contains_match() | E::safety();
 
@@ -212,10 +230,7 @@ fn main() {
         "  impatient_user scores empty output: {}",
         impatient.score("", "")
     );
-    println!(
-        "  confused_user criterion name: {}",
-        confused.name()
-    );
+    println!("  confused_user criterion name: {}", confused.name());
 
     // ── Part 6: Multi-Dimensional Quality Report ─────────────────────────
 
