@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Rebuild the apps/adk-web devtools panel into an OTel-native trace explorer with virtualized rendering, unified timeline, canvas minimap, token/usage metrics, and a SessionBridge to eliminate app boilerplate.
+**Goal:** Rebuild the apps/gemini-adk-web devtools panel into an OTel-native trace explorer with virtualized rendering, unified timeline, canvas minimap, token/usage metrics, and a SessionBridge to eliminate app boilerplate.
 
 **Architecture:** Frontend-first (Tasks 1-6 are pure JS/CSS, no Rust changes). Then backend (Tasks 7-10 add Rust types + OTel bridging). Frontend gracefully handles missing new message types so both halves are independently deployable.
 
@@ -13,9 +13,9 @@
 ### Task 1: Rendering Primitives — RingBuffer, VirtualList, RenderScheduler
 
 **Files:**
-- Create: `apps/adk-web/static/js/render/ring-buffer.js`
-- Create: `apps/adk-web/static/js/render/virtual-list.js`
-- Create: `apps/adk-web/static/js/render/render-scheduler.js`
+- Create: `apps/gemini-adk-web/static/js/render/ring-buffer.js`
+- Create: `apps/gemini-adk-web/static/js/render/virtual-list.js`
+- Create: `apps/gemini-adk-web/static/js/render/render-scheduler.js`
 
 These three modules are the performance foundation. Everything else builds on them.
 
@@ -301,7 +301,7 @@ Run: Open browser devtools console, load the app page, verify no JS errors from 
 **Step 5: Commit**
 
 ```bash
-git add apps/adk-web/static/js/render/
+git add apps/gemini-adk-web/static/js/render/
 git commit -m "feat(ui): add rendering primitives — RingBuffer, VirtualList, RenderScheduler"
 ```
 
@@ -310,9 +310,9 @@ git commit -m "feat(ui): add rendering primitives — RingBuffer, VirtualList, R
 ### Task 2: Timeline Panel — Replace Events Tab
 
 **Files:**
-- Modify: `apps/adk-web/static/app.html` — add `<script>` tags for render modules, add minimap canvas placeholder
-- Rewrite: `apps/adk-web/static/js/devtools.js` — new `DevtoolsManager` using rendering primitives
-- Modify: `apps/adk-web/static/css/devtools.css` — new timeline row styles
+- Modify: `apps/gemini-adk-web/static/app.html` — add `<script>` tags for render modules, add minimap canvas placeholder
+- Rewrite: `apps/gemini-adk-web/static/js/devtools.js` — new `DevtoolsManager` using rendering primitives
+- Modify: `apps/gemini-adk-web/static/css/devtools.css` — new timeline row styles
 
 This is the largest task. The entire `DevtoolsManager` class is rewritten to use `RingBuffer` + `VirtualList` for the timeline, with the new tab structure: Timeline | State | Phases | Metrics.
 
@@ -515,7 +515,7 @@ The `handleMessage` function in `app.js` already calls `devtools.addEvent(msg)` 
 
 **Step 5: Test manually**
 
-Run: `cargo run -p rs-genai-ui` and connect to a text-chat or tool-calling app. Verify:
+Run: `cargo run -p gemini-live-ui` and connect to a text-chat or tool-calling app. Verify:
 - Timeline shows events in chronological order with colored badges
 - Filter buttons toggle event visibility
 - Search filters rows by content
@@ -526,7 +526,7 @@ Run: `cargo run -p rs-genai-ui` and connect to a text-chat or tool-calling app. 
 **Step 6: Commit**
 
 ```bash
-git add apps/adk-web/static/js/devtools.js apps/adk-web/static/app.html apps/adk-web/static/css/devtools.css
+git add apps/gemini-adk-web/static/js/devtools.js apps/gemini-adk-web/static/app.html apps/gemini-adk-web/static/css/devtools.css
 git commit -m "feat(ui): unified timeline panel with VirtualList rendering"
 ```
 
@@ -535,9 +535,9 @@ git commit -m "feat(ui): unified timeline panel with VirtualList rendering"
 ### Task 3: Canvas Minimap
 
 **Files:**
-- Create: `apps/adk-web/static/js/render/minimap.js`
-- Modify: `apps/adk-web/static/js/devtools.js` — integrate minimap
-- Modify: `apps/adk-web/static/css/devtools.css` — minimap container styles
+- Create: `apps/gemini-adk-web/static/js/render/minimap.js`
+- Modify: `apps/gemini-adk-web/static/js/devtools.js` — integrate minimap
+- Modify: `apps/gemini-adk-web/static/css/devtools.css` — minimap container styles
 
 **Step 1: Create `minimap.js`**
 
@@ -681,7 +681,7 @@ this.scheduler.markDirty('minimap');
 **Step 5: Commit**
 
 ```bash
-git add apps/adk-web/static/js/render/minimap.js apps/adk-web/static/js/devtools.js apps/adk-web/static/css/devtools.css
+git add apps/gemini-adk-web/static/js/render/minimap.js apps/gemini-adk-web/static/js/devtools.js apps/gemini-adk-web/static/css/devtools.css
 git commit -m "feat(ui): canvas minimap with click-to-scroll and viewport overlay"
 ```
 
@@ -690,9 +690,9 @@ git commit -m "feat(ui): canvas minimap with click-to-scroll and viewport overla
 ### Task 4: Metrics Panel — Tokens, Cost, Sparkline
 
 **Files:**
-- Create: `apps/adk-web/static/js/render/sparkline.js`
-- Modify: `apps/adk-web/static/js/devtools.js` — new `_renderMetrics()` method
-- Modify: `apps/adk-web/static/css/devtools.css` — metrics panel styles
+- Create: `apps/gemini-adk-web/static/js/render/sparkline.js`
+- Modify: `apps/gemini-adk-web/static/js/devtools.js` — new `_renderMetrics()` method
+- Modify: `apps/gemini-adk-web/static/css/devtools.css` — metrics panel styles
 
 **Step 1: Create `sparkline.js`**
 
@@ -846,7 +846,7 @@ handleTelemetry(stats) {
 **Step 5: Commit**
 
 ```bash
-git add apps/adk-web/static/js/render/sparkline.js apps/adk-web/static/js/devtools.js apps/adk-web/static/css/devtools.css
+git add apps/gemini-adk-web/static/js/render/sparkline.js apps/gemini-adk-web/static/js/devtools.js apps/gemini-adk-web/static/css/devtools.css
 git commit -m "feat(ui): metrics panel with token counts, cost estimation, and latency sparkline"
 ```
 
@@ -855,8 +855,8 @@ git commit -m "feat(ui): metrics panel with token counts, cost estimation, and l
 ### Task 5: State Panel — Targeted Updates, Diff Flash, Search
 
 **Files:**
-- Modify: `apps/adk-web/static/js/devtools.js` — new state panel with `Map<key, DOMElement>` tracking
-- Modify: `apps/adk-web/static/css/devtools.css` — diff flash + search styles
+- Modify: `apps/gemini-adk-web/static/js/devtools.js` — new state panel with `Map<key, DOMElement>` tracking
+- Modify: `apps/gemini-adk-web/static/css/devtools.css` — diff flash + search styles
 
 **Step 1: Rewrite state panel rendering in `devtools.js`**
 
@@ -1007,7 +1007,7 @@ _addStateRow(key, value) {
 **Step 5: Commit**
 
 ```bash
-git add apps/adk-web/static/js/devtools.js apps/adk-web/static/css/devtools.css
+git add apps/gemini-adk-web/static/js/devtools.js apps/gemini-adk-web/static/css/devtools.css
 git commit -m "feat(ui): state panel with targeted DOM updates, diff flash, and search"
 ```
 
@@ -1016,8 +1016,8 @@ git commit -m "feat(ui): state panel with targeted DOM updates, diff flash, and 
 ### Task 6: Phases Panel — Current Phase Hero, Duration Bars
 
 **Files:**
-- Modify: `apps/adk-web/static/js/devtools.js` — new `_renderPhases()` method
-- Modify: `apps/adk-web/static/css/devtools.css` — phase hero and duration bar styles
+- Modify: `apps/gemini-adk-web/static/js/devtools.js` — new `_renderPhases()` method
+- Modify: `apps/gemini-adk-web/static/css/devtools.css` — phase hero and duration bar styles
 
 **Step 1: Implement `_renderPhases()`**
 
@@ -1126,7 +1126,7 @@ _renderPhases() {
 **Step 4: Commit**
 
 ```bash
-git add apps/adk-web/static/js/devtools.js apps/adk-web/static/css/devtools.css
+git add apps/gemini-adk-web/static/js/devtools.js apps/gemini-adk-web/static/css/devtools.css
 git commit -m "feat(ui): phases panel with current phase hero and duration bars"
 ```
 
@@ -1135,11 +1135,11 @@ git commit -m "feat(ui): phases panel with current phase hero and duration bars"
 ### Task 7: Server — SessionBridge
 
 **Files:**
-- Create: `apps/adk-web/src/bridge.rs`
-- Modify: `apps/adk-web/src/main.rs` — add `mod bridge;`
-- Modify: `apps/adk-web/src/apps/voice_chat.rs` — migrate to SessionBridge
-- Modify: `apps/adk-web/src/apps/tool_calling.rs` — migrate to SessionBridge
-- Modify: `apps/adk-web/src/apps/text_chat.rs` — migrate to SessionBridge
+- Create: `apps/gemini-adk-web/src/bridge.rs`
+- Modify: `apps/gemini-adk-web/src/main.rs` — add `mod bridge;`
+- Modify: `apps/gemini-adk-web/src/apps/voice_chat.rs` — migrate to SessionBridge
+- Modify: `apps/gemini-adk-web/src/apps/tool_calling.rs` — migrate to SessionBridge
+- Modify: `apps/gemini-adk-web/src/apps/text_chat.rs` — migrate to SessionBridge
 
 **Step 1: Create `bridge.rs`**
 
@@ -1154,7 +1154,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
-use adk_rs_fluent::prelude::*;
+use gemini_adk_fluent::prelude::*;
 
 use crate::app::{AppInfo, CookbookApp, ServerMessage, WsSender};
 
@@ -1371,18 +1371,18 @@ let handle = bridge.wire_live(Live::builder())
 
 **Step 6: Verify compilation**
 
-Run: `cargo check -p rs-genai-ui`
+Run: `cargo check -p gemini-live-ui`
 Expected: clean compile.
 
 **Step 7: Test**
 
-Run: `cargo run -p rs-genai-ui`, test voice-chat, text-chat, and tool-calling apps.
+Run: `cargo run -p gemini-live-ui`, test voice-chat, text-chat, and tool-calling apps.
 Verify: identical behavior to before migration.
 
 **Step 8: Commit**
 
 ```bash
-git add apps/adk-web/src/bridge.rs apps/adk-web/src/main.rs apps/adk-web/src/apps/voice_chat.rs apps/adk-web/src/apps/text_chat.rs apps/adk-web/src/apps/tool_calling.rs
+git add apps/gemini-adk-web/src/bridge.rs apps/gemini-adk-web/src/main.rs apps/gemini-adk-web/src/apps/voice_chat.rs apps/gemini-adk-web/src/apps/text_chat.rs apps/gemini-adk-web/src/apps/tool_calling.rs
 git commit -m "feat(ui): SessionBridge eliminates callback boilerplate in demo apps"
 ```
 
@@ -1391,11 +1391,11 @@ git commit -m "feat(ui): SessionBridge eliminates callback boilerplate in demo a
 ### Task 8: Server — New ServerMessage Variants
 
 **Files:**
-- Modify: `apps/adk-web/src/app.rs` — add `SpanEvent` and `TurnMetrics` variants to `ServerMessage`
+- Modify: `apps/gemini-adk-web/src/app.rs` — add `SpanEvent` and `TurnMetrics` variants to `ServerMessage`
 
 **Step 1: Add new variants to `ServerMessage` enum**
 
-In `apps/adk-web/src/app.rs`, add after the `ToolCallEvent` variant:
+In `apps/gemini-adk-web/src/app.rs`, add after the `ToolCallEvent` variant:
 
 ```rust
 /// OTel span lifecycle event bridged from the tracing Layer.
@@ -1445,13 +1445,13 @@ case 'spanEvent':
 
 **Step 3: Verify compilation**
 
-Run: `cargo check -p rs-genai-ui`
+Run: `cargo check -p gemini-live-ui`
 Expected: clean compile. New variants are defined but not yet sent by any app (the WebSocketSpanLayer will send them in Task 9).
 
 **Step 4: Commit**
 
 ```bash
-git add apps/adk-web/src/app.rs apps/adk-web/static/js/devtools.js apps/adk-web/static/js/app.js
+git add apps/gemini-adk-web/src/app.rs apps/gemini-adk-web/static/js/devtools.js apps/gemini-adk-web/static/js/app.js
 git commit -m "feat(ui): add SpanEvent and TurnMetrics server message variants"
 ```
 
@@ -1460,14 +1460,14 @@ git commit -m "feat(ui): add SpanEvent and TurnMetrics server message variants"
 ### Task 9: Server — WebSocketSpanLayer (OTel Span Bridge)
 
 **Files:**
-- Create: `apps/adk-web/src/span_layer.rs`
-- Modify: `apps/adk-web/src/main.rs` — add `mod span_layer;`
-- Modify: `apps/adk-web/src/bridge.rs` — integrate span layer into session lifecycle
-- Modify: `apps/adk-web/Cargo.toml` — add `tracing-subscriber` dependency
+- Create: `apps/gemini-adk-web/src/span_layer.rs`
+- Modify: `apps/gemini-adk-web/src/main.rs` — add `mod span_layer;`
+- Modify: `apps/gemini-adk-web/src/bridge.rs` — integrate span layer into session lifecycle
+- Modify: `apps/gemini-adk-web/Cargo.toml` — add `tracing-subscriber` dependency
 
 **Step 1: Add dependency**
 
-In `apps/adk-web/Cargo.toml`, add:
+In `apps/gemini-adk-web/Cargo.toml`, add:
 ```toml
 tracing-subscriber = { version = "0.3", features = ["registry", "env-filter"] }
 ```
@@ -1475,9 +1475,9 @@ tracing-subscriber = { version = "0.3", features = ["registry", "env-filter"] }
 **Step 2: Create `span_layer.rs`**
 
 ```rust
-//! WebSocketSpanLayer — bridges tracing spans from rs-genai/rs-adk to the browser.
+//! WebSocketSpanLayer — bridges tracing spans from gemini-live/gemini-adk to the browser.
 //!
-//! Only captures spans with targets `rs_genai` or `gemini` (the ~13 span types
+//! Only captures spans with targets `gemini_live` or `gemini` (the ~13 span types
 //! defined in the two spans.rs files). All other tracing output is ignored.
 //!
 //! Performance: uses a bounded channel (256) to avoid backpressure.
@@ -1550,8 +1550,8 @@ impl Visit for AttrVisitor {
 impl<S: Subscriber> Layer<S> for WebSocketSpanLayer {
     fn on_new_span(&self, attrs: &Attributes<'_>, id: &Id, _ctx: Context<'_, S>) {
         let target = attrs.metadata().target();
-        // Only capture rs_genai.* and gemini.agent.* spans
-        if !target.starts_with("rs_genai") && !target.starts_with("gemini") {
+        // Only capture gemini_live.* and gemini.agent.* spans
+        if !target.starts_with("gemini_live") && !target.starts_with("gemini") {
             return;
         }
 
@@ -1620,12 +1620,12 @@ Note: Full integration requires the span layer to be added to the tracing subscr
 
 **Step 4: Verify compilation**
 
-Run: `cargo check -p rs-genai-ui`
+Run: `cargo check -p gemini-live-ui`
 
 **Step 5: Commit**
 
 ```bash
-git add apps/adk-web/src/span_layer.rs apps/adk-web/src/main.rs apps/adk-web/src/bridge.rs apps/adk-web/Cargo.toml
+git add apps/gemini-adk-web/src/span_layer.rs apps/gemini-adk-web/src/main.rs apps/gemini-adk-web/src/bridge.rs apps/gemini-adk-web/Cargo.toml
 git commit -m "feat(ui): WebSocketSpanLayer bridges tracing spans to browser timeline"
 ```
 
@@ -1634,8 +1634,8 @@ git commit -m "feat(ui): WebSocketSpanLayer bridges tracing spans to browser tim
 ### Task 10: OTel Export — Copy as OTLP JSON + Trace ID Badge
 
 **Files:**
-- Modify: `apps/adk-web/static/js/devtools.js` — add export button and OTLP JSON serialization
-- Modify: `apps/adk-web/static/css/devtools.css` — export button styles
+- Modify: `apps/gemini-adk-web/static/js/devtools.js` — add export button and OTLP JSON serialization
+- Modify: `apps/gemini-adk-web/static/css/devtools.css` — export button styles
 
 **Step 1: Add export functionality to `devtools.js`**
 
@@ -1671,7 +1671,7 @@ _exportOtlpJson() {
         ]
       },
       scopeSpans: [{
-        scope: { name: 'rs-genai-ui', version: '0.1.0' },
+        scope: { name: 'gemini-live-ui', version: '0.1.0' },
         spans: spans.map(s => ({
           traceId: this._traceId || this._generateTraceId(),
           spanId: s.raw.span_id,
@@ -1710,11 +1710,11 @@ _generateTraceId() {
 
 **Step 2: Add trace ID to status bar**
 
-When a `spanEvent` with name `rs_genai.session` arrives, extract and display the trace ID:
+When a `spanEvent` with name `gemini_live.session` arrives, extract and display the trace ID:
 
 ```js
 // In addEvent():
-if (msg.type === 'spanEvent' && msg.name === 'rs_genai.session') {
+if (msg.type === 'spanEvent' && msg.name === 'gemini_live.session') {
   this._traceId = msg.span_id;
   this.scheduler.markDirty('statusBar');
 }
@@ -1763,7 +1763,7 @@ if (this._traceId) {
 **Step 5: Commit**
 
 ```bash
-git add apps/adk-web/static/js/devtools.js apps/adk-web/static/css/devtools.css
+git add apps/gemini-adk-web/static/js/devtools.js apps/gemini-adk-web/static/css/devtools.css
 git commit -m "feat(ui): OTel export — copy trace as OTLP JSON with trace ID badge"
 ```
 

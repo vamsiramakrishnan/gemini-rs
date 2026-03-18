@@ -13,7 +13,7 @@
 //!
 //! This example models a loan application processing pipeline.
 
-use adk_rs_fluent::prelude::*;
+use gemini_adk_fluent::prelude::*;
 #[allow(unused_imports)]
 use serde_json::json;
 use std::sync::Arc;
@@ -30,8 +30,8 @@ impl BaseLlm for MockLlm {
     }
     async fn generate(
         &self,
-        req: rs_adk::llm::LlmRequest,
-    ) -> Result<rs_adk::llm::LlmResponse, rs_adk::llm::LlmError> {
+        req: gemini_adk::llm::LlmRequest,
+    ) -> Result<gemini_adk::llm::LlmResponse, gemini_adk::llm::LlmError> {
         let instruction = req.system_instruction.unwrap_or_default();
         let response = if instruction.contains("risk") {
             json!({
@@ -46,10 +46,10 @@ impl BaseLlm for MockLlm {
         } else {
             format!("[{}]", instruction.chars().take(50).collect::<String>())
         };
-        Ok(rs_adk::llm::LlmResponse {
-            content: rs_genai::prelude::Content {
-                role: Some(rs_genai::prelude::Role::Model),
-                parts: vec![rs_genai::prelude::Part::Text { text: response }],
+        Ok(gemini_adk::llm::LlmResponse {
+            content: gemini_live::prelude::Content {
+                role: Some(gemini_live::prelude::Role::Model),
+                parts: vec![gemini_live::prelude::Part::Text { text: response }],
             },
             finish_reason: Some("STOP".into()),
             usage: None,

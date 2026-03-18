@@ -9,7 +9,7 @@
 //!   3. Review loop: iterate until quality threshold is met
 //!   4. Final formatting with structured output schema
 
-use adk_rs_fluent::prelude::*;
+use gemini_adk_fluent::prelude::*;
 use serde_json::json;
 
 fn main() {

@@ -72,7 +72,7 @@ cargo run -p example-transcription   # http://127.0.0.1:3004
 ### Multi-app Web UI
 
 ```bash
-cargo run -p adk-web                 # http://127.0.0.1:3000
+cargo run -p gemini-adk-web                 # http://127.0.0.1:3000
 ```
 
 All apps listed below are available in the multi-app UI with a shared devtools panel showing state, transcript, and telemetry.
@@ -86,7 +86,7 @@ All apps listed below are available in the multi-app UI with a shared devtools p
 Minimal text-only Gemini Live session. Connects via WebSocket, sends text, receives streaming deltas. No microphone required.
 
 - **Port:** 3001
-- **Layer:** L0 (`rs_genai::prelude::*`)
+- **Layer:** L0 (`gemini_live::prelude::*`)
 - **Features:** Text I/O, streaming text deltas, turn lifecycle
 
 ### voice-chat (L0 Wire)
@@ -94,7 +94,7 @@ Minimal text-only Gemini Live session. Connects via WebSocket, sends text, recei
 Native audio voice chat with bidirectional audio streaming. Demonstrates voice selection, VAD events, and real-time transcription.
 
 - **Port:** 3002
-- **Layer:** L0 (`rs_genai::prelude::*`)
+- **Layer:** L0 (`gemini_live::prelude::*`)
 - **Model:** `GeminiLive2_5FlashNativeAudio`
 - **Features:** Bidirectional audio, input/output transcription, VAD events
 - **Voices:** Puck, Charon, Kore, Fenrir, Aoede
@@ -104,7 +104,7 @@ Native audio voice chat with bidirectional audio streaming. Demonstrates voice s
 Function calling with `TypedTool` and auto-generated JSON Schema from Rust structs. Shows `ToolDispatcher` routing tool calls by function name.
 
 - **Port:** 3003
-- **Layer:** L1 (`rs_adk::tool::{ToolDispatcher, TypedTool}`)
+- **Layer:** L1 (`gemini_adk::tool::{ToolDispatcher, TypedTool}`)
 - **Features:** TypedTool with `JsonSchema` derive, ToolDispatcher, SessionEvent::ToolCall handling
 - **Tools:** `get_weather(city)`, `calculate(expression)`
 
@@ -113,14 +113,14 @@ Function calling with `TypedTool` and auto-generated JSON Schema from Rust struc
 Comprehensive showcase of every Gemini Live API configuration property. The most complete reference for wire-level options.
 
 - **Port:** 3004
-- **Layer:** L0 (`rs_genai::prelude::*`)
+- **Layer:** L0 (`gemini_live::prelude::*`)
 - **Features:** Input/output transcription, activity handling (`StartOfActivityInterrupts`), turn coverage, server VAD with automatic sensitivity, context window compression (2048 tokens), session resumption, affective dialog
 
 ### agents (L1/L2 Runtime + Fluent)
 
 CLI-based examples demonstrating text agent combinators and typed tool dispatch.
 
-- **Layer:** L1/L2 (`rs_adk::tool::*`, `adk_rs_fluent::prelude::*`)
+- **Layer:** L1/L2 (`gemini_adk::tool::*`, `gemini_adk_fluent::prelude::*`)
 - **Binaries:** `weather-agent` (TypedTool dispatch), `research-pipeline` (agent composition)
 - **Features:** Agent combinators (`>>`, `|`, `/`), copy-on-write builder templates, `S::pick()` / `S::rename()` state transforms, `review_loop()` pattern
 

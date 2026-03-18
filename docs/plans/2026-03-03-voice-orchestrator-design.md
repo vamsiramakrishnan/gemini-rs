@@ -70,15 +70,15 @@ conversational front-end, dispatching complex reasoning tasks to text-mode
 
 | Component | Location | Status |
 |---|---|---|
-| `TextAgent` trait + 13 implementations | `crates/rs-adk/src/text.rs` | Complete |
-| `AgentTool` (wraps `Agent` as `ToolFunction`) | `crates/rs-adk/src/agent_tool.rs` | Works but wraps live `Agent`, not `TextAgent` |
-| `Composable` operators (`>>`, `\|`, `*`, `/`) | `crates/adk-rs-fluent/src/operators.rs` | Complete |
-| `compile()` IR → `TextAgent` | `crates/adk-rs-fluent/src/operators.rs` | Complete |
-| `ToolDispatcher` with auto-dispatch | `crates/rs-adk/src/tool.rs` | Complete |
-| `on_tool_call` callback with `State` | `crates/rs-adk/src/live/callbacks.rs:59` | Complete |
-| Phase machine + transition guards | `crates/rs-adk/src/live/phase.rs` | Complete |
-| Watchers (state change reactions) | `crates/rs-adk/src/live/watcher.rs` | Complete |
-| `InstructionModifier` system | `crates/rs-adk/src/live/phase.rs:62` | Complete |
+| `TextAgent` trait + 13 implementations | `crates/gemini-adk/src/text.rs` | Complete |
+| `AgentTool` (wraps `Agent` as `ToolFunction`) | `crates/gemini-adk/src/agent_tool.rs` | Works but wraps live `Agent`, not `TextAgent` |
+| `Composable` operators (`>>`, `\|`, `*`, `/`) | `crates/gemini-adk-fluent/src/operators.rs` | Complete |
+| `compile()` IR → `TextAgent` | `crates/gemini-adk-fluent/src/operators.rs` | Complete |
+| `ToolDispatcher` with auto-dispatch | `crates/gemini-adk/src/tool.rs` | Complete |
+| `on_tool_call` callback with `State` | `crates/gemini-adk/src/live/callbacks.rs:59` | Complete |
+| Phase machine + transition guards | `crates/gemini-adk/src/live/phase.rs` | Complete |
+| Watchers (state change reactions) | `crates/gemini-adk/src/live/watcher.rs` | Complete |
+| `InstructionModifier` system | `crates/gemini-adk/src/live/phase.rs:62` | Complete |
 
 ### What's Missing (Gaps)
 
@@ -663,7 +663,7 @@ talking. Risk scoring, compliance checks, enrichment lookups, analytics.
 ### Type Definition
 
 ```rust
-// crates/rs-adk/src/text_agent_tool.rs
+// crates/gemini-adk/src/text_agent_tool.rs
 
 pub struct TextAgentTool {
     name: String,
@@ -772,7 +772,7 @@ impl TextAgentTool {
 Extend `ToolDispatcher` to pass state through:
 
 ```rust
-// In crates/rs-adk/src/tool.rs
+// In crates/gemini-adk/src/tool.rs
 impl ToolDispatcher {
     /// Call a tool function with optional parent state for state-aware tools.
     pub async fn call_function_with_state(
@@ -804,7 +804,7 @@ when constructing the tool.
 ### Type Definition
 
 ```rust
-// crates/rs-adk/src/live/background_agent.rs
+// crates/gemini-adk/src/live/background_agent.rs
 
 pub struct BackgroundAgentDispatcher {
     /// Maximum concurrent background agents.
@@ -876,7 +876,7 @@ Live::builder()
 ### API on Live
 
 ```rust
-// crates/adk-rs-fluent/src/live.rs
+// crates/gemini-adk-fluent/src/live.rs
 
 impl Live {
     /// Register a TextAgent as a tool the live model can call.
@@ -966,8 +966,8 @@ let session = Live::builder()
 ### Task 1: `TextAgentTool` (P0, ~60 LOC)
 
 **Files:**
-- Create: `crates/rs-adk/src/text_agent_tool.rs`
-- Modify: `crates/rs-adk/src/lib.rs` (add `pub mod text_agent_tool;`)
+- Create: `crates/gemini-adk/src/text_agent_tool.rs`
+- Modify: `crates/gemini-adk/src/lib.rs` (add `pub mod text_agent_tool;`)
 
 **Step 1: Write the struct and constructor**
 
@@ -1047,14 +1047,14 @@ impl ToolFunction for TextAgentTool {
 **Step 4: Run tests**
 
 ```bash
-cargo test -p rs-adk text_agent_tool
+cargo test -p gemini-adk text_agent_tool
 ```
 
 **Step 5: Commit**
 
 ```bash
-git add crates/rs-adk/src/text_agent_tool.rs crates/rs-adk/src/lib.rs
-git commit -m "feat(rs-adk): add TextAgentTool bridging text agent pipelines to tool dispatch"
+git add crates/gemini-adk/src/text_agent_tool.rs crates/gemini-adk/src/lib.rs
+git commit -m "feat(gemini-adk): add TextAgentTool bridging text agent pipelines to tool dispatch"
 ```
 
 ---
@@ -1062,7 +1062,7 @@ git commit -m "feat(rs-adk): add TextAgentTool bridging text agent pipelines to 
 ### Task 2: Fluent `.agent_tool()` on Live builder (P0, ~40 LOC)
 
 **Files:**
-- Modify: `crates/adk-rs-fluent/src/live.rs`
+- Modify: `crates/gemini-adk-fluent/src/live.rs`
 
 **Step 1: Add `agent_tool` method**
 
@@ -1118,7 +1118,7 @@ in tool declarations sent to the model.
 **Step 4: Commit**
 
 ```bash
-git commit -m "feat(adk-rs-fluent): add .agent_tool() for registering text agent pipelines as live tools"
+git commit -m "feat(gemini-adk-fluent): add .agent_tool() for registering text agent pipelines as live tools"
 ```
 
 ---
@@ -1126,8 +1126,8 @@ git commit -m "feat(adk-rs-fluent): add .agent_tool() for registering text agent
 ### Task 3: `BackgroundAgentDispatcher` (P1, ~120 LOC)
 
 **Files:**
-- Create: `crates/rs-adk/src/live/background_agent.rs`
-- Modify: `crates/rs-adk/src/live/mod.rs` (add module + re-export)
+- Create: `crates/gemini-adk/src/live/background_agent.rs`
+- Modify: `crates/gemini-adk/src/live/mod.rs` (add module + re-export)
 
 **Step 1: Core dispatcher struct**
 
@@ -1160,7 +1160,7 @@ can dispatch via `handle.dispatch_agent(...)`.
 **Step 4: Commit**
 
 ```bash
-git commit -m "feat(rs-adk): add BackgroundAgentDispatcher for async agent work from live callbacks"
+git commit -m "feat(gemini-adk): add BackgroundAgentDispatcher for async agent work from live callbacks"
 ```
 
 ---
@@ -1168,7 +1168,7 @@ git commit -m "feat(rs-adk): add BackgroundAgentDispatcher for async agent work 
 ### Task 4: `PromptComposite` → `String` bridge (P2, ~10 LOC)
 
 **Files:**
-- Modify: `crates/adk-rs-fluent/src/compose/prompt.rs`
+- Modify: `crates/gemini-adk-fluent/src/compose/prompt.rs`
 
 **Step 1: Implement conversions**
 
@@ -1202,7 +1202,7 @@ fn prompt_composite_into_string() {
 **Step 3: Commit**
 
 ```bash
-git commit -m "feat(adk-rs-fluent): implement Into<String> for PromptComposite and PromptSection"
+git commit -m "feat(gemini-adk-fluent): implement Into<String> for PromptComposite and PromptSection"
 ```
 
 ---
@@ -1210,7 +1210,7 @@ git commit -m "feat(adk-rs-fluent): implement Into<String> for PromptComposite a
 ### Task 5: Integration test — debt collection with agent dispatch (P1)
 
 **Files:**
-- Modify: `apps/adk-web/src/apps/debt_collection.rs`
+- Modify: `apps/gemini-adk-web/src/apps/debt_collection.rs`
 
 **Step 1: Add a verification agent tool**
 

@@ -9,7 +9,7 @@
 //!
 //! Also shows how these compose with S, C, P, T, A, E, G modules.
 
-use adk_rs_fluent::prelude::*;
+use gemini_adk_fluent::prelude::*;
 use serde_json::json;
 
 fn main() {

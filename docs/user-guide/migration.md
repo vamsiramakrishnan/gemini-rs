@@ -7,7 +7,7 @@ so you can see what each layer adds and decide where to build.
 
 Each layer removes a category of boilerplate:
 
-| What you write | L0 (rs-genai) | L1 (rs-adk) | L2 (adk-rs-fluent) |
+| What you write | L0 (gemini-live) | L1 (gemini-adk) | L2 (gemini-adk-fluent) |
 |----------------|:---:|:---:|:---:|
 | WebSocket connection | Manual | Manual | One line |
 | Event loop (`select!`) | Manual | Automatic | Automatic |
@@ -31,7 +31,7 @@ and manage all state yourself.
 Here is a weather assistant with one tool:
 
 ```rust,ignore
-use rs_genai::prelude::*;
+use gemini_live::prelude::*;
 use serde_json::json;
 
 #[tokio::main]
@@ -120,8 +120,8 @@ a `match` over every event variant.
 Same weather assistant:
 
 ```rust,ignore
-use rs_adk::{SimpleTool, ToolDispatcher, LiveSessionBuilder};
-use rs_genai::prelude::*;
+use gemini_adk::{SimpleTool, ToolDispatcher, LiveSessionBuilder};
+use gemini_live::prelude::*;
 use serde_json::json;
 
 #[tokio::main]
@@ -145,7 +145,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .system_instruction("You are a weather assistant. Use get_weather for queries.");
 
     // 3. Build callbacks
-    let mut callbacks = rs_adk::EventCallbacks::default();
+    let mut callbacks = gemini_adk::EventCallbacks::default();
     callbacks.on_text = Some(Box::new(|t| print!("{t}")));
     callbacks.on_turn_complete = Some(std::sync::Arc::new(|| {
         Box::pin(async { println!() })
@@ -181,7 +181,7 @@ At L2, `Live::builder()` wraps everything in a chainable API. The same
 weather assistant:
 
 ```rust,ignore
-use adk_rs_fluent::prelude::*;
+use gemini_adk_fluent::prelude::*;
 use serde_json::json;
 
 #[tokio::main]

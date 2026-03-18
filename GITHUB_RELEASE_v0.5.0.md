@@ -85,21 +85,21 @@ A progressive **Crawl / Walk / Run** learning path covering the full SDK surface
 
 | Crate | Version | Install |
 |-------|---------|---------|
-| [`rs-genai`](https://crates.io/crates/rs-genai) | 0.5.0 | `cargo add rs-genai` |
-| [`rs-adk`](https://crates.io/crates/rs-adk) | 0.5.0 | `cargo add rs-adk` |
-| [`adk-rs-fluent`](https://crates.io/crates/adk-rs-fluent) | 0.5.0 | `cargo add adk-rs-fluent` |
-| [`adk-cli`](https://crates.io/crates/adk-cli) | 0.5.0 | `cargo install adk-cli` |
+| [`gemini-live`](https://crates.io/crates/gemini-live) | 0.5.0 | `cargo add gemini-live` |
+| [`gemini-adk`](https://crates.io/crates/gemini-adk) | 0.5.0 | `cargo add gemini-adk` |
+| [`gemini-adk-fluent`](https://crates.io/crates/gemini-adk-fluent) | 0.5.0 | `cargo add gemini-adk-fluent` |
+| [`gemini-adk-cli`](https://crates.io/crates/gemini-adk-cli) | 0.5.0 | `cargo install gemini-adk-cli` |
 
 ## Install
 
 ```bash
 # Library (add to Cargo.toml)
-cargo add adk-rs-fluent    # Full fluent DX (recommended)
-cargo add rs-adk            # Runtime only
-cargo add rs-genai           # Wire protocol only
+cargo add gemini-adk-fluent    # Full fluent DX (recommended)
+cargo add gemini-adk            # Runtime only
+cargo add gemini-live           # Wire protocol only
 
 # CLI
-cargo install adk-cli
+cargo install gemini-adk-cli
 ```
 
 ## Upgrade Guide
@@ -108,10 +108,10 @@ Update your `Cargo.toml` dependencies from `0.4.0` to `0.5.0`. No breaking API c
 
 ```toml
 # Before
-adk-rs-fluent = "0.4.0"
+gemini-adk-fluent = "0.4.0"
 
 # After
-adk-rs-fluent = "0.5.0"
+gemini-adk-fluent = "0.5.0"
 ```
 
 ## CI Improvements

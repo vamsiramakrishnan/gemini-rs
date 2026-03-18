@@ -37,13 +37,13 @@ jobs:
 # Job 2 — Publish: crates.io in strict dependency order
 #
 # Publish order (must match dependency graph):
-#   L0  rs-genai
-#   L1  rs-adk          (depends on rs-genai)
-#   L2  adk-rs-fluent   (depends on rs-genai, rs-adk)
-#   app adk-server-core (depends on rs-adk)
-#   bin adk-cli         (depends on rs-genai, rs-adk, adk-rs-fluent, adk-server-core)
+#   L0  gemini-live
+#   L1  gemini-adk          (depends on gemini-live)
+#   L2  gemini-adk-fluent   (depends on gemini-live, gemini-adk)
+#   app gemini-adk-server (depends on gemini-adk)
+#   bin gemini-adk-cli         (depends on gemini-live, gemini-adk, gemini-adk-fluent, gemini-adk-server)
 #
-# adk-web and adk-api-server are publish = false (deployment apps, not library crates).
+# gemini-adk-web and gemini-adk-api are publish = false (deployment apps, not library crates).
 #
 # Each step:
 #   1. Reads version from Cargo metadata (single source of truth: workspace version)
@@ -106,28 +106,28 @@ jobs:
           HELPER
           chmod +x /tmp/publish.sh
 
-      - name: Publish rs-genai (L0)
-        run: /tmp/publish.sh rs-genai
+      - name: Publish gemini-live (L0)
+        run: /tmp/publish.sh gemini-live
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
-      - name: Publish rs-adk (L1)
-        run: /tmp/publish.sh rs-adk
+      - name: Publish gemini-adk (L1)
+        run: /tmp/publish.sh gemini-adk
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
-      - name: Publish adk-rs-fluent (L2)
-        run: /tmp/publish.sh adk-rs-fluent
+      - name: Publish gemini-adk-fluent (L2)
+        run: /tmp/publish.sh gemini-adk-fluent
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
-      - name: Publish adk-server-core
-        run: /tmp/publish.sh adk-server-core
+      - name: Publish gemini-adk-server
+        run: /tmp/publish.sh gemini-adk-server
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
-      - name: Publish adk-cli
-        run: /tmp/publish.sh adk-cli
+      - name: Publish gemini-adk-cli
+        run: /tmp/publish.sh gemini-adk-cli
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
@@ -181,11 +181,11 @@ jobs:
               echo ""
               echo "| Crate | Version |"
               echo "|-------|---------|"
-              echo "| \`rs-genai\` | $VERSION |"
-              echo "| \`rs-adk\` | $VERSION |"
-              echo "| \`adk-rs-fluent\` | $VERSION |"
-              echo "| \`adk-server-core\` | $VERSION |"
-              echo "| \`adk-cli\` | $VERSION |"
+              echo "| \`gemini-live\` | $VERSION |"
+              echo "| \`gemini-adk\` | $VERSION |"
+              echo "| \`gemini-adk-fluent\` | $VERSION |"
+              echo "| \`gemini-adk-server\` | $VERSION |"
+              echo "| \`gemini-adk-cli\` | $VERSION |"
               echo "RELEASE_EOF"
             } >> "$GITHUB_OUTPUT"
           fi

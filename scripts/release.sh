@@ -164,16 +164,16 @@ ${CHANGELOG_BODY}
 
 | Crate | Version | Install |
 |-------|---------|---------|
-| [\`rs-genai\`](https://crates.io/crates/rs-genai) | ${VERSION} | \`cargo add rs-genai@${VERSION}\` |
-| [\`rs-adk\`](https://crates.io/crates/rs-adk) | ${VERSION} | \`cargo add rs-adk@${VERSION}\` |
-| [\`adk-rs-fluent\`](https://crates.io/crates/adk-rs-fluent) | ${VERSION} | \`cargo add adk-rs-fluent@${VERSION}\` |
-| [\`adk-server-core\`](https://crates.io/crates/adk-server-core) | ${VERSION} | \`cargo add adk-server-core@${VERSION}\` |
-| [\`adk-cli\`](https://crates.io/crates/adk-cli) | ${VERSION} | \`cargo install adk-cli@${VERSION}\` |
+| [\`gemini-live\`](https://crates.io/crates/gemini-live) | ${VERSION} | \`cargo add gemini-live@${VERSION}\` |
+| [\`gemini-adk\`](https://crates.io/crates/gemini-adk) | ${VERSION} | \`cargo add gemini-adk@${VERSION}\` |
+| [\`gemini-adk-fluent\`](https://crates.io/crates/gemini-adk-fluent) | ${VERSION} | \`cargo add gemini-adk-fluent@${VERSION}\` |
+| [\`gemini-adk-server\`](https://crates.io/crates/gemini-adk-server) | ${VERSION} | \`cargo add gemini-adk-server@${VERSION}\` |
+| [\`gemini-adk-cli\`](https://crates.io/crates/gemini-adk-cli) | ${VERSION} | \`cargo install gemini-adk-cli@${VERSION}\` |
 
 ## Upgrade
 
 \`\`\`toml
-adk-rs-fluent = \"${VERSION}\"
+gemini-adk-fluent = \"${VERSION}\"
 \`\`\`
 
 **Full Changelog**: https://github.com/vamsiramakrishnan/gemini-rs/blob/main/CHANGELOG.md"
@@ -252,7 +252,7 @@ if ! $DRY_RUN; then
   echo ""
   echo -e "  Steps:"
   echo -e "  ${BOLD}1. validate${RESET}  fmt + test + clippy"
-  echo -e "  ${BOLD}2. publish${RESET}   rs-genai → rs-adk → adk-rs-fluent → adk-server-core → adk-cli"
+  echo -e "  ${BOLD}2. publish${RESET}   gemini-live → gemini-adk → gemini-adk-fluent → gemini-adk-server → gemini-adk-cli"
   echo -e "  ${BOLD}3. release${RESET}   GitHub Release from ${NOTES_FILE}"
 fi
 echo -e "${GREEN}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"

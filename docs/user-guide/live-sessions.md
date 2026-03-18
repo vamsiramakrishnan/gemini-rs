@@ -25,7 +25,7 @@ Audio formats:
 A minimal live session in under 15 lines:
 
 ```rust,ignore
-use adk_rs_fluent::prelude::*;
+use gemini_adk_fluent::prelude::*;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -249,7 +249,7 @@ When the model calls a tool, the dispatch logic follows this priority:
 Register tools with the dispatcher:
 
 ```rust,ignore
-use rs_adk::{SimpleTool, ToolDispatcher};
+use gemini_adk::{SimpleTool, ToolDispatcher};
 
 let mut dispatcher = ToolDispatcher::new();
 dispatcher.register(SimpleTool::new(
@@ -447,7 +447,7 @@ For advanced scenarios (custom auth, proxy, etc.), build the config yourself
 and pass it to `.connect()`:
 
 ```rust,ignore
-use rs_genai::prelude::*;
+use gemini_live::prelude::*;
 
 let config = SessionConfig::from_endpoint(
     ApiEndpoint::vertex("my-project", "us-central1", token)

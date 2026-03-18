@@ -168,7 +168,7 @@ Google Cloud Trace                       Google Cloud Monitoring
 
 ### Integration Point
 
-Enhance `TelemetryConfig::init()` in `rs-genai/src/telemetry/mod.rs` to
+Enhance `TelemetryConfig::init()` in `gemini-live/src/telemetry/mod.rs` to
 optionally attach the OTel tracing layer and metrics exporter.
 
 ### Configuration (env vars, standard OTel SDK config)
@@ -183,7 +183,7 @@ OTEL_METRICS_EXPORTER=otlp
 ### New Dependencies (feature-gated behind `otel`)
 
 ```toml
-# rs-genai Cargo.toml
+# gemini-live Cargo.toml
 [features]
 otel = [
   "dep:opentelemetry",
@@ -268,9 +268,9 @@ Existing spans map directly to OTel:
 
 | Tracing Span | OTel Span Name | Key Attributes |
 |---|---|---|
-| `rs_genai.session` | `rs_genai.session` | `session.id` |
-| `rs_genai.connect` | `rs_genai.connect` | `net.peer.name` |
-| `rs_genai.tool_call` | `rs_genai.tool_call` | `rpc.method` |
+| `gemini_live.session` | `gemini_live.session` | `session.id` |
+| `gemini_live.connect` | `gemini_live.connect` | `net.peer.name` |
+| `gemini_live.tool_call` | `gemini_live.tool_call` | `rpc.method` |
 | `gemini.agent.run` | `gemini.agent.run` | `agent.name` |
 | `gemini.agent.transfer` | `gemini.agent.transfer` | `agent.from`, `agent.to` |
 
@@ -384,20 +384,20 @@ if (hasEvaluation) tabs.push('evaluator');
 
 | File | Workstream |
 |------|-----------|
-| `apps/adk-web/static/worklets/capture-processor.js` | A |
-| `apps/adk-web/static/worklets/playback-processor.js` | A |
+| `apps/gemini-adk-web/static/worklets/capture-processor.js` | A |
+| `apps/gemini-adk-web/static/worklets/playback-processor.js` | A |
 
 ### Modified Files
 
 | File | Workstream | Changes |
 |------|-----------|---------|
-| `apps/adk-web/static/audio.js` | A | Rewrite: AudioWorklet + fallback |
-| `apps/adk-web/static/devtools.js` | C | Remove telemetry tab, add status bar |
-| `apps/adk-web/static/devtools.css` | C | Remove telemetry styles, add status bar styles |
-| `apps/adk-web/static/app.html` | C | Add status bar container |
-| `crates/rs-genai/Cargo.toml` | B | Add optional otel dependencies |
-| `crates/rs-genai/src/telemetry/mod.rs` | B | OTel layer init in TelemetryConfig |
-| `crates/rs-adk/Cargo.toml` | B | Forward otel feature flag |
+| `apps/gemini-adk-web/static/audio.js` | A | Rewrite: AudioWorklet + fallback |
+| `apps/gemini-adk-web/static/devtools.js` | C | Remove telemetry tab, add status bar |
+| `apps/gemini-adk-web/static/devtools.css` | C | Remove telemetry styles, add status bar styles |
+| `apps/gemini-adk-web/static/app.html` | C | Add status bar container |
+| `crates/gemini-live/Cargo.toml` | B | Add optional otel dependencies |
+| `crates/gemini-live/src/telemetry/mod.rs` | B | OTel layer init in TelemetryConfig |
+| `crates/gemini-adk/Cargo.toml` | B | Forward otel feature flag |
 
 ### Unchanged
 

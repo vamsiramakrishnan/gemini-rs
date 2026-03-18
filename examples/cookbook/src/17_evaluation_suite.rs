@@ -17,7 +17,7 @@
 //!   - `|` operator for criteria composition
 //!   - EvalSuite with case builder
 
-use adk_rs_fluent::prelude::*;
+use gemini_adk_fluent::prelude::*;
 
 fn main() {
     println!("=== Walk 17: Evaluation Suite ===\n");

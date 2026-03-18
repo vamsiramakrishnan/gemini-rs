@@ -1708,17 +1708,17 @@ let handle = Live::builder()
 
 | Primitive | Layer | Complexity | Dependencies |
 |-----------|-------|------------|-------------|
-| Session signals | L1 (rs-adk processor) | Small | Modify processor to auto-track counters |
-| State namespacing | L1 (rs-adk state) | Small | Add prefix helpers, `session()` accessor |
-| `computed()` | L1 (rs-adk) + L2 (fluent) | Medium | Dependency graph, topo-sort, recompute on TurnComplete |
-| Phase machine | L1 (rs-adk) + L2 (fluent) | Medium | Phase struct, transition evaluator, instruction override |
-| `watch()` | L1 (rs-adk) + L2 (fluent) | Medium | Previous-value tracking, predicate evaluation |
-| Temporal patterns | L1 (rs-adk) + L2 (fluent) | Medium | Event ring buffer, timer task, cooldown tracking |
-| Evaluation pipeline integration | L1 (rs-adk processor) | Medium | Wire steps 3-7 into TurnComplete handler |
+| Session signals | L1 (gemini-adk processor) | Small | Modify processor to auto-track counters |
+| State namespacing | L1 (gemini-adk state) | Small | Add prefix helpers, `session()` accessor |
+| `computed()` | L1 (gemini-adk) + L2 (fluent) | Medium | Dependency graph, topo-sort, recompute on TurnComplete |
+| Phase machine | L1 (gemini-adk) + L2 (fluent) | Medium | Phase struct, transition evaluator, instruction override |
+| `watch()` | L1 (gemini-adk) + L2 (fluent) | Medium | Previous-value tracking, predicate evaluation |
+| Temporal patterns | L1 (gemini-adk) + L2 (fluent) | Medium | Event ring buffer, timer task, cooldown tracking |
+| Evaluation pipeline integration | L1 (gemini-adk processor) | Medium | Wire steps 3-7 into TurnComplete handler |
 
 ### 10.2 What Does NOT Change
 
-- **rs-genai (L0)**: Zero changes. The wire protocol layer remains untouched.
+- **gemini-live (L0)**: Zero changes. The wire protocol layer remains untouched.
 - **Existing callbacks**: All existing callback registrations continue to work.
 - **Existing extractors**: `extract_turns::<T>()` is unchanged — it's step 2 in the
   pipeline, and everything else layers on top.

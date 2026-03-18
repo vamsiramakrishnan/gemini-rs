@@ -24,7 +24,7 @@ use axum::{
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use futures::{sink::SinkExt, stream::StreamExt};
-use rs_genai::prelude::*;
+use gemini_live::prelude::*;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tower_http::{
@@ -146,7 +146,7 @@ async fn main() {
     let state = AppState { auth };
 
     // Serve static files from the shared UI directory
-    let static_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../apps/adk-web/static");
+    let static_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../apps/gemini-adk-web/static");
 
     let app = Router::new()
         .fallback_service(

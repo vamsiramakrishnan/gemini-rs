@@ -26,7 +26,7 @@ All eight composition namespaces now match upstream ADK capabilities:
 #### Example: Full namespace composition
 
 ```rust
-use adk_rs_fluent::prelude::*;
+use gemini_adk_fluent::prelude::*;
 
 let agent = AgentBuilder::new("analyst")
     .model(GeminiModel::Gemini2_0Flash)
@@ -110,7 +110,7 @@ cargo run -p example-cookbook --example 30_production_pipeline
 
 ### Web UI Redesign
 
-The `adk-web` landing page and application shell have been rebuilt from scratch:
+The `gemini-adk-web` landing page and application shell have been rebuilt from scratch:
 
 - **Design system** — 80+ CSS custom properties for colors, spacing, typography, shadows, and radii. Fonts: `Inter` for UI, `JetBrains Mono` for code.
 - **Dark / light mode** — Full theme support with a toggle persisted to `localStorage`. All components respect `[data-theme]` attribute.
@@ -125,21 +125,21 @@ The `adk-web` landing page and application shell have been rebuilt from scratch:
 
 | Crate | Version | crates.io |
 |-------|---------|-----------|
-| `rs-genai` | 0.5.0 | [crates.io/crates/rs-genai](https://crates.io/crates/rs-genai) |
-| `rs-adk` | 0.5.0 | [crates.io/crates/rs-adk](https://crates.io/crates/rs-adk) |
-| `adk-rs-fluent` | 0.5.0 | [crates.io/crates/adk-rs-fluent](https://crates.io/crates/adk-rs-fluent) |
-| `adk-cli` | 0.5.0 | [crates.io/crates/adk-cli](https://crates.io/crates/adk-cli) |
+| `gemini-live` | 0.5.0 | [crates.io/crates/gemini-live](https://crates.io/crates/gemini-live) |
+| `gemini-adk` | 0.5.0 | [crates.io/crates/gemini-adk](https://crates.io/crates/gemini-adk) |
+| `gemini-adk-fluent` | 0.5.0 | [crates.io/crates/gemini-adk-fluent](https://crates.io/crates/gemini-adk-fluent) |
+| `gemini-adk-cli` | 0.5.0 | [crates.io/crates/gemini-adk-cli](https://crates.io/crates/gemini-adk-cli) |
 
 ## Install
 
 ```bash
 # Library (add to Cargo.toml)
-cargo add adk-rs-fluent    # Full fluent DX (recommended)
-cargo add rs-adk            # Runtime only
-cargo add rs-genai           # Wire protocol only
+cargo add gemini-adk-fluent    # Full fluent DX (recommended)
+cargo add gemini-adk            # Runtime only
+cargo add gemini-live           # Wire protocol only
 
 # CLI
-cargo install adk-cli
+cargo install gemini-adk-cli
 ```
 
 ## Upgrade Guide
@@ -148,10 +148,10 @@ Update your `Cargo.toml` dependencies from `0.4.0` to `0.5.0`. No breaking API c
 
 ```toml
 # Before
-adk-rs-fluent = "0.4.0"
+gemini-adk-fluent = "0.4.0"
 
 # After
-adk-rs-fluent = "0.5.0"
+gemini-adk-fluent = "0.5.0"
 ```
 
 ## CI Improvements

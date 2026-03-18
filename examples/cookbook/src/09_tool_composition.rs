@@ -12,7 +12,7 @@
 //! - `T::mock()` — create a mock tool for testing
 //! - `|` operator — compose tools additively
 
-use adk_rs_fluent::prelude::*;
+use gemini_adk_fluent::prelude::*;
 use serde_json::json;
 
 fn main() {
@@ -98,11 +98,11 @@ fn main() {
     println!("\nFull tool composite: {} entries", all_tools.len());
     for (i, entry) in all_tools.entries.iter().enumerate() {
         let name = match entry {
-            adk_rs_fluent::compose::tools::ToolCompositeEntry::Function(f) => f.name().to_string(),
-            adk_rs_fluent::compose::tools::ToolCompositeEntry::BuiltIn(_) => {
+            gemini_adk_fluent::compose::tools::ToolCompositeEntry::Function(f) => f.name().to_string(),
+            gemini_adk_fluent::compose::tools::ToolCompositeEntry::BuiltIn(_) => {
                 "(built-in)".to_string()
             }
-            adk_rs_fluent::compose::tools::ToolCompositeEntry::Mock { name, .. } => {
+            gemini_adk_fluent::compose::tools::ToolCompositeEntry::Mock { name, .. } => {
                 format!("{} (mock)", name)
             }
             _ => "(other)".to_string(),
@@ -112,11 +112,11 @@ fn main() {
 
     // ── Using T::toolset for bulk registration ──
     // T::toolset takes a Vec of ToolFunction trait objects.
-    let tool_a: std::sync::Arc<dyn rs_adk::ToolFunction> = std::sync::Arc::new(
-        rs_adk::SimpleTool::new("tool_a", "Tool A", None, |_| async { Ok(json!(null)) }),
+    let tool_a: std::sync::Arc<dyn gemini_adk::ToolFunction> = std::sync::Arc::new(
+        gemini_adk::SimpleTool::new("tool_a", "Tool A", None, |_| async { Ok(json!(null)) }),
     );
-    let tool_b: std::sync::Arc<dyn rs_adk::ToolFunction> = std::sync::Arc::new(
-        rs_adk::SimpleTool::new("tool_b", "Tool B", None, |_| async { Ok(json!(null)) }),
+    let tool_b: std::sync::Arc<dyn gemini_adk::ToolFunction> = std::sync::Arc::new(
+        gemini_adk::SimpleTool::new("tool_b", "Tool B", None, |_| async { Ok(json!(null)) }),
     );
     let bulk = T::toolset(vec![tool_a, tool_b]);
     println!("\nBulk toolset: {} entries", bulk.len());

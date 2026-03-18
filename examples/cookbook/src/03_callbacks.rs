@@ -13,7 +13,7 @@
 //! - `M::retry()` / `M::circuit_breaker()` — resilience middleware
 //! - `|` operator to compose middleware layers
 
-use adk_rs_fluent::prelude::*;
+use gemini_adk_fluent::prelude::*;
 use std::time::Duration;
 
 fn main() {

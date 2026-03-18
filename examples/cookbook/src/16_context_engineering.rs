@@ -18,7 +18,7 @@
 //!   - C::summarize / C::distill / C::relevant (LLM-powered markers)
 //!   - `+` operator for policy composition
 
-use adk_rs_fluent::prelude::*;
+use gemini_adk_fluent::prelude::*;
 
 fn main() {
     println!("=== Walk 16: Context Engineering ===\n");

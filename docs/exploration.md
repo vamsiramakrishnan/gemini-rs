@@ -8,7 +8,7 @@
 
   ⎿  Read(/home/user/gemini-live-rs/examples/voice-chat/Cargo.toml)
 
-  ⎿  Read(/home/user/gemini-live-rs/tools/adk-transpiler/Cargo.toml)
+  ⎿  Read(/home/user/gemini-live-rs/tools/gemini-adk-transpiler/Cargo.toml)
 
   ⎿  Search(pattern: "use gemini_live_wire|use gemini_live_runtime|use gemini_live::|extern crate gemini")
 
@@ -62,13 +62,13 @@
            "crates/gemini-live-wire",        # Layer 0: Wire protocol
            "crates/gemini-live-runtime",     # Layer 1: Agent runtime
            "crates/gemini-live",             # Layer 2: Fluent DX
-           "apps/adk-web",
+           "apps/gemini-adk-web",
            "examples/agents",
            "examples/text-chat",
            "examples/voice-chat",
            "examples/tool-calling",
            "examples/transcription",
-           "tools/adk-transpiler",
+           "tools/gemini-adk-transpiler",
        ]
 
        ---
@@ -153,7 +153,7 @@
          - Root workspace
          - 3 crate manifests
          - Examples: agents, tool-calling, voice-chat, text-chat, transcription, ui
-         - Tool: adk-transpiler
+         - Tool: gemini-adk-transpiler
        2. Source code (44 Rust files):
          - Wire crate lib.rs + modules
          - Runtime crate lib.rs + modules
@@ -164,7 +164,7 @@
          - 2026-03-01-gemini-live-adk-design.md
          - 2026-03-01-wire-refactor-design.md
          - 2026-03-01-layered-adk-implementation.md
-       4. Code generation (tools/adk-transpiler):
+       4. Code generation (tools/gemini-adk-transpiler):
          - schema.rs — type mapping comments
          - codegen.rs — 13 hardcoded type paths like gemini_live_wire::prelude::Content
          - genai_reader.rs — 55 more hardcoded paths in a mapping table
@@ -207,13 +207,13 @@
        ├─────────────────────────┼────────────────────────────────────────────────────┤
        │ examples/transcription │ gemini-live-wire only                              │
        ├─────────────────────────┼────────────────────────────────────────────────────┤
-       │ tools/adk-transpiler    │ None (only serde, clap, regex, walkdir)            │
+       │ tools/gemini-adk-transpiler    │ None (only serde, clap, regex, walkdir)            │
        └─────────────────────────┴────────────────────────────────────────────────────┘
 
        ---
-       6. Code Generation (adk-transpiler)
+       6. Code Generation (gemini-adk-transpiler)
 
-       The tools/adk-transpiler hardcodes type mappings with 68+ references:
+       The tools/gemini-adk-transpiler hardcodes type mappings with 68+ references:
 
        In codegen.rs lines 34-43:
        "gemini_live_wire::prelude::Content",
@@ -257,7 +257,7 @@
        Key Findings for Rename Impact:
 
        1. Blast radius is MODERATE — 332 direct references to wire crate, 102 to runtime crate
-       2. Code generation is the main concern — adk-transpiler has 68+ hardcoded paths in type mapping tables
+       2. Code generation is the main concern — gemini-adk-transpiler has 68+ hardcoded paths in type mapping tables
        3. Re-export structure is clean — most consumers use prelude imports, not full paths
        4. Workspace dependencies are path-based — path = "../gemini-live-wire" makes refactoring easier
        5. No external crate on crates.io — all names are internal, so semver compatibility not a concern
@@ -265,7 +265,7 @@
        7. No PyO3 bindings yet — design doc mentions gemini-live-python but not implemented
        8. Examples are downstream — will need updates to match renamed crates
 
-       The largest effort would be updating the adk-transpiler's hardcoded type paths (~70 locations), followed by Cargo.toml dependencies in
+       The largest effort would be updating the gemini-adk-transpiler's hardcoded type paths (~70 locations), followed by Cargo.toml dependencies in
         examples (8 files) and source code imports (44 files).
   ⎿  Done (32 tool uses · 37.5k tokens · 57s)
 

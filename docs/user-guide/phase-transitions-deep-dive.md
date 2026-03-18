@@ -390,7 +390,7 @@ while the voice conversation continues.
 ### Using BackgroundAgentDispatcher
 
 ```rust,ignore
-use rs_adk::live::BackgroundAgentDispatcher;
+use gemini_adk::live::BackgroundAgentDispatcher;
 
 let bg_dispatcher = BackgroundAgentDispatcher::new();
 
@@ -699,7 +699,7 @@ is written. Your transition guards should handle this gracefully:
 ```rust,ignore
 // In your main.rs or app setup
 tracing_subscriber::fmt()
-    .with_env_filter("rs_adk::live::processor=debug")
+    .with_env_filter("gemini_adk::live::processor=debug")
     .init();
 ```
 

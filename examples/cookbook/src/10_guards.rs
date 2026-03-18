@@ -14,7 +14,7 @@
 //! - `.check()` — validate a single guard
 //! - `.check_all()` — validate a composite, returning all violations
 
-use adk_rs_fluent::prelude::*;
+use gemini_adk_fluent::prelude::*;
 
 fn main() {
     println!("=== 10: Guards (G::) ===\n");

@@ -3,7 +3,7 @@
 The repository contains two sets of runnable examples:
 
 1. **`examples/cookbook/`** — 30 progressive text-based examples demonstrating SDK composition patterns (no server required)
-2. **`adk-web` apps** — Interactive voice/text demos bundled into a devtools-enabled web UI
+2. **`gemini-adk-web` apps** — Interactive voice/text demos bundled into a devtools-enabled web UI
 
 ---
 
@@ -71,19 +71,19 @@ Full-system compositions covering real-world architectures and every SDK capabil
 
 ---
 
-## ADK Web UI (`adk-web`)
+## ADK Web UI (`gemini-adk-web`)
 
 The interactive multi-app web UI runs at `http://localhost:3000` and bundles all demo apps into a single server with a shared DevTools panel.
 
 ```bash
-cargo run -p adk-web    # http://127.0.0.1:3000
+cargo run -p gemini-adk-web    # http://127.0.0.1:3000
 ```
 
 For more on the web UI design system, dark/light mode, and DevTools panels, see the [ADK Web UI](./web-ui.md) guide.
 
 ### Standalone Examples
 
-These run independently outside of `adk-web`, each with their own Axum server.
+These run independently outside of `gemini-adk-web`, each with their own Axum server.
 
 ```bash
 cargo run -p example-text-chat       # http://127.0.0.1:3001

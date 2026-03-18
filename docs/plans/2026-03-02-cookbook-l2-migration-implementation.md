@@ -6,32 +6,32 @@
 
 **Architecture:** Each app's `handle_session` keeps the same signature (`tx: WsSender, rx: Receiver<ClientMessage>`) but replaces the manual `tokio::select!` event loop with L2 callbacks for Gemini->browser and a simple recv loop for browser->Gemini. Advanced apps replace hand-coded state machines with `PhaseMachine`, regex-based state extraction moves into a `TurnExtractor` implementation, and violation detection moves to watchers.
 
-**Tech Stack:** `adk-rs-fluent` (L2 fluent builder), `rs-adk` (L1 modules: PhaseMachine, WatcherRegistry, TurnExtractor, ComputedRegistry), `rs-genai` (L0 wire protocol)
+**Tech Stack:** `gemini-adk-fluent` (L2 fluent builder), `gemini-adk` (L1 modules: PhaseMachine, WatcherRegistry, TurnExtractor, ComputedRegistry), `gemini-live` (L0 wire protocol)
 
 **Design doc:** `docs/plans/2026-03-02-cookbook-l2-migration-design.md`
 
 ---
 
-### Task 1: Add adk-rs-fluent dependency and shared helpers
+### Task 1: Add gemini-adk-fluent dependency and shared helpers
 
 **Files:**
-- Modify: `apps/adk-web/Cargo.toml`
-- Modify: `apps/adk-web/src/apps/mod.rs`
+- Modify: `apps/gemini-adk-web/Cargo.toml`
+- Modify: `apps/gemini-adk-web/src/apps/mod.rs`
 
-**Step 1: Add adk-rs-fluent to Cargo.toml**
+**Step 1: Add gemini-adk-fluent to Cargo.toml**
 
-In `apps/adk-web/Cargo.toml`, add after the `rs-adk` line:
+In `apps/gemini-adk-web/Cargo.toml`, add after the `gemini-adk` line:
 
 ```toml
-adk-rs-fluent = { path = "../../crates/adk-rs-fluent" }
+gemini-adk-fluent = { path = "../../crates/gemini-adk-fluent" }
 ```
 
 **Step 2: Add resolve_voice to shared mod.rs**
 
-In `apps/adk-web/src/apps/mod.rs`, add a shared `resolve_voice` function (currently duplicated in voice_chat, playbook, guardrails, support, all_config). Add this after the `ConversationBuffer` impl:
+In `apps/gemini-adk-web/src/apps/mod.rs`, add a shared `resolve_voice` function (currently duplicated in voice_chat, playbook, guardrails, support, all_config). Add this after the `ConversationBuffer` impl:
 
 ```rust
-use rs_genai::prelude::Voice;
+use gemini_live::prelude::Voice;
 
 /// Resolve a voice name string to the Voice enum.
 pub fn resolve_voice(name: Option<&str>) -> Voice {
@@ -48,13 +48,13 @@ pub fn resolve_voice(name: Option<&str>) -> Voice {
 
 **Step 3: Verify it compiles**
 
-Run: `cargo check -p rs-genai-ui`
+Run: `cargo check -p gemini-live-ui`
 Expected: Compiles with unused import warnings (OK for now)
 
 **Step 4: Commit**
 
 ```
-feat(examples): add adk-rs-fluent dependency and shared resolve_voice
+feat(examples): add gemini-adk-fluent dependency and shared resolve_voice
 ```
 
 ---
@@ -62,7 +62,7 @@ feat(examples): add adk-rs-fluent dependency and shared resolve_voice
 ### Task 2: Migrate text_chat.rs (simplest app, validates pattern)
 
 **Files:**
-- Modify: `apps/adk-web/src/apps/text_chat.rs`
+- Modify: `apps/gemini-adk-web/src/apps/text_chat.rs`
 
 **Step 1: Rewrite text_chat.rs**
 
@@ -75,7 +75,7 @@ use async_trait::async_trait;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
-use adk_rs_fluent::prelude::*;
+use gemini_adk_fluent::prelude::*;
 
 use crate::app::{AppCategory, AppError, ClientMessage, CookbookApp, ServerMessage, WsSender};
 
@@ -169,12 +169,12 @@ impl CookbookApp for TextChat {
 
 **Step 2: Verify it compiles**
 
-Run: `cargo check -p rs-genai-ui`
+Run: `cargo check -p gemini-live-ui`
 Expected: Compiles successfully
 
 **Step 3: Run existing tests**
 
-Run: `cargo test -p rs-genai-ui`
+Run: `cargo test -p gemini-live-ui`
 Expected: All tests pass (text_chat has no tests but other app tests should not break)
 
 **Step 4: Commit**
@@ -188,7 +188,7 @@ refactor(examples): migrate text_chat to L2 Live::builder()
 ### Task 3: Migrate voice_chat.rs
 
 **Files:**
-- Modify: `apps/adk-web/src/apps/voice_chat.rs`
+- Modify: `apps/gemini-adk-web/src/apps/voice_chat.rs`
 
 **Step 1: Rewrite voice_chat.rs**
 
@@ -202,7 +202,7 @@ use base64::Engine;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
-use adk_rs_fluent::prelude::*;
+use gemini_adk_fluent::prelude::*;
 
 use crate::app::{AppCategory, AppError, ClientMessage, CookbookApp, ServerMessage, WsSender};
 
@@ -329,7 +329,7 @@ impl CookbookApp for VoiceChat {
 
 **Step 2: Verify**
 
-Run: `cargo check -p rs-genai-ui && cargo test -p rs-genai-ui`
+Run: `cargo check -p gemini-live-ui && cargo test -p gemini-live-ui`
 Expected: Compiles and all tests pass
 
 **Step 3: Commit**
@@ -343,7 +343,7 @@ refactor(examples): migrate voice_chat to L2 Live::builder()
 ### Task 4: Migrate tool_calling.rs
 
 **Files:**
-- Modify: `apps/adk-web/src/apps/tool_calling.rs`
+- Modify: `apps/gemini-adk-web/src/apps/tool_calling.rs`
 
 **Step 1: Rewrite tool_calling.rs**
 
@@ -440,7 +440,7 @@ Keep `demo_tools()`, `execute_tool()`, `evaluate_simple_expr()` and all tests un
 
 **Step 2: Verify**
 
-Run: `cargo check -p rs-genai-ui && cargo test -p rs-genai-ui`
+Run: `cargo check -p gemini-live-ui && cargo test -p gemini-live-ui`
 Expected: Compiles; all 4 `evaluate_simple_expr` tests pass
 
 **Step 3: Commit**
@@ -454,7 +454,7 @@ refactor(examples): migrate tool_calling to L2 Live::builder()
 ### Task 5: Migrate all_config.rs
 
 **Files:**
-- Modify: `apps/adk-web/src/apps/all_config.rs`
+- Modify: `apps/gemini-adk-web/src/apps/all_config.rs`
 
 **Step 1: Rewrite handle_session**
 
@@ -620,7 +620,7 @@ The all_config app is special: it builds `SessionConfig` dynamically based on JS
 
 **Step 2: Verify**
 
-Run: `cargo check -p rs-genai-ui && cargo test -p rs-genai-ui`
+Run: `cargo check -p gemini-live-ui && cargo test -p gemini-live-ui`
 Expected: Compiles; all 8 all_config tests pass
 
 **Step 3: Commit**
@@ -634,8 +634,8 @@ refactor(examples): migrate all_config to L2 Live::builder()
 ### Task 6: Create RegexExtractor for custom TurnExtractor
 
 **Files:**
-- Create: `apps/adk-web/src/apps/extractors.rs`
-- Modify: `apps/adk-web/src/apps/mod.rs` (add `pub mod extractors;`)
+- Create: `apps/gemini-adk-web/src/apps/extractors.rs`
+- Modify: `apps/gemini-adk-web/src/apps/mod.rs` (add `pub mod extractors;`)
 
 **Step 1: Create extractors.rs**
 
@@ -654,8 +654,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::Value;
 
-use rs_adk::live::{TranscriptTurn, TurnExtractor};
-use rs_adk::llm::LlmError;
+use gemini_adk::live::{TranscriptTurn, TurnExtractor};
+use gemini_adk::llm::LlmError;
 
 /// A TurnExtractor backed by a synchronous regex/keyword extraction function.
 ///
@@ -827,7 +827,7 @@ mod tests {
 
 **Step 2: Add module declaration**
 
-In `apps/adk-web/src/apps/mod.rs`, add after the existing module declarations:
+In `apps/gemini-adk-web/src/apps/mod.rs`, add after the existing module declarations:
 
 ```rust
 pub mod extractors;
@@ -835,7 +835,7 @@ pub mod extractors;
 
 **Step 3: Verify**
 
-Run: `cargo check -p rs-genai-ui && cargo test -p rs-genai-ui`
+Run: `cargo check -p gemini-live-ui && cargo test -p gemini-live-ui`
 Expected: Compiles; all 4 new extractor tests + all existing tests pass
 
 **Step 4: Commit**
@@ -849,7 +849,7 @@ feat(examples): add RegexExtractor for TurnExtractor-based state extraction
 ### Task 7: Migrate playbook.rs
 
 **Files:**
-- Modify: `apps/adk-web/src/apps/playbook.rs`
+- Modify: `apps/gemini-adk-web/src/apps/playbook.rs`
 
 **Step 1: Rewrite playbook.rs**
 
@@ -875,7 +875,7 @@ Implementation approach:
 1. Keep the existing `Phase` struct, `PHASES` const, `extract_state()`, `evaluate_phase()`, all regex LazyLocks, and all `#[cfg(test)] mod tests` exactly as they are — these are used by unit tests
 2. Rewrite ONLY the `handle_session` method body
 3. Remove the `use super::ConversationBuffer;` import (no longer needed)
-4. Add necessary imports: `use std::sync::Arc;`, `use adk_rs_fluent::prelude::*;`, `use super::extractors::RegexExtractor;`
+4. Add necessary imports: `use std::sync::Arc;`, `use gemini_adk_fluent::prelude::*;`, `use super::extractors::RegexExtractor;`
 5. In `handle_session`, build the L2 session using the pattern from Task 3 (voice callbacks) plus:
    - `.extractor(Arc::new(RegexExtractor::new("playbook_state", 10, |text, existing| extract_state(text, existing))))`
    - Phase definitions using `.phase("greet").instruction(PHASES[0].instruction).transition("identify", |s| { ... }).on_enter(|state, _| { ... }).done()`
@@ -888,7 +888,7 @@ Implementation approach:
 
 **Step 2: Verify**
 
-Run: `cargo check -p rs-genai-ui && cargo test -p rs-genai-ui`
+Run: `cargo check -p gemini-live-ui && cargo test -p gemini-live-ui`
 Expected: Compiles; all 14 existing playbook tests pass (they test free functions, not handle_session)
 
 **Step 3: Commit**
@@ -902,7 +902,7 @@ refactor(examples): migrate playbook to L2 PhaseMachine + RegexExtractor
 ### Task 8: Migrate guardrails.rs
 
 **Files:**
-- Modify: `apps/adk-web/src/apps/guardrails.rs`
+- Modify: `apps/gemini-adk-web/src/apps/guardrails.rs`
 
 **Step 1: Rewrite guardrails.rs**
 
@@ -923,7 +923,7 @@ Implementation approach:
 1. Keep ALL existing structs, consts, functions, and tests unchanged
 2. Rewrite ONLY `handle_session` body
 3. Remove `use super::ConversationBuffer;` import
-4. Add: `use std::sync::Arc;`, `use adk_rs_fluent::prelude::*;`, `use super::extractors::RegexExtractor;`
+4. Add: `use std::sync::Arc;`, `use gemini_adk_fluent::prelude::*;`, `use super::extractors::RegexExtractor;`
 5. Create a `RegexExtractor` that calls `check_violations()` on the transcript and stores violation flags as booleans in the returned HashMap
 6. Use `.watch("violation:pii_ssn").became_true().blocking().then(|_, _, _| async { send Violation })` for each violation type
 7. Use `.instruction_template(|state| { build corrective instruction from active violations })` to replace the manual instruction update
@@ -931,7 +931,7 @@ Implementation approach:
 
 **Step 2: Verify**
 
-Run: `cargo check -p rs-genai-ui && cargo test -p rs-genai-ui`
+Run: `cargo check -p gemini-live-ui && cargo test -p gemini-live-ui`
 Expected: Compiles; all 11 existing guardrails tests pass
 
 **Step 3: Commit**
@@ -945,7 +945,7 @@ refactor(examples): migrate guardrails to L2 watchers + RegexExtractor
 ### Task 9: Migrate support.rs
 
 **Files:**
-- Modify: `apps/adk-web/src/apps/support.rs`
+- Modify: `apps/gemini-adk-web/src/apps/support.rs`
 
 **Step 1: Rewrite support.rs**
 
@@ -965,7 +965,7 @@ Keep: ALL existing structs, consts, functions, tests.
 1. Keep ALL existing code (AgentKind, AgentPhase, both PHASES arrays, extract_state, evaluate_phase, should_handoff_to_technical, build_instruction) and all tests
 2. Rewrite ONLY `handle_session` body
 3. Remove `use super::ConversationBuffer;`
-4. Add: `use std::sync::Arc;`, `use adk_rs_fluent::prelude::*;`, `use super::extractors::RegexExtractor;`
+4. Add: `use std::sync::Arc;`, `use gemini_adk_fluent::prelude::*;`, `use super::extractors::RegexExtractor;`
 5. Use `RegexExtractor::new("support_state", 10, |text, existing| extract_state(text, existing))`
 6. Use `.computed("active_agent", &["issue_type"], |state| { ... })` to derive the active agent
 7. Define phases with `billing:` and `tech:` prefixes:
@@ -986,7 +986,7 @@ Keep: ALL existing structs, consts, functions, tests.
 
 **Step 2: Verify**
 
-Run: `cargo check -p rs-genai-ui && cargo test -p rs-genai-ui`
+Run: `cargo check -p gemini-live-ui && cargo test -p gemini-live-ui`
 Expected: Compiles; all 20 existing support tests pass
 
 **Step 3: Commit**
@@ -1000,11 +1000,11 @@ refactor(examples): migrate support to L2 PhaseMachine + computed + watchers
 ### Task 10: Cleanup and final verification
 
 **Files:**
-- Modify: `apps/adk-web/src/apps/mod.rs` (potentially remove ConversationBuffer if unused)
+- Modify: `apps/gemini-adk-web/src/apps/mod.rs` (potentially remove ConversationBuffer if unused)
 
 **Step 1: Check if ConversationBuffer is still used**
 
-Search for `ConversationBuffer` in `apps/adk-web/src/apps/`. If no app imports it anymore, remove the struct from `mod.rs`. Note: the playbook test `conversation_buffer_limits_turns` and guardrails test `conversation_buffer_limits` test this struct directly, so check if those tests still exist.
+Search for `ConversationBuffer` in `apps/gemini-adk-web/src/apps/`. If no app imports it anymore, remove the struct from `mod.rs`. Note: the playbook test `conversation_buffer_limits_turns` and guardrails test `conversation_buffer_limits` test this struct directly, so check if those tests still exist.
 
 If the existing tests still reference `ConversationBuffer`, keep it. If all advanced app test suites were preserved (which they should be — we didn't modify tests), `ConversationBuffer` tests may still reference it. In that case, keep the struct.
 
@@ -1014,7 +1014,7 @@ Check each migrated file for unused imports (e.g., `regex::Regex` imports that a
 
 **Step 3: Full workspace build and test**
 
-Run: `cargo build -p rs-genai-ui && cargo test -p rs-genai-ui`
+Run: `cargo build -p gemini-live-ui && cargo test -p gemini-live-ui`
 Expected: Clean build, all tests pass
 
 Run: `cargo test --workspace`

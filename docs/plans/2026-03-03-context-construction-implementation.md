@@ -4,17 +4,17 @@
 
 **Goal:** Eliminate the double-instruction-send bug, add `prompt_on_enter` / `on_enter_context` / `TranscriptWindow` / `InstructionModifier` to the phase machine, modularize processor.rs, surface new APIs in L2 fluent builders, and rewrite demos.
 
-**Architecture:** L0 (rs-genai) is untouched. L1 (rs-adk) gains new types in `phase.rs`, a `TranscriptWindow` type in `transcript.rs`, and processor.rs is split into composable functions. L2 (adk-rs-fluent) gains new `PhaseBuilder` methods and `P` module extensions. Demos adopt per-phase modifiers replacing global `instruction_template`.
+**Architecture:** L0 (gemini-live) is untouched. L1 (gemini-adk) gains new types in `phase.rs`, a `TranscriptWindow` type in `transcript.rs`, and processor.rs is split into composable functions. L2 (gemini-adk-fluent) gains new `PhaseBuilder` methods and `P` module extensions. Demos adopt per-phase modifiers replacing global `instruction_template`.
 
-**Tech Stack:** Rust, tokio, serde_json, rs-genai (L0 wire), rs-adk (L1 runtime), adk-rs-fluent (L2 fluent)
+**Tech Stack:** Rust, tokio, serde_json, gemini-live (L0 wire), gemini-adk (L1 runtime), gemini-adk-fluent (L2 fluent)
 
 ---
 
 ## Task 1: Add `TranscriptWindow` to transcript.rs
 
 **Files:**
-- Modify: `crates/rs-adk/src/live/transcript.rs`
-- Modify: `crates/rs-adk/src/live/mod.rs` (re-export)
+- Modify: `crates/gemini-adk/src/live/transcript.rs`
+- Modify: `crates/gemini-adk/src/live/mod.rs` (re-export)
 
 **Step 1: Add `TranscriptWindow` struct after `TranscriptBuffer` (after line 186)**
 
@@ -99,7 +99,7 @@ Add inside `impl TranscriptBuffer` (after `has_pending` method, before the closi
 
 **Step 3: Add re-export in mod.rs**
 
-In `crates/rs-adk/src/live/mod.rs`, change line 36:
+In `crates/gemini-adk/src/live/mod.rs`, change line 36:
 ```rust
 pub use transcript::{ToolCallSummary, TranscriptBuffer, TranscriptTurn, TranscriptWindow};
 ```
@@ -152,13 +152,13 @@ Add to the `#[cfg(test)] mod tests` block in transcript.rs:
 
 **Step 5: Run tests**
 
-Run: `cargo test -p rs-adk transcript`
+Run: `cargo test -p gemini-adk transcript`
 Expected: All new tests pass, existing tests unaffected.
 
 **Step 6: Commit**
 
 ```
-feat(rs-adk): add TranscriptWindow for phase callback context access
+feat(gemini-adk): add TranscriptWindow for phase callback context access
 ```
 
 ---
@@ -166,8 +166,8 @@ feat(rs-adk): add TranscriptWindow for phase callback context access
 ## Task 2: Add `InstructionModifier` and new fields to `Phase`
 
 **Files:**
-- Modify: `crates/rs-adk/src/live/phase.rs`
-- Modify: `crates/rs-adk/src/live/mod.rs` (re-export)
+- Modify: `crates/gemini-adk/src/live/phase.rs`
+- Modify: `crates/gemini-adk/src/live/mod.rs` (re-export)
 
 **Step 1: Add `InstructionModifier` enum after `PhaseInstruction` (after line 46)**
 
@@ -275,7 +275,7 @@ pub struct Phase {
     /// Returns Content to send as `client_content` (turnComplete: false).
     /// Gives the model conversational continuity across phase transitions.
     pub on_enter_context: Option<Arc<
-        dyn Fn(&State, &TranscriptWindow) -> Option<Vec<rs_genai::prelude::Content>>
+        dyn Fn(&State, &TranscriptWindow) -> Option<Vec<gemini_live::prelude::Content>>
             + Send + Sync
     >>,
 }
@@ -309,7 +309,7 @@ pub struct TransitionResult {
     /// The resolved instruction for the new phase (with modifiers applied).
     pub instruction: String,
     /// Optional context content to inject via `send_client_content`.
-    pub context: Option<Vec<rs_genai::prelude::Content>>,
+    pub context: Option<Vec<gemini_live::prelude::Content>>,
     /// Whether to send `turnComplete: true` after instruction + context.
     pub prompt_on_enter: bool,
 }
@@ -388,7 +388,7 @@ Update `PhaseMachine::transition()` signature and implementation (lines 172-222)
 
 **Step 6: Update mod.rs re-exports**
 
-In `crates/rs-adk/src/live/mod.rs`, update line 29:
+In `crates/gemini-adk/src/live/mod.rs`, update line 29:
 ```rust
 pub use phase::{InstructionModifier, Phase, PhaseInstruction, PhaseMachine, PhaseTransition, Transition, TransitionResult, TransitionTrigger};
 ```
@@ -511,13 +511,13 @@ machine.transition("main", &state, &writer, 1, trigger, &tw).await;
 
 **Step 9: Run tests**
 
-Run: `cargo test -p rs-adk phase`
+Run: `cargo test -p gemini-adk phase`
 Expected: All tests pass.
 
 **Step 10: Commit**
 
 ```
-feat(rs-adk): add InstructionModifier, TransitionResult, on_enter_context, prompt_on_enter to Phase
+feat(gemini-adk): add InstructionModifier, TransitionResult, on_enter_context, prompt_on_enter to Phase
 ```
 
 ---
@@ -525,7 +525,7 @@ feat(rs-adk): add InstructionModifier, TransitionResult, on_enter_context, promp
 ## Task 3: Modularize processor.rs — extract TurnComplete pipeline
 
 **Files:**
-- Modify: `crates/rs-adk/src/live/processor.rs`
+- Modify: `crates/gemini-adk/src/live/processor.rs`
 
 This is the big refactor. We extract the TurnComplete handler into composable functions AND implement unified instruction composition (eliminating the double-send).
 
@@ -535,7 +535,7 @@ After line 31, add:
 ```rust
 use super::phase::TransitionResult;
 use super::transcript::TranscriptWindow;
-use rs_genai::prelude::Content;
+use gemini_live::prelude::Content;
 ```
 
 **Step 2: Extract tool call handler into standalone function**
@@ -975,13 +975,13 @@ The `block_on` in the amendment section is wrong — we're already in async cont
 
 **Step 6: Run tests**
 
-Run: `cargo test -p rs-adk`
+Run: `cargo test -p gemini-adk`
 Expected: All existing tests pass. The behavior is identical — only the code structure changed (plus the double-send is eliminated).
 
 **Step 7: Commit**
 
 ```
-refactor(rs-adk): modularize processor.rs, unify instruction composition into single send
+refactor(gemini-adk): modularize processor.rs, unify instruction composition into single send
 ```
 
 ---
@@ -989,17 +989,17 @@ refactor(rs-adk): modularize processor.rs, unify instruction composition into si
 ## Task 4: Update L2 PhaseBuilder with new APIs
 
 **Files:**
-- Modify: `crates/adk-rs-fluent/src/live_builders.rs`
-- Modify: `crates/adk-rs-fluent/src/live.rs`
+- Modify: `crates/gemini-adk-fluent/src/live_builders.rs`
+- Modify: `crates/gemini-adk-fluent/src/live.rs`
 
 **Step 1: Update PhaseBuilder struct and imports in live_builders.rs**
 
 Replace the imports (lines 26-28):
 ```rust
-use rs_adk::live::{
+use gemini_adk::live::{
     BoxFuture, InstructionModifier, Phase, PhaseInstruction, Transition, WatchPredicate, Watcher,
 };
-use rs_adk::live::transcript::TranscriptWindow;
+use gemini_adk::live::transcript::TranscriptWindow;
 ```
 
 Replace `PhaseBuilder` struct (lines 39-49):
@@ -1017,7 +1017,7 @@ pub struct PhaseBuilder {
     modifiers: Vec<InstructionModifier>,
     prompt_on_enter: bool,
     on_enter_context: Option<Arc<
-        dyn Fn(&State, &TranscriptWindow) -> Option<Vec<rs_genai::prelude::Content>>
+        dyn Fn(&State, &TranscriptWindow) -> Option<Vec<gemini_live::prelude::Content>>
             + Send + Sync
     >>,
 }
@@ -1133,7 +1133,7 @@ After `terminal()` (after line 133), before `done()`:
     /// ```
     pub fn on_enter_context<F>(mut self, f: F) -> Self
     where
-        F: Fn(&State, &TranscriptWindow) -> Option<Vec<rs_genai::prelude::Content>>
+        F: Fn(&State, &TranscriptWindow) -> Option<Vec<gemini_live::prelude::Content>>
             + Send + Sync + 'static,
     {
         self.on_enter_context = Some(Arc::new(f));
@@ -1168,7 +1168,7 @@ Replace `done()` (lines 136-151):
 
 **Step 4: Run tests**
 
-Run: `cargo test -p adk-rs-fluent`
+Run: `cargo test -p gemini-adk-fluent`
 Expected: All tests pass. Existing API is unchanged; new methods are additive.
 
 **Step 5: Build the full workspace to check for any compilation errors**
@@ -1179,7 +1179,7 @@ Expected: Clean compile. Fix any errors caused by new Phase fields not being pop
 **Step 6: Commit**
 
 ```
-feat(adk-rs-fluent): add with_state, when, prompt_on_enter, on_enter_context to PhaseBuilder
+feat(gemini-adk-fluent): add with_state, when, prompt_on_enter, on_enter_context to PhaseBuilder
 ```
 
 ---
@@ -1189,8 +1189,8 @@ feat(adk-rs-fluent): add with_state, when, prompt_on_enter, on_enter_context to 
 The new `Phase` fields (`modifiers`, `prompt_on_enter`, `on_enter_context`) and the changed `transition()` signature will cause compilation errors in any code that constructs `Phase` directly or calls `transition()`.
 
 **Files to check:**
-- `crates/rs-adk/src/live/builder.rs` — may construct Phase
-- `apps/adk-web/src/apps/*.rs` — construct phases via L2 builder (should be fine)
+- `crates/gemini-adk/src/live/builder.rs` — may construct Phase
+- `apps/gemini-adk-web/src/apps/*.rs` — construct phases via L2 builder (should be fine)
 - Any direct `PhaseMachine::transition()` callers
 
 **Step 1: Search for all direct Phase constructions**
@@ -1225,7 +1225,7 @@ fix: add default values for new Phase fields across workspace
 ## Task 6: Rewrite debt_collection.rs with new primitives
 
 **Files:**
-- Modify: `apps/adk-web/src/apps/debt_collection.rs`
+- Modify: `apps/gemini-adk-web/src/apps/debt_collection.rs`
 
 This is the showcase rewrite. Replace the global `instruction_template` with per-phase `with_state`/`when` modifiers, add `on_enter_context` for conversational continuity, and add `prompt_on_enter(true)` to the disclosure phase.
 
@@ -1290,7 +1290,7 @@ Delete the entire `.instruction_template(|state| { ... })` block (~40 lines, lin
 
 **Step 5: Build and test**
 
-Run: `cargo build -p adk-web`
+Run: `cargo build -p gemini-adk-web`
 Expected: Clean compile.
 
 **Step 6: Commit**
@@ -1304,8 +1304,8 @@ refactor(examples): rewrite debt_collection with per-phase modifiers, remove ins
 ## Task 7: Rewrite support.rs and playbook.rs
 
 **Files:**
-- Modify: `apps/adk-web/src/apps/support.rs`
-- Modify: `apps/adk-web/src/apps/playbook.rs`
+- Modify: `apps/gemini-adk-web/src/apps/support.rs`
+- Modify: `apps/gemini-adk-web/src/apps/playbook.rs`
 
 Same pattern as debt_collection: replace `instruction_template` with per-phase `with_state`/`when`, add `on_enter_context` where conversational continuity matters, add `prompt_on_enter` where appropriate.
 
@@ -1319,7 +1319,7 @@ Same approach.
 
 **Step 3: Build and test**
 
-Run: `cargo build -p adk-web`
+Run: `cargo build -p gemini-adk-web`
 Expected: Clean compile.
 
 **Step 4: Commit**

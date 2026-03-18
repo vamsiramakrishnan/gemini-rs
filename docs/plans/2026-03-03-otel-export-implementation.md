@@ -10,10 +10,10 @@
 
 ---
 
-### Task 1: Add OTel dependencies to rs-genai Cargo.toml
+### Task 1: Add OTel dependencies to gemini-live Cargo.toml
 
 **Files:**
-- Modify: `crates/rs-genai/Cargo.toml`
+- Modify: `crates/gemini-live/Cargo.toml`
 
 **Step 1: Add optional OTel dependencies and feature flag**
 
@@ -41,19 +41,19 @@ otel = [
 
 **Step 2: Verify it compiles without the feature**
 
-Run: `cargo check -p rs-genai`
+Run: `cargo check -p gemini-live`
 Expected: Compiles with no new warnings (otel deps are optional, not pulled in).
 
 **Step 3: Verify it compiles with the feature**
 
-Run: `cargo check -p rs-genai --features otel`
+Run: `cargo check -p gemini-live --features otel`
 Expected: Compiles. The OTel crates are pulled in but not yet used.
 
 **Step 4: Commit**
 
 ```bash
-git add crates/rs-genai/Cargo.toml
-git commit -m "feat(rs-genai): add optional otel dependencies behind feature flag"
+git add crates/gemini-live/Cargo.toml
+git commit -m "feat(gemini-live): add optional otel dependencies behind feature flag"
 ```
 
 ---
@@ -61,7 +61,7 @@ git commit -m "feat(rs-genai): add optional otel dependencies behind feature fla
 ### Task 2: Rewrite TelemetryConfig to support layered subscriber + OTel
 
 **Files:**
-- Modify: `crates/rs-genai/src/telemetry/mod.rs`
+- Modify: `crates/gemini-live/src/telemetry/mod.rs`
 
 **Step 1: Add OTel fields to TelemetryConfig and rewrite init()**
 
@@ -89,7 +89,7 @@ pub mod spans;
 pub struct TelemetryConfig {
     /// Enable structured logging.
     pub logging_enabled: bool,
-    /// Log level filter (e.g., "info", "debug", "rs_genai=debug").
+    /// Log level filter (e.g., "info", "debug", "gemini_live=debug").
     pub log_filter: String,
     /// Use JSON format for logs (production). If false, uses pretty format (development).
     pub json_logs: bool,
@@ -268,48 +268,48 @@ impl TelemetryConfig {
 
 **Step 2: Verify it compiles without otel feature**
 
-Run: `cargo check -p rs-genai`
+Run: `cargo check -p gemini-live`
 Expected: Compiles. The new fields exist but OTel code paths are `#[cfg]`-gated away.
 
 **Step 3: Verify it compiles with otel feature**
 
-Run: `cargo check -p rs-genai --features otel`
+Run: `cargo check -p gemini-live --features otel`
 Expected: Compiles with the OTel integration code included.
 
 **Step 4: Run tests**
 
-Run: `cargo test -p rs-genai`
+Run: `cargo test -p gemini-live`
 Expected: All existing tests pass. No test changes needed — `TelemetryConfig::default()` has `otel_traces: false` and `otel_metrics: false`.
 
 **Step 5: Commit**
 
 ```bash
-git add crates/rs-genai/src/telemetry/mod.rs
-git commit -m "feat(rs-genai): add OTel OTLP trace and metrics export to TelemetryConfig"
+git add crates/gemini-live/src/telemetry/mod.rs
+git commit -m "feat(gemini-live): add OTel OTLP trace and metrics export to TelemetryConfig"
 ```
 
 ---
 
-### Task 3: Forward otel feature flag through rs-adk and adk-rs-fluent
+### Task 3: Forward otel feature flag through gemini-adk and gemini-adk-fluent
 
 **Files:**
-- Modify: `crates/rs-adk/Cargo.toml`
-- Modify: `crates/adk-rs-fluent/Cargo.toml`
+- Modify: `crates/gemini-adk/Cargo.toml`
+- Modify: `crates/gemini-adk-fluent/Cargo.toml`
 
-**Step 1: Add otel feature to rs-adk**
+**Step 1: Add otel feature to gemini-adk**
 
-In `crates/rs-adk/Cargo.toml`, add after the `metrics` feature (line 40):
+In `crates/gemini-adk/Cargo.toml`, add after the `metrics` feature (line 40):
 
 ```toml
-otel = ["rs-genai/otel", "tracing-support"]
+otel = ["gemini-live/otel", "tracing-support"]
 ```
 
-**Step 2: Add otel feature to adk-rs-fluent**
+**Step 2: Add otel feature to gemini-adk-fluent**
 
-In `crates/adk-rs-fluent/Cargo.toml`, add after `gemini-llm` feature (line 29):
+In `crates/gemini-adk-fluent/Cargo.toml`, add after `gemini-llm` feature (line 29):
 
 ```toml
-otel = ["rs-adk/otel", "rs-genai/otel"]
+otel = ["gemini-adk/otel", "gemini-live/otel"]
 ```
 
 **Step 3: Verify workspace compiles**
@@ -320,8 +320,8 @@ Expected: Compiles.
 **Step 4: Commit**
 
 ```bash
-git add crates/rs-adk/Cargo.toml crates/adk-rs-fluent/Cargo.toml
-git commit -m "feat(adk): forward otel feature flag through rs-adk and adk-rs-fluent"
+git add crates/gemini-adk/Cargo.toml crates/gemini-adk-fluent/Cargo.toml
+git commit -m "feat(adk): forward otel feature flag through gemini-adk and gemini-adk-fluent"
 ```
 
 ---
@@ -329,22 +329,22 @@ git commit -m "feat(adk): forward otel feature flag through rs-adk and adk-rs-fl
 ### Task 4: Add otel feature to Web UI and document usage
 
 **Files:**
-- Modify: `apps/adk-web/Cargo.toml`
-- Modify: `apps/adk-web/README.md`
+- Modify: `apps/gemini-adk-web/Cargo.toml`
+- Modify: `apps/gemini-adk-web/README.md`
 
 **Step 1: Add optional otel feature to Web UI**
 
-In `apps/adk-web/Cargo.toml`, add a `[features]` section at the end:
+In `apps/gemini-adk-web/Cargo.toml`, add a `[features]` section at the end:
 
 ```toml
 [features]
 default = []
-otel = ["rs-genai/otel", "rs-adk/otel"]
+otel = ["gemini-live/otel", "gemini-adk/otel"]
 ```
 
 **Step 2: Update README with OTel instructions**
 
-In `apps/adk-web/README.md`, add a new section after the "Model Routing" section documenting:
+In `apps/gemini-adk-web/README.md`, add a new section after the "Model Routing" section documenting:
 
 ```markdown
 ## OpenTelemetry Export (Optional)
@@ -354,7 +354,7 @@ The demo supports exporting traces and metrics to any OTLP-compatible backend (G
 ### Build with OTel
 
 ```bash
-cargo run -p rs-genai-ui --features otel
+cargo run -p gemini-live-ui --features otel
 ```
 
 ### Configure
@@ -385,7 +385,7 @@ docker run -d --name jaeger \
   jaegertracing/jaeger:latest
 
 # Run with OTel enabled
-cargo run -p rs-genai-ui --features otel
+cargo run -p gemini-live-ui --features otel
 
 # View traces at http://localhost:16686
 ```
@@ -393,13 +393,13 @@ cargo run -p rs-genai-ui --features otel
 
 **Step 3: Verify it compiles with and without the feature**
 
-Run: `cargo check -p rs-genai-ui && cargo check -p rs-genai-ui --features otel`
+Run: `cargo check -p gemini-live-ui && cargo check -p gemini-live-ui --features otel`
 Expected: Both compile.
 
 **Step 4: Commit**
 
 ```bash
-git add apps/adk-web/Cargo.toml apps/adk-web/README.md
+git add apps/gemini-adk-web/Cargo.toml apps/gemini-adk-web/README.md
 git commit -m "feat(ui): add optional otel feature flag with documentation"
 ```
 
@@ -408,7 +408,7 @@ git commit -m "feat(ui): add optional otel feature flag with documentation"
 ### Task 5: Wire OTel init into Web UI main.rs
 
 **Files:**
-- Modify: `apps/adk-web/src/main.rs`
+- Modify: `apps/gemini-adk-web/src/main.rs`
 
 **Step 1: Read current main.rs to understand init flow**
 
@@ -423,7 +423,7 @@ In `main.rs`, near the top of `main()` (after `dotenvy::dotenv().ok()`), add:
 ```rust
 // Initialize telemetry (tracing + optional OTel)
 let otel_enabled = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").is_ok();
-let _telemetry_guard = rs_genai::telemetry::TelemetryConfig {
+let _telemetry_guard = gemini_live::telemetry::TelemetryConfig {
     logging_enabled: true,
     log_filter: std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()),
     json_logs: false,
@@ -441,10 +441,10 @@ Remove any existing `tracing_subscriber::fmt::init()` or similar calls that woul
 
 **Step 3: Verify compilation**
 
-Run: `cargo check -p rs-genai-ui`
+Run: `cargo check -p gemini-live-ui`
 Expected: Compiles. Without `otel` feature, `otel_traces` is ignored inside `init()`.
 
-Run: `cargo check -p rs-genai-ui --features otel`
+Run: `cargo check -p gemini-live-ui --features otel`
 Expected: Compiles with OTel support active.
 
 **Step 4: Run all tests**
@@ -455,7 +455,7 @@ Expected: All tests pass (149 UI tests + all crate tests).
 **Step 5: Commit**
 
 ```bash
-git add apps/adk-web/src/main.rs
+git add apps/gemini-adk-web/src/main.rs
 git commit -m "feat(ui): wire TelemetryConfig with optional OTel into main.rs"
 ```
 
@@ -465,7 +465,7 @@ git commit -m "feat(ui): wire TelemetryConfig with optional OTel into main.rs"
 
 **Step 1: Full workspace build with otel**
 
-Run: `cargo build --workspace --features rs-genai/otel`
+Run: `cargo build --workspace --features gemini-live/otel`
 Expected: Entire workspace builds. The `otel` feature propagates correctly.
 
 **Step 2: Full workspace tests**
@@ -475,15 +475,15 @@ Expected: All tests pass (no regressions from the TelemetryConfig rewrite).
 
 **Step 3: Feature-specific test**
 
-Run: `cargo test -p rs-genai --features otel`
-Expected: All rs-genai tests pass with the otel feature enabled.
+Run: `cargo test -p gemini-live --features otel`
+Expected: All gemini-live tests pass with the otel feature enabled.
 
 **Step 4: Verify no otel deps leak into default build**
 
-Run: `cargo tree -p rs-genai -e features | grep opentelemetry`
+Run: `cargo tree -p gemini-live -e features | grep opentelemetry`
 Expected: No output (opentelemetry not in default dependency tree).
 
-Run: `cargo tree -p rs-genai -e features --features otel | grep opentelemetry`
+Run: `cargo tree -p gemini-live -e features --features otel | grep opentelemetry`
 Expected: Shows opentelemetry, opentelemetry_sdk, opentelemetry-otlp, tracing-opentelemetry.
 
 **Step 5: Commit any fixes**

@@ -1,7 +1,7 @@
 # Control Plane Redesign: From Railroad to Guardrails
 
 **Date**: 2026-03-07
-**Scope**: L0 (rs-genai), L1 (rs-adk), L2 (adk-rs-fluent)
+**Scope**: L0 (gemini-live), L1 (gemini-adk), L2 (gemini-adk-fluent)
 **Philosophy**: Let the model lead. Let the SDK observe and occasionally intervene.
 **Status**: Implemented (Phases 0, 2–7). Phase 1 (Context Horizon) and Phase 8 (Affect Proxy) deferred.
 
@@ -13,15 +13,15 @@
 
 | Phase | Status | Files Changed/Added |
 |-------|--------|---------------------|
-| **0.1** GenerationComplete event | Done | `rs-genai/src/session/mod.rs`, `rs-genai/src/transport/connection.rs` |
+| **0.1** GenerationComplete event | Done | `gemini-live/src/session/mod.rs`, `gemini-live/src/transport/connection.rs` |
 | **0.2** UsageMetadata event | Done | Same as 0.1 (surfaced as `SessionEvent::Usage(UsageInfo)`) |
 | **0.3** ResumeInfo struct | Done | Same as 0.1 (enriched `SessionResumeUpdate(ResumeInfo)`) |
-| **2** Generation Complete extractors | Done | `rs-adk/src/live/extractor.rs`, `rs-adk/src/live/transcript.rs`, `rs-adk/src/live/processor.rs` |
-| **3** Soft Turn Detection | Done | `rs-adk/src/live/soft_turn.rs` (new), `rs-adk/src/live/processor.rs`, `rs-adk/src/live/builder.rs`, `adk-rs-fluent/src/live.rs` |
-| **4** Context Injection Steering | Done | `rs-adk/src/live/steering.rs` (new), `rs-adk/src/live/processor.rs`, `rs-adk/src/live/builder.rs`, `adk-rs-fluent/src/live.rs` |
-| **5** Tool Availability Advisory | Done | `rs-adk/src/live/processor.rs`, `rs-adk/src/live/builder.rs`, `adk-rs-fluent/src/live.rs` |
-| **6** Conversation Repair Protocol | Done | `rs-adk/src/live/needs.rs` (new), `rs-adk/src/live/processor.rs`, `rs-adk/src/live/builder.rs`, `adk-rs-fluent/src/live.rs` |
-| **7** Session Persistence | Done | `rs-adk/src/live/persistence.rs` (new), `rs-adk/src/state.rs`, `rs-adk/src/live/processor.rs`, `rs-adk/src/live/builder.rs`, `adk-rs-fluent/src/live.rs` |
+| **2** Generation Complete extractors | Done | `gemini-adk/src/live/extractor.rs`, `gemini-adk/src/live/transcript.rs`, `gemini-adk/src/live/processor.rs` |
+| **3** Soft Turn Detection | Done | `gemini-adk/src/live/soft_turn.rs` (new), `gemini-adk/src/live/processor.rs`, `gemini-adk/src/live/builder.rs`, `gemini-adk-fluent/src/live.rs` |
+| **4** Context Injection Steering | Done | `gemini-adk/src/live/steering.rs` (new), `gemini-adk/src/live/processor.rs`, `gemini-adk/src/live/builder.rs`, `gemini-adk-fluent/src/live.rs` |
+| **5** Tool Availability Advisory | Done | `gemini-adk/src/live/processor.rs`, `gemini-adk/src/live/builder.rs`, `gemini-adk-fluent/src/live.rs` |
+| **6** Conversation Repair Protocol | Done | `gemini-adk/src/live/needs.rs` (new), `gemini-adk/src/live/processor.rs`, `gemini-adk/src/live/builder.rs`, `gemini-adk-fluent/src/live.rs` |
+| **7** Session Persistence | Done | `gemini-adk/src/live/persistence.rs` (new), `gemini-adk/src/state.rs`, `gemini-adk/src/live/processor.rs`, `gemini-adk/src/live/builder.rs`, `gemini-adk-fluent/src/live.rs` |
 
 ### What Was Deferred
 
@@ -54,13 +54,13 @@ Where Dialogflow says "the flow is the product," we say "the model's conversatio
 
 ---
 
-## Phase 0: Protocol Surface (L0 — rs-genai)
+## Phase 0: Protocol Surface (L0 — gemini-live)
 
 These changes expose raw protocol capabilities that every higher layer needs. No behavioral changes, just visibility.
 
 ### 0.1 Surface `generationComplete` as a SessionEvent
 
-**File**: `crates/rs-genai/src/session/mod.rs`
+**File**: `crates/gemini-live/src/session/mod.rs`
 
 The wire protocol already parses `generation_complete` in `ServerContentPayload` (messages.rs:238), but `connection.rs:403-412` only handles `turn_complete`. We need a new event variant.
 
@@ -73,7 +73,7 @@ pub enum SessionEvent {
 }
 ```
 
-**File**: `crates/rs-genai/src/transport/connection.rs` (~line 403)
+**File**: `crates/gemini-live/src/transport/connection.rs` (~line 403)
 
 ```rust
 // Handle generation complete — fires BEFORE turn_complete
@@ -97,7 +97,7 @@ if content.turn_complete.unwrap_or(false) {
 
 The server sends `UsageMetadata` with `total_token_count` on responses. This is the only signal available to infer context window state.
 
-**File**: `crates/rs-genai/src/protocol/messages.rs`
+**File**: `crates/gemini-live/src/protocol/messages.rs`
 
 ```rust
 // Already parsed but not surfaced. Add to ServerContentPayload handling:
@@ -110,7 +110,7 @@ pub struct UsageMetadata {
 }
 ```
 
-**File**: `crates/rs-genai/src/session/mod.rs`
+**File**: `crates/gemini-live/src/session/mod.rs`
 
 ```rust
 pub enum SessionEvent {
@@ -119,7 +119,7 @@ pub enum SessionEvent {
 }
 ```
 
-**File**: `crates/rs-genai/src/transport/connection.rs`
+**File**: `crates/gemini-live/src/transport/connection.rs`
 
 Surface the usage metadata when present in server content messages.
 
@@ -133,7 +133,7 @@ Surface the usage metadata when present in server content messages.
 
 Already parsed in messages.rs:319-340 but not forwarded. This field tells us which client messages the server has processed — critical for Gap 8 (session resumption state reconciliation).
 
-**File**: `crates/rs-genai/src/session/mod.rs`
+**File**: `crates/gemini-live/src/session/mod.rs`
 
 ```rust
 pub enum SessionEvent {
@@ -161,7 +161,7 @@ TranscriptBuffer (50-turn ring buffer, client-side) diverges from the server's a
 
 ### 1.1 `ContextHorizon` Tracker (L1)
 
-**New file**: `crates/rs-adk/src/live/context_horizon.rs`
+**New file**: `crates/gemini-adk/src/live/context_horizon.rs`
 
 ```rust
 /// Tracks the server's context window state based on token usage signals.
@@ -257,7 +257,7 @@ Live::builder()
 
 ### 2.1 `ExtractorTrigger` Enum (L1)
 
-**File**: `crates/rs-adk/src/live/extractor.rs`
+**File**: `crates/gemini-adk/src/live/extractor.rs`
 
 ```rust
 #[derive(Debug, Clone, Copy, Default)]
@@ -279,7 +279,7 @@ pub trait TurnExtractor: Send + Sync {
 
 ### 2.2 Dual-Trigger Extraction in Processor
 
-**File**: `crates/rs-adk/src/live/processor.rs`
+**File**: `crates/gemini-adk/src/live/processor.rs`
 
 In the control lane event loop, handle `GenerationComplete` as a lightweight extraction point:
 
@@ -301,7 +301,7 @@ The key insight: `GenerationComplete` fires *before* `Interrupted` truncates the
 
 ### 2.3 `snapshot_window_with_current()` on TranscriptBuffer
 
-**File**: `crates/rs-adk/src/live/transcript.rs`
+**File**: `crates/gemini-adk/src/live/transcript.rs`
 
 ```rust
 /// Returns a window that includes the current in-progress turn (not yet finalized).
@@ -341,7 +341,7 @@ When `proactiveAudio` is enabled, the model may choose not to respond. No `TurnC
 
 ### 3.1 Soft Turn Detection (L1)
 
-**File**: `crates/rs-adk/src/live/processor.rs`
+**File**: `crates/gemini-adk/src/live/processor.rs`
 
 Add a `SoftTurnDetector` that watches for VAD-end without a subsequent model response:
 
@@ -440,7 +440,7 @@ Instruction updates are a blunt instrument. They replace the entire system promp
 
 ### 4.1 `SteeringMode` — Two Tiers (L1)
 
-**File**: `crates/rs-adk/src/live/phase.rs`
+**File**: `crates/gemini-adk/src/live/phase.rs`
 
 ```rust
 /// How the phase machine steers the model's behavior.
@@ -535,7 +535,7 @@ Per-phase tool filtering is client-side enforcement. The model doesn't know tool
 
 ### 5.1 Proactive Tool Signaling via Context Injection
 
-**File**: `crates/rs-adk/src/live/processor.rs`
+**File**: `crates/gemini-adk/src/live/processor.rs`
 
 In the phase transition path (step 7), after a transition with tool set changes:
 
@@ -592,7 +592,7 @@ Phase `needs` are informational. The SDK can't detect when the conversation is s
 
 ### 6.1 `NeedsFulfillment` Tracker (L1)
 
-**File**: `crates/rs-adk/src/live/needs.rs` (new)
+**File**: `crates/gemini-adk/src/live/needs.rs` (new)
 
 ```rust
 pub struct NeedsFulfillment {
@@ -712,7 +712,7 @@ Client-side state (State, PhaseMachine position, transcript summary) doesn't sur
 
 ### 7.1 `SessionPersistence` Trait (L1)
 
-**File**: `crates/rs-adk/src/live/persistence.rs` (new)
+**File**: `crates/gemini-adk/src/live/persistence.rs` (new)
 
 ```rust
 /// Serializable snapshot of the control plane state.
@@ -827,7 +827,7 @@ The model detects and responds to emotional tone (via `affectiveDialog`), but th
 
 Rather than adding a parallel audio analysis pipeline (expensive, latency-adding), we use the model's own affective responses as a proxy signal.
 
-**File**: `crates/rs-adk/src/live/extractor.rs`
+**File**: `crates/gemini-adk/src/live/extractor.rs`
 
 ```rust
 /// Built-in extractor that infers user affect from the model's empathetic responses.

@@ -12,9 +12,9 @@ methods are optional -- implement only what you need:
 
 ```rust,ignore
 use async_trait::async_trait;
-use rs_adk::middleware::Middleware;
-use rs_adk::error::{AgentError, ToolError};
-use rs_genai::prelude::FunctionCall;
+use gemini_adk::middleware::Middleware;
+use gemini_adk::error::{AgentError, ToolError};
+use gemini_live::prelude::FunctionCall;
 
 struct AuditMiddleware {
     log: Arc<Mutex<Vec<String>>>,
@@ -68,7 +68,7 @@ Compose multiple middleware into an ordered chain. `before_*` hooks run in
 registration order; `after_*` hooks run in reverse order (unwinding):
 
 ```rust,ignore
-use rs_adk::middleware::MiddlewareChain;
+use gemini_adk::middleware::MiddlewareChain;
 
 let mut chain = MiddlewareChain::new();
 chain.add(Arc::new(LogMiddleware::new()));
@@ -87,8 +87,8 @@ Transform outbound requests before they reach the LLM:
 
 ```rust,ignore
 use async_trait::async_trait;
-use rs_adk::processors::{RequestProcessor, ProcessorError};
-use rs_adk::llm::LlmRequest;
+use gemini_adk::processors::{RequestProcessor, ProcessorError};
+use gemini_adk::llm::LlmRequest;
 
 struct ContextInjector { context: String }
 
@@ -123,7 +123,7 @@ impl ResponseProcessor for ResponseSanitizer {
         &self, mut response: LlmResponse,
     ) -> Result<LlmResponse, ProcessorError> {
         for part in &mut response.content.parts {
-            if let rs_genai::prelude::Part::Text { text } = part {
+            if let gemini_live::prelude::Part::Text { text } = part {
                 *text = text.replace("```", "");
             }
         }
@@ -137,7 +137,7 @@ impl ResponseProcessor for ResponseSanitizer {
 **InstructionInserter** -- prepends or appends a system instruction:
 
 ```rust,ignore
-use rs_adk::processors::InstructionInserter;
+use gemini_adk::processors::InstructionInserter;
 
 let inserter = InstructionInserter::new("Always respond in JSON format.");
 let processed = inserter.process_request(request).await?;
@@ -147,7 +147,7 @@ let processed = inserter.process_request(request).await?;
 **ContentFilter** -- filters content parts by type:
 
 ```rust,ignore
-use rs_adk::processors::ContentFilter;
+use gemini_adk::processors::ContentFilter;
 
 let filter = ContentFilter::text_only();
 // Removes inline images, audio -- keeps only text parts
@@ -158,7 +158,7 @@ let filter = ContentFilter::text_only();
 Chain multiple processors into a pipeline:
 
 ```rust,ignore
-use rs_adk::processors::RequestProcessorChain;
+use gemini_adk::processors::RequestProcessorChain;
 
 let mut chain = RequestProcessorChain::new();
 chain.add(InstructionInserter::new("Be concise."));

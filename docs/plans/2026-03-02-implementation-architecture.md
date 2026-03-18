@@ -15,7 +15,7 @@
 ### What Exists Today (Abbreviated)
 
 ```
-rs-genai (L0) — Wire protocol, zero application logic
+gemini-live (L0) — Wire protocol, zero application logic
 ├── SessionHandle            — send_audio/text/video/tool_response/client_content/instruction
 ├── SessionEvent (17 variants) — broadcast to subscribers
 ├── SessionCommand (9 variants) — mpsc to transport loop
@@ -26,7 +26,7 @@ rs-genai (L0) — Wire protocol, zero application logic
 ├── Transport / Codec traits   — generic connection loop
 └── Content/Part/Role/FunctionCall/FunctionResponse — wire primitives
 
-rs-adk (L1) — Runtime, callbacks, tools, agents
+gemini-adk (L1) — Runtime, callbacks, tools, agents
 ├── State                      — DashMap<String, Value>, delta tracking, app/user/temp prefixes
 ├── EventCallbacks             — 8 sync fast-lane + 10 async control-lane + 3 interceptors
 ├── processor.rs               — spawn_event_processor(), route_event(), run_fast_lane(), run_control_lane()
@@ -43,7 +43,7 @@ rs-adk (L1) — Runtime, callbacks, tools, agents
 ├── AgentSession               — intercepting SessionWriter wrapper
 └── AgentTool                  — wraps Agent as ToolFunction
 
-adk-rs-fluent (L2) — Fluent DX, composition, patterns
+gemini-adk-fluent (L2) — Fluent DX, composition, patterns
 ├── Live                       — builder wrapping LiveSessionBuilder (~50 methods)
 ├── AgentBuilder               — copy-on-write immutable agent builder (~30 setters)
 ├── Composable                 — Agent | Pipeline | FanOut | Loop | Fallback
@@ -57,7 +57,7 @@ adk-rs-fluent (L2) — Fluent DX, composition, patterns
 
 ## 2. Delta Map — Every Change Required, By File
 
-### 2.1 rs-genai (L0) — Wire Protocol Additions
+### 2.1 gemini-live (L0) — Wire Protocol Additions
 
 L0 remains a thin, fast, allocation-minimal wire layer. All intelligence lives
 in L1 and L2. However, the API behavior study (`gemini-live-api-behavior.md`)
@@ -185,7 +185,7 @@ if let Some(resumption) = msg.get("sessionResumptionUpdate") {
 
 **Total L0 delta**: ~200 lines (new types + config serialization + parsing).
 
-### 2.2 rs-adk (L1) — The Runtime Engine
+### 2.2 gemini-adk (L1) — The Runtime Engine
 
 L1 is where most of the heavy implementation lives. The changes are organized
 by subsystem.
@@ -1098,7 +1098,7 @@ pub enum DispatchDirective { Continue, Cancel }
 pub enum LoopDirective { Continue, Break }
 ```
 
-### 2.3 adk-rs-fluent (L2) — The Fluent Surface
+### 2.3 gemini-adk-fluent (L2) — The Fluent Surface
 
 L2 is primarily additive — new builder methods and types. No existing methods
 change.
@@ -1333,7 +1333,7 @@ impl M {
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                          adk-rs-fluent (L2)                                 │
+│                          gemini-adk-fluent (L2)                                 │
 │                                                                             │
 │  Live ─── builds ──→ LiveSessionBuilder (L1)                               │
 │   │                                                                         │
@@ -1360,7 +1360,7 @@ impl M {
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                             rs-adk (L1)                                     │
+│                             gemini-adk (L1)                                     │
 │                                                                             │
 │  LiveSessionBuilder                                                        │
 │   │ holds:                                                                  │
@@ -1429,7 +1429,7 @@ impl M {
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                             rs-genai (L0)                                   │
+│                             gemini-live (L0)                                   │
 │                     WIRE PROTOCOL ADDITIONS ONLY                            │
 │                                                                             │
 │  broadcast::Sender<SessionEvent> ─── events flow UP to L1 processor        │
@@ -1463,7 +1463,7 @@ The system has **five concurrent execution contexts**:
 ┌──────────────────────────────────────────────────────────────────┐
 │                    Tokio Runtime                                  │
 │                                                                  │
-│  Task 1: rs-genai Connection Loop                                │
+│  Task 1: gemini-live Connection Loop                                │
 │           tokio::select! { recv from ws, recv from command_rx }  │
 │           Zero application logic. Wire only.                     │
 │           Hot path: base64 encode/decode, JSON parse             │
@@ -1850,13 +1850,13 @@ Depends on Phases 6 and 7 (uses background tools + composition primitives).
 
 | Module | File | Change Type | Estimated Lines |
 |--------|------|-------------|----------------|
-| **rs-genai (L0)** | | | |
+| **gemini-live (L0)** | | | |
 | protocol/types.rs | Existing | Modify | +80 |
 | session/mod.rs (or events) | Existing | Modify | +40 |
 | transport/codec.rs | Existing | Modify | +50 |
 | session/config.rs | Existing | Modify | +30 |
 | **L0 Total** | | | **~200** |
-| **rs-adk (L1)** | | | |
+| **gemini-adk (L1)** | | | |
 | state.rs | Existing | Modify | +100 |
 | live/computed.rs | New | Create | ~200 |
 | live/phase.rs | New | Create | ~350 |
@@ -1873,7 +1873,7 @@ Depends on Phases 6 and 7 (uses background tools + composition primitives).
 | middleware.rs | Existing | Modify | +100 |
 | transcript.rs | Existing | Modify | +45 |
 | **L1 Total** | | | **~2,700** |
-| **adk-rs-fluent (L2)** | | | |
+| **gemini-adk-fluent (L2)** | | | |
 | live.rs | Existing | Modify | +500 |
 | live_builders.rs | New | Create | ~300 |
 | operators.rs | Existing | Modify | +150 |
@@ -1888,35 +1888,35 @@ Depends on Phases 6 and 7 (uses background tools + composition primitives).
 
 | File | Crate | Purpose |
 |------|-------|---------|
-| `crates/rs-adk/src/live/computed.rs` | L1 | ComputedVar, ComputedRegistry, topological sort |
-| `crates/rs-adk/src/live/phase.rs` | L1 | Phase, PhaseMachine, PhaseTransition |
-| `crates/rs-adk/src/live/watcher.rs` | L1 | Watcher, WatchPredicate, WatcherRegistry |
-| `crates/rs-adk/src/live/temporal.rs` | L1 | PatternDetector, TemporalPattern, TemporalRegistry, detectors |
-| `crates/rs-adk/src/live/session_signals.rs` | L1 | SessionSignals, auto-tracking, duration awareness, resumption |
-| `crates/rs-adk/src/live/background_tool.rs` | L1 | ResultFormatter, ToolExecutionMode, BackgroundToolTracker |
-| `crates/adk-rs-fluent/src/live_builders.rs` | L2 | PhaseBuilder, WatchBuilder, TemporalBuilder, VadBuilder, CompressionBuilder, ResumptionBuilder |
+| `crates/gemini-adk/src/live/computed.rs` | L1 | ComputedVar, ComputedRegistry, topological sort |
+| `crates/gemini-adk/src/live/phase.rs` | L1 | Phase, PhaseMachine, PhaseTransition |
+| `crates/gemini-adk/src/live/watcher.rs` | L1 | Watcher, WatchPredicate, WatcherRegistry |
+| `crates/gemini-adk/src/live/temporal.rs` | L1 | PatternDetector, TemporalPattern, TemporalRegistry, detectors |
+| `crates/gemini-adk/src/live/session_signals.rs` | L1 | SessionSignals, auto-tracking, duration awareness, resumption |
+| `crates/gemini-adk/src/live/background_tool.rs` | L1 | ResultFormatter, ToolExecutionMode, BackgroundToolTracker |
+| `crates/gemini-adk-fluent/src/live_builders.rs` | L2 | PhaseBuilder, WatchBuilder, TemporalBuilder, VadBuilder, CompressionBuilder, ResumptionBuilder |
 
 ### Existing Files Modified
 
 | File | Crate | Nature of Change |
 |------|-------|-----------------|
-| `crates/rs-genai/src/protocol/types.rs` | L0 | New config types: ContextWindowCompression, SessionResumption, ActivityDetection, MediaResolution, Sensitivity |
-| `crates/rs-genai/src/session/mod.rs` | L0 | New SessionEvent variants: GoAway, SessionResumptionUpdate, InputTranscription, OutputTranscription |
-| `crates/rs-genai/src/transport/codec.rs` | L0 | Parse sessionResumptionUpdate, inputTranscription, outputTranscription from server messages |
-| `crates/rs-adk/src/state.rs` | L1 | Add prefix accessors, snapshot/diff methods |
-| `crates/rs-adk/src/live/callbacks.rs` | L1 | Add CallbackMode, change field types, new callbacks for GoAway/resumption/transcription |
-| `crates/rs-adk/src/live/processor.rs` | L1 | Mode-aware dispatch, expanded TurnComplete pipeline, interrupted transcript truncation, new event routing |
-| `crates/rs-adk/src/live/builder.rs` | L1 | Accept new registries, validate at build time, native audio model checks |
-| `crates/rs-adk/src/live/handle.rs` | L1 | New accessors |
-| `crates/rs-adk/src/live/mod.rs` | L1 | New module declarations |
-| `crates/rs-adk/src/tool.rs` | L1 | StatefulToolFunction, ToolExecutionMode, register_with_mode |
-| `crates/rs-adk/src/middleware.rs` | L1 | New hooks with default impls |
-| `crates/rs-adk/src/transcript.rs` | L1 | `set_input_transcription()`, `set_output_transcription()`, `truncate_current_model_turn()` |
-| `crates/adk-rs-fluent/src/live.rs` | L2 | ~40 new builder methods (API config + callbacks + state/phase/temporal) |
-| `crates/adk-rs-fluent/src/operators.rs` | L2 | New Composable variants |
-| `crates/adk-rs-fluent/src/builder.rs` | L2 | Per-agent callbacks, preset, prompt |
-| `crates/adk-rs-fluent/src/compose/tools.rs` | L2 | T::stateful, T::agent |
-| `crates/adk-rs-fluent/src/compose/middleware.rs` | L2 | M::scope, M::when |
+| `crates/gemini-live/src/protocol/types.rs` | L0 | New config types: ContextWindowCompression, SessionResumption, ActivityDetection, MediaResolution, Sensitivity |
+| `crates/gemini-live/src/session/mod.rs` | L0 | New SessionEvent variants: GoAway, SessionResumptionUpdate, InputTranscription, OutputTranscription |
+| `crates/gemini-live/src/transport/codec.rs` | L0 | Parse sessionResumptionUpdate, inputTranscription, outputTranscription from server messages |
+| `crates/gemini-adk/src/state.rs` | L1 | Add prefix accessors, snapshot/diff methods |
+| `crates/gemini-adk/src/live/callbacks.rs` | L1 | Add CallbackMode, change field types, new callbacks for GoAway/resumption/transcription |
+| `crates/gemini-adk/src/live/processor.rs` | L1 | Mode-aware dispatch, expanded TurnComplete pipeline, interrupted transcript truncation, new event routing |
+| `crates/gemini-adk/src/live/builder.rs` | L1 | Accept new registries, validate at build time, native audio model checks |
+| `crates/gemini-adk/src/live/handle.rs` | L1 | New accessors |
+| `crates/gemini-adk/src/live/mod.rs` | L1 | New module declarations |
+| `crates/gemini-adk/src/tool.rs` | L1 | StatefulToolFunction, ToolExecutionMode, register_with_mode |
+| `crates/gemini-adk/src/middleware.rs` | L1 | New hooks with default impls |
+| `crates/gemini-adk/src/transcript.rs` | L1 | `set_input_transcription()`, `set_output_transcription()`, `truncate_current_model_turn()` |
+| `crates/gemini-adk-fluent/src/live.rs` | L2 | ~40 new builder methods (API config + callbacks + state/phase/temporal) |
+| `crates/gemini-adk-fluent/src/operators.rs` | L2 | New Composable variants |
+| `crates/gemini-adk-fluent/src/builder.rs` | L2 | Per-agent callbacks, preset, prompt |
+| `crates/gemini-adk-fluent/src/compose/tools.rs` | L2 | T::stateful, T::agent |
+| `crates/gemini-adk-fluent/src/compose/middleware.rs` | L2 | M::scope, M::when |
 
 ---
 

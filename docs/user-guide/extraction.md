@@ -31,9 +31,9 @@ The base trait for all extractors. Implement it for synchronous extraction
 
 ```rust,ignore
 use async_trait::async_trait;
-use rs_adk::live::extractor::TurnExtractor;
-use rs_adk::live::transcript::TranscriptTurn;
-use rs_adk::llm::LlmError;
+use gemini_adk::live::extractor::TurnExtractor;
+use gemini_adk::live::transcript::TranscriptTurn;
+use gemini_adk::llm::LlmError;
 
 struct OrderNumberExtractor;
 
@@ -73,7 +73,7 @@ For extraction requiring understanding (sentiment, intent, entity
 recognition), `LlmExtractor` sends the transcript to an OOB LLM:
 
 ```rust,ignore
-use rs_adk::live::extractor::LlmExtractor;
+use gemini_adk::live::extractor::LlmExtractor;
 
 let extractor = LlmExtractor::new(
     "SentimentAnalysis",
@@ -131,7 +131,7 @@ data, and each extraction is an OOB LLM call. Extraction triggers control
 *when* extractors fire:
 
 ```rust,ignore
-use rs_adk::live::extractor::ExtractionTrigger;
+use gemini_adk::live::extractor::ExtractionTrigger;
 
 Live::builder()
     // Extract every 2 turns instead of every turn (reduces LLM costs by ~50%)
