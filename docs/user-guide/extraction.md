@@ -258,7 +258,7 @@ Live::builder()
 
 ## Real Example
 
-The debt collection cookbook combines regex and LLM extractors:
+The debt collection demo combines regex and LLM extractors:
 
 ```rust,ignore
 // Regex: captures dollar amounts, phone numbers, disclosure acknowledgment

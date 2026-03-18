@@ -143,11 +143,11 @@ pub enum ClientMessage {
 /// Sender handle for sending messages to the browser.
 pub type WsSender = mpsc::UnboundedSender<ServerMessage>;
 
-/// Generate CookbookApp metadata methods from a declarative block.
+/// Generate DemoApp metadata methods from a declarative block.
 ///
 /// Usage:
 /// ```ignore
-/// cookbook_meta! {
+/// demo_meta! {
 ///     name: "voice-chat",
 ///     description: "Native audio voice chat with Gemini Live",
 ///     category: Basic,
@@ -157,7 +157,7 @@ pub type WsSender = mpsc::UnboundedSender<ServerMessage>;
 /// }
 /// ```
 #[macro_export]
-macro_rules! cookbook_meta {
+macro_rules! demo_meta {
     (
         name: $name:literal,
         description: $desc:literal,
@@ -175,9 +175,9 @@ macro_rules! cookbook_meta {
     };
 }
 
-/// The trait that all cookbook apps implement.
+/// The trait that all demo apps implement.
 #[async_trait]
-pub trait CookbookApp: Send + Sync {
+pub trait DemoApp: Send + Sync {
     fn name(&self) -> &str;
     fn description(&self) -> &str;
     fn category(&self) -> AppCategory;
@@ -209,9 +209,9 @@ pub enum AppError {
     Other(String),
 }
 
-/// Registry of all available cookbook apps.
+/// Registry of all available demo apps.
 pub struct AppRegistry {
-    apps: HashMap<String, Arc<dyn CookbookApp>>,
+    apps: HashMap<String, Arc<dyn DemoApp>>,
     order: Vec<String>, // preserve insertion order for display
 }
 
@@ -223,13 +223,13 @@ impl AppRegistry {
         }
     }
 
-    pub fn register(&mut self, app: impl CookbookApp + 'static) {
+    pub fn register(&mut self, app: impl DemoApp + 'static) {
         let name = app.name().to_string();
         self.order.push(name.clone());
         self.apps.insert(name, Arc::new(app));
     }
 
-    pub fn get(&self, name: &str) -> Option<Arc<dyn CookbookApp>> {
+    pub fn get(&self, name: &str) -> Option<Arc<dyn DemoApp>> {
         self.apps.get(name).cloned()
     }
 

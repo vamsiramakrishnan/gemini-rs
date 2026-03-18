@@ -418,7 +418,7 @@ let handle = Live::builder()
 
 ### Production Voice Agent (phases, extraction, tools, monitoring)
 
-See the debt collection cookbook: **~430 lines** of builder setup for:
+See the debt collection demo: **~430 lines** of builder setup for:
 - 7 phases with guarded transitions
 - 2 extractors (LLM + regex)
 - 3 computed state variables

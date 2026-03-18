@@ -1,6 +1,6 @@
-# Cookbook Examples
+# Examples
 
-The `cookbooks/` directory contains runnable examples organized by complexity.
+The `examples/` directory contains runnable demos organized by complexity.
 Each demonstrates specific SDK features at the layer you need.
 
 ## Getting Started
@@ -11,17 +11,17 @@ cp .env.example .env
 # Edit .env: set GEMINI_API_KEY (Google AI)
 # or GOOGLE_CLOUD_PROJECT + GOOGLE_CLOUD_LOCATION (Vertex AI)
 
-# 2. Run a standalone cookbook
-cargo run -p cookbook-text-chat       # http://127.0.0.1:3001
-cargo run -p cookbook-voice-chat      # http://127.0.0.1:3002
-cargo run -p cookbook-tool-calling    # http://127.0.0.1:3003
-cargo run -p cookbook-transcription   # http://127.0.0.1:3004
+# 2. Run a standalone example
+cargo run -p text-chat       # http://127.0.0.1:3001
+cargo run -p voice-chat      # http://127.0.0.1:3002
+cargo run -p tool-calling    # http://127.0.0.1:3003
+cargo run -p transcription   # http://127.0.0.1:3004
 
 # 3. Run the multi-app UI (all apps + devtools panel)
-cargo run -p cookbook-ui              # http://127.0.0.1:3000
+cargo run -p adk-web              # http://127.0.0.1:3000
 ```
 
-## Standalone Cookbooks
+## Standalone Examples
 
 These run independently with their own Axum server and minimal UI.
 
@@ -115,9 +115,9 @@ let robust = AgentBuilder::new("primary") / AgentBuilder::new("fallback");
 
 ---
 
-## Multi-App UI (`cookbook-ui`)
+## ADK Web UI (`adk-web`)
 
-The UI cookbook bundles all apps into a single Axum server at `http://localhost:3000`
+The Web UI bundles all apps into a single Axum server at `http://localhost:3000`
 with a shared devtools panel showing real-time state, timeline, transcript, and telemetry.
 
 ### Crawl (Beginner)
@@ -228,7 +228,7 @@ FDCPA-compliant debt collection with compliance gates and payment negotiation.
 
 ## Platform Support
 
-All cookbooks work with both **Google AI** (API key) and **Vertex AI** (project/location).
+All examples work with both **Google AI** (API key) and **Vertex AI** (project/location).
 
 | Feature | Google AI | Vertex AI |
 |---------|-----------|-----------|

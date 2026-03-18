@@ -10,9 +10,9 @@ use tracing::info;
 
 use adk_rs_fluent::prelude::*;
 
-use crate::app::{AppError, ClientMessage, CookbookApp, ServerMessage, WsSender};
+use crate::app::{AppError, ClientMessage, DemoApp, ServerMessage, WsSender};
 use crate::bridge::SessionBridge;
-use crate::cookbook_meta;
+use crate::demo_meta;
 
 use super::extractors::RegexExtractor;
 use super::resolve_voice;
@@ -192,8 +192,8 @@ Social Security Numbers or credit card numbers. Stay focused on the support topi
 pub struct Guardrails;
 
 #[async_trait]
-impl CookbookApp for Guardrails {
-    cookbook_meta! {
+impl DemoApp for Guardrails {
+    demo_meta! {
         name: "guardrails",
         description: "Policy monitoring + corrective injection for live conversations",
         category: Advanced,

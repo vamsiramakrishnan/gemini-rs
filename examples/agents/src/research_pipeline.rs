@@ -1,4 +1,4 @@
-//! Research pipeline cookbook — demonstrates the fluent DX layer.
+//! Research pipeline example — demonstrates the fluent DX layer.
 //!
 //! Shows how to:
 //! - Build agents with AgentBuilder
@@ -10,7 +10,7 @@
 use adk_rs_fluent::prelude::*;
 
 fn main() {
-    println!("=== Research Pipeline Cookbook ===\n");
+    println!("=== Research Pipeline Example ===\n");
 
     // ── Step 1: Define agents with the builder ──
 
@@ -80,7 +80,7 @@ fn main() {
     let _simple = researcher.clone() >> writer.clone();
 
     // Review loop: write → review → repeat up to 3 times
-    let write_review = review_loop(writer.clone(), reviewer.clone(), "quality", "good", 3);
+    let write_review = review_loop(writer.clone(), reviewer.clone(), 3);
 
     // Full pipeline: research → write/review loop → edit
     let _full_pipeline = researcher.clone() >> write_review >> editor.clone();
@@ -130,10 +130,13 @@ fn main() {
     let _cascade = cascade(vec![researcher.clone(), fast_researcher.clone()]);
     println!("\nCascade: try researcher, then fast_researcher");
 
-    let _fan_out = fan_out_merge(vec![researcher.clone(), fast_researcher.clone()]);
+    let _fan_out = fan_out_merge(
+        vec![researcher.clone(), fast_researcher.clone()],
+        editor.clone(),
+    );
     println!("Fan-out: run both researchers in parallel");
 
-    let _supervised = supervised(writer.clone(), reviewer.clone(), "approved", 5);
+    let _supervised = supervised(writer.clone(), reviewer.clone(), 5);
     println!("Supervised: writer supervised by reviewer (max 5 revisions)");
 
     let _map = map_over(writer.clone(), 4);
@@ -169,5 +172,5 @@ fn main() {
         }
     }
 
-    println!("\nAll cookbook examples completed successfully!");
+    println!("\nAll examples completed successfully!");
 }

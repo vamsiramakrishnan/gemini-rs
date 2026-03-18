@@ -17,9 +17,9 @@ use rs_adk::state::StateKey;
 
 use rs_genai::session::SessionEvent;
 
-use crate::app::{AppError, ClientMessage, CookbookApp, ServerMessage, WsSender};
+use crate::app::{AppError, ClientMessage, DemoApp, ServerMessage, WsSender};
 use crate::bridge::SessionBridge;
-use crate::cookbook_meta;
+use crate::demo_meta;
 
 use super::extractors::RegexExtractor;
 use super::resolve_voice;
@@ -563,8 +563,8 @@ fn redact_pii(value: &Value) -> Value {
 pub struct DebtCollection;
 
 #[async_trait]
-impl CookbookApp for DebtCollection {
-    cookbook_meta! {
+impl DemoApp for DebtCollection {
+    demo_meta! {
         name: "debt-collection",
         description: "FDCPA-compliant debt collection with compliance gates, emotional monitoring, and payment negotiation",
         category: Showcase,

@@ -3,8 +3,10 @@
 //! Compose tools in any order with `|`.
 
 use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
+use rs_adk::text::TextAgent;
 use rs_adk::tool::{SimpleTool, ToolFunction};
 use rs_genai::prelude::Tool;
 
@@ -22,6 +24,68 @@ pub enum ToolCompositeEntry {
     Function(Arc<dyn ToolFunction>),
     /// A built-in Gemini tool declaration.
     BuiltIn(Tool),
+    /// A text agent wrapped as a tool.
+    Agent {
+        /// Tool name exposed to the model.
+        name: String,
+        /// Tool description exposed to the model.
+        description: String,
+        /// The text agent to invoke.
+        agent: Arc<dyn TextAgent>,
+    },
+    /// An MCP (Model Context Protocol) toolset connection.
+    Mcp {
+        /// Connection params (e.g. URL or command string).
+        params: String,
+    },
+    /// A remote agent-to-agent tool.
+    A2a {
+        /// URL of the remote agent.
+        url: String,
+        /// Skill to invoke on the remote agent.
+        skill: String,
+    },
+    /// A mock tool that returns a fixed response (useful for testing).
+    Mock {
+        /// Tool name.
+        name: String,
+        /// Tool description.
+        description: String,
+        /// Fixed response to return.
+        response: serde_json::Value,
+    },
+    /// An OpenAPI spec-driven tool (placeholder/marker).
+    OpenApi {
+        /// Tool name.
+        name: String,
+        /// URL to the OpenAPI spec.
+        spec_url: String,
+    },
+    /// A BM25 search tool (placeholder/marker).
+    Search {
+        /// Tool name.
+        name: String,
+        /// Tool description.
+        description: String,
+    },
+    /// A schema-defined tool (placeholder/marker).
+    Schema {
+        /// Tool name.
+        name: String,
+        /// JSON Schema defining the tool's parameters.
+        schema: serde_json::Value,
+    },
+    /// A tool wrapped with a result transformer.
+    Transform {
+        /// The inner tool entry.
+        inner: Box<ToolCompositeEntry>,
+        /// Transformer function applied to the tool result.
+        transformer: Arc<
+            dyn Fn(serde_json::Value) -> Pin<Box<dyn Future<Output = serde_json::Value> + Send>>
+                + Send
+                + Sync,
+        >,
+    },
 }
 
 impl ToolComposite {
@@ -137,6 +201,132 @@ impl T {
             entries: tools
                 .into_iter()
                 .map(ToolCompositeEntry::Function)
+                .collect(),
+        }
+    }
+
+    /// Wrap a [`TextAgent`] as a tool (shorthand for creating an agent tool entry).
+    ///
+    /// When invoked, the agent runs via `BaseLlm::generate()` and returns its
+    /// text output as the tool result. State is shared with the parent session.
+    pub fn agent(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        agent: impl TextAgent + 'static,
+    ) -> ToolComposite {
+        ToolComposite {
+            entries: vec![ToolCompositeEntry::Agent {
+                name: name.into(),
+                description: description.into(),
+                agent: Arc::new(agent),
+            }],
+        }
+    }
+
+    /// Create an MCP (Model Context Protocol) toolset entry.
+    ///
+    /// `params` is the connection string (e.g. a URL or command) used to
+    /// establish the MCP session at runtime.
+    pub fn mcp(params: impl Into<String>) -> ToolComposite {
+        ToolComposite {
+            entries: vec![ToolCompositeEntry::Mcp {
+                params: params.into(),
+            }],
+        }
+    }
+
+    /// Create a remote agent-to-agent tool.
+    ///
+    /// Routes tool calls to a remote agent at `url`, invoking the given `skill`.
+    pub fn a2a(url: impl Into<String>, skill: impl Into<String>) -> ToolComposite {
+        ToolComposite {
+            entries: vec![ToolCompositeEntry::A2a {
+                url: url.into(),
+                skill: skill.into(),
+            }],
+        }
+    }
+
+    /// Create a mock tool that returns a fixed response.
+    ///
+    /// Useful for testing and prototyping without real tool implementations.
+    pub fn mock(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        response: serde_json::Value,
+    ) -> ToolComposite {
+        ToolComposite {
+            entries: vec![ToolCompositeEntry::Mock {
+                name: name.into(),
+                description: description.into(),
+                response,
+            }],
+        }
+    }
+
+    /// Create an OpenAPI spec-driven tool (placeholder/marker).
+    ///
+    /// At runtime, the spec at `spec_url` is fetched and used to generate
+    /// tool declarations and HTTP call routing.
+    pub fn openapi(name: impl Into<String>, spec_url: impl Into<String>) -> ToolComposite {
+        ToolComposite {
+            entries: vec![ToolCompositeEntry::OpenApi {
+                name: name.into(),
+                spec_url: spec_url.into(),
+            }],
+        }
+    }
+
+    /// Create a BM25 search tool (placeholder/marker).
+    ///
+    /// Declares a search tool that performs BM25 retrieval at runtime.
+    pub fn search(name: impl Into<String>, description: impl Into<String>) -> ToolComposite {
+        ToolComposite {
+            entries: vec![ToolCompositeEntry::Search {
+                name: name.into(),
+                description: description.into(),
+            }],
+        }
+    }
+
+    /// Create a schema-defined tool (placeholder/marker).
+    ///
+    /// The tool's parameters are defined by the given JSON Schema value.
+    pub fn schema(name: impl Into<String>, schema: serde_json::Value) -> ToolComposite {
+        ToolComposite {
+            entries: vec![ToolCompositeEntry::Schema {
+                name: name.into(),
+                schema,
+            }],
+        }
+    }
+
+    /// Wrap each tool entry in a composite with a result transformer.
+    ///
+    /// The transformer function is applied to the tool's output value before
+    /// it is returned to the model.
+    pub fn transform<F, Fut>(tool: ToolComposite, f: F) -> ToolComposite
+    where
+        F: Fn(serde_json::Value) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = serde_json::Value> + Send + 'static,
+    {
+        let f: Arc<
+            dyn Fn(serde_json::Value) -> Pin<Box<dyn Future<Output = serde_json::Value> + Send>>
+                + Send
+                + Sync,
+        > = Arc::new(
+            move |v: serde_json::Value| -> Pin<Box<dyn Future<Output = serde_json::Value> + Send>> {
+                Box::pin(f(v))
+            },
+        );
+        ToolComposite {
+            entries: tool
+                .entries
+                .into_iter()
+                .map(|entry| ToolCompositeEntry::Transform {
+                    inner: Box::new(entry),
+                    transformer: Arc::clone(&f),
+                })
                 .collect(),
         }
     }

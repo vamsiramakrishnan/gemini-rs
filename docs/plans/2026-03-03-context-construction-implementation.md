@@ -2,9 +2,9 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Eliminate the double-instruction-send bug, add `prompt_on_enter` / `on_enter_context` / `TranscriptWindow` / `InstructionModifier` to the phase machine, modularize processor.rs, surface new APIs in L2 fluent builders, and rewrite cookbooks.
+**Goal:** Eliminate the double-instruction-send bug, add `prompt_on_enter` / `on_enter_context` / `TranscriptWindow` / `InstructionModifier` to the phase machine, modularize processor.rs, surface new APIs in L2 fluent builders, and rewrite demos.
 
-**Architecture:** L0 (rs-genai) is untouched. L1 (rs-adk) gains new types in `phase.rs`, a `TranscriptWindow` type in `transcript.rs`, and processor.rs is split into composable functions. L2 (adk-rs-fluent) gains new `PhaseBuilder` methods and `P` module extensions. Cookbooks adopt per-phase modifiers replacing global `instruction_template`.
+**Architecture:** L0 (rs-genai) is untouched. L1 (rs-adk) gains new types in `phase.rs`, a `TranscriptWindow` type in `transcript.rs`, and processor.rs is split into composable functions. L2 (adk-rs-fluent) gains new `PhaseBuilder` methods and `P` module extensions. Demos adopt per-phase modifiers replacing global `instruction_template`.
 
 **Tech Stack:** Rust, tokio, serde_json, rs-genai (L0 wire), rs-adk (L1 runtime), adk-rs-fluent (L2 fluent)
 
@@ -1190,7 +1190,7 @@ The new `Phase` fields (`modifiers`, `prompt_on_enter`, `on_enter_context`) and 
 
 **Files to check:**
 - `crates/rs-adk/src/live/builder.rs` — may construct Phase
-- `cookbooks/ui/src/apps/*.rs` — construct phases via L2 builder (should be fine)
+- `apps/adk-web/src/apps/*.rs` — construct phases via L2 builder (should be fine)
 - Any direct `PhaseMachine::transition()` callers
 
 **Step 1: Search for all direct Phase constructions**
@@ -1225,7 +1225,7 @@ fix: add default values for new Phase fields across workspace
 ## Task 6: Rewrite debt_collection.rs with new primitives
 
 **Files:**
-- Modify: `cookbooks/ui/src/apps/debt_collection.rs`
+- Modify: `apps/adk-web/src/apps/debt_collection.rs`
 
 This is the showcase rewrite. Replace the global `instruction_template` with per-phase `with_state`/`when` modifiers, add `on_enter_context` for conversational continuity, and add `prompt_on_enter(true)` to the disclosure phase.
 
@@ -1290,13 +1290,13 @@ Delete the entire `.instruction_template(|state| { ... })` block (~40 lines, lin
 
 **Step 5: Build and test**
 
-Run: `cargo build -p cookbooks-ui`
+Run: `cargo build -p adk-web`
 Expected: Clean compile.
 
 **Step 6: Commit**
 
 ```
-refactor(cookbooks): rewrite debt_collection with per-phase modifiers, remove instruction_template
+refactor(examples): rewrite debt_collection with per-phase modifiers, remove instruction_template
 ```
 
 ---
@@ -1304,8 +1304,8 @@ refactor(cookbooks): rewrite debt_collection with per-phase modifiers, remove in
 ## Task 7: Rewrite support.rs and playbook.rs
 
 **Files:**
-- Modify: `cookbooks/ui/src/apps/support.rs`
-- Modify: `cookbooks/ui/src/apps/playbook.rs`
+- Modify: `apps/adk-web/src/apps/support.rs`
+- Modify: `apps/adk-web/src/apps/playbook.rs`
 
 Same pattern as debt_collection: replace `instruction_template` with per-phase `with_state`/`when`, add `on_enter_context` where conversational continuity matters, add `prompt_on_enter` where appropriate.
 
@@ -1319,13 +1319,13 @@ Same approach.
 
 **Step 3: Build and test**
 
-Run: `cargo build -p cookbooks-ui`
+Run: `cargo build -p adk-web`
 Expected: Clean compile.
 
 **Step 4: Commit**
 
 ```
-refactor(cookbooks): rewrite support and playbook with per-phase modifiers
+refactor(examples): rewrite support and playbook with per-phase modifiers
 ```
 
 ---

@@ -4,9 +4,9 @@ use tracing::info;
 
 use adk_rs_fluent::prelude::*;
 
-use crate::app::{AppError, ClientMessage, CookbookApp, WsSender};
+use crate::app::{AppError, ClientMessage, DemoApp, WsSender};
 use crate::bridge::SessionBridge;
-use crate::cookbook_meta;
+use crate::demo_meta;
 
 use super::resolve_voice;
 
@@ -14,8 +14,8 @@ use super::resolve_voice;
 pub struct VoiceChat;
 
 #[async_trait]
-impl CookbookApp for VoiceChat {
-    cookbook_meta! {
+impl DemoApp for VoiceChat {
+    demo_meta! {
         name: "voice-chat",
         description: "Native audio voice chat with Gemini Live",
         category: Basic,

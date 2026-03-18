@@ -362,6 +362,279 @@ impl C {
         })
     }
 
+    /// LLM-powered context summarization.
+    ///
+    /// Stores a summarization prompt that the runtime uses to condense context
+    /// via an LLM call before passing it to the agent. The policy prepends a
+    /// marker so the runtime knows summarization is requested.
+    ///
+    /// # Example
+    /// ```ignore
+    /// C::summarize("Summarize the conversation focusing on action items")
+    /// ```
+    pub fn summarize(prompt: &str) -> ContextPolicy {
+        let prompt = prompt.to_string();
+        ContextPolicy::new("summarize", move |history| {
+            let mut result = vec![Content::user(format!("[Summarize context: {}]", prompt))];
+            result.extend(history.iter().cloned());
+            result
+        })
+    }
+
+    /// Keep only context relevant to a state key.
+    ///
+    /// Marker policy for LLM-powered relevance filtering. The runtime uses
+    /// the referenced state key's value to filter context entries by relevance.
+    ///
+    /// # Example
+    /// ```ignore
+    /// C::relevant("user:current_topic")
+    /// ```
+    pub fn relevant(query_key: &str) -> ContextPolicy {
+        let key = query_key.to_string();
+        ContextPolicy::new("relevant", move |history| {
+            let mut result = vec![Content::user(format!(
+                "[Filter context relevant to state key: {}]",
+                key
+            ))];
+            result.extend(history.iter().cloned());
+            result
+        })
+    }
+
+    /// Extract specific information from context.
+    ///
+    /// Marker policy that signals the runtime to extract only the named
+    /// pieces of information from the conversation history via an LLM call.
+    ///
+    /// # Example
+    /// ```ignore
+    /// C::extract(&["customer_name", "order_id", "complaint"])
+    /// ```
+    pub fn extract(keys: &[&str]) -> ContextPolicy {
+        let owned_keys: Vec<String> = keys.iter().map(|k| k.to_string()).collect();
+        ContextPolicy::new("extract", move |history| {
+            let mut result = vec![Content::user(format!(
+                "[Extract from context: {}]",
+                owned_keys.join(", ")
+            ))];
+            result.extend(history.iter().cloned());
+            result
+        })
+    }
+
+    /// Distill context to essential information.
+    ///
+    /// Marker policy for LLM-powered distillation. Similar to `summarize` but
+    /// focused on extracting only the essential facts per the given instruction.
+    ///
+    /// # Example
+    /// ```ignore
+    /// C::distill("Keep only decisions made and their rationale")
+    /// ```
+    pub fn distill(instruction: &str) -> ContextPolicy {
+        let instruction = instruction.to_string();
+        ContextPolicy::new("distill", move |history| {
+            let mut result = vec![Content::user(format!("[Distill context: {}]", instruction))];
+            result.extend(history.iter().cloned());
+            result
+        })
+    }
+
+    /// Priority-weighted context selection.
+    ///
+    /// Assigns weights to context entries by role or content pattern. Higher
+    /// weight entries are kept preferentially when context must be truncated.
+    /// Weights are encoded as a marker for runtime processing.
+    ///
+    /// # Example
+    /// ```ignore
+    /// C::priority(&[("user", 1.0), ("model", 0.5), ("tool", 0.2)])
+    /// ```
+    pub fn priority(weights: &[(&str, f64)]) -> ContextPolicy {
+        let owned_weights: Vec<(String, f64)> =
+            weights.iter().map(|(k, v)| (k.to_string(), *v)).collect();
+        ContextPolicy::new("priority", move |history| {
+            let weight_str = owned_weights
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, v))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let mut result = vec![Content::user(format!("[Priority weights: {}]", weight_str))];
+            result.extend(history.iter().cloned());
+            result
+        })
+    }
+
+    /// Fit context to a token budget with smart truncation.
+    ///
+    /// Similar to [`budget`](Self::budget) but adds a truncation marker so the
+    /// runtime knows content was trimmed, allowing the agent to request more
+    /// context if needed.
+    ///
+    /// # Example
+    /// ```ignore
+    /// C::fit(4096)
+    /// ```
+    pub fn fit(max_tokens: usize) -> ContextPolicy {
+        use rs_genai::prelude::Part;
+        let max_chars = max_tokens * 4; // rough estimate: 4 chars per token
+        ContextPolicy::new("fit", move |history| {
+            let mut total = 0;
+            let mut result = Vec::new();
+            // Work backwards to keep most recent messages
+            for c in history.iter().rev() {
+                let text_len: usize = c
+                    .parts
+                    .iter()
+                    .filter_map(|p| match p {
+                        Part::Text { text } => Some(text.len()),
+                        _ => None,
+                    })
+                    .sum();
+                if total + text_len > max_chars && !result.is_empty() {
+                    // Prepend truncation marker
+                    result.push(Content::user(format!(
+                        "[Context truncated to fit ~{} token budget; {} earlier messages omitted]",
+                        max_tokens,
+                        history.len() - result.len()
+                    )));
+                    break;
+                }
+                total += text_len;
+                result.push(c.clone());
+            }
+            result.reverse();
+            result
+        })
+    }
+
+    /// Project/keep only specific fields from context.
+    ///
+    /// Marker policy that signals the runtime to retain only the named fields
+    /// from structured content in the conversation history.
+    ///
+    /// # Example
+    /// ```ignore
+    /// C::project(&["name", "status", "priority"])
+    /// ```
+    pub fn project(fields: &[&str]) -> ContextPolicy {
+        let owned_fields: Vec<String> = fields.iter().map(|f| f.to_string()).collect();
+        ContextPolicy::new("project", move |history| {
+            let mut result = vec![Content::user(format!(
+                "[Project fields: {}]",
+                owned_fields.join(", ")
+            ))];
+            result.extend(history.iter().cloned());
+            result
+        })
+    }
+
+    /// Select context entries matching a predicate.
+    ///
+    /// Similar to [`filter`](Self::filter) but with select semantics: entries
+    /// matching the predicate are included (positive selection).
+    pub fn select(predicate: impl Fn(&Content) -> bool + Send + Sync + 'static) -> ContextPolicy {
+        ContextPolicy::new("select", move |history| {
+            history.iter().filter(|c| predicate(c)).cloned().collect()
+        })
+    }
+
+    /// Include context only from specific agents.
+    ///
+    /// Filters context to keep only messages attributed to the named agents.
+    /// Agent attribution is detected via `[Agent: name]` markers in content.
+    ///
+    /// # Example
+    /// ```ignore
+    /// C::from_agents(&["researcher", "analyst"])
+    /// ```
+    pub fn from_agents(names: &[&str]) -> ContextPolicy {
+        let owned_names: Vec<String> = names.iter().map(|n| n.to_string()).collect();
+        ContextPolicy::new("from_agents", move |history| {
+            history
+                .iter()
+                .filter(|c| {
+                    c.parts.iter().any(|p| match p {
+                        rs_genai::prelude::Part::Text { text } => owned_names
+                            .iter()
+                            .any(|name| text.contains(&format!("[Agent: {}]", name))),
+                        _ => false,
+                    })
+                })
+                .cloned()
+                .collect()
+        })
+    }
+
+    /// Exclude context from specific agents.
+    ///
+    /// Filters out messages attributed to the named agents. Agent attribution
+    /// is detected via `[Agent: name]` markers in content.
+    ///
+    /// # Example
+    /// ```ignore
+    /// C::exclude_agents(&["logger", "debugger"])
+    /// ```
+    pub fn exclude_agents(names: &[&str]) -> ContextPolicy {
+        let owned_names: Vec<String> = names.iter().map(|n| n.to_string()).collect();
+        ContextPolicy::new("exclude_agents", move |history| {
+            history
+                .iter()
+                .filter(|c| {
+                    !c.parts.iter().any(|p| match p {
+                        rs_genai::prelude::Part::Text { text } => owned_names
+                            .iter()
+                            .any(|name| text.contains(&format!("[Agent: {}]", name))),
+                        _ => false,
+                    })
+                })
+                .cloned()
+                .collect()
+        })
+    }
+
+    /// Scratchpad: read notes from a state key as context.
+    ///
+    /// Prepends the value of a state key as a notes/scratchpad section in the
+    /// context. Useful for maintaining running notes across turns.
+    ///
+    /// # Example
+    /// ```ignore
+    /// C::notes("session:scratchpad")
+    /// ```
+    pub fn notes(key: &str) -> ContextPolicy {
+        let key = key.to_string();
+        ContextPolicy::new("notes", move |history| {
+            let mut result = vec![Content::user(format!(
+                "[Scratchpad from state key: {}]",
+                key
+            ))];
+            result.extend(history.iter().cloned());
+            result
+        })
+    }
+
+    /// Pipeline-aware context that adapts based on pipeline position.
+    ///
+    /// Marker policy that signals the runtime to adjust context based on
+    /// where the current agent sits in a pipeline. Early stages receive full
+    /// context; later stages receive only the outputs of preceding stages.
+    ///
+    /// # Example
+    /// ```ignore
+    /// C::pipeline_aware()
+    /// ```
+    pub fn pipeline_aware() -> ContextPolicy {
+        ContextPolicy::new("pipeline_aware", |history| {
+            let mut result = vec![Content::user(
+                "[Pipeline-aware: adapt context to pipeline position]".to_string(),
+            )];
+            result.extend(history.iter().cloned());
+            result
+        })
+    }
+
     /// Deduplicate adjacent messages with identical text content.
     pub fn dedup() -> ContextPolicy {
         use rs_genai::prelude::Part;
@@ -530,6 +803,174 @@ mod tests {
         if let rs_genai::prelude::Part::Text { text } = &result[0].parts[0] {
             assert!(text.contains("user:name"));
             assert!(text.contains("app:balance"));
+        } else {
+            panic!("Expected text part");
+        }
+    }
+
+    #[test]
+    fn summarize_prepends_marker() {
+        let history = vec![Content::user("hello"), Content::model("hi")];
+        let result = C::summarize("Focus on action items").apply(&history);
+        assert_eq!(result.len(), 3);
+        if let rs_genai::prelude::Part::Text { text } = &result[0].parts[0] {
+            assert!(text.contains("Summarize context"));
+            assert!(text.contains("action items"));
+        } else {
+            panic!("Expected text part");
+        }
+    }
+
+    #[test]
+    fn relevant_prepends_key_marker() {
+        let history = vec![Content::user("hello")];
+        let result = C::relevant("user:topic").apply(&history);
+        assert_eq!(result.len(), 2);
+        if let rs_genai::prelude::Part::Text { text } = &result[0].parts[0] {
+            assert!(text.contains("user:topic"));
+        } else {
+            panic!("Expected text part");
+        }
+    }
+
+    #[test]
+    fn extract_prepends_keys_marker() {
+        let history = vec![Content::user("hello")];
+        let result = C::extract(&["name", "order_id"]).apply(&history);
+        assert_eq!(result.len(), 2);
+        if let rs_genai::prelude::Part::Text { text } = &result[0].parts[0] {
+            assert!(text.contains("name"));
+            assert!(text.contains("order_id"));
+        } else {
+            panic!("Expected text part");
+        }
+    }
+
+    #[test]
+    fn distill_prepends_instruction_marker() {
+        let history = vec![Content::user("hello")];
+        let result = C::distill("Keep only decisions").apply(&history);
+        assert_eq!(result.len(), 2);
+        if let rs_genai::prelude::Part::Text { text } = &result[0].parts[0] {
+            assert!(text.contains("Distill context"));
+            assert!(text.contains("decisions"));
+        } else {
+            panic!("Expected text part");
+        }
+    }
+
+    #[test]
+    fn priority_prepends_weights_marker() {
+        let history = vec![Content::user("hello")];
+        let result = C::priority(&[("user", 1.0), ("model", 0.5)]).apply(&history);
+        assert_eq!(result.len(), 2);
+        if let rs_genai::prelude::Part::Text { text } = &result[0].parts[0] {
+            assert!(text.contains("Priority weights"));
+            assert!(text.contains("user=1"));
+            assert!(text.contains("model=0.5"));
+        } else {
+            panic!("Expected text part");
+        }
+    }
+
+    #[test]
+    fn fit_truncates_with_marker() {
+        // Create history that exceeds budget
+        let long_msg = "a".repeat(500);
+        let history = vec![
+            Content::user(long_msg.clone()),
+            Content::user(long_msg.clone()),
+            Content::user("recent"),
+        ];
+        // Budget of 10 tokens ~ 40 chars, only "recent" fits
+        let result = C::fit(10).apply(&history);
+        // Should have the recent message + truncation marker
+        assert!(result.len() <= 3);
+        // Check that truncation marker exists somewhere
+        let has_marker = result.iter().any(|c| {
+            c.parts.iter().any(|p| match p {
+                rs_genai::prelude::Part::Text { text } => text.contains("truncated"),
+                _ => false,
+            })
+        });
+        assert!(has_marker);
+    }
+
+    #[test]
+    fn fit_keeps_all_when_under_budget() {
+        let history = vec![Content::user("hi"), Content::model("hello")];
+        let result = C::fit(1000).apply(&history);
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn project_prepends_fields_marker() {
+        let history = vec![Content::user("hello")];
+        let result = C::project(&["name", "status"]).apply(&history);
+        assert_eq!(result.len(), 2);
+        if let rs_genai::prelude::Part::Text { text } = &result[0].parts[0] {
+            assert!(text.contains("Project fields"));
+            assert!(text.contains("name"));
+            assert!(text.contains("status"));
+        } else {
+            panic!("Expected text part");
+        }
+    }
+
+    #[test]
+    fn select_filters_matching() {
+        use rs_genai::prelude::Role;
+        let history = vec![
+            Content::user("keep"),
+            Content::model("skip"),
+            Content::user("also keep"),
+        ];
+        let result = C::select(|c| c.role == Some(Role::User)).apply(&history);
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn from_agents_filters_by_agent_marker() {
+        let history = vec![
+            Content::user("[Agent: researcher] Found data"),
+            Content::user("[Agent: logger] Debug info"),
+            Content::user("[Agent: researcher] More data"),
+        ];
+        let result = C::from_agents(&["researcher"]).apply(&history);
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn exclude_agents_removes_agent_messages() {
+        let history = vec![
+            Content::user("[Agent: researcher] Found data"),
+            Content::user("[Agent: logger] Debug info"),
+            Content::user("[Agent: researcher] More data"),
+        ];
+        let result = C::exclude_agents(&["logger"]).apply(&history);
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn notes_prepends_scratchpad_marker() {
+        let history = vec![Content::user("hello")];
+        let result = C::notes("session:scratchpad").apply(&history);
+        assert_eq!(result.len(), 2);
+        if let rs_genai::prelude::Part::Text { text } = &result[0].parts[0] {
+            assert!(text.contains("Scratchpad"));
+            assert!(text.contains("session:scratchpad"));
+        } else {
+            panic!("Expected text part");
+        }
+    }
+
+    #[test]
+    fn pipeline_aware_prepends_marker() {
+        let history = vec![Content::user("hello")];
+        let result = C::pipeline_aware().apply(&history);
+        assert_eq!(result.len(), 2);
+        if let rs_genai::prelude::Part::Text { text } = &result[0].parts[0] {
+            assert!(text.contains("Pipeline-aware"));
         } else {
             panic!("Expected text part");
         }

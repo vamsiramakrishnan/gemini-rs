@@ -2,7 +2,7 @@
 
 ## Summary
 
-Align the Rust `adk-rs-fluent` (L2) crate with the upstream Python `adk-fluent` library naming conventions, add missing composition namespaces, and update cookbooks.
+Align the Rust `adk-rs-fluent` (L2) crate with the upstream Python `adk-fluent` library naming conventions, add missing composition namespaces, and update examples.
 
 ---
 
@@ -228,33 +228,33 @@ pub use crate::patterns::{chain, conditional, map_reduce, a2a_cascade, a2a_fanou
 
 ---
 
-## 8. Cookbooks Alignment
+## 8. Examples Alignment
 
-### 8a. Existing cookbooks — update naming
+### 8a. Existing examples — update naming
 
-| Current Cookbook | Changes Needed |
+| Current Example | Changes Needed |
 |---|---|
-| `cookbooks/agents/` | Update `AgentBuilder::new()` → `Agent::new()`, use `.instruct()` alias |
-| `cookbooks/text-chat/` | Update imports, use new fluent aliases |
-| `cookbooks/tool-calling/` | Update to use `T::` module composition |
-| `cookbooks/voice-chat/` | Minimal changes (Live builder) |
-| `cookbooks/transcription/` | Minimal changes |
-| `cookbooks/ui/` | Minimal changes |
+| `examples/agents/` | Update `AgentBuilder::new()` → `Agent::new()`, use `.instruct()` alias |
+| `examples/text-chat/` | Update imports, use new fluent aliases |
+| `examples/tool-calling/` | Update to use `T::` module composition |
+| `examples/voice-chat/` | Minimal changes (Live builder) |
+| `examples/transcription/` | Minimal changes |
+| `apps/adk-web/` | Minimal changes |
 
-### 8b. New cookbooks to add (matching upstream examples)
+### 8b. New examples to add (matching upstream)
 
-| Upstream Example | New Cookbook |
+| Upstream Example | New Example |
 |---|---|
-| `examples/operator_composition/` | `cookbooks/operator-composition/` |
-| `examples/context_engineering/` | `cookbooks/context-engineering/` |
-| `examples/state_transforms/` | `cookbooks/state-transforms/` |
-| `examples/g_module_guards/` | `cookbooks/guards/` |
-| `examples/a2a_remote_delegation/` | `cookbooks/a2a/` |
-| `examples/dispatch_join/` | `cookbooks/dispatch-join/` |
-| `examples/inline_testing/` | `cookbooks/testing/` |
-| `examples/middleware/` | `cookbooks/middleware/` |
-| `examples/map_over/` | `cookbooks/map-over/` |
-| `examples/loop_until/` | `cookbooks/loop-patterns/` |
+| `examples/operator_composition/` | `examples/operator-composition/` |
+| `examples/context_engineering/` | `examples/context-engineering/` |
+| `examples/state_transforms/` | `examples/state-transforms/` |
+| `examples/g_module_guards/` | `examples/guards/` |
+| `examples/a2a_remote_delegation/` | `examples/a2a/` |
+| `examples/dispatch_join/` | `examples/dispatch-join/` |
+| `examples/inline_testing/` | `examples/testing/` |
+| `examples/middleware/` | `examples/middleware/` |
+| `examples/map_over/` | `examples/map-over/` |
+| `examples/loop_until/` | `examples/loop-patterns/` |
 
 ---
 
@@ -283,6 +283,6 @@ pub use crate::patterns::{chain, conditional, map_reduce, a2a_cascade, a2a_fanou
    - Add test harness, mock backend, diagnosis
    - Add runner abstractions
 
-6. **Phase 6 — Cookbooks** (final)
-   - Update existing cookbooks
-   - Add new cookbooks
+6. **Phase 6 — Examples** (final)
+   - Update existing examples
+   - Add new examples

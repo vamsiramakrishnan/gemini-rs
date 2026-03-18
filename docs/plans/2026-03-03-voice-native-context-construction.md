@@ -5,7 +5,7 @@
 **Scope**: Instruction delivery, phase-transition context, Live-aware context policies
 **Complements**: `voice-native-state-control-design.md` (S.C.T.P.M),
 `primitives-architecture-audit.md` (five primitives), `implementation-architecture.md` (module map)
-**Reference implementation**: `cookbooks/ui/src/apps/debt_collection.rs`
+**Reference implementation**: `apps/adk-web/src/apps/debt_collection.rs`
 
 ---
 

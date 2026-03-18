@@ -308,7 +308,7 @@ var MetricsPanel = (function () {
       resourceSpans: [{
         resource: {
           attributes: [
-            { key: 'service.name', value: { stringValue: 'gemini-live-cookbooks' } },
+            { key: 'service.name', value: { stringValue: 'gemini-live-examples' } },
             { key: 'session.start', value: { stringValue: new Date(self._sessionStart).toISOString() } }
           ]
         },

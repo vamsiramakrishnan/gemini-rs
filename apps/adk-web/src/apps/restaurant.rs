@@ -12,9 +12,9 @@ use adk_rs_fluent::prelude::*;
 use rs_adk::llm::{BaseLlm, GeminiLlm, GeminiLlmParams};
 use rs_adk::state::StateKey;
 
-use crate::app::{AppError, ClientMessage, CookbookApp, WsSender};
+use crate::app::{AppError, ClientMessage, DemoApp, WsSender};
 use crate::bridge::SessionBridge;
-use crate::cookbook_meta;
+use crate::demo_meta;
 
 use super::resolve_voice;
 
@@ -533,8 +533,8 @@ fn execute_tool(name: &str, args: &Value) -> Value {
 pub struct Restaurant;
 
 #[async_trait]
-impl CookbookApp for Restaurant {
-    cookbook_meta! {
+impl DemoApp for Restaurant {
+    demo_meta! {
         name: "restaurant",
         description: "Restaurant reservation assistant with availability checking, booking management, and dietary accommodations",
         category: Showcase,

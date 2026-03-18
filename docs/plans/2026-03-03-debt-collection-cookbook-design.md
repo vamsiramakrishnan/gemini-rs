@@ -1,12 +1,12 @@
-# Debt Collection Agent Cookbook Design
+# Debt Collection Agent Demo Design
 
 **Date**: 2026-03-03
 **Status**: Approved
-**Scope**: New cookbook app exercising 15 previously-unused L2 fluent API features
+**Scope**: New demo app exercising 15 previously-unused L2 fluent API features
 
 ## Context
 
-The cookbooks/ui currently has 7 apps migrated to L2 `Live::builder()`. An audit of L2 feature coverage identified 17 builder methods that no existing cookbook exercises. This cookbook is designed to fill those gaps with a realistic contact center scenario.
+The apps/adk-web currently has 7 apps migrated to L2 `Live::builder()`. An audit of L2 feature coverage identified 17 builder methods that no existing demo exercises. This demo is designed to fill those gaps with a realistic contact center scenario.
 
 **Scenario**: FDCPA-compliant debt collection voice agent with identity verification, payment negotiation, emotional monitoring, and real-time compliance enforcement.
 
@@ -288,11 +288,11 @@ fn features(&self) -> Vec<String> {
 
 ## New Files
 
-- `cookbooks/ui/src/apps/debt_collection.rs` — the cookbook app (~350-400 lines)
+- `apps/adk-web/src/apps/debt_collection.rs` — the demo app (~350-400 lines)
 
 ## Modified Files
 
-- `cookbooks/ui/src/apps/mod.rs` — add `mod debt_collection;` and register it
+- `apps/adk-web/src/apps/mod.rs` — add `mod debt_collection;` and register it
 
 ## Testing
 

@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Add a two-lane callback system and fluent `Live::builder()` API for full-duplex Gemini Live sessions, eliminating ~100 lines of boilerplate per cookbook.
+**Goal:** Add a two-lane callback system and fluent `Live::builder()` API for full-duplex Gemini Live sessions, eliminating ~100 lines of boilerplate per demo app.
 
 **Architecture:** L0 gets `send_video()` + `update_instruction()` convenience methods (built on existing `send_client_content` + `SendAudio` with video field). L1 gets `EventCallbacks` (typed callback registry), two-lane event processor (fast lane for audio/text, control lane for tools/lifecycle), and `LiveSessionBuilder`. L2 gets `Live::builder()` fluent wrapper.
 
@@ -1391,12 +1391,12 @@ fix: resolve compilation issues in live session API
 
 ---
 
-### Task 7: Update Research Pipeline Cookbook
+### Task 7: Update Research Pipeline Example
 
 **Files:**
-- Modify: `cookbooks/agents/src/research_pipeline.rs`
+- Modify: `examples/agents/src/research_pipeline.rs`
 
-Update the cookbook to demonstrate all new L2 capabilities including the `Live::builder()` API (showing the builder chain, not connecting since it's a dry-run demo).
+Update the demo to demonstrate all new L2 capabilities including the `Live::builder()` API (showing the builder chain, not connecting since it's a dry-run demo).
 
 Add section:
 ```rust
@@ -1421,14 +1421,14 @@ let _live = Live::builder()
 println!("Live session builder configured (not connecting in dry-run).");
 ```
 
-**Step 2: Build cookbook**
+**Step 2: Build example**
 
-Run: `cargo build -p agents-cookbook`
+Run: `cargo build -p agents-example`
 
 **Step 3: Commit**
 
 ```
-feat(cookbooks): demonstrate Live::builder() API in research pipeline
+feat(examples): demonstrate Live::builder() API in research pipeline
 ```
 
 ---
@@ -1448,6 +1448,6 @@ feat(cookbooks): demonstrate Live::builder() API in research pipeline
 | `crates/rs-adk/src/lib.rs` | L1 | Modify | Add `pub mod live` + re-exports |
 | `crates/adk-rs-fluent/src/live.rs` | L2 | Create | Live::builder() fluent API |
 | `crates/adk-rs-fluent/src/lib.rs` | L2 | Modify | Add `pub mod live` + prelude |
-| `cookbooks/agents/src/research_pipeline.rs` | - | Modify | Demonstrate Live::builder() |
+| `examples/agents/src/research_pipeline.rs` | - | Modify | Demonstrate Live::builder() |
 
 ## Estimated: ~800 LoC across 7 tasks

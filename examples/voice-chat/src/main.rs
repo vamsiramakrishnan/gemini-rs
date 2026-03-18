@@ -1,10 +1,10 @@
-//! Voice Chat cookbook — native audio chat with Gemini Live.
+//! Voice Chat example — native audio chat with Gemini Live.
 //!
 //! Demonstrates bidirectional audio with the native audio model,
 //! including input and output transcription.
 //!
 //! Usage:
-//!   cargo run -p cookbook-voice-chat
+//!   cargo run -p example-voice-chat
 //!   # then open http://127.0.0.1:3002
 
 use axum::{
@@ -117,7 +117,7 @@ async fn main() {
 
     let state = AppState { auth };
 
-    let static_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../cookbooks/ui/static");
+    let static_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../apps/adk-web/static");
 
     let app = Router::new()
         .fallback_service(
@@ -130,7 +130,7 @@ async fn main() {
 
     let addr = "127.0.0.1:3002";
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    println!("Voice Chat cookbook running at http://{}", addr);
+    println!("Voice Chat example running at http://{}", addr);
 
     axum::serve(listener, app).await.unwrap();
 }

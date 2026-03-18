@@ -544,7 +544,7 @@ cargo build --workspace
 # Run tests
 cargo test --workspace
 
-# Run a specific cookbook
+# Run a specific example
 cargo run -p adk-web
 
 # Check without building

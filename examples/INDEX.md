@@ -1,4 +1,4 @@
-# Cookbook Examples
+# Examples
 
 Runnable examples demonstrating gemini-rs features, organized by difficulty.
 
@@ -10,7 +10,7 @@ cp .env.example .env   # then fill in your credentials
 
 ### Environment variables
 
-All cookbooks read from a shared `.env` at the workspace root via [`dotenvy`](https://docs.rs/dotenvy). Pick **one** auth method:
+All examples read from a shared `.env` at the workspace root via [`dotenvy`](https://docs.rs/dotenvy). Pick **one** auth method:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
@@ -21,7 +21,7 @@ All cookbooks read from a shared `.env` at the workspace root via [`dotenvy`](ht
 | `GOOGLE_ACCESS_TOKEN` | optional | Explicit OAuth2 token. Falls back to `gcloud auth print-access-token`. |
 | `GEMINI_MODEL` | optional | Override the default model (see below). |
 
-> **Tip:** The UI cookbook also accepts `GOOGLE_GENAI_API_KEY` as an alias for `GEMINI_API_KEY`.
+> **Tip:** The ADK Web UI also accepts `GOOGLE_GENAI_API_KEY` as an alias for `GEMINI_API_KEY`.
 
 #### Model string format
 
@@ -39,14 +39,14 @@ Omit `GEMINI_MODEL` to use the SDK default (`models/gemini-live-2.5-flash-native
 
 #### Two-model architecture
 
-Cookbooks use **two separate models** that share the same auth credentials:
+Examples use **two separate models** that share the same auth credentials:
 
 | Role | Model | Protocol | Configured via |
 |------|-------|----------|----------------|
 | **Live session** | `gemini-live-2.5-flash-native-audio` | WebSocket | `GEMINI_MODEL` env var |
 | **Text LLM** | `gemini-3.1-flash-lite-preview` | REST | `GeminiLlmParams` in code |
 
-The text LLM powers extractors, agent-as-tool pipelines, and background analysis in advanced cookbooks. It reads the **same auth env vars** — no extra configuration needed.
+The text LLM powers extractors, agent-as-tool pipelines, and background analysis in advanced examples. It reads the **same auth env vars** — no extra configuration needed.
 
 ```rust
 // Text LLM inherits auth from env, model set explicitly in code
@@ -58,28 +58,28 @@ let llm: Arc<dyn BaseLlm> = Arc::new(GeminiLlm::new(GeminiLlmParams {
 
 **Google AI** — single API key covers both. No location concept, no extra setup.
 
-**Vertex AI** — the text LLM may need a different `location` than the Live session. The native audio model is region-locked to `us-central1`, but `gemini-3.1-flash-lite-preview` is available at the `global` endpoint. Cookbooks handle this by passing `location: Some("global".into())` in `GeminiLlmParams`.
+**Vertex AI** — the text LLM may need a different `location` than the Live session. The native audio model is region-locked to `us-central1`, but `gemini-3.1-flash-lite-preview` is available at the `global` endpoint. Examples handle this by passing `location: Some("global".into())` in `GeminiLlmParams`.
 
-### Standalone cookbooks
+### Standalone examples
 
 ```bash
-cargo run -p cookbook-text-chat       # http://127.0.0.1:3001
-cargo run -p cookbook-voice-chat      # http://127.0.0.1:3002
-cargo run -p cookbook-tool-calling    # http://127.0.0.1:3003
-cargo run -p cookbook-transcription   # http://127.0.0.1:3004
+cargo run -p example-text-chat       # http://127.0.0.1:3001
+cargo run -p example-voice-chat      # http://127.0.0.1:3002
+cargo run -p example-tool-calling    # http://127.0.0.1:3003
+cargo run -p example-transcription   # http://127.0.0.1:3004
 ```
 
-### Multi-app UI
+### Multi-app Web UI
 
 ```bash
-cargo run -p cookbook-ui              # http://127.0.0.1:3000
+cargo run -p adk-web                 # http://127.0.0.1:3000
 ```
 
 All apps listed below are available in the multi-app UI with a shared devtools panel showing state, transcript, and telemetry.
 
 ---
 
-## Standalone Cookbooks
+## Standalone Examples
 
 ### text-chat (L0 Wire)
 
@@ -236,7 +236,7 @@ FDCPA-compliant debt collection with compliance gates, identity verification, an
 
 ## Platform Support
 
-All cookbooks work with both **Google AI** (API key) and **Vertex AI** (project/location).
+All examples work with both **Google AI** (API key) and **Vertex AI** (project/location).
 
 | Feature | Google AI | Vertex AI |
 |---------|-----------|-----------|

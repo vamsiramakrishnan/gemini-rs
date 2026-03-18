@@ -7,7 +7,7 @@
 - [ ] `rs-genai` (L0 — wire protocol)
 - [ ] `rs-adk` (L1 — agent runtime)
 - [ ] `adk-rs-fluent` (L2 — fluent DX)
-- [ ] Cookbooks / examples
+- [ ] Examples / apps
 - [ ] CI / tooling
 
 ## Breaking Changes

@@ -1,215 +1,639 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Gemini Live Cookbooks</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#x1F680;</text></svg>">
-  <link rel="stylesheet" href="/static/css/main.css">
+  <title>gemini-rs &mdash; ADK for Rust</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#x2699;&#xFE0F;</text></svg>">
+  <link rel="stylesheet" href="/static/css/design-system.css">
   <link rel="stylesheet" href="/static/css/landing.css">
 </head>
 <body class="landing">
 
-  <!-- Header -->
-  <header class="landing-header">
-    <div class="header-content">
-      <h1>Gemini Live <span class="accent">Cookbooks</span></h1>
-      <p class="tagline">
-        Interactive demos showcasing real-time multimodal patterns with the
-        Gemini Live API. Voice, text, tool calling, state machines, and guardrails.
+  <!-- ═══ Navigation Bar ══════════════════════════════════════ -->
+  <nav class="nav-bar">
+    <div class="container nav-inner">
+      <a href="/" class="nav-logo">
+        <div class="logo-icon">
+          <svg viewBox="0 0 32 32" fill="none">
+            <rect x="2" y="2" width="28" height="28" rx="6" fill="url(#logo-grad)" opacity="0.9"/>
+            <path d="M10 22V10h3l5 8 5-8h3v12h-3V15l-4 6h-2l-4-6v7h-3z" fill="#fff"/>
+            <defs><linearGradient id="logo-grad" x1="2" y1="2" x2="30" y2="30"><stop stop-color="#818cf8"/><stop offset="1" stop-color="#34d399"/></linearGradient></defs>
+          </svg>
+        </div>
+        <span class="logo-text">gemini-rs</span>
+        <span class="logo-version">v0.4</span>
+      </a>
+      <div class="nav-links">
+        <a href="#architecture" class="nav-link">Architecture</a>
+        <a href="#demos" class="nav-link">Demos</a>
+        <a href="#cookbook" class="nav-link">Cookbook</a>
+        <a href="https://github.com/vamsiramakrishnan/gemini-rs" class="nav-link nav-link-github" target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        </a>
+        <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">
+          <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
+          <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+        </button>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ═══ Hero Section ════════════════════════════════════════ -->
+  <section class="hero">
+    <div class="hero-bg">
+      <div class="hero-orb hero-orb-1"></div>
+      <div class="hero-orb hero-orb-2"></div>
+      <div class="hero-orb hero-orb-3"></div>
+      <div class="hero-grid"></div>
+    </div>
+    <div class="container hero-content">
+      <div class="hero-badge">
+        <span class="badge badge-brand">Built with Rust</span>
+      </div>
+      <h1 class="hero-title">
+        Build Multimodal AI Agents<br>
+        <span class="gradient-text">with Gemini Live</span>
+      </h1>
+      <p class="hero-subtitle">
+        A three-layer Rust SDK for the Gemini Multimodal Live API.
+        Voice, text, tool calling, state machines, guardrails &mdash;
+        all with a fluent, composable builder API.
       </p>
-      <div class="header-stats" id="header-stats" style="display: none;">
-        <div class="stat">
-          <span class="stat-value" id="stat-apps">0</span>
-          <span class="stat-label">Apps</span>
+
+      <!-- Stats row -->
+      <div class="hero-stats stagger" id="hero-stats">
+        <div class="stat-pill"><span class="stat-value gradient-text" id="stat-apps">0</span><span class="stat-label">Live Demos</span></div>
+        <div class="stat-pill"><span class="stat-value gradient-text" id="stat-layers">3</span><span class="stat-label">Crate Layers</span></div>
+        <div class="stat-pill"><span class="stat-value gradient-text" id="stat-namespaces">8</span><span class="stat-label">Namespaces</span></div>
+        <div class="stat-pill"><span class="stat-value gradient-text" id="stat-cookbook">30</span><span class="stat-label">Cookbook Recipes</span></div>
+      </div>
+
+      <!-- Pipeline visualization -->
+      <div class="hero-pipeline" id="hero-pipeline">
+        <div class="pipeline-step" data-delay="0">
+          <div class="pipeline-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+          </div>
+          <span class="pipeline-label">Fluent Builder</span>
+          <span class="pipeline-sub">L2: adk-rs-fluent</span>
         </div>
-        <div class="stat">
-          <span class="stat-value" id="stat-categories">0</span>
-          <span class="stat-label">Categories</span>
+        <div class="pipeline-arrow"><svg viewBox="0 0 24 12" fill="none"><path d="M0 6h20M16 1l5 5-5 5" stroke="currentColor" stroke-width="1.5"/></svg></div>
+        <div class="pipeline-step" data-delay="1">
+          <div class="pipeline-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          </div>
+          <span class="pipeline-label">Agent Runtime</span>
+          <span class="pipeline-sub">L1: rs-adk</span>
         </div>
-        <div class="stat">
-          <span class="stat-value" id="stat-features">0</span>
-          <span class="stat-label">Features</span>
+        <div class="pipeline-arrow"><svg viewBox="0 0 24 12" fill="none"><path d="M0 6h20M16 1l5 5-5 5" stroke="currentColor" stroke-width="1.5"/></svg></div>
+        <div class="pipeline-step" data-delay="2">
+          <div class="pipeline-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+          </div>
+          <span class="pipeline-label">Wire Protocol</span>
+          <span class="pipeline-sub">L0: rs-genai</span>
+        </div>
+        <div class="pipeline-arrow"><svg viewBox="0 0 24 12" fill="none"><path d="M0 6h20M16 1l5 5-5 5" stroke="currentColor" stroke-width="1.5"/></svg></div>
+        <div class="pipeline-step pipeline-step-deploy" data-delay="3">
+          <div class="pipeline-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 10h-1.26A8 8 0 109 20h9a5 5 0 000-10z"/></svg>
+          </div>
+          <span class="pipeline-label">Deploy</span>
+          <span class="pipeline-sub">Web / CLI / Cloud</span>
         </div>
       </div>
     </div>
-  </header>
+  </section>
 
-  <!-- Main Content -->
-  <main class="landing-main" id="main-content">
-    <!-- Loading skeleton -->
-    <div id="loading-skeleton" class="skeleton-grid">
-      <div class="skeleton-card">
-        <div class="skeleton-line short"></div>
-        <div class="skeleton-line full"></div>
-        <div class="skeleton-line medium"></div>
+  <!-- ═══ Architecture Diagram ════════════════════════════════ -->
+  <section class="section section-arch" id="architecture">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-overline">Architecture</span>
+        <h2 class="section-title">Three-Layer Stack</h2>
+        <p class="section-desc">Each layer adds progressively richer abstractions. Import from the highest level you need.</p>
       </div>
-      <div class="skeleton-card">
-        <div class="skeleton-line short"></div>
-        <div class="skeleton-line full"></div>
-        <div class="skeleton-line medium"></div>
-      </div>
-      <div class="skeleton-card">
-        <div class="skeleton-line short"></div>
-        <div class="skeleton-line full"></div>
-        <div class="skeleton-line medium"></div>
+
+      <div class="arch-grid">
+        <!-- L2 -->
+        <div class="arch-layer arch-l2">
+          <div class="arch-layer-badge">L2</div>
+          <h3>adk-rs-fluent</h3>
+          <p class="arch-layer-desc">Fluent DX, operator algebra, composition</p>
+          <div class="arch-features">
+            <span>AgentBuilder</span><span>Live</span><span>S/C/T/P/M/A</span><span>Composable</span>
+          </div>
+          <div class="arch-code-preview">
+            <code><span class="keyword">use</span> <span class="type">adk_rs_fluent</span>::prelude::*;</code>
+          </div>
+        </div>
+
+        <!-- L1 -->
+        <div class="arch-layer arch-l1">
+          <div class="arch-layer-badge">L1</div>
+          <h3>rs-adk</h3>
+          <p class="arch-layer-desc">Agent runtime, tools, state, phases</p>
+          <div class="arch-features">
+            <span>LiveSession</span><span>State</span><span>TextAgent</span><span>Phase</span>
+          </div>
+          <div class="arch-code-preview">
+            <code><span class="keyword">use</span> <span class="type">rs_adk</span>::*;</code>
+          </div>
+        </div>
+
+        <!-- L0 -->
+        <div class="arch-layer arch-l0">
+          <div class="arch-layer-badge">L0</div>
+          <h3>rs-genai</h3>
+          <p class="arch-layer-desc">Wire protocol, transport, auth, types</p>
+          <div class="arch-features">
+            <span>SessionHandle</span><span>Content</span><span>Transport</span><span>Codec</span>
+          </div>
+          <div class="arch-code-preview">
+            <code><span class="keyword">use</span> <span class="type">rs_genai</span>::prelude::*;</code>
+          </div>
+        </div>
+
+        <!-- Connector lines (CSS-drawn) -->
+        <div class="arch-connector arch-conn-1"></div>
+        <div class="arch-connector arch-conn-2"></div>
       </div>
     </div>
-  </main>
+  </section>
 
+  <!-- ═══ Operator Algebra ════════════════════════════════════ -->
+  <section class="section section-operators">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-overline">Composition</span>
+        <h2 class="section-title">Operator Algebra</h2>
+        <p class="section-desc">Eight namespaces for composing every aspect of agent configuration</p>
+      </div>
+
+      <div class="operators-grid stagger">
+        <div class="operator-card" data-ns="S">
+          <div class="operator-symbol">&gt;&gt;</div>
+          <h4>S :: State</h4>
+          <p>pick, rename, merge, flatten, validate, branch</p>
+        </div>
+        <div class="operator-card" data-ns="C">
+          <div class="operator-symbol">+</div>
+          <h4>C :: Context</h4>
+          <p>window, summarize, relevant, extract, priority</p>
+        </div>
+        <div class="operator-card" data-ns="T">
+          <div class="operator-symbol">|</div>
+          <h4>T :: Tools</h4>
+          <p>simple, typed, google_search, code_execution, mcp</p>
+        </div>
+        <div class="operator-card" data-ns="P">
+          <div class="operator-symbol">+</div>
+          <h4>P :: Prompt</h4>
+          <p>role, task, constraint, format, example, persona</p>
+        </div>
+        <div class="operator-card" data-ns="M">
+          <div class="operator-symbol">|</div>
+          <h4>M :: Middleware</h4>
+          <p>cache, dedup, metrics, before_agent, after_model</p>
+        </div>
+        <div class="operator-card" data-ns="G">
+          <div class="operator-symbol">+</div>
+          <h4>G :: Guards</h4>
+          <p>rate_limit, toxicity, grounded, hallucination</p>
+        </div>
+        <div class="operator-card" data-ns="E">
+          <div class="operator-symbol">|</div>
+          <h4>E :: Evaluation</h4>
+          <p>suite, response_match, trajectory, semantic</p>
+        </div>
+        <div class="operator-card" data-ns="A">
+          <div class="operator-symbol">+</div>
+          <h4>A :: Artifacts</h4>
+          <p>publish, save, load, json_output, text_input</p>
+        </div>
+      </div>
+
+      <!-- Code example -->
+      <div class="code-showcase">
+        <div class="code-showcase-header">
+          <span class="code-showcase-dots"><i></i><i></i><i></i></span>
+          <span class="code-showcase-title">agent_composition.rs</span>
+        </div>
+        <pre class="code-block"><span class="comment">// Compose a research pipeline with operator algebra</span>
+<span class="keyword">let</span> pipeline = <span class="type">AgentBuilder</span>::new(<span class="string">"researcher"</span>)
+    .instruction(<span class="string">"Research the given topic thoroughly"</span>)
+    .google_search()
+    >> <span class="type">AgentBuilder</span>::new(<span class="string">"analyst"</span>)
+        .instruction(<span class="string">"Analyze research findings"</span>)
+        .temperature(<span class="number">0.3</span>)
+    >> <span class="type">AgentBuilder</span>::new(<span class="string">"writer"</span>)
+        .instruction(<span class="string">"Write a clear, structured report"</span>);
+
+<span class="comment">// Compile and run</span>
+<span class="keyword">let</span> agent = pipeline.compile(llm);
+<span class="keyword">let</span> result = agent.run(&amp;state).<span class="keyword">await</span>?;</pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ Three-Lane Processor ════════════════════════════════ -->
+  <section class="section section-processor">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-overline">Runtime</span>
+        <h2 class="section-title">Three-Lane Processor</h2>
+        <p class="section-desc">Zero-work dispatcher routes events to specialized processing lanes</p>
+      </div>
+
+      <div class="processor-visual">
+        <div class="processor-input">
+          <div class="processor-pulse"></div>
+          <span>SessionEvent</span>
+        </div>
+        <div class="processor-router">Router</div>
+        <div class="processor-lanes">
+          <div class="processor-lane lane-fast">
+            <h4>Fast Lane</h4>
+            <span class="lane-timing">&lt; 1ms, sync</span>
+            <ul>
+              <li>on_audio</li>
+              <li>on_text</li>
+              <li>on_thought</li>
+              <li>on_vad_*</li>
+            </ul>
+          </div>
+          <div class="processor-lane lane-control">
+            <h4>Control Lane</h4>
+            <span class="lane-timing">async, can block</span>
+            <ul>
+              <li>on_tool_call</li>
+              <li>Phase transitions</li>
+              <li>Extractors</li>
+              <li>Watchers</li>
+              <li>Repair</li>
+            </ul>
+          </div>
+          <div class="processor-lane lane-telemetry">
+            <h4>Telemetry Lane</h4>
+            <span class="lane-timing">own broadcast rx</span>
+            <ul>
+              <li>SessionSignals</li>
+              <li>Metrics</li>
+              <li>Usage tracking</li>
+              <li>Persistence</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ Live Demos ══════════════════════════════════════════ -->
+  <section class="section section-demos" id="demos">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-overline">Interactive</span>
+        <h2 class="section-title">Live Demos</h2>
+        <p class="section-desc">Try real-time multimodal patterns right in your browser</p>
+      </div>
+
+      <!-- Search / Filter -->
+      <div class="demo-search-bar">
+        <div class="search-inner">
+          <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+          <input type="text" id="search-input" class="search-input" placeholder="Search demos by name, feature, or difficulty..." autocomplete="off" spellcheck="false">
+          <kbd class="search-kbd">/</kbd>
+        </div>
+      </div>
+
+      <!-- Demo cards container -->
+      <main id="main-content">
+        <!-- Loading skeleton -->
+        <div id="loading-skeleton" class="skeleton-grid">
+          <div class="skeleton-card"><div class="skeleton-line short"></div><div class="skeleton-line full"></div><div class="skeleton-line medium"></div></div>
+          <div class="skeleton-card"><div class="skeleton-line short"></div><div class="skeleton-line full"></div><div class="skeleton-line medium"></div></div>
+          <div class="skeleton-card"><div class="skeleton-line short"></div><div class="skeleton-line full"></div><div class="skeleton-line medium"></div></div>
+        </div>
+      </main>
+    </div>
+  </section>
+
+  <!-- ═══ Cookbook Section ═════════════════════════════════════ -->
+  <section class="section section-cookbook" id="cookbook">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-overline">Learn</span>
+        <h2 class="section-title">Cookbook</h2>
+        <p class="section-desc">30 progressive examples from basics to production patterns</p>
+      </div>
+
+      <div class="cookbook-tiers">
+        <div class="cookbook-tier tier-crawl">
+          <div class="tier-header">
+            <div class="tier-icon-wrap crawl">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
+            </div>
+            <div>
+              <h3>Crawl <span class="tier-count">01&ndash;10</span></h3>
+              <p>Single agent foundations</p>
+            </div>
+          </div>
+          <div class="tier-recipes">
+            <div class="recipe">Simple Agent</div>
+            <div class="recipe">Agent with Tools</div>
+            <div class="recipe">Callbacks</div>
+            <div class="recipe">Sequential Pipeline</div>
+            <div class="recipe">Parallel Fan-out</div>
+            <div class="recipe">Loop Agent</div>
+            <div class="recipe">State Transforms</div>
+            <div class="recipe">Prompt Composition</div>
+            <div class="recipe">Tool Composition</div>
+            <div class="recipe">Guards</div>
+          </div>
+        </div>
+
+        <div class="cookbook-tier tier-walk">
+          <div class="tier-header">
+            <div class="tier-icon-wrap walk">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/></svg>
+            </div>
+            <div>
+              <h3>Walk <span class="tier-count">11&ndash;20</span></h3>
+              <p>Multi-agent patterns</p>
+            </div>
+          </div>
+          <div class="tier-recipes">
+            <div class="recipe">Route Branching</div>
+            <div class="recipe">Fallback Chain</div>
+            <div class="recipe">Review Loop</div>
+            <div class="recipe">Map Over</div>
+            <div class="recipe">Middleware Stack</div>
+            <div class="recipe">Context Engineering</div>
+            <div class="recipe">Evaluation Suite</div>
+            <div class="recipe">Artifacts</div>
+            <div class="recipe">Agent-as-Tool</div>
+            <div class="recipe">Supervised</div>
+          </div>
+        </div>
+
+        <div class="cookbook-tier tier-run">
+          <div class="tier-header">
+            <div class="tier-icon-wrap run">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            </div>
+            <div>
+              <h3>Run <span class="tier-count">21&ndash;30</span></h3>
+              <p>Production patterns</p>
+            </div>
+          </div>
+          <div class="tier-recipes">
+            <div class="recipe">Full Algebra</div>
+            <div class="recipe">Contract Testing</div>
+            <div class="recipe">Deep Research</div>
+            <div class="recipe">Customer Support</div>
+            <div class="recipe">Code Review</div>
+            <div class="recipe">Dispatch &amp; Join</div>
+            <div class="recipe">Race &amp; Timeout</div>
+            <div class="recipe">A2A Remote</div>
+            <div class="recipe">Live Voice</div>
+            <div class="recipe">Production Pipeline</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ Feature Highlights ══════════════════════════════════ -->
+  <section class="section section-features">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-overline">Capabilities</span>
+        <h2 class="section-title">Everything You Need</h2>
+      </div>
+
+      <div class="features-grid stagger">
+        <div class="feature-card">
+          <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg></div>
+          <h4>Voice &amp; Audio</h4>
+          <p>Native PCM16 audio I/O with AudioWorklet, jitter buffer, and VAD</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg></div>
+          <h4>Phase Machine</h4>
+          <p>Declarative conversation phases with guards, transitions, and modifiers</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg></div>
+          <h4>Tool Calling</h4>
+          <p>SimpleTool, TypedTool, async background tools with scheduling</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></div>
+          <h4>State Management</h4>
+          <p>Concurrent typed KV with prefixes, delta tracking, and derived state</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div>
+          <h4>Extraction</h4>
+          <p>Out-of-band structured extraction with typed schemas per turn</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
+          <h4>Guardrails</h4>
+          <p>Rate limiting, toxicity, hallucination detection, and custom judges</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ Footer ══════════════════════════════════════════════ -->
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <div class="footer-brand">
+        <span class="logo-text">gemini-rs</span>
+        <span class="footer-copy">Rust SDK for Gemini Live API</span>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/vamsiramakrishnan/gemini-rs" target="_blank" rel="noopener">GitHub</a>
+        <a href="#architecture">Architecture</a>
+        <a href="#demos">Demos</a>
+        <a href="#cookbook">Cookbook</a>
+      </div>
+    </div>
+  </footer>
+
+  <!-- ═══ Scripts ═════════════════════════════════════════════ -->
   <script>
     (function () {
       'use strict';
 
-      const CATEGORY_META = {
-        basic: {
-          label: 'Basic',
-          desc: 'Core patterns for text chat, voice, and tool calling'
-        },
-        advanced: {
-          label: 'Advanced',
-          desc: 'State machines, multi-phase conversations, and guardrails'
-        },
-        showcase: {
-          label: 'Showcase',
-          desc: 'Full-featured demos combining multiple patterns'
-        }
+      // ── Theme toggle ────────────────────────────────────────
+      var themeBtn = document.getElementById('theme-toggle');
+      function setTheme(t) {
+        document.documentElement.setAttribute('data-theme', t);
+        try { localStorage.setItem('theme', t); } catch(e) {}
+      }
+      function getTheme() {
+        try { return localStorage.getItem('theme'); } catch(e) { return null; }
+      }
+      var saved = getTheme();
+      if (saved) setTheme(saved);
+      else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) setTheme('light');
+
+      themeBtn.addEventListener('click', function() {
+        var current = document.documentElement.getAttribute('data-theme');
+        setTheme(current === 'dark' ? 'light' : 'dark');
+      });
+
+      // ── Intersection Observer for scroll animations ─────────
+      var observer = new IntersectionObserver(function(entries) {
+        entries.forEach(function(e) {
+          if (e.isIntersecting) {
+            e.target.classList.add('visible');
+            observer.unobserve(e.target);
+          }
+        });
+      }, { threshold: 0.15 });
+
+      document.querySelectorAll('.section, .arch-layer, .operator-card, .feature-card, .cookbook-tier, .processor-lane').forEach(function(el) {
+        el.classList.add('animate-on-scroll');
+        observer.observe(el);
+      });
+
+      // ── Smooth scroll for nav links ──────────────────────────
+      document.querySelectorAll('a[href^="#"]').forEach(function(a) {
+        a.addEventListener('click', function(e) {
+          var target = document.querySelector(a.getAttribute('href'));
+          if (target) {
+            e.preventDefault();
+            target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }
+        });
+      });
+
+      // ── Pipeline step animation ──────────────────────────────
+      var pipeline = document.getElementById('hero-pipeline');
+      if (pipeline) {
+        var steps = pipeline.querySelectorAll('.pipeline-step');
+        var arrows = pipeline.querySelectorAll('.pipeline-arrow');
+        steps.forEach(function(step, i) {
+          setTimeout(function() {
+            step.classList.add('active');
+            if (arrows[i]) arrows[i].classList.add('active');
+          }, 600 + i * 300);
+        });
+      }
+
+      // ── Demo rendering ──────────────────────────────────────
+      var DIFFICULTY_META = {
+        crawl: { label: 'Crawl', subtitle: 'Single agent', desc: 'Simple patterns &mdash; the best place to start', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>' },
+        walk: { label: 'Walk', subtitle: 'Multi-agent', desc: 'Multi-phase flows, extractors, and playbooks', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/></svg>' },
+        run: { label: 'Run', subtitle: 'Production', desc: 'Full-featured production patterns', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>' }
       };
+      var DIFFICULTY_ORDER = ['crawl', 'walk', 'run'];
+      var APP_DIFFICULTY = { 'text-chat':'crawl','voice-chat':'crawl','tool-calling':'crawl','restaurant':'walk','playbook':'walk','clinic':'walk','debt-collection':'run','guardrails':'run','support-assistant':'run','call-screening':'run','all-config':'run' };
+      var FEATURE_CLASSES = { 'voice':'voice','text':'text','tools':'tools','tool-calling':'tools','state-machine':'state-machine','guardrails':'guardrails','audio':'audio','streaming':'streaming','evaluation':'evaluation' };
+      var _allApps = [];
 
-      const CATEGORY_ORDER = ['basic', 'advanced', 'showcase'];
-
-      const FEATURE_CLASSES = {
-        'voice': 'voice',
-        'text': 'text',
-        'tools': 'tools',
-        'tool-calling': 'tools',
-        'state-machine': 'state-machine',
-        'guardrails': 'guardrails',
-        'audio': 'audio',
-        'streaming': 'streaming',
-        'evaluation': 'evaluation'
-      };
-
-      function toUrlName(name) {
-        return name.toLowerCase().replace(/\s+/g, '-');
-      }
-
-      function featureBadgeClass(feature) {
-        const lower = feature.toLowerCase();
-        return FEATURE_CLASSES[lower] || '';
-      }
-
-      function escapeHtml(str) {
-        const div = document.createElement('div');
-        div.textContent = str;
-        return div.innerHTML;
-      }
+      function toUrlName(n) { return n.toLowerCase().replace(/\s+/g,'-'); }
+      function escapeHtml(s) { var d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+      function getDifficulty(app) { return APP_DIFFICULTY[toUrlName(app.name)] || 'crawl'; }
 
       function renderApps(apps) {
-        const main = document.getElementById('main-content');
-        const skeleton = document.getElementById('loading-skeleton');
+        var main = document.getElementById('main-content');
+        var skeleton = document.getElementById('loading-skeleton');
         if (skeleton) skeleton.remove();
+        _allApps = apps || [];
 
-        // Empty state
         if (!apps || apps.length === 0) {
-          main.innerHTML = `
-            <div class="landing-empty">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-                <line x1="9" y1="9" x2="15" y2="15"/>
-                <line x1="15" y1="9" x2="9" y2="15"/>
-              </svg>
-              <div class="empty-title">No apps registered yet</div>
-              <div class="empty-subtitle">Apps will appear here once they are implemented.<br>Check the cookbooks source for progress.</div>
-            </div>
-          `;
+          main.innerHTML = '<div class="landing-empty"><div class="empty-title">No apps registered yet</div><div class="empty-subtitle">Apps will appear here once they are implemented.</div></div>';
           return;
         }
 
-        // Group by category
-        const groups = {};
-        apps.forEach(function (app) {
-          const cat = app.category || 'basic';
-          if (!groups[cat]) groups[cat] = [];
-          groups[cat].push(app);
-        });
-
-        // Stats
-        const allFeatures = new Set();
-        apps.forEach(function (app) {
-          (app.features || []).forEach(function (f) { allFeatures.add(f); });
-        });
-
-        var statsEl = document.getElementById('header-stats');
-        statsEl.style.display = 'flex';
+        var allFeatures = new Set();
+        apps.forEach(function(a) { (a.features||[]).forEach(function(f) { allFeatures.add(f); }); });
         document.getElementById('stat-apps').textContent = apps.length;
-        document.getElementById('stat-categories').textContent = Object.keys(groups).length;
-        document.getElementById('stat-features').textContent = allFeatures.size;
+        renderFilteredApps(apps);
+      }
 
-        // Render categories in order
+      function renderFilteredApps(apps) {
+        var main = document.getElementById('main-content');
+        var groups = {};
+        apps.forEach(function(a) { var t=getDifficulty(a); if(!groups[t])groups[t]=[]; groups[t].push(a); });
+
         var html = '';
-        CATEGORY_ORDER.forEach(function (catKey) {
-          var catApps = groups[catKey];
-          if (!catApps || catApps.length === 0) return;
+        DIFFICULTY_ORDER.forEach(function(tierKey) {
+          var tierApps = groups[tierKey];
+          if (!tierApps || tierApps.length === 0) return;
+          var meta = DIFFICULTY_META[tierKey];
 
-          var meta = CATEGORY_META[catKey] || { label: catKey, desc: '' };
-
-          html += '<section class="category-section">';
-          html += '<div class="category-header">';
-          html += '<h2>' + escapeHtml(meta.label) + '</h2>';
-          html += '<span class="category-count">' + catApps.length + ' app' + (catApps.length !== 1 ? 's' : '') + '</span>';
-          html += '<span class="category-desc">' + escapeHtml(meta.desc) + '</span>';
+          html += '<section class="demo-tier tier-' + tierKey + '">';
+          html += '<div class="demo-tier-header">';
+          html += '<div class="tier-icon-wrap ' + tierKey + '">' + meta.icon + '</div>';
+          html += '<div class="tier-title-group"><h3>' + meta.label + ' <span class="tier-subtitle">' + meta.subtitle + '</span></h3>';
+          html += '<span class="tier-desc">' + meta.desc + '</span></div>';
+          html += '<span class="tier-count-badge">' + tierApps.length + '</span>';
           html += '</div>';
-          html += '<div class="apps-grid">';
+          html += '<div class="demo-grid">';
 
-          catApps.forEach(function (app) {
+          tierApps.forEach(function(app) {
             var urlName = toUrlName(app.name);
-            var badges = (app.features || []).map(function (f) {
-              var cls = featureBadgeClass(f);
-              return '<span class="feature-badge ' + cls + '">' + escapeHtml(f) + '</span>';
+            var badges = (app.features||[]).map(function(f) {
+              return '<span class="feature-badge ' + (FEATURE_CLASSES[f.toLowerCase()]||'') + '">' + escapeHtml(f) + '</span>';
             }).join('');
 
-            html += '<a href="/app/' + urlName + '" class="app-card">';
-            html += '<div class="card-header">';
-            html += '<span class="card-name">' + escapeHtml(app.name) + '</span>';
-            html += '<span class="card-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span>';
+            html += '<a href="/app/' + urlName + '" class="demo-card">';
+            html += '<div class="demo-card-header"><span class="demo-card-name">' + escapeHtml(app.name) + '</span>';
+            html += '<span class="demo-card-pip pip-' + tierKey + '">' + meta.label + '</span>';
+            html += '<svg class="demo-card-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></a>';
             html += '</div>';
-            html += '<div class="card-description">' + escapeHtml(app.description) + '</div>';
-
-            if (app.tips && app.tips.length > 0) {
-              html += '<div class="card-tips">' + escapeHtml(app.tips[0]) + '</div>';
-            }
+            html += '<div class="demo-card-desc">' + escapeHtml(app.description) + '</div>';
 
             if (app.try_saying && app.try_saying.length > 0) {
-              html += '<div class="card-try-saying">';
-              html += '<span class="try-label">Try saying:</span>';
-              app.try_saying.slice(0, 2).forEach(function (phrase) {
-                html += '<span class="try-phrase">\u201c' + escapeHtml(phrase) + '\u201d</span>';
+              html += '<div class="demo-card-try">';
+              app.try_saying.slice(0,2).forEach(function(p) {
+                html += '<span class="try-phrase">\u201c' + escapeHtml(p) + '\u201d</span>';
               });
               html += '</div>';
             }
-
-            html += '<div class="card-badges">' + badges + '</div>';
+            html += '<div class="demo-card-badges">' + badges + '</div>';
             html += '</a>';
           });
 
           html += '</div></section>';
         });
 
+        if (!html) html = '<div class="landing-empty"><div class="empty-title">No matching demos</div></div>';
         main.innerHTML = html;
       }
 
-      // Fetch apps
-      fetch('/api/apps')
-        .then(function (r) { return r.json(); })
-        .then(renderApps)
-        .catch(function (err) {
-          console.error('Failed to fetch apps:', err);
-          var skeleton = document.getElementById('loading-skeleton');
-          if (skeleton) {
-            skeleton.innerHTML = '<p style="color: #ea4335; grid-column: 1/-1;">Failed to load apps. Is the server running?</p>';
-          }
+      // Search
+      var input = document.getElementById('search-input');
+      if (input) {
+        input.addEventListener('input', function() {
+          var q = input.value.trim().toLowerCase();
+          if (!q) { renderFilteredApps(_allApps); return; }
+          renderFilteredApps(_allApps.filter(function(a) {
+            var h = (a.name||'').toLowerCase() + ' ' + (a.description||'').toLowerCase() + ' ' + (a.features||[]).join(' ').toLowerCase();
+            return h.indexOf(q) !== -1;
+          }));
         });
+        document.addEventListener('keydown', function(e) {
+          if (e.key === '/' && document.activeElement !== input) { e.preventDefault(); input.focus(); }
+          if (e.key === 'Escape' && document.activeElement === input) { input.value=''; input.dispatchEvent(new Event('input')); input.blur(); }
+        });
+      }
+
+      // Fetch apps
+      fetch('/api/apps').then(function(r){return r.json();}).then(renderApps).catch(function(err) {
+        console.error('Failed to fetch apps:', err);
+        var s = document.getElementById('loading-skeleton');
+        if (s) s.innerHTML = '<p style="color:var(--error);grid-column:1/-1;">Failed to load apps. Is the server running?</p>';
+      });
+
     })();
   </script>
 

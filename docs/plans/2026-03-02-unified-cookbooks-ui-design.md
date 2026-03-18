@@ -1,15 +1,15 @@
-# Unified Cookbooks UI — Design Document
+# Unified Web UI — Design Document
 
 **Date:** 2026-03-02
 **Status:** Approved
 
 ## Goal
 
-Single-binary, router-based cookbook hub that consolidates existing demos and adds new higher-order apps showcasing out-of-band control driven by Live API events in real-world speech-to-speech scenarios.
+Single-binary, router-based demo hub that consolidates existing demos and adds new higher-order apps showcasing out-of-band control driven by Live API events in real-world speech-to-speech scenarios.
 
 ## Architecture
 
-### Single Axum Binary (`cookbooks/ui/`)
+### Single Axum Binary (`apps/adk-web/`)
 
 ```
 GET /                → Landing page with app cards
@@ -147,7 +147,7 @@ Chains two processors:
 ## File Structure
 
 ```
-cookbooks/ui/
+apps/adk-web/
   Cargo.toml
   src/
     main.rs              ← Axum server, route setup, app registry

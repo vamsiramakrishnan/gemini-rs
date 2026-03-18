@@ -1,10 +1,10 @@
-//! Weather agent cookbook — self-contained CLI demo.
+//! Weather agent example — self-contained CLI demo.
 //!
 //! Connects to Gemini Live, asks about weather, dispatches the tool call,
 //! sends back the tool response, and prints the model's final answer.
 //!
 //! Usage:
-//!   cargo run -p agents-cookbook --bin weather-agent
+//!   cargo run -p agents-example --bin weather-agent
 
 use std::sync::Arc;
 

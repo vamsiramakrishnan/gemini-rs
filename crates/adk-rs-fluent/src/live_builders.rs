@@ -330,7 +330,7 @@ impl PhaseBuilder {
     /// Inject a model-role bridge message on phase entry and prompt immediately.
     ///
     /// Combines `on_enter_context` + `prompt_on_enter(true)` into a single call,
-    /// eliminating the need to import `Content` in cookbook code.
+    /// eliminating the need to import `Content` in application code.
     ///
     /// ```ignore
     /// .phase("verify_identity")

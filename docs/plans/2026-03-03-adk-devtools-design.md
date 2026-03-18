@@ -14,14 +14,14 @@
 
 ### Why Not REST?
 
-adk-js uses REST + SSE because it's a text-first SDK — every interaction is request/response. gemini-rs is voice-first: bidirectional audio streaming, real-time VAD events, phase transitions, live state mutations, and telemetry all happen concurrently. REST + SSE cannot model this. The existing cookbook UI already uses pure WebSocket for this reason.
+adk-js uses REST + SSE because it's a text-first SDK — every interaction is request/response. gemini-rs is voice-first: bidirectional audio streaming, real-time VAD events, phase transitions, live state mutations, and telemetry all happen concurrently. REST + SSE cannot model this. The existing Web UI already uses pure WebSocket for this reason.
 
 ### What adk-js Has That We Don't
 
 | Capability | adk-js | gemini-rs |
 |-----------|--------|-----------|
 | CLI tool (`adk` command) | 6 commands | None |
-| Dev server with UI | Express + Angular | Cookbook UI (demo, not product) |
+| Dev server with UI | Express + Angular | Web UI (demo, not product) |
 | Interactive REPL | `adk run` with readline | None |
 | Agent scaffolding | `adk create` | None |
 | Standardized API protocol | REST + SSE | Ad-hoc WebSocket JSON |
@@ -31,7 +31,7 @@ adk-js uses REST + SSE because it's a text-first SDK — every interaction is re
 
 - Full agent runtime (L0/L1/L2 crates)
 - Three-lane processor (fast/control/telemetry)
-- Working cookbook UI with devtools panel (state, events, phases, telemetry, tools)
+- Working Web UI with devtools panel (state, events, phases, telemetry, tools)
 - WebSocket audio streaming (base64 over JSON)
 
 ---
@@ -329,7 +329,7 @@ Vanilla JS + CSS. No framework, no build step, no node_modules. The entire UI is
 - Queue on `AudioWorklet` at 24kHz with sequential scheduling
 - `clearQueue()` on `interrupted` control message
 
-### What We Reuse From Cookbook UI
+### What We Reuse From Web UI
 
 | File | Reuse | Changes |
 |------|-------|---------|
@@ -540,12 +540,12 @@ tokio = { version = "1", features = ["full"] }
 
 ---
 
-## Relationship to Cookbook UI
+## Relationship to Web UI
 
-The cookbook UI (`cookbooks/ui/`) continues to exist as example apps. It is NOT replaced. Instead:
+The Web UI (`apps/adk-web/`) continues to exist as example apps. It is NOT replaced. Instead:
 
-- Cookbook apps can be **trivially ported** to `adk-devtools` by wrapping their `Live::builder()` calls in `AgentDescriptor` factories
-- The cookbook UI serves as a reference for how apps work
-- `adk-devtools` is the production-grade version of what the cookbook UI prototypes
+- Demo apps can be **trivially ported** to `adk-devtools` by wrapping their `Live::builder()` calls in `AgentDescriptor` factories
+- The Web UI serves as a reference for how apps work
+- `adk-devtools` is the production-grade version of what the Web UI prototypes
 
-Over time, cookbook examples may migrate to use `adk_devtools::run()` instead of their own Axum server, eliminating the duplicated server code.
+Over time, demo examples may migrate to use `adk_devtools::run()` instead of their own Axum server, eliminating the duplicated server code.

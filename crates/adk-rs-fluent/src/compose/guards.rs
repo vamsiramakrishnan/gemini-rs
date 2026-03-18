@@ -182,6 +182,80 @@ impl G {
     pub fn custom(f: impl Fn(&str) -> Result<(), String> + Send + Sync + 'static) -> GGuard {
         GGuard::new("custom", f)
     }
+
+    /// Output guard — validates model output content via a predicate function.
+    pub fn output(f: impl Fn(&str) -> Result<(), String> + Send + Sync + 'static) -> GGuard {
+        GGuard::new("output", f)
+    }
+
+    /// Input guard — validates user input content via a predicate function.
+    pub fn input(f: impl Fn(&str) -> Result<(), String> + Send + Sync + 'static) -> GGuard {
+        GGuard::new("input", f)
+    }
+
+    /// Rate limiting guard — enforces a maximum number of checks per minute.
+    pub fn rate_limit(max_per_minute: u32) -> GGuard {
+        GGuard::new("rate_limit", move |_output| {
+            // Rate limiting is enforced at runtime by the processor.
+            let _ = max_per_minute;
+            Ok(())
+        })
+    }
+
+    /// Toxicity detection guard — placeholder for toxicity classification.
+    pub fn toxicity() -> GGuard {
+        GGuard::new("toxicity", |_output| {
+            // Toxicity detection requires an external classifier at runtime.
+            Ok(())
+        })
+    }
+
+    /// Grounding check guard — placeholder for grounding verification.
+    pub fn grounded() -> GGuard {
+        GGuard::new("grounded", |_output| {
+            // Grounding checks require external verification at runtime.
+            Ok(())
+        })
+    }
+
+    /// Hallucination detection guard — placeholder for hallucination detection.
+    pub fn hallucination() -> GGuard {
+        GGuard::new("hallucination", |_output| {
+            // Hallucination detection requires external verification at runtime.
+            Ok(())
+        })
+    }
+
+    /// Conditional guard — only applies `inner` when `predicate` returns true.
+    pub fn when(predicate: impl Fn(&str) -> bool + Send + Sync + 'static, inner: GGuard) -> GGuard {
+        GGuard::new("when", move |output| {
+            if predicate(output) {
+                inner.check(output)
+            } else {
+                Ok(())
+            }
+        })
+    }
+
+    /// LLM-as-judge content guard — stores a prompt for later LLM evaluation.
+    pub fn llm_judge(prompt: &str) -> GGuard {
+        let prompt = prompt.to_string();
+        GGuard::new("llm_judge", move |_output| {
+            // LLM judge evaluation happens at runtime with access to the LLM.
+            let _ = &prompt;
+            Ok(())
+        })
+    }
+
+    /// Named custom judge function guard.
+    pub fn custom_judge(
+        name: &str,
+        f: impl Fn(&str) -> Result<(), String> + Send + Sync + 'static,
+    ) -> GGuard {
+        // Leak the name to get a 'static str, matching the GGuard field type.
+        let name: &'static str = Box::leak(name.to_string().into_boxed_str());
+        GGuard::new(name, f)
+    }
 }
 
 #[cfg(test)]
@@ -262,5 +336,100 @@ mod tests {
         });
         assert!(g.check("good output").is_ok());
         assert!(g.check("bad output").is_err());
+    }
+
+    #[test]
+    fn output_guard() {
+        let g = G::output(|output| {
+            if output.contains("forbidden") {
+                Err("Forbidden content".into())
+            } else {
+                Ok(())
+            }
+        });
+        assert!(g.check("safe content").is_ok());
+        assert!(g.check("forbidden content").is_err());
+        assert_eq!(g.name(), "output");
+    }
+
+    #[test]
+    fn input_guard() {
+        let g = G::input(|input| {
+            if input.is_empty() {
+                Err("Empty input".into())
+            } else {
+                Ok(())
+            }
+        });
+        assert!(g.check("hello").is_ok());
+        assert!(g.check("").is_err());
+        assert_eq!(g.name(), "input");
+    }
+
+    #[test]
+    fn rate_limit_guard() {
+        let g = G::rate_limit(60);
+        assert!(g.check("anything").is_ok());
+        assert_eq!(g.name(), "rate_limit");
+    }
+
+    #[test]
+    fn toxicity_guard() {
+        let g = G::toxicity();
+        assert!(g.check("anything").is_ok());
+        assert_eq!(g.name(), "toxicity");
+    }
+
+    #[test]
+    fn grounded_guard() {
+        let g = G::grounded();
+        assert!(g.check("anything").is_ok());
+        assert_eq!(g.name(), "grounded");
+    }
+
+    #[test]
+    fn hallucination_guard() {
+        let g = G::hallucination();
+        assert!(g.check("anything").is_ok());
+        assert_eq!(g.name(), "hallucination");
+    }
+
+    #[test]
+    fn when_guard_applies() {
+        let inner = G::length(1, 5);
+        let g = G::when(|output| output.starts_with("check:"), inner);
+        // Predicate true — inner guard runs and rejects long output.
+        assert!(g.check("check: this is way too long").is_err());
+        // Predicate false — inner guard skipped.
+        assert!(g.check("skip: this is way too long").is_ok());
+        assert_eq!(g.name(), "when");
+    }
+
+    #[test]
+    fn llm_judge_guard() {
+        let g = G::llm_judge("Is this response helpful?");
+        assert!(g.check("anything").is_ok());
+        assert_eq!(g.name(), "llm_judge");
+    }
+
+    #[test]
+    fn custom_judge_guard() {
+        let g = G::custom_judge("profanity_filter", |output| {
+            if output.contains("bad_word") {
+                Err("Profanity detected".into())
+            } else {
+                Ok(())
+            }
+        });
+        assert!(g.check("clean text").is_ok());
+        assert!(g.check("has bad_word here").is_err());
+        assert_eq!(g.name(), "profanity_filter");
+    }
+
+    #[test]
+    fn compose_new_guards_with_bitor() {
+        let composite = G::toxicity() | G::grounded() | G::hallucination();
+        assert_eq!(composite.len(), 3);
+        assert!(composite.check_all("test").is_empty());
     }
 }

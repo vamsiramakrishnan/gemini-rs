@@ -905,9 +905,9 @@ independent lanes, each optimized for its latency profile:
 
 ---
 
-## Cookbook Examples
+## Examples
 
-The `cookbooks/` directory contains runnable examples organized by complexity.
+The `examples/` directory contains runnable examples organized by complexity.
 Each demonstrates specific SDK features at the layer you need.
 
 ### Getting Started
@@ -917,31 +917,31 @@ Each demonstrates specific SDK features at the layer you need.
 cp .env.example .env
 # Edit .env: set GEMINI_API_KEY (Google AI) or GOOGLE_CLOUD_PROJECT + GOOGLE_CLOUD_LOCATION (Vertex AI)
 
-# 2. Run a standalone cookbook
-cargo run -p cookbook-text-chat       # http://127.0.0.1:3001
-cargo run -p cookbook-voice-chat      # http://127.0.0.1:3002
-cargo run -p cookbook-tool-calling    # http://127.0.0.1:3003
-cargo run -p cookbook-transcription   # http://127.0.0.1:3004
+# 2. Run a standalone example
+cargo run -p text-chat       # http://127.0.0.1:3001
+cargo run -p voice-chat      # http://127.0.0.1:3002
+cargo run -p tool-calling    # http://127.0.0.1:3003
+cargo run -p transcription   # http://127.0.0.1:3004
 
-# 3. Run the multi-app UI (all apps + devtools panel)
-cargo run -p cookbook-ui              # http://127.0.0.1:3000
+# 3. Run the multi-app Web UI (all apps + devtools panel)
+cargo run -p adk-web         # http://127.0.0.1:3000
 ```
 
-### Standalone Cookbooks
+### Standalone Examples
 
 These run independently with their own Axum server and minimal UI.
 
-| Cookbook | Port | Layer | What You Learn |
+| Example | Port | Layer | What You Learn |
 |---------|------|-------|----------------|
-| [`text-chat`](cookbooks/text-chat) | 3001 | L0 | Wire protocol basics — connect, send text, receive streaming deltas |
-| [`voice-chat`](cookbooks/voice-chat) | 3002 | L0 | Bidirectional audio, voice selection, VAD events, transcription |
-| [`tool-calling`](cookbooks/tool-calling) | 3003 | L1 | `TypedTool` with auto-generated JSON Schema, `ToolDispatcher` routing |
-| [`transcription`](cookbooks/transcription) | 3004 | L0 | Every Gemini Live config option: VAD, activity handling, affective dialog, context compression, session resumption |
-| [`agents`](cookbooks/agents) | CLI | L1/L2 | Text agent combinators (`>>`, `\|`, `/`), `TypedTool`, copy-on-write builders |
+| [`text-chat`](examples/text-chat) | 3001 | L0 | Wire protocol basics — connect, send text, receive streaming deltas |
+| [`voice-chat`](examples/voice-chat) | 3002 | L0 | Bidirectional audio, voice selection, VAD events, transcription |
+| [`tool-calling`](examples/tool-calling) | 3003 | L1 | `TypedTool` with auto-generated JSON Schema, `ToolDispatcher` routing |
+| [`transcription`](examples/transcription) | 3004 | L0 | Every Gemini Live config option: VAD, activity handling, affective dialog, context compression, session resumption |
+| [`agents`](examples/agents) | CLI | L1/L2 | Text agent combinators (`>>`, `\|`, `/`), `TypedTool`, copy-on-write builders |
 
-### Multi-App UI (`cookbook-ui`)
+### ADK Web UI (`adk-web`)
 
-The UI cookbook bundles all apps below into a single Axum server with a shared
+The Web UI bundles all apps below into a single Axum server with a shared
 devtools panel showing real-time state, timeline, transcript, and telemetry.
 
 #### Crawl (Beginner)
@@ -972,7 +972,7 @@ devtools panel showing real-time state, timeline, transcript, and telemetry.
 
 ### Platform Support
 
-All cookbooks work with both **Google AI** (API key) and **Vertex AI** (project/location).
+All examples work with both **Google AI** (API key) and **Vertex AI** (project/location).
 The SDK auto-strips unsupported features on Vertex AI — no code changes needed:
 
 | Feature | Google AI | Vertex AI |
@@ -1077,7 +1077,7 @@ Live::builder()
 | **cargo** | (bundled) | Build system and package manager |
 | **pkg-config** | any | Locates system libraries |
 | **OpenSSL** | 1.1+ | TLS for WebSocket connections |
-| **ALSA dev** (Linux) | any | Audio I/O for voice cookbooks |
+| **ALSA dev** (Linux) | any | Audio I/O for voice examples |
 
 **Quick setup (Ubuntu/Debian):**
 
@@ -1131,10 +1131,10 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
 ```
 
-### Run the UI cookbook
+### Run the Web UI
 
 ```bash
-cd cookbooks/ui
+cd apps/adk-web
 GEMINI_API_KEY="your-key" cargo run
 # Open http://localhost:3000
 ```
@@ -1168,15 +1168,16 @@ gemini-rs/
     rs-genai/              L0: Wire protocol, transport, types
     rs-adk/                L1: Agent runtime, state, phases, tools
     adk-rs-fluent/         L2: Fluent builder API, operators
-  cookbooks/
+  examples/
     text-chat/             Minimal text-only session (L0)
     voice-chat/            Bidirectional audio chat (L0)
     tool-calling/          TypedTool + ToolDispatcher (L1)
     transcription/         Every Gemini Live config option (L0)
     agents/                Text agent combinators (L1/L2)
-    ui/                    Multi-app UI with devtools (L2)
-      src/apps/            13 showcase apps (see cookbooks/INDEX.md)
-    INDEX.md               Full cookbook reference with per-app docs
+    INDEX.md               Full example reference with per-app docs
+  apps/
+    adk-web/               Multi-app Web UI with devtools (L2)
+      src/apps/            13 showcase apps (see examples/INDEX.md)
   tools/
     adk-transpiler/        Python ADK to Rust transpiler
   Cargo.toml               Workspace root

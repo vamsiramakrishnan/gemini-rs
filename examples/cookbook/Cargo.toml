@@ -1,0 +1,98 @@
+[package]
+name = "example-cookbook"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[[bin]]
+name = "01-simple-agent"
+path = "src/01_simple_agent.rs"
+
+[[bin]]
+name = "02-agent-with-tools"
+path = "src/02_agent_with_tools.rs"
+
+[[bin]]
+name = "03-callbacks"
+path = "src/03_callbacks.rs"
+
+[[bin]]
+name = "04-sequential-pipeline"
+path = "src/04_sequential_pipeline.rs"
+
+[[bin]]
+name = "05-parallel-fanout"
+path = "src/05_parallel_fanout.rs"
+
+[[bin]]
+name = "06-loop-agent"
+path = "src/06_loop_agent.rs"
+
+[[bin]]
+name = "07-state-transforms"
+path = "src/07_state_transforms.rs"
+
+[[bin]]
+name = "08-prompt-composition"
+path = "src/08_prompt_composition.rs"
+
+[[bin]]
+name = "09-tool-composition"
+path = "src/09_tool_composition.rs"
+
+[[bin]]
+name = "10-guards"
+path = "src/10_guards.rs"
+
+[[bin]]
+name = "11-route-branching"
+path = "src/11_route_branching.rs"
+
+[[bin]]
+name = "12-fallback-chain"
+path = "src/12_fallback_chain.rs"
+
+[[bin]]
+name = "13-review-loop"
+path = "src/13_review_loop.rs"
+
+[[bin]]
+name = "14-map-over"
+path = "src/14_map_over.rs"
+
+[[bin]]
+name = "15-middleware-stack"
+path = "src/15_middleware_stack.rs"
+
+[[bin]]
+name = "16-context-engineering"
+path = "src/16_context_engineering.rs"
+
+[[bin]]
+name = "17-evaluation-suite"
+path = "src/17_evaluation_suite.rs"
+
+[[bin]]
+name = "18-artifacts"
+path = "src/18_artifacts.rs"
+
+[[bin]]
+name = "19-agent-tool"
+path = "src/19_agent_tool.rs"
+
+[[bin]]
+name = "20-supervised"
+path = "src/20_supervised.rs"
+
+[dependencies]
+adk-rs-fluent = { path = "../../crates/adk-rs-fluent" }
+rs-adk = { path = "../../crates/rs-adk" }
+rs-genai = { path = "../../crates/rs-genai" }
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+schemars = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[lints]
+workspace = true

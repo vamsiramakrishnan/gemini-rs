@@ -1,10 +1,10 @@
-//! Text Chat cookbook — simple text-only chat with Gemini Live.
+//! Text Chat example — simple text-only chat with Gemini Live.
 //!
 //! Demonstrates the simplest possible Gemini Live integration:
 //! connect to the text model, send text/audio input, receive text responses.
 //!
 //! Usage:
-//!   cargo run -p cookbook-text-chat
+//!   cargo run -p example-text-chat
 //!   # then open http://127.0.0.1:3001
 
 use axum::{
@@ -110,7 +110,7 @@ async fn main() {
 
     let state = AppState { auth };
 
-    let static_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../cookbooks/ui/static");
+    let static_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../apps/adk-web/static");
 
     let app = Router::new()
         .fallback_service(
@@ -123,7 +123,7 @@ async fn main() {
 
     let addr = "127.0.0.1:3001";
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    println!("Text Chat cookbook running at http://{}", addr);
+    println!("Text Chat example running at http://{}", addr);
 
     axum::serve(listener, app).await.unwrap();
 }

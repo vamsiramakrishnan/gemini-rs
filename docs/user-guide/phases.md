@@ -376,7 +376,7 @@ Live::builder()
 ```
 
 For a full 7-phase example with compliance gates, computed state, watchers, and
-temporal patterns, see `cookbooks/ui/src/apps/debt_collection.rs`.
+temporal patterns, see `apps/adk-web/src/apps/debt_collection.rs`.
 
 ## How Transitions Are Evaluated
 

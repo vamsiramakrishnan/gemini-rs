@@ -7,9 +7,9 @@ use tracing::{info, warn};
 
 use adk_rs_fluent::prelude::*;
 
-use crate::app::{AppError, ClientMessage, CookbookApp, ServerMessage, WsSender};
+use crate::app::{AppError, ClientMessage, DemoApp, ServerMessage, WsSender};
 use crate::bridge::SessionBridge;
-use crate::cookbook_meta;
+use crate::demo_meta;
 
 use super::{build_session_config, resolve_voice, wait_for_start};
 
@@ -113,8 +113,8 @@ fn execute_mock_tool(name: &str, args: &serde_json::Value) -> serde_json::Value 
 pub struct AllConfig;
 
 #[async_trait]
-impl CookbookApp for AllConfig {
-    cookbook_meta! {
+impl DemoApp for AllConfig {
+    demo_meta! {
         name: "all-config",
         description: "Configuration playground — every Gemini Live option",
         category: Showcase,

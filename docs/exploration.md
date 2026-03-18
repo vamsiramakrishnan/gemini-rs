@@ -1,12 +1,12 @@
-⎿  Search(pattern: "cookbooks/*/Cargo.toml")
+⎿  Search(pattern: "examples/*/Cargo.toml")
 
   ⎿  Search(pattern: "tools/*/Cargo.toml")
 
-  ⎿  Read(/home/user/gemini-live-rs/cookbooks/agents/Cargo.toml)
+  ⎿  Read(/home/user/gemini-live-rs/examples/agents/Cargo.toml)
 
-  ⎿  Read(/home/user/gemini-live-rs/cookbooks/tool-calling/Cargo.toml)
+  ⎿  Read(/home/user/gemini-live-rs/examples/tool-calling/Cargo.toml)
 
-  ⎿  Read(/home/user/gemini-live-rs/cookbooks/voice-chat/Cargo.toml)
+  ⎿  Read(/home/user/gemini-live-rs/examples/voice-chat/Cargo.toml)
 
   ⎿  Read(/home/user/gemini-live-rs/tools/adk-transpiler/Cargo.toml)
 
@@ -30,7 +30,7 @@
 
   ⎿  Read(/home/user/gemini-live-rs/crates/gemini-live/src/builder.rs · lines 1-50)
 
-  ⎿  Read(/home/user/gemini-live-rs/cookbooks/agents/src/weather_agent.rs · lines 1-50)
+  ⎿  Read(/home/user/gemini-live-rs/examples/agents/src/weather_agent.rs · lines 1-50)
 
   ⎿  Search(pattern: "**/*.py")
 
@@ -62,12 +62,12 @@
            "crates/gemini-live-wire",        # Layer 0: Wire protocol
            "crates/gemini-live-runtime",     # Layer 1: Agent runtime
            "crates/gemini-live",             # Layer 2: Fluent DX
-           "cookbooks/ui",
-           "cookbooks/agents",
-           "cookbooks/text-chat",
-           "cookbooks/voice-chat",
-           "cookbooks/tool-calling",
-           "cookbooks/transcription",
+           "apps/adk-web",
+           "examples/agents",
+           "examples/text-chat",
+           "examples/voice-chat",
+           "examples/tool-calling",
+           "examples/transcription",
            "tools/adk-transpiler",
        ]
 
@@ -152,13 +152,13 @@
        1. Cargo.toml files (8 files):
          - Root workspace
          - 3 crate manifests
-         - Cookbooks: agents, tool-calling, voice-chat, text-chat, transcription, ui
+         - Examples: agents, tool-calling, voice-chat, text-chat, transcription, ui
          - Tool: adk-transpiler
        2. Source code (44 Rust files):
          - Wire crate lib.rs + modules
          - Runtime crate lib.rs + modules
          - Top-level crate lib.rs + modules
-         - Cookbooks and examples
+         - Examples and demos
          - Tests and benches
        3. Documentation (3 design files):
          - 2026-03-01-gemini-live-adk-design.md
@@ -190,22 +190,22 @@
        use gemini_live_runtime::agent_session::*;
 
        ---
-       5. Cookbook & Tool Dependencies
+       5. Example & Tool Dependencies
 
-       All cookbooks depend on wire and/or runtime:
+       All examples depend on wire and/or runtime:
 
        ┌─────────────────────────┬────────────────────────────────────────────────────┐
-       │        Cookbook         │                    Dependencies                    │
+       │        Example         │                    Dependencies                    │
        ├─────────────────────────┼────────────────────────────────────────────────────┤
-       │ cookbooks/agents        │ gemini-live, gemini-live-runtime, gemini-live-wire │
+       │ examples/agents        │ gemini-live, gemini-live-runtime, gemini-live-wire │
        ├─────────────────────────┼────────────────────────────────────────────────────┤
-       │ cookbooks/tool-calling  │ gemini-live-wire, gemini-live-runtime              │
+       │ examples/tool-calling  │ gemini-live-wire, gemini-live-runtime              │
        ├─────────────────────────┼────────────────────────────────────────────────────┤
-       │ cookbooks/voice-chat    │ gemini-live-wire only                              │
+       │ examples/voice-chat    │ gemini-live-wire only                              │
        ├─────────────────────────┼────────────────────────────────────────────────────┤
-       │ cookbooks/text-chat     │ gemini-live-wire only                              │
+       │ examples/text-chat     │ gemini-live-wire only                              │
        ├─────────────────────────┼────────────────────────────────────────────────────┤
-       │ cookbooks/transcription │ gemini-live-wire only                              │
+       │ examples/transcription │ gemini-live-wire only                              │
        ├─────────────────────────┼────────────────────────────────────────────────────┤
        │ tools/adk-transpiler    │ None (only serde, clap, regex, walkdir)            │
        └─────────────────────────┴────────────────────────────────────────────────────┘
@@ -263,10 +263,10 @@
        5. No external crate on crates.io — all names are internal, so semver compatibility not a concern
        6. Documentation needs updates — 3 design documents reference current crate names
        7. No PyO3 bindings yet — design doc mentions gemini-live-python but not implemented
-       8. Cookbooks are downstream — will need updates to match renamed crates
+       8. Examples are downstream — will need updates to match renamed crates
 
        The largest effort would be updating the adk-transpiler's hardcoded type paths (~70 locations), followed by Cargo.toml dependencies in
-        cookbooks (8 files) and source code imports (44 files).
+        examples (8 files) and source code imports (44 files).
   ⎿  Done (32 tool uses · 37.5k tokens · 57s)
 
 ● Explore(Explore js-genai module coverage)

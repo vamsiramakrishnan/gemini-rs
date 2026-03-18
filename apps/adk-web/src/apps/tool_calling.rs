@@ -5,9 +5,9 @@ use tracing::info;
 
 use adk_rs_fluent::prelude::*;
 
-use crate::app::{AppError, ClientMessage, CookbookApp, WsSender};
+use crate::app::{AppError, ClientMessage, DemoApp, WsSender};
 use crate::bridge::SessionBridge;
-use crate::cookbook_meta;
+use crate::demo_meta;
 
 /// Function calling with Gemini Live.
 pub struct ToolCalling;
@@ -174,8 +174,8 @@ fn evaluate_simple_expr(expr: &str) -> f64 {
 }
 
 #[async_trait]
-impl CookbookApp for ToolCalling {
-    cookbook_meta! {
+impl DemoApp for ToolCalling {
+    demo_meta! {
         name: "tool-calling",
         description: "Function calling with Gemini Live",
         category: Basic,

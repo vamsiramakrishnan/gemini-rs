@@ -1210,7 +1210,7 @@ git commit -m "feat(adk-rs-fluent): implement Into<String> for PromptComposite a
 ### Task 5: Integration test — debt collection with agent dispatch (P1)
 
 **Files:**
-- Modify: `cookbooks/ui/src/apps/debt_collection.rs`
+- Modify: `apps/adk-web/src/apps/debt_collection.rs`
 
 **Step 1: Add a verification agent tool**
 
@@ -1229,7 +1229,7 @@ agent every N turns, with results surfaced via `with_state`.
 
 **Step 4: Verify end-to-end**
 
-Run the cookbook UI and verify:
+Run the Web UI and verify:
 - Voice model calls agent tools
 - Multi-step reasoning happens in background
 - Results flow back naturally

@@ -18,11 +18,9 @@ mod voice_chat;
 use rs_genai::prelude::*;
 use tokio::sync::mpsc;
 
-use crate::app::{
-    AppError, AppInfo, AppRegistry, ClientMessage, CookbookApp, ServerMessage, WsSender,
-};
+use crate::app::{AppError, AppInfo, AppRegistry, ClientMessage, DemoApp, ServerMessage, WsSender};
 
-/// Register all basic cookbook apps.
+/// Register all demo apps.
 pub fn register_all(registry: &mut AppRegistry) {
     registry.register(text_chat::TextChat);
     registry.register(voice_chat::VoiceChat);
@@ -134,7 +132,7 @@ pub fn build_session_config(model: Option<&str>) -> Result<SessionConfig, String
 
 /// Send appMeta message to the browser so devtools can configure tabs.
 #[allow(dead_code)]
-pub fn send_app_meta(tx: &WsSender, app: &dyn CookbookApp) {
+pub fn send_app_meta(tx: &WsSender, app: &dyn DemoApp) {
     let _ = tx.send(ServerMessage::AppMeta {
         info: AppInfo {
             name: app.name().to_string(),

@@ -1,4 +1,4 @@
-//! SessionBridge — eliminates callback boilerplate in cookbook apps.
+//! SessionBridge — eliminates callback boilerplate in demo apps.
 //!
 //! Wires all standard event callbacks (audio, text, turn, interrupt, VAD, error,
 //! transcription, telemetry) onto a Live builder in one call.
@@ -9,9 +9,9 @@ use tracing::warn;
 
 use adk_rs_fluent::prelude::*;
 
-use crate::app::{AppInfo, CookbookApp, ServerMessage, WsSender};
+use crate::app::{AppInfo, DemoApp, ServerMessage, WsSender};
 
-/// Bridge between a cookbook app's WebSocket sender and a Live session builder.
+/// Bridge between a demo app's WebSocket sender and a Live session builder.
 ///
 /// Call `bridge.wire_live(builder)` to attach all standard callbacks,
 /// then `bridge.recv_loop(handle, rx)` to run the browser->Gemini forwarding loop.
@@ -31,7 +31,7 @@ impl SessionBridge {
     }
 
     /// Send appMeta message so devtools can configure tabs.
-    pub fn send_meta(&self, app: &dyn CookbookApp) {
+    pub fn send_meta(&self, app: &dyn DemoApp) {
         let _ = self.tx.send(ServerMessage::AppMeta {
             info: AppInfo {
                 name: app.name().to_string(),
@@ -226,7 +226,7 @@ impl SessionBridge {
         self.tx.clone()
     }
 
-    /// Run a complete cookbook session with LiveEvent stream.
+    /// Run a complete demo session with LiveEvent stream.
     ///
     /// Waits for Start -> builds config -> lets the app configure domain logic ->
     /// connects -> subscribes to LiveEvent stream -> forwards events to browser ->
@@ -237,7 +237,7 @@ impl SessionBridge {
     /// and return the builder. Everything else is handled.
     pub async fn run<F>(
         &self,
-        app: &dyn CookbookApp,
+        app: &dyn DemoApp,
         rx: &mut mpsc::UnboundedReceiver<crate::app::ClientMessage>,
         configure: F,
     ) -> Result<(), crate::app::AppError>
@@ -337,9 +337,9 @@ impl SessionBridge {
     }
 }
 
-/// Map a LiveEvent to a ServerMessage for the cookbook WebSocket transport.
+/// Map a LiveEvent to a ServerMessage for the demo WebSocket transport.
 ///
-/// Written once, used by all cookbook apps via `SessionBridge::run()`.
+/// Written once, used by all demo apps via `SessionBridge::run()`.
 fn map_event(event: LiveEvent) -> Option<ServerMessage> {
     match event {
         LiveEvent::Audio(data) => Some(ServerMessage::Audio {

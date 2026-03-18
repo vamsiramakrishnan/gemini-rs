@@ -459,7 +459,7 @@ impl State {
 
 - `crates/rs-adk/src/state.rs` — `StateKey<T>`, `get_key()`, `set_key()`, `with_key()`
 - `crates/adk-rs-fluent/src/compose/state.rs` — `S::key_is_true()`, `S::key_eq()`
-- Per-cookbook: `keys.rs` module declaring const keys
+- Per-example: `keys.rs` module declaring const keys
 
 ---
 
@@ -634,7 +634,7 @@ let_clone!(tx);
 ### Files
 
 - `crates/adk-rs-fluent/src/lib.rs` — `let_clone!` macro
-- `cookbooks/ui/src/apps/*.rs` — adopt macro
+- `apps/adk-web/src/apps/*.rs` — adopt macro
 
 ---
 
@@ -791,7 +791,7 @@ Live::builder()
 
 **Option B: Kill it.** The Live session already has `before_tool_response`, `on_tool_call`, `on_turn_boundary` — these are callback-based middleware. The M module adds a second abstraction for the same concern. YAGNI.
 
-**Recommendation: Option B** for now. The callback-based approach is sufficient. If a pattern emerges where 3+ cookbooks need the same middleware chain, revisit with Option A. Until then, dead code is worse than no code.
+**Recommendation: Option B** for now. The callback-based approach is sufficient. If a pattern emerges where 3+ examples need the same middleware chain, revisit with Option A. Until then, dead code is worse than no code.
 
 ### Cost
 
@@ -944,7 +944,7 @@ for deferred in &self.deferred_agent_tools {
 | VertexAI token refresh | P0 | 6h | Critical | "Dies after 1 hour" production bug |
 | Typed state keys | P1 | 6h | High | Silent typo bugs (entire class eliminated) |
 | Extractor error callback | P1 | 2h | Medium | Invisible extraction failures |
-| Channel clone ceremony | P1 | 0.5h | Low | 15 lines of boilerplate per cookbook |
+| Channel clone ceremony | P1 | 0.5h | Low | 15 lines of boilerplate per example |
 | Phase history cap | P1 | 1h | Low | Unbounded memory (smaller scale) |
 | Tool declaration caching | P1 | 1h | Low | O(tools) work per text agent round → O(1) |
 | T module integration | P2 | 3h | Low | Composition algebra completeness |

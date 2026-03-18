@@ -2,7 +2,7 @@
 
 **Date**: 2026-03-07
 **Status**: Approved
-**Scope**: L1 (rs-adk), L2 (adk-rs-fluent), Cookbooks
+**Scope**: L1 (rs-adk), L2 (adk-rs-fluent), Examples
 
 ## Problem
 
@@ -11,7 +11,7 @@ The SDK's only observation mechanism is callbacks. Callbacks conflate two concer
 - **Action**: modify processor behavior (tool dispatch, PII redaction, context injection)
 - **Observation**: report processor behavior (forward audio to browser, log phase transitions)
 
-Every cookbook app registers 12+ callbacks that do nothing but forward events — ~150 lines of identical ceremony per app, ~1,200 lines total across 10 apps. This is structural: the SDK offers no other way to observe a session.
+Every demo app registers 12+ callbacks that do nothing but forward events — ~150 lines of identical ceremony per app, ~1,200 lines total across 10 apps. This is structural: the SDK offers no other way to observe a session.
 
 ## Solution
 
@@ -187,7 +187,7 @@ if let Some(interval) = self.telemetry_interval {
 
 `LiveEvent` re-exported in prelude.
 
-## Cookbook: SessionBridge Rewrite
+## Demo App: SessionBridge Rewrite
 
 ### Event Mapper
 
@@ -271,7 +271,7 @@ impl SessionBridge {
 }
 ```
 
-## After: What Cookbook Apps Look Like
+## After: What Demo Apps Look Like
 
 ### Simple app (voice_chat.rs): ~15 lines
 
@@ -322,7 +322,7 @@ Zero breaking changes. All existing callbacks, builder methods, and patterns con
 | L2 | `live/mod.rs` | fields + builder methods | ~15 |
 | L2 | `live/connect.rs` | Pass to L1 builder | ~6 |
 | L2 | `prelude.rs` | Re-export LiveEvent | ~1 |
-| Cookbook | `bridge.rs` | Rewrite with map_event + run() | ~80 |
-| Cookbook | 10 app files | Migrate to bridge.run() | ~-1,200 |
+| Demo App | `bridge.rs` | Rewrite with map_event + run() | ~80 |
+| Demo App | 10 app files | Migrate to bridge.run() | ~-1,200 |
 | **Total SDK** | | | **~185 added** |
-| **Total Cookbook** | | | **~1,200 deleted** |
+| **Total Demo App** | | | **~1,200 deleted** |

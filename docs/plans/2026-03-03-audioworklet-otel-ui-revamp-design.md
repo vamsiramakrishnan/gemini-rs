@@ -5,7 +5,7 @@
 
 ## Problem
 
-1. **Audio**: The cookbook UI uses the deprecated `ScriptProcessorNode` for mic
+1. **Audio**: The Web UI uses the deprecated `ScriptProcessorNode` for mic
    capture. It runs on the main thread, causes GC pauses and UI jank under
    sustained audio streaming, and Chrome has signaled future removal.
 
@@ -175,7 +175,7 @@ optionally attach the OTel tracing layer and metrics exporter.
 
 ```env
 OTEL_EXPORTER_OTLP_ENDPOINT=https://monitoring.googleapis.com
-OTEL_SERVICE_NAME=gemini-live-cookbooks
+OTEL_SERVICE_NAME=gemini-rs
 OTEL_TRACES_EXPORTER=otlp
 OTEL_METRICS_EXPORTER=otlp
 ```
@@ -384,17 +384,17 @@ if (hasEvaluation) tabs.push('evaluator');
 
 | File | Workstream |
 |------|-----------|
-| `cookbooks/ui/static/worklets/capture-processor.js` | A |
-| `cookbooks/ui/static/worklets/playback-processor.js` | A |
+| `apps/adk-web/static/worklets/capture-processor.js` | A |
+| `apps/adk-web/static/worklets/playback-processor.js` | A |
 
 ### Modified Files
 
 | File | Workstream | Changes |
 |------|-----------|---------|
-| `cookbooks/ui/static/audio.js` | A | Rewrite: AudioWorklet + fallback |
-| `cookbooks/ui/static/devtools.js` | C | Remove telemetry tab, add status bar |
-| `cookbooks/ui/static/devtools.css` | C | Remove telemetry styles, add status bar styles |
-| `cookbooks/ui/static/app.html` | C | Add status bar container |
+| `apps/adk-web/static/audio.js` | A | Rewrite: AudioWorklet + fallback |
+| `apps/adk-web/static/devtools.js` | C | Remove telemetry tab, add status bar |
+| `apps/adk-web/static/devtools.css` | C | Remove telemetry styles, add status bar styles |
+| `apps/adk-web/static/app.html` | C | Add status bar container |
 | `crates/rs-genai/Cargo.toml` | B | Add optional otel dependencies |
 | `crates/rs-genai/src/telemetry/mod.rs` | B | OTel layer init in TelemetryConfig |
 | `crates/rs-adk/Cargo.toml` | B | Forward otel feature flag |

@@ -108,6 +108,11 @@ impl Live {
                     // Built-in tools go directly to session config
                     self.config = self.config.add_tool(tool);
                 }
+                // Placeholder variants — declarative markers resolved at runtime.
+                _ => {
+                    // Agent, Mcp, A2a, Mock, OpenApi, Search, Schema, Transform
+                    // are stored for later resolution by the runtime layer.
+                }
             }
         }
         self

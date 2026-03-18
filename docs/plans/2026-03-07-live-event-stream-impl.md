@@ -4,7 +4,7 @@
 
 **Goal:** Add `LiveEvent` broadcast channel to the L1 processor so applications observe sessions via event stream instead of 12+ manual callbacks.
 
-**Architecture:** The processor creates a `broadcast::Sender<LiveEvent>` at construction. Fast lane and control lane each receive a clone and emit events after processing. `LiveHandle::events()` returns a receiver. L2 `Live` builder exposes `events()` and `telemetry_interval()` fluent methods. Cookbook `SessionBridge` gains a `run()` method that subscribes to the event stream, maps events to `ServerMessage`, and handles the full session lifecycle.
+**Architecture:** The processor creates a `broadcast::Sender<LiveEvent>` at construction. Fast lane and control lane each receive a clone and emit events after processing. `LiveHandle::events()` returns a receiver. L2 `Live` builder exposes `events()` and `telemetry_interval()` fluent methods. The `SessionBridge` gains a `run()` method that subscribes to the event stream, maps events to `ServerMessage`, and handles the full session lifecycle.
 
 **Tech Stack:** Rust, tokio broadcast channels, bytes::Bytes (refcounted audio), serde_json
 
@@ -766,7 +766,7 @@ feat(fluent): wire LiveEvent stream to L2 builder with events() and telemetry_in
 ### Task 6: Rewrite SessionBridge with run() method
 
 **Files:**
-- Modify: `cookbooks/ui/src/bridge.rs`
+- Modify: `apps/adk-web/src/bridge.rs`
 
 **Step 1: Add map_event function**
 
@@ -775,9 +775,9 @@ Add at the top of `bridge.rs` (after imports):
 ```rust
 use adk_rs_fluent::prelude::LiveEvent;
 
-/// Map a LiveEvent to a ServerMessage for the cookbook WebSocket transport.
+/// Map a LiveEvent to a ServerMessage for the demo WebSocket transport.
 ///
-/// Written once, used by all cookbook apps via `SessionBridge::run()`.
+/// Written once, used by all demo apps via `SessionBridge::run()`.
 fn map_event(event: LiveEvent) -> Option<ServerMessage> {
     match event {
         LiveEvent::Audio(data) => Some(ServerMessage::Audio { data: data.to_vec() }),
@@ -811,7 +811,7 @@ fn map_event(event: LiveEvent) -> Option<ServerMessage> {
 **Step 2: Add `run()` method to SessionBridge**
 
 ```rust
-/// Run a complete cookbook session.
+/// Run a complete demo session.
 ///
 /// Waits for Start -> builds config -> connects with domain config ->
 /// subscribes to LiveEvent stream -> forwards events to browser ->
@@ -900,17 +900,17 @@ Note: The `run()` method references `crate::apps::wait_for_start` and `crate::ap
 **Step 4: Commit**
 
 ```
-feat(cookbook): add SessionBridge::run() with LiveEvent stream subscription
+feat(examples): add SessionBridge::run() with LiveEvent stream subscription
 ```
 
 ---
 
-### Task 7: Migrate simple cookbook apps (voice_chat, text_chat, tool_calling)
+### Task 7: Migrate simple demo apps (voice_chat, text_chat, tool_calling)
 
 **Files:**
-- Modify: `cookbooks/ui/src/apps/voice_chat.rs`
-- Modify: `cookbooks/ui/src/apps/text_chat.rs`
-- Modify: `cookbooks/ui/src/apps/tool_calling.rs`
+- Modify: `apps/adk-web/src/apps/voice_chat.rs`
+- Modify: `apps/adk-web/src/apps/text_chat.rs`
+- Modify: `apps/adk-web/src/apps/tool_calling.rs`
 
 These 3 apps already use `SessionBridge`. Migrate them to `bridge.run()` to validate the pattern.
 
@@ -948,17 +948,17 @@ Run: `cargo check -p rs-genai-ui`
 **Step 5: Commit**
 
 ```
-refactor(cookbook): migrate voice_chat, text_chat, tool_calling to bridge.run()
+refactor(examples): migrate voice_chat, text_chat, tool_calling to bridge.run()
 ```
 
 ---
 
-### Task 8: Migrate complex cookbook apps (batch 1: guardrails, playbook, all_config)
+### Task 8: Migrate complex demo apps (batch 1: guardrails, playbook, all_config)
 
 **Files:**
-- Modify: `cookbooks/ui/src/apps/guardrails.rs`
-- Modify: `cookbooks/ui/src/apps/playbook.rs`
-- Modify: `cookbooks/ui/src/apps/all_config.rs`
+- Modify: `apps/adk-web/src/apps/guardrails.rs`
+- Modify: `apps/adk-web/src/apps/playbook.rs`
+- Modify: `apps/adk-web/src/apps/all_config.rs`
 
 For each app:
 1. Remove ALL manual callback wiring (12+ `tx.clone()` + callback registrations)
@@ -981,17 +981,17 @@ Run: `cargo test -p rs-genai-ui --lib`
 **Step 4: Commit**
 
 ```
-refactor(cookbook): migrate guardrails, playbook, all_config to bridge.run()
+refactor(examples): migrate guardrails, playbook, all_config to bridge.run()
 ```
 
 ---
 
-### Task 9: Migrate complex cookbook apps (batch 2: restaurant, support, debt_collection)
+### Task 9: Migrate complex demo apps (batch 2: restaurant, support, debt_collection)
 
 **Files:**
-- Modify: `cookbooks/ui/src/apps/restaurant.rs`
-- Modify: `cookbooks/ui/src/apps/support.rs`
-- Modify: `cookbooks/ui/src/apps/debt_collection.rs`
+- Modify: `apps/adk-web/src/apps/restaurant.rs`
+- Modify: `apps/adk-web/src/apps/support.rs`
+- Modify: `apps/adk-web/src/apps/debt_collection.rs`
 
 Same pattern as Task 8. These are the largest apps (~1,400+ lines each) with the most ceremony to remove.
 
@@ -1000,16 +1000,16 @@ Same pattern as Task 8. These are the largest apps (~1,400+ lines each) with the
 **Step 5: Commit**
 
 ```
-refactor(cookbook): migrate restaurant, support, debt_collection to bridge.run()
+refactor(examples): migrate restaurant, support, debt_collection to bridge.run()
 ```
 
 ---
 
-### Task 10: Migrate remaining cookbook apps (clinic, call_screening)
+### Task 10: Migrate remaining demo apps (clinic, call_screening)
 
 **Files:**
-- Modify: `cookbooks/ui/src/apps/clinic.rs`
-- Modify: `cookbooks/ui/src/apps/call_screening.rs`
+- Modify: `apps/adk-web/src/apps/clinic.rs`
+- Modify: `apps/adk-web/src/apps/call_screening.rs`
 
 Same pattern.
 
@@ -1022,7 +1022,7 @@ Run: `cargo check -p rs-genai-ui && cargo test -p rs-genai-ui --lib`
 **Step 3: Commit**
 
 ```
-refactor(cookbook): migrate clinic, call_screening to bridge.run()
+refactor(examples): migrate clinic, call_screening to bridge.run()
 ```
 
 ---

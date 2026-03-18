@@ -60,6 +60,14 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
+      - name: Wait for crates.io index
+        run: sleep 30
+
+      - name: Publish adk-cli
+        run: cargo publish -p adk-cli
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
   github-release:
     name: Create GitHub Release
     needs: publish
@@ -99,6 +107,7 @@ jobs:
             echo "| \`rs-genai\` | ${{ steps.version.outputs.version }} | [crates.io](https://crates.io/crates/rs-genai) |"
             echo "| \`rs-adk\` | ${{ steps.version.outputs.version }} | [crates.io](https://crates.io/crates/rs-adk) |"
             echo "| \`adk-rs-fluent\` | ${{ steps.version.outputs.version }} | [crates.io](https://crates.io/crates/adk-rs-fluent) |"
+            echo "| \`adk-cli\` | ${{ steps.version.outputs.version }} | [crates.io](https://crates.io/crates/adk-cli) |"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 

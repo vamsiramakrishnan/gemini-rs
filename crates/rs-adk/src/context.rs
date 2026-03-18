@@ -73,6 +73,23 @@ pub enum AgentEvent {
         /// The key that was modified.
         key: String,
     },
+    /// A loop agent completed an iteration.
+    LoopIteration {
+        /// The zero-based iteration number.
+        iteration: u32,
+    },
+    /// An agent timed out.
+    Timeout,
+    /// A route agent selected a branch.
+    RouteSelected {
+        /// The name of the selected agent.
+        agent_name: String,
+    },
+    /// A fallback agent activated a fallback branch.
+    FallbackActivated {
+        /// The name of the fallback agent that was activated.
+        agent_name: String,
+    },
 }
 
 /// The context object that flows through agent execution.

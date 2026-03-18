@@ -508,6 +508,11 @@ impl AgentBuilder {
                 ToolCompositeEntry::BuiltIn(t) => {
                     inner.built_in_tools.push(t);
                 }
+                // Placeholder variants — not yet wired into the text agent builder.
+                _ => {
+                    // Agent, Mcp, A2a, Mock, OpenApi, Search, Schema, Transform
+                    // are currently only handled at the Live layer.
+                }
             }
         }
         Self::with(inner)
