@@ -8,6 +8,7 @@ mod memory;
 mod postgres;
 mod sqlite;
 mod types;
+#[cfg(feature = "vertex-ai-sessions")]
 mod vertex_ai;
 
 #[cfg(feature = "database-sessions")]
@@ -22,6 +23,7 @@ pub use memory::InMemorySessionService;
 pub use postgres::{PostgresSessionConfig, PostgresSessionService};
 pub use sqlite::{SqliteSessionConfig, SqliteSessionService};
 pub use types::{Session, SessionId};
+#[cfg(feature = "vertex-ai-sessions")]
 pub use vertex_ai::{VertexAiSessionConfig, VertexAiSessionService};
 
 use async_trait::async_trait;
