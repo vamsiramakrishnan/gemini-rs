@@ -144,6 +144,7 @@ pub use memory::{
 #[cfg(feature = "postgres-sessions")]
 pub use session::{PostgresSessionConfig, PostgresSessionService};
 pub use session::{SqliteSessionConfig, SqliteSessionService};
+#[cfg(feature = "vertex-ai-sessions")]
 pub use session::{VertexAiSessionConfig, VertexAiSessionService};
 
 // New re-exports — Tools

@@ -1,6 +1,6 @@
 [package]
 name = "rs-adk"
-version = "0.5.0"
+version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "Agent runtime for Gemini Live — tools, streaming, agent transfer, middleware"
@@ -11,7 +11,7 @@ documentation = "https://docs.rs/rs-adk"
 readme = "README.md"
 
 [dependencies]
-rs-genai = { path = "../rs-genai", version = "0.5.0" }
+rs-genai = { workspace = true }
 bytes = "1"
 tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7"
@@ -40,6 +40,7 @@ tracing-support = ["dep:tracing", "rs-genai/tracing-support"]
 metrics = ["dep:metrics"]
 database-sessions = []
 postgres-sessions = []
+vertex-ai-sessions = []
 otel = ["rs-genai/otel", "tracing-support"]
 otel-otlp = ["rs-genai/otel-otlp", "tracing-support"]
 otel-gcp = ["rs-genai/otel-gcp", "tracing-support"]

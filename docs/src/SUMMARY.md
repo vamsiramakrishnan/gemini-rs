@@ -2,6 +2,8 @@
 
 [Introduction](./introduction.md)
 
+---
+
 # Getting Started
 
 - [Architecture Overview](./user-guide/architecture.md)
@@ -29,7 +31,11 @@
 
 # Examples
 
-- [Examples](./cookbooks.md)
+- [Cookbook Examples & ADK Web Apps](./cookbooks.md)
+
+# ADK Web UI
+
+- [Design System, DevTools & Dark Mode](./web-ui.md)
 
 # Reference
 

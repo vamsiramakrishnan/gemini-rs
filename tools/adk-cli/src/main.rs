@@ -119,6 +119,9 @@ enum Command {
         print_detailed_results: bool,
     },
 
+    /// Check environment setup (API keys, toolchain, credentials).
+    Doctor,
+
     /// Deploy an agent to a cloud target.
     Deploy {
         /// Deployment target: cloud_run, gke, or agent_engine.
@@ -244,6 +247,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             )
             .await?
         }
+
+        Command::Doctor => commands::doctor::run()?,
 
         Command::Deploy {
             target,

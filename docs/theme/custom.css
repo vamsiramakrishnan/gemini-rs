@@ -1,0 +1,293 @@
+/* =============================================================================
+   gemini-rs mdBook custom theme
+   Applied on top of mdBook's built-in 'ayu' (dark) / 'light' themes.
+   ============================================================================= */
+
+/* ── Google Fonts ─────────────────────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+/* ── Brand tokens ─────────────────────────────────────────────────────────── */
+:root {
+  --brand:          #4f46e5;
+  --brand-light:    #818cf8;
+  --brand-glow:     rgba(79, 70, 229, 0.15);
+  --radius:         8px;
+  --radius-lg:      12px;
+}
+
+/* ── Base typography ──────────────────────────────────────────────────────── */
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif !important;
+  font-size: 16px;
+  line-height: 1.75;
+  -webkit-font-smoothing: antialiased;
+}
+
+.content main {
+  max-width: 860px;
+}
+
+/* ── Headings ─────────────────────────────────────────────────────────────── */
+h1, h2, h3, h4, h5 {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
+}
+
+h1 {
+  font-size: 2rem;
+  font-weight: 800;
+  margin-top: 0;
+  padding-bottom: 0.5rem;
+  border-bottom: 2px solid var(--brand);
+  background: linear-gradient(135deg, var(--brand) 0%, var(--brand-light) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+h2 {
+  font-size: 1.5rem;
+  margin-top: 2.5rem;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid var(--quote-border);
+}
+
+h3 {
+  font-size: 1.2rem;
+  margin-top: 2rem;
+  color: var(--brand-light);
+}
+
+h4 {
+  font-size: 1rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 1.5rem;
+  opacity: 0.85;
+}
+
+/* ── Links ────────────────────────────────────────────────────────────────── */
+a {
+  color: var(--brand-light) !important;
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+a:hover {
+  border-bottom-color: var(--brand-light);
+}
+
+/* ── Code: inline ─────────────────────────────────────────────────────────── */
+code {
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace !important;
+  font-size: 0.85em;
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  font-feature-settings: "liga" 1, "calt" 1;
+}
+
+/* ── Code: blocks ─────────────────────────────────────────────────────────── */
+pre {
+  border-radius: var(--radius-lg) !important;
+  border: 1px solid rgba(255,255,255,0.08) !important;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.25) !important;
+  position: relative;
+  overflow: hidden;
+}
+
+pre::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--brand) 0%, var(--brand-light) 100%);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+pre code {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace !important;
+  font-size: 0.875rem !important;
+  line-height: 1.65 !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+}
+
+/* ── Tables ───────────────────────────────────────────────────────────────── */
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1.5rem 0;
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: 0 1px 8px rgba(0,0,0,0.15);
+}
+
+thead tr {
+  background: var(--brand) !important;
+}
+
+thead th {
+  color: #ffffff !important;
+  font-weight: 600;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.75rem 1rem !important;
+  border: none !important;
+}
+
+tbody tr:nth-child(even) {
+  background: rgba(79, 70, 229, 0.05);
+}
+
+tbody tr:hover {
+  background: rgba(79, 70, 229, 0.1);
+  transition: background 0.15s;
+}
+
+td, th {
+  padding: 0.6rem 1rem !important;
+  border-bottom: 1px solid var(--quote-border) !important;
+  border-top: none !important;
+  border-left: none !important;
+  border-right: none !important;
+  vertical-align: top;
+}
+
+/* ── Blockquote → styled callout ─────────────────────────────────────────── */
+blockquote {
+  border-left: 4px solid var(--brand) !important;
+  background: var(--brand-glow) !important;
+  margin: 1.5rem 0 !important;
+  padding: 1rem 1.25rem !important;
+  border-radius: 0 var(--radius) var(--radius) 0 !important;
+  font-style: normal !important;
+}
+
+blockquote p {
+  margin: 0;
+}
+
+blockquote p:first-child::before {
+  content: '💡 ';
+}
+
+/* ── Sidebar ──────────────────────────────────────────────────────────────── */
+#sidebar {
+  background: var(--bg) !important;
+  border-right: 1px solid var(--quote-border) !important;
+}
+
+#sidebar .sidebar-scrollbox {
+  padding: 1.5rem 0.75rem;
+}
+
+.sidebar .chapter li a {
+  border-radius: var(--radius) !important;
+  padding: 0.3rem 0.75rem !important;
+  margin: 0.1rem 0 !important;
+  display: block;
+  transition: background 0.15s, color 0.15s;
+  font-size: 0.9rem;
+}
+
+.sidebar .chapter li a:hover {
+  background: var(--brand-glow) !important;
+  border-bottom: none !important;
+}
+
+.sidebar .chapter li a.active {
+  background: var(--brand) !important;
+  color: #ffffff !important;
+  font-weight: 600;
+}
+
+/* ── Nav bar ──────────────────────────────────────────────────────────────── */
+#menu-bar {
+  backdrop-filter: blur(12px) !important;
+  border-bottom: 1px solid var(--quote-border) !important;
+}
+
+/* ── Search ───────────────────────────────────────────────────────────────── */
+#searchbar {
+  border-radius: var(--radius) !important;
+  border: 1px solid var(--brand) !important;
+  box-shadow: 0 0 0 3px var(--brand-glow) !important;
+  font-family: 'Inter', sans-serif !important;
+}
+
+/* ── Page nav buttons ────────────────────────────────────────────────────────*/
+.nav-chapters {
+  border-radius: var(--radius) !important;
+  transition: background 0.15s, transform 0.15s !important;
+}
+
+.nav-chapters:hover {
+  background: var(--brand-glow) !important;
+  transform: scale(1.05);
+}
+
+/* ── hr divider ───────────────────────────────────────────────────────────── */
+hr {
+  border: none !important;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--brand), transparent) !important;
+  margin: 2.5rem 0 !important;
+  opacity: 0.5;
+}
+
+/* ── Scrollbar (Webkit) ───────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--brand); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: var(--brand-light); }
+
+/* ── "Note" / "Warning" admonish-style callouts via raw HTML in .md files ── */
+/* Usage in .md: <div class="callout note">...</div>                          */
+.callout {
+  margin: 1.5rem 0;
+  padding: 1rem 1.25rem;
+  border-radius: 0 var(--radius) var(--radius) 0;
+  border-left: 4px solid;
+  font-size: 0.95rem;
+}
+
+.callout.note {
+  border-color: var(--brand);
+  background: var(--brand-glow);
+}
+
+.callout.warning {
+  border-color: #f59e0b;
+  background: rgba(245, 158, 11, 0.1);
+}
+
+.callout.danger {
+  border-color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.callout.tip {
+  border-color: #10b981;
+  background: rgba(16, 185, 129, 0.1);
+}
+
+.callout-title {
+  font-weight: 700;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 0.5rem;
+}
+
+/* ── Mobile tweaks ────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  h1 { font-size: 1.6rem; }
+  h2 { font-size: 1.3rem; }
+  pre { border-radius: var(--radius) !important; }
+  table { font-size: 0.85rem; }
+}

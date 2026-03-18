@@ -4,6 +4,7 @@ version = "0.1.0"
 edition.workspace = true
 publish = false
 
+# ── Crawl (01–10): Foundations ──────────────────────────────────────────────
 [[bin]]
 name = "01-simple-agent"
 path = "src/01_simple_agent.rs"
@@ -44,6 +45,7 @@ path = "src/09_tool_composition.rs"
 name = "10-guards"
 path = "src/10_guards.rs"
 
+# ── Walk (11–20): Multi-Agent Patterns ──────────────────────────────────────
 [[bin]]
 name = "11-route-branching"
 path = "src/11_route_branching.rs"
@@ -84,15 +86,56 @@ path = "src/19_agent_tool.rs"
 name = "20-supervised"
 path = "src/20_supervised.rs"
 
+# ── Run (21–30): Production Patterns ────────────────────────────────────────
+[[bin]]
+name = "21-full-algebra"
+path = "src/21_full_algebra.rs"
+
+[[bin]]
+name = "22-contract-testing"
+path = "src/22_contract_testing.rs"
+
+[[bin]]
+name = "23-deep-research"
+path = "src/23_deep_research.rs"
+
+[[bin]]
+name = "24-customer-support"
+path = "src/24_customer_support.rs"
+
+[[bin]]
+name = "25-code-review"
+path = "src/25_code_review.rs"
+
+[[bin]]
+name = "26-dispatch-join"
+path = "src/26_dispatch_join.rs"
+
+[[bin]]
+name = "27-race-timeout"
+path = "src/27_race_timeout.rs"
+
+[[bin]]
+name = "28-a2a-remote"
+path = "src/28_a2a_remote.rs"
+
+[[bin]]
+name = "29-live-voice"
+path = "src/29_live_voice.rs"
+
+[[bin]]
+name = "30-production-pipeline"
+path = "src/30_production_pipeline.rs"
+
 [dependencies]
-adk-rs-fluent = { path = "../../crates/adk-rs-fluent" }
-rs-adk = { path = "../../crates/rs-adk" }
-rs-genai = { path = "../../crates/rs-genai" }
-tokio = { version = "1", features = ["full"] }
-async-trait = "0.1"
-schemars = "0.8"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+adk-rs-fluent = { workspace = true }
+rs-adk        = { workspace = true }
+rs-genai      = { workspace = true }
+tokio         = { version = "1", features = ["full"] }
+async-trait   = "0.1"
+schemars      = "0.8"
+serde         = { version = "1", features = ["derive"] }
+serde_json    = "1"
 
 [lints]
 workspace = true

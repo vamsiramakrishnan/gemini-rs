@@ -91,8 +91,9 @@ pub mod prelude {
         ResultFormatter, SessionPersistence, SessionSnapshot, SoftTurnDetector, SteeringMode,
         ToolExecutionMode, TranscriptBuffer, TranscriptTurn, TurnExtractor,
     };
-    pub use rs_adk::llm::BaseLlm;
-    pub use rs_adk::state::State;
+    pub use rs_adk::error::{AgentError, ToolError};
+    pub use rs_adk::llm::{BaseLlm, GeminiLlm, GeminiLlmParams, LlmRequest, LlmResponse};
+    pub use rs_adk::state::{State, StateKey};
     pub use rs_adk::text::{
         DispatchTextAgent, FallbackTextAgent, FnTextAgent, JoinTextAgent, LlmTextAgent,
         LoopTextAgent, MapOverTextAgent, ParallelTextAgent, RaceTextAgent, RouteRule,

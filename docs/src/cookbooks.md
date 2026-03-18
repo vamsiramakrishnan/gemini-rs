@@ -1,228 +1,140 @@
 # Examples
 
-The `examples/` directory contains runnable demos organized by complexity.
-Each demonstrates specific SDK features at the layer you need.
+The repository contains two sets of runnable examples:
 
-## Getting Started
+1. **`examples/cookbook/`** — 30 progressive text-based examples demonstrating SDK composition patterns (no server required)
+2. **`adk-web` apps** — Interactive voice/text demos bundled into a devtools-enabled web UI
+
+---
+
+## Cookbook Examples (`examples/cookbook/`)
+
+A structured **Crawl → Walk → Run** learning path. Each example is a self-contained Rust binary with detailed doc comments explaining every API used.
 
 ```bash
-# 1. Configure credentials
-cp .env.example .env
-# Edit .env: set GEMINI_API_KEY (Google AI)
-# or GOOGLE_CLOUD_PROJECT + GOOGLE_CLOUD_LOCATION (Vertex AI)
-
-# 2. Run a standalone example
-cargo run -p text-chat       # http://127.0.0.1:3001
-cargo run -p voice-chat      # http://127.0.0.1:3002
-cargo run -p tool-calling    # http://127.0.0.1:3003
-cargo run -p transcription   # http://127.0.0.1:3004
-
-# 3. Run the multi-app UI (all apps + devtools panel)
-cargo run -p adk-web              # http://127.0.0.1:3000
+# Run any example directly
+cargo run -p example-cookbook --example 01_simple_agent
+cargo run -p example-cookbook --example 17_evaluation_suite
+cargo run -p example-cookbook --example 30_production_pipeline
 ```
 
-## Standalone Examples
+### Crawl (01–10) — Foundations
 
-These run independently with their own Axum server and minimal UI.
+The core builder API and composition primitives. No async runtime required for most examples.
 
-### text-chat (L0 Wire)
+| # | Binary | What it covers |
+|---|--------|----------------|
+| 01 | `01_simple_agent` | `AgentBuilder`: name, model, instruction, temperature, thinking budget, copy-on-write semantics |
+| 02 | `02_agent_with_tools` | `SimpleTool` with raw JSON args; `TypedTool` with auto-generated JSON Schema from `schemars::JsonSchema` |
+| 03 | `03_callbacks` | Event callbacks: `on_text`, `on_audio`, `on_thought`, `on_tool_call`, `on_interrupted`, `on_turn_complete` |
+| 04 | `04_sequential_pipeline` | `>>` operator: multi-step pipelines, state passing between agents, `SequentialTextAgent` |
+| 05 | `05_parallel_fanout` | `\|` operator: concurrent fan-out, `ParallelTextAgent`, merging results |
+| 06 | `06_loop_agent` | `* N` fixed loop; `* until(predicate)` conditional loop; `LoopTextAgent` |
+| 07 | `07_state_transforms` | `S::pick`, `S::rename`, `S::merge`, `S::flatten`, `S::set`, `S::defaults`, `S::drop`, `S::map` |
+| 08 | `08_prompt_composition` | `P::role`, `P::task`, `P::constraint`, `P::format`, `P::example`, `P::guidelines`, `P::with_state`, `P::when` |
+| 09 | `09_tool_composition` | `T::simple \| T::google_search \| T::code_execution \| T::url_context` — `\|` operator for tools |
+| 10 | `10_guards` | `G::rate_limit`, `G::toxicity`, `G::grounded`, `G::hallucination`, `G::llm_judge` — input/output validation |
 
-Minimal text-only Gemini Live session. Connects via WebSocket, sends text, receives
-streaming deltas. No microphone required.
+### Walk (11–20) — Multi-Agent Patterns
 
-- **Port:** 3001
-- **Layer:** L0 (`rs_genai::prelude::*`)
-- **Features:** Text I/O, streaming text deltas, turn lifecycle
+Compound agent topologies, evaluation, artifacts, and advanced state management.
 
-```rust,ignore
-// Core pattern: connect, send text, receive events
-let session = rs_genai::quick_connect(api_key, model).await?;
-session.send_text("Hello").await?;
-let mut events = session.subscribe();
-while let Ok(event) = events.recv().await {
-    if let SessionEvent::TextDelta(ref t) = event { print!("{t}"); }
-    if let SessionEvent::TurnComplete = event { break; }
-}
-```
+| # | Binary | What it covers |
+|---|--------|----------------|
+| 11 | `11_route_branching` | `RouteTextAgent`, `FnTextAgent`, `RouteRule`, `S::is_true`, `S::eq` — deterministic state-driven routing |
+| 12 | `12_fallback_chain` | `/` operator: graceful degradation, `FallbackTextAgent`, primary/secondary chains |
+| 13 | `13_review_loop` | Reviewer + writer feedback cycle, `* until(predicate)` convergence, inter-agent state sharing |
+| 14 | `14_map_over` | `MapOverTextAgent`: parallel item-level processing, collecting and aggregating results |
+| 15 | `15_middleware_stack` | `M::cache`, `M::dedup`, `M::metrics`, `M::fallback_model` — composing middleware with `\|` |
+| 16 | `16_context_engineering` | `C::window`, `C::user_only`, `C::model_only`, `C::summarize`, `C::priority`, `C::exclude_tools`, `C::dedup` |
+| 17 | `17_evaluation_suite` | `E::suite`, `E::response_match`, `E::contains_match`, `E::trajectory`, `E::safety`, `E::semantic_match`, `E::hallucination`, `E::custom`, `E::persona` |
+| 18 | `18_artifacts` | `A::json_output`, `A::text_output`, `A::publish`, `A::save`, `A::load`, `A::version` — artifact I/O schemas |
+| 19 | `19_agent_tool` | `TextAgentTool`: wrapping a `TextAgent` as a callable tool; agent-as-tool dispatch |
+| 20 | `20_supervised` | Human-in-the-loop approval: `TapTextAgent`, approval callbacks, blocking and resuming pipelines |
 
-### voice-chat (L0 Wire)
+### Run (21–30) — Production Patterns
 
-Native audio voice chat with bidirectional audio streaming. Demonstrates voice
-selection, VAD events, and real-time transcription.
+Full-system compositions covering real-world architectures and every SDK capability.
 
-- **Port:** 3002
-- **Layer:** L0 (`rs_genai::prelude::*`)
-- **Model:** `GeminiLive2_5FlashNativeAudio`
-- **Features:** Bidirectional audio, input/output transcription, VAD events
-- **Voices:** Puck, Charon, Kore, Fenrir, Aoede
-
-### tool-calling (L1 Runtime)
-
-Function calling with `TypedTool` and auto-generated JSON Schema from Rust structs.
-Shows `ToolDispatcher` routing tool calls by function name.
-
-- **Port:** 3003
-- **Layer:** L1 (`rs_adk::tool::{ToolDispatcher, TypedTool}`)
-- **Tools:** `get_weather(city)`, `calculate(expression)`
-
-```rust,ignore
-#[derive(Deserialize, JsonSchema)]
-struct WeatherArgs {
-    /// The city to get weather for
-    city: String,
-}
-
-let tool = TypedTool::new::<WeatherArgs>(
-    "get_weather", "Get current weather",
-    |args: WeatherArgs| async move {
-        Ok(json!({"temp": 22, "city": args.city}))
-    },
-);
-
-let mut dispatcher = ToolDispatcher::new();
-dispatcher.register(tool);
-```
-
-### transcription (L0 Wire)
-
-Comprehensive showcase of every Gemini Live API configuration property. The most
-complete reference for wire-level options.
-
-- **Port:** 3004
-- **Layer:** L0 (`rs_genai::prelude::*`)
-- **Features:** Input/output transcription, activity handling, turn coverage, server VAD,
-  context window compression, session resumption, affective dialog
-
-### agents (L1/L2 Runtime + Fluent)
-
-CLI-based examples demonstrating text agent combinators and typed tool dispatch.
-
-- **Binaries:** `weather-agent`, `research-pipeline`
-- **Features:** Agent combinators (`>>`, `|`, `/`), copy-on-write builders,
-  state transforms (`S::pick()`, `S::rename()`)
-
-```rust,ignore
-// Sequential pipeline: research then summarize
-let pipeline = AgentBuilder::new("research").instruction("Research the topic")
-    >> AgentBuilder::new("summarize").instruction("Summarize findings");
-
-// Parallel fan-out
-let parallel = AgentBuilder::new("a") | AgentBuilder::new("b");
-
-// Fallback chain
-let robust = AgentBuilder::new("primary") / AgentBuilder::new("fallback");
-```
+| # | Binary | What it covers |
+|---|--------|----------------|
+| 21 | `21_full_algebra` | All operators together (`>>`, `\|`, `*`, `/`, `* until`), all six composition namespaces |
+| 22 | `22_contract_testing` | Schema validation, JSON contract tests, `A::json_output` with schema enforcement |
+| 23 | `23_deep_research` | Multi-source research pipeline with `T::google_search`, synthesis agent, and result merging |
+| 24 | `24_customer_support` | Routing, escalation state machine, `RouteTextAgent`, multi-phase support flow |
+| 25 | `25_code_review` | Automated code review: linting agent, security agent, summary agent in a `>>` pipeline |
+| 26 | `26_dispatch_join` | `DispatchTextAgent` + `JoinTextAgent`: fire-and-forget dispatch with join synchronization |
+| 27 | `27_race_timeout` | `RaceTextAgent`: first-to-finish wins; `TimeoutTextAgent`: deadline enforcement |
+| 28 | `28_a2a_remote` | Agent-to-agent protocol: remote agent declaration, `T::a2a` tool composition |
+| 29 | `29_live_voice` | Full `Live::builder()` API: phases, tools, extraction, watchers, steering, repair, persistence |
+| 30 | `30_production_pipeline` | End-to-end production pipeline: telemetry, middleware, evaluation, artifact publishing |
 
 ---
 
 ## ADK Web UI (`adk-web`)
 
-The Web UI bundles all apps into a single Axum server at `http://localhost:3000`
-with a shared devtools panel showing real-time state, timeline, transcript, and telemetry.
+The interactive multi-app web UI runs at `http://localhost:3000` and bundles all demo apps into a single server with a shared DevTools panel.
 
-### Crawl (Beginner)
+```bash
+cargo run -p adk-web    # http://127.0.0.1:3000
+```
 
-#### text-chat
+For more on the web UI design system, dark/light mode, and DevTools panels, see the [ADK Web UI](./web-ui.md) guide.
 
-Minimal text-only session — no microphone needed.
+### Standalone Examples
 
-- **SDK Features:** `Live::builder().text_only()`, text streaming
-- **Try:** "What are three interesting facts about octopuses?"
+These run independently outside of `adk-web`, each with their own Axum server.
 
-#### voice-chat
+```bash
+cargo run -p example-text-chat       # http://127.0.0.1:3001
+cargo run -p example-voice-chat      # http://127.0.0.1:3002
+cargo run -p example-tool-calling    # http://127.0.0.1:3003
+cargo run -p example-transcription   # http://127.0.0.1:3004
+```
 
-Native audio chat with real-time transcription.
+| Example | Layer | Features |
+|---------|-------|----------|
+| `text-chat` | L0 | Text-only session, streaming deltas, turn lifecycle |
+| `voice-chat` | L0 | Bidirectional audio, input/output transcription, VAD events |
+| `tool-calling` | L1 | `TypedTool`, `ToolDispatcher`, `NonBlocking` behavior, `WhenIdle` scheduling |
+| `transcription` | L0 | Every Gemini Live config option: VAD, compression, resumption, affective dialog |
 
-- **SDK Features:** `Modality::Audio`, voice selection, input/output transcription
-- **Try:** "Hello! Tell me a joke."
+### Web UI Apps
 
-#### tool-calling
+#### Crawl
 
-Three demo tools: weather, time, calculator.
+**text-chat** — Minimal text session. `Live::builder().text_only()`, streaming.
 
-- **SDK Features:** `FunctionDeclaration`, `on_tool_call`, `NonBlocking` behavior,
-  `WhenIdle` scheduling
-- **Tools:** `get_weather(city)`, `get_time(timezone)`, `calculate(expression)`
-- **Try:** "What's the weather in San Francisco?" / "Calculate 15 * 7 + 23"
+**voice-chat** — Native audio. `Modality::Audio`, voice selection, transcription.
 
-### Walk (Intermediate)
+**tool-calling** — Three demo tools (`get_weather`, `get_time`, `calculate`). `NonBlocking` + `WhenIdle`.
 
-#### all-config
+#### Walk
 
-Configuration playground — every Gemini Live option exposed via JSON config.
+**all-config** — Configuration playground. Every Gemini Live option exposed as a JSON config:
+modality, temperature, Google Search, code execution, session resumption, context compression.
 
-- **SDK Features:** Dynamic tool creation, modality switching, temperature,
-  Google Search, code execution, context compression, session resumption
-- **Try:** `{"modality": "text", "temperature": 1.5}`
+**guardrails** — Policy monitoring with real-time corrective injection. `RegexExtractor`, `.watch()`,
+`.instruction_amendment()`. Policies: PII (SSN, credit cards), off-topic, negative sentiment.
 
-#### guardrails
+**playbook** — 6-phase customer support state machine. `.phase()`, `.transition_with()`, `.greeting()`,
+`.with_context()`, `RegexExtractor`, `.watch()`.
 
-Policy monitoring with real-time corrective injection.
+#### Run
 
-- **SDK Features:** `RegexExtractor`, `.watch()` state reactions,
-  `.instruction_amendment()`, `.on_turn_boundary()`
-- **Policies:** PII detection (SSN, credit cards), off-topic detection,
-  negative sentiment monitoring
-- **Try:** "My SSN is 123-45-6789" (PII) / "Did you see the football game?" (off-topic)
+**support-assistant** — Multi-agent handoff between billing and technical support. 10-phase dual state
+machine, `.computed()` derived state, `.watch()` escalation, cross-agent transitions, telemetry.
 
-#### playbook
+**call-screening** — Incoming call screening with sentiment analysis and smart routing.
+`NonBlocking` tools: `check_contact_list`, `check_calendar`, `take_message`, `transfer_call`, `block_caller`.
 
-6-phase customer support state machine with regex-based state extraction.
+**clinic** — HIPAA-aware telehealth appointment scheduling. 8 tools with `NonBlocking` behavior.
+Patient intake, department routing, insurance check, appointment booking.
 
-- **SDK Features:** `.phase()` chains, `.transition_with()` guards, `.greeting()`,
-  `.with_context()`, `RegexExtractor`, `.watch()`
-- **Phases:** greet → identify → investigate → explain → resolve → close
-- **Try:** "Hi, my name is Alex and I need help with my order."
+**restaurant** — Reservation assistant with menu context. 6 tools, dietary and occasion tracking.
 
-### Run (Advanced)
-
-#### support-assistant
-
-Multi-agent handoff between billing and technical support.
-
-- **SDK Features:** 10-phase dual state machine, `.computed()` derived state,
-  `.watch()` escalation, cross-agent transitions, telemetry
-- **Phases:** Billing (5 phases) + Technical (5 phases) with handoff on
-  `issue_type == "technical"`
-- **Try:** "I'm having trouble with my internet connection."
-
-#### call-screening
-
-Incoming call screening with sentiment analysis and smart routing.
-
-- **SDK Features:** Phase machine, `NonBlocking` tool calling, `WhenIdle` scheduling
-- **Tools:** `check_contact_list`, `check_calendar`, `take_message`,
-  `transfer_call`, `block_caller`
-- **Try:** "Hi, I'm John from Acme Corp, I need to speak to the manager."
-
-#### clinic
-
-HIPAA-aware telehealth appointment scheduling with clinical triage.
-
-- **SDK Features:** Phase machine, 8 tools with `NonBlocking` behavior,
-  patient intake, department routing
-- **Tools:** `verify_patient`, `check_availability`, `book_appointment`,
-  `get_doctors`, `check_insurance`, `get_patient_history`, `cancel_appointment`,
-  `send_reminder`
-- **Try:** "I need to schedule an appointment. I've been having headaches."
-
-#### restaurant
-
-Restaurant reservation assistant with menu context and special requests.
-
-- **SDK Features:** Phase machine, 6 tools with `NonBlocking` behavior,
-  dietary and occasion tracking
-- **Tools:** `check_availability`, `make_reservation`, `get_menu`,
-  `check_dietary_options`, `modify_reservation`, `cancel_reservation`
-- **Try:** "I'd like a reservation for 4 this Saturday at 7pm. It's a birthday."
-
-#### debt-collection
-
-FDCPA-compliant debt collection with compliance gates and payment negotiation.
-
-- **SDK Features:** `StateKey<T>` typed state, compliance watchers,
-  identity verification, cease-and-desist handling
-- **Try:** "Hello, who's calling?" / "I can't afford to pay the full amount."
+**debt-collection** — FDCPA-compliant debt collection. `StateKey<T>` typed state, compliance watchers,
+identity verification, cease-and-desist handling.
 
 ---
 
@@ -232,9 +144,10 @@ All examples work with both **Google AI** (API key) and **Vertex AI** (project/l
 
 | Feature | Google AI | Vertex AI |
 |---------|-----------|-----------|
-| Async tool calling (`NonBlocking`) | Supported | Stripped automatically |
-| Response scheduling (`WhenIdle`/`Silent`) | Supported | Stripped automatically |
+| Async tool calling (`NonBlocking`) | ✓ Supported | Stripped automatically |
+| Response scheduling (`WhenIdle` / `Silent`) | ✓ Supported | Stripped automatically |
 | WebSocket frames | Text | Binary (handled automatically) |
+| Thinking config | ✓ Supported | Stripped automatically |
 
-The SDK detects your authentication method and strips unsupported wire fields
-transparently — no code changes needed across platforms.
+The SDK detects your authentication method and strips unsupported wire fields transparently —
+no code changes needed when switching platforms.

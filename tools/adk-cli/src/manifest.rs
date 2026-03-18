@@ -22,6 +22,21 @@ pub struct AgentManifest {
     /// Sub-agent references (directory names or paths).
     #[serde(default)]
     pub sub_agents: Vec<String>,
+    /// Sampling temperature (0.0–2.0). Controls randomness.
+    #[serde(default)]
+    pub temperature: Option<f32>,
+    /// Thinking budget in tokens. Enables extended thinking when set.
+    #[serde(default)]
+    pub thinking: Option<u32>,
+    /// Greeting message — model speaks first on connect (Live sessions).
+    #[serde(default)]
+    pub greeting: Option<String>,
+    /// Voice name for Live sessions (e.g. "Kore", "Puck", "Charon", "Fenrir", "Aoede").
+    #[serde(default)]
+    pub voice: Option<String>,
+    /// Output modality: "text", "audio", or "text_and_audio" (Live sessions).
+    #[serde(default)]
+    pub output_modality: Option<String>,
 }
 
 fn default_model() -> String {

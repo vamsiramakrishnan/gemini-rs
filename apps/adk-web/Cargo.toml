@@ -1,15 +1,15 @@
 [package]
 name = "adk-web"
-version = "0.5.0"
+version.workspace = true
 description = "Interactive web UI for ADK agent development and debugging — mirrors upstream `adk web`"
 edition.workspace = true
 publish = false
 
 [dependencies]
-rs-genai = { path = "../../crates/rs-genai" }
-rs-adk = { path = "../../crates/rs-adk", features = ["gemini-llm"] }
-adk-rs-fluent = { path = "../../crates/adk-rs-fluent", features = ["gemini-llm"] }
-adk-server-core = { path = "../adk-server-core" }
+rs-genai        = { workspace = true }
+rs-adk          = { workspace = true, features = ["gemini-llm"] }
+adk-rs-fluent   = { workspace = true, features = ["gemini-llm"] }
+adk-server-core = { workspace = true }
 tokio = { version = "1.0", features = ["full"] }
 axum = { version = "0.7", features = ["ws", "macros"] }
 tower-http = { version = "0.5", features = ["fs", "cors"] }
