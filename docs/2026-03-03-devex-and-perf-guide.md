@@ -1,4 +1,4 @@
-# gemini-adk: DevEx & Performance Reference
+# gemini-adk-rs: DevEx & Performance Reference
 
 **The honest guide.** What's fast, what's slow, what's elegant, what's janky, where the bodies are buried.
 
@@ -8,17 +8,17 @@
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  L2: gemini-adk-fluent                                      │
+│  L2: gemini-adk-fluent-rs                                      │
 │  Live::builder().model().voice().phase().connect()       │
 │  Composition: S | C | P | T | M | A                     │
 │  64 builder methods → compiles 1:1 to L1                │
 ├─────────────────────────────────────────────────────────┤
-│  L1: gemini-adk                                             │
+│  L1: gemini-adk-rs                                             │
 │  LiveSessionBuilder + EventCallbacks + PhaseMachine     │
 │  TextAgent pipeline: LlmTextAgent → BaseLlm → tools    │
 │  Three-lane processor: fast | control | telemetry       │
 ├─────────────────────────────────────────────────────────┤
-│  L0: gemini-live                                           │
+│  L0: gemini-genai-rs                                           │
 │  WebSocket transport + JSON codec + auth providers      │
 │  HTTP client (reqwest) for REST generateContent         │
 │  VAD, jitter buffer, audio pipeline                     │
@@ -84,7 +84,7 @@ Tool calls, turn completion, phase transitions, extractions — all here. Sequen
 TextAgentTool.call(args)
   └─ LlmTextAgent.run(state)
        └─ GeminiLlm.generate(request)          ← uses cached Client
-            └─ gemini_live::Client.generate_content_with()
+            └─ gemini_genai_rs::Client.generate_content_with()
                  └─ reqwest::Client.post()      ← reuses connection pool
                       └─ HTTP/2 to Gemini API   200-2000ms
 ```
@@ -92,8 +92,8 @@ TextAgentTool.call(args)
 **What's warm at session start:**
 - `TextAgentTool` — Arc, created once
 - `LlmTextAgent` — Arc, created once
-- `GeminiLlm` — owns `gemini_live::Client`, created once
-- `gemini_live::Client` — owns `reqwest::Client` with connection pool
+- `GeminiLlm` — owns `gemini_genai_rs::Client`, created once
+- `gemini_genai_rs::Client` — owns `reqwest::Client` with connection pool
 - `ToolDispatcher` — Arc, HashMap lookup per call
 
 **What's NOT warm on first call:**
@@ -301,8 +301,8 @@ on_turn_complete callback fires
 | TextAgentTool | `Arc<dyn ToolFunction>` in ToolDispatcher | Session |
 | LlmTextAgent | `Arc<dyn TextAgent>` inside TextAgentTool | Session |
 | GeminiLlm | `Arc<dyn BaseLlm>` inside LlmTextAgent | Session |
-| gemini_live Client | Owned by GeminiLlm | Session |
-| reqwest Client | Owned by gemini_live Client | Session (connection pool) |
+| gemini_genai_rs Client | Owned by GeminiLlm | Session |
+| reqwest Client | Owned by gemini_genai_rs Client | Session (connection pool) |
 | ToolDispatcher | `Arc<ToolDispatcher>` | Session |
 | State | `Arc<DashMap>` | Session |
 | BackgroundAgentDispatcher | Owned by callback closure | Session |
@@ -345,7 +345,7 @@ Mutations from any agent are immediately visible to watchers, guards, and extrac
 
 3. **Extractors run concurrently.** `join_all` on extractor futures means 3 extractors take `max(t1, t2, t3)` not `t1 + t2 + t3`.
 
-4. **Client reuse.** `GeminiLlm` caches `gemini_live::Client` (and its `reqwest::Client` with HTTP/2 connection pool). No per-call client creation.
+4. **Client reuse.** `GeminiLlm` caches `gemini_genai_rs::Client` (and its `reqwest::Client` with HTTP/2 connection pool). No per-call client creation.
 
 5. **Phase defaults eliminate repetition.** One call to `.phase_defaults()` replaces N × M redundant modifier registrations.
 
@@ -355,7 +355,7 @@ Mutations from any agent are immediately visible to watchers, guards, and extrac
 
 8. **Instruction dedup.** Processor checks `last_instruction` before sending `update_instruction`. Identical instructions (common when no phase change) are skipped — saves a WebSocket write per turn.
 
-9. **enter_prompt() hides Content import.** Users don't need `use gemini_live::prelude::Content` for the most common phase-entry pattern.
+9. **enter_prompt() hides Content import.** Users don't need `use gemini_genai_rs::prelude::Content` for the most common phase-entry pattern.
 
 10. **warm_up() on BaseLlm.** Pre-establish TCP+TLS connection at startup. First real `generate()` call hits a warm connection pool.
 

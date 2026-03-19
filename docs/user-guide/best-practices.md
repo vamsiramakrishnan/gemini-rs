@@ -9,22 +9,22 @@ Practical guidance for building with the gemini-rs stack. Organized by category:
 The three-crate stack is layered for a reason. Reach for the highest level that covers your use case:
 
 ```
-L2 (gemini-adk-fluent)  -- Fluent DX, operator algebra, AgentBuilder, Live builder
-L1 (gemini-adk)         -- Agent runtime, tools, state, phases, TextAgent
-L0 (gemini-live)       -- Wire protocol, transport, auth, raw WebSocket
+L2 (gemini-adk-fluent-rs)  -- Fluent DX, operator algebra, AgentBuilder, Live builder
+L1 (gemini-adk-rs)         -- Agent runtime, tools, state, phases, TextAgent
+L0 (gemini-genai-rs)       -- Wire protocol, transport, auth, raw WebSocket
 ```
 
 For applications, start with L2. Drop to L1 if you need custom processor logic. Drop to L0 only for raw WebSocket access or custom transport implementations.
 
 ```rust,ignore
 // Recommended for applications
-use gemini_adk_fluent::prelude::*;
+use gemini_adk_fluent_rs::prelude::*;
 
 // Only if building custom processors
-use gemini_adk::*;
+use gemini_adk_rs::*;
 
 // Only for raw wire access
-use gemini_live::prelude::*;
+use gemini_genai_rs::prelude::*;
 ```
 
 ### Use ContextInjection steering for multi-phase voice apps
@@ -392,7 +392,7 @@ Live::builder()
 `MockTransport` lets you test without real WebSocket connections. Inject scripted server responses:
 
 ```rust,ignore
-use gemini_live::transport::MockTransport;
+use gemini_genai_rs::transport::MockTransport;
 
 let mock = MockTransport::new(vec![
     // Scripted server messages

@@ -1,6 +1,6 @@
 # Text Chat Example
 
-Simple text-only chat with Gemini Live using the L0 wire protocol (`gemini-live`).
+Simple text-only chat with Gemini Live using the L0 wire protocol (`gemini-genai-rs`).
 
 Connects to `gemini-2.0-flash-live` in text-only mode, sends user text, and streams back text responses over a WebSocket-backed web UI.
 

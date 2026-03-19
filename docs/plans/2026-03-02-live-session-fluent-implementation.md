@@ -13,12 +13,12 @@
 ### Task 1: L0 — Add send_video and update_instruction to SessionHandle
 
 **Files:**
-- Modify: `crates/gemini-live/src/session/mod.rs` (SessionCommand enum + SessionWriter trait + SessionHandle impl)
-- Modify: `crates/gemini-live/src/transport/codec.rs` (encode new commands)
+- Modify: `crates/gemini-genai-rs/src/session/mod.rs` (SessionCommand enum + SessionWriter trait + SessionHandle impl)
+- Modify: `crates/gemini-genai-rs/src/transport/codec.rs` (encode new commands)
 
 **Step 1: Add SessionCommand variants**
 
-In `crates/gemini-live/src/session/mod.rs`, add to the `SessionCommand` enum:
+In `crates/gemini-genai-rs/src/session/mod.rs`, add to the `SessionCommand` enum:
 
 ```rust
 /// Send video/image data (raw JPEG bytes, will be base64-encoded).
@@ -62,7 +62,7 @@ pub async fn update_instruction(&self, instruction: impl Into<String>) -> Result
 
 **Step 4: Encode in JsonCodec**
 
-In `crates/gemini-live/src/transport/codec.rs`, add to `encode_command` match:
+In `crates/gemini-genai-rs/src/transport/codec.rs`, add to `encode_command` match:
 
 ```rust
 SessionCommand::SendVideo(data) => {
@@ -95,9 +95,9 @@ SessionCommand::UpdateInstruction(instruction) => {
 }
 ```
 
-**Step 5: Update AgentSession in gemini-adk**
+**Step 5: Update AgentSession in gemini-adk-rs**
 
-In `crates/gemini-adk/src/agent_session.rs`, add:
+In `crates/gemini-adk-rs/src/agent_session.rs`, add:
 
 ```rust
 pub async fn send_video(&self, jpeg_data: Vec<u8>) -> Result<(), AgentError> {
@@ -137,12 +137,12 @@ fn update_instruction_command_encodes() {
 
 **Step 7: Run tests**
 
-Run: `cargo test -p gemini-live`
+Run: `cargo test -p gemini-genai-rs`
 
 **Step 8: Commit**
 
 ```
-feat(gemini-live): add send_video and update_instruction to SessionHandle
+feat(gemini-genai-rs): add send_video and update_instruction to SessionHandle
 ```
 
 ---
@@ -150,13 +150,13 @@ feat(gemini-live): add send_video and update_instruction to SessionHandle
 ### Task 2: L1 — EventCallbacks struct
 
 **Files:**
-- Create: `crates/gemini-adk/src/live/mod.rs`
-- Create: `crates/gemini-adk/src/live/callbacks.rs`
-- Modify: `crates/gemini-adk/src/lib.rs` (add `pub mod live;`)
+- Create: `crates/gemini-adk-rs/src/live/mod.rs`
+- Create: `crates/gemini-adk-rs/src/live/callbacks.rs`
+- Modify: `crates/gemini-adk-rs/src/lib.rs` (add `pub mod live;`)
 
 **Step 1: Create module structure**
 
-Create `crates/gemini-adk/src/live/mod.rs`:
+Create `crates/gemini-adk-rs/src/live/mod.rs`:
 ```rust
 //! Live session management — callback-driven full-duplex event handling.
 
@@ -167,7 +167,7 @@ pub use callbacks::EventCallbacks;
 
 **Step 2: Create EventCallbacks**
 
-Create `crates/gemini-adk/src/live/callbacks.rs`:
+Create `crates/gemini-adk-rs/src/live/callbacks.rs`:
 
 ```rust
 //! Typed callback registry for Live session events.
@@ -181,7 +181,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
-use gemini_live::prelude::{FunctionCall, FunctionResponse, SessionPhase};
+use gemini_genai_rs::prelude::{FunctionCall, FunctionResponse, SessionPhase};
 
 /// A boxed future for async callbacks.
 pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
@@ -324,23 +324,23 @@ mod tests {
 
 **Step 3: Wire into lib.rs**
 
-Add to `crates/gemini-adk/src/lib.rs`:
+Add to `crates/gemini-adk-rs/src/lib.rs`:
 ```rust
 pub mod live;
 ```
 
-**Step 4: Add `bytes` dependency to gemini-adk Cargo.toml**
+**Step 4: Add `bytes` dependency to gemini-adk-rs Cargo.toml**
 
 Check if `bytes` is already a dependency; if not, add it.
 
 **Step 5: Run tests**
 
-Run: `cargo test -p gemini-adk`
+Run: `cargo test -p gemini-adk-rs`
 
 **Step 6: Commit**
 
 ```
-feat(gemini-adk): add EventCallbacks typed callback registry for Live sessions
+feat(gemini-adk-rs): add EventCallbacks typed callback registry for Live sessions
 ```
 
 ---
@@ -348,12 +348,12 @@ feat(gemini-adk): add EventCallbacks typed callback registry for Live sessions
 ### Task 3: L1 — Two-Lane Event Processor
 
 **Files:**
-- Create: `crates/gemini-adk/src/live/processor.rs`
-- Modify: `crates/gemini-adk/src/live/mod.rs`
+- Create: `crates/gemini-adk-rs/src/live/processor.rs`
+- Modify: `crates/gemini-adk-rs/src/live/mod.rs`
 
 **Step 1: Create the two-lane processor**
 
-Create `crates/gemini-adk/src/live/processor.rs`:
+Create `crates/gemini-adk-rs/src/live/processor.rs`:
 
 This implements `LiveEventProcessor` which:
 1. Subscribes to `SessionEvent` broadcast
@@ -375,8 +375,8 @@ use std::time::Duration;
 use bytes::Bytes;
 use tokio::sync::{broadcast, mpsc};
 
-use gemini_live::prelude::{FunctionResponse, SessionEvent, SessionPhase};
-use gemini_live::session::SessionWriter;
+use gemini_genai_rs::prelude::{FunctionResponse, SessionEvent, SessionPhase};
+use gemini_genai_rs::session::SessionWriter;
 
 use crate::error::AgentError;
 use crate::tool::ToolDispatcher;
@@ -401,7 +401,7 @@ pub(crate) enum FastEvent {
 
 /// Events routed to the control lane (async processing).
 pub(crate) enum ControlEvent {
-    ToolCall(Vec<gemini_live::prelude::FunctionCall>),
+    ToolCall(Vec<gemini_genai_rs::prelude::FunctionCall>),
     ToolCallCancelled(Vec<String>),
     Interrupted,
     TurnComplete,
@@ -715,18 +715,18 @@ async fn run_control_lane(
 pub mod processor;
 ```
 
-**Step 3: Add dependencies to gemini-adk Cargo.toml**
+**Step 3: Add dependencies to gemini-adk-rs Cargo.toml**
 
 Add `bytes`, `parking_lot`, `arc-swap`, `tracing` (if not already present).
 
 **Step 4: Run tests**
 
-Run: `cargo test -p gemini-adk && cargo build -p gemini-adk`
+Run: `cargo test -p gemini-adk-rs && cargo build -p gemini-adk-rs`
 
 **Step 5: Commit**
 
 ```
-feat(gemini-adk): add two-lane event processor for Live sessions
+feat(gemini-adk-rs): add two-lane event processor for Live sessions
 ```
 
 ---
@@ -734,13 +734,13 @@ feat(gemini-adk): add two-lane event processor for Live sessions
 ### Task 4: L1 — LiveSessionBuilder and LiveHandle
 
 **Files:**
-- Create: `crates/gemini-adk/src/live/builder.rs`
-- Create: `crates/gemini-adk/src/live/handle.rs`
-- Modify: `crates/gemini-adk/src/live/mod.rs`
+- Create: `crates/gemini-adk-rs/src/live/builder.rs`
+- Create: `crates/gemini-adk-rs/src/live/handle.rs`
+- Modify: `crates/gemini-adk-rs/src/live/mod.rs`
 
 **Step 1: Create LiveHandle**
 
-`crates/gemini-adk/src/live/handle.rs` — runtime interaction with a live session:
+`crates/gemini-adk-rs/src/live/handle.rs` — runtime interaction with a live session:
 
 ```rust
 //! LiveHandle — runtime interaction with a Live session.
@@ -751,8 +751,8 @@ use bytes::Bytes;
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
-use gemini_live::prelude::{Content, FunctionResponse, SessionEvent, SessionPhase};
-use gemini_live::session::{SessionError, SessionHandle, SessionWriter};
+use gemini_genai_rs::prelude::{Content, FunctionResponse, SessionEvent, SessionPhase};
+use gemini_genai_rs::session::{SessionError, SessionHandle, SessionWriter};
 
 use crate::error::AgentError;
 
@@ -834,15 +834,15 @@ impl LiveHandle {
 
 **Step 2: Create LiveSessionBuilder**
 
-`crates/gemini-adk/src/live/builder.rs` — builds and connects a Live session:
+`crates/gemini-adk-rs/src/live/builder.rs` — builds and connects a Live session:
 
 ```rust
 //! LiveSessionBuilder — combines SessionConfig + callbacks + tools into one setup.
 
 use std::sync::Arc;
 
-use gemini_live::prelude::SessionConfig;
-use gemini_live::session::SessionHandle;
+use gemini_genai_rs::prelude::SessionConfig;
+use gemini_genai_rs::session::SessionHandle;
 
 use crate::error::AgentError;
 use crate::tool::ToolDispatcher;
@@ -887,17 +887,17 @@ impl LiveSessionBuilder {
     /// Connect to Gemini and start the event processor.
     pub async fn connect(self) -> Result<LiveHandle, AgentError> {
         // Connect via L0
-        let session: SessionHandle = gemini_live::connect(self.config)
+        let session: SessionHandle = gemini_genai_rs::connect(self.config)
             .await
             .map_err(AgentError::Session)?;
 
         // Wait for Active phase
         session
-            .wait_for_phase(gemini_live::prelude::SessionPhase::Active)
+            .wait_for_phase(gemini_genai_rs::prelude::SessionPhase::Active)
             .await;
 
         let callbacks = Arc::new(self.callbacks);
-        let writer: Arc<dyn gemini_live::session::SessionWriter> = Arc::new(session.clone());
+        let writer: Arc<dyn gemini_genai_rs::session::SessionWriter> = Arc::new(session.clone());
         let event_rx = session.subscribe();
 
         // Spawn two-lane processor
@@ -924,7 +924,7 @@ pub use handle::LiveHandle;
 
 **Step 4: Re-export from lib.rs**
 
-In `crates/gemini-adk/src/lib.rs`, add to the public API:
+In `crates/gemini-adk-rs/src/lib.rs`, add to the public API:
 ```rust
 pub use live::{EventCallbacks, LiveHandle, LiveSessionBuilder};
 ```
@@ -948,12 +948,12 @@ mod tests {
 
 **Step 6: Build and test**
 
-Run: `cargo build -p gemini-adk && cargo test -p gemini-adk`
+Run: `cargo build -p gemini-adk-rs && cargo test -p gemini-adk-rs`
 
 **Step 7: Commit**
 
 ```
-feat(gemini-adk): add LiveSessionBuilder and LiveHandle for callback-driven sessions
+feat(gemini-adk-rs): add LiveSessionBuilder and LiveHandle for callback-driven sessions
 ```
 
 ---
@@ -961,13 +961,13 @@ feat(gemini-adk): add LiveSessionBuilder and LiveHandle for callback-driven sess
 ### Task 5: L2 — Live::builder() Fluent API
 
 **Files:**
-- Create: `crates/gemini-adk-fluent/src/live.rs`
-- Modify: `crates/gemini-adk-fluent/src/lib.rs`
-- Modify: `crates/gemini-adk-fluent/src/prelude.rs` (via lib.rs prelude block)
+- Create: `crates/gemini-adk-fluent-rs/src/live.rs`
+- Modify: `crates/gemini-adk-fluent-rs/src/lib.rs`
+- Modify: `crates/gemini-adk-fluent-rs/src/prelude.rs` (via lib.rs prelude block)
 
 **Step 1: Create the fluent Live builder**
 
-`crates/gemini-adk-fluent/src/live.rs`:
+`crates/gemini-adk-fluent-rs/src/live.rs`:
 
 ```rust
 //! `Live` — Fluent builder for callback-driven Gemini Live sessions.
@@ -982,9 +982,9 @@ use std::time::Duration;
 
 use bytes::Bytes;
 
-use gemini_adk::live::{EventCallbacks, LiveHandle, LiveSessionBuilder};
-use gemini_adk::tool::ToolDispatcher;
-use gemini_live::prelude::*;
+use gemini_adk_rs::live::{EventCallbacks, LiveHandle, LiveSessionBuilder};
+use gemini_adk_rs::tool::ToolDispatcher;
+use gemini_genai_rs::prelude::*;
 
 use crate::compose::middleware::MiddlewareComposite;
 
@@ -1265,7 +1265,7 @@ impl Live {
     pub async fn connect_google_ai(
         mut self,
         api_key: impl Into<String>,
-    ) -> Result<LiveHandle, gemini_adk::error::AgentError> {
+    ) -> Result<LiveHandle, gemini_adk_rs::error::AgentError> {
         self.config = SessionConfig::new(api_key).merge_from(self.config);
         self.build_and_connect().await
     }
@@ -1276,7 +1276,7 @@ impl Live {
         project: impl Into<String>,
         location: impl Into<String>,
         access_token: impl Into<String>,
-    ) -> Result<LiveHandle, gemini_adk::error::AgentError> {
+    ) -> Result<LiveHandle, gemini_adk_rs::error::AgentError> {
         self.config = SessionConfig::from_vertex(project, location, access_token)
             .merge_from(self.config);
         self.build_and_connect().await
@@ -1286,7 +1286,7 @@ impl Live {
     pub async fn connect(
         self,
         config: SessionConfig,
-    ) -> Result<LiveHandle, gemini_adk::error::AgentError> {
+    ) -> Result<LiveHandle, gemini_adk_rs::error::AgentError> {
         let mut builder = LiveSessionBuilder::new(config);
         if let Some(dispatcher) = self.dispatcher {
             builder = builder.dispatcher(dispatcher);
@@ -1295,7 +1295,7 @@ impl Live {
         builder.connect().await
     }
 
-    async fn build_and_connect(self) -> Result<LiveHandle, gemini_adk::error::AgentError> {
+    async fn build_and_connect(self) -> Result<LiveHandle, gemini_adk_rs::error::AgentError> {
         let mut builder = LiveSessionBuilder::new(self.config);
         if let Some(dispatcher) = self.dispatcher {
             builder = builder.dispatcher(dispatcher);
@@ -1337,7 +1337,7 @@ mod tests {
 
 **Step 2: Add to lib.rs and prelude**
 
-In `crates/gemini-adk-fluent/src/lib.rs`:
+In `crates/gemini-adk-fluent-rs/src/lib.rs`:
 ```rust
 pub mod live;
 ```
@@ -1349,16 +1349,16 @@ pub use crate::live::Live;
 
 **Step 3: Add bytes dependency**
 
-Check if `bytes` is in gemini-adk-fluent's Cargo.toml; if not, add it.
+Check if `bytes` is in gemini-adk-fluent-rs's Cargo.toml; if not, add it.
 
 **Step 4: Build and test**
 
-Run: `cargo build -p gemini-adk-fluent && cargo test -p gemini-adk-fluent`
+Run: `cargo build -p gemini-adk-fluent-rs && cargo test -p gemini-adk-fluent-rs`
 
 **Step 5: Commit**
 
 ```
-feat(gemini-adk-fluent): add Live::builder() fluent API for callback-driven sessions
+feat(gemini-adk-fluent-rs): add Live::builder() fluent API for callback-driven sessions
 ```
 
 ---
@@ -1437,17 +1437,17 @@ feat(examples): demonstrate Live::builder() API in research pipeline
 
 | File | Layer | Action | Purpose |
 |------|-------|--------|---------|
-| `crates/gemini-live/src/session/mod.rs` | L0 | Modify | Add SendVideo, UpdateInstruction commands + trait methods |
-| `crates/gemini-live/src/transport/codec.rs` | L0 | Modify | Encode new commands to wire format |
-| `crates/gemini-adk/src/agent_session.rs` | L1 | Modify | Add send_video, update_instruction forwarding |
-| `crates/gemini-adk/src/live/mod.rs` | L1 | Create | Live session module |
-| `crates/gemini-adk/src/live/callbacks.rs` | L1 | Create | EventCallbacks registry |
-| `crates/gemini-adk/src/live/processor.rs` | L1 | Create | Two-lane event processor |
-| `crates/gemini-adk/src/live/builder.rs` | L1 | Create | LiveSessionBuilder |
-| `crates/gemini-adk/src/live/handle.rs` | L1 | Create | LiveHandle |
-| `crates/gemini-adk/src/lib.rs` | L1 | Modify | Add `pub mod live` + re-exports |
-| `crates/gemini-adk-fluent/src/live.rs` | L2 | Create | Live::builder() fluent API |
-| `crates/gemini-adk-fluent/src/lib.rs` | L2 | Modify | Add `pub mod live` + prelude |
+| `crates/gemini-genai-rs/src/session/mod.rs` | L0 | Modify | Add SendVideo, UpdateInstruction commands + trait methods |
+| `crates/gemini-genai-rs/src/transport/codec.rs` | L0 | Modify | Encode new commands to wire format |
+| `crates/gemini-adk-rs/src/agent_session.rs` | L1 | Modify | Add send_video, update_instruction forwarding |
+| `crates/gemini-adk-rs/src/live/mod.rs` | L1 | Create | Live session module |
+| `crates/gemini-adk-rs/src/live/callbacks.rs` | L1 | Create | EventCallbacks registry |
+| `crates/gemini-adk-rs/src/live/processor.rs` | L1 | Create | Two-lane event processor |
+| `crates/gemini-adk-rs/src/live/builder.rs` | L1 | Create | LiveSessionBuilder |
+| `crates/gemini-adk-rs/src/live/handle.rs` | L1 | Create | LiveHandle |
+| `crates/gemini-adk-rs/src/lib.rs` | L1 | Modify | Add `pub mod live` + re-exports |
+| `crates/gemini-adk-fluent-rs/src/live.rs` | L2 | Create | Live::builder() fluent API |
+| `crates/gemini-adk-fluent-rs/src/lib.rs` | L2 | Modify | Add `pub mod live` + prelude |
 | `examples/agents/src/research_pipeline.rs` | - | Modify | Demonstrate Live::builder() |
 
 ## Estimated: ~800 LoC across 7 tasks

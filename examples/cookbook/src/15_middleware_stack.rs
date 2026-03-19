@@ -21,7 +21,7 @@
 
 use std::time::Duration;
 
-use gemini_adk_fluent::prelude::*;
+use gemini_adk_fluent_rs::prelude::*;
 
 fn main() {
     println!("=== Walk 15: Middleware Stack ===\n");

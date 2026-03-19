@@ -1,0 +1,25 @@
+[package]
+name = "gemini-adk-server-rs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Shared server core for gemini-adk-web-rs, gemini-adk-api-rs, and gemini-adk-cli-rs — agent loading, REST handlers, session management"
+keywords = ["gemini", "agents", "adk", "server", "axum"]
+categories = ["api-bindings", "asynchronous", "web-programming::http-server"]
+
+[dependencies]
+gemini-adk-rs = { workspace = true, features = ["gemini-llm"] }
+axum = { version = "0.7", features = ["macros"] }
+tower-http = { version = "0.5", features = ["cors"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+tracing = "0.1"
+futures = "0.3"
+uuid = { version = "1", features = ["v4"] }
+parking_lot = "0.12"
+async-trait = "0.1"
+
+[lints]
+workspace = true

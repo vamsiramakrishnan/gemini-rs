@@ -48,7 +48,7 @@ test:
 test-fast:
     cargo test --workspace --lib
 
-# Run tests for a specific crate (e.g. just test-crate gemini-live)
+# Run tests for a specific crate (e.g. just test-crate gemini-genai-rs)
 test-crate crate:
     RUSTFLAGS="-D warnings" cargo test -p {{crate}}
 
@@ -84,11 +84,11 @@ check-compile:
 
 # Run the web UI (mirrors `adk web`)
 run-web:
-    cargo run -p gemini-adk-web
+    cargo run -p gemini-adk-web-rs
 
 # Run the REST API server (mirrors `adk api_server`)
 run-api:
-    cargo run -p gemini-adk-api
+    cargo run -p gemini-adk-api-rs
 
 # ─── Examples ────────────────────────────────────────────────
 
@@ -155,7 +155,7 @@ release-preview:
        echo "Changes since $$PREV:"; \
        git log --oneline --no-decorate "$$PREV..HEAD"; \
        echo ""; \
-       echo "Crates: gemini-live, gemini-adk, gemini-adk-fluent, gemini-adk-server, gemini-adk-cli"; \
+       echo "Crates: gemini-genai-rs, gemini-adk-rs, gemini-adk-fluent-rs, gemini-adk-server-rs, gemini-adk-cli-rs"; \
        echo "Current version: $$(grep -m1 '^version = ' Cargo.toml | sed 's/.*\"\(.*\)\".*/\1/')"; \
      fi
 
@@ -169,7 +169,7 @@ release-status:
     @echo "Release branches:"
     @git branch -a 2>/dev/null | grep "release/" | head -10 || echo "  (none)"
     @echo ""
-    @echo "Published crates: gemini-live, gemini-adk, gemini-adk-fluent, gemini-adk-server, gemini-adk-cli"
+    @echo "Published crates: gemini-genai-rs, gemini-adk-rs, gemini-adk-fluent-rs, gemini-adk-server-rs, gemini-adk-cli-rs"
 
 # ─── Utilities ───────────────────────────────────────────────
 
@@ -183,15 +183,15 @@ clean:
 
 # Count lines of code per crate
 loc:
-    @echo "gemini-live:" && find crates/gemini-live/src -name '*.rs' | xargs wc -l | tail -1
-    @echo "gemini-adk:" && find crates/gemini-adk/src -name '*.rs' | xargs wc -l | tail -1
-    @echo "gemini-adk-fluent:" && find crates/gemini-adk-fluent/src -name '*.rs' | xargs wc -l | tail -1
+    @echo "gemini-genai-rs:" && find crates/gemini-genai-rs/src -name '*.rs' | xargs wc -l | tail -1
+    @echo "gemini-adk-rs:" && find crates/gemini-adk-rs/src -name '*.rs' | xargs wc -l | tail -1
+    @echo "gemini-adk-fluent-rs:" && find crates/gemini-adk-fluent-rs/src -name '*.rs' | xargs wc -l | tail -1
 
 # Show doc warning counts per crate
 doc-warnings:
-    @echo "=== gemini-live ===" && cargo doc --no-deps -p gemini-live 2>&1 | grep "warning:" | wc -l
-    @echo "=== gemini-adk ===" && cargo doc --no-deps -p gemini-adk 2>&1 | grep "warning:" | wc -l
-    @echo "=== gemini-adk-fluent ===" && cargo doc --no-deps -p gemini-adk-fluent 2>&1 | grep "warning:" | wc -l
+    @echo "=== gemini-genai-rs ===" && cargo doc --no-deps -p gemini-genai-rs 2>&1 | grep "warning:" | wc -l
+    @echo "=== gemini-adk-rs ===" && cargo doc --no-deps -p gemini-adk-rs 2>&1 | grep "warning:" | wc -l
+    @echo "=== gemini-adk-fluent-rs ===" && cargo doc --no-deps -p gemini-adk-fluent-rs 2>&1 | grep "warning:" | wc -l
 
 # Show workspace members and test summary
 stats:

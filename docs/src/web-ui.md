@@ -1,10 +1,10 @@
 # ADK Web UI
 
-`gemini-adk-web` is the interactive development environment for building and debugging Gemini Live agents.
+`gemini-adk-web-rs` is the interactive development environment for building and debugging Gemini Live agents.
 It runs a single Axum server at `http://localhost:3000` that hosts all demo apps and a shared DevTools panel.
 
 ```bash
-cargo run -p gemini-adk-web
+cargo run -p gemini-adk-web-rs
 # → http://127.0.0.1:3000
 ```
 
@@ -12,7 +12,7 @@ cargo run -p gemini-adk-web
 
 ## Design System
 
-The web UI is built on a CSS design system defined in `apps/gemini-adk-web/static/css/design-system.css`.
+The web UI is built on a CSS design system defined in `apps/gemini-adk-web-rs/static/css/design-system.css`.
 
 ### Tokens
 
@@ -115,17 +115,17 @@ The server sends additional message types alongside audio/text frames:
 ```
 Browser                              Server (Axum)
 ───────                              ─────────────
-index.html ──── static files ──────► apps/gemini-adk-web/static/
+index.html ──── static files ──────► apps/gemini-adk-web-rs/static/
 app.html   ──── WebSocket ─────────► ws_handler.rs
                                           │
                                      SessionBridge
                                           │
-                                     LiveHandle (gemini-adk)
+                                     LiveHandle (gemini-adk-rs)
                                           │
                                      Gemini Live API (WebSocket)
 ```
 
-`SessionBridge` (in `apps/gemini-adk-web/src/bridge.rs`) wires the `LiveHandle` event stream to the browser
+`SessionBridge` (in `apps/gemini-adk-web-rs/src/bridge.rs`) wires the `LiveHandle` event stream to the browser
 WebSocket connection. It translates `LiveEvent` values into JSON messages the DevTools panels consume.
 
 ---

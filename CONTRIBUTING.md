@@ -21,7 +21,7 @@ GOOGLE_CLOUD_LOCATION=us-central1
 GOOGLE_GENAI_USE_VERTEXAI=TRUE
 
 # Default model for Live sessions (override per-app via browser Start message)
-GEMINI_MODEL=gemini-live-2.5-flash-native-audio
+GEMINI_MODEL=gemini-genai-2.5-flash-native-audio
 ```
 
 Alternatively, for Google AI (non-Vertex) usage, set `GOOGLE_GENAI_API_KEY` or `GEMINI_API_KEY` instead.
@@ -34,33 +34,33 @@ The workspace follows a layered architecture where each crate has a single respo
 
 | Crate | Layer | Purpose | Key Directories |
 |-------|-------|---------|-----------------|
-| `gemini-live` | L0 (Wire) | Protocol types, WebSocket transport, auth, VAD, audio buffers | `src/protocol/`, `src/transport/`, `src/session/`, `src/vad/`, `src/buffer/` |
-| `gemini-adk` | L1 (Runtime) | Agent lifecycle, tools, state, phases, extractors, live sessions | `src/live/`, `src/tool/`, `src/state.rs`, `src/agents/`, `src/session/` |
-| `gemini-adk-fluent` | L2 (DX) | Fluent builder API, operator algebra, composition primitives | `src/builder.rs`, `src/compose/`, `src/live/`, `src/live_builders.rs` |
+| `gemini-genai-rs` | L0 (Wire) | Protocol types, WebSocket transport, auth, VAD, audio buffers | `src/protocol/`, `src/transport/`, `src/session/`, `src/vad/`, `src/buffer/` |
+| `gemini-adk-rs` | L1 (Runtime) | Agent lifecycle, tools, state, phases, extractors, live sessions | `src/live/`, `src/tool/`, `src/state.rs`, `src/agents/`, `src/session/` |
+| `gemini-adk-fluent-rs` | L2 (DX) | Fluent builder API, operator algebra, composition primitives | `src/builder.rs`, `src/compose/`, `src/live/`, `src/live_builders.rs` |
 
 Additionally:
 
 | Path | Purpose |
 |------|---------|
-| `apps/gemini-adk-web/` | Axum WebSocket tester with browser frontend and multiple demo apps |
+| `apps/gemini-adk-web-rs/` | Axum WebSocket tester with browser frontend and multiple demo apps |
 | `examples/agents/` | Standalone agent examples |
 | `examples/text-chat/` | Text-only chat example |
 | `examples/voice-chat/` | Voice chat example |
 | `examples/tool-calling/` | Tool calling example |
 | `examples/transcription/` | Audio transcription example |
-| `tools/gemini-adk-transpiler/` | Code generator that transpiles ADK-JS type definitions to Rust |
+| `tools/gemini-adk-transpiler-rs/` | Code generator that transpiles ADK-JS type definitions to Rust |
 
 ### Dependency Flow
 
 ```
-gemini-adk-fluent (L2)
+gemini-adk-fluent-rs (L2)
     |
-    +---> gemini-adk (L1)
+    +---> gemini-adk-rs (L1)
               |
-              +---> gemini-live (L0)
+              +---> gemini-genai-rs (L0)
 ```
 
-Examples depend on `gemini-adk-fluent` (L2) and get the entire stack transitively.
+Examples depend on `gemini-adk-fluent-rs` (L2) and get the entire stack transitively.
 
 ### Hand-Written vs Generated Code
 
@@ -68,30 +68,30 @@ Most code in the workspace is hand-written. The exception:
 
 | File | Status | How to Regenerate |
 |------|--------|-------------------|
-| `crates/gemini-adk/src/agents/generated.rs` | Auto-generated | `cargo run -p gemini-adk-transpiler -- transpile --source <path> --output crates/gemini-adk/src/agents/generated.rs` |
+| `crates/gemini-adk-rs/src/agents/generated.rs` | Auto-generated | `cargo run -p gemini-adk-transpiler-rs -- transpile --source <path> --output crates/gemini-adk-rs/src/agents/generated.rs` |
 
-Do **not** edit `generated.rs` directly. Modify the transpiler in `tools/gemini-adk-transpiler/` or the source definitions instead.
+Do **not** edit `generated.rs` directly. Modify the transpiler in `tools/gemini-adk-transpiler-rs/` or the source definitions instead.
 
 ### Three-Lane Processor Architecture
 
-The live session processor (`crates/gemini-adk/src/live/processor.rs`) routes messages across three lanes:
+The live session processor (`crates/gemini-adk-rs/src/live/processor.rs`) routes messages across three lanes:
 
 - **Fast lane** -- Audio, text, and VAD events. Sync callbacks only, targeting <1ms latency. No locks, no allocations on the hot path.
 - **Control lane** -- Tool calls, interruptions, lifecycle events, transcript accumulation, extractors, and phase transitions. Owns `TranscriptBuffer` directly (no `Arc<Mutex<>>`).
 - **Telemetry lane** -- `SessionSignals` and `SessionTelemetry` on their own broadcast receiver. Atomic counters (~1ns), debounced 100ms flush.
 
-The router (`crates/gemini-adk/src/live/mod.rs`) is a zero-work dispatcher that never touches session signals or telemetry on the hot path.
+The router (`crates/gemini-adk-rs/src/live/mod.rs`) is a zero-work dispatcher that never touches session signals or telemetry on the hot path.
 
 ### Key Traits
 
 | Trait | Location | Purpose |
 |-------|----------|---------|
-| `Transport` | `crates/gemini-live/src/transport/ws.rs` | WebSocket send/recv abstraction (`TungsteniteTransport`, `MockTransport`) |
-| `Codec` | `crates/gemini-live/src/transport/codec.rs` | Message serialization (`JsonCodec`) |
-| `AuthProvider` | `crates/gemini-live/src/transport/auth/` | Authentication (`GoogleAIAuth`, `VertexAIAuth`) |
-| `SessionWriter` / `SessionReader` | `crates/gemini-live/src/session/mod.rs` | Session I/O abstraction |
-| `Agent` | `crates/gemini-adk/src/agent.rs` | Agent trait for composition |
-| `CookbookApp` | `apps/gemini-adk-web/src/app.rs` | Trait for UI demo apps |
+| `Transport` | `crates/gemini-genai-rs/src/transport/ws.rs` | WebSocket send/recv abstraction (`TungsteniteTransport`, `MockTransport`) |
+| `Codec` | `crates/gemini-genai-rs/src/transport/codec.rs` | Message serialization (`JsonCodec`) |
+| `AuthProvider` | `crates/gemini-genai-rs/src/transport/auth/` | Authentication (`GoogleAIAuth`, `VertexAIAuth`) |
+| `SessionWriter` / `SessionReader` | `crates/gemini-genai-rs/src/session/mod.rs` | Session I/O abstraction |
+| `Agent` | `crates/gemini-adk-rs/src/agent.rs` | Agent trait for composition |
+| `CookbookApp` | `apps/gemini-adk-web-rs/src/app.rs` | Trait for UI demo apps |
 
 ## Getting Started
 
@@ -138,7 +138,7 @@ cargo doc --no-deps --workspace --open
 
 ### Adding a Web UI Demo App
 
-1. Create a new file in `apps/gemini-adk-web/src/apps/` (e.g., `my_example.rs`)
+1. Create a new file in `apps/gemini-adk-web-rs/src/apps/` (e.g., `my_example.rs`)
 2. Implement the `CookbookApp` trait:
 
 ```rust
@@ -167,9 +167,9 @@ impl CookbookApp for MyExample {
 }
 ```
 
-3. Add the module to `apps/gemini-adk-web/src/apps/mod.rs`
-4. Register it in `apps/gemini-adk-web/src/apps/mod.rs` inside `register_all()`
-5. Test with `cargo run -p gemini-adk-web`
+3. Add the module to `apps/gemini-adk-web-rs/src/apps/mod.rs`
+4. Register it in `apps/gemini-adk-web-rs/src/apps/mod.rs` inside `register_all()`
+5. Test with `cargo run -p gemini-adk-web-rs`
 
 ## Code Style
 
@@ -177,7 +177,7 @@ impl CookbookApp for MyExample {
 - **Linting**: `cargo clippy -- -D warnings` -- all warnings are errors
 - **Doc comments**: All public items require `///` doc comments. Keep them concise and technical. One-liners are preferred for simple items.
 - **Documentation CI**: The `docs.yml` workflow runs `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace` on every PR. Broken doc links and missing docs fail the build.
-- **Error handling**: Use `thiserror` for public error types (see `crates/gemini-adk/src/error.rs`)
+- **Error handling**: Use `thiserror` for public error types (see `crates/gemini-adk-rs/src/error.rs`)
 - **Async**: Use `tokio` as the async runtime. Use `async_trait` for async trait methods.
 
 ### Feature Flags
@@ -186,14 +186,14 @@ Feature flags are used to keep the default build lean. Key flags:
 
 | Crate | Flag | What It Enables |
 |-------|------|-----------------|
-| `gemini-live` | `live` (default) | Live session WebSocket support |
-| `gemini-live` | `vad` (default) | Voice activity detection |
-| `gemini-live` | `generate`, `embed`, `files`, etc. | REST API modules (require `http`) |
-| `gemini-live` | `all-apis` | All REST API modules |
-| `gemini-adk` | `gemini-llm` | Gemini LLM integration via HTTP |
-| `gemini-adk` | `database-sessions` | Persistent session storage |
-| `gemini-adk` | `tracing-support` | Structured logging via `tracing` |
-| `gemini-adk-fluent` | `gemini-llm` | Passthrough to `gemini-adk/gemini-llm` |
+| `gemini-genai-rs` | `live` (default) | Live session WebSocket support |
+| `gemini-genai-rs` | `vad` (default) | Voice activity detection |
+| `gemini-genai-rs` | `generate`, `embed`, `files`, etc. | REST API modules (require `http`) |
+| `gemini-genai-rs` | `all-apis` | All REST API modules |
+| `gemini-adk-rs` | `gemini-llm` | Gemini LLM integration via HTTP |
+| `gemini-adk-rs` | `database-sessions` | Persistent session storage |
+| `gemini-adk-rs` | `tracing-support` | Structured logging via `tracing` |
+| `gemini-adk-fluent-rs` | `gemini-llm` | Passthrough to `gemini-adk-rs/gemini-llm` |
 
 ## Testing
 
@@ -202,12 +202,12 @@ Feature flags are used to keep the default build lean. Key flags:
 cargo test --workspace --lib
 
 # Tests for a single crate
-cargo test -p gemini-live --lib
-cargo test -p gemini-adk --lib
-cargo test -p gemini-adk-fluent --lib
+cargo test -p gemini-genai-rs --lib
+cargo test -p gemini-adk-rs --lib
+cargo test -p gemini-adk-fluent-rs --lib
 
 # With all features enabled
-cargo test -p gemini-live --all-features --lib
+cargo test -p gemini-genai-rs --all-features --lib
 
 # Check formatting + linting + docs (the full CI check)
 cargo fmt --check \
@@ -215,22 +215,22 @@ cargo fmt --check \
   && RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace
 ```
 
-Tests live alongside the code they test using `#[cfg(test)] mod tests` blocks. The `crates/gemini-adk/src/test_helpers.rs` module provides shared test utilities.
+Tests live alongside the code they test using `#[cfg(test)] mod tests` blocks. The `crates/gemini-adk-rs/src/test_helpers.rs` module provides shared test utilities.
 
 ## Commit Message Format
 
 Use [Conventional Commits](https://www.conventionalcommits.org/):
 
 ```
-feat(gemini-live): add opus codec support
-fix(gemini-adk): prevent double phase transition on interrupt
+feat(gemini-genai-rs): add opus codec support
+fix(gemini-adk-rs): prevent double phase transition on interrupt
 docs: update wire protocol examples
-refactor(gemini-adk-fluent): simplify builder chain
-test(gemini-adk): add extractor concurrency tests
+refactor(gemini-adk-fluent-rs): simplify builder chain
+test(gemini-adk-rs): add extractor concurrency tests
 ci: add clippy to PR checks
 ```
 
-The scope should be the crate name (`gemini-live`, `gemini-adk`, `gemini-adk-fluent`) or a top-level area (`examples`, `ci`, `docs`).
+The scope should be the crate name (`gemini-genai-rs`, `gemini-adk-rs`, `gemini-adk-fluent-rs`) or a top-level area (`examples`, `ci`, `docs`).
 
 ## Design Documents
 
@@ -260,8 +260,8 @@ Existing design docs cover the full architecture and can be referenced for conte
 
 A few things worth knowing before diving into the code:
 
-- **Vertex AI sends Binary WebSocket frames** (not Text). The transport layer in `crates/gemini-live/src/transport/ws.rs` handles this transparently.
-- **The native audio model only supports AUDIO output modality**, not TEXT. You cannot get text responses from `gemini-live-2.5-flash-native-audio`.
+- **Vertex AI sends Binary WebSocket frames** (not Text). The transport layer in `crates/gemini-genai-rs/src/transport/ws.rs` handles this transparently.
+- **The native audio model only supports AUDIO output modality**, not TEXT. You cannot get text responses from `gemini-genai-2.5-flash-native-audio`.
 - **Tool definitions cannot be updated mid-session** in Live API. Only system instructions can be updated after the session is established. Phase-scoped tool filtering works by rejecting tool calls on the SDK side, not by changing the API configuration.
-- **State keys use prefixes** (`session:`, `derived:`, `turn:`, `app:`, `bg:`, `user:`, `temp:`) to control scope and lifecycle. See `crates/gemini-adk/src/state.rs`.
+- **State keys use prefixes** (`session:`, `derived:`, `turn:`, `app:`, `bg:`, `user:`, `temp:`) to control scope and lifecycle. See `crates/gemini-adk-rs/src/state.rs`.
 - **`SessionWriter` is behind `Arc<dyn SessionWriter>`** so that multiple components (phases, extractors, background tools) can share a session handle without ownership conflicts.

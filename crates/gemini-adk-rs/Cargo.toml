@@ -1,0 +1,49 @@
+[package]
+name = "gemini-adk-rs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Agent runtime for Gemini Live — tools, streaming, agent transfer, middleware"
+keywords = ["gemini", "agents", "adk", "tools", "streaming"]
+categories = ["api-bindings", "asynchronous", "network-programming"]
+repository.workspace = true
+documentation = "https://docs.rs/gemini-adk-rs"
+readme = "README.md"
+
+[dependencies]
+gemini-genai-rs = { workspace = true }
+bytes = "1"
+tokio = { version = "1", features = ["full"] }
+tokio-util = "0.7"
+async-trait = "0.1"
+schemars = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+dashmap = "6"
+futures = "0.3"
+parking_lot = "0.12"
+regex = "1"
+once_cell = "1"
+uuid = { version = "1", features = ["v4"] }
+tracing = { version = "0.1", optional = true }
+metrics = { version = "0.24", optional = true }
+
+[dev-dependencies]
+tokio-test = "0.4"
+
+[features]
+default = []
+gemini-llm = ["gemini-genai-rs/http", "gemini-genai-rs/generate"]
+gcs-artifacts = []
+tracing-support = ["dep:tracing", "gemini-genai-rs/tracing-support"]
+metrics = ["dep:metrics"]
+database-sessions = []
+postgres-sessions = []
+vertex-ai-sessions = []
+otel = ["gemini-genai-rs/otel", "tracing-support"]
+otel-otlp = ["gemini-genai-rs/otel-otlp", "tracing-support"]
+otel-gcp = ["gemini-genai-rs/otel-gcp", "tracing-support"]
+
+[lints]
+workspace = true

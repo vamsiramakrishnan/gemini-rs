@@ -15,7 +15,7 @@
 //! - `+` operator — compose sections additively
 //! - `.render()` — produce the final prompt string
 
-use gemini_adk_fluent::prelude::*;
+use gemini_adk_fluent_rs::prelude::*;
 
 fn main() {
     println!("=== 08: Prompt Composition (P::) ===\n");

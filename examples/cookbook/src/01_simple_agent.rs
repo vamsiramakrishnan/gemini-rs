@@ -11,7 +11,7 @@
 //! - `.thinking()` — enable thinking budget
 //! - Copy-on-write semantics (cloning a builder leaves the original unchanged)
 
-use gemini_adk_fluent::prelude::*;
+use gemini_adk_fluent_rs::prelude::*;
 
 fn main() {
     println!("=== 01: Simple Agent ===\n");

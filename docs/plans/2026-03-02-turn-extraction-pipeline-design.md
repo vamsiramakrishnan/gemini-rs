@@ -26,7 +26,7 @@ TurnExtractor(s) (OOB LLM + schema → typed Value)
     └─► on_extracted callback   ← react (update_instruction, UI, etc.)
 ```
 
-### L1 Components (gemini-adk)
+### L1 Components (gemini-adk-rs)
 
 **TranscriptBuffer** (`live/transcript.rs`):
 - `TranscriptTurn { turn_number, user, model, timestamp }`
@@ -53,7 +53,7 @@ TurnExtractor(s) (OOB LLM + schema → typed Value)
 **LiveHandle addition**:
 - `state() -> &State` — read extraction results at any time
 
-### L2 Fluent API (gemini-adk-fluent)
+### L2 Fluent API (gemini-adk-fluent-rs)
 
 ```rust
 let handle = Live::builder()

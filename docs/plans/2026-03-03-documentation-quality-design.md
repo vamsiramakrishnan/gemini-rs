@@ -6,11 +6,11 @@
 
 ## Goal
 
-Bring all three crates (gemini-live, gemini-adk, gemini-adk-fluent) to publishable documentation quality with enforced standards and automatic doc generation/deployment.
+Bring all three crates (gemini-genai-rs, gemini-adk-rs, gemini-adk-fluent-rs) to publishable documentation quality with enforced standards and automatic doc generation/deployment.
 
 ## Current State
 
-| Aspect | gemini-live | gemini-adk | gemini-adk-fluent |
+| Aspect | gemini-genai-rs | gemini-adk-rs | gemini-adk-fluent-rs |
 |--------|----------|--------|---------------|
 | Crate-level docs | Excellent | Good | Minimal |
 | Module //! coverage | ~80% | ~61% | ~50% |
@@ -35,7 +35,7 @@ documentation = "https://docs.rs/{crate-name}"
 readme = "README.md"
 ```
 
-**gemini-adk and gemini-adk-fluent** — add missing:
+**gemini-adk-rs and gemini-adk-fluent-rs** — add missing:
 ```toml
 keywords = [...]
 categories = [...]
@@ -51,12 +51,12 @@ Write `///` doc comments on every undocumented public item across all crates:
 - Structs, enums, traits, functions, type aliases, constants
 - Enum variants and struct fields where non-obvious
 - Trait methods (required and provided)
-- Builder methods in gemini-adk-fluent
+- Builder methods in gemini-adk-fluent-rs
 
 Estimated scope:
-- gemini-live: ~30% gap across ~25 modules
-- gemini-adk: ~40% gap across ~92 modules (largest effort)
-- gemini-adk-fluent: ~50% gap across ~14 modules
+- gemini-genai-rs: ~30% gap across ~25 modules
+- gemini-adk-rs: ~40% gap across ~92 modules (largest effort)
+- gemini-adk-fluent-rs: ~50% gap across ~14 modules
 
 ### 4. Per-Crate READMEs
 
@@ -68,13 +68,13 @@ Each crate gets `README.md` with:
 
 ### 5. Crate-Level Doc Enhancement
 
-Expand `gemini-adk-fluent/src/lib.rs` crate docs from single-line to full overview:
+Expand `gemini-adk-fluent-rs/src/lib.rs` crate docs from single-line to full overview:
 - Architecture overview of the fluent DX layer
 - Module organization
 - Key types to start with
-- Relationship to gemini-adk and gemini-live
+- Relationship to gemini-adk-rs and gemini-genai-rs
 
-gemini-live and gemini-adk lib.rs docs are already good — no changes needed.
+gemini-genai-rs and gemini-adk-rs lib.rs docs are already good — no changes needed.
 
 ### 6. GitHub Actions CI
 

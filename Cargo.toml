@@ -1,20 +1,20 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/gemini-live",
-    "crates/gemini-adk",
-    "crates/gemini-adk-fluent",
-    "apps/gemini-adk-server",
-    "apps/gemini-adk-web",
-    "apps/gemini-adk-api",
+    "crates/gemini-genai-rs",
+    "crates/gemini-adk-rs",
+    "crates/gemini-adk-fluent-rs",
+    "apps/gemini-adk-server-rs",
+    "apps/gemini-adk-web-rs",
+    "apps/gemini-adk-api-rs",
     "examples/agents",
     "examples/text-chat",
     "examples/voice-chat",
     "examples/tool-calling",
     "examples/transcription",
     "examples/cookbook",
-    "tools/gemini-adk-transpiler",
-    "tools/gemini-adk-cli",
+    "tools/gemini-adk-transpiler-rs",
+    "tools/gemini-adk-cli-rs",
 ]
 
 [workspace.package]
@@ -26,10 +26,10 @@ repository = "https://github.com/vamsiramakrishnan/gemini-rs"
 # Internal workspace crates — version mirrors [workspace.package].version above.
 # Update ONLY [workspace.package].version when releasing; release.sh handles the rest.
 [workspace.dependencies]
-gemini-live       = { path = "crates/gemini-live",       version = "0.5.0" }
-gemini-adk        = { path = "crates/gemini-adk",        version = "0.5.0" }
-gemini-adk-fluent = { path = "crates/gemini-adk-fluent", version = "0.5.0" }
-gemini-adk-server = { path = "apps/gemini-adk-server",   version = "0.5.0" }
+gemini-genai-rs      = { path = "crates/gemini-genai-rs",      version = "0.5.0" }
+gemini-adk-rs        = { path = "crates/gemini-adk-rs",        version = "0.5.0" }
+gemini-adk-fluent-rs = { path = "crates/gemini-adk-fluent-rs", version = "0.5.0" }
+gemini-adk-server-rs = { path = "apps/gemini-adk-server-rs",   version = "0.5.0" }
 
 [workspace.lints.clippy]
 type_complexity = "allow"

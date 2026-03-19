@@ -9,7 +9,7 @@
 //!   3. Conditional: approve or request changes based on severity
 //!   4. Review loop: iterate if changes requested
 
-use gemini_adk_fluent::prelude::*;
+use gemini_adk_fluent_rs::prelude::*;
 use serde_json::json;
 
 fn main() {

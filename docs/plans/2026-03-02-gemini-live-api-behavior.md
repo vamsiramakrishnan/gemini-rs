@@ -579,7 +579,7 @@ Video is sent as discrete frames, not a continuous stream. Each frame is an inde
 
 | Feature                  | Native Audio Model                          | Non-Native Audio Model             |
 |--------------------------|---------------------------------------------|-------------------------------------|
-| Model ID                 | `gemini-live-2.5-flash-native-audio`        | `gemini-live-2.5-flash`             |
+| Model ID                 | `gemini-genai-2.5-flash-native-audio`        | `gemini-genai-2.5-flash`             |
 | Language switching       | Natural mid-conversation switching          | Fixed via `language_code`           |
 | Output modality          | AUDIO only (no TEXT output)                 | AUDIO and/or TEXT                   |
 | Affective dialog         | Supported (`enable_affective_dialog: true`) | Not available                       |
@@ -748,9 +748,9 @@ These are set once in the `setup` message and cannot be changed:
 
 ---
 
-## 11. Implications for gemini-live-rs Architecture
+## 11. Implications for gemini-genai-rs Architecture
 
-### 11.1 Wire Crate (L0: gemini-live-wire)
+### 11.1 Wire Crate (L0: gemini-genai-wire)
 
 The wire crate already handles most of the protocol correctly. Key alignment points:
 
@@ -765,7 +765,7 @@ The wire crate already handles most of the protocol correctly. Key alignment poi
 | Interrupted signal             | Handled                    | `SessionEvent::Interrupted`              |
 | Tool call/response             | Handled                    | `SessionEvent::ToolCall`, `SessionCommand::ToolResponse` |
 
-### 11.2 Runtime Crate (L1: gemini-adk)
+### 11.2 Runtime Crate (L1: gemini-adk-rs)
 
 The runtime must enforce session-level constraints:
 
@@ -775,7 +775,7 @@ The runtime must enforce session-level constraints:
 - **Tool execution lifecycle**: Manage concurrent tool calls, enforce session timeout awareness
 - **Context budget tracking**: Monitor token accumulation for compression decisions
 
-### 11.3 Fluent Crate (L2: gemini-adk-fluent)
+### 11.3 Fluent Crate (L2: gemini-adk-fluent-rs)
 
 The fluent layer should expose these API behaviors as ergonomic builder options:
 

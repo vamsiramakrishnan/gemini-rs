@@ -12,7 +12,7 @@ of what matters right now.
 
 ## Solution: Four Primitives
 
-### 1. `ContextBuilder` (L1: gemini-adk)
+### 1. `ContextBuilder` (L1: gemini-adk-rs)
 
 Declarative state-to-narrative renderer. Sections group related keys. Skips missing
 values. Implements `Fn(&State) -> String` — drops into existing `with_context()`.
@@ -21,14 +21,14 @@ When the current phase has `needs` metadata, appends a "Gathering: X, Y" line fo
 missing keys so the model knows what to focus on.
 
 ```rust
-// File: crates/gemini-adk/src/live/context_builder.rs
+// File: crates/gemini-adk-rs/src/live/context_builder.rs
 pub struct ContextBuilder { sections: Vec<Section>, needs_keys: Vec<String> }
 pub struct Section { label: String, fields: Vec<Field> }
 pub struct Field { key: String, label: String, kind: FieldKind }
 enum FieldKind { Value, Flag, Sentiment, Format(Arc<dyn Fn(&Value) -> String>) }
 ```
 
-### 2. `Ctx::` namespace (L2: gemini-adk-fluent)
+### 2. `Ctx::` namespace (L2: gemini-adk-fluent-rs)
 
 Fluent factory methods mirroring `S::`, `P::`, `T::`:
 
@@ -62,12 +62,12 @@ Predicate: key exists with any non-null value. Replaces
 ## File Layout
 
 ```
-crates/gemini-adk/src/live/
+crates/gemini-adk-rs/src/live/
   context_builder.rs    NEW
   phase.rs              ADD needs field
   mod.rs                ADD re-exports
 
-crates/gemini-adk-fluent/src/
+crates/gemini-adk-fluent-rs/src/
   compose/ctx.rs        NEW
   compose/mod.rs        ADD Ctx re-export
   compose/state.rs      ADD S::is_set()

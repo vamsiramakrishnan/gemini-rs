@@ -1,6 +1,6 @@
 # Agent Examples
 
-Standalone agent examples demonstrating the L1 runtime (`gemini-adk`) and L2 fluent DX (`gemini-adk-fluent`).
+Standalone agent examples demonstrating the L1 runtime (`gemini-adk-rs`) and L2 fluent DX (`gemini-adk-fluent-rs`).
 
 ## Examples
 

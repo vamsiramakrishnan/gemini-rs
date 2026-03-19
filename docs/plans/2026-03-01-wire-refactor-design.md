@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Make `gemini-live-wire` production-grade, extensible, and SDK-parity by introducing 3 trait boundaries (Codec, Transport, Auth) plus type-safety fixes, enabling upper layers (runtime + fluent) to plug in custom behavior without forking.
+**Goal:** Make `gemini-genai-wire` production-grade, extensible, and SDK-parity by introducing 3 trait boundaries (Codec, Transport, Auth) plus type-safety fixes, enabling upper layers (runtime + fluent) to plug in custom behavior without forking.
 
 **Architecture:** Three phases, each independently shippable. Phase 1 fixes invalid-state-representability (typed errors, Role enum, Content builder). Phase 2 extracts Codec/Transport/SessionWriter traits from the monolithic `connection.rs`. Phase 3 adds AuthProvider trait and SDK-parity features (ToolProvider, Platform abstraction, session resumption).
 
@@ -15,8 +15,8 @@
 ### Task 1: Add Role enum and Content builders
 
 **Files:**
-- Modify: `crates/gemini-live-wire/src/protocol/types.rs:214-220` (Content struct)
-- Test: `crates/gemini-live-wire/src/protocol/types.rs` (existing test module at bottom)
+- Modify: `crates/gemini-genai-wire/src/protocol/types.rs:214-220` (Content struct)
+- Test: `crates/gemini-genai-wire/src/protocol/types.rs` (existing test module at bottom)
 
 **Step 1: Write failing tests for Role enum and Content builders**
 
@@ -101,7 +101,7 @@ fn content_role_backward_compat_serialization() {
 
 **Step 2: Run tests to verify they fail**
 
-Run: `cargo test -p gemini-live-wire -- role_ content_user content_model content_from_parts part_text part_inline part_function content_role_backward`
+Run: `cargo test -p gemini-genai-wire -- role_ content_user content_model content_from_parts part_text part_inline part_function content_role_backward`
 Expected: Compilation failure — `Role` type doesn't exist, `Content::user()` etc. don't exist
 
 **Step 3: Implement Role enum and Content/Part builders**
@@ -202,8 +202,8 @@ impl Part {
 **Step 4: Fix all compilation errors across workspace**
 
 The `Content.role` change from `Option<String>` to `Option<Role>` breaks:
-- `crates/gemini-live-wire/src/transport/connection.rs:320` — `role: Some("user".to_string())` → `role: Some(Role::User)`
-- `crates/gemini-live-wire/src/protocol/messages.rs:560` (test) — `role: Some("user".to_string())` → `role: Some(Role::User)`
+- `crates/gemini-genai-wire/src/transport/connection.rs:320` — `role: Some("user".to_string())` → `role: Some(Role::User)`
+- `crates/gemini-genai-wire/src/protocol/messages.rs:560` (test) — `role: Some("user".to_string())` → `role: Some(Role::User)`
 - Any runtime/fluent references to `Content { role: Some("user"...) }`
 
 Search across all crates for `role: Some("` and update each occurrence.
@@ -216,7 +216,7 @@ Expected: All tests pass (87 wire + 66 runtime + 32 fluent + doc-tests)
 **Step 6: Commit**
 
 ```bash
-git add crates/gemini-live-wire/src/protocol/types.rs crates/gemini-live-wire/src/transport/connection.rs crates/gemini-live-wire/src/protocol/messages.rs
+git add crates/gemini-genai-wire/src/protocol/types.rs crates/gemini-genai-wire/src/transport/connection.rs crates/gemini-genai-wire/src/protocol/messages.rs
 # Also add any runtime/fluent files that needed Content.role fixes
 git commit -m "refactor(wire): add Role enum, Content/Part builders"
 ```
@@ -226,10 +226,10 @@ git commit -m "refactor(wire): add Role enum, Content/Part builders"
 ### Task 2: Structured error types
 
 **Files:**
-- Modify: `crates/gemini-live-wire/src/session/mod.rs:20-54` (SessionError enum)
-- Modify: `crates/gemini-live-wire/src/transport/connection.rs` (error construction sites)
-- Test: `crates/gemini-live-wire/src/session/mod.rs` (add tests)
-- Modify: `crates/gemini-live-runtime/src/error.rs:1-27` (AgentError::Session derives)
+- Modify: `crates/gemini-genai-wire/src/session/mod.rs:20-54` (SessionError enum)
+- Modify: `crates/gemini-genai-wire/src/transport/connection.rs` (error construction sites)
+- Test: `crates/gemini-genai-wire/src/session/mod.rs` (add tests)
+- Modify: `crates/gemini-genai-runtime/src/error.rs:1-27` (AgentError::Session derives)
 
 **Step 1: Write failing tests for new error types**
 
@@ -272,7 +272,7 @@ fn goaway_error_with_duration() {
 
 **Step 2: Run tests to verify they fail**
 
-Run: `cargo test -p gemini-live-wire -- websocket_error setup_error auth_error timeout_error goaway_error`
+Run: `cargo test -p gemini-genai-wire -- websocket_error setup_error auth_error timeout_error goaway_error`
 Expected: Compilation failure
 
 **Step 3: Implement structured error types**
@@ -375,7 +375,7 @@ Key locations in `connection.rs`:
 
 **Step 5: Update runtime error handling**
 
-In `crates/gemini-live-runtime/src/error.rs`, `AgentError::Session` already uses `#[from] SessionError` — it will auto-adapt. But check any match arms on `SessionError` variants in the runtime crate.
+In `crates/gemini-genai-runtime/src/error.rs`, `AgentError::Session` already uses `#[from] SessionError` — it will auto-adapt. But check any match arms on `SessionError` variants in the runtime crate.
 
 **Step 6: Run all tests**
 
@@ -385,7 +385,7 @@ Expected: All pass
 **Step 7: Commit**
 
 ```bash
-git add crates/gemini-live-wire/src/session/mod.rs crates/gemini-live-wire/src/transport/connection.rs crates/gemini-live-runtime/src/error.rs
+git add crates/gemini-genai-wire/src/session/mod.rs crates/gemini-genai-wire/src/transport/connection.rs crates/gemini-genai-runtime/src/error.rs
 git commit -m "refactor(wire): structured SessionError, WebSocketError, SetupError, AuthError"
 ```
 
@@ -394,9 +394,9 @@ git commit -m "refactor(wire): structured SessionError, WebSocketError, SetupErr
 ### Task 3: Emit PhaseChanged events
 
 **Files:**
-- Modify: `crates/gemini-live-wire/src/session/mod.rs:208-215` (SessionState::transition_to)
-- Modify: `crates/gemini-live-wire/src/transport/connection.rs:25-50` (connect fn — pass event_tx to state)
-- Test: `crates/gemini-live-wire/src/session/mod.rs`
+- Modify: `crates/gemini-genai-wire/src/session/mod.rs:208-215` (SessionState::transition_to)
+- Modify: `crates/gemini-genai-wire/src/transport/connection.rs:25-50` (connect fn — pass event_tx to state)
+- Test: `crates/gemini-genai-wire/src/session/mod.rs`
 
 **Step 1: Write failing test**
 
@@ -418,7 +418,7 @@ async fn phase_changed_event_emitted_on_transition() {
 
 **Step 2: Run test to verify it fails**
 
-Run: `cargo test -p gemini-live-wire -- phase_changed_event`
+Run: `cargo test -p gemini-genai-wire -- phase_changed_event`
 Expected: Fail — `SessionState::with_events` doesn't exist
 
 **Step 3: Implement**
@@ -476,7 +476,7 @@ Expected: All pass
 **Step 5: Commit**
 
 ```bash
-git add crates/gemini-live-wire/src/session/mod.rs crates/gemini-live-wire/src/transport/connection.rs
+git add crates/gemini-genai-wire/src/session/mod.rs crates/gemini-genai-wire/src/transport/connection.rs
 git commit -m "feat(wire): emit PhaseChanged events on state transitions"
 ```
 
@@ -487,14 +487,14 @@ git commit -m "feat(wire): emit PhaseChanged events on state transitions"
 ### Task 4: Extract Codec trait and JsonCodec
 
 **Files:**
-- Create: `crates/gemini-live-wire/src/transport/codec.rs`
-- Modify: `crates/gemini-live-wire/src/transport/mod.rs`
-- Modify: `crates/gemini-live-wire/src/transport/connection.rs` (extract inline serialization)
-- Test: `crates/gemini-live-wire/src/transport/codec.rs`
+- Create: `crates/gemini-genai-wire/src/transport/codec.rs`
+- Modify: `crates/gemini-genai-wire/src/transport/mod.rs`
+- Modify: `crates/gemini-genai-wire/src/transport/connection.rs` (extract inline serialization)
+- Test: `crates/gemini-genai-wire/src/transport/codec.rs`
 
 **Step 1: Write failing tests for Codec trait**
 
-In new file `crates/gemini-live-wire/src/transport/codec.rs`:
+In new file `crates/gemini-genai-wire/src/transport/codec.rs`:
 
 ```rust
 #[cfg(test)]
@@ -564,7 +564,7 @@ mod tests {
 
 **Step 2: Run tests to verify they fail**
 
-Run: `cargo test -p gemini-live-wire -- json_codec`
+Run: `cargo test -p gemini-genai-wire -- json_codec`
 Expected: Compilation failure — module doesn't exist
 
 **Step 3: Implement Codec trait and JsonCodec**
@@ -683,7 +683,7 @@ Expected: All pass
 **Step 6: Commit**
 
 ```bash
-git add crates/gemini-live-wire/src/transport/codec.rs crates/gemini-live-wire/src/transport/mod.rs
+git add crates/gemini-genai-wire/src/transport/codec.rs crates/gemini-genai-wire/src/transport/mod.rs
 git commit -m "feat(wire): extract Codec trait and JsonCodec from connection.rs"
 ```
 
@@ -692,9 +692,9 @@ git commit -m "feat(wire): extract Codec trait and JsonCodec from connection.rs"
 ### Task 5: Extract Transport trait and TungsteniteTransport
 
 **Files:**
-- Create: `crates/gemini-live-wire/src/transport/ws.rs`
-- Modify: `crates/gemini-live-wire/src/transport/mod.rs`
-- Test: `crates/gemini-live-wire/src/transport/ws.rs`
+- Create: `crates/gemini-genai-wire/src/transport/ws.rs`
+- Modify: `crates/gemini-genai-wire/src/transport/mod.rs`
+- Test: `crates/gemini-genai-wire/src/transport/ws.rs`
 
 **Step 1: Write failing tests for Transport trait**
 
@@ -737,7 +737,7 @@ mod tests {
 
 **Step 2: Run tests to verify they fail**
 
-Run: `cargo test -p gemini-live-wire -- mock_transport`
+Run: `cargo test -p gemini-genai-wire -- mock_transport`
 Expected: Compilation failure
 
 **Step 3: Implement Transport trait, TungsteniteTransport, and MockTransport**
@@ -784,7 +784,7 @@ Expected: All pass
 **Step 5: Commit**
 
 ```bash
-git add crates/gemini-live-wire/src/transport/ws.rs crates/gemini-live-wire/src/transport/mod.rs
+git add crates/gemini-genai-wire/src/transport/ws.rs crates/gemini-genai-wire/src/transport/mod.rs
 git commit -m "feat(wire): extract Transport trait, TungsteniteTransport, MockTransport"
 ```
 
@@ -793,9 +793,9 @@ git commit -m "feat(wire): extract Transport trait, TungsteniteTransport, MockTr
 ### Task 6: SessionWriter and SessionReader traits
 
 **Files:**
-- Modify: `crates/gemini-live-wire/src/session/mod.rs:270-395` (SessionHandle)
-- Modify: `crates/gemini-live-wire/src/lib.rs` (prelude exports)
-- Test: `crates/gemini-live-wire/src/session/mod.rs`
+- Modify: `crates/gemini-genai-wire/src/session/mod.rs:270-395` (SessionHandle)
+- Modify: `crates/gemini-genai-wire/src/lib.rs` (prelude exports)
+- Test: `crates/gemini-genai-wire/src/session/mod.rs`
 
 **Step 1: Write failing tests**
 
@@ -825,7 +825,7 @@ fn session_reader_is_object_safe() {
 
 **Step 2: Run tests to verify they fail**
 
-Run: `cargo test -p gemini-live-wire -- session_handle_implements session_writer_is session_reader_is`
+Run: `cargo test -p gemini-genai-wire -- session_handle_implements session_writer_is session_reader_is`
 Expected: Compilation failure
 
 **Step 3: Implement traits**
@@ -867,7 +867,7 @@ Expected: All pass
 **Step 6: Commit**
 
 ```bash
-git add crates/gemini-live-wire/src/session/mod.rs crates/gemini-live-wire/src/lib.rs crates/gemini-live-wire/Cargo.toml
+git add crates/gemini-genai-wire/src/session/mod.rs crates/gemini-genai-wire/src/lib.rs crates/gemini-genai-wire/Cargo.toml
 git commit -m "feat(wire): add SessionWriter and SessionReader traits"
 ```
 
@@ -876,8 +876,8 @@ git commit -m "feat(wire): add SessionWriter and SessionReader traits"
 ### Task 7: Refactor connection.rs to use Codec + Transport
 
 **Files:**
-- Modify: `crates/gemini-live-wire/src/transport/connection.rs` (the big refactor)
-- Modify: `crates/gemini-live-wire/src/transport/mod.rs` (update connect signature)
+- Modify: `crates/gemini-genai-wire/src/transport/connection.rs` (the big refactor)
+- Modify: `crates/gemini-genai-wire/src/transport/mod.rs` (update connect signature)
 - Test: existing tests + new unit tests using MockTransport
 
 **Step 1: Write failing test with MockTransport**
@@ -941,7 +941,7 @@ Expected: All pass
 **Step 5: Commit**
 
 ```bash
-git add crates/gemini-live-wire/src/transport/connection.rs crates/gemini-live-wire/src/transport/mod.rs
+git add crates/gemini-genai-wire/src/transport/connection.rs crates/gemini-genai-wire/src/transport/mod.rs
 git commit -m "refactor(wire): connection.rs uses Codec + Transport traits"
 ```
 
@@ -950,8 +950,8 @@ git commit -m "refactor(wire): connection.rs uses Codec + Transport traits"
 ### Task 8: Update runtime AgentSession to use SessionWriter trait
 
 **Files:**
-- Modify: `crates/gemini-live-runtime/src/agent_session.rs:39-47` (AgentSession struct)
-- Test: `crates/gemini-live-runtime/src/agent_session.rs` (existing tests)
+- Modify: `crates/gemini-genai-runtime/src/agent_session.rs:39-47` (AgentSession struct)
+- Test: `crates/gemini-genai-runtime/src/agent_session.rs` (existing tests)
 
 **Step 1: Write failing test**
 
@@ -1003,7 +1003,7 @@ Expected: All pass
 **Step 5: Commit**
 
 ```bash
-git add crates/gemini-live-runtime/src/agent_session.rs
+git add crates/gemini-genai-runtime/src/agent_session.rs
 git commit -m "refactor(runtime): AgentSession uses Arc<dyn SessionWriter>"
 ```
 
@@ -1014,10 +1014,10 @@ git commit -m "refactor(runtime): AgentSession uses Arc<dyn SessionWriter>"
 ### Task 9: AuthProvider trait and built-in implementations
 
 **Files:**
-- Create: `crates/gemini-live-wire/src/transport/auth.rs`
-- Modify: `crates/gemini-live-wire/src/transport/mod.rs`
-- Modify: `crates/gemini-live-wire/src/transport/connection.rs` (use AuthProvider)
-- Test: `crates/gemini-live-wire/src/transport/auth.rs`
+- Create: `crates/gemini-genai-wire/src/transport/auth.rs`
+- Modify: `crates/gemini-genai-wire/src/transport/mod.rs`
+- Modify: `crates/gemini-genai-wire/src/transport/connection.rs` (use AuthProvider)
+- Test: `crates/gemini-genai-wire/src/transport/auth.rs`
 
 **Step 1: Write failing tests**
 
@@ -1072,7 +1072,7 @@ mod tests {
 
 **Step 2: Run tests to verify they fail**
 
-Run: `cargo test -p gemini-live-wire -- google_ai_auth vertex_ai_auth`
+Run: `cargo test -p gemini-genai-wire -- google_ai_auth vertex_ai_auth`
 Expected: Compilation failure
 
 **Step 3: Implement AuthProvider trait**
@@ -1117,7 +1117,7 @@ Expected: All pass
 **Step 5: Commit**
 
 ```bash
-git add crates/gemini-live-wire/src/transport/auth.rs crates/gemini-live-wire/src/transport/mod.rs
+git add crates/gemini-genai-wire/src/transport/auth.rs crates/gemini-genai-wire/src/transport/mod.rs
 git commit -m "feat(wire): add AuthProvider trait with GoogleAI/VertexAI implementations"
 ```
 
@@ -1126,9 +1126,9 @@ git commit -m "feat(wire): add AuthProvider trait with GoogleAI/VertexAI impleme
 ### Task 10: Platform abstraction
 
 **Files:**
-- Create: `crates/gemini-live-wire/src/protocol/platform.rs`
-- Modify: `crates/gemini-live-wire/src/protocol/mod.rs`
-- Test: `crates/gemini-live-wire/src/protocol/platform.rs`
+- Create: `crates/gemini-genai-wire/src/protocol/platform.rs`
+- Modify: `crates/gemini-genai-wire/src/protocol/mod.rs`
+- Test: `crates/gemini-genai-wire/src/protocol/platform.rs`
 
 **Step 1: Write failing tests**
 
@@ -1240,7 +1240,7 @@ Run: `cargo test --workspace`
 **Step 5: Commit**
 
 ```bash
-git add crates/gemini-live-wire/src/protocol/platform.rs crates/gemini-live-wire/src/protocol/mod.rs
+git add crates/gemini-genai-wire/src/protocol/platform.rs crates/gemini-genai-wire/src/protocol/mod.rs
 git commit -m "feat(wire): add Platform abstraction for Google AI / Vertex AI URL logic"
 ```
 
@@ -1249,8 +1249,8 @@ git commit -m "feat(wire): add Platform abstraction for Google AI / Vertex AI UR
 ### Task 11: ToolProvider trait
 
 **Files:**
-- Add trait to: `crates/gemini-live-wire/src/protocol/types.rs`
-- Modify: `crates/gemini-live-runtime/src/tool.rs:169-192` (implement for ToolDispatcher)
+- Add trait to: `crates/gemini-genai-wire/src/protocol/types.rs`
+- Modify: `crates/gemini-genai-runtime/src/tool.rs:169-192` (implement for ToolDispatcher)
 - Test: both crates
 
 **Step 1: Write failing tests**
@@ -1268,7 +1268,7 @@ In runtime `tool.rs` test module:
 ```rust
 #[test]
 fn tool_dispatcher_implements_tool_provider() {
-    fn assert_impl<T: gemini_live_wire::prelude::ToolProvider>() {}
+    fn assert_impl<T: gemini_genai_rs_wire::prelude::ToolProvider>() {}
     assert_impl::<ToolDispatcher>();
 }
 ```
@@ -1293,7 +1293,7 @@ impl ToolProvider for Vec<Tool> {
 
 In runtime `tool.rs`:
 ```rust
-impl gemini_live_wire::prelude::ToolProvider for ToolDispatcher {
+impl gemini_genai_rs_wire::prelude::ToolProvider for ToolDispatcher {
     fn declarations(&self) -> Vec<Tool> {
         self.to_tool_declarations()
     }
@@ -1307,7 +1307,7 @@ Run: `cargo test --workspace`
 **Step 5: Commit**
 
 ```bash
-git add crates/gemini-live-wire/src/protocol/types.rs crates/gemini-live-runtime/src/tool.rs
+git add crates/gemini-genai-wire/src/protocol/types.rs crates/gemini-genai-runtime/src/tool.rs
 git commit -m "feat(wire): add ToolProvider trait, implement for Vec<Tool> and ToolDispatcher"
 ```
 
@@ -1316,9 +1316,9 @@ git commit -m "feat(wire): add ToolProvider trait, implement for Vec<Tool> and T
 ### Task 12: ConnectBuilder for advanced configuration
 
 **Files:**
-- Create: `crates/gemini-live-wire/src/transport/builder.rs`
-- Modify: `crates/gemini-live-wire/src/transport/mod.rs`
-- Test: `crates/gemini-live-wire/src/transport/builder.rs`
+- Create: `crates/gemini-genai-wire/src/transport/builder.rs`
+- Modify: `crates/gemini-genai-wire/src/transport/mod.rs`
+- Test: `crates/gemini-genai-wire/src/transport/builder.rs`
 
 **Step 1: Write failing tests**
 
@@ -1378,7 +1378,7 @@ Run: `cargo test --workspace`
 **Step 4: Commit**
 
 ```bash
-git add crates/gemini-live-wire/src/transport/builder.rs crates/gemini-live-wire/src/transport/mod.rs
+git add crates/gemini-genai-wire/src/transport/builder.rs crates/gemini-genai-wire/src/transport/mod.rs
 git commit -m "feat(wire): add ConnectBuilder for advanced transport/codec configuration"
 ```
 
@@ -1387,8 +1387,8 @@ git commit -m "feat(wire): add ConnectBuilder for advanced transport/codec confi
 ### Task 13: Update prelude and integration test
 
 **Files:**
-- Modify: `crates/gemini-live-wire/src/lib.rs` (prelude additions)
-- Modify: `crates/gemini-live-wire/src/transport/mod.rs`
+- Modify: `crates/gemini-genai-wire/src/lib.rs` (prelude additions)
+- Modify: `crates/gemini-genai-wire/src/transport/mod.rs`
 - Test: integration test verifying all exports
 
 **Step 1: Write integration test**
@@ -1397,24 +1397,24 @@ git commit -m "feat(wire): add ConnectBuilder for advanced transport/codec confi
 #[test]
 fn prelude_exports_all_new_types() {
     // Traits
-    fn _codec<T: gemini_live_wire::prelude::Codec>() {}
-    fn _transport<T: gemini_live_wire::prelude::Transport>() {}
-    fn _writer<T: gemini_live_wire::prelude::SessionWriter>() {}
-    fn _reader<T: gemini_live_wire::prelude::SessionReader>() {}
-    fn _tool_provider<T: gemini_live_wire::prelude::ToolProvider>() {}
+    fn _codec<T: gemini_genai_rs_wire::prelude::Codec>() {}
+    fn _transport<T: gemini_genai_rs_wire::prelude::Transport>() {}
+    fn _writer<T: gemini_genai_rs_wire::prelude::SessionWriter>() {}
+    fn _reader<T: gemini_genai_rs_wire::prelude::SessionReader>() {}
+    fn _tool_provider<T: gemini_genai_rs_wire::prelude::ToolProvider>() {}
 
     // Implementations
-    let _ = gemini_live_wire::prelude::JsonCodec;
+    let _ = gemini_genai_rs_wire::prelude::JsonCodec;
 
     // Error types
-    fn _err1(_: gemini_live_wire::prelude::WebSocketError) {}
-    fn _err2(_: gemini_live_wire::prelude::SetupError) {}
-    fn _err3(_: gemini_live_wire::prelude::AuthError) {}
-    fn _err4(_: gemini_live_wire::prelude::CodecError) {}
+    fn _err1(_: gemini_genai_rs_wire::prelude::WebSocketError) {}
+    fn _err2(_: gemini_genai_rs_wire::prelude::SetupError) {}
+    fn _err3(_: gemini_genai_rs_wire::prelude::AuthError) {}
+    fn _err4(_: gemini_genai_rs_wire::prelude::CodecError) {}
 
     // Builders
-    fn _role(_: gemini_live_wire::prelude::Role) {}
-    fn _platform(_: gemini_live_wire::prelude::Platform) {}
+    fn _role(_: gemini_genai_rs_wire::prelude::Role) {}
+    fn _platform(_: gemini_genai_rs_wire::prelude::Platform) {}
 }
 ```
 
@@ -1445,7 +1445,7 @@ Expected: All pass — full integration verified
 **Step 4: Commit**
 
 ```bash
-git add crates/gemini-live-wire/src/lib.rs
+git add crates/gemini-genai-wire/src/lib.rs
 git commit -m "feat(wire): update prelude with all new trait and type exports"
 ```
 
@@ -1470,7 +1470,7 @@ Expected: Clean documentation build
 
 **Step 4: Verify examples compile**
 
-Run: `cargo build --examples -p gemini-live-wire`
+Run: `cargo build --examples -p gemini-genai-wire`
 Expected: All examples compile
 
 **Step 5: Commit any final fixes**

@@ -128,9 +128,9 @@ name = "30-production-pipeline"
 path = "src/30_production_pipeline.rs"
 
 [dependencies]
-gemini-adk-fluent = { workspace = true }
-gemini-adk        = { workspace = true }
-gemini-live       = { workspace = true }
+gemini-adk-fluent-rs = { workspace = true }
+gemini-adk-rs        = { workspace = true }
+gemini-genai-rs       = { workspace = true }
 tokio         = { version = "1", features = ["full"] }
 async-trait   = "0.1"
 schemars      = "0.8"

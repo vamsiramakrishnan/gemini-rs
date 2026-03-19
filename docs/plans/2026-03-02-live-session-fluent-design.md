@@ -62,14 +62,14 @@ struct SharedLiveState {
 
 ## Crate Distribution
 
-### L0 (gemini-live) — Wire primitives
+### L0 (gemini-genai-rs) — Wire primitives
 
 Add to `SessionHandle` / `SessionWriter`:
 - `send_video(jpeg_bytes)` — `realtime_input` with `image/jpeg`
 - `update_instruction(text)` — `client_content` with `role: system`
 - `compact()` — context compression trigger
 
-### L1 (gemini-adk) — Runtime
+### L1 (gemini-adk-rs) — Runtime
 
 New types:
 - `EventCallbacks` — typed callback registry (sync + async)
@@ -78,7 +78,7 @@ New types:
 - `FastLaneConsumer` — task for sync event callbacks
 - `ControlLaneProcessor` — task for async event callbacks + tool dispatch
 
-### L2 (gemini-adk-fluent) — Fluent sugar
+### L2 (gemini-adk-fluent-rs) — Fluent sugar
 
 New type:
 - `Live::builder()` — fluent wrapper over `LiveSessionBuilder`

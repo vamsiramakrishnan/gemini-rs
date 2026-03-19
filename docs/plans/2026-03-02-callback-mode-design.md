@@ -2,8 +2,8 @@
 
 **Date**: 2026-03-02
 **Status**: Design RFC
-**Scope**: `gemini-adk` (L1) callback execution model, `gemini-adk-fluent` (L2) ergonomic surface
-**No changes to**: `gemini-live` (L0) — already maximally flexible via raw broadcast channel
+**Scope**: `gemini-adk-rs` (L1) callback execution model, `gemini-adk-fluent-rs` (L2) ergonomic surface
+**No changes to**: `gemini-genai-rs` (L0) — already maximally flexible via raw broadcast channel
 
 ---
 
@@ -43,7 +43,7 @@ Understanding where blocking actually hurts requires tracing every data path:
  │  send_audio() ─────┼──→ command_tx ──→  │  ← user audio     │
  │  send_text()  ─────┼──→ command_tx ──→  │  ← user text      │
  │                    │                    │                   │
- │                    │    gemini-live        │                   │
+ │                    │    gemini-genai-rs        │                   │
  │                    │    connection      │                   │
  │                    │    loop            │                   │
  │                    │   (tokio::select!) │                   │
@@ -54,7 +54,7 @@ Understanding where blocking actually hurts requires tracing every data path:
  │                    │       │            │  → turn complete   │
  │                    │       ▼            │                   │
  │              ┌─────┼──────────────┐     │                   │
- │              │  gemini-adk processor  │     │                   │
+ │              │  gemini-adk-rs processor  │     │                   │
  │              │  ┌──────────────┐  │     │                   │
  │              │  │  Router task │  │     │                   │
  │              │  └──┬───────┬──┘  │     │                   │
@@ -760,21 +760,21 @@ Concurrent.
 
 | Layer | Change | Description |
 |-------|--------|-------------|
-| `gemini-live` | None | Raw broadcast channel. Maximum flexibility already. |
-| `gemini-adk/callbacks.rs` | Medium | Add `CallbackMode` enum. Change all callback fields to `(handler, mode)` tuples. Add forced-mode validation. |
-| `gemini-adk/processor.rs` | Medium | Replace hard-coded lane behavior with mode-aware dispatch. Add timeout guard for blocking fast-lane. Add semaphore for concurrent task pressure. |
-| `gemini-adk-fluent/live.rs` | Small | Add `_blocking()` / `_concurrent()` variants per callback. Undecorated name uses recommended default. |
+| `gemini-genai-rs` | None | Raw broadcast channel. Maximum flexibility already. |
+| `gemini-adk-rs/callbacks.rs` | Medium | Add `CallbackMode` enum. Change all callback fields to `(handler, mode)` tuples. Add forced-mode validation. |
+| `gemini-adk-rs/processor.rs` | Medium | Replace hard-coded lane behavior with mode-aware dispatch. Add timeout guard for blocking fast-lane. Add semaphore for concurrent task pressure. |
+| `gemini-adk-fluent-rs/live.rs` | Small | Add `_blocking()` / `_concurrent()` variants per callback. Undecorated name uses recommended default. |
 | Tests | Small | Existing tests pass (sync callbacks = Concurrent, same as before). Add mode-switching tests. |
 
 ### 7.2 Non-Blocking Tool Call Changes
 
 | Layer | Change | Description |
 |-------|--------|-------------|
-| `gemini-live` | None | Wire types (`FunctionCallingBehavior`, `ToolConfig`) already complete. |
-| `gemini-adk/tool.rs` | Medium | Add `ToolExecutionMode` enum, `ResultFormatter` trait, `register_function_with_mode()`. Track background tools in `ActiveStreamingTool` map for cancellation. |
-| `gemini-adk/processor.rs` | Medium | In `ControlEvent::ToolCall` handler, check tool mode. For `Background`: send ack via formatter, spawn tool, wire cancellation. For `Standard`: unchanged. |
-| `gemini-adk/callbacks.rs` | Small | Add optional `before_tool_ack` interceptor for customizing acknowledgments. |
-| `gemini-adk-fluent/live.rs` | Small | Add `.tool_behavior()`, `.tool_background()`, `.tool_background_with_formatter()`. |
+| `gemini-genai-rs` | None | Wire types (`FunctionCallingBehavior`, `ToolConfig`) already complete. |
+| `gemini-adk-rs/tool.rs` | Medium | Add `ToolExecutionMode` enum, `ResultFormatter` trait, `register_function_with_mode()`. Track background tools in `ActiveStreamingTool` map for cancellation. |
+| `gemini-adk-rs/processor.rs` | Medium | In `ControlEvent::ToolCall` handler, check tool mode. For `Background`: send ack via formatter, spawn tool, wire cancellation. For `Standard`: unchanged. |
+| `gemini-adk-rs/callbacks.rs` | Small | Add optional `before_tool_ack` interceptor for customizing acknowledgments. |
+| `gemini-adk-fluent-rs/live.rs` | Small | Add `.tool_behavior()`, `.tool_background()`, `.tool_background_with_formatter()`. |
 | Tests | Medium | Test background dispatch, cancellation, formatter, mixed Standard+Background in same session. |
 
 ### Migration
@@ -814,10 +814,10 @@ These two axes are orthogonal and compose independently:
 
 ### 8.1 What the Gemini API Provides
 
-The wire format already supports this via `FunctionCallingBehavior` in gemini-live:
+The wire format already supports this via `FunctionCallingBehavior` in gemini-genai-rs:
 
 ```rust
-// gemini-live/src/protocol/types.rs (already implemented)
+// gemini-genai-rs/src/protocol/types.rs (already implemented)
 pub enum FunctionCallingBehavior {
     /// Model waits for tool response before continuing output.
     #[default]
@@ -973,7 +973,7 @@ session are either blocking or non-blocking. But real applications mix both:
 - `search_knowledge_base` → Non-blocking (1-5s, model can say "let me look that up")
 - `set_reminder` → Blocking (model should confirm "reminder set" immediately after)
 
-This requires **per-tool behavior** at the gemini-adk layer, even if Gemini only supports
+This requires **per-tool behavior** at the gemini-adk-rs layer, even if Gemini only supports
 session-level configuration today:
 
 ```rust
@@ -1236,8 +1236,8 @@ The full matrix of how these three axes compose:
 
 ```
 Gemini Session Behavior:  BLOCKING or NON_BLOCKING (wire-level, setup time)
-Tool Execution Mode:      Standard or Background   (per-tool, gemini-adk level)
-Callback Mode:            Blocking or Concurrent    (per-callback, gemini-adk level)
+Tool Execution Mode:      Standard or Background   (per-tool, gemini-adk-rs level)
+Callback Mode:            Blocking or Concurrent    (per-callback, gemini-adk-rs level)
 ```
 
 | Gemini | Tool | on_tool_call CB | Behavior |
@@ -1267,16 +1267,16 @@ gold standard for voice UX with tool use.**
 
 | Component | Layer | Status |
 |-----------|-------|--------|
-| `FunctionCallingBehavior` enum | gemini-live (wire) | Done |
-| `FunctionCallingConfig.behavior` field | gemini-live (wire) | Done |
-| `ToolConfig` serialization in setup | gemini-live (wire) | Done |
-| `ToolCallCancellation` message parsing | gemini-live (wire) | Done |
-| `ToolExecutionMode` per-tool enum | gemini-adk (runtime) | Not implemented |
-| `ResultFormatter` trait | gemini-adk (runtime) | Not implemented |
-| Background tool dispatch in processor | gemini-adk (runtime) | Not implemented |
-| `register_function_with_mode()` on dispatcher | gemini-adk (runtime) | Not implemented |
-| `.tool_behavior()` on Live builder | gemini-adk-fluent (DX) | Not implemented |
-| Per-tool `.with_mode(Background)` in fluent | gemini-adk-fluent (DX) | Not implemented |
+| `FunctionCallingBehavior` enum | gemini-genai-rs (wire) | Done |
+| `FunctionCallingConfig.behavior` field | gemini-genai-rs (wire) | Done |
+| `ToolConfig` serialization in setup | gemini-genai-rs (wire) | Done |
+| `ToolCallCancellation` message parsing | gemini-genai-rs (wire) | Done |
+| `ToolExecutionMode` per-tool enum | gemini-adk-rs (runtime) | Not implemented |
+| `ResultFormatter` trait | gemini-adk-rs (runtime) | Not implemented |
+| Background tool dispatch in processor | gemini-adk-rs (runtime) | Not implemented |
+| `register_function_with_mode()` on dispatcher | gemini-adk-rs (runtime) | Not implemented |
+| `.tool_behavior()` on Live builder | gemini-adk-fluent-rs (DX) | Not implemented |
+| Per-tool `.with_mode(Background)` in fluent | gemini-adk-fluent-rs (DX) | Not implemented |
 
 The wire protocol is complete. The runtime and fluent layers need the dispatch
 logic, formatter trait, per-tool mode configuration, and the background spawn +

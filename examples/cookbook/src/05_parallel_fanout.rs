@@ -9,7 +9,7 @@
 //! - `fan_out_merge()` — pre-built pattern: fan out then merge with a reducer
 //! - Combining `|` with `>>` for complex topologies
 
-use gemini_adk_fluent::prelude::*;
+use gemini_adk_fluent_rs::prelude::*;
 
 fn main() {
     println!("=== 05: Parallel Fan-Out (|) ===\n");

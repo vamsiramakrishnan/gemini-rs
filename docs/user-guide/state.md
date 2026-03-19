@@ -8,7 +8,7 @@ on read, giving you type safety without a rigid schema.
 ## Reading and Writing
 
 ```rust,ignore
-use gemini_adk::State;
+use gemini_adk_rs::State;
 
 let state = State::new();
 
@@ -140,7 +140,7 @@ For keys used in multiple places, define a `StateKey<T>` constant to eliminate
 string typos and enforce type consistency at compile time:
 
 ```rust,ignore
-use gemini_adk::state::StateKey;
+use gemini_adk_rs::state::StateKey;
 
 const TURN_COUNT: StateKey<u32> = StateKey::new("session:turn_count");
 const SENTIMENT: StateKey<f64> = StateKey::new("derived:sentiment_score");

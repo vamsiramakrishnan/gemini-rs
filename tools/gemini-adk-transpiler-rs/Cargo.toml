@@ -1,0 +1,20 @@
+[package]
+name = "gemini-adk-transpiler-rs"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Extracts agent definitions from ADK-JS TypeScript source for Rust codegen"
+
+[[bin]]
+name = "gemini-adk-transpiler-rs"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive"] }
+regex = "1"
+walkdir = "2"
+
+[lints]
+workspace = true

@@ -10,9 +10,9 @@ body:
     attributes:
       label: Target Crate
       options:
-        - gemini-live (L0 — wire protocol)
-        - gemini-adk (L1 — agent runtime)
-        - gemini-adk-fluent (L2 — fluent DX)
+        - gemini-genai-rs (L0 — wire protocol)
+        - gemini-adk-rs (L1 — agent runtime)
+        - gemini-adk-fluent-rs (L2 — fluent DX)
         - examples
         - New crate / cross-cutting
     validations:

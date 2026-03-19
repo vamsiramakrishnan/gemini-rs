@@ -2,9 +2,9 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Ship two new crates — `adk-devtools` (library) and `gemini-adk-cli` (binary) — providing `adk web` and `adk run` commands with a binary-multiplexed WebSocket protocol and embedded dev UI.
+**Goal:** Ship two new crates — `adk-devtools` (library) and `gemini-adk-cli-rs` (binary) — providing `adk web` and `adk run` commands with a binary-multiplexed WebSocket protocol and embedded dev UI.
 
-**Architecture:** `adk-devtools` is a library crate with protocol types, Axum DevServer, terminal REPL, and embedded vanilla JS/CSS dev UI. `gemini-adk-cli` is a thin binary wrapping `cargo run` with env vars. The protocol uses binary WebSocket frames for audio and JSON text frames for control/devtools channels.
+**Architecture:** `adk-devtools` is a library crate with protocol types, Axum DevServer, terminal REPL, and embedded vanilla JS/CSS dev UI. `gemini-adk-cli-rs` is a thin binary wrapping `cargo run` with env vars. The protocol uses binary WebSocket frames for audio and JSON text frames for control/devtools channels.
 
 **Tech Stack:** Axum 0.8, clap 4, rust-embed 8, rustyline 15, serde_json, tokio, vanilla JS/CSS.
 
@@ -32,9 +32,9 @@ repository.workspace = true
 description = "Dev tools, CLI, and dev UI for gemini-rs agents"
 
 [dependencies]
-gemini-adk-fluent = { path = "../gemini-adk-fluent" }
-gemini-adk = { path = "../gemini-adk" }
-gemini-live = { path = "../gemini-live" }
+gemini-adk-fluent-rs = { path = "../gemini-adk-fluent-rs" }
+gemini-adk-rs = { path = "../gemini-adk-rs" }
+gemini-genai-rs = { path = "../gemini-genai-rs" }
 axum = { version = "0.8", features = ["ws"] }
 tokio = { version = "1", features = ["full"] }
 rust-embed = "8"
@@ -248,7 +248,7 @@ The agent registry holds `AgentDescriptor` instances. Each descriptor has metada
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use gemini_adk_fluent::live::Live;
+use gemini_adk_fluent_rs::live::Live;
 
 use crate::protocol::AgentInfo;
 
@@ -395,7 +395,7 @@ This is the core server. It serves the embedded UI, lists agents via JSON, and h
 
 **Step 1: Create `crates/adk-devtools/src/server.rs`**
 
-Reference the existing demo patterns from `apps/gemini-adk-web/src/main.rs` and `apps/gemini-adk-web/src/ws_handler.rs`, but with the binary protocol.
+Reference the existing demo patterns from `apps/gemini-adk-web-rs/src/main.rs` and `apps/gemini-adk-web-rs/src/ws_handler.rs`, but with the binary protocol.
 
 ```rust
 //! Axum-based dev server with embedded UI and binary WebSocket protocol.
@@ -617,8 +617,8 @@ use serde_json::json;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
-use gemini_adk::live::LiveHandle;
-use gemini_live::prelude::*;
+use gemini_adk_rs::live::LiveHandle;
+use gemini_genai_rs::prelude::*;
 
 use crate::protocol::*;
 use crate::registry::AgentRegistry;
@@ -867,7 +867,7 @@ pub use crate::registry::{AgentCategory, AgentDescriptor, AgentRegistry, Feature
 pub use crate::protocol::AgentInfo;
 
 // Re-export L2 fluent API
-pub use gemini_adk_fluent::prelude::*;
+pub use gemini_adk_fluent_rs::prelude::*;
 ```
 
 **Step 2: Add `run()` to `lib.rs`**
@@ -1099,9 +1099,9 @@ git commit -m "feat(adk-devtools): add interactive text REPL (adk run)"
 This is the biggest task. The UI has three panels: agent sidebar, conversation, and devtools.
 
 **Reference files:**
-- `apps/gemini-adk-web/static/js/app.js` — reuse WebSocket lifecycle, upgrade to binary protocol
-- `apps/gemini-adk-web/static/js/audio.js` — reuse recording/playback, upgrade to AudioWorklet + binary frames
-- `apps/gemini-adk-web/static/js/devtools.js` — reuse state grouping, event logging, telemetry
+- `apps/gemini-adk-web-rs/static/js/app.js` — reuse WebSocket lifecycle, upgrade to binary protocol
+- `apps/gemini-adk-web-rs/static/js/audio.js` — reuse recording/playback, upgrade to AudioWorklet + binary frames
+- `apps/gemini-adk-web-rs/static/js/devtools.js` — reuse state grouping, event logging, telemetry
 
 **Key differences from Web UI:**
 
@@ -1140,7 +1140,7 @@ Main app class:
 
 **Step 6: Create `ui/devtools.js`**
 
-Devtools panel manager — reuse and refactor from `apps/gemini-adk-web/static/js/devtools.js`:
+Devtools panel manager — reuse and refactor from `apps/gemini-adk-web-rs/static/js/devtools.js`:
 - State tab: grouped by prefix, highlights on change
 - Events tab: chronological log
 - Phases tab: timeline visualization
@@ -1162,18 +1162,18 @@ git commit -m "feat(adk-devtools): add embedded dev UI with binary WebSocket pro
 
 ---
 
-## Task 8: Scaffold `gemini-adk-cli` binary crate
+## Task 8: Scaffold `gemini-adk-cli-rs` binary crate
 
 **Files:**
-- Create: `tools/gemini-adk-cli/Cargo.toml`
-- Create: `tools/gemini-adk-cli/src/main.rs`
+- Create: `tools/gemini-adk-cli-rs/Cargo.toml`
+- Create: `tools/gemini-adk-cli-rs/src/main.rs`
 - Modify: `Cargo.toml` (workspace members)
 
-**Step 1: Create `tools/gemini-adk-cli/Cargo.toml`**
+**Step 1: Create `tools/gemini-adk-cli-rs/Cargo.toml`**
 
 ```toml
 [package]
-name = "gemini-adk-cli"
+name = "gemini-adk-cli-rs"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
@@ -1188,7 +1188,7 @@ path = "src/main.rs"
 clap = { version = "4", features = ["derive"] }
 ```
 
-**Step 2: Create `tools/gemini-adk-cli/src/main.rs`**
+**Step 2: Create `tools/gemini-adk-cli-rs/src/main.rs`**
 
 ```rust
 //! `adk` CLI — thin wrapper that sets env vars and runs `cargo run`.
@@ -1259,19 +1259,19 @@ fn main() {
 
 **Step 3: Add to workspace**
 
-Add `"tools/gemini-adk-cli"` to the workspace members.
+Add `"tools/gemini-adk-cli-rs"` to the workspace members.
 
 **Step 4: Verify**
 
-Run: `cargo check -p gemini-adk-cli`
-Run: `cargo run -p gemini-adk-cli -- --help`
+Run: `cargo check -p gemini-adk-cli-rs`
+Run: `cargo run -p gemini-adk-cli-rs -- --help`
 Expected: Shows help with `web` and `run` subcommands.
 
 **Step 5: Commit**
 
 ```bash
-git add tools/gemini-adk-cli/ Cargo.toml
-git commit -m "feat(gemini-adk-cli): scaffold CLI binary with web and run subcommands"
+git add tools/gemini-adk-cli-rs/ Cargo.toml
+git commit -m "feat(gemini-adk-cli-rs): scaffold CLI binary with web and run subcommands"
 ```
 
 ---
@@ -1329,7 +1329,7 @@ fn registry_register_and_list() {
         category: AgentCategory::Basic,
         features: vec![Feature::Voice],
         factory: std::sync::Arc::new(|| {
-            gemini_adk_fluent::live::Live::builder()
+            gemini_adk_fluent_rs::live::Live::builder()
         }),
     });
 
@@ -1437,7 +1437,7 @@ git commit -m "docs(adk-devtools): add doc comments, verify CI compliance"
 | 5 | `run()` entry point + prelude | `lib.rs`, `prelude.rs` |
 | 6 | Interactive text REPL | `repl.rs` |
 | 7 | Dev UI (vanilla JS/CSS) | `ui/index.html`, `app.js`, `audio.js`, `devtools.js` |
-| 8 | `adk` CLI binary | `tools/gemini-adk-cli/` |
+| 8 | `adk` CLI binary | `tools/gemini-adk-cli-rs/` |
 | 9 | Smoke tests + example | `tests/smoke.rs`, `examples/basic.rs` |
 | 10 | Docs, CI, final verification | Doc comments, CI check |
 

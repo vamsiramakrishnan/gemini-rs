@@ -13,7 +13,7 @@
 //!
 //! This example models a loan application processing pipeline.
 
-use gemini_adk_fluent::prelude::*;
+use gemini_adk_fluent_rs::prelude::*;
 #[allow(unused_imports)]
 use serde_json::json;
 use std::sync::Arc;
@@ -30,8 +30,8 @@ impl BaseLlm for MockLlm {
     }
     async fn generate(
         &self,
-        req: gemini_adk::llm::LlmRequest,
-    ) -> Result<gemini_adk::llm::LlmResponse, gemini_adk::llm::LlmError> {
+        req: gemini_adk_rs::llm::LlmRequest,
+    ) -> Result<gemini_adk_rs::llm::LlmResponse, gemini_adk_rs::llm::LlmError> {
         let instruction = req.system_instruction.unwrap_or_default();
         let response = if instruction.contains("risk") {
             json!({
@@ -46,10 +46,10 @@ impl BaseLlm for MockLlm {
         } else {
             format!("[{}]", instruction.chars().take(50).collect::<String>())
         };
-        Ok(gemini_adk::llm::LlmResponse {
-            content: gemini_live::prelude::Content {
-                role: Some(gemini_live::prelude::Role::Model),
-                parts: vec![gemini_live::prelude::Part::Text { text: response }],
+        Ok(gemini_adk_rs::llm::LlmResponse {
+            content: gemini_genai_rs::prelude::Content {
+                role: Some(gemini_genai_rs::prelude::Role::Model),
+                parts: vec![gemini_genai_rs::prelude::Part::Text { text: response }],
             },
             finish_reason: Some("STOP".into()),
             usage: None,

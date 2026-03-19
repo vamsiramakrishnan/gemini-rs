@@ -79,7 +79,7 @@ These constraints dictate architecture:
 
 These primitives exist at every layer of the stack:
 
-| Primitive | L0 (gemini-live) | L1 (gemini-adk) | L2 (gemini-adk-fluent) |
+| Primitive | L0 (gemini-genai-rs) | L1 (gemini-adk-rs) | L2 (gemini-adk-fluent-rs) |
 |-----------|---------------|-------------|---------------------|
 | **S** | `SessionConfig`, `SessionPhase`, `Turn` | `State`, `PrefixedState`, `ComputedVar`, `WatcherRegistry` | `.watch()`, `.computed()`, `S::` module |
 | **C** | `Content`, `Part`, `Role`, context compression | `TranscriptBuffer`, `InvocationContext` | `.extract_turns()`, `C::` module |
@@ -101,12 +101,12 @@ in the framework, not in the developer's code.
 
 ### 1.1 Current Architecture
 
-**L0 (gemini-live)**: State is implicit. `SessionConfig` is consumed at connection
+**L0 (gemini-genai-rs)**: State is implicit. `SessionConfig` is consumed at connection
 time and becomes immutable. Runtime state lives in `SessionState` (turn history,
 phase FSM) behind `Arc<Mutex<>>`. The session phase (`SessionPhase`) is a
 validated FSM with transitions like `Active → ToolCallPending → ToolCallExecuting`.
 
-**L1 (gemini-adk)**: `State` is a `DashMap<String, Value>` with typed get/set and
+**L1 (gemini-adk-rs)**: `State` is a `DashMap<String, Value>` with typed get/set and
 prefix-based namespacing:
 
 ```rust
@@ -127,7 +127,7 @@ Additional L1 state subsystems:
 - `SessionSignals`: Auto-populates `session:*` keys from events
 - `PhaseMachine`: Stores current phase at `session:phase`, tracks history
 
-**L2 (gemini-adk-fluent)**: Fluent builders expose state through closures:
+**L2 (gemini-adk-fluent-rs)**: Fluent builders expose state through closures:
 
 ```rust
 .computed("total", &["items"], |state| { ... })
@@ -367,7 +367,7 @@ a different `SignalProvider` trait could map their events to the same keys.
 
 ### 2.1 Current Architecture
 
-**L0 (gemini-live)**: Context is modeled as `Content` (role + parts) and `Part`
+**L0 (gemini-genai-rs)**: Context is modeled as `Content` (role + parts) and `Part`
 (text, inline data, function calls, etc.). The session maintains a turn history
 in `SessionState`. Context window management is handled via
 `ContextWindowCompressionConfig` (trigger/target token thresholds) and session
@@ -385,7 +385,7 @@ Content injection methods:
 - `update_instruction(text)` — update system instruction mid-session
 - `send_text(text)` — send user text
 
-**L1 (gemini-adk)**: `TranscriptBuffer` accumulates input/output transcripts and
+**L1 (gemini-adk-rs)**: `TranscriptBuffer` accumulates input/output transcripts and
 segments them into turns. It provides windowed access for extractors:
 
 ```rust
@@ -401,7 +401,7 @@ fn format_window(&self, n: usize) -> String       // formatted for LLM prompts
 
 `InvocationContext` wraps session, state, and event data for agent execution.
 
-**L2 (gemini-adk-fluent)**: The `C::` composition module provides context engineering:
+**L2 (gemini-adk-fluent-rs)**: The `C::` composition module provides context engineering:
 
 ```rust
 C::window(10)          // Last N messages
@@ -550,7 +550,7 @@ This keeps the abstraction minimal while allowing LLM-specific optimizations.
 
 ### 3.1 Current Architecture
 
-**L0 (gemini-live)**: Tools are declared via `FunctionDeclaration` (name, description,
+**L0 (gemini-genai-rs)**: Tools are declared via `FunctionDeclaration` (name, description,
 JSON Schema parameters) and grouped in `Tool` containers. The model emits
 `FunctionCall` events; the user responds with `FunctionResponse`.
 
@@ -563,7 +563,7 @@ Tool::functions(vec![
 Control: `ToolConfig` with `FunctionCallingMode` (Auto/Any/None) and
 `FunctionCallingBehavior` (Blocking/NonBlocking).
 
-**L1 (gemini-adk)**: `ToolDispatcher` routes `FunctionCall`s to `ToolFunction`
+**L1 (gemini-adk-rs)**: `ToolDispatcher` routes `FunctionCall`s to `ToolFunction`
 implementations. Three tool types:
 
 ```rust
@@ -580,7 +580,7 @@ trait InputStreamingTool: Send + Sync { ... } // Receives live input
 `BackgroundToolTracker` manages in-flight background tool executions with
 cancellation support.
 
-**L2 (gemini-adk-fluent)**: Tool registration through builder methods:
+**L2 (gemini-adk-fluent-rs)**: Tool registration through builder methods:
 
 ```rust
 .tools(dispatcher)                              // Full ToolDispatcher
@@ -723,11 +723,11 @@ cycle, tool dispatching, timeout management.
 
 ### 4.1 Current Architecture
 
-**L0 (gemini-live)**: System instruction set once via `SessionConfig::system_instruction()`.
+**L0 (gemini-genai-rs)**: System instruction set once via `SessionConfig::system_instruction()`.
 Can be updated mid-session via `SessionCommand::UpdateInstruction`. Generation
 parameters (temperature, top_p, etc.) set at config time.
 
-**L1 (gemini-adk)**: Three instruction mechanisms:
+**L1 (gemini-adk-rs)**: Three instruction mechanisms:
 
 1. **Static instruction**: Set at session config time
 2. **`instruction_template`**: Closure evaluated on every turn, receives `&State`,
@@ -741,7 +741,7 @@ Template interpolation via `inject_session_state()`:
 "Your score: {derived:score?}"                     // Optional keys (omitted if missing)
 ```
 
-**L2 (gemini-adk-fluent)**: Builder methods:
+**L2 (gemini-adk-fluent-rs)**: Builder methods:
 
 ```rust
 .instruction("You are a helpful assistant")
@@ -857,7 +857,7 @@ the instruction to the next user turn instead.
 
 ### 5.1 Current Architecture
 
-**L0 (gemini-live)**: No middleware system. Extension via traits:
+**L0 (gemini-genai-rs)**: No middleware system. Extension via traits:
 - `Transport` — custom WebSocket implementations
 - `Codec` — custom serialization
 - `AuthProvider` — custom authentication
@@ -866,7 +866,7 @@ the instruction to the next user turn instead.
 These are correct for L0 — the wire layer should expose extension points, not
 a middleware chain.
 
-**L1 (gemini-adk)**: `Middleware` trait for agent execution lifecycle:
+**L1 (gemini-adk-rs)**: `Middleware` trait for agent execution lifecycle:
 
 ```rust
 trait Middleware: Send + Sync {
@@ -896,7 +896,7 @@ on_extracted: |name, value| async { ... }
 This creates a **split brain**: middleware for agents, interceptors for Live
 sessions. Same concepts, different APIs.
 
-**L2 (gemini-adk-fluent)**: The `M::` composition module provides middleware primitives:
+**L2 (gemini-adk-fluent-rs)**: The `M::` composition module provides middleware primitives:
 
 ```rust
 M::log()

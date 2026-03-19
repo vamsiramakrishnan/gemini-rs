@@ -17,7 +17,7 @@
 
 use std::sync::Arc;
 
-use gemini_adk_fluent::prelude::*;
+use gemini_adk_fluent_rs::prelude::*;
 
 #[tokio::main]
 async fn main() {

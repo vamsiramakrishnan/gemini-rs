@@ -64,7 +64,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
 # ── Published crates in dependency order ──────────────────────────────────
-PUBLISH_CRATES=("gemini-live" "gemini-adk" "gemini-adk-fluent" "gemini-adk-server" "gemini-adk-cli")
+PUBLISH_CRATES=("gemini-genai-rs" "gemini-adk-rs" "gemini-adk-fluent-rs" "gemini-adk-server-rs" "gemini-adk-cli-rs")
 
 # ── Read current workspace version ────────────────────────────────────────
 CURRENT=$(grep -m1 '^version = "' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
@@ -225,16 +225,16 @@ ${CHANGELOG_BODY}
 
 | Crate | Version | Install |
 |-------|---------|---------|
-| [\`gemini-live\`](https://crates.io/crates/gemini-live) | ${VERSION} | \`cargo add gemini-live@${VERSION}\` |
-| [\`gemini-adk\`](https://crates.io/crates/gemini-adk) | ${VERSION} | \`cargo add gemini-adk@${VERSION}\` |
-| [\`gemini-adk-fluent\`](https://crates.io/crates/gemini-adk-fluent) | ${VERSION} | \`cargo add gemini-adk-fluent@${VERSION}\` |
-| [\`gemini-adk-server\`](https://crates.io/crates/gemini-adk-server) | ${VERSION} | \`cargo add gemini-adk-server@${VERSION}\` |
-| [\`gemini-adk-cli\`](https://crates.io/crates/gemini-adk-cli) | ${VERSION} | \`cargo install gemini-adk-cli@${VERSION}\` |
+| [\`gemini-genai-rs\`](https://crates.io/crates/gemini-genai-rs) | ${VERSION} | \`cargo add gemini-genai-rs@${VERSION}\` |
+| [\`gemini-adk-rs\`](https://crates.io/crates/gemini-adk-rs) | ${VERSION} | \`cargo add gemini-adk-rs@${VERSION}\` |
+| [\`gemini-adk-fluent-rs\`](https://crates.io/crates/gemini-adk-fluent-rs) | ${VERSION} | \`cargo add gemini-adk-fluent-rs@${VERSION}\` |
+| [\`gemini-adk-server-rs\`](https://crates.io/crates/gemini-adk-server-rs) | ${VERSION} | \`cargo add gemini-adk-server-rs@${VERSION}\` |
+| [\`gemini-adk-cli-rs\`](https://crates.io/crates/gemini-adk-cli-rs) | ${VERSION} | \`cargo install gemini-adk-cli-rs@${VERSION}\` |
 
 ### Upgrade
 
 \`\`\`toml
-gemini-adk-fluent = \"${VERSION}\"
+gemini-adk-fluent-rs = \"${VERSION}\"
 \`\`\`
 
 **Full Changelog**: https://github.com/vamsiramakrishnan/gemini-rs/blob/main/CHANGELOG.md"

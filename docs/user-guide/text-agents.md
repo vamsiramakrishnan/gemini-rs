@@ -39,8 +39,8 @@ pub trait TextAgent: Send + Sync {
 `LlmTextAgent` is the workhorse. It calls `BaseLlm::generate()`, dispatches any tool calls the model makes, feeds tool results back, and loops until the model produces a final text response (up to 10 rounds).
 
 ```rust,ignore
-use gemini_adk::text::LlmTextAgent;
-use gemini_adk::llm::GeminiLlm;
+use gemini_adk_rs::text::LlmTextAgent;
+use gemini_adk_rs::llm::GeminiLlm;
 
 let llm = Arc::new(GeminiLlm::new(GeminiModel::Gemini2_0Flash));
 
@@ -62,7 +62,7 @@ println!("{result}");
 When you need a pipeline step that does not call an LLM -- data formatting, validation, state manipulation -- use `FnTextAgent`:
 
 ```rust,ignore
-use gemini_adk::text::FnTextAgent;
+use gemini_adk_rs::text::FnTextAgent;
 
 let formatter = FnTextAgent::new("format_output", |state| {
     let raw = state.get::<String>("input").unwrap_or_default();
@@ -79,7 +79,7 @@ let formatter = FnTextAgent::new("format_output", |state| {
 Each agent's output becomes the next agent's input via `state.set("input", &output)`. The final agent's output is the pipeline result.
 
 ```rust,ignore
-use gemini_adk::text::SequentialTextAgent;
+use gemini_adk_rs::text::SequentialTextAgent;
 
 let pipeline = SequentialTextAgent::new("analysis_pipeline", vec![
     Arc::new(LlmTextAgent::new("extract", llm.clone())
@@ -100,7 +100,7 @@ let summary = pipeline.run(&state).await?;
 All branches execute concurrently via `tokio::spawn`. Results are joined with newlines.
 
 ```rust,ignore
-use gemini_adk::text::ParallelTextAgent;
+use gemini_adk_rs::text::ParallelTextAgent;
 
 let multi_perspective = ParallelTextAgent::new("perspectives", vec![
     Arc::new(LlmTextAgent::new("technical", llm.clone())
@@ -117,7 +117,7 @@ let multi_perspective = ParallelTextAgent::new("perspectives", vec![
 Like `ParallelTextAgent`, but returns only the first result and cancels the rest. Useful for redundancy or trying multiple model configurations:
 
 ```rust,ignore
-use gemini_adk::text::RaceTextAgent;
+use gemini_adk_rs::text::RaceTextAgent;
 
 let fastest = RaceTextAgent::new("race", vec![
     Arc::new(LlmTextAgent::new("fast", fast_llm.clone())
@@ -132,7 +132,7 @@ let fastest = RaceTextAgent::new("race", vec![
 Evaluate predicates against state. First match wins, with a default fallback:
 
 ```rust,ignore
-use gemini_adk::text::{RouteTextAgent, RouteRule};
+use gemini_adk_rs::text::{RouteTextAgent, RouteRule};
 
 let router = RouteTextAgent::new(
     "issue_router",
@@ -155,7 +155,7 @@ let router = RouteTextAgent::new(
 Attempts each candidate in order. Returns the first `Ok` result. If all fail, returns the last error:
 
 ```rust,ignore
-use gemini_adk::text::FallbackTextAgent;
+use gemini_adk_rs::text::FallbackTextAgent;
 
 let robust = FallbackTextAgent::new("robust_lookup", vec![
     Arc::new(primary_agent),
@@ -169,7 +169,7 @@ let robust = FallbackTextAgent::new("robust_lookup", vec![
 Runs the body up to `max` times, optionally breaking early when a state predicate returns `true`:
 
 ```rust,ignore
-use gemini_adk::text::LoopTextAgent;
+use gemini_adk_rs::text::LoopTextAgent;
 
 let refiner = LoopTextAgent::new("refine", Arc::new(draft_agent), 5)
     .until(|state| {
@@ -184,7 +184,7 @@ let refiner = LoopTextAgent::new("refine", Arc::new(draft_agent), 5)
 Reads a list from state, runs the agent once per item, collects results:
 
 ```rust,ignore
-use gemini_adk::text::MapOverTextAgent;
+use gemini_adk_rs::text::MapOverTextAgent;
 
 let processor = MapOverTextAgent::new("process_items", Arc::new(item_agent), "items")
     .item_key("current_item")
@@ -198,7 +198,7 @@ let processor = MapOverTextAgent::new("process_items", Arc::new(item_agent), "it
 For logging, metrics, or debugging. Returns an empty string and does not mutate the pipeline flow:
 
 ```rust,ignore
-use gemini_adk::text::TapTextAgent;
+use gemini_adk_rs::text::TapTextAgent;
 
 let logger = TapTextAgent::new("log_state", |state| {
     let input = state.get::<String>("input").unwrap_or_default();
@@ -211,7 +211,7 @@ let logger = TapTextAgent::new("log_state", |state| {
 Wraps any agent with a deadline. Returns `AgentError::Timeout` if exceeded:
 
 ```rust,ignore
-use gemini_adk::text::TimeoutTextAgent;
+use gemini_adk_rs::text::TimeoutTextAgent;
 
 let bounded = TimeoutTextAgent::new(
     "bounded_analysis",
@@ -225,7 +225,7 @@ let bounded = TimeoutTextAgent::new(
 `DispatchTextAgent` spawns agents as background tasks with a concurrency budget. `JoinTextAgent` waits for them:
 
 ```rust,ignore
-use gemini_adk::text::{DispatchTextAgent, JoinTextAgent, TaskRegistry};
+use gemini_adk_rs::text::{DispatchTextAgent, JoinTextAgent, TaskRegistry};
 
 let registry = TaskRegistry::new();
 let budget = Arc::new(tokio::sync::Semaphore::new(4)); // max 4 concurrent
@@ -256,7 +256,7 @@ let pipeline = SequentialTextAgent::new("bg_pipeline", vec![
 `TextAgentTool` wraps any `TextAgent` as a `ToolFunction`, so the live voice model can dispatch text agent pipelines as tool calls. State is shared bidirectionally -- the text agent reads live-extracted values, and its mutations are visible to watchers and phase transitions.
 
 ```rust,ignore
-use gemini_adk::text_agent_tool::TextAgentTool;
+use gemini_adk_rs::text_agent_tool::TextAgentTool;
 
 // Build a multi-step verification pipeline
 let verifier = SequentialTextAgent::new("verify_pipeline", vec![
@@ -282,10 +282,10 @@ When the voice model calls `verify_identity`, the entire sequential pipeline run
 
 ## Fluent Operator Algebra
 
-If you use the `gemini-adk-fluent` crate (L2), you get operator syntax for composing agents:
+If you use the `gemini-adk-fluent-rs` crate (L2), you get operator syntax for composing agents:
 
 ```rust,ignore
-use gemini_adk_fluent::prelude::*;
+use gemini_adk_fluent_rs::prelude::*;
 
 // Sequential pipeline: >>
 let pipeline = AgentBuilder::new("writer").instruction("Write a draft")
@@ -316,7 +316,7 @@ let result = agent.run(&state).await?;
 Here is a complete pipeline that extracts claims from a document, validates them in parallel, and produces a confidence-rated summary:
 
 ```rust,ignore
-use gemini_adk_fluent::prelude::*;
+use gemini_adk_fluent_rs::prelude::*;
 
 let extract = AgentBuilder::new("extract")
     .instruction("Extract all factual claims from the text. Output one claim per line.")
@@ -344,7 +344,7 @@ let report = agent.run(&state).await?;
 For pre-built patterns like review loops and supervised workflows, see the `patterns` module:
 
 ```rust,ignore
-use gemini_adk_fluent::patterns::{review_loop, cascade, fan_out_merge, supervised};
+use gemini_adk_fluent_rs::patterns::{review_loop, cascade, fan_out_merge, supervised};
 
 // Worker -> Reviewer -> repeat until quality passes
 let reviewed = review_loop(
