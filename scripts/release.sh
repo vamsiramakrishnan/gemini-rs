@@ -108,8 +108,8 @@ if git rev-parse "$TAG" >/dev/null 2>&1; then
   die "Tag $TAG already exists. Delete it first if re-releasing: git tag -d $TAG && git push origin :refs/tags/$TAG"
 fi
 
-# ── Validation suite ──────────────────────────────────────────────────────
-step "Running validation suite"
+# ── Auto-format ───────────────────────────────────────────────────────────
+step "Formatting"
 
 run_cmd() {
   info "$*"
@@ -117,7 +117,23 @@ run_cmd() {
   "$@"
 }
 
-run_cmd cargo fmt --all -- --check
+if ! $DRY_RUN; then
+  cargo fmt --all
+  if ! git diff --quiet; then
+    info "Formatting changes detected — committing"
+    git add -A
+    git commit -m "style: cargo fmt --all"
+    ok "Committed formatting fixes"
+  else
+    ok "Already formatted"
+  fi
+else
+  info "cargo fmt --all (skipped in dry-run)"
+fi
+
+# ── Validation suite ──────────────────────────────────────────────────────
+step "Running validation suite"
+
 run_cmd cargo check --workspace --all-targets
 run_cmd cargo clippy --workspace --all-targets -- -D warnings
 run_cmd cargo test --workspace
