@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-03-19
+
+### Bug Fixes
+
+- fix: drop --all-targets from release validation (avoids openssl-sys bench dep)
+- fix: release script publish dry-run tolerance for first-time crate publishes
+- fix: release script _section crash under set -e with empty changelog sections
+### Refactors
+
+- refactor: rename crates with -rs suffix for crates.io namespace clarity
+### Style
+
+- style: cargo fmt --all
+
 ## [0.5.0] - 2026-03-18
 
 ### Added
