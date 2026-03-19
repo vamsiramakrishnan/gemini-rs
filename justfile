@@ -48,7 +48,7 @@ test:
 test-fast:
     cargo test --workspace --lib
 
-# Run tests for a specific crate (e.g. just test-crate rs-genai)
+# Run tests for a specific crate (e.g. just test-crate gemini-live)
 test-crate crate:
     RUSTFLAGS="-D warnings" cargo test -p {{crate}}
 
@@ -84,11 +84,11 @@ check-compile:
 
 # Run the web UI (mirrors `adk web`)
 run-web:
-    cargo run -p adk-web
+    cargo run -p gemini-adk-web
 
 # Run the REST API server (mirrors `adk api_server`)
 run-api:
-    cargo run -p adk-api-server
+    cargo run -p gemini-adk-api
 
 # ─── Examples ────────────────────────────────────────────────
 
@@ -126,22 +126,50 @@ ci: fmt-check lint doc-check test
     @echo "✓ CI pipeline passed. Matches GitHub Actions exactly."
 
 # ─── Release ─────────────────────────────────────────────────
+# Release branch model: just release 0.6.0
+#   1. Creates release/v0.6.0 branch from current HEAD
+#   2. Auto-formats (cargo fmt) + commits if needed
+#   3. Validates (check, clippy, test, cargo publish --dry-run)
+#   4. Generates changelog from conventional commits
+#   5. Bumps Cargo.toml + Cargo.lock
+#   6. Commits "chore(release): v0.6.0" + tags v0.6.0
+#   7. Pushes release branch + tag atomically
+#   8. Creates PR: release/v0.6.0 → main
+#   9. CI takes over: validate → crates.io publish → GitHub Release
+#  10. You merge the PR to bring version bump into main
 
-# Release a new version. Runs full suite, generates changelog, bumps
-# workspace version, commits, tags, and pushes. CI handles crates.io + GitHub Release.
-# Usage: just release 0.6.0
+# Release a new version (creates release branch, validates, tags, pushes, opens PR)
 release version:
     @bash scripts/release.sh {{version}}
 
-# Dry-run: preview what `just release` would do without any changes.
+# Dry-run: preview what `just release` would do without any changes
 release-dry version:
     @bash scripts/release.sh {{version}} --dry-run
 
-# Preview commits since last tag (changelog preview before release).
+# Preview commits since last tag (changelog preview before release)
 release-preview:
-    @PREV=$(git tag --sort=-version:refname | head -1 2>/dev/null || echo ""); \
-     if [ -z "$$PREV" ]; then git log --oneline HEAD; \
-     else echo "Changes since $$PREV:"; git log --oneline --no-decorate "$$PREV..HEAD"; fi
+    @PREV=$$(git tag --sort=-version:refname | head -1 2>/dev/null || echo ""); \
+     if [ -z "$$PREV" ]; then \
+       echo "No tags found. All commits:"; git log --oneline HEAD; \
+     else \
+       echo "Changes since $$PREV:"; \
+       git log --oneline --no-decorate "$$PREV..HEAD"; \
+       echo ""; \
+       echo "Crates: gemini-live, gemini-adk, gemini-adk-fluent, gemini-adk-server, gemini-adk-cli"; \
+       echo "Current version: $$(grep -m1 '^version = ' Cargo.toml | sed 's/.*\"\(.*\)\".*/\1/')"; \
+     fi
+
+# Show current version and tag history
+release-status:
+    @echo "Current version: $$(grep -m1 '^version = ' Cargo.toml | sed 's/.*\"\(.*\)\".*/\1/')"
+    @echo ""
+    @echo "Tags:"
+    @git tag --sort=-version:refname | head -10 2>/dev/null || echo "  (none)"
+    @echo ""
+    @echo "Release branches:"
+    @git branch -a 2>/dev/null | grep "release/" | head -10 || echo "  (none)"
+    @echo ""
+    @echo "Published crates: gemini-live, gemini-adk, gemini-adk-fluent, gemini-adk-server, gemini-adk-cli"
 
 # ─── Utilities ───────────────────────────────────────────────
 
@@ -155,15 +183,15 @@ clean:
 
 # Count lines of code per crate
 loc:
-    @echo "rs-genai:" && find crates/rs-genai/src -name '*.rs' | xargs wc -l | tail -1
-    @echo "rs-adk:" && find crates/rs-adk/src -name '*.rs' | xargs wc -l | tail -1
-    @echo "adk-rs-fluent:" && find crates/adk-rs-fluent/src -name '*.rs' | xargs wc -l | tail -1
+    @echo "gemini-live:" && find crates/gemini-live/src -name '*.rs' | xargs wc -l | tail -1
+    @echo "gemini-adk:" && find crates/gemini-adk/src -name '*.rs' | xargs wc -l | tail -1
+    @echo "gemini-adk-fluent:" && find crates/gemini-adk-fluent/src -name '*.rs' | xargs wc -l | tail -1
 
 # Show doc warning counts per crate
 doc-warnings:
-    @echo "=== rs-genai ===" && cargo doc --no-deps -p rs-genai 2>&1 | grep "warning:" | wc -l
-    @echo "=== rs-adk ===" && cargo doc --no-deps -p rs-adk 2>&1 | grep "warning:" | wc -l
-    @echo "=== adk-rs-fluent ===" && cargo doc --no-deps -p adk-rs-fluent 2>&1 | grep "warning:" | wc -l
+    @echo "=== gemini-live ===" && cargo doc --no-deps -p gemini-live 2>&1 | grep "warning:" | wc -l
+    @echo "=== gemini-adk ===" && cargo doc --no-deps -p gemini-adk 2>&1 | grep "warning:" | wc -l
+    @echo "=== gemini-adk-fluent ===" && cargo doc --no-deps -p gemini-adk-fluent 2>&1 | grep "warning:" | wc -l
 
 # Show workspace members and test summary
 stats:

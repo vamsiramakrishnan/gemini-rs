@@ -6,25 +6,25 @@ Three-crate layered stack for the Gemini Multimodal Live API:
 
 ```
                     +--------------------------+
-                    |    adk-rs-fluent (L2)     |  Fluent DX, operator algebra, composition
+                    |    gemini-adk-fluent (L2)     |  Fluent DX, operator algebra, composition
                     |  AgentBuilder, Live, S/C  |
                     |  /T/P/M/A, Composable     |
                     +-----------+--------------+
                                 |
                     +-----------+--------------+
-                    |      rs-adk (L1)          |  Agent runtime, tools, state, phases
+                    |      gemini-adk (L1)          |  Agent runtime, tools, state, phases
                     |  LiveSessionBuilder,      |
                     |  State, TextAgent, Phase  |
                     +-----------+--------------+
                                 |
                     +-----------+--------------+
-                    |      rs-genai (L0)        |  Wire protocol, transport, auth, types
+                    |      gemini-live (L0)        |  Wire protocol, transport, auth, types
                     |  SessionHandle, Content,  |
                     |  Transport, Codec, VAD    |
                     +--------------------------+
 ```
 
-Plus `apps/adk-web` (Axum Web UI), `apps/adk-api-server` (REST API server), `examples/agents`, `examples/voice-chat`, `examples/tool-calling`, `examples/transcription`, `examples/text-chat`, and `tools/adk-transpiler`.
+Plus `apps/gemini-adk-web` (Axum Web UI), `apps/gemini-adk-api` (REST API server), `examples/agents`, `examples/voice-chat`, `examples/tool-calling`, `examples/transcription`, `examples/text-chat`, and `tools/gemini-adk-transpiler`.
 
 ## Import Guidance
 
@@ -32,13 +32,13 @@ Always import from the highest-level crate you need:
 
 ```rust
 // Full fluent DX (recommended for applications)
-use adk_rs_fluent::prelude::*;
+use gemini_adk_fluent::prelude::*;
 
 // Runtime only (building custom processors)
-use rs_adk::*;
+use gemini_adk::*;
 
 // Wire protocol only (raw WebSocket access)
-use rs_genai::prelude::*;
+use gemini_live::prelude::*;
 ```
 
 ## Core API Patterns
@@ -430,7 +430,7 @@ let artifacts = A::json_output("report", "Analysis report")
 
 ## Key Types by Layer
 
-### L0 (rs-genai) -- Wire Protocol
+### L0 (gemini-live) -- Wire Protocol
 
 | Type | Purpose |
 |------|---------|
@@ -455,7 +455,7 @@ let artifacts = A::json_output("report", "Analysis report")
 | `ResumeInfo` | Session resumption info: handle, resumable flag, last consumed index |
 | `UsageInfo` | Token usage metadata: total, prompt, response token counts |
 
-### L1 (rs-adk) -- Agent Runtime
+### L1 (gemini-adk) -- Agent Runtime
 
 | Type | Purpose |
 |------|---------|
@@ -494,7 +494,7 @@ let artifacts = A::json_output("report", "Analysis report")
 | `ControlPlaneConfig` | Consolidated control plane settings for the processor |
 | `ExtractionTrigger` | When to run extractors: EveryTurn, Interval, AfterToolCall, OnPhaseChange, OnGenerationComplete |
 
-### L2 (adk-rs-fluent) -- Fluent DX
+### L2 (gemini-adk-fluent) -- Fluent DX
 
 | Type | Purpose |
 |------|---------|
@@ -545,18 +545,74 @@ cargo build --workspace
 cargo test --workspace
 
 # Run a specific example
-cargo run -p adk-web
+cargo run -p gemini-adk-web
 
 # Check without building
 cargo check --workspace
 
 # Run with specific features
-cargo build -p rs-genai --features "vad,generate,tokens"
+cargo build -p gemini-live --features "vad,generate,tokens"
 ```
+
+## Release Process
+
+Release branch model. All releases go through `just release <version>`.
+
+```bash
+# Preview what will be released
+just release-preview
+
+# Dry-run (validates everything, changes nothing)
+just release-dry 0.6.0
+
+# Full release (branch, validate, bump, tag, push, open PR)
+just release 0.6.0
+
+# Check current version, tags, release branches
+just release-status
+```
+
+### What `just release 0.6.0` does
+
+1. **Guards**: clean tree, up-to-date with remote, no version regression
+2. **Branch**: creates `release/v0.6.0` from current HEAD
+3. **Auto-format**: runs `cargo fmt --all`, auto-commits if changes detected
+4. **Validates**: `cargo check` + `cargo clippy` + `cargo test`
+5. **Pre-publish**: `cargo publish --dry-run` for each published crate (catches manifest issues)
+6. **Changelog**: generates from conventional commits, inserts into `CHANGELOG.md`
+7. **Version bump**: updates `Cargo.toml` (workspace + dependencies) + regenerates `Cargo.lock`
+8. **Commit**: `chore(release): v0.6.0`
+9. **Tag**: annotated `v0.6.0` with full release notes in tag body
+10. **Push**: atomic push of `release/v0.6.0` branch + tag
+11. **PR**: opens PR `release/v0.6.0 → main` via `gh`
+12. **CI takes over**: validate → publish to crates.io (L0→L1→L2→server→cli) → GitHub Release
+13. **You merge the PR** to bring version bump + changelog into main
+
+### Published crates (dependency order)
+
+1. `gemini-live` (L0)
+2. `gemini-adk` (L1)
+3. `gemini-adk-fluent` (L2)
+4. `gemini-adk-server`
+5. `gemini-adk-cli`
+
+### Version management
+
+- Single source of truth: `[workspace.package].version` in root `Cargo.toml`
+- All published crates use `version.workspace = true`
+- Internal deps use `[workspace.dependencies]` with matching version
+- `release.sh` bumps all occurrences in one `sed` pass
+
+### Release notes
+
+- Release body is stored in the **annotated tag message** (not a separate file)
+- GitHub Release uses the tag annotation as the body
+- `CHANGELOG.md` is the permanent record (Keep a Changelog format)
+- No `GITHUB_RELEASE_*.md` or `RELEASE_NOTES_*.md` files committed to repo
 
 ## Best Practices
 
-- Import from `adk_rs_fluent::prelude::*` for application code -- it re-exports all three layers.
+- Import from `gemini_adk_fluent::prelude::*` for application code -- it re-exports all three layers.
 - Use `TypedTool` over `SimpleTool` when possible -- auto-generated schemas prevent drift.
 - Use `State::modify()` for atomic read-modify-write instead of separate `get()` + `set()`.
 - Use `StateKey<T>` constants for frequently accessed keys to prevent typos.
@@ -585,12 +641,12 @@ cargo build -p rs-genai --features "vad,generate,tokens"
 
 ```
 crates/
-  rs-genai/          L0 wire protocol (rs_genai)
-  rs-adk/            L1 agent runtime (rs_adk)
-  adk-rs-fluent/     L2 fluent DX (adk_rs_fluent)
+  gemini-live/          L0 wire protocol (gemini_live)
+  gemini-adk/            L1 agent runtime (gemini_adk)
+  gemini-adk-fluent/     L2 fluent DX (gemini_adk_fluent)
 apps/
-  adk-web/           Interactive web UI for agent development (adk web)
-  adk-api-server/    Standalone REST API server (adk api_server)
+  gemini-adk-web/           Interactive web UI for agent development (adk web)
+  gemini-adk-api/    Standalone REST API server (adk api_server)
 examples/
   agents/            Agent composition examples
   voice-chat/        Voice chat example
@@ -598,6 +654,6 @@ examples/
   transcription/     Transcription example
   text-chat/         Text chat example
 tools/
-  adk-cli/           CLI tool (adk create/run/web/eval/deploy)
-  adk-transpiler/    Code transpilation utilities
+  gemini-adk-cli/           CLI tool (adk create/run/web/eval/deploy)
+  gemini-adk-transpiler/    Code transpilation utilities
 ```

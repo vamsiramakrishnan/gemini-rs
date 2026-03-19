@@ -6,25 +6,25 @@ Three-crate layered stack for the Gemini Multimodal Live API:
 
 ```
                     +--------------------------+
-                    |    adk-rs-fluent (L2)     |  Fluent DX, operator algebra, composition
+                    |    gemini-adk-fluent (L2)     |  Fluent DX, operator algebra, composition
                     |  AgentBuilder, Live, S/C  |
                     |  /T/P/M/A, Composable     |
                     +-----------+--------------+
                                 |
                     +-----------+--------------+
-                    |      rs-adk (L1)          |  Agent runtime, tools, state, phases
+                    |      gemini-adk (L1)          |  Agent runtime, tools, state, phases
                     |  LiveSessionBuilder,      |
                     |  State, TextAgent, Phase  |
                     +-----------+--------------+
                                 |
                     +-----------+--------------+
-                    |      rs-genai (L0)        |  Wire protocol, transport, auth, types
+                    |      gemini-live (L0)        |  Wire protocol, transport, auth, types
                     |  SessionHandle, Content,  |
                     |  Transport, Codec, VAD    |
                     +--------------------------+
 ```
 
-Plus `apps/adk-web` (Axum Web UI), `examples/agents`, `examples/voice-chat`, `examples/tool-calling`, `examples/transcription`, `examples/text-chat`, and `tools/adk-transpiler`.
+Plus `apps/gemini-adk-web` (Axum Web UI), `examples/agents`, `examples/voice-chat`, `examples/tool-calling`, `examples/transcription`, `examples/text-chat`, and `tools/gemini-adk-transpiler`.
 
 ## Import Guidance
 
@@ -32,13 +32,13 @@ Always import from the highest-level crate you need:
 
 ```rust
 // Full fluent DX (recommended for applications)
-use adk_rs_fluent::prelude::*;
+use gemini_adk_fluent::prelude::*;
 
 // Runtime only (building custom processors)
-use rs_adk::*;
+use gemini_adk::*;
 
 // Wire protocol only (raw WebSocket access)
-use rs_genai::prelude::*;
+use gemini_live::prelude::*;
 ```
 
 ## Core API Patterns
@@ -309,7 +309,7 @@ let artifacts = A::json_output("report", "Analysis report")
 
 ## Key Types by Layer
 
-### L0 (rs-genai) -- Wire Protocol
+### L0 (gemini-live) -- Wire Protocol
 
 | Type | Purpose |
 |------|---------|
@@ -332,7 +332,7 @@ let artifacts = A::json_output("report", "Analysis report")
 | `SpscRing` / `AudioJitterBuffer` | Lock-free audio buffers |
 | `ApiEndpoint` | Connection endpoint configuration |
 
-### L1 (rs-adk) -- Agent Runtime
+### L1 (gemini-adk) -- Agent Runtime
 
 | Type | Purpose |
 |------|---------|
@@ -362,7 +362,7 @@ let artifacts = A::json_output("report", "Analysis report")
 | `TextAgentTool` | Wraps a TextAgent as a callable tool |
 | `BackgroundAgentDispatcher` | Fire-and-forget agent dispatch |
 
-### L2 (adk-rs-fluent) -- Fluent DX
+### L2 (gemini-adk-fluent) -- Fluent DX
 
 | Type | Purpose |
 |------|---------|
@@ -407,18 +407,18 @@ cargo build --workspace
 cargo test --workspace
 
 # Run a specific example
-cargo run -p adk-web
+cargo run -p gemini-adk-web
 
 # Check without building
 cargo check --workspace
 
 # Run with specific features
-cargo build -p rs-genai --features "vad,generate,tokens"
+cargo build -p gemini-live --features "vad,generate,tokens"
 ```
 
 ## Best Practices
 
-- Import from `adk_rs_fluent::prelude::*` for application code -- it re-exports all three layers.
+- Import from `gemini_adk_fluent::prelude::*` for application code -- it re-exports all three layers.
 - Use `TypedTool` over `SimpleTool` when possible -- auto-generated schemas prevent drift.
 - Use `State::modify()` for atomic read-modify-write instead of separate `get()` + `set()`.
 - Use `StateKey<T>` constants for frequently accessed keys to prevent typos.
@@ -446,11 +446,11 @@ cargo build -p rs-genai --features "vad,generate,tokens"
 
 ```
 crates/
-  rs-genai/          L0 wire protocol (rs_genai)
-  rs-adk/            L1 agent runtime (rs_adk)
-  adk-rs-fluent/     L2 fluent DX (adk_rs_fluent)
+  gemini-live/          L0 wire protocol (gemini_live)
+  gemini-adk/            L1 agent runtime (gemini_adk)
+  gemini-adk-fluent/     L2 fluent DX (gemini_adk_fluent)
 apps/
-  adk-web/           Axum Web UI with browser frontend
+  gemini-adk-web/           Axum Web UI with browser frontend
 examples/
   agents/            Agent composition examples
   voice-chat/        Voice chat example
@@ -458,5 +458,5 @@ examples/
   transcription/     Transcription example
   text-chat/         Text chat example
 tools/
-  adk-transpiler/    Code transpilation utilities
+  gemini-adk-transpiler/    Code transpilation utilities
 ```

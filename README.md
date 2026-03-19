@@ -5,7 +5,7 @@
 [![CI](https://github.com/vamsiramakrishnan/gemini-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/vamsiramakrishnan/gemini-rs/actions/workflows/ci.yml)
 [![Docs](https://github.com/vamsiramakrishnan/gemini-rs/actions/workflows/docs.yml/badge.svg)](https://github.com/vamsiramakrishnan/gemini-rs/actions/workflows/docs.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![crates.io](https://img.shields.io/crates/v/rs-genai.svg)](https://crates.io/crates/rs-genai)
+[![crates.io](https://img.shields.io/crates/v/gemini-live.svg)](https://crates.io/crates/gemini-live)
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
 
 ---
@@ -23,11 +23,11 @@ and turn lifecycle -- before you write a single line of agent logic.
 each crate adds exactly the abstraction you need:
 
 - **Wire-level access** for custom transports, proxies, or non-standard
-  deployments (`rs-genai`).
+  deployments (`gemini-live`).
 - **Agent runtime** with typed state, phase machines, tool dispatch, text agent
-  combinators, and a three-lane processor architecture (`rs-adk`).
+  combinators, and a three-lane processor architecture (`gemini-adk`).
 - **Fluent builder API** where a production voice agent is 20 lines of
-  declarative Rust, not 200 lines of boilerplate (`adk-rs-fluent`).
+  declarative Rust, not 200 lines of boilerplate (`gemini-adk-fluent`).
 
 Every layer is independently usable. Pick the altitude that fits your problem.
 
@@ -94,19 +94,19 @@ handle.send_text("Hello").await?;
 
 ```
 +----------------------------------------------------------------------+
-|  adk-rs-fluent  (L2 -- Fluent DX)                                    |
+|  gemini-adk-fluent  (L2 -- Fluent DX)                                    |
 |                                                                      |
 |  Live::builder()  .  AgentBuilder  .  S.C.T.P.M.A operators         |
 |  PhaseBuilder  .  WatchBuilder  .  Temporal patterns                 |
 +----------------------------------------------------------------------+
-|  rs-adk  (L1 -- Agent Runtime)                                       |
+|  gemini-adk  (L1 -- Agent Runtime)                                       |
 |                                                                      |
 |  LiveSessionBuilder  .  LiveHandle  .  Three-lane processor          |
 |  State (prefix-scoped)  .  PhaseMachine  .  ToolDispatcher           |
 |  TextAgent combinators  .  Extractors  .  Watchers  .  Telemetry    |
 |  LlmAgent  .  Runner  .  SessionService  .  MCP  .  A2A            |
 +----------------------------------------------------------------------+
-|  rs-genai  (L0 -- Wire Protocol)                                     |
+|  gemini-live  (L0 -- Wire Protocol)                                     |
 |                                                                      |
 |  Transport (WebSocket + Mock)  .  Codec (JSON)  .  Auth providers    |
 |  SessionHandle  .  Protocol types  .  VAD  .  Jitter buffer         |
@@ -115,7 +115,7 @@ handle.send_text("Hello").await?;
 ```
 
 Each layer depends only on the one below it. Application code imports from the
-highest layer it needs (`adk_rs_fluent::prelude::*` re-exports all three).
+highest layer it needs (`gemini_adk_fluent::prelude::*` re-exports all three).
 
 ---
 
@@ -363,7 +363,7 @@ Here's the flow for a single model turn in a phased conversation:
 ### Google AI (API Key)
 
 ```rust
-use adk_rs_fluent::prelude::*;
+use gemini_adk_fluent::prelude::*;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -398,9 +398,9 @@ let handle = Live::builder()
 ### Wire Level Only (L0)
 
 ```rust
-use rs_genai::prelude::*;
+use gemini_live::prelude::*;
 
-let session = rs_genai::quick_connect(
+let session = gemini_live::quick_connect(
     "API_KEY", "gemini-2.0-flash-live-001"
 ).await?;
 session.send_text("What is the speed of light?").await?;
@@ -420,9 +420,9 @@ while let Ok(event) = events.recv().await {
 
 | Crate | Layer | Description |
 |-------|-------|-------------|
-| [`rs-genai`](crates/rs-genai) | L0 -- Wire | Protocol types, WebSocket transport, auth providers, VAD, jitter buffer, REST APIs (feature-gated). Full Rust equivalent of Google's `@google/genai`. |
-| [`rs-adk`](crates/rs-adk) | L1 -- Runtime | Agent runtime with state management, phase machines, tool dispatch, text agent combinators, extractors, watchers, telemetry. Full Rust equivalent of Google's `@google/adk`. |
-| [`adk-rs-fluent`](crates/adk-rs-fluent) | L2 -- Fluent | `Live::builder()` API, `AgentBuilder`, S.C.T.P.M.A operator algebra, composition patterns, test utilities. |
+| [`gemini-live`](crates/gemini-live) | L0 -- Wire | Protocol types, WebSocket transport, auth providers, VAD, jitter buffer, REST APIs (feature-gated). Full Rust equivalent of Google's `@google/genai`. |
+| [`gemini-adk`](crates/gemini-adk) | L1 -- Runtime | Agent runtime with state management, phase machines, tool dispatch, text agent combinators, extractors, watchers, telemetry. Full Rust equivalent of Google's `@google/adk`. |
+| [`gemini-adk-fluent`](crates/gemini-adk-fluent) | L2 -- Fluent | `Live::builder()` API, `AgentBuilder`, S.C.T.P.M.A operator algebra, composition patterns, test utilities. |
 
 ---
 
@@ -535,8 +535,8 @@ A concurrent, type-safe `State` container with prefix-scoped namespaces,
 atomic read-modify-write, delta tracking, and transparent derived fallbacks.
 
 ```rust
-use rs_adk::State;
-use rs_adk::state::StateKey;
+use gemini_adk::State;
+use gemini_adk::state::StateKey;
 
 // Typed keys eliminate typo bugs
 const TURN_COUNT: StateKey<u32> = StateKey::new("session:turn_count");
@@ -813,7 +813,7 @@ Six operator namespaces for composing different aspects of agent configuration:
 **Prompt composition example:**
 
 ```rust
-use adk_rs_fluent::prelude::*;
+use gemini_adk_fluent::prelude::*;
 
 let prompt = P::role("a customer support agent for Acme Corp")
     + P::task("help customers with billing inquiries")
@@ -845,9 +845,9 @@ the Live WebSocket connection:
 
 ```toml
 [dependencies]
-rs-genai = { version = "0.1", features = ["generate", "embed", "files"] }
+gemini-live = { version = "0.1", features = ["generate", "embed", "files"] }
 # Or enable everything:
-# rs-genai = { version = "0.1", features = ["all-apis"] }
+# gemini-live = { version = "0.1", features = ["all-apis"] }
 ```
 
 | Feature | API |
@@ -924,7 +924,7 @@ cargo run -p tool-calling    # http://127.0.0.1:3003
 cargo run -p transcription   # http://127.0.0.1:3004
 
 # 3. Run the multi-app Web UI (all apps + devtools panel)
-cargo run -p adk-web         # http://127.0.0.1:3000
+cargo run -p gemini-adk-web         # http://127.0.0.1:3000
 ```
 
 ### Standalone Examples
@@ -939,7 +939,7 @@ These run independently with their own Axum server and minimal UI.
 | [`transcription`](examples/transcription) | 3004 | L0 | Every Gemini Live config option: VAD, activity handling, affective dialog, context compression, session resumption |
 | [`agents`](examples/agents) | CLI | L1/L2 | Text agent combinators (`>>`, `\|`, `/`), `TypedTool`, copy-on-write builders |
 
-### ADK Web UI (`adk-web`)
+### ADK Web UI (`gemini-adk-web`)
 
 The Web UI bundles all apps below into a single Axum server with a shared
 devtools panel showing real-time state, timeline, transcript, and telemetry.
@@ -1134,7 +1134,7 @@ cargo fmt --all -- --check
 ### Run the Web UI
 
 ```bash
-cd apps/adk-web
+cd apps/gemini-adk-web
 GEMINI_API_KEY="your-key" cargo run
 # Open http://localhost:3000
 ```
@@ -1145,17 +1145,17 @@ GEMINI_API_KEY="your-key" cargo run
 cargo doc --workspace --no-deps --open
 ```
 
-### Feature flags (rs-genai)
+### Feature flags (gemini-live)
 
 ```bash
 # Default: live + vad + tracing
-cargo build -p rs-genai
+cargo build -p gemini-live
 
 # With REST APIs
-cargo build -p rs-genai --features generate,embed,files
+cargo build -p gemini-live --features generate,embed,files
 
 # Everything
-cargo build -p rs-genai --features all-apis,metrics,opus
+cargo build -p gemini-live --features all-apis,metrics,opus
 ```
 
 ---
@@ -1165,9 +1165,9 @@ cargo build -p rs-genai --features all-apis,metrics,opus
 ```
 gemini-rs/
   crates/
-    rs-genai/              L0: Wire protocol, transport, types
-    rs-adk/                L1: Agent runtime, state, phases, tools
-    adk-rs-fluent/         L2: Fluent builder API, operators
+    gemini-live/              L0: Wire protocol, transport, types
+    gemini-adk/                L1: Agent runtime, state, phases, tools
+    gemini-adk-fluent/         L2: Fluent builder API, operators
   examples/
     text-chat/             Minimal text-only session (L0)
     voice-chat/            Bidirectional audio chat (L0)
@@ -1176,10 +1176,10 @@ gemini-rs/
     agents/                Text agent combinators (L1/L2)
     INDEX.md               Full example reference with per-app docs
   apps/
-    adk-web/               Multi-app Web UI with devtools (L2)
+    gemini-adk-web/               Multi-app Web UI with devtools (L2)
       src/apps/            13 showcase apps (see examples/INDEX.md)
   tools/
-    adk-transpiler/        Python ADK to Rust transpiler
+    gemini-adk-transpiler/        Python ADK to Rust transpiler
   Cargo.toml               Workspace root
 ```
 

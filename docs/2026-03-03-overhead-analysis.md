@@ -1,13 +1,13 @@
-# Overhead Analysis: rs-adk & adk-rs-fluent over rs-genai (Wire)
+# Overhead Analysis: gemini-adk & gemini-adk-fluent over gemini-live (Wire)
 
 **Date**: 2026-03-03
-**Scope**: Runtime and structural overhead introduced by the two higher-level crates (`rs-adk`, `adk-rs-fluent`) relative to the wire-level crate (`rs-genai`).
+**Scope**: Runtime and structural overhead introduced by the two higher-level crates (`gemini-adk`, `gemini-adk-fluent`) relative to the wire-level crate (`gemini-live`).
 
 ---
 
 ## 1. Scale at a Glance
 
-| Metric                        | rs-genai (wire) | rs-adk         | adk-rs-fluent   |
+| Metric                        | gemini-live (wire) | gemini-adk         | gemini-adk-fluent   |
 |-------------------------------|-----------------|----------------|-----------------|
 | Lines of Rust                 | 11,307          | 23,143         | 4,803           |
 | `Arc<` references             | 12              | 231            | 37              |
@@ -21,7 +21,7 @@
 | `HashMap` / `BTreeMap`        | 0               | 61             | 2               |
 | Extra crate deps (non-shared) | —               | dashmap, regex, once_cell, uuid | —          |
 
-**Key ratio**: rs-adk is 2× the code of rs-genai, introduces 19× more Arc usage, 24× more trait objects, 11× more async_trait boundaries, and 6× more clone sites.
+**Key ratio**: gemini-adk is 2× the code of gemini-live, introduces 19× more Arc usage, 24× more trait objects, 11× more async_trait boundaries, and 6× more clone sites.
 
 ---
 
@@ -29,9 +29,9 @@
 
 ### 2.1 Dynamic Dispatch Explosion
 
-**Wire baseline**: rs-genai uses generics (`connect_with<T: Transport, C: Codec>`) for its hot path. Transport and Codec are monomorphized — zero vtable indirection at runtime.
+**Wire baseline**: gemini-live uses generics (`connect_with<T: Transport, C: Codec>`) for its hot path. Transport and Codec are monomorphized — zero vtable indirection at runtime.
 
-**rs-adk**: Nearly every abstraction is trait-object-based:
+**gemini-adk**: Nearly every abstraction is trait-object-based:
 
 | Trait object                            | Count | Hot path? |
 |-----------------------------------------|-------|-----------|
@@ -51,7 +51,7 @@ Every callback, every tool invocation, every middleware hook, every agent dispat
 - **No devirtualization** (Rust/LLVM can devirtualize only in trivial cases)
 - **Pointer chase per call** (data ptr + vtable ptr)
 
-**adk-rs-fluent**: Adds another 36 `dyn` sites, mostly wrapping rs-adk's types in its own builder closures. These are primarily construction-time, not hot-path.
+**gemini-adk-fluent**: Adds another 36 `dyn` sites, mostly wrapping gemini-adk's types in its own builder closures. These are primarily construction-time, not hot-path.
 
 **Cost**: ~2-5ns per vtable call (L1-cached). On a tool-call round-trip with 4-5 dyn dispatches, this is ~10-25ns of pure dispatch overhead — negligible against network latency but measurable in tight loops.
 
@@ -59,22 +59,22 @@ Every callback, every tool invocation, every middleware hook, every agent dispat
 
 **Wire baseline**: 9 async_trait annotations, used on trait definitions (Transport, Codec, AuthProvider). The hot path (`generic_run_session`) is a concrete async fn — no boxing.
 
-**rs-adk**: 100 async_trait annotations. Every `Agent::run()`, `ToolFunction::call()`, `Middleware::on_*()`, `Plugin::on_*()` method allocates a `Pin<Box<dyn Future>>` on every invocation.
+**gemini-adk**: 100 async_trait annotations. Every `Agent::run()`, `ToolFunction::call()`, `Middleware::on_*()`, `Plugin::on_*()` method allocates a `Pin<Box<dyn Future>>` on every invocation.
 
 This means:
 - **1 heap allocation per async call** (the boxed future state machine)
 - **1 deallocation when the future completes**
 - **No stack-pinning possible** (the future must be heap-allocated for trait object safety)
 
-**adk-rs-fluent**: 12 more async_trait boundaries, plus 16 explicit `Box::pin` sites for callback closures.
+**gemini-adk-fluent**: 12 more async_trait boundaries, plus 16 explicit `Box::pin` sites for callback closures.
 
-**Cost**: Each boxed future is typically 64-256 bytes (depends on captured state). A tool-call round-trip through rs-adk allocates 3-6 boxed futures. At ~50ns per alloc/dealloc cycle, this is ~150-300ns per tool call.
+**Cost**: Each boxed future is typically 64-256 bytes (depends on captured state). A tool-call round-trip through gemini-adk allocates 3-6 boxed futures. At ~50ns per alloc/dealloc cycle, this is ~150-300ns per tool call.
 
 ### 2.3 Arc Proliferation and Reference Counting
 
 **Wire baseline**: 12 Arc references total. Used for `SessionHandle` internals (state, task handle) — created once per session, cloned rarely.
 
-**rs-adk**: 231 Arc references. Arcs are the default ownership model:
+**gemini-adk**: 231 Arc references. Arcs are the default ownership model:
 - Every agent: `Arc<dyn Agent>`
 - Every tool: `Arc<dyn ToolFunction>`
 - Every sub-agent: `Vec<Arc<dyn Agent>>`
@@ -84,13 +84,13 @@ This means:
 
 Arc clone is an atomic increment (~5-15ns, more under contention). Arc drop is an atomic decrement + potential deallocation. On modern x86, atomic ops serialize the memory bus for the cache line.
 
-**Worst case**: Agent transfer in rs-adk clones the entire agent registry (`HashMap<String, Arc<dyn Agent>>`), incrementing N Arc refcounts plus N String clones.
+**Worst case**: Agent transfer in gemini-adk clones the entire agent registry (`HashMap<String, Arc<dyn Agent>>`), incrementing N Arc refcounts plus N String clones.
 
 ### 2.4 Clone-Heavy Patterns
 
 **Wire baseline**: 55 clone sites. Most are cheap (Arc bump, Bytes refcount) or one-time (setup config).
 
-**rs-adk**: 309 clone sites — 5.6× more. Major clone-heavy patterns:
+**gemini-adk**: 309 clone sites — 5.6× more. Major clone-heavy patterns:
 
 1. **Copy-on-write builders**: `AgentBuilderInner` clones the entire struct (name, instruction, tools Vec, sub_agents Vec, etc.) on every setter call
 2. **Broadcast event fan-out**: Every `SessionEvent` is cloned for each subscriber
@@ -99,7 +99,7 @@ Arc clone is an atomic increment (~5-15ns, more under contention). Arc drop is a
 5. **Tool call data**: `FunctionCall` structs cloned for event emission
 6. **Agent transfer**: Registry HashMap cloned during transfer
 
-**adk-rs-fluent**: 33 clone sites, mostly Arc bumps during builder compilation. The copy-on-write `AgentBuilder` pattern means every chained `.instruction()`, `.tool()`, `.sub_agent()` call clones the entire inner struct.
+**gemini-adk-fluent**: 33 clone sites, mostly Arc bumps during builder compilation. The copy-on-write `AgentBuilder` pattern means every chained `.instruction()`, `.tool()`, `.sub_agent()` call clones the entire inner struct.
 
 ### 2.5 Lock Contention Surface
 
@@ -110,7 +110,7 @@ Arc clone is an atomic increment (~5-15ns, more under contention). Arc drop is a
 
 All critical sections are tiny (read/write a field).
 
-**rs-adk**: 81 lock sites. Adds:
+**gemini-adk**: 81 lock sites. Adds:
 - `DashMap` for state (sharded, but still locked per shard)
 - `DashMap` for memory service (nested — two DashMaps deep)
 - `tokio::sync::Mutex` for active streaming tools
@@ -119,7 +119,7 @@ All critical sections are tiny (read/write a field).
 
 **DashMap overhead**: Each `get()` or `insert()` hashes the key, selects a shard, locks that shard's RwLock, and clones the value out. For JSON `Value` keys (strings), this is hash + lock + String clone + Value clone per access.
 
-**adk-rs-fluent**: Only 2 lock sites (audit log in middleware compose module). Minimal.
+**gemini-adk-fluent**: Only 2 lock sites (audit log in middleware compose module). Minimal.
 
 ### 2.6 Channel & Task Spawn Overhead
 
@@ -129,7 +129,7 @@ All critical sections are tiny (read/write a field).
 - 1 `watch::channel` — phase state
 - 4 `tokio::spawn` sites (connection loop, reconnect)
 
-**rs-adk adds**:
+**gemini-adk adds**:
 - Additional `broadcast::Sender<InputEvent>` for input fan-out
 - Additional `broadcast::Sender<AgentEvent>` for agent lifecycle events
 - 37 `tokio::spawn` sites:
@@ -140,7 +140,7 @@ All critical sections are tiny (read/write a field).
 
 Each `tokio::spawn` allocates a task (~128-256 bytes), schedules it on the runtime, and requires a waker allocation. For streaming tools, this means 2-3 task spawns per active tool.
 
-**adk-rs-fluent**: 0 spawns. All its work happens at build time or delegates to rs-adk.
+**gemini-adk-fluent**: 0 spawns. All its work happens at build time or delegates to gemini-adk.
 
 ### 2.7 JSON / Serde Overhead
 
@@ -149,7 +149,7 @@ Each `tokio::spawn` allocates a task (~128-256 bytes), schedules it on the runti
 - `serde_json::from_str()` per incoming message
 - base64 encode/decode for audio data
 
-**rs-adk amplifies JSON cost**:
+**gemini-adk amplifies JSON cost**:
 - `serde_json::Value` as the universal state currency — every state get/set round-trips through JSON
 - Tool parameters arrive as `Value`, dispatched as `Value`, returned as `Value`
 - Schema generation (`schemars::schema_for!`) at tool registration
@@ -158,13 +158,13 @@ Each `tokio::spawn` allocates a task (~128-256 bytes), schedules it on the runti
 
 The problem: JSON `Value` is a recursive enum (~72 bytes per node) that heap-allocates for every string, array, and object. Passing a simple `{count: 5}` through state involves: serialize to Value → DashMap insert (clone) → DashMap get (clone) → deserialize from Value. That's 3 allocations + 2 clones for a single integer.
 
-**adk-rs-fluent**: Adds JSON schema generation for typed tools and JSON Map creation for state transforms. Relatively minor.
+**gemini-adk-fluent**: Adds JSON schema generation for typed tools and JSON Map creation for state transforms. Relatively minor.
 
 ### 2.8 String Allocation Patterns
 
 **Wire baseline**: Strings are used for text content, transcription, and session IDs. Most are created once (config) or are protocol-inherent (text deltas).
 
-**rs-adk adds pervasive string allocation**:
+**gemini-adk adds pervasive string allocation**:
 - Agent names: `String` (cloned on every registry lookup)
 - Tool names: `String` (cloned for HashMap keys)
 - State keys: `String` (cloned for DashMap access)
@@ -184,7 +184,7 @@ Part:     ~80 bytes (largest variant: FunctionCall)
 Role:     1 byte enum
 ```
 
-**rs-adk wraps these in layers**:
+**gemini-adk wraps these in layers**:
 ```
 InvocationContext:
   ├── AgentSession           (~104 bytes)
@@ -200,7 +200,7 @@ InvocationContext:
 
 Every tool call receives a `ToolContext` that references this entire structure. Every middleware hook receives it. Every agent `run()` receives it.
 
-**adk-rs-fluent** adds builder structs:
+**gemini-adk-fluent** adds builder structs:
 ```
 AgentBuilderInner:
   ├── name: Option<String>
@@ -227,15 +227,15 @@ This is ~200+ bytes per builder, cloned on every chained method call.
 |------|-------|-------------|--------|-------|------------|-----------|--------|
 | WS recv → decode | wire | 1 (JSON parse) | 0 | 0 | 0 | 0 | 0 |
 | Route + emit event | wire | 0 | 1 (text) | 1 (turn) | 1 (broadcast) | 0 | 0 |
-| Event router | rs-adk | 0 | 0 | 0 | 1 (fast lane) | 0 | 0 |
-| Fast lane callback | rs-adk | 0 | 0 | 0 | 0 | 1 (on_text) | 0 |
+| Event router | gemini-adk | 0 | 0 | 0 | 1 (fast lane) | 0 | 0 |
+| Fast lane callback | gemini-adk | 0 | 0 | 0 | 0 | 1 (on_text) | 0 |
 | **Total** | | **1** | **1** | **1** | **2** | **1** | **0** |
 
 ### 3.2 Outgoing Audio Chunk
 
 | Step | Layer | Allocations | Clones | Locks | Chan sends | dyn calls | Spawns |
 |------|-------|-------------|--------|-------|------------|-----------|--------|
-| send_audio() | rs-adk | 0 | 0-1 (input fan-out) | 0 | 0-1 (broadcast) | 1 (SessionWriter) | 0 |
+| send_audio() | gemini-adk | 0 | 0-1 (input fan-out) | 0 | 0-1 (broadcast) | 1 (SessionWriter) | 0 |
 | Command enqueue | wire | 1 (command) | 0 | 0 | 1 (mpsc) | 0 | 0 |
 | base64 + JSON encode | wire | 2 (b64 + json) | 0 | 0 | 0 | 0 | 0 |
 | WS send | wire | 0 | 0 | 0 | 0 | 0 | 0 |
@@ -246,12 +246,12 @@ This is ~200+ bytes per builder, cloned on every chained method call.
 | Step | Layer | Allocations | Clones | Locks | Chan sends | dyn calls | Spawns |
 |------|-------|-------------|--------|-------|------------|-----------|--------|
 | Decode tool call | wire | N (parse) | 1 (calls) | 1 (turn) | 1 (broadcast) | 0 | 0 |
-| Route to control lane | rs-adk | 0 | 0 | 0 | 1 | 0 | 0 |
-| Dispatch lookup | rs-adk | 0 | 1 (Arc tool) | 0 | 0 | 0 | 0 |
-| Tool function call | rs-adk | 1 (boxed future) | 0 | 0 | 0 | 1 (tool.call) | 0 |
-| Build response | rs-adk | 1 (FunctionResponse) | 0 | 0 | 0 | 0 | 0 |
-| Middleware hooks | rs-adk | M (boxed futures) | 0 | 0 | 0 | M | 0 |
-| Event emission | rs-adk | 1 (UUID) | 0 | 0 | 1 (broadcast) | 0 | 0 |
+| Route to control lane | gemini-adk | 0 | 0 | 0 | 1 | 0 | 0 |
+| Dispatch lookup | gemini-adk | 0 | 1 (Arc tool) | 0 | 0 | 0 | 0 |
+| Tool function call | gemini-adk | 1 (boxed future) | 0 | 0 | 0 | 1 (tool.call) | 0 |
+| Build response | gemini-adk | 1 (FunctionResponse) | 0 | 0 | 0 | 0 | 0 |
+| Middleware hooks | gemini-adk | M (boxed futures) | 0 | 0 | 0 | M | 0 |
+| Event emission | gemini-adk | 1 (UUID) | 0 | 0 | 1 (broadcast) | 0 | 0 |
 | send_tool_response | wire | 2 (JSON) | 0 | 0 | 1 (mpsc) | 0 | 0 |
 | **Total** | | **5+N+M** | **2** | **1** | **4** | **1+M** | **0** |
 
@@ -263,30 +263,30 @@ Where N = number of function calls in batch, M = number of middleware.
 
 ### 4.1 Dependency Graph
 
-rs-genai pulls in:
+gemini-live pulls in:
 - tokio, tokio-tungstenite, futures-util (async runtime)
 - serde, serde_json, base64 (serialization)
 - bytes, uuid, thiserror, async-trait
 
-rs-adk adds:
+gemini-adk adds:
 - **dashmap** (6.x) — sharded concurrent map, brings crossbeam-utils
 - **regex** — full regex engine (~1MB compiled), only used for pattern matching in extractors
 - **once_cell** — lazy initialization (now in std, arguably unnecessary)
 - **schemars** — JSON Schema generation, brings dyn-clone and serde_json schema types
 
-adk-rs-fluent adds no new dependencies beyond rs-adk + rs-genai.
+gemini-adk-fluent adds no new dependencies beyond gemini-adk + gemini-live.
 
 ### 4.2 Monomorphization Cost
 
-rs-genai uses generics for Transport and Codec — this generates specialized code per combination but avoids runtime dispatch. Total monomorphization sites: ~4.
+gemini-live uses generics for Transport and Codec — this generates specialized code per combination but avoids runtime dispatch. Total monomorphization sites: ~4.
 
-rs-adk avoids generics almost entirely — everything is `dyn`. This reduces binary size from monomorphization but increases it from vtable generation and `#[async_trait]` desugaring (100 sites × generated wrapper code).
+gemini-adk avoids generics almost entirely — everything is `dyn`. This reduces binary size from monomorphization but increases it from vtable generation and `#[async_trait]` desugaring (100 sites × generated wrapper code).
 
 ---
 
 ## 5. Qualitative Overhead Summary
 
-### What rs-adk buys (justifying some overhead)
+### What gemini-adk buys (justifying some overhead)
 
 1. **Multi-agent orchestration** — agent transfer, sub-agent trees, parallel/sequential composition
 2. **Tool dispatch** — automatic JSON-to-function routing with schema validation
@@ -295,7 +295,7 @@ rs-adk avoids generics almost entirely — everything is `dyn`. This reduces bin
 5. **Event system** — lifecycle observability (agent start/stop, tool calls, errors)
 6. **Streaming tools** — progressive results via channels
 
-### What rs-adk over-pays for
+### What gemini-adk over-pays for
 
 1. **JSON as universal currency** — state get/set round-trips through serde even for primitive values
 2. **Arc<dyn Everything>** — every abstraction boundary is a heap-allocated trait object; no option for static dispatch
@@ -304,13 +304,13 @@ rs-adk avoids generics almost entirely — everything is `dyn`. This reduces bin
 5. **Copy-on-write builders** — full struct clone on every setter (could use &mut self instead)
 6. **Regex dependency** — full regex crate for simple pattern matching that could use string contains/starts_with
 
-### What adk-rs-fluent buys
+### What gemini-adk-fluent buys
 
 1. **Builder ergonomics** — chainable API for agent/tool/live-session construction
 2. **Operator algebra** — composable pipeline/fan-out/loop abstractions
 3. **Composition modules** — state transforms, context filters, prompt composers, middleware
 
-### What adk-rs-fluent over-pays for
+### What gemini-adk-fluent over-pays for
 
 1. **Copy-on-write AgentBuilder** — Arc<Inner> cloned on every method call; could use &mut self
 2. **Callback boxing** — 18+ callback types each wrapped in Arc<Box<dyn Fn>> + Box::pin per invocation
@@ -335,7 +335,7 @@ For context on whether these overheads matter in practice:
 | UUID::new_v4() | 50-100ns |
 | tokio::spawn | 200-500ns |
 
-**Bottom line**: The per-message overhead from rs-adk is ~500ns-2μs, which is 1000× smaller than network latency. For a voice conversation doing 30 audio chunks/second, this is ~15-60μs/second — imperceptible.
+**Bottom line**: The per-message overhead from gemini-adk is ~500ns-2μs, which is 1000× smaller than network latency. For a voice conversation doing 30 audio chunks/second, this is ~15-60μs/second — imperceptible.
 
 **Where it could matter**:
 - High-frequency tool call loops (100+ calls/second)

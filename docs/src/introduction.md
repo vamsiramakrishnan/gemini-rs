@@ -4,13 +4,13 @@ Full Rust SDK for the Gemini Multimodal Live API — wire protocol, agent runtim
 
 ```text
 ┌─────────────────────────────────────────────────────┐
-│  adk-rs-fluent (L2 — Fluent DX)                    │
+│  gemini-adk-fluent (L2 — Fluent DX)                    │
 │  AgentBuilder · Live · S·C·T·P·M·A operators       │
 ├─────────────────────────────────────────────────────┤
-│  rs-adk (L1 — Agent Runtime)                       │
+│  gemini-adk (L1 — Agent Runtime)                       │
 │  Agent · Tools · State · Phases · TextAgent · LLM  │
 ├─────────────────────────────────────────────────────┤
-│  rs-genai (L0 — Wire Protocol)                     │
+│  gemini-live (L0 — Wire Protocol)                     │
 │  Transport · Session · Protocol · VAD · Buffers    │
 └─────────────────────────────────────────────────────┘
 ```
@@ -18,7 +18,7 @@ Full Rust SDK for the Gemini Multimodal Live API — wire protocol, agent runtim
 ## Quick Start
 
 ```rust,ignore
-use adk_rs_fluent::prelude::*;
+use gemini_adk_fluent::prelude::*;
 
 let handle = Live::builder()
     .model(GeminiModel::Gemini2_0Flash)
@@ -38,18 +38,18 @@ This book is organized into six sections:
 - **Voice & Live Sessions** — Building real-time voice agents with phases, state, and watchers
 - **Tools & Extraction** — Tool system and structured data extraction from conversations
 - **Composition & Patterns** — Text agent combinators, S·C·T·P·M·A operators, middleware
-- **Examples** — 30 progressive cookbook examples (Crawl/Walk/Run) plus interactive `adk-web` demos
+- **Examples** — 30 progressive cookbook examples (Crawl/Walk/Run) plus interactive `gemini-adk-web` demos
 - **ADK Web UI** — Design system, dark/light mode, DevTools panels, and the cookbook browser
 
 ## API Reference
 
-For detailed type and method documentation, see the [rustdoc API reference](./api/rs_genai/index.html).
+For detailed type and method documentation, see the [rustdoc API reference](./api/gemini_live/index.html).
 
 | Crate | Layer | API Docs |
 |-------|-------|----------|
-| `rs-genai` | L0 — Wire Protocol | [rs_genai](./api/rs_genai/index.html) |
-| `rs-adk` | L1 — Agent Runtime | [rs_adk](./api/rs_adk/index.html) |
-| `adk-rs-fluent` | L2 — Fluent DX | [adk_rs_fluent](./api/adk_rs_fluent/index.html) |
+| `gemini-live` | L0 — Wire Protocol | [gemini_live](./api/gemini_live/index.html) |
+| `gemini-adk` | L1 — Agent Runtime | [gemini_adk](./api/gemini_adk/index.html) |
+| `gemini-adk-fluent` | L2 — Fluent DX | [gemini_adk_fluent](./api/gemini_adk_fluent/index.html) |
 
 ## Links
 

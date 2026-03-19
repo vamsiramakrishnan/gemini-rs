@@ -8,7 +8,7 @@
 //!   2. Main pipeline continues without waiting
 //!   3. JoinTextAgent collects results when needed (with optional timeout)
 
-use adk_rs_fluent::prelude::*;
+use gemini_adk_fluent::prelude::*;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -22,17 +22,17 @@ impl BaseLlm for EchoLlm {
     }
     async fn generate(
         &self,
-        req: rs_adk::llm::LlmRequest,
-    ) -> Result<rs_adk::llm::LlmResponse, rs_adk::llm::LlmError> {
+        req: gemini_adk::llm::LlmRequest,
+    ) -> Result<gemini_adk::llm::LlmResponse, gemini_adk::llm::LlmError> {
         let text = req
             .system_instruction
             .unwrap_or_else(|| "no-instruction".into());
         // Simulate some work
         tokio::time::sleep(Duration::from_millis(50)).await;
-        Ok(rs_adk::llm::LlmResponse {
-            content: rs_genai::prelude::Content {
-                role: Some(rs_genai::prelude::Role::Model),
-                parts: vec![rs_genai::prelude::Part::Text { text }],
+        Ok(gemini_adk::llm::LlmResponse {
+            content: gemini_live::prelude::Content {
+                role: Some(gemini_live::prelude::Role::Model),
+                parts: vec![gemini_live::prelude::Part::Text { text }],
             },
             finish_reason: Some("STOP".into()),
             usage: None,

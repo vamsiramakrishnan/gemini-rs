@@ -13,7 +13,7 @@
 
 use std::sync::Arc;
 
-use adk_rs_fluent::prelude::*;
+use gemini_adk_fluent::prelude::*;
 
 #[tokio::main]
 async fn main() {
@@ -32,7 +32,7 @@ async fn main() {
             .unwrap_or_else(|| "test".into());
         // Simulate failure when query contains "fail"
         if query.contains("fail") {
-            Err(rs_adk::error::AgentError::Other(
+            Err(gemini_adk::error::AgentError::Other(
                 "Premium API unavailable".into(),
             ))
         } else {

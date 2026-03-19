@@ -6,13 +6,13 @@
 
 ## Context
 
-The apps/adk-web currently implements 7 apps using low-level L0 `ConnectBuilder::new(config).build()`. Each app has a hand-coded `tokio::select!` event loop, and the three advanced apps (playbook, guardrails, support) manually implement state machines, regex extraction, phase tracking, violation detection, and instruction updates.
+The apps/gemini-adk-web currently implements 7 apps using low-level L0 `ConnectBuilder::new(config).build()`. Each app has a hand-coded `tokio::select!` event loop, and the three advanced apps (playbook, guardrails, support) manually implement state machines, regex extraction, phase tracking, violation detection, and instruction updates.
 
 We now have L1 modules (PhaseMachine, WatcherRegistry, ComputedRegistry, TemporalRegistry, SessionSignals, BackgroundToolTracker) and the L2 `Live::builder()` fluent API that automates all of this.
 
 ## Architecture Decision
 
-**Use L2 `adk-rs-fluent::Live::builder()`** for all demo apps.
+**Use L2 `gemini-adk-fluent::Live::builder()`** for all demo apps.
 
 Rationale: Examples exist to showcase best DX. The L2 API is the intended public API. Using it in demos validates the API design and serves as documentation.
 
@@ -257,7 +257,7 @@ Live::builder()
 
 ## New Files
 
-### `apps/adk-web/src/apps/extractors.rs`
+### `apps/gemini-adk-web/src/apps/extractors.rs`
 
 Custom `TurnExtractor` implementations wrapping the existing regex extraction functions:
 
@@ -282,14 +282,14 @@ The existing `extract_state()` functions from playbook.rs, guardrails.rs, and su
 
 ## Dependency Changes
 
-### `apps/adk-web/Cargo.toml`
+### `apps/gemini-adk-web/Cargo.toml`
 
 Add:
 ```toml
-adk-rs-fluent = { path = "../../crates/adk-rs-fluent" }
+gemini-adk-fluent = { path = "../../crates/gemini-adk-fluent" }
 ```
 
-The `regex` dependency stays (used by RegexExtractor). The `rs-adk` dependency stays (for types like State, TurnExtractor).
+The `regex` dependency stays (used by RegexExtractor). The `gemini-adk` dependency stays (for types like State, TurnExtractor).
 
 ## What Stays Unchanged
 
@@ -319,7 +319,7 @@ The `regex` dependency stays (used by RegexExtractor). The `rs-adk` dependency s
 
 ## Implementation Order
 
-1. Add `adk-rs-fluent` dependency + create `extractors.rs`
+1. Add `gemini-adk-fluent` dependency + create `extractors.rs`
 2. Migrate basic apps (voice_chat, text_chat, tool_calling) — validates the callback pattern
 3. Migrate all_config
 4. Migrate playbook — validates PhaseMachine integration

@@ -25,26 +25,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Run: `full_algebra`, `contract_testing`, `deep_research`, `customer_support`, `code_review`, `dispatch_join`, `race_timeout`, `a2a_remote`, `live_voice`, `production_pipeline`
 - **Web UI redesign**: Design system (80+ CSS tokens, Inter + JetBrains Mono), dark/light mode, animated landing page, architecture diagram, cookbook browser, operator algebra showcase, glassmorphism navigation
 - **Cookbook browser panel** in DevTools UI
-- **`adk-cli` manifest fields**: `description`, `license`, `keywords`, `categories`, `repository` for crates.io compliance
+- **`gemini-adk-cli` manifest fields**: `description`, `license`, `keywords`, `categories`, `repository` for crates.io compliance
 
 ### Changed
 - All crate versions bumped from `0.4.0` → `0.5.0`
-- Internal dependency versions updated (`rs-genai` and `rs-adk` constraints in downstream crates)
+- Internal dependency versions updated (`gemini-live` and `gemini-adk` constraints in downstream crates)
 - Cookbook-to-example renaming across docs, configs, and source files
 - Release workflow: publish steps now check crates.io API before uploading, skip if version already exists
 
 ### Fixed
 - `cargo fmt` violations across cookbook examples and compose modules
-- `adk-cli` crates.io manifest verification failure (missing required fields)
+- `gemini-adk-cli` crates.io manifest verification failure (missing required fields)
 
 ## [0.4.0] - 2026-03-18
 
 ### Added
-- **Workspace restructure**: Organized examples under `examples/` and interactive web UI under `apps/adk-web/` to match upstream ADK convention
-- **`adk-api-server`**: Standalone REST API server for headless agent deployments
-- **`adk-server-core`**: Shared server library (agent loading, REST handlers, session management) used by both `adk-web` and `adk-api-server`
-- **`adk-cli`**: Full CLI tool with `create`, `run`, `web`, `eval`, `deploy`, and `api_server` subcommands
-- **Evaluation framework** (`rs-adk`):
+- **Workspace restructure**: Organized examples under `examples/` and interactive web UI under `apps/gemini-adk-web/` to match upstream ADK convention
+- **`gemini-adk-api`**: Standalone REST API server for headless agent deployments
+- **`gemini-adk-server`**: Shared server library (agent loading, REST handlers, session management) used by both `gemini-adk-web` and `gemini-adk-api`
+- **`gemini-adk-cli`**: Full CLI tool with `create`, `run`, `web`, `eval`, `deploy`, and `api_server` subcommands
+- **Evaluation framework** (`gemini-adk`):
   - `EvalsetParser` — TOML-based eval set configuration
   - `HallucinationEvaluator` — detect hallucinated content in agent output
   - `RubricEvaluator` — score agent responses against grading rubrics
@@ -52,24 +52,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `UserSimulatorEvaluator` — simulate multi-turn user interactions
   - `TrajectoryMatchType` — exact, in-order, and any-order tool call sequence matching
   - `TestConfig` — test case configuration and execution
-- **Session backends** (`rs-adk`): Postgres and Vertex AI session persistence
-- **Agent configuration** (`rs-adk`): `AgentConfig` with full serialization support
-- **Middleware module** (`rs-adk`): Middleware trait and composition pipeline
-- **Telemetry** (`rs-adk`): Structured logging, metrics collection, span management, and setup utilities
-- **Context module** (`rs-adk`): `InvocationContext` for agent execution context
-- **Run configuration** (`rs-adk`): `RunConfig` for agent run parameters
-- **Config-driven construction** (`adk-rs-fluent`): `AgentBuilder::from_config()` and `AgentBuilder::config()`
-- Documentation: Comprehensive READMEs for `adk-web`, `adk-api-server`, and `adk-cli`
+- **Session backends** (`gemini-adk`): Postgres and Vertex AI session persistence
+- **Agent configuration** (`gemini-adk`): `AgentConfig` with full serialization support
+- **Middleware module** (`gemini-adk`): Middleware trait and composition pipeline
+- **Telemetry** (`gemini-adk`): Structured logging, metrics collection, span management, and setup utilities
+- **Context module** (`gemini-adk`): `InvocationContext` for agent execution context
+- **Run configuration** (`gemini-adk`): `RunConfig` for agent run parameters
+- **Config-driven construction** (`gemini-adk-fluent`): `AgentBuilder::from_config()` and `AgentBuilder::config()`
+- Documentation: Comprehensive READMEs for `gemini-adk-web`, `gemini-adk-api`, and `gemini-adk-cli`
 - DevTools UI: Artifact panel, eval panel, event inspector panel, and trace panel
 
 ### Changed
-- Workspace layout: standalone examples in `examples/`, web UI in `apps/adk-web/`
-- `adk-web` now depends on `adk-server-core` instead of inlining server logic
+- Workspace layout: standalone examples in `examples/`, web UI in `apps/gemini-adk-web/`
+- `gemini-adk-web` now depends on `gemini-adk-server` instead of inlining server logic
 - All crate versions bumped from `0.1.0` → `0.4.0`
 
 ### Fixed
 - `clippy::derivable_impls` on `TrajectoryMatchType` — replaced manual impl with `#[derive(Default)]`
-- `clippy::print_literal` in `adk-cli` eval output formatting
+- `clippy::print_literal` in `gemini-adk-cli` eval output formatting
 - Dead code warnings across workspace
 - `cargo fmt` violations
 
@@ -77,9 +77,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Initial release of three-crate workspace
-- **rs-genai** (L0): Wire protocol, WebSocket transport, `Codec`/`Transport`/`AuthProvider` traits, `SessionWriter`/`SessionReader`, structured errors, `Role` enum, `Content`/`Part` builders
-- **rs-adk** (L1): Agent runtime with three-lane processor (fast/control/telemetry), `State` with prefix scoping (`session:`, `derived:`, `turn:`, `app:`, `user:`), `PhaseMachine` for conversation flow control, `ToolDispatcher` with `SimpleTool`/`TypedTool`, `ComputedRegistry` for derived state, `WatcherRegistry` for state change watchers, `TemporalRegistry` for temporal pattern detection, `SessionSignals` with atomic counters, `SessionTelemetry`, `BackgroundToolTracker`
-- **adk-rs-fluent** (L2): Fluent builder API, S-C-T-P-M-A operator algebra for agent composition, `Middleware` trait and `MiddlewareChain`, pre-built patterns and contract validation
+- **gemini-live** (L0): Wire protocol, WebSocket transport, `Codec`/`Transport`/`AuthProvider` traits, `SessionWriter`/`SessionReader`, structured errors, `Role` enum, `Content`/`Part` builders
+- **gemini-adk** (L1): Agent runtime with three-lane processor (fast/control/telemetry), `State` with prefix scoping (`session:`, `derived:`, `turn:`, `app:`, `user:`), `PhaseMachine` for conversation flow control, `ToolDispatcher` with `SimpleTool`/`TypedTool`, `ComputedRegistry` for derived state, `WatcherRegistry` for state change watchers, `TemporalRegistry` for temporal pattern detection, `SessionSignals` with atomic counters, `SessionTelemetry`, `BackgroundToolTracker`
+- **gemini-adk-fluent** (L2): Fluent builder API, S-C-T-P-M-A operator algebra for agent composition, `Middleware` trait and `MiddlewareChain`, pre-built patterns and contract validation
 - ADK Web UI framework: multi-app Axum WebSocket tester with devtools panel
 - Standalone examples: `text-chat`, `voice-chat`, `tool-calling`, `transcription`
 - Agents examples: `weather-agent` and `research-pipeline` demos

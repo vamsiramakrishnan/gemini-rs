@@ -9,7 +9,7 @@ Single-binary, router-based demo hub that consolidates existing demos and adds n
 
 ## Architecture
 
-### Single Axum Binary (`apps/adk-web/`)
+### Single Axum Binary (`apps/gemini-adk-web/`)
 
 ```
 GET /                → Landing page with app cards
@@ -132,7 +132,7 @@ Each phase defines:
 
 `PlaybookProcessor` subscribes to extracted state from `Live::builder().extract_turns()`, checks the state machine, triggers phase transitions, and rewrites the system instruction for the new phase.
 
-`TextAgent` evaluator runs on each phase transition. Takes conversation state + playbook definition, returns adherence score + notes. Uses `FnTextAgent` or `LlmTextAgent` from rs-adk.
+`TextAgent` evaluator runs on each phase transition. Takes conversation state + playbook definition, returns adherence score + notes. Uses `FnTextAgent` or `LlmTextAgent` from gemini-adk.
 
 ### Guardrails Agent
 
@@ -147,7 +147,7 @@ Chains two processors:
 ## File Structure
 
 ```
-apps/adk-web/
+apps/gemini-adk-web/
   Cargo.toml
   src/
     main.rs              ← Axum server, route setup, app registry
@@ -179,9 +179,9 @@ apps/adk-web/
 ## Dependencies
 
 Uses existing crates only:
-- `rs-genai` — wire-level Gemini Live connection
-- `rs-adk` — TextAgent, State, ToolDispatcher, Plugin system
-- `adk-rs-fluent` — Live::builder(), AgentBuilder, composition
+- `gemini-live` — wire-level Gemini Live connection
+- `gemini-adk` — TextAgent, State, ToolDispatcher, Plugin system
+- `gemini-adk-fluent` — Live::builder(), AgentBuilder, composition
 - `axum`, `tokio`, `serde_json` — server infrastructure
 
 ## Non-Goals

@@ -10,14 +10,14 @@ abstraction on top of the one below:
 
 ```
 +--------------------------------------------------+
-|  adk-rs-fluent  (L2)  — Fluent DX                |
+|  gemini-adk-fluent  (L2)  — Fluent DX                |
 |  Live::builder(), operator algebra, composition   |
 +--------------------------------------------------+
-|  rs-adk  (L1)  — Agent Runtime                   |
+|  gemini-adk  (L1)  — Agent Runtime                   |
 |  LiveSessionBuilder, callbacks, tool dispatch,    |
 |  state, phases, watchers, extractors, telemetry   |
 +--------------------------------------------------+
-|  rs-genai  (L0)  — Wire Protocol                 |
+|  gemini-live  (L0)  — Wire Protocol                 |
 |  SessionHandle, SessionConfig, Transport, Codec,  |
 |  AuthProvider, events, commands, VAD, buffers     |
 +--------------------------------------------------+
@@ -26,7 +26,7 @@ abstraction on top of the one below:
 +--------------------------------------------------+
 ```
 
-### L0: rs-genai
+### L0: gemini-live
 
 The wire protocol crate. Maps 1:1 to the Gemini API surface. No application
 logic, no opinions about how you structure your app.
@@ -42,7 +42,7 @@ What it provides:
 - Audio buffers (lock-free SPSC ring buffer, adaptive jitter buffer)
 - Client-side VAD (Voice Activity Detection)
 
-### L1: rs-adk
+### L1: gemini-adk
 
 The agent runtime. Adds the event processing loop, typed callbacks, automatic
 tool dispatch, state management, and the phase machine.
@@ -60,7 +60,7 @@ What it provides:
 - `SessionSignals` + `SessionTelemetry` for observability
 - `TextAgent` trait and combinators for text-based LLM pipelines
 
-### L2: adk-rs-fluent
+### L2: gemini-adk-fluent
 
 The fluent developer experience layer. Wraps L1 in a chainable builder API
 and adds operator-algebra composition (S, C, T, P, M modules).
@@ -189,21 +189,21 @@ no telemetry, no allocations on the hot path.
 
 | Trait | Crate | Purpose |
 |-------|-------|---------|
-| `Transport` | L0 (`rs_genai::transport::ws`) | Bidirectional byte transport (WebSocket or mock) |
-| `Codec` | L0 (`rs_genai::transport::codec`) | Encode commands / decode server messages (JSON default) |
-| `AuthProvider` | L0 (`rs_genai::transport::auth`) | URL construction + auth headers (Google AI / Vertex AI) |
-| `SessionWriter` | L0 (`rs_genai::session`) | Send audio/text/video/tools/instructions (trait object safe) |
-| `SessionReader` | L0 (`rs_genai::session`) | Subscribe to events, observe phase |
-| `ToolFunction` | L1 (`rs_adk::tool`) | One-shot tool: `call(args) -> Result<Value>` |
-| `StreamingTool` | L1 (`rs_adk::tool`) | Background tool yielding multiple results |
-| `InputStreamingTool` | L1 (`rs_adk::tool`) | Tool receiving live input while running |
-| `TurnExtractor` | L1 (`rs_adk::live::extractor`) | Extract structured data from transcript window |
-| `TextAgent` | L1 (`rs_adk::text`) | Text-based LLM agent (`generate()`, not Live) |
-| `BaseLlm` | L1 (`rs_adk::llm`) | LLM abstraction for `generate()` calls |
+| `Transport` | L0 (`gemini_live::transport::ws`) | Bidirectional byte transport (WebSocket or mock) |
+| `Codec` | L0 (`gemini_live::transport::codec`) | Encode commands / decode server messages (JSON default) |
+| `AuthProvider` | L0 (`gemini_live::transport::auth`) | URL construction + auth headers (Google AI / Vertex AI) |
+| `SessionWriter` | L0 (`gemini_live::session`) | Send audio/text/video/tools/instructions (trait object safe) |
+| `SessionReader` | L0 (`gemini_live::session`) | Subscribe to events, observe phase |
+| `ToolFunction` | L1 (`gemini_adk::tool`) | One-shot tool: `call(args) -> Result<Value>` |
+| `StreamingTool` | L1 (`gemini_adk::tool`) | Background tool yielding multiple results |
+| `InputStreamingTool` | L1 (`gemini_adk::tool`) | Tool receiving live input while running |
+| `TurnExtractor` | L1 (`gemini_adk::live::extractor`) | Extract structured data from transcript window |
+| `TextAgent` | L1 (`gemini_adk::text`) | Text-based LLM agent (`generate()`, not Live) |
+| `BaseLlm` | L1 (`gemini_adk::llm`) | LLM abstraction for `generate()` calls |
 
 ## Choosing Your Layer
 
-### Use L0 (`rs-genai`) if you need:
+### Use L0 (`gemini-live`) if you need:
 
 - Raw WebSocket access with no abstraction overhead
 - Custom event loop logic that does not fit the callback model
@@ -212,7 +212,7 @@ no telemetry, no allocations on the hot path.
 - Maximum control over every message sent and received
 
 ```rust,ignore
-use rs_genai::prelude::*;
+use gemini_live::prelude::*;
 
 let config = SessionConfig::from_endpoint(ApiEndpoint::google_ai("YOUR_KEY"))
     .model(GeminiModel::Gemini2_0FlashLive);
@@ -230,7 +230,7 @@ while let Some(event) = recv_event(&mut events).await {
 }
 ```
 
-### Use L1 (`rs-adk`) if you need:
+### Use L1 (`gemini-adk`) if you need:
 
 - Automatic tool dispatch without manual message matching
 - State management with prefix scoping (`session:`, `turn:`, `app:`)
@@ -239,7 +239,7 @@ while let Some(event) = recv_event(&mut events).await {
 - Telemetry and session signals
 - Full control over callback registration without the fluent syntax
 
-### Use L2 (`adk-rs-fluent`) if you want:
+### Use L2 (`gemini-adk-fluent`) if you want:
 
 - The fastest path from zero to working voice agent
 - Chainable builder API with sub-builders for phases and watchers
@@ -248,7 +248,7 @@ while let Some(event) = recv_event(&mut events).await {
 - Sensible defaults (auto-enables transcription when extractors are used)
 
 ```rust,ignore
-use adk_rs_fluent::prelude::*;
+use gemini_adk_fluent::prelude::*;
 
 let handle = Live::builder()
     .model(GeminiModel::Gemini2_0FlashLive)

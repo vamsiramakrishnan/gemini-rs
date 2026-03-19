@@ -9,7 +9,7 @@
 //!   4. SkillDeclaration: advertising agent capabilities
 //!   5. T::a2a: using remote agents as tools
 
-use adk_rs_fluent::prelude::*;
+use gemini_adk_fluent::prelude::*;
 use serde_json::json;
 use std::time::Duration;
 

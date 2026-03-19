@@ -10,10 +10,10 @@ body:
     attributes:
       label: Affected Crate
       options:
-        - rs-genai (L0 — wire protocol)
-        - rs-adk (L1 — agent runtime)
-        - adk-rs-fluent (L2 — fluent DX)
-        - apps/adk-web
+        - gemini-live (L0 — wire protocol)
+        - gemini-adk (L1 — agent runtime)
+        - gemini-adk-fluent (L2 — fluent DX)
+        - apps/gemini-adk-web
         - Other
     validations:
       required: true
@@ -50,7 +50,7 @@ body:
     id: version
     attributes:
       label: Version
-      description: "Output of `cargo pkgid rs-genai` or the version in Cargo.toml"
+      description: "Output of `cargo pkgid gemini-live` or the version in Cargo.toml"
       placeholder: "0.1.0"
     validations:
       required: true

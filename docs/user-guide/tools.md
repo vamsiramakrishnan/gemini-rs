@@ -8,7 +8,7 @@ sends a `FunctionCall`, your tool executes, and you return a `FunctionResponse`.
 The quickest way to define a tool -- wrap an async closure:
 
 ```rust,ignore
-use rs_adk::tool::SimpleTool;
+use gemini_adk::tool::SimpleTool;
 use serde_json::json;
 
 let weather = SimpleTool::new(
@@ -37,7 +37,7 @@ Type-safe tools with auto-generated schemas. Define a struct with `JsonSchema`
 and `Deserialize`:
 
 ```rust,ignore
-use rs_adk::tool::TypedTool;
+use gemini_adk::tool::TypedTool;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -71,8 +71,8 @@ holds state (connection pools, caches):
 
 ```rust,ignore
 use async_trait::async_trait;
-use rs_adk::tool::ToolFunction;
-use rs_adk::error::ToolError;
+use gemini_adk::tool::ToolFunction;
+use gemini_adk::error::ToolError;
 
 struct DatabaseLookup { pool: sqlx::PgPool }
 
@@ -261,7 +261,7 @@ If `tools_enabled` is `None` (default), all registered tools are available.
 re-invoke while a previous call is pending:
 
 ```rust,ignore
-use rs_adk::tools::LongRunningFunctionTool;
+use gemini_adk::tools::LongRunningFunctionTool;
 
 let long_running = LongRunningFunctionTool::new(Arc::new(MySlowTool::new()));
 dispatcher.register(long_running);

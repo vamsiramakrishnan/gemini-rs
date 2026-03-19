@@ -1,0 +1,21 @@
+[package]
+name = "gemini-adk-api"
+version.workspace = true
+edition.workspace = true
+publish = false
+description = "Standalone REST API server for Gemini ADK agents"
+
+[[bin]]
+name = "gemini-adk-api"
+path = "src/main.rs"
+
+[dependencies]
+gemini-adk-server = { path = "../gemini-adk-server" }
+axum = "0.7"
+tokio = { version = "1.0", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+dotenvy = "0.15"
+
+[lints]
+workspace = true

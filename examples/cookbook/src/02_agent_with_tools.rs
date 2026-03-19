@@ -8,8 +8,8 @@
 //! - `TypedTool::new::<T>()` — derive the schema from `schemars::JsonSchema`
 //! - `.google_search()` / `.code_execution()` — built-in Gemini tools on AgentBuilder
 
-use adk_rs_fluent::prelude::*;
-use rs_adk::{SimpleTool, ToolFunction, TypedTool};
+use gemini_adk::{SimpleTool, ToolFunction, TypedTool};
+use gemini_adk_fluent::prelude::*;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::json;
@@ -87,7 +87,7 @@ fn main() {
 
     // ── Registering tools with ToolDispatcher ──
     // ToolDispatcher routes function calls to the correct tool by name.
-    let mut dispatcher = rs_adk::ToolDispatcher::new();
+    let mut dispatcher = gemini_adk::ToolDispatcher::new();
     dispatcher.register(weather_tool);
     dispatcher.register(calc_tool);
 

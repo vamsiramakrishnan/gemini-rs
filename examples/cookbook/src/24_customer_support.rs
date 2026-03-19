@@ -9,7 +9,7 @@
 //!   4. Escalation fallback when confidence is low
 //!   5. Closer agent: summarize resolution and generate follow-up
 
-use adk_rs_fluent::prelude::*;
+use gemini_adk_fluent::prelude::*;
 use serde_json::json;
 
 fn main() {

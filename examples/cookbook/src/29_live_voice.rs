@@ -11,7 +11,7 @@
 //!   - Control plane features (steering, repair, persistence)
 //!   - Callbacks (audio, text, thought, interruption)
 
-use adk_rs_fluent::prelude::*;
+use gemini_adk_fluent::prelude::*;
 use serde_json::json;
 
 fn main() {

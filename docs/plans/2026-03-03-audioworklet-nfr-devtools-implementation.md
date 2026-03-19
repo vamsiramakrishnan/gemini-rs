@@ -13,11 +13,11 @@
 ### Task 1: Create capture-processor.js AudioWorkletProcessor
 
 **Files:**
-- Create: `apps/adk-web/static/worklets/capture-processor.js`
+- Create: `apps/gemini-adk-web/static/worklets/capture-processor.js`
 
 **Step 1: Create the worklets directory**
 
-Run: `mkdir -p apps/adk-web/static/worklets`
+Run: `mkdir -p apps/gemini-adk-web/static/worklets`
 
 **Step 2: Write the capture processor**
 
@@ -71,7 +71,7 @@ registerProcessor('capture-processor', CaptureProcessor);
 **Step 3: Commit**
 
 ```bash
-git add apps/adk-web/static/worklets/capture-processor.js
+git add apps/gemini-adk-web/static/worklets/capture-processor.js
 git commit -m "feat(ui): add capture AudioWorkletProcessor for mic input"
 ```
 
@@ -80,7 +80,7 @@ git commit -m "feat(ui): add capture AudioWorkletProcessor for mic input"
 ### Task 2: Create playback-processor.js AudioWorkletProcessor
 
 **Files:**
-- Create: `apps/adk-web/static/worklets/playback-processor.js`
+- Create: `apps/gemini-adk-web/static/worklets/playback-processor.js`
 
 **Step 1: Write the playback processor**
 
@@ -146,7 +146,7 @@ registerProcessor('playback-processor', PlaybackProcessor);
 **Step 2: Commit**
 
 ```bash
-git add apps/adk-web/static/worklets/playback-processor.js
+git add apps/gemini-adk-web/static/worklets/playback-processor.js
 git commit -m "feat(ui): add playback AudioWorkletProcessor with ring buffer"
 ```
 
@@ -155,7 +155,7 @@ git commit -m "feat(ui): add playback AudioWorkletProcessor with ring buffer"
 ### Task 3: Rewrite AudioManager with worklet support + fallback
 
 **Files:**
-- Modify: `apps/adk-web/static/js/audio.js` (full rewrite)
+- Modify: `apps/gemini-adk-web/static/js/audio.js` (full rewrite)
 
 **Step 1: Rewrite audio.js**
 
@@ -376,19 +376,19 @@ class AudioManager {
 
 **Step 2: Update app.js to call initPlayback with await**
 
-In `apps/adk-web/static/js/app.js`, change `audio.initPlayback()` (line 205) to `await audio.initPlayback()` and make `connect()` async:
+In `apps/gemini-adk-web/static/js/app.js`, change `audio.initPlayback()` (line 205) to `await audio.initPlayback()` and make `connect()` async:
 
 Change line 197: `function connect() {` -> `async function connect() {`
 Change line 205: `audio.initPlayback();` -> `await audio.initPlayback();`
 
 **Step 3: Verify worklet files are served by the static file server**
 
-The Axum `ServeDir` at `/static` already serves everything under `apps/adk-web/static/`, so `/static/worklets/capture-processor.js` will be accessible automatically.
+The Axum `ServeDir` at `/static` already serves everything under `apps/gemini-adk-web/static/`, so `/static/worklets/capture-processor.js` will be accessible automatically.
 
 **Step 4: Commit**
 
 ```bash
-git add apps/adk-web/static/js/audio.js apps/adk-web/static/js/app.js
+git add apps/gemini-adk-web/static/js/audio.js apps/gemini-adk-web/static/js/app.js
 git commit -m "feat(ui): rewrite AudioManager with AudioWorklet + ScriptProcessorNode fallback"
 ```
 
@@ -397,9 +397,9 @@ git commit -m "feat(ui): rewrite AudioManager with AudioWorklet + ScriptProcesso
 ### Task 4: Add session status bar to devtools
 
 **Files:**
-- Modify: `apps/adk-web/static/app.html` (add status bar container)
-- Modify: `apps/adk-web/static/css/devtools.css` (add status bar styles)
-- Modify: `apps/adk-web/static/js/devtools.js` (add status bar logic)
+- Modify: `apps/gemini-adk-web/static/app.html` (add status bar container)
+- Modify: `apps/gemini-adk-web/static/css/devtools.css` (add status bar styles)
+- Modify: `apps/gemini-adk-web/static/js/devtools.js` (add status bar logic)
 
 **Step 1: Add status bar HTML to app.html**
 
@@ -518,7 +518,7 @@ In `devtools.js`, add status bar update logic:
 **Step 4: Commit**
 
 ```bash
-git add apps/adk-web/static/app.html apps/adk-web/static/css/devtools.css apps/adk-web/static/js/devtools.js
+git add apps/gemini-adk-web/static/app.html apps/gemini-adk-web/static/css/devtools.css apps/gemini-adk-web/static/js/devtools.js
 git commit -m "feat(ui): add session status bar to devtools (uptime, phase, turns)"
 ```
 
@@ -527,8 +527,8 @@ git commit -m "feat(ui): add session status bar to devtools (uptime, phase, turn
 ### Task 5: Replace Telemetry tab with NFR Metrics tab
 
 **Files:**
-- Modify: `apps/adk-web/static/js/devtools.js`
-- Modify: `apps/adk-web/static/css/devtools.css`
+- Modify: `apps/gemini-adk-web/static/js/devtools.js`
+- Modify: `apps/gemini-adk-web/static/css/devtools.css`
 
 **Step 1: Rename telemetry panel to NFR panel**
 
@@ -810,7 +810,7 @@ In `devtools.css`, replace the old telemetry styles (lines 596-769) with:
 **Step 5: Commit**
 
 ```bash
-git add apps/adk-web/static/js/devtools.js apps/adk-web/static/css/devtools.css
+git add apps/gemini-adk-web/static/js/devtools.js apps/gemini-adk-web/static/css/devtools.css
 git commit -m "feat(ui): replace Telemetry tab with focused NFR Metrics tab"
 ```
 
@@ -820,17 +820,17 @@ git commit -m "feat(ui): replace Telemetry tab with focused NFR Metrics tab"
 
 **Step 1: Run cargo check**
 
-Run: `cargo check -p rs-genai-ui`
+Run: `cargo check -p gemini-live-ui`
 Expected: Compilation succeeds (no Rust changes in this workstream).
 
 **Step 2: Run cargo test**
 
-Run: `cargo test -p rs-genai-ui`
+Run: `cargo test -p gemini-live-ui`
 Expected: All existing tests pass (UI changes don't affect Rust tests).
 
 **Step 3: Manual browser verification checklist**
 
-Start the server: `cargo run -p rs-genai-ui`
+Start the server: `cargo run -p gemini-live-ui`
 
 Verify in browser at `http://localhost:25125`:
 - [ ] Landing page loads, app cards show

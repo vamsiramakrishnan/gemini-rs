@@ -4,7 +4,7 @@
 
 **Goal:** Ship `adk web` and `adk run` CLI commands backed by a binary-multiplexed WebSocket protocol and embedded dev UI, matching adk-js devtools feature parity while leveraging Rust's performance for voice-first agents.
 
-**Architecture:** Two new crates — `adk-devtools` (library with DevServer, DevRepl, protocol types, embedded UI) and `adk-cli` (thin binary wrapping `cargo run` with env vars). The protocol uses a single WebSocket connection with binary frames for audio (zero base64 overhead) and JSON text frames for control/devtools channels.
+**Architecture:** Two new crates — `adk-devtools` (library with DevServer, DevRepl, protocol types, embedded UI) and `gemini-adk-cli` (thin binary wrapping `cargo run` with env vars). The protocol uses a single WebSocket connection with binary frames for audio (zero base64 overhead) and JSON text frames for control/devtools channels.
 
 **Tech Stack:** Axum (server), clap (CLI), rust-embed (static assets), rustyline (REPL), cpal (voice I/O, feature-gated), serde_json (protocol), vanilla JS/CSS (dev UI).
 
@@ -40,13 +40,13 @@ adk-js uses REST + SSE because it's a text-first SDK — every interaction is re
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  tools/adk-cli/                (Binary crate)       │
+│  tools/gemini-adk-cli/                (Binary crate)       │
 │  `adk create` scaffolding + `adk web`/`adk run`     │
 │  thin wrapper: runs `cargo run` on user's project   │
 ├─────────────────────────────────────────────────────┤
 │  crates/adk-devtools/          (Library crate)      │
 │  DevServer · DevRepl · Protocol · Embedded UI       │
-│  Depends on: adk-rs-fluent (L2)                     │
+│  Depends on: gemini-adk-fluent (L2)                     │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -60,7 +60,7 @@ Library crate providing:
 - **Embedded UI** — Vanilla JS/CSS dev UI compiled into the binary via `rust-embed`
 - **`run()` entry point** — Reads `ADK_MODE` env var, dispatches to DevServer or DevRepl
 
-### `tools/adk-cli/`
+### `tools/gemini-adk-cli/`
 
 Thin binary crate providing:
 
@@ -443,7 +443,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-adk-rs-fluent = "0.1"
+gemini-adk-fluent = "0.1"
 adk-devtools = "0.1"
 tokio = { version = "1", features = ["full"] }
 ```
@@ -485,7 +485,7 @@ GEMINI_MODEL=gemini-2.5-flash-live
 | DevServer (Axum + WebSocket handler) | P0 |
 | Embedded dev UI (vanilla JS) | P0 |
 | `adk run` text REPL | P0 |
-| `adk-cli` binary (`adk web`, `adk run`) | P0 |
+| `gemini-adk-cli` binary (`adk web`, `adk run`) | P0 |
 | Binary audio frames | P0 |
 | `adk run --voice` (cpal) | P1 |
 | `adk run --replay` | P1 |
@@ -509,7 +509,7 @@ GEMINI_MODEL=gemini-2.5-flash-live
 
 ```toml
 [dependencies]
-adk-rs-fluent = { path = "../adk-rs-fluent" }
+gemini-adk-fluent = { path = "../gemini-adk-fluent" }
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = "0.26"
@@ -530,7 +530,7 @@ default = []
 voice-cli = ["cpal"]
 ```
 
-### `adk-cli` (binary)
+### `gemini-adk-cli` (binary)
 
 ```toml
 [dependencies]
@@ -542,7 +542,7 @@ tokio = { version = "1", features = ["full"] }
 
 ## Relationship to Web UI
 
-The Web UI (`apps/adk-web/`) continues to exist as example apps. It is NOT replaced. Instead:
+The Web UI (`apps/gemini-adk-web/`) continues to exist as example apps. It is NOT replaced. Instead:
 
 - Demo apps can be **trivially ported** to `adk-devtools` by wrapping their `Live::builder()` calls in `AgentDescriptor` factories
 - The Web UI serves as a reference for how apps work

@@ -765,7 +765,7 @@ The wire crate already handles most of the protocol correctly. Key alignment poi
 | Interrupted signal             | Handled                    | `SessionEvent::Interrupted`              |
 | Tool call/response             | Handled                    | `SessionEvent::ToolCall`, `SessionCommand::ToolResponse` |
 
-### 11.2 Runtime Crate (L1: rs-adk)
+### 11.2 Runtime Crate (L1: gemini-adk)
 
 The runtime must enforce session-level constraints:
 
@@ -775,7 +775,7 @@ The runtime must enforce session-level constraints:
 - **Tool execution lifecycle**: Manage concurrent tool calls, enforce session timeout awareness
 - **Context budget tracking**: Monitor token accumulation for compression decisions
 
-### 11.3 Fluent Crate (L2: adk-rs-fluent)
+### 11.3 Fluent Crate (L2: gemini-adk-fluent)
 
 The fluent layer should expose these API behaviors as ergonomic builder options:
 

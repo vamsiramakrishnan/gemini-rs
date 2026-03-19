@@ -1,0 +1,36 @@
+[package]
+name = "gemini-adk-fluent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Fluent DX for Gemini Live — builder API, operator algebra, composition modules"
+keywords = ["gemini", "agents", "fluent", "builder", "composition"]
+categories = ["api-bindings", "asynchronous", "development-tools"]
+repository.workspace = true
+documentation = "https://docs.rs/gemini-adk-fluent"
+readme = "README.md"
+
+[dependencies]
+gemini-live = { workspace = true }
+gemini-adk  = { workspace = true }
+bytes = "1"
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+schemars = "0.8"
+parking_lot = "0.12"
+
+[dev-dependencies]
+tokio-test = "0.4"
+
+[features]
+default = []
+gemini-llm = ["gemini-adk/gemini-llm"]
+tracing-support = ["gemini-adk/tracing-support"]
+otel = ["gemini-adk/otel", "gemini-live/otel"]
+otel-otlp = ["gemini-adk/otel-otlp", "gemini-live/otel-otlp"]
+otel-gcp = ["gemini-adk/otel-gcp", "gemini-live/otel-gcp"]
+
+[lints]
+workspace = true

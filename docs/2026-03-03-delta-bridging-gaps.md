@@ -75,8 +75,8 @@ pub fn eq<'a>(key: &'a str, expected: &'a str) -> impl Fn(&State) -> bool + Send
 
 ### Files
 
-- `crates/rs-adk/src/state.rs` — add `with()`, `with_raw()`
-- `crates/adk-rs-fluent/src/compose/state.rs` — rewrite S predicates to use `with()`
+- `crates/gemini-adk/src/state.rs` — add `with()`, `with_raw()`
+- `crates/gemini-adk-fluent/src/compose/state.rs` — rewrite S predicates to use `with()`
 - Update existing tests, add new benchmarks
 
 ---
@@ -132,8 +132,8 @@ impl TranscriptBuffer {
 
 ### Files
 
-- `crates/rs-adk/src/live/transcript.rs`
-- `crates/rs-adk/src/live/builder.rs` — expose `.transcript_capacity(n)` on LiveSessionBuilder
+- `crates/gemini-adk/src/live/transcript.rs`
+- `crates/gemini-adk/src/live/builder.rs` — expose `.transcript_capacity(n)` on LiveSessionBuilder
 
 ---
 
@@ -231,8 +231,8 @@ contents.push(content);  // MOVE, not clone
 
 ### Files
 
-- `crates/rs-adk/src/llm/mod.rs` — add `into_parts()`
-- `crates/rs-adk/src/text.rs` — use consuming access pattern
+- `crates/gemini-adk/src/llm/mod.rs` — add `into_parts()`
+- `crates/gemini-adk/src/text.rs` — use consuming access pattern
 
 ---
 
@@ -318,10 +318,10 @@ if self.variant == GoogleLlmVariant::VertexAi {
 }
 ```
 
-**Better approach** — make `rs_genai::Client` accept a `TokenProvider` trait so it refreshes transparently:
+**Better approach** — make `gemini_live::Client` accept a `TokenProvider` trait so it refreshes transparently:
 
 ```rust
-// rs-genai/src/transport/auth.rs — extend VertexAIAuth
+// gemini-live/src/transport/auth.rs — extend VertexAIAuth
 pub struct VertexAIAuth {
     project: String,
     location: String,
@@ -338,9 +338,9 @@ This way token refresh is handled at L0, invisible to L1/L2.
 
 ### Files
 
-- `crates/rs-genai/src/transport/auth.rs` — `TokenProvider` trait, `GcloudTokenProvider`
-- `crates/rs-adk/src/llm/gemini.rs` — accept `TokenProvider` in params
-- `crates/rs-adk/src/llm/mod.rs` — re-export
+- `crates/gemini-live/src/transport/auth.rs` — `TokenProvider` trait, `GcloudTokenProvider`
+- `crates/gemini-adk/src/llm/gemini.rs` — accept `TokenProvider` in params
+- `crates/gemini-adk/src/llm/mod.rs` — re-export
 
 ---
 
@@ -457,8 +457,8 @@ impl State {
 
 ### Files
 
-- `crates/rs-adk/src/state.rs` — `StateKey<T>`, `get_key()`, `set_key()`, `with_key()`
-- `crates/adk-rs-fluent/src/compose/state.rs` — `S::key_is_true()`, `S::key_eq()`
+- `crates/gemini-adk/src/state.rs` — `StateKey<T>`, `get_key()`, `set_key()`, `with_key()`
+- `crates/gemini-adk-fluent/src/compose/state.rs` — `S::key_is_true()`, `S::key_eq()`
 - Per-example: `keys.rs` module declaring const keys
 
 ---
@@ -485,7 +485,7 @@ pub struct EventCallbacks {
 impl Live {
     pub fn on_extraction_error<F, Fut>(mut self, f: F) -> Self
     where
-        F: Fn(String, rs_adk::llm::LlmError) -> Fut + Send + Sync + 'static,
+        F: Fn(String, gemini_adk::llm::LlmError) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = ()> + Send + 'static,
     {
         self.callbacks.on_extraction_error = Some(Arc::new(move |name, err| {
@@ -527,9 +527,9 @@ Live::builder()
 
 ### Files
 
-- `crates/rs-adk/src/live/callbacks.rs` — add field
-- `crates/rs-adk/src/live/processor.rs` — fire callback
-- `crates/adk-rs-fluent/src/live.rs` — builder method
+- `crates/gemini-adk/src/live/callbacks.rs` — add field
+- `crates/gemini-adk/src/live/processor.rs` — fire callback
+- `crates/gemini-adk-fluent/src/live.rs` — builder method
 
 ---
 
@@ -555,7 +555,7 @@ This is pure ceremony. 15 lines of `let tx_n = tx.clone()` before every `Live::b
 A `SharedContext` struct that callbacks capture by Arc:
 
 ```rust
-// adk-rs-fluent/src/live.rs
+// gemini-adk-fluent/src/live.rs
 
 /// Shared context for callback closures. Clone once, capture everywhere.
 pub struct CallbackCtx<T: Send + Sync + 'static> {
@@ -633,8 +633,8 @@ let_clone!(tx);
 
 ### Files
 
-- `crates/adk-rs-fluent/src/lib.rs` — `let_clone!` macro
-- `apps/adk-web/src/apps/*.rs` — adopt macro
+- `crates/gemini-adk-fluent/src/lib.rs` — `let_clone!` macro
+- `apps/gemini-adk-web/src/apps/*.rs` — adopt macro
 
 ---
 
@@ -673,7 +673,7 @@ impl PhaseMachine {
 
 ### Files
 
-- `crates/rs-adk/src/live/phase.rs`
+- `crates/gemini-adk/src/live/phase.rs`
 
 ---
 
@@ -722,7 +722,7 @@ impl ToolDispatcher {
 
 ### Files
 
-- `crates/rs-adk/src/tool.rs`
+- `crates/gemini-adk/src/tool.rs`
 
 ---
 
@@ -769,8 +769,8 @@ This requires `ToolComposite` to expose `into_tool_functions()` and `native_tool
 
 ### Files
 
-- `crates/adk-rs-fluent/src/compose/tools.rs` — expose decomposition methods
-- `crates/adk-rs-fluent/src/live.rs` — `with_tools()` method
+- `crates/gemini-adk-fluent/src/compose/tools.rs` — expose decomposition methods
+- `crates/gemini-adk-fluent/src/live.rs` — `with_tools()` method
 
 ---
 
@@ -800,7 +800,7 @@ Live::builder()
 
 ### Files
 
-- Option B: `crates/adk-rs-fluent/src/compose/middleware.rs` — delete or mark `#[doc(hidden)]`
+- Option B: `crates/gemini-adk-fluent/src/compose/middleware.rs` — delete or mark `#[doc(hidden)]`
 
 ---
 
@@ -859,8 +859,8 @@ pub struct CachedExtractor {
 
 ### Files
 
-- `crates/rs-adk/src/live/extractor.rs` — `should_extract()` default
-- `crates/rs-adk/src/live/processor.rs` — filter before `join_all`
+- `crates/gemini-adk/src/live/extractor.rs` — `should_extract()` default
+- `crates/gemini-adk/src/live/processor.rs` — filter before `join_all`
 
 ---
 
@@ -880,7 +880,7 @@ if !self.deferred_agent_tools.is_empty() {
     let state = State::new();
     let d = dispatcher.get_or_insert_with(ToolDispatcher::new);
     for deferred in self.deferred_agent_tools {
-        d.register(rs_adk::TextAgentTool::from_arc(
+        d.register(gemini_adk::TextAgentTool::from_arc(
             deferred.name, deferred.description, deferred.agent.clone(), state.clone(),
         ));
 
@@ -929,8 +929,8 @@ for deferred in &self.deferred_agent_tools {
 
 ### Files
 
-- `crates/rs-adk/src/text.rs` — `warm_up()` on TextAgent trait + LlmTextAgent override
-- `crates/adk-rs-fluent/src/live.rs` — auto-warm in `build_and_connect()`
+- `crates/gemini-adk/src/text.rs` — `warm_up()` on TextAgent trait + LlmTextAgent override
+- `crates/gemini-adk-fluent/src/live.rs` — auto-warm in `build_and_connect()`
 
 ---
 

@@ -13,13 +13,13 @@
 ### Task 1: Create LiveEvent enum (L1)
 
 **Files:**
-- Create: `crates/rs-adk/src/live/events.rs`
-- Modify: `crates/rs-adk/src/live/mod.rs` (add module + re-export)
+- Create: `crates/gemini-adk/src/live/events.rs`
+- Modify: `crates/gemini-adk/src/live/mod.rs` (add module + re-export)
 
 **Step 1: Create the LiveEvent enum**
 
 ```rust
-// crates/rs-adk/src/live/events.rs
+// crates/gemini-adk/src/live/events.rs
 //! Semantic events emitted by the L1 processor.
 //!
 //! Subscribe via [`LiveHandle::events()`]. Zero-cost when no subscribers.
@@ -30,7 +30,7 @@ use bytes::Bytes;
 
 /// Semantic events emitted by the Live session processor.
 ///
-/// The L1 equivalent of L0's [`SessionEvent`](rs_genai::prelude::SessionEvent).
+/// The L1 equivalent of L0's [`SessionEvent`](gemini_live::prelude::SessionEvent).
 /// L0 events are wire-level; LiveEvents are semantic (extractions completed,
 /// phases transitioned, tools executed).
 ///
@@ -111,7 +111,7 @@ pub enum LiveEvent {
 }
 ```
 
-**Step 2: Register module and re-export in `crates/rs-adk/src/live/mod.rs`**
+**Step 2: Register module and re-export in `crates/gemini-adk/src/live/mod.rs`**
 
 Add after line 16 (`pub(crate) mod control_plane;`):
 ```rust
@@ -125,7 +125,7 @@ pub use events::LiveEvent;
 
 **Step 3: Verify it compiles**
 
-Run: `cargo check -p rs-adk`
+Run: `cargo check -p gemini-adk`
 
 **Step 4: Commit**
 
@@ -138,11 +138,11 @@ feat(adk): add LiveEvent semantic event enum
 ### Task 2: Add event_tx to processor and fast lane (L1)
 
 **Files:**
-- Modify: `crates/rs-adk/src/live/processor.rs`
+- Modify: `crates/gemini-adk/src/live/processor.rs`
 
 **Step 1: Write test for LiveEvent emission from fast lane**
 
-Add to `crates/rs-adk/src/live/processor.rs` in the `#[cfg(test)] mod tests` block (after the existing tests):
+Add to `crates/gemini-adk/src/live/processor.rs` in the `#[cfg(test)] mod tests` block (after the existing tests):
 
 ```rust
 #[tokio::test]
@@ -199,12 +199,12 @@ async fn fast_lane_emits_live_events() {
 
 **Step 2: Run test to verify it fails**
 
-Run: `cargo test -p rs-adk fast_lane_emits_live_events -- --nocapture`
+Run: `cargo test -p gemini-adk fast_lane_emits_live_events -- --nocapture`
 Expected: FAIL — `spawn_event_processor` doesn't accept `live_event_tx` parameter yet.
 
 **Step 3: Add `live_event_tx` parameter to `spawn_event_processor` and emit in fast lane**
 
-In `crates/rs-adk/src/live/processor.rs`:
+In `crates/gemini-adk/src/live/processor.rs`:
 
 1. Add import at top (after line 13):
    ```rust
@@ -307,7 +307,7 @@ And add `live_event_tx,` as the last argument to `spawn_event_processor`.
 
 **Step 5: Run tests**
 
-Run: `cargo test -p rs-adk -- fast_lane --nocapture`
+Run: `cargo test -p gemini-adk -- fast_lane --nocapture`
 Expected: All 3 tests pass.
 
 **Step 6: Commit**
@@ -321,10 +321,10 @@ feat(adk): emit LiveEvents from fast lane processor
 ### Task 3: Emit LiveEvents from control lane (L1)
 
 **Files:**
-- Modify: `crates/rs-adk/src/live/control_plane/main_loop.rs`
-- Modify: `crates/rs-adk/src/live/control_plane/extractors.rs`
-- Modify: `crates/rs-adk/src/live/control_plane/lifecycle.rs`
-- Modify: `crates/rs-adk/src/live/control_plane/tool_handler.rs`
+- Modify: `crates/gemini-adk/src/live/control_plane/main_loop.rs`
+- Modify: `crates/gemini-adk/src/live/control_plane/extractors.rs`
+- Modify: `crates/gemini-adk/src/live/control_plane/lifecycle.rs`
+- Modify: `crates/gemini-adk/src/live/control_plane/tool_handler.rs`
 
 **Step 1: Add `event_tx` parameter to `run_control_lane`**
 
@@ -487,11 +487,11 @@ Pass `event_tx` through to `run_extractors` calls within tool_handler.rs.
 
 **Step 5: Verify compilation**
 
-Run: `cargo check -p rs-adk`
+Run: `cargo check -p gemini-adk`
 
 **Step 6: Run all tests**
 
-Run: `cargo test -p rs-adk --lib`
+Run: `cargo test -p gemini-adk --lib`
 
 **Step 7: Commit**
 
@@ -504,13 +504,13 @@ feat(adk): emit LiveEvents from control lane — extraction, phases, tools, life
 ### Task 4: Add LiveHandle::events() and builder integration (L1)
 
 **Files:**
-- Modify: `crates/rs-adk/src/live/handle.rs`
-- Modify: `crates/rs-adk/src/live/builder.rs`
-- Modify: `crates/rs-adk/src/live/processor.rs` (ControlPlaneConfig)
+- Modify: `crates/gemini-adk/src/live/handle.rs`
+- Modify: `crates/gemini-adk/src/live/builder.rs`
+- Modify: `crates/gemini-adk/src/live/processor.rs` (ControlPlaneConfig)
 
 **Step 1: Write test**
 
-Add to `crates/rs-adk/src/live/builder.rs` tests:
+Add to `crates/gemini-adk/src/live/builder.rs` tests:
 
 ```rust
 #[test]
@@ -524,7 +524,7 @@ fn builder_with_telemetry_interval() {
 
 **Step 2: Add event_tx to LiveHandle**
 
-In `crates/rs-adk/src/live/handle.rs`:
+In `crates/gemini-adk/src/live/handle.rs`:
 
 Add field to struct (after `telemetry`):
 ```rust
@@ -565,7 +565,7 @@ pub fn events(&self) -> broadcast::Receiver<super::events::LiveEvent> {
 
 **Step 3: Add fields and methods to LiveSessionBuilder**
 
-In `crates/rs-adk/src/live/builder.rs`:
+In `crates/gemini-adk/src/live/builder.rs`:
 
 Add fields to struct (after `tool_advisory: bool,`):
 ```rust
@@ -650,7 +650,7 @@ Ok(LiveHandle::new(
 
 **Step 5: Run tests**
 
-Run: `cargo test -p rs-adk --lib`
+Run: `cargo test -p gemini-adk --lib`
 
 **Step 6: Commit**
 
@@ -663,18 +663,18 @@ feat(adk): add LiveHandle::events() and telemetry_interval builder method
 ### Task 5: L2 fluent integration
 
 **Files:**
-- Modify: `crates/adk-rs-fluent/src/live/mod.rs`
-- Modify: `crates/adk-rs-fluent/src/live/connect.rs`
-- Modify: `crates/adk-rs-fluent/src/lib.rs` (prelude)
+- Modify: `crates/gemini-adk-fluent/src/live/mod.rs`
+- Modify: `crates/gemini-adk-fluent/src/live/connect.rs`
+- Modify: `crates/gemini-adk-fluent/src/lib.rs` (prelude)
 
 **Step 1: Write compile test**
 
-Add to `crates/adk-rs-fluent/src/live/mod.rs` tests:
+Add to `crates/gemini-adk-fluent/src/live/mod.rs` tests:
 
 ```rust
 #[test]
 fn builder_with_live_events_compiles() {
-    let (tx, _) = tokio::sync::broadcast::channel::<rs_adk::live::LiveEvent>(16);
+    let (tx, _) = tokio::sync::broadcast::channel::<gemini_adk::live::LiveEvent>(16);
     let _live = Live::builder()
         .model(GeminiModel::Gemini2_0FlashLive)
         .instruction("Test events")
@@ -685,11 +685,11 @@ fn builder_with_live_events_compiles() {
 
 **Step 2: Add fields and methods to Live struct**
 
-In `crates/adk-rs-fluent/src/live/mod.rs`:
+In `crates/gemini-adk-fluent/src/live/mod.rs`:
 
 Add fields to `Live` struct (after `tool_advisory: bool,` at line 125):
 ```rust
-pub(crate) external_event_tx: Option<tokio::sync::broadcast::Sender<rs_adk::live::LiveEvent>>,
+pub(crate) external_event_tx: Option<tokio::sync::broadcast::Sender<gemini_adk::live::LiveEvent>>,
 pub(crate) telemetry_interval: Option<Duration>,
 ```
 
@@ -708,7 +708,7 @@ Add builder methods (in a new `impl Live` block or the existing config.rs):
 /// extractions, phase transitions, tool executions, lifecycle events.
 /// Subscribe to this channel to observe session activity without
 /// registering individual callbacks.
-pub fn events(mut self, tx: tokio::sync::broadcast::Sender<rs_adk::live::LiveEvent>) -> Self {
+pub fn events(mut self, tx: tokio::sync::broadcast::Sender<gemini_adk::live::LiveEvent>) -> Self {
     self.external_event_tx = Some(tx);
     self
 }
@@ -725,7 +725,7 @@ pub fn telemetry_interval(mut self, interval: Duration) -> Self {
 
 **Step 3: Wire through build_and_connect**
 
-In `crates/adk-rs-fluent/src/live/connect.rs`, add before `builder.connect().await` (line 114):
+In `crates/gemini-adk-fluent/src/live/connect.rs`, add before `builder.connect().await` (line 114):
 
 ```rust
 if let Some(interval) = self.telemetry_interval {
@@ -737,10 +737,10 @@ Note: The `external_event_tx` is NOT passed to the L1 builder in this implementa
 
 **Step 4: Add LiveEvent to prelude**
 
-In `crates/adk-rs-fluent/src/lib.rs`, add `LiveEvent` to the `rs_adk::live::` import (line 84):
+In `crates/gemini-adk-fluent/src/lib.rs`, add `LiveEvent` to the `gemini_adk::live::` import (line 84):
 
 ```rust
-pub use rs_adk::live::{
+pub use gemini_adk::live::{
     CallbackMode, DefaultResultFormatter, EventCallbacks, ExtractionTrigger, FsPersistence,
     LiveEvent, LiveHandle, LiveSessionBuilder, LlmExtractor, MemoryPersistence, NeedsFulfillment,
     // ... rest unchanged
@@ -749,7 +749,7 @@ pub use rs_adk::live::{
 
 **Step 5: Run tests**
 
-Run: `cargo test -p adk-rs-fluent --lib`
+Run: `cargo test -p gemini-adk-fluent --lib`
 
 **Step 6: Run full workspace check**
 
@@ -766,14 +766,14 @@ feat(fluent): wire LiveEvent stream to L2 builder with events() and telemetry_in
 ### Task 6: Rewrite SessionBridge with run() method
 
 **Files:**
-- Modify: `apps/adk-web/src/bridge.rs`
+- Modify: `apps/gemini-adk-web/src/bridge.rs`
 
 **Step 1: Add map_event function**
 
 Add at the top of `bridge.rs` (after imports):
 
 ```rust
-use adk_rs_fluent::prelude::LiveEvent;
+use gemini_adk_fluent::prelude::LiveEvent;
 
 /// Map a LiveEvent to a ServerMessage for the demo WebSocket transport.
 ///
@@ -893,7 +893,7 @@ where
 
 **Step 3: Verify compilation**
 
-Run: `cargo check -p rs-genai-ui`
+Run: `cargo check -p gemini-live-ui`
 
 Note: The `run()` method references `crate::apps::wait_for_start` and `crate::apps::build_session_config`. Verify these are accessible (they may be pub functions in the apps module). If not, make them pub or move them to a shared location.
 
@@ -908,9 +908,9 @@ feat(examples): add SessionBridge::run() with LiveEvent stream subscription
 ### Task 7: Migrate simple demo apps (voice_chat, text_chat, tool_calling)
 
 **Files:**
-- Modify: `apps/adk-web/src/apps/voice_chat.rs`
-- Modify: `apps/adk-web/src/apps/text_chat.rs`
-- Modify: `apps/adk-web/src/apps/tool_calling.rs`
+- Modify: `apps/gemini-adk-web/src/apps/voice_chat.rs`
+- Modify: `apps/gemini-adk-web/src/apps/text_chat.rs`
+- Modify: `apps/gemini-adk-web/src/apps/tool_calling.rs`
 
 These 3 apps already use `SessionBridge`. Migrate them to `bridge.run()` to validate the pattern.
 
@@ -943,7 +943,7 @@ This one has an `on_tool_call` callback — it stays because it's ACTION (custom
 
 **Step 4: Run and verify**
 
-Run: `cargo check -p rs-genai-ui`
+Run: `cargo check -p gemini-live-ui`
 
 **Step 5: Commit**
 
@@ -956,9 +956,9 @@ refactor(examples): migrate voice_chat, text_chat, tool_calling to bridge.run()
 ### Task 8: Migrate complex demo apps (batch 1: guardrails, playbook, all_config)
 
 **Files:**
-- Modify: `apps/adk-web/src/apps/guardrails.rs`
-- Modify: `apps/adk-web/src/apps/playbook.rs`
-- Modify: `apps/adk-web/src/apps/all_config.rs`
+- Modify: `apps/gemini-adk-web/src/apps/guardrails.rs`
+- Modify: `apps/gemini-adk-web/src/apps/playbook.rs`
+- Modify: `apps/gemini-adk-web/src/apps/all_config.rs`
 
 For each app:
 1. Remove ALL manual callback wiring (12+ `tx.clone()` + callback registrations)
@@ -972,11 +972,11 @@ For each app:
 
 **Step 2: Verify compilation**
 
-Run: `cargo check -p rs-genai-ui`
+Run: `cargo check -p gemini-live-ui`
 
 **Step 3: Run tests**
 
-Run: `cargo test -p rs-genai-ui --lib`
+Run: `cargo test -p gemini-live-ui --lib`
 
 **Step 4: Commit**
 
@@ -989,9 +989,9 @@ refactor(examples): migrate guardrails, playbook, all_config to bridge.run()
 ### Task 9: Migrate complex demo apps (batch 2: restaurant, support, debt_collection)
 
 **Files:**
-- Modify: `apps/adk-web/src/apps/restaurant.rs`
-- Modify: `apps/adk-web/src/apps/support.rs`
-- Modify: `apps/adk-web/src/apps/debt_collection.rs`
+- Modify: `apps/gemini-adk-web/src/apps/restaurant.rs`
+- Modify: `apps/gemini-adk-web/src/apps/support.rs`
+- Modify: `apps/gemini-adk-web/src/apps/debt_collection.rs`
 
 Same pattern as Task 8. These are the largest apps (~1,400+ lines each) with the most ceremony to remove.
 
@@ -1008,8 +1008,8 @@ refactor(examples): migrate restaurant, support, debt_collection to bridge.run()
 ### Task 10: Migrate remaining demo apps (clinic, call_screening)
 
 **Files:**
-- Modify: `apps/adk-web/src/apps/clinic.rs`
-- Modify: `apps/adk-web/src/apps/call_screening.rs`
+- Modify: `apps/gemini-adk-web/src/apps/clinic.rs`
+- Modify: `apps/gemini-adk-web/src/apps/call_screening.rs`
 
 Same pattern.
 
@@ -1017,7 +1017,7 @@ Same pattern.
 
 **Step 2: Verify compilation and tests**
 
-Run: `cargo check -p rs-genai-ui && cargo test -p rs-genai-ui --lib`
+Run: `cargo check -p gemini-live-ui && cargo test -p gemini-live-ui --lib`
 
 **Step 3: Commit**
 

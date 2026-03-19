@@ -8,8 +8,8 @@
 
 use std::sync::Arc;
 
-use rs_adk::tool::{ToolDispatcher, TypedTool};
-use rs_genai::prelude::*;
+use gemini_adk::tool::{ToolDispatcher, TypedTool};
+use gemini_live::prelude::*;
 use schemars::JsonSchema;
 use serde::Deserialize;
 

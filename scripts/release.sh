@@ -1,28 +1,30 @@
 #!/usr/bin/env bash
 # =============================================================================
-# scripts/release.sh — One-command release for gemini-rs
+# scripts/release.sh — Release branch model for gemini-rs
 #
 # Usage:
 #   ./scripts/release.sh <version>             # full release
 #   ./scripts/release.sh <version> --dry-run   # preview only
 #
-# Flow (fully automated):
-#   1.  Guard: must be on main, clean working tree, up-to-date with remote
-#   2.  Validate semver; reject if version <= current
-#   3.  Run full local suite: fmt, check, clippy, test
-#   4.  Generate CHANGELOG entry from git log (conventional-commit aware)
-#   5.  Write GITHUB_RELEASE_vX.Y.Z.md from the generated changelog
-#   6.  Bump version in [workspace.package] AND [workspace.dependencies]
-#       — single file (Cargo.toml), single sed pass
-#   7.  Commit  "chore: release vX.Y.Z"
-#   8.  Annotated tag  vX.Y.Z  (body = release notes)
-#   9.  Push commit + tag  →  CI handles: validate → publish → GitHub Release
+# Flow:
+#   1.  Guard: clean tree, up-to-date with remote
+#   2.  Validate semver; reject version regression
+#   3.  Create release/vX.Y.Z branch from current HEAD
+#   4.  Auto-format (cargo fmt) + commit if needed
+#   5.  Validate: check, clippy, test
+#   6.  Pre-publish: cargo publish --dry-run for each crate
+#   7.  Generate changelog from conventional commits
+#   8.  Bump version in Cargo.toml + regenerate Cargo.lock
+#   9.  Commit "chore(release): vX.Y.Z"
+#  10.  Annotated tag vX.Y.Z
+#  11.  Push release branch + tag → CI validates + publishes to crates.io
+#  12.  Print instructions to merge release branch back to main
 # =============================================================================
 set -euo pipefail
 
 # ── Colour helpers ─────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
-CYAN='\033[0;36m'; BOLD='\033[1m'; RESET='\033[0m'
+CYAN='\033[0;36m'; BOLD='\033[1m'; DIM='\033[2m'; RESET='\033[0m'
 info()    { echo -e "${CYAN}${BOLD}▶${RESET} $*"; }
 ok()      { echo -e "${GREEN}${BOLD}✓${RESET} $*"; }
 warn()    { echo -e "${YELLOW}${BOLD}⚠${RESET} $*"; }
@@ -42,13 +44,15 @@ Examples:
   $0 0.6.0
   $0 0.6.0-rc.1 --dry-run
 
-The version must be a valid semver string. Do not include the leading 'v'.
+Creates a release/vX.Y.Z branch, bumps versions, tags, and pushes.
+CI handles crates.io publishing + GitHub Release creation.
 EOF
   exit 1
 fi
 
 VERSION="${VERSION#v}"   # strip leading v if provided
 TAG="v${VERSION}"
+RELEASE_BRANCH="release/${TAG}"
 
 # ── Semver validation ─────────────────────────────────────────────────────
 if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?(\+[a-zA-Z0-9.]+)?$'; then
@@ -59,37 +63,67 @@ fi
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
+# ── Published crates in dependency order ──────────────────────────────────
+PUBLISH_CRATES=("gemini-live" "gemini-adk" "gemini-adk-fluent" "gemini-adk-server" "gemini-adk-cli")
+
 # ── Read current workspace version ────────────────────────────────────────
 CURRENT=$(grep -m1 '^version = "' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
 
 step "Release ${CURRENT} → ${VERSION}"
 $DRY_RUN && warn "DRY RUN — no files will be modified, no commits, no pushes"
 
+# ── Guard: version regression ─────────────────────────────────────────────
+step "Version check"
+
+version_to_int() {
+  local IFS=.
+  local -a parts
+  local ver="${1%%-*}"
+  read -ra parts <<< "$ver"
+  echo $(( ${parts[0]:-0} * 10000 + ${parts[1]:-0} * 100 + ${parts[2]:-0} ))
+}
+
+CURRENT_INT=$(version_to_int "$CURRENT")
+NEW_INT=$(version_to_int "$VERSION")
+if [[ "$NEW_INT" -le "$CURRENT_INT" && "$VERSION" != *"-"* ]]; then
+  die "Version regression: $VERSION <= $CURRENT. New version must be greater."
+fi
+ok "Version $CURRENT → $VERSION"
+
 # ── Guard: git state ──────────────────────────────────────────────────────
 step "Git preflight"
-
-BRANCH=$(git rev-parse --abbrev-ref HEAD)
-[[ "$BRANCH" == "main" ]] || die "Must release from 'main' (currently on '$BRANCH')."
 
 if ! git diff --quiet || ! git diff --cached --quiet; then
   die "Working tree is dirty. Commit or stash changes before releasing."
 fi
 
-git fetch origin main --quiet
-BEHIND=$(git rev-list HEAD..origin/main --count 2>/dev/null || echo 0)
-[[ "$BEHIND" -gt 0 ]] && die "Branch is $BEHIND commit(s) behind origin/main. Pull first."
-ok "Git state clean"
+SOURCE_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+git fetch origin "$SOURCE_BRANCH" --quiet 2>/dev/null || true
+BEHIND=$(git rev-list "HEAD..origin/${SOURCE_BRANCH}" --count 2>/dev/null || echo 0)
+[[ "$BEHIND" -gt 0 ]] && die "Branch is $BEHIND commit(s) behind origin/${SOURCE_BRANCH}. Pull first."
+ok "Git state clean (on $SOURCE_BRANCH)"
 
-# ── Guard: tag collision ───────────────────────────────────────────────────
+# ── Guard: tag + branch collision ─────────────────────────────────────────
 if git rev-parse "$TAG" >/dev/null 2>&1; then
-  warn "Tag $TAG already exists."
-  read -rp "  Delete and re-create? [y/N] " CONFIRM
-  [[ "$CONFIRM" =~ ^[Yy]$ ]] || die "Aborted."
-  $DRY_RUN || git tag -d "$TAG"
+  die "Tag $TAG already exists. Delete it first: git tag -d $TAG && git push origin :refs/tags/$TAG"
 fi
 
-# ── Validation suite ──────────────────────────────────────────────────────
-step "Running validation suite"
+if git show-ref --verify --quiet "refs/heads/${RELEASE_BRANCH}" 2>/dev/null; then
+  die "Branch $RELEASE_BRANCH already exists locally. Delete it first: git branch -D $RELEASE_BRANCH"
+fi
+
+# ── Create release branch ────────────────────────────────────────────────
+step "Creating release branch: $RELEASE_BRANCH"
+
+if ! $DRY_RUN; then
+  git checkout -b "$RELEASE_BRANCH"
+  ok "Created and switched to $RELEASE_BRANCH"
+else
+  info "Would create branch $RELEASE_BRANCH from $SOURCE_BRANCH"
+fi
+
+# ── Auto-format ───────────────────────────────────────────────────────────
+step "Formatting"
 
 run_cmd() {
   info "$*"
@@ -97,16 +131,43 @@ run_cmd() {
   "$@"
 }
 
-run_cmd cargo fmt --all -- --check
+if ! $DRY_RUN; then
+  cargo fmt --all
+  if ! git diff --quiet; then
+    info "Formatting changes detected — committing"
+    git add -A
+    git commit -m "style: cargo fmt --all"
+    ok "Committed formatting fixes"
+  else
+    ok "Already formatted"
+  fi
+else
+  info "cargo fmt --all (skipped in dry-run)"
+fi
+
+# ── Validation suite ──────────────────────────────────────────────────────
+step "Running validation suite"
+
 run_cmd cargo check --workspace --all-targets
 run_cmd cargo clippy --workspace --all-targets -- -D warnings
 run_cmd cargo test --workspace
 ok "All checks passed"
 
+# ── Pre-publish dry-run ───────────────────────────────────────────────────
+step "Pre-publish verification (cargo publish --dry-run)"
+
+for crate in "${PUBLISH_CRATES[@]}"; do
+  info "Verifying $crate..."
+  if ! $DRY_RUN; then
+    cargo publish -p "$crate" --dry-run 2>&1 | tail -3
+  fi
+done
+ok "All crates pass publish verification"
+
 # ── Generate changelog ────────────────────────────────────────────────────
 step "Generating changelog"
 
-PREV_TAG=$(git tag --sort=-version:refname | grep -v "^${TAG}$" | head -1 || true)
+PREV_TAG=$(git tag --sort=-version:refname | head -1 2>/dev/null || true)
 if [[ -n "$PREV_TAG" ]]; then
   RANGE="${PREV_TAG}..HEAD"
   info "Commits since $PREV_TAG"
@@ -117,7 +178,7 @@ fi
 
 # Bucket commits by conventional-commit prefix
 _bucket() {
-  local prefix=$1; shift
+  local prefix=$1
   git log --oneline --no-decorate "$RANGE" 2>/dev/null \
     | grep -iE "^[a-f0-9]+ ${prefix}" | sed 's/^[a-f0-9]* /- /' || true
 }
@@ -127,6 +188,7 @@ FIXES=$(_bucket "fix")
 PERFS=$(_bucket "perf")
 REFACTORS=$(_bucket "refactor")
 DOCS=$(_bucket "docs")
+STYLES=$(_bucket "style")
 CHORES=$(_bucket "chore")
 
 _section() {
@@ -134,55 +196,54 @@ _section() {
   [[ -n "$body" ]] && printf "\n### %s\n\n%s\n" "$title" "$body"
 }
 
-CHANGELOG_BODY="$(_section "Features" "$FEATS")
-$(_section "Bug Fixes" "$FIXES")
-$(_section "Performance" "$PERFS")
-$(_section "Refactors" "$REFACTORS")
-$(_section "Documentation" "$DOCS")
+CHANGELOG_BODY="$(_section "Features" "$FEATS")\
+$(_section "Bug Fixes" "$FIXES")\
+$(_section "Performance" "$PERFS")\
+$(_section "Refactors" "$REFACTORS")\
+$(_section "Documentation" "$DOCS")\
+$(_section "Style" "$STYLES")\
 $(_section "Chores" "$CHORES")"
 
 # Fallback: raw commit list if no conventional commits detected
 if [[ -z "$(echo "$CHANGELOG_BODY" | tr -d '[:space:]')" ]]; then
   RAW=$(git log --oneline --no-decorate "$RANGE" 2>/dev/null | sed 's/^[a-f0-9]* /- /' || true)
-  CHANGELOG_BODY="### Changes
+  CHANGELOG_BODY="
+### Changes
 
 ${RAW}"
 fi
 
 TODAY=$(date +%Y-%m-%d)
 
-# ── Write GITHUB_RELEASE file ─────────────────────────────────────────────
-NOTES_FILE="GITHUB_RELEASE_v${VERSION}.md"
-step "Writing $NOTES_FILE"
-
-RELEASE_BODY="# v${VERSION} — $(date +%B\ %Y)
+# Build release body (used for tag message and GitHub Release fallback)
+RELEASE_BODY="## v${VERSION} — $(date +%B\ %Y)
 ${CHANGELOG_BODY}
 
 ---
 
-## Crates
+### Crates
 
 | Crate | Version | Install |
 |-------|---------|---------|
-| [\`rs-genai\`](https://crates.io/crates/rs-genai) | ${VERSION} | \`cargo add rs-genai@${VERSION}\` |
-| [\`rs-adk\`](https://crates.io/crates/rs-adk) | ${VERSION} | \`cargo add rs-adk@${VERSION}\` |
-| [\`adk-rs-fluent\`](https://crates.io/crates/adk-rs-fluent) | ${VERSION} | \`cargo add adk-rs-fluent@${VERSION}\` |
-| [\`adk-server-core\`](https://crates.io/crates/adk-server-core) | ${VERSION} | \`cargo add adk-server-core@${VERSION}\` |
-| [\`adk-cli\`](https://crates.io/crates/adk-cli) | ${VERSION} | \`cargo install adk-cli@${VERSION}\` |
+| [\`gemini-live\`](https://crates.io/crates/gemini-live) | ${VERSION} | \`cargo add gemini-live@${VERSION}\` |
+| [\`gemini-adk\`](https://crates.io/crates/gemini-adk) | ${VERSION} | \`cargo add gemini-adk@${VERSION}\` |
+| [\`gemini-adk-fluent\`](https://crates.io/crates/gemini-adk-fluent) | ${VERSION} | \`cargo add gemini-adk-fluent@${VERSION}\` |
+| [\`gemini-adk-server\`](https://crates.io/crates/gemini-adk-server) | ${VERSION} | \`cargo add gemini-adk-server@${VERSION}\` |
+| [\`gemini-adk-cli\`](https://crates.io/crates/gemini-adk-cli) | ${VERSION} | \`cargo install gemini-adk-cli@${VERSION}\` |
 
-## Upgrade
+### Upgrade
 
 \`\`\`toml
-adk-rs-fluent = \"${VERSION}\"
+gemini-adk-fluent = \"${VERSION}\"
 \`\`\`
 
 **Full Changelog**: https://github.com/vamsiramakrishnan/gemini-rs/blob/main/CHANGELOG.md"
 
-if ! $DRY_RUN; then
-  printf '%s\n' "$RELEASE_BODY" > "$NOTES_FILE"
-  ok "Wrote $NOTES_FILE"
-else
+if $DRY_RUN; then
+  echo ""
+  echo -e "${DIM}--- Release notes preview ---${RESET}"
   echo "$RELEASE_BODY"
+  echo -e "${DIM}--- End preview ---${RESET}"
 fi
 
 # ── Update CHANGELOG.md ───────────────────────────────────────────────────
@@ -193,9 +254,11 @@ ${CHANGELOG_BODY}"
 
 if ! $DRY_RUN; then
   if grep -q "^## \[Unreleased\]" CHANGELOG.md; then
-    # Insert new version section after [Unreleased]
-    ESCAPED=$(printf '%s\n' "$CHANGELOG_ENTRY" | sed 's/[&/\]/\\&/g; s/$/\\/')
-    sed -i "s/^## \[Unreleased\]/## [Unreleased]\n\n${ESCAPED}/" CHANGELOG.md
+    awk -v entry="$CHANGELOG_ENTRY" '
+      /^## \[Unreleased\]/ { print; print ""; print entry; next }
+      { print }
+    ' CHANGELOG.md > CHANGELOG.md.tmp
+    mv CHANGELOG.md.tmp CHANGELOG.md
   else
     warn "No [Unreleased] section found — prepending to CHANGELOG.md"
     { echo "$CHANGELOG_ENTRY"; echo ""; cat CHANGELOG.md; } > CHANGELOG.md.tmp
@@ -204,55 +267,99 @@ if ! $DRY_RUN; then
   ok "CHANGELOG.md updated"
 fi
 
-# ── Bump version — single file, single sed pass ───────────────────────────
-step "Bumping version: $CURRENT → $VERSION (Cargo.toml only)"
-# [workspace.package] version = "..." and [workspace.dependencies] version = "..."
-# all live in root Cargo.toml. One sed call handles both.
+# ── Bump version ──────────────────────────────────────────────────────────
+step "Bumping version: $CURRENT → $VERSION"
 
 if ! $DRY_RUN; then
   sed -i "s/version = \"${CURRENT}\"/version = \"${VERSION}\"/g" Cargo.toml
   FOUND=$(grep -c "\"${VERSION}\"" Cargo.toml || true)
   [[ "$FOUND" -ge 2 ]] || die "Version bump landed only $FOUND time(s) — expected ≥2"
   ok "Cargo.toml bumped ($FOUND occurrences)"
+
+  cargo generate-lockfile --quiet 2>/dev/null || cargo check --quiet 2>/dev/null || true
+  ok "Cargo.lock regenerated"
 fi
 
-# ── Commit ────────────────────────────────────────────────────────────────
-step "Committing"
-if ! $DRY_RUN; then
-  git add Cargo.toml CHANGELOG.md "$NOTES_FILE"
-  git commit -m "chore: release ${TAG}"
-  ok "Committed: chore: release ${TAG}"
-fi
+# ── Commit + Tag ──────────────────────────────────────────────────────────
+step "Committing and tagging"
 
-# ── Annotated tag ─────────────────────────────────────────────────────────
-step "Tagging $TAG"
 if ! $DRY_RUN; then
+  git add Cargo.toml Cargo.lock CHANGELOG.md
+  git commit -m "chore(release): ${TAG}
+
+Bump workspace version ${CURRENT} → ${VERSION}.
+Publish: ${PUBLISH_CRATES[*]}"
+  ok "Committed: chore(release): ${TAG}"
+
   git tag -a "$TAG" -m "Release ${TAG}
 
 ${RELEASE_BODY}"
-  ok "Tagged $TAG"
+  ok "Tagged $TAG (annotated)"
 fi
 
-# ── Push ─────────────────────────────────────────────────────────────────
-step "Pushing to origin"
+# ── Push release branch + tag ─────────────────────────────────────────────
+step "Pushing release branch + tag"
+
 if ! $DRY_RUN; then
-  git push origin main
-  git push origin "$TAG"
-  ok "Pushed commit and tag"
+  git push --atomic -u origin "$RELEASE_BRANCH" "$TAG"
+  ok "Pushed $RELEASE_BRANCH + $TAG atomically"
+fi
+
+# ── Create PR to merge release back to main ───────────────────────────────
+step "Creating pull request"
+
+if ! $DRY_RUN; then
+  if command -v gh &>/dev/null; then
+    PR_URL=$(gh pr create \
+      --base main \
+      --head "$RELEASE_BRANCH" \
+      --title "chore(release): ${TAG}" \
+      --body "$(cat <<PRBODY
+## Release ${TAG}
+
+Merging \`${RELEASE_BRANCH}\` into \`main\`.
+
+${RELEASE_BODY}
+PRBODY
+)" 2>&1) && {
+      ok "PR created: $PR_URL"
+    } || {
+      warn "gh pr create failed — create PR manually: $RELEASE_BRANCH → main"
+    }
+  else
+    warn "gh CLI not found — create PR manually: $RELEASE_BRANCH → main"
+  fi
 fi
 
 # ── Summary ───────────────────────────────────────────────────────────────
 echo ""
 echo -e "${GREEN}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-echo -e "${GREEN}${BOLD}  Released ${TAG}${RESET}"
-echo ""
-if ! $DRY_RUN; then
-  echo -e "  CI is running at:"
+if $DRY_RUN; then
+  echo -e "${YELLOW}${BOLD}  DRY RUN complete for ${TAG}${RESET}"
+  echo ""
+  echo -e "  Would have:"
+  echo -e "    1. Created branch ${RELEASE_BRANCH}"
+  echo -e "    2. Auto-formatted + committed"
+  echo -e "    3. Validated (check, clippy, test)"
+  echo -e "    4. Updated CHANGELOG.md"
+  echo -e "    5. Bumped Cargo.toml ${CURRENT} → ${VERSION}"
+  echo -e "    6. Committed: chore(release): ${TAG}"
+  echo -e "    7. Tagged: ${TAG}"
+  echo -e "    8. Pushed ${RELEASE_BRANCH} + ${TAG} to origin"
+  echo -e "    9. Created PR: ${RELEASE_BRANCH} → main"
+else
+  echo -e "${GREEN}${BOLD}  Released ${TAG}${RESET}"
+  echo ""
+  echo -e "  ${BOLD}Branch:${RESET}  ${RELEASE_BRANCH}"
+  echo -e "  ${BOLD}Tag:${RESET}     ${TAG}"
+  echo ""
+  echo -e "  CI pipeline:"
   echo -e "  ${CYAN}https://github.com/vamsiramakrishnan/gemini-rs/actions${RESET}"
   echo ""
-  echo -e "  Steps:"
   echo -e "  ${BOLD}1. validate${RESET}  fmt + test + clippy"
-  echo -e "  ${BOLD}2. publish${RESET}   rs-genai → rs-adk → adk-rs-fluent → adk-server-core → adk-cli"
-  echo -e "  ${BOLD}3. release${RESET}   GitHub Release from ${NOTES_FILE}"
+  echo -e "  ${BOLD}2. publish${RESET}   ${PUBLISH_CRATES[*]}"
+  echo -e "  ${BOLD}3. release${RESET}   GitHub Release with changelog"
+  echo ""
+  echo -e "  ${BOLD}Next:${RESET} Merge the PR to bring version bump + changelog into main"
 fi
 echo -e "${GREEN}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
