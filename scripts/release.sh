@@ -193,7 +193,7 @@ CHORES=$(_bucket "chore")
 
 _section() {
   local title=$1 body=$2
-  [[ -n "$body" ]] && printf "\n### %s\n\n%s\n" "$title" "$body"
+  [[ -n "$body" ]] && printf "\n### %s\n\n%s\n" "$title" "$body" || true
 }
 
 CHANGELOG_BODY="$(_section "Features" "$FEATS")\
