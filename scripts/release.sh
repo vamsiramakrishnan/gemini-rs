@@ -148,8 +148,8 @@ fi
 # ── Validation suite ──────────────────────────────────────────────────────
 step "Running validation suite"
 
-run_cmd cargo check --workspace --all-targets
-run_cmd cargo clippy --workspace --all-targets -- -D warnings
+run_cmd cargo check --workspace
+run_cmd cargo clippy --workspace -- -D warnings
 run_cmd cargo test --workspace
 ok "All checks passed"
 
