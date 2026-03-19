@@ -245,8 +245,9 @@ impl LiveSessionBuilder {
                     if let Some(ref mut decls) = tool.function_declarations {
                         for decl in decls {
                             if decl.name == *tool_name {
-                                decl.behavior =
-                                    Some(gemini_live::prelude::FunctionCallingBehavior::NonBlocking);
+                                decl.behavior = Some(
+                                    gemini_live::prelude::FunctionCallingBehavior::NonBlocking,
+                                );
                             }
                         }
                     }

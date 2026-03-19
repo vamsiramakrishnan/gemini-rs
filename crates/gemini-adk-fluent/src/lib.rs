@@ -103,7 +103,9 @@ pub mod prelude {
     // New ADK-JS parity types
     pub use gemini_adk::confirmation::ToolConfirmation;
     pub use gemini_adk::context::{CallbackContext, ToolContext};
-    pub use gemini_adk::credentials::{AuthCredential, CredentialService, InMemoryCredentialService};
+    pub use gemini_adk::credentials::{
+        AuthCredential, CredentialService, InMemoryCredentialService,
+    };
     pub use gemini_adk::instruction::inject_session_state;
     pub use gemini_adk::llm::LlmRegistry;
     pub use gemini_adk::run_config::{RunConfig, StreamingMode};

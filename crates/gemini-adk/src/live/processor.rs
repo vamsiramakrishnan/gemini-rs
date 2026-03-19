@@ -851,7 +851,9 @@ mod tests {
             ) -> Result<(), gemini_live::session::SessionError> {
                 Ok(())
             }
-            async fn signal_activity_start(&self) -> Result<(), gemini_live::session::SessionError> {
+            async fn signal_activity_start(
+                &self,
+            ) -> Result<(), gemini_live::session::SessionError> {
                 Ok(())
             }
             async fn signal_activity_end(&self) -> Result<(), gemini_live::session::SessionError> {

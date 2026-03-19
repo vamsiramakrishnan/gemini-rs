@@ -946,7 +946,8 @@ pub struct LlmResponse {
     /// The finish reason of the response.
     pub finish_reason: Option<serde_json::Value>,
     /// The session resumption update of the LlmResponse
-    pub live_session_resumption_update: Option<gemini_live::prelude::SessionResumptionUpdatePayload>,
+    pub live_session_resumption_update:
+        Option<gemini_live::prelude::SessionResumptionUpdatePayload>,
     /// Audio transcription of user input.
     pub input_transcription: Option<gemini_live::prelude::TranscriptionPayload>,
     /// Audio transcription of model output.

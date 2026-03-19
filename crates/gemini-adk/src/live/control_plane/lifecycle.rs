@@ -258,8 +258,9 @@ pub(in crate::live) async fn handle_turn_complete(
             if let Some(phase) = machine.current_phase() {
                 let steering_parts = steering::build_steering_context(state, &phase.modifiers);
                 if !steering_parts.is_empty() {
-                    context_buffer
-                        .push(gemini_live::prelude::Content::model(steering_parts.join("\n")));
+                    context_buffer.push(gemini_live::prelude::Content::model(
+                        steering_parts.join("\n"),
+                    ));
                 }
             }
         }

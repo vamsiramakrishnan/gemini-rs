@@ -12,8 +12,8 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Instant;
 
-use parking_lot::Mutex;
 use gemini_live::prelude::{SessionEvent, SessionPhase};
+use parking_lot::Mutex;
 
 use crate::state::State;
 

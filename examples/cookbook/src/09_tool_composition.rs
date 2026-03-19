@@ -98,7 +98,9 @@ fn main() {
     println!("\nFull tool composite: {} entries", all_tools.len());
     for (i, entry) in all_tools.entries.iter().enumerate() {
         let name = match entry {
-            gemini_adk_fluent::compose::tools::ToolCompositeEntry::Function(f) => f.name().to_string(),
+            gemini_adk_fluent::compose::tools::ToolCompositeEntry::Function(f) => {
+                f.name().to_string()
+            }
             gemini_adk_fluent::compose::tools::ToolCompositeEntry::BuiltIn(_) => {
                 "(built-in)".to_string()
             }

@@ -15,9 +15,9 @@
 
 use std::sync::Arc;
 
-use gemini_adk_fluent::prelude::*;
 use gemini_adk::text_agent_tool::TextAgentTool;
 use gemini_adk::tool::ToolFunction;
+use gemini_adk_fluent::prelude::*;
 
 #[tokio::main]
 async fn main() {

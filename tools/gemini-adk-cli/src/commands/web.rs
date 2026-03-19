@@ -1,5 +1,4 @@
 use crate::manifest::{self, AgentManifest};
-use gemini_adk_fluent::prelude::*;
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -11,6 +10,7 @@ use axum::{
     Router,
 };
 use futures::{SinkExt, StreamExt};
+use gemini_adk_fluent::prelude::*;
 use rust_embed::Embed;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

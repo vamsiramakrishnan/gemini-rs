@@ -110,7 +110,10 @@ async fn main() {
 
     let state = AppState { auth };
 
-    let static_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../apps/gemini-adk-web/static");
+    let static_dir = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../apps/gemini-adk-web/static"
+    );
 
     let app = Router::new()
         .fallback_service(

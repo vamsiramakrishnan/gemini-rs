@@ -198,7 +198,10 @@ impl M {
 
     /// Shortcut for a before-agent hook.
     pub fn before_agent(
-        f: impl Fn(&gemini_adk::context::InvocationContext) -> Result<(), String> + Send + Sync + 'static,
+        f: impl Fn(&gemini_adk::context::InvocationContext) -> Result<(), String>
+            + Send
+            + Sync
+            + 'static,
     ) -> MiddlewareComposite {
         MiddlewareComposite::new(Arc::new(BeforeAgentMiddleware {
             handler: Arc::new(f),
@@ -207,7 +210,10 @@ impl M {
 
     /// Shortcut for an after-agent hook.
     pub fn after_agent(
-        f: impl Fn(&gemini_adk::context::InvocationContext) -> Result<(), String> + Send + Sync + 'static,
+        f: impl Fn(&gemini_adk::context::InvocationContext) -> Result<(), String>
+            + Send
+            + Sync
+            + 'static,
     ) -> MiddlewareComposite {
         MiddlewareComposite::new(Arc::new(AfterAgentMiddleware {
             handler: Arc::new(f),
@@ -724,7 +730,8 @@ impl Middleware for MetricsMiddleware {
 
 struct BeforeAgentMiddleware {
     #[allow(clippy::type_complexity)]
-    handler: Arc<dyn Fn(&gemini_adk::context::InvocationContext) -> Result<(), String> + Send + Sync>,
+    handler:
+        Arc<dyn Fn(&gemini_adk::context::InvocationContext) -> Result<(), String> + Send + Sync>,
 }
 
 #[async_trait]
@@ -745,7 +752,8 @@ impl Middleware for BeforeAgentMiddleware {
 
 struct AfterAgentMiddleware {
     #[allow(clippy::type_complexity)]
-    handler: Arc<dyn Fn(&gemini_adk::context::InvocationContext) -> Result<(), String> + Send + Sync>,
+    handler:
+        Arc<dyn Fn(&gemini_adk::context::InvocationContext) -> Result<(), String> + Send + Sync>,
 }
 
 #[async_trait]

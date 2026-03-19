@@ -80,7 +80,10 @@ fn wire_type_map() -> HashMap<&'static str, &'static str> {
         "gemini_live::prelude::ContextWindowCompressionConfig",
     );
     m.insert("SlidingWindow", "gemini_live::prelude::SlidingWindow");
-    m.insert("ProactivityConfig", "gemini_live::prelude::ProactivityConfig");
+    m.insert(
+        "ProactivityConfig",
+        "gemini_live::prelude::ProactivityConfig",
+    );
     m.insert(
         "InputAudioTranscription",
         "gemini_live::prelude::InputAudioTranscription",
@@ -92,7 +95,10 @@ fn wire_type_map() -> HashMap<&'static str, &'static str> {
 
     // Metadata
     m.insert("UsageMetadata", "gemini_live::prelude::UsageMetadata");
-    m.insert("GroundingMetadata", "gemini_live::prelude::GroundingMetadata");
+    m.insert(
+        "GroundingMetadata",
+        "gemini_live::prelude::GroundingMetadata",
+    );
     m.insert(
         "UrlContextMetadata",
         "gemini_live::prelude::UrlContextMetadata",
@@ -108,7 +114,10 @@ fn wire_type_map() -> HashMap<&'static str, &'static str> {
         "LiveServerContent",
         "gemini_live::prelude::ServerContentPayload",
     );
-    m.insert("LiveServerToolCall", "gemini_live::prelude::ToolCallPayload");
+    m.insert(
+        "LiveServerToolCall",
+        "gemini_live::prelude::ToolCallPayload",
+    );
     m.insert(
         "LiveServerToolCallCancellation",
         "gemini_live::prelude::ToolCallCancellationPayload",
@@ -138,7 +147,10 @@ fn wire_type_map() -> HashMap<&'static str, &'static str> {
     m.insert("Session", "gemini_live::prelude::SessionHandle");
 
     // Transcription
-    m.insert("Transcription", "gemini_live::prelude::TranscriptionPayload");
+    m.insert(
+        "Transcription",
+        "gemini_live::prelude::TranscriptionPayload",
+    );
 
     m
 }
