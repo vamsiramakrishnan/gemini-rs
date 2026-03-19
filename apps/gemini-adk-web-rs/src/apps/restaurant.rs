@@ -8,9 +8,9 @@ use serde_json::{json, Value};
 use tokio::sync::mpsc;
 use tracing::info;
 
+use gemini_adk_fluent_rs::prelude::*;
 use gemini_adk_rs::llm::{BaseLlm, GeminiLlm, GeminiLlmParams};
 use gemini_adk_rs::state::StateKey;
-use gemini_adk_fluent_rs::prelude::*;
 
 use crate::app::{AppError, ClientMessage, DemoApp, WsSender};
 use crate::bridge::SessionBridge;

@@ -231,7 +231,10 @@ impl M {
 
     /// Shortcut for an after-model hook.
     pub fn after_model(
-        f: impl Fn(&gemini_adk_rs::llm::LlmRequest, &gemini_adk_rs::llm::LlmResponse) -> Result<(), String>
+        f: impl Fn(
+                &gemini_adk_rs::llm::LlmRequest,
+                &gemini_adk_rs::llm::LlmResponse,
+            ) -> Result<(), String>
             + Send
             + Sync
             + 'static,
@@ -797,7 +800,10 @@ impl Middleware for BeforeModelMiddleware {
 struct AfterModelMiddleware {
     #[allow(clippy::type_complexity)]
     handler: Arc<
-        dyn Fn(&gemini_adk_rs::llm::LlmRequest, &gemini_adk_rs::llm::LlmResponse) -> Result<(), String>
+        dyn Fn(
+                &gemini_adk_rs::llm::LlmRequest,
+                &gemini_adk_rs::llm::LlmResponse,
+            ) -> Result<(), String>
             + Send
             + Sync,
     >,

@@ -38,7 +38,10 @@ fn wire_type_map() -> HashMap<&'static str, &'static str> {
 
     // Function calling
     m.insert("FunctionCall", "gemini_genai_rs::prelude::FunctionCall");
-    m.insert("FunctionResponse", "gemini_genai_rs::prelude::FunctionResponse");
+    m.insert(
+        "FunctionResponse",
+        "gemini_genai_rs::prelude::FunctionResponse",
+    );
     m.insert(
         "FunctionDeclaration",
         "gemini_genai_rs::prelude::FunctionDeclaration",
@@ -55,7 +58,10 @@ fn wire_type_map() -> HashMap<&'static str, &'static str> {
     m.insert("Role", "gemini_genai_rs::prelude::Role");
 
     // Configuration
-    m.insert("GenerationConfig", "gemini_genai_rs::prelude::GenerationConfig");
+    m.insert(
+        "GenerationConfig",
+        "gemini_genai_rs::prelude::GenerationConfig",
+    );
     m.insert("SpeechConfig", "gemini_genai_rs::prelude::SpeechConfig");
     m.insert("VoiceConfig", "gemini_genai_rs::prelude::VoiceConfig");
     m.insert(
@@ -105,7 +111,10 @@ fn wire_type_map() -> HashMap<&'static str, &'static str> {
     );
 
     // Session/Live API messages
-    m.insert("LiveServerMessage", "gemini_genai_rs::prelude::ServerMessage");
+    m.insert(
+        "LiveServerMessage",
+        "gemini_genai_rs::prelude::ServerMessage",
+    );
     m.insert(
         "LiveServerSetupComplete",
         "gemini_genai_rs::prelude::SetupCompletePayload",
@@ -122,7 +131,10 @@ fn wire_type_map() -> HashMap<&'static str, &'static str> {
         "LiveServerToolCallCancellation",
         "gemini_genai_rs::prelude::ToolCallCancellationPayload",
     );
-    m.insert("LiveServerGoAway", "gemini_genai_rs::prelude::GoAwayPayload");
+    m.insert(
+        "LiveServerGoAway",
+        "gemini_genai_rs::prelude::GoAwayPayload",
+    );
     m.insert(
         "LiveServerSessionResumptionUpdate",
         "gemini_genai_rs::prelude::SessionResumptionUpdatePayload",
@@ -174,7 +186,10 @@ fn helper_map() -> HashMap<&'static str, &'static str> {
 fn enum_map() -> HashMap<&'static str, &'static str> {
     let mut m = HashMap::new();
     m.insert("Modality", "gemini_genai_rs::prelude::Modality");
-    m.insert("MediaResolution", "gemini_genai_rs::prelude::MediaResolution");
+    m.insert(
+        "MediaResolution",
+        "gemini_genai_rs::prelude::MediaResolution",
+    );
     m.insert("Type", "gemini_genai_rs::prelude::SchemaType");
     m
 }

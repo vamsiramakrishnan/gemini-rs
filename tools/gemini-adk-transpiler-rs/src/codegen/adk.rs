@@ -486,7 +486,9 @@ fn resolve_runtime_type(rust_type: &str) -> String {
         "Blob" => return "gemini_genai_rs::prelude::Blob".to_string(),
         "FunctionCall" => return "gemini_genai_rs::prelude::FunctionCall".to_string(),
         "FunctionResponse" => return "gemini_genai_rs::prelude::FunctionResponse".to_string(),
-        "FunctionDeclaration" => return "gemini_genai_rs::prelude::FunctionDeclaration".to_string(),
+        "FunctionDeclaration" => {
+            return "gemini_genai_rs::prelude::FunctionDeclaration".to_string()
+        }
         "Tool" => return "gemini_genai_rs::prelude::Tool".to_string(),
         "GenerationConfig" => return "gemini_genai_rs::prelude::GenerationConfig".to_string(),
         "SpeechConfig" => return "gemini_genai_rs::prelude::SpeechConfig".to_string(),
@@ -494,7 +496,9 @@ fn resolve_runtime_type(rust_type: &str) -> String {
         "UsageMetadata" => return "gemini_genai_rs::prelude::UsageMetadata".to_string(),
         "GroundingMetadata" => return "gemini_genai_rs::prelude::GroundingMetadata".to_string(),
         "ExecutableCode" => return "gemini_genai_rs::prelude::ExecutableCode".to_string(),
-        "CodeExecutionResult" => return "gemini_genai_rs::prelude::CodeExecutionResult".to_string(),
+        "CodeExecutionResult" => {
+            return "gemini_genai_rs::prelude::CodeExecutionResult".to_string()
+        }
         "SessionHandle" => return "gemini_genai_rs::prelude::SessionHandle".to_string(),
         _ => {}
     }

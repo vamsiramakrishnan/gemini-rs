@@ -8,8 +8,8 @@
 //! - `TypedTool::new::<T>()` — derive the schema from `schemars::JsonSchema`
 //! - `.google_search()` / `.code_execution()` — built-in Gemini tools on AgentBuilder
 
-use gemini_adk_rs::{SimpleTool, ToolFunction, TypedTool};
 use gemini_adk_fluent_rs::prelude::*;
+use gemini_adk_rs::{SimpleTool, ToolFunction, TypedTool};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::json;

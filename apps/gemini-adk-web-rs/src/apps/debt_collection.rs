@@ -11,9 +11,9 @@ use std::sync::LazyLock;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
+use gemini_adk_fluent_rs::prelude::*;
 use gemini_adk_rs::llm::{BaseLlm, GeminiLlm, GeminiLlmParams};
 use gemini_adk_rs::state::StateKey;
-use gemini_adk_fluent_rs::prelude::*;
 
 use gemini_genai_rs::session::SessionEvent;
 

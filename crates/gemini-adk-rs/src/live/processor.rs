@@ -856,7 +856,9 @@ mod tests {
             ) -> Result<(), gemini_genai_rs::session::SessionError> {
                 Ok(())
             }
-            async fn signal_activity_end(&self) -> Result<(), gemini_genai_rs::session::SessionError> {
+            async fn signal_activity_end(
+                &self,
+            ) -> Result<(), gemini_genai_rs::session::SessionError> {
                 Ok(())
             }
             async fn disconnect(&self) -> Result<(), gemini_genai_rs::session::SessionError> {
