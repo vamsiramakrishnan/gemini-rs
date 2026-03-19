@@ -554,6 +554,58 @@ cargo check --workspace
 cargo build -p gemini-live --features "vad,generate,tokens"
 ```
 
+## Release Process
+
+All releases go through `just release <version>`. This is the single entry point.
+
+```bash
+# Preview what will be released
+just release-preview
+
+# Dry-run (validates everything, changes nothing)
+just release-dry 0.6.0
+
+# Full release (bumps, commits, tags, pushes — CI publishes to crates.io)
+just release 0.6.0
+
+# Check current version and tag history
+just release-status
+```
+
+### What `just release 0.6.0` does
+
+1. **Guards**: clean tree, on `main` or `release/*`, up-to-date with remote, no version regression
+2. **Validates**: `cargo fmt --check` + `cargo check` + `cargo clippy` + `cargo test`
+3. **Pre-publish**: `cargo publish --dry-run` for each published crate (catches manifest issues)
+4. **Changelog**: generates from conventional commits, inserts into `CHANGELOG.md`
+5. **Version bump**: updates `Cargo.toml` (workspace + dependencies) + regenerates `Cargo.lock`
+6. **Commit**: `chore(release): v0.6.0`
+7. **Tag**: annotated `v0.6.0` with full release notes in tag body
+8. **Push**: atomic push of commit + tag (both succeed or both fail)
+9. **CI takes over**: validate → publish to crates.io (L0→L1→L2→server→cli) → GitHub Release
+
+### Published crates (dependency order)
+
+1. `gemini-live` (L0)
+2. `gemini-adk` (L1)
+3. `gemini-adk-fluent` (L2)
+4. `gemini-adk-server`
+5. `gemini-adk-cli`
+
+### Version management
+
+- Single source of truth: `[workspace.package].version` in root `Cargo.toml`
+- All published crates use `version.workspace = true`
+- Internal deps use `[workspace.dependencies]` with matching version
+- `release.sh` bumps all occurrences in one `sed` pass
+
+### Release notes
+
+- Release body is stored in the **annotated tag message** (not a separate file)
+- GitHub Release uses the tag annotation as the body
+- `CHANGELOG.md` is the permanent record (Keep a Changelog format)
+- No `GITHUB_RELEASE_*.md` or `RELEASE_NOTES_*.md` files committed to repo
+
 ## Best Practices
 
 - Import from `gemini_adk_fluent::prelude::*` for application code -- it re-exports all three layers.

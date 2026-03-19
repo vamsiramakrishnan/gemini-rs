@@ -1,6 +1,6 @@
 name: Release
 
-# Triggered by pushing a vX.Y.Z tag (created by scripts/release.sh).
+# Triggered by pushing a vX.Y.Z tag (created by `just release`).
 # Flow: validate → publish (L0→L1→L2→server→cli) → GitHub Release
 on:
   push:
@@ -16,7 +16,7 @@ permissions:
   contents: write   # needed to create GitHub Release
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Job 1 — Validate: tests + clippy (same gating as CI, but on the tagged commit)
+# Job 1 — Validate: tests + clippy (same gating as CI, on the tagged commit)
 # ─────────────────────────────────────────────────────────────────────────────
 jobs:
   validate:
@@ -32,6 +32,14 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo test --workspace
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      # Pre-publish verification — catch manifest issues before real publish
+      - name: Verify crate manifests
+        run: |
+          for crate in gemini-live gemini-adk gemini-adk-fluent gemini-adk-server gemini-adk-cli; do
+            echo "::group::cargo publish --dry-run -p $crate"
+            cargo publish -p "$crate" --dry-run
+            echo "::endgroup::"
+          done
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Job 2 — Publish: crates.io in strict dependency order
@@ -40,16 +48,13 @@ jobs:
 #   L0  gemini-live
 #   L1  gemini-adk          (depends on gemini-live)
 #   L2  gemini-adk-fluent   (depends on gemini-live, gemini-adk)
-#   app gemini-adk-server (depends on gemini-adk)
-#   bin gemini-adk-cli         (depends on gemini-live, gemini-adk, gemini-adk-fluent, gemini-adk-server)
-#
-# gemini-adk-web and gemini-adk-api are publish = false (deployment apps, not library crates).
+#   app gemini-adk-server   (depends on gemini-adk)
+#   bin gemini-adk-cli      (depends on all above)
 #
 # Each step:
-#   1. Reads version from Cargo metadata (single source of truth: workspace version)
-#   2. Checks crates.io API — skips if that exact version already exists
-#   3. Polls until the crate appears in the sparse index (max ~3 min) before
-#      proceeding to the next crate, so downstream crates can resolve the dep
+#   1. Reads version from Cargo metadata (single source of truth)
+#   2. Checks crates.io — skips if that exact version already exists
+#   3. Polls until crate appears in sparse index (max ~3 min) before next crate
 # ─────────────────────────────────────────────────────────────────────────────
   publish:
     name: Publish to crates.io
@@ -64,7 +69,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       # ── Helper: publish one crate, then poll until it appears in the index ──
-      # Usage:  publish_and_wait <crate-name>
       - name: Define publish helper
         run: |
           cat > /tmp/publish.sh << 'HELPER'
@@ -88,20 +92,27 @@ jobs:
           echo "Publishing $CRATE@$VERSION ..."
           cargo publish -p "$CRATE" --no-verify
 
-          # Poll until the crate appears on static.crates.io (max 180 s)
+          # Poll until the crate appears on static.crates.io (max 240s with backoff)
           echo "Waiting for $CRATE@$VERSION to appear on crates.io..."
-          for i in $(seq 1 36); do
-            sleep 5
+          DELAY=5
+          TOTAL=0
+          MAX_WAIT=240
+          while [ "$TOTAL" -lt "$MAX_WAIT" ]; do
+            sleep "$DELAY"
+            TOTAL=$((TOTAL + DELAY))
             HTTP=$(curl -sI -o /dev/null -w "%{http_code}" \
               "https://static.crates.io/crates/$CRATE/$CRATE-${VERSION}.crate" 2>/dev/null || echo 000)
             if [ "$HTTP" = "200" ]; then
-              echo "✓ $CRATE@$VERSION confirmed available (${i}×5 s)"
+              echo "✓ $CRATE@$VERSION confirmed available (${TOTAL}s)"
               echo "::endgroup::"
               exit 0
             fi
-            echo "  …still waiting ($((i * 5)) s elapsed)"
+            echo "  …still waiting (${TOTAL}s elapsed)"
+            # Backoff: 5, 5, 10, 10, 15, 15...
+            [ "$TOTAL" -ge 30 ] && DELAY=10
+            [ "$TOTAL" -ge 60 ] && DELAY=15
           done
-          echo "::warning::Timed out waiting for $CRATE@$VERSION after 180 s"
+          echo "::warning::Timed out waiting for $CRATE@$VERSION after ${MAX_WAIT}s — proceeding anyway"
           echo "::endgroup::"
           HELPER
           chmod +x /tmp/publish.sh
@@ -132,8 +143,7 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Job 3 — GitHub Release: uses the pre-written GITHUB_RELEASE_vX.Y.Z.md file
-#          if it exists; falls back to auto-generated changelog
+# Job 3 — GitHub Release: auto-generated from tag annotation + git log
 # ─────────────────────────────────────────────────────────────────────────────
   github-release:
     name: Create GitHub Release
@@ -152,22 +162,26 @@ jobs:
         id: body
         run: |
           VERSION="${{ steps.ver.outputs.version }}"
-          NOTES_FILE="GITHUB_RELEASE_v${VERSION}.md"
+          TAG="${GITHUB_REF_NAME}"
 
-          if [ -f "$NOTES_FILE" ]; then
-            echo "Using pre-written release notes: $NOTES_FILE"
+          # Use annotated tag message as release body (set by release.sh)
+          TAG_MSG=$(git tag -l --format='%(contents)' "$TAG" 2>/dev/null || true)
+
+          if [ -n "$TAG_MSG" ] && [ "$(echo "$TAG_MSG" | wc -l)" -gt 2 ]; then
+            echo "Using annotated tag message for release body"
             {
               echo "body<<RELEASE_EOF"
-              cat "$NOTES_FILE"
+              echo "$TAG_MSG"
               echo "RELEASE_EOF"
             } >> "$GITHUB_OUTPUT"
           else
-            echo "No $NOTES_FILE found — generating from git log"
-            PREV_TAG=$(git tag --sort=-version:refname | grep -v "^${GITHUB_REF_NAME}$" | head -1)
+            # Fallback: generate from git log
+            echo "Generating release body from git log"
+            PREV_TAG=$(git tag --sort=-version:refname | grep -v "^${TAG}$" | head -1)
             if [ -n "$PREV_TAG" ]; then
-              RANGE="${PREV_TAG}..${GITHUB_REF_NAME}"
+              RANGE="${PREV_TAG}..${TAG}"
             else
-              RANGE="${GITHUB_REF_NAME}"
+              RANGE="${TAG}"
             fi
             {
               echo "body<<RELEASE_EOF"
@@ -177,15 +191,15 @@ jobs:
                 echo "- $line"
               done
               echo ""
-              echo "## Crates"
+              echo "### Crates"
               echo ""
-              echo "| Crate | Version |"
-              echo "|-------|---------|"
-              echo "| \`gemini-live\` | $VERSION |"
-              echo "| \`gemini-adk\` | $VERSION |"
-              echo "| \`gemini-adk-fluent\` | $VERSION |"
-              echo "| \`gemini-adk-server\` | $VERSION |"
-              echo "| \`gemini-adk-cli\` | $VERSION |"
+              echo "| Crate | Version | Install |"
+              echo "|-------|---------|---------|"
+              echo "| \`gemini-live\` | $VERSION | \`cargo add gemini-live@${VERSION}\` |"
+              echo "| \`gemini-adk\` | $VERSION | \`cargo add gemini-adk@${VERSION}\` |"
+              echo "| \`gemini-adk-fluent\` | $VERSION | \`cargo add gemini-adk-fluent@${VERSION}\` |"
+              echo "| \`gemini-adk-server\` | $VERSION | \`cargo add gemini-adk-server@${VERSION}\` |"
+              echo "| \`gemini-adk-cli\` | $VERSION | \`cargo install gemini-adk-cli@${VERSION}\` |"
               echo "RELEASE_EOF"
             } >> "$GITHUB_OUTPUT"
           fi

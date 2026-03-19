@@ -126,22 +126,44 @@ ci: fmt-check lint doc-check test
     @echo "✓ CI pipeline passed. Matches GitHub Actions exactly."
 
 # ─── Release ─────────────────────────────────────────────────
+# Full workflow: just release 0.6.0
+#   1. Validates (fmt, clippy, test, cargo publish --dry-run)
+#   2. Generates changelog from conventional commits
+#   3. Bumps Cargo.toml + Cargo.lock
+#   4. Commits "chore(release): v0.6.0"
+#   5. Tags v0.6.0 (annotated, with release notes in body)
+#   6. Pushes commit + tag atomically to origin
+#   7. CI takes over: validate → crates.io publish → GitHub Release
 
-# Release a new version. Runs full suite, generates changelog, bumps
-# workspace version, commits, tags, and pushes. CI handles crates.io + GitHub Release.
-# Usage: just release 0.6.0
+# Release a new version (full pipeline)
 release version:
     @bash scripts/release.sh {{version}}
 
-# Dry-run: preview what `just release` would do without any changes.
+# Dry-run: preview what `just release` would do without any changes
 release-dry version:
     @bash scripts/release.sh {{version}} --dry-run
 
-# Preview commits since last tag (changelog preview before release).
+# Preview commits since last tag (changelog preview before release)
 release-preview:
-    @PREV=$(git tag --sort=-version:refname | head -1 2>/dev/null || echo ""); \
-     if [ -z "$$PREV" ]; then git log --oneline HEAD; \
-     else echo "Changes since $$PREV:"; git log --oneline --no-decorate "$$PREV..HEAD"; fi
+    @PREV=$$(git tag --sort=-version:refname | head -1 2>/dev/null || echo ""); \
+     if [ -z "$$PREV" ]; then \
+       echo "No tags found. All commits:"; git log --oneline HEAD; \
+     else \
+       echo "Changes since $$PREV:"; \
+       git log --oneline --no-decorate "$$PREV..HEAD"; \
+       echo ""; \
+       echo "Crates: gemini-live, gemini-adk, gemini-adk-fluent, gemini-adk-server, gemini-adk-cli"; \
+       echo "Current version: $$(grep -m1 '^version = ' Cargo.toml | sed 's/.*\"\(.*\)\".*/\1/')"; \
+     fi
+
+# Show current version and tag history
+release-status:
+    @echo "Current version: $$(grep -m1 '^version = ' Cargo.toml | sed 's/.*\"\(.*\)\".*/\1/')"
+    @echo ""
+    @echo "Tags:"
+    @git tag --sort=-version:refname | head -10 2>/dev/null || echo "  (none)"
+    @echo ""
+    @echo "Published crates: gemini-live, gemini-adk, gemini-adk-fluent, gemini-adk-server, gemini-adk-cli"
 
 # ─── Utilities ───────────────────────────────────────────────
 
