@@ -1,21 +1,24 @@
 #!/usr/bin/env bash
 # =============================================================================
-# scripts/release.sh — Production release for gemini-rs
+# scripts/release.sh — Release branch model for gemini-rs
 #
 # Usage:
 #   ./scripts/release.sh <version>             # full release
 #   ./scripts/release.sh <version> --dry-run   # preview only
 #
 # Flow:
-#   1.  Guard: clean tree, up-to-date with remote, on main or release/* branch
+#   1.  Guard: clean tree, up-to-date with remote
 #   2.  Validate semver; reject version regression
-#   3.  Run full local suite: fmt, check, clippy, test
-#   4.  Pre-publish dry-run: cargo publish --dry-run for each published crate
-#   5.  Generate changelog from conventional commits
-#   6.  Bump version in Cargo.toml + regenerate Cargo.lock
-#   7.  Commit "chore(release): vX.Y.Z"
-#   8.  Annotated tag vX.Y.Z (body = release notes)
-#   9.  Push commit + tag atomically → CI handles crates.io + GitHub Release
+#   3.  Create release/vX.Y.Z branch from current HEAD
+#   4.  Auto-format (cargo fmt) + commit if needed
+#   5.  Validate: check, clippy, test
+#   6.  Pre-publish: cargo publish --dry-run for each crate
+#   7.  Generate changelog from conventional commits
+#   8.  Bump version in Cargo.toml + regenerate Cargo.lock
+#   9.  Commit "chore(release): vX.Y.Z"
+#  10.  Annotated tag vX.Y.Z
+#  11.  Push release branch + tag → CI validates + publishes to crates.io
+#  12.  Print instructions to merge release branch back to main
 # =============================================================================
 set -euo pipefail
 
@@ -41,13 +44,15 @@ Examples:
   $0 0.6.0
   $0 0.6.0-rc.1 --dry-run
 
-The version must be a valid semver string (with or without leading 'v').
+Creates a release/vX.Y.Z branch, bumps versions, tags, and pushes.
+CI handles crates.io publishing + GitHub Release creation.
 EOF
   exit 1
 fi
 
 VERSION="${VERSION#v}"   # strip leading v if provided
 TAG="v${VERSION}"
+RELEASE_BRANCH="release/${TAG}"
 
 # ── Semver validation ─────────────────────────────────────────────────────
 if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?(\+[a-zA-Z0-9.]+)?$'; then
@@ -73,7 +78,6 @@ step "Version check"
 version_to_int() {
   local IFS=.
   local -a parts
-  # Strip pre-release suffix for comparison
   local ver="${1%%-*}"
   read -ra parts <<< "$ver"
   echo $(( ${parts[0]:-0} * 10000 + ${parts[1]:-0} * 100 + ${parts[2]:-0} ))
@@ -89,23 +93,33 @@ ok "Version $CURRENT → $VERSION"
 # ── Guard: git state ──────────────────────────────────────────────────────
 step "Git preflight"
 
-BRANCH=$(git rev-parse --abbrev-ref HEAD)
-if [[ "$BRANCH" != "main" && "$BRANCH" != release/* ]]; then
-  die "Must release from 'main' or 'release/*' branch (currently on '$BRANCH')."
-fi
-
 if ! git diff --quiet || ! git diff --cached --quiet; then
   die "Working tree is dirty. Commit or stash changes before releasing."
 fi
 
-git fetch origin "$BRANCH" --quiet 2>/dev/null || true
-BEHIND=$(git rev-list "HEAD..origin/${BRANCH}" --count 2>/dev/null || echo 0)
-[[ "$BEHIND" -gt 0 ]] && die "Branch is $BEHIND commit(s) behind origin/${BRANCH}. Pull first."
-ok "Git state clean (on $BRANCH)"
+SOURCE_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+git fetch origin "$SOURCE_BRANCH" --quiet 2>/dev/null || true
+BEHIND=$(git rev-list "HEAD..origin/${SOURCE_BRANCH}" --count 2>/dev/null || echo 0)
+[[ "$BEHIND" -gt 0 ]] && die "Branch is $BEHIND commit(s) behind origin/${SOURCE_BRANCH}. Pull first."
+ok "Git state clean (on $SOURCE_BRANCH)"
 
-# ── Guard: tag collision ─────────────────────────────────────────────────
+# ── Guard: tag + branch collision ─────────────────────────────────────────
 if git rev-parse "$TAG" >/dev/null 2>&1; then
-  die "Tag $TAG already exists. Delete it first if re-releasing: git tag -d $TAG && git push origin :refs/tags/$TAG"
+  die "Tag $TAG already exists. Delete it first: git tag -d $TAG && git push origin :refs/tags/$TAG"
+fi
+
+if git show-ref --verify --quiet "refs/heads/${RELEASE_BRANCH}" 2>/dev/null; then
+  die "Branch $RELEASE_BRANCH already exists locally. Delete it first: git branch -D $RELEASE_BRANCH"
+fi
+
+# ── Create release branch ────────────────────────────────────────────────
+step "Creating release branch: $RELEASE_BRANCH"
+
+if ! $DRY_RUN; then
+  git checkout -b "$RELEASE_BRANCH"
+  ok "Created and switched to $RELEASE_BRANCH"
+else
+  info "Would create branch $RELEASE_BRANCH from $SOURCE_BRANCH"
 fi
 
 # ── Auto-format ───────────────────────────────────────────────────────────
@@ -240,7 +254,6 @@ ${CHANGELOG_BODY}"
 
 if ! $DRY_RUN; then
   if grep -q "^## \[Unreleased\]" CHANGELOG.md; then
-    # Use awk for reliable multi-line insertion (no sed escaping issues)
     awk -v entry="$CHANGELOG_ENTRY" '
       /^## \[Unreleased\]/ { print; print ""; print entry; next }
       { print }
@@ -258,13 +271,11 @@ fi
 step "Bumping version: $CURRENT → $VERSION"
 
 if ! $DRY_RUN; then
-  # Replace all occurrences of the current version in root Cargo.toml
   sed -i "s/version = \"${CURRENT}\"/version = \"${VERSION}\"/g" Cargo.toml
   FOUND=$(grep -c "\"${VERSION}\"" Cargo.toml || true)
   [[ "$FOUND" -ge 2 ]] || die "Version bump landed only $FOUND time(s) — expected ≥2"
   ok "Cargo.toml bumped ($FOUND occurrences)"
 
-  # Regenerate Cargo.lock so it matches the new version
   cargo generate-lockfile --quiet 2>/dev/null || cargo check --quiet 2>/dev/null || true
   ok "Cargo.lock regenerated"
 fi
@@ -286,13 +297,38 @@ ${RELEASE_BODY}"
   ok "Tagged $TAG (annotated)"
 fi
 
-# ── Push (atomic: commit + tag together) ──────────────────────────────────
-step "Pushing to origin"
+# ── Push release branch + tag ─────────────────────────────────────────────
+step "Pushing release branch + tag"
 
 if ! $DRY_RUN; then
-  # Atomic push: both commit and tag succeed or both fail
-  git push --atomic origin "$BRANCH" "$TAG"
-  ok "Pushed commit + tag atomically"
+  git push --atomic -u origin "$RELEASE_BRANCH" "$TAG"
+  ok "Pushed $RELEASE_BRANCH + $TAG atomically"
+fi
+
+# ── Create PR to merge release back to main ───────────────────────────────
+step "Creating pull request"
+
+if ! $DRY_RUN; then
+  if command -v gh &>/dev/null; then
+    PR_URL=$(gh pr create \
+      --base main \
+      --head "$RELEASE_BRANCH" \
+      --title "chore(release): ${TAG}" \
+      --body "$(cat <<PRBODY
+## Release ${TAG}
+
+Merging \`${RELEASE_BRANCH}\` into \`main\`.
+
+${RELEASE_BODY}
+PRBODY
+)" 2>&1) && {
+      ok "PR created: $PR_URL"
+    } || {
+      warn "gh pr create failed — create PR manually: $RELEASE_BRANCH → main"
+    }
+  else
+    warn "gh CLI not found — create PR manually: $RELEASE_BRANCH → main"
+  fi
 fi
 
 # ── Summary ───────────────────────────────────────────────────────────────
@@ -302,13 +338,20 @@ if $DRY_RUN; then
   echo -e "${YELLOW}${BOLD}  DRY RUN complete for ${TAG}${RESET}"
   echo ""
   echo -e "  Would have:"
-  echo -e "    1. Updated CHANGELOG.md"
-  echo -e "    2. Bumped Cargo.toml ${CURRENT} → ${VERSION}"
-  echo -e "    3. Committed: chore(release): ${TAG}"
-  echo -e "    4. Tagged: ${TAG}"
-  echo -e "    5. Pushed commit + tag to origin/${BRANCH}"
+  echo -e "    1. Created branch ${RELEASE_BRANCH}"
+  echo -e "    2. Auto-formatted + committed"
+  echo -e "    3. Validated (check, clippy, test)"
+  echo -e "    4. Updated CHANGELOG.md"
+  echo -e "    5. Bumped Cargo.toml ${CURRENT} → ${VERSION}"
+  echo -e "    6. Committed: chore(release): ${TAG}"
+  echo -e "    7. Tagged: ${TAG}"
+  echo -e "    8. Pushed ${RELEASE_BRANCH} + ${TAG} to origin"
+  echo -e "    9. Created PR: ${RELEASE_BRANCH} → main"
 else
   echo -e "${GREEN}${BOLD}  Released ${TAG}${RESET}"
+  echo ""
+  echo -e "  ${BOLD}Branch:${RESET}  ${RELEASE_BRANCH}"
+  echo -e "  ${BOLD}Tag:${RESET}     ${TAG}"
   echo ""
   echo -e "  CI pipeline:"
   echo -e "  ${CYAN}https://github.com/vamsiramakrishnan/gemini-rs/actions${RESET}"
@@ -316,5 +359,7 @@ else
   echo -e "  ${BOLD}1. validate${RESET}  fmt + test + clippy"
   echo -e "  ${BOLD}2. publish${RESET}   ${PUBLISH_CRATES[*]}"
   echo -e "  ${BOLD}3. release${RESET}   GitHub Release with changelog"
+  echo ""
+  echo -e "  ${BOLD}Next:${RESET} Merge the PR to bring version bump + changelog into main"
 fi
 echo -e "${GREEN}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"

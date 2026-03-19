@@ -556,7 +556,7 @@ cargo build -p gemini-live --features "vad,generate,tokens"
 
 ## Release Process
 
-All releases go through `just release <version>`. This is the single entry point.
+Release branch model. All releases go through `just release <version>`.
 
 ```bash
 # Preview what will be released
@@ -565,25 +565,28 @@ just release-preview
 # Dry-run (validates everything, changes nothing)
 just release-dry 0.6.0
 
-# Full release (bumps, commits, tags, pushes — CI publishes to crates.io)
+# Full release (branch, validate, bump, tag, push, open PR)
 just release 0.6.0
 
-# Check current version and tag history
+# Check current version, tags, release branches
 just release-status
 ```
 
 ### What `just release 0.6.0` does
 
-1. **Guards**: clean tree, on `main` or `release/*`, up-to-date with remote, no version regression
-2. **Auto-format**: runs `cargo fmt --all`, auto-commits if changes detected
-3. **Validates**: `cargo check` + `cargo clippy` + `cargo test`
-4. **Pre-publish**: `cargo publish --dry-run` for each published crate (catches manifest issues)
-4. **Changelog**: generates from conventional commits, inserts into `CHANGELOG.md`
-6. **Version bump**: updates `Cargo.toml` (workspace + dependencies) + regenerates `Cargo.lock`
-7. **Commit**: `chore(release): v0.6.0`
-8. **Tag**: annotated `v0.6.0` with full release notes in tag body
-9. **Push**: atomic push of commit + tag (both succeed or both fail)
-10. **CI takes over**: validate → publish to crates.io (L0→L1→L2→server→cli) → GitHub Release
+1. **Guards**: clean tree, up-to-date with remote, no version regression
+2. **Branch**: creates `release/v0.6.0` from current HEAD
+3. **Auto-format**: runs `cargo fmt --all`, auto-commits if changes detected
+4. **Validates**: `cargo check` + `cargo clippy` + `cargo test`
+5. **Pre-publish**: `cargo publish --dry-run` for each published crate (catches manifest issues)
+6. **Changelog**: generates from conventional commits, inserts into `CHANGELOG.md`
+7. **Version bump**: updates `Cargo.toml` (workspace + dependencies) + regenerates `Cargo.lock`
+8. **Commit**: `chore(release): v0.6.0`
+9. **Tag**: annotated `v0.6.0` with full release notes in tag body
+10. **Push**: atomic push of `release/v0.6.0` branch + tag
+11. **PR**: opens PR `release/v0.6.0 → main` via `gh`
+12. **CI takes over**: validate → publish to crates.io (L0→L1→L2→server→cli) → GitHub Release
+13. **You merge the PR** to bring version bump + changelog into main
 
 ### Published crates (dependency order)
 

@@ -126,16 +126,19 @@ ci: fmt-check lint doc-check test
     @echo "✓ CI pipeline passed. Matches GitHub Actions exactly."
 
 # ─── Release ─────────────────────────────────────────────────
-# Full workflow: just release 0.6.0
-#   1. Validates (fmt, clippy, test, cargo publish --dry-run)
-#   2. Generates changelog from conventional commits
-#   3. Bumps Cargo.toml + Cargo.lock
-#   4. Commits "chore(release): v0.6.0"
-#   5. Tags v0.6.0 (annotated, with release notes in body)
-#   6. Pushes commit + tag atomically to origin
-#   7. CI takes over: validate → crates.io publish → GitHub Release
+# Release branch model: just release 0.6.0
+#   1. Creates release/v0.6.0 branch from current HEAD
+#   2. Auto-formats (cargo fmt) + commits if needed
+#   3. Validates (check, clippy, test, cargo publish --dry-run)
+#   4. Generates changelog from conventional commits
+#   5. Bumps Cargo.toml + Cargo.lock
+#   6. Commits "chore(release): v0.6.0" + tags v0.6.0
+#   7. Pushes release branch + tag atomically
+#   8. Creates PR: release/v0.6.0 → main
+#   9. CI takes over: validate → crates.io publish → GitHub Release
+#  10. You merge the PR to bring version bump into main
 
-# Release a new version (full pipeline)
+# Release a new version (creates release branch, validates, tags, pushes, opens PR)
 release version:
     @bash scripts/release.sh {{version}}
 
@@ -162,6 +165,9 @@ release-status:
     @echo ""
     @echo "Tags:"
     @git tag --sort=-version:refname | head -10 2>/dev/null || echo "  (none)"
+    @echo ""
+    @echo "Release branches:"
+    @git branch -a 2>/dev/null | grep "release/" | head -10 || echo "  (none)"
     @echo ""
     @echo "Published crates: gemini-live, gemini-adk, gemini-adk-fluent, gemini-adk-server, gemini-adk-cli"
 
