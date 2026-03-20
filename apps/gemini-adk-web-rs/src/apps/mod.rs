@@ -15,6 +15,9 @@ mod text_chat;
 mod tool_calling;
 mod voice_chat;
 
+use std::sync::Arc;
+
+use gemini_adk_rs::llm::{BaseLlm, GeminiLlm, GeminiLlmParams};
 use gemini_genai_rs::prelude::*;
 use tokio::sync::mpsc;
 
@@ -65,12 +68,42 @@ pub async fn wait_for_start(
     }
 }
 
+/// Resolve the Vertex AI access token from env vars or gcloud CLI.
+fn resolve_vertex_token() -> Result<String, String> {
+    std::env::var("GOOGLE_ACCESS_TOKEN")
+        .or_else(|_| std::env::var("GCLOUD_ACCESS_TOKEN"))
+        .or_else(|_| {
+            std::process::Command::new("gcloud")
+                .args(["auth", "print-access-token"])
+                .output()
+                .map_err(|e| format!("Failed to run gcloud: {e}"))
+                .and_then(|output| {
+                    if output.status.success() {
+                        String::from_utf8(output.stdout)
+                            .map(|s| s.trim().to_string())
+                            .map_err(|e| format!("Invalid gcloud output: {e}"))
+                    } else {
+                        Err(format!(
+                            "gcloud failed: {}",
+                            String::from_utf8_lossy(&output.stderr)
+                        ))
+                    }
+                })
+        })
+        .map_err(|e| format!("Cannot obtain Vertex AI access token: {e}"))
+}
+
 /// Build a base `SessionConfig` from environment variables.
 ///
-/// Reads `GOOGLE_GENAI_USE_VERTEXAI`, `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`,
-/// and API key env vars to determine the correct endpoint.
+/// Reads `GOOGLE_GENAI_USE_VERTEXAI`, `GOOGLE_CLOUD_PROJECT`, and API key env vars
+/// to determine the correct endpoint.
 ///
-/// If `model` is provided, sets the model on the config.
+/// For the Live session location, prefers `GEMINI_LIVE_MODEL_LOCATION` over
+/// `GOOGLE_CLOUD_LOCATION` (default: `us-central1`). This allows setting
+/// `GOOGLE_CLOUD_LOCATION=global` for HTTP APIs while using a regional
+/// endpoint for the Live WebSocket API.
+///
+/// For the model, prefers `model` argument > `GEMINI_LIVE_MODEL` > `GEMINI_MODEL`.
 pub fn build_session_config(model: Option<&str>) -> Result<SessionConfig, String> {
     let use_vertex = std::env::var("GOOGLE_GENAI_USE_VERTEXAI")
         .map(|v| v.eq_ignore_ascii_case("true"))
@@ -79,31 +112,11 @@ pub fn build_session_config(model: Option<&str>) -> Result<SessionConfig, String
     let mut config = if use_vertex {
         let project = std::env::var("GOOGLE_CLOUD_PROJECT")
             .map_err(|_| "GOOGLE_CLOUD_PROJECT env var not set".to_string())?;
-        let location =
-            std::env::var("GOOGLE_CLOUD_LOCATION").unwrap_or_else(|_| "us-central1".to_string());
+        let location = std::env::var("GEMINI_LIVE_MODEL_LOCATION")
+            .or_else(|_| std::env::var("GOOGLE_CLOUD_LOCATION"))
+            .unwrap_or_else(|_| "us-central1".to_string());
 
-        // Try to get access token from env var first, then fall back to gcloud CLI.
-        let access_token = std::env::var("GOOGLE_ACCESS_TOKEN")
-            .or_else(|_| std::env::var("GCLOUD_ACCESS_TOKEN"))
-            .or_else(|_| {
-                std::process::Command::new("gcloud")
-                    .args(["auth", "print-access-token"])
-                    .output()
-                    .map_err(|e| format!("Failed to run gcloud: {e}"))
-                    .and_then(|output| {
-                        if output.status.success() {
-                            String::from_utf8(output.stdout)
-                                .map(|s| s.trim().to_string())
-                                .map_err(|e| format!("Invalid gcloud output: {e}"))
-                        } else {
-                            Err(format!(
-                                "gcloud failed: {}",
-                                String::from_utf8_lossy(&output.stderr)
-                            ))
-                        }
-                    })
-            })
-            .map_err(|e| format!("Cannot obtain Vertex AI access token: {e}"))?;
+        let access_token = resolve_vertex_token()?;
 
         SessionConfig::from_vertex(project, location, access_token)
     } else {
@@ -121,6 +134,7 @@ pub fn build_session_config(model: Option<&str>) -> Result<SessionConfig, String
 
     let effective_model = model
         .map(|s| s.to_string())
+        .or_else(|| std::env::var("GEMINI_LIVE_MODEL").ok())
         .or_else(|| std::env::var("GEMINI_MODEL").ok());
 
     if let Some(m) = effective_model {
@@ -128,6 +142,33 @@ pub fn build_session_config(model: Option<&str>) -> Result<SessionConfig, String
     }
 
     Ok(config)
+}
+
+/// Resolve the Live session model from env vars, falling back to `Gemini2_0FlashLive`.
+///
+/// Precedence: `GEMINI_LIVE_MODEL` env var > `GeminiModel::Gemini2_0FlashLive`.
+pub fn live_model() -> GeminiModel {
+    std::env::var("GEMINI_LIVE_MODEL")
+        .ok()
+        .map(GeminiModel::Custom)
+        .unwrap_or(GeminiModel::Gemini2_0FlashLive)
+}
+
+/// Build a `GeminiLlm` for OOB extraction from environment variables.
+///
+/// Reads `GEMINI_EXTRACTION_MODEL` (default: `gemini-2.0-flash`) and
+/// `GEMINI_EXTRACTION_LOCATION` (default: `GOOGLE_CLOUD_LOCATION`, then `us-central1`).
+pub fn build_extraction_llm() -> Arc<dyn BaseLlm> {
+    let model = std::env::var("GEMINI_EXTRACTION_MODEL").ok();
+    let location = std::env::var("GEMINI_EXTRACTION_LOCATION")
+        .or_else(|_| std::env::var("GOOGLE_CLOUD_LOCATION"))
+        .ok();
+
+    Arc::new(GeminiLlm::new(GeminiLlmParams {
+        model,
+        location,
+        ..Default::default()
+    }))
 }
 
 /// Send appMeta message to the browser so devtools can configure tabs.

@@ -12,7 +12,6 @@ use tokio::sync::mpsc;
 use tracing::{info, warn};
 
 use gemini_adk_fluent_rs::prelude::*;
-use gemini_adk_rs::llm::{BaseLlm, GeminiLlm, GeminiLlmParams};
 use gemini_adk_rs::state::StateKey;
 
 use gemini_genai_rs::session::SessionEvent;
@@ -599,11 +598,8 @@ impl DemoApp for DebtCollection {
     ) -> Result<(), AppError> {
         info!("DebtCollection session starting");
 
-        // Create GeminiLlm for LLM extraction
-        let llm: Arc<dyn BaseLlm> = Arc::new(GeminiLlm::new(GeminiLlmParams {
-            model: Some("gemini-3.1-flash-lite-preview".to_string()),
-            ..Default::default()
-        }));
+        // Create GeminiLlm for LLM extraction (configured via GEMINI_EXTRACTION_* env vars)
+        let llm = super::build_extraction_llm();
 
         // Create RegexExtractor for debt_fields
         let extractor = Arc::new(RegexExtractor::new("debt_fields", 10, |text, existing| {
@@ -662,7 +658,7 @@ impl DemoApp for DebtCollection {
             .run(self, &mut rx, |live, start| {
                 let voice = resolve_voice(start.voice.as_deref());
 
-                live.model(GeminiModel::Gemini2_0FlashLive)
+                live.model(super::live_model())
                     .voice(voice)
                     .instruction(
                         start

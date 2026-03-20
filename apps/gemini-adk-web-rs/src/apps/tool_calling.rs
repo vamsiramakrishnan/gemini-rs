@@ -200,7 +200,7 @@ impl DemoApp for ToolCalling {
         info!("ToolCalling session starting");
         SessionBridge::new(tx)
             .run(self, &mut rx, |live, start| {
-                live.model(GeminiModel::Gemini2_0FlashLive)
+                live.model(super::live_model())
                     .text_only()
                     .add_tool(demo_tools())
                     .instruction(

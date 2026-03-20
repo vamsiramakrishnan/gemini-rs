@@ -9,7 +9,6 @@ use tokio::sync::mpsc;
 use tracing::info;
 
 use gemini_adk_fluent_rs::prelude::*;
-use gemini_adk_rs::llm::{BaseLlm, GeminiLlm, GeminiLlmParams};
 use gemini_adk_rs::state::StateKey;
 
 use crate::app::{AppError, ClientMessage, DemoApp, WsSender};
@@ -418,12 +417,8 @@ impl DemoApp for CallScreening {
     ) -> Result<(), AppError> {
         info!("CallScreening session starting");
 
-        // Create GeminiLlm for LLM extraction (background agent uses flash-lite at global)
-        let llm: Arc<dyn BaseLlm> = Arc::new(GeminiLlm::new(GeminiLlmParams {
-            model: Some("gemini-3.1-flash-lite-preview".to_string()),
-            location: Some("global".to_string()),
-            ..Default::default()
-        }));
+        // Create GeminiLlm for LLM extraction (configured via GEMINI_EXTRACTION_* env vars)
+        let llm = super::build_extraction_llm();
 
         SessionBridge::new(tx)
             .run(self, &mut rx, |live, start| {
@@ -473,7 +468,7 @@ impl DemoApp for CallScreening {
                 //   decisions without the state being in the system instruction.
                 // =================================================================
 
-                live.model(GeminiModel::Gemini2_0FlashLive)
+                live.model(super::live_model())
                     .voice(voice)
                     .instruction(SYSTEM_INSTRUCTION)
                     .transcription(true, true)

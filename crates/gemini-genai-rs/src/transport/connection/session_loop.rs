@@ -45,6 +45,8 @@ pub(super) async fn generic_connection_loop<T: Transport, C: Codec>(
 
         // Build URL and headers from config
         let url = config.ws_url();
+        let model_uri = config.model_uri();
+        tracing::info!(url = %url, model = %model_uri, "WebSocket connecting");
         let mut headers = vec![];
         if let Some(token) = config.bearer_token() {
             headers.push(("Authorization".to_string(), format!("Bearer {token}")));
@@ -130,17 +132,21 @@ pub(super) async fn generic_connection_loop<T: Transport, C: Codec>(
                         }
                     }
                     Ok(Err(e)) => {
+                        tracing::warn!(error = %e, "WebSocket setup failed");
                         let _ = event_tx.send(SessionEvent::Error(format!("Setup failed: {e}")));
                     }
                     Err(_) => {
+                        tracing::warn!("WebSocket setup timeout ({}s)", transport_config.setup_timeout_secs);
                         let _ = event_tx.send(SessionEvent::Error("Setup timeout".into()));
                     }
                 }
             }
             Ok(Err(e)) => {
+                tracing::warn!(error = %e, "WebSocket connection failed");
                 let _ = event_tx.send(SessionEvent::Error(format!("Connection failed: {e}")));
             }
             Err(_) => {
+                tracing::warn!("WebSocket connect timeout");
                 let _ = event_tx.send(SessionEvent::Error("Connect timeout".into()));
             }
         }
@@ -199,6 +205,7 @@ async fn wait_for_setup<T: Transport, C: Codec>(
                 }
             },
             Ok(None) => {
+                tracing::warn!("Server closed connection during setup (no setupComplete received)");
                 return Err(SessionError::SetupFailed(SetupError::Timeout));
             }
             Err(e) => {

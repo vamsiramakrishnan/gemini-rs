@@ -506,7 +506,7 @@ impl DemoApp for SupportAssistant {
                 //   graph (5 billing + 5 technical). Critical for a large phase
                 //   graph where the model needs to understand its position.
                 // =================================================================
-                live.model(GeminiModel::Gemini2_0FlashLive)
+                live.model(super::live_model())
                     .voice(voice)
                     .instruction(
                         start
