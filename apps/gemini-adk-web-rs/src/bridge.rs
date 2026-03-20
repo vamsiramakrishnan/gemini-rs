@@ -143,18 +143,18 @@ impl SessionBridge {
 
                 // Emit per-turn metrics when the turn count advances
                 if let Some(obj) = stats.as_object() {
-                    let turn_count = obj.get("turn_count").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let turn_count = obj.get("response_count").and_then(|v| v.as_u64()).unwrap_or(0);
                     if turn_count > prev_turn_count {
                         let latency_ms = obj
-                            .get("last_latency_ms")
+                            .get("last_response_latency_ms")
                             .and_then(|v| v.as_u64())
                             .unwrap_or(0) as u32;
                         let prompt_tokens = obj
-                            .get("prompt_tokens")
+                            .get("prompt_token_count")
                             .and_then(|v| v.as_u64())
                             .unwrap_or(0) as u32;
                         let response_tokens = obj
-                            .get("response_tokens")
+                            .get("response_token_count")
                             .and_then(|v| v.as_u64())
                             .unwrap_or(0) as u32;
                         let _ = tx.send(ServerMessage::TurnMetrics {

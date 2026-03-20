@@ -373,18 +373,18 @@ impl LiveSessionBuilder {
                     tick.tick().await;
                     let snap = telem_ref.snapshot();
                     if let Some(obj) = snap.as_object() {
-                        let tc = obj.get("turn_count").and_then(|v| v.as_u64()).unwrap_or(0);
+                        let tc = obj.get("response_count").and_then(|v| v.as_u64()).unwrap_or(0);
                         if tc > prev_turns {
                             let latency = obj
-                                .get("last_latency_ms")
+                                .get("last_response_latency_ms")
                                 .and_then(|v| v.as_u64())
                                 .unwrap_or(0) as u32;
                             let prompt = obj
-                                .get("prompt_tokens")
+                                .get("prompt_token_count")
                                 .and_then(|v| v.as_u64())
                                 .unwrap_or(0) as u32;
                             let response = obj
-                                .get("response_tokens")
+                                .get("response_token_count")
                                 .and_then(|v| v.as_u64())
                                 .unwrap_or(0) as u32;
                             let _ = telem_tx.send(LiveEvent::TurnMetrics {
