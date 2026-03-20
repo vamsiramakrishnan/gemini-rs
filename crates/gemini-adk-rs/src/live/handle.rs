@@ -68,6 +68,7 @@ impl LiveHandle {
     /// When deferred context delivery is enabled, any pending model-role
     /// context turns are flushed to the wire before the text message.
     pub async fn send_text(&self, text: impl Into<String>) -> Result<(), SessionError> {
+        self.telemetry.record_text_send();
         self.writer.send_text(text.into()).await
     }
 

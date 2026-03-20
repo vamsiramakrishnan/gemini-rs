@@ -265,6 +265,9 @@ pub(crate) fn spawn_telemetry_lane(
                                 SessionEvent::AudioData(data) => {
                                     telemetry.record_audio_out(data.len());
                                 }
+                                SessionEvent::TextDelta(_) => {
+                                    telemetry.record_text_out();
+                                }
                                 SessionEvent::VoiceActivityEnd => {
                                     telemetry.record_vad_end();
                                 }
