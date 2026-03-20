@@ -24,11 +24,28 @@
   --text-muted: var(--text-4);
   --border: var(--border-1);
   --border-light: var(--bg-inset);
+  --row-hover: #f5f7ff;
+  --row-selected: #e3f2fd;
+  --nfr-good-tint: #f0faf3;
+  --nfr-ok-tint: #fef9f0;
+  --nfr-warn-tint: #fef0ef;
+  --status-trace-fg: #00695c;
+  --status-trace-bg: #e0f7fa;
   --msg-user-bg: var(--brand);
   --msg-user-text: #ffffff;
   --msg-model-bg: var(--bg-card);
   --msg-model-text: var(--text-1);
   --mono: var(--font-mono);
+}
+
+[data-theme="dark"] .app-container {
+  --row-hover: rgba(99, 130, 255, 0.08);
+  --row-selected: rgba(99, 130, 255, 0.15);
+  --nfr-good-tint: rgba(27, 135, 63, 0.12);
+  --nfr-ok-tint: rgba(212, 130, 12, 0.12);
+  --nfr-warn-tint: rgba(234, 67, 53, 0.12);
+  --status-trace-fg: #4dd0e1;
+  --status-trace-bg: rgba(0, 105, 92, 0.25);
 }
 
 /* ============================================
