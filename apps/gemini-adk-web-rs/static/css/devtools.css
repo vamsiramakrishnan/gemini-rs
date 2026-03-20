@@ -31,7 +31,7 @@
   height: 40px;
   min-height: 40px;
   border-bottom: 1px solid var(--devtools-border);
-  background: #ffffff;
+  background: var(--bg-card, #ffffff);
   padding: 0 4px;
   gap: 2px;
 }
@@ -191,12 +191,32 @@
 .state-value.null { color: var(--text-muted); font-style: italic; }
 
 /* State search */
+.state-search-row {
+  display: flex; align-items: center; gap: 6px; padding: 6px 8px;
+  border-bottom: 1px solid var(--border-light); background: var(--devtools-bg);
+}
 .state-search {
-  width: calc(100% - 16px); margin: 8px; padding: 5px 8px;
+  flex: 1; padding: 5px 8px;
   border: 1px solid var(--border-light); border-radius: 4px;
   font-size: 11px; font-family: var(--mono); outline: none; background: #fff;
 }
 .state-search:focus { border-color: var(--primary); }
+.state-match-count {
+  font-size: 10px; font-family: var(--mono); color: var(--text-muted);
+  white-space: nowrap; flex-shrink: 0;
+}
+
+/* State empty hint */
+.state-empty-hint {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 40px 16px; color: var(--text-muted); text-align: center; gap: 8px;
+}
+.state-empty-icon {
+  font-size: 28px; font-family: var(--mono); font-weight: 300; opacity: 0.3;
+  line-height: 1;
+}
+.state-empty-text { font-size: 13px; font-weight: 500; }
+.state-empty-sub { font-size: 11px; opacity: 0.7; }
 
 /* State groups container */
 .state-groups {
@@ -1196,9 +1216,9 @@
    ============================================ */
 .devtools-resize-handle {
   position: absolute;
-  left: -3px;
+  left: -4px;
   top: 0;
-  width: 6px;
+  width: 8px;
   height: 100%;
   cursor: col-resize;
   z-index: 10;
@@ -1206,10 +1226,33 @@
   transition: background 0.15s;
 }
 
+/* Visible grip dots */
+.devtools-resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 4px;
+  height: 24px;
+  background: var(--border);
+  border-radius: 2px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.devtools-resize-handle:hover::after {
+  opacity: 1;
+}
+
 .devtools-resize-handle:hover,
 .devtools-resize-handle.active {
+  background: rgba(66,133,244,0.1);
+}
+
+.devtools-resize-handle.active::after {
+  opacity: 1;
   background: var(--primary);
-  opacity: 0.4;
 }
 
 .devtools-pane.collapsed .devtools-resize-handle {
@@ -1760,4 +1803,19 @@
   border-radius: 4px;
   border-left: 2px solid var(--primary);
   font-style: italic;
+}
+
+/* ============================================
+   Reduced Motion
+   ============================================ */
+@media (prefers-reduced-motion: reduce) {
+  .event-entry,
+  .state-row-flash,
+  .state-was,
+  .nfr-range-fill,
+  .nfr-range-marker,
+  .phase-bar-fill {
+    animation: none !important;
+    transition: none !important;
+  }
 }

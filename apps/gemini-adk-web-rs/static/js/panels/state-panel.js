@@ -49,9 +49,11 @@ var StatePanel = (function () {
       }
     } else {
       this._addRow(key, value);
+      // Hide empty hint once we have data
+      if (this._emptyHint) this._emptyHint.style.display = 'none';
     }
 
-    if (this._searchTerm) this._filter(this._searchTerm);
+    this._filter(this._searchTerm);
   };
 
   StatePanel.prototype.reset = function () {
@@ -69,13 +71,29 @@ var StatePanel = (function () {
     this._container.innerHTML = '';
     this._container.classList.add('state-panel');
 
+    var searchRow = U.el('div', 'state-search-row');
+
     var search = U.el('input', 'state-search');
     search.placeholder = 'Filter keys...';
     search.addEventListener('input', function () {
       self._searchTerm = search.value.toLowerCase();
       self._filter(self._searchTerm);
     });
-    this._container.appendChild(search);
+    searchRow.appendChild(search);
+
+    var countEl = U.el('span', 'state-match-count');
+    searchRow.appendChild(countEl);
+    this._matchCountEl = countEl;
+
+    this._container.appendChild(searchRow);
+
+    // Empty state
+    var emptyState = U.el('div', 'state-empty-hint');
+    emptyState.innerHTML = '<div class="state-empty-icon">{ }</div>' +
+      '<div class="state-empty-text">No state variables yet</div>' +
+      '<div class="state-empty-sub">State will appear as the session progresses</div>';
+    this._container.appendChild(emptyState);
+    this._emptyHint = emptyState;
 
     var groupContainer = U.el('div', 'state-groups');
     this._container.appendChild(groupContainer);
@@ -127,9 +145,17 @@ var StatePanel = (function () {
   };
 
   StatePanel.prototype._filter = function (term) {
+    var matchCount = 0;
+    var total = this._map.size;
     this._map.forEach(function (entry, key) {
-      entry.row.style.display = (!term || key.toLowerCase().indexOf(term) !== -1) ? '' : 'none';
+      var visible = !term || key.toLowerCase().indexOf(term) !== -1;
+      entry.row.style.display = visible ? '' : 'none';
+      if (visible) matchCount++;
     });
+    if (this._matchCountEl) {
+      this._matchCountEl.textContent = term ? matchCount + '/' + total : total + ' keys';
+      this._matchCountEl.style.display = total > 0 ? '' : 'none';
+    }
   };
 
   return StatePanel;

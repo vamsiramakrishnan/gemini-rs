@@ -532,6 +532,189 @@
 }
 
 /* ============================================
+   Scroll to Bottom Button
+   ============================================ */
+.scroll-bottom-btn {
+  display: none;
+  position: absolute;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--border-1);
+  background: var(--bg-card);
+  color: var(--text-3);
+  cursor: pointer;
+  z-index: 5;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  transition: background var(--duration-fast), color var(--duration-fast);
+}
+
+.scroll-bottom-btn:hover {
+  background: var(--brand);
+  color: #ffffff;
+  border-color: var(--brand);
+}
+
+.scroll-bottom-btn.visible {
+  display: flex;
+}
+
+.scroll-bottom-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.conversation-pane {
+  position: relative;
+}
+
+/* ============================================
+   Tool Call Messages
+   ============================================ */
+.message-row.tool-call {
+  justify-content: flex-start;
+}
+
+.tool-call-bubble {
+  background: var(--bg-inset) !important;
+  border: 1px solid var(--border-1) !important;
+  border-left: 3px solid #e65100 !important;
+  border-radius: var(--radius-md) !important;
+  padding: 8px 12px !important;
+  font-size: var(--font-size-sm) !important;
+  font-family: var(--font-mono);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 80%;
+}
+
+.tool-call-name {
+  font-weight: 600;
+  color: #e65100;
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.tool-call-args {
+  color: var(--text-3);
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.tool-call-result {
+  color: #2e7d32;
+  font-size: 12px;
+  border-top: 1px solid var(--border-1);
+  padding-top: 4px;
+  word-break: break-all;
+}
+
+/* ============================================
+   Phase Change Messages
+   ============================================ */
+.message-row.phase-change {
+  justify-content: center;
+}
+
+.phase-change-bubble {
+  background: rgba(66,133,244,0.06) !important;
+  border: 1px solid rgba(66,133,244,0.15) !important;
+  border-radius: var(--radius-md) !important;
+  padding: 4px 14px !important;
+  font-size: var(--font-size-xs) !important;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-2) !important;
+}
+
+.phase-change-label {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #e65100;
+  font-size: 10px;
+}
+
+.phase-change-text {
+  font-weight: 500;
+  font-family: var(--font-mono);
+  color: var(--text-1);
+}
+
+.phase-change-reason {
+  color: var(--text-3);
+  font-style: italic;
+}
+
+/* ============================================
+   Error Categorization
+   ============================================ */
+.message-row.error .message-bubble {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.error-label {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  line-height: 1.4;
+}
+
+.message-row.error-transient .error-label {
+  background: rgba(251,188,4,0.2);
+  color: #b06000;
+}
+
+.message-row.error-transient .message-bubble {
+  background: var(--warning-bg);
+  border-color: rgba(251,188,4,0.3);
+  color: #7c4a00;
+}
+
+.message-row.error-fatal .error-label {
+  background: rgba(220,38,38,0.15);
+  color: #c5221f;
+}
+
+.error-text {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+
+/* ============================================
+   Reduced Motion
+   ============================================ */
+@media (prefers-reduced-motion: reduce) {
+  .message-row,
+  .transcription-row,
+  .speaking-dots span,
+  .connection-badge.connecting .dot,
+  .mic-btn.recording,
+  .message-row.model.streaming .message-bubble::after {
+    animation: none !important;
+  }
+
+  .messages-container {
+    scroll-behavior: auto;
+  }
+}
+
+/* ============================================
    Responsive
    ============================================ */
 @media (max-width: 768px) {

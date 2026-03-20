@@ -49,6 +49,9 @@
   let currentModelBubble = null;
   let currentUserTranscription = null;
   let currentModelTranscription = null;
+  let connectTimer = null;
+  let connectStartTime = 0;
+  let userScrolledUp = false;
 
   // ------------------------------------------------
   // Connection status
@@ -59,11 +62,15 @@
     const dot = connectionBadge.querySelector('.dot');
     const label = connectionBadge.querySelector('.label');
 
+    // Clear connect timer
+    if (connectTimer) { clearInterval(connectTimer); connectTimer = null; }
+
     switch (state) {
       case 'disconnected':
         label.textContent = 'Disconnected';
         connectBtn.textContent = 'Connect';
         connectBtn.classList.remove('active');
+        connectBtn.disabled = false;
         textInput.disabled = true;
         sendBtn.disabled = true;
         micBtn.disabled = true;
@@ -72,9 +79,15 @@
         micBtn.classList.remove('recording');
         break;
       case 'connecting':
-        label.textContent = 'Connecting';
-        connectBtn.textContent = 'Connecting...';
-        connectBtn.disabled = true;
+        connectStartTime = Date.now();
+        label.textContent = 'Connecting...';
+        connectBtn.textContent = 'Cancel';
+        connectBtn.disabled = false;
+        // Show elapsed time during connection
+        connectTimer = setInterval(() => {
+          const elapsed = Math.floor((Date.now() - connectStartTime) / 1000);
+          label.textContent = 'Connecting... ' + elapsed + 's';
+        }, 1000);
         break;
       case 'connected':
         label.textContent = 'Connected';
@@ -85,6 +98,7 @@
         sendBtn.disabled = false;
         micBtn.disabled = false;
         connected = true;
+        textInput.focus();
         break;
     }
   }
@@ -95,6 +109,32 @@
   function hideEmptyState() {
     if (emptyState) emptyState.style.display = 'none';
   }
+
+  function scrollToBottom() {
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    userScrolledUp = false;
+    updateScrollBtn();
+  }
+
+  function updateScrollBtn() {
+    const btn = document.getElementById('scroll-bottom-btn');
+    if (!btn) return;
+    btn.classList.toggle('visible', userScrolledUp);
+  }
+
+  function autoScroll() {
+    if (!userScrolledUp) {
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+  }
+
+  // Track if user scrolled up
+  messagesContainer.addEventListener('scroll', () => {
+    const threshold = 80;
+    const atBottom = messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight < threshold;
+    userScrolledUp = !atBottom;
+    updateScrollBtn();
+  });
 
   function addMessage(text, role) {
     hideEmptyState();
@@ -108,7 +148,7 @@
 
     row.appendChild(bubble);
     messagesContainer.appendChild(row);
-    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    autoScroll();
 
     return bubble;
   }
@@ -121,7 +161,7 @@
       currentModelBubble.parentElement.classList.add('streaming');
     }
     currentModelBubble.textContent += text;
-    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    autoScroll();
   }
 
   function finalizeModelBubble() {
@@ -177,7 +217,7 @@
       currentModelTranscription.textContent += text;
     }
 
-    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    autoScroll();
   }
 
   // ------------------------------------------------
@@ -196,7 +236,7 @@
 
     row.appendChild(bubble);
     messagesContainer.appendChild(row);
-    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    autoScroll();
   }
 
   // ------------------------------------------------
@@ -216,6 +256,11 @@
   // WebSocket connection
   // ------------------------------------------------
   async function connect() {
+    if (ws && !connected) {
+      // Currently connecting — cancel
+      disconnect();
+      return;
+    }
     if (ws) {
       // Already connected — disconnect
       disconnect();
@@ -228,6 +273,14 @@
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(`${protocol}//${window.location.host}/ws/${appName}`);
+
+    // Connection timeout — 30 seconds
+    const connectionTimeout = setTimeout(() => {
+      if (!connected && ws) {
+        addErrorMessage('Connection timed out after 30 seconds. Check server logs.');
+        disconnect();
+      }
+    }, 30000);
 
     ws.onopen = () => {
       // Send start message
@@ -268,11 +321,13 @@
     };
 
     ws.onclose = () => {
+      clearTimeout(connectionTimeout);
       ws = null;
       setConnectionState('disconnected');
     };
 
     ws.onerror = (err) => {
+      clearTimeout(connectionTimeout);
       console.error('WebSocket error:', err);
     };
   }
@@ -319,7 +374,7 @@
         break;
 
       case 'error':
-        addMessage(msg.message || 'Unknown error', 'error');
+        addErrorMessage(msg.message || 'Unknown error');
         break;
 
       case 'inputTranscription':
@@ -349,6 +404,7 @@
 
       case 'phaseChange':
         devtools.handlePhaseChange(msg);
+        addPhaseChangeMessage(msg);
         break;
 
       case 'evaluation':
@@ -369,6 +425,7 @@
 
       case 'toolCallEvent':
         devtools.handleToolCallEvent(msg);
+        addToolCallMessage(msg);
         break;
 
       case 'appMeta':
@@ -393,6 +450,111 @@
         devtools.handleTurnMetrics(msg);
         break;
     }
+  }
+
+  // ------------------------------------------------
+  // Phase change inline display
+  // ------------------------------------------------
+  function addPhaseChangeMessage(msg) {
+    hideEmptyState();
+    const row = document.createElement('div');
+    row.className = 'message-row phase-change';
+
+    const bubble = document.createElement('div');
+    bubble.className = 'message-bubble phase-change-bubble';
+
+    const arrow = (msg.from || '?') + ' \u2192 ' + (msg.to || '?');
+    const label = document.createElement('span');
+    label.className = 'phase-change-label';
+    label.textContent = 'Phase';
+
+    const text = document.createElement('span');
+    text.className = 'phase-change-text';
+    text.textContent = arrow;
+
+    bubble.appendChild(label);
+    bubble.appendChild(text);
+
+    if (msg.reason) {
+      const reason = document.createElement('span');
+      reason.className = 'phase-change-reason';
+      reason.textContent = msg.reason;
+      bubble.appendChild(reason);
+    }
+
+    row.appendChild(bubble);
+    messagesContainer.appendChild(row);
+    autoScroll();
+  }
+
+  // ------------------------------------------------
+  // Tool call inline display
+  // ------------------------------------------------
+  function addToolCallMessage(msg) {
+    hideEmptyState();
+    const row = document.createElement('div');
+    row.className = 'message-row tool-call';
+
+    const bubble = document.createElement('div');
+    bubble.className = 'message-bubble tool-call-bubble';
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'tool-call-name';
+    nameSpan.textContent = msg.name || 'tool';
+
+    const argsSpan = document.createElement('span');
+    argsSpan.className = 'tool-call-args';
+    const argsText = msg.args || '';
+    argsSpan.textContent = argsText.length > 100 ? argsText.substring(0, 100) + '...' : argsText;
+
+    bubble.appendChild(nameSpan);
+    bubble.appendChild(argsSpan);
+
+    if (msg.result) {
+      const resultSpan = document.createElement('span');
+      resultSpan.className = 'tool-call-result';
+      const resultText = msg.result || '';
+      resultSpan.textContent = resultText.length > 150 ? resultText.substring(0, 150) + '...' : resultText;
+      bubble.appendChild(resultSpan);
+    }
+
+    row.appendChild(bubble);
+    messagesContainer.appendChild(row);
+    autoScroll();
+  }
+
+  // ------------------------------------------------
+  // Error categorization
+  // ------------------------------------------------
+  function addErrorMessage(message) {
+    hideEmptyState();
+    const row = document.createElement('div');
+
+    // Categorize error
+    const lower = (message || '').toLowerCase();
+    const isTransient = lower.includes('timeout') || lower.includes('reconnect') ||
+                        lower.includes('temporarily') || lower.includes('503') ||
+                        lower.includes('rate limit');
+    const category = isTransient ? 'transient' : 'fatal';
+
+    row.className = 'message-row error error-' + category;
+
+    const bubble = document.createElement('div');
+    bubble.className = 'message-bubble';
+
+    const label = document.createElement('span');
+    label.className = 'error-label';
+    label.textContent = isTransient ? 'Transient' : 'Error';
+
+    const text = document.createElement('span');
+    text.className = 'error-text';
+    text.textContent = message;
+
+    bubble.appendChild(label);
+    bubble.appendChild(text);
+    row.appendChild(bubble);
+    messagesContainer.appendChild(row);
+    autoScroll();
   }
 
   // ------------------------------------------------
@@ -449,6 +611,11 @@
   connectBtn.addEventListener('click', connect);
   sendBtn.addEventListener('click', sendText);
   micBtn.addEventListener('click', toggleMic);
+
+  const scrollBottomBtn = document.getElementById('scroll-bottom-btn');
+  if (scrollBottomBtn) {
+    scrollBottomBtn.addEventListener('click', scrollToBottom);
+  }
 
   textInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {

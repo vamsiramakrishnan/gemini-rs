@@ -1109,6 +1109,19 @@
 .skeleton-line.medium { width: 75%; }
 .skeleton-line.full { width: 100%; }
 
+/* ── Reduced Motion ────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .hero-bg-orb,
+  .skeleton-line,
+  .demo-card,
+  .hero-title,
+  .hero-subtitle,
+  .hero-stats,
+  .hero-cta {
+    animation: none !important;
+  }
+}
+
 /* ── Responsive ────────────────────────────────────────────────── */
 @media (max-width: 1024px) {
   .operators-grid { grid-template-columns: repeat(2, 1fr); }
