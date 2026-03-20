@@ -1,7 +1,7 @@
 # Voice & Live Sessions
 
 This guide covers everything you need to build voice-enabled agents with
-the Gemini Multimodal Live API using gemini-live-rs.
+the Gemini Multimodal Live API using gemini-genai-rs.
 
 ## What is a Live Session?
 
@@ -25,7 +25,7 @@ Audio formats:
 A minimal live session in under 15 lines:
 
 ```rust,ignore
-use gemini_adk_fluent::prelude::*;
+use gemini_adk_fluent_rs::prelude::*;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -249,7 +249,7 @@ When the model calls a tool, the dispatch logic follows this priority:
 Register tools with the dispatcher:
 
 ```rust,ignore
-use gemini_adk::{SimpleTool, ToolDispatcher};
+use gemini_adk_rs::{SimpleTool, ToolDispatcher};
 
 let mut dispatcher = ToolDispatcher::new();
 dispatcher.register(SimpleTool::new(
@@ -447,7 +447,7 @@ For advanced scenarios (custom auth, proxy, etc.), build the config yourself
 and pass it to `.connect()`:
 
 ```rust,ignore
-use gemini_live::prelude::*;
+use gemini_genai_rs::prelude::*;
 
 let config = SessionConfig::from_endpoint(
     ApiEndpoint::vertex("my-project", "us-central1", token)

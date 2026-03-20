@@ -2,7 +2,7 @@
 
 **Date**: 2026-03-07
 **Status**: Approved
-**Scope**: L1 (gemini-adk), L2 (gemini-adk-fluent), Examples
+**Scope**: L1 (gemini-adk-rs), L2 (gemini-adk-fluent-rs), Examples
 
 ## Problem
 
@@ -41,7 +41,7 @@ Add `LiveEvent` as a first-class output of the L1 processor. The processor emits
 ## LiveEvent Enum (L1)
 
 ```rust
-// crates/gemini-adk/src/live/events.rs
+// crates/gemini-adk-rs/src/live/events.rs
 
 #[derive(Debug, Clone)]
 pub enum LiveEvent {

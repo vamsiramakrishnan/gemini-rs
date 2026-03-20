@@ -4,7 +4,7 @@
 
 **Goal:** Bring all three crates to publishable documentation quality with `#![warn(missing_docs)]`, complete public API doc comments, per-crate READMEs, and a GitHub Actions workflow that builds docs on PR and deploys to GitHub Pages on merge to main.
 
-**Architecture:** Three independent crates (gemini-live L0, gemini-adk L1, gemini-adk-fluent L2) form a layered stack. Documentation work is parallelizable across crates. The CI workflow is a single file covering the whole workspace.
+**Architecture:** Three independent crates (gemini-genai-rs L0, gemini-adk-rs L1, gemini-adk-fluent-rs L2) form a layered stack. Documentation work is parallelizable across crates. The CI workflow is a single file covering the whole workspace.
 
 **Tech Stack:** Rust (rustdoc), GitHub Actions, GitHub Pages (`actions/deploy-pages@v4`)
 
@@ -16,9 +16,9 @@
 
 **Files:**
 - Modify: `Cargo.toml` (workspace root, line 16-18)
-- Modify: `crates/gemini-live/Cargo.toml` (lines 1-8)
-- Modify: `crates/gemini-adk/Cargo.toml` (lines 1-7)
-- Modify: `crates/gemini-adk-fluent/Cargo.toml` (lines 1-7)
+- Modify: `crates/gemini-genai-rs/Cargo.toml` (lines 1-8)
+- Modify: `crates/gemini-adk-rs/Cargo.toml` (lines 1-7)
+- Modify: `crates/gemini-adk-fluent-rs/Cargo.toml` (lines 1-7)
 
 **Step 1: Add repository to workspace Cargo.toml**
 
@@ -31,17 +31,17 @@ license = "Apache-2.0"
 repository = "https://github.com/vamsiramakrishnan/gemini-rs"
 ```
 
-**Step 2: Add metadata to gemini-live/Cargo.toml**
+**Step 2: Add metadata to gemini-genai-rs/Cargo.toml**
 
 Add after the `categories` line:
 
 ```toml
 repository.workspace = true
-documentation = "https://docs.rs/gemini-live"
+documentation = "https://docs.rs/gemini-genai-rs"
 readme = "README.md"
 ```
 
-**Step 3: Add metadata to gemini-adk/Cargo.toml**
+**Step 3: Add metadata to gemini-adk-rs/Cargo.toml**
 
 Add after `description`:
 
@@ -49,11 +49,11 @@ Add after `description`:
 keywords = ["gemini", "agents", "adk", "tools", "streaming"]
 categories = ["api-bindings", "asynchronous", "network-programming"]
 repository.workspace = true
-documentation = "https://docs.rs/gemini-adk"
+documentation = "https://docs.rs/gemini-adk-rs"
 readme = "README.md"
 ```
 
-**Step 4: Add metadata to gemini-adk-fluent/Cargo.toml**
+**Step 4: Add metadata to gemini-adk-fluent-rs/Cargo.toml**
 
 Add after `description`:
 
@@ -61,20 +61,20 @@ Add after `description`:
 keywords = ["gemini", "agents", "fluent", "builder", "composition"]
 categories = ["api-bindings", "asynchronous", "development-tools"]
 repository.workspace = true
-documentation = "https://docs.rs/gemini-adk-fluent"
+documentation = "https://docs.rs/gemini-adk-fluent-rs"
 readme = "README.md"
 ```
 
 **Step 5: Verify**
 
-Run: `cargo metadata --no-deps --format-version 1 | python3 -c "import sys,json; pkgs=json.load(sys.stdin)['packages']; [print(f'{p[\"name\"]}: repo={p.get(\"repository\",\"MISSING\")} docs={p.get(\"documentation\",\"MISSING\")} readme={p.get(\"readme\",\"MISSING\")}') for p in pkgs if p['name'] in ['gemini-live','gemini-adk','gemini-adk-fluent']]"`
+Run: `cargo metadata --no-deps --format-version 1 | python3 -c "import sys,json; pkgs=json.load(sys.stdin)['packages']; [print(f'{p[\"name\"]}: repo={p.get(\"repository\",\"MISSING\")} docs={p.get(\"documentation\",\"MISSING\")} readme={p.get(\"readme\",\"MISSING\")}') for p in pkgs if p['name'] in ['gemini-genai-rs','gemini-adk-rs','gemini-adk-fluent-rs']]"`
 
 Expected: all three show repository, documentation, and readme fields.
 
 **Step 6: Commit**
 
 ```bash
-git add Cargo.toml crates/gemini-live/Cargo.toml crates/gemini-adk/Cargo.toml crates/gemini-adk-fluent/Cargo.toml
+git add Cargo.toml crates/gemini-genai-rs/Cargo.toml crates/gemini-adk-rs/Cargo.toml crates/gemini-adk-fluent-rs/Cargo.toml
 git commit -m "docs: add repository, documentation, and readme metadata to all crates"
 ```
 
@@ -83,29 +83,29 @@ git commit -m "docs: add repository, documentation, and readme metadata to all c
 ## Task 2: Add `#![warn(missing_docs)]` to All Crates
 
 **Files:**
-- Modify: `crates/gemini-live/src/lib.rs` (line 1)
-- Modify: `crates/gemini-adk/src/lib.rs` (line 1)
-- Modify: `crates/gemini-adk-fluent/src/lib.rs` (line 1)
+- Modify: `crates/gemini-genai-rs/src/lib.rs` (line 1)
+- Modify: `crates/gemini-adk-rs/src/lib.rs` (line 1)
+- Modify: `crates/gemini-adk-fluent-rs/src/lib.rs` (line 1)
 
-**Step 1: Add warn attribute to gemini-live**
+**Step 1: Add warn attribute to gemini-genai-rs**
 
-Insert at the very top of `crates/gemini-live/src/lib.rs` (before `//! # gemini-live`):
-
-```rust
-#![warn(missing_docs)]
-```
-
-**Step 2: Add warn attribute to gemini-adk**
-
-Insert at the very top of `crates/gemini-adk/src/lib.rs`:
+Insert at the very top of `crates/gemini-genai-rs/src/lib.rs` (before `//! # gemini-genai-rs`):
 
 ```rust
 #![warn(missing_docs)]
 ```
 
-**Step 3: Add warn attribute to gemini-adk-fluent**
+**Step 2: Add warn attribute to gemini-adk-rs**
 
-Insert at the very top of `crates/gemini-adk-fluent/src/lib.rs`:
+Insert at the very top of `crates/gemini-adk-rs/src/lib.rs`:
+
+```rust
+#![warn(missing_docs)]
+```
+
+**Step 3: Add warn attribute to gemini-adk-fluent-rs**
+
+Insert at the very top of `crates/gemini-adk-fluent-rs/src/lib.rs`:
 
 ```rust
 #![warn(missing_docs)]
@@ -120,21 +120,21 @@ Record the count — this is the baseline. Each subsequent task should reduce it
 **Step 5: Commit**
 
 ```bash
-git add crates/gemini-live/src/lib.rs crates/gemini-adk/src/lib.rs crates/gemini-adk-fluent/src/lib.rs
+git add crates/gemini-genai-rs/src/lib.rs crates/gemini-adk-rs/src/lib.rs crates/gemini-adk-fluent-rs/src/lib.rs
 git commit -m "docs: add #![warn(missing_docs)] to all three crates"
 ```
 
 ---
 
-## Task 3: Document All Public Items in gemini-live
+## Task 3: Document All Public Items in gemini-genai-rs
 
 **Scope:** ~25 module files. The crate-level docs (lib.rs) are already excellent. Focus on undocumented public structs, enums, traits, functions, variants, and fields.
 
-**Files:** All `.rs` files under `crates/gemini-live/src/`
+**Files:** All `.rs` files under `crates/gemini-genai-rs/src/`
 
 **Step 1: Get exact list of missing docs**
 
-Run: `cargo doc --no-deps -p gemini-live 2>&1 | grep "warning: missing documentation"`
+Run: `cargo doc --no-deps -p gemini-genai-rs 2>&1 | grep "warning: missing documentation"`
 
 This gives you the exact file:line for every undocumented item.
 
@@ -152,32 +152,32 @@ Style: Match existing docs in the crate — concise, technical, no fluff. One-li
 
 **Step 3: Verify zero warnings**
 
-Run: `cargo doc --no-deps -p gemini-live 2>&1 | grep "warning: missing documentation" | wc -l`
+Run: `cargo doc --no-deps -p gemini-genai-rs 2>&1 | grep "warning: missing documentation" | wc -l`
 
 Expected: `0`
 
 **Step 4: Commit**
 
 ```bash
-git add crates/gemini-live/src/
-git commit -m "docs: add missing doc comments to all public items in gemini-live"
+git add crates/gemini-genai-rs/src/
+git commit -m "docs: add missing doc comments to all public items in gemini-genai-rs"
 ```
 
 ---
 
-## Task 4: Document All Public Items in gemini-adk
+## Task 4: Document All Public Items in gemini-adk-rs
 
 **Scope:** ~92 module files. Largest crate. The crate-level docs are good. Focus on undocumented public items.
 
-**Files:** All `.rs` files under `crates/gemini-adk/src/`
+**Files:** All `.rs` files under `crates/gemini-adk-rs/src/`
 
 **Step 1: Get exact list of missing docs**
 
-Run: `cargo doc --no-deps -p gemini-adk 2>&1 | grep "warning: missing documentation"`
+Run: `cargo doc --no-deps -p gemini-adk-rs 2>&1 | grep "warning: missing documentation"`
 
 **Step 2: Add doc comments to every item listed**
 
-Same guidelines as Task 3. Additional notes for gemini-adk:
+Same guidelines as Task 3. Additional notes for gemini-adk-rs:
 - **Agent trait methods**: Describe the lifecycle stage each method handles.
 - **Tool traits** (ToolFunction, StreamingTool, etc.): Describe when to use each variant.
 - **State methods**: Describe prefix scoping behavior if relevant.
@@ -186,36 +186,36 @@ Same guidelines as Task 3. Additional notes for gemini-adk:
 
 **Step 3: Verify zero warnings**
 
-Run: `cargo doc --no-deps -p gemini-adk 2>&1 | grep "warning: missing documentation" | wc -l`
+Run: `cargo doc --no-deps -p gemini-adk-rs 2>&1 | grep "warning: missing documentation" | wc -l`
 
 Expected: `0`
 
 **Step 4: Commit**
 
 ```bash
-git add crates/gemini-adk/src/
-git commit -m "docs: add missing doc comments to all public items in gemini-adk"
+git add crates/gemini-adk-rs/src/
+git commit -m "docs: add missing doc comments to all public items in gemini-adk-rs"
 ```
 
 ---
 
-## Task 5: Document All Public Items in gemini-adk-fluent + Enhance lib.rs
+## Task 5: Document All Public Items in gemini-adk-fluent-rs + Enhance lib.rs
 
 **Scope:** ~14 module files. Smallest crate but highest doc gap (~50%). Also needs lib.rs crate-level doc enhancement.
 
-**Files:** All `.rs` files under `crates/gemini-adk-fluent/src/`
+**Files:** All `.rs` files under `crates/gemini-adk-fluent-rs/src/`
 
 **Step 1: Enhance crate-level docs in lib.rs**
 
 Replace the current crate-level docs (lines 1-4) with a full overview:
 
 ```rust
-//! # gemini-adk-fluent
+//! # gemini-adk-fluent-rs
 //!
 //! Fluent developer experience layer for the Gemini Live agent stack.
 //! This is the highest-level crate in the workspace, providing a builder API,
 //! operator algebra, and composition modules that sit on top of
-//! [`gemini_adk`] (agent runtime) and [`gemini_live`] (wire protocol).
+//! [`gemini_adk_rs`] (agent runtime) and [`gemini_genai_rs`] (wire protocol).
 //!
 //! ## Module Organization
 //!
@@ -232,7 +232,7 @@ Replace the current crate-level docs (lines 1-4) with a full overview:
 //! ## Quick Start
 //!
 //! ```rust,ignore
-//! use gemini_adk_fluent::prelude::*;
+//! use gemini_adk_fluent_rs::prelude::*;
 //!
 //! let agent = AgentBuilder::new("my-agent")
 //!     .model(GeminiModel::Gemini2_0Flash)
@@ -242,18 +242,18 @@ Replace the current crate-level docs (lines 1-4) with a full overview:
 //!
 //! ## Relationship to Other Crates
 //!
-//! - **`gemini-live`** (L0): Wire protocol, transport, types — re-exported via [`gemini_live`]
-//! - **`gemini-adk`** (L1): Agent runtime, tools, sessions — re-exported via [`gemini_adk`]
-//! - **`gemini-adk-fluent`** (L2): This crate — ergonomic builder API and composition
+//! - **`gemini-genai-rs`** (L0): Wire protocol, transport, types — re-exported via [`gemini_genai_rs`]
+//! - **`gemini-adk-rs`** (L1): Agent runtime, tools, sessions — re-exported via [`gemini_adk_rs`]
+//! - **`gemini-adk-fluent-rs`** (L2): This crate — ergonomic builder API and composition
 ```
 
 **Step 2: Get exact list of missing docs**
 
-Run: `cargo doc --no-deps -p gemini-adk-fluent 2>&1 | grep "warning: missing documentation"`
+Run: `cargo doc --no-deps -p gemini-adk-fluent-rs 2>&1 | grep "warning: missing documentation"`
 
 **Step 3: Add doc comments to every item listed**
 
-Same guidelines as Tasks 3-4. Additional notes for gemini-adk-fluent:
+Same guidelines as Tasks 3-4. Additional notes for gemini-adk-fluent-rs:
 - **Builder methods**: Document what each method configures, the default value, and return type.
 - **Operators (S, C, T, P, M, A)**: Ensure each operator module has a `//!` header explaining the algebra.
 - **Live type**: Document the callback registration methods.
@@ -261,15 +261,15 @@ Same guidelines as Tasks 3-4. Additional notes for gemini-adk-fluent:
 
 **Step 4: Verify zero warnings**
 
-Run: `cargo doc --no-deps -p gemini-adk-fluent 2>&1 | grep "warning: missing documentation" | wc -l`
+Run: `cargo doc --no-deps -p gemini-adk-fluent-rs 2>&1 | grep "warning: missing documentation" | wc -l`
 
 Expected: `0`
 
 **Step 5: Commit**
 
 ```bash
-git add crates/gemini-adk-fluent/src/
-git commit -m "docs: enhance crate-level docs and add missing doc comments in gemini-adk-fluent"
+git add crates/gemini-adk-fluent-rs/src/
+git commit -m "docs: enhance crate-level docs and add missing doc comments in gemini-adk-fluent-rs"
 ```
 
 ---
@@ -277,14 +277,14 @@ git commit -m "docs: enhance crate-level docs and add missing doc comments in ge
 ## Task 6: Create Per-Crate README.md Files
 
 **Files:**
-- Create: `crates/gemini-live/README.md`
-- Create: `crates/gemini-adk/README.md`
-- Create: `crates/gemini-adk-fluent/README.md`
+- Create: `crates/gemini-genai-rs/README.md`
+- Create: `crates/gemini-adk-rs/README.md`
+- Create: `crates/gemini-adk-fluent-rs/README.md`
 
-**Step 1: Create gemini-live/README.md**
+**Step 1: Create gemini-genai-rs/README.md**
 
 ```markdown
-# gemini-live
+# gemini-genai-rs
 
 Raw wire protocol and transport for the Gemini Multimodal Live API. This is the L0 (foundation) crate in the gemini-rs workspace — it handles WebSocket connections, authentication, wire-format types, and audio buffering with no agent abstractions.
 
@@ -300,7 +300,7 @@ Raw wire protocol and transport for the Gemini Multimodal Live API. This is the 
 ## Quick Start
 
 ```rust,ignore
-use gemini_live::prelude::*;
+use gemini_genai_rs::prelude::*;
 
 let config = TransportConfig::google_ai("YOUR_API_KEY", GeminiModel::Gemini2_0Flash);
 let (handle, events) = connect(config).await?;
@@ -313,19 +313,19 @@ while let Some(event) = events.recv().await {
 
 ## Documentation
 
-[API Reference (docs.rs)](https://docs.rs/gemini-live)
+[API Reference (docs.rs)](https://docs.rs/gemini-genai-rs)
 
 ## License
 
 Apache-2.0
 ```
 
-**Step 2: Create gemini-adk/README.md**
+**Step 2: Create gemini-adk-rs/README.md**
 
 ```markdown
-# gemini-adk
+# gemini-adk-rs
 
-Agent runtime for Gemini Live — tools, streaming, agent transfer, middleware. This is the L1 (runtime) crate that builds on `gemini-live` to provide agent lifecycle, tool dispatch, state management, and the three-lane processor architecture.
+Agent runtime for Gemini Live — tools, streaming, agent transfer, middleware. This is the L1 (runtime) crate that builds on `gemini-genai-rs` to provide agent lifecycle, tool dispatch, state management, and the three-lane processor architecture.
 
 ## Features
 
@@ -341,14 +341,14 @@ Agent runtime for Gemini Live — tools, streaming, agent transfer, middleware. 
 ## Quick Start
 
 ```rust,ignore
-use gemini_adk::*;
+use gemini_adk_rs::*;
 
 let tool = SimpleTool::new("get_weather", "Get current weather", |args| async {
     Ok(serde_json::json!({"temp": 72, "unit": "F"}))
 });
 
 let session = LiveSessionBuilder::new()
-    .model(gemini_live::prelude::GeminiModel::Gemini2_0Flash)
+    .model(gemini_genai_rs::prelude::GeminiModel::Gemini2_0Flash)
     .instruction("You are a weather assistant.")
     .tool(tool)
     .build()
@@ -357,17 +357,17 @@ let session = LiveSessionBuilder::new()
 
 ## Documentation
 
-[API Reference (docs.rs)](https://docs.rs/gemini-adk)
+[API Reference (docs.rs)](https://docs.rs/gemini-adk-rs)
 
 ## License
 
 Apache-2.0
 ```
 
-**Step 3: Create gemini-adk-fluent/README.md**
+**Step 3: Create gemini-adk-fluent-rs/README.md**
 
 ```markdown
-# gemini-adk-fluent
+# gemini-adk-fluent-rs
 
 Fluent developer experience for Gemini Live — builder API, operator algebra, and composition modules. This is the L2 (DX) crate, the highest-level entry point in the gemini-rs workspace.
 
@@ -377,12 +377,12 @@ Fluent developer experience for Gemini Live — builder API, operator algebra, a
 - **S·C·T·P·M·A operators** — composable algebra for state, context, tools, phases, middleware, and agents
 - **`Live` session** — callback-driven full-duplex voice/text event handling
 - **Pre-built patterns** — common agent compositions ready to use
-- **Full re-exports** — `gemini_adk` and `gemini_live` available through the prelude
+- **Full re-exports** — `gemini_adk_rs` and `gemini_genai_rs` available through the prelude
 
 ## Quick Start
 
 ```rust,ignore
-use gemini_adk_fluent::prelude::*;
+use gemini_adk_fluent_rs::prelude::*;
 
 let agent = AgentBuilder::new("assistant")
     .model(GeminiModel::Gemini2_0Flash)
@@ -392,7 +392,7 @@ let agent = AgentBuilder::new("assistant")
 
 ## Documentation
 
-[API Reference (docs.rs)](https://docs.rs/gemini-adk-fluent)
+[API Reference (docs.rs)](https://docs.rs/gemini-adk-fluent-rs)
 
 ## License
 
@@ -402,7 +402,7 @@ Apache-2.0
 **Step 4: Commit**
 
 ```bash
-git add crates/gemini-live/README.md crates/gemini-adk/README.md crates/gemini-adk-fluent/README.md
+git add crates/gemini-genai-rs/README.md crates/gemini-adk-rs/README.md crates/gemini-adk-fluent-rs/README.md
 git commit -m "docs: add per-crate README.md files"
 ```
 
@@ -460,7 +460,7 @@ jobs:
       - name: Build documentation
         run: cargo doc --no-deps --workspace
       - name: Add redirect index
-        run: echo '<meta http-equiv="refresh" content="0; url=gemini_live/index.html">' > target/doc/index.html
+        run: echo '<meta http-equiv="refresh" content="0; url=gemini_genai_rs/index.html">' > target/doc/index.html
       - uses: actions/upload-pages-artifact@v3
         with:
           path: target/doc
@@ -496,14 +496,14 @@ Expected: Clean build, zero warnings, zero errors.
 Run: `cargo doc --no-deps --workspace --open`
 
 Manually check:
-- gemini-live landing page has full crate overview
-- gemini-adk landing page lists all modules with descriptions
-- gemini-adk-fluent landing page shows the enhanced overview with module table
+- gemini-genai-rs landing page has full crate overview
+- gemini-adk-rs landing page lists all modules with descriptions
+- gemini-adk-fluent-rs landing page shows the enhanced overview with module table
 - Click through 3-4 types per crate — confirm doc comments render
 
 **Step 3: Verify Cargo.toml metadata**
 
-Run: `cargo metadata --no-deps --format-version 1 | python3 -c "import sys,json; pkgs=json.load(sys.stdin)['packages']; [print(f'{p[\"name\"]}: repo={p.get(\"repository\",\"MISSING\")} docs={p.get(\"documentation\",\"MISSING\")} readme={p.get(\"readme\",\"MISSING\")} kw={p.get(\"keywords\",[])}') for p in pkgs if p['name'] in ['gemini-live','gemini-adk','gemini-adk-fluent']]"`
+Run: `cargo metadata --no-deps --format-version 1 | python3 -c "import sys,json; pkgs=json.load(sys.stdin)['packages']; [print(f'{p[\"name\"]}: repo={p.get(\"repository\",\"MISSING\")} docs={p.get(\"documentation\",\"MISSING\")} readme={p.get(\"readme\",\"MISSING\")} kw={p.get(\"keywords\",[])}') for p in pkgs if p['name'] in ['gemini-genai-rs','gemini-adk-rs','gemini-adk-fluent-rs']]"`
 
 Expected: All fields populated for all three crates.
 
@@ -522,8 +522,8 @@ Expected: All fields populated for all three crates.
 ```
 Task 1 (Cargo.toml metadata)  ──┐
 Task 2 (warn attribute)  ───────┤
-                                 ├──→ Task 3 (gemini-live docs)    ──┐
-                                 ├──→ Task 4 (gemini-adk docs)      ──┼──→ Task 7 (CI workflow) ──→ Task 8 (verification)
-                                 ├──→ Task 5 (gemini-adk-fluent)    ──┘
+                                 ├──→ Task 3 (gemini-genai-rs docs)    ──┐
+                                 ├──→ Task 4 (gemini-adk-rs docs)      ──┼──→ Task 7 (CI workflow) ──→ Task 8 (verification)
+                                 ├──→ Task 5 (gemini-adk-fluent-rs)    ──┘
                                  └──→ Task 6 (READMEs)          ──┘
 ```

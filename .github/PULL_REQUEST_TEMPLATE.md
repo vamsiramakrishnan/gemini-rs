@@ -4,9 +4,9 @@
 
 ## Affected Crate(s)
 
-- [ ] `gemini-live` (L0 — wire protocol)
-- [ ] `gemini-adk` (L1 — agent runtime)
-- [ ] `gemini-adk-fluent` (L2 — fluent DX)
+- [ ] `gemini-genai-rs` (L0 — wire protocol)
+- [ ] `gemini-adk-rs` (L1 — agent runtime)
+- [ ] `gemini-adk-fluent-rs` (L2 — fluent DX)
 - [ ] Examples / apps
 - [ ] CI / tooling
 

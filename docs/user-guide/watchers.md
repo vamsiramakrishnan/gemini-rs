@@ -15,7 +15,7 @@ mutation cycle (extractors + computed variables), comparing a snapshot of watche
 keys taken before mutations to the values after.
 
 ```rust,ignore
-use gemini_adk_fluent::prelude::*;
+use gemini_adk_fluent_rs::prelude::*;
 
 Live::builder()
     .watch("app:score")
@@ -179,7 +179,7 @@ Fires when at least `count` matching events occur within a sliding time window.
 The filter function selects which `SessionEvent` types count.
 
 ```rust,ignore
-use gemini_live::session::SessionEvent;
+use gemini_genai_rs::session::SessionEvent;
 
 // Fire when 3+ interruptions happen within 60 seconds
 .when_rate(
@@ -302,7 +302,7 @@ Live::builder()
 
 ## Real-World Example: Debt Collection Escalation
 
-The debt collection demo (`apps/gemini-adk-web/src/apps/debt_collection.rs`) combines
+The debt collection demo (`apps/gemini-adk-web-rs/src/apps/debt_collection.rs`) combines
 all reactive primitives in a single builder chain:
 
 1. **Computed chain**: `emotional_state` (from extractor) -> `sentiment_score` -> `call_risk_level`

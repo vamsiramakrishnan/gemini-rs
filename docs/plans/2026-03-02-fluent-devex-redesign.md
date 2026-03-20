@@ -2,7 +2,7 @@
 
 **Date**: 2026-03-02
 **Status**: Design RFC
-**Scope**: Foundational changes across `gemini-adk` (L1) and `gemini-adk-fluent` (L2)
+**Scope**: Foundational changes across `gemini-adk-rs` (L1) and `gemini-adk-fluent-rs` (L2)
 **Reference**: `/tmp/adk-fluent` (Python ADK Fluent — the gold standard for text agent DX)
 
 ---
@@ -27,7 +27,7 @@ execution sequences.
 
 The Python `adk-fluent` library provides an excellent DX for text agents: operator
 algebra, dispatch/join primitives, per-agent callback stacks, rich middleware with
-topology hooks, and conditional control flow. Our Rust `gemini-adk-fluent` crate has
+topology hooks, and conditional control flow. Our Rust `gemini-adk-fluent-rs` crate has
 adopted the operator algebra and composition modules (P, C, S, M, T, A), but is
 missing the **runtime primitives** that bridge these patterns into the live session
 event loop.
@@ -537,7 +537,7 @@ pipeline's output is formatted and sent as the tool response:
 
 ### 3.1 `FnStep` — Inline Code in Pipelines
 
-**Layer**: `gemini-adk-fluent` (L2)
+**Layer**: `gemini-adk-fluent-rs` (L2)
 
 The simplest missing primitive. A closure that runs between pipeline stages with
 full state access:
@@ -588,7 +588,7 @@ pub enum Composable {
 
 ### 3.2 `dispatch()` / `join()` — Background Agent Execution
 
-**Layer**: `gemini-adk-fluent` (L2) with runtime support in `gemini-adk` (L1)
+**Layer**: `gemini-adk-fluent-rs` (L2) with runtime support in `gemini-adk-rs` (L1)
 
 The core non-blocking primitive. Fire agents in background, continue pipeline, collect
 results at a later point:
@@ -611,7 +611,7 @@ pub struct JoinNode {
 
 **Fluent API**:
 ```rust
-use gemini_adk_fluent::prelude::*;
+use gemini_adk_fluent_rs::prelude::*;
 
 let pipeline = classifier
     >> dispatch(
@@ -637,7 +637,7 @@ let pipeline = classifier
     >> join_all();
 ```
 
-**Runtime support in gemini-adk (L1)**:
+**Runtime support in gemini-adk-rs (L1)**:
 ```rust
 /// Task handle for a dispatched background agent.
 pub struct DispatchedTask {
@@ -655,7 +655,7 @@ pub struct TaskRegistry {
 
 ### 3.3 Per-Agent Callback Stacks
 
-**Layer**: `gemini-adk-fluent` (L2)
+**Layer**: `gemini-adk-fluent-rs` (L2)
 
 Add callback hooks to `AgentBuilder`. Callbacks are additive — multiple registrations
 accumulate:
@@ -712,7 +712,7 @@ let agent = AgentBuilder::new("writer")
 
 ### 3.4 Enhanced Middleware Protocol
 
-**Layer**: `gemini-adk` (L1)
+**Layer**: `gemini-adk-rs` (L1)
 
 Expand the `Middleware` trait with agent lifecycle and topology hooks:
 
@@ -792,7 +792,7 @@ pub enum LoopDirective {
 
 ### 3.5 Route — State-Driven Branching
 
-**Layer**: `gemini-adk-fluent` (L2)
+**Layer**: `gemini-adk-fluent-rs` (L2)
 
 Deterministic branching based on state key values:
 
@@ -1004,7 +1004,7 @@ let tool = SimpleTool::new("get_order", "Get order by ID", None,
 **Proposed**: `StatefulTool` — tool with state access:
 
 ```rust
-// gemini-adk (L1)
+// gemini-adk-rs (L1)
 #[async_trait]
 pub trait StatefulToolFunction: Send + Sync + 'static {
     fn name(&self) -> &str;
@@ -1017,7 +1017,7 @@ pub trait StatefulToolFunction: Send + Sync + 'static {
     ) -> Result<serde_json::Value, ToolError>;
 }
 
-// gemini-adk-fluent (L2) — ergonomic registration
+// gemini-adk-fluent-rs (L2) — ergonomic registration
 impl Live {
     fn tool_with_state<F, Fut>(
         self,
@@ -1052,7 +1052,7 @@ Live::builder()
 Wrap an `AgentBuilder` as a tool — the agent runs when the tool is called:
 
 ```rust
-// gemini-adk-fluent (L2)
+// gemini-adk-fluent-rs (L2)
 impl Live {
     fn agent_tool(
         self,
@@ -1089,7 +1089,7 @@ Live::builder()
 
 ### 5.1 S (State) — Bridge to Live Session State
 
-**Gap**: `StateTransform` operates on `serde_json::Value`, not `gemini_adk::State`.
+**Gap**: `StateTransform` operates on `serde_json::Value`, not `gemini_adk_rs::State`.
 
 **Fix**: Add `State`-native transforms:
 
@@ -1327,7 +1327,7 @@ A restaurant order agent with:
 - Telemetry middleware scoped to specific agents
 
 ```rust
-use gemini_adk_fluent::prelude::*;
+use gemini_adk_fluent_rs::prelude::*;
 
 // ---- Define agents ----
 

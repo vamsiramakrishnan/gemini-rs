@@ -6,7 +6,7 @@
 
 ## Context
 
-The apps/gemini-adk-web currently has 7 apps migrated to L2 `Live::builder()`. An audit of L2 feature coverage identified 17 builder methods that no existing demo exercises. This demo is designed to fill those gaps with a realistic contact center scenario.
+The apps/gemini-adk-web-rs currently has 7 apps migrated to L2 `Live::builder()`. An audit of L2 feature coverage identified 17 builder methods that no existing demo exercises. This demo is designed to fill those gaps with a realistic contact center scenario.
 
 **Scenario**: FDCPA-compliant debt collection voice agent with identity verification, payment negotiation, emotional monitoring, and real-time compliance enforcement.
 
@@ -288,11 +288,11 @@ fn features(&self) -> Vec<String> {
 
 ## New Files
 
-- `apps/gemini-adk-web/src/apps/debt_collection.rs` — the demo app (~350-400 lines)
+- `apps/gemini-adk-web-rs/src/apps/debt_collection.rs` — the demo app (~350-400 lines)
 
 ## Modified Files
 
-- `apps/gemini-adk-web/src/apps/mod.rs` — add `mod debt_collection;` and register it
+- `apps/gemini-adk-web-rs/src/apps/mod.rs` — add `mod debt_collection;` and register it
 
 ## Testing
 

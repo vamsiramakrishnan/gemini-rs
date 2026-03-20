@@ -5,7 +5,7 @@
 //!   - TimeoutTextAgent: wrap any agent with a time limit
 //!   - Combining race + timeout for production resilience
 
-use gemini_adk_fluent::prelude::*;
+use gemini_adk_fluent_rs::prelude::*;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -23,13 +23,13 @@ impl BaseLlm for DelayLlm {
     }
     async fn generate(
         &self,
-        _req: gemini_adk::llm::LlmRequest,
-    ) -> Result<gemini_adk::llm::LlmResponse, gemini_adk::llm::LlmError> {
+        _req: gemini_adk_rs::llm::LlmRequest,
+    ) -> Result<gemini_adk_rs::llm::LlmResponse, gemini_adk_rs::llm::LlmError> {
         tokio::time::sleep(self.delay).await;
-        Ok(gemini_adk::llm::LlmResponse {
-            content: gemini_live::prelude::Content {
-                role: Some(gemini_live::prelude::Role::Model),
-                parts: vec![gemini_live::prelude::Part::Text {
+        Ok(gemini_adk_rs::llm::LlmResponse {
+            content: gemini_genai_rs::prelude::Content {
+                role: Some(gemini_genai_rs::prelude::Role::Model),
+                parts: vec![gemini_genai_rs::prelude::Part::Text {
                     text: self.response.clone(),
                 }],
             },

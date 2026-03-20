@@ -1,8 +1,8 @@
-# gemini-adk-fluent ↔ adk-fluent Naming Parity Plan
+# gemini-adk-fluent-rs ↔ adk-fluent Naming Parity Plan
 
 ## Summary
 
-Align the Rust `gemini-adk-fluent` (L2) crate with the upstream Python `adk-fluent` library naming conventions, add missing composition namespaces, and update examples.
+Align the Rust `gemini-adk-fluent-rs` (L2) crate with the upstream Python `adk-fluent` library naming conventions, add missing composition namespaces, and update examples.
 
 ---
 
@@ -239,7 +239,7 @@ pub use crate::patterns::{chain, conditional, map_reduce, a2a_cascade, a2a_fanou
 | `examples/tool-calling/` | Update to use `T::` module composition |
 | `examples/voice-chat/` | Minimal changes (Live builder) |
 | `examples/transcription/` | Minimal changes |
-| `apps/gemini-adk-web/` | Minimal changes |
+| `apps/gemini-adk-web-rs/` | Minimal changes |
 
 ### 8b. New examples to add (matching upstream)
 

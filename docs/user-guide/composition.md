@@ -43,7 +43,7 @@ State transforms mutate a `serde_json::Value` representing agent state. Chain th
 ### Example
 
 ```rust,ignore
-use gemini_adk_fluent::compose::S;
+use gemini_adk_fluent_rs::compose::S;
 
 // Chain transforms: pick keys, then rename
 let transform = S::pick(&["name", "age"]) >> S::rename(&[("name", "customer_name")]);
@@ -94,7 +94,7 @@ Context policies filter and transform conversation history. Compose them with `+
 ### Example
 
 ```rust,ignore
-use gemini_adk_fluent::compose::C;
+use gemini_adk_fluent_rs::compose::C;
 
 // Keep recent context, no tool noise, inject state
 let policy = C::window(20) + C::exclude_tools() + C::from_state(&["user:name", "app:balance"]);
@@ -124,7 +124,7 @@ Compose tools with `|`. Mix runtime function tools with built-in Gemini tools.
 ### Example
 
 ```rust,ignore
-use gemini_adk_fluent::compose::T;
+use gemini_adk_fluent_rs::compose::T;
 
 // Combine custom tools with built-ins
 let tools = T::simple("get_weather", "Get weather for a city", |args| async move {
@@ -188,7 +188,7 @@ The `PromptSectionKind` enum provides semantic categories:
 ### Example
 
 ```rust,ignore
-use gemini_adk_fluent::compose::P;
+use gemini_adk_fluent_rs::compose::P;
 
 // Build a structured prompt
 let prompt = P::role("a senior financial analyst")
@@ -248,7 +248,7 @@ Compose middleware layers with `|`. Middleware intercepts agent events, tool cal
 ### Example
 
 ```rust,ignore
-use gemini_adk_fluent::compose::M;
+use gemini_adk_fluent_rs::compose::M;
 use std::time::Duration;
 
 // Production middleware stack
@@ -288,7 +288,7 @@ Declare input/output artifact schemas with `+`. Artifacts describe data that flo
 ### Example
 
 ```rust,ignore
-use gemini_adk_fluent::compose::A;
+use gemini_adk_fluent_rs::compose::A;
 
 // Declare what an analysis agent produces and consumes
 let artifacts = A::text_input("source_document", "The document to analyze")
@@ -314,7 +314,7 @@ Beyond the six namespace modules, the `operators` module provides structural com
 These produce `Composable` nodes that form a tree. Call `.compile(llm)` to turn the tree into an executable `TextAgent`.
 
 ```rust,ignore
-use gemini_adk_fluent::prelude::*;
+use gemini_adk_fluent_rs::prelude::*;
 
 // Build a tree
 let workflow = AgentBuilder::new("research").instruction("Research the topic")
@@ -334,7 +334,7 @@ The tree auto-flattens: `a >> b >> c` produces a single `Pipeline` with 3 steps,
 The six namespaces compose orthogonally. Each configures a separate dimension:
 
 ```rust,ignore
-use gemini_adk_fluent::prelude::*;
+use gemini_adk_fluent_rs::prelude::*;
 
 // S: transform state before agent sees it
 let state_prep = S::pick(&["customer", "order"]) >> S::defaults(json!({"priority": "normal"}));
@@ -366,7 +366,7 @@ let middleware = M::log() | M::latency() | M::audit();
 `AgentBuilder` is the entry point for compiling these into executable agents:
 
 ```rust,ignore
-use gemini_adk_fluent::builder::AgentBuilder;
+use gemini_adk_fluent_rs::builder::AgentBuilder;
 
 let agent = AgentBuilder::new("support")
     .model(GeminiModel::Gemini2_0Flash)
@@ -398,7 +398,7 @@ let creative = base.clone().temperature(0.9);
 The `patterns` module provides common multi-agent workflows built from these operators:
 
 ```rust,ignore
-use gemini_adk_fluent::patterns::*;
+use gemini_adk_fluent_rs::patterns::*;
 
 // Review loop: worker -> reviewer -> repeat until quality target
 let reviewed = review_loop(writer, reviewer, "quality", "good", 3);

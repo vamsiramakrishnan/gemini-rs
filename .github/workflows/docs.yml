@@ -55,7 +55,7 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           cp -r target/doc target/book/api
-          printf '<meta http-equiv="refresh" content="0; url=api/gemini_live/index.html">' \
+          printf '<meta http-equiv="refresh" content="0; url=api/gemini_genai_rs/index.html">' \
             > target/book/api/index.html
 
       - uses: actions/upload-pages-artifact@v3

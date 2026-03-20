@@ -18,7 +18,7 @@
 //!   - A::when (conditional operations)
 //!   - `+` operator for artifact composition
 
-use gemini_adk_fluent::prelude::*;
+use gemini_adk_fluent_rs::prelude::*;
 
 fn main() {
     println!("=== Walk 18: Artifacts ===\n");

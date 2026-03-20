@@ -24,7 +24,7 @@ Use the fluent `Live::builder()` API. Each `.phase()` call starts a
 `PhaseBuilder` that returns to the main builder via `.done()`:
 
 ```rust,ignore
-use gemini_adk_fluent::prelude::*;
+use gemini_adk_fluent_rs::prelude::*;
 
 let handle = Live::builder()
     .model(GeminiModel::Gemini2_0FlashLive)
@@ -95,7 +95,7 @@ The plain `.transition()` method still works and sets `description: None`.
 The `S` module provides ergonomic predicate factories that eliminate boilerplate:
 
 ```rust,ignore
-use gemini_adk_fluent::prelude::S;
+use gemini_adk_fluent_rs::prelude::S;
 
 .transition("verify_identity", S::is_true("disclosure_given"))
 .transition("negotiate", S::is_true("debt_acknowledged"))
@@ -376,7 +376,7 @@ Live::builder()
 ```
 
 For a full 7-phase example with compliance gates, computed state, watchers, and
-temporal patterns, see `apps/gemini-adk-web/src/apps/debt_collection.rs`.
+temporal patterns, see `apps/gemini-adk-web-rs/src/apps/debt_collection.rs`.
 
 ## How Transitions Are Evaluated
 

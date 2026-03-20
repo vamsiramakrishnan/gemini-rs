@@ -6,9 +6,9 @@
 
 **Architecture:** Axum server with `CookbookApp` trait, `AppRegistry`, route-based app selection. Each app is a module implementing `handle_session()`. Frontend: landing page with app cards + per-app screen with conversation pane and collapsible devtools panel.
 
-**Tech Stack:** Rust (axum, tokio, serde_json), gemini-live, gemini-adk, gemini-adk-fluent, HTML/CSS/JS (vanilla)
+**Tech Stack:** Rust (axum, tokio, serde_json), gemini-genai-rs, gemini-adk-rs, gemini-adk-fluent-rs, HTML/CSS/JS (vanilla)
 
-**Working directory:** `/home/user/gemini-live-rs`
+**Working directory:** `/home/user/gemini-genai-rs`
 
 ---
 
@@ -17,9 +17,9 @@
 ### Task 1: CookbookApp trait + AppRegistry
 
 **Files:**
-- Create: `apps/gemini-adk-web/src/app.rs`
-- Modify: `apps/gemini-adk-web/src/main.rs`
-- Modify: `apps/gemini-adk-web/Cargo.toml`
+- Create: `apps/gemini-adk-web-rs/src/app.rs`
+- Modify: `apps/gemini-adk-web-rs/src/main.rs`
+- Modify: `apps/gemini-adk-web-rs/Cargo.toml`
 
 **Step 1: Create `app.rs`**
 
@@ -101,14 +101,14 @@ Add `async-trait = "0.1"` to `[dependencies]`.
 
 **Step 4: Verify compilation**
 
-Run: `cargo check -p gemini-live-ui`
+Run: `cargo check -p gemini-genai-ui`
 
 ---
 
 ### Task 2: Refactor main.rs — Router + shared WS handler
 
 **Files:**
-- Modify: `apps/gemini-adk-web/src/main.rs`
+- Modify: `apps/gemini-adk-web-rs/src/main.rs`
 
 Replace the single `/ws` route with `/ws/{name}` and add `/api/apps` endpoint. Keep existing `AuthConfig` and move message types into a shared module.
 
@@ -211,15 +211,15 @@ async fn handle_app_socket(
 
 **Step 4: Verify compilation**
 
-Run: `cargo check -p gemini-live-ui`
+Run: `cargo check -p gemini-genai-ui`
 
 ---
 
 ### Task 3: Voice Chat app (port existing main.rs logic)
 
 **Files:**
-- Create: `apps/gemini-adk-web/src/apps/mod.rs`
-- Create: `apps/gemini-adk-web/src/apps/voice_chat.rs`
+- Create: `apps/gemini-adk-web-rs/src/apps/mod.rs`
+- Create: `apps/gemini-adk-web-rs/src/apps/voice_chat.rs`
 
 This ports the existing `handle_socket` logic into a `CookbookApp` implementation.
 
@@ -238,7 +238,7 @@ Port the existing `handle_socket` logic, using `Live::builder()` from the fluent
 ```rust
 use crate::app::{AppCategory, AppConfig, AppMeta, CookbookApp, WsSender};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use gemini_live::prelude::*;
+use gemini_genai_rs::prelude::*;
 use serde_json::json;
 use tokio::sync::mpsc;
 use tracing::{error, info};
@@ -270,7 +270,7 @@ impl CookbookApp for VoiceChatApp {
         };
 
         // Extract config from start message
-        let model_str = start_msg.get("model").and_then(|v| v.as_str()).unwrap_or("gemini-live-2.5-flash-native-audio");
+        let model_str = start_msg.get("model").and_then(|v| v.as_str()).unwrap_or("gemini-genai-2.5-flash-native-audio");
         let voice_str = start_msg.get("voice").and_then(|v| v.as_str()).unwrap_or("Aoede");
         let sys_instr = start_msg.get("system_instruction").and_then(|v| v.as_str());
 
@@ -284,7 +284,7 @@ impl CookbookApp for VoiceChatApp {
 
         let model = match model_str {
             "gemini-2.0-flash-live-001" => GeminiModel::Gemini2_0FlashLive,
-            "gemini-live-2.5-flash-native-audio" => GeminiModel::GeminiLive2_5FlashNativeAudio,
+            "gemini-genai-2.5-flash-native-audio" => GeminiModel::GeminiLive2_5FlashNativeAudio,
             other => GeminiModel::Custom(other.to_string()),
         };
 
@@ -297,7 +297,7 @@ impl CookbookApp for VoiceChatApp {
         let tx6 = ws_tx.clone();
         let tx7 = ws_tx.clone();
 
-        let mut builder = gemini_adk_fluent::Live::builder()
+        let mut builder = gemini_adk_fluent_rs::Live::builder()
             .model(model)
             .voice(voice)
             .transcription(true, true)
@@ -419,25 +419,25 @@ let registry = {
 };
 ```
 
-**Step 4: Add `gemini-adk-fluent` dependency to Cargo.toml**
+**Step 4: Add `gemini-adk-fluent-rs` dependency to Cargo.toml**
 
 ```toml
-gemini-adk-fluent = { path = "../../crates/gemini-adk-fluent" }
+gemini-adk-fluent-rs = { path = "../../crates/gemini-adk-fluent-rs" }
 ```
 
 **Step 5: Verify compilation**
 
-Run: `cargo check -p gemini-live-ui`
+Run: `cargo check -p gemini-genai-ui`
 
 ---
 
 ### Task 4: Text Chat + Tool Calling apps
 
 **Files:**
-- Create: `apps/gemini-adk-web/src/apps/text_chat.rs`
-- Create: `apps/gemini-adk-web/src/apps/tool_calling.rs`
-- Modify: `apps/gemini-adk-web/src/apps/mod.rs`
-- Modify: `apps/gemini-adk-web/src/main.rs` (register apps)
+- Create: `apps/gemini-adk-web-rs/src/apps/text_chat.rs`
+- Create: `apps/gemini-adk-web-rs/src/apps/tool_calling.rs`
+- Modify: `apps/gemini-adk-web-rs/src/apps/mod.rs`
+- Modify: `apps/gemini-adk-web-rs/src/main.rs` (register apps)
 
 **Step 1: Create `text_chat.rs`**
 
@@ -458,7 +458,7 @@ Key differences from voice_chat:
 
 **Step 2: Create `tool_calling.rs`**
 
-Uses `TypedTool` + `ToolDispatcher` from gemini-adk:
+Uses `TypedTool` + `ToolDispatcher` from gemini-adk-rs:
 
 ```rust
 // Define tool argument types with JsonSchema
@@ -489,16 +489,16 @@ r.register(apps::VoiceChatApp);
 r.register(apps::ToolCallingApp);
 ```
 
-**Step 5: Add gemini-adk + schemars dependencies to Cargo.toml**
+**Step 5: Add gemini-adk-rs + schemars dependencies to Cargo.toml**
 
 ```toml
-gemini-adk = { path = "../../crates/gemini-adk" }
+gemini-adk-rs = { path = "../../crates/gemini-adk-rs" }
 schemars = "0.8"
 ```
 
 **Step 6: Verify compilation**
 
-Run: `cargo check -p gemini-live-ui`
+Run: `cargo check -p gemini-genai-ui`
 
 ---
 
@@ -507,9 +507,9 @@ Run: `cargo check -p gemini-live-ui`
 ### Task 5: Landing page
 
 **Files:**
-- Rewrite: `apps/gemini-adk-web/static/index.html`
-- Create: `apps/gemini-adk-web/static/css/main.css`
-- Create: `apps/gemini-adk-web/static/css/landing.css`
+- Rewrite: `apps/gemini-adk-web-rs/static/index.html`
+- Create: `apps/gemini-adk-web-rs/static/css/main.css`
+- Create: `apps/gemini-adk-web-rs/static/css/landing.css`
 
 **Step 1: Rewrite `index.html` as landing page**
 
@@ -583,9 +583,9 @@ Grid layout, card styles, badges, responsive.
 ### Task 6: App screen — conversation pane
 
 **Files:**
-- Create: `apps/gemini-adk-web/static/app.html`
-- Create: `apps/gemini-adk-web/static/js/app.js`
-- Create: `apps/gemini-adk-web/static/js/audio.js`
+- Create: `apps/gemini-adk-web-rs/static/app.html`
+- Create: `apps/gemini-adk-web-rs/static/js/app.js`
+- Create: `apps/gemini-adk-web-rs/static/js/audio.js`
 
 **Step 1: Create `app.html`**
 
@@ -654,8 +654,8 @@ Port existing style.css conversation styles into app-specific stylesheet.
 ### Task 7: Devtools panel
 
 **Files:**
-- Create: `apps/gemini-adk-web/static/js/devtools.js`
-- Create: `apps/gemini-adk-web/static/css/devtools.css`
+- Create: `apps/gemini-adk-web-rs/static/js/devtools.js`
+- Create: `apps/gemini-adk-web-rs/static/css/devtools.css`
 
 **Step 1: Create `js/devtools.js`**
 
@@ -718,9 +718,9 @@ devtools.handleMessage(msg);
 ### Task 8: Playbook Agent app
 
 **Files:**
-- Create: `apps/gemini-adk-web/src/apps/playbook.rs`
-- Modify: `apps/gemini-adk-web/src/apps/mod.rs`
-- Modify: `apps/gemini-adk-web/src/main.rs`
+- Create: `apps/gemini-adk-web-rs/src/apps/playbook.rs`
+- Modify: `apps/gemini-adk-web-rs/src/apps/mod.rs`
+- Modify: `apps/gemini-adk-web-rs/src/main.rs`
 
 This is the core advanced app. Uses `Live::builder()` with `extract_turns()`, `instruction_template()`, and `on_extracted()` to implement a state machine that controls a voice agent following a customer support playbook.
 
@@ -871,16 +871,16 @@ r.register(apps::PlaybookApp);
 
 **Step 5: Verify compilation**
 
-Run: `cargo check -p gemini-live-ui`
+Run: `cargo check -p gemini-genai-ui`
 
 ---
 
 ### Task 9: Guardrails Agent app
 
 **Files:**
-- Create: `apps/gemini-adk-web/src/apps/guardrails.rs`
-- Modify: `apps/gemini-adk-web/src/apps/mod.rs`
-- Modify: `apps/gemini-adk-web/src/main.rs`
+- Create: `apps/gemini-adk-web-rs/src/apps/guardrails.rs`
+- Modify: `apps/gemini-adk-web-rs/src/apps/mod.rs`
+- Modify: `apps/gemini-adk-web-rs/src/main.rs`
 
 Same architecture as playbook but monitors for policy violations instead of phase transitions.
 
@@ -920,9 +920,9 @@ struct PolicyRule {
 ### Task 10: Support Assistant app (multi-agent)
 
 **Files:**
-- Create: `apps/gemini-adk-web/src/apps/support.rs`
-- Modify: `apps/gemini-adk-web/src/apps/mod.rs`
-- Modify: `apps/gemini-adk-web/src/main.rs`
+- Create: `apps/gemini-adk-web-rs/src/apps/support.rs`
+- Modify: `apps/gemini-adk-web-rs/src/apps/mod.rs`
+- Modify: `apps/gemini-adk-web-rs/src/main.rs`
 
 **Step 1: Define multi-agent flow**
 
@@ -939,9 +939,9 @@ Two instruction sets (billing flow, technical flow). Handoff detected via extrac
 ### Task 11: All Config app
 
 **Files:**
-- Create: `apps/gemini-adk-web/src/apps/all_config.rs`
-- Modify: `apps/gemini-adk-web/src/apps/mod.rs`
-- Modify: `apps/gemini-adk-web/src/main.rs`
+- Create: `apps/gemini-adk-web-rs/src/apps/all_config.rs`
+- Modify: `apps/gemini-adk-web-rs/src/apps/mod.rs`
+- Modify: `apps/gemini-adk-web-rs/src/main.rs`
 
 Showcase app exposing every Gemini Live config option in the UI. Extended start message includes all config fields. Frontend shows additional controls.
 
@@ -952,8 +952,8 @@ Showcase app exposing every Gemini Live config option in the UI. Extended start 
 ### Task 12: Wire everything together + test all apps
 
 **Files:**
-- Modify: `apps/gemini-adk-web/src/main.rs` (final registration)
-- Modify: `apps/gemini-adk-web/static/js/devtools.js` (tab visibility per category)
+- Modify: `apps/gemini-adk-web-rs/src/main.rs` (final registration)
+- Modify: `apps/gemini-adk-web-rs/static/js/devtools.js` (tab visibility per category)
 
 **Step 1: Final app registration in main.rs**
 
@@ -987,7 +987,7 @@ Send `appMeta` message on connect. JS hides tabs not relevant to app category:
 
 **Step 4: Verify full build**
 
-Run: `cargo build -p gemini-live-ui`
+Run: `cargo build -p gemini-genai-ui`
 
 ---
 
@@ -997,7 +997,7 @@ Run: `cargo build -p gemini-live-ui`
 - Modify: `README.md`
 
 Update to reflect:
-- New unified Web UI (`cargo run -p gemini-live-ui`)
+- New unified Web UI (`cargo run -p gemini-genai-ui`)
 - App descriptions and categories
 - Screenshot placeholder for landing page
 - Out-of-band control pattern explanation
@@ -1007,8 +1007,8 @@ Update to reflect:
 
 ## Verification
 
-1. `cargo build -p gemini-live-ui` — compiles
-2. `cargo run -p gemini-live-ui` — server starts on port 3000
+1. `cargo build -p gemini-genai-ui` — compiles
+2. `cargo run -p gemini-genai-ui` — server starts on port 3000
 3. Landing page shows 7 app cards
 4. Voice chat app works end-to-end
 5. Playbook app shows state extraction + phase transitions in devtools
@@ -1017,26 +1017,26 @@ Update to reflect:
 
 | File | Action | What |
 |------|--------|------|
-| `apps/gemini-adk-web/src/app.rs` | CREATE | CookbookApp trait, AppRegistry, AppConfig |
-| `apps/gemini-adk-web/src/apps/mod.rs` | CREATE | App module exports |
-| `apps/gemini-adk-web/src/apps/voice_chat.rs` | CREATE | Voice chat using Live::builder() |
-| `apps/gemini-adk-web/src/apps/text_chat.rs` | CREATE | Text-only chat |
-| `apps/gemini-adk-web/src/apps/tool_calling.rs` | CREATE | TypedTool demo |
-| `apps/gemini-adk-web/src/apps/playbook.rs` | CREATE | State machine + extraction |
-| `apps/gemini-adk-web/src/apps/guardrails.rs` | CREATE | Policy monitoring |
-| `apps/gemini-adk-web/src/apps/support.rs` | CREATE | Multi-agent handoff |
-| `apps/gemini-adk-web/src/apps/all_config.rs` | CREATE | Every config option |
-| `apps/gemini-adk-web/src/main.rs` | MODIFY | Router, registry, handle_app_socket |
-| `apps/gemini-adk-web/Cargo.toml` | MODIFY | Add gemini-adk-fluent, gemini-adk, async-trait, schemars |
-| `apps/gemini-adk-web/static/index.html` | REWRITE | Landing page with app cards |
-| `apps/gemini-adk-web/static/app.html` | CREATE | App screen with devtools |
-| `apps/gemini-adk-web/static/css/main.css` | CREATE | Shared styles |
-| `apps/gemini-adk-web/static/css/landing.css` | CREATE | Landing page styles |
-| `apps/gemini-adk-web/static/css/app.css` | CREATE | App screen styles |
-| `apps/gemini-adk-web/static/css/devtools.css` | CREATE | Devtools panel styles |
-| `apps/gemini-adk-web/static/js/app.js` | CREATE | Conversation logic |
-| `apps/gemini-adk-web/static/js/audio.js` | CREATE | Audio recording/playback |
-| `apps/gemini-adk-web/static/js/devtools.js` | CREATE | Devtools panel logic |
+| `apps/gemini-adk-web-rs/src/app.rs` | CREATE | CookbookApp trait, AppRegistry, AppConfig |
+| `apps/gemini-adk-web-rs/src/apps/mod.rs` | CREATE | App module exports |
+| `apps/gemini-adk-web-rs/src/apps/voice_chat.rs` | CREATE | Voice chat using Live::builder() |
+| `apps/gemini-adk-web-rs/src/apps/text_chat.rs` | CREATE | Text-only chat |
+| `apps/gemini-adk-web-rs/src/apps/tool_calling.rs` | CREATE | TypedTool demo |
+| `apps/gemini-adk-web-rs/src/apps/playbook.rs` | CREATE | State machine + extraction |
+| `apps/gemini-adk-web-rs/src/apps/guardrails.rs` | CREATE | Policy monitoring |
+| `apps/gemini-adk-web-rs/src/apps/support.rs` | CREATE | Multi-agent handoff |
+| `apps/gemini-adk-web-rs/src/apps/all_config.rs` | CREATE | Every config option |
+| `apps/gemini-adk-web-rs/src/main.rs` | MODIFY | Router, registry, handle_app_socket |
+| `apps/gemini-adk-web-rs/Cargo.toml` | MODIFY | Add gemini-adk-fluent-rs, gemini-adk-rs, async-trait, schemars |
+| `apps/gemini-adk-web-rs/static/index.html` | REWRITE | Landing page with app cards |
+| `apps/gemini-adk-web-rs/static/app.html` | CREATE | App screen with devtools |
+| `apps/gemini-adk-web-rs/static/css/main.css` | CREATE | Shared styles |
+| `apps/gemini-adk-web-rs/static/css/landing.css` | CREATE | Landing page styles |
+| `apps/gemini-adk-web-rs/static/css/app.css` | CREATE | App screen styles |
+| `apps/gemini-adk-web-rs/static/css/devtools.css` | CREATE | Devtools panel styles |
+| `apps/gemini-adk-web-rs/static/js/app.js` | CREATE | Conversation logic |
+| `apps/gemini-adk-web-rs/static/js/audio.js` | CREATE | Audio recording/playback |
+| `apps/gemini-adk-web-rs/static/js/devtools.js` | CREATE | Devtools panel logic |
 | `README.md` | MODIFY | Updated project docs |
 
 ## Estimated Total: ~2,500 LoC across 13 tasks

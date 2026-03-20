@@ -32,24 +32,21 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo test --workspace
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      # Pre-publish verification — catch manifest issues before real publish
-      - name: Verify crate manifests
-        run: |
-          for crate in gemini-live gemini-adk gemini-adk-fluent gemini-adk-server gemini-adk-cli; do
-            echo "::group::cargo publish --dry-run -p $crate"
-            cargo publish -p "$crate" --dry-run
-            echo "::endgroup::"
-          done
+      # Pre-publish verification — only verify L0 (independent crate).
+      # Dependent crates (L1+) can't dry-run until L0 is on crates.io,
+      # so we verify them with --no-verify during actual publish (Job 2).
+      - name: Verify L0 crate manifest
+        run: cargo publish -p gemini-genai-rs --dry-run
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Job 2 — Publish: crates.io in strict dependency order
 #
 # Publish order (must match dependency graph):
-#   L0  gemini-live
-#   L1  gemini-adk          (depends on gemini-live)
-#   L2  gemini-adk-fluent   (depends on gemini-live, gemini-adk)
-#   app gemini-adk-server   (depends on gemini-adk)
-#   bin gemini-adk-cli      (depends on all above)
+#   L0  gemini-genai-rs
+#   L1  gemini-adk-rs          (depends on gemini-genai-rs)
+#   L2  gemini-adk-fluent-rs   (depends on gemini-genai-rs, gemini-adk-rs)
+#   app gemini-adk-server-rs   (depends on gemini-adk-rs)
+#   bin gemini-adk-cli-rs      (depends on all above)
 #
 # Each step:
 #   1. Reads version from Cargo metadata (single source of truth)
@@ -117,28 +114,28 @@ jobs:
           HELPER
           chmod +x /tmp/publish.sh
 
-      - name: Publish gemini-live (L0)
-        run: /tmp/publish.sh gemini-live
+      - name: Publish gemini-genai-rs (L0)
+        run: /tmp/publish.sh gemini-genai-rs
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
-      - name: Publish gemini-adk (L1)
-        run: /tmp/publish.sh gemini-adk
+      - name: Publish gemini-adk-rs (L1)
+        run: /tmp/publish.sh gemini-adk-rs
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
-      - name: Publish gemini-adk-fluent (L2)
-        run: /tmp/publish.sh gemini-adk-fluent
+      - name: Publish gemini-adk-fluent-rs (L2)
+        run: /tmp/publish.sh gemini-adk-fluent-rs
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
-      - name: Publish gemini-adk-server
-        run: /tmp/publish.sh gemini-adk-server
+      - name: Publish gemini-adk-server-rs
+        run: /tmp/publish.sh gemini-adk-server-rs
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
-      - name: Publish gemini-adk-cli
-        run: /tmp/publish.sh gemini-adk-cli
+      - name: Publish gemini-adk-cli-rs
+        run: /tmp/publish.sh gemini-adk-cli-rs
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
@@ -195,11 +192,11 @@ jobs:
               echo ""
               echo "| Crate | Version | Install |"
               echo "|-------|---------|---------|"
-              echo "| \`gemini-live\` | $VERSION | \`cargo add gemini-live@${VERSION}\` |"
-              echo "| \`gemini-adk\` | $VERSION | \`cargo add gemini-adk@${VERSION}\` |"
-              echo "| \`gemini-adk-fluent\` | $VERSION | \`cargo add gemini-adk-fluent@${VERSION}\` |"
-              echo "| \`gemini-adk-server\` | $VERSION | \`cargo add gemini-adk-server@${VERSION}\` |"
-              echo "| \`gemini-adk-cli\` | $VERSION | \`cargo install gemini-adk-cli@${VERSION}\` |"
+              echo "| \`gemini-genai-rs\` | $VERSION | \`cargo add gemini-genai-rs@${VERSION}\` |"
+              echo "| \`gemini-adk-rs\` | $VERSION | \`cargo add gemini-adk-rs@${VERSION}\` |"
+              echo "| \`gemini-adk-fluent-rs\` | $VERSION | \`cargo add gemini-adk-fluent-rs@${VERSION}\` |"
+              echo "| \`gemini-adk-server-rs\` | $VERSION | \`cargo add gemini-adk-server-rs@${VERSION}\` |"
+              echo "| \`gemini-adk-cli-rs\` | $VERSION | \`cargo install gemini-adk-cli-rs@${VERSION}\` |"
               echo "RELEASE_EOF"
             } >> "$GITHUB_OUTPUT"
           fi

@@ -2,7 +2,7 @@
 
 **Date**: 2026-03-07
 **Status**: Approved
-**Scope**: `apps/gemini-adk-web/` — frontend (HTML/CSS/JS) + server-side message types + session bridge
+**Scope**: `apps/gemini-adk-web-rs/` — frontend (HTML/CSS/JS) + server-side message types + session bridge
 
 ## Problem
 
@@ -65,7 +65,7 @@ The Timeline is the primary devtools view. Everything that happens in a session 
 [T+3.1s] [TEXT]   "The weather in New York is..."
 [T+3.1s] [AUDIO]  2.4KB out
 [T+4.0s] [TURN]   complete    347 prompt / 89 response tokens
-[T+4.1s] [SPAN]   gemini_live.tool_call exited                      180ms
+[T+4.1s] [SPAN]   gemini_genai_rs.tool_call exited                      180ms
 ```
 
 **Color coding** by event type (reuses existing badge palette). Clicking a row expands to show the full JSON payload or span attributes.
@@ -139,12 +139,12 @@ Layout: three-column hero strip + sections below.
 
 A custom `tracing::Layer` implementation that bridges backend spans to the browser.
 
-**Filtering**: Only captures spans with targets matching `gemini_live` or `gemini.agent` (the ~13 span types defined in `spans.rs` files). All other tracing output is ignored.
+**Filtering**: Only captures spans with targets matching `gemini_genai_rs` or `gemini.agent` (the ~13 span types defined in `spans.rs` files). All other tracing output is ignored.
 
 **Serialization**: On span close, emits:
 ```rust
 ServerMessage::SpanEvent {
-    name: String,           // "gemini_live.tool_call"
+    name: String,           // "gemini_genai_rs.tool_call"
     span_id: String,        // hex-encoded span ID
     parent_id: Option<String>,
     duration_us: u64,
@@ -163,7 +163,7 @@ ServerMessage::SpanEvent {
 - Copy to clipboard and `curl` it to any OTLP collector
 - Save as a `.json` file and import into Jaeger/Grafana Tempo
 
-**Trace ID display**: If the session has a trace ID (from the `gemini_live.session` span), show it in the status bar as a clickable badge. If `OTEL_EXPORTER_OTLP_ENDPOINT` is configured, the badge links to `{jaeger_url}/trace/{trace_id}` (configurable base URL via env var `TRACE_VIEWER_URL`).
+**Trace ID display**: If the session has a trace ID (from the `gemini_genai_rs.session` span), show it in the status bar as a clickable badge. If `OTEL_EXPORTER_OTLP_ENDPOINT` is configured, the badge links to `{jaeger_url}/trace/{trace_id}` (configurable base URL via env var `TRACE_VIEWER_URL`).
 
 ### 9. Server-Side: SessionBridge
 

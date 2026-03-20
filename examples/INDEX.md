@@ -35,7 +35,7 @@ GEMINI_MODEL=models/gemini-2.5-flash-native-audio-preview-12-2025
 # Vertex AI  → stripped to: projects/{project}/locations/{loc}/publishers/google/models/gemini-2.5-flash-native-audio-preview-12-2025
 ```
 
-Omit `GEMINI_MODEL` to use the SDK default (`models/gemini-live-2.5-flash-native-audio`).
+Omit `GEMINI_MODEL` to use the SDK default (`models/gemini-genai-2.5-flash-native-audio`).
 
 #### Two-model architecture
 
@@ -43,7 +43,7 @@ Examples use **two separate models** that share the same auth credentials:
 
 | Role | Model | Protocol | Configured via |
 |------|-------|----------|----------------|
-| **Live session** | `gemini-live-2.5-flash-native-audio` | WebSocket | `GEMINI_MODEL` env var |
+| **Live session** | `gemini-genai-2.5-flash-native-audio` | WebSocket | `GEMINI_MODEL` env var |
 | **Text LLM** | `gemini-3.1-flash-lite-preview` | REST | `GeminiLlmParams` in code |
 
 The text LLM powers extractors, agent-as-tool pipelines, and background analysis in advanced examples. It reads the **same auth env vars** — no extra configuration needed.
@@ -72,7 +72,7 @@ cargo run -p example-transcription   # http://127.0.0.1:3004
 ### Multi-app Web UI
 
 ```bash
-cargo run -p gemini-adk-web                 # http://127.0.0.1:3000
+cargo run -p gemini-adk-web-rs                 # http://127.0.0.1:3000
 ```
 
 All apps listed below are available in the multi-app UI with a shared devtools panel showing state, transcript, and telemetry.
@@ -86,7 +86,7 @@ All apps listed below are available in the multi-app UI with a shared devtools p
 Minimal text-only Gemini Live session. Connects via WebSocket, sends text, receives streaming deltas. No microphone required.
 
 - **Port:** 3001
-- **Layer:** L0 (`gemini_live::prelude::*`)
+- **Layer:** L0 (`gemini_genai_rs::prelude::*`)
 - **Features:** Text I/O, streaming text deltas, turn lifecycle
 
 ### voice-chat (L0 Wire)
@@ -94,7 +94,7 @@ Minimal text-only Gemini Live session. Connects via WebSocket, sends text, recei
 Native audio voice chat with bidirectional audio streaming. Demonstrates voice selection, VAD events, and real-time transcription.
 
 - **Port:** 3002
-- **Layer:** L0 (`gemini_live::prelude::*`)
+- **Layer:** L0 (`gemini_genai_rs::prelude::*`)
 - **Model:** `GeminiLive2_5FlashNativeAudio`
 - **Features:** Bidirectional audio, input/output transcription, VAD events
 - **Voices:** Puck, Charon, Kore, Fenrir, Aoede
@@ -104,7 +104,7 @@ Native audio voice chat with bidirectional audio streaming. Demonstrates voice s
 Function calling with `TypedTool` and auto-generated JSON Schema from Rust structs. Shows `ToolDispatcher` routing tool calls by function name.
 
 - **Port:** 3003
-- **Layer:** L1 (`gemini_adk::tool::{ToolDispatcher, TypedTool}`)
+- **Layer:** L1 (`gemini_adk_rs::tool::{ToolDispatcher, TypedTool}`)
 - **Features:** TypedTool with `JsonSchema` derive, ToolDispatcher, SessionEvent::ToolCall handling
 - **Tools:** `get_weather(city)`, `calculate(expression)`
 
@@ -113,14 +113,14 @@ Function calling with `TypedTool` and auto-generated JSON Schema from Rust struc
 Comprehensive showcase of every Gemini Live API configuration property. The most complete reference for wire-level options.
 
 - **Port:** 3004
-- **Layer:** L0 (`gemini_live::prelude::*`)
+- **Layer:** L0 (`gemini_genai_rs::prelude::*`)
 - **Features:** Input/output transcription, activity handling (`StartOfActivityInterrupts`), turn coverage, server VAD with automatic sensitivity, context window compression (2048 tokens), session resumption, affective dialog
 
 ### agents (L1/L2 Runtime + Fluent)
 
 CLI-based examples demonstrating text agent combinators and typed tool dispatch.
 
-- **Layer:** L1/L2 (`gemini_adk::tool::*`, `gemini_adk_fluent::prelude::*`)
+- **Layer:** L1/L2 (`gemini_adk_rs::tool::*`, `gemini_adk_fluent_rs::prelude::*`)
 - **Binaries:** `weather-agent` (TypedTool dispatch), `research-pipeline` (agent composition)
 - **Features:** Agent combinators (`>>`, `|`, `/`), copy-on-write builder templates, `S::pick()` / `S::rename()` state transforms, `review_loop()` pattern
 

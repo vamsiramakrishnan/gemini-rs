@@ -5,7 +5,7 @@
 **Scope**: Instruction delivery, phase-transition context, Live-aware context policies
 **Complements**: `voice-native-state-control-design.md` (S.C.T.P.M),
 `primitives-architecture-audit.md` (five primitives), `implementation-architecture.md` (module map)
-**Reference implementation**: `apps/gemini-adk-web/src/apps/debt_collection.rs`
+**Reference implementation**: `apps/gemini-adk-web-rs/src/apps/debt_collection.rs`
 
 ---
 
@@ -605,14 +605,14 @@ completes, not at transition time.
 
 ## 5. Delta Summary — Layer by Layer
 
-### 5.1 L0 (gemini-live) — No Changes
+### 5.1 L0 (gemini-genai-rs) — No Changes
 
 All proposed features compose over existing `SessionCommand` variants:
 - `UpdateInstruction(String)` for instruction updates
 - `SendClientContent { turns, turn_complete }` for context injection
 - No new wire types needed
 
-### 5.2 L1 (gemini-adk) — Three Changes
+### 5.2 L1 (gemini-adk-rs) — Three Changes
 
 | File | Delta | Lines (est.) |
 |------|-------|-------------|
@@ -634,7 +634,7 @@ All proposed features compose over existing `SessionCommand` variants:
 - Modifier application in `instruction.resolve_with_modifiers(&state)` or
   separate `apply_modifiers(base, &state)` function
 
-### 5.3 L2 (gemini-adk-fluent) — Three Changes
+### 5.3 L2 (gemini-adk-fluent-rs) — Three Changes
 
 | File | Delta | Lines (est.) |
 |------|-------|-------------|

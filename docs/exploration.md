@@ -2,81 +2,81 @@
 
   ⎿  Search(pattern: "tools/*/Cargo.toml")
 
-  ⎿  Read(/home/user/gemini-live-rs/examples/agents/Cargo.toml)
+  ⎿  Read(/home/user/gemini-genai-rs/examples/agents/Cargo.toml)
 
-  ⎿  Read(/home/user/gemini-live-rs/examples/tool-calling/Cargo.toml)
+  ⎿  Read(/home/user/gemini-genai-rs/examples/tool-calling/Cargo.toml)
 
-  ⎿  Read(/home/user/gemini-live-rs/examples/voice-chat/Cargo.toml)
+  ⎿  Read(/home/user/gemini-genai-rs/examples/voice-chat/Cargo.toml)
 
-  ⎿  Read(/home/user/gemini-live-rs/tools/gemini-adk-transpiler/Cargo.toml)
+  ⎿  Read(/home/user/gemini-genai-rs/tools/gemini-adk-transpiler-rs/Cargo.toml)
 
-  ⎿  Search(pattern: "use gemini_live_wire|use gemini_live_runtime|use gemini_live::|extern crate gemini")
+  ⎿  Search(pattern: "use gemini_genai_rs_wire|use gemini_genai_rs_runtime|use gemini_genai_rs::|extern crate gemini")
 
-  ⎿  Search(pattern: "crates/gemini-live-wire/src/**/*.rs")
+  ⎿  Search(pattern: "crates/gemini-genai-wire/src/**/*.rs")
 
-  ⎿  Search(pattern: "crates/gemini-live-runtime/src/**/*.rs")
+  ⎿  Search(pattern: "crates/gemini-genai-runtime/src/**/*.rs")
 
   ⎿  Bash(find . -name "*.rs" -type f | head -20 | xargs grep -l "crate::" | head -10)
 
-  ⎿  Search(pattern: "mod gemini_live|mod wire|mod runtime")
+  ⎿  Search(pattern: "mod gemini_genai_rs|mod wire|mod runtime")
 
-  ⎿  Bash(ls -la /home/user/gemini-live-rs/crates/)
+  ⎿  Bash(ls -la /home/user/gemini-genai-rs/crates/)
 
-  ⎿  Bash(find /home/user/gemini-live-rs -type d -name "gemini*" | grep -v target | grep -v ".git")
+  ⎿  Bash(find /home/user/gemini-genai-rs -type d -name "gemini*" | grep -v target | grep -v ".git")
 
-  ⎿  Bash(grep -r "extern crate gemini" /home/user/gemini-live-rs --include="*.rs" | head -5)
+  ⎿  Bash(grep -r "extern crate gemini" /home/user/gemini-genai-rs --include="*.rs" | head -5)
 
-  ⎿  Read(/home/user/gemini-live-rs/crates/gemini-live-runtime/src/agent_session.rs · lines 1-50)
+  ⎿  Read(/home/user/gemini-genai-rs/crates/gemini-genai-runtime/src/agent_session.rs · lines 1-50)
 
-  ⎿  Read(/home/user/gemini-live-rs/crates/gemini-live/src/builder.rs · lines 1-50)
+  ⎿  Read(/home/user/gemini-genai-rs/crates/gemini-genai-rs/src/builder.rs · lines 1-50)
 
-  ⎿  Read(/home/user/gemini-live-rs/examples/agents/src/weather_agent.rs · lines 1-50)
+  ⎿  Read(/home/user/gemini-genai-rs/examples/agents/src/weather_agent.rs · lines 1-50)
 
   ⎿  Search(pattern: "**/*.py")
 
   ⎿  Search(pattern: "**/*.pyi")
 
-  ⎿  Bash(find /home/user/gemini-live-rs -name "*pyo3*" -o -name "*python*" 2>/dev/null | grep -v target)
+  ⎿  Bash(find /home/user/gemini-genai-rs -name "*pyo3*" -o -name "*python*" 2>/dev/null | grep -v target)
 
-  ⎿  Read(/home/user/gemini-live-rs/docs/plans/2026-03-01-gemini-live-adk-design.md · lines 1-100)
+  ⎿  Read(/home/user/gemini-genai-rs/docs/plans/2026-03-01-gemini-genai-adk-design.md · lines 1-100)
 
-  ⎿  Read(/home/user/gemini-live-rs/docs/plans/2026-03-01-layered-adk-implementation.md · lines 1-100)
+  ⎿  Read(/home/user/gemini-genai-rs/docs/plans/2026-03-01-layered-adk-implementation.md · lines 1-100)
 
-  ⎿  Search(pattern: "gemini_live_wire|gemini-live-wire", path: "/home/user/gemini-live-rs")
+  ⎿  Search(pattern: "gemini_genai_rs_wire|gemini-genai-wire", path: "/home/user/gemini-genai-rs")
 
   ⎿  Response:
        Perfect! Now I have comprehensive data. Let me compile my findings in a detailed report.
 
        Workspace Structure & Rename Impact Analysis
 
-       I've thoroughly explored the gemini-live-rs workspace. Here's a comprehensive overview:
+       I've thoroughly explored the gemini-genai-rs workspace. Here's a comprehensive overview:
 
        1. Root Configuration
 
-       File: /home/user/gemini-live-rs/Cargo.toml
+       File: /home/user/gemini-genai-rs/Cargo.toml
 
        The workspace contains 11 members organized as:
        [workspace]
        resolver = "2"
        members = [
-           "crates/gemini-live-wire",        # Layer 0: Wire protocol
-           "crates/gemini-live-runtime",     # Layer 1: Agent runtime
-           "crates/gemini-live",             # Layer 2: Fluent DX
-           "apps/gemini-adk-web",
+           "crates/gemini-genai-wire",        # Layer 0: Wire protocol
+           "crates/gemini-genai-runtime",     # Layer 1: Agent runtime
+           "crates/gemini-genai-rs",             # Layer 2: Fluent DX
+           "apps/gemini-adk-web-rs",
            "examples/agents",
            "examples/text-chat",
            "examples/voice-chat",
            "examples/tool-calling",
            "examples/transcription",
-           "tools/gemini-adk-transpiler",
+           "tools/gemini-adk-transpiler-rs",
        ]
 
        ---
        2. Crate Manifests
 
-       gemini-live-wire (Layer 0)
+       gemini-genai-wire (Layer 0)
 
-       - Package name: gemini-live-wire
+       - Package name: gemini-genai-wire
        - Version: 0.1.0
        - Description: "Raw wire protocol and transport for the Gemini Multimodal Live API"
        - Dependencies: Tokio, tokio-tungstenite, serde, base64, uuid, bytes, parking_lot, dashmap, arc-swap, url, audiopus (optional),
@@ -93,13 +93,13 @@
          - telemetry/ — spans, logging, metrics
          - quick.rs — convenience functions
 
-       gemini-live-runtime (Layer 1)
+       gemini-genai-runtime (Layer 1)
 
-       - Package name: gemini-live-runtime
+       - Package name: gemini-genai-runtime
        - Version: 0.1.0
        - Description: "Agent runtime for Gemini Live — tools, streaming, agent transfer, middleware"
        - Dependencies:
-         - gemini-live-wire = { path = "../gemini-live-wire" } ← direct dependency
+         - gemini-genai-wire = { path = "../gemini-genai-wire" } ← direct dependency
          - Tokio, async-trait, schemars, serde, dashmap, parking_lot, uuid
        - Features: default = [], tracing-support, metrics
        - Module structure (20 Rust files):
@@ -113,16 +113,16 @@
          - router.rs — AgentRegistry
          - context.rs — AgentEvent, InvocationContext
          - telemetry/ — spans, logging, metrics
-         - Re-exports: pub use gemini_live_wire; ← exposes wire crate
+         - Re-exports: pub use gemini_genai_rs_wire; ← exposes wire crate
 
-       gemini-live (Layer 2)
+       gemini-genai-rs (Layer 2)
 
-       - Package name: gemini-live
+       - Package name: gemini-genai-rs
        - Version: 0.1.0
        - Description: "Fluent DX for Gemini Live — builder API, operator algebra, composition modules"
        - Dependencies:
-         - gemini-live-wire = { path = "../gemini-live-wire" } ← direct dependency
-         - gemini-live-runtime = { path = "../gemini-live-runtime" } ← direct dependency
+         - gemini-genai-wire = { path = "../gemini-genai-wire" } ← direct dependency
+         - gemini-genai-runtime = { path = "../gemini-genai-runtime" } ← direct dependency
          - Tokio, async-trait, serde, serde_json
        - Module structure (5+ modules):
          - builder.rs — AgentBuilder
@@ -131,8 +131,8 @@
          - patterns.rs — composition patterns
          - testing.rs — test utilities
          - Re-exports:
-             - pub use gemini_live_runtime;
-           - pub use gemini_live_wire;
+             - pub use gemini_genai_rs_runtime;
+           - pub use gemini_genai_rs_wire;
 
        ---
        3. Reference Count Analysis
@@ -142,9 +142,9 @@
        ┌────────────────────────────────────────────┬───────┬──────────┐
        │                  Pattern                   │ Count │  Files   │
        ├────────────────────────────────────────────┼───────┼──────────┤
-       │ gemini_live_wire or gemini-live-wire       │ 332   │ 51 files │
+       │ gemini_genai_rs_wire or gemini-genai-wire       │ 332   │ 51 files │
        ├────────────────────────────────────────────┼───────┼──────────┤
-       │ gemini_live_runtime or gemini-live-runtime │ 102   │ 20 files │
+       │ gemini_genai_rs_runtime or gemini-genai-runtime │ 102   │ 20 files │
        └────────────────────────────────────────────┴───────┴──────────┘
 
        Breakdown by category:
@@ -153,7 +153,7 @@
          - Root workspace
          - 3 crate manifests
          - Examples: agents, tool-calling, voice-chat, text-chat, transcription, ui
-         - Tool: gemini-adk-transpiler
+         - Tool: gemini-adk-transpiler-rs
        2. Source code (44 Rust files):
          - Wire crate lib.rs + modules
          - Runtime crate lib.rs + modules
@@ -161,33 +161,33 @@
          - Examples and demos
          - Tests and benches
        3. Documentation (3 design files):
-         - 2026-03-01-gemini-live-adk-design.md
+         - 2026-03-01-gemini-genai-adk-design.md
          - 2026-03-01-wire-refactor-design.md
          - 2026-03-01-layered-adk-implementation.md
-       4. Code generation (tools/gemini-adk-transpiler):
+       4. Code generation (tools/gemini-adk-transpiler-rs):
          - schema.rs — type mapping comments
-         - codegen.rs — 13 hardcoded type paths like gemini_live_wire::prelude::Content
+         - codegen.rs — 13 hardcoded type paths like gemini_genai_rs_wire::prelude::Content
          - genai_reader.rs — 55 more hardcoded paths in a mapping table
 
        ---
        4. Import Patterns in Source
 
        Wire crate imports:
-       use gemini_live_wire::prelude::*;           // Most common
-       use gemini_live_wire::session::*;           // Specific modules
-       use gemini_live_wire::{...};                // Path imports
+       use gemini_genai_rs_wire::prelude::*;           // Most common
+       use gemini_genai_rs_wire::session::*;           // Specific modules
+       use gemini_genai_rs_wire::{...};                // Path imports
 
        Runtime crate imports:
-       use gemini_live_wire::prelude::{...};       // Re-exports from wire
-       use gemini_live_runtime::tool::*;
-       use gemini_live_runtime::agent::*;
+       use gemini_genai_rs_wire::prelude::{...};       // Re-exports from wire
+       use gemini_genai_rs_runtime::tool::*;
+       use gemini_genai_rs_runtime::agent::*;
 
        Top-level crate:
-       pub use gemini_live_runtime;                // Re-export all layers
-       pub use gemini_live_wire;
+       pub use gemini_genai_rs_runtime;                // Re-export all layers
+       pub use gemini_genai_rs_wire;
 
-       use gemini_live_wire::prelude::*;           // In compose modules
-       use gemini_live_runtime::agent_session::*;
+       use gemini_genai_rs_wire::prelude::*;           // In compose modules
+       use gemini_genai_rs_runtime::agent_session::*;
 
        ---
        5. Example & Tool Dependencies
@@ -197,36 +197,36 @@
        ┌─────────────────────────┬────────────────────────────────────────────────────┐
        │        Example         │                    Dependencies                    │
        ├─────────────────────────┼────────────────────────────────────────────────────┤
-       │ examples/agents        │ gemini-live, gemini-live-runtime, gemini-live-wire │
+       │ examples/agents        │ gemini-genai-rs, gemini-genai-runtime, gemini-genai-wire │
        ├─────────────────────────┼────────────────────────────────────────────────────┤
-       │ examples/tool-calling  │ gemini-live-wire, gemini-live-runtime              │
+       │ examples/tool-calling  │ gemini-genai-wire, gemini-genai-runtime              │
        ├─────────────────────────┼────────────────────────────────────────────────────┤
-       │ examples/voice-chat    │ gemini-live-wire only                              │
+       │ examples/voice-chat    │ gemini-genai-wire only                              │
        ├─────────────────────────┼────────────────────────────────────────────────────┤
-       │ examples/text-chat     │ gemini-live-wire only                              │
+       │ examples/text-chat     │ gemini-genai-wire only                              │
        ├─────────────────────────┼────────────────────────────────────────────────────┤
-       │ examples/transcription │ gemini-live-wire only                              │
+       │ examples/transcription │ gemini-genai-wire only                              │
        ├─────────────────────────┼────────────────────────────────────────────────────┤
-       │ tools/gemini-adk-transpiler    │ None (only serde, clap, regex, walkdir)            │
+       │ tools/gemini-adk-transpiler-rs    │ None (only serde, clap, regex, walkdir)            │
        └─────────────────────────┴────────────────────────────────────────────────────┘
 
        ---
-       6. Code Generation (gemini-adk-transpiler)
+       6. Code Generation (gemini-adk-transpiler-rs)
 
-       The tools/gemini-adk-transpiler hardcodes type mappings with 68+ references:
+       The tools/gemini-adk-transpiler-rs hardcodes type mappings with 68+ references:
 
        In codegen.rs lines 34-43:
-       "gemini_live_wire::prelude::Content",
-       "gemini_live_wire::prelude::Part",
-       "gemini_live_wire::prelude::Blob",
-       "gemini_live_wire::prelude::FunctionCall",
+       "gemini_genai_rs_wire::prelude::Content",
+       "gemini_genai_rs_wire::prelude::Part",
+       "gemini_genai_rs_wire::prelude::Blob",
+       "gemini_genai_rs_wire::prelude::FunctionCall",
        ...
 
        In genai_reader.rs lines 29-71:
        A HashMap mapping js-genai types → Rust module paths with 25+ entries like:
-       m.insert("Content", "gemini_live_wire::prelude::Content");
-       m.insert("Tool", "gemini_live_wire::prelude::Tool");
-       m.insert("SessionHandle", "gemini_live_wire::prelude::SessionHandle");
+       m.insert("Content", "gemini_genai_rs_wire::prelude::Content");
+       m.insert("Tool", "gemini_genai_rs_wire::prelude::Tool");
+       m.insert("SessionHandle", "gemini_genai_rs_wire::prelude::SessionHandle");
        ...
 
        ---
@@ -238,18 +238,18 @@
        - Top-level convenience: pub use quick::{quick_connect, quick_connect_vertex}
 
        Runtime crate (lib.rs):
-       - Imports wire: pub use gemini_live_wire;
+       - Imports wire: pub use gemini_genai_rs_wire;
        - Exports self: pub use agent::Agent, pub use tool::ToolDispatcher, etc.
 
        Top-level crate (lib.rs):
-       - Re-exports both layers: pub use gemini_live_runtime;, pub use gemini_live_wire;
-       - Uses gemini_live_wire::prelude::* in compose modules
+       - Re-exports both layers: pub use gemini_genai_rs_runtime;, pub use gemini_genai_rs_wire;
+       - Uses gemini_genai_rs_wire::prelude::* in compose modules
 
        ---
        8. Design Documentation References
 
        All three design documents mention the crate names:
-       - Design doc proposes gemini-live-python for PyO3 bindings (currently not implemented)
+       - Design doc proposes gemini-genai-python for PyO3 bindings (currently not implemented)
        - References to "Layer 0/1/2" architecture with explicit crate names
        - Implementation plan lists all module structure by crate
 
@@ -257,15 +257,15 @@
        Key Findings for Rename Impact:
 
        1. Blast radius is MODERATE — 332 direct references to wire crate, 102 to runtime crate
-       2. Code generation is the main concern — gemini-adk-transpiler has 68+ hardcoded paths in type mapping tables
+       2. Code generation is the main concern — gemini-adk-transpiler-rs has 68+ hardcoded paths in type mapping tables
        3. Re-export structure is clean — most consumers use prelude imports, not full paths
-       4. Workspace dependencies are path-based — path = "../gemini-live-wire" makes refactoring easier
+       4. Workspace dependencies are path-based — path = "../gemini-genai-wire" makes refactoring easier
        5. No external crate on crates.io — all names are internal, so semver compatibility not a concern
        6. Documentation needs updates — 3 design documents reference current crate names
-       7. No PyO3 bindings yet — design doc mentions gemini-live-python but not implemented
+       7. No PyO3 bindings yet — design doc mentions gemini-genai-python but not implemented
        8. Examples are downstream — will need updates to match renamed crates
 
-       The largest effort would be updating the gemini-adk-transpiler's hardcoded type paths (~70 locations), followed by Cargo.toml dependencies in
+       The largest effort would be updating the gemini-adk-transpiler-rs's hardcoded type paths (~70 locations), followed by Cargo.toml dependencies in
         examples (8 files) and source code imports (44 files).
   ⎿  Done (32 tool uses · 37.5k tokens · 57s)
 
@@ -604,10 +604,10 @@
          - _models_converters.ts, _live_converters.ts, etc.
 
        ---
-       Summary: What js-genai Provides That gemini-live-rs Doesn't
+       Summary: What js-genai Provides That gemini-genai-rs Doesn't
 
        ┌─────────────────────────────┬─────────────────────────────────────────────┬──────────────────────────┐
-       │         Capability          │                  js-genai                   │      gemini-live-rs      │
+       │         Capability          │                  js-genai                   │      gemini-genai-rs      │
        ├─────────────────────────────┼─────────────────────────────────────────────┼──────────────────────────┤
        │ Live WebSocket API          │ ✅ Full (Session class with send/callbacks) │ ✅ (goal)                │
        ├─────────────────────────────┼─────────────────────────────────────────────┼──────────────────────────┤
@@ -647,7 +647,7 @@
        └─────────────────────────────┴─────────────────────────────────────────────┴──────────────────────────┘
 
        Architecture Difference: js-genai is a full-featured REST+WebSocket SDK covering Google's entire Gemini/Vertex AI surface.
-       gemini-live-rs is strategically focused on Live API WebSocket only with layered abstraction (wire → runtime → fluent).
+       gemini-genai-rs is strategically focused on Live API WebSocket only with layered abstraction (wire → runtime → fluent).
   ⎿  Done (20 tool uses · 45.4k tokens · 3m 30s)
 
 ● Explore(Explore ADK-JS module coverage)
@@ -736,7 +736,7 @@
 
        ADK-JS Core Module Structure - Comprehensive Analysis
 
-       I've completed a thorough exploration of the ADK-JS codebase. Here's what the framework provides that your gemini-live-rs project does
+       I've completed a thorough exploration of the ADK-JS codebase. Here's what the framework provides that your gemini-genai-rs project does
         NOT currently cover:
 
        ---

@@ -6,25 +6,25 @@ Three-crate layered stack for the Gemini Multimodal Live API:
 
 ```
                     +--------------------------+
-                    |    gemini-adk-fluent (L2)     |  Fluent DX, operator algebra, composition
+                    |    gemini-adk-fluent-rs (L2)     |  Fluent DX, operator algebra, composition
                     |  AgentBuilder, Live, S/C  |
                     |  /T/P/M/A, Composable     |
                     +-----------+--------------+
                                 |
                     +-----------+--------------+
-                    |      gemini-adk (L1)          |  Agent runtime, tools, state, phases
+                    |      gemini-adk-rs (L1)          |  Agent runtime, tools, state, phases
                     |  LiveSessionBuilder,      |
                     |  State, TextAgent, Phase  |
                     +-----------+--------------+
                                 |
                     +-----------+--------------+
-                    |      gemini-live (L0)        |  Wire protocol, transport, auth, types
+                    |      gemini-genai-rs (L0)        |  Wire protocol, transport, auth, types
                     |  SessionHandle, Content,  |
                     |  Transport, Codec, VAD    |
                     +--------------------------+
 ```
 
-Plus `apps/gemini-adk-web` (Axum Web UI), `apps/gemini-adk-api` (REST API server), `examples/agents`, `examples/voice-chat`, `examples/tool-calling`, `examples/transcription`, `examples/text-chat`, and `tools/gemini-adk-transpiler`.
+Plus `apps/gemini-adk-web-rs` (Axum Web UI), `apps/gemini-adk-api-rs` (REST API server), `examples/agents`, `examples/voice-chat`, `examples/tool-calling`, `examples/transcription`, `examples/text-chat`, and `tools/gemini-adk-transpiler-rs`.
 
 ## Import Guidance
 
@@ -32,13 +32,13 @@ Always import from the highest-level crate you need:
 
 ```rust
 // Full fluent DX (recommended for applications)
-use gemini_adk_fluent::prelude::*;
+use gemini_adk_fluent_rs::prelude::*;
 
 // Runtime only (building custom processors)
-use gemini_adk::*;
+use gemini_adk_rs::*;
 
 // Wire protocol only (raw WebSocket access)
-use gemini_live::prelude::*;
+use gemini_genai_rs::prelude::*;
 ```
 
 ## Core API Patterns
@@ -430,7 +430,7 @@ let artifacts = A::json_output("report", "Analysis report")
 
 ## Key Types by Layer
 
-### L0 (gemini-live) -- Wire Protocol
+### L0 (gemini-genai-rs) -- Wire Protocol
 
 | Type | Purpose |
 |------|---------|
@@ -455,7 +455,7 @@ let artifacts = A::json_output("report", "Analysis report")
 | `ResumeInfo` | Session resumption info: handle, resumable flag, last consumed index |
 | `UsageInfo` | Token usage metadata: total, prompt, response token counts |
 
-### L1 (gemini-adk) -- Agent Runtime
+### L1 (gemini-adk-rs) -- Agent Runtime
 
 | Type | Purpose |
 |------|---------|
@@ -494,7 +494,7 @@ let artifacts = A::json_output("report", "Analysis report")
 | `ControlPlaneConfig` | Consolidated control plane settings for the processor |
 | `ExtractionTrigger` | When to run extractors: EveryTurn, Interval, AfterToolCall, OnPhaseChange, OnGenerationComplete |
 
-### L2 (gemini-adk-fluent) -- Fluent DX
+### L2 (gemini-adk-fluent-rs) -- Fluent DX
 
 | Type | Purpose |
 |------|---------|
@@ -545,13 +545,13 @@ cargo build --workspace
 cargo test --workspace
 
 # Run a specific example
-cargo run -p gemini-adk-web
+cargo run -p gemini-adk-web-rs
 
 # Check without building
 cargo check --workspace
 
 # Run with specific features
-cargo build -p gemini-live --features "vad,generate,tokens"
+cargo build -p gemini-genai-rs --features "vad,generate,tokens"
 ```
 
 ## Release Process
@@ -590,11 +590,11 @@ just release-status
 
 ### Published crates (dependency order)
 
-1. `gemini-live` (L0)
-2. `gemini-adk` (L1)
-3. `gemini-adk-fluent` (L2)
-4. `gemini-adk-server`
-5. `gemini-adk-cli`
+1. `gemini-genai-rs` (L0)
+2. `gemini-adk-rs` (L1)
+3. `gemini-adk-fluent-rs` (L2)
+4. `gemini-adk-server-rs`
+5. `gemini-adk-cli-rs`
 
 ### Version management
 
@@ -612,7 +612,7 @@ just release-status
 
 ## Best Practices
 
-- Import from `gemini_adk_fluent::prelude::*` for application code -- it re-exports all three layers.
+- Import from `gemini_adk_fluent_rs::prelude::*` for application code -- it re-exports all three layers.
 - Use `TypedTool` over `SimpleTool` when possible -- auto-generated schemas prevent drift.
 - Use `State::modify()` for atomic read-modify-write instead of separate `get()` + `set()`.
 - Use `StateKey<T>` constants for frequently accessed keys to prevent typos.
@@ -641,12 +641,12 @@ just release-status
 
 ```
 crates/
-  gemini-live/          L0 wire protocol (gemini_live)
-  gemini-adk/            L1 agent runtime (gemini_adk)
-  gemini-adk-fluent/     L2 fluent DX (gemini_adk_fluent)
+  gemini-genai-rs/          L0 wire protocol (gemini_genai_rs)
+  gemini-adk-rs/            L1 agent runtime (gemini_adk_rs)
+  gemini-adk-fluent-rs/     L2 fluent DX (gemini_adk_fluent_rs)
 apps/
-  gemini-adk-web/           Interactive web UI for agent development (adk web)
-  gemini-adk-api/    Standalone REST API server (adk api_server)
+  gemini-adk-web-rs/           Interactive web UI for agent development (adk web)
+  gemini-adk-api-rs/    Standalone REST API server (adk api_server)
 examples/
   agents/            Agent composition examples
   voice-chat/        Voice chat example
@@ -654,6 +654,6 @@ examples/
   transcription/     Transcription example
   text-chat/         Text chat example
 tools/
-  gemini-adk-cli/           CLI tool (adk create/run/web/eval/deploy)
-  gemini-adk-transpiler/    Code transpilation utilities
+  gemini-adk-cli-rs/           CLI tool (adk create/run/web/eval/deploy)
+  gemini-adk-transpiler-rs/    Code transpilation utilities
 ```

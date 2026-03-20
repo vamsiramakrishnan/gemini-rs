@@ -9,7 +9,7 @@
 //! - `Composable::Pipeline` — the underlying type produced by `>>`
 //! - `review_loop()` — a pre-built pattern that uses sequential + loop
 
-use gemini_adk_fluent::prelude::*;
+use gemini_adk_fluent_rs::prelude::*;
 
 fn main() {
     println!("=== 04: Sequential Pipeline (>>) ===\n");

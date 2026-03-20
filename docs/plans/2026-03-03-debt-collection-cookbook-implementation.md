@@ -6,7 +6,7 @@
 
 **Architecture:** Single-agent, 7-phase conversation flow (`disclosure → verify_identity → inform_debt → negotiate → arrange_payment → confirm → close`) with compliance-gated transitions, emotional monitoring via LLM + regex hybrid extraction, temporal escalation patterns, tool response redaction, and turn boundary compliance injection.
 
-**Tech Stack:** `gemini-adk-fluent` L2 API (`Live::builder()`), `gemini-adk` (State, TurnExtractor, BaseLlm, GeminiLlm), `gemini-live` (FunctionCall, FunctionResponse, SessionConfig, SessionEvent), `schemars` (LLM extraction schema), `serde/serde_json`, `regex`, `base64`, `tokio`, `async-trait`, `tracing`.
+**Tech Stack:** `gemini-adk-fluent-rs` L2 API (`Live::builder()`), `gemini-adk-rs` (State, TurnExtractor, BaseLlm, GeminiLlm), `gemini-genai-rs` (FunctionCall, FunctionResponse, SessionConfig, SessionEvent), `schemars` (LLM extraction schema), `serde/serde_json`, `regex`, `base64`, `tokio`, `async-trait`, `tracing`.
 
 **Design doc:** `docs/plans/2026-03-03-debt-collection-cookbook-design.md`
 
@@ -15,13 +15,13 @@
 ### Task 1: Register the module + add schemars dependency
 
 **Files:**
-- Modify: `apps/gemini-adk-web/src/apps/mod.rs`
-- Modify: `apps/gemini-adk-web/Cargo.toml`
-- Create: `apps/gemini-adk-web/src/apps/debt_collection.rs`
+- Modify: `apps/gemini-adk-web-rs/src/apps/mod.rs`
+- Modify: `apps/gemini-adk-web-rs/Cargo.toml`
+- Create: `apps/gemini-adk-web-rs/src/apps/debt_collection.rs`
 
 **Step 1: Add `schemars` dependency to Cargo.toml**
 
-In `apps/gemini-adk-web/Cargo.toml`, add to `[dependencies]`:
+In `apps/gemini-adk-web-rs/Cargo.toml`, add to `[dependencies]`:
 
 ```toml
 schemars = "0.8"
@@ -31,7 +31,7 @@ This is needed for `#[derive(JsonSchema)]` on the LLM extraction struct (`Debtor
 
 **Step 2: Create the skeleton file**
 
-Create `apps/gemini-adk-web/src/apps/debt_collection.rs`:
+Create `apps/gemini-adk-web-rs/src/apps/debt_collection.rs`:
 
 ```rust
 use std::collections::HashMap;
@@ -48,8 +48,8 @@ use std::sync::LazyLock;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
-use gemini_adk_fluent::prelude::*;
-use gemini_adk::llm::{BaseLlm, GeminiLlm, GeminiLlmParams};
+use gemini_adk_fluent_rs::prelude::*;
+use gemini_adk_rs::llm::{BaseLlm, GeminiLlm, GeminiLlmParams};
 
 use crate::app::{AppCategory, AppError, ClientMessage, CookbookApp, ServerMessage, WsSender};
 
@@ -116,7 +116,7 @@ impl CookbookApp for DebtCollection {
 
 **Step 3: Register in mod.rs**
 
-In `apps/gemini-adk-web/src/apps/mod.rs`, add the module declaration:
+In `apps/gemini-adk-web-rs/src/apps/mod.rs`, add the module declaration:
 
 ```rust
 mod debt_collection;
@@ -130,13 +130,13 @@ registry.register(debt_collection::DebtCollection);
 
 **Step 4: Verify it compiles**
 
-Run: `cargo check -p gemini-live-ui 2>&1`
+Run: `cargo check -p gemini-genai-ui 2>&1`
 Expected: Compiles (with warnings about unused imports — that's fine).
 
 **Step 5: Commit**
 
 ```bash
-git add apps/gemini-adk-web/Cargo.toml apps/gemini-adk-web/src/apps/mod.rs apps/gemini-adk-web/src/apps/debt_collection.rs
+git add apps/gemini-adk-web-rs/Cargo.toml apps/gemini-adk-web-rs/src/apps/mod.rs apps/gemini-adk-web-rs/src/apps/debt_collection.rs
 git commit -m "feat(examples): scaffold debt-collection app with CookbookApp impl"
 ```
 
@@ -145,7 +145,7 @@ git commit -m "feat(examples): scaffold debt-collection app with CookbookApp imp
 ### Task 2: Phase instructions and constants
 
 **Files:**
-- Modify: `apps/gemini-adk-web/src/apps/debt_collection.rs`
+- Modify: `apps/gemini-adk-web-rs/src/apps/debt_collection.rs`
 
 **Step 1: Add all phase instruction constants**
 
@@ -241,13 +241,13 @@ const MOCK_ACCOUNT: &str = r#"{
 
 **Step 2: Verify it compiles**
 
-Run: `cargo check -p gemini-live-ui 2>&1`
+Run: `cargo check -p gemini-genai-ui 2>&1`
 Expected: Compiles (constants are unused for now — that's fine).
 
 **Step 3: Commit**
 
 ```bash
-git add apps/gemini-adk-web/src/apps/debt_collection.rs
+git add apps/gemini-adk-web-rs/src/apps/debt_collection.rs
 git commit -m "feat(examples): add debt-collection phase instructions and mock data"
 ```
 
@@ -256,7 +256,7 @@ git commit -m "feat(examples): add debt-collection phase instructions and mock d
 ### Task 3: Mock tools and PII redaction
 
 **Files:**
-- Modify: `apps/gemini-adk-web/src/apps/debt_collection.rs`
+- Modify: `apps/gemini-adk-web-rs/src/apps/debt_collection.rs`
 
 **Step 1: Write tests for the mock tools and redaction**
 
@@ -354,7 +354,7 @@ mod tests {
 
 **Step 2: Run tests to verify they fail**
 
-Run: `cargo test -p gemini-live-ui -- debt_collection 2>&1`
+Run: `cargo test -p gemini-genai-ui -- debt_collection 2>&1`
 Expected: FAIL — `execute_tool` and `redact_pii` not found.
 
 **Step 3: Implement the mock tools and redaction**
@@ -469,13 +469,13 @@ fn redact_pii(value: &Value) -> Value {
 
 **Step 4: Run tests to verify they pass**
 
-Run: `cargo test -p gemini-live-ui -- debt_collection 2>&1`
+Run: `cargo test -p gemini-genai-ui -- debt_collection 2>&1`
 Expected: All 10 tests PASS.
 
 **Step 5: Commit**
 
 ```bash
-git add apps/gemini-adk-web/src/apps/debt_collection.rs
+git add apps/gemini-adk-web-rs/src/apps/debt_collection.rs
 git commit -m "feat(examples): add debt-collection mock tools and PII redaction"
 ```
 
@@ -484,7 +484,7 @@ git commit -m "feat(examples): add debt-collection mock tools and PII redaction"
 ### Task 4: Regex extractor for structured fields
 
 **Files:**
-- Modify: `apps/gemini-adk-web/src/apps/debt_collection.rs`
+- Modify: `apps/gemini-adk-web-rs/src/apps/debt_collection.rs`
 
 **Step 1: Write tests for regex extraction**
 
@@ -538,7 +538,7 @@ Add to the `tests` module:
 
 **Step 2: Run tests to verify they fail**
 
-Run: `cargo test -p gemini-live-ui -- debt_collection 2>&1`
+Run: `cargo test -p gemini-genai-ui -- debt_collection 2>&1`
 Expected: FAIL — `extract_structured` not found.
 
 **Step 3: Implement the regex extraction function**
@@ -607,13 +607,13 @@ fn extract_structured(text: &str, existing: &HashMap<String, Value>) -> HashMap<
 
 **Step 4: Run tests to verify they pass**
 
-Run: `cargo test -p gemini-live-ui -- debt_collection 2>&1`
+Run: `cargo test -p gemini-genai-ui -- debt_collection 2>&1`
 Expected: All 16 tests PASS.
 
 **Step 5: Commit**
 
 ```bash
-git add apps/gemini-adk-web/src/apps/debt_collection.rs
+git add apps/gemini-adk-web-rs/src/apps/debt_collection.rs
 git commit -m "feat(examples): add debt-collection regex extraction for structured fields"
 ```
 
@@ -622,7 +622,7 @@ git commit -m "feat(examples): add debt-collection regex extraction for structur
 ### Task 5: LLM extraction struct and computed state derivation
 
 **Files:**
-- Modify: `apps/gemini-adk-web/src/apps/debt_collection.rs`
+- Modify: `apps/gemini-adk-web-rs/src/apps/debt_collection.rs`
 
 **Step 1: Write tests for computed state**
 
@@ -662,7 +662,7 @@ Add to the `tests` module:
 
 **Step 2: Run tests to verify they fail**
 
-Run: `cargo test -p gemini-live-ui -- debt_collection 2>&1`
+Run: `cargo test -p gemini-genai-ui -- debt_collection 2>&1`
 Expected: FAIL — functions not found.
 
 **Step 3: Implement LLM extraction struct and computed helpers**
@@ -729,13 +729,13 @@ fn compute_risk_level(sentiment: f64, cease_desist: bool) -> &'static str {
 
 **Step 4: Run tests to verify they pass**
 
-Run: `cargo test -p gemini-live-ui -- debt_collection 2>&1`
+Run: `cargo test -p gemini-genai-ui -- debt_collection 2>&1`
 Expected: All 22 tests PASS.
 
 **Step 5: Commit**
 
 ```bash
-git add apps/gemini-adk-web/src/apps/debt_collection.rs
+git add apps/gemini-adk-web-rs/src/apps/debt_collection.rs
 git commit -m "feat(examples): add DebtorState LLM extraction struct and computed helpers"
 ```
 
@@ -746,7 +746,7 @@ git commit -m "feat(examples): add DebtorState LLM extraction struct and compute
 This is the core task. It wires up everything: callbacks, phases, watchers, temporal patterns, extractors, interceptors, and the browser recv loop.
 
 **Files:**
-- Modify: `apps/gemini-adk-web/src/apps/debt_collection.rs`
+- Modify: `apps/gemini-adk-web-rs/src/apps/debt_collection.rs`
 
 **Step 1: Replace the `todo!()` in `handle_session` with the full implementation**
 
@@ -1200,7 +1200,7 @@ Replace the `handle_session` method body with:
             .on_tool_call(move |calls| {
                 let tx = tx_tool.clone();
                 async move {
-                    let responses: Vec<gemini_live::prelude::FunctionResponse> = calls
+                    let responses: Vec<gemini_genai_rs::prelude::FunctionResponse> = calls
                         .iter()
                         .map(|call| {
                             let result = execute_tool(&call.name, &call.args);
@@ -1213,7 +1213,7 @@ Replace the `handle_session` method body with:
                                     "result": redact_pii(&result),
                                 }),
                             });
-                            gemini_live::prelude::FunctionResponse {
+                            gemini_genai_rs::prelude::FunctionResponse {
                                 name: call.name.clone(),
                                 response: result,
                                 id: call.id.clone(),
@@ -1347,20 +1347,20 @@ Replace the `handle_session` method body with:
 
 **Step 2: Verify it compiles**
 
-Run: `cargo check -p gemini-live-ui 2>&1`
+Run: `cargo check -p gemini-genai-ui 2>&1`
 Expected: Compiles (possibly with warnings about unused variables which is fine).
 
-**Important**: This step may require adjusting import paths or type signatures based on the exact API. If `SessionEvent` is not in scope, add `use gemini_live::session::SessionEvent;`. If `FunctionResponse` isn't in `gemini_live::prelude`, use `gemini_live::protocol::types::FunctionResponse`. Adapt as needed — the exact types are documented in the design doc.
+**Important**: This step may require adjusting import paths or type signatures based on the exact API. If `SessionEvent` is not in scope, add `use gemini_genai_rs::session::SessionEvent;`. If `FunctionResponse` isn't in `gemini_genai_rs::prelude`, use `gemini_genai_rs::protocol::types::FunctionResponse`. Adapt as needed — the exact types are documented in the design doc.
 
 **Step 3: Run all tests**
 
-Run: `cargo test -p gemini-live-ui 2>&1`
+Run: `cargo test -p gemini-genai-ui 2>&1`
 Expected: All existing 67 tests + all new debt_collection tests PASS.
 
 **Step 4: Commit**
 
 ```bash
-git add apps/gemini-adk-web/src/apps/debt_collection.rs
+git add apps/gemini-adk-web-rs/src/apps/debt_collection.rs
 git commit -m "feat(examples): implement debt-collection handle_session with full L2 pipeline
 
 Exercises 15 previously-unused L2 features: phase guards, on_exit,
@@ -1375,7 +1375,7 @@ on_turn_boundary, extract_turns::<T>(), on_go_away, and computed state."
 ### Task 7: Final verification and cleanup
 
 **Files:**
-- Possibly modify: `apps/gemini-adk-web/src/apps/debt_collection.rs` (fix any warnings)
+- Possibly modify: `apps/gemini-adk-web-rs/src/apps/debt_collection.rs` (fix any warnings)
 
 **Step 1: Full workspace check**
 
@@ -1389,7 +1389,7 @@ Expected: All tests pass across all crates.
 
 **Step 3: Check for new warnings in debt_collection**
 
-Run: `cargo check -p gemini-live-ui 2>&1 | grep debt_collection`
+Run: `cargo check -p gemini-genai-ui 2>&1 | grep debt_collection`
 Expected: No warnings from debt_collection.rs.
 
 If there are unused import warnings, fix them. If there are dead_code warnings on helper functions only used at runtime, that's expected.

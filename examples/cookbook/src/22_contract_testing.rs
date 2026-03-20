@@ -5,7 +5,7 @@
 //!
 //! This is a static analysis approach: no LLM calls needed.
 
-use gemini_adk_fluent::prelude::*;
+use gemini_adk_fluent_rs::prelude::*;
 use serde_json::json;
 
 fn main() {

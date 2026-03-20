@@ -20,8 +20,8 @@ use axum::{
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use futures::{sink::SinkExt, stream::StreamExt};
-use gemini_adk::tool::{ToolDispatcher, TypedTool};
-use gemini_live::prelude::*;
+use gemini_adk_rs::tool::{ToolDispatcher, TypedTool};
+use gemini_genai_rs::prelude::*;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
@@ -278,7 +278,7 @@ async fn main() {
 
     let static_dir = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../apps/gemini-adk-web/static"
+        "/../../apps/gemini-adk-web-rs/static"
     );
 
     let app = Router::new()

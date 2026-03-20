@@ -4,7 +4,7 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 #[cfg(feature = "vad")]
 fn bench_vad_silence(c: &mut Criterion) {
-    use gemini_live::vad::{VadConfig, VoiceActivityDetector};
+    use gemini_genai_rs::vad::{VadConfig, VoiceActivityDetector};
 
     let config = VadConfig {
         sample_rate: 16000,
@@ -23,7 +23,7 @@ fn bench_vad_silence(c: &mut Criterion) {
 
 #[cfg(feature = "vad")]
 fn bench_vad_speech(c: &mut Criterion) {
-    use gemini_live::vad::{VadConfig, VoiceActivityDetector};
+    use gemini_genai_rs::vad::{VadConfig, VoiceActivityDetector};
 
     let config = VadConfig {
         sample_rate: 16000,

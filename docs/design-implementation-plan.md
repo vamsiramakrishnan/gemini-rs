@@ -1,4 +1,4 @@
-# gemini-live-rs — Design Document
+# gemini-genai-rs — Design Document
 
 **Ultra-Low-Latency, High-Concurrency Rust Library for the Gemini Multimodal Live API**
 
@@ -8,9 +8,9 @@ Version 0.1 · March 2026
 
 ## 1. Executive Summary
 
-`gemini-live-rs` is a systems-grade Rust library purpose-built for the Gemini Multimodal Live API. It delivers what Pipecat and LiveKit cannot: **true real-time performance without the Python GIL ceiling**, **zero-copy audio pipelines**, **lock-free concurrency**, and **native integration with Google’s agent ecosystem (ADK, A2A, MCP)**.
+`gemini-genai-rs` is a systems-grade Rust library purpose-built for the Gemini Multimodal Live API. It delivers what Pipecat and LiveKit cannot: **true real-time performance without the Python GIL ceiling**, **zero-copy audio pipelines**, **lock-free concurrency**, and **native integration with Google’s agent ecosystem (ADK, A2A, MCP)**.
 
-Where Pipecat and LiveKit are orchestration frameworks that bolt together external STT/LLM/TTS services, `gemini-live-rs` treats the Gemini Live API as a **first-class, unified speech-to-speech system** — eliminating the cascaded pipeline entirely and operating at the wire level where milliseconds are reclaimed.
+Where Pipecat and LiveKit are orchestration frameworks that bolt together external STT/LLM/TTS services, `gemini-genai-rs` treats the Gemini Live API as a **first-class, unified speech-to-speech system** — eliminating the cascaded pipeline entirely and operating at the wire level where milliseconds are reclaimed.
 
 ### Why This Exists
 
@@ -32,7 +32,7 @@ Pipecat is a Python framework by Daily.co for orchestrating cascaded voice pipel
 
 Issue #3222 is a user explicitly asking whether Pipecat has any jitter buffering for WebSocket audio output. Their SIP provider reports chunks arriving with 600ms+ inter-packet variance. Pipecat’s `AudioBufferProcessor` handles recording, not jitter compensation. The `audio_out_10ms_chunks` parameter controls send granularity, not receive smoothing. On Twilio, users report choppy/distorted phone audio while server-side recordings are clean (#2551), confirming the problem is in output delivery, not generation.
 
-*Why this matters for gemini-live-rs*: The Gemini Live API streams audio over WebSocket. Network jitter is unavoidable. Without an adaptive jitter buffer on the receive path, audio playback will stutter. We implement a dedicated jitter buffer with EWMA-based depth adaptation and instant flush on barge-in — a component Pipecat does not have.
+*Why this matters for gemini-genai-rs*: The Gemini Live API streams audio over WebSocket. Network jitter is unavoidable. Without an adaptive jitter buffer on the receive path, audio playback will stutter. We implement a dedicated jitter buffer with EWMA-based depth adaptation and instant flush on barge-in — a component Pipecat does not have.
 
 **Gap 2: Interruption Handling is Broken Across Multiple Transports**
 
@@ -48,7 +48,7 @@ This is the most consistently reported class of issues, spanning years and trans
 
 The root cause is architectural: Pipecat’s frame pipeline propagates interruptions as `CancelFrame` objects that travel linearly through the pipeline. Flushing state across STT → LLM → TTS → Transport boundaries — each operating on different frames at different times — creates race conditions. When the Gemini Live API (which handles VAD server-side) sends an interrupt signal, it conflicts with the pipeline’s own interruption model.
 
-*Why this matters for gemini-live-rs*: We use the Gemini server’s VAD signals as the authoritative interrupt source. Barge-in is a single atomic operation: flush the jitter buffer, send `activityStart`, and transition the session FSM. There is no pipeline of in-flight frames to cancel.
+*Why this matters for gemini-genai-rs*: We use the Gemini server’s VAD signals as the authoritative interrupt source. Barge-in is a single atomic operation: flush the jitter buffer, send `activityStart`, and transition the session FSM. There is no pipeline of in-flight frames to cancel.
 
 **Gap 3: Pipeline Lifecycle Is Dangerous in Production**
 
@@ -64,7 +64,7 @@ Multiple issues document that stopping a Pipecat pipeline is unreliable:
 
 Issue #976 captures this pattern most honestly: “I have used Pipecat for several months, stability is always a problem.” The user reports Gemini error 1011, ElevenLabs error 1008/1009, and Cartesia `NoneType` errors all appearing after ~10 minutes of production use.
 
-*Why this matters for gemini-live-rs*: Our actor-per-session model uses independent Tokio task constellations. When a session ends, all its tasks are cancelled and their memory is reclaimed immediately. There is no shared mutable state between sessions, no global pipeline that can block, and no frame propagation chain that can deadlock.
+*Why this matters for gemini-genai-rs*: Our actor-per-session model uses independent Tokio task constellations. When a session ends, all its tasks are cancelled and their memory is reclaimed immediately. There is no shared mutable state between sessions, no global pipeline that can block, and no frame propagation chain that can deadlock.
 
 **Gap 4: Gemini Live Integration Is Incomplete**
 
@@ -77,7 +77,7 @@ Despite having a `GeminiMultimodalLiveLLMService`, multiple Gemini-native featur
 - Twilio→Gemini audio path broken: mulaw 8kHz to PCM 16kHz conversion not handled (#1823)
 - Vertex AI regional endpoints not supported, blocking GDPR compliance (#1783)
 
-*Why this matters for gemini-live-rs*: We implement the Gemini Live wire protocol directly with one-to-one type mappings. Every API feature (VAD params, session resumption, GoAway, activity signals, async function calling) is a first-class Rust type with compile-time validation.
+*Why this matters for gemini-genai-rs*: We implement the Gemini Live wire protocol directly with one-to-one type mappings. Every API feature (VAD params, session resumption, GoAway, activity signals, async function calling) is a first-class Rust type with compile-time validation.
 
 **Gap 5: Context Management Is Manual and Error-Prone**
 
@@ -93,7 +93,7 @@ Issue #3418 is the most consequential bug in LiveKit’s voice agent system: aft
 
 The root cause: interruption handling, turn detection, and TTS orchestration operate as loosely coupled components. When an interruption fires during a narrow window of the agent’s state transition (thinking → speaking), the components desynchronize. The state machine says “speaking,” but the TTS pipeline has been cancelled.
 
-*Why this matters for gemini-live-rs*: Our session FSM enforces validated state transitions. Every transition must pass through `can_transition_to()` — the system cannot enter a state like “speaking with no audio source” because the FSM transition is gated on the audio pipeline being active. Phase observers (via `watch` channels) detect and surface stuck states.
+*Why this matters for gemini-genai-rs*: Our session FSM enforces validated state transitions. Every transition must pass through `can_transition_to()` — the system cannot enter a state like “speaking with no audio source” because the FSM transition is gated on the audio pipeline being active. Phase observers (via `watch` channels) detect and surface stuck states.
 
 **Gap 2: Turn Detection Is Fundamentally Unsolved**
 
@@ -106,7 +106,7 @@ This is LiveKit’s most actively discussed problem area:
 - Leading audio dropped on barge-in (#3261) — first word/phoneme lost during interruptions
 - Resume-false-interruption regression (#4039) — feature that worked in 1.2.18 broke in 1.3.3, causing “mhmm” and backchannel signals to interrupt the agent
 
-*Why this matters for gemini-live-rs*: For Gemini Live specifically, turn detection is solved server-side. The Gemini model has full access to audio features (prosody, energy, context) and makes its own end-of-turn decisions. We relay these decisions as authoritative. Our client-side VAD exists only for instant local barge-in feedback — it does not make turn-taking decisions.
+*Why this matters for gemini-genai-rs*: For Gemini Live specifically, turn detection is solved server-side. The Gemini model has full access to audio features (prosody, energy, context) and makes its own end-of-turn decisions. We relay these decisions as authoritative. Our client-side VAD exists only for instant local barge-in feedback — it does not make turn-taking decisions.
 
 **Gap 3: Vertex AI / Gemini Realtime Integration Has Fundamental Conflicts**
 
@@ -118,7 +118,7 @@ This is LiveKit’s most actively discussed problem area:
 - Empty Gemini responses processed as success (#4066) — `finish_reason=STOP` with empty content produces silent turn
 - WebSocket connection bombardment (#1679) — no rate limiting on reconnection attempts, causing `OVERLOADED_TOO_MANY_RETRIES` errors
 
-*Why this matters for gemini-live-rs*: These are consequences of wrapping a direct-API model in an SFU abstraction designed for separate STT/LLM/TTS providers. Our library speaks the Gemini Live wire protocol natively. There is no abstraction layer to conflict with the API’s own session management, VAD, or tool calling semantics.
+*Why this matters for gemini-genai-rs*: These are consequences of wrapping a direct-API model in an SFU abstraction designed for separate STT/LLM/TTS providers. Our library speaks the Gemini Live wire protocol natively. There is no abstraction layer to conflict with the API’s own session management, VAD, or tool calling semantics.
 
 **Gap 4: Observability Is Acknowledged as Missing**
 
@@ -130,7 +130,7 @@ Issue #2260 — requesting native OpenTelemetry instrumentation — received 57 
 - Pipeline-level metrics were removed in newer versions with no replacement (#2522)
 - Enabling recording/observability degrades voice quality to 2x slower and distorted (#4055) — the observability system itself causes production failures
 
-*Why this matters for gemini-live-rs*: OTel spans, structured logging, and Prometheus metrics are built into the architecture from day one, feature-gated to add zero overhead when disabled. Observability does not contend with the audio path because they run on separate Tokio tasks.
+*Why this matters for gemini-genai-rs*: OTel spans, structured logging, and Prometheus metrics are built into the architecture from day one, feature-gated to add zero overhead when disabled. Observability does not contend with the audio path because they run on separate Tokio tasks.
 
 **Gap 5: Session Lifecycle and Recovery**
 
@@ -157,7 +157,7 @@ Intellectual honesty requires acknowledging where Pipecat and LiveKit have genui
 
 This table compares specifically for the Gemini Live API use case, not general-purpose voice AI.
 
-|Dimension                   |Pipecat                                            |LiveKit                                           |**gemini-live-rs**                                     |
+|Dimension                   |Pipecat                                            |LiveKit                                           |**gemini-genai-rs**                                     |
 |----------------------------|---------------------------------------------------|--------------------------------------------------|-------------------------------------------------------|
 |**Language**                |Python                                             |Go SFU + Python/Node agents                       |**Rust**                                               |
 |**Concurrency Model**       |async Python + GIL                                 |Go goroutines (SFU) + Python GIL (agents)         |**Tokio async + lock-free data structures**            |
@@ -252,7 +252,7 @@ This table compares specifically for the Gemini Live API use case, not general-p
 ### 3.3 Module Architecture
 
 ```
-gemini-live-rs/
+gemini-genai-rs/
 ├── src/
 │   ├── lib.rs                  # Public API surface
 │   ├── protocol/               # Wire-format types
@@ -460,7 +460,7 @@ Functions are registered with their JSON Schema declaration (sent to Gemini in t
 
 **4.6.2 ADK Bridge**
 
-Bridges `gemini-live-rs` sessions to Google’s Agent Development Kit for complex agent orchestration:
+Bridges `gemini-genai-rs` sessions to Google’s Agent Development Kit for complex agent orchestration:
 
 ```rust
 let adk = AdkBridge::new(AdkConfig {
@@ -474,7 +474,7 @@ let adk = AdkBridge::new(AdkConfig {
 session.attach_adk_bridge(adk);
 ```
 
-The bridge translates between Gemini’s `FunctionCall`/`FunctionResponse` protocol and ADK’s `LiveRequestQueue`/event model. This allows complex multi-step agent workflows to run in ADK while the voice interface runs in `gemini-live-rs`.
+The bridge translates between Gemini’s `FunctionCall`/`FunctionResponse` protocol and ADK’s `LiveRequestQueue`/event model. This allows complex multi-step agent workflows to run in ADK while the voice interface runs in `gemini-genai-rs`.
 
 **4.6.3 A2A Client**
 
@@ -581,19 +581,19 @@ Log levels follow a clear policy:
 
 |Metric                                  |Type     |Description                                    |
 |----------------------------------------|---------|-----------------------------------------------|
-|`gemini_live_sessions_active`           |Gauge    |Currently active sessions                      |
-|`gemini_live_audio_latency_ms`          |Histogram|Time from audio capture to WS send             |
-|`gemini_live_response_latency_ms`       |Histogram|Time from end-of-speech to first model response|
-|`gemini_live_jitter_buffer_depth_ms`    |Gauge    |Current playback buffer depth                  |
-|`gemini_live_jitter_underruns_total`    |Counter  |Playback underrun events                       |
-|`gemini_live_vad_speech_segments_total` |Counter  |Speech segments detected                       |
-|`gemini_live_tool_calls_total`          |Counter  |Tool calls dispatched (label: function_name)   |
-|`gemini_live_tool_call_duration_ms`     |Histogram|Tool execution time                            |
-|`gemini_live_reconnections_total`       |Counter  |Reconnection attempts                          |
-|`gemini_live_ws_messages_sent_total`    |Counter  |WebSocket frames sent                          |
-|`gemini_live_ws_messages_received_total`|Counter  |WebSocket frames received                      |
-|`gemini_live_ws_bytes_sent_total`       |Counter  |Total bytes sent                               |
-|`gemini_live_ws_bytes_received_total`   |Counter  |Total bytes received                           |
+|`gemini_genai_rs_sessions_active`           |Gauge    |Currently active sessions                      |
+|`gemini_genai_rs_audio_latency_ms`          |Histogram|Time from audio capture to WS send             |
+|`gemini_genai_rs_response_latency_ms`       |Histogram|Time from end-of-speech to first model response|
+|`gemini_genai_rs_jitter_buffer_depth_ms`    |Gauge    |Current playback buffer depth                  |
+|`gemini_genai_rs_jitter_underruns_total`    |Counter  |Playback underrun events                       |
+|`gemini_genai_rs_vad_speech_segments_total` |Counter  |Speech segments detected                       |
+|`gemini_genai_rs_tool_calls_total`          |Counter  |Tool calls dispatched (label: function_name)   |
+|`gemini_genai_rs_tool_call_duration_ms`     |Histogram|Tool execution time                            |
+|`gemini_genai_rs_reconnections_total`       |Counter  |Reconnection attempts                          |
+|`gemini_genai_rs_ws_messages_sent_total`    |Counter  |WebSocket frames sent                          |
+|`gemini_genai_rs_ws_messages_received_total`|Counter  |WebSocket frames received                      |
+|`gemini_genai_rs_ws_bytes_sent_total`       |Counter  |Total bytes sent                               |
+|`gemini_genai_rs_ws_bytes_received_total`   |Counter  |Total bytes received                           |
 
 -----
 
@@ -634,7 +634,7 @@ Both frameworks suffer from their abstraction layers conflicting with Gemini’s
 ```
 Pipecat:  Client → Daily SFU → Pipecat Server → Gemini API
 LiveKit:  Client → LiveKit SFU → Agent Process → Gemini API
-Ours:     Client → gemini-live-rs → Gemini API (direct)
+Ours:     Client → gemini-genai-rs → Gemini API (direct)
 ```
 
 We speak the wire protocol directly. Every Gemini message type is a Rust enum variant. `serde` handles serialization. There is no abstraction layer to misinterpret, silently drop, or incorrectly transform Gemini’s signals.
@@ -674,7 +674,7 @@ Our FSM uses `can_transition_to()` with exhaustive `matches!` macro validation. 
 
 Every ⚠️ or ❌ below for Pipecat/LiveKit is traceable to a specific GitHub issue. This is not marketing — it’s engineering due diligence.
 
-|Feature Category     |Feature                          |Pipecat                                      |LiveKit                                     |gemini-live-rs                          |
+|Feature Category     |Feature                          |Pipecat                                      |LiveKit                                     |gemini-genai-rs                          |
 |---------------------|---------------------------------|---------------------------------------------|--------------------------------------------|----------------------------------------|
 |**Core Audio**       |PCM16 streaming                  |✅                                            |✅                                           |✅                                       |
 |                     |Opus codec support               |✅ (via service)                              |✅ (WebRTC)                                  |✅ (feature flag)                        |
@@ -736,7 +736,7 @@ Every ⚠️ or ❌ below for Pipecat/LiveKit is traceable to a specific GitHub 
 
 ## 7. Gemini Live API Capabilities Leveraged
 
-`gemini-live-rs` is designed to exploit every Gemini Multimodal Live API capability:
+`gemini-genai-rs` is designed to exploit every Gemini Multimodal Live API capability:
 
 |Gemini Feature                    |How We Use It                                                          |
 |----------------------------------|-----------------------------------------------------------------------|
@@ -792,7 +792,7 @@ pub enum SessionError {
 
 1. **API Key Handling**: The API key is held in `SessionConfig` and only transmitted in the WebSocket URL query parameter (as required by Gemini). Never logged, never serialized to disk.
 1. **TLS**: All connections use WSS (WebSocket Secure). `tokio-tungstenite` with `native-tls` feature uses the system’s TLS implementation.
-1. **No Key Embedding**: Unlike Pipecat’s server-only architecture (which requires API keys on the server), `gemini-live-rs` can use ephemeral tokens for client-side deployments, preventing key exposure.
+1. **No Key Embedding**: Unlike Pipecat’s server-only architecture (which requires API keys on the server), `gemini-genai-rs` can use ephemeral tokens for client-side deployments, preventing key exposure.
 1. **A2A Authentication**: Supports OAuth 2.0, API keys, and OpenID Connect per the A2A v0.3 specification.
 1. **Audio Data**: Audio is base64-encoded in transit (Gemini’s requirement) over TLS. No audio is stored by the library — it flows through ring buffers and is overwritten.
 
@@ -813,7 +813,7 @@ pub enum SessionError {
 
 *This document reflects the architecture as of March 2026. The Gemini Multimodal Live API is actively evolving; this library evolves with it.*
 
-# gemini-live-rs — Implementation Guide
+# gemini-genai-rs — Implementation Guide
 
 **From Design to Code: A Complete Implementation Reference**
 
@@ -823,7 +823,7 @@ Version 0.1 · March 2026
 
 ## 1. Implementation Overview
 
-This document provides the concrete implementation plan for `gemini-live-rs`. It maps every design component to specific Rust types, crates, and code patterns. Use this as your blueprint when writing the actual code.
+This document provides the concrete implementation plan for `gemini-genai-rs`. It maps every design component to specific Rust types, crates, and code patterns. Use this as your blueprint when writing the actual code.
 
 ### 1.1 Implementation Phases
 
@@ -1415,7 +1415,7 @@ let config = SessionConfig::new(api_key)
 
 **File: `src/agent/adk_bridge.rs`**
 
-The ADK bridge translates between `gemini-live-rs` events and ADK’s `LiveRequestQueue` model.
+The ADK bridge translates between `gemini-genai-rs` events and ADK’s `LiveRequestQueue` model.
 
 ```rust
 pub struct AdkBridge {
@@ -1698,37 +1698,37 @@ pub fn tool_call_span(function_name: &str, session_id: &str) -> Span {
 use metrics::{counter, gauge, histogram};
 
 pub fn record_session_connected(session_id: &str) {
-    counter!("gemini_live_connections_total").increment(1);
-    gauge!("gemini_live_sessions_active").increment(1.0);
+    counter!("gemini_genai_rs_connections_total").increment(1);
+    gauge!("gemini_genai_rs_sessions_active").increment(1.0);
 }
 
 pub fn record_session_disconnected(session_id: &str) {
-    gauge!("gemini_live_sessions_active").decrement(1.0);
+    gauge!("gemini_genai_rs_sessions_active").decrement(1.0);
 }
 
 pub fn record_audio_latency(latency_ms: f64) {
-    histogram!("gemini_live_audio_latency_ms").record(latency_ms);
+    histogram!("gemini_genai_rs_audio_latency_ms").record(latency_ms);
 }
 
 pub fn record_response_latency(latency_ms: f64) {
-    histogram!("gemini_live_response_latency_ms").record(latency_ms);
+    histogram!("gemini_genai_rs_response_latency_ms").record(latency_ms);
 }
 
 pub fn record_jitter_depth(depth_ms: f64) {
-    gauge!("gemini_live_jitter_buffer_depth_ms").set(depth_ms);
+    gauge!("gemini_genai_rs_jitter_buffer_depth_ms").set(depth_ms);
 }
 
 pub fn record_tool_call(function_name: &str, duration_ms: f64) {
-    counter!("gemini_live_tool_calls_total", "function" => function_name.to_string()).increment(1);
-    histogram!("gemini_live_tool_call_duration_ms", "function" => function_name.to_string()).record(duration_ms);
+    counter!("gemini_genai_rs_tool_calls_total", "function" => function_name.to_string()).increment(1);
+    histogram!("gemini_genai_rs_tool_call_duration_ms", "function" => function_name.to_string()).record(duration_ms);
 }
 
 pub fn record_vad_event(event: &str) {
-    counter!("gemini_live_vad_events_total", "event" => event.to_string()).increment(1);
+    counter!("gemini_genai_rs_vad_events_total", "event" => event.to_string()).increment(1);
 }
 
 pub fn record_reconnection() {
-    counter!("gemini_live_reconnections_total").increment(1);
+    counter!("gemini_genai_rs_reconnections_total").increment(1);
 }
 ```
 
@@ -1739,14 +1739,14 @@ pub fn record_reconnection() {
 ### 4.1 `lib.rs` — The Entry Point
 
 ```rust
-//! # gemini-live-rs
+//! # gemini-genai-rs
 //!
 //! Ultra-low-latency Rust library for the Gemini Multimodal Live API.
 //!
 //! ## Quick Start
 //!
 //! ```rust,no_run
-//! use gemini_live_rs::prelude::*;
+//! use gemini_genai_rs::prelude::*;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -1808,7 +1808,7 @@ pub mod prelude {
 
 ```rust
 // examples/simple_conversation.rs
-use gemini_live_rs::prelude::*;
+use gemini_genai_rs::prelude::*;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -1871,7 +1871,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ```rust
 // examples/function_calling_agent.rs
-use gemini_live_rs::prelude::*;
+use gemini_genai_rs::prelude::*;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -1967,8 +1967,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ```rust
 // examples/a2a_dispatch.rs
-use gemini_live_rs::prelude::*;
-use gemini_live_rs::agent::a2a::{A2AClient, A2AConfig};
+use gemini_genai_rs::prelude::*;
+use gemini_genai_rs::agent::a2a::{A2AClient, A2AConfig};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -2123,7 +2123,7 @@ async fn live_text_conversation() {
 ```rust
 // benches/buffer_throughput.rs
 use criterion::{criterion_group, criterion_main, Criterion, black_box};
-use gemini_live_rs::buffer::SpscRing;
+use gemini_genai_rs::buffer::SpscRing;
 
 fn bench_spsc(c: &mut Criterion) {
     let ring = SpscRing::<i16>::new(65536);
@@ -2159,7 +2159,7 @@ use libfuzzer_sys::fuzz_target;
 fuzz_target!(|data: &[u8]| {
     if let Ok(text) = std::str::from_utf8(data) {
         // Should never panic, even on garbage input
-        let _ = serde_json::from_str::<gemini_live_rs::protocol::ServerMessage>(text);
+        let _ = serde_json::from_str::<gemini_genai_rs::protocol::ServerMessage>(text);
     }
 });
 ```
@@ -2186,10 +2186,10 @@ fuzz_target!(|data: &[u8]| {
 
 ```toml
 # Minimal (core only):
-gemini-live-rs = "0.1"
+gemini-genai-rs = "0.1"
 
 # With all features:
-gemini-live-rs = { version = "0.1", features = ["opus", "vad", "agent-adk", "agent-a2a", "tracing-support", "metrics"] }
+gemini-genai-rs = { version = "0.1", features = ["opus", "vad", "agent-adk", "agent-a2a", "tracing-support", "metrics"] }
 
 # Runtime requirement:
 tokio = { version = "1", features = ["full"] }
@@ -2313,7 +2313,7 @@ pipeline = Pipeline([
 ```
 
 ```rust
-// gemini-live-rs (Rust) — no pipeline needed
+// gemini-genai-rs (Rust) — no pipeline needed
 // Gemini Live API IS the pipeline (speech-to-speech)
 let config = SessionConfig::new(api_key)
     .model(GeminiModel::Gemini2_5FlashPreview)  // Native audio model
@@ -2353,7 +2353,7 @@ session = AgentSession(
     vad=silero.VAD.load(),           # Client VAD → but server VAD overrides + conflicts (#4441)
     stt=deepgram.STT(),              # Separate STT — redundant with Gemini's native audio
     llm=google.realtime.RealtimeModel(  # Wrapped in abstraction that strips system msgs (#4497)
-        model="gemini-live-2.5-flash",
+        model="gemini-genai-2.5-flash",
     ),
     tts=cartesia.TTS(),              # Separate TTS — redundant with Gemini's native output
     turn_detection=MultilingualModel(),  # Text-only, no prosody (#3094)
@@ -2363,7 +2363,7 @@ agent.start(ctx.room, participant)
 ```
 
 ```rust
-// gemini-live-rs (Rust) — no separate VAD/STT/LLM/TTS
+// gemini-genai-rs (Rust) — no separate VAD/STT/LLM/TTS
 let config = SessionConfig::new(api_key)
     .model(GeminiModel::Gemini2_5FlashPreview)
     .voice(Voice::Aoede)

@@ -1,6 +1,6 @@
 # Voice Chat Example
 
-Bidirectional audio chat with Gemini Live using the L0 wire protocol (`gemini-live`).
+Bidirectional audio chat with Gemini Live using the L0 wire protocol (`gemini-genai-rs`).
 
 Streams microphone PCM audio to `gemini-2.0-flash-live` and plays back the model's audio response, with real-time input and output transcription.
 

@@ -1,0 +1,45 @@
+[package]
+name = "gemini-adk-cli-rs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "CLI tool for Gemini ADK agent development — create, run, web, eval, deploy, api_server"
+keywords = ["gemini", "agents", "adk", "cli", "tools"]
+categories = ["command-line-utilities", "development-tools"]
+repository.workspace = true
+
+[dependencies]
+# Internal workspace crates
+gemini-genai-rs       = { workspace = true }
+gemini-adk-rs        = { workspace = true, features = ["gemini-llm"] }
+gemini-adk-fluent-rs = { workspace = true, features = ["gemini-llm"] }
+gemini-adk-server-rs = { workspace = true }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+
+# Web framework (for `adk web` — embedded UI + WebSocket)
+axum = { version = "0.7", features = ["ws"] }
+tower-http = { version = "0.5", features = ["cors", "set-header"] }
+rust-embed = "8"
+mime_guess = "2"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+# Misc
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["registry", "env-filter"] }
+dotenvy = "0.15"
+base64 = "0.22"
+bytes = "1"
+
+[[bin]]
+name = "adk"
+path = "src/main.rs"

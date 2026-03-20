@@ -10,7 +10,7 @@
 //! - `review_loop()` — pre-built write/review loop pattern
 //! - `supervised()` — pre-built supervised iteration pattern
 
-use gemini_adk_fluent::prelude::*;
+use gemini_adk_fluent_rs::prelude::*;
 
 fn main() {
     println!("=== 06: Loop Agent (*) ===\n");
