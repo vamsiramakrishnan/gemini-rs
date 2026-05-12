@@ -1,11 +1,11 @@
 # ADK Web UI
 
 `gemini-adk-web-rs` is the interactive development environment for building and debugging Gemini Live agents.
-It runs a single Axum server at `http://localhost:3000` that hosts all demo apps and a shared DevTools panel.
+It runs a single Axum server at `http://localhost:25125` that hosts all demo apps and a shared DevTools panel.
 
 ```bash
 cargo run -p gemini-adk-web-rs
-# → http://127.0.0.1:3000
+# → http://127.0.0.1:25125
 ```
 
 ---
@@ -57,7 +57,7 @@ The `index.html` landing page showcases the SDK before a user starts a session.
 
 | Section | Description |
 |---------|-------------|
-| **Hero** | Animated gradient orbs, headline, CTA buttons, live stats counters (crates, examples, namespaces) |
+| **Hero** | Launch actions, run command, runtime preview, live stats counters (apps, layers, namespaces, recipes) |
 | **Architecture diagram** | Three-layer crate stack (L0/L1/L2) with the three-lane processor (Fast/Control/Telemetry) |
 | **Operator algebra** | Interactive showcase of S·C·T·P·M·A operators with syntax-highlighted composition examples |
 | **Pipeline visualization** | Animated flow diagram of the `>>`, `\|`, `*`, `/` agent combinators |
@@ -97,7 +97,7 @@ Open DevTools by clicking the `</>` button in the top-right corner of any app.
 | **Eval** | Evaluation results when the session runs an `EvalSuite` — scores per criterion |
 | **Event Inspector** | Raw `SessionEvent` stream with JSON expansion for any event |
 | **Trace** | OpenTelemetry-style span timeline, copy-as-OTLP button, trace ID badge |
-| **Cookbook** | Filterable cookbook browser (same data as the landing page gallery) |
+| **Cookbook** | App-specific source path, run command, features, prompts to try, and inspection checklist |
 
 ### Telemetry Integration
 

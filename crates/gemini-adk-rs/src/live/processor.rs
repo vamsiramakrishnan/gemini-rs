@@ -265,6 +265,9 @@ pub(crate) fn spawn_telemetry_lane(
                                 SessionEvent::AudioData(data) => {
                                     telemetry.record_audio_out(data.len());
                                 }
+                                SessionEvent::TextDelta(_) => {
+                                    telemetry.record_text_out();
+                                }
                                 SessionEvent::VoiceActivityEnd => {
                                     telemetry.record_vad_end();
                                 }
@@ -856,7 +859,9 @@ mod tests {
             ) -> Result<(), gemini_genai_rs::session::SessionError> {
                 Ok(())
             }
-            async fn signal_activity_end(&self) -> Result<(), gemini_genai_rs::session::SessionError> {
+            async fn signal_activity_end(
+                &self,
+            ) -> Result<(), gemini_genai_rs::session::SessionError> {
                 Ok(())
             }
             async fn disconnect(&self) -> Result<(), gemini_genai_rs::session::SessionError> {

@@ -2,14 +2,19 @@
 
 use std::sync::Arc;
 
-use gemini_genai_rs::prelude::{FunctionResponse, SessionEvent, SessionPhase};
+use gemini_genai_rs::prelude::{FunctionResponse, SessionEvent, SessionPhase, VadEvent};
 use gemini_genai_rs::session::{SessionError, SessionHandle, SessionWriter};
+use parking_lot::Mutex;
 use serde::de::DeserializeOwned;
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
 use crate::state::State;
 
+use super::context_writer::PendingContext;
+use super::effect_executor::LiveEffectExecutor;
+use super::input_vad::{BackendInputVad, BackendVadSnapshot};
+use super::reactor::{LiveReactor, ReactorEvent, VoiceRuntimeState};
 use super::telemetry::SessionTelemetry;
 
 /// Handle for interacting with a running Live session.
@@ -32,6 +37,10 @@ pub struct LiveHandle {
     state: State,
     telemetry: Arc<SessionTelemetry>,
     event_tx: broadcast::Sender<super::events::LiveEvent>,
+    pending_context: Option<Arc<PendingContext>>,
+    reactor: Arc<LiveReactor>,
+    effect_executor: LiveEffectExecutor,
+    input_vad: Arc<Mutex<BackendInputVad>>,
 }
 
 impl LiveHandle {
@@ -43,7 +52,15 @@ impl LiveHandle {
         state: State,
         telemetry: Arc<SessionTelemetry>,
         event_tx: broadcast::Sender<super::events::LiveEvent>,
+        pending_context: Option<Arc<PendingContext>>,
     ) -> Self {
+        let reactor = Arc::new(LiveReactor::voice_defaults());
+        let effect_executor = LiveEffectExecutor::new(
+            Arc::new(session.clone()),
+            pending_context.clone(),
+            event_tx.clone(),
+        );
+
         Self {
             session,
             writer,
@@ -52,6 +69,10 @@ impl LiveHandle {
             state,
             telemetry,
             event_tx,
+            pending_context,
+            reactor,
+            effect_executor,
+            input_vad: Arc::new(Mutex::new(BackendInputVad::default())),
         }
     }
 
@@ -60,7 +81,22 @@ impl LiveHandle {
     /// When deferred context delivery is enabled, any pending model-role
     /// context turns are flushed to the wire before the audio frame.
     pub async fn send_audio(&self, data: Vec<u8>) -> Result<(), SessionError> {
-        self.writer.send_audio(data).await
+        let vad_events = {
+            let mut input_vad = self.input_vad.lock();
+            input_vad.process_pcm_bytes(&data)
+        };
+
+        if vad_events.contains(&VadEvent::SpeechStart) {
+            self.user_speech_started().await?;
+        }
+
+        self.writer.send_audio(data).await?;
+
+        if vad_events.contains(&VadEvent::SpeechEnd) {
+            self.user_speech_ended().await?;
+        }
+
+        Ok(())
     }
 
     /// Send a text message.
@@ -68,6 +104,7 @@ impl LiveHandle {
     /// When deferred context delivery is enabled, any pending model-role
     /// context turns are flushed to the wire before the text message.
     pub async fn send_text(&self, text: impl Into<String>) -> Result<(), SessionError> {
+        self.telemetry.record_text_send();
         self.writer.send_text(text.into()).await
     }
 
@@ -93,6 +130,63 @@ impl LiveHandle {
         responses: Vec<FunctionResponse>,
     ) -> Result<(), SessionError> {
         self.session.send_tool_response(responses).await
+    }
+
+    /// Notify the runtime that client-side playback has drained.
+    ///
+    /// Voice UIs should call this only when it is safe for the model to speak,
+    /// for example after browser speaker playback has drained and the user is
+    /// not actively speaking. User audio/text sends intentionally flush context
+    /// only and leave the prompt armed.
+    pub async fn playback_drained(&self) -> Result<(), SessionError> {
+        let prompt_pending = self
+            .pending_context
+            .as_ref()
+            .is_some_and(|pending| pending.has_prompt());
+        let reactions = self
+            .reactor
+            .react(&ReactorEvent::PlaybackDrained { prompt_pending });
+        self.effect_executor.execute_reactions(reactions).await
+    }
+
+    /// Notify the runtime that client-side user speech has started.
+    ///
+    /// This is the barge-in edge for voice clients: pending model prompts are
+    /// cancelled before they can race with user audio, while queued context is
+    /// kept so the next user send can still carry it.
+    pub async fn user_speech_started(&self) -> Result<(), SessionError> {
+        let reactions = self.reactor.react(&ReactorEvent::UserSpeechStarted);
+        self.effect_executor.execute_reactions(reactions).await
+    }
+
+    /// Notify the runtime that client-side user speech has ended.
+    pub async fn user_speech_ended(&self) -> Result<(), SessionError> {
+        let prompt_pending = self
+            .pending_context
+            .as_ref()
+            .is_some_and(|pending| pending.has_prompt());
+        let reactions = self
+            .reactor
+            .react(&ReactorEvent::UserSpeechEnded { prompt_pending });
+        self.effect_executor.execute_reactions(reactions).await
+    }
+
+    /// Snapshot the reactor-owned voice runtime state.
+    pub fn voice_state(&self) -> VoiceRuntimeState {
+        self.reactor.voice_state()
+    }
+
+    /// Snapshot backend input VAD state.
+    pub fn input_vad_state(&self) -> BackendVadSnapshot {
+        self.input_vad.lock().snapshot()
+    }
+
+    /// Flush deferred context and any pending model prompt.
+    ///
+    /// Prefer [`Self::playback_drained`] for voice clients. This compatibility
+    /// method routes through the same reactor/effect executor path.
+    pub async fn flush_deferred_prompt(&self) -> Result<(), SessionError> {
+        self.playback_drained().await
     }
 
     /// Get the user-facing session writer.

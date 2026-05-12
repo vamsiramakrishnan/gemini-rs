@@ -81,15 +81,34 @@ impl PendingContext {
     ///
     /// After this call, the buffer is empty and the prompt flag is cleared.
     pub fn drain(&self) -> (Vec<Content>, bool) {
+        let contents = self.drain_context();
+        let prompt = self.take_prompt();
+        (contents, prompt)
+    }
+
+    /// Drain only context turns, leaving any pending prompt armed.
+    pub fn drain_context(&self) -> Vec<Content> {
         let contents = {
             let mut buf = self.buffer.lock();
             std::mem::take(&mut *buf)
         };
-        let prompt = {
-            let mut p = self.prompt.lock();
-            std::mem::replace(&mut *p, false)
-        };
-        (contents, prompt)
+        contents
+    }
+
+    /// Take and clear the pending prompt flag without touching queued context.
+    pub fn take_prompt(&self) -> bool {
+        let mut p = self.prompt.lock();
+        std::mem::replace(&mut *p, false)
+    }
+
+    /// Clear any armed prompt without touching queued context.
+    pub fn clear_prompt(&self) {
+        *self.prompt.lock() = false;
+    }
+
+    /// Return whether a prompt is currently armed.
+    pub fn has_prompt(&self) -> bool {
+        *self.prompt.lock()
     }
 
     /// Check if the buffer is empty (no pending context or prompt).
@@ -139,17 +158,14 @@ impl DeferredWriter {
         Self { inner, pending }
     }
 
-    /// Flush any pending context to the wire.
+    /// Flush any pending context to the wire without triggering a model prompt.
     ///
-    /// Sends all queued context turns as a single `send_client_content` call,
-    /// then sends a prompt frame if one was requested.
-    async fn flush(&self) -> Result<(), SessionError> {
-        let (contents, prompt) = self.pending.drain();
+    /// User sends (audio/text/video) use this context-only flush so queued
+    /// phase prompts cannot make the model speak while the user is speaking.
+    async fn flush_context(&self) -> Result<(), SessionError> {
+        let contents = self.pending.drain_context();
         if !contents.is_empty() {
             self.inner.send_client_content(contents, false).await?;
-        }
-        if prompt {
-            self.inner.send_client_content(vec![], true).await?;
         }
         Ok(())
     }
@@ -163,12 +179,12 @@ impl DeferredWriter {
 #[async_trait]
 impl SessionWriter for DeferredWriter {
     async fn send_audio(&self, data: Vec<u8>) -> Result<(), SessionError> {
-        self.flush().await?;
+        self.flush_context().await?;
         self.inner.send_audio(data).await
     }
 
     async fn send_text(&self, text: String) -> Result<(), SessionError> {
-        self.flush().await?;
+        self.flush_context().await?;
         self.inner.send_text(text).await
     }
 
@@ -191,7 +207,7 @@ impl SessionWriter for DeferredWriter {
     }
 
     async fn send_video(&self, jpeg_data: Vec<u8>) -> Result<(), SessionError> {
-        self.flush().await?;
+        self.flush_context().await?;
         self.inner.send_video(jpeg_data).await
     }
 
@@ -210,7 +226,7 @@ impl SessionWriter for DeferredWriter {
 
     async fn disconnect(&self) -> Result<(), SessionError> {
         // Flush any remaining context before disconnecting so it's not lost.
-        let _ = self.flush().await;
+        let _ = self.flush_context().await;
         self.inner.disconnect().await
     }
 }
@@ -386,7 +402,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn deferred_writer_flushes_prompt_after_context() {
+    async fn deferred_writer_keeps_prompt_pending_on_user_audio() {
         let inner = Arc::new(CountingWriter::new());
         let pending = Arc::new(PendingContext::new());
         let writer = DeferredWriter::new(inner.clone(), pending.clone());
@@ -396,9 +412,12 @@ mod tests {
 
         writer.send_audio(vec![0u8; 100]).await.unwrap();
 
-        // 1 client_content for context + 1 for prompt + 1 audio
-        assert_eq!(inner.client_content_count.load(Ordering::SeqCst), 2);
+        // User audio only flushes context. Prompt remains armed until an
+        // explicit idle/playback-drained flush.
+        assert_eq!(inner.client_content_count.load(Ordering::SeqCst), 1);
         assert_eq!(inner.audio_count.load(Ordering::SeqCst), 1);
+        assert!(pending.is_empty() == false);
+        assert!(pending.take_prompt());
     }
 
     #[tokio::test]

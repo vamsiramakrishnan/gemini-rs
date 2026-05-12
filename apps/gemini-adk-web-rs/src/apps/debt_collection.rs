@@ -11,9 +11,9 @@ use std::sync::LazyLock;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
-use gemini_adk_rs::llm::{BaseLlm, GeminiLlm, GeminiLlmParams};
-use gemini_adk_rs::state::StateKey;
 use gemini_adk_fluent_rs::prelude::*;
+use gemini_adk_rs::live::Phase;
+use gemini_adk_rs::state::StateKey;
 
 use gemini_genai_rs::session::SessionEvent;
 
@@ -33,6 +33,7 @@ const DISCLOSURE_GIVEN: StateKey<bool> = StateKey::new("disclosure_given");
 const CEASE_DESIST: StateKey<bool> = StateKey::new("cease_desist_requested");
 const PAYMENT_PROCESSED: StateKey<bool> = StateKey::new("payment_processed");
 const WILLINGNESS: StateKey<f64> = StateKey::new("willingness_to_pay");
+const ACCOUNT_LOADED: StateKey<bool> = StateKey::new("account_loaded");
 
 // Suppress unused-constant warnings — these serve as documentation for
 // the typed state contract and will be used when the codebase migrates
@@ -43,6 +44,7 @@ const _: () = {
     _ = CEASE_DESIST;
     _ = PAYMENT_PROCESSED;
     _ = WILLINGNESS;
+    _ = ACCOUNT_LOADED;
 };
 
 // ---------------------------------------------------------------------------
@@ -65,8 +67,8 @@ Ask for full name, date of birth, and last four digits of SSN. \
 Use verify_identity to confirm. Be patient; explain it's for their protection.";
 
 const INFORM_DEBT_INSTRUCTION: &str = "\
-Use lookup_account to retrieve account details. \
-State creditor, balance, and days past due. \
+State only the loaded account facts from context: creditor, balance, and days past due. \
+Do not substitute, invent, or use example debt facts. \
 Inform them of their right to dispute within 30 days. \
 If they dispute, a validation notice will be sent and collection stops.";
 
@@ -167,6 +169,9 @@ fn collection_context(s: &State) -> String {
     let payment_processed: bool = s.get("payment_processed").unwrap_or(false);
     if acknowledged {
         ctx.push("Debt acknowledged.".into());
+    }
+    if Phase::is_presented(s, "debt_details") {
+        ctx.push("Debt details have been presented to the debtor.".into());
     }
     if let Some(i) = &intent {
         let label = match i.as_str() {
@@ -293,8 +298,57 @@ static DATE_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2},?\s+\d{4}\b|\b\d{1,2}/\d{1,2}/\d{2,4}\b|\b\d{4}-\d{2}-\d{2}\b").unwrap()
 });
 static DISCLOSURE_ACK_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b(?:yes|yeah|I understand|I acknowledge|got it|okay|ok|sure)\b").unwrap()
+    Regex::new(
+        r"(?i)\b(?:yes|yeah|yep|correct|I understand|I acknowledge|I agree|got it|okay|ok|sure|that makes sense|makes sense)\b",
+    )
+    .unwrap()
 });
+
+static DISCLOSURE_REJECTION_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?i)\b(?:no|nope|don't understand|do not understand|not understand|what.*understand|why.*calling|confused|explain)\b",
+    )
+    .unwrap()
+});
+
+fn user_transcript_text(text: &str) -> String {
+    let mut segments = Vec::new();
+    let mut rest = text;
+
+    while let Some(start) = rest.find("[User]") {
+        let after_user = &rest[start + "[User]".len()..];
+        let next_user = after_user.find("[User]");
+        let next_agent = after_user.find("[Agent]");
+        let end = match (next_user, next_agent) {
+            (Some(u), Some(a)) => u.min(a),
+            (Some(u), None) => u,
+            (None, Some(a)) => a,
+            (None, None) => after_user.len(),
+        };
+        let segment = after_user[..end].trim();
+        if !segment.is_empty() {
+            segments.push(segment);
+        }
+        rest = &after_user[end..];
+    }
+
+    segments.join(" ")
+}
+
+fn is_disclosure_acknowledgment(text: &str) -> bool {
+    let user_text = user_transcript_text(text);
+    let candidate = if user_text.is_empty() {
+        text.trim()
+    } else {
+        user_text.as_str()
+    };
+
+    if candidate.contains('?') || DISCLOSURE_REJECTION_RE.is_match(candidate) {
+        return false;
+    }
+
+    DISCLOSURE_ACK_RE.is_match(candidate)
+}
 
 fn extract_structured(text: &str, existing: &HashMap<String, Value>) -> HashMap<String, Value> {
     let mut extracted = HashMap::new();
@@ -318,11 +372,7 @@ fn extract_structured(text: &str, existing: &HashMap<String, Value>) -> HashMap<
     }
 
     if !existing.contains_key("disclosure_given") {
-        let lower = text.to_lowercase();
-        if (lower.contains("understand") || lower.contains("acknowledge"))
-            && DISCLOSURE_ACK_RE.is_match(text)
-            || (DISCLOSURE_ACK_RE.is_match(text) && existing.is_empty())
-        {
+        if is_disclosure_acknowledgment(text) {
             extracted.insert("disclosure_given".into(), json!(true));
         }
     }
@@ -517,7 +567,11 @@ fn execute_tool(name: &str, args: &Value) -> Value {
                 .unwrap_or("unknown");
             let details = args.get("details").and_then(|v| v.as_str()).unwrap_or("");
             info!("Compliance event: {event_type} — {details}");
-            json!({"logged": true, "event_id": format!("EVT-{event_type}")})
+            json!({
+                "logged": true,
+                "event_id": format!("EVT-{event_type}"),
+                "event_type": event_type,
+            })
         }
         _ => json!({"error": format!("Unknown tool: {name}")}),
     }
@@ -553,6 +607,89 @@ fn redact_pii(value: &Value) -> Value {
         obj.remove("address");
     }
     redacted
+}
+
+fn promote_tool_response_state(name: &str, response: &Value, state: &State) {
+    match name {
+        "verify_identity" => {
+            if response
+                .get("verified")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+            {
+                state.set("identity_verified", true);
+            }
+        }
+        "lookup_account" => {
+            let Some(obj) = response.as_object() else {
+                return;
+            };
+
+            if let Some(value) = obj.get("debtor_name") {
+                state.set("debtor_name", value.clone());
+            }
+            if let Some(value) = obj.get("creditor") {
+                state.set("creditor", value.clone());
+            }
+            if let Some(value) = obj.get("balance") {
+                state.set("balance", value.clone());
+            }
+            if let Some(value) = obj.get("days_past_due") {
+                state.set("days_past_due", value.clone());
+            }
+            if let Some(value) = obj.get("account_id") {
+                state.set("account_id", value.clone());
+            }
+
+            let has_required_facts = obj.contains_key("creditor")
+                && obj.contains_key("balance")
+                && obj.contains_key("days_past_due");
+            if has_required_facts {
+                state.set("account_loaded", true);
+            }
+        }
+        "process_payment" => {
+            if response.get("status").and_then(|v| v.as_str()) == Some("processed") {
+                state.set("payment_processed", true);
+            }
+        }
+        "log_compliance_event" => {
+            if response.get("logged").and_then(|v| v.as_bool()) != Some(true) {
+                return;
+            }
+            let event_type = response
+                .get("event_type")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+
+            match event_type {
+                "disclosure_given" | "mini_miranda_acknowledged" => {
+                    state.set("disclosure_given", true);
+                }
+                "identity_verified" => {
+                    state.set("identity_verified", true);
+                }
+                "debt_acknowledged" => {
+                    if Phase::is_presented(state, "debt_details") {
+                        state.set("debt_acknowledged", true);
+                    }
+                }
+                "debt_disputed" => {
+                    if Phase::is_presented(state, "debt_details") {
+                        state.set("negotiation_intent", "dispute");
+                    }
+                }
+                "cease_desist" => {
+                    state.set("cease_desist_requested", true);
+                }
+                "payment_processed" => {
+                    state.set("payment_processed", true);
+                }
+                _ => {}
+            }
+        }
+        _ => {}
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -599,11 +736,8 @@ impl DemoApp for DebtCollection {
     ) -> Result<(), AppError> {
         info!("DebtCollection session starting");
 
-        // Create GeminiLlm for LLM extraction
-        let llm: Arc<dyn BaseLlm> = Arc::new(GeminiLlm::new(GeminiLlmParams {
-            model: Some("gemini-3.1-flash-lite-preview".to_string()),
-            ..Default::default()
-        }));
+        // Create GeminiLlm for LLM extraction (configured via GEMINI_EXTRACTION_* env vars)
+        let llm = super::build_extraction_llm();
 
         // Create RegexExtractor for debt_fields
         let extractor = Arc::new(RegexExtractor::new("debt_fields", 10, |text, existing| {
@@ -662,7 +796,7 @@ impl DemoApp for DebtCollection {
             .run(self, &mut rx, |live, start| {
                 let voice = resolve_voice(start.voice.as_deref());
 
-                live.model(GeminiModel::Gemini2_0FlashLive)
+                live.model(super::live_model())
                     .voice(voice)
                     .instruction(
                         start
@@ -679,7 +813,7 @@ impl DemoApp for DebtCollection {
                     // --- Regex extractor ---
                     .extractor(extractor)
                     // --- LLM extraction (windowed, min 5 words to skip "uh huh" / "ok") ---
-                    .extract_turns_triggered::<DebtorState>(
+                    .extract_turns_configured::<DebtorState>(
                         llm,
                         "Extract from the debt collection conversation: the debtor's emotional state \
                          (calm/cooperative/frustrated/angry), willingness to pay (0.0-1.0), \
@@ -687,6 +821,17 @@ impl DemoApp for DebtCollection {
                          whether they requested cease-and-desist, and whether they acknowledged the debt.",
                         5,
                         ExtractionTrigger::Interval(2),
+                        |extractor| {
+                            extractor.with_promotions(vec![
+                                FieldPromotion::overwrite("emotional_state"),
+                                FieldPromotion::overwrite("willingness_to_pay"),
+                                FieldPromotion::true_only("cease_desist_requested"),
+                                FieldPromotion::true_only("debt_acknowledged")
+                                    .after_presented("debt_details"),
+                                FieldPromotion::non_empty("negotiation_intent")
+                                    .after_presented("debt_details"),
+                            ])
+                        },
                     )
                     // --- on_extraction_error: log failures (concurrent — fire-and-forget) ---
                     .on_extraction_error_concurrent(|name, err| async move {
@@ -706,19 +851,7 @@ impl DemoApp for DebtCollection {
                     .before_tool_response(move |responses, state| {
                         async move {
                             responses.into_iter().map(|mut r| {
-                                match r.name.as_str() {
-                                    "verify_identity" => {
-                                        if r.response.get("verified").and_then(|v| v.as_bool()).unwrap_or(false) {
-                                            state.set("identity_verified", true);
-                                        }
-                                    }
-                                    "process_payment" => {
-                                        if r.response.get("status").and_then(|v| v.as_str()) == Some("processed") {
-                                            state.set("payment_processed", true);
-                                        }
-                                    }
-                                    _ => {}
-                                }
+                                promote_tool_response_state(&r.name, &r.response, &state);
                                 r.response = redact_pii(&r.response);
                                 r
                             }).collect()
@@ -781,6 +914,7 @@ impl DemoApp for DebtCollection {
                     // Phase 1: Disclosure (Mini-Miranda)
                     .phase("disclosure")
                         .instruction(DISCLOSURE_INSTRUCTION)
+                        .tools(vec!["log_compliance_event".into()])
                         .needs(&["disclosure_given"])
                         .prompt_on_enter(true)
                         .transition_with("verify_identity", S::is_true("disclosure_given"), "when disclosure has been given")
@@ -789,6 +923,7 @@ impl DemoApp for DebtCollection {
                     // Phase 2: Verify Identity
                     .phase("verify_identity")
                         .instruction(VERIFY_IDENTITY_INSTRUCTION)
+                        .tools(vec!["verify_identity".into(), "log_compliance_event".into()])
                         .needs(&["identity_verified"])
                         .guard(S::is_true("disclosure_given"))
                         .transition_with("inform_debt", S::is_true("identity_verified"), "when identity is verified")
@@ -801,22 +936,49 @@ impl DemoApp for DebtCollection {
                     // Phase 3: Inform Debt
                     .phase("inform_debt")
                         .instruction(INFORM_DEBT_INSTRUCTION)
+                        .tools(vec!["lookup_account".into(), "log_compliance_event".into()])
                         .needs(&["debt_acknowledged"])
+                        .requires(&["account_loaded", "creditor", "balance", "days_past_due"])
+                        .prepare(
+                            "load_account",
+                            &["account_loaded", "creditor", "balance", "days_past_due"],
+                            |state, _writer| async move {
+                                let result = execute_tool("lookup_account", &json!({"account_id": "default"}));
+                                promote_tool_response_state("lookup_account", &result, &state);
+                            },
+                        )
+                        .presents(&["debt_details"])
+                        .clear_on_enter(&["debt_acknowledged", "negotiation_intent"])
                         .guard(S::is_true("identity_verified"))
-                        .transition_with("negotiate", S::is_true("debt_acknowledged"), "when debt is acknowledged")
+                        .transition_after_presented(
+                            "negotiate",
+                            "debt_details",
+                            "debt_acknowledged",
+                            "when debt has been presented and acknowledged",
+                        )
                         .transition_with("close", |s| {
                             S::is_true("cease_desist_requested")(s) || S::eq("negotiation_intent", "dispute")(s)
                         }, "when debtor disputes or requests cease and desist")
                         .enter_prompt_fn(|s, _| {
                             let name: String = s.get("debtor_name").unwrap_or_else(|| "the caller".into());
-                            format!("{name}'s identity is verified. I'll now inform them about the debt.")
+                            let creditor: String = s.get("creditor").unwrap_or_else(|| "the creditor on file".into());
+                            let balance = s
+                                .get::<f64>("balance")
+                                .map(|b| format!("${b:.2}"))
+                                .unwrap_or_else(|| "the loaded balance".into());
+                            let days = s
+                                .get::<u32>("days_past_due")
+                                .map(|d| format!("{d} days past due"))
+                                .unwrap_or_else(|| "past due".into());
+                            format!("Say this to {name} now: \"This call is regarding a debt with {creditor} for a balance of {balance}, which is {days}. You have the right to dispute this debt within 30 days. Do you understand?\"")
                         })
                         .done()
                     // Phase 4: Negotiate
                     .phase("negotiate")
                         .instruction(NEGOTIATE_INSTRUCTION)
+                        .tools(vec!["calculate_payment_plan".into(), "log_compliance_event".into()])
                         .needs(&["negotiation_intent", "willingness_to_pay"])
-                        .guard(S::is_true("debt_acknowledged"))
+                        .guard(|s| Phase::is_presented(s, "debt_details") && S::is_true("debt_acknowledged")(s))
                         .transition_with("arrange_payment", S::one_of("negotiation_intent", &["full_pay", "partial_pay"]), "when debtor agrees to full or partial payment")
                         .transition_with("close", |s| {
                             S::is_true("cease_desist_requested")(s) || S::eq("negotiation_intent", "refuse")(s)
@@ -832,6 +994,7 @@ impl DemoApp for DebtCollection {
                     // Phase 5: Arrange Payment
                     .phase("arrange_payment")
                         .instruction(ARRANGE_PAYMENT_INSTRUCTION)
+                        .tools(vec!["process_payment".into(), "log_compliance_event".into()])
                         .needs(&["payment_processed"])
                         .guard(S::one_of("negotiation_intent", &["full_pay", "partial_pay"]))
                         .transition_with("confirm", S::is_true("payment_processed"), "when payment is processed")
@@ -845,6 +1008,7 @@ impl DemoApp for DebtCollection {
                     // Phase 6: Confirm
                     .phase("confirm")
                         .instruction(CONFIRM_INSTRUCTION)
+                        .tools(vec!["log_compliance_event".into()])
                         .guard(S::is_true("payment_processed"))
                         .transition_with("close", |_s| {
                             true
@@ -857,6 +1021,7 @@ impl DemoApp for DebtCollection {
                     // Phase 7: Close
                     .phase("close")
                         .instruction(CLOSE_INSTRUCTION)
+                        .tools(vec!["log_compliance_event".into()])
                         .terminal()
                         .enter_prompt_fn(|state, _tw| {
                             if S::is_true("cease_desist_requested")(state) {
@@ -1062,6 +1227,22 @@ mod tests {
     }
 
     #[test]
+    fn lookup_account_promotes_authoritative_state() {
+        let state = State::new();
+        let result = execute_tool("lookup_account", &json!({"account_id": "78234561"}));
+
+        promote_tool_response_state("lookup_account", &result, &state);
+
+        assert_eq!(state.get::<bool>("account_loaded"), Some(true));
+        assert_eq!(
+            state.get::<String>("creditor"),
+            Some("Acme Medical Group".to_string())
+        );
+        assert_eq!(state.get::<f64>("balance"), Some(4250.0));
+        assert_eq!(state.get::<u32>("days_past_due"), Some(127));
+    }
+
+    #[test]
     fn verify_identity_success() {
         let result = execute_tool(
             "verify_identity",
@@ -1109,6 +1290,37 @@ mod tests {
             &json!({"event_type": "disclosure_given", "details": "Mini-Miranda delivered"}),
         );
         assert_eq!(result["logged"], true);
+        assert_eq!(result["event_type"], "disclosure_given");
+    }
+
+    #[test]
+    fn compliance_disclosure_event_promotes_phase_state() {
+        let state = State::new();
+        let result = execute_tool(
+            "log_compliance_event",
+            &json!({"event_type": "disclosure_given", "details": "Mini-Miranda acknowledged"}),
+        );
+
+        promote_tool_response_state("log_compliance_event", &result, &state);
+
+        assert_eq!(state.get::<bool>("disclosure_given"), Some(true));
+    }
+
+    #[test]
+    fn compliance_debt_dispute_promotes_negotiation_intent() {
+        let state = State::new();
+        state.set(Phase::presented_key("debt_details"), true);
+        let result = execute_tool(
+            "log_compliance_event",
+            &json!({"event_type": "debt_disputed", "details": "Debtor disputes debt"}),
+        );
+
+        promote_tool_response_state("log_compliance_event", &result, &state);
+
+        assert_eq!(
+            state.get::<String>("negotiation_intent"),
+            Some("dispute".to_string())
+        );
     }
 
     #[test]
@@ -1185,6 +1397,30 @@ mod tests {
         let state = HashMap::new();
         let result = extract_structured("Yes, I understand the disclosure", &state);
         assert_eq!(result.get("disclosure_given"), Some(&json!(true)));
+    }
+
+    #[test]
+    fn extract_disclosure_rejects_confusion() {
+        let state = HashMap::new();
+        let result = extract_structured("No, I don't understand. Why are you calling me?", &state);
+        assert!(!result.contains_key("disclosure_given"));
+    }
+
+    #[test]
+    fn extract_disclosure_rejects_understand_question() {
+        let state = HashMap::new();
+        let result = extract_structured("But, what exactly should I understand?", &state);
+        assert!(!result.contains_key("disclosure_given"));
+    }
+
+    #[test]
+    fn extract_disclosure_uses_user_transcript_only() {
+        let state = HashMap::new();
+        let result = extract_structured(
+            "[Agent] Does that make sense? [User] But what exactly should I understand?",
+            &state,
+        );
+        assert!(!result.contains_key("disclosure_given"));
     }
 
     // -- Computed state --

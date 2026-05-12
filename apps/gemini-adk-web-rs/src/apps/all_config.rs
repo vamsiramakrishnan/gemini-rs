@@ -268,6 +268,7 @@ impl DemoApp for AllConfig {
         // 6. Signal browser.
         bridge.send_connected();
         bridge.send_meta(self);
+        let _ = tx.send(crate::bridge::voice_runtime_message(&handle));
 
         // 7. Send active configuration to the client.
         let _ = tx.send(ServerMessage::StateUpdate {
@@ -288,11 +289,20 @@ impl DemoApp for AllConfig {
             match msg {
                 ClientMessage::Audio { data } if is_audio => {
                     if let Ok(pcm_bytes) = b64.decode(&data) {
+                        let was_speaking = handle.voice_state().user_speaking;
                         if let Err(e) = handle.send_audio(pcm_bytes).await {
                             warn!("Failed to send audio: {e}");
                             let _ = tx.send(ServerMessage::Error {
                                 message: e.to_string(),
                             });
+                        } else {
+                            let is_speaking = handle.voice_state().user_speaking;
+                            if is_speaking && !was_speaking {
+                                let _ = tx.send(ServerMessage::VoiceActivityStart);
+                            } else if !is_speaking && was_speaking {
+                                let _ = tx.send(ServerMessage::VoiceActivityEnd);
+                            }
+                            let _ = tx.send(crate::bridge::voice_runtime_message(&handle));
                         }
                     }
                 }
@@ -302,6 +312,36 @@ impl DemoApp for AllConfig {
                         let _ = tx.send(ServerMessage::Error {
                             message: e.to_string(),
                         });
+                    }
+                }
+                ClientMessage::PlaybackDrained => {
+                    if let Err(e) = handle.playback_drained().await {
+                        warn!("Failed to handle playback drained: {e}");
+                        let _ = tx.send(ServerMessage::Error {
+                            message: e.to_string(),
+                        });
+                    } else {
+                        let _ = tx.send(crate::bridge::voice_runtime_message(&handle));
+                    }
+                }
+                ClientMessage::UserSpeechStarted => {
+                    if let Err(e) = handle.user_speech_started().await {
+                        warn!("Failed to handle user speech start: {e}");
+                        let _ = tx.send(ServerMessage::Error {
+                            message: e.to_string(),
+                        });
+                    } else {
+                        let _ = tx.send(crate::bridge::voice_runtime_message(&handle));
+                    }
+                }
+                ClientMessage::UserSpeechEnded => {
+                    if let Err(e) = handle.user_speech_ended().await {
+                        warn!("Failed to handle user speech end: {e}");
+                        let _ = tx.send(ServerMessage::Error {
+                            message: e.to_string(),
+                        });
+                    } else {
+                        let _ = tx.send(crate::bridge::voice_runtime_message(&handle));
                     }
                 }
                 ClientMessage::Stop => {

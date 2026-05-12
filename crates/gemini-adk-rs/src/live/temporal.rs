@@ -383,7 +383,10 @@ mod tests {
 
     #[async_trait::async_trait]
     impl SessionWriter for MockWriter {
-        async fn send_audio(&self, _: Vec<u8>) -> Result<(), gemini_genai_rs::session::SessionError> {
+        async fn send_audio(
+            &self,
+            _: Vec<u8>,
+        ) -> Result<(), gemini_genai_rs::session::SessionError> {
             Ok(())
         }
         async fn send_text(&self, _: String) -> Result<(), gemini_genai_rs::session::SessionError> {
@@ -402,7 +405,10 @@ mod tests {
         ) -> Result<(), gemini_genai_rs::session::SessionError> {
             Ok(())
         }
-        async fn send_video(&self, _: Vec<u8>) -> Result<(), gemini_genai_rs::session::SessionError> {
+        async fn send_video(
+            &self,
+            _: Vec<u8>,
+        ) -> Result<(), gemini_genai_rs::session::SessionError> {
             Ok(())
         }
         async fn update_instruction(
@@ -411,7 +417,9 @@ mod tests {
         ) -> Result<(), gemini_genai_rs::session::SessionError> {
             Ok(())
         }
-        async fn signal_activity_start(&self) -> Result<(), gemini_genai_rs::session::SessionError> {
+        async fn signal_activity_start(
+            &self,
+        ) -> Result<(), gemini_genai_rs::session::SessionError> {
             Ok(())
         }
         async fn signal_activity_end(&self) -> Result<(), gemini_genai_rs::session::SessionError> {

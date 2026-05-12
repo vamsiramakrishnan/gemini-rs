@@ -24,8 +24,8 @@ use std::sync::Arc;
 use serde_json::Value;
 
 use gemini_adk_rs::live::{
-    BoxFuture, InstructionModifier, Phase, PhaseInstruction, TranscriptWindow, Transition,
-    WatchPredicate, Watcher,
+    BoxFuture, InstructionModifier, Phase, PhaseInstruction, PhasePreparation, TranscriptWindow,
+    Transition, WatchPredicate, Watcher,
 };
 use gemini_adk_rs::State;
 use gemini_genai_rs::prelude::Content;
@@ -145,6 +145,10 @@ pub struct PhaseBuilder {
     on_enter_context_fn:
         Option<Arc<dyn Fn(&State, &TranscriptWindow) -> Option<Vec<Content>> + Send + Sync>>,
     needs: Vec<String>,
+    requires: Vec<String>,
+    preparations: Vec<PhasePreparation>,
+    presents: Vec<String>,
+    clear_on_enter: Vec<String>,
 }
 
 impl PhaseBuilder {
@@ -163,6 +167,10 @@ impl PhaseBuilder {
             prompt_on_enter_flag: false,
             on_enter_context_fn: None,
             needs: Vec::new(),
+            requires: Vec::new(),
+            preparations: Vec::new(),
+            presents: Vec::new(),
+            clear_on_enter: Vec::new(),
         }
     }
 
@@ -184,6 +192,63 @@ impl PhaseBuilder {
     /// ```
     pub fn needs(mut self, keys: &[&str]) -> Self {
         self.needs = keys.iter().map(|k| k.to_string()).collect();
+        self
+    }
+
+    /// Declare state keys that must exist before this phase can be entered.
+    ///
+    /// This is a hard phase-machine gate, unlike [`needs`](Self::needs), which
+    /// is only conversational guidance. Use `requires` for authoritative facts
+    /// that must be produced by tools, callbacks, retrieval, or other runtime
+    /// mechanisms before the model can operate in the phase.
+    ///
+    /// ```ignore
+    /// .phase("quote_price")
+    ///     .requires(&["catalog_item_loaded", "price"])
+    ///     .instruction("Quote only the loaded catalog price.")
+    ///     .done()
+    /// ```
+    pub fn requires(mut self, keys: &[&str]) -> Self {
+        self.requires = keys.iter().map(|k| k.to_string()).collect();
+        self
+    }
+
+    /// Add a preparation effect that runs before this phase is entered when
+    /// its required state is missing.
+    ///
+    /// Preparations are run by the phase lifecycle after an outbound transition
+    /// guard selects this phase, but before the phase is committed. If the
+    /// preparation does not satisfy this phase's `requires`, the transition
+    /// remains blocked.
+    pub fn prepare<F, Fut>(mut self, name: impl Into<String>, produces: &[&str], f: F) -> Self
+    where
+        F: Fn(State, Arc<dyn SessionWriter>) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        self.preparations.push(PhasePreparation {
+            name: name.into(),
+            produces: produces.iter().map(|k| k.to_string()).collect(),
+            run: Arc::new(move |s, w| Box::pin(f(s, w))),
+        });
+        self
+    }
+
+    /// Declare semantic concepts presented to the user by this phase.
+    ///
+    /// On phase entry the runtime writes `presented:<concept> = true`. Use this
+    /// with [`transition_after_presented`](Self::transition_after_presented) to
+    /// avoid accepting stale acknowledgements from earlier phases.
+    pub fn presents(mut self, concepts: &[&str]) -> Self {
+        self.presents = concepts.iter().map(|c| c.to_string()).collect();
+        self
+    }
+
+    /// Clear state keys on phase entry.
+    ///
+    /// This is useful for removing stale acknowledgements or intents that were
+    /// extracted before the current phase's concept was presented.
+    pub fn clear_on_enter(mut self, keys: &[&str]) -> Self {
+        self.clear_on_enter = keys.iter().map(|k| k.to_string()).collect();
         self
     }
 
@@ -267,6 +332,26 @@ impl PhaseBuilder {
             description: Some(description.into()),
         });
         self
+    }
+
+    /// Add a transition that only fires after a semantic concept was presented
+    /// and an acknowledgement key is true.
+    pub fn transition_after_presented(
+        self,
+        target: &str,
+        concept: &str,
+        ack_key: &str,
+        description: impl Into<String>,
+    ) -> Self {
+        let concept = concept.to_string();
+        let ack_key = ack_key.to_string();
+        self.transition_with(
+            target,
+            move |state| {
+                Phase::is_presented(state, &concept) && state.get::<bool>(&ack_key).unwrap_or(false)
+            },
+            description,
+        )
     }
 
     /// Mark this phase as terminal (no outbound transitions will be evaluated).
@@ -423,6 +508,10 @@ impl PhaseBuilder {
             prompt_on_enter: prompt,
             on_enter_context: self.on_enter_context_fn,
             needs: self.needs,
+            requires: self.requires,
+            preparations: self.preparations,
+            presents: self.presents,
+            clear_on_enter: self.clear_on_enter,
         };
         self.live.add_phase(phase);
         self.live

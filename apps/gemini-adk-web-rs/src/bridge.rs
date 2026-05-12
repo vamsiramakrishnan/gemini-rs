@@ -11,6 +11,30 @@ use gemini_adk_fluent_rs::prelude::*;
 
 use crate::app::{AppInfo, DemoApp, ServerMessage, WsSender};
 
+pub(crate) fn voice_runtime_message(handle: &LiveHandle) -> ServerMessage {
+    let state = handle.voice_state();
+    let vad = handle.input_vad_state();
+    ServerMessage::VoiceRuntimeState {
+        user_speaking: state.user_speaking,
+        playback_active: state.playback_active,
+        prompt_pending: state.prompt_pending,
+        prompt_epoch: state.prompt_epoch,
+        last_barge_in_ms_ago: state
+            .last_barge_in_at
+            .map(|t| t.elapsed().as_millis() as u64),
+        last_playback_drained_ms_ago: state
+            .last_playback_drained_at
+            .map(|t| t.elapsed().as_millis() as u64),
+        vad_backend: vad.backend.to_string(),
+        vad_state: vad.state.to_string(),
+        vad_speaking: vad.speaking,
+        vad_probability: vad.last_probability,
+        vad_frame_duration_ms: vad.frame_duration_ms,
+        vad_frames_processed: vad.frames_processed,
+        vad_last_transition_ms_ago: vad.last_transition_ms_ago,
+    }
+}
+
 /// Bridge between a demo app's WebSocket sender and a Live session builder.
 ///
 /// Call `bridge.wire_live(builder)` to attach all standard callbacks,
@@ -28,6 +52,10 @@ impl SessionBridge {
     /// Send the Connected message to the browser.
     pub fn send_connected(&self) {
         let _ = self.tx.send(ServerMessage::Connected);
+    }
+
+    fn send_voice_runtime_state(&self, handle: &LiveHandle) {
+        let _ = self.tx.send(voice_runtime_message(handle));
     }
 
     /// Send appMeta message so devtools can configure tabs.
@@ -143,18 +171,22 @@ impl SessionBridge {
 
                 // Emit per-turn metrics when the turn count advances
                 if let Some(obj) = stats.as_object() {
-                    let turn_count = obj.get("turn_count").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let turn_count = obj
+                        .get("turn_count")
+                        .or_else(|| obj.get("response_count"))
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
                     if turn_count > prev_turn_count {
                         let latency_ms = obj
-                            .get("last_latency_ms")
+                            .get("last_response_latency_ms")
                             .and_then(|v| v.as_u64())
                             .unwrap_or(0) as u32;
                         let prompt_tokens = obj
-                            .get("prompt_tokens")
+                            .get("prompt_token_count")
                             .and_then(|v| v.as_u64())
                             .unwrap_or(0) as u32;
                         let response_tokens = obj
-                            .get("response_tokens")
+                            .get("response_token_count")
                             .and_then(|v| v.as_u64())
                             .unwrap_or(0) as u32;
                         let _ = tx.send(ServerMessage::TurnMetrics {
@@ -194,11 +226,20 @@ impl SessionBridge {
             match msg {
                 ClientMessage::Audio { data } => {
                     if let Ok(pcm_bytes) = b64.decode(&data) {
+                        let was_speaking = handle.voice_state().user_speaking;
                         if let Err(e) = handle.send_audio(pcm_bytes).await {
                             warn!("Failed to send audio: {e}");
                             let _ = self.tx.send(ServerMessage::Error {
                                 message: e.to_string(),
                             });
+                        } else {
+                            let is_speaking = handle.voice_state().user_speaking;
+                            if is_speaking && !was_speaking {
+                                let _ = self.tx.send(ServerMessage::VoiceActivityStart);
+                            } else if !is_speaking && was_speaking {
+                                let _ = self.tx.send(ServerMessage::VoiceActivityEnd);
+                            }
+                            self.send_voice_runtime_state(handle);
                         }
                     }
                 }
@@ -208,6 +249,36 @@ impl SessionBridge {
                         let _ = self.tx.send(ServerMessage::Error {
                             message: e.to_string(),
                         });
+                    }
+                }
+                ClientMessage::PlaybackDrained => {
+                    if let Err(e) = handle.playback_drained().await {
+                        warn!("Failed to handle playback drained: {e}");
+                        let _ = self.tx.send(ServerMessage::Error {
+                            message: e.to_string(),
+                        });
+                    } else {
+                        self.send_voice_runtime_state(handle);
+                    }
+                }
+                ClientMessage::UserSpeechStarted => {
+                    if let Err(e) = handle.user_speech_started().await {
+                        warn!("Failed to handle user speech start: {e}");
+                        let _ = self.tx.send(ServerMessage::Error {
+                            message: e.to_string(),
+                        });
+                    } else {
+                        self.send_voice_runtime_state(handle);
+                    }
+                }
+                ClientMessage::UserSpeechEnded => {
+                    if let Err(e) = handle.user_speech_ended().await {
+                        warn!("Failed to handle user speech end: {e}");
+                        let _ = self.tx.send(ServerMessage::Error {
+                            message: e.to_string(),
+                        });
+                    } else {
+                        self.send_voice_runtime_state(handle);
                     }
                 }
                 ClientMessage::Stop => {
@@ -269,18 +340,25 @@ impl SessionBridge {
         // 5. Signal browser
         self.send_connected();
         self.send_meta(app);
+        send_phase_snapshot(&self.tx, &handle);
+        self.send_voice_runtime_state(&handle);
 
         // 6. Spawn event forwarder (LiveEvent -> ServerMessage -> WebSocket)
         let mut events = handle.events();
         let tx = self.tx.clone();
+        let event_handle = handle.clone();
         let event_task = tokio::spawn(async move {
             loop {
                 match events.recv().await {
                     Ok(event) => {
+                        let phase_changed = matches!(event, LiveEvent::PhaseTransition { .. });
                         if let Some(msg) = map_event(event) {
                             if tx.send(msg).is_err() {
                                 break;
                             }
+                        }
+                        if phase_changed {
+                            send_phase_snapshot(&tx, &event_handle);
                         }
                     }
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
@@ -311,11 +389,20 @@ impl SessionBridge {
             match msg {
                 ClientMessage::Audio { data } => {
                     if let Ok(pcm_bytes) = b64.decode(&data) {
+                        let was_speaking = handle.voice_state().user_speaking;
                         if let Err(e) = handle.send_audio(pcm_bytes).await {
                             warn!("Failed to send audio: {e}");
                             let _ = self.tx.send(ServerMessage::Error {
                                 message: e.to_string(),
                             });
+                        } else {
+                            let is_speaking = handle.voice_state().user_speaking;
+                            if is_speaking && !was_speaking {
+                                let _ = self.tx.send(ServerMessage::VoiceActivityStart);
+                            } else if !is_speaking && was_speaking {
+                                let _ = self.tx.send(ServerMessage::VoiceActivityEnd);
+                            }
+                            self.send_voice_runtime_state(handle);
                         }
                     }
                 }
@@ -327,6 +414,36 @@ impl SessionBridge {
                         });
                     }
                 }
+                ClientMessage::PlaybackDrained => {
+                    if let Err(e) = handle.playback_drained().await {
+                        warn!("Failed to handle playback drained: {e}");
+                        let _ = self.tx.send(ServerMessage::Error {
+                            message: e.to_string(),
+                        });
+                    } else {
+                        self.send_voice_runtime_state(handle);
+                    }
+                }
+                ClientMessage::UserSpeechStarted => {
+                    if let Err(e) = handle.user_speech_started().await {
+                        warn!("Failed to handle user speech start: {e}");
+                        let _ = self.tx.send(ServerMessage::Error {
+                            message: e.to_string(),
+                        });
+                    } else {
+                        self.send_voice_runtime_state(handle);
+                    }
+                }
+                ClientMessage::UserSpeechEnded => {
+                    if let Err(e) = handle.user_speech_ended().await {
+                        warn!("Failed to handle user speech end: {e}");
+                        let _ = self.tx.send(ServerMessage::Error {
+                            message: e.to_string(),
+                        });
+                    } else {
+                        self.send_voice_runtime_state(handle);
+                    }
+                }
                 ClientMessage::Stop => {
                     let _ = handle.disconnect().await;
                     break;
@@ -335,6 +452,24 @@ impl SessionBridge {
             }
         }
     }
+}
+
+fn send_phase_snapshot(tx: &WsSender, handle: &LiveHandle) {
+    if let Some(phase) = handle.state().get::<String>("session:phase") {
+        let _ = tx.send(ServerMessage::StateUpdate {
+            key: "session:phase".into(),
+            value: serde_json::json!(phase),
+        });
+    }
+
+    let needs = handle
+        .state()
+        .get::<Vec<String>>("session:phase_needs")
+        .unwrap_or_default();
+    let _ = tx.send(ServerMessage::StateUpdate {
+        key: "session:phase_needs".into(),
+        value: serde_json::json!(needs),
+    });
 }
 
 /// Map a LiveEvent to a ServerMessage for the demo WebSocket transport.
@@ -361,6 +496,21 @@ fn map_event(event: LiveEvent) -> Option<ServerMessage> {
             Some(ServerMessage::StateUpdate { key: name, value })
         }
         LiveEvent::ExtractionError { .. } => None,
+        LiveEvent::StatePromotion {
+            extractor,
+            field,
+            state_key,
+            accepted,
+            reason,
+            value,
+        } => Some(ServerMessage::StatePromotionEvent {
+            extractor,
+            field,
+            state_key,
+            accepted,
+            reason,
+            value,
+        }),
         LiveEvent::PhaseTransition { from, to, reason } => {
             Some(ServerMessage::PhaseChange { from, to, reason })
         }

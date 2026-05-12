@@ -73,10 +73,10 @@ Full-system compositions covering real-world architectures and every SDK capabil
 
 ## ADK Web UI (`gemini-adk-web-rs`)
 
-The interactive multi-app web UI runs at `http://localhost:3000` and bundles all demo apps into a single server with a shared DevTools panel.
+The interactive multi-app web UI runs at `http://localhost:25125` and bundles all demo apps into a single server with a shared DevTools panel.
 
 ```bash
-cargo run -p gemini-adk-web-rs    # http://127.0.0.1:3000
+cargo run -p gemini-adk-web-rs    # http://127.0.0.1:25125
 ```
 
 For more on the web UI design system, dark/light mode, and DevTools panels, see the [ADK Web UI](./web-ui.md) guide.

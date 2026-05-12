@@ -22,12 +22,14 @@
           </svg>
         </div>
         <span class="logo-text">gemini-rs</span>
-        <span class="logo-version">v0.4</span>
+        <span class="logo-version">v0.6</span>
       </a>
       <div class="nav-links">
+        <a href="#quickstart" class="nav-link">Quickstart</a>
         <a href="#architecture" class="nav-link">Architecture</a>
         <a href="#demos" class="nav-link">Demos</a>
         <a href="#cookbook" class="nav-link">Cookbook</a>
+        <a href="https://github.com/vamsiramakrishnan/gemini-rs/tree/main/docs" class="nav-link" target="_blank" rel="noopener">Docs</a>
         <a href="https://github.com/vamsiramakrishnan/gemini-rs" class="nav-link nav-link-github" target="_blank" rel="noopener">
           <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
         </a>
@@ -42,31 +44,52 @@
   <!-- ═══ Hero Section ════════════════════════════════════════ -->
   <section class="hero">
     <div class="hero-bg">
-      <div class="hero-orb hero-orb-1"></div>
-      <div class="hero-orb hero-orb-2"></div>
-      <div class="hero-orb hero-orb-3"></div>
       <div class="hero-grid"></div>
     </div>
     <div class="container hero-content">
-      <div class="hero-badge">
-        <span class="badge badge-brand">Built with Rust</span>
-      </div>
-      <h1 class="hero-title">
-        Build Multimodal AI Agents<br>
-        <span class="gradient-text">with Gemini Live</span>
-      </h1>
-      <p class="hero-subtitle">
-        A three-layer Rust SDK for the Gemini Multimodal Live API.
-        Voice, text, tool calling, state machines, guardrails &mdash;
-        all with a fluent, composable builder API.
-      </p>
+      <div class="hero-layout">
+        <div class="hero-copy">
+          <div class="hero-badge">
+            <span class="badge badge-brand">Gemini Live agents in Rust</span>
+            <span class="hero-badge-note">ADK runtime · voice · tools · state</span>
+          </div>
+          <h1 class="hero-title">
+            Build, inspect, and harden realtime agents.
+          </h1>
+          <p class="hero-subtitle">
+            `gemini-rs` gives you a three-layer SDK for Gemini Live: low-level wire control,
+            an ADK runtime with phase/state mechanisms, and a fluent layer that reads like
+            the agent you are building.
+          </p>
+          <div class="hero-actions">
+            <a class="hero-btn primary" href="#demos">Open live demos</a>
+            <a class="hero-btn secondary" href="#quickstart">Run locally</a>
+            <a class="hero-btn secondary" href="https://github.com/vamsiramakrishnan/gemini-rs" target="_blank" rel="noopener">GitHub</a>
+          </div>
+          <div class="hero-command" aria-label="Run command">
+            <span>$</span><code>cargo run -p gemini-adk-web-rs</code><small>http://localhost:25125</small>
+          </div>
+        </div>
 
-      <!-- Stats row -->
-      <div class="hero-stats stagger" id="hero-stats">
-        <div class="stat-pill"><span class="stat-value gradient-text" id="stat-apps">0</span><span class="stat-label">Live Demos</span></div>
-        <div class="stat-pill"><span class="stat-value gradient-text" id="stat-layers">3</span><span class="stat-label">Crate Layers</span></div>
-        <div class="stat-pill"><span class="stat-value gradient-text" id="stat-namespaces">8</span><span class="stat-label">Namespaces</span></div>
-        <div class="stat-pill"><span class="stat-value gradient-text" id="stat-cookbook">30</span><span class="stat-label">Cookbook Recipes</span></div>
+        <div class="hero-console" aria-label="SDK runtime preview">
+          <div class="console-top">
+            <span class="console-dot ok"></span>
+            <span class="console-title">live session</span>
+            <span class="console-status">connected</span>
+          </div>
+          <div class="console-flow">
+            <div class="console-row"><span class="console-key">phase</span><span>disclosure → verify_identity</span></div>
+            <div class="console-row"><span class="console-key">turn</span><span>playback drained · user idle</span></div>
+            <div class="console-row"><span class="console-key">tool</span><span>verify_identity allowed in phase</span></div>
+            <div class="console-row"><span class="console-key">state</span><span>debt_acknowledged blocked until presented</span></div>
+          </div>
+          <div class="console-metrics">
+            <div><strong id="stat-apps">0</strong><span>apps</span></div>
+            <div><strong id="stat-layers">3</strong><span>layers</span></div>
+            <div><strong id="stat-namespaces">8</strong><span>namespaces</span></div>
+            <div><strong id="stat-cookbook">30</strong><span>recipes</span></div>
+          </div>
+        </div>
       </div>
 
       <!-- Pipeline visualization -->
@@ -101,6 +124,33 @@
           </div>
           <span class="pipeline-label">Deploy</span>
           <span class="pipeline-sub">Web / CLI / Cloud</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ Quickstart ══════════════════════════════════════════ -->
+  <section class="section section-quickstart" id="quickstart">
+    <div class="container">
+      <div class="quickstart-grid">
+        <div class="quickstart-copy">
+          <span class="section-overline">Setup</span>
+          <h2 class="section-title">Run the full dev environment in minutes</h2>
+          <p class="section-desc">Use Google AI for the fastest path, or Vertex AI when you need project-scoped enterprise auth. The same web UI and examples work with both.</p>
+        </div>
+        <div class="quickstart-steps">
+          <div class="quickstep">
+            <span class="quickstep-num">1</span>
+            <div><strong>Install system deps</strong><code>sudo apt-get install -y pkg-config libssl-dev libasound2-dev build-essential</code></div>
+          </div>
+          <div class="quickstep">
+            <span class="quickstep-num">2</span>
+            <div><strong>Add credentials</strong><code>echo 'GOOGLE_API_KEY=your-key' &gt; .env</code></div>
+          </div>
+          <div class="quickstep">
+            <span class="quickstep-num">3</span>
+            <div><strong>Launch</strong><code>cargo run -p gemini-adk-web-rs</code></div>
+          </div>
         </div>
       </div>
     </div>
@@ -327,7 +377,19 @@
       <div class="section-header">
         <span class="section-overline">Learn</span>
         <h2 class="section-title">Cookbook</h2>
-        <p class="section-desc">30 progressive examples from basics to production patterns</p>
+        <p class="section-desc">30 progressive recipes plus interactive web apps. Start with a single agent, then move into phase machines, extraction, voice, and production telemetry.</p>
+      </div>
+
+      <div class="cookbook-actions">
+        <a class="cookbook-action" href="https://github.com/vamsiramakrishnan/gemini-rs/tree/main/examples/cookbook" target="_blank" rel="noopener">
+          <strong>Browse source</strong><span>Every recipe is a runnable Rust example.</span>
+        </a>
+        <a class="cookbook-action" href="/app/debt-collection">
+          <strong>Open advanced voice flow</strong><span>Inspect phases, tools, state promotion, and metrics live.</span>
+        </a>
+        <a class="cookbook-action" href="https://github.com/vamsiramakrishnan/gemini-rs/blob/main/docs/src/setup-and-running.md" target="_blank" rel="noopener">
+          <strong>Read setup guide</strong><span>Auth, ports, audio prerequisites, and troubleshooting.</span>
+        </a>
       </div>
 
       <div class="cookbook-tiers">
@@ -342,16 +404,16 @@
             </div>
           </div>
           <div class="tier-recipes">
-            <div class="recipe">Simple Agent</div>
-            <div class="recipe">Agent with Tools</div>
-            <div class="recipe">Callbacks</div>
-            <div class="recipe">Sequential Pipeline</div>
-            <div class="recipe">Parallel Fan-out</div>
-            <div class="recipe">Loop Agent</div>
-            <div class="recipe">State Transforms</div>
-            <div class="recipe">Prompt Composition</div>
-            <div class="recipe">Tool Composition</div>
-            <div class="recipe">Guards</div>
+            <div class="recipe"><span>01</span> Simple Agent</div>
+            <div class="recipe"><span>02</span> Agent with Tools</div>
+            <div class="recipe"><span>03</span> Callbacks</div>
+            <div class="recipe"><span>04</span> Sequential Pipeline</div>
+            <div class="recipe"><span>05</span> Parallel Fan-out</div>
+            <div class="recipe"><span>06</span> Loop Agent</div>
+            <div class="recipe"><span>07</span> State Transforms</div>
+            <div class="recipe"><span>08</span> Prompt Composition</div>
+            <div class="recipe"><span>09</span> Tool Composition</div>
+            <div class="recipe"><span>10</span> Guards</div>
           </div>
         </div>
 
@@ -366,16 +428,16 @@
             </div>
           </div>
           <div class="tier-recipes">
-            <div class="recipe">Route Branching</div>
-            <div class="recipe">Fallback Chain</div>
-            <div class="recipe">Review Loop</div>
-            <div class="recipe">Map Over</div>
-            <div class="recipe">Middleware Stack</div>
-            <div class="recipe">Context Engineering</div>
-            <div class="recipe">Evaluation Suite</div>
-            <div class="recipe">Artifacts</div>
-            <div class="recipe">Agent-as-Tool</div>
-            <div class="recipe">Supervised</div>
+            <div class="recipe"><span>11</span> Route Branching</div>
+            <div class="recipe"><span>12</span> Fallback Chain</div>
+            <div class="recipe"><span>13</span> Review Loop</div>
+            <div class="recipe"><span>14</span> Map Over</div>
+            <div class="recipe"><span>15</span> Middleware Stack</div>
+            <div class="recipe"><span>16</span> Context Engineering</div>
+            <div class="recipe"><span>17</span> Evaluation Suite</div>
+            <div class="recipe"><span>18</span> Artifacts</div>
+            <div class="recipe"><span>19</span> Agent-as-Tool</div>
+            <div class="recipe"><span>20</span> Supervised</div>
           </div>
         </div>
 
@@ -390,16 +452,16 @@
             </div>
           </div>
           <div class="tier-recipes">
-            <div class="recipe">Full Algebra</div>
-            <div class="recipe">Contract Testing</div>
-            <div class="recipe">Deep Research</div>
-            <div class="recipe">Customer Support</div>
-            <div class="recipe">Code Review</div>
-            <div class="recipe">Dispatch &amp; Join</div>
-            <div class="recipe">Race &amp; Timeout</div>
-            <div class="recipe">A2A Remote</div>
-            <div class="recipe">Live Voice</div>
-            <div class="recipe">Production Pipeline</div>
+            <div class="recipe"><span>21</span> Full Algebra</div>
+            <div class="recipe"><span>22</span> Contract Testing</div>
+            <div class="recipe"><span>23</span> Deep Research</div>
+            <div class="recipe"><span>24</span> Customer Support</div>
+            <div class="recipe"><span>25</span> Code Review</div>
+            <div class="recipe"><span>26</span> Dispatch &amp; Join</div>
+            <div class="recipe"><span>27</span> Race &amp; Timeout</div>
+            <div class="recipe"><span>28</span> A2A Remote</div>
+            <div class="recipe"><span>29</span> Live Voice</div>
+            <div class="recipe"><span>30</span> Production Pipeline</div>
           </div>
         </div>
       </div>
@@ -588,7 +650,7 @@
             html += '<a href="/app/' + urlName + '" class="demo-card">';
             html += '<div class="demo-card-header"><span class="demo-card-name">' + escapeHtml(app.name) + '</span>';
             html += '<span class="demo-card-pip pip-' + tierKey + '">' + meta.label + '</span>';
-            html += '<svg class="demo-card-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></a>';
+            html += '<svg class="demo-card-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>';
             html += '</div>';
             html += '<div class="demo-card-desc">' + escapeHtml(app.description) + '</div>';
 

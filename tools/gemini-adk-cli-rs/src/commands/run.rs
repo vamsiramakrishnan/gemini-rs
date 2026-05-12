@@ -1,6 +1,6 @@
 use crate::manifest;
-use gemini_adk_rs::{BaseLlm, GeminiLlm, GeminiLlmParams};
 use gemini_adk_fluent_rs::prelude::*;
+use gemini_adk_rs::{BaseLlm, GeminiLlm, GeminiLlmParams};
 use std::io::{self, BufRead, Write};
 use std::sync::Arc;
 

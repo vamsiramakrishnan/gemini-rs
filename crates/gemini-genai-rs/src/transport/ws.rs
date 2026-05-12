@@ -147,7 +147,12 @@ impl Transport for TungsteniteTransport {
                 Some(Ok(Message::Text(t))) => return Ok(Some(t.into_bytes())),
                 // IMPORTANT: Vertex AI sends JSON in Binary frames.
                 Some(Ok(Message::Binary(b))) => return Ok(Some(b)),
-                Some(Ok(Message::Close(_))) => return Ok(None),
+                Some(Ok(Message::Close(frame))) => {
+                    if let Some(ref cf) = frame {
+                        tracing::warn!(code = %cf.code, reason = %cf.reason, "WebSocket close frame received");
+                    }
+                    return Ok(None);
+                }
                 // Ping/Pong are handled internally by tungstenite; skip them.
                 Some(Ok(Message::Ping(_) | Message::Pong(_))) => continue,
                 // Frame is a low-level variant; skip.

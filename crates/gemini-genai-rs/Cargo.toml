@@ -11,9 +11,10 @@ documentation = "https://docs.rs/gemini-genai-rs"
 readme = "README.md"
 
 [features]
-default = ["live", "vad", "tracing-support"]
+default = ["live", "vad", "vad-wavekat", "tracing-support"]
 live = []
 vad = []
+vad-wavekat = ["vad", "dep:wavekat-vad"]
 opus = ["dep:audiopus"]
 http = ["dep:reqwest"]
 generate = ["http"]
@@ -80,6 +81,7 @@ reqwest = { version = "0.12", features = ["json"], optional = true }
 
 # Audio (optional)
 audiopus = { version = "0.3.0-rc.0", optional = true }
+wavekat-vad = { version = "0.1.14", optional = true, default-features = true }
 
 # Tracing (optional)
 tracing = { version = "0.1", optional = true }

@@ -34,57 +34,66 @@ var CookbookPanel = (function () {
     },
     'restaurant': {
       description: 'Multi-phase restaurant order assistant. Uses the phase system to guide the conversation through greeting, order-taking, confirmation, and farewell stages.',
-      source: 'apps/adk-web/src/apps/restaurant.rs',
+      source: 'apps/gemini-adk-web-rs/src/apps/restaurant.rs',
       features: ['Phases', 'State Machine', 'Transitions', 'Guards', 'Extractors'],
-      difficulty: 'walk'
+      difficulty: 'walk',
+      inspect: ['Follow the Phases panel as the order advances', 'Watch extracted reservation fields in State', 'Open Timeline for tool call ordering']
     },
     'extractors': {
       description: 'Out-of-band extraction pipeline. Runs a secondary LLM call on each turn to extract structured data (JSON schema) from the conversation without interrupting the main flow.',
-      source: 'apps/adk-web/src/apps/mod.rs',
+      source: 'apps/gemini-adk-web-rs/src/apps/extractors.rs',
       features: ['Extractors', 'Typed Extraction', 'JSON Schema'],
-      difficulty: 'walk'
+      difficulty: 'walk',
+      inspect: ['Compare raw extractor output with promoted state', 'Use Events to inspect extraction JSON', 'Check Metrics for turn latency impact']
     },
     'playbook': {
       description: 'Playbook-driven agent that follows a structured script. Demonstrates dynamic instructions, phase-level tool gating, and context injection steering.',
-      source: 'apps/adk-web/src/apps/mod.rs',
+      source: 'apps/gemini-adk-web-rs/src/apps/playbook.rs',
       features: ['Phases', 'Dynamic Instructions', 'Context Injection'],
-      difficulty: 'walk'
+      difficulty: 'walk',
+      inspect: ['Watch phase instructions change over time', 'Inspect context injection events', 'Track needs in the Phases panel']
     },
     'clinic': {
       description: 'Medical clinic intake assistant. Multi-phase flow with needs-based repair, temporal patterns for detecting confused users, and structured data extraction.',
-      source: 'apps/adk-web/src/apps/clinic.rs',
+      source: 'apps/gemini-adk-web-rs/src/apps/clinic.rs',
       features: ['Phases', 'Repair', 'Temporal Patterns', 'Extractors', 'Needs'],
-      difficulty: 'walk'
+      difficulty: 'walk',
+      inspect: ['Observe repair prompts when required fields are missing', 'Track temporal signals for confusion', 'Inspect scheduling tool results']
     },
     'debt-collection': {
       description: 'Production-grade debt collection agent with compliance guardrails, mandatory disclosures, agent-as-tool for verification, and full audit trail.',
-      source: 'apps/adk-web/src/apps/debt_collection.rs',
-      features: ['Phases', 'Guardrails', 'Agent-as-Tool', 'Watchers', 'Compliance'],
-      difficulty: 'run'
+      source: 'apps/gemini-adk-web-rs/src/apps/debt_collection.rs',
+      features: ['Phases', 'Guardrails', 'Agent-as-Tool', 'Watchers', 'Compliance', 'State Promotion'],
+      difficulty: 'run',
+      inspect: ['Use State provenance to see accepted and blocked promotions', 'Confirm tool calls are gated by phase', 'Watch Metrics for interruptions and audio health']
     },
     'guardrails': {
       description: 'Demonstrates content guardrails and safety filters. Shows how to gate model behavior, block unsafe topics, and enforce output constraints.',
-      source: 'apps/adk-web/src/apps/mod.rs',
+      source: 'apps/gemini-adk-web-rs/src/apps/guardrails.rs',
       features: ['Guardrails', 'Watchers', 'Content Filtering'],
-      difficulty: 'run'
+      difficulty: 'run',
+      inspect: ['Trigger a policy violation and inspect the Timeline', 'Watch State for guardrail counters', 'Open Events for raw violation payloads']
     },
     'support-assistant': {
       description: 'Customer support agent with knowledge base lookup, escalation flow, sentiment tracking, and session persistence for surviving restarts.',
-      source: 'apps/adk-web/src/apps/support.rs',
+      source: 'apps/gemini-adk-web-rs/src/apps/support.rs',
       features: ['Phases', 'Tools', 'Watchers', 'Persistence', 'Temporal Patterns'],
-      difficulty: 'run'
+      difficulty: 'run',
+      inspect: ['Track escalation transitions', 'Inspect sentiment and issue category state', 'Review tool calls in the Timeline']
     },
     'call-screening': {
       description: 'Inbound call screening agent. Identifies caller intent, routes to the right department, and blocks spam -- all in real-time voice.',
-      source: 'apps/adk-web/src/apps/call_screening.rs',
+      source: 'apps/gemini-adk-web-rs/src/apps/call_screening.rs',
       features: ['Voice', 'Phases', 'Extractors', 'Routing', 'Guards'],
-      difficulty: 'run'
+      difficulty: 'run',
+      inspect: ['Watch caller intent extraction', 'Inspect routing decisions', 'Use Metrics to verify audio playback health']
     },
     'all-config': {
       description: 'Kitchen-sink demo exercising every configuration option: phases, extractors, watchers, temporal patterns, repair, steering modes, tool advisory, and persistence.',
-      source: 'apps/adk-web/src/apps/all_config.rs',
+      source: 'apps/gemini-adk-web-rs/src/apps/all_config.rs',
       features: ['Phases', 'Extractors', 'Watchers', 'Temporal Patterns', 'Repair', 'Steering', 'Persistence', 'Tool Advisory'],
-      difficulty: 'run'
+      difficulty: 'run',
+      inspect: ['Change one config option at a time', 'Compare setup events in the Event Inspector', 'Use Metrics and Traces together']
     }
   };
 
@@ -188,6 +197,11 @@ var CookbookPanel = (function () {
     html += '<p class="cookbook-desc">' + U.esc(desc) + '</p>';
     html += '</div>';
 
+    html += '<div class="cookbook-run-card">';
+    html += '<div><span>Run locally</span><code>cargo run -p gemini-adk-web-rs</code></div>';
+    html += '<div><span>Open app</span><code>http://localhost:25125/app/' + U.esc(urlName) + '</code></div>';
+    html += '</div>';
+
     // Features used
     var features = cookbook ? cookbook.features : (info.features || []);
     if (features.length > 0) {
@@ -215,6 +229,20 @@ var CookbookPanel = (function () {
       html += '</div>';
       html += '</div>';
     }
+
+    var inspect = cookbook && cookbook.inspect ? cookbook.inspect : [
+      'Use Timeline for event ordering',
+      'Use State for extracted and computed values',
+      'Use Metrics for latency, audio, and tool-call health'
+    ];
+    html += '<div class="cookbook-section">';
+    html += '<div class="cookbook-section-label">What to inspect</div>';
+    html += '<div class="cookbook-inspect-list">';
+    inspect.forEach(function (item) {
+      html += '<div class="cookbook-inspect-item"><span></span><p>' + U.esc(item) + '</p></div>';
+    });
+    html += '</div>';
+    html += '</div>';
 
     // Tips
     if (info.tips && info.tips.length > 0) {

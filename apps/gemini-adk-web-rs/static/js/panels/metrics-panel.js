@@ -27,6 +27,8 @@ var MetricsPanel = (function () {
     this._traceId = null;
     this._sessionStart = Date.now();
     this._bufferMetrics = null;
+    this._localTurnCount = 0;
+    this._localInterruptions = 0;
   }
 
   MetricsPanel.prototype.create = function (container, scheduler, eventsRef) {
@@ -42,11 +44,11 @@ var MetricsPanel = (function () {
   };
 
   MetricsPanel.prototype.updateTelemetry = function (stats) {
-    this._telemetry = stats;
+    this._telemetry = Object.assign({}, this._telemetry, stats || {});
 
-    var rc = stats.response_count || 0;
-    if (rc > this._lastResponseCount && stats.last_response_latency_ms > 0) {
-      this._turnLatencies.push(stats.last_response_latency_ms);
+    var rc = this._telemetry.response_count || 0;
+    if (rc > this._lastResponseCount && this._telemetry.last_response_latency_ms > 0) {
+      this._turnLatencies.push(this._telemetry.last_response_latency_ms);
       this._lastResponseCount = rc;
     }
 
@@ -59,7 +61,17 @@ var MetricsPanel = (function () {
   };
 
   MetricsPanel.prototype.addTurnLatency = function (ms) {
-    this._turnLatencies.push(ms);
+    if (ms > 0) this._turnLatencies.push(ms);
+    this._scheduler.markDirty('metrics');
+  };
+
+  MetricsPanel.prototype.onTurnComplete = function () {
+    this._localTurnCount += 1;
+    this._scheduler.markDirty('metrics');
+  };
+
+  MetricsPanel.prototype.onInterrupted = function () {
+    this._localInterruptions += 1;
     this._scheduler.markDirty('metrics');
   };
 
@@ -103,6 +115,8 @@ var MetricsPanel = (function () {
     this._traceId = null;
     this._sessionStart = Date.now();
     this._bufferMetrics = null;
+    this._localTurnCount = 0;
+    this._localInterruptions = 0;
     this._container.innerHTML = '<div class="events-empty">No metrics yet</div>';
   };
 
@@ -130,6 +144,8 @@ var MetricsPanel = (function () {
     var minL = Math.round(stats.min_response_latency_ms || 0);
     var maxL = Math.round(stats.max_response_latency_ms || 0);
     var responses = stats.response_count || 0;
+    var turns = Math.max(stats.turn_count || 0, this._localTurnCount || 0);
+    var interruptions = Math.max(stats.interruptions || 0, this._localInterruptions || 0);
     var totalTokens = stats.total_token_count || 0;
     var promptTokens = stats.prompt_token_count || 0;
     var responseTokens = stats.response_token_count || 0;
@@ -143,13 +159,16 @@ var MetricsPanel = (function () {
       : uptimeSec + 's';
 
     // Hero values
-    r.latencyValue.textContent = avg;
-    r.latencySub.textContent = 'last ' + last + 'ms' + (responses > 1 ? '\n' + minL + ' \u2013 ' + maxL + 'ms' : '');
+    r.latencyValue.textContent = responses > 0 ? avg : '-';
+    r.latencyUnit.style.display = responses > 0 ? '' : 'none';
+    r.latencySub.textContent = responses > 0
+      ? 'last ' + last + 'ms' + (responses > 1 ? '\n' + minL + ' \u2013 ' + maxL + 'ms' : '')
+      : 'waiting for first model response';
     r.tokensValue.textContent = totalTokens.toLocaleString();
     r.tokensSub.textContent = promptTokens.toLocaleString() + ' prompt\n' +
       responseTokens.toLocaleString() + ' response\nest. ~$' + cost.toFixed(6);
     r.sessionValue.textContent = uptimeStr;
-    var sessionSubText = responses + ' turns\n' + (stats.interruptions || 0) + ' interruptions';
+    var sessionSubText = turns + ' turns\n' + responses + ' measured responses\n' + interruptions + ' interruptions';
     if (stats.current_phase) sessionSubText += '\nphase: ' + stats.current_phase;
     r.sessionSub.textContent = sessionSubText;
 
@@ -184,18 +203,19 @@ var MetricsPanel = (function () {
     // Audio section
     if (stats.audio_chunks_out > 0 || this._bufferMetrics) {
       r.audioSection.style.display = '';
-      r.audioKB.textContent = (stats.audio_kbytes_out || 0);
-      r.audioKBPS.textContent = (stats.audio_throughput_kbps || 0);
+      r.audioChunks.textContent = (stats.audio_chunks_out || 0).toLocaleString();
+      r.audioKB.textContent = Number(stats.audio_kbytes_out || 0).toLocaleString();
+      r.audioKBPS.textContent = Number(stats.audio_throughput_kbps || 0).toFixed(1);
 
       // Jitter buffer metrics
       if (this._bufferMetrics && r.bufferDepth) {
         var bm = this._bufferMetrics;
         r.bufferStrip.style.display = '';
-        r.bufferDepth.textContent = bm.depthMs + 'ms';
-        r.bufferState.textContent = bm.state;
+        r.bufferDepth.textContent = Number(bm.depthMs || 0).toFixed(1) + 'ms';
+        r.bufferState.textContent = bm.state || 'unknown';
         r.bufferState.className = 'nfr-metric-value nfr-buf-' + bm.state;
-        r.bufferJitter.textContent = bm.jitterMs + 'ms';
-        r.bufferUnderruns.textContent = bm.underruns;
+        r.bufferJitter.textContent = Number(bm.jitterMs || 0).toFixed(1) + 'ms';
+        r.bufferUnderruns.textContent = (bm.underruns || 0).toLocaleString();
       }
     } else {
       r.audioSection.style.display = 'none';
@@ -235,7 +255,7 @@ var MetricsPanel = (function () {
       '<div class="metrics-content">' +
         '<div class="metrics-heroes">' +
           '<div class="metrics-hero"><div class="metrics-hero-label">Latency</div>' +
-            '<div class="metrics-hero-value"><span data-ref="latencyValue"></span><span class="nfr-unit">ms</span></div>' +
+            '<div class="metrics-hero-value"><span data-ref="latencyValue"></span><span class="nfr-unit" data-ref="latencyUnit">ms</span></div>' +
             '<div class="metrics-hero-sub" style="white-space:pre-line" data-ref="latencySub"></div></div>' +
           '<div class="metrics-hero"><div class="metrics-hero-label">Tokens</div>' +
             '<div class="metrics-hero-value"><span data-ref="tokensValue"></span></div>' +
@@ -263,6 +283,7 @@ var MetricsPanel = (function () {
         '<div class="nfr-section" style="display:none" data-ref="audioSection">' +
           '<div class="nfr-section-header"><span class="nfr-section-icon audio"></span><span class="nfr-section-title">Audio</span></div>' +
           '<div class="nfr-metric-strip">' +
+            '<div class="nfr-metric"><span class="nfr-metric-value" data-ref="audioChunks"></span><span class="nfr-metric-label">Chunks Out</span></div>' +
             '<div class="nfr-metric"><span class="nfr-metric-value" data-ref="audioKB"></span><span class="nfr-metric-label">Total Out (KB)</span></div>' +
             '<div class="nfr-metric"><span class="nfr-metric-value" data-ref="audioKBPS"></span><span class="nfr-metric-label">Throughput (KB/s)</span></div>' +
           '</div>' +

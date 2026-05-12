@@ -1,6 +1,6 @@
 use crate::manifest;
-use gemini_adk_rs::{BaseLlm, GeminiLlm, GeminiLlmParams, LlmRequest};
 use gemini_adk_fluent_rs::prelude::*;
+use gemini_adk_rs::{BaseLlm, GeminiLlm, GeminiLlmParams, LlmRequest};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 

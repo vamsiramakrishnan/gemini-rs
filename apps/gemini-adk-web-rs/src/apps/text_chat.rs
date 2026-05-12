@@ -37,14 +37,12 @@ impl DemoApp for TextChat {
         info!("TextChat session starting");
         SessionBridge::new(tx)
             .run(self, &mut rx, |live, start| {
-                live.model(GeminiModel::Gemini2_0FlashLive)
-                    .text_only()
-                    .instruction(
-                        start
-                            .system_instruction
-                            .as_deref()
-                            .unwrap_or("You are a helpful assistant."),
-                    )
+                live.model(super::live_model()).text_only().instruction(
+                    start
+                        .system_instruction
+                        .as_deref()
+                        .unwrap_or("You are a helpful assistant."),
+                )
             })
             .await
     }

@@ -101,6 +101,15 @@ pub enum ServerMessage {
         args: String,
         result: String,
     },
+    /// State promotion decision from an extraction field.
+    StatePromotionEvent {
+        extractor: String,
+        field: String,
+        state_key: String,
+        accepted: bool,
+        reason: String,
+        value: serde_json::Value,
+    },
     /// OTel span lifecycle event bridged from the WebSocketSpanLayer.
     SpanEvent {
         name: String,
@@ -116,6 +125,22 @@ pub enum ServerMessage {
         latency_ms: u32,
         prompt_tokens: u32,
         response_tokens: u32,
+    },
+    /// Voice reactor state snapshot for devtools.
+    VoiceRuntimeState {
+        user_speaking: bool,
+        playback_active: bool,
+        prompt_pending: bool,
+        prompt_epoch: u64,
+        last_barge_in_ms_ago: Option<u64>,
+        last_playback_drained_ms_ago: Option<u64>,
+        vad_backend: String,
+        vad_state: String,
+        vad_speaking: bool,
+        vad_probability: Option<f32>,
+        vad_frame_duration_ms: u32,
+        vad_frames_processed: u64,
+        vad_last_transition_ms_ago: Option<u64>,
     },
 }
 
@@ -137,6 +162,9 @@ pub enum ClientMessage {
     Audio {
         data: String,
     }, // base64
+    PlaybackDrained,
+    UserSpeechStarted,
+    UserSpeechEnded,
     Stop,
 }
 

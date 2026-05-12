@@ -3,12 +3,16 @@
 //! Supports optional delta tracking for transactional state management
 //! and prefix-scoped accessors for namespace isolation.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::marker::PhantomData;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use dashmap::DashMap;
 use serde_json::Value;
+
+const DEFAULT_MUTATION_JOURNAL_CAPACITY: usize = 1024;
 
 /// A compile-time typed state key that eliminates typo bugs and type mismatches.
 ///
@@ -41,6 +45,40 @@ impl<T> StateKey<T> {
     }
 }
 
+/// Where a state mutation came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StateMutationOrigin {
+    /// Regular `State::set` or prefixed state write.
+    Set,
+    /// Direct committed-store write that bypasses delta tracking.
+    SetCommitted,
+    /// Removal of a single key.
+    Remove,
+    /// Removal caused by clearing a prefix.
+    ClearPrefix,
+    /// Delta changes committed into the base state.
+    Commit,
+}
+
+/// A single state mutation recorded in the bounded mutation journal.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StateMutation {
+    /// Monotonic sequence number assigned when the mutation was recorded.
+    pub sequence: u64,
+    /// State key that changed.
+    pub key: String,
+    /// Value before the mutation, or `None` when the key did not exist.
+    pub old: Option<Value>,
+    /// Value after the mutation, or `None` when the key was removed.
+    pub new: Option<Value>,
+    /// Operation that recorded the mutation.
+    pub origin: StateMutationOrigin,
+    /// Wall-clock time at which the mutation was recorded.
+    pub timestamp: SystemTime,
+    /// Whether the mutation was written to a delta-tracked view.
+    pub delta: bool,
+}
+
 /// A concurrent, type-safe state container that agents read from and write to.
 ///
 /// By default, `set()` writes directly to the inner store. When delta tracking
@@ -50,6 +88,9 @@ impl<T> StateKey<T> {
 pub struct State {
     inner: Arc<DashMap<String, Value>>,
     delta: Arc<DashMap<String, Value>>,
+    mutations: Arc<std::sync::Mutex<VecDeque<StateMutation>>>,
+    next_mutation_sequence: Arc<AtomicU64>,
+    mutation_capacity: usize,
     track_delta: bool,
 }
 
@@ -65,6 +106,9 @@ impl State {
         Self {
             inner: Arc::new(DashMap::new()),
             delta: Arc::new(DashMap::new()),
+            mutations: Arc::new(std::sync::Mutex::new(VecDeque::new())),
+            next_mutation_sequence: Arc::new(AtomicU64::new(1)),
+            mutation_capacity: DEFAULT_MUTATION_JOURNAL_CAPACITY,
             track_delta: false,
         }
     }
@@ -75,6 +119,9 @@ impl State {
         State {
             inner: self.inner.clone(),
             delta: Arc::new(DashMap::new()),
+            mutations: self.mutations.clone(),
+            next_mutation_sequence: self.next_mutation_sequence.clone(),
+            mutation_capacity: self.mutation_capacity,
             track_delta: true,
         }
     }
@@ -170,18 +217,24 @@ impl State {
     /// Set a value by key.
     /// When delta tracking is enabled, writes to delta instead of inner.
     pub fn set(&self, key: impl Into<String>, value: impl serde::Serialize) {
+        let key = key.into();
         let v = serde_json::to_value(value).expect("value must be serializable");
+        let old = self.get_raw(&key);
         if self.track_delta {
-            self.delta.insert(key.into(), v);
+            self.delta.insert(key.clone(), v.clone());
+            self.record_mutation(key, old, Some(v), StateMutationOrigin::Set);
         } else {
-            self.inner.insert(key.into(), v);
+            self.inner.insert(key.clone(), v.clone());
+            self.record_mutation(key, old, Some(v), StateMutationOrigin::Set);
         }
     }
 
     /// Set a value directly in the committed store, bypassing delta tracking.
     pub fn set_committed(&self, key: impl Into<String>, value: impl serde::Serialize) {
+        let key = key.into();
         let v = serde_json::to_value(value).expect("value must be serializable");
-        self.inner.insert(key.into(), v);
+        let old = self.inner.insert(key.clone(), v.clone());
+        self.record_mutation(key, old, Some(v), StateMutationOrigin::SetCommitted);
     }
 
     /// Atomically read-modify-write a value.
@@ -215,9 +268,27 @@ impl State {
             // Remove from delta if present, but also check inner
             let from_delta = self.delta.remove(key).map(|(_, v)| v);
             let from_inner = self.inner.remove(key).map(|(_, v)| v);
-            from_delta.or(from_inner)
+            let removed = from_delta.or(from_inner);
+            if let Some(ref old) = removed {
+                self.record_mutation(
+                    key.to_string(),
+                    Some(old.clone()),
+                    None,
+                    StateMutationOrigin::Remove,
+                );
+            }
+            removed
         } else {
-            self.inner.remove(key).map(|(_, v)| v)
+            let removed = self.inner.remove(key).map(|(_, v)| v);
+            if let Some(ref old) = removed {
+                self.record_mutation(
+                    key.to_string(),
+                    Some(old.clone()),
+                    None,
+                    StateMutationOrigin::Remove,
+                );
+            }
+            removed
         }
     }
 
@@ -257,8 +328,7 @@ impl State {
     /// Merge another state into this one (other's values overwrite on conflict).
     pub fn merge(&self, other: &State) {
         for entry in other.inner.iter() {
-            self.inner
-                .insert(entry.key().clone(), entry.value().clone());
+            self.set(entry.key().clone(), entry.value().clone());
         }
     }
 
@@ -266,9 +336,9 @@ impl State {
     pub fn rename(&self, from: &str, to: &str) {
         if let Some(v) = self.remove(from) {
             if self.track_delta {
-                self.delta.insert(to.to_string(), v);
+                self.set(to.to_string(), v);
             } else {
-                self.inner.insert(to.to_string(), v);
+                self.set(to.to_string(), v);
             }
         }
     }
@@ -296,8 +366,16 @@ impl State {
     /// Commit delta changes into the inner store, then clear the delta.
     pub fn commit(&self) {
         for entry in self.delta.iter() {
-            self.inner
-                .insert(entry.key().clone(), entry.value().clone());
+            let key = entry.key().clone();
+            let value = entry.value().clone();
+            let old = self.inner.insert(key.clone(), value.clone());
+            self.record_mutation_with_delta(
+                key,
+                old,
+                Some(value),
+                StateMutationOrigin::Commit,
+                false,
+            );
         }
         self.delta.clear();
     }
@@ -407,7 +485,7 @@ impl State {
     /// Restore state from a HashMap (for persistence/deserialization).
     pub fn from_hashmap(&self, map: std::collections::HashMap<String, serde_json::Value>) {
         for (key, value) in map {
-            self.inner.insert(key, value);
+            self.set_committed(key, value);
         }
     }
 
@@ -420,7 +498,9 @@ impl State {
             .map(|entry| entry.key().clone())
             .collect();
         for key in keys_to_remove {
-            self.inner.remove(&key);
+            if let Some((_, old)) = self.inner.remove(&key) {
+                self.record_mutation(key, Some(old), None, StateMutationOrigin::ClearPrefix);
+            }
         }
         if self.track_delta {
             let delta_keys: Vec<String> = self
@@ -430,9 +510,85 @@ impl State {
                 .map(|entry| entry.key().clone())
                 .collect();
             for key in delta_keys {
-                self.delta.remove(&key);
+                if let Some((_, old)) = self.delta.remove(&key) {
+                    self.record_mutation(key, Some(old), None, StateMutationOrigin::ClearPrefix);
+                }
             }
         }
+    }
+
+    /// Return a snapshot of recent state mutations.
+    pub fn recent_mutations(&self) -> Vec<StateMutation> {
+        self.mutations
+            .lock()
+            .expect("state mutation journal poisoned")
+            .iter()
+            .cloned()
+            .collect()
+    }
+
+    /// Return the current monotonic cursor for the mutation journal.
+    pub fn mutation_cursor(&self) -> u64 {
+        self.next_mutation_sequence.load(Ordering::Relaxed) - 1
+    }
+
+    /// Return mutations appended after a previously captured cursor.
+    pub fn mutations_since(&self, cursor: u64) -> Vec<StateMutation> {
+        let mutations = self
+            .mutations
+            .lock()
+            .expect("state mutation journal poisoned");
+        mutations
+            .iter()
+            .filter(|mutation| mutation.sequence > cursor)
+            .cloned()
+            .collect()
+    }
+
+    /// Drain and return all recorded state mutations.
+    pub fn drain_mutations(&self) -> Vec<StateMutation> {
+        self.mutations
+            .lock()
+            .expect("state mutation journal poisoned")
+            .drain(..)
+            .collect()
+    }
+
+    fn record_mutation(
+        &self,
+        key: String,
+        old: Option<Value>,
+        new: Option<Value>,
+        origin: StateMutationOrigin,
+    ) {
+        self.record_mutation_with_delta(key, old, new, origin, self.track_delta);
+    }
+
+    fn record_mutation_with_delta(
+        &self,
+        key: String,
+        old: Option<Value>,
+        new: Option<Value>,
+        origin: StateMutationOrigin,
+        delta: bool,
+    ) {
+        let mut mutations = self
+            .mutations
+            .lock()
+            .expect("state mutation journal poisoned");
+        if mutations.len() >= self.mutation_capacity {
+            mutations.pop_front();
+        }
+        let sequence = self.next_mutation_sequence.fetch_add(1, Ordering::Relaxed);
+        mutations.push_back(StateMutation {
+            sequence,
+            key,
+            old,
+            new,
+            origin,
+            timestamp: SystemTime::now(),
+            delta,
+        });
     }
 }
 
@@ -685,6 +841,75 @@ mod tests {
         assert!(!tracked.has_delta());
         // Still visible through tracked (reads inner too)
         assert_eq!(tracked.get::<String>("direct"), Some("value".to_string()));
+    }
+
+    #[test]
+    fn mutation_journal_records_set_and_remove() {
+        let state = State::new();
+        state.set("key", "first");
+        state.set("key", "second");
+        state.remove("key");
+
+        let mutations = state.recent_mutations();
+        assert_eq!(mutations.len(), 3);
+        assert_eq!(mutations[0].key, "key");
+        assert_eq!(mutations[0].old, None);
+        assert_eq!(mutations[0].new, Some(serde_json::json!("first")));
+        assert_eq!(mutations[0].origin, StateMutationOrigin::Set);
+
+        assert_eq!(mutations[1].old, Some(serde_json::json!("first")));
+        assert_eq!(mutations[1].new, Some(serde_json::json!("second")));
+
+        assert_eq!(mutations[2].old, Some(serde_json::json!("second")));
+        assert_eq!(mutations[2].new, None);
+        assert_eq!(mutations[2].origin, StateMutationOrigin::Remove);
+    }
+
+    #[test]
+    fn mutation_journal_is_shared_with_delta_tracking() {
+        let state = State::new();
+        state.set("committed", "yes");
+
+        let tracked = state.with_delta_tracking();
+        tracked.set("committed", "maybe");
+        tracked.commit();
+
+        let mutations = state.recent_mutations();
+        assert_eq!(mutations.len(), 3);
+        assert_eq!(mutations[1].key, "committed");
+        assert_eq!(mutations[1].old, Some(serde_json::json!("yes")));
+        assert_eq!(mutations[1].new, Some(serde_json::json!("maybe")));
+        assert_eq!(mutations[1].origin, StateMutationOrigin::Set);
+        assert!(mutations[1].delta);
+
+        assert_eq!(mutations[2].origin, StateMutationOrigin::Commit);
+        assert!(!mutations[2].delta);
+    }
+
+    #[test]
+    fn drain_mutations_clears_journal() {
+        let state = State::new();
+        state.set("a", 1);
+        state.set("b", 2);
+
+        let drained = state.drain_mutations();
+        assert_eq!(drained.len(), 2);
+        assert!(state.recent_mutations().is_empty());
+    }
+
+    #[test]
+    fn mutation_cursor_reads_only_later_changes() {
+        let state = State::new();
+        state.set("before", 1);
+        let cursor = state.mutation_cursor();
+
+        state.set("after", 2);
+        state.remove("before");
+
+        let mutations = state.mutations_since(cursor);
+        assert_eq!(mutations.len(), 2);
+        assert_eq!(mutations[0].key, "after");
+        assert_eq!(mutations[1].key, "before");
     }
 
     #[test]

@@ -401,7 +401,7 @@ impl DemoApp for Playbook {
                 //   flow relies entirely on the LLM's natural conversational
                 //   ability to gather the required info.
                 // =================================================================
-                live.model(GeminiModel::Gemini2_0FlashLive)
+                live.model(super::live_model())
                     .voice(voice)
                     .transcription(true, true)
                     .steering_mode(SteeringMode::ContextInjection)

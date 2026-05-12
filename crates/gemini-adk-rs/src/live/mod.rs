@@ -14,13 +14,16 @@ pub mod computed;
 pub mod context_builder;
 pub mod context_writer;
 pub(crate) mod control_plane;
+pub mod effect_executor;
 pub mod events;
 pub mod extractor;
 pub mod handle;
+pub mod input_vad;
 pub mod needs;
 pub mod persistence;
 pub mod phase;
 pub(crate) mod processor;
+pub mod reactor;
 pub mod session_signals;
 pub mod soft_turn;
 pub mod steering;
@@ -38,14 +41,20 @@ pub use callbacks::{CallbackMode, EventCallbacks};
 pub use computed::{ComputedRegistry, ComputedVar};
 pub use context_builder::ContextBuilder;
 pub use context_writer::{DeferredWriter, PendingContext};
+pub use effect_executor::LiveEffectExecutor;
 pub use events::LiveEvent;
-pub use extractor::{ExtractionTrigger, LlmExtractor, TurnExtractor};
+pub use extractor::{ExtractionTrigger, FieldPromotion, LlmExtractor, MergePolicy, TurnExtractor};
 pub use handle::LiveHandle;
+pub use input_vad::{BackendInputVad, BackendVadSnapshot};
 pub use needs::{NeedsFulfillment, RepairAction, RepairConfig};
 pub use persistence::{FsPersistence, MemoryPersistence, SessionPersistence, SessionSnapshot};
 pub use phase::{
-    InstructionModifier, Phase, PhaseInstruction, PhaseMachine, PhaseTransition, Transition,
-    TransitionResult, TransitionTrigger,
+    InstructionModifier, Phase, PhaseInstruction, PhaseMachine, PhasePreparation, PhaseTransition,
+    Transition, TransitionEvaluation, TransitionResult, TransitionTrigger,
+};
+pub use reactor::{
+    EffectMode, EffectPolicy, LiveEffect, LiveReactor, Reaction, ReactorEvent, ReactorRule,
+    VoiceRuntimeState,
 };
 pub use session_signals::{SessionSignals, SessionType};
 pub use soft_turn::SoftTurnDetector;

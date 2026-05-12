@@ -132,6 +132,8 @@ var EventInspectorPanel = (function () {
 
   EventInspectorPanel.prototype._renderList = function () {
     if (!this._listEl) return;
+    var distanceFromBottom = this._listEl.scrollHeight - this._listEl.scrollTop - this._listEl.clientHeight;
+    var shouldStickToBottom = distanceFromBottom < 48;
     this._listEl.innerHTML = '';
 
     var self = this;
@@ -177,8 +179,9 @@ var EventInspectorPanel = (function () {
       this._listEl.appendChild(row);
     }
 
-    // Auto-scroll to bottom for new events
-    this._listEl.scrollTop = this._listEl.scrollHeight;
+    if (shouldStickToBottom) {
+      this._listEl.scrollTop = this._listEl.scrollHeight;
+    }
   };
 
   EventInspectorPanel.prototype._renderDetail = function (evt) {

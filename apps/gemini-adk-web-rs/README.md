@@ -39,7 +39,23 @@ cargo run -p gemini-adk-web-rs
 just run-web
 ```
 
-Opens at `http://localhost:25125`. The landing page lists all registered agent apps (debt collection, call screening, clinic, restaurant, etc.).
+Opens at `http://localhost:25125`. The landing page lists all registered agent apps, the cookbook path, setup commands, and links into the DevTools-enabled sessions.
+
+## Developer Loop
+
+```bash
+# Compile and run the web UI
+cargo run -p gemini-adk-web-rs
+
+# Run the web app tests
+cargo test -p gemini-adk-web-rs
+
+# Static-check touched browser scripts
+node --check apps/gemini-adk-web-rs/static/js/app.js
+node --check apps/gemini-adk-web-rs/static/js/devtools.js
+```
+
+The server reads `.env` from the repository root. Use either `GOOGLE_API_KEY` for Google AI or `GOOGLE_GENAI_USE_VERTEXAI=TRUE` plus `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION` for Vertex AI.
 
 ## Embedded Agent Apps
 
@@ -74,6 +90,7 @@ The right-side devtools panel includes:
 | **Traces** | Span waterfall / flame chart with zoom, click-to-inspect detail |
 | **Eval** | Evaluation results with pass/fail filtering, per-criterion scores |
 | **Artifacts** | Versioned artifact browser with content preview |
+| **Cookbook** | App-specific source path, run command, features, prompts, and inspection checklist |
 
 ## API Endpoints (Embedded)
 

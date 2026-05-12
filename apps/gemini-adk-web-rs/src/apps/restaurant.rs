@@ -8,9 +8,8 @@ use serde_json::{json, Value};
 use tokio::sync::mpsc;
 use tracing::info;
 
-use gemini_adk_rs::llm::{BaseLlm, GeminiLlm, GeminiLlmParams};
-use gemini_adk_rs::state::StateKey;
 use gemini_adk_fluent_rs::prelude::*;
+use gemini_adk_rs::state::StateKey;
 
 use crate::app::{AppError, ClientMessage, DemoApp, WsSender};
 use crate::bridge::SessionBridge;
@@ -569,11 +568,8 @@ impl DemoApp for Restaurant {
             .run(self, &mut rx, |live, start| {
                 let selected_voice = resolve_voice(start.voice.as_deref());
 
-                // Create GeminiLlm for LLM extraction
-                let llm: Arc<dyn BaseLlm> = Arc::new(GeminiLlm::new(GeminiLlmParams {
-                    model: Some("gemini-3.1-flash-lite-preview".to_string()),
-                    ..Default::default()
-                }));
+                // Create GeminiLlm for LLM extraction (configured via GEMINI_EXTRACTION_* env vars)
+                let llm = super::build_extraction_llm();
 
                 // =================================================================
                 // DESIGN DISSECTION: Why this app is built the way it is

@@ -924,7 +924,7 @@ cargo run -p tool-calling    # http://127.0.0.1:3003
 cargo run -p transcription   # http://127.0.0.1:3004
 
 # 3. Run the multi-app Web UI (all apps + devtools panel)
-cargo run -p gemini-adk-web-rs         # http://127.0.0.1:3000
+cargo run -p gemini-adk-web-rs         # http://127.0.0.1:25125
 ```
 
 ### Standalone Examples
@@ -1136,7 +1136,7 @@ cargo fmt --all -- --check
 ```bash
 cd apps/gemini-adk-web-rs
 GEMINI_API_KEY="your-key" cargo run
-# Open http://localhost:3000
+# Open http://localhost:25125
 ```
 
 ### Generate documentation

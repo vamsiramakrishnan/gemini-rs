@@ -51,7 +51,8 @@ pub fn record_tool_call(function_name: &str, duration_ms: f64) {
 /// Record a VAD event.
 #[cfg(feature = "metrics")]
 pub fn record_vad_event(event: &str) {
-    metrics::counter!("gemini_genai_rs_vad_events_total", "event" => event.to_string()).increment(1);
+    metrics::counter!("gemini_genai_rs_vad_events_total", "event" => event.to_string())
+        .increment(1);
 }
 
 /// Record a reconnection attempt.

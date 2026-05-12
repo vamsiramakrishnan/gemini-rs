@@ -87,10 +87,11 @@ pub mod prelude {
     pub use gemini_adk_rs::error::{AgentError, ToolError};
     pub use gemini_adk_rs::live::{
         CallbackMode, ContextDelivery, DefaultResultFormatter, DeferredWriter, EventCallbacks,
-        ExtractionTrigger, FsPersistence, LiveEvent, LiveHandle, LiveSessionBuilder, LlmExtractor,
-        MemoryPersistence, NeedsFulfillment, PendingContext, RepairAction, RepairConfig,
-        ResultFormatter, SessionPersistence, SessionSnapshot, SoftTurnDetector, SteeringMode,
-        ToolExecutionMode, TranscriptBuffer, TranscriptTurn, TurnExtractor,
+        ExtractionTrigger, FieldPromotion, FsPersistence, LiveEvent, LiveHandle,
+        LiveSessionBuilder, LlmExtractor, MemoryPersistence, MergePolicy, NeedsFulfillment,
+        PendingContext, RepairAction, RepairConfig, ResultFormatter, SessionPersistence,
+        SessionSnapshot, SoftTurnDetector, SteeringMode, ToolExecutionMode, TranscriptBuffer,
+        TranscriptTurn, TurnExtractor,
     };
     pub use gemini_adk_rs::llm::{BaseLlm, GeminiLlm, GeminiLlmParams, LlmRequest, LlmResponse};
     pub use gemini_adk_rs::state::{State, StateKey};

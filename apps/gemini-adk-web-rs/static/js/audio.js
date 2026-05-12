@@ -30,6 +30,8 @@ class AudioManager {
 
     // Jitter buffer metrics callback (set by consumer)
     this.onBufferMetrics = null;
+    this.onPlaybackDrained = null;
+    this._playbackInFlight = false;
   }
 
   // --- Playback ---
@@ -54,6 +56,13 @@ class AudioManager {
         this._playbackNode.port.onmessage = (e) => {
           if (e.data && e.data.metrics && this.onBufferMetrics) {
             this.onBufferMetrics(e.data.metrics);
+          }
+          if (e.data && e.data.drained) {
+            this._maybeNotifyPlaybackDrained(e.data.metrics || { depth: 0, state: 'underrun' });
+            return;
+          }
+          if (e.data && e.data.metrics) {
+            this._maybeNotifyPlaybackDrained(e.data.metrics);
           }
         };
         this._playbackNode.connect(this.playbackCtx.destination);
@@ -81,6 +90,7 @@ class AudioManager {
     const int16 = new Int16Array(bytes.buffer);
 
     if (this._playbackNode) {
+      this._playbackInFlight = true;
       // Worklet path: send PCM16 with generation fence (transfer ownership)
       const copy = new Int16Array(int16);
       this._playbackNode.port.postMessage(
@@ -112,7 +122,9 @@ class AudioManager {
       source.onended = () => {
         const idx = this._activeSources.indexOf(source);
         if (idx !== -1) this._activeSources.splice(idx, 1);
+        this._maybeNotifyPlaybackDrained();
       };
+      this._playbackInFlight = true;
     }
   }
 
@@ -131,6 +143,7 @@ class AudioManager {
     const int16 = new Int16Array(arrayBuffer);
 
     if (this._playbackNode) {
+      this._playbackInFlight = true;
       // Worklet path: send PCM16 with generation fence (transfer ownership)
       const copy = new Int16Array(int16);
       this._playbackNode.port.postMessage(
@@ -162,7 +175,25 @@ class AudioManager {
       source.onended = () => {
         const idx = this._activeSources.indexOf(source);
         if (idx !== -1) this._activeSources.splice(idx, 1);
+        this._maybeNotifyPlaybackDrained();
       };
+      this._playbackInFlight = true;
+    }
+  }
+
+  _maybeNotifyPlaybackDrained(metrics = null) {
+    if (!this._playbackInFlight) return;
+
+    const workletDrained = metrics &&
+      metrics.depth === 0 &&
+      (metrics.state === 'filling' || metrics.state === 'underrun' || metrics.state === 'drained');
+    const fallbackDrained = !this._playbackNode && this._activeSources.length === 0;
+
+    if (!workletDrained && !fallbackDrained) return;
+
+    this._playbackInFlight = false;
+    if (this.onPlaybackDrained) {
+      this.onPlaybackDrained();
     }
   }
 
@@ -183,6 +214,7 @@ class AudioManager {
       try { src.stop(); } catch (_) {}
     }
     this._activeSources = [];
+    this._playbackInFlight = false;
 
     if (this.playbackCtx) {
       this._nextPlayTime = this.playbackCtx.currentTime;

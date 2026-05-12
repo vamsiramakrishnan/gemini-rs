@@ -32,6 +32,9 @@ pub struct SessionTelemetry {
     // Stores nanos-since-session-start for atomic compatibility with Instant.
     vad_end_ns: AtomicU64,
     awaiting_response: AtomicBool,
+    /// Timestamp when user sent text (for text-input latency tracking).
+    text_send_ns: AtomicU64,
+    awaiting_text_response: AtomicBool,
 
     // Aggregated latency stats (CAS + fetch_add)
     last_latency_ns: AtomicU64,
@@ -41,6 +44,7 @@ pub struct SessionTelemetry {
     max_latency_ns: AtomicU64,
 
     // ── Turn timing ──
+    turn_complete_count: AtomicU64,
     last_turn_start_ns: AtomicU64,
     turn_duration_sum_ns: AtomicU64,
     turn_duration_count: AtomicU64,
@@ -68,11 +72,14 @@ impl SessionTelemetry {
             interruptions: AtomicU64::new(0),
             vad_end_ns: AtomicU64::new(0),
             awaiting_response: AtomicBool::new(false),
+            text_send_ns: AtomicU64::new(0),
+            awaiting_text_response: AtomicBool::new(false),
             last_latency_ns: AtomicU64::new(0),
             latency_sum_ns: AtomicU64::new(0),
             latency_count: AtomicU64::new(0),
             min_latency_ns: AtomicU64::new(u64::MAX),
             max_latency_ns: AtomicU64::new(0),
+            turn_complete_count: AtomicU64::new(0),
             last_turn_start_ns: AtomicU64::new(0),
             turn_duration_sum_ns: AtomicU64::new(0),
             turn_duration_count: AtomicU64::new(0),
@@ -91,6 +98,9 @@ impl SessionTelemetry {
     pub fn record_audio_out(&self, byte_len: usize) {
         self.audio_chunks_out.fetch_add(1, Relaxed);
         self.audio_bytes_out.fetch_add(byte_len as u64, Relaxed);
+
+        // Also check text-send latency (user sent text, model responds with audio)
+        self.record_text_response_latency();
 
         // Latency: if we're awaiting the model's first byte after VAD end,
         // record the response latency via CAS (only the first chunk wins).
@@ -143,6 +153,65 @@ impl SessionTelemetry {
         self.awaiting_response.store(true, Relaxed);
     }
 
+    /// Record that user sent a text message (for text-input latency tracking).
+    #[inline]
+    pub fn record_text_send(&self) {
+        self.text_send_ns.store(self.elapsed_ns(), Relaxed);
+        self.awaiting_text_response.store(true, Relaxed);
+    }
+
+    /// Record first model output for text-input latency.
+    /// Call on first TextDelta or AudioData after a text send.
+    #[inline]
+    fn record_text_response_latency(&self) {
+        if self
+            .awaiting_text_response
+            .compare_exchange(true, false, Relaxed, Relaxed)
+            .is_ok()
+        {
+            let now_ns = self.elapsed_ns();
+            let send_ns = self.text_send_ns.load(Relaxed);
+            if now_ns > send_ns && send_ns > 0 {
+                let latency = now_ns - send_ns;
+                self.last_latency_ns.store(latency, Relaxed);
+                self.latency_sum_ns.fetch_add(latency, Relaxed);
+                self.latency_count.fetch_add(1, Relaxed);
+                // Update min (CAS loop)
+                let mut current_min = self.min_latency_ns.load(Relaxed);
+                while latency < current_min {
+                    match self.min_latency_ns.compare_exchange_weak(
+                        current_min,
+                        latency,
+                        Relaxed,
+                        Relaxed,
+                    ) {
+                        Ok(_) => break,
+                        Err(actual) => current_min = actual,
+                    }
+                }
+                // Update max (CAS loop)
+                let mut current_max = self.max_latency_ns.load(Relaxed);
+                while latency > current_max {
+                    match self.max_latency_ns.compare_exchange_weak(
+                        current_max,
+                        latency,
+                        Relaxed,
+                        Relaxed,
+                    ) {
+                        Ok(_) => break,
+                        Err(actual) => current_max = actual,
+                    }
+                }
+            }
+        }
+    }
+
+    /// Record first model text output (TextDelta). Tracks text-input latency.
+    #[inline]
+    pub fn record_text_out(&self) {
+        self.record_text_response_latency();
+    }
+
     /// Record an interruption (barge-in).
     #[inline]
     pub fn record_interruption(&self) {
@@ -152,6 +221,7 @@ impl SessionTelemetry {
     /// Record turn completion for duration tracking.
     #[inline]
     pub fn record_turn_complete(&self) {
+        self.turn_complete_count.fetch_add(1, Relaxed);
         let now = self.elapsed_ns();
         let turn_start = self.last_turn_start_ns.swap(now, Relaxed);
         if turn_start > 0 {
@@ -228,6 +298,7 @@ impl SessionTelemetry {
         let max_latency_ms = self.max_latency_ns.load(Relaxed) / 1_000_000;
 
         let turn_count = self.turn_duration_count.load(Relaxed);
+        let turn_complete_count = self.turn_complete_count.load(Relaxed);
         let avg_turn_ms = if turn_count > 0 {
             self.turn_duration_sum_ns.load(Relaxed) / turn_count / 1_000_000
         } else {
@@ -258,6 +329,7 @@ impl SessionTelemetry {
             "min_response_latency_ms": min_latency_ms,
             "max_response_latency_ms": max_latency_ms,
             "response_count": latency_count,
+            "turn_count": turn_complete_count,
             "avg_turn_duration_ms": avg_turn_ms,
             "total_token_count": total_tokens,
             "prompt_token_count": prompt_tokens,
@@ -291,6 +363,7 @@ mod tests {
         assert_eq!(snap["interruptions"], 0);
         assert_eq!(snap["last_response_latency_ms"], 0);
         assert_eq!(snap["response_count"], 0);
+        assert_eq!(snap["turn_count"], 0);
     }
 
     #[test]
@@ -309,6 +382,17 @@ mod tests {
         t.record_interruption();
         t.record_interruption();
         assert_eq!(t.snapshot()["interruptions"], 2);
+    }
+
+    #[test]
+    fn turn_complete_counter_is_independent_of_latency() {
+        let t = SessionTelemetry::new();
+        t.record_turn_complete();
+        t.record_turn_complete();
+
+        let snap = t.snapshot();
+        assert_eq!(snap["turn_count"], 2);
+        assert_eq!(snap["response_count"], 0);
     }
 
     #[test]
@@ -345,5 +429,52 @@ mod tests {
         let snap = t.snapshot();
         assert_eq!(snap["response_count"], 2);
         assert!(snap["avg_response_latency_ms"].as_u64().unwrap() >= 5);
+    }
+
+    #[test]
+    fn text_input_latency_via_text_out() {
+        let t = SessionTelemetry::new();
+        // Simulate: user sends text → delay → model responds with text
+        t.record_text_send();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        t.record_text_out();
+        // Subsequent text outputs should not re-record
+        t.record_text_out();
+
+        let snap = t.snapshot();
+        assert_eq!(snap["response_count"], 1);
+        assert!(snap["last_response_latency_ms"].as_u64().unwrap() >= 5);
+    }
+
+    #[test]
+    fn text_input_latency_via_audio_out() {
+        let t = SessionTelemetry::new();
+        // Simulate: user sends text → delay → model responds with audio
+        t.record_text_send();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        t.record_audio_out(480);
+
+        let snap = t.snapshot();
+        // Should record text-send latency (response_count = 1)
+        assert_eq!(snap["response_count"], 1);
+        assert!(snap["last_response_latency_ms"].as_u64().unwrap() >= 5);
+    }
+
+    #[test]
+    fn mixed_voice_and_text_turns() {
+        let t = SessionTelemetry::new();
+
+        // Voice turn
+        t.record_vad_end();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        t.record_audio_out(480);
+
+        // Text turn
+        t.record_text_send();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        t.record_text_out();
+
+        let snap = t.snapshot();
+        assert_eq!(snap["response_count"], 2);
     }
 }

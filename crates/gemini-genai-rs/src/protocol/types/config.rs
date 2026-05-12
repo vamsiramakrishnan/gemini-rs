@@ -60,10 +60,11 @@ pub enum ActivityHandling {
 /// Controls which input counts toward a user's conversation turn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TurnCoverage {
-    /// Only speech/audio included in turn (VAD-filtered). Default.
+    /// Only speech/audio included in turn (VAD-filtered).
     #[serde(rename = "TURN_INCLUDES_ONLY_ACTIVITY")]
     TurnIncludesOnlyActivity,
-    /// All input including silence included in turn.
+    /// All input including silence included in turn. This is the Gemini API default
+    /// when `turn_coverage` is unspecified.
     #[serde(rename = "TURN_INCLUDES_ALL_INPUT")]
     TurnIncludesAllInput,
 }
@@ -633,6 +634,25 @@ impl SessionConfig {
         self
     }
 
+    /// Apply recommended realtime input defaults for voice conversations.
+    ///
+    /// This preserves any values the caller already set. In particular, it sets
+    /// `TURN_INCLUDES_ONLY_ACTIVITY` so long pauses/silence in a continuous mic
+    /// stream are not included in the user's semantic turn.
+    pub fn voice_realtime_defaults(mut self) -> Self {
+        let mut ric = self.realtime_input_config.unwrap_or(RealtimeInputConfig {
+            automatic_activity_detection: None,
+            activity_handling: None,
+            turn_coverage: None,
+        });
+        ric.activity_handling
+            .get_or_insert(ActivityHandling::StartOfActivityInterrupts);
+        ric.turn_coverage
+            .get_or_insert(TurnCoverage::TurnIncludesOnlyActivity);
+        self.realtime_input_config = Some(ric);
+        self
+    }
+
     /// Enable session resumption.
     pub fn session_resumption(mut self, handle: Option<String>) -> Self {
         self.session_resumption = Some(SessionResumptionConfig { handle });
@@ -1041,6 +1061,34 @@ mod tests {
         assert_eq!(json, "\"TURN_INCLUDES_ALL_INPUT\"");
         let parsed: TurnCoverage = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, all);
+    }
+
+    #[test]
+    fn voice_realtime_defaults_sets_turn_coverage_without_overriding() {
+        let config = SessionConfig::new("key").voice_realtime_defaults();
+        let realtime = config.realtime_input_config.expect("realtime config");
+        assert_eq!(
+            realtime.activity_handling,
+            Some(ActivityHandling::StartOfActivityInterrupts)
+        );
+        assert_eq!(
+            realtime.turn_coverage,
+            Some(TurnCoverage::TurnIncludesOnlyActivity)
+        );
+
+        let config = SessionConfig::new("key")
+            .activity_handling(ActivityHandling::NoInterruption)
+            .turn_coverage(TurnCoverage::TurnIncludesAllInput)
+            .voice_realtime_defaults();
+        let realtime = config.realtime_input_config.expect("realtime config");
+        assert_eq!(
+            realtime.activity_handling,
+            Some(ActivityHandling::NoInterruption)
+        );
+        assert_eq!(
+            realtime.turn_coverage,
+            Some(TurnCoverage::TurnIncludesAllInput)
+        );
     }
 
     #[test]

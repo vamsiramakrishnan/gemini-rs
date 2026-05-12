@@ -243,7 +243,7 @@ impl DemoApp for Guardrails {
             .run(self, &mut rx, |live, start| {
                 let voice = resolve_voice(start.voice.as_deref());
 
-                live.model(GeminiModel::Gemini2_0FlashLive)
+                live.model(super::live_model())
                     .voice(voice)
                     .instruction(BASE_INSTRUCTION)
                     .transcription(true, true)

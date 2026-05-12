@@ -62,6 +62,21 @@ pub enum LiveEvent {
         /// Human-readable error description.
         error: String,
     },
+    /// A raw extraction field was considered for promotion into authoritative state.
+    StatePromotion {
+        /// Extractor name that produced the field.
+        extractor: String,
+        /// Field name inside the extractor result.
+        field: String,
+        /// State key targeted by the promotion rule.
+        state_key: String,
+        /// Whether the promotion was accepted and written.
+        accepted: bool,
+        /// Human-readable reason for the decision.
+        reason: String,
+        /// Extracted value that was considered.
+        value: serde_json::Value,
+    },
     /// Phase machine transitioned.
     PhaseTransition {
         /// Phase the machine transitioned from.
