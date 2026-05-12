@@ -14,18 +14,27 @@
 //   - Adaptive jitter buffer (RFC 6298 EWMA): accumulates a dynamic minimum depth
 //     before starting playback. Measures inter-arrival jitter and adjusts fill
 //     threshold accordingly. Three states: filling → playing → underrun.
-//   - 2-second ring buffer (48000 samples at 24 kHz).
+//   - 30-second ring buffer (720000 samples at 24 kHz).
 //   - Anti-click exponential decay on buffer drain prevents audible pops.
 
 class PlaybackProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
 
-    // Ring buffer — 2 seconds at 24 kHz
-    this._cap = 48000;
+    // Gemini Live emits PCM16 at 24 kHz. The browser may run the actual
+    // AudioContext at the hardware rate despite the requested rate, so the
+    // worklet resamples while draining the ring.
+    this._sourceRate = 24000;
+    this._outputRate = sampleRate;
+    this._sourcePerOutput = this._sourceRate / this._outputRate;
+
+    // Ring buffer — model audio often arrives faster than real-time. Keep enough
+    // headroom for long generated greetings/disclosures without dropping chunks.
+    this._cap = this._sourceRate * 30;
     this._ring = new Float32Array(this._cap);
     this._wr = 0;
     this._rd = 0;
+    this._rdFrac = 0;
     this._len = 0;
 
     // Generation fence — monotonically increasing; stale chunks discarded
@@ -40,15 +49,21 @@ class PlaybackProcessor extends AudioWorkletProcessor {
 
     // Minimum depth before playback starts (samples). 100ms at 24kHz = 2400.
     this._minDepth = 2400;
+    // Keep adaptive startup latency bounded. Long conversational pauses must not
+    // make the next response wait seconds before playback starts.
+    this._maxDepth = 12000; // 500ms at 24kHz
 
     // Jitter estimation (EWMA, RFC 6298 style)
     this._lastArrivalFrame = -1;     // currentFrame at last push
-    this._jitterEstimate = 0;        // smoothed jitter in frames
+    this._meanInterval = 0;          // smoothed mean inter-arrival interval
+    this._jitterEstimate = 0;        // smoothed jitter (deviation from mean)
     this._jitterAlpha = 0.125;       // EWMA factor
     this._jitterMultiple = 2.0;      // target depth = jitter * multiple
+    this._idleResetFrames = this._outputRate; // 1s idle gap starts a new burst
 
     // Underrun counter
     this._underruns = 0;
+    this._drainReported = true;
 
     // Metrics reporting — every ~500ms (12000 frames at 24kHz)
     this._metricFrames = 0;
@@ -62,10 +77,13 @@ class PlaybackProcessor extends AudioWorkletProcessor {
         this._gen = d.gen;
         this._wr = 0;
         this._rd = 0;
+        this._rdFrac = 0;
         this._len = 0;
         this._state = 0; // back to filling
         this._tail = 0;
         this._lastArrivalFrame = -1;
+        this._meanInterval = 0;
+        this._drainReported = true;
         return;
       }
 
@@ -89,6 +107,9 @@ class PlaybackProcessor extends AudioWorkletProcessor {
 
   _enqueue(pcm16) {
     const n = pcm16.length;
+    if (n > 0) {
+      this._drainReported = false;
+    }
     for (let i = 0; i < n; i++) {
       if (this._len >= this._cap) break; // full — drop incoming tail
       this._ring[this._wr] = pcm16[i] / 32768.0;
@@ -101,7 +122,22 @@ class PlaybackProcessor extends AudioWorkletProcessor {
     const now = currentFrame;
     if (this._lastArrivalFrame >= 0) {
       const interval = now - this._lastArrivalFrame;
-      const deviation = Math.abs(interval - this._jitterEstimate);
+
+      // A long gap usually means a new assistant response after user silence,
+      // not packet jitter. Carrying that gap into EWMA makes playback stall
+      // until an unnecessarily huge buffer has accumulated.
+      if (interval > this._idleResetFrames) {
+        this._meanInterval = 0;
+        this._jitterEstimate = 0;
+        this._lastArrivalFrame = now;
+        return;
+      }
+
+      // Track mean interval separately, then compute deviation from the mean
+      this._meanInterval =
+        this._meanInterval * (1.0 - this._jitterAlpha) +
+        interval * this._jitterAlpha;
+      const deviation = Math.abs(interval - this._meanInterval);
       this._jitterEstimate =
         this._jitterEstimate * (1.0 - this._jitterAlpha) +
         deviation * this._jitterAlpha;
@@ -112,7 +148,29 @@ class PlaybackProcessor extends AudioWorkletProcessor {
   _adaptiveMinDepth() {
     // Dynamic minimum based on measured jitter, clamped to configured floor
     const jitterDepth = this._jitterEstimate * this._jitterMultiple;
-    return Math.max(this._minDepth, Math.round(jitterDepth));
+    return Math.min(this._maxDepth, Math.max(this._minDepth, Math.round(jitterDepth)));
+  }
+
+  _popSample() {
+    if (this._len <= 0) return null;
+
+    const s0 = this._ring[this._rd];
+    const s1 = this._len > 1 ? this._ring[(this._rd + 1) % this._cap] : s0;
+    const out = s0 + (s1 - s0) * this._rdFrac;
+
+    this._rdFrac += this._sourcePerOutput;
+    const whole = Math.floor(this._rdFrac);
+    if (whole > 0) {
+      const consumed = Math.min(whole, this._len);
+      this._rd = (this._rd + consumed) % this._cap;
+      this._len -= consumed;
+      this._rdFrac -= whole;
+      if (this._len === 0) {
+        this._rdFrac = 0;
+      }
+    }
+
+    return out;
   }
 
   _checkFillThreshold() {
@@ -123,23 +181,39 @@ class PlaybackProcessor extends AudioWorkletProcessor {
     }
   }
 
-  process(outputs) {
+  process(_inputs, outputs) {
     const ch = outputs[0]?.[0];
     if (!ch) return true;
 
     const blockLen = ch.length;
 
-    if (this._state === 0) {
-      // Filling — output silence while accumulating
-      ch.fill(0);
-    } else {
-      // Playing or underrun-recovery
+    if (this._state === 0 || this._state === 2) {
+      // Filling or underrun-recovery — output silence while accumulating.
+      // Critical: do NOT consume the buffer here, otherwise arrival rate
+      // matches consumption rate and the buffer can never reach the
+      // refill threshold (recovery deadlock).
       for (let i = 0; i < blockLen; i++) {
-        if (this._len > 0) {
-          this._tail = this._ring[this._rd];
+        if (this._state === 2 && Math.abs(this._tail) > 0.003) {
+          // Anti-click: decay the last sample to avoid a hard cut
+          this._tail *= 0.85;
           ch[i] = this._tail;
-          this._rd = (this._rd + 1) % this._cap;
-          this._len--;
+        } else {
+          ch[i] = 0;
+          this._tail = 0;
+        }
+      }
+
+      // Check if buffer has accumulated enough to start/resume playback
+      if (this._len >= this._adaptiveMinDepth()) {
+        this._state = 1; // → playing
+      }
+    } else {
+      // State 1: playing
+      for (let i = 0; i < blockLen; i++) {
+        const sample = this._popSample();
+        if (sample !== null) {
+          this._tail = sample;
+          ch[i] = sample;
         } else if (Math.abs(this._tail) > 0.003) {
           // Anti-click: exponential decay to zero (~1.2ms at 24 kHz)
           this._tail *= 0.85;
@@ -151,14 +225,10 @@ class PlaybackProcessor extends AudioWorkletProcessor {
       }
 
       // Check for underrun
-      if (this._len === 0 && this._state === 1) {
+      if (this._len === 0) {
         this._state = 2; // → underrun
         this._underruns++;
-      }
-
-      // Recover from underrun when buffer refills
-      if (this._state === 2 && this._len >= this._adaptiveMinDepth()) {
-        this._state = 1; // → playing
+        this._postDrained();
       }
     }
 
@@ -178,6 +248,21 @@ class PlaybackProcessor extends AudioWorkletProcessor {
     }
 
     return true;
+  }
+
+  _postDrained() {
+    if (this._drainReported || this._len !== 0) return;
+    this._drainReported = true;
+    this.port.postMessage({
+      drained: true,
+      metrics: {
+        depth: this._len,
+        depthMs: 0,
+        state: 'underrun',
+        underruns: this._underruns,
+        jitterMs: Math.round((this._jitterEstimate / 24000) * 1000 * 10) / 10,
+      },
+    });
   }
 }
 

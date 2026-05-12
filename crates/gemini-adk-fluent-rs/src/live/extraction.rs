@@ -107,6 +107,47 @@ impl Live {
         self
     }
 
+    /// Like [`extract_turns_triggered`](Self::extract_turns_triggered), but lets
+    /// callers configure the underlying [`LlmExtractor`] before registration.
+    ///
+    /// Use this for field promotion rules, custom minimum word counts, or other
+    /// extraction policies that should live at the SDK layer instead of app
+    /// callback glue.
+    pub fn extract_turns_configured<T>(
+        mut self,
+        llm: Arc<dyn BaseLlm>,
+        prompt: impl Into<String>,
+        window_size: usize,
+        trigger: ExtractionTrigger,
+        configure: impl FnOnce(LlmExtractor) -> LlmExtractor,
+    ) -> Self
+    where
+        T: DeserializeOwned + Serialize + schemars::JsonSchema + Send + Sync + 'static,
+    {
+        self.config = self
+            .config
+            .enable_input_transcription()
+            .enable_output_transcription();
+
+        let name = std::any::type_name::<T>()
+            .rsplit("::")
+            .next()
+            .unwrap_or("Extraction")
+            .to_string();
+
+        let root_schema = schemars::schema_for!(T);
+        let schema = serde_json::to_value(root_schema).unwrap_or(serde_json::Value::Null);
+
+        self.warm_up_llms.push(llm.clone());
+
+        let extractor = LlmExtractor::new(name, llm, prompt, window_size)
+            .with_schema(schema)
+            .with_min_words(3)
+            .with_trigger(trigger);
+        self.extractors.push(Arc::new(configure(extractor)));
+        self
+    }
+
     /// Add a custom `TurnExtractor` implementation.
     pub fn extractor(mut self, extractor: Arc<dyn TurnExtractor>) -> Self {
         // Auto-enable transcription

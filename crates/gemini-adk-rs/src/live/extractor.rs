@@ -10,7 +10,9 @@ use async_trait::async_trait;
 use serde_json::Value;
 
 use crate::llm::{BaseLlm, LlmError, LlmRequest};
+use crate::state::State;
 
+use super::phase::Phase;
 use super::transcript::TranscriptTurn;
 
 /// Controls WHEN an extractor runs.
@@ -34,6 +36,106 @@ pub enum ExtractionTrigger {
     /// Use this to extract from the model's full intended output, even if
     /// the user barged in and the audio delivery was interrupted.
     OnGenerationComplete,
+}
+
+/// How an extracted field should be merged into authoritative session state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MergePolicy {
+    /// Keep an existing state value; write only when the target key is absent.
+    KeepKnown,
+    /// Always overwrite the target state key with the extracted field value.
+    Overwrite,
+}
+
+/// Predicate used to decide whether an extracted field may be promoted.
+pub type PromotionPredicate = Arc<dyn Fn(&State, &Value) -> bool + Send + Sync>;
+
+/// Rule for promoting one raw extraction field into authoritative state.
+#[derive(Clone)]
+pub struct FieldPromotion {
+    /// Field name inside the extractor's JSON object.
+    pub field: String,
+    /// State key to write when the field is accepted.
+    pub state_key: String,
+    /// Merge behavior for the target state key.
+    pub merge: MergePolicy,
+    /// Optional acceptance predicate.
+    pub accept: Option<PromotionPredicate>,
+}
+
+impl FieldPromotion {
+    /// Promote `field` into the same state key using [`MergePolicy::KeepKnown`].
+    pub fn keep_known(field: impl Into<String>) -> Self {
+        let field = field.into();
+        Self {
+            state_key: field.clone(),
+            field,
+            merge: MergePolicy::KeepKnown,
+            accept: None,
+        }
+    }
+
+    /// Promote `field` into the same state key using [`MergePolicy::Overwrite`].
+    pub fn overwrite(field: impl Into<String>) -> Self {
+        let field = field.into();
+        Self {
+            state_key: field.clone(),
+            field,
+            merge: MergePolicy::Overwrite,
+            accept: None,
+        }
+    }
+
+    /// Promote a boolean field only when its extracted value is `true`.
+    pub fn true_only(field: impl Into<String>) -> Self {
+        Self::overwrite(field).accept_when(|_, value| value.as_bool() == Some(true))
+    }
+
+    /// Promote a string field only when its extracted value is non-empty.
+    pub fn non_empty(field: impl Into<String>) -> Self {
+        Self::overwrite(field).accept_when(|_, value| {
+            value.as_str().is_some_and(|s| !s.trim().is_empty())
+        })
+    }
+
+    /// Promote into a custom target state key.
+    pub fn to(mut self, state_key: impl Into<String>) -> Self {
+        self.state_key = state_key.into();
+        self
+    }
+
+    /// Only accept this promotion when `predicate` returns true.
+    ///
+    /// This is the escape hatch for application-specific logic:
+    /// `FieldPromotion::overwrite("intent").accept_when(|state, value| ...)`.
+    pub fn accept_when(
+        mut self,
+        predicate: impl Fn(&State, &Value) -> bool + Send + Sync + 'static,
+    ) -> Self {
+        self.accept = Some(Arc::new(predicate));
+        self
+    }
+
+    /// Add an additional acceptance predicate, preserving any existing predicate.
+    pub fn and_accept_when(
+        mut self,
+        predicate: impl Fn(&State, &Value) -> bool + Send + Sync + 'static,
+    ) -> Self {
+        let previous = self.accept.take();
+        self.accept = Some(Arc::new(move |state, value| {
+            previous
+                .as_ref()
+                .map_or(true, |accept| accept(state, value))
+                && predicate(state, value)
+        }));
+        self
+    }
+
+    /// Only promote after the named concept has been presented by a phase.
+    pub fn after_presented(self, concept: impl Into<String>) -> Self {
+        let concept = concept.into();
+        self.and_accept_when(move |state, _| Phase::is_presented(state, &concept))
+    }
 }
 
 /// Strip markdown code fences from LLM output.
@@ -85,6 +187,15 @@ pub trait TurnExtractor: Send + Sync {
         ExtractionTrigger::EveryTurn
     }
 
+    /// Field promotion rules for this extractor.
+    ///
+    /// When empty, the runtime preserves legacy behavior and auto-flattens
+    /// top-level non-null fields into state. When non-empty, only these rules
+    /// can promote raw extraction fields into authoritative state.
+    fn promotion_rules(&self) -> &[FieldPromotion] {
+        &[]
+    }
+
     /// Extract structured data from the transcript window.
     async fn extract(&self, window: &[TranscriptTurn]) -> Result<Value, LlmError>;
 }
@@ -103,6 +214,8 @@ pub struct LlmExtractor {
     min_words: usize,
     /// When this extractor should fire.
     trigger: ExtractionTrigger,
+    /// Field promotion rules. Empty means legacy auto-flattening.
+    promotion_rules: Vec<FieldPromotion>,
 }
 
 impl LlmExtractor {
@@ -127,6 +240,7 @@ impl LlmExtractor {
             schema_str: None,
             min_words: 0,
             trigger: ExtractionTrigger::EveryTurn,
+            promotion_rules: Vec::new(),
         }
     }
 
@@ -152,6 +266,15 @@ impl LlmExtractor {
     /// Set the trigger mode for this extractor.
     pub fn with_trigger(mut self, trigger: ExtractionTrigger) -> Self {
         self.trigger = trigger;
+        self
+    }
+
+    /// Set explicit field promotion rules.
+    ///
+    /// Once promotion rules are present, top-level fields are no longer
+    /// automatically flattened into state; only accepted rules promote.
+    pub fn with_promotions(mut self, rules: Vec<FieldPromotion>) -> Self {
+        self.promotion_rules = rules;
         self
     }
 
@@ -199,6 +322,10 @@ impl TurnExtractor for LlmExtractor {
 
     fn trigger(&self) -> ExtractionTrigger {
         self.trigger.clone()
+    }
+
+    fn promotion_rules(&self) -> &[FieldPromotion] {
+        &self.promotion_rules
     }
 
     async fn extract(&self, window: &[TranscriptTurn]) -> Result<Value, LlmError> {

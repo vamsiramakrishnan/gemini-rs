@@ -42,7 +42,11 @@ impl Live {
         self.build_and_connect().await
     }
 
-    async fn build_and_connect(self) -> Result<LiveHandle, gemini_adk_rs::error::AgentError> {
+    async fn build_and_connect(mut self) -> Result<LiveHandle, gemini_adk_rs::error::AgentError> {
+        if uses_audio_output(&self.config) {
+            self.config = self.config.voice_realtime_defaults();
+        }
+
         let mut builder = LiveSessionBuilder::new(self.config);
 
         // Resolve deferred agent tools: create shared State, register TextAgentTools
@@ -122,5 +126,31 @@ impl Live {
         }
 
         builder.connect().await
+    }
+}
+
+fn uses_audio_output(config: &SessionConfig) -> bool {
+    config
+        .generation_config
+        .response_modalities
+        .as_ref()
+        .map(|modalities| modalities.iter().any(|m| matches!(m, Modality::Audio)))
+        .unwrap_or(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn uses_audio_output_defaults_to_audio() {
+        let config = SessionConfig::new("key");
+        assert!(uses_audio_output(&config));
+    }
+
+    #[test]
+    fn uses_audio_output_respects_text_only() {
+        let config = SessionConfig::new("key").text_only();
+        assert!(!uses_audio_output(&config));
     }
 }

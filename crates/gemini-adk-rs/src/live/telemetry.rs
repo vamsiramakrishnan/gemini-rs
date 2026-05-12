@@ -44,6 +44,7 @@ pub struct SessionTelemetry {
     max_latency_ns: AtomicU64,
 
     // ── Turn timing ──
+    turn_complete_count: AtomicU64,
     last_turn_start_ns: AtomicU64,
     turn_duration_sum_ns: AtomicU64,
     turn_duration_count: AtomicU64,
@@ -78,6 +79,7 @@ impl SessionTelemetry {
             latency_count: AtomicU64::new(0),
             min_latency_ns: AtomicU64::new(u64::MAX),
             max_latency_ns: AtomicU64::new(0),
+            turn_complete_count: AtomicU64::new(0),
             last_turn_start_ns: AtomicU64::new(0),
             turn_duration_sum_ns: AtomicU64::new(0),
             turn_duration_count: AtomicU64::new(0),
@@ -219,6 +221,7 @@ impl SessionTelemetry {
     /// Record turn completion for duration tracking.
     #[inline]
     pub fn record_turn_complete(&self) {
+        self.turn_complete_count.fetch_add(1, Relaxed);
         let now = self.elapsed_ns();
         let turn_start = self.last_turn_start_ns.swap(now, Relaxed);
         if turn_start > 0 {
@@ -295,6 +298,7 @@ impl SessionTelemetry {
         let max_latency_ms = self.max_latency_ns.load(Relaxed) / 1_000_000;
 
         let turn_count = self.turn_duration_count.load(Relaxed);
+        let turn_complete_count = self.turn_complete_count.load(Relaxed);
         let avg_turn_ms = if turn_count > 0 {
             self.turn_duration_sum_ns.load(Relaxed) / turn_count / 1_000_000
         } else {
@@ -325,6 +329,7 @@ impl SessionTelemetry {
             "min_response_latency_ms": min_latency_ms,
             "max_response_latency_ms": max_latency_ms,
             "response_count": latency_count,
+            "turn_count": turn_complete_count,
             "avg_turn_duration_ms": avg_turn_ms,
             "total_token_count": total_tokens,
             "prompt_token_count": prompt_tokens,
@@ -358,6 +363,7 @@ mod tests {
         assert_eq!(snap["interruptions"], 0);
         assert_eq!(snap["last_response_latency_ms"], 0);
         assert_eq!(snap["response_count"], 0);
+        assert_eq!(snap["turn_count"], 0);
     }
 
     #[test]
@@ -376,6 +382,17 @@ mod tests {
         t.record_interruption();
         t.record_interruption();
         assert_eq!(t.snapshot()["interruptions"], 2);
+    }
+
+    #[test]
+    fn turn_complete_counter_is_independent_of_latency() {
+        let t = SessionTelemetry::new();
+        t.record_turn_complete();
+        t.record_turn_complete();
+
+        let snap = t.snapshot();
+        assert_eq!(snap["turn_count"], 2);
+        assert_eq!(snap["response_count"], 0);
     }
 
     #[test]

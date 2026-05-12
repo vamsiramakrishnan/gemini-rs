@@ -136,7 +136,10 @@ pub(super) async fn generic_connection_loop<T: Transport, C: Codec>(
                         let _ = event_tx.send(SessionEvent::Error(format!("Setup failed: {e}")));
                     }
                     Err(_) => {
-                        tracing::warn!("WebSocket setup timeout ({}s)", transport_config.setup_timeout_secs);
+                        tracing::warn!(
+                            "WebSocket setup timeout ({}s)",
+                            transport_config.setup_timeout_secs
+                        );
                         let _ = event_tx.send(SessionEvent::Error("Setup timeout".into()));
                     }
                 }

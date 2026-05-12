@@ -276,6 +276,7 @@ impl LiveSessionBuilder {
 
         // Store initial phase's `needs` metadata for ContextBuilder.
         if let Some(ref pm) = self.phase_machine {
+            state.session().set("phase", pm.current());
             if let Some(phase) = pm.current_phase() {
                 if !phase.needs.is_empty() {
                     state.set("session:phase_needs", phase.needs.clone());
@@ -336,7 +337,7 @@ impl LiveSessionBuilder {
         };
 
         // Pass shared pending context to control plane config
-        control_plane.pending_context = pending_context;
+        control_plane.pending_context = pending_context.clone();
 
         // Create LiveEvent broadcast channel
         use super::events::LiveEvent;
@@ -373,7 +374,11 @@ impl LiveSessionBuilder {
                     tick.tick().await;
                     let snap = telem_ref.snapshot();
                     if let Some(obj) = snap.as_object() {
-                        let tc = obj.get("response_count").and_then(|v| v.as_u64()).unwrap_or(0);
+                        let tc = obj
+                            .get("turn_count")
+                            .or_else(|| obj.get("response_count"))
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0);
                         if tc > prev_turns {
                             let latency = obj
                                 .get("last_response_latency_ms")
@@ -419,6 +424,7 @@ impl LiveSessionBuilder {
             state,
             telemetry,
             live_event_tx,
+            pending_context,
         ))
     }
 }

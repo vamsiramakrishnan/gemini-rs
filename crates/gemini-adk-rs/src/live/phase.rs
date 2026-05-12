@@ -144,6 +144,21 @@ pub struct Transition {
     pub description: Option<String>,
 }
 
+/// A preparation effect that can materialize state before a phase is entered.
+///
+/// Preparations run after an outbound transition guard selects a target phase
+/// but before the machine commits to entering that target. They are intended
+/// for authoritative preconditions such as loading records, retrieving catalog
+/// facts, fetching policy, or hydrating state from durable storage.
+pub struct PhasePreparation {
+    /// Stable name for diagnostics.
+    pub name: String,
+    /// State keys this preparation is expected to produce.
+    pub produces: Vec<String>,
+    /// Async effect that can mutate state and/or write context.
+    pub run: Arc<dyn Fn(State, Arc<dyn SessionWriter>) -> BoxFuture<()> + Send + Sync>,
+}
+
 /// A conversation phase with instruction, tools, and transitions.
 pub struct Phase {
     /// Unique name identifying this phase.
@@ -185,6 +200,27 @@ pub struct Phase {
     /// these from `session:phase_needs` to append a "\[Gathering\] key1, key2"
     /// line to the instruction, so the model knows what to focus on.
     pub needs: Vec<String>,
+    /// State keys that must exist before this phase can be entered.
+    ///
+    /// Unlike [`needs`](Self::needs), these are enforced by the phase machine.
+    /// A transition targeting this phase is skipped until every required key is
+    /// present in state. Use this for authoritative facts that must be
+    /// materialized before the model is allowed to operate in the phase.
+    pub requires: Vec<String>,
+    /// Effects that can run before this phase is entered to satisfy
+    /// [`requires`](Self::requires).
+    pub preparations: Vec<PhasePreparation>,
+    /// Semantic concepts this phase presents to the user.
+    ///
+    /// On phase entry the machine writes `presented:<concept> = true` to state.
+    /// This lets flows distinguish "the model has collected a yes" from "the
+    /// user acknowledged this specific concept after it was presented".
+    pub presents: Vec<String>,
+    /// State keys to clear when this phase is entered.
+    ///
+    /// Useful for removing stale acknowledgements or intents gathered before
+    /// the phase's presented concepts are valid.
+    pub clear_on_enter: Vec<String>,
 }
 
 impl Phase {
@@ -203,7 +239,32 @@ impl Phase {
             prompt_on_enter: false,
             on_enter_context: None,
             needs: Vec::new(),
+            requires: Vec::new(),
+            preparations: Vec::new(),
+            presents: Vec::new(),
+            clear_on_enter: Vec::new(),
         }
+    }
+
+    /// State key used to mark that a concept has been presented.
+    pub fn presented_key(concept: &str) -> String {
+        format!("presented:{concept}")
+    }
+
+    /// Whether a semantic concept has been presented in this conversation.
+    pub fn is_presented(state: &State, concept: &str) -> bool {
+        state
+            .get::<bool>(&Self::presented_key(concept))
+            .unwrap_or(false)
+    }
+
+    /// Required state keys that are not currently present.
+    pub fn missing_requirements(&self, state: &State) -> Vec<String> {
+        self.requires
+            .iter()
+            .filter(|key| !state.contains(key))
+            .cloned()
+            .collect()
     }
 }
 
@@ -232,6 +293,28 @@ pub struct TransitionResult {
     pub context: Option<Vec<gemini_genai_rs::prelude::Content>>,
     /// Whether to send `turnComplete: true` after instruction + context.
     pub prompt_on_enter: bool,
+}
+
+/// Result of evaluating outbound transitions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TransitionEvaluation {
+    /// A transition can be committed immediately.
+    Ready {
+        /// Target phase name.
+        target: String,
+        /// Index of the selected transition in the source phase.
+        transition_index: usize,
+    },
+    /// A transition guard matched, but the target phase is missing required
+    /// state that its preparations may be able to materialize.
+    Blocked {
+        /// Target phase name.
+        target: String,
+        /// Index of the selected transition in the source phase.
+        transition_index: usize,
+        /// Missing required state keys.
+        missing: Vec<String>,
+    },
 }
 
 // ── PhaseMachine ────────────────────────────────────────────────────────────
@@ -330,7 +413,29 @@ impl PhaseMachine {
                 lines.push(format!("Still needed: {}", missing.join(", ")));
             }
 
-            // 4. Possible transitions or terminal
+            // 4. Hard requirements for the current phase.
+            let missing_required: Vec<&str> = phase
+                .requires
+                .iter()
+                .filter(|key| !state.contains(key))
+                .map(|s| s.as_str())
+                .collect();
+            if !missing_required.is_empty() {
+                lines.push(format!(
+                    "Blocked until required state is available: {}",
+                    missing_required.join(", ")
+                ));
+            }
+            if !phase.preparations.is_empty() {
+                let preparations: Vec<&str> =
+                    phase.preparations.iter().map(|p| p.name.as_str()).collect();
+                lines.push(format!("Preparers: {}", preparations.join(", ")));
+            }
+            if !phase.presents.is_empty() {
+                lines.push(format!("Presents: {}", phase.presents.join(", ")));
+            }
+
+            // 5. Possible transitions or terminal
             if phase.terminal {
                 lines.push("This is the final phase.".to_string());
             } else if !phase.transitions.is_empty() {
@@ -356,6 +461,21 @@ impl PhaseMachine {
     ///
     /// This method is **pure** — it does not modify state or execute callbacks.
     pub fn evaluate(&self, state: &State) -> Option<(&str, usize)> {
+        match self.evaluate_for_transition(state)? {
+            TransitionEvaluation::Ready {
+                transition_index, ..
+            } => {
+                let phase = self.phases.get(&self.current)?;
+                let target = phase.transitions.get(transition_index)?.target.as_str();
+                Some((target, transition_index))
+            }
+            TransitionEvaluation::Blocked { .. } => None,
+        }
+    }
+
+    /// Evaluate transitions from the current phase, preserving blocked targets
+    /// that declare preparations.
+    pub fn evaluate_for_transition(&self, state: &State) -> Option<TransitionEvaluation> {
         let phase = self.phases.get(&self.current)?;
         if phase.terminal {
             return None;
@@ -370,11 +490,50 @@ impl PhaseMachine {
                             continue;
                         }
                     }
+                    let missing = target_phase.missing_requirements(state);
+                    if missing.is_empty() {
+                        return Some(TransitionEvaluation::Ready {
+                            target: transition.target.clone(),
+                            transition_index: index,
+                        });
+                    }
+                    if !target_phase.preparations.is_empty() {
+                        return Some(TransitionEvaluation::Blocked {
+                            target: transition.target.clone(),
+                            transition_index: index,
+                            missing,
+                        });
+                    } else {
+                        continue;
+                    }
                 }
-                return Some((&transition.target, index));
+                return Some(TransitionEvaluation::Ready {
+                    target: transition.target.clone(),
+                    transition_index: index,
+                });
             }
         }
         None
+    }
+
+    /// Run preparation effects declared by a target phase, then report whether
+    /// all target requirements are now satisfied.
+    pub async fn prepare_target(
+        &self,
+        target: &str,
+        state: &State,
+        writer: &Arc<dyn SessionWriter>,
+    ) -> bool {
+        let Some(phase) = self.phases.get(target) else {
+            return false;
+        };
+
+        for preparation in &phase.preparations {
+            let fut = (preparation.run)(state.clone(), Arc::clone(writer));
+            fut.await;
+        }
+
+        phase.missing_requirements(state).is_empty()
     }
 
     /// Execute a transition: run `on_exit` for the current phase, update
@@ -413,6 +572,12 @@ impl PhaseMachine {
 
         // Run on_enter for the new phase.
         if let Some(phase) = self.phases.get(target) {
+            for key in &phase.clear_on_enter {
+                state.remove(key);
+            }
+            for concept in &phase.presents {
+                state.set(&Phase::presented_key(concept), true);
+            }
             if let Some(ref on_enter) = phase.on_enter {
                 let fut = on_enter(state.clone(), Arc::clone(writer));
                 fut.await;
@@ -518,6 +683,10 @@ mod tests {
             prompt_on_enter: false,
             on_enter_context: None,
             needs: Vec::new(),
+            requires: Vec::new(),
+            preparations: Vec::new(),
+            presents: Vec::new(),
+            clear_on_enter: Vec::new(),
         }
     }
 
@@ -536,6 +705,10 @@ mod tests {
             prompt_on_enter: false,
             on_enter_context: None,
             needs: Vec::new(),
+            requires: Vec::new(),
+            preparations: Vec::new(),
+            presents: Vec::new(),
+            clear_on_enter: Vec::new(),
         }
     }
 
@@ -912,6 +1085,10 @@ mod tests {
             prompt_on_enter: false,
             on_enter_context: None,
             needs: Vec::new(),
+            requires: Vec::new(),
+            preparations: Vec::new(),
+            presents: Vec::new(),
+            clear_on_enter: Vec::new(),
         };
 
         let mut machine = PhaseMachine::new("start");
@@ -1157,6 +1334,147 @@ mod tests {
             !nav.contains("caller_name"),
             "caller_name should NOT be in still-needed (it's set)"
         );
+    }
+
+    #[test]
+    fn evaluate_skips_target_when_required_state_missing() {
+        let state = State::new();
+        let mut machine = PhaseMachine::new("start");
+
+        let mut start = simple_phase("start", "Start.");
+        start.transitions.push(Transition {
+            target: "grounded".to_string(),
+            guard: Arc::new(|_| true),
+            description: Some("when ready".into()),
+        });
+        machine.add_phase(start);
+
+        let mut grounded = simple_phase("grounded", "Use authoritative facts.");
+        grounded.requires = vec!["facts_loaded".into()];
+        machine.add_phase(grounded);
+
+        assert!(machine.evaluate(&state).is_none());
+
+        state.set("facts_loaded", true);
+        assert_eq!(
+            machine.evaluate(&state).map(|(target, _)| target),
+            Some("grounded")
+        );
+    }
+
+    #[test]
+    fn evaluate_reports_blocked_target_with_preparation() {
+        let state = State::new();
+        let mut machine = PhaseMachine::new("start");
+
+        let mut start = simple_phase("start", "Start.");
+        start.transitions.push(Transition {
+            target: "grounded".to_string(),
+            guard: Arc::new(|_| true),
+            description: Some("when ready".into()),
+        });
+        machine.add_phase(start);
+
+        let mut grounded = simple_phase("grounded", "Use authoritative facts.");
+        grounded.requires = vec!["facts_loaded".into()];
+        grounded.preparations.push(PhasePreparation {
+            name: "load_facts".into(),
+            produces: vec!["facts_loaded".into()],
+            run: Arc::new(|state, _writer| {
+                Box::pin(async move {
+                    state.set("facts_loaded", true);
+                })
+            }),
+        });
+        machine.add_phase(grounded);
+
+        assert_eq!(
+            machine.evaluate_for_transition(&state),
+            Some(TransitionEvaluation::Blocked {
+                target: "grounded".into(),
+                transition_index: 0,
+                missing: vec!["facts_loaded".into()],
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn prepare_target_materializes_required_state() {
+        let writer: Arc<dyn SessionWriter> = Arc::new(crate::test_helpers::MockWriter);
+        let state = State::new();
+        let mut machine = PhaseMachine::new("start");
+
+        machine.add_phase(simple_phase("start", "Start."));
+
+        let mut grounded = simple_phase("grounded", "Use authoritative facts.");
+        grounded.requires = vec!["facts_loaded".into()];
+        grounded.preparations.push(PhasePreparation {
+            name: "load_facts".into(),
+            produces: vec!["facts_loaded".into()],
+            run: Arc::new(|state, _writer| {
+                Box::pin(async move {
+                    state.set("facts_loaded", true);
+                })
+            }),
+        });
+        machine.add_phase(grounded);
+
+        assert!(machine.prepare_target("grounded", &state, &writer).await);
+        assert_eq!(state.get::<bool>("facts_loaded"), Some(true));
+    }
+
+    #[tokio::test]
+    async fn transition_marks_presented_concepts_and_clears_stale_keys() {
+        let writer: Arc<dyn SessionWriter> = Arc::new(crate::test_helpers::MockWriter);
+        let state = State::new();
+        state.set("ack", true);
+
+        let mut machine = PhaseMachine::new("start");
+        let mut start = simple_phase("start", "Start.");
+        start.transitions.push(Transition {
+            target: "present".to_string(),
+            guard: Arc::new(|_| true),
+            description: None,
+        });
+        machine.add_phase(start);
+
+        let mut present = simple_phase("present", "Present concept.");
+        present.presents = vec!["terms".into()];
+        present.clear_on_enter = vec!["ack".into()];
+        machine.add_phase(present);
+
+        machine
+            .transition(
+                "present",
+                &state,
+                &writer,
+                1,
+                TransitionTrigger::Programmatic { source: "test" },
+                &empty_tw(),
+            )
+            .await
+            .expect("transition should succeed");
+
+        assert_eq!(
+            state.get::<bool>(&Phase::presented_key("terms")),
+            Some(true)
+        );
+        assert!(!state.contains("ack"));
+    }
+
+    #[test]
+    fn describe_navigation_lists_missing_required_state() {
+        let state = State::new();
+        let mut machine = PhaseMachine::new("grounded");
+
+        let mut grounded = simple_phase("grounded", "Use authoritative facts.");
+        grounded.requires = vec!["facts_loaded".into(), "price".into()];
+        machine.add_phase(grounded);
+
+        let nav = machine.describe_navigation(&state);
+        assert!(nav.contains("Blocked until required state is available"));
+        assert!(nav.contains("facts_loaded"));
+        assert!(nav.contains("price"));
     }
 
     #[test]

@@ -34,7 +34,7 @@ let handle = Live::builder()
 
 This book is organized into six sections:
 
-- **Getting Started** — Architecture overview, migration guide, and best practices
+- **Getting Started** — Local setup, architecture overview, migration guide, and best practices
 - **Voice & Live Sessions** — Building real-time voice agents with phases, state, and watchers
 - **Tools & Extraction** — Tool system and structured data extraction from conversations
 - **Composition & Patterns** — Text agent combinators, S·C·T·P·M·A operators, middleware

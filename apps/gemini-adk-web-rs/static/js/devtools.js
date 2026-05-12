@@ -59,12 +59,14 @@ var DevtoolsManager = (function () {
     this._uptimeInterval = null;
     this._traceId = null;
     this._currentPhase = null;
+    this._resizeObserver = null;
 
     this._initPanels();
     this._initTabs();
     this._initStatusBar();
     this._initResize();
     this._initMinimap();
+    this._initLayoutObserver();
   }
 
   // ------------------------------------------------
@@ -191,6 +193,7 @@ var DevtoolsManager = (function () {
   };
 
   DevtoolsManager.prototype.switchTab = function (tabId) {
+    if (!this.panels[tabId]) return;
     this.activeTab = tabId;
     Object.keys(this.tabButtons).forEach(function (k) {
       this.tabButtons[k].classList.toggle('active', k === tabId);
@@ -199,14 +202,34 @@ var DevtoolsManager = (function () {
       this.panels[k].classList.toggle('active', k === tabId);
     }.bind(this));
 
-    // Panels rendered while display:none have zero clientHeight — force
-    // a refresh now that the panel is visible again.
-    if (tabId === 'timeline' && this._timeline._vl) {
-      this._timeline._vl.refresh();
-    }
+    // Panels rendered while display:none have zero clientHeight. Defer the
+    // refresh one frame so flex sizing has settled.
+    this.refreshActiveLayout();
     if (tabId === 'metrics') {
       this.scheduler.markDirty('metrics');
     }
+  };
+
+  DevtoolsManager.prototype.refreshActiveLayout = function () {
+    var self = this;
+    requestAnimationFrame(function () {
+      if (self.activeTab === 'timeline' && self._timeline._vl) {
+        self._timeline._vl.refresh();
+      }
+      if (self._minimap) {
+        self.scheduler.markDirty('minimap');
+      }
+    });
+  };
+
+  DevtoolsManager.prototype._initLayoutObserver = function () {
+    if (typeof ResizeObserver === 'undefined') return;
+    var self = this;
+    this._resizeObserver = new ResizeObserver(function () {
+      self.refreshActiveLayout();
+    });
+    this._resizeObserver.observe(this.container);
+    this._resizeObserver.observe(this.contentArea);
   };
 
   DevtoolsManager.prototype.toggleCollapse = function () {
@@ -284,9 +307,11 @@ var DevtoolsManager = (function () {
 
     var onMouseMove = function (e) {
       var dx = startX - e.clientX;
-      var newWidth = Math.min(520, Math.max(280, startWidth + dx));
+      var maxWidth = Math.min(Math.floor(window.innerWidth * 0.72), 760);
+      var newWidth = Math.min(maxWidth, Math.max(320, startWidth + dx));
       self.container.style.width = newWidth + 'px';
       self.container.style.minWidth = newWidth + 'px';
+      self.refreshActiveLayout();
       e.preventDefault();
     };
 
@@ -296,6 +321,7 @@ var DevtoolsManager = (function () {
       document.removeEventListener('mouseup', onMouseUp);
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
+      self.refreshActiveLayout();
     };
 
     handle.addEventListener('mousedown', function (e) {
@@ -334,10 +360,22 @@ var DevtoolsManager = (function () {
     if (msg.type === 'artifact' || msg.type === 'artifactUpdate') {
       this._artifacts.addArtifact(msg);
     }
+
+    if (msg.type === 'turnComplete') {
+      this._metrics.onTurnComplete();
+    } else if (msg.type === 'interrupted') {
+      this._metrics.onInterrupted();
+    }
   };
 
   DevtoolsManager.prototype.handleStateUpdate = function (key, value) {
     this._state.update(key, value);
+    this._phases.updateState(key, value);
+    if ((key === 'session:phase' || key === 'phase') && value) {
+      this._currentPhase = String(value);
+      if (this._statusPhaseEl) this._statusPhaseEl.textContent = this._currentPhase;
+      this.scheduler.markDirty('statusBar');
+    }
   };
 
   DevtoolsManager.prototype.handlePhaseChange = function (data) {
@@ -369,8 +407,8 @@ var DevtoolsManager = (function () {
     if (stats.current_phase && this._statusPhaseEl) {
       this._statusPhaseEl.textContent = stats.current_phase;
     }
-    if (stats.response_count !== undefined && this._statusTurnsEl) {
-      this._statusTurnsEl.textContent = stats.response_count;
+    if (this._statusTurnsEl) {
+      this._statusTurnsEl.textContent = stats.turn_count || stats.response_count || 0;
     }
 
     // Start uptime ticker on first telemetry
@@ -385,6 +423,18 @@ var DevtoolsManager = (function () {
 
   DevtoolsManager.prototype.handleToolCallEvent = function (data) {
     this._metrics.addToolCall(data);
+    this._phases.addToolCall(data);
+  };
+
+  DevtoolsManager.prototype.handleStatePromotionEvent = function (data) {
+    this._phases.addPromotion(data);
+    this._state.update('state_meta:' + data.state_key, {
+      source: 'extraction',
+      extractor: data.extractor,
+      field: data.field,
+      accepted: !!data.accepted,
+      reason: data.reason || ''
+    });
   };
 
   DevtoolsManager.prototype.handleTurnMetrics = function (data) {
@@ -393,6 +443,39 @@ var DevtoolsManager = (function () {
 
   DevtoolsManager.prototype.handleBufferMetrics = function (metrics) {
     this._metrics.updateBufferMetrics(metrics);
+  };
+
+  DevtoolsManager.prototype.handleVoiceRuntimeState = function (state) {
+    var snapshot = {
+      user_speaking: !!state.user_speaking,
+      playback_active: !!state.playback_active,
+      prompt_pending: !!state.prompt_pending,
+      prompt_epoch: state.prompt_epoch || 0,
+      last_barge_in_ms_ago: state.last_barge_in_ms_ago,
+      last_playback_drained_ms_ago: state.last_playback_drained_ms_ago,
+      vad_backend: state.vad_backend || 'unknown',
+      vad_state: state.vad_state || 'unknown',
+      vad_speaking: !!state.vad_speaking,
+      vad_probability: state.vad_probability,
+      vad_frame_duration_ms: state.vad_frame_duration_ms,
+      vad_frames_processed: state.vad_frames_processed || 0,
+      vad_last_transition_ms_ago: state.vad_last_transition_ms_ago
+    };
+
+    this._state.update('voice:runtime', snapshot);
+    this._state.update('voice:user_speaking', snapshot.user_speaking);
+    this._state.update('voice:playback_active', snapshot.playback_active);
+    this._state.update('voice:prompt_pending', snapshot.prompt_pending);
+    this._state.update('voice:prompt_epoch', snapshot.prompt_epoch);
+    this._state.update('voice:vad', {
+      backend: snapshot.vad_backend,
+      state: snapshot.vad_state,
+      speaking: snapshot.vad_speaking,
+      probability: snapshot.vad_probability,
+      frame_duration_ms: snapshot.vad_frame_duration_ms,
+      frames_processed: snapshot.vad_frames_processed,
+      last_transition_ms_ago: snapshot.vad_last_transition_ms_ago
+    });
   };
 
   DevtoolsManager.prototype.handleAppMeta = function (info) {
@@ -412,7 +495,10 @@ var DevtoolsManager = (function () {
     this.tabButtons = {};
     this._renderTabs();
     // Always re-apply active tab to guarantee panel visibility is correct
-    this.switchTab(this.availableTabs.includes(this.activeTab) ? this.activeTab : 'timeline');
+    var defaultTab = (features.includes('state-machine') || info.category === 'showcase') ? 'phases' : 'timeline';
+    this.switchTab(this.availableTabs.includes(this.activeTab) && this.activeTab !== 'timeline'
+      ? this.activeTab
+      : defaultTab);
   };
 
   // ------------------------------------------------

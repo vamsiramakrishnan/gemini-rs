@@ -7,13 +7,13 @@
 //! cycle. It returns two sets of futures: blocking (awaited sequentially on the
 //! control lane) and concurrent (spawned via `tokio::spawn`).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use serde_json::Value;
 
 use super::BoxFuture;
-use crate::state::State;
+use crate::state::{State, StateMutation};
 
 // ── Predicate ────────────────────────────────────────────────────────────────
 
@@ -170,6 +170,44 @@ impl WatcherRegistry {
         }
 
         (blocking, concurrent)
+    }
+
+    /// Evaluate watchers from a batch of recorded state mutations.
+    ///
+    /// Multiple mutations for the same key are collapsed into the same net
+    /// `(old, new)` diff shape used by [`Self::evaluate`], preserving watcher
+    /// behavior while avoiding a pre-turn state snapshot.
+    pub fn evaluate_mutations(
+        &self,
+        mutations: &[StateMutation],
+        state: &State,
+    ) -> (Vec<BoxFuture<()>>, Vec<BoxFuture<()>>) {
+        let mut net: HashMap<String, (Option<Value>, Option<Value>)> = HashMap::new();
+
+        for mutation in mutations {
+            if !self.observed_keys.contains(&mutation.key) {
+                continue;
+            }
+
+            net.entry(mutation.key.clone())
+                .and_modify(|(_, new)| {
+                    *new = mutation.new.clone();
+                })
+                .or_insert_with(|| (mutation.old.clone(), mutation.new.clone()));
+        }
+
+        let diffs: Vec<(String, Value, Value)> = net
+            .into_iter()
+            .filter_map(|(key, (old, new))| {
+                if old == new {
+                    None
+                } else {
+                    Some((key, old.unwrap_or(Value::Null), new.unwrap_or(Value::Null)))
+                }
+            })
+            .collect();
+
+        self.evaluate(&diffs, state)
     }
 }
 
@@ -556,6 +594,55 @@ mod tests {
         let diffs = vec![("y".to_string(), json!(1), json!(2))];
 
         let (blocking, concurrent) = registry.evaluate(&diffs, &state);
+        assert!(blocking.is_empty());
+        assert!(concurrent.is_empty());
+    }
+
+    #[tokio::test]
+    async fn evaluate_mutations_collapses_to_net_diff() {
+        let counter = Arc::new(AtomicU32::new(0));
+        let mut registry = WatcherRegistry::new();
+        registry.add(counting_watcher(
+            "x",
+            WatchPredicate::ChangedTo(json!(3)),
+            counter.clone(),
+            false,
+        ));
+
+        let state = State::new();
+        let cursor = state.mutation_cursor();
+        state.set("x", 1);
+        state.set("x", 2);
+        state.set("x", 3);
+        state.set("ignored", 10);
+
+        let (_, concurrent) = registry.evaluate_mutations(&state.mutations_since(cursor), &state);
+        assert_eq!(concurrent.len(), 1);
+        for fut in concurrent {
+            fut.await;
+        }
+        assert_eq!(counter.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn evaluate_mutations_ignores_net_noop() {
+        let counter = Arc::new(AtomicU32::new(0));
+        let mut registry = WatcherRegistry::new();
+        registry.add(counting_watcher(
+            "x",
+            WatchPredicate::Changed,
+            counter,
+            false,
+        ));
+
+        let state = State::new();
+        state.set("x", 1);
+        let cursor = state.mutation_cursor();
+        state.set("x", 2);
+        state.set("x", 1);
+
+        let (blocking, concurrent) =
+            registry.evaluate_mutations(&state.mutations_since(cursor), &state);
         assert!(blocking.is_empty());
         assert!(concurrent.is_empty());
     }

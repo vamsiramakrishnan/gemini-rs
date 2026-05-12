@@ -6,6 +6,7 @@
 
 # Getting Started
 
+- [Setup and Running](./setup-and-running.md)
 - [Architecture Overview](./user-guide/architecture.md)
 - [Migration Guide: L0 → L1 → L2](./user-guide/migration.md)
 - [Best Practices & Common Mistakes](./user-guide/best-practices.md)

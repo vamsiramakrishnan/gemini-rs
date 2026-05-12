@@ -11,11 +11,11 @@ var TimelinePanel = (function () {
 
   var BADGE_LABELS = {
     textDelta: 'TEXT', textComplete: 'TEXT', audio: 'AUDIO', turnComplete: 'TURN',
-    stateUpdate: 'STATE', phaseChange: 'PHASE', toolCallEvent: 'TOOL', violation: 'VIOL',
+    stateUpdate: 'STATE', statePromotionEvent: 'PROMO', phaseChange: 'PHASE', toolCallEvent: 'TOOL', violation: 'VIOL',
     evaluation: 'EVAL', spanEvent: 'SPAN', connected: 'SYS', appMeta: 'META',
     interrupted: 'INT', error: 'ERR', inputTranscription: 'TXIN', outputTranscription: 'TXOUT', thought: 'THINK',
     voiceActivityStart: 'VAD', voiceActivityEnd: 'VAD', telemetry: 'TEL',
-    phaseTimeline: 'PHASE', turnMetrics: 'TURN'
+    phaseTimeline: 'PHASE', turnMetrics: 'TURN', voiceRuntimeState: 'VOICE'
   };
 
   var DEFAULT_HIDDEN = ['audio', 'voiceActivityStart', 'voiceActivityEnd'];
@@ -148,7 +148,7 @@ var TimelinePanel = (function () {
       'audio', 'voiceActivityStart', 'textDelta', 'textComplete',
       'turnComplete', 'stateUpdate', 'phaseChange', 'toolCallEvent',
       'telemetry', 'evaluation', 'violation', 'interrupted', 'error',
-      'inputTranscription', 'outputTranscription', 'thought'
+      'inputTranscription', 'outputTranscription', 'thought', 'voiceRuntimeState'
     ];
 
     types.forEach(function (type) {
@@ -262,6 +262,7 @@ var TimelinePanel = (function () {
       el._tlInit = true;
     }
     el.dataset.idx = idx;
+    el.className = 'tl-row' + (idx === this._expandedIdx ? ' selected' : '');
     el._tlTime.textContent = '[' + event.time + ']';
     el._tlBadge.textContent = BADGE_LABELS[event.type] || event.type.toUpperCase();
     el._tlBadge.className = 'tl-badge tl-badge-' + event.type;
@@ -279,6 +280,7 @@ var TimelinePanel = (function () {
     if (this._expandedIdx === idx) {
       this._detailPanel.style.display = 'none';
       this._expandedIdx = -1;
+      if (this._vl) this._vl.refresh();
       return;
     }
     var event = this._events.get(idx);
@@ -287,6 +289,7 @@ var TimelinePanel = (function () {
     catch (e) { this._detailContent.textContent = String(event.raw); }
     this._detailPanel.style.display = '';
     this._expandedIdx = idx;
+    if (this._vl) this._vl.refresh();
   };
 
   // --- Summarization ---
@@ -301,6 +304,9 @@ var TimelinePanel = (function () {
       case 'interrupted': return 'Model interrupted';
       case 'error': return msg.message || 'Unknown error';
       case 'stateUpdate': return msg.key + ' = ' + U.truncText(JSON.stringify(msg.value), 60);
+      case 'statePromotionEvent':
+        return (msg.accepted ? 'accepted ' : 'blocked ') + (msg.state_key || msg.field || '?') +
+          ' from ' + (msg.extractor || 'extractor') + '.' + (msg.field || '?');
       case 'phaseChange': return (msg.from || '?') + ' -> ' + (msg.to || '?');
       case 'evaluation': return (msg.phase || '') + ': ' + ((msg.score || 0) * 100).toFixed(0) + '%';
       case 'violation': return '[' + (msg.severity || '') + '] ' + (msg.rule || '');
@@ -318,6 +324,13 @@ var TimelinePanel = (function () {
         return (msg.name || '') + '  ' + (msg.status || '') + '  ' + dur;
       case 'turnMetrics':
         return 'turn ' + msg.turn + '  ' + msg.latency_ms + 'ms  ' + msg.prompt_tokens + '/' + msg.response_tokens + ' tokens';
+      case 'voiceRuntimeState':
+        return 'speaking=' + !!msg.user_speaking +
+          ' vad=' + (msg.vad_backend || '?') + '/' + (msg.vad_state || '?') +
+          ' p=' + (msg.vad_probability == null ? '?' : Number(msg.vad_probability).toFixed(2)) +
+          ' playback=' + !!msg.playback_active +
+          ' prompt=' + !!msg.prompt_pending +
+          ' epoch=' + (msg.prompt_epoch || 0);
       default: return U.truncText(JSON.stringify(msg), 80);
     }
   };

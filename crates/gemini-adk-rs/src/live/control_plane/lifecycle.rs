@@ -12,7 +12,7 @@ use crate::live::computed::ComputedRegistry;
 use crate::live::events::LiveEvent;
 use crate::live::extractor::{ExtractionTrigger, TurnExtractor};
 use crate::live::needs::RepairAction;
-use crate::live::phase::{PhaseMachine, TransitionResult};
+use crate::live::phase::{PhaseMachine, TransitionEvaluation, TransitionResult};
 use crate::live::processor::{ControlPlaneConfig, SharedState};
 use crate::live::steering::{self, SteeringMode};
 use crate::live::temporal::TemporalRegistry;
@@ -61,15 +61,8 @@ pub(in crate::live) async fn handle_turn_complete(
     }
     transcript_buffer.end_turn();
 
-    // 3. Snapshot watched keys BEFORE extractors
-    let pre_snapshot = watchers.as_ref().map(|w| {
-        state.snapshot_values(
-            &w.observed_keys()
-                .iter()
-                .map(|s| s.as_str())
-                .collect::<Vec<_>>(),
-        )
-    });
+    // 3. Capture a journal cursor before extractor/computed/phase mutations.
+    let pre_watcher_cursor = watchers.as_ref().map(|_| state.mutation_cursor());
 
     // 4. Run extractors matching EveryTurn or Interval triggers
     let current_turn = state.session().get::<u32>("turn_count").unwrap_or(0);
@@ -131,9 +124,19 @@ pub(in crate::live) async fn handle_turn_complete(
     if let Some(ref pm) = phase_machine {
         let mut machine = pm.lock().await;
 
-        // 7a. Evaluate transitions
-        if let Some((target, transition_index)) =
-            machine.evaluate(state).map(|(s, i)| (s.to_string(), i))
+        // 7a. Evaluate transitions and run target preparations when a guarded
+        // transition is blocked only by missing required state.
+        let mut evaluation = machine.evaluate_for_transition(state);
+        if let Some(TransitionEvaluation::Blocked { target, .. }) = &evaluation {
+            if machine.prepare_target(target, state, writer).await {
+                evaluation = machine.evaluate_for_transition(state);
+            }
+        }
+
+        if let Some(TransitionEvaluation::Ready {
+            target,
+            transition_index,
+        }) = evaluation
         {
             let from_phase = machine.current().to_string();
             let turn = state.session().get::<u32>("turn_count").unwrap_or(0);
@@ -155,6 +158,11 @@ pub(in crate::live) async fn handle_turn_complete(
                     state.remove("session:phase_needs");
                 } else {
                     state.set("session:phase_needs", phase.needs.clone());
+                }
+                if phase.requires.is_empty() {
+                    state.remove("session:phase_requires");
+                } else {
+                    state.set("session:phase_requires", phase.requires.clone());
                 }
             }
         }
@@ -266,16 +274,11 @@ pub(in crate::live) async fn handle_turn_complete(
         }
     }
 
-    // 8. Fire watchers (compare pre vs post snapshots)
-    if let (Some(ref watchers), Some(pre)) = (watchers, pre_snapshot) {
-        let post_keys: Vec<&str> = watchers
-            .observed_keys()
-            .iter()
-            .map(|s| s.as_str())
-            .collect();
-        let diffs = state.diff_values(&pre, &post_keys);
-        if !diffs.is_empty() {
-            let (blocking, concurrent) = watchers.evaluate(&diffs, state);
+    // 8. Fire watchers from net state mutations since the cursor.
+    if let (Some(ref watchers), Some(cursor)) = (watchers, pre_watcher_cursor) {
+        let mutations = state.mutations_since(cursor);
+        if !mutations.is_empty() {
+            let (blocking, concurrent) = watchers.evaluate_mutations(&mutations, state);
             for action in blocking {
                 action.await;
             }
@@ -364,19 +367,19 @@ pub(in crate::live) async fn handle_turn_complete(
     //            arrives in the same burst as user speech rather than as isolated
     //            frames during silence.
     //
-    // Exception: when should_prompt is true, we MUST send immediately —
-    // the prompt triggers a model response and the context must precede it.
+    // In Deferred mode, context and prompt are queued separately. User sends
+    // flush context only; prompt is released explicitly by the host when voice
+    // playback is drained/idle.
     if !context_buffer.is_empty() || should_prompt {
-        let force_immediate = should_prompt;
         use crate::live::steering::ContextDelivery;
-        match (
-            &control_plane.context_delivery,
-            &shared.pending_context,
-            force_immediate,
-        ) {
-            (ContextDelivery::Deferred, Some(pending), false) => {
-                // Deferred: queue for synchronized delivery with next user activity
+        match (&control_plane.context_delivery, &shared.pending_context) {
+            (ContextDelivery::Deferred, Some(pending)) => {
+                // Deferred: queue context for synchronized delivery with next
+                // user activity; queue prompts for explicit idle flush.
                 pending.extend(context_buffer);
+                if should_prompt {
+                    pending.set_prompt();
+                }
             }
             _ => {
                 // Immediate (or forced by prompt): send now

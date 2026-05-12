@@ -1,7 +1,8 @@
 //! Client-side Voice Activity Detection (VAD).
 //!
-//! Dual-threshold energy detector with zero-crossing rate (ZCR) confirmation
-//! and adaptive noise floor estimation. Complements Gemini's server-side VAD:
+//! WaveKat-backed VAD with the previous dual-threshold energy detector retained
+//! as a fallback for unsupported sample rates or frame sizes. Complements
+//! Gemini's server-side VAD:
 //!
 //! - **Bandwidth savings**: Don't send silence over the network
 //! - **Latency reduction**: Signal `activityStart` before server detects it
@@ -78,6 +79,9 @@ pub enum VadEvent {
 /// Voice Activity Detector with adaptive noise floor.
 pub struct VoiceActivityDetector {
     config: VadConfig,
+    #[cfg(feature = "vad-wavekat")]
+    wavekat: Option<WaveKatWebRtcBackend>,
+    use_wavekat: bool,
     state: VadState,
     /// Adaptive noise floor estimate (dBFS).
     noise_floor_db: f64,
@@ -85,6 +89,8 @@ pub struct VoiceActivityDetector {
     state_frames: u32,
     /// Number of frames used for noise adaptation.
     noise_adapt_frames: u64,
+    /// Last backend speech probability/decision, normalized to 0.0..1.0.
+    last_probability: Option<f32>,
     /// Circular buffer of pre-speech frames.
     pre_speech_buf: Vec<Vec<i16>>,
     pre_speech_idx: usize,
@@ -93,19 +99,43 @@ pub struct VoiceActivityDetector {
 impl VoiceActivityDetector {
     /// Create a new VAD with the given configuration.
     pub fn new(config: VadConfig) -> Self {
+        Self::new_with_backend(config, true)
+    }
+
+    fn new_with_backend(config: VadConfig, prefer_wavekat: bool) -> Self {
         let frame_size = config.frame_size();
         let pre_speech_buf: Vec<Vec<i16>> = (0..config.pre_speech_frames)
             .map(|_| vec![0i16; frame_size])
             .collect();
+        #[cfg(feature = "vad-wavekat")]
+        let wavekat = prefer_wavekat
+            .then(|| WaveKatWebRtcBackend::new(&config))
+            .flatten();
+        #[cfg(feature = "vad-wavekat")]
+        let use_wavekat = wavekat.is_some();
+        #[cfg(not(feature = "vad-wavekat"))]
+        let use_wavekat = {
+            let _ = prefer_wavekat;
+            false
+        };
         Self {
             noise_floor_db: config.initial_noise_floor_db,
             state: VadState::Silence,
             state_frames: 0,
             noise_adapt_frames: 0,
+            last_probability: None,
             pre_speech_buf,
             pre_speech_idx: 0,
+            #[cfg(feature = "vad-wavekat")]
+            wavekat,
+            use_wavekat,
             config,
         }
+    }
+
+    #[cfg(test)]
+    fn new_energy(config: VadConfig) -> Self {
+        Self::new_with_backend(config, false)
     }
 
     /// Current VAD state.
@@ -121,6 +151,25 @@ impl VoiceActivityDetector {
     /// Current noise floor estimate (dBFS).
     pub fn noise_floor_db(&self) -> f64 {
         self.noise_floor_db
+    }
+
+    /// Whether this detector is currently using the WaveKat backend.
+    pub fn is_wavekat_backed(&self) -> bool {
+        self.use_wavekat
+    }
+
+    /// Name of the active backend.
+    pub fn backend_name(&self) -> &'static str {
+        if self.use_wavekat {
+            "wavekat-webrtc"
+        } else {
+            "energy-zcr"
+        }
+    }
+
+    /// Last normalized speech probability or binary backend decision.
+    pub fn last_probability(&self) -> Option<f32> {
+        self.last_probability
     }
 
     /// Get pre-speech frames (the frames captured just before speech onset).
@@ -140,11 +189,16 @@ impl VoiceActivityDetector {
         let zcr = compute_zcr(samples);
         let energy_above_noise = energy_db - self.noise_floor_db;
 
-        let is_speech_like = energy_above_noise > self.config.start_threshold_db
+        let wavekat_decision = self.wavekat_decision(samples);
+        let energy_speech_like = energy_above_noise > self.config.start_threshold_db
             && zcr >= self.config.speech_zcr_range.0
             && zcr <= self.config.speech_zcr_range.1;
-
-        let is_above_stop = energy_above_noise > self.config.stop_threshold_db;
+        let energy_above_stop = energy_above_noise > self.config.stop_threshold_db;
+        let is_speech_like = wavekat_decision.unwrap_or(energy_speech_like);
+        let is_above_stop = wavekat_decision.unwrap_or(energy_above_stop);
+        if wavekat_decision.is_none() {
+            self.last_probability = Some(if energy_speech_like { 1.0 } else { 0.0 });
+        }
 
         match self.state {
             VadState::Silence => {
@@ -225,16 +279,65 @@ impl VoiceActivityDetector {
         self.noise_floor_db = self.noise_floor_db * (1.0 - alpha) + energy_db * alpha;
     }
 
+    fn wavekat_decision(&mut self, samples: &[i16]) -> Option<bool> {
+        #[cfg(feature = "vad-wavekat")]
+        {
+            let probability = self
+                .wavekat
+                .as_mut()
+                .and_then(|backend| backend.process(samples, self.config.sample_rate));
+            self.last_probability = probability;
+            probability.map(|probability| probability >= 0.5)
+        }
+        #[cfg(not(feature = "vad-wavekat"))]
+        {
+            let _ = samples;
+            None
+        }
+    }
+
     /// Reset the VAD to its initial state.
     pub fn reset(&mut self) {
         self.state = VadState::Silence;
         self.state_frames = 0;
         self.noise_adapt_frames = 0;
+        self.last_probability = None;
         self.noise_floor_db = self.config.initial_noise_floor_db;
         for buf in &mut self.pre_speech_buf {
             buf.iter_mut().for_each(|s| *s = 0);
         }
         self.pre_speech_idx = 0;
+    }
+}
+
+#[cfg(feature = "vad-wavekat")]
+struct WaveKatWebRtcBackend {
+    detector: wavekat_vad::backends::webrtc::WebRtcVad,
+}
+
+#[cfg(feature = "vad-wavekat")]
+impl WaveKatWebRtcBackend {
+    fn new(config: &VadConfig) -> Option<Self> {
+        if !matches!(config.sample_rate, 8000 | 16000 | 32000 | 48000) {
+            return None;
+        }
+        if !matches!(config.frame_duration_ms, 10 | 20 | 30) {
+            return None;
+        }
+
+        let detector = wavekat_vad::backends::webrtc::WebRtcVad::with_frame_duration(
+            config.sample_rate,
+            wavekat_vad::backends::webrtc::WebRtcVadMode::Aggressive,
+            config.frame_duration_ms,
+        )
+        .ok()?;
+        Some(Self { detector })
+    }
+
+    fn process(&mut self, samples: &[i16], sample_rate: u32) -> Option<f32> {
+        use wavekat_vad::VoiceActivityDetector as _;
+
+        self.detector.process(samples, sample_rate).ok()
     }
 }
 
@@ -269,7 +372,7 @@ mod tests {
     use super::*;
 
     fn make_vad() -> VoiceActivityDetector {
-        VoiceActivityDetector::new(VadConfig {
+        VoiceActivityDetector::new_energy(VadConfig {
             sample_rate: 16000,
             frame_duration_ms: 20,
             start_threshold_db: 15.0,
@@ -298,6 +401,28 @@ mod tests {
         let vad = make_vad();
         assert_eq!(vad.state(), VadState::Silence);
         assert!(!vad.is_speaking());
+    }
+
+    #[cfg(feature = "vad-wavekat")]
+    #[test]
+    fn default_detector_uses_wavekat_for_supported_frames() {
+        let vad = VoiceActivityDetector::new(VadConfig {
+            sample_rate: 16000,
+            frame_duration_ms: 20,
+            ..VadConfig::default()
+        });
+        assert!(vad.is_wavekat_backed());
+    }
+
+    #[cfg(feature = "vad-wavekat")]
+    #[test]
+    fn unsupported_frames_fall_back_to_energy_detector() {
+        let vad = VoiceActivityDetector::new(VadConfig {
+            sample_rate: 16000,
+            frame_duration_ms: 32,
+            ..VadConfig::default()
+        });
+        assert!(!vad.is_wavekat_backed());
     }
 
     #[test]

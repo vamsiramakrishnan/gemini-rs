@@ -40,6 +40,10 @@
   // ------------------------------------------------
   const audio = new AudioManager();
   const devtools = new DevtoolsManager(devtoolsPane);
+  audio.onPlaybackDrained = () => {
+    if (!ws || !connected) return;
+    ws.send(JSON.stringify({ type: 'playbackDrained' }));
+  };
 
   // ------------------------------------------------
   // State
@@ -363,6 +367,13 @@
         finalizeModelBubble();
         break;
 
+      case 'audio':
+        // Text-frame audio (base64-encoded PCM16) from standalone examples
+        if (msg.data) {
+          audio.playAudio(msg.data);
+        }
+        break;
+
       case 'turnComplete':
         finalizeModelBubble();
         break;
@@ -428,6 +439,10 @@
         addToolCallMessage(msg);
         break;
 
+      case 'statePromotionEvent':
+        devtools.handleStatePromotionEvent(msg);
+        break;
+
       case 'appMeta':
         devtools.handleAppMeta(msg.info);
         if (msg.info && msg.info.name) {
@@ -448,6 +463,11 @@
       case 'turnMetrics':
         // Already added to timeline via devtools.addEvent(msg) above
         devtools.handleTurnMetrics(msg);
+        break;
+
+      case 'voiceRuntimeState':
+        // Already added to timeline via devtools.addEvent(msg) above
+        devtools.handleVoiceRuntimeState(msg);
         break;
     }
   }
@@ -579,6 +599,9 @@
     try {
       const recording = await audio.toggleRecording();
       micBtn.classList.toggle('recording', recording);
+      if (recording) {
+        audio.clearQueue();
+      }
     } catch (err) {
       addMessage('Could not access microphone', 'error');
     }
