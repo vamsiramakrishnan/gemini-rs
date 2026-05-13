@@ -13,6 +13,7 @@ pub mod callbacks;
 pub mod computed;
 pub mod context_builder;
 pub mod context_writer;
+pub mod contract;
 pub(crate) mod control_plane;
 pub mod effect_executor;
 pub mod events;
@@ -41,6 +42,10 @@ pub use callbacks::{CallbackMode, EventCallbacks};
 pub use computed::{ComputedRegistry, ComputedVar};
 pub use context_builder::ContextBuilder;
 pub use context_writer::{DeferredWriter, PendingContext};
+pub use contract::{
+    ComputedContract, ControlContract, ExtractorContract, PhaseContract, PreparationContract,
+    PromotionContract, RuntimeContract, ToolContract, TransitionContract, WatcherContract,
+};
 pub use effect_executor::LiveEffectExecutor;
 pub use events::LiveEvent;
 pub use extractor::{ExtractionTrigger, FieldPromotion, LlmExtractor, MergePolicy, TurnExtractor};

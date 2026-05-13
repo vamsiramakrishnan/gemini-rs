@@ -11,6 +11,8 @@ use serde_json::Value;
 
 use crate::state::State;
 
+use super::contract::ComputedContract;
+
 /// A computed state variable: a pure function of other state keys.
 ///
 /// The `compute` closure receives the full [`State`] and returns an optional
@@ -196,6 +198,17 @@ impl ComputedRegistry {
     /// Returns true if no computed variables are registered.
     pub fn is_empty(&self) -> bool {
         self.vars.is_empty()
+    }
+
+    /// Return serializable contract metadata for all computed variables.
+    pub fn describe(&self) -> Vec<ComputedContract> {
+        self.vars
+            .iter()
+            .map(|var| ComputedContract {
+                key: var.key.clone(),
+                dependencies: var.dependencies.clone(),
+            })
+            .collect()
     }
 
     // ── Internal helpers ──────────────────────────────────────────────────

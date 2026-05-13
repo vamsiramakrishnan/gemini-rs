@@ -12,6 +12,7 @@
  *   EvalPanel        — evaluation results viewer (panels/eval-panel.js)
  *   ArtifactPanel    — artifact browser with versions (panels/artifact-panel.js)
  *   EventInspectorPanel — per-event JSON inspector (panels/event-inspector-panel.js)
+ *   ContractPanel    — SDK runtime contract explorer (panels/contract-panel.js)
  *
  * Exports:
  *   DevtoolsManager — the single object app.js interacts with
@@ -50,6 +51,7 @@ var DevtoolsManager = (function () {
     this._artifacts = new ArtifactPanel();
     this._eventInspector = new EventInspectorPanel();
     this._cookbook = new CookbookPanel();
+    this._contract = new ContractPanel();
 
     // Status bar
     this._statusUptimeEl = null;
@@ -87,6 +89,12 @@ var DevtoolsManager = (function () {
     ce.appendChild(stEl);
     this._state.create(stEl);
     this.panels.state = stEl;
+
+    // Runtime contract
+    var ctEl = U.el('div', '');
+    ce.appendChild(ctEl);
+    this._contract.create(ctEl);
+    this.panels.contract = ctEl;
 
     // Phases
     var phEl = U.el('div', '');
@@ -437,6 +445,10 @@ var DevtoolsManager = (function () {
     });
   };
 
+  DevtoolsManager.prototype.handleRuntimeContract = function (contract) {
+    this._contract.setContract(contract);
+  };
+
   DevtoolsManager.prototype.handleTurnMetrics = function (data) {
     this._metrics.addTurnLatency(data.latency_ms);
   };
@@ -479,7 +491,7 @@ var DevtoolsManager = (function () {
   };
 
   DevtoolsManager.prototype.handleAppMeta = function (info) {
-    this.availableTabs = ['timeline', 'events', 'state'];
+    this.availableTabs = ['timeline', 'events', 'state', 'contract'];
     var features = (info.features || []).map(function (f) { return f.toLowerCase(); });
     if (features.includes('state-machine') || info.category === 'advanced' || info.category === 'showcase') {
       this.availableTabs.push('phases');
@@ -524,6 +536,7 @@ var DevtoolsManager = (function () {
     this._eventInspector.reset();
     this._eventInspector.setSessionStart(this.sessionStart);
     this._cookbook.reset();
+    this._contract.reset();
 
     // Re-bind minimap
     if (this._minimap) {
@@ -543,6 +556,7 @@ var DevtoolsManager = (function () {
     switch (tabId) {
       case 'timeline': return 'Timeline';
       case 'state': return 'State';
+      case 'contract': return 'Contract';
       case 'phases': return 'Phases';
       case 'metrics': return 'Metrics';
       case 'traces': return 'Traces';

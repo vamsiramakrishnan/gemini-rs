@@ -91,12 +91,14 @@ pub mod prelude {
         Verdict, Violation,
     };
     pub use gemini_adk_rs::live::{
-        CallbackMode, ContextDelivery, DefaultResultFormatter, DeferredWriter, EventCallbacks,
-        ExtractionTrigger, FieldPromotion, FsPersistence, LiveEvent, LiveHandle,
-        LiveSessionBuilder, LlmExtractor, MemoryPersistence, MergePolicy, NeedsFulfillment,
-        PendingContext, RepairAction, RepairConfig, ResultFormatter, SessionPersistence,
-        SessionSnapshot, SoftTurnDetector, SteeringMode, ToolExecutionMode, TranscriptBuffer,
-        TranscriptTurn, TurnExtractor,
+        CallbackMode, ComputedContract, ContextDelivery, ControlContract, DefaultResultFormatter,
+        DeferredWriter, EventCallbacks, ExtractionTrigger, ExtractorContract, FieldPromotion,
+        FsPersistence, LiveEvent, LiveHandle, LiveSessionBuilder, LlmExtractor, MemoryPersistence,
+        MergePolicy, NeedsFulfillment, PendingContext, PhaseContract, PreparationContract,
+        PromotionContract, RepairAction, RepairConfig, ResultFormatter, RuntimeContract,
+        SessionPersistence, SessionSnapshot, SoftTurnDetector, SteeringMode, ToolContract,
+        ToolExecutionMode, TranscriptBuffer, TranscriptTurn, TransitionContract, TurnExtractor,
+        WatcherContract,
     };
     pub use gemini_adk_rs::llm::{BaseLlm, GeminiLlm, GeminiLlmParams, LlmRequest, LlmResponse};
     pub use gemini_adk_rs::orchestration::{

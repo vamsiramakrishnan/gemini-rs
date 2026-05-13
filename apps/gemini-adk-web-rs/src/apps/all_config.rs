@@ -258,6 +258,7 @@ impl DemoApp for AllConfig {
                 Some(responses)
             }
         });
+        let contract = live.describe_contract();
 
         // 5. Connect with manually-built config.
         let handle = live
@@ -268,6 +269,7 @@ impl DemoApp for AllConfig {
         // 6. Signal browser.
         bridge.send_connected();
         bridge.send_meta(self);
+        bridge.send_runtime_contract(contract);
         let _ = tx.send(crate::bridge::voice_runtime_message(&handle));
 
         // 7. Send active configuration to the client.

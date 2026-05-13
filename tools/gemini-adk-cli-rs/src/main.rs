@@ -39,6 +39,15 @@ enum Command {
         replay: Option<String>,
     },
 
+    /// Replay and validate a captured Live session event log.
+    Replay {
+        /// Path to a JSON event log or object containing an `events` array.
+        path: String,
+        /// Optional runtime contract JSON exported from DevTools or SDK.
+        #[arg(long)]
+        contract: Option<String>,
+    },
+
     /// Start a development web server with UI.
     Web {
         /// Path to the agent directory containing agent.toml.
@@ -178,6 +187,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             )
             .await?
         }
+
+        Command::Replay { path, contract } => commands::replay::run(&path, contract.as_deref())?,
 
         Command::Web {
             agent_dir,

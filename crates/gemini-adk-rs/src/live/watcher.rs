@@ -15,6 +15,8 @@ use serde_json::Value;
 use super::BoxFuture;
 use crate::state::{State, StateMutation};
 
+use super::contract::WatcherContract;
+
 // ── Predicate ────────────────────────────────────────────────────────────────
 
 /// Custom predicate function type for state change watchers.
@@ -139,6 +141,18 @@ impl WatcherRegistry {
     /// relevant keys are captured before mutations.
     pub fn observed_keys(&self) -> &HashSet<String> {
         &self.observed_keys
+    }
+
+    /// Return serializable contract metadata for all watchers.
+    pub fn describe(&self) -> Vec<WatcherContract> {
+        self.watchers
+            .iter()
+            .map(|watcher| WatcherContract {
+                key: watcher.key.clone(),
+                predicate: format!("{:?}", watcher.predicate),
+                blocking: watcher.blocking,
+            })
+            .collect()
     }
 
     /// Evaluate all watchers against the given state diffs.

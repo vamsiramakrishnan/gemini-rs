@@ -456,6 +456,10 @@
         }
         break;
 
+      case 'runtimeContract':
+        devtools.handleRuntimeContract(msg.contract);
+        break;
+
       case 'spanEvent':
         // Already added to timeline via devtools.addEvent(msg) above
         break;

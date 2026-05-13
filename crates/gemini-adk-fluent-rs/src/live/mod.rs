@@ -27,6 +27,7 @@
 mod callbacks;
 mod config;
 mod connect;
+mod contract;
 mod extraction;
 mod phases;
 

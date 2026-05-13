@@ -72,6 +72,14 @@ impl SessionBridge {
         });
     }
 
+    /// Send the configured runtime contract to DevTools.
+    pub fn send_runtime_contract(&self, contract: RuntimeContract) {
+        let value = serde_json::to_value(contract).unwrap_or_else(|_| serde_json::json!({}));
+        let _ = self
+            .tx
+            .send(ServerMessage::RuntimeContract { contract: value });
+    }
+
     /// Wire all standard event callbacks onto a Live builder.
     ///
     /// Attaches: on_audio, on_text, on_text_complete, on_turn_complete,
@@ -330,6 +338,7 @@ impl SessionBridge {
             Live::builder().telemetry_interval(std::time::Duration::from_secs(2)),
             &start,
         );
+        let contract = builder.describe_contract();
 
         // 4. Connect
         let handle = builder
@@ -340,6 +349,7 @@ impl SessionBridge {
         // 5. Signal browser
         self.send_connected();
         self.send_meta(app);
+        self.send_runtime_contract(contract);
         send_phase_snapshot(&self.tx, &handle);
         self.send_voice_runtime_state(&handle);
 

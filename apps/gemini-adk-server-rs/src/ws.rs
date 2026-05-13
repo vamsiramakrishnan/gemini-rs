@@ -145,6 +145,11 @@ pub enum ServerMessage {
         /// The agent's [`AppInfo`].
         info: AppInfo,
     },
+    /// Declarative runtime contract for DevTools and replay validation.
+    RuntimeContract {
+        /// The serialized contract payload.
+        contract: serde_json::Value,
+    },
     /// Live session telemetry stats (turn count, phase durations, tool calls, etc.)
     Telemetry {
         /// Arbitrary stats payload.
