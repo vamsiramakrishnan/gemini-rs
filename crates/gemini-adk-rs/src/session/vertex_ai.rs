@@ -466,7 +466,10 @@ impl VertexAiSessionService {
 #[async_trait]
 impl SessionService for VertexAiSessionService {
     async fn create_session(&self, app_name: &str, user_id: &str) -> Result<Session, SessionError> {
-        let url = self.config.sessions_url(app_name);
+        // Physically create the session under the configured reasoning engine
+        // (the same engine the other CRUD methods use), so it stays reachable.
+        // `app_name` is only a logical label carried on the returned session.
+        let url = self.config.sessions_url(&self.engine_id);
         let body = build_create_body(user_id, self.config.ttl_seconds);
 
         let resp = self
@@ -508,7 +511,9 @@ impl SessionService for VertexAiSessionService {
         app_name: &str,
         user_id: &str,
     ) -> Result<Vec<Session>, SessionError> {
-        let base_url = self.config.sessions_url(app_name);
+        // List under the configured engine (where sessions are stored), but
+        // keep `app_name` as the logical label on the returned sessions.
+        let base_url = self.config.sessions_url(&self.engine_id);
         let url = format!("{base_url}?filter=userId={user_id}");
 
         let resp = self
@@ -835,25 +840,25 @@ mod tests {
         // classify_status returns Ok(false) to signal "treat as None"
         let result = classify_status(404, "not found");
         assert!(result.is_ok(), "expected Ok, got {result:?}");
-        assert_eq!(result.unwrap(), false, "expected false for 404");
+        assert!(!result.unwrap(), "expected false for 404");
     }
 
     #[test]
     fn classify_status_200_is_success_signal() {
         let result = classify_status(200, "");
-        assert_eq!(result.unwrap(), true, "expected true for 200");
+        assert!(result.unwrap(), "expected true for 200");
     }
 
     #[test]
     fn classify_status_201_is_success_signal() {
         let result = classify_status(201, "");
-        assert_eq!(result.unwrap(), true, "expected true for 201");
+        assert!(result.unwrap(), "expected true for 201");
     }
 
     #[test]
     fn classify_status_299_is_success_signal() {
         let result = classify_status(299, "");
-        assert_eq!(result.unwrap(), true, "expected true for 299");
+        assert!(result.unwrap(), "expected true for 299");
     }
 
     #[test]

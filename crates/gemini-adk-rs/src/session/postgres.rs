@@ -56,7 +56,8 @@ impl PostgresSessionService {
     /// This only creates the service struct. The pool connects lazily on first
     /// use, or eagerly via [`initialize`](Self::initialize).
     pub fn new(config: PostgresSessionConfig) -> Self {
-        let inner = DatabaseSessionService::new(config.connection_string.clone());
+        let inner = DatabaseSessionService::new(config.connection_string.clone())
+            .with_max_connections(config.max_connections);
         Self { config, inner }
     }
 

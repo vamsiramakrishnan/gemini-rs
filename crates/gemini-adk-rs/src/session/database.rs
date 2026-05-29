@@ -55,6 +55,9 @@ enum Pool {
 #[cfg(feature = "database-sessions")]
 pub struct DatabaseSessionService {
     connection_url: String,
+    /// Max pool connections (PostgreSQL). SQLite always uses 1 so an
+    /// in-memory database persists across calls.
+    max_connections: Option<u32>,
     pool: Mutex<Option<std::sync::Arc<Pool>>>,
 }
 
@@ -71,8 +74,18 @@ impl DatabaseSessionService {
     pub fn new(connection_url: impl Into<String>) -> Self {
         Self {
             connection_url: connection_url.into(),
+            max_connections: None,
             pool: Mutex::new(None),
         }
+    }
+
+    /// Set the maximum number of pool connections (PostgreSQL only).
+    ///
+    /// SQLite ignores this and always uses a single connection so that an
+    /// in-memory database survives across calls.
+    pub fn with_max_connections(mut self, max: u32) -> Self {
+        self.max_connections = Some(max);
+        self
     }
 
     /// Returns the connection URL this service was configured with.
@@ -86,7 +99,11 @@ impl DatabaseSessionService {
         if is_postgres_url(url) {
             #[cfg(feature = "postgres-sessions")]
             {
-                let pool = PgPoolOptions::new()
+                let mut opts = PgPoolOptions::new();
+                if let Some(max) = self.max_connections {
+                    opts = opts.max_connections(max);
+                }
+                let pool = opts
                     .connect(url)
                     .await
                     .map_err(|e| SessionError::Storage(e.to_string()))?;
@@ -136,6 +153,11 @@ impl DatabaseSessionService {
         self.pool().await?;
         Ok(())
     }
+}
+
+/// Returns true if a sqlx error is a unique-constraint violation.
+fn is_unique_violation(e: &sqlx::Error) -> bool {
+    matches!(e, sqlx::Error::Database(db) if db.is_unique_violation())
 }
 
 /// Returns true if `url` denotes a PostgreSQL connection.
@@ -408,42 +430,46 @@ impl SessionService for DatabaseSessionService {
         let data =
             serde_json::to_string(&event).map_err(|e| SessionError::Storage(e.to_string()))?;
 
-        match pool.as_ref() {
-            Pool::Sqlite(p) => {
-                let next: i64 = sqlx::query_scalar(
-                    "SELECT COALESCE(MAX(seq), -1) + 1 FROM events WHERE session_id = ?",
+        // Allocate the sequence number and insert in a single atomic statement
+        // (`INSERT ... SELECT COALESCE(MAX(seq), -1) + 1`) so concurrent
+        // appenders can't read the same `MAX(seq)` and collide. On Postgres,
+        // two transactions under READ COMMITTED can still both observe the
+        // pre-insert snapshot and one will hit the `(session_id, seq)` unique
+        // constraint — retry a bounded number of times in that case. SQLite's
+        // single-connection pool serializes writes, so it never retries.
+        const MAX_ATTEMPTS: u32 = 8;
+        for attempt in 0..MAX_ATTEMPTS {
+            let result = match pool.as_ref() {
+                Pool::Sqlite(p) => sqlx::query(
+                    "INSERT INTO events (session_id, seq, data) \
+                     SELECT ?, COALESCE(MAX(seq), -1) + 1, ? FROM events WHERE session_id = ?",
                 )
                 .bind(id_str)
-                .fetch_one(p)
+                .bind(&data)
+                .bind(id_str)
+                .execute(p)
                 .await
-                .map_err(|e| SessionError::Storage(e.to_string()))?;
-                sqlx::query("INSERT INTO events (session_id, seq, data) VALUES (?, ?, ?)")
-                    .bind(id_str)
-                    .bind(next)
-                    .bind(&data)
-                    .execute(p)
-                    .await
-                    .map_err(|e| SessionError::Storage(e.to_string()))?;
-            }
-            #[cfg(feature = "postgres-sessions")]
-            Pool::Postgres(p) => {
-                let next: i64 = sqlx::query_scalar(
-                    "SELECT COALESCE(MAX(seq), -1) + 1 FROM events WHERE session_id = $1",
+                .map(|_| ()),
+                #[cfg(feature = "postgres-sessions")]
+                Pool::Postgres(p) => sqlx::query(
+                    "INSERT INTO events (session_id, seq, data) \
+                     SELECT $1, COALESCE(MAX(seq), -1) + 1, $2 FROM events WHERE session_id = $1",
                 )
                 .bind(id_str)
-                .fetch_one(p)
+                .bind(&data)
+                .execute(p)
                 .await
-                .map_err(|e| SessionError::Storage(e.to_string()))?;
-                sqlx::query("INSERT INTO events (session_id, seq, data) VALUES ($1, $2, $3)")
-                    .bind(id_str)
-                    .bind(next)
-                    .bind(&data)
-                    .execute(p)
-                    .await
-                    .map_err(|e| SessionError::Storage(e.to_string()))?;
+                .map(|_| ()),
+            };
+            match result {
+                Ok(_) => return Ok(()),
+                Err(e) if is_unique_violation(&e) && attempt + 1 < MAX_ATTEMPTS => continue,
+                Err(e) => return Err(SessionError::Storage(e.to_string())),
             }
         }
-        Ok(())
+        Err(SessionError::Storage(
+            "append_event: exhausted retries allocating event sequence number".into(),
+        ))
     }
 
     async fn get_events(&self, id: &SessionId) -> Result<Vec<Event>, SessionError> {
@@ -507,6 +533,34 @@ mod tests {
         let session = svc.create_session("app", "user").await.unwrap();
         assert_eq!(session.app_name, "app");
         assert_eq!(session.user_id, "user");
+    }
+
+    /// Regression for the event-sequence race: concurrent `append_event`
+    /// calls must each get a distinct seq and none may be dropped on the
+    /// `(session_id, seq)` primary key.
+    #[tokio::test]
+    async fn concurrent_appends_allocate_distinct_sequences() {
+        let svc = std::sync::Arc::new(DatabaseSessionService::new("sqlite::memory:"));
+        svc.initialize().await.unwrap();
+        let session = svc.create_session("app", "user").await.unwrap();
+
+        const N: usize = 25;
+        let mut handles = Vec::new();
+        for i in 0..N {
+            let svc = svc.clone();
+            let id = session.id.clone();
+            handles.push(tokio::spawn(async move {
+                svc.append_event(&id, Event::new("user", Some(format!("msg-{i}"))))
+                    .await
+            }));
+        }
+        for h in handles {
+            h.await.unwrap().unwrap();
+        }
+
+        // All N events landed (no drops), and ordering is stable.
+        let events = svc.get_events(&session.id).await.unwrap();
+        assert_eq!(events.len(), N, "every concurrent append must persist");
     }
 
     #[tokio::test]
