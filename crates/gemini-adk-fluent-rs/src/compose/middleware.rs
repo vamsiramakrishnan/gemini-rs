@@ -2,8 +2,23 @@
 //!
 //! Compose middleware in any order with `|`.
 //!
-//! **Note:** Not yet wired into Live session dispatch. Available for
-//! `TextAgent` pipelines. Hidden from docs until Live integration lands.
+//! ## Wiring status
+//!
+//! **TextAgent pipelines** (via `AgentBuilder::middleware` + `AgentBuilder::build`) —
+//! **fully wired**.  Every factory in this module produces a `MiddlewareComposite`
+//! whose layers are installed into the `LlmTextAgent` middleware chain at compile
+//! time.  Hooks fire in this order per `run()` call:
+//!
+//! 1. `before_model` (forward order) — may short-circuit with a cached response.
+//! 2. LLM call (skipped if `before_model` returned `Some`).
+//! 3. `after_model` (reverse order) — may replace the LLM response.
+//! 4. `before_tool` (forward) / `after_tool` (reverse) / `on_tool_error` (forward)
+//!    — called for each tool dispatch round.
+//! 5. `on_error` (forward) — called once if `run()` returns an error.
+//!
+//! **Live session dispatch** — not yet wired.  The `before_agent`/`after_agent`
+//! hooks on `Middleware` are Live-only (they require a full `InvocationContext`).
+//! Live integration is tracked as a future work item.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -92,6 +107,24 @@ impl M {
         f: impl Fn(&FunctionCall) -> Result<(), String> + Send + Sync + 'static,
     ) -> MiddlewareComposite {
         MiddlewareComposite::new(Arc::new(BeforeToolMiddleware {
+            handler: Arc::new(f),
+        }))
+    }
+
+    /// Add a custom after-tool hook — called after every successful tool invocation.
+    pub fn after_tool(
+        f: impl Fn(&FunctionCall, &serde_json::Value) -> Result<(), String> + Send + Sync + 'static,
+    ) -> MiddlewareComposite {
+        MiddlewareComposite::new(Arc::new(AfterToolMiddleware {
+            handler: Arc::new(f),
+        }))
+    }
+
+    /// Add a custom error observer — called when an agent-level error occurs.
+    pub fn on_error(
+        f: impl Fn(&AgentError) -> Result<(), String> + Send + Sync + 'static,
+    ) -> MiddlewareComposite {
+        MiddlewareComposite::new(Arc::new(OnErrorMiddleware {
             handler: Arc::new(f),
         }))
     }
@@ -321,6 +354,46 @@ impl Middleware for BeforeToolMiddleware {
 
     async fn before_tool(&self, call: &FunctionCall) -> Result<(), AgentError> {
         (self.handler)(call).map_err(AgentError::Other)
+    }
+}
+
+// ── AfterTool Middleware ────────────────────────────────────────────────────
+
+struct AfterToolMiddleware {
+    #[allow(clippy::type_complexity)]
+    handler: Arc<dyn Fn(&FunctionCall, &serde_json::Value) -> Result<(), String> + Send + Sync>,
+}
+
+#[async_trait]
+impl Middleware for AfterToolMiddleware {
+    fn name(&self) -> &str {
+        "after_tool"
+    }
+
+    async fn after_tool(
+        &self,
+        call: &FunctionCall,
+        result: &serde_json::Value,
+    ) -> Result<(), AgentError> {
+        (self.handler)(call, result).map_err(AgentError::Other)
+    }
+}
+
+// ── OnError Middleware ──────────────────────────────────────────────────────
+
+struct OnErrorMiddleware {
+    #[allow(clippy::type_complexity)]
+    handler: Arc<dyn Fn(&AgentError) -> Result<(), String> + Send + Sync>,
+}
+
+#[async_trait]
+impl Middleware for OnErrorMiddleware {
+    fn name(&self) -> &str {
+        "on_error"
+    }
+
+    async fn on_error(&self, err: &AgentError) -> Result<(), AgentError> {
+        (self.handler)(err).map_err(AgentError::Other)
     }
 }
 

@@ -7,7 +7,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use gemini_adk_rs::text::TextAgent;
-use gemini_adk_rs::tool::{SimpleTool, ToolFunction};
+use gemini_adk_rs::tool::{PolicyTool, SimpleTool, ToolFunction, ToolPolicy};
 use gemini_genai_rs::prelude::Tool;
 
 /// A tool composite — one or more tool entries.
@@ -112,6 +112,30 @@ impl ToolComposite {
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
+
+    /// Apply a per-tool [`ToolPolicy`] transform to every function entry.
+    ///
+    /// Each [`ToolCompositeEntry::Function`] is wrapped in a [`PolicyTool`]
+    /// carrying the policy. Successive modifiers nest (e.g. `T::cached(T::timeout(..))`
+    /// applies both timeout and cache), since a `PolicyTool` is itself a
+    /// [`ToolFunction`]. Other entry kinds are left untouched.
+    fn map_function_policy(
+        mut self,
+        f: impl Fn(ToolPolicy) -> ToolPolicy + Send + Sync + 'static,
+    ) -> Self {
+        self.entries = self
+            .entries
+            .into_iter()
+            .map(|entry| match entry {
+                ToolCompositeEntry::Function(func) => {
+                    let policy = f(ToolPolicy::new());
+                    ToolCompositeEntry::Function(PolicyTool::wrap(func, policy))
+                }
+                other => other,
+            })
+            .collect();
+        self
+    }
 }
 
 /// Compose two tool composites with `|`.
@@ -177,22 +201,37 @@ impl T {
         Self::simple(name, description, f)
     }
 
-    /// Wrap a tool with a confirmation requirement (marker for runtime).
-    pub fn confirm(tool: ToolComposite, _message: &str) -> ToolComposite {
-        // Confirmation enforcement happens at runtime. This is a declarative marker.
-        tool
+    /// Require user confirmation before each function tool in the composite runs.
+    ///
+    /// The confirmation flag is recorded on the tool's [`ToolPolicy`] and surfaced
+    /// to the runtime via [`PolicyTool::requires_confirmation`] — it is never
+    /// silently dropped. The `message` becomes the confirmation hint. Built-in and
+    /// placeholder entries are left unchanged.
+    pub fn confirm(tool: ToolComposite, message: &str) -> ToolComposite {
+        let msg = if message.is_empty() {
+            None
+        } else {
+            Some(message.to_string())
+        };
+        tool.map_function_policy(move |p| p.with_confirm(msg.clone()))
     }
 
-    /// Wrap a tool with a timeout (marker for runtime).
-    pub fn timeout(tool: ToolComposite, _duration: std::time::Duration) -> ToolComposite {
-        // Timeout enforcement happens at runtime.
-        tool
+    /// Bound each function tool in the composite by a timeout.
+    ///
+    /// At dispatch the tool's future is raced against the duration; on elapse the
+    /// call returns [`ToolError::Timeout`](gemini_adk_rs::ToolError::Timeout).
+    /// Built-in and placeholder entries are left unchanged.
+    pub fn timeout(tool: ToolComposite, duration: std::time::Duration) -> ToolComposite {
+        tool.map_function_policy(move |p| p.with_timeout(duration))
     }
 
-    /// Wrap a tool with caching (marker for runtime).
+    /// Memoize each function tool's successful results.
+    ///
+    /// Results are cached by `(tool name, canonical-JSON args)`; repeat calls with
+    /// identical arguments return the cached value without re-invoking the tool.
+    /// Errors are not cached. Built-in/placeholder entries are left unchanged.
     pub fn cached(tool: ToolComposite) -> ToolComposite {
-        // Cache enforcement happens at runtime.
-        tool
+        tool.map_function_policy(|p| p.with_cache())
     }
 
     /// Combine multiple tool functions into a single composite.
@@ -368,6 +407,68 @@ mod tests {
         assert_eq!(t.len(), 1);
         match &t.entries[0] {
             ToolCompositeEntry::Function(f) => assert_eq!(f.name(), "greet"),
+            _ => panic!("expected Function entry"),
+        }
+    }
+
+    #[tokio::test]
+    async fn timeout_modifier_enforces_timeout() {
+        use gemini_adk_rs::ToolError;
+        use std::time::Duration;
+
+        let t = T::timeout(
+            T::simple("slow", "slow tool", |_| async move {
+                tokio::time::sleep(Duration::from_secs(3600)).await;
+                Ok(serde_json::json!({"ok": true}))
+            }),
+            Duration::from_millis(50),
+        );
+        match &t.entries[0] {
+            ToolCompositeEntry::Function(f) => match f.call(serde_json::json!({})).await {
+                Err(ToolError::Timeout(d)) => assert_eq!(d, Duration::from_millis(50)),
+                other => panic!("expected Timeout, got {other:?}"),
+            },
+            _ => panic!("expected Function entry"),
+        }
+    }
+
+    #[tokio::test]
+    async fn cached_modifier_memoizes_results() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+
+        let counter = Arc::new(AtomicU32::new(0));
+        let c = counter.clone();
+        let t = T::cached(T::simple("count", "counts calls", move |_| {
+            let c = c.clone();
+            async move {
+                let n = c.fetch_add(1, Ordering::SeqCst) + 1;
+                Ok(serde_json::json!({"n": n}))
+            }
+        }));
+        match &t.entries[0] {
+            ToolCompositeEntry::Function(f) => {
+                let first = f.call(serde_json::json!({"x": 1})).await.unwrap();
+                let second = f.call(serde_json::json!({"x": 1})).await.unwrap();
+                assert_eq!(first, second);
+                assert_eq!(first["n"], 1);
+                assert_eq!(counter.load(Ordering::SeqCst), 1);
+            }
+            _ => panic!("expected Function entry"),
+        }
+    }
+
+    #[test]
+    fn confirm_modifier_wraps_function() {
+        // confirm() wraps the function (preserving its name) so the policy flag
+        // travels to the runtime rather than being silently dropped.
+        let t = T::confirm(
+            T::simple("danger", "dangerous", |_| async move {
+                Ok(serde_json::json!({}))
+            }),
+            "are you sure?",
+        );
+        match &t.entries[0] {
+            ToolCompositeEntry::Function(f) => assert_eq!(f.name(), "danger"),
             _ => panic!("expected Function entry"),
         }
     }

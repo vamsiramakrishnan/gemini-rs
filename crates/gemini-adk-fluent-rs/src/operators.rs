@@ -212,6 +212,83 @@ impl Composable {
     }
 }
 
+// ── Safe variant accessors ──
+//
+// These inspect a `Composable` for a specific shape and return `None` when the
+// variant does not match, rather than panicking. Callers that want the
+// underlying structure should pattern-match directly; these are convenience
+// accessors for introspection (tests, tooling, debugging).
+
+impl Composable {
+    /// The first step of a [`Pipeline`], or `None` if this is not a pipeline
+    /// (or the pipeline is empty).
+    pub fn first_step(&self) -> Option<&Composable> {
+        match self {
+            Composable::Pipeline(p) => p.steps.first(),
+            _ => None,
+        }
+    }
+
+    /// The last step of a [`Pipeline`], or `None` if this is not a pipeline
+    /// (or the pipeline is empty).
+    pub fn last_step(&self) -> Option<&Composable> {
+        match self {
+            Composable::Pipeline(p) => p.steps.last(),
+            _ => None,
+        }
+    }
+
+    /// The `n`th step of a [`Pipeline`], or `None` if this is not a pipeline
+    /// or the index is out of bounds.
+    pub fn nth_step(&self, n: usize) -> Option<&Composable> {
+        match self {
+            Composable::Pipeline(p) => p.steps.get(n),
+            _ => None,
+        }
+    }
+
+    /// All steps of a [`Pipeline`], or `None` if this is not a pipeline.
+    pub fn pipeline_steps(&self) -> Option<&[Composable]> {
+        match self {
+            Composable::Pipeline(p) => Some(&p.steps),
+            _ => None,
+        }
+    }
+
+    /// The branches of a [`FanOut`], or `None` if this is not a fan-out.
+    pub fn fan_out_branches(&self) -> Option<&[Composable]> {
+        match self {
+            Composable::FanOut(f) => Some(&f.branches),
+            _ => None,
+        }
+    }
+
+    /// The termination predicate of a [`Loop`], or `None` if this is not a loop
+    /// (or the loop has no predicate).
+    pub fn loop_predicate(&self) -> Option<&LoopPredicate> {
+        match self {
+            Composable::Loop(l) => l.until.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// The body of a [`Loop`], or `None` if this is not a loop.
+    pub fn loop_body(&self) -> Option<&Composable> {
+        match self {
+            Composable::Loop(l) => Some(&l.body),
+            _ => None,
+        }
+    }
+
+    /// The candidates of a [`Fallback`] chain, or `None` if this is not a fallback.
+    pub fn fallback_candidates(&self) -> Option<&[Composable]> {
+        match self {
+            Composable::Fallback(f) => Some(&f.candidates),
+            _ => None,
+        }
+    }
+}
+
 // ── Pipeline construction helpers ──
 
 impl Pipeline {
@@ -657,6 +734,48 @@ mod tests {
             }
             _ => panic!("expected Pipeline"),
         }
+    }
+
+    #[test]
+    fn safe_accessors_return_some_on_match() {
+        let pipeline = agent("a").instruction("x") >> agent("b").instruction("y");
+        assert!(pipeline.first_step().is_some());
+        assert!(pipeline.last_step().is_some());
+        assert!(pipeline.nth_step(1).is_some());
+        assert!(pipeline.nth_step(99).is_none());
+        assert_eq!(pipeline.pipeline_steps().map(|s| s.len()), Some(2));
+
+        let fan_out = Composable::Agent(agent("a")) | Composable::Agent(agent("b"));
+        assert_eq!(fan_out.fan_out_branches().map(|b| b.len()), Some(2));
+
+        let looped = agent("a") * until(|_| true);
+        assert!(looped.loop_predicate().is_some());
+        assert!(looped.loop_body().is_some());
+
+        let fallback = agent("a") / agent("b");
+        assert_eq!(fallback.fallback_candidates().map(|c| c.len()), Some(2));
+    }
+
+    #[test]
+    fn safe_accessors_return_none_on_mismatch() {
+        // Calling a pipeline accessor on a non-Pipeline returns None, not panic.
+        let solo = Composable::Agent(agent("solo"));
+        assert!(solo.first_step().is_none());
+        assert!(solo.last_step().is_none());
+        assert!(solo.nth_step(0).is_none());
+        assert!(solo.pipeline_steps().is_none());
+        assert!(solo.fan_out_branches().is_none());
+        assert!(solo.loop_predicate().is_none());
+        assert!(solo.loop_body().is_none());
+        assert!(solo.fallback_candidates().is_none());
+
+        // A fixed loop (no predicate) returns None for loop_predicate but
+        // Some for loop_body.
+        let fixed = agent("a") * 3;
+        assert!(fixed.loop_predicate().is_none());
+        assert!(fixed.loop_body().is_some());
+        // And a pipeline accessor on a loop is None.
+        assert!(fixed.first_step().is_none());
     }
 
     #[test]

@@ -1,14 +1,14 @@
 //! PostgreSQL session service — scalable persistent session storage.
 //!
-//! Provides session persistence using a PostgreSQL database with JSONB
-//! storage for structured event data. Suitable for multi-process and
-//! distributed deployments.
+//! Provides session persistence using a PostgreSQL database. Suitable for
+//! multi-process and distributed deployments.
 //!
-//! Feature-gated behind `postgres-sessions`.
+//! Feature-gated behind `postgres-sessions`. Delegates to the real
+//! `sqlx`-backed [`DatabaseSessionService`](super::DatabaseSessionService).
 
 use async_trait::async_trait;
 
-use super::{db_schema, Session, SessionError, SessionId, SessionService};
+use super::{DatabaseSessionService, Session, SessionError, SessionId, SessionService};
 use crate::events::Event;
 
 /// Configuration for the PostgreSQL session service.
@@ -38,39 +38,34 @@ impl PostgresSessionConfig {
 
 /// Session service backed by PostgreSQL.
 ///
-/// Provides scalable, multi-process session persistence using PostgreSQL
-/// with JSONB columns for structured event data. Suitable for production
-/// deployments requiring horizontal scaling.
+/// Provides scalable, multi-process session persistence using PostgreSQL.
+/// Suitable for production deployments requiring horizontal scaling.
 ///
-/// The database schema is defined in [`db_schema::POSTGRES_SCHEMA`] and
-/// must be applied via [`initialize`](Self::initialize) before first use.
+/// Delegates all storage operations to a [`DatabaseSessionService`] built from
+/// the configured connection string. The connection pool is opened lazily on
+/// first use; call [`initialize`](Self::initialize) to open it eagerly and run
+/// the schema migration.
 pub struct PostgresSessionService {
     config: PostgresSessionConfig,
-    // In a real implementation, this would hold a connection pool
-    // (e.g., `sqlx::PgPool` or `deadpool_postgres::Pool`).
+    inner: DatabaseSessionService,
 }
 
 impl PostgresSessionService {
     /// Create a new PostgreSQL session service.
     ///
-    /// This only creates the service struct. Call [`initialize`](Self::initialize)
-    /// to run the schema migration before using the service.
+    /// This only creates the service struct. The pool connects lazily on first
+    /// use, or eagerly via [`initialize`](Self::initialize).
     pub fn new(config: PostgresSessionConfig) -> Self {
-        Self { config }
+        let inner = DatabaseSessionService::new(config.connection_string.clone());
+        Self { config, inner }
     }
 
-    /// Run the PostgreSQL schema migration.
+    /// Open the pool and run the schema migration.
     ///
     /// Creates the `sessions` and `events` tables if they don't exist.
-    /// Safe to call multiple times (uses `CREATE TABLE IF NOT EXISTS`).
+    /// Safe to call multiple times.
     pub async fn initialize(&self) -> Result<(), SessionError> {
-        let _schema = db_schema::POSTGRES_SCHEMA;
-        let _conn_str = &self.config.connection_string;
-        let _max_conns = self.config.max_connections;
-        // Real implementation would:
-        // 1. Create a connection pool with max_connections
-        // 2. Execute POSTGRES_SCHEMA as a migration
-        todo!("Connect to PostgreSQL at {_conn_str} and run POSTGRES_SCHEMA migration")
+        self.inner.initialize().await
     }
 
     /// Returns the configured connection string.
@@ -87,25 +82,11 @@ impl PostgresSessionService {
 #[async_trait]
 impl SessionService for PostgresSessionService {
     async fn create_session(&self, app_name: &str, user_id: &str) -> Result<Session, SessionError> {
-        let session = Session::new(app_name, user_id);
-        let _id = session.id.as_str();
-        let _state = serde_json::to_value(&session.state)
-            .map_err(|e| SessionError::Storage(e.to_string()))?;
-
-        // Real implementation:
-        // INSERT INTO sessions (id, app_name, user_id, state)
-        // VALUES ($1, $2, $3, $4)
-        // RETURNING id, app_name, user_id, state, create_time, update_time
-        todo!("INSERT session {_id} into PostgreSQL")
+        self.inner.create_session(app_name, user_id).await
     }
 
     async fn get_session(&self, id: &SessionId) -> Result<Option<Session>, SessionError> {
-        let _id = id.as_str();
-
-        // Real implementation:
-        // SELECT id, app_name, user_id, state, create_time, update_time
-        // FROM sessions WHERE id = $1
-        todo!("SELECT session {_id} from PostgreSQL")
+        self.inner.get_session(id).await
     }
 
     async fn list_sessions(
@@ -113,52 +94,19 @@ impl SessionService for PostgresSessionService {
         app_name: &str,
         user_id: &str,
     ) -> Result<Vec<Session>, SessionError> {
-        let _app = app_name;
-        let _user = user_id;
-
-        // Real implementation:
-        // SELECT id, app_name, user_id, state, create_time, update_time
-        // FROM sessions WHERE app_name = $1 AND user_id = $2
-        // ORDER BY create_time DESC
-        todo!("SELECT sessions for app={_app} user={_user} from PostgreSQL")
+        self.inner.list_sessions(app_name, user_id).await
     }
 
     async fn delete_session(&self, id: &SessionId) -> Result<(), SessionError> {
-        let _id = id.as_str();
-
-        // Real implementation:
-        // DELETE FROM sessions WHERE id = $1
-        // (events cascade-deleted via ON DELETE CASCADE)
-        todo!("DELETE session {_id} from PostgreSQL")
+        self.inner.delete_session(id).await
     }
 
     async fn append_event(&self, id: &SessionId, event: Event) -> Result<(), SessionError> {
-        let _session_id = id.as_str();
-        let _event_id = &event.id;
-        let _invocation_id = &event.invocation_id;
-        let _author = &event.author;
-        let _content = &event.content;
-        let _actions = serde_json::to_value(&event.actions)
-            .map_err(|e| SessionError::Storage(e.to_string()))?;
-        let _timestamp = event.timestamp;
-
-        // Real implementation:
-        // INSERT INTO events (id, session_id, invocation_id, author, content, actions, timestamp)
-        // VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
-        //
-        // Also update session's update_time:
-        // UPDATE sessions SET update_time = NOW() WHERE id = $1
-        todo!("INSERT event {_event_id} for session {_session_id} into PostgreSQL")
+        self.inner.append_event(id, event).await
     }
 
     async fn get_events(&self, id: &SessionId) -> Result<Vec<Event>, SessionError> {
-        let _id = id.as_str();
-
-        // Real implementation:
-        // SELECT id, session_id, invocation_id, author, content, actions, timestamp
-        // FROM events WHERE session_id = $1
-        // ORDER BY timestamp ASC, created_at ASC
-        todo!("SELECT events for session {_id} from PostgreSQL")
+        self.inner.get_events(id).await
     }
 }
 

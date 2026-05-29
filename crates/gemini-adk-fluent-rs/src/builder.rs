@@ -6,12 +6,14 @@
 use std::sync::Arc;
 
 use gemini_adk_rs::llm::BaseLlm;
+use gemini_adk_rs::middleware::Middleware;
 use gemini_adk_rs::text::{LlmTextAgent, TextAgent};
 use gemini_adk_rs::tool::{ToolDispatcher, ToolFunction, ToolKind};
 use gemini_genai_rs::prelude::{GeminiModel, Modality, Tool, Voice};
 
 use crate::compose::context::ContextPolicy;
 use crate::compose::guards::GComposite;
+use crate::compose::middleware::MiddlewareComposite;
 use crate::compose::tools::ToolComposite;
 
 /// Inner state of an AgentBuilder — shared via Arc for copy-on-write.
@@ -39,6 +41,8 @@ struct AgentBuilderInner {
     output_schema: Option<serde_json::Value>,
     output_key: Option<String>,
     transfer_to_agent: Option<String>,
+    /// Middleware layers to install on the compiled `LlmTextAgent`.
+    middleware_layers: Vec<Arc<dyn Middleware>>,
 }
 
 /// An entry in the builder's tool list — either a runtime ToolKind or a declaration.
@@ -173,6 +177,7 @@ impl AgentBuilder {
                 output_schema: None,
                 output_key: None,
                 transfer_to_agent: None,
+                middleware_layers: Vec::new(),
             }),
         }
     }
@@ -298,6 +303,11 @@ impl AgentBuilder {
     /// Configured transfer target agent, if any.
     pub fn get_transfer_to(&self) -> Option<&str> {
         self.inner.transfer_to_agent.as_deref()
+    }
+
+    /// Number of registered middleware layers.
+    pub fn middleware_layer_count(&self) -> usize {
+        self.inner.middleware_layers.len()
     }
 
     // ── Fluent Setters (copy-on-write) ──
@@ -539,6 +549,27 @@ impl AgentBuilder {
         self.isolate()
     }
 
+    /// Attach a [`MiddlewareComposite`] — all layers are installed on the
+    /// compiled `LlmTextAgent` in the order they appear in the composite.
+    ///
+    /// Multiple calls to `.middleware()` accumulate: the new layers are
+    /// appended after any previously registered layers, preserving the
+    /// copy-on-write contract.
+    ///
+    /// ```rust,ignore
+    /// use gemini_adk_fluent_rs::compose::middleware::M;
+    ///
+    /// let agent = AgentBuilder::new("analyst")
+    ///     .instruction("Analyze topics")
+    ///     .middleware(M::log() | M::latency())
+    ///     .build(llm);
+    /// ```
+    pub fn middleware(self, composite: MiddlewareComposite) -> Self {
+        let mut inner = self.mutate();
+        inner.middleware_layers.extend(composite.layers);
+        Self::with(inner)
+    }
+
     // ── Compilation ──
 
     /// Compile this builder into an executable `TextAgent`.
@@ -590,6 +621,11 @@ impl AgentBuilder {
             if !dispatcher.is_empty() {
                 agent = agent.tools(Arc::new(dispatcher));
             }
+        }
+
+        // Install middleware layers from the builder.
+        for mw in &self.inner.middleware_layers {
+            agent = agent.add_middleware(mw.clone());
         }
 
         Arc::new(agent)
@@ -873,5 +909,167 @@ mod tests {
         state.set("input", "hello from state");
         let result = agent.run(&state).await.unwrap();
         assert!(result.contains("hello from state"));
+    }
+
+    // ── Middleware end-to-end tests ──
+
+    /// A mock LLM that issues one tool call and then returns text.
+    struct ToolCallingMockLlm {
+        tool_name: &'static str,
+        final_text: &'static str,
+    }
+
+    #[async_trait]
+    impl BaseLlm for ToolCallingMockLlm {
+        fn model_id(&self) -> &str {
+            "tool-mock"
+        }
+
+        async fn generate(&self, req: LlmRequest) -> Result<LlmResponse, LlmError> {
+            use gemini_genai_rs::prelude::FunctionCall;
+
+            // If any part is a FunctionResponse, we already dispatched — return text.
+            let already_responded = req
+                .contents
+                .iter()
+                .flat_map(|c| &c.parts)
+                .any(|p| matches!(p, Part::FunctionResponse { .. }));
+
+            if already_responded {
+                Ok(LlmResponse {
+                    content: Content {
+                        role: Some(Role::Model),
+                        parts: vec![Part::Text {
+                            text: self.final_text.to_string(),
+                        }],
+                    },
+                    finish_reason: Some("STOP".into()),
+                    usage: None,
+                })
+            } else {
+                Ok(LlmResponse {
+                    content: Content {
+                        role: Some(Role::Model),
+                        parts: vec![Part::FunctionCall {
+                            function_call: FunctionCall {
+                                name: self.tool_name.to_string(),
+                                args: serde_json::json!({"x": 1}),
+                                id: Some("call-1".into()),
+                            },
+                        }],
+                    },
+                    finish_reason: None,
+                    usage: None,
+                })
+            }
+        }
+    }
+
+    /// Verify that `M::before_model` and `M::after_tool` hooks fire when the agent runs.
+    #[tokio::test]
+    async fn middleware_hooks_fire_end_to_end() {
+        use crate::compose::middleware::M;
+        use gemini_adk_rs::tool::SimpleTool;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let before_model_count = Arc::new(AtomicUsize::new(0));
+        let after_tool_count = Arc::new(AtomicUsize::new(0));
+
+        let bm = before_model_count.clone();
+        let at = after_tool_count.clone();
+
+        let mw = M::before_model(move |_req| {
+            bm.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }) | M::after_tool(move |_call, _result| {
+            at.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        });
+
+        let llm: Arc<dyn BaseLlm> = Arc::new(ToolCallingMockLlm {
+            tool_name: "echo_tool",
+            final_text: "done",
+        });
+
+        let agent = AgentBuilder::new("mw-test")
+            .middleware(mw)
+            .tool(Arc::new(SimpleTool::new(
+                "echo_tool",
+                "Echo tool",
+                None,
+                |_args| async move { Ok(serde_json::json!({"echo": true})) },
+            )))
+            .build(llm);
+
+        let state = gemini_adk_rs::State::new();
+        let result = agent.run(&state).await.unwrap();
+        assert_eq!(result, "done");
+
+        // before_model fires once per LLM call: first call (tool call) + second call (final text).
+        assert_eq!(
+            before_model_count.load(Ordering::SeqCst),
+            2,
+            "before_model should fire for each generate() call"
+        );
+        // after_tool fires once per successful tool dispatch.
+        assert_eq!(
+            after_tool_count.load(Ordering::SeqCst),
+            1,
+            "after_tool should fire once for the tool dispatch"
+        );
+    }
+
+    /// Verify copy-on-write: adding middleware to a clone does not affect the original.
+    #[test]
+    fn middleware_copy_on_write() {
+        use crate::compose::middleware::M;
+
+        let base = AgentBuilder::new("base").instruction("base");
+        let with_mw = base.clone().middleware(M::log() | M::latency());
+
+        // Original should have no middleware layers.
+        assert_eq!(base.middleware_layer_count(), 0);
+        // Clone with middleware should have 2 layers.
+        assert_eq!(with_mw.middleware_layer_count(), 2);
+    }
+
+    /// Verify `on_error` hook fires when the agent errors.
+    #[tokio::test]
+    async fn middleware_on_error_fires_on_failure() {
+        use crate::compose::middleware::M;
+        use gemini_adk_rs::llm::LlmError;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let error_count = Arc::new(AtomicUsize::new(0));
+        let ec = error_count.clone();
+
+        let mw = M::on_error(move |_err| {
+            ec.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        });
+
+        struct FailLlm;
+        #[async_trait]
+        impl BaseLlm for FailLlm {
+            fn model_id(&self) -> &str {
+                "fail"
+            }
+            async fn generate(&self, _req: LlmRequest) -> Result<LlmResponse, LlmError> {
+                Err(LlmError::RequestFailed("boom".into()))
+            }
+        }
+
+        let agent = AgentBuilder::new("error-test")
+            .middleware(mw)
+            .build(Arc::new(FailLlm));
+
+        let state = gemini_adk_rs::State::new();
+        let result = agent.run(&state).await;
+        assert!(result.is_err(), "agent should fail");
+        assert_eq!(
+            error_count.load(Ordering::SeqCst),
+            1,
+            "on_error should fire exactly once"
+        );
     }
 }
