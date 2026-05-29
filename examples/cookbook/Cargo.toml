@@ -127,6 +127,10 @@ path = "src/29_live_voice.rs"
 name = "30-production-pipeline"
 path = "src/30_production_pipeline.rs"
 
+[[bin]]
+name = "31-connect-from-env"
+path = "src/31_connect_from_env.rs"
+
 [dependencies]
 gemini-adk-fluent-rs = { workspace = true }
 gemini-adk-rs        = { workspace = true }

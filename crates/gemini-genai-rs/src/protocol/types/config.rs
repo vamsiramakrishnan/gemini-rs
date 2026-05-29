@@ -395,6 +395,62 @@ impl ApiEndpoint {
             api_host: Some(api_host.into()),
         })
     }
+
+    /// Resolve an endpoint from standard environment variables.
+    ///
+    /// Selects the platform from `GOOGLE_GENAI_USE_VERTEXAI` (`true`/`1`):
+    ///
+    /// - **Vertex AI** (`GOOGLE_GENAI_USE_VERTEXAI=true`): reads
+    ///   `GOOGLE_CLOUD_PROJECT` (required), `GOOGLE_CLOUD_LOCATION`
+    ///   (default `us-central1`), and `GOOGLE_ACCESS_TOKEN` (required —
+    ///   higher layers may fall back to `gcloud auth print-access-token`).
+    /// - **Google AI** (default): reads the first set of `GEMINI_API_KEY`,
+    ///   `GOOGLE_GENAI_API_KEY`, or `GOOGLE_API_KEY`.
+    ///
+    /// Returns a descriptive error naming the missing variable so the
+    /// failure is actionable.
+    pub fn from_env() -> Result<Self, EndpointEnvError> {
+        let use_vertex = std::env::var("GOOGLE_GENAI_USE_VERTEXAI")
+            .map(|v| {
+                let v = v.trim();
+                v.eq_ignore_ascii_case("true") || v == "1"
+            })
+            .unwrap_or(false);
+
+        if use_vertex {
+            let project = non_empty_env("GOOGLE_CLOUD_PROJECT")
+                .ok_or(EndpointEnvError::Missing("GOOGLE_CLOUD_PROJECT"))?;
+            let location =
+                non_empty_env("GOOGLE_CLOUD_LOCATION").unwrap_or_else(|| "us-central1".to_string());
+            let token = non_empty_env("GOOGLE_ACCESS_TOKEN")
+                .ok_or(EndpointEnvError::Missing("GOOGLE_ACCESS_TOKEN"))?;
+            Ok(Self::vertex(project, location, token))
+        } else {
+            let api_key = non_empty_env("GEMINI_API_KEY")
+                .or_else(|| non_empty_env("GOOGLE_GENAI_API_KEY"))
+                .or_else(|| non_empty_env("GOOGLE_API_KEY"))
+                .ok_or(EndpointEnvError::Missing(
+                    "GEMINI_API_KEY (or GOOGLE_GENAI_API_KEY / GOOGLE_API_KEY)",
+                ))?;
+            Ok(Self::google_ai(api_key))
+        }
+    }
+}
+
+/// Read an environment variable, treating empty/whitespace as unset.
+fn non_empty_env(key: &str) -> Option<String> {
+    match std::env::var(key) {
+        Ok(v) if !v.trim().is_empty() => Some(v.trim().to_string()),
+        _ => None,
+    }
+}
+
+/// Error resolving an [`ApiEndpoint`] from the environment.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum EndpointEnvError {
+    /// A required environment variable is unset or empty.
+    #[error("missing required environment variable: {0}")]
+    Missing(&'static str),
 }
 
 /// Complete session configuration — the builder entrypoint.
@@ -856,6 +912,73 @@ impl SessionConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Drives `ApiEndpoint::from_env` through its branches. Kept in one test
+    /// because process environment is global; vars are cleaned up at the end.
+    #[test]
+    fn api_endpoint_from_env() {
+        let vars = [
+            "GOOGLE_GENAI_USE_VERTEXAI",
+            "GOOGLE_CLOUD_PROJECT",
+            "GOOGLE_CLOUD_LOCATION",
+            "GOOGLE_ACCESS_TOKEN",
+            "GEMINI_API_KEY",
+            "GOOGLE_GENAI_API_KEY",
+            "GOOGLE_API_KEY",
+        ];
+        for v in vars {
+            std::env::remove_var(v);
+        }
+
+        // Google AI via GEMINI_API_KEY (default platform).
+        std::env::set_var("GEMINI_API_KEY", "k-123");
+        assert!(matches!(
+            ApiEndpoint::from_env(),
+            Ok(ApiEndpoint::GoogleAI { ref api_key }) if api_key == "k-123"
+        ));
+
+        // Empty values are treated as unset → fall through to next candidate.
+        std::env::set_var("GEMINI_API_KEY", "   ");
+        std::env::set_var("GOOGLE_API_KEY", "k-fallback");
+        assert!(matches!(
+            ApiEndpoint::from_env(),
+            Ok(ApiEndpoint::GoogleAI { ref api_key }) if api_key == "k-fallback"
+        ));
+
+        // No key anywhere → actionable error.
+        std::env::remove_var("GEMINI_API_KEY");
+        std::env::remove_var("GOOGLE_API_KEY");
+        assert!(matches!(
+            ApiEndpoint::from_env(),
+            Err(EndpointEnvError::Missing(_))
+        ));
+
+        // Vertex AI with explicit token + default location.
+        std::env::set_var("GOOGLE_GENAI_USE_VERTEXAI", "TRUE");
+        std::env::set_var("GOOGLE_CLOUD_PROJECT", "proj-1");
+        std::env::set_var("GOOGLE_ACCESS_TOKEN", "tok-abc");
+        match ApiEndpoint::from_env() {
+            Ok(ApiEndpoint::VertexAI(cfg)) => {
+                assert_eq!(cfg.project, "proj-1");
+                assert_eq!(cfg.location, "us-central1");
+                assert_eq!(cfg.access_token, "tok-abc");
+            }
+            other => panic!("expected Vertex endpoint, got {other:?}"),
+        }
+
+        // Vertex selected but token missing → distinguishable error so higher
+        // layers can fall back to gcloud.
+        std::env::remove_var("GOOGLE_ACCESS_TOKEN");
+        assert!(matches!(
+            ApiEndpoint::from_env(),
+            Err(EndpointEnvError::Missing("GOOGLE_ACCESS_TOKEN"))
+        ));
+
+        for v in vars {
+            std::env::remove_var(v);
+        }
+    }
+
     #[test]
     fn session_config_builder() {
         let config = SessionConfig::new("test-key")
