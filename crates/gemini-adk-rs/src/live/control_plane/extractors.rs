@@ -372,7 +372,7 @@ mod tests {
 
         let mut first_buffer = buffer_with_turn();
         run_extractors(
-            &[extractor.clone()],
+            std::slice::from_ref(&extractor),
             &mut first_buffer,
             &state,
             &callbacks,

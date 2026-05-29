@@ -8,8 +8,6 @@ use serde_json::json;
 use tokio::sync::mpsc;
 use tracing::info;
 
-use gemini_adk_fluent_rs::prelude::*;
-
 use crate::app::{AppError, ClientMessage, DemoApp, ServerMessage, WsSender};
 use crate::bridge::SessionBridge;
 use crate::demo_meta;

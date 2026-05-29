@@ -125,7 +125,7 @@ impl FieldPromotion {
         self.accept = Some(Arc::new(move |state, value| {
             previous
                 .as_ref()
-                .map_or(true, |accept| accept(state, value))
+                .is_none_or(|accept| accept(state, value))
                 && predicate(state, value)
         }));
         self
