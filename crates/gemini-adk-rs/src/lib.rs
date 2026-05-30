@@ -81,6 +81,13 @@ pub use flow::{Flow, FlowMonitor, Guard, Mode as FlowMode, Verdict, Violation};
 ///
 /// See the [`gemini_adk_macros_rs::tool`] documentation for details.
 pub use gemini_adk_macros_rs::tool;
+/// The `#[derive(Extract)]` macro — builds an [`extract::Extract`] record from a
+/// struct's `#[recognize(..)]` fields. Shares the name `Extract` with the
+/// struct (macro vs type namespace), so both can be imported together.
+///
+/// See the [`gemini_adk_macros_rs::Extract`](macro@gemini_adk_macros_rs::Extract)
+/// documentation for details.
+pub use gemini_adk_macros_rs::Extract;
 pub use instruction::inject_session_state;
 pub use live::{
     CallbackMode, EventCallbacks, LiveHandle, LiveSessionBuilder, LlmExtractor, ToolCallSummary,

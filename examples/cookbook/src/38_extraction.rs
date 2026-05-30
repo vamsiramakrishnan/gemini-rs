@@ -5,15 +5,31 @@
 //! into a `Flow` guard so a stage advances deterministically.
 //!
 //! Key concepts:
-//! - `Recognizer` — `integer`/`money`/`one_of`/`fuzzy`/`yes_no`/`regex`
-//! - `Extract::record(..)` — declare a typed record of recognized fields
+//! - `Recognizer` — `integer`/`money`/`one_of`/`fuzzy`/`yes_no`/`regex`/`datetime`
+//! - `#[derive(Extract)]` — declare a typed record of recognized fields on a struct
 //! - `.extract_record(spec)` on `Live` + `Flow` `done(captured([..]))` interplay
 //!
 //! Runs real logic: Yes — runs recognizers on sample utterances and drives a
 //! Flow step to completion from the recognized fields (no credentials needed).
 
 use gemini_adk_fluent_rs::prelude::*;
-use serde_json::json;
+use serde_json::{json, Value};
+
+/// Declare the record as a struct — each field names a deterministic recognizer.
+/// The derive generates `Order::extract() -> Extract`.
+#[derive(Extract)]
+#[extract(name = "order", window = 3)]
+struct Order {
+    #[recognize(integer_near = ["order", "want"])]
+    quantity: Option<i64>,
+    #[recognize(one_of = ["pizza", "salad", "soda"])]
+    item: Option<String>,
+    #[recognize(datetime)]
+    #[extract(state = "when")]
+    pickup: Option<Value>,
+    #[recognize(yes_no)]
+    confirmed: Option<bool>,
+}
 
 fn main() {
     println!("=== 38: Deterministic Extraction ===\n");
@@ -36,13 +52,9 @@ fn main() {
         }
     }
 
-    // 2. Declare a record once; it compiles to a TurnExtractor.
-    let order = Extract::record("order")
-        .field("quantity", Recognizer::integer_near(["order", "want"]))
-        .field("item", Recognizer::one_of(["pizza", "salad", "soda"]))
-        .field("confirmed", Recognizer::yes_no())
-        .window(3)
-        .build();
+    // 2. Declare a record once (via `#[derive(Extract)]`); it compiles to a
+    //    TurnExtractor that runs the recognizers and promotes fields to State.
+    let order = Order::extract();
 
     println!("\n--- In a live session ---");
     println!("    Live::builder()");
