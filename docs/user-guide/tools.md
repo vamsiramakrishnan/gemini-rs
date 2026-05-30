@@ -64,6 +64,42 @@ Doc comments on fields become parameter descriptions. Required vs optional is
 inferred from `#[serde(default)]`. Invalid arguments return
 `ToolError::InvalidArgs`.
 
+## The `#[tool]` Attribute Macro
+
+The most ergonomic way to define a tool: annotate an `async fn` and the macro
+generates the args struct, JSON Schema, and `ToolFunction` impl for you — no
+separate struct, no `TypedTool::new::<Args>` ceremony.
+
+```rust,ignore
+use gemini_adk_fluent_rs::prelude::*;   // brings `tool`, `ToolError`, `ToolDispatcher`
+use serde_json::{json, Value};
+use std::sync::Arc;
+
+/// Get the current weather for a city.
+#[tool("Get the current weather for a city")]
+async fn get_weather(city: String, units: Option<String>) -> Result<Value, ToolError> {
+    Ok(json!({ "city": city, "temp_c": 22, "units": units.unwrap_or("metric".into()) }))
+}
+
+let mut dispatcher = ToolDispatcher::new();
+dispatcher.register_function(Arc::new(get_weather()));   // macro emits `fn get_weather() -> impl ToolFunction`
+```
+
+How it expands, for `async fn foo(...)`:
+
+- a hidden `Deserialize + JsonSchema` args struct (one field per parameter;
+  `Option<T>` params are non-required and default to `None`),
+- a `ToolFunction` impl whose `call()` deserializes the JSON args, runs the
+  original body, and returns its `Result<Value, ToolError>`,
+- a constructor `fn foo() -> impl ToolFunction` (visibility mirrors the `fn`).
+
+The tool's `name()` is the function name and `description()` is the macro's
+string. Parameters of any `Deserialize + JsonSchema` type are supported.
+(Per-parameter doc descriptions are not extracted yet — use `TypedTool` with a
+documented args struct when you need them.)
+
+See cookbook example `33_tool_macro` for a runnable demonstration.
+
 ## ToolFunction Trait
 
 For full control, implement `ToolFunction` directly. Use this when your tool
