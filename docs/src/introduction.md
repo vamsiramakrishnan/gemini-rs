@@ -47,7 +47,7 @@ This book is organized into six sections:
 - **Voice & Live Sessions** — Building real-time voice agents with phases, state, and watchers
 - **Tools & Extraction** — Tool system and structured data extraction from conversations
 - **Composition & Patterns** — Text agent combinators, S·C·T·P·M·A operators, middleware
-- **Examples** — 36 progressive cookbook examples (Crawl/Walk/Run) plus interactive `gemini-adk-web-rs` demos
+- **Examples** — 37 progressive cookbook examples (Crawl/Walk/Run) plus interactive `gemini-adk-web-rs` demos
 - **ADK Web UI** — Design system, dark/light mode, DevTools panels, and the cookbook browser
 
 ## API Reference
