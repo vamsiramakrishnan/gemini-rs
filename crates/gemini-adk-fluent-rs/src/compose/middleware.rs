@@ -16,9 +16,13 @@
 //!    — called for each tool dispatch round.
 //! 5. `on_error` (forward) — called once if `run()` returns an error.
 //!
-//! **Live session dispatch** — not yet wired.  The `before_agent`/`after_agent`
-//! hooks on `Middleware` are Live-only (they require a full `InvocationContext`).
-//! Live integration is tracked as a future work item.
+//! **Live sessions** (via `Live::middleware`) — the **tool-lifecycle hooks**
+//! are wired: `before_tool` (a returned error vetoes the call), `after_tool`,
+//! and `on_tool_error` fire around every tool dispatch in the control lane,
+//! including background tools. Model-level hooks (`before_model`/`after_model`)
+//! do **not** apply to Live — a Live session streams over the wire and has no
+//! discrete `LlmRequest`/`LlmResponse` to intercept; use them on TextAgent
+//! pipelines instead.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -136,9 +140,11 @@ impl M {
         }))
     }
 
-    /// Add rate limiting middleware — enforces max requests per second.
+    /// Add rate-limiting middleware — spaces tool calls to at most `rps` per
+    /// second by delaying `before_tool` (concurrent calls queue rather than
+    /// burst).
     pub fn rate_limit(rps: u32) -> MiddlewareComposite {
-        MiddlewareComposite::new(Arc::new(RateLimitMiddleware { rps }))
+        MiddlewareComposite::new(Arc::new(RateLimitMiddleware::new(rps)))
     }
 
     /// Add circuit breaker middleware — opens after consecutive failures.
@@ -162,10 +168,12 @@ impl M {
     }
 
     /// Scope middleware to specific agent names.
-    pub fn scope(names: &[&str], inner: MiddlewareComposite) -> MiddlewareComposite {
-        let _names: Vec<String> = names.iter().map(|n| n.to_string()).collect();
-        // Scoping is a runtime concern — the composite is passed through as-is.
-        // The runtime filters by agent name when dispatching events.
+    ///
+    /// Not yet enforced — agent-name routing requires dispatch-time filtering
+    /// the middleware chain doesn't expose, so this currently returns `inner`
+    /// unchanged. Hidden until real scoping lands to avoid implying behavior.
+    #[doc(hidden)]
+    pub fn scope(_names: &[&str], inner: MiddlewareComposite) -> MiddlewareComposite {
         inner
     }
 
@@ -194,6 +202,11 @@ impl M {
     }
 
     /// Fallback to an alternative model on error.
+    ///
+    /// Not yet enforced — swapping the model and retrying requires re-issuing
+    /// the LLM call, which the current `after_model`/`on_error` hooks can't do.
+    /// Hidden until real fallback lands to avoid implying behavior.
+    #[doc(hidden)]
     pub fn fallback_model(model: &str) -> MiddlewareComposite {
         MiddlewareComposite::new(Arc::new(FallbackModelMiddleware {
             model: model.to_string(),
@@ -432,13 +445,46 @@ impl Middleware for CostMiddleware {
 
 #[allow(dead_code)]
 struct RateLimitMiddleware {
-    rps: u32,
+    /// Minimum spacing between successive tool calls.
+    min_interval: Duration,
+    /// Reserved start time of the most recent call (advances as calls queue).
+    last: parking_lot::Mutex<Option<std::time::Instant>>,
+}
+
+impl RateLimitMiddleware {
+    fn new(rps: u32) -> Self {
+        let rps = rps.max(1);
+        Self {
+            min_interval: Duration::from_secs_f64(1.0 / rps as f64),
+            last: parking_lot::Mutex::new(None),
+        }
+    }
 }
 
 #[async_trait]
 impl Middleware for RateLimitMiddleware {
     fn name(&self) -> &str {
         "rate_limit"
+    }
+
+    async fn before_tool(&self, _call: &FunctionCall) -> Result<(), AgentError> {
+        // Compute the wait needed to honor min_interval, reserving this call's
+        // slot so concurrent callers queue instead of bursting. The lock is
+        // released before the await (never held across it).
+        let wait = {
+            let mut last = self.last.lock();
+            let now = std::time::Instant::now();
+            let scheduled = match *last {
+                Some(prev) if prev + self.min_interval > now => prev + self.min_interval,
+                _ => now,
+            };
+            *last = Some(scheduled);
+            scheduled.saturating_duration_since(now)
+        };
+        if !wait.is_zero() {
+            tokio::time::sleep(wait).await;
+        }
+        Ok(())
     }
 }
 

@@ -1,0 +1,33 @@
+[package]
+name = "gemini-adk-macros-rs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Procedural macros for gemini-adk-rs — the #[tool] attribute for turning async fns into Gemini tools"
+keywords = ["gemini", "adk", "macros", "proc-macro", "tools"]
+categories = ["api-bindings", "development-tools::procedural-macro-helpers"]
+repository.workspace = true
+documentation = "https://docs.rs/gemini-adk-macros-rs"
+
+[lib]
+name = "gemini_adk_macros_rs"
+proc-macro = true
+
+[dependencies]
+syn = { version = "2", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"
+
+# Integration tests exercise the generated code, which references the consumer's
+# crate graph (gemini-adk-rs, serde, schemars, ...). These are dev-only and do
+# NOT create a build cycle: the proc-macro crate itself depends on none of them.
+[dev-dependencies]
+gemini-adk-rs = { workspace = true }
+async-trait = "0.1"
+schemars = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

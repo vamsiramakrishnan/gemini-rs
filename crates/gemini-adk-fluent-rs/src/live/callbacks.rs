@@ -134,6 +134,15 @@ impl Live {
         self
     }
 
+    /// Called on session phase transitions.
+    ///
+    /// Receives the new [`SessionPhase`]. Fast lane callback (sync, must
+    /// complete in < 1ms). Use for lightweight UI state updates or metrics.
+    pub fn on_phase(mut self, f: impl Fn(SessionPhase) + Send + Sync + 'static) -> Self {
+        self.callbacks.on_phase = Some(Box::new(f));
+        self
+    }
+
     // -- Control Lane Callbacks (async, can block) --
 
     /// Called when model is interrupted by barge-in.
@@ -158,6 +167,19 @@ impl Live {
         self
     }
 
+    /// Called when the server cancels pending tool calls.
+    ///
+    /// Receives the list of cancelled tool call IDs. Use to clean up any
+    /// in-flight async work associated with those calls.
+    pub fn on_tool_cancelled<F, Fut>(mut self, f: F) -> Self
+    where
+        F: Fn(Vec<String>) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        self.callbacks.on_tool_cancelled = Some(Arc::new(move |ids| Box::pin(f(ids))));
+        self
+    }
+
     /// Called when model turn completes.
     pub fn on_turn_complete<F, Fut>(mut self, f: F) -> Self
     where
@@ -165,6 +187,21 @@ impl Live {
         Fut: Future<Output = ()> + Send + 'static,
     {
         self.callbacks.on_turn_complete = Some(Arc::new(move || Box::pin(f())));
+        self
+    }
+
+    /// Called when the model finishes generating its full intended response.
+    ///
+    /// Fires on the wire `GenerationComplete` event, before any interruption
+    /// truncation. Use this to capture the model's complete output even when
+    /// the user barges in. Paired with `.extract_on_generation()` for structured
+    /// extraction of the pre-truncation response.
+    pub fn on_generation_complete<F, Fut>(mut self, f: F) -> Self
+    where
+        F: Fn() -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        self.callbacks.on_generation_complete = Some(Arc::new(move || Box::pin(f())));
         self
     }
 
@@ -200,6 +237,19 @@ impl Live {
         self
     }
 
+    /// Called after the session resumes following a GoAway disconnect.
+    ///
+    /// Use to re-subscribe to external streams, reset UI state, or log
+    /// resume events. Paired with `.session_resume(true)` on the builder.
+    pub fn on_resumed<F, Fut>(mut self, f: F) -> Self
+    where
+        F: Fn() -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        self.callbacks.on_resumed = Some(Arc::new(move || Box::pin(f())));
+        self
+    }
+
     /// Called on non-fatal errors.
     pub fn on_error<F, Fut>(mut self, f: F) -> Self
     where
@@ -225,6 +275,17 @@ impl Live {
         self
     }
 
+    /// Called when the model finishes generating its full intended response (spawned concurrently).
+    pub fn on_generation_complete_concurrent<F, Fut>(mut self, f: F) -> Self
+    where
+        F: Fn() -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        self.callbacks.on_generation_complete = Some(Arc::new(move || Box::pin(f())));
+        self.callbacks.on_generation_complete_mode = CallbackMode::Concurrent;
+        self
+    }
+
     /// Called when session connects (spawned concurrently).
     pub fn on_connected_concurrent<F, Fut>(mut self, f: F) -> Self
     where
@@ -244,6 +305,17 @@ impl Live {
     {
         self.callbacks.on_disconnected = Some(Arc::new(move |r| Box::pin(f(r))));
         self.callbacks.on_disconnected_mode = CallbackMode::Concurrent;
+        self
+    }
+
+    /// Called after session resumes from GoAway (spawned concurrently).
+    pub fn on_resumed_concurrent<F, Fut>(mut self, f: F) -> Self
+    where
+        F: Fn() -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        self.callbacks.on_resumed = Some(Arc::new(move || Box::pin(f())));
+        self.callbacks.on_resumed_mode = CallbackMode::Concurrent;
         self
     }
 
@@ -269,6 +341,17 @@ impl Live {
         self
     }
 
+    /// Called when the server cancels pending tool calls (spawned concurrently).
+    pub fn on_tool_cancelled_concurrent<F, Fut>(mut self, f: F) -> Self
+    where
+        F: Fn(Vec<String>) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        self.callbacks.on_tool_cancelled = Some(Arc::new(move |ids| Box::pin(f(ids))));
+        self.callbacks.on_tool_cancelled_mode = CallbackMode::Concurrent;
+        self
+    }
+
     /// Called when a TurnExtractor produces a result (spawned concurrently).
     pub fn on_extracted_concurrent<F, Fut>(mut self, f: F) -> Self
     where
@@ -290,5 +373,36 @@ impl Live {
             Some(Arc::new(move |name, error| Box::pin(f(name, error))));
         self.callbacks.on_extraction_error_mode = CallbackMode::Concurrent;
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Verify that all four new callback setters are accepted by the builder
+    /// and that the chain returns `Self` (i.e., the type-system accepts them).
+    #[test]
+    fn builder_accepts_new_callbacks() {
+        let _live = Live::builder()
+            // on_phase: sync fast-lane
+            .on_phase(|_phase| {})
+            // on_tool_cancelled: async control-lane
+            .on_tool_cancelled(|_ids| async {})
+            // on_generation_complete: async control-lane, no args
+            .on_generation_complete(|| async {})
+            // on_resumed: async control-lane, no args
+            .on_resumed(|| async {});
+        // Compiles = test passes
+    }
+
+    /// Verify that the concurrent variants of the new setters also compile.
+    #[test]
+    fn builder_accepts_new_callbacks_concurrent() {
+        let _live = Live::builder()
+            .on_tool_cancelled_concurrent(|_ids| async {})
+            .on_generation_complete_concurrent(|| async {})
+            .on_resumed_concurrent(|| async {});
+        // Compiles = test passes
     }
 }

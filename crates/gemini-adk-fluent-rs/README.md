@@ -8,7 +8,9 @@ Fluent developer experience for Gemini Live — builder API, operator algebra, a
 - **S-C-T-P-M-A operators** — composable algebra for state, context, tools, phases, middleware, and agents
 - **`Live` session** — callback-driven full-duplex voice/text event handling
 - **Pre-built patterns** — common agent compositions ready to use
-- **Full re-exports** — `gemini_adk_rs` and `gemini_genai_rs` available through the prelude
+- **Full re-exports** — `gemini_adk_fluent_rs::prelude::*` re-exports all three
+  layers (L0 `gemini_genai_rs`, L1 `gemini_adk_rs`, and L2 itself), so a
+  single `use` statement is enough for most applications
 
 ## Quick Start
 
@@ -24,6 +26,11 @@ let agent = AgentBuilder::new("assistant")
 ## Documentation
 
 [API Reference (docs.rs)](https://docs.rs/gemini-adk-fluent-rs)
+
+## See Also
+
+- [Cookbook examples](../../examples/cookbook) — end-to-end runnable examples
+  using the fluent API.
 
 ## License
 

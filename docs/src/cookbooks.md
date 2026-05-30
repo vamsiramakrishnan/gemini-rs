@@ -2,7 +2,7 @@
 
 The repository contains two sets of runnable examples:
 
-1. **`examples/cookbook/`** — 30 progressive text-based examples demonstrating SDK composition patterns (no server required)
+1. **`examples/cookbook/`** — 36 progressive text-based examples demonstrating SDK composition patterns (no server required)
 2. **`gemini-adk-web-rs` apps** — Interactive voice/text demos bundled into a devtools-enabled web UI
 
 ---
@@ -68,6 +68,19 @@ Full-system compositions covering real-world architectures and every SDK capabil
 | 28 | `28_a2a_remote` | Agent-to-agent protocol: remote agent declaration, `T::a2a` tool composition |
 | 29 | `29_live_voice` | Full `Live::builder()` API: phases, tools, extraction, watchers, steering, repair, persistence |
 | 30 | `30_production_pipeline` | End-to-end production pipeline: telemetry, middleware, evaluation, artifact publishing |
+
+### Fly (31–36) — Advanced Internals
+
+Deep dives into connection helpers, callback surfaces, macros, and production runtime features.
+
+| # | Binary | What it covers |
+|---|--------|----------------|
+| 31 | `31_connect_from_env` | `ApiEndpoint::from_env()` / `connect_from_env()`: zero-ceremony platform + credential resolution |
+| 32 | `32_live_callbacks` | Full Live callback catalog: fast-lane vs control-lane, every hook, `_concurrent` variants |
+| 33 | `33_tool_macro` | `#[tool]` attribute macro: turn an `async fn` into a registrable tool with auto-generated JSON Schema |
+| 34 | `34_tool_policies` | `T::cached`, `T::timeout`, `T::confirm`, nested policies, `PolicyTool` + `ToolPolicy` low-level API |
+| 35 | `35_session_persistence` | `MemoryPersistence`, `FsPersistence`, `SessionSnapshot` round-trips; `InMemorySessionService` event log |
+| 36 | `36_mcp_tools` | `McpConnectionParams::Stdio/Sse`, `McpSessionManager`, `McpToolset`, `T::mcp()`, JSON-RPC 2.0 lifecycle |
 
 ---
 

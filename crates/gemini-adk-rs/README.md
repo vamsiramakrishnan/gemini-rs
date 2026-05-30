@@ -11,7 +11,8 @@ Agent runtime for Gemini Live — tools, streaming, agent transfer, middleware. 
 - **LLM extractors** — structured data extraction from conversation transcripts
 - **Phase system** — instruction-scoped conversation phases with tool filtering
 - **Middleware chain** — composable request/response processing pipeline
-- **Text agents** — 15+ combinators (sequential, parallel, race, route, loop, etc.)
+- **Text agents** — 15+ combinators: Sequential, Parallel, Loop, Fallback,
+  Route, Race, Timeout, MapOver, Tap, Dispatch, Join, and more
 
 ## Quick Start
 
@@ -30,9 +31,33 @@ let session = LiveSessionBuilder::new()
     .await?;
 ```
 
+## Agent-as-Tool
+
+Wrap any `TextAgent` pipeline so the live model can invoke it as a function
+call. The agent shares the session `State`, making its writes immediately
+visible to watchers and phase transitions:
+
+```rust,ignore
+use gemini_adk_rs::TextAgentTool;
+
+let verifier = /* build your TextAgent pipeline */;
+let agent_tool = TextAgentTool::from_arc(
+    "verify_identity",
+    "Verify the caller's identity",
+    verifier,
+    state.clone(),
+);
+dispatcher.register(agent_tool);
+```
+
 ## Documentation
 
 [API Reference (docs.rs)](https://docs.rs/gemini-adk-rs)
+
+## See Also
+
+- [Cookbook examples](../../examples/cookbook) — runnable snippets for tool
+  dispatch, state management, phase machines, and text agent combinators.
 
 ## License
 

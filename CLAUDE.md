@@ -84,6 +84,68 @@ handle.send_text("Hello").await?;
 handle.disconnect().await?;
 ```
 
+### Live Session Callbacks
+
+Every `Live::builder()` callback is routed through one of two lanes. Choose the right lane for your workload — misusing the fast lane causes audio glitches or deadlocks (see Common Mistakes below).
+
+#### Fast Lane — sync, must complete in <1 ms
+
+These callbacks are invoked synchronously on the event-dispatch hot path. They **must not** allocate, acquire locks, or perform async work. Channel sends (e.g. `mpsc::Sender::try_send`) are acceptable.
+
+| Setter | Arguments | Purpose |
+|--------|-----------|---------|
+| `on_audio` | `&Bytes` | Raw PCM audio chunk from the model output |
+| `on_text` | `&str` | Incremental text delta from the model (streaming) |
+| `on_text_complete` | `&str` | Full accumulated text for the current generation, delivered once at turn boundary |
+| `on_input_transcript` | `(&str, is_final: bool)` | ASR transcript of the user's speech (see partial/final semantics below) |
+| `on_output_transcript` | `(&str, is_final: bool)` | Transcript of the model's audio output (see partial/final semantics below) |
+| `on_thought` | `&str` | Thought summary chunk (Google AI only; requires `.include_thoughts()`) |
+| `on_vad_start` | `()` | Voice activity detected — user started speaking |
+| `on_vad_end` | `()` | Voice activity ended — user stopped speaking |
+| `on_phase` | `SessionPhase` | Session lifecycle phase changed (connecting, connected, disconnecting, etc.) |
+| `on_usage` | `&UsageMetadata` | Token usage update delivered at the end of each generation |
+
+##### Partial/final transcript semantics (`is_final`)
+
+Both `on_input_transcript` and `on_output_transcript` follow a partial/final ASR pattern:
+
+- While speech is in progress, callbacks fire repeatedly with `is_final = false`, each delivering the latest partial recognition result. These may be revised as the ASR model refines its output.
+- At the turn boundary, a single callback fires with `is_final = true` delivering the **complete, finalized transcript** for the turn. Only this value is suitable for storage or downstream processing.
+
+#### Control Lane — async, may block
+
+These callbacks run in the async control lane and may perform I/O, acquire locks, or call async functions. Most have a `_concurrent` variant (e.g. `.on_tool_call_concurrent(...)`) that spawns a detached task for fire-and-forget behavior, preventing the callback from blocking the processor loop.
+
+| Setter | Arguments | Purpose |
+|--------|-----------|---------|
+| `on_connected` | `(writer: SessionWriter)` | Session is connected and ready; `writer` can be cloned and used to send content |
+| `on_disconnected` | `(reason: Option<String>)` | Session disconnected; `Some(msg)` for an error close, `None` for a normal close |
+| `on_go_away` | `(duration: Duration)` | Server sent a GoAway signal with time-to-disconnect hint |
+| `on_error` | `(msg: String)` | Non-fatal error from the server or processor |
+| `on_interrupted` | `()` | Model output was interrupted (e.g. user spoke over the model) |
+| `on_tool_call` | `(calls: Vec<FunctionCall>, state: &State) -> Option<Vec<FunctionResponse>>` | Tool invocation request from the model; return `Some(responses)` to reply, `None` to defer |
+| `before_tool_response` | `(responses: Vec<FunctionResponse>, state: &State) -> Vec<FunctionResponse>` | Middleware hook: inspect or mutate tool responses before they are sent to the model |
+| `on_tool_cancelled` | `(Vec<String>)` | Tool calls cancelled (e.g. due to interruption); contains the cancelled call IDs |
+| `on_generation_complete` | `()` | Model finished its full intended response before any interruption truncation (see note below) |
+| `on_turn_complete` | `()` | Turn boundary reached — model has finished its (possibly truncated) response for this turn |
+| `on_turn_boundary` | `(...)` | Turn boundary with full context (transcript, usage, phase); use when `on_turn_complete` is insufficient |
+| `on_extracted` | `(name: &str, value: serde_json::Value)` | Out-of-band extraction completed for the named schema type |
+| `on_extraction_error` | `(name: &str, err: String)` | Extraction attempt failed for the named schema type |
+| `on_resumed` | `()` | Session resumed from a persisted snapshot (requires `.persistence(...)`) |
+
+Middleware tool hooks (`before_tool` / `after_tool` / `on_tool_error`) are also available in Live sessions via `Live::middleware(...)`.
+
+##### `on_generation_complete` vs `on_turn_complete`
+
+These two callbacks mark different points in the model lifecycle:
+
+- **`on_generation_complete`**: fires when the model finishes generating its full intended response. Crucially, this fires **before** interruption truncation — so if the user interrupts mid-response, `on_generation_complete` still delivers the complete intended output. Use this with `.extract_on_generation::<T>(...)` to capture the model's full intent even when interrupted.
+- **`on_turn_complete`**: fires at the turn boundary after any truncation has been applied. This is the right hook for turn-level bookkeeping, transcript commits, phase evaluation, and extractor runs.
+
+##### `_concurrent` variants
+
+Appending `_concurrent` to a control-lane setter (e.g. `.on_tool_call_concurrent(...)`) spawns the callback body in a detached async task. Use this for fire-and-forget side effects (logging, analytics, database writes) where you do not need to block the processor or return a value. Hooks that return values (e.g. `on_tool_call`, `before_tool_response`) do not have a `_concurrent` variant.
+
 ### Tool Definition
 
 **SimpleTool** (raw JSON args):

@@ -59,6 +59,7 @@ pub struct LiveSessionBuilder {
     session_id: Option<String>,
     tool_advisory: bool,
     telemetry_interval: Option<std::time::Duration>,
+    middleware: Vec<Arc<dyn crate::middleware::Middleware>>,
 }
 
 impl LiveSessionBuilder {
@@ -84,7 +85,18 @@ impl LiveSessionBuilder {
             session_id: None,
             tool_advisory: true,
             telemetry_interval: None,
+            middleware: Vec::new(),
         }
+    }
+
+    /// Add a middleware layer.
+    ///
+    /// Layers run around tool dispatch in the control lane: `before_tool`
+    /// (a returned error vetoes the call), `after_tool`, and `on_tool_error`.
+    /// Multiple calls accumulate in order.
+    pub fn middleware(mut self, layer: Arc<dyn crate::middleware::Middleware>) -> Self {
+        self.middleware.push(layer);
+        self
     }
 
     /// Provide a pre-created State to use for this session.
@@ -312,6 +324,13 @@ impl LiveSessionBuilder {
             session_id: self.session_id,
             tool_advisory: self.tool_advisory,
             pending_context: None, // set after PendingContext is created below
+            middleware: {
+                let mut chain = crate::middleware::MiddlewareChain::new();
+                for layer in self.middleware {
+                    chain.add(layer);
+                }
+                Arc::new(chain)
+            },
         };
 
         // Create shared PendingContext for deferred delivery.

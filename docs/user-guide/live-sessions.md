@@ -22,7 +22,10 @@ Audio formats:
 
 ## Quick Start
 
-A minimal live session in under 15 lines:
+### Zero-ceremony with `connect_from_env()`
+
+The recommended starting point reads platform selection and credentials from
+standard environment variables — no token-fetching boilerplate required:
 
 ```rust,ignore
 use gemini_adk_fluent_rs::prelude::*;
@@ -34,13 +37,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .instruction("You are a helpful voice assistant.")
         .on_text(|t| print!("{t}"))
         .on_turn_complete(|| async { println!() })
-        .connect_google_ai(std::env::var("GEMINI_API_KEY")?)
+        .connect_from_env()
         .await?;
 
     handle.send_text("What is the capital of France?").await?;
     handle.done().await?;
     Ok(())
 }
+```
+
+`connect_from_env()` checks `GOOGLE_GENAI_USE_VERTEXAI` to select the platform,
+then resolves credentials from standard variables (`GEMINI_API_KEY` for Google
+AI; `GOOGLE_CLOUD_PROJECT` + `GOOGLE_ACCESS_TOKEN` for Vertex AI, with an
+automatic `gcloud auth print-access-token` fallback). See
+[Authentication and Connecting](./auth-and-connecting.md) for the full
+resolution rules and troubleshooting guide.
+
+### Explicit API key
+
+```rust,ignore
+let handle = Live::builder()
+    .model(GeminiModel::Gemini2_0FlashLive)
+    .instruction("You are a helpful voice assistant.")
+    .on_text(|t| print!("{t}"))
+    .on_turn_complete(|| async { println!() })
+    .connect_google_ai(std::env::var("GEMINI_API_KEY")?)
+    .await?;
+
+handle.send_text("What is the capital of France?").await?;
+handle.done().await?;
 ```
 
 This connects to Gemini, sends a text message, prints the streamed response,
@@ -110,31 +135,28 @@ All methods are optional except the connect method.
 
 ## Callbacks
 
-Callbacks are split into two categories based on latency requirements.
+Callbacks are split into two categories based on latency requirements. For the
+full callback catalog, argument shapes, `is_final` transcript semantics,
+`on_generation_complete` vs `on_turn_complete`, `_concurrent` variants, and
+outbound interceptors, see [Live Callbacks](./live-callbacks.md).
 
-### Fast Lane (Sync)
+### Fast Lane (Sync, `<1 ms`)
 
-These fire on the fast lane and must complete in under 1ms. They receive
-references (not owned values) and cannot be `async`.
+These fire on the fast lane and must complete in under 1 ms. They receive
+references (not owned values) and cannot be `async`. No allocations, no mutex
+locks, no blocking I/O.
 
 ```rust,ignore
-// Audio: receives zero-copy Bytes (cloning bumps an Arc refcount, not data)
+// Audio: receives zero-copy Bytes
 .on_audio(|data: &Bytes| {
-    playback_tx.send(data.clone()).ok();
+    playback_tx.try_send(data.clone()).ok();
 })
 
 // Text: incremental deltas as the model generates
-.on_text(|text: &str| {
-    print!("{text}");
-})
-
-// Text complete: full text when model finishes a text response
-.on_text_complete(|text: &str| {
-    println!("\nComplete: {text}");
-})
+.on_text(|text: &str| { print!("{text}"); })
 
 // Transcription: text version of audio (input or output)
-// Second parameter is `is_final` (true when transcription is finalized)
+// Second parameter is `is_final` — only the final delivery is suitable for storage
 .on_input_transcript(|text: &str, is_final: bool| {
     if is_final { println!("User said: {text}"); }
 })
@@ -142,98 +164,48 @@ references (not owned values) and cannot be `async`.
 // VAD: voice activity detection events from the server
 .on_vad_start(|| { /* user started talking */ })
 .on_vad_end(|| { /* user stopped talking */ })
-
-// Usage metadata: token counts from the server (fires on telemetry lane)
-.on_usage(|usage: &UsageMetadata| {
-    if let Some(total) = usage.total_token_count {
-        println!("Total tokens: {total}");
-    }
-    // Also available: prompt_token_count, response_token_count,
-    // cached_content_token_count, thoughts_token_count,
-    // tool_use_prompt_token_count, plus per-modality breakdowns
-})
 ```
 
 ### Control Lane (Async)
 
 These fire on the control lane and can perform I/O, state access, or any
 async work. They block the control lane while running (other control events
-queue behind them).
+queue behind them). Append `_concurrent` to any setter to spawn the body as a
+detached task instead.
 
 ```rust,ignore
-// Tool calls: return None for auto-dispatch, Some for manual responses
-.on_tool_call(|calls: Vec<FunctionCall>, state: State| async move {
-    // Read state if needed
-    let user_id: Option<String> = state.get("user_id");
-    // Return None to let the ToolDispatcher handle it
-    None
-})
-
-// Interrupted: model was interrupted by barge-in
+// Interrupted: flush playback on barge-in (forced blocking)
 .on_interrupted(|| async {
     playback_buffer.flush().await;
 })
 
-// Turn complete: model finished its response
+// Turn complete: model finished its (possibly truncated) response
 .on_turn_complete(|| async {
     println!("--- turn complete ---");
 })
 
-// Connected: session is ready (receives SessionWriter for advanced use)
-.on_connected(|writer: Arc<dyn SessionWriter>| async move {
-    println!("Session connected");
+// Generation complete: full intended response, before truncation
+// Use with .extract_on_generation::<T>() for pre-interruption extraction
+.on_generation_complete(|| async {
+    println!("--- generation complete (pre-truncation) ---");
 })
 
-// Disconnected: session ended (receives optional reason string)
-.on_disconnected(|reason: Option<String>| async move {
-    println!("Disconnected: {reason:?}");
-})
+// Tool calls: return None for auto-dispatch, Some to override
+.on_tool_call(|calls: Vec<FunctionCall>, state: State| async move { None })
 
 // Error: non-fatal error (session continues)
-.on_error(|msg: String| async move {
-    eprintln!("Error: {msg}");
+.on_error(|msg: String| async move { eprintln!("Error: {msg}") })
+
+// Disconnected (concurrent — fire-and-forget)
+.on_disconnected_concurrent(|reason| async move {
+    tracing::info!(?reason, "session disconnected");
 })
 ```
 
-### Callback Execution Modes
-
-Control-lane callbacks support two execution modes via `CallbackMode`:
-
-**Blocking (default)** — the event loop waits for the callback to complete.
-Use when subsequent events depend on the callback's side effects, or when
-ordering guarantees are required.
-
-**Concurrent** — the callback is spawned as a detached tokio task. The event
-loop continues immediately. Use for fire-and-forget work: logging, analytics,
-webhook dispatch, or background agent triggering.
-
-Use `_concurrent` suffixed methods to opt in:
-
-```rust,ignore
-Live::builder()
-    // Blocking (default) — client depends on TurnComplete ordering
-    .on_turn_complete(|| async { tx.send(TurnComplete).ok(); })
-
-    // Concurrent — fire-and-forget broadcast, doesn't block the pipeline
-    .on_extracted_concurrent(|name, val| async move {
-        tx.send(StateUpdate { key: name, value: val }).ok();
-    })
-    .on_error_concurrent(|e| async move {
-        webhook::send_alert(&e).await;
-    })
-    .on_disconnected_concurrent(|reason| async move {
-        info!("Disconnected: {reason:?}");
-    })
-```
-
-**Forced-blocking callbacks** (no concurrent variant):
-
-| Callback | Reason |
-|----------|--------|
-| `on_interrupted` | Must clear interrupted flag before audio resumes |
-| `on_tool_call` | Return value is the tool response |
-| `before_tool_response` | Transforms data in the pipeline |
-| `on_turn_boundary` | Content injection must complete before turn_complete |
+See [Live Callbacks](./live-callbacks.md) for the complete reference including
+`on_tool_cancelled`, `on_resumed`, `on_go_away`, `before_tool_response`,
+`on_turn_boundary`, `on_extracted`, `on_extraction_error`, and the full list of
+`_concurrent` variants.
 
 ### Tool Dispatch
 
@@ -333,7 +305,7 @@ let handle = Live::builder()
     .transcription(true, true)  // input, output
     .on_input_transcript(|text, is_final| {
         if is_final {
-            println!("User: {text}");
+            println!("User: {text}");  // final, suitable for storage
         }
     })
     .on_output_transcript(|text, is_final| {
@@ -341,12 +313,24 @@ let handle = Live::builder()
             println!("Model: {text}");
         }
     })
-    .connect_google_ai(api_key)
+    .connect_from_env()
     .await?;
 ```
 
+Both transcript callbacks deliver intermediate partial results (`is_final =
+false`) while speech is in progress, followed by a single finalized result
+(`is_final = true`) at the turn boundary. Only the `is_final = true` delivery
+should be persisted or processed downstream. See
+[Live Callbacks — partial/final semantics](./live-callbacks.md#partial-and-final-transcript-semantics)
+for details.
+
 Transcription is required for turn extraction (`.extract_turns()`) to work.
 When you add an extractor, transcription is enabled automatically.
+
+If the user interrupts the model mid-response, `on_output_transcript` will
+not receive `is_final = true` for the truncated portion. Use
+`on_generation_complete` with `.extract_on_generation::<T>(...)` to capture
+the model's full intended output before truncation.
 
 ## Session Lifecycle
 
@@ -411,7 +395,12 @@ handle.done().await?;
 
 The SDK supports both Google AI (API key) and Vertex AI (OAuth2 token)
 backends. The wire protocol is the same; only the endpoint URL and
-authentication differ.
+authentication differ. For the full credential-resolution rules and
+troubleshooting guide, see
+[Authentication and Connecting](./auth-and-connecting.md).
+
+The easiest way to switch platforms is `connect_from_env()` with
+`GOOGLE_GENAI_USE_VERTEXAI=true|false`.
 
 ### Google AI
 
@@ -422,14 +411,14 @@ let handle = Live::builder()
     .await?;
 ```
 
-- Endpoint: `wss://generativelanguage.googleapis.com/v1beta/models/{model}`
-- Auth: API key in query parameter
+- Endpoint: `wss://generativelanguage.googleapis.com` (API version `v1beta`)
+- Auth: API key appended as `?key={api_key}` in the WebSocket URL
 
 ### Vertex AI
 
 ```rust,ignore
 // Get token via gcloud: gcloud auth print-access-token
-let token = std::env::var("GCLOUD_ACCESS_TOKEN")?;
+let token = std::env::var("GOOGLE_ACCESS_TOKEN")?;
 
 let handle = Live::builder()
     .model(GeminiModel::Gemini2_0FlashLive)
@@ -437,14 +426,14 @@ let handle = Live::builder()
     .await?;
 ```
 
-- Endpoint: `wss://aiplatform.googleapis.com/v1beta1/projects/{project}/locations/{location}/publishers/google/models/{model}`
+- Endpoint: `wss://{location}-aiplatform.googleapis.com` (API version `v1beta1`)
 - Auth: Bearer token in WebSocket upgrade headers
-- Note: Uses the global endpoint (`aiplatform.googleapis.com`), not `global-aiplatform.googleapis.com`
+- Binary WebSocket frames (decoded automatically by the SDK)
 
 ### Pre-configured SessionConfig
 
-For advanced scenarios (custom auth, proxy, etc.), build the config yourself
-and pass it to `.connect()`:
+For advanced scenarios (custom auth, VPC-SC private endpoints, etc.), build
+the config yourself and pass it to `.connect()`:
 
 ```rust,ignore
 use gemini_genai_rs::prelude::*;
@@ -465,17 +454,18 @@ let handle = Live::builder()
     .await?;
 ```
 
-When using `.connect(config)`, model/voice/instruction settings on the
-`SessionConfig` take precedence. The `.model()` / `.voice()` / `.instruction()`
-methods on the Live builder configure the same underlying `SessionConfig`, so
-you can use either approach -- just not both for the same setting.
+When using `.connect(config)`, the config's `endpoint` and `model` are merged
+into the builder's settings. Everything else — system instruction, tools,
+voice, transcription, callbacks — is taken from the `Live` builder.
 
 ### Key Differences
 
 | Feature | Google AI | Vertex AI |
 |---------|-----------|-----------|
-| Auth | API key (string) | OAuth2 Bearer token |
+| Auth | API key (`?key=...`) | OAuth2 Bearer token (header) |
 | API version | `v1beta` | `v1beta1` |
-| Frame format | Text WebSocket frames | Binary WebSocket frames |
+| Frame format | Text WebSocket frames | Binary WebSocket frames (auto-decoded) |
+| Async tool calling | Supported | Not supported (fields auto-stripped) |
+| Thinking config | Supported | Not supported (auto-stripped) |
 | Billing | Per-token pricing | GCP billing account |
 | Region | Global | Regional (e.g., `us-central1`) |

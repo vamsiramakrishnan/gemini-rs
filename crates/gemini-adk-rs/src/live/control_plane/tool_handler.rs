@@ -34,6 +34,7 @@ pub(in crate::live) async fn handle_tool_calls(
     >,
     background_tracker: &Option<Arc<BackgroundToolTracker>>,
     extractors: &[Arc<dyn TurnExtractor>],
+    middleware: &Arc<crate::middleware::MiddlewareChain>,
     event_tx: &tokio::sync::broadcast::Sender<LiveEvent>,
 ) {
     // 0. Phase-scoped tool filtering: reject calls not in phase's allowed list
@@ -117,20 +118,36 @@ pub(in crate::live) async fn handle_tool_calls(
                             bg_spawns.push((call.clone(), formatter.clone()));
                         }
                         _ => {
-                            // Standard: execute inline
-                            match disp.call_function(&call.name, call.args.clone()).await {
-                                Ok(result) => results.push(FunctionResponse {
-                                    name: call.name.clone(),
-                                    response: result,
-                                    id: call.id.clone(),
-                                    scheduling: None,
-                                }),
-                                Err(e) => results.push(FunctionResponse {
+                            // Standard: execute inline, wrapped in middleware hooks.
+                            // A `before_tool` error vetoes execution (e.g. guardrails).
+                            if let Err(e) = middleware.run_before_tool(call).await {
+                                results.push(FunctionResponse {
                                     name: call.name.clone(),
                                     response: serde_json::json!({"error": e.to_string()}),
                                     id: call.id.clone(),
                                     scheduling: None,
-                                }),
+                                });
+                                continue;
+                            }
+                            match disp.call_function(&call.name, call.args.clone()).await {
+                                Ok(result) => {
+                                    let _ = middleware.run_after_tool(call, &result).await;
+                                    results.push(FunctionResponse {
+                                        name: call.name.clone(),
+                                        response: result,
+                                        id: call.id.clone(),
+                                        scheduling: None,
+                                    });
+                                }
+                                Err(e) => {
+                                    let _ = middleware.run_on_tool_error(call, &e).await;
+                                    results.push(FunctionResponse {
+                                        name: call.name.clone(),
+                                        response: serde_json::json!({"error": e.to_string()}),
+                                        id: call.id.clone(),
+                                        scheduling: None,
+                                    });
+                                }
                             }
                         }
                     }
@@ -178,10 +195,29 @@ pub(in crate::live) async fn handle_tool_calls(
         let disp = dispatcher.clone();
         let bg_writer = writer.clone();
         let tracker = background_tracker.clone();
+        let mw = middleware.clone();
         let call_id = call.id.clone().unwrap_or_default();
         let cancel = CancellationToken::new();
 
         let handle = tokio::spawn(async move {
+            // A `before_tool` veto blocks execution for background tools too,
+            // matching the standard path and the `Live::middleware` contract:
+            // send an error response, skip dispatch, and self-clean.
+            if let Err(veto) = mw.run_before_tool(&call).await {
+                bg_writer
+                    .send_tool_response(vec![FunctionResponse {
+                        name: call.name.clone(),
+                        response: serde_json::json!({ "error": veto.to_string() }),
+                        id: call.id.clone(),
+                        scheduling: None,
+                    }])
+                    .await
+                    .ok();
+                if let Some(ref t) = tracker {
+                    t.remove(&call.id.clone().unwrap_or_default());
+                }
+                return;
+            }
             let result = if let Some(ref d) = disp {
                 d.call_function(&call.name, call.args.clone())
                     .await
@@ -189,6 +225,14 @@ pub(in crate::live) async fn handle_tool_calls(
             } else {
                 Err(crate::error::ToolError::NotFound(call.name.clone()))
             };
+            match &result {
+                Ok(value) => {
+                    let _ = mw.run_after_tool(&call, value).await;
+                }
+                Err(e) => {
+                    let _ = mw.run_on_tool_error(&call, e).await;
+                }
+            }
 
             let fmt: &dyn crate::live::background_tool::ResultFormatter = formatter
                 .as_ref()
@@ -232,4 +276,175 @@ pub(in crate::live) async fn handle_tool_calls(
         event_tx,
     )
     .await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use async_trait::async_trait;
+    use gemini_genai_rs::prelude::{Content, FunctionCall};
+    use gemini_genai_rs::session::SessionError;
+    use serde_json::json;
+
+    use crate::middleware::{Middleware, MiddlewareChain};
+    use crate::tool::{SimpleTool, ToolDispatcher};
+
+    /// Middleware that counts hook invocations and can veto `before_tool`.
+    #[derive(Default)]
+    struct CountingMiddleware {
+        before: AtomicUsize,
+        after: AtomicUsize,
+        errors: AtomicUsize,
+        veto: bool,
+    }
+
+    #[async_trait]
+    impl Middleware for CountingMiddleware {
+        fn name(&self) -> &str {
+            "counting"
+        }
+        async fn before_tool(&self, _call: &FunctionCall) -> Result<(), crate::error::AgentError> {
+            self.before.fetch_add(1, Ordering::SeqCst);
+            if self.veto {
+                Err(crate::error::AgentError::Other("vetoed".into()))
+            } else {
+                Ok(())
+            }
+        }
+        async fn after_tool(
+            &self,
+            _call: &FunctionCall,
+            _result: &serde_json::Value,
+        ) -> Result<(), crate::error::AgentError> {
+            self.after.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+        async fn on_tool_error(
+            &self,
+            _call: &FunctionCall,
+            _err: &crate::error::ToolError,
+        ) -> Result<(), crate::error::AgentError> {
+            self.errors.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    struct NoopWriter;
+    #[async_trait]
+    impl SessionWriter for NoopWriter {
+        async fn send_audio(&self, _: Vec<u8>) -> Result<(), SessionError> {
+            Ok(())
+        }
+        async fn send_text(&self, _: String) -> Result<(), SessionError> {
+            Ok(())
+        }
+        async fn send_tool_response(&self, _: Vec<FunctionResponse>) -> Result<(), SessionError> {
+            Ok(())
+        }
+        async fn send_client_content(&self, _: Vec<Content>, _: bool) -> Result<(), SessionError> {
+            Ok(())
+        }
+        async fn send_video(&self, _: Vec<u8>) -> Result<(), SessionError> {
+            Ok(())
+        }
+        async fn update_instruction(&self, _: String) -> Result<(), SessionError> {
+            Ok(())
+        }
+        async fn signal_activity_start(&self) -> Result<(), SessionError> {
+            Ok(())
+        }
+        async fn signal_activity_end(&self) -> Result<(), SessionError> {
+            Ok(())
+        }
+        async fn disconnect(&self) -> Result<(), SessionError> {
+            Ok(())
+        }
+    }
+
+    fn dispatcher_with_counter(counter: Arc<AtomicUsize>) -> Arc<ToolDispatcher> {
+        let mut d = ToolDispatcher::new();
+        d.register(SimpleTool::new("echo", "echoes", None, move |args| {
+            let counter = counter.clone();
+            async move {
+                counter.fetch_add(1, Ordering::SeqCst);
+                Ok(json!({ "echoed": args }))
+            }
+        }));
+        Arc::new(d)
+    }
+
+    async fn run_one(middleware: Arc<MiddlewareChain>, tool_runs: Arc<AtomicUsize>) {
+        let dispatcher = Some(dispatcher_with_counter(tool_runs));
+        let writer: Arc<dyn SessionWriter> = Arc::new(NoopWriter);
+        let callbacks = EventCallbacks::default();
+        let state = State::new();
+        let mut transcript = TranscriptBuffer::new();
+        let (tx, _rx) = tokio::sync::broadcast::channel(16);
+        let call = FunctionCall {
+            name: "echo".into(),
+            args: json!({ "x": 1 }),
+            id: Some("c1".into()),
+        };
+        handle_tool_calls(
+            vec![call],
+            &callbacks,
+            &dispatcher,
+            &writer,
+            &state,
+            &None,
+            &mut transcript,
+            &std::collections::HashMap::new(),
+            &None,
+            &[],
+            &middleware,
+            &tx,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn middleware_fires_before_and_after_tool() {
+        let mw = Arc::new(CountingMiddleware::default());
+        let mut chain = MiddlewareChain::new();
+        chain.add(mw.clone());
+        let tool_runs = Arc::new(AtomicUsize::new(0));
+
+        run_one(Arc::new(chain), tool_runs.clone()).await;
+
+        assert_eq!(
+            mw.before.load(Ordering::SeqCst),
+            1,
+            "before_tool should fire"
+        );
+        assert_eq!(mw.after.load(Ordering::SeqCst), 1, "after_tool should fire");
+        assert_eq!(mw.errors.load(Ordering::SeqCst), 0);
+        assert_eq!(tool_runs.load(Ordering::SeqCst), 1, "tool should execute");
+    }
+
+    #[tokio::test]
+    async fn before_tool_error_vetoes_execution() {
+        let mw = Arc::new(CountingMiddleware {
+            veto: true,
+            ..Default::default()
+        });
+        let mut chain = MiddlewareChain::new();
+        chain.add(mw.clone());
+        let tool_runs = Arc::new(AtomicUsize::new(0));
+
+        run_one(Arc::new(chain), tool_runs.clone()).await;
+
+        assert_eq!(mw.before.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            mw.after.load(Ordering::SeqCst),
+            0,
+            "after must not fire on veto"
+        );
+        assert_eq!(
+            tool_runs.load(Ordering::SeqCst),
+            0,
+            "tool must not run when before_tool vetoes"
+        );
+    }
 }
