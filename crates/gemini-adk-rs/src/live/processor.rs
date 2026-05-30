@@ -111,6 +111,9 @@ pub(crate) struct ControlPlaneConfig {
     /// Middleware layers run around tool dispatch in the control lane
     /// (`before_tool` / `after_tool` / `on_tool_error`).
     pub middleware: Arc<crate::middleware::MiddlewareChain>,
+    /// Optional governed-flow monitor: gates tool calls, projects active-step
+    /// postures into steering, and drives repair from unmet requirements.
+    pub flow: Option<crate::flow::FlowMonitor>,
 }
 
 impl Default for ControlPlaneConfig {
@@ -125,6 +128,7 @@ impl Default for ControlPlaneConfig {
             tool_advisory: true,
             pending_context: None,
             middleware: Arc::new(crate::middleware::MiddlewareChain::new()),
+            flow: None,
         }
     }
 }

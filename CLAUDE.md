@@ -555,6 +555,7 @@ let artifacts = A::json_output("report", "Analysis report")
 | `FsPersistence` / `MemoryPersistence` | Built-in persistence backends |
 | `ControlPlaneConfig` | Consolidated control plane settings for the processor |
 | `ExtractionTrigger` | When to run extractors: EveryTurn, Interval, AfterToolCall, OnPhaseChange, OnGenerationComplete |
+| `Flow` / `Step` / `Guard` / `FlowMonitor` | Governed conversation/tool DAG: one declarative spec enforced live (`Live::govern(flow)`) — gates tool calls, projects active-step postures, drives repair. Closed serializable vocabulary; see `docs/user-guide/flow.md` |
 
 ### L2 (gemini-adk-fluent-rs) -- Fluent DX
 

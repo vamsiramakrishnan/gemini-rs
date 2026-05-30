@@ -99,6 +99,7 @@ pub(in crate::live) async fn run_control_lane(
                     &background_tracker,
                     &extractors,
                     &middleware,
+                    &mut control_plane.flow,
                     &event_tx,
                 )
                 .await;

@@ -274,6 +274,30 @@ pub(in crate::live) async fn handle_turn_complete(
         }
     }
 
+    // 7g. Flow governance: re-latch the marking, project active-step postures
+    // as steering, surface unmet requirements as repair, and publish status.
+    if let Some(ref mut mon) = control_plane.flow {
+        mon.on_turn(state);
+        let done: Vec<String> = mon.marking().done.iter().cloned().collect();
+        state.set("flow:done", done);
+        let active: Vec<String> = mon
+            .active_steps(state)
+            .iter()
+            .map(|s| s.id.clone())
+            .collect();
+        state.set("flow:active", active);
+        for posture in mon.active_postures(state) {
+            context_buffer.push(gemini_genai_rs::prelude::Content::model(posture));
+        }
+        let unmet = mon.unmet_requirements();
+        if !unmet.is_empty() {
+            context_buffer.push(gemini_genai_rs::prelude::Content::model(format!(
+                "Before finishing, these still need to happen: {}.",
+                unmet.join(", ")
+            )));
+        }
+    }
+
     // 8. Fire watchers from net state mutations since the cursor.
     if let (Some(ref watchers), Some(cursor)) = (watchers, pre_watcher_cursor) {
         let mutations = state.mutations_since(cursor);

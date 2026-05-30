@@ -130,6 +130,9 @@ pub struct Live {
     // Confirmation provider consulted before running `T::confirm(..)` tools.
     pub(crate) confirmation_provider:
         Option<Arc<dyn gemini_adk_rs::confirmation::ConfirmationProvider>>,
+    // Governed flow (DAG) + its enforcement mode.
+    pub(crate) flow: Option<gemini_adk_rs::flow::Flow>,
+    pub(crate) flow_mode: gemini_adk_rs::flow::Mode,
 }
 
 impl Live {
@@ -200,7 +203,26 @@ impl Live {
             telemetry_interval: None,
             middleware_layers: Vec::new(),
             confirmation_provider: None,
+            flow: None,
+            flow_mode: gemini_adk_rs::flow::Mode::Enforce,
         }
+    }
+
+    /// Govern the session with a [`Flow`](gemini_adk_rs::flow::Flow) DAG and
+    /// **enforce** it: inadmissible tool calls are blocked and active-step
+    /// postures steer the model at each turn boundary.
+    pub fn govern(mut self, flow: gemini_adk_rs::flow::Flow) -> Self {
+        self.flow = Some(flow);
+        self.flow_mode = gemini_adk_rs::flow::Mode::Enforce;
+        self
+    }
+
+    /// Attach a [`Flow`](gemini_adk_rs::flow::Flow) in **observe** mode: nothing
+    /// is blocked, but deviations are recorded for audit/analytics.
+    pub fn observe(mut self, flow: gemini_adk_rs::flow::Flow) -> Self {
+        self.flow = Some(flow);
+        self.flow_mode = gemini_adk_rs::flow::Mode::Observe;
+        self
     }
 
     /// Gate `T::confirm(..)` tools behind a confirmation provider.

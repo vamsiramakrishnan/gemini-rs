@@ -151,6 +151,10 @@ path = "src/35_session_persistence.rs"
 name = "36-mcp-tools"
 path = "src/36_mcp_tools.rs"
 
+[[bin]]
+name = "37-governed-flow"
+path = "src/37_governed_flow.rs"
+
 [dependencies]
 gemini-adk-fluent-rs = { workspace = true }
 gemini-adk-rs        = { workspace = true }

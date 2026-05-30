@@ -60,6 +60,7 @@ pub struct LiveSessionBuilder {
     tool_advisory: bool,
     telemetry_interval: Option<std::time::Duration>,
     middleware: Vec<Arc<dyn crate::middleware::Middleware>>,
+    flow: Option<crate::flow::FlowMonitor>,
 }
 
 impl LiveSessionBuilder {
@@ -86,6 +87,7 @@ impl LiveSessionBuilder {
             tool_advisory: true,
             telemetry_interval: None,
             middleware: Vec::new(),
+            flow: None,
         }
     }
 
@@ -96,6 +98,12 @@ impl LiveSessionBuilder {
     /// Multiple calls accumulate in order.
     pub fn middleware(mut self, layer: Arc<dyn crate::middleware::Middleware>) -> Self {
         self.middleware.push(layer);
+        self
+    }
+
+    /// Attach a governed-flow monitor (built from a `Flow` + `Mode`).
+    pub fn flow_monitor(mut self, monitor: crate::flow::FlowMonitor) -> Self {
+        self.flow = Some(monitor);
         self
     }
 
@@ -331,6 +339,7 @@ impl LiveSessionBuilder {
                 }
                 Arc::new(chain)
             },
+            flow: self.flow,
         };
 
         // Create shared PendingContext for deferred delivery.

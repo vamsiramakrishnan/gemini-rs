@@ -152,6 +152,10 @@ impl Live {
         for layer in self.middleware_layers {
             builder = builder.middleware(layer);
         }
+        if let Some(flow) = self.flow {
+            builder =
+                builder.flow_monitor(gemini_adk_rs::flow::FlowMonitor::new(flow, self.flow_mode));
+        }
         builder = builder.tool_advisory(self.tool_advisory);
         if let Some(interval) = self.telemetry_interval {
             builder = builder.telemetry_interval(interval);
