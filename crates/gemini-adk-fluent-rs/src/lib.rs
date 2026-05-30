@@ -85,6 +85,7 @@ pub mod prelude {
     // Use gemini_adk_rs::agent::Agent directly if you need the L1 trait.
     pub use gemini_adk_rs::agent_session::*;
     pub use gemini_adk_rs::error::{AgentError, AgentResult, ToolError};
+    pub use gemini_adk_rs::flow::{Flow, FlowMonitor, Guard, Mode as FlowMode, Verdict, Violation};
     pub use gemini_adk_rs::live::{
         CallbackMode, ContextDelivery, DefaultResultFormatter, DeferredWriter, EventCallbacks,
         ExtractionTrigger, FieldPromotion, FsPersistence, LiveEvent, LiveHandle,
