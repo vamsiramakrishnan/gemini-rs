@@ -371,10 +371,9 @@ fn extract_structured(text: &str, existing: &HashMap<String, Value>) -> HashMap<
         }
     }
 
-    if !existing.contains_key("disclosure_given")
-        && is_disclosure_acknowledgment(text) {
-            extracted.insert("disclosure_given".into(), json!(true));
-        }
+    if !existing.contains_key("disclosure_given") && is_disclosure_acknowledgment(text) {
+        extracted.insert("disclosure_given".into(), json!(true));
+    }
 
     extracted
 }
