@@ -2,6 +2,11 @@
 
 Status: proposed · Author: library team · 2026-05-30
 
+> Refined by the [Governed Agents synthesis](./2026-05-30-governed-agents-synthesis.md):
+> field "sources" are **Resolvers** (`Recognizer`/`Llm`/`Fetch`/`Mcp`/`Agent`/`NativeFn`),
+> `Guard` is the shared predicate, and `Mode` (`Call`/`Dispatch`/`Background`)
+> applies to async resolvers.
+
 ## Motivation
 
 Structured state is the spine of every governed agent: `Flow` guards read it,

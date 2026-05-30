@@ -2,6 +2,11 @@
 
 Status: accepted (core landed) · Author: library team · 2026-05-30
 
+> Refined by the [Governed Agents synthesis](./2026-05-30-governed-agents-synthesis.md):
+> `Guard` is the shared predicate across Flow / Extract / watchers; steps gain
+> `on_enter(run(resolver, mode))` and `done(resolved(..))` so a Flow can
+> orchestrate sub-agents and complete on resolved system/agent data.
+
 ## Motivation
 
 Authoring a non-trivial voice agent today means hand-wiring four separate
