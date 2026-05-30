@@ -139,6 +139,18 @@ path = "src/32_live_callbacks.rs"
 name = "33-tool-macro"
 path = "src/33_tool_macro.rs"
 
+[[bin]]
+name = "34-tool-policies"
+path = "src/34_tool_policies.rs"
+
+[[bin]]
+name = "35-session-persistence"
+path = "src/35_session_persistence.rs"
+
+[[bin]]
+name = "36-mcp-tools"
+path = "src/36_mcp_tools.rs"
+
 [dependencies]
 gemini-adk-fluent-rs = { workspace = true }
 gemini-adk-rs        = { workspace = true }
