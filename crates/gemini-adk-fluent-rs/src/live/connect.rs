@@ -142,6 +142,9 @@ impl Live {
         if let Some(id) = self.session_id {
             builder = builder.session_id(id);
         }
+        for layer in self.middleware_layers {
+            builder = builder.middleware(layer);
+        }
         builder = builder.tool_advisory(self.tool_advisory);
         if let Some(interval) = self.telemetry_interval {
             builder = builder.telemetry_interval(interval);

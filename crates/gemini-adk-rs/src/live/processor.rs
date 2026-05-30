@@ -108,6 +108,9 @@ pub(crate) struct ControlPlaneConfig {
     /// Must be the same Arc given to the DeferredWriter so the control lane
     /// can push context and the DeferredWriter can drain it.
     pub pending_context: Option<Arc<PendingContext>>,
+    /// Middleware layers run around tool dispatch in the control lane
+    /// (`before_tool` / `after_tool` / `on_tool_error`).
+    pub middleware: Arc<crate::middleware::MiddlewareChain>,
 }
 
 impl Default for ControlPlaneConfig {
@@ -121,6 +124,7 @@ impl Default for ControlPlaneConfig {
             session_id: None,
             tool_advisory: true,
             pending_context: None,
+            middleware: Arc::new(crate::middleware::MiddlewareChain::new()),
         }
     }
 }

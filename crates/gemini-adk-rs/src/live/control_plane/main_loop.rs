@@ -53,6 +53,9 @@ pub(in crate::live) async fn run_control_lane(
     // TranscriptBuffer is exclusively owned by the control lane -- no mutex.
     let mut transcript_buffer = TranscriptBuffer::new();
 
+    // Middleware chain for tool-lifecycle hooks (shared, cheap Arc clone).
+    let middleware = control_plane.middleware.clone();
+
     // Track which turn each interval-based extractor last ran on.
     let mut extraction_turn_tracker: std::collections::HashMap<String, u32> =
         std::collections::HashMap::new();
@@ -79,6 +82,7 @@ pub(in crate::live) async fn run_control_lane(
                     &execution_modes,
                     &background_tracker,
                     &extractors,
+                    &middleware,
                     &event_tx,
                 )
                 .await;

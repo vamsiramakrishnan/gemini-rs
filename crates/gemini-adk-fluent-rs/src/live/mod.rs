@@ -125,6 +125,8 @@ pub struct Live {
     pub(crate) session_id: Option<String>,
     pub(crate) tool_advisory: bool,
     pub(crate) telemetry_interval: Option<Duration>,
+    // Middleware layers run around tool dispatch in the control lane.
+    pub(crate) middleware_layers: Vec<Arc<dyn gemini_adk_rs::middleware::Middleware>>,
 }
 
 impl Live {
@@ -193,7 +195,24 @@ impl Live {
             session_id: None,
             tool_advisory: true,
             telemetry_interval: None,
+            middleware_layers: Vec::new(),
         }
+    }
+
+    /// Attach a [`MiddlewareComposite`] — every layer runs around tool
+    /// dispatch in the control lane (`before_tool` can veto a call,
+    /// `after_tool` and `on_tool_error` observe results).
+    ///
+    /// Compose layers with `|`, e.g. `M::log() | M::latency()`.
+    ///
+    /// Note: model-level hooks (`before_model`/`after_model`) are TextAgent
+    /// pipeline concepts and do not apply to a streaming Live session.
+    pub fn middleware(
+        mut self,
+        composite: crate::compose::middleware::MiddlewareComposite,
+    ) -> Self {
+        self.middleware_layers.extend(composite.layers);
+        self
     }
 
     /// Set the periodic telemetry emission interval.
