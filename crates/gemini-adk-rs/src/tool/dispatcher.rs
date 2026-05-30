@@ -409,6 +409,34 @@ mod confirmation_tests {
     }
 
     #[tokio::test]
+    async fn nested_policy_wrapper_does_not_bypass_confirmation() {
+        // T::cached(T::confirm(tool)): an outer cache PolicyTool (confirm=false)
+        // wraps an inner confirm PolicyTool. The gate must still fire.
+        let runs = Arc::new(AtomicUsize::new(0));
+        let inner_confirm = confirm_tool(runs.clone()); // Arc<PolicyTool{confirm}>
+        let outer_cached: Arc<dyn ToolFunction> = Arc::new(PolicyTool::new(
+            inner_confirm,
+            ToolPolicy::new().with_cache(),
+        ));
+        assert!(
+            outer_cached.requires_confirmation(),
+            "must propagate through nesting"
+        );
+
+        let mut d = ToolDispatcher::new();
+        d.register_function(outer_cached);
+        d.set_confirmation_provider(StaticConfirmation::deny_all("blocked"));
+
+        let result = d.call_function("danger", json!({})).await;
+        assert!(matches!(result, Err(ToolError::Cancelled)));
+        assert_eq!(
+            runs.load(Ordering::SeqCst),
+            0,
+            "nested confirm must not run when denied"
+        );
+    }
+
+    #[tokio::test]
     async fn closure_provider_can_gate_by_name() {
         let runs = Arc::new(AtomicUsize::new(0));
         let mut d = ToolDispatcher::new();
