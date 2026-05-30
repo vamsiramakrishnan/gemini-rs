@@ -304,3 +304,9 @@ let handle = Live::builder()
 Extracted fields flow through the full pipeline: extraction produces raw
 values, computed state derives higher-level signals, guards evaluate on every
 turn, and the phase machine transitions when conditions are met.
+
+## See also
+
+- [Live Callbacks](./live-callbacks.md) — `on_extracted` and `on_extraction_error` callbacks
+- [State Management](./state.md) — how extracted values land in `derived:` prefix and are accessed
+- [cookbook 29 — live voice](../../examples/cookbook/src/29_live_voice.rs)

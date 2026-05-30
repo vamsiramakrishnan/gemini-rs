@@ -258,3 +258,11 @@ impl Middleware for RateLimitMiddleware {
 In live voice sessions, most interception uses `EventCallbacks` because the
 session runs over a persistent WebSocket. Middleware and processors are for
 text-mode agent pipelines where request/response cycles are explicit.
+
+## See also
+
+- [Tools](./tools.md) — tool definitions and the `before_tool_response` callback
+- [Live Sessions](./live-sessions.md) — `EventCallbacks` for live voice session interception
+- [Per-Tool Policies](./tool-policies.md) — `T::timeout`, `T::cached`, and `T::confirm` wrappers
+- [cookbook 03 — callbacks](../../examples/cookbook/src/03_callbacks.rs)
+- [cookbook 15 — middleware stack](../../examples/cookbook/src/15_middleware_stack.rs)

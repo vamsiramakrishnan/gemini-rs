@@ -226,9 +226,12 @@ Live::builder()
   call; elapse returns `ToolError::Timeout`.
 - **`T::cached(tool)`** — enforced: memoizes successful results by
   `(name, canonical-JSON args)`; errors are not cached.
-- **`T::confirm(tool, message)`** — flag recorded and surfaced via
-  `PolicyTool::requires_confirmation()`; full dispatch gating is forthcoming
-  (check the flag manually in `on_tool_call` today if you need it enforced).
+- **`T::confirm(tool, message)`** — enforced at dispatch when a
+  `ConfirmationProvider` is wired (`Live::confirmation_provider` or
+  `ToolDispatcher::with_confirmation_provider`); a denied decision returns
+  `ToolError::Cancelled` and the tool never runs. Opt-in: with no provider,
+  the gate is inert and surfaced via `requires_confirmation()`. See
+  [Per-Tool Policies](./tool-policies.md).
 
 For async/background execution (`ToolExecutionMode::Background`,
 `FunctionResponseScheduling`) and MCP tool integration, see the dedicated
@@ -394,6 +397,7 @@ LiveSessionBuilder::new(config)
     .dispatcher(dispatcher)
     .tool_execution_mode("search_knowledge_base", ToolExecutionMode::Background {
         formatter: None,
+        scheduling: Some(FunctionResponseScheduling::WhenIdle),
     })
     .connect()
     .await?;
@@ -453,4 +457,13 @@ state promotion, or result augmentation:
         r
     }).collect()
 })
+
+## See also
+
+- [Per-Tool Policies](./tool-policies.md) — timeout, caching, confirmation, and background execution
+- [MCP Tools](./mcp-tools.md) — connecting to Model Context Protocol servers
+- [Text Agent Combinators](./text-agents.md) — using `TextAgentTool` to call agent pipelines as tools
+- [cookbook 02 — agent with tools](../../examples/cookbook/src/02_agent_with_tools.rs)
+- [cookbook 09 — tool composition](../../examples/cookbook/src/09_tool_composition.rs)
+- [cookbook 33 — tool macro](../../examples/cookbook/src/33_tool_macro.rs)
 ```

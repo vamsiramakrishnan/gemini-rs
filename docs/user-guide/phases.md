@@ -394,3 +394,10 @@ Terminal phases skip transition evaluation entirely.
 
 For the full turn-complete pipeline, timing diagrams, background agent
 dispatch, and common pitfalls, see [Phase Transitions Deep Dive](phase-transitions-deep-dive.md).
+
+## See also
+
+- [Phase Transitions Deep Dive](./phase-transitions-deep-dive.md) — timing diagrams, background agents, and debugging
+- [Steering Modes](./steering-modes.md) — how phase instructions reach the model (`ContextInjection` vs `InstructionUpdate`)
+- [State Watchers](./watchers.md) — reactive triggers that complement phase transition guards
+- [cookbook 24 — customer support](../../examples/cookbook/src/24_customer_support.rs)

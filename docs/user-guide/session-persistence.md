@@ -306,3 +306,9 @@ shapes back to the SDK's `Session` and `Event` types.
 - `SessionService` and `SessionPersistence` (Live snapshots) are orthogonal.
   A voice bot can use `VertexAiSessionService` for session tracking while also
   using `FsPersistence` for Live snapshot/resume — they do not share storage.
+
+## See also
+
+- [Live Sessions](./live-sessions.md) — connecting, disconnecting, and the `LiveHandle` runtime API
+- [Live Callbacks](./live-callbacks.md) — `on_resumed` callback fired when a prior snapshot is restored
+- [cookbook 35 — session persistence](../../examples/cookbook/src/35_session_persistence.rs)

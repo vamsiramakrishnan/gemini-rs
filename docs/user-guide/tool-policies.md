@@ -278,3 +278,10 @@ Live::builder()
     )
     .tool_background("get_stock_price")  // also run it in background
 ```
+
+## See also
+
+- [Tools](./tools.md) — `SimpleTool`, `TypedTool`, `ToolDispatcher`, and tool registration
+- [MCP Tools](./mcp-tools.md) — applying policies to Model Context Protocol tools
+- [Middleware](./middleware.md) — `before_tool` / `after_tool` hooks in agent pipelines
+- [cookbook 34 — tool policies](../../examples/cookbook/src/34_tool_policies.rs)
