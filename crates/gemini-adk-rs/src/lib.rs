@@ -20,6 +20,7 @@ pub mod credentials;
 pub mod error;
 pub mod evaluation;
 pub mod events;
+pub mod extract;
 pub mod flow;
 pub mod instruction;
 pub mod live;
@@ -73,6 +74,7 @@ pub use credentials::{
 };
 pub use error::{AgentError, AgentResult, ToolError};
 pub use events::{Event, EventActions, EventType, StructuredEvent};
+pub use extract::{Extract, Recognizer, RecordExtractor};
 pub use flow::{Flow, FlowMonitor, Guard, Mode as FlowMode, Verdict, Violation};
 /// The `#[tool]` attribute macro — turns an `async fn` into a registrable Gemini tool.
 ///

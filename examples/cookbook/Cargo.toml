@@ -155,6 +155,10 @@ path = "src/36_mcp_tools.rs"
 name = "37-governed-flow"
 path = "src/37_governed_flow.rs"
 
+[[bin]]
+name = "38-extraction"
+path = "src/38_extraction.rs"
+
 [dependencies]
 gemini-adk-fluent-rs = { workspace = true }
 gemini-adk-rs        = { workspace = true }

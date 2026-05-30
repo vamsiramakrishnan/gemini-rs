@@ -30,6 +30,17 @@ impl Live {
         self.extract_turns_windowed::<T>(llm, prompt, 3)
     }
 
+    /// Register a deterministic [`Extract`](gemini_adk_rs::extract::Extract)
+    /// record — CPU recognizers over the transcript, no model, no network. The
+    /// recognized fields are promoted into `State`, where `Flow` guards
+    /// (`done(captured([...]))`) and repair read them. Composes with
+    /// `extract_turns` (LLM) on the same session for a cheap-first cascade.
+    pub fn extract_record(mut self, spec: gemini_adk_rs::extract::Extract) -> Self {
+        self.config = self.config.enable_input_transcription();
+        self.extractors.push(spec.into_extractor());
+        self
+    }
+
     /// Like `extract_turns` but with a custom window size.
     pub fn extract_turns_windowed<T>(
         mut self,
