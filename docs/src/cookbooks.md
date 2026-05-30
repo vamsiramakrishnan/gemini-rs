@@ -1,21 +1,51 @@
 # Examples
 
-The repository contains two sets of runnable examples:
-
-1. **`examples/cookbook/`** — 36 progressive text-based examples demonstrating SDK composition patterns (no server required)
-2. **`gemini-adk-web-rs` apps** — Interactive voice/text demos bundled into a devtools-enabled web UI
+`gemini-rs` ships **38+ runnable cookbook examples** plus interactive web demos.
+The cookbook is organized around the **higher-order, governed-agent
+capabilities** — the powerful primitives this SDK is built on — with the
+composition foundations beneath them.
 
 ---
 
-## Cookbook Examples (`examples/cookbook/`)
+## Governed Agents — the higher-order capabilities
 
-A structured **Crawl → Walk → Run** learning path. Each example is a self-contained Rust binary with detailed doc comments explaining every API used.
+These primitives make an agent *governed*: a declarative control DAG,
+deterministic fact extraction, agent orchestration, and the safety/connection
+capabilities around them. They compose **multiplicatively** (see the
+[Governed Agents synthesis](../plans/2026-05-30-governed-agents-synthesis.md) and
+the Flow / Extraction-kit / Orchestration RFCs in `docs/plans/`). **Start here.**
+
+| Capability | Example | What it shows |
+|---|---|---|
+| **Flow** — governed conversation/tool DAG | `37_governed_flow` | one DAG gates tools, projects postures, enforces order, `once`/`never…until`, mermaid (debt collection) |
+| **Extract** — deterministic facts (no LLM) | `38_extraction` | CPU recognizers fill `State` → drive a `Flow` guard with no model in the control loop |
+| **Orchestration** — `call`/`dispatch`/`background` | `19_agent_tool`, `26_dispatch_join`, `27_race_timeout` | invoke sub-agents sync/async; results land in `State` |
+| **Tool governance** — `confirm`/`timeout`/`cached` | `34_tool_policies` | per-tool policies + `ConfirmationProvider` enforcement; commit-tool safety |
+| **`#[tool]` macro** | `33_tool_macro` | turn an `async fn` into a registrable tool |
+| **Zero-ceremony connect** | `31_connect_from_env` | platform + credentials resolved from the environment |
+| **Live callbacks** | `32_live_callbacks` | the full fast-lane vs control-lane catalog |
+| **Session persistence** | `35_session_persistence` | snapshot/resume + the session store |
+| **MCP tools** | `36_mcp_tools` | stdio/SSE MCP integration |
+| **Capstones** *(combine all three lenses)* | `39_booking`, `40_screening` *(coming)* | Flow × Extract × Orchestration on real use cases |
 
 ```bash
-# Run any example directly
-cargo run -p example-cookbook --example 01_simple_agent
-cargo run -p example-cookbook --example 17_evaluation_suite
-cargo run -p example-cookbook --example 30_production_pipeline
+cargo run -p example-cookbook --bin 37-governed-flow
+cargo run -p example-cookbook --bin 38-extraction
+cargo run -p example-cookbook --bin 34-tool-policies
+```
+
+---
+
+## Composition foundations (`examples/cookbook/`)
+
+The building blocks the governed capabilities compose: the builder API, the
+S·C·T·P·M·A operator algebra, and the text-agent combinators — a structured
+**Crawl → Walk → Run** path. Each example is a self-contained binary with
+detailed doc comments.
+
+```bash
+cargo run -p example-cookbook --bin 01-simple-agent
+cargo run -p example-cookbook --bin 21-full-algebra
 ```
 
 ### Crawl (01–10) — Foundations
@@ -69,18 +99,21 @@ Full-system compositions covering real-world architectures and every SDK capabil
 | 29 | `29_live_voice` | Full `Live::builder()` API: phases, tools, extraction, watchers, steering, repair, persistence |
 | 30 | `30_production_pipeline` | End-to-end production pipeline: telemetry, middleware, evaluation, artifact publishing |
 
-### Fly (31–36) — Advanced Internals
+### Fly (31–38) — Higher-order capabilities
 
-Deep dives into connection helpers, callback surfaces, macros, and production runtime features.
+Connection helpers, callback surfaces, macros, governance, and the
+**governed-agent primitives** (see the capability track at the top).
 
 | # | Binary | What it covers |
 |---|--------|----------------|
 | 31 | `31_connect_from_env` | `ApiEndpoint::from_env()` / `connect_from_env()`: zero-ceremony platform + credential resolution |
 | 32 | `32_live_callbacks` | Full Live callback catalog: fast-lane vs control-lane, every hook, `_concurrent` variants |
 | 33 | `33_tool_macro` | `#[tool]` attribute macro: turn an `async fn` into a registrable tool with auto-generated JSON Schema |
-| 34 | `34_tool_policies` | `T::cached`, `T::timeout`, `T::confirm`, nested policies, `PolicyTool` + `ToolPolicy` low-level API |
+| 34 | `34_tool_policies` | `T::cached`, `T::timeout`, `T::confirm`, nested policies, `ConfirmationProvider` enforcement |
 | 35 | `35_session_persistence` | `MemoryPersistence`, `FsPersistence`, `SessionSnapshot` round-trips; `InMemorySessionService` event log |
 | 36 | `36_mcp_tools` | `McpConnectionParams::Stdio/Sse`, `McpSessionManager`, `McpToolset`, `T::mcp()`, JSON-RPC 2.0 lifecycle |
+| 37 | `37_governed_flow` | **`Flow`** — a governed conversation/tool DAG: gate tools, project postures, `once`/`never…until`, mermaid |
+| 38 | `38_extraction` | **`Extract`** — CPU recognizers (`integer`/`money`/`one_of`/`fuzzy`/`yes_no`) fill State and drive a Flow guard, no LLM |
 
 ---
 
