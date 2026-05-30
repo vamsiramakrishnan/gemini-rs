@@ -200,7 +200,24 @@ pub(in crate::live) async fn handle_tool_calls(
         let cancel = CancellationToken::new();
 
         let handle = tokio::spawn(async move {
-            let _ = mw.run_before_tool(&call).await;
+            // A `before_tool` veto blocks execution for background tools too,
+            // matching the standard path and the `Live::middleware` contract:
+            // send an error response, skip dispatch, and self-clean.
+            if let Err(veto) = mw.run_before_tool(&call).await {
+                bg_writer
+                    .send_tool_response(vec![FunctionResponse {
+                        name: call.name.clone(),
+                        response: serde_json::json!({ "error": veto.to_string() }),
+                        id: call.id.clone(),
+                        scheduling: None,
+                    }])
+                    .await
+                    .ok();
+                if let Some(ref t) = tracker {
+                    t.remove(&call.id.clone().unwrap_or_default());
+                }
+                return;
+            }
             let result = if let Some(ref d) = disp {
                 d.call_function(&call.name, call.args.clone())
                     .await
