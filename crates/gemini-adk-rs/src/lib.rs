@@ -29,6 +29,7 @@ pub mod llm_agent;
 pub mod memory;
 pub mod middleware;
 pub mod optimization;
+pub mod orchestration;
 pub mod planners;
 pub mod plugin;
 pub mod processors;
@@ -89,6 +90,7 @@ pub use llm::{BaseLlm, GeminiLlm, GeminiLlmParams, LlmRegistry, LlmRequest, LlmR
 pub use llm_agent::{LlmAgent, LlmAgentBuilder};
 pub use memory::{InMemoryMemoryService, MemoryEntry, MemoryService};
 pub use middleware::{Middleware, MiddlewareChain};
+pub use orchestration::{call as call_agent, Mode as AgentMode};
 pub use plugin::{Plugin, PluginManager, PluginResult};
 pub use processors::{
     ContentFilter, InstructionInserter, RequestProcessor, RequestProcessorChain, ResponseProcessor,

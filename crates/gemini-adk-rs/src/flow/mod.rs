@@ -136,6 +136,12 @@ impl Guard {
     pub fn done(step: impl Into<String>) -> Self {
         Guard::Spec(Pred::Done(step.into()))
     }
+    /// True once an orchestrated agent named `name` has produced a result
+    /// (its `{name}:result` state key is set). Pairs with the
+    /// [`orchestration`](crate::orchestration) `call`/`dispatch`/`background`.
+    pub fn resolved(name: impl AsRef<str>) -> Self {
+        Guard::Spec(Pred::IsSet(format!("{}:result", name.as_ref())))
+    }
     /// Conjunction.
     pub fn all(guards: impl IntoIterator<Item = Guard>) -> Self {
         Guard::Spec(Pred::All(collect_specs(guards)))
