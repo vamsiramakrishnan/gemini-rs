@@ -199,7 +199,8 @@ impl Live {
         }
     }
 
-    /// Attach a [`MiddlewareComposite`] — every layer runs around tool
+    /// Attach a [`MiddlewareComposite`](crate::compose::middleware::MiddlewareComposite)
+    /// — every layer runs around tool
     /// dispatch in the control lane (`before_tool` can veto a call,
     /// `after_tool` and `on_tool_error` observe results).
     ///
