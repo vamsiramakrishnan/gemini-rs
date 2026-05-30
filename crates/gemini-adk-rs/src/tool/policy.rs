@@ -173,6 +173,20 @@ impl ToolFunction for PolicyTool {
         self.inner.parameters()
     }
 
+    fn requires_confirmation(&self) -> bool {
+        // Propagate through nested wrappers so modifier order can't bypass a
+        // gate: e.g. `T::cached(T::confirm(..))` wraps a confirm PolicyTool in
+        // a cache PolicyTool whose own policy has `confirm == false`.
+        self.policy.confirm || self.inner.requires_confirmation()
+    }
+
+    fn confirmation_message(&self) -> Option<&str> {
+        self.policy
+            .confirm_message
+            .as_deref()
+            .or_else(|| self.inner.confirmation_message())
+    }
+
     async fn call(&self, args: serde_json::Value) -> Result<serde_json::Value, ToolError> {
         // Cache lookup (only for cacheable tools).
         let key = if self.policy.cache {

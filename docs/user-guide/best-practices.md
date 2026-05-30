@@ -516,3 +516,9 @@ fn context_window() {
     assert_eq!(result.len(), 2);
 }
 ```
+
+## See also
+
+- [Architecture Overview](./architecture.md) — the three-crate stack and which layer to choose
+- [Live Callbacks](./live-callbacks.md) — fast-lane vs control-lane callback constraints
+- [Tools](./tools.md) — `TypedTool`, `SimpleTool`, and the `#[tool]` macro

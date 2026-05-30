@@ -256,3 +256,8 @@ If a prompt is needed (`prompt_on_enter: true` or a repair nudge on the first at
 | `greeting()` | Works normally | Works normally | Works normally |
 | `prompt_on_enter` | Works normally | Works normally | Works normally |
 | `enter_prompt` | Works normally | Works normally | Works normally |
+
+## See also
+
+- [Phase System](./phases.md) — defining phases, modifiers, and lifecycle callbacks
+- [Phase Transitions Deep Dive](./phase-transitions-deep-dive.md) — the full turn-complete pipeline where steering fires

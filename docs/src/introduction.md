@@ -20,15 +20,24 @@ Full Rust SDK for the Gemini Multimodal Live API — wire protocol, agent runtim
 ```rust,ignore
 use gemini_adk_fluent_rs::prelude::*;
 
+// `connect_from_env()` resolves Google AI vs Vertex AI from the environment —
+// no auth ceremony. See "Authentication & Connecting" for the variables it reads.
 let handle = Live::builder()
-    .model(GeminiModel::Gemini2_0Flash)
+    .model(GeminiModel::Gemini2_0FlashLive)   // native-audio Live model
     .voice(Voice::Kore)
-    .instruction("You are a helpful assistant.")
-    .on_audio(|audio| { /* play audio */ })
-    .on_text(|text| { /* display text */ })
-    .connect()
+    .instruction("You are a helpful voice assistant.")
+    .on_audio(|pcm| { /* play audio */ })
+    .on_text(|text| print!("{text}"))
+    .connect_from_env()
     .await?;
+
+handle.send_text("What's the weather like?").await?;
+handle.disconnect().await?;
 ```
+
+New here? Start with [Setup and Running](./setup-and-running.md) and
+[Authentication & Connecting](./user-guide/auth-and-connecting.md), then browse
+the [cookbook](./cookbooks.md) (Crawl → Walk → Run).
 
 ## Guide Structure
 
@@ -38,7 +47,7 @@ This book is organized into six sections:
 - **Voice & Live Sessions** — Building real-time voice agents with phases, state, and watchers
 - **Tools & Extraction** — Tool system and structured data extraction from conversations
 - **Composition & Patterns** — Text agent combinators, S·C·T·P·M·A operators, middleware
-- **Examples** — 30 progressive cookbook examples (Crawl/Walk/Run) plus interactive `gemini-adk-web-rs` demos
+- **Examples** — 36 progressive cookbook examples (Crawl/Walk/Run) plus interactive `gemini-adk-web-rs` demos
 - **ADK Web UI** — Design system, dark/light mode, DevTools panels, and the cookbook browser
 
 ## API Reference

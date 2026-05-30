@@ -266,3 +266,9 @@ handle.done().await?;
 Most developers should start at L2 and drop to L1/L0 only when they hit a
 specific limitation. The layers are designed to compose: you can use L0
 types (like `SessionConfig`) with L2 builders via `Live::connect(config)`.
+
+## See also
+
+- [Migration Guide](./migration.md) — side-by-side comparison of the same agent at L0, L1, and L2
+- [Best Practices](./best-practices.md) — when to stay at each layer and common pitfalls
+- [Live Sessions](./live-sessions.md) — building a full voice session with the L2 builder

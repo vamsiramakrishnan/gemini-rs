@@ -722,3 +722,10 @@ DEBUG processor: Turn 3 complete, turn_count=3
 | "Tool not available" | Tool scoped to unreachable phase |
 | Model repeats itself | No transition guard matches (stuck in phase) |
 | Callback blocks pipeline | Blocking callback doing slow I/O (use _concurrent) |
+
+## See also
+
+- [Phase System](./phases.md) — phase definitions, guards, lifecycle callbacks, and tool filtering
+- [Steering Modes](./steering-modes.md) — how phase instructions are delivered (`ContextInjection` vs `InstructionUpdate`)
+- [State Watchers](./watchers.md) — watcher patterns that complement phase transitions
+- [cookbook 24 — customer support](../../examples/cookbook/src/24_customer_support.rs)

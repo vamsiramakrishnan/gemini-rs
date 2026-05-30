@@ -131,6 +131,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dispatcher.register(SimpleTool::new(
         "get_weather",
         "Get current weather for a city",
+        None, // JSON Schema for parameters (None = no declared schema)
         |args| async move {
             let city = args["city"].as_str().unwrap_or("unknown");
             Ok(json!({ "city": city, "temp_c": 22, "condition": "sunny" }))
@@ -371,3 +372,8 @@ When migrating from L0 to L2:
 8. Replace manual phase tracking with `.phase("name").instruction().transition().done()`
 9. Replace manual state HashMaps with `.extract_turns::<T>()` and `handle.state()`
 10. Remove the `tokio::select!` loop -- the three-lane processor handles it
+
+## See also
+
+- [Architecture Overview](./architecture.md) — the three-crate stack explained, with a guide on choosing your layer
+- [S.C.T.P.M.A Operator Algebra](./composition.md) — fluent composition operators available at L2

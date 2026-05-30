@@ -64,6 +64,42 @@ Doc comments on fields become parameter descriptions. Required vs optional is
 inferred from `#[serde(default)]`. Invalid arguments return
 `ToolError::InvalidArgs`.
 
+## The `#[tool]` Attribute Macro
+
+The most ergonomic way to define a tool: annotate an `async fn` and the macro
+generates the args struct, JSON Schema, and `ToolFunction` impl for you — no
+separate struct, no `TypedTool::new::<Args>` ceremony.
+
+```rust,ignore
+use gemini_adk_fluent_rs::prelude::*;   // brings `tool`, `ToolError`, `ToolDispatcher`
+use serde_json::{json, Value};
+use std::sync::Arc;
+
+/// Get the current weather for a city.
+#[tool("Get the current weather for a city")]
+async fn get_weather(city: String, units: Option<String>) -> Result<Value, ToolError> {
+    Ok(json!({ "city": city, "temp_c": 22, "units": units.unwrap_or("metric".into()) }))
+}
+
+let mut dispatcher = ToolDispatcher::new();
+dispatcher.register_function(Arc::new(get_weather()));   // macro emits `fn get_weather() -> impl ToolFunction`
+```
+
+How it expands, for `async fn foo(...)`:
+
+- a hidden `Deserialize + JsonSchema` args struct (one field per parameter;
+  `Option<T>` params are non-required and default to `None`),
+- a `ToolFunction` impl whose `call()` deserializes the JSON args, runs the
+  original body, and returns its `Result<Value, ToolError>`,
+- a constructor `fn foo() -> impl ToolFunction` (visibility mirrors the `fn`).
+
+The tool's `name()` is the function name and `description()` is the macro's
+string. Parameters of any `Deserialize + JsonSchema` type are supported.
+(Per-parameter doc descriptions are not extracted yet — use `TypedTool` with a
+documented args struct when you need them.)
+
+See cookbook example `33_tool_macro` for a runnable demonstration.
+
 ## ToolFunction Trait
 
 For full control, implement `ToolFunction` directly. Use this when your tool
@@ -190,9 +226,12 @@ Live::builder()
   call; elapse returns `ToolError::Timeout`.
 - **`T::cached(tool)`** — enforced: memoizes successful results by
   `(name, canonical-JSON args)`; errors are not cached.
-- **`T::confirm(tool, message)`** — flag recorded and surfaced via
-  `PolicyTool::requires_confirmation()`; full dispatch gating is forthcoming
-  (check the flag manually in `on_tool_call` today if you need it enforced).
+- **`T::confirm(tool, message)`** — enforced at dispatch when a
+  `ConfirmationProvider` is wired (`Live::confirmation_provider` or
+  `ToolDispatcher::with_confirmation_provider`); a denied decision returns
+  `ToolError::Cancelled` and the tool never runs. Opt-in: with no provider,
+  the gate is inert and surfaced via `requires_confirmation()`. See
+  [Per-Tool Policies](./tool-policies.md).
 
 For async/background execution (`ToolExecutionMode::Background`,
 `FunctionResponseScheduling`) and MCP tool integration, see the dedicated
@@ -358,6 +397,7 @@ LiveSessionBuilder::new(config)
     .dispatcher(dispatcher)
     .tool_execution_mode("search_knowledge_base", ToolExecutionMode::Background {
         formatter: None,
+        scheduling: Some(FunctionResponseScheduling::WhenIdle),
     })
     .connect()
     .await?;
@@ -417,4 +457,13 @@ state promotion, or result augmentation:
         r
     }).collect()
 })
+
+## See also
+
+- [Per-Tool Policies](./tool-policies.md) — timeout, caching, confirmation, and background execution
+- [MCP Tools](./mcp-tools.md) — connecting to Model Context Protocol servers
+- [Text Agent Combinators](./text-agents.md) — using `TextAgentTool` to call agent pipelines as tools
+- [cookbook 02 — agent with tools](../../examples/cookbook/src/02_agent_with_tools.rs)
+- [cookbook 09 — tool composition](../../examples/cookbook/src/09_tool_composition.rs)
+- [cookbook 33 — tool macro](../../examples/cookbook/src/33_tool_macro.rs)
 ```

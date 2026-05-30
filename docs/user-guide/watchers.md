@@ -334,3 +334,9 @@ After each turn, the control lane processes mutations in this order:
 This means a computed variable can react to extractor output, a watcher can
 react to a computed variable's change, and a phase transition can react to state
 set by a watcher -- all within a single turn cycle.
+
+## See also
+
+- [State Management](./state.md) — the `State` type and `derived:` prefix that watchers observe
+- [Phase System](./phases.md) — phase transition guards that react to the same state watchers write
+- [cookbook 10 — guards](../../examples/cookbook/src/10_guards.rs)

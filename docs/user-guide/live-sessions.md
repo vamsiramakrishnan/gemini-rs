@@ -227,6 +227,7 @@ let mut dispatcher = ToolDispatcher::new();
 dispatcher.register(SimpleTool::new(
     "get_weather",
     "Get current weather for a city",
+    None, // JSON Schema for parameters (None = no declared schema)
     |args| async move {
         let city = args["city"].as_str().unwrap_or("unknown");
         Ok(serde_json::json!({ "city": city, "temp_c": 22, "condition": "sunny" }))

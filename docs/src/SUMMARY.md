@@ -18,6 +18,7 @@
 - [Live Callbacks: Fast Lane vs Control Lane](./user-guide/live-callbacks.md)
 - [Phase System](./user-guide/phases.md)
 - [Phase Transitions Deep Dive](./user-guide/phase-transitions-deep-dive.md)
+- [Steering Modes](./user-guide/steering-modes.md)
 - [State Management](./user-guide/state.md)
 - [State Watchers & Temporal Patterns](./user-guide/watchers.md)
 - [Session Persistence & Resumption](./user-guide/session-persistence.md)

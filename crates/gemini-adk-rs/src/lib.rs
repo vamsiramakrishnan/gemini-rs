@@ -63,7 +63,9 @@ pub use callback::{AfterToolCallback, BeforeToolCallback, BeforeToolResult, Tool
 pub use code_executors::{
     BuiltInCodeExecutor, CodeExecutionInput, CodeExecutionResult, CodeExecutor, CodeFile,
 };
-pub use confirmation::ToolConfirmation;
+pub use confirmation::{
+    ConfirmationProvider, ConfirmationRequest, StaticConfirmation, ToolConfirmation,
+};
 pub use context::{AgentEvent, CallbackContext, InvocationContext, ToolContext};
 pub use credentials::{
     AuthCredential, CredentialError, CredentialService, InMemoryCredentialService,

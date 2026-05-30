@@ -243,3 +243,9 @@ let handle = Live::builder()
 
 handle.send_text("List the files in the root of /workspace").await?;
 ```
+
+## See also
+
+- [Tools](./tools.md) — `SimpleTool`, `TypedTool`, and the `ToolDispatcher` registration API
+- [Per-Tool Policies](./tool-policies.md) — timeout, caching, and confirmation policies for MCP tools
+- [cookbook 36 — MCP tools](../../examples/cookbook/src/36_mcp_tools.rs)
