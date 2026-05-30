@@ -1,10 +1,12 @@
 //! Tool dispatch — regular, streaming, and input-streaming tools.
 
 pub mod dispatcher;
+pub mod policy;
 pub mod simple;
 pub mod typed;
 
 pub use dispatcher::*;
+pub use policy::*;
 pub use simple::*;
 pub use typed::*;
 

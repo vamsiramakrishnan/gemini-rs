@@ -2,6 +2,12 @@
 
 use gemini_genai_rs::session::SessionError;
 
+/// Convenience alias for fallible agent-runtime operations.
+///
+/// Lets call sites write `AgentResult<T>` instead of the more verbose
+/// `Result<T, AgentError>`.
+pub type AgentResult<T> = std::result::Result<T, AgentError>;
+
 /// Errors that can occur during agent execution.
 #[derive(Debug, thiserror::Error)]
 pub enum AgentError {

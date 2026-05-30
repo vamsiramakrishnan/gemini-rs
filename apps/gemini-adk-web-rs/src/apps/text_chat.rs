@@ -2,8 +2,6 @@ use async_trait::async_trait;
 use tokio::sync::mpsc;
 use tracing::info;
 
-use gemini_adk_fluent_rs::prelude::*;
-
 use crate::app::{AppError, ClientMessage, DemoApp, WsSender};
 use crate::bridge::SessionBridge;
 use crate::demo_meta;

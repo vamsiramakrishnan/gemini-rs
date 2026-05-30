@@ -335,11 +335,7 @@ impl State {
     /// Rename a key.
     pub fn rename(&self, from: &str, to: &str) {
         if let Some(v) = self.remove(from) {
-            if self.track_delta {
-                self.set(to.to_string(), v);
-            } else {
-                self.set(to.to_string(), v);
-            }
+            self.set(to.to_string(), v);
         }
     }
 

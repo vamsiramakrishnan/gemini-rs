@@ -416,7 +416,7 @@ mod tests {
         // explicit idle/playback-drained flush.
         assert_eq!(inner.client_content_count.load(Ordering::SeqCst), 1);
         assert_eq!(inner.audio_count.load(Ordering::SeqCst), 1);
-        assert!(pending.is_empty() == false);
+        assert!(!pending.is_empty());
         assert!(pending.take_prompt());
     }
 

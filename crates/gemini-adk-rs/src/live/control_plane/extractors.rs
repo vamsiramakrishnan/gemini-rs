@@ -366,13 +366,14 @@ mod tests {
         let extractor: Arc<dyn TurnExtractor> = Arc::new(MockExtractor {
             name: "DebtorState",
             value: json!({ "debt_acknowledged": true }),
-            promotions: vec![FieldPromotion::true_only("debt_acknowledged")
-                .after_presented("debt_details")],
+            promotions: vec![
+                FieldPromotion::true_only("debt_acknowledged").after_presented("debt_details")
+            ],
         });
 
         let mut first_buffer = buffer_with_turn();
         run_extractors(
-            &[extractor.clone()],
+            std::slice::from_ref(&extractor),
             &mut first_buffer,
             &state,
             &callbacks,

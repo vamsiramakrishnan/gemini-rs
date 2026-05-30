@@ -68,7 +68,7 @@ pub use context::{AgentEvent, CallbackContext, InvocationContext, ToolContext};
 pub use credentials::{
     AuthCredential, CredentialError, CredentialService, InMemoryCredentialService,
 };
-pub use error::{AgentError, ToolError};
+pub use error::{AgentError, AgentResult, ToolError};
 pub use events::{Event, EventActions, EventType, StructuredEvent};
 pub use instruction::inject_session_state;
 pub use live::{

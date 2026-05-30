@@ -2,6 +2,11 @@
 //!
 //! Mirrors ADK-Python's `sqlite_session_service`. Provides session
 //! persistence using a local SQLite database file.
+//!
+//! When the `database-sessions` feature is enabled this delegates to the real
+//! `sqlx`-backed [`DatabaseSessionService`](super::DatabaseSessionService).
+//! Without that feature it falls back to an in-memory stub so the default
+//! build stays dependency-free.
 
 use std::path::PathBuf;
 
@@ -26,6 +31,15 @@ impl SqliteSessionConfig {
     }
 }
 
+/// Backend used by [`SqliteSessionService`].
+///
+/// With `database-sessions` this is the real `sqlx`-backed service; otherwise
+/// it is an in-memory stub.
+#[cfg(feature = "database-sessions")]
+type Backend = super::DatabaseSessionService;
+#[cfg(not(feature = "database-sessions"))]
+type Backend = super::InMemorySessionService;
+
 /// Session service backed by SQLite.
 ///
 /// Provides lightweight, file-based session persistence suitable for
@@ -34,24 +48,35 @@ impl SqliteSessionConfig {
 /// The database schema is automatically created on first use.
 pub struct SqliteSessionService {
     config: SqliteSessionConfig,
-    // In a real implementation, this would hold a connection pool.
-    // For now, we delegate to InMemorySessionService as a stub.
-    inner: super::InMemorySessionService,
+    inner: Backend,
 }
 
 impl SqliteSessionService {
     /// Create a new SQLite session service.
     ///
-    /// Initializes the database schema if it doesn't exist.
+    /// With the `database-sessions` feature this builds a real `sqlx` pool
+    /// (opened lazily on first use). Without it, an in-memory stub is used.
     pub fn new(config: SqliteSessionConfig) -> Self {
-        // In a real implementation, this would:
-        // 1. Open/create the SQLite database file
-        // 2. Run the SQLITE_SCHEMA migration
-        // 3. Return a connected service
-        Self {
-            config,
-            inner: super::InMemorySessionService::new(),
-        }
+        let inner = Self::build_backend(&config);
+        Self { config, inner }
+    }
+
+    #[cfg(feature = "database-sessions")]
+    fn build_backend(config: &SqliteSessionConfig) -> Backend {
+        let path = config.db_path.to_string_lossy();
+        // `:memory:` maps to sqlx's in-memory URL; file paths map to
+        // `sqlite://<path>`.
+        let url = if path == ":memory:" {
+            "sqlite::memory:".to_string()
+        } else {
+            format!("sqlite://{path}")
+        };
+        super::DatabaseSessionService::new(url)
+    }
+
+    #[cfg(not(feature = "database-sessions"))]
+    fn build_backend(_config: &SqliteSessionConfig) -> Backend {
+        super::InMemorySessionService::new()
     }
 
     /// Returns the configured database path.
@@ -63,8 +88,6 @@ impl SqliteSessionService {
 #[async_trait]
 impl SessionService for SqliteSessionService {
     async fn create_session(&self, app_name: &str, user_id: &str) -> Result<Session, SessionError> {
-        // Stub: delegates to in-memory implementation.
-        // A real implementation would INSERT INTO sessions ...
         self.inner.create_session(app_name, user_id).await
     }
 

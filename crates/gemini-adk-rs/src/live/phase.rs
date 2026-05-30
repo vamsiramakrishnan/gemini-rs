@@ -576,7 +576,7 @@ impl PhaseMachine {
                 state.remove(key);
             }
             for concept in &phase.presents {
-                state.set(&Phase::presented_key(concept), true);
+                state.set(Phase::presented_key(concept), true);
             }
             if let Some(ref on_enter) = phase.on_enter {
                 let fut = on_enter(state.clone(), Arc::clone(writer));

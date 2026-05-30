@@ -93,9 +93,8 @@ impl FieldPromotion {
 
     /// Promote a string field only when its extracted value is non-empty.
     pub fn non_empty(field: impl Into<String>) -> Self {
-        Self::overwrite(field).accept_when(|_, value| {
-            value.as_str().is_some_and(|s| !s.trim().is_empty())
-        })
+        Self::overwrite(field)
+            .accept_when(|_, value| value.as_str().is_some_and(|s| !s.trim().is_empty()))
     }
 
     /// Promote into a custom target state key.
@@ -123,10 +122,7 @@ impl FieldPromotion {
     ) -> Self {
         let previous = self.accept.take();
         self.accept = Some(Arc::new(move |state, value| {
-            previous
-                .as_ref()
-                .map_or(true, |accept| accept(state, value))
-                && predicate(state, value)
+            previous.as_ref().is_none_or(|accept| accept(state, value)) && predicate(state, value)
         }));
         self
     }

@@ -622,6 +622,7 @@ just release-status
 - Register agent tools via `.agent_tool()` to share session State with text agent pipelines.
 - Use `.phase_defaults()` to DRY up modifiers shared across all phases.
 - Use `.greeting("...")` to make the model speak first on connect.
+- Use `.connect_from_env()` to skip auth ceremony -- it resolves Google AI vs Vertex from `GOOGLE_GENAI_USE_VERTEXAI`, reads the standard env vars, and falls back to `gcloud auth print-access-token` for Vertex tokens. (`ApiEndpoint::from_env()` is the L0 building block.)
 
 ## Common Mistakes
 

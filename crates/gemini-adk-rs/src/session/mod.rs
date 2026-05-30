@@ -41,6 +41,9 @@ pub enum SessionError {
     Storage(String),
 }
 
+/// Convenience alias for fallible session-service operations.
+pub type SessionResult<T> = std::result::Result<T, SessionError>;
+
 /// Trait for session persistence — CRUD operations + event append.
 ///
 /// Implementations must be `Send + Sync` for use across async tasks.

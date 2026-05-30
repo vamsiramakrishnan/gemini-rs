@@ -84,7 +84,7 @@ pub mod prelude {
     // it conflicts with the L2 Agent type alias (= AgentBuilder).
     // Use gemini_adk_rs::agent::Agent directly if you need the L1 trait.
     pub use gemini_adk_rs::agent_session::*;
-    pub use gemini_adk_rs::error::{AgentError, ToolError};
+    pub use gemini_adk_rs::error::{AgentError, AgentResult, ToolError};
     pub use gemini_adk_rs::live::{
         CallbackMode, ContextDelivery, DefaultResultFormatter, DeferredWriter, EventCallbacks,
         ExtractionTrigger, FieldPromotion, FsPersistence, LiveEvent, LiveHandle,
@@ -112,5 +112,8 @@ pub mod prelude {
     pub use gemini_adk_rs::run_config::{RunConfig, StreamingMode};
     pub use gemini_adk_rs::text_runner::InMemoryRunner;
     pub use gemini_adk_rs::toolset::{StaticToolset, Toolset};
+    // Core tool types — surfaced at L2 so application code building tools
+    // doesn't have to reach into the L1 crate directly.
+    pub use gemini_adk_rs::tool::{SimpleTool, ToolDispatcher, ToolFunction, TypedTool};
     pub use gemini_genai_rs::prelude::*;
 }
