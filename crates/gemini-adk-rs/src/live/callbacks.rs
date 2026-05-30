@@ -100,6 +100,9 @@ pub struct EventCallbacks {
     pub on_tool_cancelled: Option<Arc<dyn Fn(Vec<String>) -> BoxFuture<()> + Send + Sync>>,
     /// Called when the model completes its turn.
     pub on_turn_complete: Option<Arc<dyn Fn() -> BoxFuture<()> + Send + Sync>>,
+    /// Called when the model finishes generating its full intended response,
+    /// before any interruption truncation (the wire `GenerationComplete`).
+    pub on_generation_complete: Option<Arc<dyn Fn() -> BoxFuture<()> + Send + Sync>>,
     /// Called when server sends GoAway (session ending soon).
     pub on_go_away: Option<Arc<dyn Fn(Duration) -> BoxFuture<()> + Send + Sync>>,
     /// Called when session setup completes (connected).
@@ -125,6 +128,8 @@ pub struct EventCallbacks {
     // -- Callback modes (control-lane only) --
     /// Execution mode for [`on_turn_complete`](Self::on_turn_complete).
     pub on_turn_complete_mode: CallbackMode,
+    /// Execution mode for [`on_generation_complete`](Self::on_generation_complete).
+    pub on_generation_complete_mode: CallbackMode,
     /// Execution mode for [`on_connected`](Self::on_connected).
     pub on_connected_mode: CallbackMode,
     /// Execution mode for [`on_disconnected`](Self::on_disconnected).
@@ -200,6 +205,7 @@ impl Default for EventCallbacks {
             on_tool_call: None,
             on_tool_cancelled: None,
             on_turn_complete: None,
+            on_generation_complete: None,
             on_go_away: None,
             on_connected: None,
             on_disconnected: None,
@@ -209,6 +215,7 @@ impl Default for EventCallbacks {
             on_extracted: None,
             on_extraction_error: None,
             on_turn_complete_mode: CallbackMode::Blocking,
+            on_generation_complete_mode: CallbackMode::Blocking,
             on_connected_mode: CallbackMode::Blocking,
             on_disconnected_mode: CallbackMode::Blocking,
             on_error_mode: CallbackMode::Blocking,
