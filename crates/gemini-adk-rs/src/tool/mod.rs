@@ -52,6 +52,20 @@ pub trait ToolFunction: Send + Sync + 'static {
     fn parameters(&self) -> Option<serde_json::Value>;
     /// Execute the tool with the given arguments and return the result.
     async fn call(&self, args: serde_json::Value) -> Result<serde_json::Value, ToolError>;
+
+    /// Whether this tool must be confirmed before it runs. Defaults to `false`.
+    ///
+    /// Tools built with `T::confirm(..)` (a [`PolicyTool`] with a confirm
+    /// policy) return `true`, prompting the [`ToolDispatcher`] to consult its
+    /// configured `ConfirmationProvider` before executing.
+    fn requires_confirmation(&self) -> bool {
+        false
+    }
+
+    /// Optional hint shown when confirmation is requested.
+    fn confirmation_message(&self) -> Option<&str> {
+        None
+    }
 }
 
 /// A streaming tool — runs in background, yields multiple results.

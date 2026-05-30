@@ -95,6 +95,13 @@ impl Live {
             builder = builder.with_state(state);
         }
 
+        // Attach the confirmation provider so `T::confirm(..)` tools are gated.
+        if let Some(provider) = self.confirmation_provider {
+            dispatcher
+                .get_or_insert_with(gemini_adk_rs::tool::ToolDispatcher::new)
+                .set_confirmation_provider(provider);
+        }
+
         if let Some(dispatcher) = dispatcher {
             builder = builder.dispatcher(dispatcher);
         }

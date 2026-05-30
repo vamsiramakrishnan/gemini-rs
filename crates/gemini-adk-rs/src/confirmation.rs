@@ -1,5 +1,9 @@
 //! Tool confirmation — user confirmation for sensitive tool calls.
 
+use std::future::Future;
+use std::sync::Arc;
+
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 /// Represents a user's confirmation decision for a tool call.
@@ -36,6 +40,92 @@ impl ToolConfirmation {
     pub fn with_payload(mut self, payload: serde_json::Value) -> Self {
         self.payload = Some(payload);
         self
+    }
+}
+
+/// A request for confirmation of a sensitive tool call, handed to a
+/// [`ConfirmationProvider`] before the tool executes.
+#[derive(Debug, Clone)]
+pub struct ConfirmationRequest {
+    /// The tool about to run.
+    pub tool_name: String,
+    /// The arguments the model supplied.
+    pub args: serde_json::Value,
+    /// Optional hint describing what needs confirming (from the tool's policy).
+    pub message: Option<String>,
+}
+
+/// Decides whether a confirmation-gated tool call may proceed.
+///
+/// Wire one into a [`ToolDispatcher`](crate::tool::ToolDispatcher) via
+/// [`with_confirmation_provider`](crate::tool::ToolDispatcher::with_confirmation_provider).
+/// When a tool reports [`ToolFunction::requires_confirmation`](crate::tool::ToolFunction::requires_confirmation)
+/// (e.g. one built with `T::confirm(..)`), the dispatcher consults the provider
+/// before executing and returns an error if it is denied. Enforcement is
+/// opt-in: with no provider configured, confirmation-gated tools run normally.
+#[async_trait]
+pub trait ConfirmationProvider: Send + Sync {
+    /// Resolve a confirmation decision for the given request.
+    async fn confirm(&self, request: ConfirmationRequest) -> ToolConfirmation;
+}
+
+/// Blanket impl so a plain async closure can act as a [`ConfirmationProvider`]:
+///
+/// ```rust,ignore
+/// dispatcher.set_confirmation_provider(std::sync::Arc::new(
+///     |req: ConfirmationRequest| async move {
+///         if req.tool_name == "delete_account" {
+///             ToolConfirmation::denied("blocked by policy")
+///         } else {
+///             ToolConfirmation::confirmed()
+///         }
+///     },
+/// ));
+/// ```
+#[async_trait]
+impl<F, Fut> ConfirmationProvider for F
+where
+    F: Fn(ConfirmationRequest) -> Fut + Send + Sync,
+    Fut: Future<Output = ToolConfirmation> + Send,
+{
+    async fn confirm(&self, request: ConfirmationRequest) -> ToolConfirmation {
+        self(request).await
+    }
+}
+
+/// A [`ConfirmationProvider`] that approves or denies every request uniformly —
+/// handy for tests and "deny-all" / "allow-all" defaults.
+pub struct StaticConfirmation {
+    confirmed: bool,
+    hint: Option<String>,
+}
+
+impl StaticConfirmation {
+    /// Approve every confirmation request.
+    pub fn allow_all() -> Arc<dyn ConfirmationProvider> {
+        Arc::new(Self {
+            confirmed: true,
+            hint: None,
+        })
+    }
+
+    /// Deny every confirmation request with an optional hint.
+    pub fn deny_all(hint: impl Into<String>) -> Arc<dyn ConfirmationProvider> {
+        Arc::new(Self {
+            confirmed: false,
+            hint: Some(hint.into()),
+        })
+    }
+}
+
+#[async_trait]
+impl ConfirmationProvider for StaticConfirmation {
+    async fn confirm(&self, _request: ConfirmationRequest) -> ToolConfirmation {
+        ToolConfirmation {
+            hint: self.hint.clone(),
+            confirmed: self.confirmed,
+            payload: None,
+        }
     }
 }
 

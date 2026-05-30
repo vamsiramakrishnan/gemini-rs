@@ -173,6 +173,14 @@ impl ToolFunction for PolicyTool {
         self.inner.parameters()
     }
 
+    fn requires_confirmation(&self) -> bool {
+        self.policy.confirm
+    }
+
+    fn confirmation_message(&self) -> Option<&str> {
+        self.policy.confirm_message.as_deref()
+    }
+
     async fn call(&self, args: serde_json::Value) -> Result<serde_json::Value, ToolError> {
         // Cache lookup (only for cacheable tools).
         let key = if self.policy.cache {

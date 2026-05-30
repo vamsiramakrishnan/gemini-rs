@@ -98,13 +98,39 @@ Live::builder()
     )
 ```
 
-**Current status**: the confirmation flag is recorded and never silently
-dropped — `PolicyTool::requires_confirmation()` returns `true` and the message
-is accessible via `policy().confirm_message`. Full interactive confirmation
-gating at dispatch (e.g., pausing execution and prompting the user through a
-channel) is not yet wired into the session runtime. If you need confirmation
-enforcement today, check `requires_confirmation()` in your `on_tool_call`
-callback and handle it manually.
+### Enforcing confirmation with a provider
+
+Confirmation is **enforced at dispatch** when you wire a `ConfirmationProvider`.
+Before running any tool that reports `requires_confirmation()`, the
+`ToolDispatcher` consults the provider; a denied decision returns
+`ToolError::Cancelled` instead of executing the tool. Enforcement is **opt-in** —
+with no provider configured, confirmation-gated tools run normally (the flag is
+still surfaced via `requires_confirmation()`).
+
+Wire one onto a dispatcher directly, or via `Live::confirmation_provider`:
+
+```rust,ignore
+use std::sync::Arc;
+
+let handle = Live::builder()
+    .with_tools(T::confirm(send_email_tool, "Send this email?"))
+    // Any async closure `Fn(ConfirmationRequest) -> impl Future<Output = ToolConfirmation>`
+    // works, or implement the `ConfirmationProvider` trait.
+    .confirmation_provider(Arc::new(|req: ConfirmationRequest| async move {
+        if approved_by_operator(&req.tool_name, &req.args).await {
+            ToolConfirmation::confirmed()
+        } else {
+            ToolConfirmation::denied("operator rejected the action")
+        }
+    }))
+    .connect_from_env()
+    .await?;
+```
+
+For tests and simple defaults, `StaticConfirmation::allow_all()` /
+`StaticConfirmation::deny_all("reason")` provide uniform providers. The same
+`ToolDispatcher::with_confirmation_provider` / `set_confirmation_provider` API
+gates tools in text-agent pipelines too.
 
 ---
 

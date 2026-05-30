@@ -102,7 +102,9 @@ pub mod prelude {
         TimeoutTextAgent,
     };
     // New ADK-JS parity types
-    pub use gemini_adk_rs::confirmation::ToolConfirmation;
+    pub use gemini_adk_rs::confirmation::{
+        ConfirmationProvider, ConfirmationRequest, StaticConfirmation, ToolConfirmation,
+    };
     pub use gemini_adk_rs::context::{CallbackContext, ToolContext};
     pub use gemini_adk_rs::credentials::{
         AuthCredential, CredentialService, InMemoryCredentialService,

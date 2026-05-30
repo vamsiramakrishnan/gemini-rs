@@ -127,6 +127,9 @@ pub struct Live {
     pub(crate) telemetry_interval: Option<Duration>,
     // Middleware layers run around tool dispatch in the control lane.
     pub(crate) middleware_layers: Vec<Arc<dyn gemini_adk_rs::middleware::Middleware>>,
+    // Confirmation provider consulted before running `T::confirm(..)` tools.
+    pub(crate) confirmation_provider:
+        Option<Arc<dyn gemini_adk_rs::confirmation::ConfirmationProvider>>,
 }
 
 impl Live {
@@ -196,7 +199,26 @@ impl Live {
             tool_advisory: true,
             telemetry_interval: None,
             middleware_layers: Vec::new(),
+            confirmation_provider: None,
         }
+    }
+
+    /// Gate `T::confirm(..)` tools behind a confirmation provider.
+    ///
+    /// When set, any confirmation-gated tool is checked against `provider`
+    /// before it runs; a denied decision returns an error to the model instead
+    /// of executing the tool. Accepts any [`ConfirmationProvider`] — including a
+    /// plain async closure of `Fn(ConfirmationRequest) -> impl Future<Output = ToolConfirmation>`.
+    ///
+    /// [`ConfirmationProvider`]: gemini_adk_rs::confirmation::ConfirmationProvider
+    /// [`ConfirmationRequest`]: gemini_adk_rs::confirmation::ConfirmationRequest
+    /// [`ToolConfirmation`]: gemini_adk_rs::confirmation::ToolConfirmation
+    pub fn confirmation_provider(
+        mut self,
+        provider: Arc<dyn gemini_adk_rs::confirmation::ConfirmationProvider>,
+    ) -> Self {
+        self.confirmation_provider = Some(provider);
+        self
     }
 
     /// Attach a [`MiddlewareComposite`](crate::compose::middleware::MiddlewareComposite)
