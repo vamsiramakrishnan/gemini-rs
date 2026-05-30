@@ -360,6 +360,32 @@ Here's the flow for a single model turn in a phased conversation:
 
 ## Quick Start
 
+### Zero-Ceremony (Recommended)
+
+`connect_from_env()` resolves platform and credentials automatically — no
+manual token wiring needed:
+
+```rust
+use gemini_adk_fluent_rs::prelude::*;
+
+// Set GEMINI_API_KEY  (Google AI)
+// or GOOGLE_GENAI_USE_VERTEXAI=true + GOOGLE_CLOUD_PROJECT  (Vertex AI)
+let handle = Live::builder()
+    .model(GeminiModel::Gemini2_0FlashLive)
+    .instruction("You are a friendly assistant.")
+    .on_text(|t| print!("{t}"))
+    .connect_from_env()
+    .await?;
+
+handle.send_text("What is the speed of light?").await?;
+```
+
+Resolution order: `GOOGLE_GENAI_USE_VERTEXAI=true` → Vertex AI with
+`GOOGLE_CLOUD_PROJECT` / `GOOGLE_CLOUD_LOCATION` and a token from
+`GOOGLE_ACCESS_TOKEN` (falls back to `gcloud auth print-access-token`).
+Otherwise → Google AI via `GEMINI_API_KEY` (or `GOOGLE_GENAI_API_KEY` /
+`GOOGLE_API_KEY`).
+
 ### Google AI (API Key)
 
 ```rust
@@ -861,6 +887,44 @@ gemini-genai-rs = { version = "0.1", features = ["generate", "embed", "files"] }
 | `tunings` | Fine-tuning jobs |
 | `batches` | Batch prediction |
 | `chats` | Multi-turn chat sessions |
+
+### MCP Tools
+
+Register Model Context Protocol servers (stdio or HTTP) as tools callable by
+the live model. The SDK handles the MCP handshake, tool schema translation, and
+call routing automatically.
+
+```rust
+Live::builder()
+    .mcp_stdio("filesystem", "npx", &["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
+    .mcp_http("kb", "http://localhost:8080/mcp")
+```
+
+### Session Persistence
+
+Survive process restarts by persisting session state to a storage backend.
+Resume a session transparently — the model context, phase, and state are
+restored from the snapshot.
+
+Built-in backends: `FsPersistence` (filesystem), `MemoryPersistence`
+(in-process, useful for tests). Implement the `SessionPersistence` trait for
+custom backends (Redis, SQLite via sqlx, DynamoDB, etc.).
+
+```rust
+Live::builder()
+    .persistence(Arc::new(FsPersistence::new("/var/sessions")))
+    .session_id("user-123-session-456")
+```
+
+### Operator Quick Reference
+
+| Operator | Namespace(s) | Meaning |
+|----------|-------------|---------|
+| `>>` | `S::` (State), text agents | Sequential / pipeline — left runs first, output feeds right |
+| `\|` | `T::` (Tools), `M::` (Middleware), text agents | Parallel fan-out (agents) or compose into a set (tools / middleware) |
+| `/` | text agents | Fallback — try left, use right if left fails |
+| `*` | text agents | Loop — `agent * 3` (fixed count) or `agent * until(pred)` (conditional) |
+| `+` | `C::` (Context), `P::` (Prompt), `A::` (Artifacts) | Additive composition — layers are merged in order |
 
 ---
 

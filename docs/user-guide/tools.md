@@ -155,6 +155,53 @@ Live::builder().google_search().code_execution().url_context()
 Live::builder().with_tools(T::google_search() | T::code_execution() | T::url_context())
 ```
 
+## Per-Tool Policies
+
+Attach execution constraints to individual tools using the `T::` policy
+wrappers. Policies compose with `|` like any other tool entry.
+
+```rust,ignore
+Live::builder()
+    .with_tools(
+        // 10-second timeout on a slow tool
+        T::timeout(
+            T::simple("search_kb", "Search the knowledge base", |args| async move {
+                Ok(search(args).await?)
+            }),
+            Duration::from_secs(10),
+        )
+        // In-session result cache
+        | T::cached(
+            T::simple("get_rate", "Get exchange rate", |args| async move {
+                Ok(fetch_rate(args).await?)
+            })
+        )
+        // Confirmation flag (recorded; see note in tool-policies.md)
+        | T::confirm(
+            T::simple("send_email", "Send email to customer", |args| async move {
+                Ok(send(args).await?)
+            }),
+            "This will send a real email — are you sure?",
+        )
+    )
+```
+
+- **`T::timeout(tool, duration)`** — enforced: `tokio::time::timeout` wraps the
+  call; elapse returns `ToolError::Timeout`.
+- **`T::cached(tool)`** — enforced: memoizes successful results by
+  `(name, canonical-JSON args)`; errors are not cached.
+- **`T::confirm(tool, message)`** — flag recorded and surfaced via
+  `PolicyTool::requires_confirmation()`; full dispatch gating is forthcoming
+  (check the flag manually in `on_tool_call` today if you need it enforced).
+
+For async/background execution (`ToolExecutionMode::Background`,
+`FunctionResponseScheduling`) and MCP tool integration, see the dedicated
+chapters:
+
+- [Per-tool policies](tool-policies.md) — full reference for timeout, cache,
+  confirm, and background scheduling.
+- [MCP Tools](mcp-tools.md) — connecting to Model Context Protocol servers.
+
 ## Agent as Tool
 
 `TextAgentTool` wraps a text-mode agent as a callable tool for voice sessions.

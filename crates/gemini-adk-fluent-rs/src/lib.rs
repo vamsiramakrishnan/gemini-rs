@@ -115,5 +115,9 @@ pub mod prelude {
     // Core tool types — surfaced at L2 so application code building tools
     // doesn't have to reach into the L1 crate directly.
     pub use gemini_adk_rs::tool::{SimpleTool, ToolDispatcher, ToolFunction, TypedTool};
+    // The `#[tool]` attribute macro — turns an `async fn` into a registrable tool.
+    // Re-exported from L1 (which re-exports it from the proc-macro crate), so the
+    // fluent prelude doesn't need a direct dependency on `gemini-adk-macros-rs`.
+    pub use gemini_adk_rs::tool;
     pub use gemini_genai_rs::prelude::*;
 }

@@ -70,6 +70,10 @@ pub use credentials::{
 };
 pub use error::{AgentError, AgentResult, ToolError};
 pub use events::{Event, EventActions, EventType, StructuredEvent};
+/// The `#[tool]` attribute macro — turns an `async fn` into a registrable Gemini tool.
+///
+/// See the [`gemini_adk_macros_rs::tool`] documentation for details.
+pub use gemini_adk_macros_rs::tool;
 pub use instruction::inject_session_state;
 pub use live::{
     CallbackMode, EventCallbacks, LiveHandle, LiveSessionBuilder, LlmExtractor, ToolCallSummary,

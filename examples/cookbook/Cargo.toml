@@ -135,6 +135,10 @@ path = "src/31_connect_from_env.rs"
 name = "32-live-callbacks"
 path = "src/32_live_callbacks.rs"
 
+[[bin]]
+name = "33-tool-macro"
+path = "src/33_tool_macro.rs"
+
 [dependencies]
 gemini-adk-fluent-rs = { workspace = true }
 gemini-adk-rs        = { workspace = true }
