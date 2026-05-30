@@ -35,6 +35,37 @@ use crate::llm::LlmError;
 static MONEY_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\$?\s?(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d{1,2}))?").unwrap());
 static INT_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"-?\d+").unwrap());
+static DATE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\b\d{4}-\d{2}-\d{2}\b").unwrap());
+// 12-hour clock with an am/pm marker: "3pm", "3:30 pm".
+static TIME12_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?i)\b(\d{1,2})(?::(\d{2}))?\s*([ap]m)\b").unwrap());
+// 24-hour clock: "15:00", "09:30".
+static TIME24_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"\b([01]?\d|2[0-3]):([0-5]\d)\b").unwrap());
+
+/// Normalize a clock time found in `text` to a 24-hour `"HH:MM"` string.
+fn parse_time(text: &str) -> Option<String> {
+    if let Some(c) = TIME12_RE.captures(text) {
+        let mut hour: u32 = c.get(1)?.as_str().parse().ok()?;
+        let min: u32 = c.get(2).map(|m| m.as_str()).unwrap_or("00").parse().ok()?;
+        let pm = c.get(3)?.as_str().eq_ignore_ascii_case("pm");
+        if hour > 12 {
+            return None; // "13pm" is not a real time
+        }
+        if pm && hour < 12 {
+            hour += 12;
+        } else if !pm && hour == 12 {
+            hour = 0; // 12am -> 00:00
+        }
+        return Some(format!("{hour:02}:{min:02}"));
+    }
+    let c = TIME24_RE.captures(text)?;
+    Some(format!(
+        "{:02}:{}",
+        c.get(1)?.as_str().parse::<u32>().ok()?,
+        c.get(2)?.as_str()
+    ))
+}
 
 /// A deterministic transcript recognizer: `text -> (value, confidence)`.
 ///
@@ -65,6 +96,12 @@ pub enum Recognizer {
     },
     /// Affirmative/negative detection → boolean.
     YesNo,
+    /// A calendar/clock expression → a JSON object with any of the keys
+    /// `date` (`YYYY-MM-DD`), `time` (24h `HH:MM`), `day` (`today`/`tomorrow`/
+    /// `tonight`/`yesterday`), `weekday`, and `part` (`morning`/`afternoon`/
+    /// `evening`/`noon`/`midnight`). Deterministic, on-device — a small
+    /// Duckling-style normalizer, not a full grammar.
+    DateTime,
 }
 
 impl Recognizer {
@@ -112,6 +149,10 @@ impl Recognizer {
     /// Affirmative/negative.
     pub fn yes_no() -> Self {
         Recognizer::YesNo
+    }
+    /// A calendar/clock expression normalized to a JSON object.
+    pub fn datetime() -> Self {
+        Recognizer::DateTime
     }
 
     /// Recognize a value in `text`, with a confidence in `0.0..=1.0`.
@@ -168,6 +209,44 @@ impl Recognizer {
                     Some((Value::Bool(false), 0.9))
                 } else {
                     None
+                }
+            }
+            Recognizer::DateTime => {
+                const WEEKDAYS: &[&str] = &[
+                    "monday",
+                    "tuesday",
+                    "wednesday",
+                    "thursday",
+                    "friday",
+                    "saturday",
+                    "sunday",
+                ];
+                let mut obj = serde_json::Map::new();
+                if let Some(m) = DATE_RE.find(text) {
+                    obj.insert("date".into(), Value::from(m.as_str().to_string()));
+                }
+                if let Some(t) = parse_time(&lower) {
+                    obj.insert("time".into(), Value::from(t));
+                }
+                if let Some(d) = ["today", "tomorrow", "tonight", "yesterday"]
+                    .into_iter()
+                    .find(|d| lower.contains(d))
+                {
+                    obj.insert("day".into(), Value::from(d));
+                }
+                if let Some(w) = WEEKDAYS.iter().find(|w| lower.contains(*w)) {
+                    obj.insert("weekday".into(), Value::from(*w));
+                }
+                if let Some(p) = ["morning", "afternoon", "evening", "noon", "midnight"]
+                    .into_iter()
+                    .find(|p| lower.contains(p))
+                {
+                    obj.insert("part".into(), Value::from(p));
+                }
+                if obj.is_empty() {
+                    None
+                } else {
+                    Some((Value::Object(obj), 1.0))
                 }
             }
         }
@@ -376,6 +455,37 @@ mod tests {
             json!(false)
         );
         assert!(Recognizer::yes_no().recognize("maybe later").is_none());
+    }
+
+    #[test]
+    fn datetime_normalizes_clock_and_calendar() {
+        let r = Recognizer::datetime();
+        // 12-hour clock with pm.
+        assert_eq!(
+            r.recognize("can we meet at 3pm").unwrap().0,
+            json!({"time": "15:00"})
+        );
+        // Minutes + am, plus a relative day.
+        assert_eq!(
+            r.recognize("tomorrow at 9:30 am works").unwrap().0,
+            json!({"time": "09:30", "day": "tomorrow"})
+        );
+        // 12am normalizes to midnight.
+        assert_eq!(
+            r.recognize("12am sharp").unwrap().0,
+            json!({"time": "00:00"})
+        );
+        // 24-hour clock + weekday + part of day + ISO date.
+        assert_eq!(
+            r.recognize("friday afternoon, 2026-06-05 at 15:00")
+                .unwrap()
+                .0,
+            json!({"date": "2026-06-05", "time": "15:00", "weekday": "friday", "part": "afternoon"})
+        );
+        // A bare integer is not a time.
+        assert!(r.recognize("a table for 4 people").is_none());
+        // "13pm" is not a real clock time.
+        assert!(r.recognize("at 13pm").is_none());
     }
 
     #[test]

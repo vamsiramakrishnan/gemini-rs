@@ -16,7 +16,11 @@
 //! result via [`Guard::resolved`](crate::flow::Guard::resolved), and any
 //! consumer reads the value the same way.
 
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
+
+use serde_json::Value;
 
 use crate::error::AgentError;
 use crate::state::State;
@@ -64,10 +68,99 @@ pub async fn call(
     result
 }
 
+/// The async source of a value, bound from `State`.
+type FetchFn =
+    Arc<dyn Fn(State) -> Pin<Box<dyn Future<Output = Result<Value, String>> + Send>> + Send + Sync>;
+
+enum Source {
+    /// Run a [`TextAgent`] (which reads its inputs from `State`).
+    Agent(Arc<dyn TextAgent>),
+    /// Run an async closure that reads `State` and returns a value — the seam
+    /// for a tool call, an HTTP fetch, or an MCP request.
+    Fetch(FetchFn),
+}
+
+/// A named async value source whose inputs come from `State` and whose result
+/// lands back in `State` under `{name}:result` (or `{name}:error`).
+///
+/// `Resolver` is the async sibling of the deterministic
+/// [`Recognizer`](crate::extract::Recognizer): both are *inputs from State →
+/// value*. A `Resolver`
+/// generalizes [`call`] from "a sub-agent" to **any** async source — a sub-agent
+/// ([`Resolver::agent`]) or a system fetch / tool call / MCP request
+/// ([`Resolver::fetch`]) — under one result convention, so a `Flow` step can
+/// complete on it via [`Guard::resolved`](crate::flow::Guard::resolved)
+/// regardless of where the value came from.
+pub struct Resolver {
+    name: String,
+    source: Source,
+}
+
+impl Resolver {
+    /// Resolve by running a sub-agent. Its `String` output becomes the result.
+    pub fn agent(name: impl Into<String>, agent: Arc<dyn TextAgent>) -> Self {
+        Self {
+            name: name.into(),
+            source: Source::Agent(agent),
+        }
+    }
+
+    /// Resolve by running an async closure over a clone of `State` — the seam
+    /// for an HTTP fetch, a tool call, or an MCP request. The closure returns
+    /// `Ok(value)` on success or `Err(message)` to record an error.
+    pub fn fetch<F, Fut>(name: impl Into<String>, f: F) -> Self
+    where
+        F: Fn(State) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<Value, String>> + Send + 'static,
+    {
+        let f = Arc::new(f);
+        Self {
+            name: name.into(),
+            source: Source::Fetch(Arc::new(move |state| {
+                let f = f.clone();
+                Box::pin(async move { f(state).await })
+            })),
+        }
+    }
+
+    /// The resolver's name (the `{name}:result` prefix it writes).
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Resolve **synchronously** ([`Mode::Call`]): await the source, write its
+    /// value to `{name}:result` (or its error to `{name}:error`), and return it.
+    pub async fn resolve(&self, state: &State) -> Result<Value, String> {
+        let outcome = match &self.source {
+            Source::Agent(a) => a
+                .run(state)
+                .await
+                .map(Value::from)
+                .map_err(|e| e.to_string()),
+            Source::Fetch(f) => f(state.clone()).await,
+        };
+        match &outcome {
+            Ok(v) => state.set(result_key(&self.name), v.clone()),
+            Err(e) => state.set(error_key(&self.name), e),
+        }
+        outcome
+    }
+
+    /// Resolve **detached** ([`Mode::Dispatch`]): spawn the resolution on the
+    /// runtime and return immediately. The conversation does not wait; consumers
+    /// observe completion reactively via `{name}:result`.
+    pub fn dispatch(self, state: State) {
+        tokio::spawn(async move {
+            let _ = self.resolve(&state).await;
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use async_trait::async_trait;
+    use serde_json::json;
 
     struct Echo(&'static str);
     #[async_trait]
@@ -111,5 +204,65 @@ mod tests {
         assert!(r.is_err());
         assert!(state.contains("verify:error"));
         assert!(!state.contains("verify:result"));
+    }
+
+    #[tokio::test]
+    async fn resolver_fetch_binds_state_and_writes_result() {
+        let state = State::new();
+        state.set("slot", "afternoon");
+        let r = Resolver::fetch("availability", |s: State| async move {
+            // Inputs come from State; the value is arbitrary JSON.
+            let slot = s.get::<String>("slot").unwrap_or_default();
+            Ok(json!({ "open": slot == "afternoon" }))
+        });
+        let out = r.resolve(&state).await.unwrap();
+        assert_eq!(out, json!({ "open": true }));
+        assert_eq!(
+            state.get::<Value>("availability:result"),
+            Some(json!({ "open": true }))
+        );
+    }
+
+    #[tokio::test]
+    async fn resolver_agent_uses_result_convention() {
+        let state = State::new();
+        // An agent resolver shares the `{name}:result` convention with `call`.
+        Resolver::agent("verify", Arc::new(Echo("ok-9")))
+            .resolve(&state)
+            .await
+            .unwrap();
+        assert_eq!(
+            state.get::<String>("verify:result").as_deref(),
+            Some("ok-9")
+        );
+    }
+
+    #[tokio::test]
+    async fn resolver_fetch_records_error() {
+        let state = State::new();
+        let r = Resolver::fetch("lookup", |_s: State| async move {
+            Err::<Value, String>("upstream 503".into())
+        });
+        assert!(r.resolve(&state).await.is_err());
+        assert_eq!(
+            state.get::<String>("lookup:error").as_deref(),
+            Some("upstream 503")
+        );
+        assert!(!state.contains("lookup:result"));
+    }
+
+    #[tokio::test]
+    async fn resolver_dispatch_runs_detached() {
+        let state = State::new();
+        Resolver::fetch("ping", |_s: State| async move { Ok(json!("pong")) })
+            .dispatch(state.clone());
+        // The spawned task writes the result; await it becoming visible.
+        for _ in 0..100 {
+            if state.contains("ping:result") {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert_eq!(state.get::<String>("ping:result").as_deref(), Some("pong"));
     }
 }

@@ -5,18 +5,16 @@
 //! availability (sync `call`), and a `Flow` DAG gates the booking commit.
 //!
 //! Key concepts:
-//! - `Extract` recognizers fill `State` (slot, party size)
-//! - `call_agent(..)` runs a sub-agent synchronously; its result lands in
-//!   `availability:result`
+//! - `Recognizer` (incl. `datetime`) fills `State` (party size, slot, time)
+//! - `Resolver::fetch(..)` resolves availability from a "calendar" — any async
+//!   source bound from `State`; its value lands in `availability:result`
 //! - `Flow` `done(captured([..]))` + `done(resolved("availability"))` +
 //!   `commit("book", ..)` gate the irreversible booking
 //!
 //! Runs real logic: Yes — drives the whole loop with no credentials.
 
-use std::sync::Arc;
-
 use gemini_adk_fluent_rs::prelude::*;
-use serde_json::json;
+use serde_json::{json, Value};
 
 fn booking_flow() -> Flow {
     Flow::new()
@@ -54,7 +52,7 @@ async fn main() {
     let state = State::new();
 
     // 1. EXTRACT — deterministic recognizers fill the slots from what was said.
-    let utterance = "I'd like a table for 4 in the afternoon please";
+    let utterance = "I'd like a table for 4 tomorrow afternoon at 3pm please";
     let party = Recognizer::integer_near(["table", "for", "party", "people"]);
     let slot = Recognizer::one_of(["morning", "afternoon", "evening"]);
     if let Some((v, _)) = party.recognize(utterance) {
@@ -63,12 +61,17 @@ async fn main() {
     if let Some((v, _)) = slot.recognize(utterance) {
         state.set("slot", v);
     }
+    // The `datetime` recognizer normalizes the clock/calendar phrase on-device.
+    if let Some((when, _)) = Recognizer::datetime().recognize(utterance) {
+        state.set("when", when);
+    }
     mon.on_turn(&state);
     println!("--- After extraction ---");
     println!(
-        "    party_size = {:?}, slot = {:?}",
+        "    party_size = {:?}, slot = {:?}, when = {:?}",
         state.get::<u32>("party_size"),
-        state.get::<String>("slot")
+        state.get::<String>("slot"),
+        state.get::<Value>("when"),
     );
     println!(
         "    collect: {:?}   check: {:?}",
@@ -76,19 +79,17 @@ async fn main() {
         mon.verdict("check", &state)
     );
 
-    // 2. ORCHESTRATION — call an availability sub-agent synchronously (`call`).
-    //    A real one would hit a calendar; here it reads the recognized slot.
-    let availability = Arc::new(FnTextAgent::new("availability", |s: &State| {
+    // 2. ORCHESTRATION — resolve availability from a "calendar" with a
+    //    `Resolver::fetch`: an async source whose inputs come from `State` and
+    //    whose value lands in `availability:result` (the same convention as a
+    //    sub-agent `call`, a tool call, or an MCP request).
+    let verdict = Resolver::fetch("availability", |s: State| async move {
         let slot = s.get::<String>("slot").unwrap_or_default();
-        Ok(if slot == "afternoon" {
-            "open".into()
-        } else {
-            "full".into()
-        })
-    }));
-    let verdict = call_agent("availability", availability, &state)
-        .await
-        .unwrap();
+        Ok(json!({ "status": if slot == "afternoon" { "open" } else { "full" } }))
+    })
+    .resolve(&state)
+    .await
+    .unwrap();
     println!("\n--- After orchestrated availability check ---");
     println!("    availability:result = {verdict:?}");
     mon.on_turn(&state);
