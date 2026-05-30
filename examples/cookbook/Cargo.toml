@@ -159,6 +159,14 @@ path = "src/37_governed_flow.rs"
 name = "38-extraction"
 path = "src/38_extraction.rs"
 
+[[bin]]
+name = "39-booking"
+path = "src/39_booking.rs"
+
+[[bin]]
+name = "40-screening"
+path = "src/40_screening.rs"
+
 [dependencies]
 gemini-adk-fluent-rs = { workspace = true }
 gemini-adk-rs        = { workspace = true }

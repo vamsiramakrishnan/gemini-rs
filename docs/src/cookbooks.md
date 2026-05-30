@@ -26,7 +26,7 @@ the Flow / Extraction-kit / Orchestration RFCs in `docs/plans/`). **Start here.*
 | **Live callbacks** | `32_live_callbacks` | the full fast-lane vs control-lane catalog |
 | **Session persistence** | `35_session_persistence` | snapshot/resume + the session store |
 | **MCP tools** | `36_mcp_tools` | stdio/SSE MCP integration |
-| **Capstones** *(combine all three lenses)* | `39_booking`, `40_screening` *(coming)* | Flow × Extract × Orchestration on real use cases |
+| **Capstones** *(combine all three lenses)* | `39_booking`, `40_screening` | Flow × Extract × Orchestration on real use cases |
 
 ```bash
 cargo run -p example-cookbook --bin 37-governed-flow

@@ -71,6 +71,11 @@ without blocking anything.
   `never…until` forbids, or that a `once` has spent, is denied at the
   `before_tool` boundary and an error is returned to the model. (This shares the
   seam used by middleware vetoes and the [`ConfirmationProvider`](./tool-policies.md).)
+  - Note: a step's `allow`/`deny` only applies *while that step is active*. For a
+    **cross-cutting** gate that must hold regardless of which step is active
+    (e.g. "never transfer a spam caller", and recall that a `terminal()` step
+    latches done immediately and is therefore never active), use a global
+    `never(tool).until(guard)` constraint instead of a step `deny`.
 - **Speech is shaped softly, proactively.** The active step's `posture` is
   injected as turn-boundary steering *before* the model speaks — you never block
   speech mid-stream in a voice session.

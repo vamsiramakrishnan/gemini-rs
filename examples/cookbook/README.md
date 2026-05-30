@@ -21,7 +21,7 @@ synthesis).
 | **Live callbacks** | `32-live-callbacks` | fast-lane vs control-lane catalog |
 | **Persistence** | `35-session-persistence` | snapshot/resume + session store |
 | **MCP tools** | `36-mcp-tools` | stdio/SSE MCP integration |
-| **Capstones** *(combine all three)* | `39-booking`, `40-screening` *(coming)* | Flow × Extract × Orchestration |
+| **Capstones** *(combine all three)* | `39-booking`, `40-screening` | Flow × Extract × Orchestration |
 
 ```bash
 cargo run -p example-cookbook --bin 37-governed-flow
