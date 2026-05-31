@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-05-31
+
+### Added
+
+- **Governed Agents** — three lenses over a shared State+result core (`{name}:result` + `state_meta:` provenance), composing multiplicatively:
+  - **Flow** — governed conversation/tool DAG (`Flow`/`Step`/`Guard`, closed serializable predicate atoms). `FlowMonitor` keeps a token-replay `Marking`, gates tool calls (`once`/`never…until`/allow-deny), projects active-step postures as steering, surfaces unmet `require`s as repair, and exposes `verdict`/`violations`/`to_mermaid()`. Wired into `Live` via `.govern()` / `.observe()`.
+  - **`Effect::ground(template)`** — serializable, `State`-interpolated fact line (`{key}`, `{key?yes:no}`) projected while a step is active (anti-hallucination), via `render_ground`.
+  - **Flow `on_enter(run(agent, mode))`** — a step runs an agent on activation (fire-once); result → `{step}:result`, completing a downstream step via `Guard::resolved`.
+  - **Extract** — deterministic recognizers (`integer`/`integer_near`/`money`/`regex`/`one_of`/`fuzzy`/`yes_no`/`datetime`) fill `State` on the CPU; **`#[derive(Extract)]`** builds a record from struct fields.
+  - **Async resolver field sources** — `Extract::field_resolve(name, args, ttl, fetch)` binds args from `State`, caches by `(field, args)` for a TTL, runs concurrently with recognizers; `TurnExtractor::extract_with_state` threads `State` through the pipeline.
+  - **`Extract::on_complete(agent, mode)`** — dispatch a downstream agent when a record lands fields.
+  - **Orchestration** — `Mode` (`Call`/`Dispatch`/`Background`) + **`Resolver`** (`agent`/`fetch`/`llm`): a named async value source whose inputs come from `State`; `resolve`/`dispatch`. **Provenance** recorded under `state_meta:{name}:result` and readable via `provenance(state, key)`.
+- **Cookbook** re-centered on the higher-order capabilities; capstones `39_booking` and `40_screening` combine all three lenses (run with no credentials).
+- **mdbook** — new *Agent Orchestration* chapter; updated *Extraction* and *Governed Flows* chapters; RFCs in `docs/plans/`.
+
 ## [0.6.0] - 2026-03-19
 
 ### Bug Fixes

@@ -85,6 +85,11 @@ pub mod prelude {
     // Use gemini_adk_rs::agent::Agent directly if you need the L1 trait.
     pub use gemini_adk_rs::agent_session::*;
     pub use gemini_adk_rs::error::{AgentError, AgentResult, ToolError};
+    pub use gemini_adk_rs::extract::{Recognizer, RecordExtractor};
+    pub use gemini_adk_rs::flow::{
+        render_ground, run as run_on_enter, Flow, FlowMonitor, Guard, Mode as FlowMode, StepAction,
+        Verdict, Violation,
+    };
     pub use gemini_adk_rs::live::{
         CallbackMode, ContextDelivery, DefaultResultFormatter, DeferredWriter, EventCallbacks,
         ExtractionTrigger, FieldPromotion, FsPersistence, LiveEvent, LiveHandle,
@@ -94,6 +99,9 @@ pub mod prelude {
         TranscriptTurn, TurnExtractor,
     };
     pub use gemini_adk_rs::llm::{BaseLlm, GeminiLlm, GeminiLlmParams, LlmRequest, LlmResponse};
+    pub use gemini_adk_rs::orchestration::{
+        self, call as call_agent, provenance, Mode as AgentMode, Resolver,
+    };
     pub use gemini_adk_rs::state::{State, StateKey};
     pub use gemini_adk_rs::text::{
         DispatchTextAgent, FallbackTextAgent, FnTextAgent, JoinTextAgent, LlmTextAgent,
@@ -121,5 +129,9 @@ pub mod prelude {
     // Re-exported from L1 (which re-exports it from the proc-macro crate), so the
     // fluent prelude doesn't need a direct dependency on `gemini-adk-macros-rs`.
     pub use gemini_adk_rs::tool;
+    // Brings in *both* the `Extract` struct (type namespace) and the
+    // `#[derive(Extract)]` macro (macro namespace) under one name, so the
+    // builder (`Extract::record(..)`) and the derive are both usable.
+    pub use gemini_adk_rs::Extract;
     pub use gemini_genai_rs::prelude::*;
 }

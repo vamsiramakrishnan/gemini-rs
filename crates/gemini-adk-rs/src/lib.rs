@@ -20,6 +20,8 @@ pub mod credentials;
 pub mod error;
 pub mod evaluation;
 pub mod events;
+pub mod extract;
+pub mod flow;
 pub mod instruction;
 pub mod live;
 pub mod llm;
@@ -27,6 +29,7 @@ pub mod llm_agent;
 pub mod memory;
 pub mod middleware;
 pub mod optimization;
+pub mod orchestration;
 pub mod planners;
 pub mod plugin;
 pub mod processors;
@@ -72,10 +75,22 @@ pub use credentials::{
 };
 pub use error::{AgentError, AgentResult, ToolError};
 pub use events::{Event, EventActions, EventType, StructuredEvent};
+pub use extract::{Extract, Recognizer, RecordExtractor};
+pub use flow::{
+    render_ground, run as run_on_enter, Flow, FlowMonitor, Guard, Mode as FlowMode, StepAction,
+    Verdict, Violation,
+};
 /// The `#[tool]` attribute macro — turns an `async fn` into a registrable Gemini tool.
 ///
 /// See the [`gemini_adk_macros_rs::tool`] documentation for details.
 pub use gemini_adk_macros_rs::tool;
+/// The `#[derive(Extract)]` macro — builds an [`extract::Extract`] record from a
+/// struct's `#[recognize(..)]` fields. Shares the name `Extract` with the
+/// struct (macro vs type namespace), so both can be imported together.
+///
+/// See the [`gemini_adk_macros_rs::Extract`](macro@gemini_adk_macros_rs::Extract)
+/// documentation for details.
+pub use gemini_adk_macros_rs::Extract;
 pub use instruction::inject_session_state;
 pub use live::{
     CallbackMode, EventCallbacks, LiveHandle, LiveSessionBuilder, LlmExtractor, ToolCallSummary,
@@ -85,6 +100,7 @@ pub use llm::{BaseLlm, GeminiLlm, GeminiLlmParams, LlmRegistry, LlmRequest, LlmR
 pub use llm_agent::{LlmAgent, LlmAgentBuilder};
 pub use memory::{InMemoryMemoryService, MemoryEntry, MemoryService};
 pub use middleware::{Middleware, MiddlewareChain};
+pub use orchestration::{call as call_agent, provenance, Mode as AgentMode, Resolver};
 pub use plugin::{Plugin, PluginManager, PluginResult};
 pub use processors::{
     ContentFilter, InstructionInserter, RequestProcessor, RequestProcessorChain, ResponseProcessor,

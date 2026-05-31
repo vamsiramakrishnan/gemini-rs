@@ -24,7 +24,10 @@
 
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
-use syn::{parse_macro_input, FnArg, ItemFn, LitStr, Pat, PatType, ReturnType, Type, TypePath};
+use syn::{
+    parse_macro_input, Data, DeriveInput, Expr, ExprLit, Fields, FnArg, ItemFn, Lit, LitInt,
+    LitStr, Meta, Pat, PatType, ReturnType, Type, TypePath,
+};
 
 /// Turn an `async fn` into a registrable Gemini tool.
 ///
@@ -240,6 +243,266 @@ fn expand(description: LitStr, func: ItemFn) -> syn::Result<proc_macro2::TokenSt
     };
 
     Ok(expanded)
+}
+
+/// Derive an `Extract` record builder from a struct's fields.
+///
+/// Each field carries a `#[recognize(..)]` attribute naming a deterministic
+/// recognizer; the macro generates an inherent `fn extract() -> Extract` that
+/// builds the record. The field name becomes the record field name and (by
+/// default) its `State` key.
+///
+/// ```ignore
+/// use gemini_adk_rs::extract::Extract;   // the type — same name, type namespace
+/// use gemini_adk_rs::Extract;            // the derive — macro namespace
+///
+/// #[derive(Extract)]
+/// #[extract(name = "order", window = 3)]
+/// struct Order {
+///     #[recognize(integer_near = ["want", "get"])]
+///     quantity: Option<i64>,
+///     #[recognize(one_of = ["pizza", "salad", "soda"])]
+///     item: Option<String>,
+///     #[recognize(datetime)]
+///     #[extract(state = "when")]
+///     pickup: Option<serde_json::Value>,
+///     #[recognize(yes_no)]
+///     confirmed: Option<bool>,
+/// }
+///
+/// let record: Extract = Order::extract();
+/// ```
+///
+/// # Recognizer forms
+///
+/// | Attribute | Recognizer |
+/// |---|---|
+/// | `#[recognize(integer)]` | `Recognizer::integer()` |
+/// | `#[recognize(integer_near = ["a", "b"])]` | `Recognizer::integer_near([..])` |
+/// | `#[recognize(money)]` | `Recognizer::money()` |
+/// | `#[recognize(regex = "pat")]` | `Recognizer::regex("pat")` |
+/// | `#[recognize(one_of = ["a", "b"])]` | `Recognizer::one_of([..])` |
+/// | `#[recognize(fuzzy = ["a", "b"])]` | `Recognizer::fuzzy([..])` |
+/// | `#[recognize(yes_no)]` | `Recognizer::yes_no()` |
+/// | `#[recognize(datetime)]` | `Recognizer::datetime()` |
+///
+/// # Options
+///
+/// - Container `#[extract(name = "...")]` — record name (default: the struct
+///   name in `snake_case`).
+/// - Container `#[extract(window = N)]` — transcript window (default `3`).
+/// - Field `#[extract(state = "key")]` — promote to a custom `State` key.
+///
+/// Fields without a `#[recognize(..)]` attribute are ignored.
+#[proc_macro_derive(Extract, attributes(recognize, extract))]
+pub fn derive_extract(item: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(item as DeriveInput);
+    match expand_extract(input) {
+        Ok(ts) => ts.into(),
+        Err(e) => e.to_compile_error().into(),
+    }
+}
+
+fn expand_extract(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
+    let ident = &input.ident;
+
+    let fields = match &input.data {
+        Data::Struct(s) => match &s.fields {
+            Fields::Named(named) => &named.named,
+            _ => {
+                return Err(syn::Error::new_spanned(
+                    ident,
+                    "#[derive(Extract)] requires a struct with named fields",
+                ));
+            }
+        },
+        _ => {
+            return Err(syn::Error::new_spanned(
+                ident,
+                "#[derive(Extract)] can only be applied to structs",
+            ));
+        }
+    };
+
+    // Container options: name + window.
+    let mut name = to_snake_case(&ident.to_string());
+    let mut window: usize = 3;
+    for attr in &input.attrs {
+        if attr.path().is_ident("extract") {
+            attr.parse_nested_meta(|meta| {
+                if meta.path.is_ident("name") {
+                    let v: LitStr = meta.value()?.parse()?;
+                    name = v.value();
+                } else if meta.path.is_ident("window") {
+                    let v: LitInt = meta.value()?.parse()?;
+                    window = v.base10_parse()?;
+                } else {
+                    return Err(
+                        meta.error("unknown `extract` option (expected `name` or `window`)")
+                    );
+                }
+                Ok(())
+            })?;
+        }
+    }
+
+    // Every named field, referenced by a hidden marker method so that deriving
+    // `Extract` on an otherwise-unread struct does not trip `dead_code`.
+    let all_field_idents: Vec<_> = fields.iter().filter_map(|f| f.ident.clone()).collect();
+
+    // One `.field(..)` / `.field_to(..)` call per recognized field.
+    let mut field_calls = Vec::new();
+    for field in fields {
+        let Some(recognize) = field.attrs.iter().find(|a| a.path().is_ident("recognize")) else {
+            continue;
+        };
+        let fname = field.ident.as_ref().expect("named field").to_string();
+        let recognizer = recognizer_expr(recognize)?;
+
+        // Optional per-field state-key override.
+        let mut state_key: Option<String> = None;
+        for attr in &field.attrs {
+            if attr.path().is_ident("extract") {
+                attr.parse_nested_meta(|meta| {
+                    if meta.path.is_ident("state") {
+                        let v: LitStr = meta.value()?.parse()?;
+                        state_key = Some(v.value());
+                    } else {
+                        return Err(meta.error("unknown field `extract` option (expected `state`)"));
+                    }
+                    Ok(())
+                })?;
+            }
+        }
+
+        field_calls.push(match state_key {
+            Some(sk) => quote! { .field_to(#fname, #sk, #recognizer) },
+            None => quote! { .field(#fname, #recognizer) },
+        });
+    }
+
+    let doc = format!("The `Extract` record derived from `{ident}`'s `#[recognize(..)]` fields.");
+    Ok(quote! {
+        impl #ident {
+            #[doc = #doc]
+            pub fn extract() -> ::gemini_adk_rs::extract::Extract {
+                ::gemini_adk_rs::extract::Extract::record(#name)
+                    #(#field_calls)*
+                    .window(#window)
+                    .build()
+            }
+
+            #[allow(dead_code)]
+            #[doc(hidden)]
+            fn __extract_mark_fields_used(&self) {
+                #( let _ = &self.#all_field_idents; )*
+            }
+        }
+    })
+}
+
+/// Build the `Recognizer::..` expression for a single `#[recognize(..)]` attr.
+fn recognizer_expr(attr: &syn::Attribute) -> syn::Result<proc_macro2::TokenStream> {
+    let r = quote! { ::gemini_adk_rs::extract::Recognizer };
+    let meta: Meta = attr.parse_args()?;
+    match meta {
+        Meta::Path(p) => {
+            let id = p
+                .get_ident()
+                .ok_or_else(|| syn::Error::new_spanned(&p, "expected a recognizer name"))?;
+            match id.to_string().as_str() {
+                "integer" => Ok(quote! { #r::integer() }),
+                "money" => Ok(quote! { #r::money() }),
+                "yes_no" => Ok(quote! { #r::yes_no() }),
+                "datetime" => Ok(quote! { #r::datetime() }),
+                other => Err(syn::Error::new_spanned(
+                    &p,
+                    format!("unknown recognizer `{other}`"),
+                )),
+            }
+        }
+        Meta::NameValue(nv) => {
+            let id = nv
+                .path
+                .get_ident()
+                .ok_or_else(|| syn::Error::new_spanned(&nv.path, "expected a recognizer name"))?;
+            match id.to_string().as_str() {
+                "integer_near" => {
+                    let a = str_array(&nv.value)?;
+                    Ok(quote! { #r::integer_near([ #(#a),* ]) })
+                }
+                "one_of" => {
+                    let a = str_array(&nv.value)?;
+                    Ok(quote! { #r::one_of([ #(#a),* ]) })
+                }
+                "fuzzy" => {
+                    let a = str_array(&nv.value)?;
+                    Ok(quote! { #r::fuzzy([ #(#a),* ]) })
+                }
+                "regex" => {
+                    let s = str_lit(&nv.value)?;
+                    Ok(quote! { #r::regex(#s) })
+                }
+                other => Err(syn::Error::new_spanned(
+                    &nv.path,
+                    format!("`{other}` does not take a value"),
+                )),
+            }
+        }
+        Meta::List(l) => Err(syn::Error::new_spanned(
+            l,
+            "unexpected nested list in `#[recognize(..)]`",
+        )),
+    }
+}
+
+/// Parse an expression that must be an array of string literals.
+fn str_array(expr: &Expr) -> syn::Result<Vec<LitStr>> {
+    match expr {
+        Expr::Array(arr) => arr
+            .elems
+            .iter()
+            .map(|e| match e {
+                Expr::Lit(ExprLit {
+                    lit: Lit::Str(s), ..
+                }) => Ok(s.clone()),
+                other => Err(syn::Error::new_spanned(
+                    other,
+                    "expected a string literal in the array",
+                )),
+            })
+            .collect(),
+        other => Err(syn::Error::new_spanned(
+            other,
+            "expected an array of string literals, e.g. [\"a\", \"b\"]",
+        )),
+    }
+}
+
+/// Parse an expression that must be a single string literal.
+fn str_lit(expr: &Expr) -> syn::Result<LitStr> {
+    match expr {
+        Expr::Lit(ExprLit {
+            lit: Lit::Str(s), ..
+        }) => Ok(s.clone()),
+        other => Err(syn::Error::new_spanned(other, "expected a string literal")),
+    }
+}
+
+/// Convert a `PascalCase`/`camelCase` identifier to `snake_case`.
+fn to_snake_case(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 4);
+    for (i, ch) in s.chars().enumerate() {
+        if ch.is_uppercase() {
+            if i != 0 {
+                out.push('_');
+            }
+            out.extend(ch.to_lowercase());
+        } else {
+            out.push(ch);
+        }
+    }
+    out
 }
 
 /// Returns `true` if `ty` is syntactically an `Option<...>`.

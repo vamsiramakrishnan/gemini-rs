@@ -35,6 +35,7 @@ pub(in crate::live) async fn handle_tool_calls(
     background_tracker: &Option<Arc<BackgroundToolTracker>>,
     extractors: &[Arc<dyn TurnExtractor>],
     middleware: &Arc<crate::middleware::MiddlewareChain>,
+    flow: &mut Option<crate::flow::FlowMonitor>,
     event_tx: &tokio::sync::broadcast::Sender<LiveEvent>,
 ) {
     // 0. Phase-scoped tool filtering: reject calls not in phase's allowed list
@@ -97,6 +98,21 @@ pub(in crate::live) async fn handle_tool_calls(
 
             if let Some(ref disp) = dispatcher {
                 for call in &allowed_calls {
+                    // Flow governance gate: deny inadmissible tools (out-of-order,
+                    // once-violated, gated) in Enforce mode; record in Observe.
+                    if let Some(mon) = flow.as_mut() {
+                        if let Err(reason) = mon.admits_tool(&call.name, state) {
+                            if mon.mode() == crate::flow::Mode::Enforce {
+                                results.push(FunctionResponse {
+                                    name: call.name.clone(),
+                                    response: serde_json::json!({ "error": reason }),
+                                    id: call.id.clone(),
+                                    scheduling: None,
+                                });
+                                continue;
+                            }
+                        }
+                    }
                     let mode = execution_modes.get(&call.name);
                     match mode {
                         Some(crate::live::background_tool::ToolExecutionMode::Background {
@@ -116,6 +132,14 @@ pub(in crate::live) async fn handle_tool_calls(
                                 scheduling: *scheduling,
                             });
                             bg_spawns.push((call.clone(), formatter.clone()));
+                            // NOTE: a background tool is NOT recorded as flow-ok here.
+                            // Its real outcome (success, `before_tool` veto, failure, or
+                            // cancellation) is only known when the spawned task finishes,
+                            // and that task cannot reach the synchronous `FlowMonitor`.
+                            // Marking it ok now would wrongly latch `done(called_ok(..))`
+                            // and spend `once(..)` for work that may never succeed. Gate
+                            // background-tool steps on their delivered result instead
+                            // (e.g. `done(Guard::resolved(..))` / `captured([..])`).
                         }
                         _ => {
                             // Standard: execute inline, wrapped in middleware hooks.
@@ -132,6 +156,9 @@ pub(in crate::live) async fn handle_tool_calls(
                             match disp.call_function(&call.name, call.args.clone()).await {
                                 Ok(result) => {
                                     let _ = middleware.run_after_tool(call, &result).await;
+                                    if let Some(mon) = flow.as_mut() {
+                                        mon.observe_tool(&call.name, true, state);
+                                    }
                                     results.push(FunctionResponse {
                                         name: call.name.clone(),
                                         response: result,
@@ -141,6 +168,9 @@ pub(in crate::live) async fn handle_tool_calls(
                                 }
                                 Err(e) => {
                                     let _ = middleware.run_on_tool_error(call, &e).await;
+                                    if let Some(mon) = flow.as_mut() {
+                                        mon.observe_tool(&call.name, false, state);
+                                    }
                                     results.push(FunctionResponse {
                                         name: call.name.clone(),
                                         response: serde_json::json!({"error": e.to_string()}),
@@ -399,6 +429,7 @@ mod tests {
             &None,
             &[],
             &middleware,
+            &mut None,
             &tx,
         )
         .await;
