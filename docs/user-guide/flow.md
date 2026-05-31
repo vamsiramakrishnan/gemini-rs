@@ -65,6 +65,31 @@ let handle = Live::builder()
 Use `.observe(flow)` instead of `.govern(flow)` to record deviations for audit
 without blocking anything.
 
+### Driving orchestration on step entry
+
+A step can run an agent the moment it becomes active — the flow *drives*
+orchestration in-session:
+
+```rust,ignore
+let handle = Live::builder()
+    .tools(dispatcher)
+    .govern(booking_flow)
+    // when `check` activates, run the availability agent; its result lands in
+    // `check:result`, which the step completes on via `done(resolved("check"))`.
+    .on_enter("check", availability_agent, AgentMode::Call)
+    .connect_from_env()
+    .await?;
+```
+
+`AgentMode::Call` resolves inline at the turn boundary; `Dispatch`/`Background`
+run detached so a slow agent never blocks speech. The result is written to
+`{step}:result`, so a downstream step reads it with `Guard::resolved(step)` —
+the same convention as a `Resolver` (`call`/`dispatch`/`background`) or a
+deterministic [`Extract`](./extraction.md) field. That shared
+`State`-result convention is what makes the three lenses compose
+multiplicatively: extraction fills slots, a step's `on_enter` orchestrates a
+sub-agent or fetch, and guards gate on either — all reading the same `State`.
+
 ## Enforcement semantics
 
 - **Tools are gated hard.** A call that no active step allows, that a

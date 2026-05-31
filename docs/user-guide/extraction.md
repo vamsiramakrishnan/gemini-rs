@@ -24,6 +24,70 @@ Turn completes
   -> Conversation continues (no blocking)
 ```
 
+## Deterministic extraction (no model)
+
+Not every field needs an LLM. Slots like quantities, money, yes/no, a name
+matched against a roster, or a date/time are recognizable on the CPU — no model,
+no network, no accelerator. The `Extract` kit declares a record of typed fields,
+each filled by a `Recognizer`, and compiles to a `TurnExtractor` that promotes
+recognized fields straight into `State`.
+
+```rust,ignore
+use gemini_adk_rs::Extract;   // the #[derive(Extract)] macro
+
+#[derive(Extract)]
+#[extract(name = "order", window = 3)]
+struct Order {
+    #[recognize(integer_near = ["want", "get"])]
+    quantity: Option<i64>,
+    #[recognize(one_of = ["pizza", "salad", "soda"])]
+    item: Option<String>,
+    #[recognize(fuzzy = ["Johnson", "Jackson"])]   // ASR-robust name match
+    name: Option<String>,
+    #[recognize(datetime)]                          // → { "time": "18:00", "day": "tomorrow" }
+    #[extract(state = "when")]
+    pickup: Option<serde_json::Value>,
+    #[recognize(yes_no)]
+    confirmed: Option<bool>,
+}
+
+Live::builder()
+    .extract_record(Order::extract())   // deterministic, runs on the control lane
+    .govern(order_flow)                 // Flow reads done(captured(["quantity", "item"]))
+    .connect_from_env().await?;
+```
+
+Recognizer forms: `integer`/`integer_near`, `money`, `regex`, `one_of`,
+`fuzzy` (Jaro-Winkler, ASR-robust), `yes_no`, and `datetime` (a small on-device
+clock/calendar normalizer: 12h/24h time → `HH:MM`, relative days, weekdays,
+parts of day, ISO dates). You can also build a record fluently with
+`Extract::record(name).field(..)` instead of the derive.
+
+### Async sources — `Resolver`
+
+The async sibling of `Recognizer` is `Resolver`: a named value source whose
+inputs come from `State` and whose result lands under `{name}:result` (or
+`{name}:error`). It generalizes a sub-agent call to **any** async source — a
+tool call, an HTTP fetch, or an MCP request:
+
+```rust,ignore
+use gemini_adk_rs::Resolver;
+
+// From a sub-agent (its String output becomes the result):
+Resolver::agent("availability", availability_agent).resolve(&state).await?;
+
+// From any async system, with inputs bound from State:
+Resolver::fetch("availability", |s: State| async move {
+    let slot = s.get::<String>("slot").unwrap_or_default();
+    Ok(serde_json::json!({ "open": slot == "afternoon" }))
+}).resolve(&state).await?;   // or .dispatch(state) to run detached
+```
+
+Both deterministic `Recognizer` fields and async `Resolver` results live in
+`State` under the same conventions, so a [`Flow`](./flow.md) step completes on
+either — `done(captured(["quantity"]))` or `done(resolved("availability"))` —
+and a flow step's `on_enter` can launch a resolver automatically.
+
 ## TurnExtractor
 
 The base trait for all extractors. Implement it for synchronous extraction
