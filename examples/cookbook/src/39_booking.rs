@@ -1,17 +1,20 @@
 //! # 39 — Booking capstone: Flow × Extract × Orchestration  (Tier: Run)
 //!
 //! What it teaches: combine all three higher-order lenses in one appointment
-//! flow — deterministic extraction fills slots, an orchestrated sub-agent checks
-//! availability (sync `call`), and a `Flow` DAG gates the booking commit.
+//! flow — deterministic extraction fills slots, the `check` step's `on_enter`
+//! action orchestrates an availability sub-agent automatically, and a `Flow`
+//! DAG gates the booking commit.
 //!
 //! Key concepts:
 //! - `Recognizer` (incl. `datetime`) fills `State` (party size, slot, time)
-//! - `Resolver::fetch(..)` resolves availability from a "calendar" — any async
-//!   source bound from `State`; its value lands in `availability:result`
-//! - `Flow` `done(captured([..]))` + `done(resolved("availability"))` +
+//! - `Flow` `on_enter("check", run(agent, mode))` — the step drives
+//!   orchestration in-session; the result lands in `check:result`
+//! - `Flow` `done(captured([..]))` + `done(resolved("check"))` +
 //!   `commit("book", ..)` gate the irreversible booking
 //!
 //! Runs real logic: Yes — drives the whole loop with no credentials.
+
+use std::sync::Arc;
 
 use gemini_adk_fluent_rs::prelude::*;
 use serde_json::{json, Value};
@@ -24,7 +27,7 @@ fn booking_flow() -> Flow {
         .step("check")
         .after("collect")
         .posture("Check availability for the requested time.")
-        .done(Guard::resolved("availability")) // ← an orchestrated sub-agent's result
+        .done(Guard::resolved("check")) // ← completes on its own on_enter result
         .step("book")
         .after("check")
         .allow(["book"])
@@ -34,11 +37,20 @@ fn booking_flow() -> Flow {
         .terminal()
         // The booking commit is once-only and gated until availability is known.
         .never("book")
-        .until(Guard::resolved("availability"))
+        .until(Guard::resolved("check"))
         .once("book")
         .require(["close"])
         .build()
         .expect("valid flow")
+}
+
+/// The availability sub-agent the `check` step runs on entry. A real one would
+/// hit a calendar; here it reads the recognized slot from `State`.
+fn availability_agent() -> Arc<dyn TextAgent> {
+    Arc::new(FnTextAgent::new("availability", |s: &State| {
+        let slot = s.get::<String>("slot").unwrap_or_default();
+        Ok(if slot == "afternoon" { "open" } else { "full" }.to_string())
+    }))
 }
 
 #[tokio::main]
@@ -48,7 +60,11 @@ async fn main() {
     let flow = booking_flow();
     println!("--- The flow ---\n{}", flow.to_mermaid());
 
-    let mut mon = FlowMonitor::new(flow, FlowMode::Enforce);
+    // The `check` step orchestrates the availability agent the moment it
+    // activates — no manual call, just `on_enter`. In a Live session this is
+    // `Live::builder().govern(flow).on_enter("check", agent, AgentMode::Call)`.
+    let mut mon = FlowMonitor::new(flow, FlowMode::Enforce)
+        .on_enter("check", run_on_enter(availability_agent(), AgentMode::Call));
     let state = State::new();
 
     // 1. EXTRACT — deterministic recognizers fill the slots from what was said.
@@ -79,19 +95,15 @@ async fn main() {
         mon.verdict("check", &state)
     );
 
-    // 2. ORCHESTRATION — resolve availability from a "calendar" with a
-    //    `Resolver::fetch`: an async source whose inputs come from `State` and
-    //    whose value lands in `availability:result` (the same convention as a
-    //    sub-agent `call`, a tool call, or an MCP request).
-    let verdict = Resolver::fetch("availability", |s: State| async move {
-        let slot = s.get::<String>("slot").unwrap_or_default();
-        Ok(json!({ "status": if slot == "afternoon" { "open" } else { "full" } }))
-    })
-    .resolve(&state)
-    .await
-    .unwrap();
-    println!("\n--- After orchestrated availability check ---");
-    println!("    availability:result = {verdict:?}");
+    // 2. ORCHESTRATION — `check` is now active, so its `on_enter` action runs
+    //    the availability agent at the turn boundary (exactly what the Live
+    //    control plane does for you). The result lands in `check:result`.
+    mon.fire_enter_actions(&state).await;
+    println!("\n--- After the check step's on_enter orchestration ---");
+    println!(
+        "    check:result = {:?}",
+        state.get::<String>("check:result")
+    );
     mon.on_turn(&state);
     println!("    check: {:?}", mon.verdict("check", &state));
 
