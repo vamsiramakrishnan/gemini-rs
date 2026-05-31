@@ -90,6 +90,62 @@ impl Pred {
     }
 }
 
+/// Render a grounding template against `state`.
+///
+/// - `{key}` interpolates the value at `key` (strings bare, other JSON compact);
+///   an absent key renders empty.
+/// - `{key?yes:no}` renders `yes` when `key` is *truthy* (present and not
+///   `false`/`null`/`0`/`""`), else `no`.
+///
+/// This is the realization of `Effect::ground`: a deterministic projection of
+/// known `State` into a steering line, so the model restates facts rather than
+/// inventing them.
+pub fn render_ground(template: &str, state: &State) -> String {
+    let mut out = String::with_capacity(template.len());
+    let mut rest = template;
+    while let Some(open) = rest.find('{') {
+        out.push_str(&rest[..open]);
+        let after = &rest[open + 1..];
+        let Some(close) = after.find('}') else {
+            // Unbalanced brace: emit the remainder verbatim.
+            out.push_str(&rest[open..]);
+            return out;
+        };
+        let expr = &after[..close];
+        out.push_str(&render_expr(expr, state));
+        rest = &after[close + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
+fn render_expr(expr: &str, state: &State) -> String {
+    if let Some((cond, arms)) = expr.split_once('?') {
+        let (yes, no) = arms.split_once(':').unwrap_or((arms, ""));
+        if is_truthy(state, cond.trim()) {
+            yes.to_string()
+        } else {
+            no.to_string()
+        }
+    } else {
+        match state.get::<Value>(expr.trim()) {
+            Some(Value::String(s)) => s,
+            Some(v) => v.to_string(),
+            None => String::new(),
+        }
+    }
+}
+
+fn is_truthy(state: &State, key: &str) -> bool {
+    match state.get::<Value>(key) {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(b)) => b,
+        Some(Value::Number(n)) => n.as_f64().map(|f| f != 0.0).unwrap_or(true),
+        Some(Value::String(s)) => !s.is_empty(),
+        Some(_) => true,
+    }
+}
+
 type CustomFn = Arc<dyn Fn(&FlowCtx) -> bool + Send + Sync>;
 
 /// A boolean predicate over `(state, marking)` — the *only* predicate type.
@@ -237,6 +293,11 @@ pub struct Step {
     /// Instruction imposed while this step is active (projected as steering).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub posture: Option<String>,
+    /// A grounding template projected while active: a curated, `State`-interpolated
+    /// fact line that pins the model to known values (anti-hallucination). See
+    /// [`render_ground`]. Serializable, like `posture`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ground: Option<String>,
     /// Tools available while this step is active (whitelist; empty = no restriction).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allow: Vec<String>,
@@ -658,6 +719,16 @@ impl FlowMonitor {
             .collect()
     }
 
+    /// Rendered grounding lines of the active steps — curated, `State`-
+    /// interpolated facts to inject as turn-boundary steering (anti-hallucination).
+    pub fn active_grounds(&self, state: &State) -> Vec<String> {
+        self.active_steps(state)
+            .into_iter()
+            .filter_map(|s| s.ground.as_ref().map(|t| render_ground(t, state)))
+            .filter(|s| !s.trim().is_empty())
+            .collect()
+    }
+
     /// Required steps not yet done (drives repair).
     pub fn unmet_requirements(&self) -> Vec<String> {
         self.flow
@@ -775,6 +846,7 @@ impl FlowBuilder {
             gate: None,
             done: None,
             posture: None,
+            ground: None,
             allow: Vec::new(),
             deny: Vec::new(),
             terminal: false,
@@ -799,6 +871,14 @@ impl FlowBuilder {
     /// Instruction imposed while active.
     pub fn posture(mut self, text: impl Into<String>) -> Self {
         self.current().posture = Some(text.into());
+        self
+    }
+    /// A grounding template projected while active — a curated, `State`-
+    /// interpolated fact line that pins the model to known values. `{key}`
+    /// interpolates a value; `{key?yes:no}` picks by truthiness. See
+    /// [`render_ground`].
+    pub fn ground(mut self, template: impl Into<String>) -> Self {
+        self.current().ground = Some(template.into());
         self
     }
     /// Tools available while active (whitelist).
@@ -956,6 +1036,7 @@ mod tests {
                 gate: None,
                 done: Some(Guard::always()),
                 posture: None,
+                ground: None,
                 allow: vec![],
                 deny: vec![],
                 terminal: false,
@@ -966,6 +1047,7 @@ mod tests {
                 gate: None,
                 done: Some(Guard::always()),
                 posture: None,
+                ground: None,
                 allow: vec![],
                 deny: vec![],
                 terminal: false,
@@ -1128,6 +1210,50 @@ mod tests {
         assert!(mon.is_complete());
         // No further newly-active steps to announce.
         assert!(mon.take_newly_active(&state).is_empty());
+    }
+
+    #[test]
+    fn ground_template_interpolates_and_branches() {
+        let state = State::new();
+        state.set("when", "3pm");
+        state.set("available", true);
+        state.set("prior_visits", 2);
+        assert_eq!(
+            render_ground(
+                "{when} is {available?open:taken}; {prior_visits} prior visits.",
+                &state
+            ),
+            "3pm is open; 2 prior visits."
+        );
+        // Falsy branch + absent key renders empty.
+        state.set("available", false);
+        assert_eq!(
+            render_ground("slot {missing}is {available?free:full}", &state),
+            "slot is full"
+        );
+    }
+
+    #[test]
+    fn active_grounds_projects_only_active_steps() {
+        let flow = Flow::new()
+            .step("collect")
+            .ground("Known time: {when}.")
+            .done(Guard::is_set("when"))
+            .step("done")
+            .after("collect")
+            .terminal()
+            .build()
+            .expect("valid flow");
+        let mut mon = FlowMonitor::new(flow, Mode::Enforce);
+        let state = State::new();
+        state.set("when", "3pm");
+        assert_eq!(
+            mon.active_grounds(&state),
+            vec!["Known time: 3pm.".to_string()]
+        );
+        // Once collect completes, its ground no longer projects.
+        mon.on_turn(&state);
+        assert!(mon.active_grounds(&state).is_empty());
     }
 
     #[test]

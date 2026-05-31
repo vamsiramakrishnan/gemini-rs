@@ -116,6 +116,7 @@ sub-agent or fetch, and guards gate on either — all reading the same `State`.
 | `gate(Guard)` | extra eligibility beyond dependencies |
 | `done(Guard)` | completion condition (required for non-terminal steps) |
 | `posture(text)` | instruction imposed while active |
+| `ground(template)` | curated, `State`-interpolated fact line projected while active (anti-hallucination) — `{key}` / `{key?yes:no}` |
 | `allow([tools])` / `deny([tools])` | tool whitelist/blacklist while active |
 | `terminal()` | a step that completes on eligibility |
 | `once(tool)` | a tool may run at most once |

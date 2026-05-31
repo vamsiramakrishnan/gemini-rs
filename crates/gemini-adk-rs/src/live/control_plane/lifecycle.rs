@@ -289,6 +289,10 @@ pub(in crate::live) async fn handle_turn_complete(
         for posture in mon.active_postures(state) {
             context_buffer.push(gemini_genai_rs::prelude::Content::model(posture));
         }
+        // Grounding lines: curated, State-interpolated facts (anti-hallucination).
+        for ground in mon.active_grounds(state) {
+            context_buffer.push(gemini_genai_rs::prelude::Content::model(ground));
+        }
         let unmet = mon.unmet_requirements();
         if !unmet.is_empty() {
             context_buffer.push(gemini_genai_rs::prelude::Content::model(format!(
