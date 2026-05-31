@@ -101,6 +101,14 @@ pub trait Middleware: Send + Sync + 'static {
     ) -> Result<Option<LlmResponse>, AgentError> {
         Ok(None)
     }
+
+    /// Called with the fully-built request *before* it is sent to the model,
+    /// allowing in-place mutation (e.g. trimming or rewriting conversation
+    /// history). Runs ahead of [`Middleware::before_model`]. This mirrors the
+    /// mutable `before_model_callback` request hook in the ADK Python SDK.
+    async fn transform_request(&self, _request: &mut LlmRequest) -> Result<(), AgentError> {
+        Ok(())
+    }
 }
 
 /// Ordered chain of middleware.
@@ -185,6 +193,17 @@ impl MiddlewareChain {
     pub async fn run_on_error(&self, err: &AgentError) -> Result<(), AgentError> {
         for m in &self.layers {
             m.on_error(err).await?;
+        }
+        Ok(())
+    }
+
+    /// Run all `transform_request` hooks in order, mutating the request in place.
+    pub async fn run_transform_request(
+        &self,
+        request: &mut LlmRequest,
+    ) -> Result<(), AgentError> {
+        for m in &self.layers {
+            m.transform_request(request).await?;
         }
         Ok(())
     }

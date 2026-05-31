@@ -4,6 +4,10 @@
 
 use std::sync::Arc;
 
+use async_trait::async_trait;
+use gemini_adk_rs::error::AgentError;
+use gemini_adk_rs::llm::LlmRequest;
+use gemini_adk_rs::middleware::Middleware;
 use gemini_genai_rs::prelude::Content;
 
 /// A context policy that filters/transforms conversation history.
@@ -64,15 +68,50 @@ pub struct ContextPolicyChain {
 }
 
 impl ContextPolicyChain {
-    /// Apply all policies and return the union of their results.
+    /// Apply all policies in sequence, piping each policy's output into the
+    /// next. For `C::window(10) + C::user_only()` this means "take the last 10
+    /// turns, then keep only the user turns" — the additive `+` composes the
+    /// transforms rather than unioning their independent results.
     pub fn apply(&self, history: &[Content]) -> Vec<Content> {
-        let mut result = Vec::new();
+        let mut current = history.to_vec();
         for policy in &self.policies {
-            let filtered = policy.apply(history);
-            // Simple append — dedup can be added if Content implements Eq
-            result.extend(filtered);
+            current = policy.apply(&current);
         }
-        result
+        current
+    }
+
+    /// Adapt this policy chain into a `transform_request` middleware layer that
+    /// rewrites the request's conversation history before it reaches the model.
+    pub fn into_middleware(self) -> Arc<dyn Middleware> {
+        Arc::new(ContextMiddleware { chain: self })
+    }
+}
+
+/// A single policy is a one-element chain, so `.context(C::window(10))` works
+/// without an explicit `+`.
+impl From<ContextPolicy> for ContextPolicyChain {
+    fn from(policy: ContextPolicy) -> Self {
+        ContextPolicyChain {
+            policies: vec![policy],
+        }
+    }
+}
+
+/// Middleware adapter that applies a [`ContextPolicyChain`] to the request
+/// history on every model call.
+struct ContextMiddleware {
+    chain: ContextPolicyChain,
+}
+
+#[async_trait]
+impl Middleware for ContextMiddleware {
+    fn name(&self) -> &str {
+        "context"
+    }
+
+    async fn transform_request(&self, request: &mut LlmRequest) -> Result<(), AgentError> {
+        request.contents = self.chain.apply(&request.contents);
+        Ok(())
     }
 }
 

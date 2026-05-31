@@ -1,8 +1,21 @@
 //! G — Guard composition.
 //!
 //! Compose output guards with `|` for validation and safety checks.
+//!
+//! ## Wiring
+//!
+//! A [`GComposite`] attached via `AgentBuilder::guard` is installed on the
+//! compiled `LlmTextAgent` as an `after_model` middleware layer (see
+//! [`GComposite::into_middleware`]). Every model response is checked against
+//! all guards; if any guard rejects the output the agent run fails with an
+//! [`AgentError`] enumerating the violations, vetoing the response.
 
 use std::sync::Arc;
+
+use async_trait::async_trait;
+use gemini_adk_rs::error::AgentError;
+use gemini_adk_rs::llm::{LlmRequest, LlmResponse};
+use gemini_adk_rs::middleware::Middleware;
 
 /// A guard that validates agent output.
 #[derive(Clone)]
@@ -84,6 +97,52 @@ impl std::ops::BitOr<GGuard> for GComposite {
     fn bitor(mut self, rhs: GGuard) -> Self::Output {
         self.guards.push(rhs);
         self
+    }
+}
+
+/// A single guard is a one-element composite, so `.guard(G::pii())` works
+/// without an explicit `| `.
+impl From<GGuard> for GComposite {
+    fn from(guard: GGuard) -> Self {
+        GComposite {
+            guards: vec![guard],
+        }
+    }
+}
+
+impl GComposite {
+    /// Adapt this guard composite into an `after_model` middleware layer that
+    /// vetoes any model response failing one or more guards.
+    pub fn into_middleware(self) -> Arc<dyn Middleware> {
+        Arc::new(GuardMiddleware { guards: self })
+    }
+}
+
+/// Middleware adapter that enforces a [`GComposite`] on every model response.
+struct GuardMiddleware {
+    guards: GComposite,
+}
+
+#[async_trait]
+impl Middleware for GuardMiddleware {
+    fn name(&self) -> &str {
+        "guard"
+    }
+
+    async fn after_model(
+        &self,
+        _request: &LlmRequest,
+        response: &LlmResponse,
+    ) -> Result<Option<LlmResponse>, AgentError> {
+        let violations = self.guards.check_all(&response.text());
+        if violations.is_empty() {
+            Ok(None)
+        } else {
+            Err(AgentError::Other(format!(
+                "guard violation: {}",
+                violations.join("; ")
+            )))
+        }
     }
 }
 

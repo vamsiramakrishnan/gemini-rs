@@ -177,7 +177,11 @@ impl LlmTextAgent {
     /// Inner execution loop — separated so `on_error` fires exactly once.
     async fn run_inner(&self, contents: &mut Vec<Content>) -> Result<String, AgentError> {
         for _round in 0..MAX_TOOL_ROUNDS {
-            let request = self.build_request(contents.clone());
+            let mut request = self.build_request(contents.clone());
+
+            // transform_request hook — may rewrite the request (e.g. context
+            // policies trimming conversation history) before it is sent.
+            self.middleware.run_transform_request(&mut request).await?;
 
             // before_model hook — may short-circuit with a cached response.
             let response = match self.middleware.run_before_model(&request).await? {
