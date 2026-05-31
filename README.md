@@ -28,6 +28,9 @@ each crate adds exactly the abstraction you need:
   combinators, and a three-lane processor architecture (`gemini-adk-rs`).
 - **Fluent builder API** where a production voice agent is 20 lines of
   declarative Rust, not 200 lines of boilerplate (`gemini-adk-fluent-rs`).
+- **Governed agents** — a declarative control DAG (`Flow`), deterministic +
+  async fact resolution (`Extract`), and agent orchestration (`Resolver`),
+  composing over one shared `State` spine (`gemini-adk-rs`, surfaced at L2).
 
 Every layer is independently usable. Pick the altitude that fits your problem.
 
@@ -98,12 +101,14 @@ handle.send_text("Hello").await?;
 |                                                                      |
 |  Live::builder()  .  AgentBuilder  .  S.C.T.P.M.A operators         |
 |  PhaseBuilder  .  WatchBuilder  .  Temporal patterns                 |
+|  .govern(flow)  .  .extract_record(..)  .  .on_enter(..)            |
 +----------------------------------------------------------------------+
 |  gemini-adk-rs  (L1 -- Agent Runtime)                                       |
 |                                                                      |
 |  LiveSessionBuilder  .  LiveHandle  .  Three-lane processor          |
 |  State (prefix-scoped)  .  PhaseMachine  .  ToolDispatcher           |
-|  TextAgent combinators  .  Extractors  .  Watchers  .  Telemetry    |
+|  Governed Agents:  Flow  .  Extract/Recognizer  .  Resolver         |
+|  TextAgent combinators  .  Watchers  .  Telemetry                   |
 |  LlmAgent  .  Runner  .  SessionService  .  MCP  .  A2A            |
 +----------------------------------------------------------------------+
 |  gemini-genai-rs  (L0 -- Wire Protocol)                                     |
@@ -116,6 +121,57 @@ handle.send_text("Hello").await?;
 
 Each layer depends only on the one below it. Application code imports from the
 highest layer it needs (`gemini_adk_fluent_rs::prelude::*` re-exports all three).
+
+> **Where does `Flow` live?** `Flow`, `Extract`, and the `Resolver`
+> orchestration primitives are **L1 runtime** types (`gemini-adk-rs`) — *not* a
+> layer above the fluent API. L2 simply surfaces them ergonomically
+> (`Live::govern(flow)`, `.extract_record(..)`, `.on_enter(..)`). They are
+> cross-cutting capabilities *within* the three-layer stack, composing over the
+> shared `State` spine — so you can use them from L1 directly or via the L2
+> builder.
+
+---
+
+## Governed Agents
+
+Three **runtime primitives** (L1, surfaced fluently at L2) make an agent
+*governed*. They are three lenses over one shared spine — session `State` — and
+compose **multiplicatively**: every result lands in `State` under one convention
+(`{name}:result` + `state_meta:` provenance), so each lens consumes the others'
+output reactively.
+
+| Lens | What it does | Surfaced as |
+|------|--------------|-------------|
+| **Flow** | a governed conversation/tool DAG — gates tool calls, projects per-step steering (`posture`/`ground`), enforces order (`once` / `never…until` / `require`) | `Live::govern(flow)` · `.observe(flow)` |
+| **Extract** | fills `State` with typed facts — CPU `Recognizer`s (no model: `integer`/`money`/`fuzzy`/`yes_no`/`datetime`/…) and async `Resolver` field sources (fetch/MCP/LLM/agent) with a TTL cache | `.extract_record(Order::extract())` |
+| **Orchestration** | invoke a sub-agent / fetch / LLM in a `Mode` (`Call`/`Dispatch`/`Background`); result + provenance → `State` | `Resolver` · `.on_enter(step, agent, mode)` |
+
+```rust
+use gemini_adk_fluent_rs::prelude::*;
+
+// A booking flow: extraction fills slots, a step orchestrates availability on
+// entry, grounding pins the model to known facts, and the commit is gated.
+let flow = Flow::new()
+    .step("collect").done(Guard::captured(["party_size", "slot"]))
+    .step("check").after("collect")
+        .ground("Party of {party_size} at {slot}; availability: {check:result}.")
+        .done(Guard::resolved("check"))
+    .step("book").after("check").allow(["book"]).done(Guard::called_ok("book"))
+    .never("book").until(Guard::resolved("check")).once("book")
+    .build()?;
+
+let handle = Live::builder()
+    .govern(flow)                                            // enforce the DAG
+    .extract_record(Booking::extract())                      // #[derive(Extract)]
+    .on_enter("check", availability_agent, AgentMode::Call)  // result -> check:result
+    .connect_from_env().await?;
+```
+
+Deterministic where it can be (recognizers, guards — no model in the control
+loop), model-driven where it must be. See the **Governed Flows**, **Extraction
+Pipeline**, and **Agent Orchestration** chapters in
+[the book](https://vamsiramakrishnan.github.io/gemini-rs/), and cookbook
+examples `37`–`40`.
 
 ---
 
@@ -744,6 +800,83 @@ let info: Option<CallerInfo> = handle.extracted("CallerInfo");
 Extractors automatically enable transcription and warm up the OOB LLM
 connection at session start for fast first-extraction latency.
 
+#### Deterministic extraction (no model)
+
+Not every field needs an LLM. Declare an `Extract` record of typed fields filled
+by CPU `Recognizer`s — they run on the control lane with no model, network, or
+accelerator and promote straight into `State`:
+
+```rust
+use gemini_adk_rs::Extract;   // the #[derive(Extract)] macro
+
+#[derive(Extract)]
+#[extract(name = "order", window = 3)]
+struct Order {
+    #[recognize(integer_near = ["want", "get"])]
+    quantity: Option<i64>,
+    #[recognize(one_of = ["pizza", "salad", "soda"])]
+    item: Option<String>,
+    #[recognize(datetime)]           // -> { "time": "18:00", "day": "tomorrow" }
+    #[extract(state = "when")]
+    pickup: Option<serde_json::Value>,
+    #[recognize(yes_no)]
+    confirmed: Option<bool>,
+}
+
+Live::builder()
+    .extract_record(Order::extract())   // drives Flow done(captured([..]))
+    .govern(order_flow)
+    .connect_from_env().await?;
+```
+
+Recognizers: `integer`/`integer_near`, `money`, `regex`, `one_of`, `fuzzy`
+(ASR-robust), `yes_no`, `datetime`. Async field sources
+(`field_resolve(name, args, ttl, fetch)`) bind args from `State` and cache by
+`(field, args)`; `on_complete(agent, mode)` dispatches a downstream agent when a
+record lands fields.
+
+### Agent Orchestration
+
+Invoke a sub-agent, a system fetch, or a one-shot LLM in a `Mode`; the result
+(and its provenance) lands in `State` under `{name}:result`, so a `Flow` step
+completes on it via `Guard::resolved`:
+
+```rust
+use gemini_adk_rs::Resolver;
+
+Resolver::agent("availability", availability_agent).resolve(&state).await?;
+Resolver::fetch("availability", |s| async move { /* tool/HTTP/MCP */ Ok(json!({"open": true})) })
+    .dispatch(state.clone());                       // fire-and-forget
+Resolver::llm("summary", flash_llm, "Summarize the {topic} issue").resolve(&state).await?;
+```
+
+A governed `Flow` drives this in-session: `.on_enter("check", agent, AgentMode::Call)`
+runs an agent the moment a step activates.
+
+### Governed Flows
+
+A `Flow` is one declarative DAG governing both conversation stages and tool-call
+order. The runtime enforces it live — gating tools, steering per active step,
+surfacing what still has to happen:
+
+```rust
+let flow = Flow::new()
+    .step("verify").posture("Verify the caller's identity.")
+        .allow(["lookup_account"]).done(Guard::is_true("identity_verified"))
+    .step("disclose").after("verify").done(Guard::is_true("disclosure_given"))
+    .step("take_payment").after("disclose").allow(["charge_card"])
+        .done(Guard::called_ok("charge_card"))
+    .never("charge_card").until(Guard::is_true("ptp_confirmed")).once("charge_card")
+    .build()?;
+
+Live::builder().tools(dispatcher).govern(flow).connect_from_env().await?;
+```
+
+Guards are a closed, serializable predicate set (`is_true`/`captured`/
+`called_ok`/`resolved`/…), so a flow can be authored as data; `flow.to_mermaid()`
+renders the DAG. Use `.observe(flow)` for audit-only (records deviations, blocks
+nothing).
+
 ### State Watchers & Temporal Patterns
 
 React to state changes and time-based conditions declaratively:
@@ -971,8 +1104,10 @@ independent lanes, each optimized for its latency profile:
 
 ## Examples
 
-The `examples/` directory contains runnable examples organized by complexity.
-Each demonstrates specific SDK features at the layer you need.
+The `examples/cookbook/` directory ships **40 runnable cookbook examples** on a
+Crawl → Walk → Run → Governed path; `37`–`40` cover the governed-agent
+capabilities (`Flow`, `Extract`, and the booking/screening capstones) and run
+with no credentials. Plus standalone Axum demos and the multi-app Web UI below.
 
 ### Getting Started
 

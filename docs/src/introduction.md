@@ -5,15 +5,24 @@ Full Rust SDK for the Gemini Multimodal Live API — wire protocol, agent runtim
 ```text
 ┌─────────────────────────────────────────────────────┐
 │  gemini-adk-fluent-rs (L2 — Fluent DX)                    │
-│  AgentBuilder · Live · S·C·T·P·M·A operators       │
+│  AgentBuilder · Live · S·C·T·P·M·A · .govern/.on_enter │
 ├─────────────────────────────────────────────────────┤
 │  gemini-adk-rs (L1 — Agent Runtime)                       │
 │  Agent · Tools · State · Phases · TextAgent · LLM  │
+│  Governed Agents: Flow · Extract · Resolver        │
 ├─────────────────────────────────────────────────────┤
 │  gemini-genai-rs (L0 — Wire Protocol)                     │
 │  Transport · Session · Protocol · VAD · Buffers    │
 └─────────────────────────────────────────────────────┘
 ```
+
+> **Governed Agents** — `Flow` (control DAG), `Extract` (deterministic + async
+> fact resolution), and `Resolver` (orchestration) are **L1 runtime primitives**,
+> *not* a layer above the fluent API. L2 surfaces them ergonomically
+> (`Live::govern`, `.extract_record`, `.on_enter`). They compose over one shared
+> `State` spine — see the [Governed Flows](./user-guide/flow.md),
+> [Extraction](./user-guide/extraction.md), and
+> [Agent Orchestration](./user-guide/orchestration.md) chapters.
 
 ## Quick Start
 
@@ -45,9 +54,9 @@ This book is organized into six sections:
 
 - **Getting Started** — Local setup, architecture overview, migration guide, and best practices
 - **Voice & Live Sessions** — Building real-time voice agents with phases, state, and watchers
-- **Tools & Extraction** — Tool system and structured data extraction from conversations
-- **Composition & Patterns** — Text agent combinators, S·C·T·P·M·A operators, middleware
-- **Examples** — 37 progressive cookbook examples (Crawl/Walk/Run) plus interactive `gemini-adk-web-rs` demos
+- **Tools & Extraction** — Tool system, deterministic + LLM extraction, MCP
+- **Composition & Patterns** — Governed Flows, Agent Orchestration, text-agent combinators, S·C·T·P·M·A operators, middleware
+- **Examples** — 40 progressive cookbook examples (Crawl/Walk/Run/Governed) plus interactive `gemini-adk-web-rs` demos
 - **ADK Web UI** — Design system, dark/light mode, DevTools panels, and the cookbook browser
 
 ## API Reference
