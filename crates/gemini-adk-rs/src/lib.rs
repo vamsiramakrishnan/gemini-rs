@@ -100,7 +100,7 @@ pub use llm::{BaseLlm, GeminiLlm, GeminiLlmParams, LlmRegistry, LlmRequest, LlmR
 pub use llm_agent::{LlmAgent, LlmAgentBuilder};
 pub use memory::{InMemoryMemoryService, MemoryEntry, MemoryService};
 pub use middleware::{Middleware, MiddlewareChain};
-pub use orchestration::{call as call_agent, Mode as AgentMode, Resolver};
+pub use orchestration::{call as call_agent, provenance, Mode as AgentMode, Resolver};
 pub use plugin::{Plugin, PluginManager, PluginResult};
 pub use processors::{
     ContentFilter, InstructionInserter, RequestProcessor, RequestProcessorChain, ResponseProcessor,

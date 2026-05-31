@@ -99,7 +99,9 @@ pub mod prelude {
         TranscriptTurn, TurnExtractor,
     };
     pub use gemini_adk_rs::llm::{BaseLlm, GeminiLlm, GeminiLlmParams, LlmRequest, LlmResponse};
-    pub use gemini_adk_rs::orchestration::{self, call as call_agent, Mode as AgentMode, Resolver};
+    pub use gemini_adk_rs::orchestration::{
+        self, call as call_agent, provenance, Mode as AgentMode, Resolver,
+    };
     pub use gemini_adk_rs::state::{State, StateKey};
     pub use gemini_adk_rs::text::{
         DispatchTextAgent, FallbackTextAgent, FnTextAgent, JoinTextAgent, LlmTextAgent,

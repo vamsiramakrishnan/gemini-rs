@@ -23,6 +23,7 @@ use std::sync::Arc;
 use serde_json::Value;
 
 use crate::error::AgentError;
+use crate::llm::{BaseLlm, LlmRequest};
 use crate::state::State;
 use crate::text::TextAgent;
 
@@ -47,6 +48,14 @@ pub fn result_key(name: &str) -> String {
 /// State key an agent's error is written to.
 pub fn error_key(name: &str) -> String {
     format!("{name}:error")
+}
+
+/// The provenance source of a value at `key` (e.g. `"agent"`, `"fetch"`,
+/// `"llm"`, or `"extraction"`), if one was recorded under `state_meta:{key}`.
+pub fn provenance(state: &State, key: &str) -> Option<String> {
+    state
+        .get::<serde_json::Value>(&format!("state_meta:{key}"))
+        .and_then(|m| m.get("source").and_then(|s| s.as_str().map(String::from)))
 }
 
 /// Invoke `agent` **synchronously**: run it to completion, write its result to
@@ -78,6 +87,36 @@ enum Source {
     /// Run an async closure that reads `State` and returns a value — the seam
     /// for a tool call, an HTTP fetch, or an MCP request.
     Fetch(FetchFn),
+    /// One-shot OOB LLM completion over a `State`-interpolated prompt.
+    Llm {
+        /// The out-of-band LLM.
+        llm: Arc<dyn BaseLlm>,
+        /// Prompt template; `{key}` interpolates the `State` value at `key`.
+        prompt: String,
+    },
+}
+
+/// Interpolate `{key}` placeholders in `template` with `State` string values.
+fn interpolate(template: &str, state: &State) -> String {
+    let mut out = String::with_capacity(template.len());
+    let mut rest = template;
+    while let Some(open) = rest.find('{') {
+        out.push_str(&rest[..open]);
+        let after = &rest[open + 1..];
+        let Some(close) = after.find('}') else {
+            out.push_str(&rest[open..]);
+            return out;
+        };
+        let key = after[..close].trim();
+        match state.get::<serde_json::Value>(key) {
+            Some(serde_json::Value::String(s)) => out.push_str(&s),
+            Some(v) => out.push_str(&v.to_string()),
+            None => {}
+        }
+        rest = &after[close + 1..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// A named async value source whose inputs come from `State` and whose result
@@ -123,13 +162,35 @@ impl Resolver {
         }
     }
 
+    /// Resolve by running a one-shot OOB LLM over a `State`-interpolated prompt
+    /// (`{key}` placeholders). The completion text becomes the result.
+    pub fn llm(name: impl Into<String>, llm: Arc<dyn BaseLlm>, prompt: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            source: Source::Llm {
+                llm,
+                prompt: prompt.into(),
+            },
+        }
+    }
+
     /// The resolver's name (the `{name}:result` prefix it writes).
     pub fn name(&self) -> &str {
         &self.name
     }
 
+    /// The provenance kind of this resolver's source (`agent`/`fetch`/`llm`).
+    fn source_kind(&self) -> &'static str {
+        match &self.source {
+            Source::Agent(_) => "agent",
+            Source::Fetch(_) => "fetch",
+            Source::Llm { .. } => "llm",
+        }
+    }
+
     /// Resolve **synchronously** ([`Mode::Call`]): await the source, write its
-    /// value to `{name}:result` (or its error to `{name}:error`), and return it.
+    /// value to `{name}:result` (or its error to `{name}:error`), record its
+    /// provenance under `state_meta:{name}:result`, and return it.
     pub async fn resolve(&self, state: &State) -> Result<Value, String> {
         let outcome = match &self.source {
             Source::Agent(a) => a
@@ -138,9 +199,23 @@ impl Resolver {
                 .map(Value::from)
                 .map_err(|e| e.to_string()),
             Source::Fetch(f) => f(state.clone()).await,
+            Source::Llm { llm, prompt } => {
+                let rendered = interpolate(prompt, state);
+                llm.generate(LlmRequest::from_text(rendered))
+                    .await
+                    .map(|r| Value::from(r.text()))
+                    .map_err(|e| e.to_string())
+            }
         };
         match &outcome {
-            Ok(v) => state.set(result_key(&self.name), v.clone()),
+            Ok(v) => {
+                let key = result_key(&self.name);
+                state.set(
+                    format!("state_meta:{key}"),
+                    serde_json::json!({ "source": self.source_kind(), "resolver": self.name }),
+                );
+                state.set(key, v.clone());
+            }
             Err(e) => state.set(error_key(&self.name), e),
         }
         outcome
@@ -221,6 +296,11 @@ mod tests {
             state.get::<Value>("availability:result"),
             Some(json!({ "open": true }))
         );
+        // Provenance is recorded for the resolved value.
+        assert_eq!(
+            provenance(&state, "availability:result").as_deref(),
+            Some("fetch")
+        );
     }
 
     #[tokio::test]
@@ -249,6 +329,44 @@ mod tests {
             Some("upstream 503")
         );
         assert!(!state.contains("lookup:result"));
+    }
+
+    #[tokio::test]
+    async fn resolver_llm_interpolates_prompt_and_stores_text() {
+        use crate::llm::{LlmError, LlmResponse};
+        use gemini_genai_rs::prelude::Content;
+
+        struct EchoLlm;
+        #[async_trait]
+        impl BaseLlm for EchoLlm {
+            fn model_id(&self) -> &str {
+                "echo"
+            }
+            async fn generate(&self, request: LlmRequest) -> Result<LlmResponse, LlmError> {
+                // Echo the (interpolated) prompt back as the completion.
+                let prompt = request.contents[0].parts.iter().find_map(|p| match p {
+                    gemini_genai_rs::prelude::Part::Text { text } => Some(text.clone()),
+                    _ => None,
+                });
+                Ok(LlmResponse {
+                    content: Content::model(prompt.unwrap_or_default()),
+                    finish_reason: None,
+                    usage: None,
+                })
+            }
+        }
+
+        let state = State::new();
+        state.set("topic", "billing");
+        let out = Resolver::llm("summary", Arc::new(EchoLlm), "Summarize the {topic} issue")
+            .resolve(&state)
+            .await
+            .unwrap();
+        assert_eq!(out, json!("Summarize the billing issue"));
+        assert_eq!(
+            state.get::<String>("summary:result").as_deref(),
+            Some("Summarize the billing issue")
+        );
     }
 
     #[tokio::test]
