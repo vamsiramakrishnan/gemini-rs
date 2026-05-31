@@ -26,7 +26,7 @@ pub mod client;
 pub mod embed;
 #[cfg(feature = "files")]
 pub mod files;
-pub mod flow;
+pub mod turn;
 #[cfg(feature = "generate")]
 pub mod generate;
 #[cfg(feature = "models")]
@@ -78,7 +78,7 @@ pub mod prelude {
     pub use crate::vad::{VadConfig, VadEvent, VoiceActivityDetector};
 
     // Flow
-    pub use crate::flow::{
+    pub use crate::turn::{
         BargeInAction, BargeInConfig, BargeInDetector, TurnDetectionConfig, TurnDetectionEvent,
         TurnDetector,
     };

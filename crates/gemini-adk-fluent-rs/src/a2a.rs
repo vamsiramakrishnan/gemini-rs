@@ -144,11 +144,11 @@ impl A2AServer {
 
 /// Registry for discovering remote agents.
 #[derive(Clone, Debug)]
-pub struct AgentRegistry {
+pub struct A2aRegistry {
     base_url: String,
 }
 
-impl AgentRegistry {
+impl A2aRegistry {
     /// Create a registry pointing at the given base URL.
     pub fn new(base_url: impl Into<String>) -> Self {
         Self {
@@ -222,7 +222,7 @@ mod tests {
 
     #[test]
     fn agent_registry() {
-        let registry = AgentRegistry::new("https://registry.example.com");
+        let registry = A2aRegistry::new("https://registry.example.com");
         assert_eq!(registry.base_url(), "https://registry.example.com");
     }
 

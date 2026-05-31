@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use gemini_adk_server_rs::{AgentRegistry, ServerState};
+use gemini_adk_server_rs::{ServerAgentRegistry, ServerState};
 
 /// Configuration for the API server command.
 #[allow(dead_code)]
@@ -27,7 +27,7 @@ pub async fn run(config: ApiConfig) -> Result<(), Box<dyn std::error::Error>> {
 
     // Discover agents via gemini-adk-server-rs unified registry
     let dir = PathBuf::from(&config.agent_dir);
-    let mut registry = AgentRegistry::new();
+    let mut registry = ServerAgentRegistry::new();
     let count = registry.discover(&dir);
 
     if count == 0 {

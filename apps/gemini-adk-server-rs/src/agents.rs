@@ -29,11 +29,11 @@ fn default_agent_type() -> String {
 /// Agent registry — the single source of truth for available agents.
 ///
 /// Load from files, register programmatically, or both.
-pub struct AgentRegistry {
+pub struct ServerAgentRegistry {
     agents: HashMap<String, AgentEntry>,
 }
 
-impl AgentRegistry {
+impl ServerAgentRegistry {
     /// Create an empty registry.
     pub fn new() -> Self {
         Self {
@@ -168,7 +168,7 @@ impl AgentRegistry {
     }
 }
 
-impl Default for AgentRegistry {
+impl Default for ServerAgentRegistry {
     fn default() -> Self {
         Self::new()
     }
@@ -200,7 +200,7 @@ mod tests {
 
     #[test]
     fn register_and_lookup() {
-        let mut reg = AgentRegistry::new();
+        let mut reg = ServerAgentRegistry::new();
         reg.register(AgentEntry {
             name: "test".into(),
             description: Some("A test agent".into()),
@@ -218,7 +218,7 @@ mod tests {
 
     #[test]
     fn list_agents() {
-        let mut reg = AgentRegistry::new();
+        let mut reg = ServerAgentRegistry::new();
         reg.register(AgentEntry {
             name: "a".into(),
             description: None,

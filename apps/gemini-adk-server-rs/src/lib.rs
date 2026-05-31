@@ -15,7 +15,7 @@ pub mod router;
 pub mod sessions;
 pub mod types;
 
-pub use agents::{AgentEntry, AgentRegistry};
+pub use agents::{AgentEntry, ServerAgentRegistry};
 pub use router::build_api_router;
 pub use sessions::{InMemorySessionStore, SessionStore};
 pub use types::*;
@@ -28,7 +28,7 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub struct ServerState {
     /// Registered agents.
-    pub agents: Arc<AgentRegistry>,
+    pub agents: Arc<ServerAgentRegistry>,
     /// Session store (pluggable).
     pub sessions: Arc<dyn SessionStore>,
     /// Artifact store.
@@ -37,7 +37,7 @@ pub struct ServerState {
 
 impl ServerState {
     /// Create with defaults (in-memory sessions and artifacts).
-    pub fn new(agents: AgentRegistry) -> Self {
+    pub fn new(agents: ServerAgentRegistry) -> Self {
         Self {
             agents: Arc::new(agents),
             sessions: Arc::new(InMemorySessionStore::new()),

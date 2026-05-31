@@ -9,7 +9,7 @@
 //! ADK_API_PORT=8080 cargo run -p gemini-adk-api-rs
 //! ```
 
-use gemini_adk_server_rs::{AgentRegistry, ServerState};
+use gemini_adk_server_rs::{ServerAgentRegistry, ServerState};
 
 #[tokio::main]
 async fn main() {
@@ -17,7 +17,7 @@ async fn main() {
     init_tracing();
 
     // Discover agents from working directory
-    let mut registry = AgentRegistry::new();
+    let mut registry = ServerAgentRegistry::new();
     let dir = std::env::current_dir().unwrap_or_default();
     let count = registry.discover(&dir);
 

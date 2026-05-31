@@ -1,4 +1,4 @@
-//! Conversation flow control — barge-in handling and turn detection.
+//! Turn-taking — barge-in handling and turn detection (VAD-driven).
 
 pub mod barge_in;
 pub mod turn_detection;

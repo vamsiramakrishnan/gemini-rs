@@ -4,7 +4,7 @@ Shared server core powering all ADK server surfaces (`gemini-adk-web-rs`, `gemin
 
 ## What it provides
 
-- **`AgentRegistry`** — Unified agent discovery from `agent.toml` / `agent.json` / programmatic registration
+- **`ServerAgentRegistry`** — Unified agent discovery from `agent.toml` / `agent.json` / programmatic registration
 - **REST API router** — All upstream ADK API endpoints (`/apps`, `/run`, `/sessions`, etc.)
 - **`SessionStore` trait** — Pluggable session persistence (in-memory default, swap for DB-backed)
 - **Shared types** — Request/response types used across all server surfaces
@@ -14,9 +14,9 @@ Shared server core powering all ADK server surfaces (`gemini-adk-web-rs`, `gemin
 This crate is a library — it's never run directly. Import it from your server binary:
 
 ```rust
-use gemini_adk_server_rs::{AgentRegistry, ServerState, build_api_router};
+use gemini_adk_server_rs::{ServerAgentRegistry, ServerState, build_api_router};
 
-let mut registry = AgentRegistry::new();
+let mut registry = ServerAgentRegistry::new();
 registry.discover(&agent_dir);
 
 let state = ServerState::new(registry);
