@@ -194,6 +194,36 @@ pub trait TurnExtractor: Send + Sync {
 
     /// Extract structured data from the transcript window.
     async fn extract(&self, window: &[TranscriptTurn]) -> Result<Value, LlmError>;
+
+    /// Extract with access to session `State` — for extractors whose sources
+    /// bind arguments from `State` (e.g. async fetch/agent resolvers).
+    ///
+    /// The default delegates to [`extract`](Self::extract), so transcript-only
+    /// extractors need not implement it. The pipeline always calls this method.
+    async fn extract_with_state(
+        &self,
+        window: &[TranscriptTurn],
+        state: &State,
+    ) -> Result<Value, LlmError> {
+        let _ = state;
+        self.extract(window).await
+    }
+
+    /// An optional agent to run when this extractor's results land in state —
+    /// the `on_complete(dispatch(agent))` effect. Fired by the pipeline after
+    /// promotion, only when the extractor produced a non-empty object.
+    fn on_complete(&self) -> Option<OnComplete> {
+        None
+    }
+}
+
+/// A downstream agent fired when an extractor's results land in state.
+#[derive(Clone)]
+pub struct OnComplete {
+    /// The agent to run; it reads its inputs from `State`.
+    pub agent: Arc<dyn crate::text::TextAgent>,
+    /// How to run it (`Call` awaits inline; `Dispatch`/`Background` detached).
+    pub mode: crate::orchestration::Mode,
 }
 
 /// LLM-backed turn extractor that sends transcript windows to an OOB LLM

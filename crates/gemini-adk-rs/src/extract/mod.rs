@@ -21,16 +21,23 @@
 //!     .build();
 //! ```
 
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
+use dashmap::DashMap;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use serde_json::Value;
 
-use crate::live::extractor::{ExtractionTrigger, FieldPromotion, TurnExtractor};
+use crate::live::extractor::{ExtractionTrigger, FieldPromotion, OnComplete, TurnExtractor};
 use crate::live::transcript::TranscriptTurn;
 use crate::llm::LlmError;
+use crate::orchestration::Mode as AgentMode;
+use crate::state::State;
+use crate::text::TextAgent;
 
 static MONEY_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\$?\s?(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d{1,2}))?").unwrap());
@@ -253,22 +260,45 @@ impl Recognizer {
     }
 }
 
+/// The async source of a field: inputs (state keys) → value. The seam for a
+/// tool call, an HTTP fetch, or an MCP request.
+type FieldFetchFn =
+    Arc<dyn Fn(Value) -> Pin<Box<dyn Future<Output = Result<Value, String>> + Send>> + Send + Sync>;
+
+/// How a field is filled.
+#[derive(Clone)]
+enum Source {
+    /// Deterministic transcript recognizer (sync, no state).
+    Recognize(Recognizer),
+    /// Async resolver: bind `args` from `State`, fetch, optionally cache.
+    Resolve {
+        /// State keys bound into the args object passed to the fetcher.
+        args: Vec<String>,
+        /// Optional cache time-to-live keyed by `(field, canonical args)`.
+        ttl: Option<Duration>,
+        /// The async fetcher.
+        fetch: FieldFetchFn,
+    },
+}
+
 /// A field in an [`Extract`] record.
 #[derive(Clone)]
 pub struct Field {
     name: String,
-    recognizer: Recognizer,
+    source: Source,
     state_key: String,
     overwrite: bool,
 }
 
-/// A declarative extraction record: typed fields filled by recognizers.
+/// A declarative extraction record: typed fields filled by recognizers and/or
+/// async resolvers.
 #[derive(Clone)]
 pub struct Extract {
     name: String,
     fields: Vec<Field>,
     window: usize,
     trigger: ExtractionTrigger,
+    on_complete: Option<OnComplete>,
 }
 
 impl Extract {
@@ -279,6 +309,7 @@ impl Extract {
             fields: Vec::new(),
             window: 3,
             trigger: ExtractionTrigger::EveryTurn,
+            on_complete: None,
         }
     }
 
@@ -294,6 +325,7 @@ pub struct ExtractBuilder {
     fields: Vec<Field>,
     window: usize,
     trigger: ExtractionTrigger,
+    on_complete: Option<OnComplete>,
 }
 
 impl ExtractBuilder {
@@ -303,7 +335,7 @@ impl ExtractBuilder {
         self.fields.push(Field {
             state_key: name.clone(),
             name,
-            recognizer,
+            source: Source::Recognize(recognizer),
             overwrite: false,
         });
         self
@@ -318,7 +350,41 @@ impl ExtractBuilder {
         self.fields.push(Field {
             name: name.into(),
             state_key: state_key.into(),
-            recognizer,
+            source: Source::Recognize(recognizer),
+            overwrite: false,
+        });
+        self
+    }
+    /// Add a field filled by an **async resolver** — a tool call, HTTP fetch, or
+    /// MCP request. `args` names the `State` keys bound into the JSON object
+    /// passed to `fetch`; the returned value becomes the field. With a `ttl`,
+    /// results are memoized by `(field, canonical args)` for that duration.
+    pub fn field_resolve<I, S, F, Fut>(
+        mut self,
+        name: impl Into<String>,
+        args: I,
+        ttl: Option<Duration>,
+        fetch: F,
+    ) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+        F: Fn(Value) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<Value, String>> + Send + 'static,
+    {
+        let name = name.into();
+        let fetch = Arc::new(fetch);
+        self.fields.push(Field {
+            state_key: name.clone(),
+            name,
+            source: Source::Resolve {
+                args: args.into_iter().map(Into::into).collect(),
+                ttl,
+                fetch: Arc::new(move |a| {
+                    let fetch = fetch.clone();
+                    Box::pin(async move { fetch(a).await })
+                }),
+            },
             overwrite: false,
         });
         self
@@ -333,6 +399,12 @@ impl ExtractBuilder {
         self.trigger = trigger;
         self
     }
+    /// Run `agent` (in `mode`) when this record lands fields in state — the
+    /// `on_complete(dispatch(agent))` effect. Its result lands in `{name}:result`.
+    pub fn on_complete(mut self, agent: Arc<dyn TextAgent>, mode: AgentMode) -> Self {
+        self.on_complete = Some(OnComplete { agent, mode });
+        self
+    }
     /// Finalize the record.
     pub fn build(self) -> Extract {
         Extract {
@@ -340,15 +412,18 @@ impl ExtractBuilder {
             fields: self.fields,
             window: self.window,
             trigger: self.trigger,
+            on_complete: self.on_complete,
         }
     }
 }
 
-/// A [`TurnExtractor`] that runs an [`Extract`] record's recognizers over the
-/// transcript and promotes recognized fields into state.
+/// A [`TurnExtractor`] that runs an [`Extract`] record's recognizers and
+/// resolvers, and promotes the recognized fields into state.
 pub struct RecordExtractor {
     spec: Extract,
     promotions: Vec<FieldPromotion>,
+    /// Per-field resolver cache keyed by `(field, canonical args)`.
+    cache: Arc<DashMap<String, (Value, Instant)>>,
 }
 
 impl RecordExtractor {
@@ -366,7 +441,52 @@ impl RecordExtractor {
                 p.to(&f.state_key)
             })
             .collect();
-        Self { spec, promotions }
+        Self {
+            spec,
+            promotions,
+            cache: Arc::new(DashMap::new()),
+        }
+    }
+
+    /// Resolve one async field, honoring the per-field TTL cache.
+    async fn resolve_field(
+        &self,
+        field: &str,
+        args: &[String],
+        ttl: Option<Duration>,
+        fetch: &FieldFetchFn,
+        state: &State,
+    ) -> Option<Value> {
+        // Bind args from State (skip absent keys).
+        let mut obj = serde_json::Map::new();
+        for key in args {
+            if let Some(v) = state.get::<Value>(key) {
+                obj.insert(key.clone(), v);
+            }
+        }
+        let args_value = Value::Object(obj);
+        let cache_key = format!("{field}|{args_value}");
+        if let Some(ttl) = ttl {
+            if let Some(entry) = self.cache.get(&cache_key) {
+                if entry.1.elapsed() < ttl {
+                    return Some(entry.0.clone());
+                }
+            }
+        }
+        match fetch(args_value).await {
+            Ok(value) => {
+                if ttl.is_some() {
+                    self.cache
+                        .insert(cache_key, (value.clone(), Instant::now()));
+                }
+                Some(value)
+            }
+            Err(_e) => {
+                #[cfg(feature = "tracing-support")]
+                tracing::warn!(field, "resolver failed: {_e}");
+                None
+            }
+        }
     }
 }
 
@@ -388,8 +508,12 @@ impl TurnExtractor for RecordExtractor {
         &self.promotions
     }
 
+    fn on_complete(&self) -> Option<OnComplete> {
+        self.spec.on_complete.clone()
+    }
+
     async fn extract(&self, window: &[TranscriptTurn]) -> Result<Value, LlmError> {
-        // Recognizers read the user's speech across the window.
+        // Recognizer-only path (no State): used by callers that don't bind args.
         let text = window
             .iter()
             .map(|t| t.user.as_str())
@@ -397,9 +521,53 @@ impl TurnExtractor for RecordExtractor {
             .join(" ");
         let mut obj = serde_json::Map::new();
         for field in &self.spec.fields {
-            if let Some((value, _confidence)) = field.recognizer.recognize(&text) {
-                obj.insert(field.name.clone(), value);
+            if let Source::Recognize(rec) = &field.source {
+                if let Some((value, _confidence)) = rec.recognize(&text) {
+                    obj.insert(field.name.clone(), value);
+                }
             }
+        }
+        Ok(Value::Object(obj))
+    }
+
+    async fn extract_with_state(
+        &self,
+        window: &[TranscriptTurn],
+        state: &State,
+    ) -> Result<Value, LlmError> {
+        let text = window
+            .iter()
+            .map(|t| t.user.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let mut obj = serde_json::Map::new();
+        // Sync recognizers over the transcript.
+        for field in &self.spec.fields {
+            if let Source::Recognize(rec) = &field.source {
+                if let Some((value, _confidence)) = rec.recognize(&text) {
+                    obj.insert(field.name.clone(), value);
+                }
+            }
+        }
+        // Async resolvers, bound from State and run concurrently.
+        let resolves = self
+            .spec
+            .fields
+            .iter()
+            .filter_map(|field| match &field.source {
+                Source::Resolve { args, ttl, fetch } => Some(async move {
+                    self.resolve_field(&field.name, args, *ttl, fetch, state)
+                        .await
+                        .map(|v| (field.name.clone(), v))
+                }),
+                Source::Recognize(_) => None,
+            });
+        for resolved in futures::future::join_all(resolves)
+            .await
+            .into_iter()
+            .flatten()
+        {
+            obj.insert(resolved.0, resolved.1);
         }
         Ok(Value::Object(obj))
     }
@@ -519,6 +687,69 @@ mod tests {
         let out = extractor.extract(&window).await.unwrap();
         assert_eq!(out["quantity"], json!(2));
         assert_eq!(out["item"], json!("pizza"));
+    }
+
+    #[tokio::test]
+    async fn record_resolves_async_field_from_state() {
+        let spec = Extract::record("booking")
+            .field("slot", Recognizer::one_of(["morning", "afternoon"]))
+            .field_resolve("availability", ["slot"], None, |args: Value| async move {
+                let slot = args.get("slot").and_then(|v| v.as_str()).unwrap_or("");
+                Ok(serde_json::json!({ "open": slot == "afternoon" }))
+            })
+            .build();
+        let ext = RecordExtractor::new(spec);
+        let state = State::new();
+        state.set("slot", "afternoon");
+        let out = ext
+            .extract_with_state(&[turn("afternoon please")], &state)
+            .await
+            .unwrap();
+        assert_eq!(out["slot"], json!("afternoon"));
+        assert_eq!(out["availability"], json!({ "open": true }));
+    }
+
+    #[tokio::test]
+    async fn resolver_field_caches_within_ttl() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counter = calls.clone();
+        let spec = Extract::record("b")
+            .field_resolve("v", ["k"], Some(Duration::from_secs(60)), move |_args| {
+                let counter = counter.clone();
+                async move {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    Ok(json!("x"))
+                }
+            })
+            .build();
+        let ext = RecordExtractor::new(spec);
+        let state = State::new();
+        state.set("k", 1);
+        let _ = ext.extract_with_state(&[turn("a")], &state).await.unwrap();
+        let _ = ext.extract_with_state(&[turn("a")], &state).await.unwrap();
+        // Identical args within the TTL → fetched once.
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn on_complete_is_exposed() {
+        use crate::error::AgentError;
+        struct A;
+        #[async_trait]
+        impl TextAgent for A {
+            fn name(&self) -> &str {
+                "a"
+            }
+            async fn run(&self, _s: &State) -> Result<String, AgentError> {
+                Ok("done".into())
+            }
+        }
+        let spec = Extract::record("x")
+            .field("q", Recognizer::integer())
+            .on_complete(Arc::new(A), AgentMode::Dispatch)
+            .build();
+        assert!(RecordExtractor::new(spec).on_complete().is_some());
     }
 
     #[tokio::test]

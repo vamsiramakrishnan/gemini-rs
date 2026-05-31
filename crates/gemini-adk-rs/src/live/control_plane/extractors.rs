@@ -42,8 +42,9 @@ pub(in crate::live) async fn run_extractors(
                 return None;
             }
             let ext = extractor.clone();
+            let state = state.clone();
             Some(async move {
-                match ext.extract(&window).await {
+                match ext.extract_with_state(&window, &state).await {
                     Ok(value) => Ok((ext, value)),
                     Err(e) => {
                         #[cfg(feature = "tracing-support")]
@@ -67,6 +68,7 @@ pub(in crate::live) async fn run_extractors(
                     value: value.clone(),
                 });
                 promote_extraction_fields(extractor.as_ref(), &name, &value, state, event_tx);
+                fire_on_complete(extractor.as_ref(), &value, state).await;
                 if let Some(cb) = &callbacks.on_extracted {
                     dispatch_callback!(callbacks.on_extracted_mode, cb(name, value));
                 }
@@ -182,6 +184,29 @@ fn promote_extraction_fields(
     }
 }
 
+/// Fire an extractor's `on_complete` agent after its results land in state.
+async fn fire_on_complete(extractor: &dyn TurnExtractor, value: &Value, state: &State) {
+    // Only fire when the extractor actually produced fields this turn.
+    if value.as_object().map(|o| o.is_empty()).unwrap_or(true) {
+        return;
+    }
+    let Some(oc) = extractor.on_complete() else {
+        return;
+    };
+    let name = extractor.name().to_string();
+    match oc.mode {
+        crate::orchestration::Mode::Call => {
+            let _ = crate::orchestration::call(&name, oc.agent, state).await;
+        }
+        crate::orchestration::Mode::Dispatch | crate::orchestration::Mode::Background => {
+            let state = state.clone();
+            tokio::spawn(async move {
+                let _ = crate::orchestration::call(&name, oc.agent, &state).await;
+            });
+        }
+    }
+}
+
 fn emit_promotion_decision(
     event_tx: &broadcast::Sender<LiveEvent>,
     extractor: &str,
@@ -233,8 +258,9 @@ pub(in crate::live) async fn run_extractors_with_window(
                 return None;
             }
             let ext = extractor.clone();
+            let state = state.clone();
             Some(async move {
-                match ext.extract(&window).await {
+                match ext.extract_with_state(&window, &state).await {
                     Ok(value) => Ok((ext, value)),
                     Err(e) => {
                         #[cfg(feature = "tracing-support")]
@@ -257,6 +283,7 @@ pub(in crate::live) async fn run_extractors_with_window(
                     value: value.clone(),
                 });
                 promote_extraction_fields(extractor.as_ref(), &name, &value, state, event_tx);
+                fire_on_complete(extractor.as_ref(), &value, state).await;
                 if let Some(cb) = &callbacks.on_extracted {
                     dispatch_callback!(callbacks.on_extracted_mode, cb(name, value));
                 }
