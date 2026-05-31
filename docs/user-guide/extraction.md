@@ -63,12 +63,33 @@ clock/calendar normalizer: 12h/24h time → `HH:MM`, relative days, weekdays,
 parts of day, ISO dates). You can also build a record fluently with
 `Extract::record(name).field(..)` instead of the derive.
 
-### Async sources — `Resolver`
+### Async field sources
+
+A field can be filled by an **async resolver** instead of a recognizer —
+arguments bound from `State`, with an optional TTL cache:
+
+```rust,ignore
+let booking = Extract::record("booking")
+    .field("slot", Recognizer::one_of(["morning", "afternoon"]))
+    // args bound from State → fetcher → field; cached 30s by (field, args).
+    .field_resolve("availability", ["slot"], Some(Duration::from_secs(30)), |args| async move {
+        let slot = args.get("slot").and_then(|v| v.as_str()).unwrap_or("");
+        Ok(serde_json::json!({ "open": slot == "afternoon" }))
+    })
+    // run a downstream agent when the record lands fields (result → booking:result):
+    .on_complete(router_agent, AgentMode::Dispatch)
+    .build();
+```
+
+(Closures can't live in attributes, so resolver fields use the builder;
+`#[derive(Extract)]` covers the recognizer fields.)
+
+### Standalone `Resolver`
 
 The async sibling of `Recognizer` is `Resolver`: a named value source whose
 inputs come from `State` and whose result lands under `{name}:result` (or
 `{name}:error`). It generalizes a sub-agent call to **any** async source — a
-tool call, an HTTP fetch, or an MCP request:
+tool call, an HTTP fetch, or an MCP request (see [Orchestration](./orchestration.md)):
 
 ```rust,ignore
 use gemini_adk_rs::Resolver;

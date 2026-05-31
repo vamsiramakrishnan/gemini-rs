@@ -84,8 +84,8 @@ let handle = Live::builder()
 `AgentMode::Call` resolves inline at the turn boundary; `Dispatch`/`Background`
 run detached so a slow agent never blocks speech. The result is written to
 `{step}:result`, so a downstream step reads it with `Guard::resolved(step)` —
-the same convention as a `Resolver` (`call`/`dispatch`/`background`) or a
-deterministic [`Extract`](./extraction.md) field. That shared
+the same convention as a [`Resolver`](./orchestration.md) (`call`/`dispatch`/
+`background`) or a deterministic [`Extract`](./extraction.md) field. That shared
 `State`-result convention is what makes the three lenses compose
 multiplicatively: extraction fills slots, a step's `on_enter` orchestrates a
 sub-agent or fetch, and guards gate on either — all reading the same `State`.

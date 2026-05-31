@@ -33,6 +33,7 @@
 # Composition & Patterns
 
 - [Governed Flows (conversation/tool DAGs)](./user-guide/flow.md)
+- [Agent Orchestration](./user-guide/orchestration.md)
 - [Text Agent Combinators](./user-guide/text-agents.md)
 - [S·C·T·P·M·A Operator Algebra](./user-guide/composition.md)
 - [Middleware & Processors](./user-guide/middleware.md)
