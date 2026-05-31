@@ -208,12 +208,46 @@ impl Recognizer {
                 best.map(|(opt, sim)| (Value::from(opt.clone()), sim as f32))
             }
             Recognizer::YesNo => {
-                const YES: &[&str] = &["yes", "yeah", "yep", "sure", "correct", "confirm", "ok"];
-                const NO: &[&str] = &["no", "nope", "nah", "incorrect", "don't", "do not"];
-                if YES.iter().any(|w| lower.contains(w)) {
-                    Some((Value::Bool(true), 0.9))
-                } else if NO.iter().any(|w| lower.contains(w)) {
+                // Whole-word tokens (keeping apostrophes so "don't" stays intact),
+                // so "incorrect" doesn't match "correct" and "another" doesn't match
+                // "no". Negation is checked first: "not correct"/"don't confirm" → false.
+                const NO: &[&str] = &[
+                    "no",
+                    "nope",
+                    "nah",
+                    "not",
+                    "don't",
+                    "dont",
+                    "doesn't",
+                    "isn't",
+                    "won't",
+                    "never",
+                    "incorrect",
+                    "wrong",
+                    "negative",
+                ];
+                const YES: &[&str] = &[
+                    "yes",
+                    "yeah",
+                    "yep",
+                    "yup",
+                    "sure",
+                    "correct",
+                    "confirm",
+                    "confirmed",
+                    "ok",
+                    "okay",
+                    "right",
+                    "affirmative",
+                ];
+                let tokens: Vec<&str> = lower
+                    .split(|c: char| !(c.is_alphanumeric() || c == '\''))
+                    .filter(|t| !t.is_empty())
+                    .collect();
+                if tokens.iter().any(|t| NO.contains(t)) {
                     Some((Value::Bool(false), 0.9))
+                } else if tokens.iter().any(|t| YES.contains(t)) {
+                    Some((Value::Bool(true), 0.9))
                 } else {
                     None
                 }
@@ -449,18 +483,23 @@ impl RecordExtractor {
     }
 
     /// Resolve one async field, honoring the per-field TTL cache.
+    ///
+    /// Args bind from `fresh` (values recognized in *this* turn, keyed by their
+    /// state key) first, then from session `State` — so a resolver sees a slot
+    /// recognized in the same utterance, not a stale value.
     async fn resolve_field(
         &self,
         field: &str,
         args: &[String],
         ttl: Option<Duration>,
         fetch: &FieldFetchFn,
+        fresh: &serde_json::Map<String, Value>,
         state: &State,
     ) -> Option<Value> {
-        // Bind args from State (skip absent keys).
+        // Bind args, preferring this turn's recognitions (skip absent keys).
         let mut obj = serde_json::Map::new();
         for key in args {
-            if let Some(v) = state.get::<Value>(key) {
+            if let Some(v) = fresh.get(key).cloned().or_else(|| state.get::<Value>(key)) {
                 obj.insert(key.clone(), v);
             }
         }
@@ -541,22 +580,26 @@ impl TurnExtractor for RecordExtractor {
             .collect::<Vec<_>>()
             .join(" ");
         let mut obj = serde_json::Map::new();
-        // Sync recognizers over the transcript.
+        // Sync recognizers over the transcript. `fresh` maps each recognized
+        // field's *state key* to its value, so resolvers can bind args from
+        // values recognized in this same turn (before promotion runs).
+        let mut fresh = serde_json::Map::new();
         for field in &self.spec.fields {
             if let Source::Recognize(rec) = &field.source {
                 if let Some((value, _confidence)) = rec.recognize(&text) {
+                    fresh.insert(field.state_key.clone(), value.clone());
                     obj.insert(field.name.clone(), value);
                 }
             }
         }
-        // Async resolvers, bound from State and run concurrently.
+        // Async resolvers, bound from this turn's recognitions + State.
         let resolves = self
             .spec
             .fields
             .iter()
             .filter_map(|field| match &field.source {
-                Source::Resolve { args, ttl, fetch } => Some(async move {
-                    self.resolve_field(&field.name, args, *ttl, fetch, state)
+                Source::Resolve { args, ttl, fetch } => Some(async {
+                    self.resolve_field(&field.name, args, *ttl, fetch, &fresh, state)
                         .await
                         .map(|v| (field.name.clone(), v))
                 }),
@@ -623,6 +666,40 @@ mod tests {
             json!(false)
         );
         assert!(Recognizer::yes_no().recognize("maybe later").is_none());
+    }
+
+    #[test]
+    fn yes_no_negation_wins_and_is_word_aware() {
+        let r = Recognizer::yes_no();
+        // Negation beats an affirmative substring.
+        assert_eq!(r.recognize("not correct").unwrap().0, json!(false));
+        assert_eq!(r.recognize("don't confirm that").unwrap().0, json!(false));
+        // "incorrect" must not match "correct"; it's a negation.
+        assert_eq!(r.recognize("that's incorrect").unwrap().0, json!(false));
+        // Word-aware: "another" does not contain a standalone "no".
+        assert!(r.recognize("another option").is_none());
+        // Plain affirmation still works.
+        assert_eq!(r.recognize("yes please").unwrap().0, json!(true));
+    }
+
+    #[tokio::test]
+    async fn resolver_binds_args_recognized_this_turn() {
+        // `slot` is recognized this turn (not yet in State); the resolver must
+        // bind it from the same utterance, not see it missing.
+        let spec = Extract::record("booking")
+            .field("slot", Recognizer::one_of(["morning", "afternoon"]))
+            .field_resolve("availability", ["slot"], None, |args: Value| async move {
+                Ok(json!({ "slot_seen": args.get("slot").cloned() }))
+            })
+            .build();
+        let ext = RecordExtractor::new(spec);
+        let state = State::new(); // slot is NOT in State yet
+        let out = ext
+            .extract_with_state(&[turn("afternoon works")], &state)
+            .await
+            .unwrap();
+        assert_eq!(out["slot"], json!("afternoon"));
+        assert_eq!(out["availability"], json!({ "slot_seen": "afternoon" }));
     }
 
     #[test]

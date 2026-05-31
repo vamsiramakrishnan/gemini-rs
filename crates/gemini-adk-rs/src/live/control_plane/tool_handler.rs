@@ -132,9 +132,14 @@ pub(in crate::live) async fn handle_tool_calls(
                                 scheduling: *scheduling,
                             });
                             bg_spawns.push((call.clone(), formatter.clone()));
-                            if let Some(mon) = flow.as_mut() {
-                                mon.observe_tool(&call.name, true, state);
-                            }
+                            // NOTE: a background tool is NOT recorded as flow-ok here.
+                            // Its real outcome (success, `before_tool` veto, failure, or
+                            // cancellation) is only known when the spawned task finishes,
+                            // and that task cannot reach the synchronous `FlowMonitor`.
+                            // Marking it ok now would wrongly latch `done(called_ok(..))`
+                            // and spend `once(..)` for work that may never succeed. Gate
+                            // background-tool steps on their delivered result instead
+                            // (e.g. `done(Guard::resolved(..))` / `captured([..])`).
                         }
                         _ => {
                             // Standard: execute inline, wrapped in middleware hooks.
