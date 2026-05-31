@@ -153,8 +153,11 @@ impl Live {
             builder = builder.middleware(layer);
         }
         if let Some(flow) = self.flow {
-            builder =
-                builder.flow_monitor(gemini_adk_rs::flow::FlowMonitor::new(flow, self.flow_mode));
+            let mut monitor = gemini_adk_rs::flow::FlowMonitor::new(flow, self.flow_mode);
+            for (step, agent, mode) in self.flow_actions {
+                monitor = monitor.on_enter(step, gemini_adk_rs::flow::run(agent, mode));
+            }
+            builder = builder.flow_monitor(monitor);
         }
         builder = builder.tool_advisory(self.tool_advisory);
         if let Some(interval) = self.telemetry_interval {

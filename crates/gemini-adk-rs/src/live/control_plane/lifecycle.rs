@@ -296,6 +296,9 @@ pub(in crate::live) async fn handle_turn_complete(
                 unmet.join(", ")
             )));
         }
+        // Fire on_enter actions for steps that just became active. `Call`
+        // actions resolve inline; `Dispatch`/`Background` run detached.
+        mon.fire_enter_actions(state).await;
     }
 
     // 8. Fire watchers from net state mutations since the cursor.

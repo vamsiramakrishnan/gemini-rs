@@ -133,6 +133,12 @@ pub struct Live {
     // Governed flow (DAG) + its enforcement mode.
     pub(crate) flow: Option<gemini_adk_rs::flow::Flow>,
     pub(crate) flow_mode: gemini_adk_rs::flow::Mode,
+    // Per-step on_enter actions: run an agent in a mode when a step activates.
+    pub(crate) flow_actions: Vec<(
+        String,
+        Arc<dyn gemini_adk_rs::text::TextAgent>,
+        gemini_adk_rs::orchestration::Mode,
+    )>,
 }
 
 impl Live {
@@ -205,6 +211,7 @@ impl Live {
             confirmation_provider: None,
             flow: None,
             flow_mode: gemini_adk_rs::flow::Mode::Enforce,
+            flow_actions: Vec::new(),
         }
     }
 
@@ -222,6 +229,28 @@ impl Live {
     pub fn observe(mut self, flow: gemini_adk_rs::flow::Flow) -> Self {
         self.flow = Some(flow);
         self.flow_mode = gemini_adk_rs::flow::Mode::Observe;
+        self
+    }
+
+    /// Run an agent the first time the named flow step becomes active.
+    ///
+    /// The agent reads its inputs from `State` and its result lands in
+    /// `{step}:result` ([`AgentMode::Call`] resolves inline at the turn boundary;
+    /// [`AgentMode::Dispatch`]/[`AgentMode::Background`] run detached). A
+    /// downstream step can then complete on it via `Guard::resolved(step)`. This
+    /// is how a governed flow drives in-session orchestration. Requires a flow
+    /// (`govern`/`observe`).
+    ///
+    /// [`AgentMode::Call`]: gemini_adk_rs::orchestration::Mode::Call
+    /// [`AgentMode::Dispatch`]: gemini_adk_rs::orchestration::Mode::Dispatch
+    /// [`AgentMode::Background`]: gemini_adk_rs::orchestration::Mode::Background
+    pub fn on_enter(
+        mut self,
+        step: impl Into<String>,
+        agent: Arc<dyn gemini_adk_rs::text::TextAgent>,
+        mode: gemini_adk_rs::orchestration::Mode,
+    ) -> Self {
+        self.flow_actions.push((step.into(), agent, mode));
         self
     }
 

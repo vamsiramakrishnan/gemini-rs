@@ -18,13 +18,15 @@
 //! recompile. The `custom` closure escape hatch is available in code but is not
 //! serializable.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 
+use crate::orchestration::{call, Mode as AgentMode};
 use crate::state::State;
+use crate::text::TextAgent;
 
 /// Evaluation context handed to a [`Guard`]: the session state plus the
 /// current flow marking.
@@ -445,6 +447,57 @@ pub enum Mode {
     Observe,
 }
 
+/// An action fired the first time a step becomes active: run an agent in an
+/// [`AgentMode`]. Built with [`run`]. The result lands in `{name}:result` (the
+/// name defaults to the step id), so a *downstream* step can complete on it via
+/// [`Guard::resolved`] — this is how a flow drives orchestration in-session.
+pub struct StepAction {
+    name: Option<String>,
+    agent: Arc<dyn TextAgent>,
+    mode: AgentMode,
+}
+
+/// Build a step-enter action that runs `agent` in `mode` when the step first
+/// activates. Pair with [`FlowMonitor::on_enter`].
+///
+/// ```ignore
+/// let mon = FlowMonitor::new(flow, Mode::Enforce)
+///     .on_enter("check", run(availability_agent, AgentMode::Dispatch));
+/// ```
+pub fn run(agent: Arc<dyn TextAgent>, mode: AgentMode) -> StepAction {
+    StepAction {
+        name: None,
+        agent,
+        mode,
+    }
+}
+
+impl StepAction {
+    /// Override the result name (defaults to the step id it is attached to).
+    pub fn named(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
+        self
+    }
+
+    /// Run the action. `Call` awaits inline; `Dispatch`/`Background` spawn it
+    /// detached so the turn is never blocked.
+    async fn fire(&self, step_id: &str, state: &State) {
+        let name = self.name.clone().unwrap_or_else(|| step_id.to_string());
+        match self.mode {
+            AgentMode::Call => {
+                let _ = call(&name, self.agent.clone(), state).await;
+            }
+            AgentMode::Dispatch | AgentMode::Background => {
+                let agent = self.agent.clone();
+                let state = state.clone();
+                tokio::spawn(async move {
+                    let _ = call(&name, agent, &state).await;
+                });
+            }
+        }
+    }
+}
+
 /// Observes the session trace, maintains the [`Marking`], answers tool
 /// admissibility, and projects active postures.
 pub struct FlowMonitor {
@@ -452,6 +505,10 @@ pub struct FlowMonitor {
     mode: Mode,
     marking: Marking,
     violations: Vec<Violation>,
+    /// Per-step actions fired the first time the step becomes active.
+    enter_actions: HashMap<String, StepAction>,
+    /// Steps whose `on_enter` action has already fired (fire-once).
+    announced: BTreeSet<String>,
 }
 
 impl FlowMonitor {
@@ -462,6 +519,46 @@ impl FlowMonitor {
             mode,
             marking: Marking::default(),
             violations: Vec::new(),
+            enter_actions: HashMap::new(),
+            announced: BTreeSet::new(),
+        }
+    }
+
+    /// Attach an action fired the first time `step` becomes active (see
+    /// [`run`]). Chainable at construction time.
+    pub fn on_enter(mut self, step: impl Into<String>, action: StepAction) -> Self {
+        self.enter_actions.insert(step.into(), action);
+        self
+    }
+
+    /// Steps that became active since the last call — each reported exactly once
+    /// over the session. Drives [`on_enter`](Self::on_enter) firing.
+    pub fn take_newly_active(&mut self, state: &State) -> Vec<String> {
+        let mut fresh = Vec::new();
+        for s in self.active_steps(state) {
+            if !self.announced.contains(&s.id) {
+                fresh.push(s.id.clone());
+            }
+        }
+        for id in &fresh {
+            self.announced.insert(id.clone());
+        }
+        fresh
+    }
+
+    /// The enter-action registered for a step, if any.
+    pub fn enter_action(&self, step: &str) -> Option<&StepAction> {
+        self.enter_actions.get(step)
+    }
+
+    /// Fire enter-actions for every step that just became active. Convenience
+    /// over [`take_newly_active`](Self::take_newly_active) + [`enter_action`](Self::enter_action);
+    /// call it right after [`on_turn`](Self::on_turn).
+    pub async fn fire_enter_actions(&mut self, state: &State) {
+        for id in self.take_newly_active(state) {
+            if let Some(action) = self.enter_actions.get(&id) {
+                action.fire(&id, state).await;
+            }
         }
     }
 
@@ -977,6 +1074,60 @@ mod tests {
         assert!(m.contains("flowchart TD"));
         assert!(m.contains("verify --> disclose"));
         assert!(m.contains("close([close])")); // terminal shape
+    }
+
+    struct WriteAgent;
+    #[async_trait::async_trait]
+    impl TextAgent for WriteAgent {
+        fn name(&self) -> &str {
+            "writer"
+        }
+        async fn run(&self, _state: &State) -> Result<String, crate::error::AgentError> {
+            Ok("available".to_string())
+        }
+    }
+
+    #[tokio::test]
+    async fn on_enter_fires_once_when_step_activates() {
+        // collect -> check ; `check` runs an agent on enter whose result
+        // (`check:result`) then completes a downstream `book` step.
+        let flow = Flow::new()
+            .step("collect")
+            .done(Guard::is_true("collected"))
+            .step("check")
+            .after("collect")
+            .done(Guard::resolved("check"))
+            .step("book")
+            .after("check")
+            .terminal()
+            .require(["book"])
+            .build()
+            .expect("valid flow");
+
+        let mut mon = FlowMonitor::new(flow, Mode::Enforce)
+            .on_enter("check", run(Arc::new(WriteAgent), AgentMode::Call));
+        let state = State::new();
+
+        // Only `collect` is active at the start.
+        assert_eq!(mon.take_newly_active(&state), vec!["collect".to_string()]);
+        // Re-asking yields nothing — fire-once.
+        assert!(mon.take_newly_active(&state).is_empty());
+
+        // Complete `collect`; `check` becomes active and its on_enter fires.
+        state.set("collected", true);
+        mon.on_turn(&state);
+        mon.fire_enter_actions(&state).await;
+        assert_eq!(
+            state.get::<String>("check:result").as_deref(),
+            Some("available")
+        );
+
+        // The resolved result completes `check`, then terminal `book`.
+        mon.on_turn(&state);
+        assert!(mon.marking().done.contains("check"));
+        assert!(mon.is_complete());
+        // No further newly-active steps to announce.
+        assert!(mon.take_newly_active(&state).is_empty());
     }
 
     #[test]

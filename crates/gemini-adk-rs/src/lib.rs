@@ -76,7 +76,9 @@ pub use credentials::{
 pub use error::{AgentError, AgentResult, ToolError};
 pub use events::{Event, EventActions, EventType, StructuredEvent};
 pub use extract::{Extract, Recognizer, RecordExtractor};
-pub use flow::{Flow, FlowMonitor, Guard, Mode as FlowMode, Verdict, Violation};
+pub use flow::{
+    run as run_on_enter, Flow, FlowMonitor, Guard, Mode as FlowMode, StepAction, Verdict, Violation,
+};
 /// The `#[tool]` attribute macro — turns an `async fn` into a registrable Gemini tool.
 ///
 /// See the [`gemini_adk_macros_rs::tool`] documentation for details.
