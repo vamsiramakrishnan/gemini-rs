@@ -98,20 +98,34 @@ impl Live {
     ///     )
     /// ```
     pub fn with_tools(mut self, composite: crate::compose::tools::ToolComposite) -> Self {
-        let dispatcher = self.dispatcher.get_or_insert_with(ToolDispatcher::new);
+        use crate::compose::tools::ToolResolution;
         for entry in composite.entries {
-            match entry {
-                crate::compose::tools::ToolCompositeEntry::Function(f) => {
-                    dispatcher.register_function(f);
+            match entry.classify() {
+                ToolResolution::Runtime(f) => {
+                    self.dispatcher
+                        .get_or_insert_with(ToolDispatcher::new)
+                        .register_function(f);
                 }
-                crate::compose::tools::ToolCompositeEntry::BuiltIn(tool) => {
-                    // Built-in tools go directly to session config
+                ToolResolution::BuiltIn(tool) => {
                     self.config = self.config.add_tool(tool);
                 }
-                // Placeholder variants — declarative markers resolved at runtime.
-                _ => {
-                    // Agent, Mcp, A2a, Mock, OpenApi, Search, Schema, Transform
-                    // are stored for later resolution by the runtime layer.
+                ToolResolution::Agent {
+                    name,
+                    description,
+                    agent,
+                } => {
+                    // Reuse the deferred agent-tool path so the sub-agent shares
+                    // the session State created at connect time.
+                    self.deferred_agent_tools.push(DeferredAgentTool {
+                        name,
+                        description,
+                        agent,
+                    });
+                }
+                ToolResolution::Deferred(deferred) => {
+                    // MCP / A2A / OpenAPI / Search need an async connection;
+                    // resolve them at connect time (see build_and_connect).
+                    self.deferred_tools.push(deferred);
                 }
             }
         }

@@ -506,22 +506,50 @@ impl AgentBuilder {
     /// Agent::new("assistant").tools(tools)
     /// ```
     pub fn tools(self, composite: ToolComposite) -> Self {
-        use crate::compose::tools::ToolCompositeEntry;
+        use crate::compose::tools::{DeferredTool, ToolResolution};
         let mut inner = self.mutate();
         for entry in composite.entries {
-            match entry {
-                ToolCompositeEntry::Function(f) => {
+            match entry.classify() {
+                ToolResolution::Runtime(f) => {
                     inner
                         .tools
                         .push(ToolEntry::Runtime(Arc::new(ToolFunctionEntry(f))));
                 }
-                ToolCompositeEntry::BuiltIn(t) => {
+                ToolResolution::BuiltIn(t) => {
                     inner.built_in_tools.push(t);
                 }
-                // Placeholder variants — not yet wired into the text agent builder.
-                _ => {
-                    // Agent, Mcp, A2a, Mock, OpenApi, Search, Schema, Transform
-                    // are currently only handled at the Live layer.
+                ToolResolution::Agent {
+                    name,
+                    description,
+                    agent,
+                } => {
+                    // Expose the sub-agent as a callable tool over a fresh State.
+                    let tool = gemini_adk_rs::TextAgentTool::from_arc(
+                        name,
+                        description,
+                        agent,
+                        gemini_adk_rs::State::new(),
+                    );
+                    inner
+                        .tools
+                        .push(ToolEntry::Runtime(Arc::new(ToolFunctionEntry(Arc::new(tool)))));
+                }
+                ToolResolution::Deferred(deferred) => {
+                    // MCP / A2A / OpenAPI / Search require an async connection,
+                    // which the synchronous text-agent `build()` cannot perform.
+                    // These belong on a `Live` session; surface that rather than
+                    // dropping the tool silently.
+                    let kind = match deferred {
+                        DeferredTool::Mcp { .. } => "T::mcp",
+                        DeferredTool::A2a { .. } => "T::a2a",
+                        DeferredTool::OpenApi { .. } => "T::openapi",
+                        DeferredTool::Search { .. } => "T::search",
+                    };
+                    tracing::warn!(
+                        tool = kind,
+                        "ignoring async-resolved tool on a text AgentBuilder: {kind} \
+                         requires a Live session (async connect); attach it via Live::with_tools"
+                    );
                 }
             }
         }

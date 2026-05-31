@@ -114,6 +114,9 @@ pub struct Live {
     pub(crate) tool_execution_modes: HashMap<String, ToolExecutionMode>,
     // Deferred agent tools (resolved at connect time).
     pub(crate) deferred_agent_tools: Vec<DeferredAgentTool>,
+    // Tools requiring async I/O to resolve (MCP/A2A/OpenAPI/Search),
+    // resolved at connect time.
+    pub(crate) deferred_tools: Vec<crate::compose::tools::DeferredTool>,
     // LLMs to warm up at connect time.
     pub(crate) warm_up_llms: Vec<Arc<dyn BaseLlm>>,
     // Control plane configuration.
@@ -198,6 +201,7 @@ impl Live {
             phase_default_prompt_on_enter: false,
             tool_execution_modes: HashMap::new(),
             deferred_agent_tools: Vec::new(),
+            deferred_tools: Vec::new(),
             warm_up_llms: Vec::new(),
             soft_turn_timeout: None,
             steering_mode: SteeringMode::default(),
