@@ -30,6 +30,8 @@ fn booking_flow() -> Flow {
         .done(Guard::resolved("check")) // ← completes on its own on_enter result
         .step("book")
         .after("check")
+        // Ground the model on the known facts so it restates rather than invents.
+        .ground("Party of {party_size} at {slot}; availability: {check:result}.")
         .allow(["book"])
         .done(Guard::called_ok("book"))
         .step("close")
@@ -106,9 +108,17 @@ async fn main() {
     );
     mon.on_turn(&state);
     println!("    check: {:?}", mon.verdict("check", &state));
+    println!(
+        "    provenance(check:result) = {:?}",
+        provenance(&state, "check:result")
+    );
 
     // 3. FLOW — the commit is now admitted (availability resolved); book once.
+    //    The `book` step grounds the model on the known facts (anti-hallucination).
     println!("\n--- Booking commit ---");
+    for line in mon.active_grounds(&state) {
+        println!("    [ground] {line}");
+    }
     match mon.admits_tool("book", &state) {
         Ok(()) => println!("    'book': admitted"),
         Err(e) => println!("    'book': DENIED — {e}"),

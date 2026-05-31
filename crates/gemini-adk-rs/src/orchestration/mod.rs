@@ -71,7 +71,14 @@ pub async fn call(
 ) -> Result<String, AgentError> {
     let result = agent.run(state).await;
     match &result {
-        Ok(r) => state.set(result_key(name), r),
+        Ok(r) => {
+            let key = result_key(name);
+            state.set(
+                format!("state_meta:{key}"),
+                serde_json::json!({ "source": "agent", "resolver": name }),
+            );
+            state.set(key, r);
+        }
         Err(e) => state.set(error_key(name), e.to_string()),
     }
     result
