@@ -24,44 +24,57 @@ pub async fn run_agent(
             .into_response();
     };
 
+    // Build a runnable agent from the registry entry (clone the metadata so we
+    // don't hold a borrow across the await point).
+    let runnable = crate::execution::build_text_agent(agent);
+
     let session_id = req
         .session_id
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-    // Ensure session exists
+    // Ensure session exists.
     if state.sessions.get(&session_id).is_none() {
         state.sessions.create(&req.agent, &req.user_id);
     }
 
-    // Record user message
+    // Snapshot prior session state so the agent sees accumulated context, then
+    // record the user message (mirrors ADK Runner appending the user turn).
+    let prior_state = state.sessions.state(&session_id);
     state.sessions.append_event(
         &session_id,
         serde_json::json!({"role": "user", "content": req.message}),
     );
 
-    // TODO: Execute agent via gemini-adk-rs Runner and collect real events.
-    let response_text = format!(
-        "[{}] (placeholder — wire up gemini_adk_rs::Runner for real execution)",
-        agent.name
-    );
+    // Execute the agent to completion and collect the produced events.
+    let outcome =
+        match crate::execution::run_agent_turn(&runnable, &req.message, &prior_state).await {
+            Ok(outcome) => outcome,
+            Err(e) => {
+                let msg = format!("Agent execution failed: {e}");
+                state.sessions.append_event(
+                    &session_id,
+                    serde_json::json!({"role": "error", "content": &msg}),
+                );
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": msg, "session_id": session_id})),
+                )
+                    .into_response();
+            }
+        };
 
-    let events = vec![AgentEvent {
-        event_type: "text".into(),
-        data: serde_json::json!({"content": &response_text}),
-    }];
-
-    // Record agent response
+    // Record the agent response.
     state.sessions.append_event(
         &session_id,
-        serde_json::json!({"role": "agent", "content": &response_text}),
+        serde_json::json!({"role": "agent", "content": &outcome.response}),
     );
 
     let session_state = state.sessions.state(&session_id);
 
     Json(RunResponse {
         session_id,
-        response: response_text,
-        events,
+        response: outcome.response,
+        events: outcome.events,
         state: session_state,
     })
     .into_response()

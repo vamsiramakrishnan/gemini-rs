@@ -1,6 +1,4 @@
-use std::path::PathBuf;
-
-use gemini_adk_server_rs::{ServerAgentRegistry, ServerState};
+use gemini_adk_server_rs::{run_server, ServeConfig};
 
 /// Configuration for the API server command.
 #[allow(dead_code)]
@@ -25,27 +23,11 @@ pub async fn run(config: ApiConfig) -> Result<(), Box<dyn std::error::Error>> {
 
     dotenvy::dotenv().ok();
 
-    // Discover agents via gemini-adk-server-rs unified registry
-    let dir = PathBuf::from(&config.agent_dir);
-    let mut registry = ServerAgentRegistry::new();
-    let count = registry.discover(&dir);
+    // Delegate discover → build router → bind → serve to the shared helper.
+    let serve_config = ServeConfig::new(std::path::PathBuf::from(&config.agent_dir))
+        .host(config.host)
+        .port(config.port)
+        .require_agents(true);
 
-    if count == 0 {
-        return Err(format!(
-            "No agents found in '{}'. Place an agent.toml or agent.json in the directory.",
-            config.agent_dir
-        )
-        .into());
-    }
-
-    let state = ServerState::new(registry);
-    let app = gemini_adk_server_rs::build_api_router(state);
-
-    let addr = format!("{}:{}", config.host, config.port);
-    tracing::info!("ADK API server listening on http://{addr}");
-
-    let listener = tokio::net::TcpListener::bind(&addr).await?;
-    axum::serve(listener, app).await?;
-
-    Ok(())
+    run_server(serve_config).await
 }
