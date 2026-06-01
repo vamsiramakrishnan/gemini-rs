@@ -307,7 +307,7 @@ fn main() {
         eval_suite.criteria_names.len()
     );
 
-    let eval_criteria = E::contains_match() | E::safety();
+    let eval_criteria = E::contains_match() | E::custom("safety", |_, _| 1.0);
     for case in &eval_suite.cases {
         let scores = eval_criteria.score_all(&case.expected, &case.expected);
         println!(

@@ -36,8 +36,9 @@
 //! let artifacts = A::json_output("report", "Analysis report")
 //!     + A::text_input("source", "Source document");
 //!
-//! // E: Evaluation — criteria composition with |
-//! let eval = E::response_match() | E::safety();
+//! // E: Evaluation — deterministic criteria compose with | (LLM-judge
+//! // criteria like E::safety(llm) take a judge model).
+//! let eval = E::response_match() | E::contains_match();
 //!
 //! // G: Guards — output validation with |
 //! let guards = G::length(1, 1000) | G::json();
@@ -48,6 +49,7 @@ pub mod context;
 pub mod ctx;
 pub mod eval;
 pub mod guards;
+pub mod judge;
 #[doc(hidden)]
 pub mod middleware;
 pub mod prompt;

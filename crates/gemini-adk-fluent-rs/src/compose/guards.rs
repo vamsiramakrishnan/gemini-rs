@@ -14,15 +14,25 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use gemini_adk_rs::error::AgentError;
-use gemini_adk_rs::llm::{LlmRequest, LlmResponse};
+use gemini_adk_rs::llm::{BaseLlm, LlmRequest, LlmResponse};
 use gemini_adk_rs::middleware::Middleware;
+
+use crate::compose::judge::{render_contents, LlmJudge};
 
 /// A guard that validates agent output.
 #[derive(Clone)]
 pub struct GGuard {
     name: &'static str,
-    #[allow(clippy::type_complexity)]
-    checker: Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>,
+    kind: GuardKind,
+}
+
+/// How a guard decides pass/fail.
+#[derive(Clone)]
+enum GuardKind {
+    /// Synchronous predicate over the output text.
+    Sync(#[allow(clippy::type_complexity)] Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>),
+    /// LLM-as-judge over the output (and, for grounding, the input context).
+    Judge(LlmJudge),
 }
 
 impl GGuard {
@@ -32,7 +42,14 @@ impl GGuard {
     ) -> Self {
         Self {
             name,
-            checker: Arc::new(f),
+            kind: GuardKind::Sync(Arc::new(f)),
+        }
+    }
+
+    fn judge(name: &'static str, judge: LlmJudge) -> Self {
+        Self {
+            name,
+            kind: GuardKind::Judge(judge),
         }
     }
 
@@ -41,9 +58,30 @@ impl GGuard {
         self.name
     }
 
-    /// Check the output. Returns `Ok(())` if valid, `Err(reason)` if not.
+    /// Synchronously check the output. LLM-judge guards cannot run on the sync
+    /// path and always return `Ok(())` here — use [`GGuard::check_async`] (the
+    /// guard middleware uses the async path).
     pub fn check(&self, output: &str) -> Result<(), String> {
-        (self.checker)(output)
+        match &self.kind {
+            GuardKind::Sync(f) => f(output),
+            GuardKind::Judge(_) => Ok(()),
+        }
+    }
+
+    /// Check the output, running an LLM judge if this is a judge guard.
+    /// `context` is the model's input history (for grounding/hallucination).
+    pub async fn check_async(&self, output: &str, context: Option<&str>) -> Result<(), String> {
+        match &self.kind {
+            GuardKind::Sync(f) => f(output),
+            GuardKind::Judge(judge) => {
+                let verdict = judge.judge(output, context).await;
+                if verdict.flagged {
+                    Err(verdict.reason)
+                } else {
+                    Ok(())
+                }
+            }
+        }
     }
 }
 
@@ -72,12 +110,25 @@ pub struct GComposite {
 }
 
 impl GComposite {
-    /// Check all guards against the output. Returns all violations.
+    /// Check all guards against the output (sync path; LLM-judge guards are
+    /// skipped — see [`GComposite::check_all_async`]). Returns all violations.
     pub fn check_all(&self, output: &str) -> Vec<String> {
         self.guards
             .iter()
             .filter_map(|g| g.check(output).err())
             .collect()
+    }
+
+    /// Check all guards, running LLM-judge guards against `output` and the
+    /// optional input `context`. Returns all violations as `name: reason`.
+    pub async fn check_all_async(&self, output: &str, context: Option<&str>) -> Vec<String> {
+        let mut violations = Vec::new();
+        for g in &self.guards {
+            if let Err(reason) = g.check_async(output, context).await {
+                violations.push(format!("{}: {}", g.name(), reason));
+            }
+        }
+        violations
     }
 
     /// Number of guards.
@@ -131,10 +182,16 @@ impl Middleware for GuardMiddleware {
 
     async fn after_model(
         &self,
-        _request: &LlmRequest,
+        request: &LlmRequest,
         response: &LlmResponse,
     ) -> Result<Option<LlmResponse>, AgentError> {
-        let violations = self.guards.check_all(&response.text());
+        // Render the input history so grounding/hallucination judges can see
+        // what the response is supposed to be consistent with.
+        let context = render_contents(&request.contents);
+        let violations = self
+            .guards
+            .check_all_async(&response.text(), Some(&context))
+            .await;
         if violations.is_empty() {
             Ok(None)
         } else {
@@ -261,28 +318,49 @@ impl G {
         })
     }
 
-    /// Toxicity detection guard — placeholder for toxicity classification.
-    pub fn toxicity() -> GGuard {
-        GGuard::new("toxicity", |_output| {
-            // Toxicity detection requires an external classifier at runtime.
-            Ok(())
-        })
+    /// Toxicity guard — flags toxic/abusive output using an LLM judge.
+    ///
+    /// Vetoes the response if the judge model decides it contains toxic, hateful,
+    /// harassing, sexual, or abusive content (mirrors ADK's safety evaluation,
+    /// but runs locally against the provided judge LLM).
+    pub fn toxicity(judge: Arc<dyn BaseLlm>) -> GGuard {
+        GGuard::judge(
+            "toxicity",
+            LlmJudge::new(
+                judge,
+                "the RESPONSE contains toxic, hateful, harassing, sexual, or otherwise \
+                 abusive or unsafe content",
+            ),
+        )
     }
 
-    /// Grounding check guard — placeholder for grounding verification.
-    pub fn grounded() -> GGuard {
-        GGuard::new("grounded", |_output| {
-            // Grounding checks require external verification at runtime.
-            Ok(())
-        })
+    /// Grounding guard — flags output not supported by the conversation context.
+    ///
+    /// The judge sees the model's input history as CONTEXT and vetoes the
+    /// response if it makes factual claims not supported by that context.
+    pub fn grounded(judge: Arc<dyn BaseLlm>) -> GGuard {
+        GGuard::judge(
+            "grounded",
+            LlmJudge::new(
+                judge,
+                "the RESPONSE asserts facts that are NOT supported by, or that \
+                 contradict, the provided CONTEXT",
+            )
+            .with_context("CONTEXT"),
+        )
     }
 
-    /// Hallucination detection guard — placeholder for hallucination detection.
-    pub fn hallucination() -> GGuard {
-        GGuard::new("hallucination", |_output| {
-            // Hallucination detection requires external verification at runtime.
-            Ok(())
-        })
+    /// Hallucination guard — flags fabricated/unverifiable claims via an LLM judge.
+    pub fn hallucination(judge: Arc<dyn BaseLlm>) -> GGuard {
+        GGuard::judge(
+            "hallucination",
+            LlmJudge::new(
+                judge,
+                "the RESPONSE contains fabricated, invented, or unverifiable facts \
+                 that are not supported by the CONTEXT",
+            )
+            .with_context("CONTEXT"),
+        )
     }
 
     /// Conditional guard — only applies `inner` when `predicate` returns true.
@@ -296,14 +374,13 @@ impl G {
         })
     }
 
-    /// LLM-as-judge content guard — stores a prompt for later LLM evaluation.
-    pub fn llm_judge(prompt: &str) -> GGuard {
-        let prompt = prompt.to_string();
-        GGuard::new("llm_judge", move |_output| {
-            // LLM judge evaluation happens at runtime with access to the LLM.
-            let _ = &prompt;
-            Ok(())
-        })
+    /// LLM-as-judge content guard.
+    ///
+    /// `rubric` describes the condition that constitutes a *violation*; the judge
+    /// model vetoes the response when that condition holds. Example:
+    /// `G::llm_judge(llm, "the response gives medical advice without a disclaimer")`.
+    pub fn llm_judge(judge: Arc<dyn BaseLlm>, rubric: impl Into<String>) -> GGuard {
+        GGuard::judge("llm_judge", LlmJudge::new(judge, rubric))
     }
 
     /// Named custom judge function guard.
@@ -432,25 +509,82 @@ mod tests {
         assert_eq!(g.name(), "rate_limit");
     }
 
+    // A no-op judge LLM for constructing LLM-backed guards in unit tests
+    // (these tests exercise composition/naming, not the judge call itself).
+    fn judge_llm() -> Arc<dyn BaseLlm> {
+        use gemini_adk_rs::llm::{LlmError, LlmResponse};
+        use gemini_genai_rs::prelude::{Content, Part, Role};
+
+        struct NoopJudge;
+        #[async_trait]
+        impl BaseLlm for NoopJudge {
+            fn model_id(&self) -> &str {
+                "noop-judge"
+            }
+            async fn generate(&self, _req: LlmRequest) -> Result<LlmResponse, LlmError> {
+                Ok(LlmResponse {
+                    content: Content {
+                        role: Some(Role::Model),
+                        parts: vec![Part::Text {
+                            text: r#"{"violation": false, "reason": "ok"}"#.to_string(),
+                        }],
+                    },
+                    finish_reason: Some("STOP".into()),
+                    usage: None,
+                })
+            }
+        }
+        Arc::new(NoopJudge)
+    }
+
     #[test]
     fn toxicity_guard() {
-        let g = G::toxicity();
+        let g = G::toxicity(judge_llm());
+        // Sync path is a no-op for judge guards.
         assert!(g.check("anything").is_ok());
         assert_eq!(g.name(), "toxicity");
     }
 
     #[test]
     fn grounded_guard() {
-        let g = G::grounded();
+        let g = G::grounded(judge_llm());
         assert!(g.check("anything").is_ok());
         assert_eq!(g.name(), "grounded");
     }
 
     #[test]
     fn hallucination_guard() {
-        let g = G::hallucination();
+        let g = G::hallucination(judge_llm());
         assert!(g.check("anything").is_ok());
         assert_eq!(g.name(), "hallucination");
+    }
+
+    #[tokio::test]
+    async fn judge_guard_runs_async() {
+        // A judge that flags everything should produce a violation via check_async.
+        use gemini_adk_rs::llm::{LlmError, LlmResponse};
+        use gemini_genai_rs::prelude::{Content, Part, Role};
+        struct FlagAll;
+        #[async_trait]
+        impl BaseLlm for FlagAll {
+            fn model_id(&self) -> &str {
+                "flag-all"
+            }
+            async fn generate(&self, _req: LlmRequest) -> Result<LlmResponse, LlmError> {
+                Ok(LlmResponse {
+                    content: Content {
+                        role: Some(Role::Model),
+                        parts: vec![Part::Text {
+                            text: r#"{"violation": true, "reason": "bad"}"#.to_string(),
+                        }],
+                    },
+                    finish_reason: Some("STOP".into()),
+                    usage: None,
+                })
+            }
+        }
+        let g = G::toxicity(Arc::new(FlagAll));
+        assert!(g.check_async("hello", None).await.is_err());
     }
 
     #[test]
@@ -466,7 +600,7 @@ mod tests {
 
     #[test]
     fn llm_judge_guard() {
-        let g = G::llm_judge("Is this response helpful?");
+        let g = G::llm_judge(judge_llm(), "the response is unhelpful");
         assert!(g.check("anything").is_ok());
         assert_eq!(g.name(), "llm_judge");
     }
@@ -487,8 +621,9 @@ mod tests {
 
     #[test]
     fn compose_new_guards_with_bitor() {
-        let composite = G::toxicity() | G::grounded() | G::hallucination();
+        let composite = G::toxicity(judge_llm()) | G::grounded(judge_llm()) | G::hallucination(judge_llm());
         assert_eq!(composite.len(), 3);
+        // Sync path skips judge guards, so no violations surface synchronously.
         assert!(composite.check_all("test").is_empty());
     }
 }

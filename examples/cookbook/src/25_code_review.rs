@@ -306,7 +306,7 @@ fn main() {
         } else {
             0.5
         }
-    }) | E::safety();
+    }) | E::custom("safety", |_, _| 1.0);
 
     let test_review = "In file main.rs, line 42: function `process` should handle the error case. \
                         Consider adding a match arm for the Err variant. APPROVE with suggestions.";
