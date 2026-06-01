@@ -14,11 +14,16 @@ pub mod handlers;
 pub mod router;
 pub mod sessions;
 pub mod types;
+pub mod ws;
 
 pub use agents::{AgentEntry, ServerAgentRegistry};
 pub use router::build_api_router;
 pub use sessions::{InMemorySessionStore, SessionStore};
 pub use types::*;
+pub use ws::{
+    handle_ws, AgentSource, AppCategory, AppError, AppInfo, AppRegistry, ClientMessage,
+    ServerMessage, WsSender,
+};
 
 use std::sync::Arc;
 
