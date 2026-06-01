@@ -84,7 +84,9 @@ impl M {
         MiddlewareComposite::new(Arc::new(LatencyMiddleware::new()))
     }
 
-    /// Add timeout middleware (placeholder — records the duration for use by the runtime).
+    /// Bound the agent run to `duration`. The text agent enforces the tightest
+    /// timeout across its middleware chain by wrapping the whole run; on elapse
+    /// it emits `AgentEvent::Timeout` and returns an error.
     pub fn timeout(duration: Duration) -> MiddlewareComposite {
         MiddlewareComposite::new(Arc::new(TimeoutMiddleware {
             name: "timeout".to_string(),
@@ -330,6 +332,10 @@ struct TimeoutMiddleware {
 impl Middleware for TimeoutMiddleware {
     fn name(&self) -> &str {
         &self.name
+    }
+
+    fn timeout(&self) -> Option<Duration> {
+        Some(self.duration)
     }
 }
 

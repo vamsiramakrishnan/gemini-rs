@@ -6,6 +6,58 @@ use std::sync::Arc;
 
 use crate::compose::judge::LlmJudge;
 
+/// Tool-call trajectory match mode (mirrors ADK's `TrajectoryEvaluator`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TrajectoryMatch {
+    /// Perfect match: identical tool calls in identical order, no extras.
+    Exact,
+    /// Every expected call appears, in order, with extras allowed in between.
+    InOrder,
+    /// Every expected call appears, in any order, with extras allowed.
+    AnyOrder,
+}
+
+/// Parse a tool-call trajectory from a string: either a JSON array of names
+/// (`["search","lookup"]`) or objects with a `name` field, or a comma/newline
+/// separated list (`search, lookup`).
+fn parse_tool_seq(s: &str) -> Vec<String> {
+    let t = s.trim();
+    if t.starts_with('[') {
+        if let Ok(v) = serde_json::from_str::<Vec<serde_json::Value>>(t) {
+            return v
+                .iter()
+                .filter_map(|x| {
+                    x.as_str()
+                        .map(str::to_string)
+                        .or_else(|| x.get("name").and_then(|n| n.as_str()).map(str::to_string))
+                })
+                .collect();
+        }
+    }
+    t.split([',', '\n'])
+        .map(|p| p.trim().to_string())
+        .filter(|p| !p.is_empty())
+        .collect()
+}
+
+/// Score a tool trajectory against an expected one: `1.0` on match, else `0.0`.
+fn trajectory_score(actual: &[String], expected: &[String], mode: TrajectoryMatch) -> f64 {
+    let matched = match mode {
+        TrajectoryMatch::Exact => actual == expected,
+        TrajectoryMatch::InOrder => {
+            // expected must be a subsequence of actual, preserving order.
+            let mut iter = actual.iter();
+            expected.iter().all(|e| iter.any(|a| a == e))
+        }
+        TrajectoryMatch::AnyOrder => expected.iter().all(|e| actual.contains(e)),
+    };
+    if matched {
+        1.0
+    } else {
+        0.0
+    }
+}
+
 /// An evaluation criterion applied to agent output.
 #[derive(Clone)]
 pub struct ECriterion {
@@ -257,14 +309,43 @@ impl E {
         )
     }
 
-    /// Trajectory evaluation — placeholder.
-    ///
-    /// ADK's `TrajectoryEvaluator` compares the agent's actual tool-call sequence
-    /// to an expected one (EXACT / IN_ORDER / ANY_ORDER). That needs the tool
-    /// trajectory, which the `(output, expected)` string signature here does not
-    /// carry; bringing this to parity requires a tool-trajectory-aware eval case.
+    /// Tool-trajectory criterion (EXACT match) — mirrors ADK's
+    /// `TrajectoryEvaluator`. Both `output` and `expected` are parsed as tool-call
+    /// sequences (a JSON array of names/objects, or a comma-separated list), so an
+    /// eval harness can score the agent's captured tool calls against an expected
+    /// sequence. Scores `1.0` on an exact match, else `0.0`.
     pub fn trajectory() -> ECriterion {
-        ECriterion::new("trajectory", |_output, _expected| 0.5)
+        ECriterion::new("trajectory", |output, expected| {
+            trajectory_score(
+                &parse_tool_seq(output),
+                &parse_tool_seq(expected),
+                TrajectoryMatch::Exact,
+            )
+        })
+    }
+
+    /// Tool-trajectory criterion requiring the expected calls in order
+    /// (extras allowed in between) — ADK's `IN_ORDER` mode.
+    pub fn trajectory_in_order() -> ECriterion {
+        ECriterion::new("trajectory_in_order", |output, expected| {
+            trajectory_score(
+                &parse_tool_seq(output),
+                &parse_tool_seq(expected),
+                TrajectoryMatch::InOrder,
+            )
+        })
+    }
+
+    /// Tool-trajectory criterion requiring the expected calls in any order
+    /// (extras allowed) — ADK's `ANY_ORDER` mode.
+    pub fn trajectory_any_order() -> ECriterion {
+        ECriterion::new("trajectory_any_order", |output, expected| {
+            trajectory_score(
+                &parse_tool_seq(output),
+                &parse_tool_seq(expected),
+                TrajectoryMatch::AnyOrder,
+            )
+        })
     }
 
     /// Custom evaluation criterion from a scoring function.
@@ -340,6 +421,24 @@ mod tests {
         let c = E::contains_match();
         assert_eq!(c.score("hello world", "world"), 1.0);
         assert_eq!(c.score("hello", "world"), 0.0);
+    }
+
+    #[test]
+    fn trajectory_exact_and_modes() {
+        // Exact: identical sequence (JSON array form).
+        let exact = E::trajectory();
+        assert_eq!(exact.score(r#"["a","b"]"#, r#"["a","b"]"#), 1.0);
+        assert_eq!(exact.score(r#"["a","b","c"]"#, r#"["a","b"]"#), 0.0);
+
+        // In-order: expected is an ordered subsequence (comma form), extras ok.
+        let in_order = E::trajectory_in_order();
+        assert_eq!(in_order.score("a, x, b", "a, b"), 1.0);
+        assert_eq!(in_order.score("b, a", "a, b"), 0.0);
+
+        // Any-order: all expected present, order irrelevant.
+        let any_order = E::trajectory_any_order();
+        assert_eq!(any_order.score("b, x, a", "a, b"), 1.0);
+        assert_eq!(any_order.score("a, x", "a, b"), 0.0);
     }
 
     #[test]

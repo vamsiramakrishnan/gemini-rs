@@ -109,6 +109,13 @@ pub trait Middleware: Send + Sync + 'static {
     async fn transform_request(&self, _request: &mut LlmRequest) -> Result<(), AgentError> {
         Ok(())
     }
+
+    /// Maximum wall-clock duration this middleware imposes on the agent run.
+    /// `None` (the default) means no limit. The agent enforces the *tightest*
+    /// timeout across its middleware chain by bounding the whole run.
+    fn timeout(&self) -> Option<std::time::Duration> {
+        None
+    }
 }
 
 /// Ordered chain of middleware.
@@ -233,6 +240,11 @@ impl MiddlewareChain {
             }
         }
         Ok(None)
+    }
+
+    /// The tightest timeout imposed by any middleware in the chain, if any.
+    pub fn timeout(&self) -> Option<std::time::Duration> {
+        self.layers.iter().filter_map(|m| m.timeout()).min()
     }
 
     /// Whether the chain has no middleware layers.
