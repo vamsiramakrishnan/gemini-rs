@@ -12,11 +12,13 @@
 use std::sync::Arc;
 
 use gemini_adk_rs::llm::BaseLlm;
+use gemini_adk_rs::middleware::{Middleware, MiddlewareChain};
 use gemini_adk_rs::text::{
     FallbackTextAgent, LoopTextAgent, ParallelTextAgent, SequentialTextAgent, TextAgent,
 };
 
 use crate::builder::AgentBuilder;
+use crate::compose::middleware::MiddlewareComposite;
 
 /// A composable workflow node — can be sequenced, fan-out, looped, etc.
 #[derive(Clone, Debug)]
@@ -56,6 +58,11 @@ pub struct Loop {
     pub max: u32,
     /// Optional early-exit predicate evaluated after each iteration.
     pub until: Option<LoopPredicate>,
+    /// Middleware attached to the loop agent (e.g. `M::on_loop` observers).
+    /// Set via [`Loop::middleware`] / [`Composable::middleware`]; construct as
+    /// `Vec::new()` in literals.
+    #[doc(hidden)]
+    pub middleware: Vec<Arc<dyn Middleware>>,
 }
 
 /// Predicate for conditional loop termination.
@@ -95,10 +102,20 @@ impl std::fmt::Debug for Loop {
 }
 
 /// Fallback chain: try each agent in sequence until one succeeds.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Fallback {
     /// Candidate composables tried in order until one succeeds.
     pub candidates: Vec<Composable>,
+    /// Middleware attached to the fallback agent (e.g. `M::on_fallback`).
+    middleware: Vec<Arc<dyn Middleware>>,
+}
+
+impl std::fmt::Debug for Fallback {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Fallback")
+            .field("candidates", &self.candidates)
+            .finish()
+    }
 }
 
 /// Create a conditional loop predicate.
@@ -180,6 +197,7 @@ impl Composable {
             }
 
             Composable::Loop(loop_node) => {
+                let middleware = loop_node.middleware;
                 let body = loop_node.body.compile(llm);
                 let mut loop_agent = LoopTextAgent::new("loop", body, loop_node.max);
 
@@ -197,17 +215,51 @@ impl Composable {
                     });
                 }
 
+                if !middleware.is_empty() {
+                    loop_agent = loop_agent.with_middleware_chain(chain_from(middleware));
+                }
+
                 Arc::new(loop_agent)
             }
 
             Composable::Fallback(fallback) => {
+                let middleware = fallback.middleware;
                 let candidates: Vec<Arc<dyn TextAgent>> = fallback
                     .candidates
                     .into_iter()
                     .map(|c| c.compile(llm.clone()))
                     .collect();
-                Arc::new(FallbackTextAgent::new("fallback", candidates))
+                let mut agent = FallbackTextAgent::new("fallback", candidates);
+                if !middleware.is_empty() {
+                    agent = agent.with_middleware_chain(chain_from(middleware));
+                }
+                Arc::new(agent)
             }
+        }
+    }
+}
+
+/// Build a [`MiddlewareChain`] from an ordered list of middleware layers.
+fn chain_from(layers: Vec<Arc<dyn Middleware>>) -> MiddlewareChain {
+    let mut chain = MiddlewareChain::new();
+    for layer in layers {
+        chain.add(layer);
+    }
+    chain
+}
+
+impl Composable {
+    /// Attach middleware to a `Loop` or `Fallback` node — the place where
+    /// combinator-level observers (`M::on_loop`, `M::on_fallback`) live.
+    ///
+    /// For other node kinds (single agent, pipeline, fan-out) this is a no-op:
+    /// attach `M::` middleware to the agent itself via
+    /// [`AgentBuilder::middleware`](crate::AgentBuilder::middleware) instead.
+    pub fn middleware(self, composite: MiddlewareComposite) -> Self {
+        match self {
+            Composable::Loop(l) => Composable::Loop(l.middleware(composite)),
+            Composable::Fallback(f) => Composable::Fallback(f.middleware(composite)),
+            other => other,
         }
     }
 }
@@ -380,7 +432,17 @@ impl FanOut {
 impl Fallback {
     /// Create a fallback chain from the given candidates.
     pub fn new(candidates: Vec<Composable>) -> Self {
-        Self { candidates }
+        Self {
+            candidates,
+            middleware: Vec::new(),
+        }
+    }
+
+    /// Attach middleware to the fallback agent (e.g. `M::on_fallback(|name| …)`),
+    /// observed when a fallback branch activates.
+    pub fn middleware(mut self, composite: MiddlewareComposite) -> Self {
+        self.middleware.extend(composite.layers);
+        self
     }
 
     fn push_flat(&mut self, candidate: Composable) {
@@ -497,6 +559,7 @@ impl std::ops::Mul<u32> for AgentBuilder {
             body: Box::new(Composable::Agent(self)),
             max: rhs,
             until: None,
+            middleware: Vec::new(),
         })
     }
 }
@@ -510,6 +573,7 @@ impl std::ops::Mul<u32> for Composable {
             body: Box::new(self),
             max: rhs,
             until: None,
+            middleware: Vec::new(),
         })
     }
 }
@@ -523,6 +587,7 @@ impl std::ops::Mul<LoopPredicate> for AgentBuilder {
             body: Box::new(Composable::Agent(self)),
             max: u32::MAX,
             until: Some(rhs),
+            middleware: Vec::new(),
         })
     }
 }
@@ -536,6 +601,7 @@ impl std::ops::Mul<LoopPredicate> for Composable {
             body: Box::new(self),
             max: u32::MAX,
             until: Some(rhs),
+            middleware: Vec::new(),
         })
     }
 }
@@ -598,7 +664,15 @@ impl Loop {
             body: Box::new(Composable::Pipeline(Pipeline::new(Vec::new()))),
             max: 10,
             until: None,
+            middleware: Vec::new(),
         }
+    }
+
+    /// Attach middleware to the loop agent (e.g. `M::on_loop(|i| …)`), observed
+    /// on every iteration.
+    pub fn middleware(mut self, composite: MiddlewareComposite) -> Self {
+        self.middleware.extend(composite.layers);
+        self
     }
 
     /// Set the body composable to loop over.
@@ -867,6 +941,25 @@ mod tests {
             let result = compiled.run(&state).await.unwrap();
             // First agent succeeds, so its result is returned.
             assert_eq!(result, "first");
+        }
+
+        #[tokio::test]
+        async fn on_loop_fires_through_operator() {
+            use crate::compose::M;
+            use std::sync::atomic::{AtomicU32, Ordering};
+
+            let count = Arc::new(AtomicU32::new(0));
+            let c2 = count.clone();
+            // Attach the combinator-level observer to the loop node.
+            let looped = (agent("counter").instruction("tick") * 3)
+                .middleware(M::on_loop(move |_i| {
+                    c2.fetch_add(1, Ordering::SeqCst);
+                }));
+            let compiled = looped.compile(llm());
+            let state = gemini_adk_rs::State::new();
+            compiled.run(&state).await.unwrap();
+            // Three iterations → three LoopIteration events observed.
+            assert_eq!(count.load(Ordering::SeqCst), 3);
         }
 
         #[tokio::test]
