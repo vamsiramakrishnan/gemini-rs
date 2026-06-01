@@ -10,13 +10,17 @@
 //! Used by `gemini-adk-web-rs`, `gemini-adk-api-rs`, and `gemini-adk-cli-rs` — never run directly.
 
 pub mod agents;
+pub mod execution;
 pub mod handlers;
 pub mod router;
+pub mod serve;
 pub mod sessions;
 pub mod types;
 
 pub use agents::{AgentEntry, AgentRegistry};
+pub use execution::{build_text_agent, run_agent_turn, RunOutcome};
 pub use router::build_api_router;
+pub use serve::{run_server, ServeConfig};
 pub use sessions::{InMemorySessionStore, SessionStore};
 pub use types::*;
 
