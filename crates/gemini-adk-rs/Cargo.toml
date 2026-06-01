@@ -47,6 +47,8 @@ metrics = ["dep:metrics"]
 database-sessions = ["dep:sqlx", "sqlx/runtime-tokio-rustls", "sqlx/sqlite"]
 postgres-sessions = ["database-sessions", "sqlx/postgres"]
 vertex-ai-sessions = ["dep:reqwest"]
+# Vertex AI managed code execution (Code Interpreter Extension over REST)
+vertex-ai-code-executor = ["dep:reqwest"]
 # MCP-over-HTTP/SSE transport (stdio transport needs no extra deps)
 mcp-http = ["dep:reqwest"]
 otel = ["gemini-genai-rs/otel", "tracing-support"]
