@@ -171,7 +171,8 @@ pub use session::{VertexAiSessionConfig, VertexAiSessionService};
 
 // New re-exports — Tools
 pub use tools::retrieval::{
-    BaseRetrievalTool, FilesRetrievalTool, RetrievalResult, VertexAiRagRetrievalTool,
+    BaseRetrievalTool, FilesRetrievalTool, RetrievalResult, VertexAiRagConfig,
+    VertexAiRagRetrievalTool,
 };
 pub use tools::{
     BashToolPolicy, DiscoveryEngineSearchTool, Example, ExampleTool, ExecuteBashTool, ExitLoopTool,
