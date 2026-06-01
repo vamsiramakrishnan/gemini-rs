@@ -41,7 +41,7 @@ tokio-test = "0.4"
 [features]
 default = []
 gemini-llm = ["gemini-genai-rs/http", "gemini-genai-rs/generate"]
-gcs-artifacts = []
+gcs-artifacts = ["dep:reqwest"]
 tracing-support = ["dep:tracing", "gemini-genai-rs/tracing-support"]
 metrics = ["dep:metrics"]
 database-sessions = ["dep:sqlx", "sqlx/runtime-tokio-rustls", "sqlx/sqlite"]
