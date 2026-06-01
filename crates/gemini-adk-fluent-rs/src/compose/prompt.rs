@@ -75,7 +75,7 @@ impl PromptSection {
             PromptSectionKind::Guidelines => self.content.clone(),
             PromptSectionKind::Scaffolded => self.content.clone(),
             PromptSectionKind::Versioned => self.content.clone(),
-            PromptSectionKind::Compressed => format!("[compressed] {}", self.content),
+            PromptSectionKind::Compressed => compress_text(&self.content),
             PromptSectionKind::Adaptive => self.content.clone(),
         }
     }
@@ -122,13 +122,46 @@ pub struct PromptComposite {
 
 impl PromptComposite {
     /// Render the full prompt by joining all sections.
+    ///
+    /// If a [`P::compress`](super::P::compress) marker is present, the joined
+    /// prompt is run through [`compress_text`] (the marker itself is dropped),
+    /// deterministically shrinking the prompt before it reaches the model.
     pub fn render(&self) -> String {
-        self.sections
+        let compress = self
+            .sections
             .iter()
+            .any(|s| s.kind == PromptSectionKind::Compressed);
+        let body = self
+            .sections
+            .iter()
+            .filter(|s| s.kind != PromptSectionKind::Compressed)
             .map(|s| s.render())
             .collect::<Vec<_>>()
-            .join("\n\n")
+            .join("\n\n");
+        if compress {
+            compress_text(&body)
+        } else {
+            body
+        }
     }
+}
+
+/// Deterministically compress prompt text to reduce tokens without an LLM:
+/// trims each line, collapses internal whitespace runs to single spaces, drops
+/// blank lines, and removes consecutive duplicate lines.
+pub fn compress_text(s: &str) -> String {
+    let mut out: Vec<String> = Vec::new();
+    for line in s.lines() {
+        let collapsed = line.split_whitespace().collect::<Vec<_>>().join(" ");
+        if collapsed.is_empty() {
+            continue;
+        }
+        if out.last().map(|l| l.as_str()) == Some(collapsed.as_str()) {
+            continue;
+        }
+        out.push(collapsed);
+    }
+    out.join("\n")
 }
 
 impl PromptComposite {
@@ -427,8 +460,10 @@ impl P {
         PromptTransform::Without(names)
     }
 
-    /// Mark prompt for compression. This is a placeholder/marker indicating
-    /// the prompt content should be compressed before sending to the model.
+    /// Add a compression marker to a prompt. When present in a composite, the
+    /// whole rendered prompt is run through [`compress_text`] — trimming lines,
+    /// collapsing whitespace, and dropping blank/duplicate lines — to reduce
+    /// tokens deterministically (no LLM call) before it reaches the model.
     pub fn compress() -> PromptSection {
         PromptSection {
             kind: PromptSectionKind::Compressed,
@@ -693,7 +728,24 @@ mod tests {
     fn compress_renders() {
         let s = P::compress();
         assert_eq!(s.kind, PromptSectionKind::Compressed);
-        assert_eq!(s.render(), "[compressed] ");
+        // The bare marker carries no content, so it renders empty.
+        assert_eq!(s.render(), "");
+    }
+
+    #[test]
+    fn compress_marker_shrinks_composite() {
+        // A composite with redundant whitespace/blank lines + a compress marker.
+        let verbose = P::text("You   are    helpful.")
+            + P::text("You   are    helpful.")
+            + P::text("Be    concise.")
+            + P::compress();
+        let out = verbose.render();
+        // Whitespace collapsed, duplicate line dropped, marker removed.
+        assert_eq!(out, "You are helpful.\nBe concise.");
+
+        // Without the marker, nothing is compressed.
+        let plain = (P::text("a    b") + P::text("c")).render();
+        assert_eq!(plain, "a    b\n\nc");
     }
 
     #[test]
