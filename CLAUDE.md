@@ -456,16 +456,28 @@ This captures the model's full output before interruption truncates it.
 
 ## S.C.T.P.M.A Operator Algebra
 
-Six namespaces for composing agent configuration aspects:
+Eight namespaces for composing agent configuration aspects (S/C/T/P/M/A plus
+`E::` evaluation and `G::` guards):
 
 | Namespace | Operator | Purpose | Key Methods |
 |-----------|----------|---------|-------------|
 | `S::` | `>>` | State transforms | `pick`, `rename`, `merge`, `flatten`, `set`, `defaults`, `drop`, `map`, `is_true`, `eq`, `one_of` |
 | `C::` | `+` | Context engineering | `window`, `user_only`, `model_only`, `head`, `sample`, `truncate`, `exclude_tools`, `prepend`, `append`, `from_state`, `dedup`, `empty`, `filter`, `map` |
-| `T::` | `\|` | Tool composition | `simple`, `function`, `google_search`, `url_context`, `code_execution`, `toolset` |
+| `T::` | `\|` | Tool composition | `simple`, `function`, `google_search`, `url_context`, `code_execution`, `toolset`, `agent`, `mock`, `transform`, `mcp` |
 | `P::` | `+` | Prompt composition | `role`, `task`, `constraint`, `format`, `example`, `text`, `context`, `persona`, `guidelines`, `with_state`, `when`, `context_fn` |
-| `M::` | `\|` | Middleware composition | (reserved) |
+| `M::` | `\|` | Middleware composition | `log`, `latency`, `retry`, `cost`, `cache`, `dedup`, `rate_limit`, `circuit_breaker`, `trace`, `audit`, `metrics`, `validate`, `before_tool`, `after_tool`, `before_model`, `after_model` |
 | `A::` | `+` | Artifact schemas | `output`, `input`, `json_output`, `json_input`, `text_output`, `text_input` |
+| `E::` | `\|` | Evaluation criteria | `exact_match`, `contains_match`, `custom` (LLM-judge criteria — `safety`, `semantic_match`, `hallucination`, `trajectory` — require an async judge; see note) |
+| `G::` | `\|` | Output guards | `pii`, `length`, `regex`, `json`, `budget`, `topic`, `custom`, `llm_judge` |
+
+**Wiring:** `M::` is fully wired into `LlmTextAgent` (model + tool lifecycle
+hooks) and into Live tool-lifecycle hooks. `AgentBuilder::guard(G::…)` installs
+guards as an `after_model` validation layer that vetoes violating responses;
+`AgentBuilder::context(C::…)` installs a `transform_request` layer that rewrites
+conversation history before each model call. The four LLM-judge `E::` criteria
+and the classifier-style `G::` guards (`toxicity`, `grounded`, `hallucination`)
+are still scaffolds — their sync `Fn(&str, …)` signatures cannot host an async
+judge; bringing them to ADK parity needs an async/LLM-aware variant.
 
 Examples:
 

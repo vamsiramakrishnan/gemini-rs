@@ -6,7 +6,7 @@ use crate::protocol::types::GeminiModel;
 use crate::session::AuthError;
 
 use super::url_builders::{build_google_ai_rest_url, build_google_ai_rest_url_no_key};
-use super::{AuthProvider, ServiceEndpoint};
+use super::{AuthProvider, RestAuth, ServiceEndpoint};
 
 // ---------------------------------------------------------------------------
 // Google AI — API key authentication
@@ -37,17 +37,19 @@ impl AuthProvider for GoogleAIAuth {
         )
     }
 
-    fn rest_url(&self, endpoint: ServiceEndpoint, model: Option<&GeminiModel>) -> String {
-        let base = "https://generativelanguage.googleapis.com/v1beta";
-        build_google_ai_rest_url(base, endpoint, model, &self.api_key)
-    }
-
     async fn auth_headers(&self) -> Result<Vec<(String, String)>, AuthError> {
         Ok(vec![]) // API key is in the URL
     }
 
     fn query_params(&self) -> Vec<(String, String)> {
         vec![("key".to_string(), self.api_key.clone())]
+    }
+}
+
+impl RestAuth for GoogleAIAuth {
+    fn rest_url(&self, endpoint: ServiceEndpoint, model: Option<&GeminiModel>) -> String {
+        let base = "https://generativelanguage.googleapis.com/v1beta";
+        build_google_ai_rest_url(base, endpoint, model, &self.api_key)
     }
 }
 
@@ -80,16 +82,18 @@ impl AuthProvider for GoogleAITokenAuth {
         )
     }
 
-    fn rest_url(&self, endpoint: ServiceEndpoint, model: Option<&GeminiModel>) -> String {
-        let base = "https://generativelanguage.googleapis.com/v1beta";
-        // Token auth uses Bearer header, not query param — build URL without key
-        build_google_ai_rest_url_no_key(base, endpoint, model)
-    }
-
     async fn auth_headers(&self) -> Result<Vec<(String, String)>, AuthError> {
         Ok(vec![(
             "Authorization".to_string(),
             format!("Bearer {}", self.access_token),
         )])
+    }
+}
+
+impl RestAuth for GoogleAITokenAuth {
+    fn rest_url(&self, endpoint: ServiceEndpoint, model: Option<&GeminiModel>) -> String {
+        let base = "https://generativelanguage.googleapis.com/v1beta";
+        // Token auth uses Bearer header, not query param — build URL without key
+        build_google_ai_rest_url_no_key(base, endpoint, model)
     }
 }

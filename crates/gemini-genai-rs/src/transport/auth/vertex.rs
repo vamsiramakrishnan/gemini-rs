@@ -8,7 +8,7 @@ use crate::protocol::types::GeminiModel;
 use crate::session::AuthError;
 
 use super::url_builders::build_vertex_rest_url;
-use super::{AuthProvider, ServiceEndpoint};
+use super::{AuthProvider, RestAuth, ServiceEndpoint};
 
 /// How a [`VertexAIAuth`] resolves its Bearer token.
 enum TokenSource {
@@ -93,15 +93,6 @@ impl AuthProvider for VertexAIAuth {
         )
     }
 
-    fn rest_url(&self, endpoint: ServiceEndpoint, model: Option<&GeminiModel>) -> String {
-        let host = if self.location == "global" {
-            "aiplatform.googleapis.com".to_string()
-        } else {
-            format!("{}-aiplatform.googleapis.com", self.location)
-        };
-        build_vertex_rest_url(&host, &self.project, &self.location, endpoint, model)
-    }
-
     async fn auth_headers(&self) -> Result<Vec<(String, String)>, AuthError> {
         let token = match &self.token_source {
             TokenSource::Fixed(m) => m.lock().clone(),
@@ -111,5 +102,16 @@ impl AuthProvider for VertexAIAuth {
             "Authorization".to_string(),
             format!("Bearer {token}"),
         )])
+    }
+}
+
+impl RestAuth for VertexAIAuth {
+    fn rest_url(&self, endpoint: ServiceEndpoint, model: Option<&GeminiModel>) -> String {
+        let host = if self.location == "global" {
+            "aiplatform.googleapis.com".to_string()
+        } else {
+            format!("{}-aiplatform.googleapis.com", self.location)
+        };
+        build_vertex_rest_url(&host, &self.project, &self.location, endpoint, model)
     }
 }
