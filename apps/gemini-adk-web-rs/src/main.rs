@@ -44,7 +44,7 @@ async fn main() {
     };
 
     // Discover agents from working directory for the REST API
-    let mut agent_registry = gemini_adk_server_rs::AgentRegistry::new();
+    let mut agent_registry = gemini_adk_server_rs::ServerAgentRegistry::new();
     let dir = std::env::current_dir().unwrap_or_default();
     agent_registry.discover(&dir);
     let server_state = gemini_adk_server_rs::ServerState::new(agent_registry);

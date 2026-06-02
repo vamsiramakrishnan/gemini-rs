@@ -11,7 +11,7 @@ use gemini_adk_rs::text::{LlmTextAgent, TextAgent};
 use gemini_adk_rs::tool::{ToolDispatcher, ToolFunction, ToolKind};
 use gemini_genai_rs::prelude::{GeminiModel, Modality, Tool, Voice};
 
-use crate::compose::context::ContextPolicy;
+use crate::compose::context::ContextPolicyChain;
 use crate::compose::guards::GComposite;
 use crate::compose::middleware::MiddlewareComposite;
 use crate::compose::tools::ToolComposite;
@@ -506,42 +506,94 @@ impl AgentBuilder {
     /// Agent::new("assistant").tools(tools)
     /// ```
     pub fn tools(self, composite: ToolComposite) -> Self {
-        use crate::compose::tools::ToolCompositeEntry;
+        use crate::compose::tools::{DeferredTool, ToolResolution};
         let mut inner = self.mutate();
         for entry in composite.entries {
-            match entry {
-                ToolCompositeEntry::Function(f) => {
+            match entry.classify() {
+                ToolResolution::Runtime(f) => {
                     inner
                         .tools
                         .push(ToolEntry::Runtime(Arc::new(ToolFunctionEntry(f))));
                 }
-                ToolCompositeEntry::BuiltIn(t) => {
+                ToolResolution::BuiltIn(t) => {
                     inner.built_in_tools.push(t);
                 }
-                // Placeholder variants — not yet wired into the text agent builder.
-                _ => {
-                    // Agent, Mcp, A2a, Mock, OpenApi, Search, Schema, Transform
-                    // are currently only handled at the Live layer.
+                ToolResolution::Agent {
+                    name,
+                    description,
+                    agent,
+                } => {
+                    // Expose the sub-agent as a callable tool over a fresh State.
+                    let tool = gemini_adk_rs::TextAgentTool::from_arc(
+                        name,
+                        description,
+                        agent,
+                        gemini_adk_rs::State::new(),
+                    );
+                    inner
+                        .tools
+                        .push(ToolEntry::Runtime(Arc::new(ToolFunctionEntry(Arc::new(tool)))));
+                }
+                ToolResolution::Deferred(deferred) => {
+                    // MCP / A2A / OpenAPI / Search require an async connection,
+                    // which the synchronous text-agent `build()` cannot perform.
+                    // These belong on a `Live` session; surface that rather than
+                    // dropping the tool silently.
+                    let kind = match deferred {
+                        DeferredTool::Mcp { .. } => "T::mcp",
+                        DeferredTool::A2a { .. } => "T::a2a",
+                        DeferredTool::OpenApi { .. } => "T::openapi",
+                        DeferredTool::Search { .. } => "T::search",
+                    };
+                    tracing::warn!(
+                        tool = kind,
+                        "ignoring async-resolved tool on a text AgentBuilder: {kind} \
+                         requires a Live session (async connect); attach it via Live::with_tools"
+                    );
                 }
             }
         }
         Self::with(inner)
     }
 
-    /// Set a guard composite for output validation.
+    /// Attach output guards. Each model response is validated against every
+    /// guard; if any rejects the output the agent run fails with an
+    /// [`AgentError`](gemini_adk_rs::error::AgentError) listing the violations.
     ///
-    /// Guards are evaluated after each agent response. This stores the guard
-    /// configuration for use at compile time.
-    pub fn guard(self, _guard: GComposite) -> Self {
-        // Guards are declarative metadata — stored for compile-time wiring.
-        // Full enforcement requires runtime integration (Phase 4+).
-        self
+    /// Accepts a single guard or a `|`-composed [`GComposite`]:
+    ///
+    /// ```rust,ignore
+    /// use gemini_adk_fluent_rs::compose::guards::G;
+    /// Agent::new("writer").guard(G::pii() | G::length(1, 2000))
+    /// ```
+    ///
+    /// The guards are installed as an `after_model` middleware layer, so they
+    /// accumulate with `.middleware(...)` and honor copy-on-write.
+    pub fn guard(self, guard: impl Into<GComposite>) -> Self {
+        let mut inner = self.mutate();
+        inner
+            .middleware_layers
+            .push(guard.into().into_middleware());
+        Self::with(inner)
     }
 
-    /// Set a context policy for conversation history management.
-    pub fn context(self, _policy: ContextPolicy) -> Self {
-        // Context policies are declarative — stored for compile-time wiring.
-        self
+    /// Attach a context policy that rewrites conversation history before each
+    /// model call (e.g. windowing, role filtering, tool-result exclusion).
+    ///
+    /// Accepts a single policy or a `+`-composed [`ContextPolicyChain`]:
+    ///
+    /// ```rust,ignore
+    /// use gemini_adk_fluent_rs::compose::context::C;
+    /// Agent::new("chat").context(C::window(10) + C::user_only())
+    /// ```
+    ///
+    /// The policy is installed as a `transform_request` middleware layer.
+    pub fn context(self, policy: impl Into<ContextPolicyChain>) -> Self {
+        let mut inner = self.mutate();
+        inner
+            .middleware_layers
+            .push(policy.into().into_middleware());
+        Self::with(inner)
     }
 
     /// Disallow transfer to peer agents.
@@ -1070,6 +1122,132 @@ mod tests {
             error_count.load(Ordering::SeqCst),
             1,
             "on_error should fire exactly once"
+        );
+    }
+
+    // ── Guard / context wiring tests ──
+
+    /// A mock LLM that echoes a fixed response and records the number of
+    /// `contents` it was asked to generate from (to observe context rewriting).
+    struct RecordingLlm {
+        text: &'static str,
+        seen_len: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl BaseLlm for RecordingLlm {
+        fn model_id(&self) -> &str {
+            "recording-mock"
+        }
+
+        async fn generate(&self, req: LlmRequest) -> Result<LlmResponse, LlmError> {
+            self.seen_len
+                .store(req.contents.len(), std::sync::atomic::Ordering::SeqCst);
+            Ok(LlmResponse {
+                content: Content {
+                    role: Some(Role::Model),
+                    parts: vec![Part::Text {
+                        text: self.text.to_string(),
+                    }],
+                },
+                finish_reason: Some("STOP".into()),
+                usage: None,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn guard_blocks_violating_output() {
+        use crate::compose::guards::G;
+
+        let llm: Arc<dyn BaseLlm> = Arc::new(RecordingLlm {
+            text: "you can reach me at agent@example.com",
+            seen_len: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        });
+
+        let agent = AgentBuilder::new("guarded")
+            .guard(G::pii())
+            .build(llm);
+
+        let state = gemini_adk_rs::State::new();
+        let err = agent.run(&state).await.unwrap_err();
+        assert!(
+            err.to_string().contains("guard violation"),
+            "PII guard should veto the response, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn guard_allows_clean_output() {
+        use crate::compose::guards::G;
+
+        let llm: Arc<dyn BaseLlm> = Arc::new(RecordingLlm {
+            text: "all clean here",
+            seen_len: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        });
+
+        let agent = AgentBuilder::new("guarded")
+            .guard(G::pii() | G::length(1, 1000))
+            .build(llm);
+
+        let state = gemini_adk_rs::State::new();
+        let result = agent.run(&state).await.unwrap();
+        assert_eq!(result, "all clean here");
+    }
+
+    #[tokio::test]
+    async fn context_policy_rewrites_request_history() {
+        use crate::compose::context::C;
+
+        // The agent seeds one user turn; a prepend policy injects a second turn,
+        // so the LLM should see 2 contents — proving transform_request ran.
+        let seen = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let llm: Arc<dyn BaseLlm> = Arc::new(RecordingLlm {
+            text: "ok",
+            seen_len: seen.clone(),
+        });
+
+        let agent = AgentBuilder::new("ctx")
+            .context(C::prepend(Content::user("system preamble")))
+            .build(llm);
+
+        let state = gemini_adk_rs::State::new();
+        state.set("input", "hello");
+        let _ = agent.run(&state).await.unwrap();
+        assert_eq!(
+            seen.load(std::sync::atomic::Ordering::SeqCst),
+            2,
+            "context policy should have prepended a turn before the model call"
+        );
+    }
+
+    #[tokio::test]
+    async fn context_window_trims_history() {
+        use crate::compose::context::C;
+
+        // window(1) keeps only the last turn. We seed a single input turn and
+        // prepend two extra turns, then window down to 1 — the model sees 1.
+        let seen = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let llm: Arc<dyn BaseLlm> = Arc::new(RecordingLlm {
+            text: "ok",
+            seen_len: seen.clone(),
+        });
+
+        let agent = AgentBuilder::new("ctx")
+            .context(
+                C::prepend(Content::user("a"))
+                    + C::prepend(Content::user("b"))
+                    + C::window(1),
+            )
+            .build(llm);
+
+        let state = gemini_adk_rs::State::new();
+        state.set("input", "hello");
+        let _ = agent.run(&state).await.unwrap();
+        assert_eq!(
+            seen.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "window(1) should trim history to the last turn"
         );
     }
 }

@@ -233,7 +233,7 @@ fn main() {
 
     // ── 12. E module: Evaluation ──
     println!("\n--- E Module: Evaluation Criteria ---");
-    let eval = E::response_match() | E::contains_match() | E::safety();
+    let eval = E::response_match() | E::contains_match() | E::custom("safety", |_, _| 1.0);
     let scores = eval.score_all("The answer is 42", "42");
     println!("   Evaluation scores:");
     for (name, score) in &scores {

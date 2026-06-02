@@ -10,4 +10,4 @@ mod vertex_ai_rag;
 
 pub use base::{BaseRetrievalTool, RetrievalResult};
 pub use files::FilesRetrievalTool;
-pub use vertex_ai_rag::VertexAiRagRetrievalTool;
+pub use vertex_ai_rag::{VertexAiRagConfig, VertexAiRagRetrievalTool};

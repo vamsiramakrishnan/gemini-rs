@@ -10,15 +10,24 @@
 //! Used by `gemini-adk-web-rs`, `gemini-adk-api-rs`, and `gemini-adk-cli-rs` — never run directly.
 
 pub mod agents;
+pub mod execution;
 pub mod handlers;
 pub mod router;
+pub mod serve;
 pub mod sessions;
 pub mod types;
+pub mod ws;
 
-pub use agents::{AgentEntry, AgentRegistry};
+pub use agents::{AgentEntry, ServerAgentRegistry};
+pub use execution::{build_text_agent, run_agent_turn, RunOutcome};
 pub use router::build_api_router;
+pub use serve::{run_server, ServeConfig};
 pub use sessions::{InMemorySessionStore, SessionStore};
 pub use types::*;
+pub use ws::{
+    handle_ws, AgentSource, AppCategory, AppError, AppInfo, AppRegistry, ClientMessage,
+    ServerMessage, WsSender,
+};
 
 use std::sync::Arc;
 
@@ -28,7 +37,7 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub struct ServerState {
     /// Registered agents.
-    pub agents: Arc<AgentRegistry>,
+    pub agents: Arc<ServerAgentRegistry>,
     /// Session store (pluggable).
     pub sessions: Arc<dyn SessionStore>,
     /// Artifact store.
@@ -37,7 +46,7 @@ pub struct ServerState {
 
 impl ServerState {
     /// Create with defaults (in-memory sessions and artifacts).
-    pub fn new(agents: AgentRegistry) -> Self {
+    pub fn new(agents: ServerAgentRegistry) -> Self {
         Self {
             agents: Arc::new(agents),
             sessions: Arc::new(InMemorySessionStore::new()),

@@ -66,6 +66,7 @@ pub fn review_loop(author: AgentBuilder, reviewer: AgentBuilder, max_rounds: usi
     Composable::Loop(Loop {
         body: Box::new(inner),
         max: max_rounds as u32,
+        middleware: Vec::new(),
         until: Some(LoopPredicate::new(|state| {
             state
                 .get("approved")
@@ -105,6 +106,7 @@ pub fn review_loop_keyed(
     Composable::Loop(Loop {
         body: Box::new(inner),
         max: max_rounds,
+        middleware: Vec::new(),
         until: Some(LoopPredicate::new(move |state| {
             state
                 .get(&key)
@@ -221,6 +223,7 @@ pub fn conditional(
     let guarded = Composable::Loop(Loop {
         body: Box::new(Composable::Agent(true_branch)),
         max: 1,
+        middleware: Vec::new(),
         until: Some(LoopPredicate::new(move |state| pred_clone(state))),
     });
 
@@ -263,6 +266,7 @@ pub fn supervised(worker: AgentBuilder, supervisor: AgentBuilder, max_rounds: us
     Composable::Loop(Loop {
         body: Box::new(inner),
         max: max_rounds as u32,
+        middleware: Vec::new(),
         until: Some(LoopPredicate::new(|state| {
             state
                 .get("approved")
@@ -298,6 +302,7 @@ pub fn supervised_keyed(
     Composable::Loop(Loop {
         body: Box::new(inner),
         max: max_revisions,
+        middleware: Vec::new(),
         until: Some(LoopPredicate::new(move |state| {
             state.get(&key).and_then(|v| v.as_bool()).unwrap_or(false)
         })),

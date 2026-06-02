@@ -456,16 +456,32 @@ This captures the model's full output before interruption truncates it.
 
 ## S.C.T.P.M.A Operator Algebra
 
-Six namespaces for composing agent configuration aspects:
+Eight namespaces for composing agent configuration aspects (S/C/T/P/M/A plus
+`E::` evaluation and `G::` guards):
 
 | Namespace | Operator | Purpose | Key Methods |
 |-----------|----------|---------|-------------|
 | `S::` | `>>` | State transforms | `pick`, `rename`, `merge`, `flatten`, `set`, `defaults`, `drop`, `map`, `is_true`, `eq`, `one_of` |
 | `C::` | `+` | Context engineering | `window`, `user_only`, `model_only`, `head`, `sample`, `truncate`, `exclude_tools`, `prepend`, `append`, `from_state`, `dedup`, `empty`, `filter`, `map` |
-| `T::` | `\|` | Tool composition | `simple`, `function`, `google_search`, `url_context`, `code_execution`, `toolset` |
+| `T::` | `\|` | Tool composition | `simple`, `function`, `google_search`, `url_context`, `code_execution`, `toolset`, `agent`, `mock`, `transform`, `mcp` |
 | `P::` | `+` | Prompt composition | `role`, `task`, `constraint`, `format`, `example`, `text`, `context`, `persona`, `guidelines`, `with_state`, `when`, `context_fn` |
-| `M::` | `\|` | Middleware composition | (reserved) |
+| `M::` | `\|` | Middleware composition | `log`, `latency`, `retry`, `cost`, `cache`, `dedup`, `rate_limit`, `circuit_breaker`, `trace`, `audit`, `metrics`, `validate`, `before_tool`, `after_tool`, `before_model`, `after_model` |
 | `A::` | `+` | Artifact schemas | `output`, `input`, `json_output`, `json_input`, `text_output`, `text_input` |
+| `E::` | `\|` | Evaluation criteria | deterministic: `exact_match`, `contains_match`, `trajectory`/`trajectory_in_order`/`trajectory_any_order`, `custom`; LLM-judge (take a judge LLM, scored via `score_async`): `safety(llm)`, `semantic_match(llm)`, `hallucination(llm)` |
+| `G::` | `\|` | Output guards | sync: `pii`, `length`, `regex`, `json`, `budget`, `topic`, `custom`; LLM-judge (take a judge LLM): `toxicity(llm)`, `grounded(llm)`, `hallucination(llm)`, `llm_judge(llm, rubric)` |
+
+**Wiring:** `M::` is fully wired into `LlmTextAgent` (model + tool lifecycle
+hooks, plus `M::timeout` run bounding and `on_event` lifecycle/combinator
+events) and into Live tool-lifecycle hooks. `AgentBuilder::guard(G::…)` installs
+guards as an `after_model` validation layer that vetoes violating responses;
+`AgentBuilder::context(C::…)` installs a `transform_request` layer that rewrites
+conversation history before each model call. The LLM-judge `E::`/`G::` criteria
+(`safety`, `semantic_match`, `hallucination`, `toxicity`, `grounded`,
+`llm_judge`) are backed by `compose::judge::LlmJudge`, mirroring ADK's
+`final_response_match_v2` judge+label pattern; the guard middleware feeds them
+the request context for grounding. Combinator-level `on_event` (`M::on_loop` /
+`on_route` / `on_fallback`) requires attaching middleware at the combinator via
+`Composable::middleware(…)` / `Loop::middleware(…)` / `Fallback::middleware(…)`.
 
 Examples:
 

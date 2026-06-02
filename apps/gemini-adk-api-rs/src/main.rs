@@ -9,38 +9,27 @@
 //! ADK_API_PORT=8080 cargo run -p gemini-adk-api-rs
 //! ```
 
-use gemini_adk_server_rs::{AgentRegistry, ServerState};
+use gemini_adk_server_rs::{run_server, ServeConfig};
 
 #[tokio::main]
 async fn main() {
     dotenvy::dotenv().ok();
     init_tracing();
 
-    // Discover agents from working directory
-    let mut registry = AgentRegistry::new();
+    // CLI/env arg parsing stays local to this binary.
     let dir = std::env::current_dir().unwrap_or_default();
-    let count = registry.discover(&dir);
-
-    if count == 0 {
-        tracing::warn!(
-            "No agents discovered in '{}'. Place an agent.json or agent.toml in the working directory.",
-            dir.display()
-        );
-    }
-
-    let state = ServerState::new(registry);
-    let app = gemini_adk_server_rs::build_api_router(state);
-
     let port: u16 = std::env::var("ADK_API_PORT")
         .ok()
         .and_then(|p| p.parse().ok())
         .unwrap_or(8000);
 
-    let addr = format!("0.0.0.0:{port}");
-    tracing::info!("ADK API server listening on http://localhost:{port}");
+    // Delegate discover → build router → bind → serve to the shared helper.
+    let config = ServeConfig::new(dir).host("0.0.0.0").port(port);
 
-    let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    if let Err(e) = run_server(config).await {
+        tracing::error!("Server error: {e}");
+        std::process::exit(1);
+    }
 }
 
 fn init_tracing() {

@@ -101,6 +101,21 @@ pub trait Middleware: Send + Sync + 'static {
     ) -> Result<Option<LlmResponse>, AgentError> {
         Ok(None)
     }
+
+    /// Called with the fully-built request *before* it is sent to the model,
+    /// allowing in-place mutation (e.g. trimming or rewriting conversation
+    /// history). Runs ahead of [`Middleware::before_model`]. This mirrors the
+    /// mutable `before_model_callback` request hook in the ADK Python SDK.
+    async fn transform_request(&self, _request: &mut LlmRequest) -> Result<(), AgentError> {
+        Ok(())
+    }
+
+    /// Maximum wall-clock duration this middleware imposes on the agent run.
+    /// `None` (the default) means no limit. The agent enforces the *tightest*
+    /// timeout across its middleware chain by bounding the whole run.
+    fn timeout(&self) -> Option<std::time::Duration> {
+        None
+    }
 }
 
 /// Ordered chain of middleware.
@@ -189,6 +204,17 @@ impl MiddlewareChain {
         Ok(())
     }
 
+    /// Run all `transform_request` hooks in order, mutating the request in place.
+    pub async fn run_transform_request(
+        &self,
+        request: &mut LlmRequest,
+    ) -> Result<(), AgentError> {
+        for m in &self.layers {
+            m.transform_request(request).await?;
+        }
+        Ok(())
+    }
+
     /// Run all `before_model` hooks in order. Returns the first non-None override response.
     pub async fn run_before_model(
         &self,
@@ -214,6 +240,11 @@ impl MiddlewareChain {
             }
         }
         Ok(None)
+    }
+
+    /// The tightest timeout imposed by any middleware in the chain, if any.
+    pub fn timeout(&self) -> Option<std::time::Duration> {
+        self.layers.iter().filter_map(|m| m.timeout()).min()
     }
 
     /// Whether the chain has no middleware layers.

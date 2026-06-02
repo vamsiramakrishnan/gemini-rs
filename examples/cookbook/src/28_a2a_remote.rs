@@ -5,7 +5,7 @@
 //! Patterns shown:
 //!   1. RemoteAgent: client-side reference to a remote agent
 //!   2. A2AServer: publishing a local agent for remote invocation
-//!   3. AgentRegistry: discovering remote agents
+//!   3. A2aRegistry: discovering remote agents
 //!   4. SkillDeclaration: advertising agent capabilities
 //!   5. T::a2a: using remote agents as tools
 
@@ -82,7 +82,7 @@ fn main() {
     // ── 3. Agent Registry for discovery ──
     println!("\n--- 3. Agent Registry ---\n");
 
-    let registry = AgentRegistry::new("https://registry.agents.example.com");
+    let registry = A2aRegistry::new("https://registry.agents.example.com");
     println!("Registry: {}", registry.base_url());
     println!("  In production, agents register here for discovery");
     println!("  Other agents can query the registry to find capabilities");

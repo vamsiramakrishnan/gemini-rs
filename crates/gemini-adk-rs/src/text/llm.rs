@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use gemini_genai_rs::prelude::{Content, FunctionCall, FunctionResponse, Part, Role};
 
 use super::TextAgent;
+use crate::context::AgentEvent;
 use crate::error::AgentError;
 use crate::llm::{BaseLlm, LlmRequest};
 use crate::middleware::MiddlewareChain;
@@ -161,12 +162,39 @@ impl TextAgent for LlmTextAgent {
 
         let mut contents = vec![Content::user(&input)];
 
-        let result = self.run_inner(&mut contents).await;
+        // Lifecycle event — makes `on_event` (e.g. M::tap) observe agent start.
+        let _ = self
+            .middleware
+            .run_on_event(&AgentEvent::AgentStarted {
+                name: self.name.clone(),
+            })
+            .await;
+
+        // Enforce the tightest middleware timeout (M::timeout) over the whole run.
+        let result = match self.middleware.timeout() {
+            Some(limit) => match tokio::time::timeout(limit, self.run_inner(&mut contents)).await {
+                Ok(r) => r,
+                Err(_) => {
+                    let _ = self.middleware.run_on_event(&AgentEvent::Timeout).await;
+                    Err(AgentError::Other(format!(
+                        "agent '{}' timed out after {:?}",
+                        self.name, limit
+                    )))
+                }
+            },
+            None => self.run_inner(&mut contents).await,
+        };
 
         if let Err(ref e) = result {
             let _ = self.middleware.run_on_error(e).await;
         } else if let Ok(ref text) = result {
             state.set("output", text);
+            let _ = self
+                .middleware
+                .run_on_event(&AgentEvent::AgentCompleted {
+                    name: self.name.clone(),
+                })
+                .await;
         }
 
         result
@@ -177,7 +205,11 @@ impl LlmTextAgent {
     /// Inner execution loop — separated so `on_error` fires exactly once.
     async fn run_inner(&self, contents: &mut Vec<Content>) -> Result<String, AgentError> {
         for _round in 0..MAX_TOOL_ROUNDS {
-            let request = self.build_request(contents.clone());
+            let mut request = self.build_request(contents.clone());
+
+            // transform_request hook — may rewrite the request (e.g. context
+            // policies trimming conversation history) before it is sent.
+            self.middleware.run_transform_request(&mut request).await?;
 
             // before_model hook — may short-circuit with a cached response.
             let response = match self.middleware.run_before_model(&request).await? {
@@ -230,5 +262,96 @@ impl LlmTextAgent {
             "Agent '{}' exceeded max tool rounds ({})",
             self.name, MAX_TOOL_ROUNDS
         )))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::context::AgentEvent;
+    use crate::llm::{LlmError, LlmResponse};
+    use crate::middleware::Middleware;
+    use gemini_genai_rs::prelude::{Content, Part, Role};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
+
+    fn text_response(t: &str) -> LlmResponse {
+        LlmResponse {
+            content: Content {
+                role: Some(Role::Model),
+                parts: vec![Part::Text { text: t.into() }],
+            },
+            finish_reason: Some("STOP".into()),
+            usage: None,
+        }
+    }
+
+    struct SlowLlm;
+    #[async_trait]
+    impl BaseLlm for SlowLlm {
+        fn model_id(&self) -> &str {
+            "slow"
+        }
+        async fn generate(&self, _req: LlmRequest) -> Result<LlmResponse, LlmError> {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            Ok(text_response("done"))
+        }
+    }
+
+    struct FastLlm;
+    #[async_trait]
+    impl BaseLlm for FastLlm {
+        fn model_id(&self) -> &str {
+            "fast"
+        }
+        async fn generate(&self, _req: LlmRequest) -> Result<LlmResponse, LlmError> {
+            Ok(text_response("hi"))
+        }
+    }
+
+    struct ShortTimeout;
+    #[async_trait]
+    impl Middleware for ShortTimeout {
+        fn name(&self) -> &str {
+            "short-timeout"
+        }
+        fn timeout(&self) -> Option<Duration> {
+            Some(Duration::from_millis(20))
+        }
+    }
+
+    struct EventFlag(Arc<AtomicBool>);
+    #[async_trait]
+    impl Middleware for EventFlag {
+        fn name(&self) -> &str {
+            "event-flag"
+        }
+        async fn on_event(&self, event: &AgentEvent) -> Result<(), AgentError> {
+            if matches!(event, AgentEvent::AgentStarted { .. }) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn timeout_aborts_slow_run() {
+        let agent =
+            LlmTextAgent::new("slowpoke", Arc::new(SlowLlm)).add_middleware(Arc::new(ShortTimeout));
+        let state = State::new();
+        state.set("input", "hi");
+        let err = agent.run(&state).await.expect_err("expected timeout");
+        assert!(format!("{err:?}").contains("timed out"), "got: {err:?}");
+    }
+
+    #[tokio::test]
+    async fn on_event_fires_for_agent_lifecycle() {
+        let flag = Arc::new(AtomicBool::new(false));
+        let agent = LlmTextAgent::new("a", Arc::new(FastLlm))
+            .add_middleware(Arc::new(EventFlag(flag.clone())));
+        let state = State::new();
+        state.set("input", "hi");
+        let _ = agent.run(&state).await;
+        assert!(flag.load(Ordering::SeqCst), "on_event(AgentStarted) should fire");
     }
 }

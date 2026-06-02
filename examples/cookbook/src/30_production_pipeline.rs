@@ -314,7 +314,7 @@ async fn main() {
             .filter(|w| output.to_lowercase().contains(*w))
             .count();
         (count as f64 / formal_words.len() as f64).min(1.0)
-    }) | E::safety()
+    }) | E::custom("safety", |_, _| 1.0)
         | E::contains_match();
 
     let eval_suite = E::suite()

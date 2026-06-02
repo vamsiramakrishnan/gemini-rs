@@ -7,14 +7,14 @@ use std::time::{Duration, Instant};
 
 /// Configuration for the token bucket rate limiter.
 #[derive(Debug, Clone)]
-pub struct FlowConfig {
+pub struct BackpressureConfig {
     /// Maximum tokens (bytes) in the bucket.
     pub bucket_capacity: usize,
     /// Refill rate in bytes per second.
     pub refill_rate_bps: usize,
 }
 
-impl Default for FlowConfig {
+impl Default for BackpressureConfig {
     fn default() -> Self {
         // Default: 256 kbps (16kHz × 16-bit PCM)
         Self {
@@ -29,7 +29,7 @@ impl Default for FlowConfig {
 /// Allows bursts up to `bucket_capacity` bytes, then throttles
 /// to `refill_rate_bps` sustained rate.
 pub struct TokenBucket {
-    config: FlowConfig,
+    config: BackpressureConfig,
     /// Current token count.
     tokens: f64,
     /// Last refill timestamp.
@@ -38,7 +38,7 @@ pub struct TokenBucket {
 
 impl TokenBucket {
     /// Create a new token bucket with the given configuration.
-    pub fn new(config: FlowConfig) -> Self {
+    pub fn new(config: BackpressureConfig) -> Self {
         let tokens = config.bucket_capacity as f64;
         Self {
             config,
@@ -105,7 +105,7 @@ mod tests {
 
     #[test]
     fn initial_burst() {
-        let mut bucket = TokenBucket::new(FlowConfig {
+        let mut bucket = TokenBucket::new(BackpressureConfig {
             bucket_capacity: 1000,
             refill_rate_bps: 100,
         });
@@ -118,7 +118,7 @@ mod tests {
 
     #[test]
     fn refill_over_time() {
-        let mut bucket = TokenBucket::new(FlowConfig {
+        let mut bucket = TokenBucket::new(BackpressureConfig {
             bucket_capacity: 1000,
             refill_rate_bps: 1000,
         });
@@ -133,7 +133,7 @@ mod tests {
 
     #[test]
     fn wait_duration_calculation() {
-        let mut bucket = TokenBucket::new(FlowConfig {
+        let mut bucket = TokenBucket::new(BackpressureConfig {
             bucket_capacity: 1000,
             refill_rate_bps: 100,
         });

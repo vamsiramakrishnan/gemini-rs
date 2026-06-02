@@ -4,14 +4,14 @@ pub mod auth;
 pub mod builder;
 pub mod codec;
 pub mod connection;
-pub mod flow;
+pub mod backpressure;
 pub mod ws;
 
 pub use auth::{AuthProvider, GoogleAIAuth, GoogleAITokenAuth, ServiceEndpoint, VertexAIAuth};
 pub use builder::ConnectBuilder;
 pub use codec::{Codec, CodecError, JsonCodec};
 pub use connection::{connect, connect_with};
-pub use flow::{FlowConfig, TokenBucket};
+pub use backpressure::{BackpressureConfig, TokenBucket};
 pub use ws::{MockTransport, MockTransportError, Transport, TungsteniteTransport};
 
 /// Configuration for the transport layer.

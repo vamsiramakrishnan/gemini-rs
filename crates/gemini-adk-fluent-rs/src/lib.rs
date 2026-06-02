@@ -72,7 +72,7 @@ macro_rules! let_clone {
 
 /// Convenience re-exports for common types across all layers.
 pub mod prelude {
-    pub use crate::a2a::{A2AServer, AgentRegistry, RemoteAgent, SkillDeclaration};
+    pub use crate::a2a::{A2AServer, A2aRegistry, RemoteAgent, SkillDeclaration};
     pub use crate::builder::*;
     pub use crate::compose::{Ctx, A, C, E, G, M, P, S, T};
     pub use crate::live::Live;

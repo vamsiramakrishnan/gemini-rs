@@ -53,7 +53,7 @@ fn main() {
     );
 
     // Safety — placeholder that always passes
-    let safety = E::safety();
+    let safety = E::custom("safety", |_, _| 1.0);
     println!("  safety('anything', ''): {}", safety.score("anything", ""));
 
     // Trajectory — placeholder for tool call validation
@@ -64,14 +64,14 @@ fn main() {
     );
 
     // Semantic match — placeholder for LLM-judged similarity
-    let semantic = E::semantic_match();
+    let semantic = E::custom("semantic_match", |_, _| 1.0);
     println!(
         "  semantic_match('output', 'expected'): {}",
         semantic.score("output", "expected")
     );
 
     // Hallucination — placeholder for hallucination detection
-    let hallucination = E::hallucination();
+    let hallucination = E::custom("hallucination", |_, _| 1.0);
     println!(
         "  hallucination('output', 'expected'): {}",
         hallucination.score("output", "expected")
@@ -150,7 +150,7 @@ fn main() {
 
     println!("\n--- Part 3: Composing Criteria ---");
 
-    let composite = E::response_match() | E::contains_match() | E::safety();
+    let composite = E::response_match() | E::contains_match() | E::custom("safety", |_, _| 1.0);
     println!("  Composite has {} criteria", composite.len());
 
     // Score all criteria at once
@@ -182,7 +182,7 @@ fn main() {
         "The sky is Blue",
     ];
 
-    let criteria = E::response_match() | E::contains_match() | E::safety();
+    let criteria = E::response_match() | E::contains_match() | E::custom("safety", |_, _| 1.0);
 
     println!("\n  Running suite:");
     let mut total_scores: Vec<f64> = vec![0.0; criteria.criteria.len()];
@@ -238,9 +238,9 @@ fn main() {
 
     let quality_criteria = E::response_match()
         | E::contains_match()
-        | E::safety()
-        | E::semantic_match()
-        | E::hallucination()
+        | E::custom("safety", |_, _| 1.0)
+        | E::custom("semantic_match", |_, _| 1.0)
+        | E::custom("hallucination", |_, _| 1.0)
         | E::trajectory();
 
     let test_output = "The capital of France is Paris, located along the Seine river.";

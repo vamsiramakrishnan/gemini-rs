@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use gemini_adk_rs::text::TextAgent;
 use gemini_adk_rs::tool::{PolicyTool, SimpleTool, ToolFunction, ToolPolicy};
-use gemini_genai_rs::prelude::Tool;
+use gemini_genai_rs::prelude::{FunctionDeclaration, Tool};
 
 /// A tool composite — one or more tool entries.
 #[derive(Clone)]
@@ -371,9 +371,239 @@ impl T {
     }
 }
 
+// ── Resolution ────────────────────────────────────────────────────────────
+
+/// A tool entry that needs asynchronous I/O (network or subprocess) to resolve,
+/// and is therefore resolved at connect time rather than when the composite is
+/// built. See [`crate::live::Live`] connection methods.
+#[derive(Clone, Debug)]
+pub enum DeferredTool {
+    /// MCP server connection — a stdio command line or an SSE/HTTP URL.
+    Mcp {
+        /// Connection string: an `http(s)://` URL (SSE) or a command line (stdio).
+        params: String,
+    },
+    /// Remote agent-to-agent skill invocation.
+    A2a {
+        /// URL of the remote agent.
+        url: String,
+        /// Skill to invoke on the remote agent.
+        skill: String,
+    },
+    /// OpenAPI spec-driven toolset — one tool per operation in the spec.
+    OpenApi {
+        /// Toolset name.
+        name: String,
+        /// URL of the OpenAPI document.
+        spec_url: String,
+    },
+    /// Search/retrieval tool.
+    Search {
+        /// Tool name.
+        name: String,
+        /// Tool description.
+        description: String,
+    },
+}
+
+/// The concrete outcome of classifying a single [`ToolCompositeEntry`].
+///
+/// This is the *single* exhaustive mapping from the composable tool algebra to
+/// the runtime; both [`crate::builder::AgentBuilder`] and [`crate::live::Live`]
+/// resolve through it, so no entry can be silently dropped.
+pub(crate) enum ToolResolution {
+    /// A runtime-executable tool function (register with a dispatcher).
+    Runtime(Arc<dyn ToolFunction>),
+    /// A built-in / declaration-only Gemini tool (add to the session config).
+    BuiltIn(Tool),
+    /// A text agent to expose as a tool (needs a shared session `State`).
+    Agent {
+        /// Tool name exposed to the model.
+        name: String,
+        /// Tool description exposed to the model.
+        description: String,
+        /// The text agent to invoke.
+        agent: Arc<dyn TextAgent>,
+    },
+    /// A tool that can only be resolved with async I/O at connect time.
+    Deferred(DeferredTool),
+}
+
+impl ToolCompositeEntry {
+    /// Classify this entry into its concrete [`ToolResolution`]. Exhaustive by
+    /// construction — adding a variant forces every consumer to handle it.
+    pub(crate) fn classify(self) -> ToolResolution {
+        match self {
+            ToolCompositeEntry::Function(f) => ToolResolution::Runtime(f),
+            ToolCompositeEntry::BuiltIn(t) => ToolResolution::BuiltIn(t),
+            ToolCompositeEntry::Agent {
+                name,
+                description,
+                agent,
+            } => ToolResolution::Agent {
+                name,
+                description,
+                agent,
+            },
+            ToolCompositeEntry::Mock {
+                name,
+                description,
+                response,
+            } => ToolResolution::Runtime(Arc::new(SimpleTool::new(
+                name,
+                description,
+                None,
+                move |_args| {
+                    let r = response.clone();
+                    async move { Ok(r) }
+                },
+            ))),
+            ToolCompositeEntry::Transform { inner, transformer } => match inner.classify() {
+                ToolResolution::Runtime(f) => {
+                    ToolResolution::Runtime(Arc::new(TransformTool { inner: f, transformer }))
+                }
+                // A transformer only applies to a runtime function; for any other
+                // inner kind the transform is a no-op and the inner resolution
+                // passes through unchanged.
+                other => other,
+            },
+            ToolCompositeEntry::Schema { name, schema } => {
+                // A declaration-only tool: the model is told the function exists
+                // and the application services the call (e.g. via on_tool_call).
+                ToolResolution::BuiltIn(Tool::functions(vec![FunctionDeclaration {
+                    name,
+                    description: String::new(),
+                    parameters: Some(schema),
+                    behavior: None,
+                }]))
+            }
+            ToolCompositeEntry::Mcp { params } => ToolResolution::Deferred(DeferredTool::Mcp { params }),
+            ToolCompositeEntry::A2a { url, skill } => {
+                ToolResolution::Deferred(DeferredTool::A2a { url, skill })
+            }
+            ToolCompositeEntry::OpenApi { name, spec_url } => {
+                ToolResolution::Deferred(DeferredTool::OpenApi { name, spec_url })
+            }
+            ToolCompositeEntry::Search { name, description } => {
+                ToolResolution::Deferred(DeferredTool::Search { name, description })
+            }
+        }
+    }
+}
+
+/// A [`ToolFunction`] that applies an async transformer to another tool's result.
+struct TransformTool {
+    inner: Arc<dyn ToolFunction>,
+    #[allow(clippy::type_complexity)]
+    transformer: Arc<
+        dyn Fn(serde_json::Value) -> Pin<Box<dyn Future<Output = serde_json::Value> + Send>>
+            + Send
+            + Sync,
+    >,
+}
+
+#[async_trait::async_trait]
+impl ToolFunction for TransformTool {
+    fn name(&self) -> &str {
+        self.inner.name()
+    }
+
+    fn description(&self) -> &str {
+        self.inner.description()
+    }
+
+    fn parameters(&self) -> Option<serde_json::Value> {
+        self.inner.parameters()
+    }
+
+    async fn call(
+        &self,
+        args: serde_json::Value,
+    ) -> Result<serde_json::Value, gemini_adk_rs::error::ToolError> {
+        let result = self.inner.call(args).await?;
+        Ok((self.transformer)(result).await)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Classify the single entry of a one-element composite.
+    fn classify_one(c: ToolComposite) -> ToolResolution {
+        c.entries.into_iter().next().unwrap().classify()
+    }
+
+    #[test]
+    fn classify_maps_every_variant() {
+        // Synchronous, runtime-executable.
+        assert!(matches!(
+            classify_one(T::mock("m", "d", serde_json::json!({"ok": true}))),
+            ToolResolution::Runtime(_)
+        ));
+        assert!(matches!(
+            classify_one(T::simple("s", "d", |a| async move { Ok(a) })),
+            ToolResolution::Runtime(_)
+        ));
+        // Built-in / declaration-only.
+        assert!(matches!(
+            classify_one(T::google_search()),
+            ToolResolution::BuiltIn(_)
+        ));
+        assert!(matches!(
+            classify_one(T::schema("s", serde_json::json!({"type": "object"}))),
+            ToolResolution::BuiltIn(_)
+        ));
+        // Async, connect-time.
+        assert!(matches!(
+            classify_one(T::mcp("node ./server.js")),
+            ToolResolution::Deferred(DeferredTool::Mcp { .. })
+        ));
+        assert!(matches!(
+            classify_one(T::a2a("http://x", "skill")),
+            ToolResolution::Deferred(DeferredTool::A2a { .. })
+        ));
+        assert!(matches!(
+            classify_one(T::openapi("o", "http://x/openapi.json")),
+            ToolResolution::Deferred(DeferredTool::OpenApi { .. })
+        ));
+        assert!(matches!(
+            classify_one(T::search("s", "d")),
+            ToolResolution::Deferred(DeferredTool::Search { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn mock_resolves_to_callable_runtime_tool() {
+        let resolution = classify_one(T::mock(
+            "weather",
+            "Mock weather",
+            serde_json::json!({"temp": 22}),
+        ));
+        let ToolResolution::Runtime(tool) = resolution else {
+            panic!("mock should resolve to a runtime tool");
+        };
+        assert_eq!(tool.name(), "weather");
+        let out = tool.call(serde_json::json!({})).await.unwrap();
+        assert_eq!(out, serde_json::json!({"temp": 22}));
+    }
+
+    #[tokio::test]
+    async fn transform_wraps_inner_runtime_result() {
+        let composite = T::transform(
+            T::mock("base", "d", serde_json::json!({"n": 1})),
+            |mut v| async move {
+                v["doubled"] = serde_json::json!(true);
+                v
+            },
+        );
+        let ToolResolution::Runtime(tool) = classify_one(composite) else {
+            panic!("transform over a mock should resolve to a runtime tool");
+        };
+        assert_eq!(tool.name(), "base");
+        let out = tool.call(serde_json::json!({})).await.unwrap();
+        assert_eq!(out, serde_json::json!({"n": 1, "doubled": true}));
+    }
 
     #[test]
     fn google_search_creates_composite() {

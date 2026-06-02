@@ -83,14 +83,6 @@ pub trait AuthProvider: Send + Sync + 'static {
     /// Build the WebSocket URL for the given model.
     fn ws_url(&self, model: &GeminiModel) -> String;
 
-    /// Build a REST API URL for the given service endpoint and model.
-    ///
-    /// Default implementation panics — override when using HTTP client features.
-    fn rest_url(&self, endpoint: ServiceEndpoint, model: Option<&GeminiModel>) -> String {
-        let _ = (endpoint, model);
-        unimplemented!("REST URLs require a concrete auth provider (GoogleAIAuth or VertexAIAuth)")
-    }
-
     /// HTTP headers for the WebSocket upgrade request (e.g., Bearer token).
     async fn auth_headers(&self) -> Result<Vec<(String, String)>, AuthError>;
 
@@ -103,6 +95,17 @@ pub trait AuthProvider: Send + Sync + 'static {
     async fn refresh(&self) -> Result<(), AuthError> {
         Ok(())
     }
+}
+
+/// Auth providers that additionally support REST endpoint URL construction.
+///
+/// Split from [`AuthProvider`] so that Live-only providers are not forced to
+/// implement REST URL building, and so the REST [`Client`](crate::client::Client)
+/// can require it at the type level — replacing the previous runtime
+/// `unimplemented!()` default with a compile-time guarantee.
+pub trait RestAuth: AuthProvider {
+    /// Build a REST API URL for the given service endpoint and model.
+    fn rest_url(&self, endpoint: ServiceEndpoint, model: Option<&GeminiModel>) -> String;
 }
 
 // ---------------------------------------------------------------------------

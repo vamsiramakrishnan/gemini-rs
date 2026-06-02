@@ -95,6 +95,14 @@ impl Live {
             builder = builder.with_state(state);
         }
 
+        // Resolve deferred async tools (MCP connections, etc.).
+        if !self.deferred_tools.is_empty() {
+            let d = dispatcher.get_or_insert_with(gemini_adk_rs::tool::ToolDispatcher::new);
+            for deferred in std::mem::take(&mut self.deferred_tools) {
+                resolve_deferred_tool(deferred, d).await?;
+            }
+        }
+
         // Attach the confirmation provider so `T::confirm(..)` tools are gated.
         if let Some(provider) = self.confirmation_provider {
             dispatcher
@@ -229,6 +237,72 @@ fn gcloud_access_token() -> Result<String, gemini_adk_rs::error::AgentError> {
         ));
     }
     Ok(token)
+}
+
+/// Resolve a single [`DeferredTool`](crate::compose::tools::DeferredTool) into
+/// concrete tool registrations on the dispatcher. Runs at connect time because
+/// these tools require async I/O (a network call or a subprocess handshake).
+async fn resolve_deferred_tool(
+    tool: crate::compose::tools::DeferredTool,
+    dispatcher: &mut gemini_adk_rs::tool::ToolDispatcher,
+) -> Result<(), gemini_adk_rs::error::AgentError> {
+    use crate::compose::tools::DeferredTool;
+    use gemini_adk_rs::error::AgentError;
+    use gemini_adk_rs::tools::mcp::{McpSessionManager, McpTool};
+    use std::sync::Arc;
+
+    match tool {
+        DeferredTool::Mcp { params } => {
+            let manager = Arc::new(McpSessionManager::new(parse_mcp_params(&params)));
+            let infos = manager.list_tools().await.map_err(|e| {
+                AgentError::Config(format!("MCP tool discovery failed for {params:?}: {e}"))
+            })?;
+            for info in infos {
+                dispatcher.register_function(Arc::new(McpTool::new(
+                    info.name,
+                    info.description,
+                    Some(info.input_schema),
+                    manager.clone(),
+                )));
+            }
+            Ok(())
+        }
+        // The following are part of the ADK-parity toolset roadmap; they are
+        // surfaced as explicit connect-time errors rather than silently dropped.
+        DeferredTool::A2a { url, skill } => Err(AgentError::Config(format!(
+            "T::a2a(url={url:?}, skill={skill:?}) is not yet implemented; tracked for ADK parity"
+        ))),
+        DeferredTool::OpenApi { name, spec_url } => Err(AgentError::Config(format!(
+            "T::openapi(name={name:?}, spec_url={spec_url:?}) is not yet implemented; \
+             tracked for ADK parity"
+        ))),
+        DeferredTool::Search { name, .. } => Err(AgentError::Config(format!(
+            "T::search(name={name:?}) is not yet implemented; tracked for ADK parity"
+        ))),
+    }
+}
+
+/// Parse an MCP connection string: an `http(s)://` URL becomes an SSE/HTTP
+/// connection, anything else is treated as a stdio command line.
+fn parse_mcp_params(params: &str) -> gemini_adk_rs::tools::mcp::McpConnectionParams {
+    use gemini_adk_rs::tools::mcp::McpConnectionParams;
+
+    let trimmed = params.trim();
+    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        McpConnectionParams::Sse {
+            url: trimmed.to_string(),
+            headers: None,
+        }
+    } else {
+        let mut parts = trimmed.split_whitespace();
+        let command = parts.next().unwrap_or_default().to_string();
+        let args = parts.map(str::to_string).collect();
+        McpConnectionParams::Stdio {
+            command,
+            args,
+            timeout: Some(std::time::Duration::from_secs(30)),
+        }
+    }
 }
 
 fn uses_audio_output(config: &SessionConfig) -> bool {

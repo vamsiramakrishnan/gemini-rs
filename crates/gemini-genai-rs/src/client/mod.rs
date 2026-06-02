@@ -13,7 +13,7 @@ use crate::protocol::types::{ApiEndpoint, GeminiModel, SessionConfig};
 use crate::session::SessionError;
 use crate::session::SessionHandle;
 use crate::transport::auth::{
-    AuthProvider, GoogleAIAuth, GoogleAITokenAuth, ServiceEndpoint, VertexAIAuth,
+    AuthProvider, GoogleAIAuth, GoogleAITokenAuth, RestAuth, ServiceEndpoint, VertexAIAuth,
 };
 use crate::transport::{connect, TransportConfig};
 
@@ -38,7 +38,7 @@ use crate::transport::{connect, TransportConfig};
 pub struct Client {
     endpoint: ApiEndpoint,
     model: GeminiModel,
-    auth: Arc<dyn AuthProvider>,
+    auth: Arc<dyn RestAuth>,
     #[cfg(feature = "http")]
     http: http::HttpClient,
 }
@@ -48,7 +48,7 @@ impl Client {
     pub fn from_api_key(api_key: impl Into<String>) -> Self {
         let key: String = api_key.into();
         let endpoint = ApiEndpoint::google_ai(key.clone());
-        let auth: Arc<dyn AuthProvider> = Arc::new(GoogleAIAuth::new(key));
+        let auth: Arc<dyn RestAuth> = Arc::new(GoogleAIAuth::new(key));
         Self {
             endpoint,
             model: GeminiModel::default(),
@@ -62,7 +62,7 @@ impl Client {
     pub fn from_access_token(access_token: impl Into<String>) -> Self {
         let token: String = access_token.into();
         let endpoint = ApiEndpoint::google_ai_token(token.clone());
-        let auth: Arc<dyn AuthProvider> = Arc::new(GoogleAITokenAuth::new(token));
+        let auth: Arc<dyn RestAuth> = Arc::new(GoogleAITokenAuth::new(token));
         Self {
             endpoint,
             model: GeminiModel::default(),
@@ -82,7 +82,7 @@ impl Client {
         let loc: String = location.into();
         let tok: String = access_token.into();
         let endpoint = ApiEndpoint::vertex(proj.clone(), loc.clone(), tok.clone());
-        let auth: Arc<dyn AuthProvider> = Arc::new(VertexAIAuth::new(proj, loc, tok));
+        let auth: Arc<dyn RestAuth> = Arc::new(VertexAIAuth::new(proj, loc, tok));
         Self {
             endpoint,
             model: GeminiModel::default(),
@@ -110,7 +110,7 @@ impl Client {
         // Get initial token for the ApiEndpoint (used if .live() is called)
         let initial_token = refresher();
         let endpoint = ApiEndpoint::vertex(proj.clone(), loc.clone(), initial_token);
-        let auth: Arc<dyn AuthProvider> =
+        let auth: Arc<dyn RestAuth> =
             Arc::new(VertexAIAuth::with_token_refresher(proj, loc, refresher));
         Self {
             endpoint,
