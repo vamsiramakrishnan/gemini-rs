@@ -7,18 +7,7 @@ most common audio-quality and deadlock bugs.
 
 ## The Two-Lane Model
 
-```
-  SessionEvent (broadcast)
-         |
-    +----+----+
-    |  Router  |   Zero-work dispatcher — no state access on hot path
-    +--+----+--+
-       |    |
-  +----+    +-------+
-  |                 |
-Fast Lane       Control Lane
-(sync, <1ms)    (async, can block)
-```
+<p align="center"><img src="../assets/diagrams/two-lane-model.svg" alt="The two-lane callback model: fast lane versus control lane" width="720"></p>
 
 The router receives every incoming WebSocket event and dispatches it to the
 appropriate lane. It does zero work itself — no state reads, no allocations.

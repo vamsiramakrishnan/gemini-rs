@@ -247,20 +247,7 @@ let handle = Live::builder()
 
 The audio pipeline for a typical voice agent:
 
-```
-Microphone (PCM16 16kHz)
-    |
-    v
-handle.send_audio(bytes)       --- outbound --->  Gemini Live API
-                                                       |
-                                                  Server-side VAD
-                                                  Model inference
-                                                       |
-on_audio(|data: &Bytes|)       <--- inbound ---   Audio response
-    |                                             (PCM16 24kHz)
-    v
-Speaker / Playback buffer
-```
+<p align="center"><img src="../assets/diagrams/audio-pipeline.svg" alt="Audio pipeline: outbound microphone PCM and inbound model audio" width="760"></p>
 
 Key points:
 
@@ -337,12 +324,7 @@ the model's full intended output before truncation.
 
 A session progresses through these phases:
 
-```
-Disconnected --> Connecting --> SetupSent --> Active --> Disconnected
-                                               |
-                                               +--> GoAway (60s warning)
-                                               +--> Interrupted (barge-in)
-```
+<p align="center"><img src="../assets/diagrams/session-lifecycle.svg" alt="Session lifecycle phases from Disconnected to Active" width="880"></p>
 
 | Phase | Description |
 |-------|-------------|

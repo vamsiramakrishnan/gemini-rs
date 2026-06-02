@@ -9,30 +9,7 @@ with visual diagrams.
 Every model response ends with a `TurnComplete` event from the Gemini Live
 API. This triggers a pipeline on the control lane:
 
-```
-  Gemini API                        Control Lane
-  ─────────                         ────────────
-  Model speaks...
-  Model finishes ─── TurnComplete ──>  1. Reset turn state
-                                       2. Finalize transcript
-                                       3. Snapshot watched keys (before)
-                                       4. Run extractors (filtered by trigger)
-                                       5. Recompute derived state
-                                       6. Build transcript window
-                                       7. Evaluate phase transitions
-                                       7b. Regenerate navigation context
-                                       7c. Run OnPhaseChange extractors (if transitioned)
-                                       8. Fire watchers (before vs after)
-                                       9. Check temporal patterns
-                                      10. Instruction amendment
-                                      11. Instruction template
-                                      12. Send instruction update (deduped)
-                                      13. Send on_enter context
-                                      14. Send turnComplete if prompt_on_enter
-                                      15. Turn boundary hook
-                                      16. User turn-complete callback
-                                      17. Increment turn_count
-```
+<p align="center"><img src="../assets/diagrams/turn-complete-pipeline.svg" alt="The TurnComplete pipeline: 17 ordered steps on the control lane" width="820"></p>
 
 **Key insight**: extractors (step 4) run BEFORE transitions (step 7).
 This means freshly extracted state is available for transition guards.
@@ -53,37 +30,7 @@ Phases using `.navigation()` will include this context in the instruction.
 
 Data flows through the system in one direction per turn cycle:
 
-```
-  ┌─────────────┐    ┌──────────────┐    ┌──────────────┐
-  │ Conversation │    │  Extractors  │    │    State     │
-  │ (transcript) │───>│ (LLM / regex)│───>│  (derived:)  │
-  └─────────────┘    └──────────────┘    └──────┬───────┘
-                                                │
-                     ┌──────────────────────────┘
-                     │
-          ┌──────────▼───────────┐
-          │   Computed Variables  │
-          │  (dependency-sorted)  │
-          └──────────┬───────────┘
-                     │
-       ┌─────────────┼──────────────┐
-       │             │              │
-  ┌────▼────┐  ┌─────▼─────┐  ┌────▼─────────┐
-  │Watchers │  │ Temporal   │  │    Phase      │
-  │ (diffs) │  │ Patterns   │  │ Transitions   │
-  └────┬────┘  └─────┬─────┘  └────┬─────────┘
-       │             │              │
-       └─────────────┴──────────────┘
-                     │
-           ┌─────────▼──────────┐
-           │ Instruction Update  │
-           │ + prompt_on_enter   │
-           └─────────┬──────────┘
-                     │
-             ┌───────▼───────┐
-             │  Model speaks  │
-             └───────────────┘
-```
+<p align="center"><img src="../assets/diagrams/state-flow.svg" alt="State flow from conversation to instruction update" width="760"></p>
 
 ## When Do Transitions Fire?
 
@@ -92,27 +39,7 @@ all extractors have run and computed variables have been recalculated.
 
 ### Timeline of a Typical Turn
 
-```
-Time ─────────────────────────────────────────────────────>
-
-User speaks    Model responds       TurnComplete fires
-   │               │                       │
-   ▼               ▼                       ▼
-┌──────┐    ┌────────────┐    ┌─────────────────────────────────┐
-│ Audio │───>│ Model turn │───>│ Pipeline:                       │
-│ input │    │ (speech)   │    │  4. Extract: "caller_name=Jane" │
-└──────┘    └────────────┘    │  5. Computed: risk_level=low    │
-                              │  7. Transition: greeting→main   │
-                              │ 12. Update instruction          │
-                              │ 14. prompt_on_enter → model     │
-                              └────────────────────────────────┘
-                                                │
-                                     ┌──────────▼──────────┐
-                                     │ Model speaks in new │
-                                     │ phase with updated  │
-                                     │ instruction         │
-                                     └─────────────────────┘
-```
+<p align="center"><img src="../assets/diagrams/turn-timeline.svg" alt="Timeline of a typical turn and the pipeline that fires at TurnComplete" width="840"></p>
 
 ## Transition Guards: What Works, What Doesn't
 
@@ -140,25 +67,7 @@ These wait for real data from the conversation:
 
 Why this breaks:
 
-```
-  Session connects
-       │
-       ▼
-  ┌───────────────────────┐
-  │ greeting phase enters │
-  │ prompt_on_enter fires │
-  │ Model: "Hello!"       │
-  │                       │ TurnComplete
-  │ Guard: true ──────────┼────> Transition fires!
-  └───────────────────────┘     (user hasn't spoken yet)
-       │
-       ▼
-  ┌──────────────────────────────┐
-  │ next_phase enters            │
-  │ enter_prompt: "User said..." │  ← LIE: user said nothing
-  │ Model HALLUCINATES response  │
-  └──────────────────────────────┘
-```
+<p align="center"><img src="../assets/diagrams/unconditional-guard-bug.svg" alt="Why an unconditional transition guard fires before the user has spoken" width="760"></p>
 
 ### Fix: Turn-count guards for greeting phases
 
@@ -191,19 +100,7 @@ Why this breaks:
 This appears in the conversation as the model's own previous speech, giving
 it continuity across the phase boundary.
 
-```
-  Phase A (exiting)              Phase B (entering)
-  ──────────────────             ──────────────────
-
-  Model: "How can I help?"      Instruction updated to Phase B
-                                enter_prompt injected as Content::model():
-                                  "I have the caller's name. I'll verify."
-                                turnComplete:true sent
-                                       │
-                                       ▼
-                                Model sees its "own" previous output
-                                and generates a coherent continuation
-```
+<p align="center"><img src="../assets/diagrams/enter-prompt.svg" alt="How enter_prompt injects a model-role message across a phase boundary" width="800"></p>
 
 ### Pitfall: False context in enter_prompt
 
@@ -363,29 +260,7 @@ Live::builder()
 Fire-and-forget agent execution from callbacks. The agent runs independently
 while the voice conversation continues.
 
-```
-  Voice Session (Live)            Background Agent
-  ────────────────────            ────────────────
-
-  Turn completes
-       │
-  on_turn_complete fires
-       │
-       ├── dispatch agent ──────> Agent runs generate()
-       │   (fire-and-forget)      against flash LLM
-       │                          │
-  Next turn continues             │ Agent reads State
-  (no blocking)                   │ Agent writes State
-       │                          │
-       │                          ▼
-       │                     Agent completes
-       │                     Results in State
-       │                          │
-  Next turn_complete              │
-       │                          │
-  Transition guard checks ◄───────┘
-  state set by agent
-```
+<p align="center"><img src="../assets/diagrams/background-agent-dispatch.svg" alt="Fire-and-forget background agent dispatch alongside the voice session" width="800"></p>
 
 ### Using BackgroundAgentDispatcher
 
@@ -432,46 +307,14 @@ Live::builder()
         .done()
 ```
 
-```
-  Model calls "verify_identity"
-       │
-       ▼
-  TextAgentTool runs
-  (synchronous — model waits)
-       │
-       ├── Agent calls generate() on flash LLM
-       │   Agent reads/writes shared State
-       │   Agent returns result
-       │
-       ▼
-  FunctionResponse sent to model
-  Model continues with result
-```
+<p align="center"><img src="../assets/diagrams/agent-tool-sync.svg" alt="Synchronous agent-as-tool dispatch where the model waits for the result" width="600"></p>
 
 ## Background Tool Execution (Zero Dead Air)
 
 For tools that take seconds (DB queries, API calls, agent pipelines),
 background execution eliminates silence in voice sessions:
 
-```
-  Standard tool                 Background tool
-  ─────────────                 ───────────────
-
-  Model: "Let me check..."     Model: "Let me check..."
-       │                             │
-  ┌────▼────────────┐          ┌─────▼─────────────┐
-  │ Tool executes   │          │ Ack sent: "running"│──> Model receives ack
-  │ (3 seconds)     │          └─────┬─────────────┘    Model keeps talking:
-  │                 │                │                   "While I look that up..."
-  │ Dead air...     │          ┌─────▼─────────────┐
-  │                 │          │ Tool executes      │
-  └────┬────────────┘          │ (in background)    │
-       │                       │ (3 seconds)        │
-  Model gets result            └─────┬─────────────┘
-  Model speaks                       │
-                               Result injected
-                               Model incorporates naturally
-```
+<p align="center"><img src="../assets/diagrams/background-tool-execution.svg" alt="Standard versus background tool execution and the elimination of dead air" width="800"></p>
 
 ### L2 API
 

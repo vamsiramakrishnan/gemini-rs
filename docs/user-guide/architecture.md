@@ -8,23 +8,7 @@ flows through the system, and how to decide which layer to build on.
 The workspace is organized into three crates, each adding a layer of
 abstraction on top of the one below:
 
-```
-+--------------------------------------------------+
-|  gemini-adk-fluent-rs  (L2)  — Fluent DX                |
-|  Live::builder(), operator algebra, composition   |
-+--------------------------------------------------+
-|  gemini-adk-rs  (L1)  — Agent Runtime                   |
-|  LiveSessionBuilder, callbacks, tool dispatch,    |
-|  state, phases, watchers, extractors, telemetry   |
-+--------------------------------------------------+
-|  gemini-genai-rs  (L0)  — Wire Protocol                 |
-|  SessionHandle, SessionConfig, Transport, Codec,  |
-|  AuthProvider, events, commands, VAD, buffers     |
-+--------------------------------------------------+
-|          Gemini Multimodal Live API               |
-|       (WebSocket, full-duplex audio/text)         |
-+--------------------------------------------------+
-```
+<p align="center"><img src="../assets/diagrams/architecture-stack-full.svg" alt="Four-layer stack from L2 fluent DX down to the Gemini Multimodal Live API" width="780"></p>
 
 ### L0: gemini-genai-rs
 
@@ -78,42 +62,7 @@ What it provides:
 
 Here is how data moves through the system during a live session:
 
-```
-  Client App                    gemini-genai-rs                   Gemini API
-  ----------                    --------------                   ----------
-
-  Microphone
-      |
-      v
-  [PCM16 16kHz] --send_audio()--> SessionHandle --WebSocket--> Gemini Live
-                                       |                          |
-                                  SessionCommand                  |
-                                  (mpsc channel)                  |
-                                       |                          |
-                                  Transport::send()               |
-                                       |                          v
-                                       |                    Model processes
-                                       |                    audio/text/tools
-                                       |                          |
-                                  Transport::recv()               |
-                                       |                          |
-                                  Codec::decode()                 |
-                                       |                          |
-                                  SessionEvent          <--- WebSocket frames
-                                  (broadcast channel)
-                                       |
-                              +--------+--------+
-                              |        |        |
-                          Fast Lane  Ctrl Lane  Telemetry Lane
-                              |        |        |
-                          on_audio  on_tool  SessionSignals
-                          on_text   phases   SessionTelemetry
-                          on_vad    extract
-                              |        |
-                              v        v
-                          Speaker   State
-                          Display   Updates
-```
+<p align="center"><img src="../assets/diagrams/data-flow.svg" alt="Data flow from microphone through gemini-genai-rs to the Gemini API and back into the three lanes" width="860"></p>
 
 **Outbound path**: Your app calls `send_audio()` / `send_text()` on the
 `LiveHandle` (L1/L2) or `SessionHandle` (L0). These become `SessionCommand`
