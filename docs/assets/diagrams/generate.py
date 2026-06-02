@@ -507,8 +507,46 @@ def d_turn_flow(fname):
     write(fname, svg(W, H, "".join(body)))
 
 
-def d_three_lane(fname, title_from_l0=True):
-    W, H = 820, 470
+def d_three_lane(fname, detailed=False):
+    W = 820
+    if not detailed:
+        lanes = [
+            ("fast", "Fast Lane", "sync · <1 ms", [
+                "on_audio", "on_text", "on_vad_*",
+                "on_input_transcript", "on_output_transcript"]),
+            ("control", "Control Lane", "async · can block", [
+                "on_tool_call", "on_interrupted", "Phase transitions",
+                "Extractors (concurrent)", "Watchers · Computed state",
+                "Temporal patterns", "TranscriptBuffer (owned)"]),
+            ("tele", "Telemetry Lane", "own broadcast rx", [
+                "SessionSignals (State)", "SessionTelemetry (AtomicU64)",
+                "on_usage callback", "Debounced 100 ms flush"]),
+        ]
+    else:
+        lanes = [
+            ("fast", "Fast Lane", "sync · <1 ms", [
+                "on_audio", "on_text", "on_thought",
+                "on_vad_*", "on_input_transcript"]),
+            ("control", "Control Lane", "async · can block", [
+                "on_tool_call", "on_interrupted", "Phase transitions",
+                "Extractors (concurrent)", "Watchers · Computed state",
+                "Temporal patterns", "TranscriptBuffer (owned)",
+                "GenerationComplete extractors", "Soft turn detection",
+                "Steering (context injection)", "Tool advisory signaling",
+                "Conversation repair", "Session persistence"]),
+            ("tele", "Telemetry Lane", "own broadcast rx", [
+                "SessionSignals (State)", "SessionTelemetry (AtomicU64)",
+                "Usage(UsageInfo)", "GenerationComplete",
+                "SessionResumeUpdate(ResumeInfo)", "Debounced 100 ms flush"]),
+        ]
+    n = 3
+    lw = 244
+    gap = (W - 52 - n * lw) / (n - 1)
+    xs = [26 + i * (lw + gap) for i in range(n)]
+    ly = 210
+    max_items = max(len(items) for *_, items in lanes)
+    lh = 78 + max_items * 22 + 12
+    H = ly + lh + 26
     body = []
     body.append(box(W / 2 - 175, 24, 350, 44, kind="l0", fs=14,
                     lines=["SessionEvent  (broadcast from L0)"]))
@@ -517,24 +555,6 @@ def d_three_lane(fname, title_from_l0=True):
     body.append(arrow(W / 2, 68, W / 2, 98, marker="arrowd"))
     body.append(caption(W / 2 + 150, 125, "no state access on hot path",
                         fs=10.5, anchor="start"))
-    lanes = [
-        ("fast", "Fast Lane", "sync · <1 ms", [
-            "on_audio", "on_text", "on_vad_*",
-            "on_input_transcript", "on_output_transcript"]),
-        ("control", "Control Lane", "async · can block", [
-            "on_tool_call", "on_interrupted", "Phase transitions",
-            "Extractors (concurrent)", "Watchers · Computed state",
-            "Temporal patterns", "TranscriptBuffer (owned)"]),
-        ("tele", "Telemetry Lane", "own broadcast rx", [
-            "SessionSignals (State)", "SessionTelemetry (AtomicU64)",
-            "on_usage callback", "Debounced 100 ms flush"]),
-    ]
-    n = 3
-    lw = 240
-    gap = (W - 52 - n * lw) / (n - 1)
-    xs = [26 + i * (lw + gap) for i in range(n)]
-    ly = 210
-    lh = 230
     for (kind, name, sub, items), x in zip(lanes, xs):
         fill, stroke, tcol = PAL[kind]
         body.append(elbow([(W / 2, 150), (W / 2, 182),
@@ -947,6 +967,8 @@ def main():
     d_telemetry_pipeline("telemetry-pipeline.svg")
     d_turn_flow("turn-flow.svg")
     d_three_lane("three-lane-processor.svg")
+    # CLAUDE.md / GEMINI.md (detailed control + telemetry lanes)
+    d_three_lane("three-lane-processor-full.svg", detailed=True)
     # architecture.md
     d_architecture_stack("architecture-stack-full.svg", with_api=True)
     d_data_flow("data-flow.svg")
