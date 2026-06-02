@@ -4,25 +4,7 @@
 
 Three-crate layered stack for the Gemini Multimodal Live API:
 
-```
-                    +--------------------------+
-                    |    gemini-adk-fluent-rs (L2)     |  Fluent DX, operator algebra, composition
-                    |  AgentBuilder, Live, S/C  |
-                    |  /T/P/M/A, Composable     |
-                    +-----------+--------------+
-                                |
-                    +-----------+--------------+
-                    |      gemini-adk-rs (L1)          |  Agent runtime, tools, state, phases
-                    |  LiveSessionBuilder,      |
-                    |  State, TextAgent, Phase  |
-                    +-----------+--------------+
-                                |
-                    +-----------+--------------+
-                    |      gemini-genai-rs (L0)        |  Wire protocol, transport, auth, types
-                    |  SessionHandle, Content,  |
-                    |  Transport, Codec, VAD    |
-                    +--------------------------+
-```
+<p align="center"><img src="docs/assets/diagrams/architecture-stack.svg" alt="Three-crate layered stack: L2 fluent DX over L1 runtime over L0 wire protocol" width="760"></p>
 
 Plus `apps/gemini-adk-web-rs` (Axum Web UI), `apps/gemini-adk-api-rs` (REST API server), `examples/agents`, `examples/voice-chat`, `examples/tool-calling`, `examples/transcription`, `examples/text-chat`, and `tools/gemini-adk-transpiler-rs`.
 
@@ -587,32 +569,7 @@ let artifacts = A::json_output("report", "Analysis report")
 
 ## Three-Lane Processor Architecture
 
-```
-  SessionEvent (broadcast)
-         |
-    +----+----+
-    |  Router  |   Zero-work dispatcher, NO state access on hot path
-    +--+----+--+
-       |    |
-  +----+    +----+
-  |              |
-Fast Lane    Control Lane              Telemetry Lane
-(sync <1ms)  (async, can block)        (own broadcast rx)
-- on_audio   - on_tool_call            - SessionSignals (AtomicU64)
-- on_text    - on_interrupted           - SessionTelemetry (atomic counters)
-- on_thought - Phase transitions        - Debounced 100ms flush
-- on_vad_*   - Extractors (concurrent)  - Usage(UsageInfo)
-- on_input_  - Watchers                 - GenerationComplete
-  transcript - Computed state           - SessionResumeUpdate(ResumeInfo)
-             - Temporal patterns
-             - TranscriptBuffer (owned, no mutex)
-             - GenerationComplete extractors
-             - Soft turn detection
-             - Steering (context injection)
-             - Tool advisory signaling
-             - Conversation repair (nudge/escalate)
-             - Session persistence (fire-and-forget)
-```
+<p align="center"><img src="docs/assets/diagrams/three-lane-processor-full.svg" alt="Three-lane processor: fast, control, and telemetry lanes" width="820"></p>
 
 ## Development Commands
 

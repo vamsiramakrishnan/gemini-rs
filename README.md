@@ -95,29 +95,7 @@ handle.send_text("Hello").await?;
 
 ## Architecture
 
-```
-+----------------------------------------------------------------------+
-|  gemini-adk-fluent-rs  (L2 -- Fluent DX)                                    |
-|                                                                      |
-|  Live::builder()  .  AgentBuilder  .  S.C.T.P.M.A operators         |
-|  PhaseBuilder  .  WatchBuilder  .  Temporal patterns                 |
-|  .govern(flow)  .  .extract_record(..)  .  .on_enter(..)            |
-+----------------------------------------------------------------------+
-|  gemini-adk-rs  (L1 -- Agent Runtime)                                       |
-|                                                                      |
-|  LiveSessionBuilder  .  LiveHandle  .  Three-lane processor          |
-|  State (prefix-scoped)  .  PhaseMachine  .  ToolDispatcher           |
-|  Governed Agents:  Flow  .  Extract/Recognizer  .  Resolver         |
-|  TextAgent combinators  .  Watchers  .  Telemetry                   |
-|  LlmAgent  .  Runner  .  SessionService  .  MCP  .  A2A            |
-+----------------------------------------------------------------------+
-|  gemini-genai-rs  (L0 -- Wire Protocol)                                     |
-|                                                                      |
-|  Transport (WebSocket + Mock)  .  Codec (JSON)  .  Auth providers    |
-|  SessionHandle  .  Protocol types  .  VAD  .  Jitter buffer         |
-|  Telemetry (OTel + Prometheus)  .  REST APIs (feature-gated)         |
-+----------------------------------------------------------------------+
-```
+<p align="center"><img src="docs/assets/diagrams/architecture-stack.svg" alt="Three-crate layered architecture: L2 fluent DX over L1 runtime over L0 wire protocol" width="760"></p>
 
 Each layer depends only on the one below it. Application code imports from the
 highest layer it needs (`gemini_adk_fluent_rs::prelude::*` re-exports all three).
@@ -180,24 +158,7 @@ examples `37`–`40`.
 A gemini-rs voice session is built from six core concepts that work together.
 This section shows what each one does and how they connect.
 
-```
-                         +------------------+
-                         |   Live::builder  |  (L2 Fluent API)
-                         +--------+---------+
-                                  |  configures
-          +-----------+-----------+-----------+-----------+
-          |           |           |           |           |
-     +----v---+  +----v----+  +--v---+  +----v----+  +--v--------+
-     | Phases |  |Extractors| | Tools |  |Watchers |  | Telemetry |
-     +----+---+  +----+----+  +--+---+  +----+----+  +-----+-----+
-          |           |          |           |              |
-          +-----+-----+----+----+-----+-----+              |
-                |          |          |                     |
-          +-----v----------v----------v-----+        +-----v-----+
-          |            State                |        | Signals & |
-          |  (prefix-scoped, concurrent)    |<-------+ Counters  |
-          +---------------------------------+        +-----------+
-```
+<p align="center"><img src="docs/assets/diagrams/core-concepts.svg" alt="How the six core concepts (phases, extractors, tools, watchers, telemetry) converge on shared State" width="840"></p>
 
 ### 1. State -- The Shared Spine
 
@@ -205,16 +166,7 @@ Everything reads from and writes to `State`. It is the single source of truth
 for a session -- a concurrent, typed key-value store with prefix-scoped
 namespaces.
 
-```
-State
-  |
-  +-- app:caller_name = "Alice"          (application state)
-  +-- session:turn_count = 5             (auto-tracked by SessionSignals)
-  +-- session:total_token_count = 1284   (auto-tracked from UsageMetadata)
-  +-- derived:risk_level = "high"        (computed variable, read-only)
-  +-- turn:transcript = "I need help"    (cleared each turn)
-  +-- bg:verification_status = "pending" (background agent result)
-```
+<p align="center"><img src="docs/assets/diagrams/state-hierarchy.svg" alt="State prefix namespaces: app, session, derived, turn, bg" width="760"></p>
 
 **Why it matters:** Phase transitions check state. Extractors write to state.
 Watchers fire when state changes. Computed variables derive from state.
@@ -225,18 +177,7 @@ Telemetry auto-populates state. Everything converges here.
 Phases define the *shape* of a conversation: what the model should do, what
 tools are available, and when to move on.
 
-```
-  [greeting] ---> [identify_caller] ---> [handle_request] ---> [farewell]
-       |               |                       |                    |
-   instruction:    instruction:            instruction:         instruction:
-   "Welcome..."   "Get name..."          "Help with..."       "Say goodbye"
-       |               |                       |
-   tools: []       tools: [lookup]         tools: [search, calc]
-       |               |                       |
-   transition:     transition:             transition:
-   caller_name     request_type            resolved == true
-   is_some()       is_some()
-```
+<p align="center"><img src="docs/assets/diagrams/phase-flow.svg" alt="Conversation phases with instructions, tools, and transition predicates" width="860"></p>
 
 Each phase declares:
 - **Instruction**: what the model should do (static or state-driven dynamic)
@@ -254,20 +195,7 @@ asks follow-up questions until the transition predicate becomes true.
 Extractors run out-of-band LLM calls to pull structured data from the
 conversation transcript and write it into State.
 
-```
- Conversation transcript        OOB LLM call           State
- +-----------------------+     +---------------+     +------------------+
- | "Hi, I'm Alice from   | --> | Extract with  | --> | caller_name:     |
- |  Acme Corp, I need    |     | JSON Schema   |     |   "Alice"        |
- |  help with billing."  |     +---------------+     | caller_org:      |
- +-----------------------+                           |   "Acme Corp"    |
-                                                     | request_type:    |
-                                                     |   "billing"      |
-                                                     +------------------+
-                                                           |
-                                                    triggers phase
-                                                    transition!
-```
+<p align="center"><img src="docs/assets/diagrams/extraction-pipeline.svg" alt="Extraction pipeline: transcript through an out-of-band LLM call into State" width="820"></p>
 
 **Extraction triggers** control *when* extractors fire:
 
@@ -283,27 +211,7 @@ conversation transcript and write it into State.
 Watchers observe state changes and fire callbacks. Temporal patterns detect
 conditions that persist over time or turns.
 
-```
-  State change: app:score = 0.85 --> 0.95
-                    |
-            +-------v--------+
-            | Watcher:       |
-            | crossed_above  |
-            | threshold=0.9  |
-            +-------+--------+
-                    |
-            fires callback:
-            state.set("alert", true)
-
-
-  Condition held for 30s:          3 consecutive turns:
-  +-------------------------+     +-------------------------+
-  | when_sustained:         |     | when_turns:             |
-  | confused == true        |     | repeating == true       |
-  | for 30 seconds          |     | for 3 turns             |
-  | --> offer help          |     | --> break loop           |
-  +-------------------------+     +-------------------------+
-```
+<p align="center"><img src="docs/assets/diagrams/watchers-temporal.svg" alt="Watchers and temporal patterns reacting to state change" width="820"></p>
 
 ### 5. Tools -- Model Actions
 
@@ -312,24 +220,7 @@ tools (auto-schema from Rust structs), simple tools (raw JSON), built-in
 tools (Google Search, code execution), and agent-as-tool (text agent pipelines
 callable by the live model).
 
-```
-  Model decides to call tool
-           |
-  +--------v---------+
-  |  ToolDispatcher   |  Routes by function name
-  +--+-----+-----+---+
-     |     |     |
-  +--v-+ +-v--+ +v---------+
-  |get_| |calc| |verify_   |
-  |wx  | |pay | |identity  |
-  +----+ +----+ +----------+
-  Simple  Typed   AgentTool
-  Tool    Tool    (text agent
-                   pipeline)
-
-  Background tools: model continues talking
-  while the tool executes asynchronously.
-```
+<p align="center"><img src="docs/assets/diagrams/tool-dispatcher.svg" alt="ToolDispatcher routing calls to simple, typed, and agent tools" width="760"></p>
 
 **Background tool execution** eliminates dead air in voice sessions. Mark
 tools as background and the model receives a "processing" acknowledgment
@@ -346,25 +237,7 @@ Live::builder()
 Telemetry flows through two complementary systems, both running on the
 telemetry lane (off the hot path):
 
-```
-  SessionEvent stream
-        |
-  +-----v--------------+     +------------------+
-  | SessionSignals      |     | SessionTelemetry |
-  | (State keys)        |     | (Atomic counters)|
-  +-----+---------------+     +--------+---------+
-        |                              |
-        v                              v
-  session:turn_count          audio_chunks_out: 1482
-  session:total_token_count   avg_latency_ms: 340
-  session:is_speaking         interruptions: 3
-  session:silence_ms          total_token_count: 5280
-        |                              |
-        v                              v
-  Available to phases,         snapshot() --> JSON
-  watchers, extractors,        for devtools UI
-  transition guards
-```
+<p align="center"><img src="docs/assets/diagrams/telemetry-pipeline.svg" alt="Telemetry pipeline: SessionSignals to State and SessionTelemetry atomic counters" width="820"></p>
 
 **SessionSignals** writes to State -- so phases, watchers, and extractors can
 react to session-level metrics (e.g., transition after N turns, alert when
@@ -383,34 +256,7 @@ turn duration, token usage, and interruption counts.
 
 Here's the flow for a single model turn in a phased conversation:
 
-```
-  User speaks: "I'm Alice from Acme Corp"
-       |
-  [1]  v  Fast lane: on_audio, on_input_transcript (sync, <1ms)
-       |
-  [2]  v  Model responds, turn completes
-       |
-  [3]  v  Control lane: TranscriptBuffer records the turn
-       |
-  [4]  v  Extractors run (OOB LLM call)
-       |    --> writes caller_name="Alice", caller_org="Acme Corp" to State
-       |
-  [5]  v  Watchers fire on state changes
-       |    --> crossed_above, became_true, changed_to callbacks
-       |
-  [6]  v  Computed variables recompute
-       |    --> derived:risk_level updates based on new state
-       |
-  [7]  v  Phase machine evaluates transitions
-       |    --> caller_name.is_some() == true
-       |    --> transition: identify_caller --> handle_request
-       |
-  [8]  v  Phase on_exit / on_enter hooks fire
-       |    --> instruction updated, navigation context regenerated
-       |
-  [9]  v  Telemetry lane: SessionSignals + SessionTelemetry update
-            --> session:turn_count++, latency recorded, tokens tracked
-```
+<p align="center"><img src="docs/assets/diagrams/turn-flow.svg" alt="The nine steps of processing a single model turn" width="760"></p>
 
 ---
 
@@ -1066,33 +912,7 @@ Live::builder()
 All Live session events are routed through a zero-copy dispatcher into three
 independent lanes, each optimized for its latency profile:
 
-```
-  SessionEvent (broadcast from L0)
-         |
-    +----+----+
-    |  Router  |   Zero-work dispatcher -- NO state access on hot path
-    +--+--+--+-+
-       |  |  |
-       |  |  +------------------------------+
-       |  +----------------+                 |
-       |                   |                 |
-  +----v---------+   +-----v----------+  +---v--------------+
-  | Fast Lane    |   | Control Lane   |  | Telemetry Lane   |
-  | (sync <1ms)  |   | (async)        |  | (own broadcast)  |
-  +--------------+   +--------------  +  +------------------+
-  | on_audio     |   | on_tool_call   |  | SessionSignals   |
-  | on_text      |   | on_interrupted |  |  (State keys)    |
-  | on_vad_*     |   | Phase trans.   |  | SessionTelemetry |
-  | on_input_    |   | Extractors     |  |  (AtomicU64)     |
-  |   transcript |   |  (concurrent)  |  | on_usage cb      |
-  | on_output_   |   | Watchers       |  | Debounced 100ms  |
-  |   transcript |   | Computed state |  |   flush          |
-  +--------------+   | Temporal ptns  |  +------------------+
-                     | TranscriptBuf  |
-                     |  (owned, no    |
-                     |   mutex)       |
-                     +----------------+
-```
+<p align="center"><img src="docs/assets/diagrams/three-lane-processor.svg" alt="Three-lane processor: fast, control, and telemetry lanes" width="820"></p>
 
 **Design constraints:**
 - Fast lane callbacks must be sync and complete in < 1ms (no allocations, no locks, no async)
