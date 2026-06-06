@@ -177,23 +177,19 @@ fn deploy_agent_engine(
     config: &DeployConfig,
     agent: &manifest::AgentManifest,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let project = config
-        .project
-        .as_deref()
-        .ok_or("--project is required for Agent Engine deployment")?;
-
-    println!("Deploying agent '{}' to Vertex AI Agent Engine", agent.name);
-    println!("  Project: {}", project);
-    println!("  Region:  {}", config.region);
-
-    // TODO: Call Vertex AI Agent Engine API to register/deploy the agent.
-    // This requires:
-    //   1. Package agent code as a Cloud Function or container
-    //   2. POST to https://{region}-aiplatform.googleapis.com/v1/projects/{project}/locations/{region}/agents
-    //   3. Wait for operation to complete
-
-    println!("\nAgent Engine deployment is not yet implemented.");
-    println!("See: https://cloud.google.com/vertex-ai/docs/agents/deploy");
-
-    Ok(())
+    // Agent Engine is intentionally not a supported target: this stack ships as a
+    // standard containerized service, for which Cloud Run is the first-class path.
+    // Maintaining a second, redundant deployment surface adds no value, so we
+    // redirect the user to Cloud Run instead.
+    println!(
+        "Agent Engine is not a supported deployment target for '{}'.",
+        agent.name
+    );
+    println!(
+        "This agent runs as a container — deploy it to Cloud Run instead:\n\n  \
+         adk deploy --target cloud-run --project {} --region {}\n",
+        config.project.as_deref().unwrap_or("<PROJECT>"),
+        config.region,
+    );
+    Err("Agent Engine deployment is not supported; use --target cloud-run".into())
 }

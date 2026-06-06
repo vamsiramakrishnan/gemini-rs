@@ -16,6 +16,7 @@ pub mod handlers;
 pub mod router;
 pub mod serve;
 pub mod sessions;
+pub mod trace;
 pub mod types;
 pub mod ws;
 
@@ -45,6 +46,8 @@ pub struct ServerState {
     pub artifacts: Arc<parking_lot::RwLock<std::collections::HashMap<String, Vec<ArtifactEntry>>>>,
     /// Completed evaluation run summaries, newest last.
     pub eval_results: Arc<parking_lot::RwLock<Vec<EvalResultSummary>>>,
+    /// Recent execution traces, queryable via the debug endpoint.
+    pub traces: Arc<trace::TraceStore>,
 }
 
 impl ServerState {
@@ -55,6 +58,7 @@ impl ServerState {
             sessions: Arc::new(InMemorySessionStore::new()),
             artifacts: Arc::new(parking_lot::RwLock::new(std::collections::HashMap::new())),
             eval_results: Arc::new(parking_lot::RwLock::new(Vec::new())),
+            traces: Arc::new(trace::TraceStore::new()),
         }
     }
 

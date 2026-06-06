@@ -21,9 +21,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use gemini_adk_rs::evaluation::{
-    EvalSet, Evaluator, Invocation, InvocationTurn, MatchStrategy, ResponseEvaluator,
-    TrajectoryEvaluator,
+    EvalSet, Evaluator, HallucinationEvaluator, Invocation, InvocationTurn, LlmAsJudge,
+    LlmAsJudgeConfig, MatchStrategy, ResponseEvaluator, SafetyEvaluator, TrajectoryEvaluator,
 };
+use gemini_adk_rs::{BaseLlm, GeminiLlm, GeminiLlmParams};
 
 use crate::execution::{build_text_agent, run_agent_turn};
 use crate::types::{now_iso8601, EvalResultSummary, EvalRunRequest};
@@ -75,11 +76,9 @@ pub fn parse_criteria(raw: &[String]) -> Vec<Criterion> {
         .collect()
 }
 
-/// Resolve a criterion name to a deterministic [`Evaluator`].
+/// Resolve a criterion name to a deterministic [`Evaluator`] (no LLM required).
 ///
-/// Returns `None` for criteria that require an LLM judge (safety, hallucination,
-/// rubric, llm_judge) — those are out of scope for the deterministic REST path
-/// and are reported as skipped rather than silently scored.
+/// Returns `None` for criteria that need an LLM judge — see [`judge_evaluator_for`].
 pub fn evaluator_for(name: &str) -> Option<Arc<dyn Evaluator>> {
     let eval: Arc<dyn Evaluator> = match name {
         "response_match" | "response" | "final_response_match" => {
@@ -93,6 +92,24 @@ pub fn evaluator_for(name: &str) -> Option<Arc<dyn Evaluator>> {
         }
         "tool_trajectory_any_order" => {
             Arc::new(TrajectoryEvaluator::new(false).with_metric_name(name))
+        }
+        // Safety scoring is heuristic (PII/safety pattern detection), so it runs
+        // on the deterministic path without an LLM.
+        "safety" => Arc::new(SafetyEvaluator::new(DEFAULT_PASS_THRESHOLD)),
+        _ => return None,
+    };
+    Some(eval)
+}
+
+/// Resolve a criterion name to an LLM-judge [`Evaluator`], given a judge LLM.
+///
+/// Covers criteria that require a model to score: `hallucination` (grounding
+/// against tool/context truth) and `llm_judge` (rubric-based quality scoring).
+pub fn judge_evaluator_for(name: &str, llm: &Arc<dyn BaseLlm>) -> Option<Arc<dyn Evaluator>> {
+    let eval: Arc<dyn Evaluator> = match name {
+        "hallucination" => Arc::new(HallucinationEvaluator::new().with_llm(llm.clone())),
+        "llm_judge" | "llm_as_judge" | "quality" => {
+            Arc::new(LlmAsJudge::new(llm.clone(), LlmAsJudgeConfig::default()))
         }
         _ => return None,
     };
@@ -229,11 +246,28 @@ pub async fn run_evalset(
     let eval_set = load_eval_set(&req.eval_set)?;
     let criteria = parse_criteria(&req.criteria);
 
-    // Pre-build evaluators once; skipped criteria (LLM-judge) are reported as such.
-    let evaluators: Vec<(Criterion, Arc<dyn Evaluator>)> = criteria
-        .iter()
-        .filter_map(|c| evaluator_for(&c.name).map(|e| (c.clone(), e)))
-        .collect();
+    // A judge LLM (resolved from the agent's model / env) backs LLM-judge criteria.
+    let judge: Arc<dyn BaseLlm> = Arc::new(GeminiLlm::new(GeminiLlmParams {
+        model: entry.model.clone(),
+        ..Default::default()
+    }));
+
+    // Build evaluators: deterministic first, then LLM-judge. Criteria matching
+    // neither are recorded as skipped so the caller knows they were not scored.
+    let mut evaluators: Vec<(Criterion, Arc<dyn Evaluator>)> = Vec::new();
+    let mut skipped: Vec<String> = Vec::new();
+    for c in &criteria {
+        if let Some(e) = evaluator_for(&c.name) {
+            evaluators.push((c.clone(), e));
+        } else if let Some(e) = judge_evaluator_for(&c.name, &judge) {
+            evaluators.push((c.clone(), e));
+        } else {
+            skipped.push(c.name.clone());
+        }
+    }
+    if !skipped.is_empty() {
+        tracing::warn!(?skipped, "unknown eval criteria skipped");
+    }
 
     let mut per_case: Vec<HashMap<String, f64>> = Vec::with_capacity(eval_set.cases.len());
 
@@ -322,7 +356,18 @@ mod tests {
         assert!(evaluator_for("response_match").is_some());
         assert!(evaluator_for("exact_match").is_some());
         assert!(evaluator_for("tool_trajectory").is_some());
-        assert!(evaluator_for("safety").is_none()); // needs an LLM judge
+        assert!(evaluator_for("safety").is_some()); // heuristic, no LLM needed
+        assert!(evaluator_for("hallucination").is_none()); // needs an LLM judge
+        assert!(evaluator_for("nonsense").is_none());
+    }
+
+    #[test]
+    fn judge_evaluator_mapping() {
+        let llm: Arc<dyn BaseLlm> = Arc::new(GeminiLlm::new(GeminiLlmParams::default()));
+        assert!(judge_evaluator_for("hallucination", &llm).is_some());
+        assert!(judge_evaluator_for("llm_judge", &llm).is_some());
+        // Deterministic criteria are not handled by the judge path.
+        assert!(judge_evaluator_for("response_match", &llm).is_none());
     }
 
     #[tokio::test]
