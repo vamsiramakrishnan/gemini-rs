@@ -40,11 +40,32 @@
 //!   of its `next` conditions.
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::time::Duration;
 
 use gemini_adk_rs::extract::Extract;
 use gemini_adk_rs::flow::{CompiledFlow, Enforcement, Flow, FlowErrors, FlowMonitor, Guard, Pred};
 use gemini_adk_rs::frame::{Frame, FrameSpec};
+
+/// A boxed async fetcher: bind args (a JSON object) → resolved value.
+type SlotFetch =
+    Arc<dyn Fn(Value) -> Pin<Box<dyn Future<Output = Result<Value, String>> + Send>> + Send + Sync>;
+
+/// A resolver binding attached to a stage by [`Conversation::resolve_slot`]. The
+/// closure lives only in the builder (it is not serializable); the serializable
+/// [`ConversationSpec`] is unaffected.
+#[derive(Clone)]
+struct StageResolver {
+    stage: String,
+    name: String,
+    args: Vec<String>,
+    ttl: Option<Duration>,
+    fetch: SlotFetch,
+}
 
 /// A transition: advance to `to` when `when` holds.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -190,9 +211,13 @@ impl CompiledConversation {
 }
 
 /// Fluent builder that produces a [`ConversationSpec`]; sugar over the spec.
-#[derive(Debug, Clone, Default)]
+///
+/// (Not `Debug`: [`resolve_slot`](Conversation::resolve_slot) bindings hold async
+/// closures. The serializable [`ConversationSpec`] is `Debug` via [`spec`](Conversation::spec).)
+#[derive(Clone, Default)]
 pub struct Conversation {
     spec: ConversationSpec,
+    resolvers: Vec<StageResolver>,
 }
 
 impl Conversation {
@@ -203,6 +228,7 @@ impl Conversation {
                 name: name.into(),
                 ..Default::default()
             },
+            resolvers: Vec::new(),
         }
     }
 
@@ -290,6 +316,46 @@ impl Conversation {
         self
     }
 
+    /// Fill a slot in the current stage from an **async resolver** — a tool call,
+    /// HTTP fetch, MCP request, or agent. `args` names the `State` keys bound into
+    /// the JSON object passed to `fetch`; the returned value fills `name`. With a
+    /// `ttl`, results are memoized by `(field, canonical args)`.
+    ///
+    /// The slot is added to the stage's `collect`, so its `captured` completion
+    /// waits for the resolution. The closure lives only in the builder; the
+    /// serializable spec is unaffected.
+    pub fn resolve_slot<I, S, F, Fut>(
+        mut self,
+        name: impl Into<String>,
+        args: I,
+        ttl: Option<Duration>,
+        fetch: F,
+    ) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+        F: Fn(Value) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<Value, String>> + Send + 'static,
+    {
+        let name = name.into();
+        let stage = self.current().id.clone();
+        if !self.current().collect.contains(&name) {
+            self.current().collect.push(name.clone());
+        }
+        let fetch = Arc::new(fetch);
+        self.resolvers.push(StageResolver {
+            stage,
+            name,
+            args: args.into_iter().map(Into::into).collect(),
+            ttl,
+            fetch: Arc::new(move |v| {
+                let fetch = fetch.clone();
+                Box::pin(async move { fetch(v).await })
+            }),
+        });
+        self
+    }
+
     /// Add an explicit dependency on another stage.
     pub fn after(mut self, dep: impl Into<String>) -> Self {
         self.current().after.push(dep.into());
@@ -322,14 +388,48 @@ impl Conversation {
         self.spec
     }
 
-    /// Compile from a [`ConversationSpec`] (e.g. parsed from YAML).
+    /// Compile from a [`ConversationSpec`] (e.g. parsed from YAML). Resolver-slot
+    /// bindings are builder-only, so a spec loaded this way has none.
     pub fn from_spec(spec: ConversationSpec) -> Result<CompiledConversation, ConversationError> {
-        compile_spec(spec)
+        compile_spec(spec, Vec::new())
     }
 
     /// Lower and validate into a [`CompiledConversation`].
     pub fn compile(self) -> Result<CompiledConversation, ConversationError> {
-        compile_spec(self.spec)
+        compile_spec(self.spec, self.resolvers)
+    }
+}
+
+impl crate::live::Live {
+    /// Drive a [`Live`](crate::live::Live) session from a compiled conversation:
+    /// **govern** with its lowered flow and **register** the extractors that fill
+    /// its frames' slots each turn. The one-liner entrypoint for "run this
+    /// conversation".
+    ///
+    /// ```ignore
+    /// let convo = Conversation::new("booking")./* … */.compile()?;
+    /// let handle = Live::builder()
+    ///     .model(GeminiModel::Gemini2_0FlashLive)
+    ///     .converse(&convo)
+    ///     .connect_from_env()
+    ///     .await?;
+    /// ```
+    pub fn converse(self, convo: &CompiledConversation) -> Self {
+        let mut live = self.govern(convo.flow().flow().clone());
+        for extract in convo.extractors() {
+            live = live.extract_record(extract.clone());
+        }
+        live
+    }
+
+    /// Like [`converse`](Self::converse) but attaches the flow in **observe** mode
+    /// (nothing blocked; deviations recorded) while still registering extractors.
+    pub fn converse_observe(self, convo: &CompiledConversation) -> Self {
+        let mut live = self.observe(convo.flow().flow().clone());
+        for extract in convo.extractors() {
+            live = live.extract_record(extract.clone());
+        }
+        live
     }
 }
 
@@ -351,7 +451,10 @@ fn any_of(guards: Vec<Guard>) -> Option<Guard> {
     Some(Guard::any(guards))
 }
 
-fn compile_spec(spec: ConversationSpec) -> Result<CompiledConversation, ConversationError> {
+fn compile_spec(
+    spec: ConversationSpec,
+    resolvers: Vec<StageResolver>,
+) -> Result<CompiledConversation, ConversationError> {
     if spec.stages.is_empty() {
         return Err(ConversationError::Empty);
     }
@@ -459,15 +562,41 @@ fn compile_spec(spec: ConversationSpec) -> Result<CompiledConversation, Conversa
         fb = fb.require(spec.require.clone());
     }
 
+    for r in &resolvers {
+        if !ids.contains(r.stage.as_str()) {
+            return Err(ConversationError::Spec(format!(
+                "resolver for slot '{}' references unknown stage '{}'",
+                r.name, r.stage
+            )));
+        }
+    }
+
     let flow = fb.build().map_err(ConversationError::Flow)?;
     let compiled = flow.compile().map_err(ConversationError::Compile)?;
 
     // Lower each frame-collecting stage into an extractor that fills its slots.
-    let extractors = spec
+    let mut extractors: Vec<Extract> = spec
         .stages
         .iter()
         .filter_map(|s| s.frame.as_ref().and_then(FrameSpec::to_extract))
         .collect();
+
+    // Lower resolver-slot bindings (grouped by stage) into resolver extractors.
+    let mut by_stage: BTreeMap<&str, Vec<&StageResolver>> = BTreeMap::new();
+    for r in &resolvers {
+        by_stage.entry(r.stage.as_str()).or_default().push(r);
+    }
+    for (stage, binds) in by_stage {
+        let mut builder = Extract::record(format!("{}__{}_resolve", spec.name, stage));
+        for r in binds {
+            let fetch = r.fetch.clone();
+            builder = builder.field_resolve(r.name.clone(), r.args.clone(), r.ttl, move |args| {
+                let fetch = fetch.clone();
+                async move { fetch(args).await }
+            });
+        }
+        extractors.push(builder.build());
+    }
 
     Ok(CompiledConversation {
         flow: compiled,
@@ -645,6 +774,124 @@ mod tests {
         let ev = state.evidence("item");
         assert_eq!(ev.source.as_deref(), Some("extraction"));
         assert!(ev.confidence.unwrap() > 0.0);
+    }
+
+    #[tokio::test]
+    async fn validate_rejects_out_of_range_recognized_values() {
+        use gemini_adk_rs::frame::{Frame, FrameSpec, SlotRecognizer, SlotSpec, SlotValidator};
+        use gemini_adk_rs::live::TranscriptTurn;
+
+        struct Party;
+        impl Frame for Party {
+            fn frame() -> FrameSpec {
+                FrameSpec {
+                    name: "party".into(),
+                    slots: vec![SlotSpec {
+                        recognizer: Some(SlotRecognizer::Integer),
+                        validate: Some(SlotValidator::Range {
+                            min: Some(1.0),
+                            max: Some(12.0),
+                        }),
+                        ..SlotSpec::new("party_size")
+                    }],
+                }
+            }
+        }
+
+        let convo = Conversation::new("p")
+            .stage("collect")
+            .collect_frame::<Party>()
+            .next("done", Guard::captured(["party_size"]))
+            .stage("done")
+            .terminal()
+            .compile()
+            .expect("compiles");
+        let extractor = convo.extractors()[0].clone().into_extractor();
+
+        let run = |text: &str| {
+            let extractor = extractor.clone();
+            let text = text.to_string();
+            async move {
+                let state = State::new();
+                let window = vec![TranscriptTurn {
+                    turn_number: 0,
+                    user: text,
+                    model: String::new(),
+                    tool_calls: Vec::new(),
+                    timestamp: std::time::Instant::now(),
+                }];
+                let out = extractor.extract_with_state(&window, &state).await.unwrap();
+                out.get("party_size").cloned()
+            }
+        };
+
+        // In range -> filled; out of range -> rejected (no value promoted).
+        assert_eq!(run("a table for 4").await, Some(serde_json::json!(4)));
+        assert_eq!(run("a table for 40").await, None);
+    }
+
+    #[tokio::test]
+    async fn resolve_slot_fills_from_async_fetch() {
+        use gemini_adk_rs::live::TranscriptTurn;
+
+        let convo = Conversation::new("c")
+            .stage("check")
+            .resolve_slot("availability", ["party_size"], None, |args| async move {
+                // Echo an availability decision derived from the bound arg.
+                let n = args.get("party_size").and_then(|v| v.as_i64()).unwrap_or(0);
+                Ok(serde_json::json!(n <= 8))
+            })
+            .next("done", Guard::is_set("availability"))
+            .stage("done")
+            .terminal()
+            .compile()
+            .expect("compiles");
+
+        // The resolver lowered to an extractor.
+        assert_eq!(convo.extractors().len(), 1);
+        let extractor = convo.extractors()[0].clone().into_extractor();
+
+        let state = State::new();
+        let _ = state.set("party_size", 4i64);
+        let window = vec![TranscriptTurn {
+            turn_number: 0,
+            user: "any".into(),
+            model: String::new(),
+            tool_calls: Vec::new(),
+            timestamp: std::time::Instant::now(),
+        }];
+        let out = extractor.extract_with_state(&window, &state).await.unwrap();
+        assert_eq!(out.get("availability"), Some(&serde_json::json!(true)));
+    }
+
+    #[test]
+    fn converse_registers_flow_and_extractors() {
+        // Smoke test: the one-liner entrypoint wires onto a Live builder.
+        use gemini_adk_rs::frame::{Frame, FrameSpec, SlotRecognizer, SlotSpec};
+
+        struct Order;
+        impl Frame for Order {
+            fn frame() -> FrameSpec {
+                FrameSpec {
+                    name: "order".into(),
+                    slots: vec![SlotSpec {
+                        recognizer: Some(SlotRecognizer::OneOf(vec!["pizza".into()])),
+                        ..SlotSpec::new("item")
+                    }],
+                }
+            }
+        }
+        let convo = Conversation::new("o")
+            .stage("collect")
+            .collect_frame::<Order>()
+            .next("done", Guard::captured(["item"]))
+            .stage("done")
+            .terminal()
+            .compile()
+            .expect("compiles");
+
+        // Builds without panic; converse is the one-liner that govern()s + registers.
+        let _live = crate::live::Live::builder().converse(&convo);
     }
 
     #[test]

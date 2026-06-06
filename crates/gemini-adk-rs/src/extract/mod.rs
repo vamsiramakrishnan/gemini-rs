@@ -315,6 +315,10 @@ enum Source {
     },
 }
 
+/// Post-recognition validator: a recognized value is only promoted when this
+/// returns `true`.
+type FieldValidator = Arc<dyn Fn(&Value) -> bool + Send + Sync>;
+
 /// A field in an [`Extract`] record.
 #[derive(Clone)]
 pub struct Field {
@@ -322,6 +326,8 @@ pub struct Field {
     source: Source,
     state_key: String,
     overwrite: bool,
+    /// Optional predicate; a recognized value failing it is rejected (not promoted).
+    validate: Option<FieldValidator>,
 }
 
 /// A declarative extraction record: typed fields filled by recognizers and/or
@@ -371,6 +377,7 @@ impl ExtractBuilder {
             name,
             source: Source::Recognize(recognizer),
             overwrite: false,
+            validate: None,
         });
         self
     }
@@ -386,6 +393,7 @@ impl ExtractBuilder {
             state_key: state_key.into(),
             source: Source::Recognize(recognizer),
             overwrite: false,
+            validate: None,
         });
         self
     }
@@ -420,9 +428,23 @@ impl ExtractBuilder {
                 }),
             },
             overwrite: false,
+            validate: None,
         });
         self
     }
+    /// Attach a validator to the **most recently added** field: a recognized
+    /// value is promoted only when `predicate` returns `true` (else it is
+    /// rejected, as if no value was recognized this turn).
+    pub fn validate<F>(mut self, predicate: F) -> Self
+    where
+        F: Fn(&Value) -> bool + Send + Sync + 'static,
+    {
+        if let Some(field) = self.fields.last_mut() {
+            field.validate = Some(Arc::new(predicate));
+        }
+        self
+    }
+
     /// Number of recent turns the recognizers read (default 3).
     pub fn window(mut self, n: usize) -> Self {
         self.window = n;
@@ -562,6 +584,9 @@ impl TurnExtractor for RecordExtractor {
         for field in &self.spec.fields {
             if let Source::Recognize(rec) = &field.source {
                 if let Some((value, _confidence)) = rec.recognize(&text) {
+                    if field.validate.as_ref().is_some_and(|v| !v(&value)) {
+                        continue; // recognized but rejected by the slot validator
+                    }
                     obj.insert(field.name.clone(), value);
                 }
             }
@@ -587,6 +612,9 @@ impl TurnExtractor for RecordExtractor {
         for field in &self.spec.fields {
             if let Source::Recognize(rec) = &field.source {
                 if let Some((value, confidence)) = rec.recognize(&text) {
+                    if field.validate.as_ref().is_some_and(|v| !v(&value)) {
+                        continue; // recognized but rejected by the slot validator
+                    }
                     // Record provenance + confidence under the `state_meta:` convention
                     // so `State::evidence()` can surface how a slot was filled.
                     let _ = state.set(

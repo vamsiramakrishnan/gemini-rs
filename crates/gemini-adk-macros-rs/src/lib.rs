@@ -478,6 +478,9 @@ fn expand_frame(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         let mut reprompt: Option<String> = None;
         let mut confirm = quote! { ::gemini_adk_rs::frame::ConfirmPolicy::Never };
         let mut pii = false;
+        let mut min: Option<f64> = None;
+        let mut max: Option<f64> = None;
+        let mut non_empty = false;
 
         // Optional `#[recognize(..)]` (same vocabulary as `#[derive(Extract)]`).
         let recognizer = match field.attrs.iter().find(|a| a.path().is_ident("recognize")) {
@@ -518,14 +521,37 @@ fn expand_frame(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                     };
                 } else if meta.path.is_ident("pii") {
                     pii = true;
+                } else if meta.path.is_ident("min") {
+                    min = Some(lit_to_f64(&meta.value()?.parse()?)?);
+                } else if meta.path.is_ident("max") {
+                    max = Some(lit_to_f64(&meta.value()?.parse()?)?);
+                } else if meta.path.is_ident("non_empty") {
+                    non_empty = true;
                 } else {
                     return Err(meta.error(
-                        "unknown `slot` option (expected prompt/reprompt/state/confirm/pii)",
+                        "unknown `slot` option (expected prompt/reprompt/state/confirm/pii/min/max/non_empty)",
                     ));
                 }
                 Ok(())
             })?;
         }
+
+        // Lower min/max/non_empty into a serializable SlotValidator.
+        let validate = if min.is_some() || max.is_some() {
+            let min_tok = match min {
+                Some(v) => quote! { Some(#v) },
+                None => quote! { None },
+            };
+            let max_tok = match max {
+                Some(v) => quote! { Some(#v) },
+                None => quote! { None },
+            };
+            quote! { Some(::gemini_adk_rs::frame::SlotValidator::Range { min: #min_tok, max: #max_tok }) }
+        } else if non_empty {
+            quote! { Some(::gemini_adk_rs::frame::SlotValidator::NonEmpty) }
+        } else {
+            quote! { None }
+        };
 
         let prompt_tok = match prompt {
             Some(p) => quote! { Some(#p.to_string()) },
@@ -544,6 +570,7 @@ fn expand_frame(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                 confirm: #confirm,
                 pii: #pii,
                 recognizer: #recognizer,
+                validate: #validate,
             }
         });
     }
@@ -677,6 +704,18 @@ fn slot_recognizer_expr(attr: &syn::Attribute) -> syn::Result<proc_macro2::Token
         Meta::List(l) => Err(syn::Error::new_spanned(
             l,
             "unexpected nested list in `#[recognize(..)]`",
+        )),
+    }
+}
+
+/// Parse an integer or float literal into an `f64` (for slot `min`/`max`).
+fn lit_to_f64(lit: &Lit) -> syn::Result<f64> {
+    match lit {
+        Lit::Int(i) => i.base10_parse::<f64>(),
+        Lit::Float(f) => f.base10_parse::<f64>(),
+        other => Err(syn::Error::new_spanned(
+            other,
+            "expected a numeric literal for `min`/`max`",
         )),
     }
 }

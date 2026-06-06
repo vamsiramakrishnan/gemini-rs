@@ -26,8 +26,59 @@
 //! ```
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::extract::{Extract, Recognizer};
+
+/// A serializable validator applied to a recognized slot value; a value failing
+/// it is rejected (the slot stays unfilled until a valid value is recognized).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SlotValidator {
+    /// Numeric range with optional inclusive bounds (accepts numbers, or numeric
+    /// strings).
+    Range {
+        /// Inclusive lower bound.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        min: Option<f64>,
+        /// Inclusive upper bound.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max: Option<f64>,
+    },
+    /// A non-empty (after trim) string.
+    NonEmpty,
+    /// A string matching this regex pattern.
+    Regex(String),
+    /// One of a fixed set (case-insensitive for strings).
+    OneOf(Vec<String>),
+}
+
+impl SlotValidator {
+    /// Whether `value` passes this validator.
+    pub fn check(&self, value: &Value) -> bool {
+        match self {
+            SlotValidator::Range { min, max } => {
+                let n = match value {
+                    Value::Number(n) => n.as_f64(),
+                    Value::String(s) => s.trim().parse::<f64>().ok(),
+                    _ => None,
+                };
+                match n {
+                    Some(n) => min.is_none_or(|lo| n >= lo) && max.is_none_or(|hi| n <= hi),
+                    None => false,
+                }
+            }
+            SlotValidator::NonEmpty => value.as_str().is_some_and(|s| !s.trim().is_empty()),
+            SlotValidator::Regex(pat) => regex::Regex::new(pat)
+                .ok()
+                .zip(value.as_str())
+                .is_some_and(|(re, s)| re.is_match(s)),
+            SlotValidator::OneOf(opts) => value
+                .as_str()
+                .is_some_and(|s| opts.iter().any(|o| o.eq_ignore_ascii_case(s))),
+        }
+    }
+}
 
 /// A serializable description of the deterministic recognizer that fills a slot.
 ///
@@ -119,6 +170,9 @@ pub struct SlotSpec {
     /// The deterministic recognizer that fills this slot, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recognizer: Option<SlotRecognizer>,
+    /// A validator applied to recognized values; invalid values are rejected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub validate: Option<SlotValidator>,
 }
 
 fn is_default_confirm(c: &ConfirmPolicy) -> bool {
@@ -137,6 +191,7 @@ impl SlotSpec {
             confirm: ConfirmPolicy::Never,
             pii: false,
             recognizer: None,
+            validate: None,
         }
     }
 }
@@ -176,6 +231,9 @@ impl FrameSpec {
                     slot.state_key.clone(),
                     rec.to_recognizer(),
                 );
+                if let Some(validator) = slot.validate.clone() {
+                    builder = builder.validate(move |v| validator.check(v));
+                }
                 any = true;
             }
         }
@@ -201,6 +259,26 @@ mod tests {
             Some(ConfirmPolicy::LowConfidence)
         );
         assert_eq!(ConfirmPolicy::parse("nope"), None);
+    }
+
+    #[test]
+    fn slot_validator_checks() {
+        let range = SlotValidator::Range {
+            min: Some(1.0),
+            max: Some(12.0),
+        };
+        assert!(range.check(&serde_json::json!(6)));
+        assert!(range.check(&serde_json::json!("4"))); // numeric string
+        assert!(!range.check(&serde_json::json!(0)));
+        assert!(!range.check(&serde_json::json!(13)));
+        assert!(!range.check(&serde_json::json!("x")));
+
+        assert!(SlotValidator::NonEmpty.check(&serde_json::json!("hi")));
+        assert!(!SlotValidator::NonEmpty.check(&serde_json::json!("  ")));
+
+        let one_of = SlotValidator::OneOf(vec!["pizza".into(), "salad".into()]);
+        assert!(one_of.check(&serde_json::json!("PIZZA")));
+        assert!(!one_of.check(&serde_json::json!("soda")));
     }
 
     #[test]

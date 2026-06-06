@@ -81,7 +81,7 @@ pub use flow::{
     render_ground, run as run_on_enter, CompiledFlow, Enforcement as FlowMode, Flow, FlowError,
     FlowErrors, FlowExplanation, FlowMonitor, Guard, StepAction, ToolPolicy, Verdict, Violation,
 };
-pub use frame::{ConfirmPolicy, Frame, FrameSpec, SlotRecognizer, SlotSpec};
+pub use frame::{ConfirmPolicy, Frame, FrameSpec, SlotRecognizer, SlotSpec, SlotValidator};
 /// The `#[tool]` attribute macro — turns an `async fn` into a registrable Gemini tool.
 ///
 /// See the [`gemini_adk_macros_rs::tool`] documentation for details.

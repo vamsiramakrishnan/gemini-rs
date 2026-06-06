@@ -40,9 +40,15 @@ the substrate the compiler targets; the compiler arc proper is:
   - slot **evidence**: `State::evidence(key)` over the mutation journal +
     `state_meta:` provenance + confidence; deterministic extraction now records
     confidence into `state_meta`, so evidence confidence is real end-to-end.
-  - 📋 *Remaining (small):* auto-register `CompiledConversation::extractors()` on a
-    `Live` session from `Live::govern`/a conversation entrypoint (today they're
-    exposed for manual registration); slot `validate`; frame Resolver fields.
+  - `Live::converse(&convo)` / `converse_observe` — one-liner that governs + registers
+    the conversation's extractors.
+  - slot **validation**: serializable `SlotValidator` (`Range`/`NonEmpty`/`Regex`/
+    `OneOf`) + `#[slot(min=…, max=…, non_empty)]`; invalid recognized values are
+    rejected.
+  - **resolver-filled slots**: `Conversation::resolve_slot(name, args, ttl, fetch)`
+    fills a slot from an async fetch/agent, lowering to an Extract resolver field.
+
+  **Phase 1 is complete.** Next: Phase 2 (deterministic simulation harness).
 - 📋 **Phase 2 — trust:** deterministic simulation harness (fake user + tool
   latency) + scenario/property tests.
 - 📋 **Phase 3 — overlays (own RFC):** hierarchical digressions + resumable

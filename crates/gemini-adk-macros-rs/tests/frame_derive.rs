@@ -4,13 +4,18 @@
 //! live in `tests/` and exercise the generated code against the real
 //! `gemini-adk-rs` crate graph.
 
-use gemini_adk_rs::frame::{ConfirmPolicy, SlotRecognizer};
+use gemini_adk_rs::frame::{ConfirmPolicy, SlotRecognizer, SlotValidator};
 use gemini_adk_rs::Frame; // brings both the `Frame` trait and the `#[derive(Frame)]` macro
 
 #[derive(Frame)]
 #[frame(name = "booking")]
 struct Booking {
-    #[slot(prompt = "For how many people?", confirm = "low_confidence")]
+    #[slot(
+        prompt = "For how many people?",
+        confirm = "low_confidence",
+        min = 1,
+        max = 12
+    )]
     #[recognize(integer_near = ["people", "guests", "party"])]
     party_size: u8,
     #[slot(
@@ -58,6 +63,15 @@ fn derives_frame_spec_with_metadata() {
     );
     assert_eq!(when.recognizer, Some(SlotRecognizer::DateTime));
     assert_eq!(name.recognizer, None); // no #[recognize]
+
+    // `min`/`max` lower to a Range validator.
+    assert_eq!(
+        party.validate,
+        Some(SlotValidator::Range {
+            min: Some(1.0),
+            max: Some(12.0)
+        })
+    );
 
     // The recognizer-bearing slots lower to an extractor.
     assert!(Booking::frame().to_extract().is_some());

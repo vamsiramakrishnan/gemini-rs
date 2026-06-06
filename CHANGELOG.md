@@ -40,6 +40,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Live::converse(&conversation)`** — one-liner that governs a Live session with
+  a compiled conversation's flow and registers the extractors that fill its
+  frames' slots (`converse_observe` for observe mode).
+- **Slot validation.** A serializable `SlotValidator` (`Range`/`NonEmpty`/`Regex`/
+  `OneOf`) on slots; `#[slot(min=…, max=…, non_empty)]` in the derive. A recognized
+  value failing its validator is rejected (the slot stays unfilled). Extract gains
+  `ExtractBuilder::validate(predicate)` to attach a post-recognition check.
+- **Resolver-filled slots.** `Conversation::resolve_slot(name, args, ttl, fetch)`
+  fills a slot from an async fetch/agent (bound from `State`), lowering to an
+  Extract resolver field. The closure stays builder-only, so `ConversationSpec`
+  remains serializable.
 - **Typed frames & slots.** A `Frame` trait + `FrameSpec`/`SlotSpec`/`ConfirmPolicy`/
   `SlotRecognizer` and a `#[derive(Frame)]` macro: declare a struct with
   `#[slot(prompt=…, reprompt=…, confirm=…, state=…, pii)]` and `#[recognize(…)]`

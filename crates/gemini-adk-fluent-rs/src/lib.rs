@@ -96,7 +96,9 @@ pub mod prelude {
         FlowErrors, FlowExplanation, FlowMonitor, Guard, StepAction, ToolPolicy, Verdict,
         Violation,
     };
-    pub use gemini_adk_rs::frame::{ConfirmPolicy, FrameSpec, SlotRecognizer, SlotSpec};
+    pub use gemini_adk_rs::frame::{
+        ConfirmPolicy, FrameSpec, SlotRecognizer, SlotSpec, SlotValidator,
+    };
     pub use gemini_adk_rs::live::{
         CallbackMode, ComputedContract, ContextDelivery, ControlContract, DefaultResultFormatter,
         DeferredWriter, EventCallbacks, ExtractionTrigger, ExtractorContract, FieldPromotion,
