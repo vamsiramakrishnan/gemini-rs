@@ -268,15 +268,20 @@ pub async fn health_check(State(state): State<ServerState>) -> Json<HealthRespon
 
 // ── Eval ────────────────────────────────────────────────────────
 
-pub async fn run_eval(Json(req): Json<EvalRunRequest>) -> impl IntoResponse {
-    // TODO: Wire up to gemini_adk_rs::evaluation
-    Json(serde_json::json!({
-        "agent": req.agent,
-        "status": "submitted",
-        "criteria": req.criteria,
-    }))
+pub async fn run_eval(
+    State(state): State<ServerState>,
+    Json(req): Json<EvalRunRequest>,
+) -> impl IntoResponse {
+    match crate::eval::run_evalset(&state, &req).await {
+        Ok(summary) => Json(summary).into_response(),
+        Err(err) => (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": err })),
+        )
+            .into_response(),
+    }
 }
 
-pub async fn list_eval_results() -> Json<Vec<EvalResultSummary>> {
-    Json(vec![])
+pub async fn list_eval_results(State(state): State<ServerState>) -> Json<Vec<EvalResultSummary>> {
+    Json(state.eval_results.read().clone())
 }

@@ -111,7 +111,7 @@ pub struct EvalRunRequest {
 }
 
 /// Eval result summary.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct EvalResultSummary {
     pub agent: String,
     pub timestamp: String,
