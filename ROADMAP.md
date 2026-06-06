@@ -29,13 +29,17 @@ the substrate the compiler targets; the compiler arc proper is:
 - ✅ **Phase 0 — keystone:** `CompiledFlow` (validated IR + `FlowErrors` +
   `ToolPolicy`) and `FlowMonitor::explain()`/`why_blocked()`. *(L1 landed; L2
   surface + richer checks remain — see Milestone 2.)*
-- 🚧 **Phase 1 — compiler MVP:** serializable `ConversationSpec` + `Conversation`
-  builder lowering `stage/say/ground/collect/commit/next/require` → `CompiledFlow`
-  **landed** (spec round-trips through JSON; `monitor()` yields a `FlowMonitor`).
-  *Remaining:* `#[derive(Frame)]` slots (prompt/validate/confidence/confirm),
-  slot **evidence** (aggregated over the mutation journal + `state_meta:`
-  provenance + recognizer confidence), and Extract/Resolver bindings emitted from
-  `collect`.
+- 🚧 **Phase 1 — compiler MVP:** mostly landed.
+  - ✅ serializable `ConversationSpec` + `Conversation` builder lowering
+    `stage/say/ground/collect/commit/next/require` → `CompiledFlow` (JSON
+    round-trip; `monitor()` yields a `FlowMonitor`).
+  - ✅ typed frames: `#[derive(Frame)]` + `FrameSpec`/`SlotSpec`/`ConfirmPolicy`
+    (prompt/reprompt/confirm/state/pii) and `Conversation::collect_frame::<F>()`.
+  - ✅ slot **evidence**: `State::evidence(key)` over the mutation journal +
+    `state_meta:` provenance + confidence.
+  - 📋 *Remaining:* emit Extract recognizers + Resolver bindings from a frame's
+    `collect` (so a stage actually populates its slots, with recognizer confidence
+    flowing into `state_meta` for evidence); slot `validate`.
 - 📋 **Phase 2 — trust:** deterministic simulation harness (fake user + tool
   latency) + scenario/property tests.
 - 📋 **Phase 3 — overlays (own RFC):** hierarchical digressions + resumable

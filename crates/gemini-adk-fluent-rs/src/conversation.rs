@@ -219,6 +219,15 @@ impl Conversation {
         self
     }
 
+    /// Collect the slots of a typed [`Frame`](gemini_adk_rs::frame::Frame) in this
+    /// stage. The frame's slot state-keys drive the `captured` completion; its
+    /// metadata (prompts/confirm/pii) is available via `F::frame()` for
+    /// confirmation and repair.
+    pub fn collect_frame<F: gemini_adk_rs::frame::Frame>(mut self) -> Self {
+        self.current().collect = F::frame().slot_keys();
+        self
+    }
+
     /// Allow the given tools while this stage is active.
     pub fn allow<I, S>(mut self, tools: I) -> Self
     where
@@ -512,6 +521,41 @@ mod tests {
         let back: ConversationSpec = serde_json::from_str(&json).expect("deserialize spec");
         let recompiled = Conversation::from_spec(back).expect("recompile from spec");
         assert_eq!(recompiled.flow().flow().steps.len(), 4);
+    }
+
+    #[test]
+    fn collect_frame_uses_frame_slot_keys() {
+        use gemini_adk_rs::frame::{Frame, FrameSpec, SlotSpec};
+
+        struct Booking;
+        impl Frame for Booking {
+            fn frame() -> FrameSpec {
+                FrameSpec {
+                    name: "booking".into(),
+                    slots: vec![SlotSpec::new("party_size"), SlotSpec::new("slot")],
+                }
+            }
+        }
+
+        let convo = Conversation::new("b")
+            .stage("collect")
+            .collect_frame::<Booking>()
+            .next("done", Guard::captured(["party_size", "slot"]))
+            .stage("done")
+            .terminal()
+            .compile()
+            .expect("compiles");
+
+        // The collect stage completes on the frame's slots being captured.
+        let mut mon = convo.monitor(Enforcement::Enforce);
+        let state = State::new();
+        assert!(mon.explain(&state).active.contains(&"collect".to_string()));
+        let _ = state.set("party_size", 2u8);
+        let _ = state.set("slot", "noon");
+        mon.on_turn(&state);
+        // Frame slots captured -> collect completes and the (terminal) done latches.
+        assert!(mon.marking().done.contains("collect"));
+        assert!(mon.marking().done.contains("done"));
     }
 
     #[test]

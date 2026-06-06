@@ -40,6 +40,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Typed frames & slots.** A `Frame` trait + `FrameSpec`/`SlotSpec`/`ConfirmPolicy`
+  and a `#[derive(Frame)]` macro: declare a struct with `#[slot(prompt=…,
+  reprompt=…, confirm=…, state=…, pii)]` fields and get the slot definition (keys,
+  prompts, confirmation policy, PII flags). `Conversation::collect_frame::<F>()`
+  collects a frame's slots in a stage (drives the `captured` completion).
+- **Slot evidence.** `State::evidence(key) -> SlotEvidence` aggregates a slot's
+  current value, provenance (`state_meta:{key}.source`), confidence, and the most
+  recent journal write — the basis for principled confirmations ("I heard 6,
+  right?") and stale/low-confidence repair. `StateMutationOrigin` is now serde.
 - **Conversation compiler (Phase 1 MVP).** A serializable `ConversationSpec` and
   a fluent `Conversation` builder (sugar over the spec) that **compile down to a
   governed `CompiledFlow`** via `Conversation::compile() -> CompiledConversation`.

@@ -96,6 +96,7 @@ pub mod prelude {
         FlowErrors, FlowExplanation, FlowMonitor, Guard, StepAction, ToolPolicy, Verdict,
         Violation,
     };
+    pub use gemini_adk_rs::frame::{ConfirmPolicy, FrameSpec, SlotSpec};
     pub use gemini_adk_rs::live::{
         CallbackMode, ComputedContract, ContextDelivery, ControlContract, DefaultResultFormatter,
         DeferredWriter, EventCallbacks, ExtractionTrigger, ExtractorContract, FieldPromotion,
@@ -110,7 +111,7 @@ pub mod prelude {
     pub use gemini_adk_rs::orchestration::{
         self, call as call_agent, provenance, Mode as AgentMode, Resolver,
     };
-    pub use gemini_adk_rs::state::{State, StateKey};
+    pub use gemini_adk_rs::state::{SlotEvidence, State, StateKey};
     pub use gemini_adk_rs::text::{
         DispatchTextAgent, FallbackTextAgent, FnTextAgent, JoinTextAgent, LlmTextAgent,
         LoopTextAgent, MapOverTextAgent, ParallelTextAgent, RaceTextAgent, RouteRule,
@@ -141,5 +142,7 @@ pub mod prelude {
     // `#[derive(Extract)]` macro (macro namespace) under one name, so the
     // builder (`Extract::record(..)`) and the derive are both usable.
     pub use gemini_adk_rs::Extract;
+    // The `#[derive(Frame)]` macro — generates a `Frame` impl from `#[slot(..)]`.
+    pub use gemini_adk_rs::Frame;
     pub use gemini_genai_rs::prelude::*;
 }

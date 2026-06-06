@@ -401,6 +401,165 @@ fn expand_extract(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     })
 }
 
+/// Derive a [`Frame`] impl from a struct's `#[slot(..)]` fields.
+///
+/// Every named field becomes a slot (state key = field name unless overridden).
+/// The generated `fn frame() -> FrameSpec` carries each slot's prompt, reprompt,
+/// confirmation policy, and PII flag — the metadata the conversation compiler and
+/// repair use.
+///
+/// ```ignore
+/// #[derive(Frame)]
+/// #[frame(name = "booking")]
+/// struct Booking {
+///     #[slot(prompt = "For how many people?", confirm = "low_confidence")]
+///     party_size: u8,
+///     #[slot(prompt = "Name?", pii)]
+///     name: String,
+/// }
+/// ```
+///
+/// Field `#[slot(..)]` options: `prompt`, `reprompt`, `confirm`
+/// (`never`/`low_confidence`/`always`), `state` (key override), `pii` (flag).
+/// Container `#[frame(name = "...")]` sets the frame name.
+#[proc_macro_derive(Frame, attributes(slot, frame))]
+pub fn derive_frame(item: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(item as DeriveInput);
+    match expand_frame(input) {
+        Ok(ts) => ts.into(),
+        Err(e) => e.to_compile_error().into(),
+    }
+}
+
+fn expand_frame(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
+    let ident = &input.ident;
+
+    let fields = match &input.data {
+        Data::Struct(s) => match &s.fields {
+            Fields::Named(named) => &named.named,
+            _ => {
+                return Err(syn::Error::new_spanned(
+                    ident,
+                    "#[derive(Frame)] requires a struct with named fields",
+                ))
+            }
+        },
+        _ => {
+            return Err(syn::Error::new_spanned(
+                ident,
+                "#[derive(Frame)] can only be applied to structs",
+            ))
+        }
+    };
+
+    // Container `#[frame(name = "...")]`.
+    let mut name = to_snake_case(&ident.to_string());
+    for attr in &input.attrs {
+        if attr.path().is_ident("frame") {
+            attr.parse_nested_meta(|meta| {
+                if meta.path.is_ident("name") {
+                    let v: LitStr = meta.value()?.parse()?;
+                    name = v.value();
+                    Ok(())
+                } else {
+                    Err(meta.error("unknown `frame` option (expected `name`)"))
+                }
+            })?;
+        }
+    }
+
+    let all_field_idents: Vec<_> = fields.iter().filter_map(|f| f.ident.clone()).collect();
+
+    let mut slot_exprs = Vec::new();
+    for field in fields {
+        let fname = field.ident.as_ref().expect("named field").to_string();
+        let mut state_key = fname.clone();
+        let mut prompt: Option<String> = None;
+        let mut reprompt: Option<String> = None;
+        let mut confirm = quote! { ::gemini_adk_rs::frame::ConfirmPolicy::Never };
+        let mut pii = false;
+
+        for attr in &field.attrs {
+            if !attr.path().is_ident("slot") {
+                continue;
+            }
+            attr.parse_nested_meta(|meta| {
+                if meta.path.is_ident("prompt") {
+                    let v: LitStr = meta.value()?.parse()?;
+                    prompt = Some(v.value());
+                } else if meta.path.is_ident("reprompt") {
+                    let v: LitStr = meta.value()?.parse()?;
+                    reprompt = Some(v.value());
+                } else if meta.path.is_ident("state") {
+                    let v: LitStr = meta.value()?.parse()?;
+                    state_key = v.value();
+                } else if meta.path.is_ident("confirm") {
+                    let v: LitStr = meta.value()?.parse()?;
+                    confirm = match v.value().as_str() {
+                        "never" => quote! { ::gemini_adk_rs::frame::ConfirmPolicy::Never },
+                        "low_confidence" => {
+                            quote! { ::gemini_adk_rs::frame::ConfirmPolicy::LowConfidence }
+                        }
+                        "always" => quote! { ::gemini_adk_rs::frame::ConfirmPolicy::Always },
+                        other => {
+                            return Err(meta.error(format!(
+                                "unknown confirm policy '{other}' (expected never/low_confidence/always)"
+                            )))
+                        }
+                    };
+                } else if meta.path.is_ident("pii") {
+                    pii = true;
+                } else {
+                    return Err(meta.error(
+                        "unknown `slot` option (expected prompt/reprompt/state/confirm/pii)",
+                    ));
+                }
+                Ok(())
+            })?;
+        }
+
+        let prompt_tok = match prompt {
+            Some(p) => quote! { Some(#p.to_string()) },
+            None => quote! { None },
+        };
+        let reprompt_tok = match reprompt {
+            Some(p) => quote! { Some(#p.to_string()) },
+            None => quote! { None },
+        };
+        slot_exprs.push(quote! {
+            ::gemini_adk_rs::frame::SlotSpec {
+                name: #fname.to_string(),
+                state_key: #state_key.to_string(),
+                prompt: #prompt_tok,
+                reprompt: #reprompt_tok,
+                confirm: #confirm,
+                pii: #pii,
+            }
+        });
+    }
+
+    let doc = format!("The `FrameSpec` derived from `{ident}`'s `#[slot(..)]` fields.");
+    Ok(quote! {
+        impl ::gemini_adk_rs::frame::Frame for #ident {
+            #[doc = #doc]
+            fn frame() -> ::gemini_adk_rs::frame::FrameSpec {
+                ::gemini_adk_rs::frame::FrameSpec {
+                    name: #name.to_string(),
+                    slots: ::std::vec![ #(#slot_exprs),* ],
+                }
+            }
+        }
+
+        impl #ident {
+            #[allow(dead_code)]
+            #[doc(hidden)]
+            fn __frame_mark_fields_used(&self) {
+                #( let _ = &self.#all_field_idents; )*
+            }
+        }
+    })
+}
+
 /// Build the `Recognizer::..` expression for a single `#[recognize(..)]` attr.
 fn recognizer_expr(attr: &syn::Attribute) -> syn::Result<proc_macro2::TokenStream> {
     let r = quote! { ::gemini_adk_rs::extract::Recognizer };

@@ -46,7 +46,8 @@ impl<T> StateKey<T> {
 }
 
 /// Where a state mutation came from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum StateMutationOrigin {
     /// Regular `State::set` or prefixed state write.
     Set,
@@ -103,6 +104,32 @@ enum DeltaOp {
     Put(Value),
     /// Remove the key on commit (tombstone — shadows the committed value).
     Delete,
+}
+
+/// Provenance and confidence for a single state slot — the evidence behind a
+/// value, aggregated from the mutation journal and the `state_meta:{key}` record.
+///
+/// This is what lets the model confirm principled-ly ("I heard 6, right?"):
+/// whether a slot was directly set, resolved from a system, or carries low
+/// confidence, and when it last changed.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SlotEvidence {
+    /// The state key.
+    pub key: String,
+    /// Whether the key currently has a value.
+    pub present: bool,
+    /// The current value, if any.
+    pub value: Option<Value>,
+    /// Provenance source from `state_meta:{key}.source` (e.g. `agent`/`fetch`/
+    /// `llm`/`extraction`), if recorded.
+    pub source: Option<String>,
+    /// Confidence from `state_meta:{key}.confidence` (0.0–1.0), if recorded.
+    pub confidence: Option<f64>,
+    /// Journal sequence of the most recent write to this key, if still in the
+    /// bounded journal window.
+    pub last_sequence: Option<u64>,
+    /// Origin of the most recent recorded write, if known.
+    pub last_origin: Option<StateMutationOrigin>,
 }
 
 /// A concurrent, type-safe state container that agents read from and write to.
@@ -730,6 +757,40 @@ impl State {
             .expect("state mutation journal poisoned")
             .drain(..)
             .collect()
+    }
+
+    /// Aggregate the [`SlotEvidence`] for a key: its current value, provenance
+    /// (`state_meta:{key}`), confidence, and most-recent journal write.
+    pub fn evidence(&self, key: &str) -> SlotEvidence {
+        let value = self.get_raw(key);
+        let meta = self.get::<Value>(&format!("state_meta:{key}"));
+        let source = meta
+            .as_ref()
+            .and_then(|m| m.get("source"))
+            .and_then(|s| s.as_str().map(String::from));
+        let confidence = meta
+            .as_ref()
+            .and_then(|m| m.get("confidence"))
+            .and_then(serde_json::Value::as_f64);
+
+        let mut last_sequence: Option<u64> = None;
+        let mut last_origin: Option<StateMutationOrigin> = None;
+        for m in self.recent_mutations() {
+            if m.key == key && last_sequence.is_none_or(|s| m.sequence > s) {
+                last_sequence = Some(m.sequence);
+                last_origin = Some(m.origin);
+            }
+        }
+
+        SlotEvidence {
+            key: key.to_string(),
+            present: value.is_some(),
+            value,
+            source,
+            confidence,
+            last_sequence,
+            last_origin,
+        }
     }
 
     fn record_mutation(
@@ -1610,6 +1671,30 @@ mod tests {
         let _ = state.set_key(&TURN_COUNT, 10);
         // Can also read via raw key
         assert_eq!(state.get::<u32>("session:turn_count"), Some(10));
+    }
+
+    #[test]
+    fn slot_evidence_aggregates_value_provenance_and_journal() {
+        let state = State::new();
+        let _ = state.set("party_size", 6u8);
+        // Provenance written under the state_meta convention (as resolvers do).
+        let _ = state.set(
+            "state_meta:party_size",
+            serde_json::json!({ "source": "extraction", "confidence": 0.9 }),
+        );
+
+        let ev = state.evidence("party_size");
+        assert!(ev.present);
+        assert_eq!(ev.value, Some(serde_json::json!(6)));
+        assert_eq!(ev.source.as_deref(), Some("extraction"));
+        assert_eq!(ev.confidence, Some(0.9));
+        assert!(ev.last_sequence.is_some());
+        assert_eq!(ev.last_origin, Some(StateMutationOrigin::Set));
+
+        // An absent key reports no evidence.
+        let missing = state.evidence("nope");
+        assert!(!missing.present);
+        assert!(missing.source.is_none());
     }
 
     // ── Transaction-invariant tests (the verified correctness bugs) ──────────
