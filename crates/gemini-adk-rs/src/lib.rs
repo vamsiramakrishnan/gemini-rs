@@ -77,8 +77,8 @@ pub use error::{AgentError, AgentResult, ToolError};
 pub use events::{Event, EventActions, EventType, StructuredEvent};
 pub use extract::{Extract, Recognizer, RecordExtractor};
 pub use flow::{
-    render_ground, run as run_on_enter, Enforcement as FlowMode, Flow, FlowMonitor, Guard,
-    StepAction, Verdict, Violation,
+    render_ground, run as run_on_enter, CompiledFlow, Enforcement as FlowMode, Flow, FlowError,
+    FlowErrors, FlowExplanation, FlowMonitor, Guard, StepAction, ToolPolicy, Verdict, Violation,
 };
 /// The `#[tool]` attribute macro — turns an `async fn` into a registrable Gemini tool.
 ///

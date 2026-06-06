@@ -87,8 +87,9 @@ pub mod prelude {
     pub use gemini_adk_rs::error::{AgentError, AgentResult, ToolError};
     pub use gemini_adk_rs::extract::{Recognizer, RecordExtractor};
     pub use gemini_adk_rs::flow::{
-        render_ground, run as run_on_enter, Enforcement as FlowMode, Flow, FlowMonitor, Guard,
-        StepAction, Verdict, Violation,
+        render_ground, run as run_on_enter, CompiledFlow, Enforcement as FlowMode, Flow, FlowError,
+        FlowErrors, FlowExplanation, FlowMonitor, Guard, StepAction, ToolPolicy, Verdict,
+        Violation,
     };
     pub use gemini_adk_rs::live::{
         CallbackMode, ComputedContract, ContextDelivery, ControlContract, DefaultResultFormatter,

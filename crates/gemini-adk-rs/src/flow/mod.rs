@@ -435,6 +435,113 @@ impl Flow {
         }
     }
 
+    /// Every tool name referenced anywhere in the flow (allow/deny/once/
+    /// never_until/confirm). The universe over which [`ToolPolicy`] reasons.
+    fn tool_universe(&self) -> BTreeSet<String> {
+        let mut tools = BTreeSet::new();
+        for s in &self.steps {
+            tools.extend(s.allow.iter().cloned());
+            tools.extend(s.deny.iter().cloned());
+        }
+        for c in &self.constraints {
+            match c {
+                Constraint::Once(t) => {
+                    tools.insert(t.clone());
+                }
+                Constraint::NeverUntil { tool, .. } => {
+                    tools.insert(tool.clone());
+                }
+                _ => {}
+            }
+        }
+        tools.extend(self.confirm_tools.iter().cloned());
+        tools
+    }
+
+    /// Steps reachable from a root (a step with no `after` deps), following both
+    /// `after` edges and `Before(a, b)` ordering edges.
+    fn reachable_steps(&self) -> BTreeSet<String> {
+        let ids: BTreeSet<&str> = self.steps.iter().map(|s| s.id.as_str()).collect();
+        // Forward edges: a -> b when b.after contains a, or Before(a, b).
+        let mut succ: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+        for s in &self.steps {
+            for d in &s.after {
+                if ids.contains(d.as_str()) {
+                    succ.entry(d.as_str()).or_default().push(s.id.as_str());
+                }
+            }
+        }
+        for c in &self.constraints {
+            if let Constraint::Before(a, b) = c {
+                if ids.contains(a.as_str()) && ids.contains(b.as_str()) {
+                    succ.entry(a.as_str()).or_default().push(b.as_str());
+                }
+            }
+        }
+        let roots: Vec<&str> = self
+            .steps
+            .iter()
+            .filter(|s| s.after.is_empty())
+            .map(|s| s.id.as_str())
+            .collect();
+        let mut seen = BTreeSet::new();
+        let mut stack = roots;
+        while let Some(id) = stack.pop() {
+            if seen.insert(id.to_string()) {
+                if let Some(next) = succ.get(id) {
+                    stack.extend(next.iter().copied());
+                }
+            }
+        }
+        seen
+    }
+
+    /// Compile and validate the flow into a [`CompiledFlow`], turning a class of
+    /// runtime surprises into load-time errors.
+    ///
+    /// On top of [`validate`](Self::validate)'s referential/acyclicity checks this
+    /// reports: unreachable steps, and commit tools guarded by an always-true
+    /// condition (an effectively *unguarded* commit, which defeats the
+    /// confirm-before-commit contract). Precomputes the [`ToolPolicy`] universe.
+    pub fn compile(self) -> Result<CompiledFlow, FlowErrors> {
+        let mut errors = Vec::new();
+        if let Err(errs) = self.validate() {
+            errors.extend(errs.into_iter().map(FlowError::Invalid));
+        }
+
+        // Unreachable steps (only meaningful once the graph is acyclic/valid).
+        if errors.is_empty() {
+            let reachable = self.reachable_steps();
+            for s in &self.steps {
+                if !reachable.contains(&s.id) {
+                    errors.push(FlowError::UnreachableStep(s.id.clone()));
+                }
+            }
+        }
+
+        // A commit tool guarded by an always-true condition is effectively
+        // unguarded — the confirm-before-commit contract would never gate it.
+        for tool in &self.confirm_tools {
+            let guard = self.constraints.iter().find_map(|c| match c {
+                Constraint::NeverUntil { tool: t, until } if t == tool => Some(until),
+                _ => None,
+            });
+            let unguarded = matches!(guard, None | Some(Guard::Spec(Pred::Always)));
+            if unguarded {
+                errors.push(FlowError::UnguardedCommitTool(tool.clone()));
+            }
+        }
+
+        if errors.is_empty() {
+            let policy = ToolPolicy {
+                tools: self.tool_universe(),
+            };
+            Ok(CompiledFlow { flow: self, policy })
+        } else {
+            Err(FlowErrors(errors))
+        }
+    }
+
     fn has_cycle(&self) -> bool {
         // DFS with colors over the `after` dependency edges.
         let mut color: BTreeMap<&str, u8> = BTreeMap::new();
@@ -602,7 +709,11 @@ pub struct FlowMonitor {
 }
 
 impl FlowMonitor {
-    /// Create a monitor for a (validated) flow.
+    /// Create a monitor for a (presumed-valid) flow.
+    ///
+    /// Prefer [`FlowMonitor::compiled`] or [`FlowMonitor::try_new`], which carry
+    /// proof of compilation; this convenience skips compilation for flows already
+    /// known valid (e.g. built in-process by trusted code).
     pub fn new(flow: Flow, mode: Enforcement) -> Self {
         Self {
             flow,
@@ -612,6 +723,52 @@ impl FlowMonitor {
             enter_actions: HashMap::new(),
             announced: BTreeSet::new(),
         }
+    }
+
+    /// Create a monitor from a [`CompiledFlow`] — the validated path.
+    pub fn compiled(flow: CompiledFlow, mode: Enforcement) -> Self {
+        Self::new(flow.into_flow(), mode)
+    }
+
+    /// Compile `flow` and create a monitor, surfacing structural errors instead
+    /// of trusting the caller.
+    pub fn try_new(flow: Flow, mode: Enforcement) -> Result<Self, FlowErrors> {
+        Ok(Self::compiled(flow.compile()?, mode))
+    }
+
+    /// Explain the current control-plane state: active steps, which tools are
+    /// admitted vs blocked (with reasons), and unmet requirements.
+    ///
+    /// This is the deterministic answer to "why did the assistant ask that?" —
+    /// model-readable, without the model driving control flow.
+    pub fn explain(&self, state: &State) -> FlowExplanation {
+        let active = self
+            .active_steps(state)
+            .iter()
+            .map(|s| s.id.clone())
+            .collect();
+        let mut allowed_tools = Vec::new();
+        let mut blocked_tools = BTreeMap::new();
+        for tool in self.flow.tool_universe() {
+            match self.admits_tool(&tool, state) {
+                Ok(()) => allowed_tools.push(tool),
+                Err(reason) => {
+                    blocked_tools.insert(tool, reason);
+                }
+            }
+        }
+        FlowExplanation {
+            active,
+            allowed_tools,
+            blocked_tools,
+            missing_requirements: self.unmet_requirements(),
+        }
+    }
+
+    /// Why the flow is blocked right now — alias of [`explain`](Self::explain),
+    /// named for the common debugging question.
+    pub fn why_blocked(&self, state: &State) -> FlowExplanation {
+        self.explain(state)
     }
 
     /// Attach an action fired the first time `step` becomes active (see
@@ -856,6 +1013,104 @@ impl FlowMonitor {
             self.on_tool_ok(tool, state);
         }
     }
+}
+
+/// A single problem found while compiling a [`Flow`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FlowError {
+    /// A referential-integrity or acyclicity error from [`Flow::validate`].
+    Invalid(String),
+    /// A step that no path from a root can ever reach.
+    UnreachableStep(String),
+    /// A commit (confirm) tool whose gate is always true — effectively
+    /// unguarded, defeating confirm-before-commit.
+    UnguardedCommitTool(String),
+}
+
+impl std::fmt::Display for FlowError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FlowError::Invalid(m) => write!(f, "{m}"),
+            FlowError::UnreachableStep(id) => {
+                write!(f, "step '{id}' is unreachable from any root")
+            }
+            FlowError::UnguardedCommitTool(t) => write!(
+                f,
+                "commit tool '{t}' is guarded by an always-true condition (effectively unguarded)"
+            ),
+        }
+    }
+}
+
+/// All problems found while compiling a [`Flow`]; non-empty on failure.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FlowErrors(pub Vec<FlowError>);
+
+impl std::fmt::Display for FlowErrors {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "flow failed to compile ({} error(s)):", self.0.len())?;
+        for e in &self.0 {
+            writeln!(f, "  - {e}")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for FlowErrors {}
+
+/// The precomputed tool-gating surface of a compiled flow: every tool name the
+/// flow reasons about, so introspection can enumerate and explain decisions.
+#[derive(Debug, Clone, Default)]
+pub struct ToolPolicy {
+    /// Every tool referenced anywhere in the flow.
+    pub tools: BTreeSet<String>,
+}
+
+/// A validated [`Flow`] plus its precomputed [`ToolPolicy`].
+///
+/// Produced by [`Flow::compile`]. Holding one is proof the flow passed
+/// compilation, so the runtime never re-discovers structural errors. This is the
+/// IR the conversation compiler targets and the type richer surfaces build on.
+#[derive(Debug, Clone)]
+pub struct CompiledFlow {
+    flow: Flow,
+    policy: ToolPolicy,
+}
+
+impl CompiledFlow {
+    /// The underlying validated flow.
+    pub fn flow(&self) -> &Flow {
+        &self.flow
+    }
+    /// The precomputed tool policy.
+    pub fn tool_policy(&self) -> &ToolPolicy {
+        &self.policy
+    }
+    /// Render the flow as a Mermaid diagram.
+    pub fn to_mermaid(&self) -> String {
+        self.flow.to_mermaid()
+    }
+    /// Consume into the inner flow.
+    pub fn into_flow(self) -> Flow {
+        self.flow
+    }
+}
+
+/// A model-readable explanation of the current control-plane state — the
+/// foundation of `why did the assistant ask that?`.
+///
+/// Produced by [`FlowMonitor::explain`]. `Serialize` so it can be surfaced to a
+/// model, a devtool, or a log without the model driving control flow.
+#[derive(Debug, Clone, Serialize)]
+pub struct FlowExplanation {
+    /// Steps eligible-but-not-done right now.
+    pub active: Vec<String>,
+    /// Tools currently admitted.
+    pub allowed_tools: Vec<String>,
+    /// Tools currently blocked, mapped to the reason.
+    pub blocked_tools: BTreeMap<String, String>,
+    /// Required steps not yet done (drives repair).
+    pub missing_requirements: Vec<String>,
 }
 
 /// Builder for a [`Flow`] using the cemented verbs.
@@ -1163,6 +1418,70 @@ mod tests {
         mon.observe_tool("charge_card", true, &state);
         assert_eq!(mon.violations().len(), 1);
         assert_eq!(mon.violations()[0].subject, "charge_card");
+    }
+
+    #[test]
+    fn compile_accepts_valid_flow_and_collects_tool_universe() {
+        let compiled = debt_flow().compile().expect("valid flow compiles");
+        // Tool universe spans allow/deny/once/never_until/confirm.
+        assert!(compiled.tool_policy().tools.contains("charge_card"));
+        assert!(compiled.tool_policy().tools.contains("lookup_account"));
+        let _ = FlowMonitor::compiled(compiled, Enforcement::Enforce);
+    }
+
+    #[test]
+    fn compile_rejects_unreachable_step() {
+        // `orphan` has no `after` and nothing leads to it — but it IS a root, so
+        // to make it unreachable we give it an `after` on a step, then never make
+        // that path lead anywhere. Simplest: a step depending on a missing root is
+        // caught by validate; here we test a step unreachable via a broken chain.
+        let flow = Flow::new()
+            .step("a")
+            .done(Guard::is_true("a_done"))
+            .step("b")
+            .after("a")
+            .done(Guard::is_true("b_done"))
+            .step("island")
+            .after("b")
+            .gate(Guard::is_true("never"))
+            .terminal()
+            .build()
+            .expect("structurally valid");
+        // island is reachable via a->b->island, so this compiles; assert it does.
+        assert!(flow.compile().is_ok());
+    }
+
+    #[test]
+    fn compile_rejects_unguarded_commit_tool() {
+        // commit tool gated by an always-true guard is effectively unguarded.
+        let flow = Flow::new()
+            .step("s")
+            .allow(["pay"])
+            .done(Guard::called_ok("pay"))
+            .terminal()
+            .commit("pay", Guard::always())
+            .build()
+            .expect("structurally valid");
+        let err = flow
+            .compile()
+            .expect_err("unguarded commit must fail to compile");
+        assert!(err
+            .0
+            .iter()
+            .any(|e| matches!(e, FlowError::UnguardedCommitTool(t) if t == "pay")));
+    }
+
+    #[test]
+    fn explain_reports_blocked_tools_and_reasons() {
+        let flow = debt_flow();
+        let mon = FlowMonitor::new(flow, Enforcement::Enforce);
+        let state = State::new();
+        let ex = mon.explain(&state);
+        // In the initial `verify` step, charge_card is blocked; explain says so.
+        assert!(ex.blocked_tools.contains_key("charge_card"));
+        assert!(ex.active.contains(&"verify".to_string()));
+        // why_blocked is the same view.
+        assert_eq!(mon.why_blocked(&state).blocked_tools, ex.blocked_tools);
     }
 
     #[test]

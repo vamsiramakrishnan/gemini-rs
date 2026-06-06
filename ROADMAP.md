@@ -16,6 +16,35 @@ correctness first.
 Each item states the **gap** (what's true in the code today) and the **value**
 (why fixing it matters). Line references are to the state at the time of writing.
 
+## North star: the conversation compiler
+
+The ~100× direction (full design in
+[`docs/plans/2026-06-06-conversation-compiler-rfc.md`](docs/plans/2026-06-06-conversation-compiler-rfc.md)):
+let developers author voice behavior in terms of **slots, confirmations,
+interruptions, repairs, digressions, commitments, and handoffs**, and have the
+SDK *compile* that into Flow + Extract + Resolver + Reactor + ToolPolicy. **Flow
+becomes the bytecode, not the authoring language.** Milestones 1–4 below harden
+the substrate the compiler targets; the compiler arc proper is:
+
+- ✅ **Phase 0 — keystone:** `CompiledFlow` (validated IR + `FlowErrors` +
+  `ToolPolicy`) and `FlowMonitor::explain()`/`why_blocked()`. *(L1 landed; L2
+  surface + richer checks remain — see Milestone 2.)*
+- 📋 **Phase 1 — compiler MVP:** serializable `ConversationSpec` + `#[derive(Frame)]`
+  slots (prompt/validate/confidence/confirm) + slot **evidence** (aggregated over
+  the existing mutation journal + `state_meta:` provenance + recognizer
+  confidence) + lowering `stage/collect/confirm/commit/next` → `CompiledFlow` +
+  Extract + Resolver bindings.
+- 📋 **Phase 2 — trust:** deterministic simulation harness (fake user + tool
+  latency) + scenario/property tests.
+- 📋 **Phase 3 — overlays (own RFC):** hierarchical digressions + resumable
+  `FlowStack`.
+- 📋 **Phase 4 — product surface:** motif stdlib + policy aspects (fail-loud) +
+  voice timing as graph policy.
+
+Locked decisions: the spec is serializable-first (builder is sugar; YAML nearly
+free), and higher layers only ever emit lower-layer constructs (no privileged
+backdoors).
+
 ---
 
 ## Milestone 1 — State correctness `0.8.0` ✅ shipped (Unreleased)
@@ -47,12 +76,13 @@ verified correctness bugs are fixed; the full compile-time validator remains.
   `Pred::Always`.
 - ✅ **Rename `flow::Mode` → `Enforcement`.** Removes the collision with
   `orchestration::Mode`; deprecated alias kept one release.
-- 📋 **`CompiledFlow`.** `Flow::build()`/deserialization feed
-  `compile() -> Result<CompiledFlow, FlowErrors>` that also surfaces unreachable
-  steps, unsatisfiable guards, dangling tool names, unused `confirm_tools`, and
-  unguarded commit tools, and precomputes the active-tool policy.
-  `FlowMonitor::new` takes only `CompiledFlow`. → **Value:** turns a class of
-  runtime surprises into load-time errors.
+- ✅ **`CompiledFlow` (L1).** `Flow::compile() -> Result<CompiledFlow, FlowErrors>`
+  reports unreachable steps and effectively-unguarded commit tools on top of
+  `validate()`, and precomputes a `ToolPolicy`. `FlowMonitor::compiled`/`try_new`
+  construct from it. Plus `FlowMonitor::explain()`/`why_blocked()` → a serializable
+  `FlowExplanation` ("why did the assistant ask that?"). *(Remaining: richer
+  checks — unsatisfiable guards, dangling tool names vs a tool registry — and L2
+  `Live::govern(CompiledFlow)` + `handle.why_blocked()`.)*
 
 ## Milestone 3 — Reactive substrate `0.9.0`
 

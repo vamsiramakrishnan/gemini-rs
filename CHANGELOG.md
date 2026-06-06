@@ -40,6 +40,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Flow::compile() -> Result<CompiledFlow, FlowErrors>`** — the validated flow
+  IR the conversation compiler targets. On top of `validate()` it reports
+  unreachable steps and effectively-unguarded commit tools (`FlowError`), and
+  precomputes a `ToolPolicy` (the tool universe). `FlowMonitor::compiled` /
+  `try_new` construct from it; `new` remains for in-process trusted flows.
+- **`FlowMonitor::explain()` / `why_blocked()`** returning a serializable
+  `FlowExplanation` (active steps, allowed/blocked tools with reasons, unmet
+  requirements) — the deterministic answer to "why did the assistant ask that?".
+- **Conversation-compiler RFC** (`docs/plans/2026-06-06-conversation-compiler-rfc.md`)
+  — the plan to author voice behavior (slots/confirm/repair/digress/commit) and
+  compile it down to Flow + Extract + Resolver + Reactor; locks
+  serializable-spec-first and the one-control-structure rule.
 - `State` property test (rollback always restores base) and regression tests for
   atomic `modify`, rollback-after-remove, and rollback-after-clear-prefix; `Flow`
   regression tests for `Before` enforcement and custom-guard preservation.
