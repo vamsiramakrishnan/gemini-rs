@@ -40,6 +40,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Conversation compiler (Phase 1 MVP).** A serializable `ConversationSpec` and
+  a fluent `Conversation` builder (sugar over the spec) that **compile down to a
+  governed `CompiledFlow`** via `Conversation::compile() -> CompiledConversation`.
+  Authors describe stages that `say`/`ground`, `collect` slots, `commit` tools
+  behind confirmation, and advance via `next(to, when)`; the compiler lowers these
+  to Flow steps, gates, postures, grounding, tool whitelists, and commit
+  constraints. The spec round-trips through JSON (YAML/hot-reload follows for free)
+  and `CompiledConversation::monitor()` yields a ready `FlowMonitor`.
 - **`Flow::compile() -> Result<CompiledFlow, FlowErrors>`** — the validated flow
   IR the conversation compiler targets. On top of `validate()` it reports
   unreachable steps and effectively-unguarded commit tools (`FlowError`), and

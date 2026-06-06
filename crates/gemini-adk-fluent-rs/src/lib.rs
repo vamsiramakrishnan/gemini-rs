@@ -38,6 +38,7 @@
 pub mod a2a;
 pub mod builder;
 pub mod compose;
+pub mod conversation;
 pub mod live;
 pub mod live_builders;
 pub mod operators;
@@ -75,6 +76,10 @@ pub mod prelude {
     pub use crate::a2a::{A2AServer, A2aRegistry, RemoteAgent, SkillDeclaration};
     pub use crate::builder::*;
     pub use crate::compose::{Ctx, A, C, E, G, M, P, S, T};
+    pub use crate::conversation::{
+        CommitSpec, CompiledConversation, Conversation, ConversationError, ConversationSpec,
+        StageSpec, TransitionSpec,
+    };
     pub use crate::live::Live;
     pub use crate::live_builders::*;
     pub use crate::operators::*;
