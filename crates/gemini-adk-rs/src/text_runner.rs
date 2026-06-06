@@ -103,11 +103,11 @@ impl InMemoryRunner {
             .map_err(|e| AgentError::Other(format!("Events error: {e}")))?;
         for event in &events {
             for (key, value) in &event.actions.state_delta {
-                state.set(key.clone(), value.clone());
+                let _ = state.set(key.clone(), value.clone());
             }
         }
 
-        state.set("input", prompt);
+        let _ = state.set("input", prompt);
 
         // Persist user input event
         let user_event = Event::new("user", Some(prompt.to_string()));
@@ -133,7 +133,7 @@ impl InMemoryRunner {
     /// Run without persistence (one-shot, ephemeral).
     pub async fn run_ephemeral(&self, prompt: &str) -> Result<String, AgentError> {
         let state = State::new();
-        state.set("input", prompt);
+        let _ = state.set("input", prompt);
         self.root_agent.run(&state).await
     }
 

@@ -105,7 +105,13 @@ fn blob_prefix(app_name: &str, user_id: &str, session_id: &str, filename: &str) 
 }
 
 /// Construct the full blob name including the version suffix.
-fn blob_name(app_name: &str, user_id: &str, session_id: &str, filename: &str, version: u64) -> String {
+fn blob_name(
+    app_name: &str,
+    user_id: &str,
+    session_id: &str,
+    filename: &str,
+    version: u64,
+) -> String {
     format!(
         "{}/{}",
         blob_prefix(app_name, user_id, session_id, filename),
@@ -115,7 +121,9 @@ fn blob_name(app_name: &str, user_id: &str, session_id: &str, filename: &str, ve
 
 /// Parse the trailing `/{version}` integer from a blob name, if present.
 fn version_from_blob_name(name: &str) -> Option<u64> {
-    name.rsplit('/').next().and_then(|seg| seg.parse::<u64>().ok())
+    name.rsplit('/')
+        .next()
+        .and_then(|seg| seg.parse::<u64>().ok())
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -279,10 +287,7 @@ impl GcsArtifactService {
     }
 
     /// Download a blob's payload and content type. Returns `Ok(None)` on 404.
-    async fn download_blob(
-        &self,
-        blob: &str,
-    ) -> Result<Option<(Vec<u8>, String)>, ArtifactError> {
+    async fn download_blob(&self, blob: &str) -> Result<Option<(Vec<u8>, String)>, ArtifactError> {
         let token = self.token()?;
         let url = format!(
             "{STORAGE_BASE}/b/{}/o/{}",
@@ -444,7 +449,8 @@ impl ArtifactService for GcsArtifactService {
         let Some(latest) = versions.iter().copied().max() else {
             return Ok(None);
         };
-        self.load_version(session_id, name, (latest + 1) as u32).await
+        self.load_version(session_id, name, (latest + 1) as u32)
+            .await
     }
 
     async fn load_version(
@@ -458,7 +464,13 @@ impl ArtifactService for GcsArtifactService {
         }
         // Trait versions are 1-based; the wire layout is 0-based.
         let wire_version = (version - 1) as u64;
-        let blob = blob_name(&self.app_name, &self.user_id, session_id, name, wire_version);
+        let blob = blob_name(
+            &self.app_name,
+            &self.user_id,
+            session_id,
+            name,
+            wire_version,
+        );
 
         let Some((data, content_type)) = self.download_blob(&blob).await? else {
             return Ok(None);
@@ -521,7 +533,13 @@ impl ArtifactService for GcsArtifactService {
     async fn delete(&self, session_id: &str, name: &str) -> Result<(), ArtifactError> {
         let versions = self.list_wire_versions(session_id, name).await?;
         for wire_version in versions {
-            let blob = blob_name(&self.app_name, &self.user_id, session_id, name, wire_version);
+            let blob = blob_name(
+                &self.app_name,
+                &self.user_id,
+                session_id,
+                name,
+                wire_version,
+            );
             self.delete_blob(&blob).await?;
         }
         Ok(())
@@ -570,10 +588,7 @@ mod tests {
 
     #[test]
     fn blob_prefix_session_scoped() {
-        assert_eq!(
-            blob_prefix("app", "u", "s", "doc.txt"),
-            "app/u/s/doc.txt"
-        );
+        assert_eq!(blob_prefix("app", "u", "s", "doc.txt"), "app/u/s/doc.txt");
     }
 
     #[test]
@@ -620,8 +635,8 @@ mod tests {
 
     #[test]
     fn with_token_refresher_calls_closure() {
-        let svc = GcsArtifactService::new("b", "a")
-            .with_token_refresher(|| "dynamic-token".to_string());
+        let svc =
+            GcsArtifactService::new("b", "a").with_token_refresher(|| "dynamic-token".to_string());
         assert_eq!(svc.token().unwrap(), "dynamic-token");
     }
 

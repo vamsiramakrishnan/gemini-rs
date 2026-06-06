@@ -21,6 +21,7 @@ members = [
 [workspace.package]
 version = "0.7.0"
 edition = "2021"
+rust-version = "1.93"
 license = "MIT"
 repository = "https://github.com/vamsiramakrishnan/gemini-rs"
 

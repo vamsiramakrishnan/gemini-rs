@@ -951,8 +951,8 @@ mod tests {
             let count = Arc::new(AtomicU32::new(0));
             let c2 = count.clone();
             // Attach the combinator-level observer to the loop node.
-            let looped = (agent("counter").instruction("tick") * 3)
-                .middleware(M::on_loop(move |_i| {
+            let looped =
+                (agent("counter").instruction("tick") * 3).middleware(M::on_loop(move |_i| {
                     c2.fetch_add(1, Ordering::SeqCst);
                 }));
             let compiled = looped.compile(llm());
@@ -997,7 +997,7 @@ mod tests {
             // This tests that the predicate is wired through.
             let compiled = looped.compile(Arc::new(IncrementLlm));
             let state = gemini_adk_rs::State::new();
-            state.set("n", 5); // Pre-set to pass predicate immediately.
+            let _ = state.set("n", 5); // Pre-set to pass predicate immediately.
             let result = compiled.run(&state).await.unwrap();
             assert_eq!(result, "done"); // Ran once, predicate passed.
         }

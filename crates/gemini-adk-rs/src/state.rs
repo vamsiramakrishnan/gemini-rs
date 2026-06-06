@@ -79,15 +79,41 @@ pub struct StateMutation {
     pub delta: bool,
 }
 
+/// Error returned by fallible state writes.
+#[derive(Debug, thiserror::Error)]
+pub enum StateError {
+    /// The value could not be serialized to JSON.
+    #[error("failed to serialize state value for key '{key}': {source}")]
+    Serialize {
+        /// The key that was being written.
+        key: String,
+        /// The underlying serde error.
+        source: serde_json::Error,
+    },
+}
+
+/// A pending write in a delta-tracked view.
+///
+/// Unlike a bare value, this distinguishes a *write* from a *removal* so that a
+/// delta can record tombstones and `rollback()` can restore the base state
+/// after removals and prefix clears.
+#[derive(Debug, Clone)]
+enum DeltaOp {
+    /// Set the key to this value on commit.
+    Put(Value),
+    /// Remove the key on commit (tombstone — shadows the committed value).
+    Delete,
+}
+
 /// A concurrent, type-safe state container that agents read from and write to.
 ///
 /// By default, `set()` writes directly to the inner store. When delta tracking
 /// is enabled via `with_delta_tracking()`, writes go to a separate delta map
-/// that can be committed or rolled back.
+/// (with tombstones) that can be atomically committed or rolled back.
 #[derive(Debug, Clone)]
 pub struct State {
     inner: Arc<DashMap<String, Value>>,
-    delta: Arc<DashMap<String, Value>>,
+    delta: Arc<DashMap<String, DeltaOp>>,
     mutations: Arc<std::sync::Mutex<VecDeque<StateMutation>>>,
     next_mutation_sequence: Arc<AtomicU64>,
     mutation_capacity: usize,
@@ -145,8 +171,10 @@ impl State {
         F: FnOnce(&Value) -> R,
     {
         if self.track_delta {
-            if let Some(ref_multi) = self.delta.get(key) {
-                return Some(f(ref_multi.value()));
+            match self.delta.get(key).map(|r| r.value().clone()) {
+                Some(DeltaOp::Put(v)) => return Some(f(&v)),
+                Some(DeltaOp::Delete) => return None, // tombstone shadows inner
+                None => {}
             }
         }
         if let Some(ref_multi) = self.inner.get(key) {
@@ -157,8 +185,10 @@ impl State {
             use std::fmt::Write;
             let _ = write!(derived_key, "derived:{}", key);
             if self.track_delta {
-                if let Some(ref_multi) = self.delta.get(&derived_key) {
-                    return Some(f(ref_multi.value()));
+                match self.delta.get(&derived_key).map(|r| r.value().clone()) {
+                    Some(DeltaOp::Put(v)) => return Some(f(&v)),
+                    Some(DeltaOp::Delete) => return None,
+                    None => {}
                 }
             }
             if let Some(ref_multi) = self.inner.get(&derived_key) {
@@ -174,8 +204,10 @@ impl State {
     /// as a transparent fallback for computed variables.
     pub fn get_raw(&self, key: &str) -> Option<Value> {
         if self.track_delta {
-            if let Some(v) = self.delta.get(key) {
-                return Some(v.value().clone());
+            match self.delta.get(key).map(|r| r.value().clone()) {
+                Some(DeltaOp::Put(v)) => return Some(v),
+                Some(DeltaOp::Delete) => return None, // tombstone shadows inner
+                None => {}
             }
         }
         if let Some(v) = self.inner.get(key) {
@@ -187,8 +219,10 @@ impl State {
             let mut derived_key = String::with_capacity(8 + key.len());
             let _ = write!(derived_key, "derived:{}", key);
             if self.track_delta {
-                if let Some(v) = self.delta.get(&derived_key) {
-                    return Some(v.value().clone());
+                match self.delta.get(&derived_key).map(|r| r.value().clone()) {
+                    Some(DeltaOp::Put(v)) => return Some(v),
+                    Some(DeltaOp::Delete) => return None,
+                    None => {}
                 }
             }
             return self.inner.get(&derived_key).map(|v| v.value().clone());
@@ -202,8 +236,14 @@ impl State {
     }
 
     /// Set a typed value using a `StateKey<T>`.
-    pub fn set_key<T: serde::Serialize>(&self, key: &StateKey<T>, value: T) {
-        self.set(key.key(), value);
+    ///
+    /// Returns [`StateError`] if `value` cannot be serialized to JSON.
+    pub fn set_key<T: serde::Serialize>(
+        &self,
+        key: &StateKey<T>,
+        value: T,
+    ) -> Result<(), StateError> {
+        self.set(key.key(), value)
     }
 
     /// Zero-copy borrow using a `StateKey<T>`.
@@ -215,60 +255,156 @@ impl State {
     }
 
     /// Set a value by key.
-    /// When delta tracking is enabled, writes to delta instead of inner.
-    pub fn set(&self, key: impl Into<String>, value: impl serde::Serialize) {
+    ///
+    /// When delta tracking is enabled, writes to the delta view instead of the
+    /// committed store. Returns [`StateError`] if `value` cannot be serialized
+    /// to JSON — a public SDK write never panics on caller data.
+    pub fn set(
+        &self,
+        key: impl Into<String>,
+        value: impl serde::Serialize,
+    ) -> Result<(), StateError> {
         let key = key.into();
-        let v = serde_json::to_value(value).expect("value must be serializable");
+        let v = serde_json::to_value(value).map_err(|source| StateError::Serialize {
+            key: key.clone(),
+            source,
+        })?;
+        self.put_value(key, v, StateMutationOrigin::Set);
+        Ok(())
+    }
+
+    /// Infallible internal write of an already-serialized [`Value`].
+    ///
+    /// Shared by `set` and the value-level helpers (`merge`/`pick`/`rename`/
+    /// `from_hashmap`) so those do not re-serialize and cannot fail.
+    fn put_value(&self, key: String, v: Value, origin: StateMutationOrigin) {
         let old = self.get_raw(&key);
         if self.track_delta {
-            self.delta.insert(key.clone(), v.clone());
-            self.record_mutation(key, old, Some(v), StateMutationOrigin::Set);
+            self.delta.insert(key.clone(), DeltaOp::Put(v.clone()));
         } else {
             self.inner.insert(key.clone(), v.clone());
-            self.record_mutation(key, old, Some(v), StateMutationOrigin::Set);
         }
+        self.record_mutation(key, old, Some(v), origin);
     }
 
     /// Set a value directly in the committed store, bypassing delta tracking.
-    pub fn set_committed(&self, key: impl Into<String>, value: impl serde::Serialize) {
+    ///
+    /// Returns [`StateError`] if `value` cannot be serialized to JSON.
+    pub fn set_committed(
+        &self,
+        key: impl Into<String>,
+        value: impl serde::Serialize,
+    ) -> Result<(), StateError> {
         let key = key.into();
-        let v = serde_json::to_value(value).expect("value must be serializable");
+        let v = serde_json::to_value(value).map_err(|source| StateError::Serialize {
+            key: key.clone(),
+            source,
+        })?;
         let old = self.inner.insert(key.clone(), v.clone());
         self.record_mutation(key, old, Some(v), StateMutationOrigin::SetCommitted);
+        Ok(())
     }
 
-    /// Atomically read-modify-write a value.
+    /// Atomically read-modify-write a value under a per-key lock.
     ///
-    /// If the key doesn't exist, `default` is used as the initial value.
-    /// The function `f` receives the current value and returns the new value.
-    /// Returns the new value after modification.
-    pub fn modify<T, F>(&self, key: &str, default: T, f: F) -> T
+    /// If the key doesn't exist, `default` is used as the initial value. The
+    /// function `f` receives the current value and returns the new value. The
+    /// read-modify-write is performed while holding the map shard for `key`, so
+    /// concurrent `modify` calls on the same key do not lose updates. Returns
+    /// the new value, or [`StateError`] if it cannot be serialized.
+    pub fn modify<T, F>(&self, key: &str, default: T, f: F) -> Result<T, StateError>
     where
         T: serde::Serialize + serde::de::DeserializeOwned,
         F: FnOnce(T) -> T,
     {
-        // Read current value from whichever store has it
-        let current: T = self.get(key).unwrap_or(default);
-        let new_val = f(current);
-        self.set(key, &new_val);
-        new_val
+        use dashmap::mapref::entry::Entry;
+
+        let serialize = |key: &str, val: &T| {
+            serde_json::to_value(val).map_err(|source| StateError::Serialize {
+                key: key.to_string(),
+                source,
+            })
+        };
+
+        if self.track_delta {
+            // Atomic w.r.t. the delta shard; the committed base is read as the
+            // initial value only when the delta has no entry for this key.
+            match self.delta.entry(key.to_string()) {
+                Entry::Occupied(mut o) => {
+                    let current = match o.get() {
+                        DeltaOp::Put(v) => serde_json::from_value(v.clone()).unwrap_or(default),
+                        DeltaOp::Delete => default,
+                    };
+                    let old = self.inner.get(key).map(|r| r.value().clone());
+                    let new_val = f(current);
+                    let v = serialize(key, &new_val)?;
+                    o.insert(DeltaOp::Put(v.clone()));
+                    self.record_mutation(key.to_string(), old, Some(v), StateMutationOrigin::Set);
+                    Ok(new_val)
+                }
+                Entry::Vacant(slot) => {
+                    let base = self
+                        .inner
+                        .get(key)
+                        .and_then(|r| serde_json::from_value(r.value().clone()).ok());
+                    let old = self.inner.get(key).map(|r| r.value().clone());
+                    let new_val = f(base.unwrap_or(default));
+                    let v = serialize(key, &new_val)?;
+                    slot.insert(DeltaOp::Put(v.clone()));
+                    self.record_mutation(key.to_string(), old, Some(v), StateMutationOrigin::Set);
+                    Ok(new_val)
+                }
+            }
+        } else {
+            match self.inner.entry(key.to_string()) {
+                Entry::Occupied(mut o) => {
+                    let old = o.get().clone();
+                    let current = serde_json::from_value(old.clone()).unwrap_or(default);
+                    let new_val = f(current);
+                    let v = serialize(key, &new_val)?;
+                    o.insert(v.clone());
+                    self.record_mutation(
+                        key.to_string(),
+                        Some(old),
+                        Some(v),
+                        StateMutationOrigin::Set,
+                    );
+                    Ok(new_val)
+                }
+                Entry::Vacant(slot) => {
+                    let new_val = f(default);
+                    let v = serialize(key, &new_val)?;
+                    slot.insert(v.clone());
+                    self.record_mutation(key.to_string(), None, Some(v), StateMutationOrigin::Set);
+                    Ok(new_val)
+                }
+            }
+        }
     }
 
     /// Check if a key exists (in delta or inner).
     pub fn contains(&self, key: &str) -> bool {
-        if self.track_delta && self.delta.contains_key(key) {
-            return true;
+        if self.track_delta {
+            match self.delta.get(key).map(|r| r.value().clone()) {
+                Some(DeltaOp::Put(_)) => return true,
+                Some(DeltaOp::Delete) => return false, // tombstone shadows inner
+                None => {}
+            }
         }
         self.inner.contains_key(key)
     }
 
     /// Remove a key.
+    ///
+    /// In delta-tracking mode this records a tombstone in the delta view and
+    /// leaves the committed store untouched, so a subsequent `rollback()` fully
+    /// restores the base state. Returns the value that was visible before removal.
     pub fn remove(&self, key: &str) -> Option<Value> {
         if self.track_delta {
-            // Remove from delta if present, but also check inner
-            let from_delta = self.delta.remove(key).map(|(_, v)| v);
-            let from_inner = self.inner.remove(key).map(|(_, v)| v);
-            let removed = from_delta.or(from_inner);
+            let removed = self.get_raw(key);
+            // Tombstone in the delta — never mutate `inner` directly, so rollback
+            // can restore the committed value.
+            self.delta.insert(key.to_string(), DeltaOp::Delete);
             if let Some(ref old) = removed {
                 self.record_mutation(
                     key.to_string(),
@@ -293,6 +429,8 @@ impl State {
     }
 
     /// Get all keys (from both inner and delta when tracking).
+    ///
+    /// Keys tombstoned in the delta are excluded.
     pub fn keys(&self) -> Vec<String> {
         if !self.track_delta || self.delta.is_empty() {
             return self.inner.iter().map(|r| r.key().clone()).collect();
@@ -300,12 +438,15 @@ impl State {
         let mut seen =
             std::collections::HashSet::with_capacity(self.inner.len() + self.delta.len());
         let mut keys = Vec::with_capacity(self.inner.len() + self.delta.len());
-        for entry in self.inner.iter() {
+        // Delta first so tombstones win over committed entries.
+        for entry in self.delta.iter() {
             let key = entry.key().clone();
             seen.insert(key.clone());
-            keys.push(key);
+            if matches!(entry.value(), DeltaOp::Put(_)) {
+                keys.push(key);
+            }
         }
-        for entry in self.delta.iter() {
+        for entry in self.inner.iter() {
             let key = entry.key().clone();
             if seen.insert(key.clone()) {
                 keys.push(key);
@@ -319,7 +460,7 @@ impl State {
         let new = State::new();
         for key in keys {
             if let Some(v) = self.get_raw(key) {
-                new.set(*key, v);
+                new.put_value((*key).to_string(), v, StateMutationOrigin::Set);
             }
         }
         new
@@ -328,14 +469,18 @@ impl State {
     /// Merge another state into this one (other's values overwrite on conflict).
     pub fn merge(&self, other: &State) {
         for entry in other.inner.iter() {
-            self.set(entry.key().clone(), entry.value().clone());
+            self.put_value(
+                entry.key().clone(),
+                entry.value().clone(),
+                StateMutationOrigin::Set,
+            );
         }
     }
 
     /// Rename a key.
     pub fn rename(&self, from: &str, to: &str) {
         if let Some(v) = self.remove(from) {
-            self.set(to.to_string(), v);
+            self.put_value(to.to_string(), v, StateMutationOrigin::Set);
         }
     }
 
@@ -351,32 +496,61 @@ impl State {
         self.track_delta && !self.delta.is_empty()
     }
 
-    /// Get a snapshot of the current delta.
+    /// Get a snapshot of the current delta's pending writes (tombstones omitted).
     pub fn delta(&self) -> HashMap<String, Value> {
         self.delta
             .iter()
-            .map(|entry| (entry.key().clone(), entry.value().clone()))
+            .filter_map(|entry| match entry.value() {
+                DeltaOp::Put(v) => Some((entry.key().clone(), v.clone())),
+                DeltaOp::Delete => None,
+            })
             .collect()
     }
 
     /// Commit delta changes into the inner store, then clear the delta.
+    ///
+    /// Pending puts are applied and tombstones remove the committed key, so a
+    /// removal made under delta tracking becomes durable only at commit time.
     pub fn commit(&self) {
-        for entry in self.delta.iter() {
-            let key = entry.key().clone();
-            let value = entry.value().clone();
-            let old = self.inner.insert(key.clone(), value.clone());
-            self.record_mutation_with_delta(
-                key,
-                old,
-                Some(value),
-                StateMutationOrigin::Commit,
-                false,
-            );
+        // Snapshot first so we don't iterate the delta while mutating `inner`.
+        let ops: Vec<(String, DeltaOp)> = self
+            .delta
+            .iter()
+            .map(|e| (e.key().clone(), e.value().clone()))
+            .collect();
+        for (key, op) in ops {
+            match op {
+                DeltaOp::Put(value) => {
+                    let old = self.inner.insert(key.clone(), value.clone());
+                    self.record_mutation_with_delta(
+                        key,
+                        old,
+                        Some(value),
+                        StateMutationOrigin::Commit,
+                        false,
+                    );
+                }
+                DeltaOp::Delete => {
+                    if let Some((_, old)) = self.inner.remove(&key) {
+                        self.record_mutation_with_delta(
+                            key,
+                            Some(old),
+                            None,
+                            StateMutationOrigin::Commit,
+                            false,
+                        );
+                    }
+                }
+            }
         }
         self.delta.clear();
     }
 
-    /// Discard all uncommitted delta changes.
+    /// Discard all uncommitted delta changes, restoring the committed base state.
+    ///
+    /// Because removals and prefix clears under delta tracking only write
+    /// tombstones (never mutating `inner`), dropping the delta is sufficient to
+    /// restore the base — including keys that were removed in the transaction.
     pub fn rollback(&self) {
         self.delta.clear();
     }
@@ -481,12 +655,33 @@ impl State {
     /// Restore state from a HashMap (for persistence/deserialization).
     pub fn from_hashmap(&self, map: std::collections::HashMap<String, serde_json::Value>) {
         for (key, value) in map {
-            self.set_committed(key, value);
+            // Values are already `Value`, so this write cannot fail to serialize.
+            let old = self.inner.insert(key.clone(), value.clone());
+            self.record_mutation(key, old, Some(value), StateMutationOrigin::SetCommitted);
         }
     }
 
     /// Remove all keys with the given prefix.
+    ///
+    /// In delta-tracking mode this writes tombstones for matching keys (from both
+    /// the committed store and pending delta puts) without mutating the committed
+    /// store, so `rollback()` restores everything that was cleared.
     pub fn clear_prefix(&self, prefix: &str) {
+        if self.track_delta {
+            let keys: Vec<String> = self
+                .keys()
+                .into_iter()
+                .filter(|k| k.starts_with(prefix))
+                .collect();
+            for key in keys {
+                let old = self.get_raw(&key);
+                self.delta.insert(key.clone(), DeltaOp::Delete);
+                if let Some(old) = old {
+                    self.record_mutation(key, Some(old), None, StateMutationOrigin::ClearPrefix);
+                }
+            }
+            return;
+        }
         let keys_to_remove: Vec<String> = self
             .inner
             .iter()
@@ -496,19 +691,6 @@ impl State {
         for key in keys_to_remove {
             if let Some((_, old)) = self.inner.remove(&key) {
                 self.record_mutation(key, Some(old), None, StateMutationOrigin::ClearPrefix);
-            }
-        }
-        if self.track_delta {
-            let delta_keys: Vec<String> = self
-                .delta
-                .iter()
-                .filter(|entry| entry.key().starts_with(prefix))
-                .map(|entry| entry.key().clone())
-                .collect();
-            for key in delta_keys {
-                if let Some((_, old)) = self.delta.remove(&key) {
-                    self.record_mutation(key, Some(old), None, StateMutationOrigin::ClearPrefix);
-                }
             }
         }
     }
@@ -618,8 +800,14 @@ impl<'a> PrefixedState<'a> {
     }
 
     /// Set a value by key (with prefix applied).
-    pub fn set(&self, key: impl AsRef<str>, value: impl serde::Serialize) {
-        self.state.set(self.prefixed_key(key.as_ref()), value);
+    ///
+    /// Returns [`StateError`] if `value` cannot be serialized to JSON.
+    pub fn set(
+        &self,
+        key: impl AsRef<str>,
+        value: impl serde::Serialize,
+    ) -> Result<(), StateError> {
+        self.state.set(self.prefixed_key(key.as_ref()), value)
     }
 
     /// Check if a key exists (with prefix applied).
@@ -696,14 +884,14 @@ mod tests {
     #[test]
     fn set_and_get_string() {
         let state = State::new();
-        state.set("name", "Alice");
+        let _ = state.set("name", "Alice");
         assert_eq!(state.get::<String>("name"), Some("Alice".to_string()));
     }
 
     #[test]
     fn set_and_get_json() {
         let state = State::new();
-        state.set("data", serde_json::json!({"temp": 22}));
+        let _ = state.set("data", serde_json::json!({"temp": 22}));
         let v: Value = state.get("data").unwrap();
         assert_eq!(v["temp"], 22);
     }
@@ -711,9 +899,9 @@ mod tests {
     #[test]
     fn pick_subset() {
         let state = State::new();
-        state.set("a", 1);
-        state.set("b", 2);
-        state.set("c", 3);
+        let _ = state.set("a", 1);
+        let _ = state.set("b", 2);
+        let _ = state.set("c", 3);
         let picked = state.pick(&["a", "c"]);
         assert!(picked.contains("a"));
         assert!(!picked.contains("b"));
@@ -723,9 +911,9 @@ mod tests {
     #[test]
     fn merge_states() {
         let s1 = State::new();
-        s1.set("a", 1);
+        let _ = s1.set("a", 1);
         let s2 = State::new();
-        s2.set("b", 2);
+        let _ = s2.set("b", 2);
         s1.merge(&s2);
         assert!(s1.contains("a"));
         assert!(s1.contains("b"));
@@ -734,7 +922,7 @@ mod tests {
     #[test]
     fn rename_key() {
         let state = State::new();
-        state.set("old", "value");
+        let _ = state.set("old", "value");
         state.rename("old", "new");
         assert!(!state.contains("old"));
         assert_eq!(state.get::<String>("new"), Some("value".to_string()));
@@ -743,7 +931,7 @@ mod tests {
     #[test]
     fn remove_returns_value() {
         let state = State::new();
-        state.set("key", 42);
+        let _ = state.set("key", 42);
         let removed = state.remove("key");
         assert!(removed.is_some());
         assert!(!state.contains("key"));
@@ -760,10 +948,10 @@ mod tests {
     #[test]
     fn delta_tracking_writes_to_delta() {
         let state = State::new();
-        state.set("committed", "yes");
+        let _ = state.set("committed", "yes");
 
         let tracked = state.with_delta_tracking();
-        tracked.set("new_key", "new_value");
+        let _ = tracked.set("new_key", "new_value");
 
         // New key visible through tracked state
         assert_eq!(
@@ -782,7 +970,7 @@ mod tests {
         let tracked = state.with_delta_tracking();
         assert!(!tracked.has_delta());
 
-        tracked.set("key", "val");
+        let _ = tracked.set("key", "val");
         assert!(tracked.has_delta());
     }
 
@@ -790,7 +978,7 @@ mod tests {
     fn delta_commit_merges_to_inner() {
         let state = State::new();
         let tracked = state.with_delta_tracking();
-        tracked.set("key", "val");
+        let _ = tracked.set("key", "val");
         assert!(!state.contains("key"));
 
         tracked.commit();
@@ -803,7 +991,7 @@ mod tests {
     fn delta_rollback_discards_changes() {
         let state = State::new();
         let tracked = state.with_delta_tracking();
-        tracked.set("key", "val");
+        let _ = tracked.set("key", "val");
         assert!(tracked.has_delta());
 
         tracked.rollback();
@@ -816,8 +1004,8 @@ mod tests {
     fn delta_snapshot() {
         let state = State::new();
         let tracked = state.with_delta_tracking();
-        tracked.set("a", 1);
-        tracked.set("b", 2);
+        let _ = tracked.set("a", 1);
+        let _ = tracked.set("b", 2);
 
         let snapshot = tracked.delta();
         assert_eq!(snapshot.len(), 2);
@@ -829,7 +1017,7 @@ mod tests {
     fn set_committed_bypasses_delta() {
         let state = State::new();
         let tracked = state.with_delta_tracking();
-        tracked.set_committed("direct", "value");
+        let _ = tracked.set_committed("direct", "value");
 
         // Visible immediately in inner
         assert_eq!(state.get::<String>("direct"), Some("value".to_string()));
@@ -842,8 +1030,8 @@ mod tests {
     #[test]
     fn mutation_journal_records_set_and_remove() {
         let state = State::new();
-        state.set("key", "first");
-        state.set("key", "second");
+        let _ = state.set("key", "first");
+        let _ = state.set("key", "second");
         state.remove("key");
 
         let mutations = state.recent_mutations();
@@ -864,10 +1052,10 @@ mod tests {
     #[test]
     fn mutation_journal_is_shared_with_delta_tracking() {
         let state = State::new();
-        state.set("committed", "yes");
+        let _ = state.set("committed", "yes");
 
         let tracked = state.with_delta_tracking();
-        tracked.set("committed", "maybe");
+        let _ = tracked.set("committed", "maybe");
         tracked.commit();
 
         let mutations = state.recent_mutations();
@@ -885,8 +1073,8 @@ mod tests {
     #[test]
     fn drain_mutations_clears_journal() {
         let state = State::new();
-        state.set("a", 1);
-        state.set("b", 2);
+        let _ = state.set("a", 1);
+        let _ = state.set("b", 2);
 
         let drained = state.drain_mutations();
         assert_eq!(drained.len(), 2);
@@ -896,10 +1084,10 @@ mod tests {
     #[test]
     fn mutation_cursor_reads_only_later_changes() {
         let state = State::new();
-        state.set("before", 1);
+        let _ = state.set("before", 1);
         let cursor = state.mutation_cursor();
 
-        state.set("after", 2);
+        let _ = state.set("after", 2);
         state.remove("before");
 
         let mutations = state.mutations_since(cursor);
@@ -912,7 +1100,7 @@ mod tests {
     fn no_delta_tracking_preserves_existing_behavior() {
         let state = State::new();
         assert!(!state.is_tracking_delta());
-        state.set("key", "val");
+        let _ = state.set("key", "val");
         assert_eq!(state.get::<String>("key"), Some("val".to_string()));
         assert!(!state.has_delta());
     }
@@ -922,7 +1110,7 @@ mod tests {
     #[test]
     fn prefix_app_set_and_get() {
         let state = State::new();
-        state.app().set("flag", true);
+        let _ = state.app().set("flag", true);
 
         // Accessible via prefix accessor
         assert_eq!(state.app().get::<bool>("flag"), Some(true));
@@ -933,7 +1121,7 @@ mod tests {
     #[test]
     fn prefix_user_set_and_get() {
         let state = State::new();
-        state.user().set("name", "Alice");
+        let _ = state.user().set("name", "Alice");
         assert_eq!(
             state.user().get::<String>("name"),
             Some("Alice".to_string())
@@ -944,14 +1132,14 @@ mod tests {
     #[test]
     fn prefix_temp_set_and_get() {
         let state = State::new();
-        state.temp().set("scratch", 42);
+        let _ = state.temp().set("scratch", 42);
         assert_eq!(state.temp().get::<i32>("scratch"), Some(42));
     }
 
     #[test]
     fn prefix_contains_and_remove() {
         let state = State::new();
-        state.app().set("x", 1);
+        let _ = state.app().set("x", 1);
         assert!(state.app().contains("x"));
         state.app().remove("x");
         assert!(!state.app().contains("x"));
@@ -960,9 +1148,9 @@ mod tests {
     #[test]
     fn prefix_keys() {
         let state = State::new();
-        state.app().set("a", 1);
-        state.app().set("b", 2);
-        state.user().set("c", 3);
+        let _ = state.app().set("a", 1);
+        let _ = state.app().set("b", 2);
+        let _ = state.user().set("c", 3);
 
         let app_keys = state.app().keys();
         assert_eq!(app_keys.len(), 2);
@@ -978,7 +1166,7 @@ mod tests {
     fn prefix_with_delta_tracking() {
         let state = State::new();
         let tracked = state.with_delta_tracking();
-        tracked.app().set("flag", true);
+        let _ = tracked.app().set("flag", true);
 
         // Visible in tracked state via prefix
         assert_eq!(tracked.app().get::<bool>("flag"), Some(true));
@@ -995,7 +1183,7 @@ mod tests {
     #[test]
     fn prefix_session_set_and_get() {
         let state = State::new();
-        state.session().set("turn_count", 5);
+        let _ = state.session().set("turn_count", 5);
         assert_eq!(state.session().get::<i32>("turn_count"), Some(5));
         assert_eq!(state.get::<i32>("session:turn_count"), Some(5));
     }
@@ -1003,7 +1191,7 @@ mod tests {
     #[test]
     fn prefix_turn_set_and_get() {
         let state = State::new();
-        state.turn().set("transcript", "hello");
+        let _ = state.turn().set("transcript", "hello");
         assert_eq!(
             state.turn().get::<String>("transcript"),
             Some("hello".to_string())
@@ -1017,7 +1205,7 @@ mod tests {
     #[test]
     fn prefix_bg_set_and_get() {
         let state = State::new();
-        state.bg().set("task_id", "abc-123");
+        let _ = state.bg().set("task_id", "abc-123");
         assert_eq!(
             state.bg().get::<String>("task_id"),
             Some("abc-123".to_string())
@@ -1031,7 +1219,7 @@ mod tests {
     #[test]
     fn prefix_session_contains_and_remove() {
         let state = State::new();
-        state.session().set("x", 1);
+        let _ = state.session().set("x", 1);
         assert!(state.session().contains("x"));
         state.session().remove("x");
         assert!(!state.session().contains("x"));
@@ -1040,9 +1228,9 @@ mod tests {
     #[test]
     fn prefix_turn_keys() {
         let state = State::new();
-        state.turn().set("a", 1);
-        state.turn().set("b", 2);
-        state.session().set("c", 3);
+        let _ = state.turn().set("a", 1);
+        let _ = state.turn().set("b", 2);
+        let _ = state.session().set("c", 3);
 
         let turn_keys = state.turn().keys();
         assert_eq!(turn_keys.len(), 2);
@@ -1056,7 +1244,7 @@ mod tests {
     fn derived_read_only_get() {
         let state = State::new();
         // Write via raw key (simulating ComputedRegistry)
-        state.set("derived:sentiment", "positive");
+        let _ = state.set("derived:sentiment", "positive");
         assert_eq!(
             state.derived().get::<String>("sentiment"),
             Some("positive".to_string())
@@ -1066,7 +1254,7 @@ mod tests {
     #[test]
     fn derived_read_only_get_raw() {
         let state = State::new();
-        state.set("derived:score", serde_json::json!(0.95));
+        let _ = state.set("derived:score", serde_json::json!(0.95));
         let raw = state.derived().get_raw("score");
         assert!(raw.is_some());
         assert_eq!(raw.unwrap(), serde_json::json!(0.95));
@@ -1075,7 +1263,7 @@ mod tests {
     #[test]
     fn derived_read_only_contains() {
         let state = State::new();
-        state.set("derived:exists", true);
+        let _ = state.set("derived:exists", true);
         assert!(state.derived().contains("exists"));
         assert!(!state.derived().contains("missing"));
     }
@@ -1083,9 +1271,9 @@ mod tests {
     #[test]
     fn derived_read_only_keys() {
         let state = State::new();
-        state.set("derived:a", 1);
-        state.set("derived:b", 2);
-        state.set("app:c", 3);
+        let _ = state.set("derived:a", 1);
+        let _ = state.set("derived:b", 2);
+        let _ = state.set("app:c", 3);
 
         let derived_keys = state.derived().keys();
         assert_eq!(derived_keys.len(), 2);
@@ -1105,9 +1293,9 @@ mod tests {
     #[test]
     fn snapshot_values_captures_existing_keys() {
         let state = State::new();
-        state.set("a", 1);
-        state.set("b", "hello");
-        state.set("c", true);
+        let _ = state.set("a", 1);
+        let _ = state.set("b", "hello");
+        let _ = state.set("c", true);
 
         let snap = state.snapshot_values(&["a", "b", "missing"]);
         assert_eq!(snap.len(), 2);
@@ -1119,7 +1307,7 @@ mod tests {
     #[test]
     fn snapshot_values_empty_keys() {
         let state = State::new();
-        state.set("a", 1);
+        let _ = state.set("a", 1);
         let snap = state.snapshot_values(&[]);
         assert!(snap.is_empty());
     }
@@ -1129,10 +1317,10 @@ mod tests {
     #[test]
     fn diff_values_detects_changed_value() {
         let state = State::new();
-        state.set("x", 1);
+        let _ = state.set("x", 1);
         let snap = state.snapshot_values(&["x"]);
 
-        state.set("x", 2);
+        let _ = state.set("x", 2);
         let diffs = state.diff_values(&snap, &["x"]);
         assert_eq!(diffs.len(), 1);
         assert_eq!(diffs[0].0, "x");
@@ -1145,7 +1333,7 @@ mod tests {
         let state = State::new();
         let snap = state.snapshot_values(&["y"]);
 
-        state.set("y", "new");
+        let _ = state.set("y", "new");
         let diffs = state.diff_values(&snap, &["y"]);
         assert_eq!(diffs.len(), 1);
         assert_eq!(diffs[0].0, "y");
@@ -1156,7 +1344,7 @@ mod tests {
     #[test]
     fn diff_values_detects_removed_key() {
         let state = State::new();
-        state.set("z", 42);
+        let _ = state.set("z", 42);
         let snap = state.snapshot_values(&["z"]);
 
         state.remove("z");
@@ -1170,7 +1358,7 @@ mod tests {
     #[test]
     fn diff_values_no_change() {
         let state = State::new();
-        state.set("stable", 10);
+        let _ = state.set("stable", 10);
         let snap = state.snapshot_values(&["stable"]);
 
         // No mutation
@@ -1181,13 +1369,13 @@ mod tests {
     #[test]
     fn diff_values_multiple_keys_mixed_changes() {
         let state = State::new();
-        state.set("a", 1);
-        state.set("b", 2);
+        let _ = state.set("a", 1);
+        let _ = state.set("b", 2);
         let snap = state.snapshot_values(&["a", "b", "c"]);
 
-        state.set("a", 10); // changed
-                            // b unchanged
-        state.set("c", 3); // new
+        let _ = state.set("a", 10); // changed
+                                    // b unchanged
+        let _ = state.set("c", 3); // new
 
         let diffs = state.diff_values(&snap, &["a", "b", "c"]);
         assert_eq!(diffs.len(), 2); // a changed, c new; b unchanged
@@ -1201,10 +1389,10 @@ mod tests {
     #[test]
     fn clear_prefix_removes_matching_keys() {
         let state = State::new();
-        state.set("turn:a", 1);
-        state.set("turn:b", 2);
-        state.set("app:c", 3);
-        state.set("session:d", 4);
+        let _ = state.set("turn:a", 1);
+        let _ = state.set("turn:b", 2);
+        let _ = state.set("app:c", 3);
+        let _ = state.set("session:d", 4);
 
         state.clear_prefix("turn:");
         assert!(!state.contains("turn:a"));
@@ -1216,7 +1404,7 @@ mod tests {
     #[test]
     fn clear_prefix_no_matching_keys_is_noop() {
         let state = State::new();
-        state.set("app:x", 1);
+        let _ = state.set("app:x", 1);
         state.clear_prefix("turn:");
         assert!(state.contains("app:x"));
     }
@@ -1224,9 +1412,9 @@ mod tests {
     #[test]
     fn clear_prefix_also_clears_delta() {
         let state = State::new();
-        state.set("turn:committed", 1);
+        let _ = state.set("turn:committed", 1);
         let tracked = state.with_delta_tracking();
-        tracked.set("turn:delta_val", 2);
+        let _ = tracked.set("turn:delta_val", 2);
 
         // Both committed and delta have turn: keys
         assert!(tracked.contains("turn:committed"));
@@ -1240,9 +1428,9 @@ mod tests {
     #[test]
     fn clear_prefix_via_turn_accessor() {
         let state = State::new();
-        state.turn().set("x", 1);
-        state.turn().set("y", 2);
-        state.app().set("z", 3);
+        let _ = state.turn().set("x", 1);
+        let _ = state.turn().set("y", 2);
+        let _ = state.app().set("z", 3);
 
         state.clear_prefix("turn:");
         assert!(state.turn().keys().is_empty());
@@ -1254,8 +1442,8 @@ mod tests {
     #[test]
     fn modify_increment_existing() {
         let state = State::new();
-        state.set("count", 5u32);
-        let result = state.modify("count", 0u32, |n| n + 1);
+        let _ = state.set("count", 5u32);
+        let result = state.modify("count", 0u32, |n| n + 1).unwrap();
         assert_eq!(result, 6);
         assert_eq!(state.get::<u32>("count"), Some(6));
     }
@@ -1263,7 +1451,7 @@ mod tests {
     #[test]
     fn modify_uses_default_when_missing() {
         let state = State::new();
-        let result = state.modify("new_count", 0u32, |n| n + 1);
+        let result = state.modify("new_count", 0u32, |n| n + 1).unwrap();
         assert_eq!(result, 1);
         assert_eq!(state.get::<u32>("new_count"), Some(1));
     }
@@ -1271,9 +1459,9 @@ mod tests {
     #[test]
     fn modify_with_delta_tracking() {
         let state = State::new();
-        state.set("x", 10u32);
+        let _ = state.set("x", 10u32);
         let tracked = state.with_delta_tracking();
-        let result = tracked.modify("x", 0u32, |n| n * 2);
+        let result = tracked.modify("x", 0u32, |n| n * 2).unwrap();
         assert_eq!(result, 20);
         // Written to delta, not committed
         assert_eq!(tracked.get::<u32>("x"), Some(20));
@@ -1285,7 +1473,7 @@ mod tests {
     #[test]
     fn get_falls_back_to_derived_prefix() {
         let state = State::new();
-        state.set("derived:risk", 0.85);
+        let _ = state.set("derived:risk", 0.85);
         // Access without prefix — should find derived:risk
         assert_eq!(state.get::<f64>("risk"), Some(0.85));
     }
@@ -1293,8 +1481,8 @@ mod tests {
     #[test]
     fn get_prefers_direct_key_over_derived() {
         let state = State::new();
-        state.set("score", 1.0);
-        state.set("derived:score", 0.5);
+        let _ = state.set("score", 1.0);
+        let _ = state.set("derived:score", 0.5);
         // Direct key should win
         assert_eq!(state.get::<f64>("score"), Some(1.0));
     }
@@ -1302,7 +1490,7 @@ mod tests {
     #[test]
     fn get_derived_fallback_skipped_for_prefixed_keys() {
         let state = State::new();
-        state.set("derived:risk", 0.85);
+        let _ = state.set("derived:risk", 0.85);
         // Prefixed key should NOT trigger fallback
         assert_eq!(state.get::<f64>("app:risk"), None);
     }
@@ -1311,7 +1499,7 @@ mod tests {
     fn get_derived_fallback_with_delta_tracking() {
         let state = State::new();
         let tracked = state.with_delta_tracking();
-        tracked.set("derived:computed_val", 42);
+        let _ = tracked.set("derived:computed_val", 42);
         assert_eq!(tracked.get::<i32>("computed_val"), Some(42));
     }
 
@@ -1320,7 +1508,7 @@ mod tests {
     #[test]
     fn with_reads_from_inner() {
         let state = State::new();
-        state.set("name", "Alice");
+        let _ = state.set("name", "Alice");
         let len = state.with("name", |v| v.as_str().unwrap().len());
         assert_eq!(len, Some(5));
     }
@@ -1328,9 +1516,9 @@ mod tests {
     #[test]
     fn with_reads_from_delta_first() {
         let state = State::new();
-        state.set("x", 1);
+        let _ = state.set("x", 1);
         let tracked = state.with_delta_tracking();
-        tracked.set("x", 99);
+        let _ = tracked.set("x", 99);
         let val = tracked.with("x", |v| v.as_i64().unwrap());
         assert_eq!(val, Some(99));
     }
@@ -1338,7 +1526,7 @@ mod tests {
     #[test]
     fn with_falls_back_to_inner_when_not_in_delta() {
         let state = State::new();
-        state.set("committed", "yes");
+        let _ = state.set("committed", "yes");
         let tracked = state.with_delta_tracking();
         let val = tracked.with("committed", |v| v.as_str().unwrap().to_string());
         assert_eq!(val, Some("yes".to_string()));
@@ -1347,7 +1535,7 @@ mod tests {
     #[test]
     fn with_falls_back_to_derived() {
         let state = State::new();
-        state.set("derived:risk", 0.85);
+        let _ = state.set("derived:risk", 0.85);
         let val = state.with("risk", |v| v.as_f64().unwrap());
         assert_eq!(val, Some(0.85));
     }
@@ -1355,7 +1543,7 @@ mod tests {
     #[test]
     fn with_derived_fallback_skipped_for_prefixed() {
         let state = State::new();
-        state.set("derived:risk", 0.85);
+        let _ = state.set("derived:risk", 0.85);
         let val = state.with("app:risk", |v| v.as_f64().unwrap());
         assert_eq!(val, None);
     }
@@ -1370,7 +1558,7 @@ mod tests {
     #[test]
     fn with_on_prefixed_state() {
         let state = State::new();
-        state.app().set("flag", true);
+        let _ = state.app().set("flag", true);
         let val = state.app().with("flag", |v| v.as_bool().unwrap());
         assert_eq!(val, Some(true));
     }
@@ -1378,7 +1566,7 @@ mod tests {
     #[test]
     fn with_on_read_only_prefixed_state() {
         let state = State::new();
-        state.set("derived:score", serde_json::json!(0.95));
+        let _ = state.set("derived:score", serde_json::json!(0.95));
         let val = state.derived().with("score", |v| v.as_f64().unwrap());
         assert_eq!(val, Some(0.95));
     }
@@ -1391,7 +1579,7 @@ mod tests {
     #[test]
     fn state_key_get_and_set() {
         let state = State::new();
-        state.set_key(&TURN_COUNT, 5);
+        let _ = state.set_key(&TURN_COUNT, 5);
         assert_eq!(state.get_key(&TURN_COUNT), Some(5));
     }
 
@@ -1404,14 +1592,14 @@ mod tests {
     #[test]
     fn state_key_string_type() {
         let state = State::new();
-        state.set_key(&NAME, "Alice".to_string());
+        let _ = state.set_key(&NAME, "Alice".to_string());
         assert_eq!(state.get_key(&NAME), Some("Alice".to_string()));
     }
 
     #[test]
     fn state_key_with() {
         let state = State::new();
-        state.set_key(&TURN_COUNT, 42);
+        let _ = state.set_key(&TURN_COUNT, 42);
         let val = state.with_key(&TURN_COUNT, |v| v.as_u64().unwrap());
         assert_eq!(val, Some(42));
     }
@@ -1419,8 +1607,144 @@ mod tests {
     #[test]
     fn state_key_interop_with_raw() {
         let state = State::new();
-        state.set_key(&TURN_COUNT, 10);
+        let _ = state.set_key(&TURN_COUNT, 10);
         // Can also read via raw key
         assert_eq!(state.get::<u32>("session:turn_count"), Some(10));
+    }
+
+    // ── Transaction-invariant tests (the verified correctness bugs) ──────────
+
+    #[test]
+    fn rollback_restores_base_after_remove() {
+        // Regression: previously remove() in delta mode deleted from the committed
+        // store, so rollback() could not restore it.
+        let base = State::new();
+        let _ = base.set("k", "original");
+
+        let tx = base.with_delta_tracking();
+        assert_eq!(tx.remove("k"), Some(serde_json::json!("original")));
+        assert_eq!(tx.get::<String>("k"), None); // tombstoned in the tx view
+        assert_eq!(base.get::<String>("k"), Some("original".into())); // base intact
+
+        tx.rollback();
+        assert_eq!(tx.get::<String>("k"), Some("original".into()));
+        assert_eq!(base.get::<String>("k"), Some("original".into()));
+    }
+
+    #[test]
+    fn rollback_restores_base_after_clear_prefix() {
+        // Regression: clear_prefix() used to mutate the committed store directly.
+        let base = State::new();
+        let _ = base.set("app:a", 1u32);
+        let _ = base.set("app:b", 2u32);
+        let _ = base.set("user:c", 3u32);
+
+        let tx = base.with_delta_tracking();
+        tx.clear_prefix("app:");
+        assert_eq!(tx.get::<u32>("app:a"), None);
+        assert_eq!(tx.get::<u32>("app:b"), None);
+        assert_eq!(tx.get::<u32>("user:c"), Some(3));
+        // Base untouched until commit.
+        assert_eq!(base.get::<u32>("app:a"), Some(1));
+
+        tx.rollback();
+        assert_eq!(tx.get::<u32>("app:a"), Some(1));
+        assert_eq!(tx.get::<u32>("app:b"), Some(2));
+    }
+
+    #[test]
+    fn commit_applies_removals() {
+        let base = State::new();
+        let _ = base.set("k", "v");
+        let tx = base.with_delta_tracking();
+        tx.remove("k");
+        tx.commit();
+        assert_eq!(base.get::<String>("k"), None);
+    }
+
+    #[test]
+    fn commit_applies_prefix_clear() {
+        let base = State::new();
+        let _ = base.set("app:a", 1u32);
+        let _ = base.set("user:c", 3u32);
+        let tx = base.with_delta_tracking();
+        tx.clear_prefix("app:");
+        tx.commit();
+        assert_eq!(base.get::<u32>("app:a"), None);
+        assert_eq!(base.get::<u32>("user:c"), Some(3));
+    }
+
+    #[test]
+    fn modify_is_atomic_under_concurrency() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let state = Arc::new(State::new());
+        let _ = state.set("count", 0u64);
+
+        let threads = 8;
+        let per_thread = 1000;
+        let handles: Vec<_> = (0..threads)
+            .map(|_| {
+                let state = state.clone();
+                thread::spawn(move || {
+                    for _ in 0..per_thread {
+                        let _ = state.modify("count", 0u64, |n| n + 1);
+                    }
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
+        // With a real per-key atomic RMW, no increments are lost.
+        assert_eq!(
+            state.get::<u64>("count"),
+            Some((threads * per_thread) as u64)
+        );
+    }
+}
+
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    // A transaction's puts and removes never leak to the base before commit, and
+    // a rollback always restores the exact committed base.
+    proptest! {
+        #[test]
+        fn rollback_always_restores_base(
+            base_keys in proptest::collection::vec(("[a-c]", 0u32..5), 0..6),
+            ops in proptest::collection::vec(
+                prop_oneof![
+                    ("[a-c]", 0u32..5).prop_map(|(k, v)| (k, Some(v))),
+                    "[a-c]".prop_map(|k| (k, None)),
+                ],
+                0..12,
+            ),
+        ) {
+            let base = State::new();
+            for (k, v) in &base_keys {
+                let _ = base.set(k.clone(), *v);
+            }
+            let snapshot = |s: &State| -> std::collections::BTreeMap<String, Value> {
+                s.keys().into_iter().filter_map(|k| s.get_raw(&k).map(|v| (k, v))).collect()
+            };
+            let before = snapshot(&base);
+
+            let tx = base.with_delta_tracking();
+            for (k, v) in &ops {
+                match v {
+                    Some(v) => { let _ = tx.set(k.clone(), *v); }
+                    None => { tx.remove(k); }
+                }
+            }
+            // Base is never mutated while the tx is open.
+            prop_assert_eq!(&before, &snapshot(&base));
+
+            tx.rollback();
+            prop_assert_eq!(&before, &snapshot(&tx));
+        }
     }
 }

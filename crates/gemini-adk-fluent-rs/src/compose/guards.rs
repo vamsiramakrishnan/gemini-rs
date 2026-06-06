@@ -621,7 +621,8 @@ mod tests {
 
     #[test]
     fn compose_new_guards_with_bitor() {
-        let composite = G::toxicity(judge_llm()) | G::grounded(judge_llm()) | G::hallucination(judge_llm());
+        let composite =
+            G::toxicity(judge_llm()) | G::grounded(judge_llm()) | G::hallucination(judge_llm());
         assert_eq!(composite.len(), 3);
         // Sync path skips judge guards, so no violations surface synchronously.
         assert!(composite.check_all("test").is_empty());

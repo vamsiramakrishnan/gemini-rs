@@ -188,7 +188,7 @@ impl TextAgent for LlmTextAgent {
         if let Err(ref e) = result {
             let _ = self.middleware.run_on_error(e).await;
         } else if let Ok(ref text) = result {
-            state.set("output", text);
+            let _ = state.set("output", text);
             let _ = self
                 .middleware
                 .run_on_event(&AgentEvent::AgentCompleted {
@@ -339,7 +339,7 @@ mod tests {
         let agent =
             LlmTextAgent::new("slowpoke", Arc::new(SlowLlm)).add_middleware(Arc::new(ShortTimeout));
         let state = State::new();
-        state.set("input", "hi");
+        let _ = state.set("input", "hi");
         let err = agent.run(&state).await.expect_err("expected timeout");
         assert!(format!("{err:?}").contains("timed out"), "got: {err:?}");
     }
@@ -350,8 +350,11 @@ mod tests {
         let agent = LlmTextAgent::new("a", Arc::new(FastLlm))
             .add_middleware(Arc::new(EventFlag(flag.clone())));
         let state = State::new();
-        state.set("input", "hi");
+        let _ = state.set("input", "hi");
         let _ = agent.run(&state).await;
-        assert!(flag.load(Ordering::SeqCst), "on_event(AgentStarted) should fire");
+        assert!(
+            flag.load(Ordering::SeqCst),
+            "on_event(AgentStarted) should fire"
+        );
     }
 }

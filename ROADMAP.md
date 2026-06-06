@@ -18,57 +18,41 @@ Each item states the **gap** (what's true in the code today) and the **value**
 
 ---
 
-## Milestone 1 — State correctness `0.8.0` 🔴 highest value
+## Milestone 1 — State correctness `0.8.0` ✅ shipped (Unreleased)
 
-`State` is the spine everything else reads and writes. Its advertised transactional
-guarantees do not currently hold.
+`State` is the spine everything else reads and writes; its advertised
+transactional guarantees now hold.
 
-- 📋 **Atomic `modify`.** Today `modify()` is `get()` → `f()` → `set()`
-  (`state.rs:251`), which races under concurrent writers despite the README calling
-  it "atomic read-modify-write." → **Value:** the one method users reach for to
-  avoid races currently has one. Build it on `DashMap::entry` (per-key lock).
-- 📋 **Delta tracking that can actually roll back.** `delta` is a
-  `DashMap<String, Value>` (`state.rs:90`) with no tombstones, so `remove()`
-  deletes from the committed `inner` directly (`state.rs:268`) and `clear_prefix()`
-  mutates `inner` too (`state.rs:497`) — but `rollback()` is just `delta.clear()`
-  (`state.rs:381`). **A rollback after a remove/clear silently cannot restore the
-  base state.** → **Value:** transactions that don't roll back are worse than no
-  transactions. Fix: `delta: DashMap<String, DeltaOp>` where
-  `DeltaOp = Put(Value) | Delete`; reads honor tombstones, `commit()` applies
-  puts+deletes, `rollback()` drops the delta.
-- 📋 **Fallible setters.** `set()`/`set_committed()` `expect("value must be
-  serializable")` (`state.rs:221,235`) — a public SDK path that panics on user
-  data. → **Value:** no library call should be able to abort the host process. Add
-  `try_set`/`try_modify` returning `Result`; keep `set` ergonomic.
-- 📋 **Property tests** for the transaction invariants: concurrent-increment,
-  rollback-after-remove, rollback-after-clear-prefix, snapshot/merge under delta.
+- ✅ **Atomic `modify`.** Now a per-key locked read-modify-write
+  (`DashMap::entry`); concurrent increments no longer lose updates. Covered by a
+  multi-thread regression test.
+- ✅ **Delta tracking that can actually roll back.** `delta` is now
+  `DashMap<String, DeltaOp>` (`Put`/`Delete` tombstones); `remove()`/`clear_prefix()`
+  no longer touch the committed store, so `rollback()` restores the base after
+  removals/clears and `commit()` applies removals.
+- ✅ **Fallible setters.** `set`/`set_committed`/`set_key`/`modify`/`PrefixedState::set`
+  return `Result<_, StateError>` instead of panicking on non-serializable input.
+- ✅ **Property + regression tests** for the transaction invariants.
 
 ## Milestone 2 — Flow: compile, don't just build `0.8.0`
 
-Flow is the most valuable product surface — a serializable governed DAG. Two
-declared semantics are not actually enforced, and one silently weakens policy.
+Flow is the most valuable product surface — a serializable governed DAG. The two
+verified correctness bugs are fixed; the full compile-time validator remains.
 
-- 📋 **Enforce `Constraint::Before`.** `before(a,b)` is exposed and validated for
-  references (`flow/mod.rs:388`) but never consulted by `eligible()`
-  (`flow/mod.rs:650`) or `admits_tool()` (`flow/mod.rs:775`). → **Value:** a
-  documented ordering guarantee that does nothing is a trap. Lower it into explicit
-  dependency/gate semantics at compile time, or reject it as ambiguous.
-- 📋 **Never silently erase a custom guard.** `collect_specs` lowers any
-  `Guard::Custom` nested in `all`/`any`/`not` to `Pred::Always`
-  (`flow/mod.rs:248`). A composed safety guard *disappears*. → **Value:** this is a
-  security-relevant footgun — "I added a guard" becomes "the guard vanished." Make
-  it a compile/`compile()` error instead.
-- 📋 **`CompiledFlow`.** `Flow::build()` and deserialization feed
-  `compile() -> Result<CompiledFlow, FlowErrors>` that rejects the above, surfaces
-  unreachable steps, unsatisfiable guards, dangling tool names, unused
-  `confirm_tools`, and unguarded commit tools, and precomputes the active-tool
-  policy. `FlowMonitor::new` takes only `CompiledFlow`. → **Value:** turns a class
-  of runtime surprises into load-time errors.
-- 📋 **Rename `flow::Mode`.** It collides with `orchestration::Mode`
-  (Call/Dispatch/Background) — both public, used side-by-side, disambiguated only by
-  prelude aliases. Rename → `Enforcement` (Enforce/Observe) and reserve `Mode` for
-  resolver execution discipline, per the synthesis glossary. → **Value:** removes a
-  standing autocomplete/refactor hazard.
+- ✅ **Enforce `Constraint::Before`.** `before(a, b)` now gates step eligibility
+  (`b` cannot start until `a` is done).
+- ✅ **Never silently erase a custom guard.** A `Guard::custom` nested in
+  `all`/`any` is preserved as a runtime closure (the combinator becomes
+  non-serializable, surfacing as a serialize error) instead of lowered to
+  `Pred::Always`.
+- ✅ **Rename `flow::Mode` → `Enforcement`.** Removes the collision with
+  `orchestration::Mode`; deprecated alias kept one release.
+- 📋 **`CompiledFlow`.** `Flow::build()`/deserialization feed
+  `compile() -> Result<CompiledFlow, FlowErrors>` that also surfaces unreachable
+  steps, unsatisfiable guards, dangling tool names, unused `confirm_tools`, and
+  unguarded commit tools, and precomputes the active-tool policy.
+  `FlowMonitor::new` takes only `CompiledFlow`. → **Value:** turns a class of
+  runtime surprises into load-time errors.
 
 ## Milestone 3 — Reactive substrate `0.9.0`
 
@@ -114,11 +98,10 @@ Mechanical guardrails so Milestones 1–2 can't regress and the crate stays hone
   Vertex-vs-Google-AI differences; a model/voice catalog with `GeminiModel::Custom`
   escape hatch. → **Value:** the wire layer *will* drift with Gemini releases; make
   staleness obvious instead of silently wrong.
-- 📋 **Metadata truth.** Workspace is MIT but crate READMEs say Apache-2.0;
-  install snippets show `0.1`/`0.6` vs a `0.7.0` workspace; README says Rust 1.75+
-  while CI pins 1.93.1. Generate crate READMEs from one source, test snippets as
-  doctests/trycmd, set an explicit MSRV. → **Value:** stale install snippets and a
-  wrong license badge are trust/conversion leaks.
+- ✅ **Metadata truth.** Crate READMEs + README license section corrected to MIT
+  (matching `LICENSE`); install snippets bumped to `0.7`; MSRV made explicit
+  (`rust-version = "1.93"`, badge `1.93+`). *(Remaining: generate crate READMEs
+  from one source + test snippets as doctests/trycmd.)*
 - 📋 **Macro hardening.** Add `trybuild` compile-fail tests (bad signatures,
   non-serializable args, duplicate/undescribed tools) and `insta` schema snapshots
   for `#[tool]`/`#[derive(Extract)]`. → **Value:** the tool-call surface is too

@@ -45,15 +45,15 @@ fn classify(utterance: &str, state: &State) {
     if let Some((org, _)) =
         Recognizer::fuzzy(["Acme Corp", "Globex", "Initech"]).recognize(utterance)
     {
-        state.set("caller_org", org);
+        let _ = state.set("caller_org", org);
     }
     if Recognizer::one_of(SPAM).recognize(utterance).is_some() {
-        state.set("spam", true);
-        state.set("category", "spam");
+        let _ = state.set("spam", true);
+        let _ = state.set("category", "spam");
     } else if let Some((cat, _)) =
         Recognizer::one_of(["invoice", "billing", "support", "sales"]).recognize(utterance)
     {
-        state.set("category", cat);
+        let _ = state.set("category", cat);
     }
 }
 

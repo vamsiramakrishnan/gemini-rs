@@ -78,10 +78,10 @@ impl BackgroundAgentDispatcher {
 
             match agent.run(&state).await {
                 Ok(result) => {
-                    state.set(&result_key, &result);
+                    let _ = state.set(&result_key, &result);
                 }
                 Err(e) => {
-                    state.set(&error_key, format!("{e}"));
+                    let _ = state.set(&error_key, format!("{e}"));
                 }
             }
 
@@ -179,7 +179,7 @@ mod tests {
             "writer"
         }
         async fn run(&self, state: &State) -> Result<String, AgentError> {
-            state.set("bg_wrote", true);
+            let _ = state.set("bg_wrote", true);
             Ok("wrote state".into())
         }
     }

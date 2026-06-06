@@ -6,7 +6,7 @@
 [![Docs](https://github.com/vamsiramakrishnan/gemini-rs/actions/workflows/docs.yml/badge.svg)](https://github.com/vamsiramakrishnan/gemini-rs/actions/workflows/docs.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![crates.io](https://img.shields.io/crates/v/gemini-genai-rs.svg)](https://crates.io/crates/gemini-genai-rs)
-[![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/rust-1.93%2B-orange.svg)](https://www.rust-lang.org)
 
 ---
 
@@ -850,9 +850,9 @@ the Live WebSocket connection:
 
 ```toml
 [dependencies]
-gemini-genai-rs = { version = "0.1", features = ["generate", "embed", "files"] }
+gemini-genai-rs = { version = "0.7", features = ["generate", "embed", "files"] }
 # Or enable everything:
-# gemini-genai-rs = { version = "0.1", features = ["all-apis"] }
+# gemini-genai-rs = { version = "0.7", features = ["all-apis"] }
 ```
 
 | Feature | API |
@@ -1092,7 +1092,7 @@ Live::builder()
 
 | Requirement | Version | Purpose |
 |------------|---------|---------|
-| **Rust** | 1.75+ | Language toolchain ([install](https://rustup.rs/)) |
+| **Rust** | 1.93+ | Language toolchain ([install](https://rustup.rs/)) |
 | **cargo** | (bundled) | Build system and package manager |
 | **pkg-config** | any | Locates system libraries |
 | **OpenSSL** | 1.1+ | TLS for WebSocket connections |
@@ -1206,5 +1206,5 @@ gemini-rs/
 
 ## License
 
-Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for
+Licensed under the MIT License. See [LICENSE](LICENSE) for
 details.

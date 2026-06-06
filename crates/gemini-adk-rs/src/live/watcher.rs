@@ -270,8 +270,8 @@ mod tests {
             predicate,
             action: Arc::new(|old, new, state| {
                 Box::pin(async move {
-                    state.set("recorded_old", old);
-                    state.set("recorded_new", new);
+                    let _ = state.set("recorded_old", old);
+                    let _ = state.set("recorded_new", new);
                 })
             }),
             blocking,
@@ -625,10 +625,10 @@ mod tests {
 
         let state = State::new();
         let cursor = state.mutation_cursor();
-        state.set("x", 1);
-        state.set("x", 2);
-        state.set("x", 3);
-        state.set("ignored", 10);
+        let _ = state.set("x", 1);
+        let _ = state.set("x", 2);
+        let _ = state.set("x", 3);
+        let _ = state.set("ignored", 10);
 
         let (_, concurrent) = registry.evaluate_mutations(&state.mutations_since(cursor), &state);
         assert_eq!(concurrent.len(), 1);
@@ -650,10 +650,10 @@ mod tests {
         ));
 
         let state = State::new();
-        state.set("x", 1);
+        let _ = state.set("x", 1);
         let cursor = state.mutation_cursor();
-        state.set("x", 2);
-        state.set("x", 1);
+        let _ = state.set("x", 2);
+        let _ = state.set("x", 1);
 
         let (blocking, concurrent) =
             registry.evaluate_mutations(&state.mutations_since(cursor), &state);

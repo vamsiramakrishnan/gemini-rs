@@ -352,7 +352,7 @@ mod tests {
                 "agent_a"
             }
             async fn run_live(&self, ctx: &mut InvocationContext) -> Result<(), AgentError> {
-                ctx.state().set("greeting", "hello from A");
+                let _ = ctx.state().set("greeting", "hello from A");
                 Err(AgentError::TransferRequested("agent_b".to_string()))
             }
         }
@@ -416,7 +416,7 @@ mod tests {
         }
 
         let initial_state = State::new();
-        initial_state.set("initial_key", "initial_value");
+        let _ = initial_state.set("initial_key", "initial_value");
 
         let runner = Runner::new(StateCheckAgent).with_state(initial_state);
 

@@ -73,13 +73,15 @@ pub async fn call(
     match &result {
         Ok(r) => {
             let key = result_key(name);
-            state.set(
+            let _ = state.set(
                 format!("state_meta:{key}"),
                 serde_json::json!({ "source": "agent", "resolver": name }),
             );
-            state.set(key, r);
+            let _ = state.set(key, r);
         }
-        Err(e) => state.set(error_key(name), e.to_string()),
+        Err(e) => {
+            let _ = state.set(error_key(name), e.to_string());
+        }
     }
     result
 }
@@ -217,13 +219,15 @@ impl Resolver {
         match &outcome {
             Ok(v) => {
                 let key = result_key(&self.name);
-                state.set(
+                let _ = state.set(
                     format!("state_meta:{key}"),
                     serde_json::json!({ "source": self.source_kind(), "resolver": self.name }),
                 );
-                state.set(key, v.clone());
+                let _ = state.set(key, v.clone());
             }
-            Err(e) => state.set(error_key(&self.name), e),
+            Err(e) => {
+                let _ = state.set(error_key(&self.name), e);
+            }
         }
         outcome
     }
@@ -291,7 +295,7 @@ mod tests {
     #[tokio::test]
     async fn resolver_fetch_binds_state_and_writes_result() {
         let state = State::new();
-        state.set("slot", "afternoon");
+        let _ = state.set("slot", "afternoon");
         let r = Resolver::fetch("availability", |s: State| async move {
             // Inputs come from State; the value is arbitrary JSON.
             let slot = s.get::<String>("slot").unwrap_or_default();
@@ -364,7 +368,7 @@ mod tests {
         }
 
         let state = State::new();
-        state.set("topic", "billing");
+        let _ = state.set("topic", "billing");
         let out = Resolver::llm("summary", Arc::new(EchoLlm), "Summarize the {topic} issue")
             .resolve(&state)
             .await

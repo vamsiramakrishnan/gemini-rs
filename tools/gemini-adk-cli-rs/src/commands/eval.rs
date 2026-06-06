@@ -125,7 +125,7 @@ pub async fn run(
         // Run agent
         let state = State::new();
         let combined_input = case.inputs.join("\n");
-        state.set("input", &combined_input);
+        let _ = state.set("input", &combined_input);
 
         let agent_output = match agent.run(&state).await {
             Ok(output) => output,

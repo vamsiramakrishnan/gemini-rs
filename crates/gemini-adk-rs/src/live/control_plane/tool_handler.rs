@@ -102,7 +102,7 @@ pub(in crate::live) async fn handle_tool_calls(
                     // once-violated, gated) in Enforce mode; record in Observe.
                     if let Some(mon) = flow.as_mut() {
                         if let Err(reason) = mon.admits_tool(&call.name, state) {
-                            if mon.mode() == crate::flow::Mode::Enforce {
+                            if mon.mode() == crate::flow::Enforcement::Enforce {
                                 results.push(FunctionResponse {
                                     name: call.name.clone(),
                                     response: serde_json::json!({ "error": reason }),

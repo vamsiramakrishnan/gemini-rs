@@ -651,7 +651,7 @@ impl DemoApp for SupportAssistant {
                         move |state, _writer| {
                             let tx = tx.clone();
                             async move {
-                                let turn_count: u32 = state.modify("session:turn_count", 0u32, |n| n + 1);
+                                let turn_count: u32 = state.modify("session:turn_count", 0u32, |n| n + 1).unwrap_or(0);
                                 let current_phase: String = state.get("session:phase").unwrap_or_default();
                                 let active_agent: String = state.get("active_agent").unwrap_or_else(|| "billing-support".to_string());
 

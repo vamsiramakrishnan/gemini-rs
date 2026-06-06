@@ -532,7 +532,9 @@ impl AgentBuilder {
                     );
                     inner
                         .tools
-                        .push(ToolEntry::Runtime(Arc::new(ToolFunctionEntry(Arc::new(tool)))));
+                        .push(ToolEntry::Runtime(Arc::new(ToolFunctionEntry(Arc::new(
+                            tool,
+                        )))));
                 }
                 ToolResolution::Deferred(deferred) => {
                     // MCP / A2A / OpenAPI / Search require an async connection,
@@ -571,9 +573,7 @@ impl AgentBuilder {
     /// accumulate with `.middleware(...)` and honor copy-on-write.
     pub fn guard(self, guard: impl Into<GComposite>) -> Self {
         let mut inner = self.mutate();
-        inner
-            .middleware_layers
-            .push(guard.into().into_middleware());
+        inner.middleware_layers.push(guard.into().into_middleware());
         Self::with(inner)
     }
 
@@ -958,7 +958,7 @@ mod tests {
 
         let agent = AgentBuilder::new("echo").build(Arc::new(EchoLlm));
         let state = gemini_adk_rs::State::new();
-        state.set("input", "hello from state");
+        let _ = state.set("input", "hello from state");
         let result = agent.run(&state).await.unwrap();
         assert!(result.contains("hello from state"));
     }
@@ -1165,9 +1165,7 @@ mod tests {
             seen_len: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         });
 
-        let agent = AgentBuilder::new("guarded")
-            .guard(G::pii())
-            .build(llm);
+        let agent = AgentBuilder::new("guarded").guard(G::pii()).build(llm);
 
         let state = gemini_adk_rs::State::new();
         let err = agent.run(&state).await.unwrap_err();
@@ -1212,7 +1210,7 @@ mod tests {
             .build(llm);
 
         let state = gemini_adk_rs::State::new();
-        state.set("input", "hello");
+        let _ = state.set("input", "hello");
         let _ = agent.run(&state).await.unwrap();
         assert_eq!(
             seen.load(std::sync::atomic::Ordering::SeqCst),
@@ -1234,15 +1232,11 @@ mod tests {
         });
 
         let agent = AgentBuilder::new("ctx")
-            .context(
-                C::prepend(Content::user("a"))
-                    + C::prepend(Content::user("b"))
-                    + C::window(1),
-            )
+            .context(C::prepend(Content::user("a")) + C::prepend(Content::user("b")) + C::window(1))
             .build(llm);
 
         let state = gemini_adk_rs::State::new();
-        state.set("input", "hello");
+        let _ = state.set("input", "hello");
         let _ = agent.run(&state).await.unwrap();
         assert_eq!(
             seen.load(std::sync::atomic::Ordering::SeqCst),

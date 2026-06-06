@@ -459,9 +459,10 @@ impl ToolCompositeEntry {
                 },
             ))),
             ToolCompositeEntry::Transform { inner, transformer } => match inner.classify() {
-                ToolResolution::Runtime(f) => {
-                    ToolResolution::Runtime(Arc::new(TransformTool { inner: f, transformer }))
-                }
+                ToolResolution::Runtime(f) => ToolResolution::Runtime(Arc::new(TransformTool {
+                    inner: f,
+                    transformer,
+                })),
                 // A transformer only applies to a runtime function; for any other
                 // inner kind the transform is a no-op and the inner resolution
                 // passes through unchanged.
@@ -477,7 +478,9 @@ impl ToolCompositeEntry {
                     behavior: None,
                 }]))
             }
-            ToolCompositeEntry::Mcp { params } => ToolResolution::Deferred(DeferredTool::Mcp { params }),
+            ToolCompositeEntry::Mcp { params } => {
+                ToolResolution::Deferred(DeferredTool::Mcp { params })
+            }
             ToolCompositeEntry::A2a { url, skill } => {
                 ToolResolution::Deferred(DeferredTool::A2a { url, skill })
             }

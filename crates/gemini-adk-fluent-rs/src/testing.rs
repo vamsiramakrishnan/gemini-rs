@@ -146,7 +146,7 @@ impl AgentHarness {
 
     /// Set a state value before running.
     pub fn set<V: serde::Serialize>(self, key: &str, value: V) -> Self {
-        self.state.set(key, value);
+        let _ = self.state.set(key, value);
         self
     }
 

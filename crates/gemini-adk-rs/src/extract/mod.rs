@@ -777,7 +777,7 @@ mod tests {
             .build();
         let ext = RecordExtractor::new(spec);
         let state = State::new();
-        state.set("slot", "afternoon");
+        let _ = state.set("slot", "afternoon");
         let out = ext
             .extract_with_state(&[turn("afternoon please")], &state)
             .await
@@ -802,7 +802,7 @@ mod tests {
             .build();
         let ext = RecordExtractor::new(spec);
         let state = State::new();
-        state.set("k", 1);
+        let _ = state.set("k", 1);
         let _ = ext.extract_with_state(&[turn("a")], &state).await.unwrap();
         let _ = ext.extract_with_state(&[turn("a")], &state).await.unwrap();
         // Identical args within the TTL → fetched once.

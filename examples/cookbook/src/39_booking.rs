@@ -74,14 +74,14 @@ async fn main() {
     let party = Recognizer::integer_near(["table", "for", "party", "people"]);
     let slot = Recognizer::one_of(["morning", "afternoon", "evening"]);
     if let Some((v, _)) = party.recognize(utterance) {
-        state.set("party_size", v);
+        let _ = state.set("party_size", v);
     }
     if let Some((v, _)) = slot.recognize(utterance) {
-        state.set("slot", v);
+        let _ = state.set("slot", v);
     }
     // The `datetime` recognizer normalizes the clock/calendar phrase on-device.
     if let Some((when, _)) = Recognizer::datetime().recognize(utterance) {
-        state.set("when", when);
+        let _ = state.set("when", when);
     }
     mon.on_turn(&state);
     println!("--- After extraction ---");
@@ -124,7 +124,7 @@ async fn main() {
         Err(e) => println!("    'book': DENIED — {e}"),
     }
     mon.observe_tool("book", true, &state);
-    state.set("booking", json!({ "slot": "afternoon", "party_size": 4 }));
+    let _ = state.set("booking", json!({ "slot": "afternoon", "party_size": 4 }));
     mon.on_turn(&state);
     println!(
         "    'book' again: {:?}",

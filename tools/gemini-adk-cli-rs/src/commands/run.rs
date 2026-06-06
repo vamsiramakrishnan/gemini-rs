@@ -58,7 +58,7 @@ pub async fn run(
         for turn in &turns {
             if let Some(user_input) = turn["user"].as_str() {
                 println!("> {}", user_input);
-                state.set("input", user_input);
+                let _ = state.set("input", user_input);
                 match agent.run(&state).await {
                     Ok(output) => println!("\n{}\n", output),
                     Err(e) => eprintln!("\nError: {}\n", e),
@@ -89,7 +89,7 @@ pub async fn run(
             _ => {}
         }
 
-        state.set("input", input);
+        let _ = state.set("input", input);
         match agent.run(&state).await {
             Ok(output) => {
                 println!("\n{}\n", output);

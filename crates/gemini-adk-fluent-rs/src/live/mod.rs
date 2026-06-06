@@ -136,7 +136,7 @@ pub struct Live {
         Option<Arc<dyn gemini_adk_rs::confirmation::ConfirmationProvider>>,
     // Governed flow (DAG) + its enforcement mode.
     pub(crate) flow: Option<gemini_adk_rs::flow::Flow>,
-    pub(crate) flow_mode: gemini_adk_rs::flow::Mode,
+    pub(crate) flow_mode: gemini_adk_rs::flow::Enforcement,
     // Per-step on_enter actions: run an agent in a mode when a step activates.
     pub(crate) flow_actions: Vec<(
         String,
@@ -215,7 +215,7 @@ impl Live {
             middleware_layers: Vec::new(),
             confirmation_provider: None,
             flow: None,
-            flow_mode: gemini_adk_rs::flow::Mode::Enforce,
+            flow_mode: gemini_adk_rs::flow::Enforcement::Enforce,
             flow_actions: Vec::new(),
         }
     }
@@ -225,7 +225,7 @@ impl Live {
     /// postures steer the model at each turn boundary.
     pub fn govern(mut self, flow: gemini_adk_rs::flow::Flow) -> Self {
         self.flow = Some(flow);
-        self.flow_mode = gemini_adk_rs::flow::Mode::Enforce;
+        self.flow_mode = gemini_adk_rs::flow::Enforcement::Enforce;
         self
     }
 
@@ -233,7 +233,7 @@ impl Live {
     /// is blocked, but deviations are recorded for audit/analytics.
     pub fn observe(mut self, flow: gemini_adk_rs::flow::Flow) -> Self {
         self.flow = Some(flow);
-        self.flow_mode = gemini_adk_rs::flow::Mode::Observe;
+        self.flow_mode = gemini_adk_rs::flow::Enforcement::Observe;
         self
     }
 
@@ -411,7 +411,7 @@ mod tests {
             .instruction("Welcome the user warmly")
             .transition("main", |s| s.get::<bool>("greeted").unwrap_or(false))
             .on_enter(|state, _writer| async move {
-                state.set("entered_greeting", true);
+                let _ = state.set("entered_greeting", true);
             })
             .done()
             .phase("main")
@@ -441,7 +441,7 @@ mod tests {
             .instruction("Secure area")
             .guard(|s| s.get::<bool>("verified").unwrap_or(false))
             .on_exit(|state, _writer| async move {
-                state.set("left_secure", true);
+                let _ = state.set("left_secure", true);
             })
             .terminal()
             .done()
@@ -455,7 +455,7 @@ mod tests {
             .watch("app:score")
             .crossed_above(0.9)
             .then(|_old, _new, state| async move {
-                state.set("high_score_alert", true);
+                let _ = state.set("high_score_alert", true);
             })
             .watch("app:status")
             .changed_to(serde_json::json!("complete"))
@@ -533,7 +533,7 @@ mod tests {
             .watch("app:sentiment_score")
             .crossed_below(0.2)
             .then(|_old, _new, state| async move {
-                state.set("alert:low_sentiment", true);
+                let _ = state.set("alert:low_sentiment", true);
             })
             // Temporal
             .when_turns(

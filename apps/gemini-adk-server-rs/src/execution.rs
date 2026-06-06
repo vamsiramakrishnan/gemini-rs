@@ -72,9 +72,9 @@ pub async fn run_agent_turn(
 
     // Rehydrate prior session state so the agent sees accumulated context.
     for (key, value) in prior_state {
-        state.set(key.clone(), value.clone());
+        let _ = state.set(key.clone(), value.clone());
     }
-    state.set("input", message);
+    let _ = state.set("input", message);
 
     let response = agent.run(&state).await?;
 

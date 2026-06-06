@@ -100,8 +100,8 @@ async fn main() {
     println!("\n--- Running Pipeline ---\n");
 
     let state = State::new();
-    state.set("customer_id", "CUST-42");
-    state.set("transaction_id", "TXN-12345");
+    let _ = state.set("customer_id", "CUST-42");
+    let _ = state.set("transaction_id", "TXN-12345");
 
     // Dispatch fires all tasks in background
     println!("Dispatching background tasks...");
@@ -214,7 +214,7 @@ async fn main() {
     });
 
     let state3 = State::new();
-    state3.set("output", "Some intermediate result");
+    let _ = state3.set("output", "Some intermediate result");
     tap.run(&state3).await.unwrap();
     println!("  Tap agent ran (read-only observation, no mutation)");
 

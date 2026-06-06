@@ -89,54 +89,56 @@ impl SessionSignals {
                 self.connected_at_ns.store(now_ns, Ordering::Relaxed);
                 self.is_connected.store(true, Ordering::Relaxed);
                 self.last_activity_ns.store(now_ns, Ordering::Relaxed);
-                self.state.session().set("connected_at_ms", 0u64);
-                self.state.session().set("interrupt_count", 0u64);
-                self.state.session().set("error_count", 0u64);
-                self.state.session().set("is_user_speaking", false);
-                self.state.session().set("is_model_speaking", false);
-                self.state.session().set("go_away_received", false);
-                self.state.session().set("resumable", false);
-                self.state.session().set("session_type", "audio_only");
+                let _ = self.state.session().set("connected_at_ms", 0u64);
+                let _ = self.state.session().set("interrupt_count", 0u64);
+                let _ = self.state.session().set("error_count", 0u64);
+                let _ = self.state.session().set("is_user_speaking", false);
+                let _ = self.state.session().set("is_model_speaking", false);
+                let _ = self.state.session().set("go_away_received", false);
+                let _ = self.state.session().set("resumable", false);
+                let _ = self.state.session().set("session_type", "audio_only");
             }
 
             SessionEvent::VoiceActivityStart => {
-                self.state.session().set("is_user_speaking", true);
+                let _ = self.state.session().set("is_user_speaking", true);
                 self.touch_activity();
             }
 
             SessionEvent::VoiceActivityEnd => {
-                self.state.session().set("is_user_speaking", false);
+                let _ = self.state.session().set("is_user_speaking", false);
                 self.touch_activity();
             }
 
             SessionEvent::Interrupted => {
                 let count: u64 = self.state.session().get("interrupt_count").unwrap_or(0);
-                self.state.session().set("interrupt_count", count + 1);
+                let _ = self.state.session().set("interrupt_count", count + 1);
                 self.touch_activity();
             }
 
             SessionEvent::Error(msg) => {
                 let count: u64 = self.state.session().get("error_count").unwrap_or(0);
-                self.state.session().set("error_count", count + 1);
-                self.state.session().set("last_error", msg.clone());
+                let _ = self.state.session().set("error_count", count + 1);
+                let _ = self.state.session().set("last_error", msg.clone());
             }
 
             SessionEvent::PhaseChanged(phase) => {
-                self.state
+                let _ = self
+                    .state
                     .session()
                     .set("is_model_speaking", *phase == SessionPhase::ModelSpeaking);
-                self.state.session().set("phase", phase.to_string());
+                let _ = self.state.session().set("phase", phase.to_string());
                 self.touch_activity();
             }
 
             SessionEvent::GoAway(time_left) => {
-                self.state.session().set("go_away_received", true);
+                let _ = self.state.session().set("go_away_received", true);
                 if let Some(ref tl) = time_left {
-                    self.state.session().set("go_away_time_left", tl.clone());
+                    let _ = self.state.session().set("go_away_time_left", tl.clone());
                     if let Ok(secs) = tl.trim_end_matches('s').parse::<u64>() {
                         let deadline = Instant::now() + std::time::Duration::from_secs(secs);
                         *self.go_away_at.lock() = Some(deadline);
-                        self.state
+                        let _ = self
+                            .state
                             .session()
                             .set("go_away_time_left_ms", secs * 1000);
                     }
@@ -145,9 +147,10 @@ impl SessionSignals {
 
             SessionEvent::SessionResumeUpdate(info) => {
                 *self.latest_resume_handle.lock() = Some(info.handle.clone());
-                self.state.session().set("resumable", info.resumable);
+                let _ = self.state.session().set("resumable", info.resumable);
                 if let Some(ref idx) = info.last_consumed_index {
-                    self.state
+                    let _ = self
+                        .state
                         .session()
                         .set("last_consumed_client_index", idx.clone());
                 }
@@ -155,21 +158,22 @@ impl SessionSignals {
 
             SessionEvent::Usage(usage) => {
                 if let Some(total) = usage.total_token_count {
-                    self.state.session().set("total_token_count", total);
+                    let _ = self.state.session().set("total_token_count", total);
                 }
                 if let Some(prompt) = usage.prompt_token_count {
-                    self.state.session().set("prompt_token_count", prompt);
+                    let _ = self.state.session().set("prompt_token_count", prompt);
                 }
                 if let Some(response) = usage.response_token_count {
-                    self.state.session().set("response_token_count", response);
+                    let _ = self.state.session().set("response_token_count", response);
                 }
                 if let Some(cached) = usage.cached_content_token_count {
-                    self.state
+                    let _ = self
+                        .state
                         .session()
                         .set("cached_content_token_count", cached);
                 }
                 if let Some(thoughts) = usage.thoughts_token_count {
-                    self.state.session().set("thoughts_token_count", thoughts);
+                    let _ = self.state.session().set("thoughts_token_count", thoughts);
                 }
             }
 
@@ -178,14 +182,16 @@ impl SessionSignals {
             }
 
             SessionEvent::InputTranscription(text) => {
-                self.state
+                let _ = self
+                    .state
                     .session()
                     .set("last_input_transcription", text.clone());
                 self.touch_activity();
             }
 
             SessionEvent::OutputTranscription(text) => {
-                self.state
+                let _ = self
+                    .state
                     .session()
                     .set("last_output_transcription", text.clone());
                 self.touch_activity();
@@ -205,7 +211,7 @@ impl SessionSignals {
 
             SessionEvent::Disconnected(_reason) => {
                 self.is_connected.store(false, Ordering::Relaxed);
-                self.state.session().set("disconnected", true);
+                let _ = self.state.session().set("disconnected", true);
             }
 
             _ => {}
@@ -222,21 +228,21 @@ impl SessionSignals {
         if last_activity > 0 {
             let now_ns = self.elapsed_ns();
             let silence_ms = now_ns.saturating_sub(last_activity) / 1_000_000;
-            self.state.session().set("silence_ms", silence_ms);
+            let _ = self.state.session().set("silence_ms", silence_ms);
         }
 
         if self.is_connected.load(Ordering::Relaxed) {
             let connected_ns = self.connected_at_ns.load(Ordering::Relaxed);
             let now_ns = self.elapsed_ns();
             let elapsed_ms = now_ns.saturating_sub(connected_ns) / 1_000_000;
-            self.state.session().set("elapsed_ms", elapsed_ms);
+            let _ = self.state.session().set("elapsed_ms", elapsed_ms);
 
             let limit_ms: u64 = match self.session_type() {
                 SessionType::AudioOnly => 15 * 60 * 1000,
                 SessionType::AudioVideo => 2 * 60 * 1000,
             };
             let remaining = limit_ms.saturating_sub(elapsed_ms);
-            self.state.session().set("remaining_budget_ms", remaining);
+            let _ = self.state.session().set("remaining_budget_ms", remaining);
         }
     }
 
@@ -268,7 +274,7 @@ impl SessionSignals {
     /// Mark that video has been sent (changes session type to `AudioVideo`).
     pub fn mark_video_sent(&self) {
         if !self.has_video.swap(true, Ordering::Relaxed) {
-            self.state.session().set("session_type", "audio_video");
+            let _ = self.state.session().set("session_type", "audio_video");
         }
     }
 }

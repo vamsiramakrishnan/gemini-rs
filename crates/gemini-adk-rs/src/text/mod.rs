@@ -239,7 +239,7 @@ mod tests {
         });
         let agent = LlmTextAgent::new("echoer", llm);
         let state = State::new();
-        state.set("input", "test message");
+        let _ = state.set("input", "test message");
         let result = agent.run(&state).await.unwrap();
         assert!(result.contains("test message"));
     }
@@ -282,12 +282,12 @@ mod tests {
         let agent = FnTextAgent::new("upper", |state: &State| {
             let input = state.get::<String>("input").unwrap_or_default();
             let upper = input.to_uppercase();
-            state.set("output", &upper);
+            let _ = state.set("output", &upper);
             Ok(upper)
         });
 
         let state = State::new();
-        state.set("input", "hello");
+        let _ = state.set("input", "hello");
         let result = agent.run(&state).await.unwrap();
         assert_eq!(result, "HELLO");
         assert_eq!(state.get::<String>("output"), Some("HELLO".into()));
@@ -363,11 +363,11 @@ mod tests {
     async fn parallel_runs_concurrently() {
         let branches: Vec<Arc<dyn TextAgent>> = vec![
             Arc::new(FnTextAgent::new("a", |state: &State| {
-                state.set("key_a", "val_a");
+                let _ = state.set("key_a", "val_a");
                 Ok("result_a".into())
             })),
             Arc::new(FnTextAgent::new("b", |state: &State| {
-                state.set("key_b", "val_b");
+                let _ = state.set("key_b", "val_b");
                 Ok("result_b".into())
             })),
         ];
@@ -417,7 +417,7 @@ mod tests {
     async fn loop_breaks_on_predicate() {
         let body = Arc::new(FnTextAgent::new("incrementer", |state: &State| {
             let n = state.get::<i32>("n").unwrap_or(0);
-            state.set("n", n + 1);
+            let _ = state.set("n", n + 1);
             Ok(format!("n={}", n + 1))
         }));
 
@@ -496,7 +496,7 @@ mod tests {
         );
 
         let state = State::new();
-        state.set("mode", "b");
+        let _ = state.set("mode", "b");
         let result = router.run(&state).await.unwrap();
         assert_eq!(result, "route_b");
     }
@@ -594,7 +594,7 @@ mod tests {
 
         let map = MapOverTextAgent::new("mapper", agent, "items");
         let state = State::new();
-        state.set(
+        let _ = state.set(
             "items",
             vec![
                 serde_json::Value::String("hello".into()),
@@ -635,7 +635,7 @@ mod tests {
         });
 
         let state = State::new();
-        state.set("input", "hello");
+        let _ = state.set("input", "hello");
         let result = tap.run(&state).await.unwrap();
         assert_eq!(result, ""); // Tap returns empty string
         assert_eq!(*observed.lock().unwrap(), "hello");

@@ -30,7 +30,7 @@ async fn main() {
 
     // Worker: writes code, incorporating supervisor feedback
     let coder: Arc<dyn TextAgent> = Arc::new(FnTextAgent::new("coder", |state| {
-        let iteration = state.modify("revision", 0u32, |n| n + 1);
+        let iteration = state.modify("revision", 0u32, |n| n + 1).unwrap_or(0);
         let feedback = state
             .get::<String>("supervisor_feedback")
             .unwrap_or_else(|| "initial submission".into());
@@ -49,7 +49,7 @@ async fn main() {
             }
         );
 
-        state.set("submitted_code", &code);
+        let _ = state.set("submitted_code", &code);
         println!("  [Coder] Revision {iteration} (feedback: {feedback})");
         println!("  [Coder] Submitted:\n{code}");
         Ok(code)
@@ -62,20 +62,20 @@ async fn main() {
 
         // Simulate progressive quality improvement
         if revision >= 3 {
-            state.set("approved", true);
+            let _ = state.set("approved", true);
             let review = "APPROVED: Code meets all quality standards. Ready to merge.".to_string();
             println!("  [Lead] {review}");
             Ok(review)
         } else if revision >= 2 {
-            state.set("approved", false);
+            let _ = state.set("approved", false);
             let feedback = "Add bounds checking for empty arrays".to_string();
-            state.set("supervisor_feedback", &feedback);
+            let _ = state.set("supervisor_feedback", &feedback);
             println!("  [Lead] REVISION NEEDED: {feedback}");
             Ok(format!("REVISION NEEDED: {feedback}"))
         } else {
-            state.set("approved", false);
+            let _ = state.set("approved", false);
             let feedback = "Add documentation comments".to_string();
-            state.set("supervisor_feedback", &feedback);
+            let _ = state.set("supervisor_feedback", &feedback);
             println!("  [Lead] REVISION NEEDED: {feedback}");
             Ok(format!("REVISION NEEDED: {feedback}"))
         }
@@ -279,9 +279,9 @@ async fn main() {
     println!("\n--- Part 6: State Predicates for Supervision ---");
 
     let supervision_state = State::new();
-    supervision_state.set("approved", false);
-    supervision_state.set("quality_score", "high");
-    supervision_state.set("status", "review");
+    let _ = supervision_state.set("approved", false);
+    let _ = supervision_state.set("quality_score", "high");
+    let _ = supervision_state.set("status", "review");
 
     let is_approved = S::is_true("approved");
     let is_high_quality = S::eq("quality_score", "high");
@@ -295,7 +295,7 @@ async fn main() {
     println!("  is_actionable:    {}", is_actionable(&supervision_state));
 
     // Update state and re-check
-    supervision_state.set("approved", true);
+    let _ = supervision_state.set("approved", true);
     println!(
         "  After approval -> is_approved: {}",
         is_approved(&supervision_state)

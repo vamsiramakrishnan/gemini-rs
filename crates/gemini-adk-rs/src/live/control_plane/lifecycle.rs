@@ -150,26 +150,26 @@ pub(in crate::live) async fn handle_turn_complete(
                 transition_to = Some(target.clone());
                 transition_result = Some(tr);
             }
-            state.session().set("phase", machine.current());
+            let _ = state.session().set("phase", machine.current());
 
             // Store current phase's `needs` for ContextBuilder to read.
             if let Some(phase) = machine.current_phase() {
                 if phase.needs.is_empty() {
                     state.remove("session:phase_needs");
                 } else {
-                    state.set("session:phase_needs", phase.needs.clone());
+                    let _ = state.set("session:phase_needs", phase.needs.clone());
                 }
                 if phase.requires.is_empty() {
                     state.remove("session:phase_requires");
                 } else {
-                    state.set("session:phase_requires", phase.requires.clone());
+                    let _ = state.set("session:phase_requires", phase.requires.clone());
                 }
             }
         }
 
         // 7b. Always compute and store navigation context
         let nav = machine.describe_navigation(state);
-        state.session().set("navigation_context", nav);
+        let _ = state.session().set("navigation_context", nav);
     }
 
     // 7c. Emit PhaseTransition LiveEvent (if a transition fired)
@@ -211,7 +211,7 @@ pub(in crate::live) async fn handle_turn_complete(
                 let tools_vec: Vec<String> = tools.iter().map(|s| s.to_string()).collect();
                 let changed = prev_tools.as_ref() != Some(&tools_vec);
                 if changed {
-                    state.session().set("active_tools", tools_vec.clone());
+                    let _ = state.session().set("active_tools", tools_vec.clone());
                     let tool_names = tools_vec.join(", ");
                     context_buffer.push(gemini_genai_rs::prelude::Content::model(format!(
                         "In this phase, I have access to these tools: {}. \
@@ -246,8 +246,8 @@ pub(in crate::live) async fn handle_turn_complete(
                             }
                         }
                         RepairAction::Escalate { unfulfilled } => {
-                            state.set("repair:escalation", true);
-                            state.set("repair:unfulfilled", unfulfilled);
+                            let _ = state.set("repair:escalation", true);
+                            let _ = state.set("repair:unfulfilled", unfulfilled);
                         }
                         RepairAction::None => {}
                     }
@@ -279,13 +279,13 @@ pub(in crate::live) async fn handle_turn_complete(
     if let Some(ref mut mon) = control_plane.flow {
         mon.on_turn(state);
         let done: Vec<String> = mon.marking().done.iter().cloned().collect();
-        state.set("flow:done", done);
+        let _ = state.set("flow:done", done);
         let active: Vec<String> = mon
             .active_steps(state)
             .iter()
             .map(|s| s.id.clone())
             .collect();
-        state.set("flow:active", active);
+        let _ = state.set("flow:active", active);
         for posture in mon.active_postures(state) {
             context_buffer.push(gemini_genai_rs::prelude::Content::model(posture));
         }
@@ -436,7 +436,7 @@ pub(in crate::live) async fn handle_turn_complete(
 
     // 17. Update session turn count
     let tc: u32 = state.session().get("turn_count").unwrap_or(0);
-    state.session().set("turn_count", tc + 1);
+    let _ = state.session().set("turn_count", tc + 1);
 
     // 18. Persist session state (Phase 7 -- fire and forget)
     if let Some(ref persistence) = control_plane.persistence {

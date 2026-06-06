@@ -61,4 +61,4 @@ dispatcher.register(agent_tool);
 
 ## License
 
-Apache-2.0
+MIT

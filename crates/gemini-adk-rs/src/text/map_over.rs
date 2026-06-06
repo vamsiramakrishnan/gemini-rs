@@ -58,13 +58,13 @@ impl TextAgent for MapOverTextAgent {
         let mut results = Vec::with_capacity(items.len());
 
         for item in &items {
-            state.set(&self.item_key, item);
-            state.set("input", item.to_string());
+            let _ = state.set(&self.item_key, item);
+            let _ = state.set("input", item.to_string());
             let result = self.agent.run(state).await?;
             results.push(result);
         }
 
-        state.set(&self.output_key, &results);
+        let _ = state.set(&self.output_key, &results);
         Ok(results.join("\n"))
     }
 }

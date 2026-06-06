@@ -157,7 +157,7 @@ fn state_operators_chain() {
 #[test]
 fn state_predicates_is_true() {
     let state = State::new();
-    state.set("flag", true);
+    let _ = state.set("flag", true);
     let predicate = S::is_true("flag");
     assert!(predicate(&state));
 }
@@ -165,7 +165,7 @@ fn state_predicates_is_true() {
 #[test]
 fn state_predicates_eq() {
     let state = State::new();
-    state.set("status", "active");
+    let _ = state.set("status", "active");
     let predicate = S::eq("status", "active");
     assert!(predicate(&state));
 
@@ -176,11 +176,11 @@ fn state_predicates_eq() {
 #[test]
 fn state_predicates_one_of() {
     let state = State::new();
-    state.set("intent", "full_pay");
+    let _ = state.set("intent", "full_pay");
     let predicate = S::one_of("intent", &["full_pay", "partial_pay"]);
     assert!(predicate(&state));
 
-    state.set("intent", "refuse");
+    let _ = state.set("intent", "refuse");
     assert!(!predicate(&state));
 }
 
@@ -462,11 +462,11 @@ fn live_builder_with_steering_mode() {
 fn state_basic_operations() {
     let state = State::new();
 
-    state.set("name", "Alice");
+    let _ = state.set("name", "Alice");
     assert_eq!(state.get::<String>("name"), Some("Alice".to_string()));
 
-    state.set("count", 0u32);
-    let new_count = state.modify("count", 0u32, |n| n + 1);
+    let _ = state.set("count", 0u32);
+    let new_count = state.modify("count", 0u32, |n| n + 1).unwrap();
     assert_eq!(new_count, 1);
 }
 
@@ -474,16 +474,16 @@ fn state_basic_operations() {
 fn state_prefixed_scopes() {
     let state = State::new();
 
-    state.app().set("flag", true);
+    let _ = state.app().set("flag", true);
     assert_eq!(state.app().get::<bool>("flag"), Some(true));
 
-    state.user().set("name", "Bob");
+    let _ = state.user().set("name", "Bob");
     assert_eq!(state.user().get::<String>("name"), Some("Bob".to_string()));
 
-    state.session().set("turn_count", 5u32);
+    let _ = state.session().set("turn_count", 5u32);
     assert_eq!(state.session().get::<u32>("turn_count"), Some(5));
 
-    state.turn().set("transcript", "hello");
+    let _ = state.turn().set("transcript", "hello");
     assert_eq!(
         state.turn().get::<String>("transcript"),
         Some("hello".to_string())
@@ -495,7 +495,7 @@ fn state_derived_fallback() {
     let state = State::new();
 
     // Setting a derived key
-    state.set("derived:risk", 0.85f64);
+    let _ = state.set("derived:risk", 0.85f64);
 
     // Auto-fallback: state.get("risk") checks "derived:risk"
     assert_eq!(state.get::<f64>("risk"), Some(0.85));
@@ -504,7 +504,7 @@ fn state_derived_fallback() {
 #[test]
 fn state_with_zero_copy_borrow() {
     let state = State::new();
-    state.set("name", "Alice");
+    let _ = state.set("name", "Alice");
 
     let len = state.with("name", |v| v.as_str().unwrap().len());
     assert_eq!(len, Some(5));

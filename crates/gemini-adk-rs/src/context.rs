@@ -296,7 +296,7 @@ mod tests {
             Arc::new(crate::test_helpers::MockWriter);
         let session = crate::agent_session::AgentSession::from_writer(writer, evt_tx);
         let ctx = InvocationContext::new(session);
-        ctx.state().set("key", "value");
+        let _ = ctx.state().set("key", "value");
 
         let cb_ctx = CallbackContext::new(&ctx);
         assert_eq!(
@@ -315,7 +315,7 @@ mod tests {
             Arc::new(crate::test_helpers::MockWriter);
         let session = crate::agent_session::AgentSession::from_writer(writer, evt_tx);
         let ctx = InvocationContext::new(session);
-        ctx.state().set("x", 42);
+        let _ = ctx.state().set("x", 42);
 
         let tool_ctx = ToolContext::new(&ctx, Some("call-1".to_string()));
         assert_eq!(tool_ctx.state().get::<i32>("x"), Some(42));

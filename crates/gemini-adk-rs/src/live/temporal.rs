@@ -451,7 +451,7 @@ mod tests {
     #[test]
     fn sustained_fires_after_duration() {
         let state = State::new();
-        state.set("hot", true);
+        let _ = state.set("hot", true);
 
         let detector = SustainedDetector::new(
             Arc::new(|s: &State| s.get::<bool>("hot").unwrap_or(false)),
@@ -478,7 +478,7 @@ mod tests {
     #[test]
     fn sustained_resets_on_false() {
         let state = State::new();
-        state.set("hot", true);
+        let _ = state.set("hot", true);
 
         let detector = SustainedDetector::new(
             Arc::new(|s: &State| s.get::<bool>("hot").unwrap_or(false)),
@@ -491,11 +491,11 @@ mod tests {
         assert!(!detector.check(&state, None, t0));
 
         // Condition becomes false at t0+2s — resets internal timer.
-        state.set("hot", false);
+        let _ = state.set("hot", false);
         assert!(!detector.check(&state, None, t0 + Duration::from_secs(2)));
 
         // Condition becomes true again at t0+3s — starts fresh.
-        state.set("hot", true);
+        let _ = state.set("hot", true);
         assert!(!detector.check(&state, None, t0 + Duration::from_secs(3)));
 
         // t0+7s: only 4s since re-start at t0+3s — not enough.
@@ -510,7 +510,7 @@ mod tests {
     #[test]
     fn sustained_reset_clears_state() {
         let state = State::new();
-        state.set("hot", true);
+        let _ = state.set("hot", true);
 
         let detector = SustainedDetector::new(
             Arc::new(|s: &State| s.get::<bool>("hot").unwrap_or(false)),
@@ -600,7 +600,7 @@ mod tests {
     #[test]
     fn turn_count_fires_after_n_consecutive() {
         let state = State::new();
-        state.set("confused", true);
+        let _ = state.set("confused", true);
 
         let detector = TurnCountDetector::new(
             Arc::new(|s: &State| s.get::<bool>("confused").unwrap_or(false)),
@@ -620,7 +620,7 @@ mod tests {
     #[test]
     fn turn_count_resets_on_false() {
         let state = State::new();
-        state.set("confused", true);
+        let _ = state.set("confused", true);
 
         let detector = TurnCountDetector::new(
             Arc::new(|s: &State| s.get::<bool>("confused").unwrap_or(false)),
@@ -633,11 +633,11 @@ mod tests {
         assert!(!detector.check(&state, None, t0));
 
         // Condition becomes false — resets counter.
-        state.set("confused", false);
+        let _ = state.set("confused", false);
         assert!(!detector.check(&state, None, t0));
 
         // Start again — need 3 more consecutive trues.
-        state.set("confused", true);
+        let _ = state.set("confused", true);
         assert!(!detector.check(&state, None, t0));
         assert!(!detector.check(&state, None, t0));
         assert!(detector.check(&state, None, t0));
@@ -648,7 +648,7 @@ mod tests {
     #[test]
     fn consecutive_failure_fires_after_threshold() {
         let state = State::new();
-        state.set("bg:search_failed", true);
+        let _ = state.set("bg:search_failed", true);
 
         let detector = ConsecutiveFailureDetector::new("search", 3);
 
@@ -665,7 +665,7 @@ mod tests {
     #[test]
     fn consecutive_failure_resets_on_success() {
         let state = State::new();
-        state.set("bg:search_failed", true);
+        let _ = state.set("bg:search_failed", true);
 
         let detector = ConsecutiveFailureDetector::new("search", 3);
 
@@ -675,11 +675,11 @@ mod tests {
         assert!(!detector.check(&state, None, t0));
 
         // Tool succeeds — reset.
-        state.set("bg:search_failed", false);
+        let _ = state.set("bg:search_failed", false);
         assert!(!detector.check(&state, None, t0));
 
         // Must accumulate again from 0.
-        state.set("bg:search_failed", true);
+        let _ = state.set("bg:search_failed", true);
         assert!(!detector.check(&state, None, t0));
         assert!(!detector.check(&state, None, t0));
         assert!(detector.check(&state, None, t0));
@@ -691,7 +691,7 @@ mod tests {
     async fn pattern_cooldown_prevents_rapid_refiring() {
         let counter = Arc::new(AtomicU32::new(0));
         let state = State::new();
-        state.set("active", true);
+        let _ = state.set("active", true);
         let writer = mock_writer();
 
         let pattern = TemporalPattern::new(
@@ -734,7 +734,7 @@ mod tests {
     async fn registry_check_all_returns_actions() {
         let counter = Arc::new(AtomicU32::new(0));
         let state = State::new();
-        state.set("confused", true);
+        let _ = state.set("confused", true);
         let writer = mock_writer();
 
         let mut registry = TemporalRegistry::new();
@@ -842,7 +842,7 @@ mod tests {
     #[test]
     fn turn_count_reset_clears_counter() {
         let state = State::new();
-        state.set("confused", true);
+        let _ = state.set("confused", true);
 
         let detector = TurnCountDetector::new(
             Arc::new(|s: &State| s.get::<bool>("confused").unwrap_or(false)),
@@ -868,7 +868,7 @@ mod tests {
     #[test]
     fn consecutive_failure_reset_clears_counter() {
         let state = State::new();
-        state.set("bg:search_failed", true);
+        let _ = state.set("bg:search_failed", true);
 
         let detector = ConsecutiveFailureDetector::new("search", 3);
         let t0 = Instant::now();
@@ -917,7 +917,7 @@ mod tests {
     async fn pattern_without_cooldown_fires_every_time() {
         let counter = Arc::new(AtomicU32::new(0));
         let state = State::new();
-        state.set("active", true);
+        let _ = state.set("active", true);
         let writer = mock_writer();
 
         let pattern = TemporalPattern::new(

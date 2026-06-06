@@ -113,9 +113,9 @@ impl ToolFunction for AgentTool {
 
         // 2. Inject args into state
         if let Some(request) = args.get("request").and_then(|r| r.as_str()) {
-            isolated_session.state().set("request_text", request);
+            let _ = isolated_session.state().set("request_text", request);
         }
-        isolated_session.state().set("request", &args);
+        let _ = isolated_session.state().set("request", &args);
 
         // 3. Create isolated InvocationContext
         let mut ctx = InvocationContext::new(isolated_session);

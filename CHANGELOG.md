@@ -7,9 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (breaking)
+
+- **`State` writes are now fallible.** `State::set`, `set_committed`, `set_key`,
+  `modify`, and `PrefixedState::set` return `Result<_, StateError>` instead of
+  panicking via `expect` on non-serializable input — a public SDK write no longer
+  aborts the host process. Call sites must handle the `Result`.
+- **`flow::Mode` renamed to `flow::Enforcement`** (`Enforce`/`Observe`) to remove
+  the collision with `orchestration::Mode` (`Call`/`Dispatch`/`Background`). A
+  deprecated `flow::Mode` alias is kept for one release; the `FlowMode` prelude
+  alias now points at `Enforcement`.
+
+### Fixed
+
+- **`State::modify` is now atomic.** It performs the read-modify-write under a
+  per-key map lock (`DashMap::entry`) instead of a racy `get`→`f`→`set`, so
+  concurrent increments no longer lose updates.
+- **Delta rollback is now correct.** Delta tracking uses tombstones
+  (`DeltaOp::Put`/`Delete`): `remove()` and `clear_prefix()` no longer mutate the
+  committed store, so `rollback()` reliably restores the base state after removals
+  and prefix clears, and `commit()` applies removals.
+- **`Flow` `Before` constraint is now enforced.** `before(a, b)` gates step
+  eligibility (`b` cannot start until `a` is done); previously it was validated but
+  never consulted at runtime.
+- **Custom guards inside `Guard::all`/`any` are no longer silently dropped.** A
+  nested `Guard::custom` is preserved as a runtime closure (making the combinator
+  non-serializable) instead of being lowered to `Pred::Always`, which had silently
+  deleted composed safety guards.
+- **Metadata truth.** Crate READMEs and the main README license section corrected
+  to MIT (matching `LICENSE`); install snippets bumped to `0.7`; documented MSRV
+  aligned with CI (`rust-version = "1.93"`, README badge `1.93+`).
+
 ### Added
 
-- **`ROADMAP.md`** — milestone-based plan for post-0.7.0 work (core unification, Flow L2 completion, Extract v2, server/tooling completion, hardening).
+- `State` property test (rollback always restores base) and regression tests for
+  atomic `modify`, rollback-after-remove, and rollback-after-clear-prefix; `Flow`
+  regression tests for `Before` enforcement and custom-guard preservation.
+- **`ROADMAP.md`** — milestone-based plan for post-0.7.0 work, reframed around
+  hardening the primitives into contracts.
 - **Eval REST endpoint wired to `gemini_adk_rs::evaluation`** — `POST /eval/run` now loads an `EvalSet` (inline JSON or file path), maps criteria → deterministic evaluators (`response_match`/`exact_match`/`tool_trajectory`[`_any_order`], with optional `name=threshold`), scores each case (pre-recorded actuals, or live agent runs when actuals are absent), and aggregates a real `EvalResultSummary`. Results are stored on `ServerState` and served from `GET /eval/results`.
 
 ## [0.7.0] - 2026-05-31

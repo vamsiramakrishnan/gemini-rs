@@ -576,7 +576,7 @@ impl PhaseMachine {
                 state.remove(key);
             }
             for concept in &phase.presents {
-                state.set(Phase::presented_key(concept), true);
+                let _ = state.set(Phase::presented_key(concept), true);
             }
             if let Some(ref on_enter) = phase.on_enter {
                 let fut = on_enter(state.clone(), Arc::clone(writer));
@@ -733,7 +733,7 @@ mod tests {
     #[test]
     fn evaluate_single_transition_fires() {
         let state = State::new();
-        state.set("ready", true);
+        let _ = state.set("ready", true);
 
         let mut greeting = simple_phase("greeting", "Say hello");
         greeting.transitions.push(Transition {
@@ -775,8 +775,8 @@ mod tests {
     #[test]
     fn evaluate_multiple_transitions_first_match_wins() {
         let state = State::new();
-        state.set("escalate", true);
-        state.set("done", true);
+        let _ = state.set("escalate", true);
+        let _ = state.set("done", true);
 
         let mut greeting = simple_phase("greeting", "Say hello");
         greeting.transitions.push(Transition {
@@ -804,7 +804,7 @@ mod tests {
     #[test]
     fn evaluate_terminal_phase_returns_none() {
         let state = State::new();
-        state.set("anything", true);
+        let _ = state.set("anything", true);
 
         let mut term = terminal_phase("end", "Goodbye");
         // Even if we add a transition, terminal should short-circuit.
@@ -943,7 +943,7 @@ mod tests {
     #[test]
     fn phase_instruction_dynamic_resolves() {
         let state = State::new();
-        state.set("user_name", "Alice");
+        let _ = state.set("user_name", "Alice");
 
         let instr = PhaseInstruction::Dynamic(Arc::new(|s: &State| {
             let name: String = s.get("user_name").unwrap_or_default();
@@ -992,14 +992,14 @@ mod tests {
         let mut greeting = simple_phase("greeting", "Hi");
         greeting.on_exit = Some(Arc::new(|s: State, _w: Arc<dyn SessionWriter>| {
             Box::pin(async move {
-                s.set("exited_greeting", true);
+                let _ = s.set("exited_greeting", true);
             })
         }));
 
         let mut main = simple_phase("main", "Main");
         main.on_enter = Some(Arc::new(|s: State, _w: Arc<dyn SessionWriter>| {
             Box::pin(async move {
-                s.set("entered_main", true);
+                let _ = s.set("entered_main", true);
             })
         }));
 
@@ -1067,7 +1067,7 @@ mod tests {
     async fn transition_resolves_dynamic_instruction() {
         let writer: Arc<dyn SessionWriter> = Arc::new(crate::test_helpers::MockWriter);
         let state = State::new();
-        state.set("topic", "weather");
+        let _ = state.set("topic", "weather");
 
         let dynamic_phase = Phase {
             name: "dynamic".to_string(),
@@ -1111,7 +1111,7 @@ mod tests {
     #[test]
     fn phase_guard_blocks_transition() {
         let state = State::new();
-        state.set("ready", true);
+        let _ = state.set("ready", true);
         // "verified" is NOT set, so the target phase guard will reject entry.
 
         let mut greeting = simple_phase("greeting", "Say hello");
@@ -1139,8 +1139,8 @@ mod tests {
     #[test]
     fn phase_guard_allows_transition_when_satisfied() {
         let state = State::new();
-        state.set("ready", true);
-        state.set("verified", true);
+        let _ = state.set("ready", true);
+        let _ = state.set("verified", true);
 
         let mut greeting = simple_phase("greeting", "Say hello");
         greeting.transitions.push(Transition {
@@ -1166,7 +1166,7 @@ mod tests {
     #[test]
     fn phase_guard_skips_to_next_transition() {
         let state = State::new();
-        state.set("ready", true);
+        let _ = state.set("ready", true);
         // "verified" is NOT set — first target's phase guard will block.
 
         let mut greeting = simple_phase("greeting", "Say hello");
@@ -1203,8 +1203,8 @@ mod tests {
     #[test]
     fn instruction_modifier_state_append() {
         let state = State::new();
-        state.set("emotion", "happy");
-        state.set("score", 0.8f64);
+        let _ = state.set("emotion", "happy");
+        let _ = state.set("score", 0.8f64);
 
         let modifier =
             InstructionModifier::StateAppend(vec!["emotion".to_string(), "score".to_string()]);
@@ -1216,7 +1216,7 @@ mod tests {
     #[test]
     fn instruction_modifier_conditional_true() {
         let state = State::new();
-        state.set("risk", "high");
+        let _ = state.set("risk", "high");
 
         let modifier = InstructionModifier::Conditional {
             predicate: Arc::new(|s: &State| s.get::<String>("risk").unwrap_or_default() == "high"),
@@ -1230,7 +1230,7 @@ mod tests {
     #[test]
     fn instruction_modifier_conditional_false() {
         let state = State::new();
-        state.set("risk", "low");
+        let _ = state.set("risk", "low");
 
         let modifier = InstructionModifier::Conditional {
             predicate: Arc::new(|s: &State| s.get::<String>("risk").unwrap_or_default() == "high"),
@@ -1244,7 +1244,7 @@ mod tests {
     #[test]
     fn resolve_with_modifiers_composes() {
         let state = State::new();
-        state.set("mood", "calm");
+        let _ = state.set("mood", "calm");
 
         let instr = PhaseInstruction::Static("You are helpful.".to_string());
         let modifiers = vec![InstructionModifier::StateAppend(vec!["mood".to_string()])];
@@ -1258,7 +1258,7 @@ mod tests {
     #[test]
     fn describe_navigation_basic() {
         let state = State::new();
-        state.set("caller_name", "Vamsi");
+        let _ = state.set("caller_name", "Vamsi");
 
         let mut machine = PhaseMachine::new("greeting");
 
@@ -1292,7 +1292,7 @@ mod tests {
     fn describe_navigation_with_history_and_needs() {
         let state = State::new();
         // caller_name is set, caller_org is NOT set
-        state.set("caller_name", "Vamsi");
+        let _ = state.set("caller_name", "Vamsi");
 
         let mut machine = PhaseMachine::new("identify");
 
@@ -1355,7 +1355,7 @@ mod tests {
 
         assert!(machine.evaluate(&state).is_none());
 
-        state.set("facts_loaded", true);
+        let _ = state.set("facts_loaded", true);
         assert_eq!(
             machine.evaluate(&state).map(|(target, _)| target),
             Some("grounded")
@@ -1382,7 +1382,7 @@ mod tests {
             produces: vec!["facts_loaded".into()],
             run: Arc::new(|state, _writer| {
                 Box::pin(async move {
-                    state.set("facts_loaded", true);
+                    let _ = state.set("facts_loaded", true);
                 })
             }),
         });
@@ -1413,7 +1413,7 @@ mod tests {
             produces: vec!["facts_loaded".into()],
             run: Arc::new(|state, _writer| {
                 Box::pin(async move {
-                    state.set("facts_loaded", true);
+                    let _ = state.set("facts_loaded", true);
                 })
             }),
         });
@@ -1427,7 +1427,7 @@ mod tests {
     async fn transition_marks_presented_concepts_and_clears_stale_keys() {
         let writer: Arc<dyn SessionWriter> = Arc::new(crate::test_helpers::MockWriter);
         let state = State::new();
-        state.set("ack", true);
+        let _ = state.set("ack", true);
 
         let mut machine = PhaseMachine::new("start");
         let mut start = simple_phase("start", "Start.");
