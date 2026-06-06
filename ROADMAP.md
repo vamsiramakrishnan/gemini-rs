@@ -29,17 +29,20 @@ the substrate the compiler targets; the compiler arc proper is:
 - ✅ **Phase 0 — keystone:** `CompiledFlow` (validated IR + `FlowErrors` +
   `ToolPolicy`) and `FlowMonitor::explain()`/`why_blocked()`. *(L1 landed; L2
   surface + richer checks remain — see Milestone 2.)*
-- 🚧 **Phase 1 — compiler MVP:** mostly landed.
-  - ✅ serializable `ConversationSpec` + `Conversation` builder lowering
+- ✅ **Phase 1 — compiler MVP:** landed.
+  - serializable `ConversationSpec` + `Conversation` builder lowering
     `stage/say/ground/collect/commit/next/require` → `CompiledFlow` (JSON
     round-trip; `monitor()` yields a `FlowMonitor`).
-  - ✅ typed frames: `#[derive(Frame)]` + `FrameSpec`/`SlotSpec`/`ConfirmPolicy`
-    (prompt/reprompt/confirm/state/pii) and `Conversation::collect_frame::<F>()`.
-  - ✅ slot **evidence**: `State::evidence(key)` over the mutation journal +
-    `state_meta:` provenance + confidence.
-  - 📋 *Remaining:* emit Extract recognizers + Resolver bindings from a frame's
-    `collect` (so a stage actually populates its slots, with recognizer confidence
-    flowing into `state_meta` for evidence); slot `validate`.
+  - typed frames: `#[derive(Frame)]` + `FrameSpec`/`SlotSpec`/`ConfirmPolicy`/
+    `SlotRecognizer` (prompt/reprompt/confirm/state/pii + `#[recognize(..)]`);
+    `FrameSpec::to_extract()`; `Conversation::collect_frame::<F>()` lowers both the
+    completion guard and the extractor (`CompiledConversation::extractors()`).
+  - slot **evidence**: `State::evidence(key)` over the mutation journal +
+    `state_meta:` provenance + confidence; deterministic extraction now records
+    confidence into `state_meta`, so evidence confidence is real end-to-end.
+  - 📋 *Remaining (small):* auto-register `CompiledConversation::extractors()` on a
+    `Live` session from `Live::govern`/a conversation entrypoint (today they're
+    exposed for manual registration); slot `validate`; frame Resolver fields.
 - 📋 **Phase 2 — trust:** deterministic simulation harness (fake user + tool
   latency) + scenario/property tests.
 - 📋 **Phase 3 — overlays (own RFC):** hierarchical digressions + resumable

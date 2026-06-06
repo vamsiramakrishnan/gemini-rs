@@ -27,6 +27,51 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::extract::{Extract, Recognizer};
+
+/// A serializable description of the deterministic recognizer that fills a slot.
+///
+/// Mirrors [`Recognizer`] but is serde-friendly (it holds patterns/options as
+/// data, not a compiled `Regex`), so a [`FrameSpec`] — and the conversation spec
+/// that embeds it — round-trips through JSON/YAML. Lower to a runtime recognizer
+/// with [`SlotRecognizer::to_recognizer`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SlotRecognizer {
+    /// First integer in the text.
+    Integer,
+    /// First integer, but only when one of these anchor words is present.
+    IntegerNear(Vec<String>),
+    /// A monetary amount.
+    Money,
+    /// First capture (or whole match) of this regex pattern.
+    Regex(String),
+    /// The first of these options to appear (case-insensitive substring).
+    OneOf(Vec<String>),
+    /// The best Jaro-Winkler match among these options.
+    Fuzzy(Vec<String>),
+    /// Affirmative/negative → boolean.
+    YesNo,
+    /// A calendar/clock expression → a JSON object.
+    DateTime,
+}
+
+impl SlotRecognizer {
+    /// Lower to a runtime [`Recognizer`].
+    pub fn to_recognizer(&self) -> Recognizer {
+        match self {
+            SlotRecognizer::Integer => Recognizer::integer(),
+            SlotRecognizer::IntegerNear(anchors) => Recognizer::integer_near(anchors.clone()),
+            SlotRecognizer::Money => Recognizer::money(),
+            SlotRecognizer::Regex(pat) => Recognizer::regex(pat),
+            SlotRecognizer::OneOf(opts) => Recognizer::one_of(opts.clone()),
+            SlotRecognizer::Fuzzy(opts) => Recognizer::fuzzy(opts.clone()),
+            SlotRecognizer::YesNo => Recognizer::yes_no(),
+            SlotRecognizer::DateTime => Recognizer::datetime(),
+        }
+    }
+}
+
 /// When a slot's value should be confirmed back to the user before it is trusted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -71,6 +116,9 @@ pub struct SlotSpec {
     /// Whether the slot holds PII (redact in logs/transcripts).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub pii: bool,
+    /// The deterministic recognizer that fills this slot, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recognizer: Option<SlotRecognizer>,
 }
 
 fn is_default_confirm(c: &ConfirmPolicy) -> bool {
@@ -88,6 +136,7 @@ impl SlotSpec {
             reprompt: None,
             confirm: ConfirmPolicy::Never,
             pii: false,
+            recognizer: None,
         }
     }
 }
@@ -113,6 +162,25 @@ impl FrameSpec {
     pub fn slot(&self, name: &str) -> Option<&SlotSpec> {
         self.slots.iter().find(|s| s.name == name)
     }
+
+    /// Lower the frame's recognizer-bearing slots into an [`Extract`] record that
+    /// fills them from the transcript. Returns `None` when no slot has a
+    /// recognizer (a frame whose slots are gathered some other way).
+    pub fn to_extract(&self) -> Option<Extract> {
+        let mut builder = Extract::record(self.name.clone());
+        let mut any = false;
+        for slot in &self.slots {
+            if let Some(rec) = &slot.recognizer {
+                builder = builder.field_to(
+                    slot.name.clone(),
+                    slot.state_key.clone(),
+                    rec.to_recognizer(),
+                );
+                any = true;
+            }
+        }
+        any.then(|| builder.build())
+    }
 }
 
 /// A typed conversation frame. Implement via `#[derive(Frame)]`.
@@ -133,6 +201,31 @@ mod tests {
             Some(ConfirmPolicy::LowConfidence)
         );
         assert_eq!(ConfirmPolicy::parse("nope"), None);
+    }
+
+    #[test]
+    fn to_extract_lowers_recognizer_slots() {
+        let spec = FrameSpec {
+            name: "order".into(),
+            slots: vec![
+                SlotSpec {
+                    recognizer: Some(SlotRecognizer::OneOf(vec!["pizza".into(), "salad".into()])),
+                    ..SlotSpec::new("item")
+                },
+                // No recognizer — not part of the extract record.
+                SlotSpec::new("note"),
+            ],
+        };
+        let extract = spec.to_extract().expect("has a recognizer slot");
+        // Round-trips as part of the extract pipeline (built without panic).
+        let _ = extract;
+
+        // A frame with no recognizers lowers to no extractor.
+        let bare = FrameSpec {
+            name: "bare".into(),
+            slots: vec![SlotSpec::new("x")],
+        };
+        assert!(bare.to_extract().is_none());
     }
 
     #[test]

@@ -4,19 +4,21 @@
 //! live in `tests/` and exercise the generated code against the real
 //! `gemini-adk-rs` crate graph.
 
-use gemini_adk_rs::frame::ConfirmPolicy;
+use gemini_adk_rs::frame::{ConfirmPolicy, SlotRecognizer};
 use gemini_adk_rs::Frame; // brings both the `Frame` trait and the `#[derive(Frame)]` macro
 
 #[derive(Frame)]
 #[frame(name = "booking")]
 struct Booking {
     #[slot(prompt = "For how many people?", confirm = "low_confidence")]
+    #[recognize(integer_near = ["people", "guests", "party"])]
     party_size: u8,
     #[slot(
         prompt = "What day and time?",
         reprompt = "When would you like to come in?"
     )]
     #[slot(state = "when")]
+    #[recognize(datetime)]
     slot: String,
     #[slot(prompt = "Name for the reservation?", pii)]
     name: String,
@@ -44,6 +46,21 @@ fn derives_frame_spec_with_metadata() {
     let name = spec.slot("name").unwrap();
     assert!(name.pii);
     assert_eq!(name.confirm, ConfirmPolicy::Never); // default
+
+    // Recognizers parsed from `#[recognize(..)]`.
+    assert_eq!(
+        party.recognizer,
+        Some(SlotRecognizer::IntegerNear(vec![
+            "people".into(),
+            "guests".into(),
+            "party".into()
+        ]))
+    );
+    assert_eq!(when.recognizer, Some(SlotRecognizer::DateTime));
+    assert_eq!(name.recognizer, None); // no #[recognize]
+
+    // The recognizer-bearing slots lower to an extractor.
+    assert!(Booking::frame().to_extract().is_some());
 }
 
 #[derive(Frame)]

@@ -422,7 +422,7 @@ fn expand_extract(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
 /// Field `#[slot(..)]` options: `prompt`, `reprompt`, `confirm`
 /// (`never`/`low_confidence`/`always`), `state` (key override), `pii` (flag).
 /// Container `#[frame(name = "...")]` sets the frame name.
-#[proc_macro_derive(Frame, attributes(slot, frame))]
+#[proc_macro_derive(Frame, attributes(slot, frame, recognize))]
 pub fn derive_frame(item: TokenStream) -> TokenStream {
     let input = parse_macro_input!(item as DeriveInput);
     match expand_frame(input) {
@@ -479,6 +479,15 @@ fn expand_frame(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         let mut confirm = quote! { ::gemini_adk_rs::frame::ConfirmPolicy::Never };
         let mut pii = false;
 
+        // Optional `#[recognize(..)]` (same vocabulary as `#[derive(Extract)]`).
+        let recognizer = match field.attrs.iter().find(|a| a.path().is_ident("recognize")) {
+            Some(attr) => {
+                let r = slot_recognizer_expr(attr)?;
+                quote! { Some(#r) }
+            }
+            None => quote! { None },
+        };
+
         for attr in &field.attrs {
             if !attr.path().is_ident("slot") {
                 continue;
@@ -534,6 +543,7 @@ fn expand_frame(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                 reprompt: #reprompt_tok,
                 confirm: #confirm,
                 pii: #pii,
+                recognizer: #recognizer,
             }
         });
     }
@@ -601,6 +611,62 @@ fn recognizer_expr(attr: &syn::Attribute) -> syn::Result<proc_macro2::TokenStrea
                 "regex" => {
                     let s = str_lit(&nv.value)?;
                     Ok(quote! { #r::regex(#s) })
+                }
+                other => Err(syn::Error::new_spanned(
+                    &nv.path,
+                    format!("`{other}` does not take a value"),
+                )),
+            }
+        }
+        Meta::List(l) => Err(syn::Error::new_spanned(
+            l,
+            "unexpected nested list in `#[recognize(..)]`",
+        )),
+    }
+}
+
+/// Build a serializable `SlotRecognizer` expression for a `#[recognize(..)]` attr
+/// on a `#[derive(Frame)]` field (same vocabulary as the Extract derive).
+fn slot_recognizer_expr(attr: &syn::Attribute) -> syn::Result<proc_macro2::TokenStream> {
+    let r = quote! { ::gemini_adk_rs::frame::SlotRecognizer };
+    let meta: Meta = attr.parse_args()?;
+    match meta {
+        Meta::Path(p) => {
+            let id = p
+                .get_ident()
+                .ok_or_else(|| syn::Error::new_spanned(&p, "expected a recognizer name"))?;
+            match id.to_string().as_str() {
+                "integer" => Ok(quote! { #r::Integer }),
+                "money" => Ok(quote! { #r::Money }),
+                "yes_no" => Ok(quote! { #r::YesNo }),
+                "datetime" => Ok(quote! { #r::DateTime }),
+                other => Err(syn::Error::new_spanned(
+                    &p,
+                    format!("unknown recognizer `{other}`"),
+                )),
+            }
+        }
+        Meta::NameValue(nv) => {
+            let id = nv
+                .path
+                .get_ident()
+                .ok_or_else(|| syn::Error::new_spanned(&nv.path, "expected a recognizer name"))?;
+            match id.to_string().as_str() {
+                "integer_near" => {
+                    let a = str_array(&nv.value)?;
+                    Ok(quote! { #r::IntegerNear(::std::vec![ #(#a.to_string()),* ]) })
+                }
+                "one_of" => {
+                    let a = str_array(&nv.value)?;
+                    Ok(quote! { #r::OneOf(::std::vec![ #(#a.to_string()),* ]) })
+                }
+                "fuzzy" => {
+                    let a = str_array(&nv.value)?;
+                    Ok(quote! { #r::Fuzzy(::std::vec![ #(#a.to_string()),* ]) })
+                }
+                "regex" => {
+                    let s = str_lit(&nv.value)?;
+                    Ok(quote! { #r::Regex(#s.to_string()) })
                 }
                 other => Err(syn::Error::new_spanned(
                     &nv.path,

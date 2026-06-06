@@ -586,7 +586,13 @@ impl TurnExtractor for RecordExtractor {
         let mut fresh = serde_json::Map::new();
         for field in &self.spec.fields {
             if let Source::Recognize(rec) = &field.source {
-                if let Some((value, _confidence)) = rec.recognize(&text) {
+                if let Some((value, confidence)) = rec.recognize(&text) {
+                    // Record provenance + confidence under the `state_meta:` convention
+                    // so `State::evidence()` can surface how a slot was filled.
+                    let _ = state.set(
+                        format!("state_meta:{}", field.state_key),
+                        serde_json::json!({ "source": "extraction", "confidence": confidence }),
+                    );
                     fresh.insert(field.state_key.clone(), value.clone());
                     obj.insert(field.name.clone(), value);
                 }

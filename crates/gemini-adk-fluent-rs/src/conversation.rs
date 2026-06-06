@@ -42,7 +42,9 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
+use gemini_adk_rs::extract::Extract;
 use gemini_adk_rs::flow::{CompiledFlow, Enforcement, Flow, FlowErrors, FlowMonitor, Guard, Pred};
+use gemini_adk_rs::frame::{Frame, FrameSpec};
 
 /// A transition: advance to `to` when `when` holds.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,6 +78,10 @@ pub struct StageSpec {
     /// Slots to collect; drives the default completion (`captured`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub collect: Vec<String>,
+    /// The frame whose slots this stage collects, if set via `collect_frame`. Its
+    /// recognizer-bearing slots lower to an extractor that fills the slots.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame: Option<FrameSpec>,
     /// Tools available while this stage is active.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allow: Vec<String>,
@@ -138,17 +144,36 @@ impl std::fmt::Display for ConversationError {
 
 impl std::error::Error for ConversationError {}
 
-/// A compiled conversation: the validated [`CompiledFlow`] plus the source spec.
-#[derive(Debug, Clone)]
+/// A compiled conversation: the validated [`CompiledFlow`], the extractors that
+/// fill its frames' slots, and the source spec.
+#[derive(Clone)]
 pub struct CompiledConversation {
     flow: CompiledFlow,
+    extractors: Vec<Extract>,
     spec: ConversationSpec,
+}
+
+// Manual: the lowered `Extract`s hold recognizer/resolver closures (not `Debug`),
+// so they are summarized by count.
+impl std::fmt::Debug for CompiledConversation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CompiledConversation")
+            .field("flow", &self.flow)
+            .field("extractors", &self.extractors.len())
+            .field("spec", &self.spec)
+            .finish()
+    }
 }
 
 impl CompiledConversation {
     /// The governed flow IR this conversation lowered to.
     pub fn flow(&self) -> &CompiledFlow {
         &self.flow
+    }
+    /// The extractors lowered from `collect_frame` stages — register these on the
+    /// live session so each turn fills the frames' slots from the transcript.
+    pub fn extractors(&self) -> &[Extract] {
+        &self.extractors
     }
     /// The authoring spec it was compiled from.
     pub fn spec(&self) -> &ConversationSpec {
@@ -223,8 +248,11 @@ impl Conversation {
     /// stage. The frame's slot state-keys drive the `captured` completion; its
     /// metadata (prompts/confirm/pii) is available via `F::frame()` for
     /// confirmation and repair.
-    pub fn collect_frame<F: gemini_adk_rs::frame::Frame>(mut self) -> Self {
-        self.current().collect = F::frame().slot_keys();
+    pub fn collect_frame<F: Frame>(mut self) -> Self {
+        let spec = F::frame();
+        let stage = self.current();
+        stage.collect = spec.slot_keys();
+        stage.frame = Some(spec);
         self
     }
 
@@ -433,8 +461,17 @@ fn compile_spec(spec: ConversationSpec) -> Result<CompiledConversation, Conversa
 
     let flow = fb.build().map_err(ConversationError::Flow)?;
     let compiled = flow.compile().map_err(ConversationError::Compile)?;
+
+    // Lower each frame-collecting stage into an extractor that fills its slots.
+    let extractors = spec
+        .stages
+        .iter()
+        .filter_map(|s| s.frame.as_ref().and_then(FrameSpec::to_extract))
+        .collect();
+
     Ok(CompiledConversation {
         flow: compiled,
+        extractors,
         spec,
     })
 }
@@ -556,6 +593,58 @@ mod tests {
         // Frame slots captured -> collect completes and the (terminal) done latches.
         assert!(mon.marking().done.contains("collect"));
         assert!(mon.marking().done.contains("done"));
+    }
+
+    #[tokio::test]
+    async fn collect_frame_extractor_fills_and_scores_slots() {
+        use gemini_adk_rs::frame::{Frame, FrameSpec, SlotRecognizer, SlotSpec};
+        use gemini_adk_rs::live::TranscriptTurn;
+
+        struct Order;
+        impl Frame for Order {
+            fn frame() -> FrameSpec {
+                FrameSpec {
+                    name: "order".into(),
+                    slots: vec![SlotSpec {
+                        recognizer: Some(SlotRecognizer::OneOf(vec![
+                            "pizza".into(),
+                            "salad".into(),
+                        ])),
+                        ..SlotSpec::new("item")
+                    }],
+                }
+            }
+        }
+
+        let convo = Conversation::new("o")
+            .stage("collect")
+            .collect_frame::<Order>()
+            .next("done", Guard::captured(["item"]))
+            .stage("done")
+            .terminal()
+            .compile()
+            .expect("compiles");
+
+        // The frame lowered to exactly one extractor.
+        assert_eq!(convo.extractors().len(), 1);
+        let extractor = convo.extractors()[0].clone().into_extractor();
+
+        // Run it over a transcript turn against State — it fills the slot and
+        // records confidence under `state_meta:` for evidence.
+        let state = State::new();
+        let window = vec![TranscriptTurn {
+            turn_number: 0,
+            user: "I'd like a large PIZZA".into(),
+            model: String::new(),
+            tool_calls: Vec::new(),
+            timestamp: std::time::Instant::now(),
+        }];
+        let out = extractor.extract_with_state(&window, &state).await.unwrap();
+        assert_eq!(out.get("item").and_then(|v| v.as_str()), Some("pizza"));
+
+        let ev = state.evidence("item");
+        assert_eq!(ev.source.as_deref(), Some("extraction"));
+        assert!(ev.confidence.unwrap() > 0.0);
     }
 
     #[test]
