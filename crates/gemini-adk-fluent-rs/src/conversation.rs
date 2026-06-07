@@ -124,6 +124,19 @@ pub struct StageSpec {
     /// Whether this is a terminal stage.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub terminal: bool,
+    /// Repair policy for this stage (reprompt/escalate on stalling).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repair: Option<RepairPolicy>,
+}
+
+/// The state key set when a stage's repair policy escalates.
+fn escalate_flag(stage: &str) -> String {
+    format!("repair:{stage}:escalate")
+}
+
+/// The state key set when a stage's repair policy raises a reprompt.
+fn reprompt_flag(stage: &str) -> String {
+    format!("repair:{stage}:reprompt")
 }
 
 /// How the main flow continues after a digression (overlay) completes.
@@ -137,6 +150,58 @@ pub enum Resume {
     Restart,
     /// End the conversation (e.g. a cancel/handoff digression).
     Terminate,
+}
+
+fn default_reprompt_after() -> u32 {
+    2
+}
+fn default_escalate_after() -> u32 {
+    4
+}
+
+/// A stage's repair policy for the weird paths (silence, no-match, the user
+/// stalling). The runtime sets `repair:{stage}:reprompt` once the stage has been
+/// active `reprompt_after` turns without completing, and `repair:{stage}:escalate`
+/// after `escalate_after`. When `escalate_to` is set, escalation also *completes*
+/// the stage and routes to that stage — a deterministic "give up and hand off".
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepairPolicy {
+    /// Turns the stage may be active before a reprompt signal is raised.
+    #[serde(default = "default_reprompt_after")]
+    pub reprompt_after: u32,
+    /// Turns the stage may be active before an escalation signal is raised.
+    #[serde(default = "default_escalate_after")]
+    pub escalate_after: u32,
+    /// Stage to route to on escalation (also completes the current stage).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub escalate_to: Option<String>,
+}
+
+impl Default for RepairPolicy {
+    fn default() -> Self {
+        Self {
+            reprompt_after: default_reprompt_after(),
+            escalate_after: default_escalate_after(),
+            escalate_to: None,
+        }
+    }
+}
+
+impl RepairPolicy {
+    /// A policy with the given reprompt/escalate turn thresholds.
+    pub fn new(reprompt_after: u32, escalate_after: u32) -> Self {
+        Self {
+            reprompt_after,
+            escalate_after,
+            escalate_to: None,
+        }
+    }
+
+    /// Route to `stage` on escalation (also completes the current stage).
+    pub fn escalate_to(mut self, stage: impl Into<String>) -> Self {
+        self.escalate_to = Some(stage.into());
+        self
+    }
 }
 
 /// A digression (overlay): a named sub-flow that suspends the main flow when its
@@ -225,6 +290,7 @@ pub struct CompiledConversation {
     flow: CompiledFlow,
     extractors: Vec<Extract>,
     overlays: Vec<CompiledOverlay>,
+    repair: BTreeMap<String, RepairPolicy>,
     spec: ConversationSpec,
 }
 
@@ -511,6 +577,12 @@ impl Conversation {
         self
     }
 
+    /// Attach a [`RepairPolicy`] to the current stage.
+    pub fn repair(mut self, policy: RepairPolicy) -> Self {
+        self.current().repair = Some(policy);
+        self
+    }
+
     /// Require these stages for completion (lowers to a Flow `require`). Targets
     /// the active overlay when authoring one, else the main flow.
     pub fn require<I, S>(mut self, steps: I) -> Self
@@ -602,6 +674,10 @@ pub struct FlowStack {
     overlays: Vec<CompiledOverlay>,
     active: Option<ActiveOverlay>,
     terminated: bool,
+    /// Per-main-stage repair policies.
+    repair: BTreeMap<String, RepairPolicy>,
+    /// Consecutive turns each main stage has been active without completing.
+    active_turns: BTreeMap<String, u32>,
 }
 
 impl FlowStack {
@@ -613,6 +689,42 @@ impl FlowStack {
             overlays: convo.overlays.clone(),
             active: None,
             terminated: false,
+            repair: convo.repair.clone(),
+            active_turns: BTreeMap::new(),
+        }
+    }
+
+    /// Bump per-stage active-turn counters for the main flow and raise repair
+    /// signals (`repair:{stage}:reprompt` / `:escalate`) when thresholds are hit.
+    /// Clears signals for stages that are no longer active.
+    fn apply_repair(&mut self, state: &State) {
+        if self.repair.is_empty() {
+            return;
+        }
+        let active: BTreeSet<String> = self.main.explain(state).active.into_iter().collect();
+        // Reset stages that left active since last turn.
+        let left: Vec<String> = self
+            .active_turns
+            .keys()
+            .filter(|k| !active.contains(*k))
+            .cloned()
+            .collect();
+        for stage in left {
+            self.active_turns.remove(&stage);
+            let _ = state.set(reprompt_flag(&stage), false);
+            let _ = state.set(escalate_flag(&stage), false);
+        }
+        for stage in &active {
+            let count = self.active_turns.entry(stage.clone()).or_insert(0);
+            *count += 1;
+            if let Some(rp) = self.repair.get(stage) {
+                if *count >= rp.reprompt_after {
+                    let _ = state.set(reprompt_flag(stage), true);
+                }
+                if *count >= rp.escalate_after {
+                    let _ = state.set(escalate_flag(stage), true);
+                }
+            }
         }
     }
 
@@ -685,6 +797,9 @@ impl FlowStack {
                         });
                     }
                 } else {
+                    // Repair bookkeeping is based on the pre-turn active set so
+                    // an escalation signal can take effect this turn.
+                    self.apply_repair(state);
                     self.main.on_turn(state);
                 }
             }
@@ -755,6 +870,14 @@ fn lower_flow(stages: &[StageSpec], require: &[String]) -> Result<CompiledFlow, 
                 )));
             }
         }
+        if let Some(target) = s.repair.as_ref().and_then(|r| r.escalate_to.as_ref()) {
+            if !ids.contains(target.as_str()) {
+                return Err(ConversationError::Spec(format!(
+                    "stage '{}' escalates to unknown stage '{}'",
+                    s.id, target
+                )));
+            }
+        }
     }
     for r in require {
         if !ids.contains(r.as_str()) {
@@ -772,6 +895,13 @@ fn lower_flow(stages: &[StageSpec], require: &[String]) -> Result<CompiledFlow, 
                 .entry(t.to.as_str())
                 .or_default()
                 .push((s.id.as_str(), t.when.clone()));
+        }
+        // Repair escalation is an extra edge gated on the escalate signal.
+        if let Some(target) = s.repair.as_ref().and_then(|r| r.escalate_to.as_ref()) {
+            incoming
+                .entry(target.as_str())
+                .or_default()
+                .push((s.id.as_str(), Guard::is_true(escalate_flag(&s.id))));
         }
     }
 
@@ -904,24 +1034,46 @@ fn compile_spec(
         });
     }
 
+    // Per-stage repair policies for the runtime to apply.
+    let repair = spec
+        .stages
+        .iter()
+        .filter_map(|s| s.repair.clone().map(|p| (s.id.clone(), p)))
+        .collect();
+
     Ok(CompiledConversation {
         flow,
         extractors,
         overlays,
+        repair,
         spec,
     })
 }
 
 /// The completion guard for a non-terminal stage, by priority:
 /// explicit `done` → `captured(collect)` → disjunction of `next` conditions.
+/// When repair escalation is configured, the stage may also complete by escalating
+/// (so a stalled stage can hand off even though its normal completion never fired).
 fn stage_completion(s: &StageSpec) -> Option<Guard> {
-    if let Some(g) = &s.done {
-        return Some(g.clone());
+    let base = if let Some(g) = &s.done {
+        Some(g.clone())
+    } else if !s.collect.is_empty() {
+        Some(Guard::captured(s.collect.clone()))
+    } else {
+        any_of(s.next.iter().map(|t| t.when.clone()).collect())
+    };
+    if s.repair
+        .as_ref()
+        .and_then(|r| r.escalate_to.as_ref())
+        .is_some()
+    {
+        let esc = Guard::is_true(escalate_flag(&s.id));
+        return Some(match base {
+            Some(b) => Guard::any(vec![b, esc]),
+            None => esc,
+        });
     }
-    if !s.collect.is_empty() {
-        return Some(Guard::captured(s.collect.clone()));
-    }
-    any_of(s.next.iter().map(|t| t.when.clone()).collect())
+    base
 }
 
 #[cfg(test)]
@@ -1269,6 +1421,70 @@ mod tests {
         assert_eq!(back.overlays[0].resume, Resume::Terminate);
         // Recompiles from the round-tripped spec.
         assert!(Conversation::from_spec(back).is_ok());
+    }
+
+    #[tokio::test]
+    async fn repair_reprompts_then_escalates_to_handoff() {
+        use crate::simulation::Sim;
+
+        // `collect` needs `info`; if the user stalls, reprompt after 2 turns and
+        // escalate (route to `handoff`) after 3.
+        let convo = Conversation::new("support")
+            .stage("collect")
+            .done(Guard::is_true("info"))
+            .next("done", Guard::is_true("info"))
+            .repair(RepairPolicy::new(2, 3).escalate_to("handoff"))
+            .stage("done")
+            .terminal()
+            // Non-terminal so it stays *active* (terminal stages latch instantly).
+            .stage("handoff")
+            .done(Guard::is_true("handoff_complete"))
+            .compile()
+            .expect("compiles");
+
+        let mut sim = Sim::new(&convo, Enforcement::Enforce);
+        assert!(sim.active().contains(&"collect".to_string()));
+
+        // User stalls. Turn 1 active: no signal yet.
+        sim.turn();
+        assert_eq!(sim.slot::<bool>("repair:collect:reprompt"), None);
+        // Turn 2 active: reprompt raised.
+        sim.turn();
+        assert_eq!(sim.slot::<bool>("repair:collect:reprompt"), Some(true));
+        assert!(sim.active().contains(&"collect".to_string()));
+        // Turn 3 active: escalate raised -> stage completes via escalation -> handoff.
+        sim.turn();
+        assert_eq!(sim.slot::<bool>("repair:collect:escalate"), Some(true));
+        assert!(sim.active().contains(&"handoff".to_string()));
+        assert!(!sim.active().contains(&"collect".to_string()));
+    }
+
+    #[tokio::test]
+    async fn repair_signal_clears_when_stage_satisfied() {
+        use crate::simulation::Sim;
+
+        let convo = Conversation::new("s")
+            .stage("collect")
+            .done(Guard::is_true("info"))
+            .next("done", Guard::is_true("info"))
+            .repair(RepairPolicy::new(1, 9))
+            .stage("done")
+            .terminal()
+            .require(["done"])
+            .compile()
+            .expect("compiles");
+
+        let mut sim = Sim::new(&convo, Enforcement::Enforce);
+        sim.turn(); // active 1 turn -> reprompt (threshold 1)
+        assert_eq!(sim.slot::<bool>("repair:collect:reprompt"), Some(true));
+
+        // User provides info -> collect completes this turn; the signal clears the
+        // following turn (once the stage is observed no longer active).
+        sim.set("info", true);
+        sim.turn();
+        sim.turn();
+        assert_eq!(sim.slot::<bool>("repair:collect:reprompt"), Some(false));
+        assert!(sim.is_complete());
     }
 
     #[test]

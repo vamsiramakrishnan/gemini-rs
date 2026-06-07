@@ -80,7 +80,7 @@ pub mod prelude {
     pub use crate::compose::{Ctx, A, C, E, G, M, P, S, T};
     pub use crate::conversation::{
         CommitSpec, CompiledConversation, CompiledOverlay, Conversation, ConversationError,
-        ConversationSpec, FlowStack, OverlaySpec, Resume, StageSpec, TransitionSpec,
+        ConversationSpec, FlowStack, OverlaySpec, RepairPolicy, Resume, StageSpec, TransitionSpec,
     };
     pub use crate::live::Live;
     pub use crate::live_builders::*;

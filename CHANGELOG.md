@@ -40,6 +40,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Repair flows first-class.** A serializable per-stage `RepairPolicy`
+  (`reprompt_after`/`escalate_after`/`escalate_to`) via `Conversation::repair(..)`.
+  The runtime raises `repair:{stage}:reprompt` once a stage has been active too long
+  without completing and `repair:{stage}:escalate` after the escalate threshold;
+  when `escalate_to` is set, escalation also completes the stage and routes there
+  (deterministic "give up and hand off"). Signals clear when the stage leaves.
 - **Motif stdlib.** `Motif` factories for high-confidence flow fragments —
   `collect_frame::<F>` / `confirm_then_commit` / `identity_verification` /
   `disclosure` / `say` / `handoff` (→ `StageSpec`) and `faq_digression`

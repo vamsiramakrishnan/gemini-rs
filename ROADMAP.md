@@ -72,8 +72,11 @@ Authored as focused, green commits, in this order:
    `identity_verification`/`disclosure`/`say`/`handoff` (→ `StageSpec`) +
    `faq_digression` (→ `OverlaySpec`), composed via `Conversation::add_stage`/
    `add_overlay`; all lower through the validated IR (fail-loud).
-4. 📋 **Repair flows first-class** — no-input / no-match / low-confidence /
-   correction / barge-in / tool-timeout policies as flow-level concepts.
+4. ✅ **Repair flows first-class** — serializable per-stage `RepairPolicy`
+   (`reprompt_after`/`escalate_after`/`escalate_to`); the runtime raises
+   `repair:{stage}:reprompt`/`:escalate` signals and escalation routes to a handoff
+   stage. *(MVP: turn-based stalling; barge-in/tool-timeout variants are
+   follow-ups.)*
 5. 📋 **Typed graph macros** — a `voice_flow!` macro generating typed step/slot/
    tool constants + `build()`.
 6. 📋 **Bidirectional visual devtools loop** — `inspect`/`graph`/`simulate`/
