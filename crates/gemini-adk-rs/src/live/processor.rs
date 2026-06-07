@@ -913,23 +913,26 @@ mod tests {
         // Wait just enough for the ack (but not the full tool)
         tokio::time::sleep(Duration::from_millis(50)).await;
 
-        let responses = sent.lock();
-        // First batch should be the ack
-        assert!(!responses.is_empty(), "Should have sent ack immediately");
-        assert_eq!(responses[0][0].response["status"], "running");
-
-        drop(responses);
+        // Scope the guard so it is never held across an await point.
+        {
+            let responses = sent.lock();
+            // First batch should be the ack
+            assert!(!responses.is_empty(), "Should have sent ack immediately");
+            assert_eq!(responses[0][0].response["status"], "running");
+        }
 
         // Wait for background tool to complete
         tokio::time::sleep(Duration::from_millis(300)).await;
 
-        let responses = sent.lock();
-        // Second batch should be the completed result
-        assert!(
-            responses.len() >= 2,
-            "Should have sent result after completion"
-        );
-        assert_eq!(responses[1][0].response["status"], "completed");
+        {
+            let responses = sent.lock();
+            // Second batch should be the completed result
+            assert!(
+                responses.len() >= 2,
+                "Should have sent result after completion"
+            );
+            assert_eq!(responses[1][0].response["status"], "completed");
+        }
 
         drop(event_tx);
         let _ = fast_handle.await;
