@@ -187,9 +187,17 @@ fn expand(description: LitStr, func: ItemFn) -> syn::Result<proc_macro2::TokenSt
     let destructure = &field_idents;
     let forward_args = &field_idents;
 
+    // Upstream crates are reached through `gemini_adk_rs::__macros` so the consumer
+    // doesn't need them in scope under those exact names.
+    let serde = quote! { ::gemini_adk_rs::__macros::serde };
+    let schemars = quote! { ::gemini_adk_rs::__macros::schemars };
+    let async_trait = quote! { ::gemini_adk_rs::__macros::async_trait };
+    let serde_json = quote! { ::gemini_adk_rs::__macros::serde_json };
+
     let expanded = quote! {
         // Hidden args struct: drives both deserialization and schema generation.
-        #[derive(::serde::Deserialize, ::schemars::JsonSchema)]
+        #[derive(#serde::Deserialize, #schemars::JsonSchema)]
+        #[serde(crate = "gemini_adk_rs::__macros::serde")]
         #[allow(non_camel_case_types, non_snake_case)]
         struct #args_struct {
             #(#struct_fields),*
@@ -203,7 +211,7 @@ fn expand(description: LitStr, func: ItemFn) -> syn::Result<proc_macro2::TokenSt
         #[allow(non_camel_case_types)]
         #vis struct #tool_struct;
 
-        #[::async_trait::async_trait]
+        #[#async_trait::async_trait]
         impl ::gemini_adk_rs::tool::ToolFunction for #tool_struct {
             fn name(&self) -> &str {
                 #fn_name_str
@@ -213,20 +221,20 @@ fn expand(description: LitStr, func: ItemFn) -> syn::Result<proc_macro2::TokenSt
                 #description
             }
 
-            fn parameters(&self) -> ::core::option::Option<::serde_json::Value> {
-                let root = ::schemars::schema_for!(#args_struct);
+            fn parameters(&self) -> ::core::option::Option<#serde_json::Value> {
+                let root = #schemars::schema_for!(#args_struct);
                 ::core::option::Option::Some(
-                    ::serde_json::to_value(root)
+                    #serde_json::to_value(root)
                         .expect("schemars schema should serialize to JSON"),
                 )
             }
 
             async fn call(
                 &self,
-                args: ::serde_json::Value,
-            ) -> ::core::result::Result<::serde_json::Value, ::gemini_adk_rs::error::ToolError> {
+                args: #serde_json::Value,
+            ) -> ::core::result::Result<#serde_json::Value, ::gemini_adk_rs::error::ToolError> {
                 let #args_struct { #(#destructure),* } =
-                    ::serde_json::from_value(args).map_err(|e| {
+                    #serde_json::from_value(args).map_err(|e| {
                         ::gemini_adk_rs::error::ToolError::InvalidArgs(
                             ::std::format!("Failed to deserialize arguments: {e}"),
                         )

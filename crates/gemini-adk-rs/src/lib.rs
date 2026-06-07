@@ -82,6 +82,18 @@ pub use flow::{
     FlowErrors, FlowExplanation, FlowMonitor, Guard, StepAction, ToolPolicy, Verdict, Violation,
 };
 pub use frame::{ConfirmPolicy, Frame, FrameSpec, SlotRecognizer, SlotSpec, SlotValidator};
+/// Re-exports the `#[tool]`/`#[derive(..)]` macros route their generated code
+/// through, so downstream crates don't need the upstream crate names
+/// (`serde`/`schemars`/`async_trait`/`serde_json`) in scope or under those exact
+/// names. Not public API.
+#[doc(hidden)]
+pub mod __macros {
+    pub use async_trait;
+    pub use schemars;
+    pub use serde;
+    pub use serde_json;
+}
+
 /// The `#[tool]` attribute macro — turns an `async fn` into a registrable Gemini tool.
 ///
 /// See the [`gemini_adk_macros_rs::tool`] documentation for details.

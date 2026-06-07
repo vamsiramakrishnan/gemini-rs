@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Proc-macro hygiene.** The `#[tool]` macro now routes its generated code
+  through `gemini_adk_rs::__macros` (re-exporting `serde`/`schemars`/`async_trait`/
+  `serde_json`) and sets `#[serde(crate = ..)]`, so downstream crates no longer
+  need those upstream crates as direct dependencies under those exact names.
+
 ### Changed (breaking)
 
 - **Reactor: dead effect nouns removed.** Dropped `EffectPolicy::dedupe_key` and
