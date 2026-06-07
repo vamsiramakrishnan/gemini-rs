@@ -355,74 +355,20 @@ pub(in crate::live) async fn handle_turn_complete(
         }
     }
 
-    // 12. Instruction delivery (dedup against last sent)
-    //
-    // Behavior depends on SteeringMode:
-    //   - InstructionUpdate / Hybrid: replace the system instruction via
-    //     `update_instruction()`.  Sent immediately (different wire message type).
-    //   - ContextInjection: accumulate into context_buffer for batched delivery.
-    if let Some(instruction) = resolved_instruction {
-        match control_plane.steering_mode {
-            SteeringMode::InstructionUpdate | SteeringMode::Hybrid => {
-                let should_update = {
-                    let last = shared.last_instruction.lock();
-                    last.as_deref() != Some(&instruction)
-                };
-                if should_update {
-                    *shared.last_instruction.lock() = Some(instruction.clone());
-                    writer.update_instruction(instruction).await.ok();
-                }
-            }
-            SteeringMode::ContextInjection => {
-                context_buffer.push(gemini_genai_rs::prelude::Content::model(instruction));
-            }
-        }
-    }
-
-    // 13. Add on_enter_context content to batch (if phase transition produced context)
-    if let Some(ref tr) = transition_result {
-        if let Some(ref contents) = tr.context {
-            context_buffer.extend(contents.iter().cloned());
-        }
-        if tr.prompt_on_enter {
-            should_prompt = true;
-        }
-    }
-
-    // 14. Context delivery — Immediate or Deferred
-    //
-    // Immediate: all context turns sent as one atomic WebSocket frame now.
-    // Deferred:  pushed to PendingContext, synchronized with user activity —
-    //            the DeferredWriter drains and sends context immediately before
-    //            the next user send (send_audio/send_text/send_video), so context
-    //            arrives in the same burst as user speech rather than as isolated
-    //            frames during silence.
-    //
-    // In Deferred mode, context and prompt are queued separately. User sends
-    // flush context only; prompt is released explicitly by the host when voice
-    // playback is drained/idle.
-    if !context_buffer.is_empty() || should_prompt {
-        use crate::live::steering::ContextDelivery;
-        match (&control_plane.context_delivery, &shared.pending_context) {
-            (ContextDelivery::Deferred, Some(pending)) => {
-                // Deferred: queue context for synchronized delivery with next
-                // user activity; queue prompts for explicit idle flush.
-                pending.extend(context_buffer);
-                if should_prompt {
-                    pending.set_prompt();
-                }
-            }
-            _ => {
-                // Immediate (or forced by prompt): send now
-                if !context_buffer.is_empty() {
-                    writer.send_client_content(context_buffer, false).await.ok();
-                }
-                if should_prompt {
-                    writer.send_client_content(vec![], true).await.ok();
-                }
-            }
-        }
-    }
+    // 12–14. Compose the final instruction and deliver it plus any context turns
+    // as one batched, dedup'd, delivery-mode-aware step. (Extracted so this
+    // scar-heavy block is a named, harness-covered unit — see `harness` below and
+    // docs/plans/2026-06-07-turn-tool-pipeline-rfc.md.)
+    deliver_instruction_and_context(
+        writer,
+        shared,
+        control_plane,
+        resolved_instruction,
+        context_buffer,
+        &transition_result,
+        should_prompt,
+    )
+    .await;
 
     // 15. Turn boundary hook
     if let Some(cb) = &callbacks.on_turn_boundary {
@@ -471,6 +417,77 @@ pub(in crate::live) async fn handle_turn_complete(
                 let _ = e;
             }
         });
+    }
+}
+
+/// Deliver the resolved instruction and any batched context turns for a turn.
+///
+/// Encodes three invariants (asserted by the `harness` tests):
+/// - the instruction is delivered **once** and deduped against the last sent
+///   (InstructionUpdate/Hybrid), or accumulated as a context frame
+///   (ContextInjection);
+/// - on-enter context and prompt from a phase transition join the same batch;
+/// - delivery is `Immediate` (one `send_client_content`) or `Deferred` (queued in
+///   `PendingContext` for the next user send), never a burst of isolated frames.
+async fn deliver_instruction_and_context(
+    writer: &Arc<dyn SessionWriter>,
+    shared: &SharedState,
+    control_plane: &ControlPlaneConfig,
+    resolved_instruction: Option<String>,
+    mut context_buffer: Vec<gemini_genai_rs::prelude::Content>,
+    transition_result: &Option<TransitionResult>,
+    mut should_prompt: bool,
+) {
+    // Instruction delivery (dedup against last sent).
+    if let Some(instruction) = resolved_instruction {
+        match control_plane.steering_mode {
+            SteeringMode::InstructionUpdate | SteeringMode::Hybrid => {
+                let should_update = {
+                    let last = shared.last_instruction.lock();
+                    last.as_deref() != Some(&instruction)
+                };
+                if should_update {
+                    *shared.last_instruction.lock() = Some(instruction.clone());
+                    writer.update_instruction(instruction).await.ok();
+                }
+            }
+            SteeringMode::ContextInjection => {
+                context_buffer.push(gemini_genai_rs::prelude::Content::model(instruction));
+            }
+        }
+    }
+
+    // Add on_enter_context content to the batch (if a phase transition produced it).
+    if let Some(ref tr) = transition_result {
+        if let Some(ref contents) = tr.context {
+            context_buffer.extend(contents.iter().cloned());
+        }
+        if tr.prompt_on_enter {
+            should_prompt = true;
+        }
+    }
+
+    // Context delivery — Immediate (one atomic frame now) or Deferred (queued in
+    // PendingContext, synchronized with the next user send by the DeferredWriter,
+    // so context never arrives as isolated frames during silence).
+    if !context_buffer.is_empty() || should_prompt {
+        use crate::live::steering::ContextDelivery;
+        match (&control_plane.context_delivery, &shared.pending_context) {
+            (ContextDelivery::Deferred, Some(pending)) => {
+                pending.extend(context_buffer);
+                if should_prompt {
+                    pending.set_prompt();
+                }
+            }
+            _ => {
+                if !context_buffer.is_empty() {
+                    writer.send_client_content(context_buffer, false).await.ok();
+                }
+                if should_prompt {
+                    writer.send_client_content(vec![], true).await.ok();
+                }
+            }
+        }
     }
 }
 
