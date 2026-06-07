@@ -136,27 +136,16 @@ pub(in crate::live) async fn handle_turn_complete(
         .await;
     }
 
-    // 7d. Tool availability advisory (Phase 5)
-    // When phase transitions change the tool set, add advisory to context buffer
-    if transition_result.is_some() && control_plane.tool_advisory {
-        if let Some(ref pm) = phase_machine {
-            let machine = pm.lock().await;
-            if let Some(tools) = machine.active_tools() {
-                let prev_tools: Option<Vec<String>> = state.session().get("active_tools");
-                let tools_vec: Vec<String> = tools.iter().map(|s| s.to_string()).collect();
-                let changed = prev_tools.as_ref() != Some(&tools_vec);
-                if changed {
-                    let _ = state.session().set("active_tools", tools_vec.clone());
-                    let tool_names = tools_vec.join(", ");
-                    context_buffer.push(gemini_genai_rs::prelude::Content::model(format!(
-                        "In this phase, I have access to these tools: {}. \
-                         I should only use these tools.",
-                        tool_names
-                    )));
-                }
-            }
-        }
-    }
+    // 7d. Tool availability advisory (Phase 5). (Extracted so the active-tool
+    // diffing + advisory projection is a named, harness-covered unit — see
+    // `harness` below and docs/plans/2026-06-07-turn-tool-pipeline-rfc.md.)
+    project_tool_advisory(
+        transition_result.is_some() && control_plane.tool_advisory,
+        phase_machine,
+        state,
+        &mut context_buffer,
+    )
+    .await;
 
     // 7e. Conversation repair (Phase 6). (Extracted so the needs evaluation +
     // nudge/escalate projection is a named, harness-covered unit — see `harness`
@@ -169,23 +158,16 @@ pub(in crate::live) async fn handle_turn_complete(
     )
     .await;
 
-    // 7f. Context injection steering (Phase 4)
-    if matches!(
+    // 7f. Context injection steering (Phase 4). (Extracted so the modifier-based
+    // steering projection is a named, harness-covered unit — see `harness` below
+    // and docs/plans/2026-06-07-turn-tool-pipeline-rfc.md.)
+    project_steering_context(
         control_plane.steering_mode,
-        SteeringMode::ContextInjection | SteeringMode::Hybrid
-    ) {
-        if let Some(ref pm) = phase_machine {
-            let machine = pm.lock().await;
-            if let Some(phase) = machine.current_phase() {
-                let steering_parts = steering::build_steering_context(state, &phase.modifiers);
-                if !steering_parts.is_empty() {
-                    context_buffer.push(gemini_genai_rs::prelude::Content::model(
-                        steering_parts.join("\n"),
-                    ));
-                }
-            }
-        }
-    }
+        phase_machine,
+        state,
+        &mut context_buffer,
+    )
+    .await;
 
     // 7g. Flow governance. (Extracted so the re-latch + status publish + posture
     // /grounding/unmet projection + on-enter firing is a named, harness-covered
@@ -304,6 +286,68 @@ pub(in crate::live) async fn handle_turn_complete(
                 let _ = e;
             }
         });
+    }
+}
+
+/// Project a tool-availability advisory into the context buffer.
+///
+/// When `enabled` (a phase transition fired and `tool_advisory` is on) and the
+/// active phase's tool set differs from the one last advertised, persists the
+/// new set to `active_tools` and pushes a "tools I have access to" advisory line.
+/// Behavior-preserving lift of step 7d. No-op when disabled or unchanged.
+async fn project_tool_advisory(
+    enabled: bool,
+    phase_machine: &Option<tokio::sync::Mutex<PhaseMachine>>,
+    state: &State,
+    context_buffer: &mut Vec<gemini_genai_rs::prelude::Content>,
+) {
+    if enabled {
+        if let Some(ref pm) = phase_machine {
+            let machine = pm.lock().await;
+            if let Some(tools) = machine.active_tools() {
+                let prev_tools: Option<Vec<String>> = state.session().get("active_tools");
+                let tools_vec: Vec<String> = tools.iter().map(|s| s.to_string()).collect();
+                let changed = prev_tools.as_ref() != Some(&tools_vec);
+                if changed {
+                    let _ = state.session().set("active_tools", tools_vec.clone());
+                    let tool_names = tools_vec.join(", ");
+                    context_buffer.push(gemini_genai_rs::prelude::Content::model(format!(
+                        "In this phase, I have access to these tools: {}. \
+                         I should only use these tools.",
+                        tool_names
+                    )));
+                }
+            }
+        }
+    }
+}
+
+/// Project context-injection steering modifiers into the context buffer.
+///
+/// Under `ContextInjection`/`Hybrid` steering, composes the active phase's
+/// instruction modifiers into a steering context line. Behavior-preserving lift
+/// of step 7f. No-op under `InstructionUpdate` steering or with no phase machine.
+async fn project_steering_context(
+    steering_mode: SteeringMode,
+    phase_machine: &Option<tokio::sync::Mutex<PhaseMachine>>,
+    state: &State,
+    context_buffer: &mut Vec<gemini_genai_rs::prelude::Content>,
+) {
+    if matches!(
+        steering_mode,
+        SteeringMode::ContextInjection | SteeringMode::Hybrid
+    ) {
+        if let Some(ref pm) = phase_machine {
+            let machine = pm.lock().await;
+            if let Some(phase) = machine.current_phase() {
+                let steering_parts = steering::build_steering_context(state, &phase.modifiers);
+                if !steering_parts.is_empty() {
+                    context_buffer.push(gemini_genai_rs::prelude::Content::model(
+                        steering_parts.join("\n"),
+                    ));
+                }
+            }
+        }
     }
 }
 
@@ -622,7 +666,7 @@ mod harness {
     use crate::live::events::LiveEvent;
     use crate::live::extractor::{ExtractionTrigger, TurnExtractor};
     use crate::live::needs::{NeedsFulfillment, RepairConfig};
-    use crate::live::phase::{Phase, PhaseMachine, Transition};
+    use crate::live::phase::{InstructionModifier, Phase, PhaseMachine, Transition};
     use crate::live::processor::{ControlPlaneConfig, SharedState};
     use crate::live::steering::{ContextDelivery, SteeringMode};
     use crate::live::temporal::TemporalRegistry;
@@ -1015,6 +1059,62 @@ mod harness {
         assert_eq!(
             h.state.get::<Vec<String>>("repair:unfulfilled"),
             Some(vec!["customer_id".to_string()])
+        );
+    }
+
+    #[tokio::test]
+    async fn phase_transition_advertises_the_new_tool_set() {
+        // The tool-advisory stage: when a transition changes the active tool set,
+        // the new set is persisted to active_tools (and advertised).
+        let mut greeting = Phase::new("greeting", "Say hello");
+        greeting.transitions.push(Transition {
+            target: "main".into(),
+            guard: Arc::new(|s| s.get::<bool>("ready").unwrap_or(false)),
+            description: None,
+        });
+        let mut main = Phase::new("main", "Main phase");
+        main.tools_enabled = Some(vec!["search".to_string()]);
+        let mut machine = PhaseMachine::new("greeting");
+        machine.add_phase(greeting);
+        machine.add_phase(main);
+
+        let mut h = Harness::new();
+        h.phase = Some(tokio::sync::Mutex::new(machine));
+        // tool_advisory defaults on.
+        let _ = h.state.set("ready", true);
+
+        h.run_turn().await;
+
+        assert_eq!(
+            h.state.session().get::<Vec<String>>("active_tools"),
+            Some(vec!["search".to_string()]),
+            "new phase's tool set advertised + persisted"
+        );
+    }
+
+    #[tokio::test]
+    async fn context_injection_projects_phase_steering_modifiers() {
+        // The steering stage: under ContextInjection, the active phase's
+        // instruction modifiers are projected as one steering context frame.
+        let mut phase = Phase::new("main", "Main phase");
+        phase.modifiers = vec![InstructionModifier::StateAppend(vec!["mood".to_string()])];
+        let mut machine = PhaseMachine::new("main");
+        machine.add_phase(phase);
+
+        let mut h = Harness::new();
+        h.phase = Some(tokio::sync::Mutex::new(machine));
+        h.control.steering_mode = SteeringMode::ContextInjection;
+        let _ = h.state.set("mood", "calm");
+
+        h.run_turn().await;
+
+        assert_eq!(
+            h.writes(),
+            vec![Write::ClientContent {
+                turns: 1,
+                turn_complete: false
+            }],
+            "steering modifiers delivered as one batched context frame"
         );
     }
 }
