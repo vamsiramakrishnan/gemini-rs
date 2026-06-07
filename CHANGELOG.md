@@ -40,6 +40,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`conversation-from-script` skill.** A Claude Code skill
+  (`.claude/skills/conversation-from-script/`) that drafts a serializable
+  `ConversationSpec` + simulation `Scenario` tests from a call-center script/SOP —
+  an authoring assistant (the model drafts; the deterministic control plane
+  governs). Its example spec/scenario JSON are validated by an integration test so
+  the guidance can't drift from what the compiler accepts.
 - **Policy aspects.** Reusable, cross-cutting governance attached to a whole
   conversation via `Conversation::policy(..)`: `Policy::safety_handoff([intents])`
   (lowers to a `safety` digression that terminates on `intent:{name}`),

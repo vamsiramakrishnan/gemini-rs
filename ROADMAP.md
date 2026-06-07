@@ -90,9 +90,10 @@ Authored as focused, green commits, in this order:
    are recorded + surfaced.)*
 8. 📋 **Voice timing in the graph** — per-stage filler/reprompt/interrupt/
    endpointing/context-delivery as declarative policy lowering to Live settings.
-9. 📋 **NL→flow codegen as a skill** — a harness (Claude Code skill) that drafts a
-   `ConversationSpec` + tests from a call-center script (authoring assistant; the
-   model drafts, never governs).
+9. ✅ **NL→flow codegen as a skill** — `.claude/skills/conversation-from-script/`
+   drafts a `ConversationSpec` + `Scenario` tests from a script (authoring
+   assistant; model drafts, control plane governs). Example JSON validated by an
+   integration test.
 
 Already shipped from the vision: frames/slots first-class (#2, Phase 1) and
 `explain()`/`why_blocked()` (#11, Phase 0).
