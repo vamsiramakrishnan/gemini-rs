@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **CI: feature-boundary checks.** Added a job that builds the workspace with
+  `--no-default-features` and `--all-features` (both verified green), so the
+  feature-heavy SDK can't regress at the extremes. Also: `await_holding_lock` is
+  now enforced (removed from the workspace lint allow-list).
 - **Proc-macro hygiene.** The `#[tool]` macro now routes its generated code
   through `gemini_adk_rs::__macros` (re-exporting `serde`/`schemars`/`async_trait`/
   `serde_json`) and sets `#[serde(crate = ..)]`, so downstream crates no longer

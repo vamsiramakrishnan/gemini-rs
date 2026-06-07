@@ -56,3 +56,17 @@ jobs:
           toolchain: "1.93.1"
           components: rustfmt
       - run: cargo fmt --all -- --check
+
+  # Feature-boundary checks: a feature-heavy SDK must build at both extremes, not
+  # just the default set. (Next: `cargo hack --feature-powerset` for combinations.)
+  features:
+    name: Feature extremes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.93.1"
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --workspace --no-default-features
+      - run: cargo check --workspace --all-features
