@@ -209,36 +209,10 @@ pub(in crate::live) async fn handle_turn_complete(
         }
     }
 
-    // 7g. Flow governance: re-latch the marking, project active-step postures
-    // as steering, surface unmet requirements as repair, and publish status.
-    if let Some(ref mut mon) = control_plane.flow {
-        mon.on_turn(state);
-        let done: Vec<String> = mon.marking().done.iter().cloned().collect();
-        let _ = state.set("flow:done", done);
-        let active: Vec<String> = mon
-            .active_steps(state)
-            .iter()
-            .map(|s| s.id.clone())
-            .collect();
-        let _ = state.set("flow:active", active);
-        for posture in mon.active_postures(state) {
-            context_buffer.push(gemini_genai_rs::prelude::Content::model(posture));
-        }
-        // Grounding lines: curated, State-interpolated facts (anti-hallucination).
-        for ground in mon.active_grounds(state) {
-            context_buffer.push(gemini_genai_rs::prelude::Content::model(ground));
-        }
-        let unmet = mon.unmet_requirements();
-        if !unmet.is_empty() {
-            context_buffer.push(gemini_genai_rs::prelude::Content::model(format!(
-                "Before finishing, these still need to happen: {}.",
-                unmet.join(", ")
-            )));
-        }
-        // Fire on_enter actions for steps that just became active. `Call`
-        // actions resolve inline; `Dispatch`/`Background` run detached.
-        mon.fire_enter_actions(state).await;
-    }
+    // 7g. Flow governance. (Extracted so the re-latch + status publish + posture
+    // /grounding/unmet projection + on-enter firing is a named, harness-covered
+    // unit — see `harness` below and docs/plans/2026-06-07-turn-tool-pipeline-rfc.md.)
+    govern_flow(&mut control_plane.flow, state, &mut context_buffer).await;
 
     // 8. Fire watchers from net state mutations since the cursor.
     if let (Some(ref watchers), Some(cursor)) = (watchers, pre_watcher_cursor) {
@@ -352,6 +326,48 @@ pub(in crate::live) async fn handle_turn_complete(
                 let _ = e;
             }
         });
+    }
+}
+
+/// Re-latch the governed flow for a turn and project its status.
+///
+/// Re-evaluates the marking, publishes `flow:done` / `flow:active`, pushes
+/// active-step postures and grounding lines into the context buffer, surfaces
+/// unmet requirements as a repair line, and fires on-enter actions for steps
+/// that just became active. Behavior-preserving lift of step 7g. No-op when no
+/// flow is governing the session.
+async fn govern_flow(
+    flow: &mut Option<crate::flow::FlowMonitor>,
+    state: &State,
+    context_buffer: &mut Vec<gemini_genai_rs::prelude::Content>,
+) {
+    if let Some(ref mut mon) = flow {
+        mon.on_turn(state);
+        let done: Vec<String> = mon.marking().done.iter().cloned().collect();
+        let _ = state.set("flow:done", done);
+        let active: Vec<String> = mon
+            .active_steps(state)
+            .iter()
+            .map(|s| s.id.clone())
+            .collect();
+        let _ = state.set("flow:active", active);
+        for posture in mon.active_postures(state) {
+            context_buffer.push(gemini_genai_rs::prelude::Content::model(posture));
+        }
+        // Grounding lines: curated, State-interpolated facts (anti-hallucination).
+        for ground in mon.active_grounds(state) {
+            context_buffer.push(gemini_genai_rs::prelude::Content::model(ground));
+        }
+        let unmet = mon.unmet_requirements();
+        if !unmet.is_empty() {
+            context_buffer.push(gemini_genai_rs::prelude::Content::model(format!(
+                "Before finishing, these still need to happen: {}.",
+                unmet.join(", ")
+            )));
+        }
+        // Fire on_enter actions for steps that just became active. `Call`
+        // actions resolve inline; `Dispatch`/`Background` run detached.
+        mon.fire_enter_actions(state).await;
     }
 }
 
@@ -572,6 +588,7 @@ mod harness {
     //! (`docs/plans/2026-06-07-turn-tool-pipeline-rfc.md`).
 
     use super::handle_turn_complete;
+    use crate::flow::{Enforcement, Flow, FlowMonitor, Guard};
     use crate::live::callbacks::EventCallbacks;
     use crate::live::computed::ComputedRegistry;
     use crate::live::context_writer::PendingContext;
@@ -902,6 +919,42 @@ mod harness {
             h.state.session().get::<String>("phase").as_deref(),
             Some("main"),
             "new phase persisted to state"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_turn_publishes_governed_flow_status() {
+        // The flow stage: a turn re-latches the marking and publishes
+        // flow:active / flow:done to state.
+        let flow = Flow::new()
+            .step("greet")
+            .posture("Greet the caller.")
+            .done(Guard::is_true("greeted"))
+            .step("end")
+            .after("greet")
+            .terminal()
+            .build()
+            .expect("valid flow");
+        let mut h = Harness::new();
+        h.control.flow = Some(FlowMonitor::new(flow, Enforcement::Observe));
+
+        // Not yet greeted -> greet is the active step, nothing done.
+        h.run_turn().await;
+        assert_eq!(
+            h.state.get::<Vec<String>>("flow:active"),
+            Some(vec!["greet".to_string()])
+        );
+        assert_eq!(h.state.get::<Vec<String>>("flow:done"), Some(vec![]));
+
+        // Complete the step -> next turn latches it done.
+        let _ = h.state.set("greeted", true);
+        h.run_turn().await;
+        assert!(
+            h.state
+                .get::<Vec<String>>("flow:done")
+                .unwrap_or_default()
+                .contains(&"greet".to_string()),
+            "completed step latched done"
         );
     }
 }
