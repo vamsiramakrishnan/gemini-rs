@@ -85,14 +85,6 @@ pub(in crate::live) async fn handle_turn_complete(
     // 6. Build transcript window snapshot for phase evaluation
     let transcript_window = transcript_buffer.snapshot_window(5);
 
-    // Unified instruction composition:
-    // Instead of sending instruction at each step (6/9/10), we accumulate
-    // into resolved_instruction and send ONCE at the end.
-    let mut resolved_instruction: Option<String> = None;
-    let mut transition_result: Option<TransitionResult> = None;
-    let mut transition_from: Option<String> = None;
-    let mut transition_to: Option<String> = None;
-
     // Batched context buffer: all model-role context turns are accumulated here
     // and sent as a SINGLE send_client_content call, eliminating the burst of
     // separate WebSocket frames that can confuse the model or clash with user input.
@@ -100,57 +92,20 @@ pub(in crate::live) async fn handle_turn_complete(
     // Whether to prompt the model after sending the batched context.
     let mut should_prompt = false;
 
-    // 7. Evaluate phase transitions + compute navigation context
-    if let Some(ref pm) = phase_machine {
-        let mut machine = pm.lock().await;
-
-        // 7a. Evaluate transitions and run target preparations when a guarded
-        // transition is blocked only by missing required state.
-        let mut evaluation = machine.evaluate_for_transition(state);
-        if let Some(TransitionEvaluation::Blocked { target, .. }) = &evaluation {
-            if machine.prepare_target(target, state, writer).await {
-                evaluation = machine.evaluate_for_transition(state);
-            }
-        }
-
-        if let Some(TransitionEvaluation::Ready {
-            target,
-            transition_index,
-        }) = evaluation
-        {
-            let from_phase = machine.current().to_string();
-            let turn = state.session().get::<u32>("turn_count").unwrap_or(0);
-            let trigger = crate::live::phase::TransitionTrigger::Guard { transition_index };
-            let result = machine
-                .transition(&target, state, writer, turn, trigger, &transcript_window)
-                .await;
-            if let Some(tr) = result {
-                resolved_instruction = Some(tr.instruction.clone());
-                transition_from = Some(from_phase);
-                transition_to = Some(target.clone());
-                transition_result = Some(tr);
-            }
-            let _ = state.session().set("phase", machine.current());
-
-            // Store current phase's `needs` for ContextBuilder to read.
-            if let Some(phase) = machine.current_phase() {
-                if phase.needs.is_empty() {
-                    state.remove("session:phase_needs");
-                } else {
-                    let _ = state.set("session:phase_needs", phase.needs.clone());
-                }
-                if phase.requires.is_empty() {
-                    state.remove("session:phase_requires");
-                } else {
-                    let _ = state.set("session:phase_requires", phase.requires.clone());
-                }
-            }
-        }
-
-        // 7b. Always compute and store navigation context
-        let nav = machine.describe_navigation(state);
-        let _ = state.session().set("navigation_context", nav);
-    }
+    // 7. Evaluate phase transitions + compute navigation context. (Extracted so
+    // the transition evaluation + target-prep retry + phase-state persistence is
+    // a named, harness-covered unit — see `harness` below and
+    // docs/plans/2026-06-07-turn-tool-pipeline-rfc.md.)
+    //
+    // Unified instruction composition: a fired transition seeds
+    // `resolved_instruction`, which later steps (10/11) may amend/override, so it
+    // is sent ONCE at the end rather than at each step.
+    let PhaseOutcome {
+        mut resolved_instruction,
+        transition_result,
+        transition_from,
+        transition_to,
+    } = evaluate_phase_transition(phase_machine, state, writer, &transcript_window).await;
 
     // 7c. Emit PhaseTransition LiveEvent (if a transition fired)
     if let (Some(ref from), Some(ref to)) = (&transition_from, &transition_to) {
@@ -400,6 +355,94 @@ pub(in crate::live) async fn handle_turn_complete(
     }
 }
 
+/// Result of evaluating phase transitions for a turn.
+///
+/// A fired transition seeds `resolved_instruction` (the new phase's instruction)
+/// and records the `from`/`to` phase names plus the full [`TransitionResult`] for
+/// downstream steps (event emission, OnPhaseChange extractors, on-enter context).
+struct PhaseOutcome {
+    resolved_instruction: Option<String>,
+    transition_result: Option<TransitionResult>,
+    transition_from: Option<String>,
+    transition_to: Option<String>,
+}
+
+/// Evaluate phase transitions and compute navigation context for a turn.
+///
+/// Runs target preparation when a guarded transition is blocked only by missing
+/// required state (re-evaluating once after prep), fires the transition if ready,
+/// persists the resulting phase + its `needs`/`requires` to state, and always
+/// refreshes the stored navigation context. Behavior-preserving lift of step 7.
+async fn evaluate_phase_transition(
+    phase_machine: &Option<tokio::sync::Mutex<PhaseMachine>>,
+    state: &State,
+    writer: &Arc<dyn SessionWriter>,
+    transcript_window: &crate::live::transcript::TranscriptWindow,
+) -> PhaseOutcome {
+    let mut resolved_instruction: Option<String> = None;
+    let mut transition_result: Option<TransitionResult> = None;
+    let mut transition_from: Option<String> = None;
+    let mut transition_to: Option<String> = None;
+
+    if let Some(ref pm) = phase_machine {
+        let mut machine = pm.lock().await;
+
+        // 7a. Evaluate transitions and run target preparations when a guarded
+        // transition is blocked only by missing required state.
+        let mut evaluation = machine.evaluate_for_transition(state);
+        if let Some(TransitionEvaluation::Blocked { target, .. }) = &evaluation {
+            if machine.prepare_target(target, state, writer).await {
+                evaluation = machine.evaluate_for_transition(state);
+            }
+        }
+
+        if let Some(TransitionEvaluation::Ready {
+            target,
+            transition_index,
+        }) = evaluation
+        {
+            let from_phase = machine.current().to_string();
+            let turn = state.session().get::<u32>("turn_count").unwrap_or(0);
+            let trigger = crate::live::phase::TransitionTrigger::Guard { transition_index };
+            let result = machine
+                .transition(&target, state, writer, turn, trigger, transcript_window)
+                .await;
+            if let Some(tr) = result {
+                resolved_instruction = Some(tr.instruction.clone());
+                transition_from = Some(from_phase);
+                transition_to = Some(target.clone());
+                transition_result = Some(tr);
+            }
+            let _ = state.session().set("phase", machine.current());
+
+            // Store current phase's `needs` for ContextBuilder to read.
+            if let Some(phase) = machine.current_phase() {
+                if phase.needs.is_empty() {
+                    state.remove("session:phase_needs");
+                } else {
+                    let _ = state.set("session:phase_needs", phase.needs.clone());
+                }
+                if phase.requires.is_empty() {
+                    state.remove("session:phase_requires");
+                } else {
+                    let _ = state.set("session:phase_requires", phase.requires.clone());
+                }
+            }
+        }
+
+        // 7b. Always compute and store navigation context
+        let nav = machine.describe_navigation(state);
+        let _ = state.session().set("navigation_context", nav);
+    }
+
+    PhaseOutcome {
+        resolved_instruction,
+        transition_result,
+        transition_from,
+        transition_to,
+    }
+}
+
 /// Run the extractors eligible to fire on a plain turn boundary.
 ///
 /// Selects extractors whose trigger is `EveryTurn`, or `Interval(n)` when at
@@ -534,7 +577,7 @@ mod harness {
     use crate::live::context_writer::PendingContext;
     use crate::live::events::LiveEvent;
     use crate::live::extractor::{ExtractionTrigger, TurnExtractor};
-    use crate::live::phase::PhaseMachine;
+    use crate::live::phase::{Phase, PhaseMachine, Transition};
     use crate::live::processor::{ControlPlaneConfig, SharedState};
     use crate::live::steering::{ContextDelivery, SteeringMode};
     use crate::live::temporal::TemporalRegistry;
@@ -644,6 +687,7 @@ mod harness {
         control: ControlPlaneConfig,
         callbacks: EventCallbacks,
         extractors: Vec<Arc<dyn TurnExtractor>>,
+        phase: Option<tokio::sync::Mutex<PhaseMachine>>,
         event_tx: broadcast::Sender<LiveEvent>,
     }
 
@@ -670,13 +714,13 @@ mod harness {
                 control: ControlPlaneConfig::default(),
                 callbacks: EventCallbacks::default(),
                 extractors: vec![],
+                phase: None,
                 event_tx,
             }
         }
 
         async fn run_turn(&mut self) {
             let computed: Option<ComputedRegistry> = None;
-            let phase: Option<tokio::sync::Mutex<PhaseMachine>> = None;
             let watchers: Option<WatcherRegistry> = None;
             let temporal: Option<Arc<TemporalRegistry>> = None;
             handle_turn_complete(
@@ -686,7 +730,7 @@ mod harness {
                 &self.extractors,
                 &self.state,
                 &computed,
-                &phase,
+                &self.phase,
                 &watchers,
                 &temporal,
                 &mut self.transcript,
@@ -828,5 +872,36 @@ mod harness {
 
         h.run_turn().await; // turn_count 2 -> 3, 2 - 0 >= 2 -> runs
         assert_eq!(h.state.get::<Value>("Order"), Some(json!({ "n": 1 })));
+    }
+
+    #[tokio::test]
+    async fn a_turn_advances_the_phase_when_the_guard_is_satisfied() {
+        // The phase stage: a guarded transition fires on a turn boundary, the
+        // machine advances, and the new phase is persisted to state.
+        let mut h = Harness::new();
+        let mut greeting = Phase::new("greeting", "Say hello");
+        greeting.transitions.push(Transition {
+            target: "main".into(),
+            guard: Arc::new(|s| s.get::<bool>("ready").unwrap_or(false)),
+            description: None,
+        });
+        let mut machine = PhaseMachine::new("greeting");
+        machine.add_phase(greeting);
+        machine.add_phase(Phase::new("main", "Main phase"));
+        h.phase = Some(tokio::sync::Mutex::new(machine));
+
+        // Guard not yet satisfied -> stays in greeting.
+        h.run_turn().await;
+        assert_eq!(h.phase.as_ref().unwrap().lock().await.current(), "greeting");
+
+        // Satisfy the guard -> next turn advances to main.
+        let _ = h.state.set("ready", true);
+        h.run_turn().await;
+        assert_eq!(h.phase.as_ref().unwrap().lock().await.current(), "main");
+        assert_eq!(
+            h.state.session().get::<String>("phase").as_deref(),
+            Some("main"),
+            "new phase persisted to state"
+        );
     }
 }
