@@ -64,38 +64,18 @@ pub(in crate::live) async fn handle_turn_complete(
     // 3. Capture a journal cursor before extractor/computed/phase mutations.
     let pre_watcher_cursor = watchers.as_ref().map(|_| state.mutation_cursor());
 
-    // 4. Run extractors matching EveryTurn or Interval triggers
-    let current_turn = state.session().get::<u32>("turn_count").unwrap_or(0);
-    let turn_extractors: Vec<Arc<dyn TurnExtractor>> = extractors
-        .iter()
-        .filter(|e| match e.trigger() {
-            ExtractionTrigger::EveryTurn => true,
-            ExtractionTrigger::Interval(n) => {
-                let last = extraction_turn_tracker.get(e.name()).copied().unwrap_or(0);
-                current_turn.saturating_sub(last) >= n
-            }
-            ExtractionTrigger::AfterToolCall
-            | ExtractionTrigger::OnPhaseChange
-            | ExtractionTrigger::OnGenerationComplete => false,
-        })
-        .cloned()
-        .collect();
-
-    run_extractors(
-        &turn_extractors,
+    // 4. Run extractors matching EveryTurn or Interval triggers. (Extracted so the
+    // trigger-gating + interval-tracker bookkeeping is a named, harness-covered
+    // unit — see `harness` below and docs/plans/2026-06-07-turn-tool-pipeline-rfc.md.)
+    run_turn_extractors(
+        extractors,
         transcript_buffer,
         state,
         callbacks,
+        extraction_turn_tracker,
         event_tx,
     )
     .await;
-
-    // Update interval trackers for extractors that ran
-    for ext in &turn_extractors {
-        if matches!(ext.trigger(), ExtractionTrigger::Interval(_)) {
-            extraction_turn_tracker.insert(ext.name().to_string(), current_turn);
-        }
-    }
 
     // 5. Recompute derived state
     if let Some(ref computed) = computed {
@@ -420,6 +400,54 @@ pub(in crate::live) async fn handle_turn_complete(
     }
 }
 
+/// Run the extractors eligible to fire on a plain turn boundary.
+///
+/// Selects extractors whose trigger is `EveryTurn`, or `Interval(n)` when at
+/// least `n` turns have elapsed since they last ran, runs them via
+/// [`run_extractors`], then advances the interval tracker for any interval
+/// extractor that fired. `AfterToolCall` / `OnPhaseChange` /
+/// `OnGenerationComplete` extractors are owned by their respective stages.
+async fn run_turn_extractors(
+    extractors: &[Arc<dyn TurnExtractor>],
+    transcript_buffer: &mut TranscriptBuffer,
+    state: &State,
+    callbacks: &EventCallbacks,
+    extraction_turn_tracker: &mut std::collections::HashMap<String, u32>,
+    event_tx: &tokio::sync::broadcast::Sender<LiveEvent>,
+) {
+    let current_turn = state.session().get::<u32>("turn_count").unwrap_or(0);
+    let turn_extractors: Vec<Arc<dyn TurnExtractor>> = extractors
+        .iter()
+        .filter(|e| match e.trigger() {
+            ExtractionTrigger::EveryTurn => true,
+            ExtractionTrigger::Interval(n) => {
+                let last = extraction_turn_tracker.get(e.name()).copied().unwrap_or(0);
+                current_turn.saturating_sub(last) >= n
+            }
+            ExtractionTrigger::AfterToolCall
+            | ExtractionTrigger::OnPhaseChange
+            | ExtractionTrigger::OnGenerationComplete => false,
+        })
+        .cloned()
+        .collect();
+
+    run_extractors(
+        &turn_extractors,
+        transcript_buffer,
+        state,
+        callbacks,
+        event_tx,
+    )
+    .await;
+
+    // Update interval trackers for extractors that ran
+    for ext in &turn_extractors {
+        if matches!(ext.trigger(), ExtractionTrigger::Interval(_)) {
+            extraction_turn_tracker.insert(ext.name().to_string(), current_turn);
+        }
+    }
+}
+
 /// Deliver the resolved instruction and any batched context turns for a turn.
 ///
 /// Encodes three invariants (asserted by the `harness` tests):
@@ -505,19 +533,23 @@ mod harness {
     use crate::live::computed::ComputedRegistry;
     use crate::live::context_writer::PendingContext;
     use crate::live::events::LiveEvent;
-    use crate::live::extractor::TurnExtractor;
+    use crate::live::extractor::{ExtractionTrigger, TurnExtractor};
     use crate::live::phase::PhaseMachine;
     use crate::live::processor::{ControlPlaneConfig, SharedState};
     use crate::live::steering::{ContextDelivery, SteeringMode};
     use crate::live::temporal::TemporalRegistry;
     use crate::live::transcript::TranscriptBuffer;
+    use crate::live::transcript::TranscriptTurn;
     use crate::live::watcher::WatcherRegistry;
+    use crate::llm::LlmError;
     use crate::state::State;
 
     use gemini_genai_rs::prelude::{Content, FunctionResponse};
     use gemini_genai_rs::session::{SessionError, SessionWriter};
 
+    use async_trait::async_trait;
     use parking_lot::Mutex;
+    use serde_json::{json, Value};
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
@@ -576,6 +608,30 @@ mod harness {
         }
     }
 
+    /// A `TurnExtractor` that returns a fixed value with a fixed trigger — enough
+    /// to assert the turn pipeline fills a slot from the turn.
+    struct FixedExtractor {
+        name: &'static str,
+        value: Value,
+        trigger: ExtractionTrigger,
+    }
+
+    #[async_trait]
+    impl TurnExtractor for FixedExtractor {
+        fn name(&self) -> &str {
+            self.name
+        }
+        fn window_size(&self) -> usize {
+            1
+        }
+        fn trigger(&self) -> ExtractionTrigger {
+            self.trigger.clone()
+        }
+        async fn extract(&self, _window: &[TranscriptTurn]) -> Result<Value, LlmError> {
+            Ok(self.value.clone())
+        }
+    }
+
     /// Fixture: the collaborators a turn-complete invocation needs, with the
     /// optional subsystems off so a test exercises one path at a time.
     struct Harness {
@@ -587,6 +643,7 @@ mod harness {
         tracker: HashMap<String, u32>,
         control: ControlPlaneConfig,
         callbacks: EventCallbacks,
+        extractors: Vec<Arc<dyn TurnExtractor>>,
         event_tx: broadcast::Sender<LiveEvent>,
     }
 
@@ -612,12 +669,12 @@ mod harness {
                 tracker: HashMap::new(),
                 control: ControlPlaneConfig::default(),
                 callbacks: EventCallbacks::default(),
+                extractors: vec![],
                 event_tx,
             }
         }
 
         async fn run_turn(&mut self) {
-            let extractors: Vec<Arc<dyn TurnExtractor>> = vec![];
             let computed: Option<ComputedRegistry> = None;
             let phase: Option<tokio::sync::Mutex<PhaseMachine>> = None;
             let watchers: Option<WatcherRegistry> = None;
@@ -626,7 +683,7 @@ mod harness {
                 &self.callbacks,
                 &self.writer,
                 &self.shared,
-                &extractors,
+                &self.extractors,
                 &self.state,
                 &computed,
                 &phase,
@@ -723,5 +780,53 @@ mod harness {
             "nothing sent on the wire in Deferred mode"
         );
         assert_eq!(pending.drain_context().len(), 1, "context queued instead");
+    }
+
+    #[tokio::test]
+    async fn every_turn_extractor_fills_a_slot() {
+        // The extractor stage: an EveryTurn extractor runs on a turn boundary and
+        // its result (plus auto-flattened fields) lands in State.
+        let mut h = Harness::new();
+        h.extractors = vec![Arc::new(FixedExtractor {
+            name: "Order",
+            value: json!({ "item": "latte" }),
+            trigger: ExtractionTrigger::EveryTurn,
+        })];
+
+        h.run_turn().await;
+
+        assert_eq!(
+            h.state.get::<Value>("Order"),
+            Some(json!({ "item": "latte" })),
+            "extractor value stored under its name"
+        );
+        assert_eq!(
+            h.state.get::<String>("item").as_deref(),
+            Some("latte"),
+            "auto-flattened field promoted to a slot"
+        );
+    }
+
+    #[tokio::test]
+    async fn interval_extractor_respects_its_cadence() {
+        // Interval(2) runs at turn 0, is skipped at turn 1, runs again at turn 2 —
+        // the interval-tracker bookkeeping moved into `run_turn_extractors`.
+        let mut h = Harness::new();
+        h.extractors = vec![Arc::new(FixedExtractor {
+            name: "Order",
+            value: json!({ "n": 1 }),
+            trigger: ExtractionTrigger::Interval(2),
+        })];
+
+        // Turn 0: runs (last seen = 0, current = 0, 0 - 0 >= 2 is false)... so it
+        // does NOT run at turn 0. First eligible turn is when current - last >= 2.
+        h.run_turn().await; // turn_count 0 -> 1
+        assert!(!h.state.contains("Order"), "skipped at turn 0 (0 - 0 < 2)");
+
+        h.run_turn().await; // turn_count 1 -> 2
+        assert!(!h.state.contains("Order"), "skipped at turn 1 (1 - 0 < 2)");
+
+        h.run_turn().await; // turn_count 2 -> 3, 2 - 0 >= 2 -> runs
+        assert_eq!(h.state.get::<Value>("Order"), Some(json!({ "n": 1 })));
     }
 }
