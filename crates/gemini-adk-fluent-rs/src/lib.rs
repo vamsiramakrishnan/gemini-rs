@@ -107,15 +107,15 @@ pub mod prelude {
     pub use gemini_adk_rs::frame::{
         ConfirmPolicy, FrameSpec, SlotRecognizer, SlotSpec, SlotValidator,
     };
+    // Live session surface. Advanced *Contract / formatter types are intentionally
+    // NOT in the prelude (import them from `gemini_adk_rs::live` when needed) —
+    // the prelude carries the common session types, not the whole control plane.
     pub use gemini_adk_rs::live::{
-        CallbackMode, ComputedContract, ContextDelivery, ControlContract, DefaultResultFormatter,
-        DeferredWriter, EventCallbacks, ExtractionTrigger, ExtractorContract, FieldPromotion,
-        FsPersistence, LiveEvent, LiveHandle, LiveSessionBuilder, LlmExtractor, MemoryPersistence,
-        MergePolicy, NeedsFulfillment, PendingContext, PhaseContract, PreparationContract,
-        PromotionContract, RepairAction, RepairConfig, ResultFormatter, RuntimeContract,
-        SessionPersistence, SessionSnapshot, SoftTurnDetector, SteeringMode, ToolContract,
-        ToolExecutionMode, TranscriptBuffer, TranscriptTurn, TransitionContract, TurnExtractor,
-        WatcherContract,
+        CallbackMode, ContextDelivery, DeferredWriter, EventCallbacks, ExtractionTrigger,
+        FieldPromotion, FsPersistence, LiveEvent, LiveHandle, LiveSessionBuilder, LlmExtractor,
+        MemoryPersistence, NeedsFulfillment, PendingContext, RepairAction, RepairConfig,
+        RuntimeContract, SessionPersistence, SessionSnapshot, SoftTurnDetector, SteeringMode,
+        ToolExecutionMode, TranscriptBuffer, TranscriptTurn, TurnExtractor,
     };
     pub use gemini_adk_rs::llm::{BaseLlm, GeminiLlm, GeminiLlmParams, LlmRequest, LlmResponse};
     pub use gemini_adk_rs::orchestration::{
