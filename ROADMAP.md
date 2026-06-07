@@ -48,13 +48,44 @@ the substrate the compiler targets; the compiler arc proper is:
   - **resolver-filled slots**: `Conversation::resolve_slot(name, args, ttl, fetch)`
     fills a slot from an async fetch/agent, lowering to an Extract resolver field.
 
-  **Phase 1 is complete.** Next: Phase 2 (deterministic simulation harness).
-- 📋 **Phase 2 — trust:** deterministic simulation harness (fake user + tool
-  latency) + scenario/property tests.
-- 📋 **Phase 3 — overlays (own RFC):** hierarchical digressions + resumable
-  `FlowStack`.
-- 📋 **Phase 4 — product surface:** motif stdlib + policy aspects (fail-loud) +
-  voice timing as graph policy.
+  **Phase 1 is complete.**
+
+### Remaining sequence (reconciled with the original 13-item vision)
+
+Authored as focused, green commits, in this order:
+
+1. ✅ **Hierarchical statecharts + digressions above the DAG** — `OverlaySpec`
+   (serializable) + `Conversation::overlay/trigger/resume/done_overlay`, each
+   lowering to its own `CompiledFlow`; runtime `FlowStack`
+   (`CompiledConversation::stack`) with push-on-trigger / resume-on-completion
+   (`Resume::Previous`/`Restart`/`Terminate`); active-layer delegation for
+   admission/postures/`explain()`. RFC:
+   `docs/plans/2026-06-07-statecharts-digressions-rfc.md`. *(MVP: depth-1; nested
+   overlays, slot-reopen-on-correction, and `Live`-drives-`FlowStack` are
+   follow-ups — today `Live::converse` registers overlay extractors and governs
+   the main flow.)*
+2. 📋 **Model-free flow simulation** *(pulled up from #6: it makes everything
+   after it testable without live API)* — deterministic fake-user + tool-latency
+   harness; scenario + property tests.
+3. 📋 **Motif stdlib** — `collect_slots` / `confirm_then_commit` / `identity` /
+   `disclosure` / `faq_digression` / `payment` / `handoff`, each compiling through
+   the validated IR (fail-loud).
+4. 📋 **Repair flows first-class** — no-input / no-match / low-confidence /
+   correction / barge-in / tool-timeout policies as flow-level concepts.
+5. 📋 **Typed graph macros** — a `voice_flow!` macro generating typed step/slot/
+   tool constants + `build()`.
+6. 📋 **Bidirectional visual devtools loop** — `inspect`/`graph`/`simulate`/
+   `replay`/`why` CLI over the spec + traces.
+7. 📋 **Policy overlays as reusable aspects** — PCI/commit/safety policies that
+   lower to tool gates, redaction, confirmation, idempotency, compensation.
+8. 📋 **Voice timing in the graph** — per-stage filler/reprompt/interrupt/
+   endpointing/context-delivery as declarative policy lowering to Live settings.
+9. 📋 **NL→flow codegen as a skill** — a harness (Claude Code skill) that drafts a
+   `ConversationSpec` + tests from a call-center script (authoring assistant; the
+   model drafts, never governs).
+
+Already shipped from the vision: frames/slots first-class (#2, Phase 1) and
+`explain()`/`why_blocked()` (#11, Phase 0).
 
 Locked decisions: the spec is serializable-first (builder is sugar; YAML nearly
 free), and higher layers only ever emit lower-layer constructs (no privileged

@@ -48,8 +48,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gemini_adk_rs::extract::Extract;
-use gemini_adk_rs::flow::{CompiledFlow, Enforcement, Flow, FlowErrors, FlowMonitor, Guard, Pred};
+use gemini_adk_rs::flow::{
+    CompiledFlow, Enforcement, Flow, FlowErrors, FlowExplanation, FlowMonitor, Guard, Pred,
+};
 use gemini_adk_rs::frame::{Frame, FrameSpec};
+use gemini_adk_rs::state::State;
 
 /// A boxed async fetcher: bind args (a JSON object) → resolved value.
 type SlotFetch =
@@ -123,6 +126,38 @@ pub struct StageSpec {
     pub terminal: bool,
 }
 
+/// How the main flow continues after a digression (overlay) completes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Resume {
+    /// Resume the main flow exactly where it was suspended (history state).
+    #[default]
+    Previous,
+    /// Re-enter the main flow from its start.
+    Restart,
+    /// End the conversation (e.g. a cancel/handoff digression).
+    Terminate,
+}
+
+/// A digression (overlay): a named sub-flow that suspends the main flow when its
+/// `trigger` holds, runs to completion, then resumes per `resume`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OverlaySpec {
+    /// Overlay name.
+    pub name: String,
+    /// The guard that activates this overlay (e.g. an `intent:*` flag).
+    pub trigger: Guard,
+    /// The overlay's own stages.
+    #[serde(default)]
+    pub stages: Vec<StageSpec>,
+    /// Stages required for the overlay to be considered complete.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub require: Vec<String>,
+    /// What the main flow does once the overlay completes.
+    #[serde(default)]
+    pub resume: Resume,
+}
+
 /// The serializable authoring spec — the single source of truth from which the
 /// typed builder, YAML, and (later) codegen all derive.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -135,6 +170,9 @@ pub struct ConversationSpec {
     /// Stages that must be done for the conversation to be complete.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub require: Vec<String>,
+    /// Digressions/overlays that can suspend and resume the main flow.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub overlays: Vec<OverlaySpec>,
 }
 
 /// Error compiling a [`ConversationSpec`] into a [`CompiledConversation`].
@@ -165,12 +203,28 @@ impl std::fmt::Display for ConversationError {
 
 impl std::error::Error for ConversationError {}
 
-/// A compiled conversation: the validated [`CompiledFlow`], the extractors that
-/// fill its frames' slots, and the source spec.
+/// A compiled digression: its trigger, lowered flow, extractors, and resume policy.
+#[derive(Clone)]
+pub struct CompiledOverlay {
+    /// Overlay name.
+    pub name: String,
+    /// Guard that activates the overlay.
+    pub trigger: Guard,
+    /// The overlay's lowered governance flow.
+    pub flow: CompiledFlow,
+    /// Extractors that fill the overlay's frame slots.
+    pub extractors: Vec<Extract>,
+    /// What the main flow does once this overlay completes.
+    pub resume: Resume,
+}
+
+/// A compiled conversation: the validated main [`CompiledFlow`], the extractors
+/// that fill its frames' slots, any digressions, and the source spec.
 #[derive(Clone)]
 pub struct CompiledConversation {
     flow: CompiledFlow,
     extractors: Vec<Extract>,
+    overlays: Vec<CompiledOverlay>,
     spec: ConversationSpec,
 }
 
@@ -181,6 +235,7 @@ impl std::fmt::Debug for CompiledConversation {
         f.debug_struct("CompiledConversation")
             .field("flow", &self.flow)
             .field("extractors", &self.extractors.len())
+            .field("overlays", &self.overlays.len())
             .field("spec", &self.spec)
             .finish()
     }
@@ -195,6 +250,24 @@ impl CompiledConversation {
     /// live session so each turn fills the frames' slots from the transcript.
     pub fn extractors(&self) -> &[Extract] {
         &self.extractors
+    }
+    /// The compiled digressions/overlays.
+    pub fn overlays(&self) -> &[CompiledOverlay] {
+        &self.overlays
+    }
+    /// Every extractor (main + overlays) — what [`Live::converse`](crate::live::Live)
+    /// registers so slots fill whether the main flow or a digression is active.
+    pub fn all_extractors(&self) -> Vec<Extract> {
+        let mut all = self.extractors.clone();
+        for ov in &self.overlays {
+            all.extend(ov.extractors.iter().cloned());
+        }
+        all
+    }
+    /// Build the runtime [`FlowStack`] — the main flow plus its digressions, with
+    /// push-on-trigger / resume-on-completion.
+    pub fn stack(&self, mode: Enforcement) -> FlowStack {
+        FlowStack::new(self, mode)
     }
     /// The authoring spec it was compiled from.
     pub fn spec(&self) -> &ConversationSpec {
@@ -218,6 +291,9 @@ impl CompiledConversation {
 pub struct Conversation {
     spec: ConversationSpec,
     resolvers: Vec<StageResolver>,
+    /// When `Some(i)`, stage setters target `spec.overlays[i]` instead of the main
+    /// flow (between `.overlay(..)` and `.done_overlay()`).
+    current_overlay: Option<usize>,
 }
 
 impl Conversation {
@@ -229,21 +305,69 @@ impl Conversation {
                 ..Default::default()
             },
             resolvers: Vec::new(),
+            current_overlay: None,
         }
     }
 
-    /// Begin authoring a new stage; subsequent setters apply to it.
+    /// Begin authoring a new stage; subsequent setters apply to it. Routes to the
+    /// active overlay when between `.overlay(..)` and `.done_overlay()`.
     pub fn stage(mut self, id: impl Into<String>) -> Self {
-        self.spec.stages.push(StageSpec {
+        let stage = StageSpec {
             id: id.into(),
             ..Default::default()
+        };
+        match self.current_overlay {
+            Some(i) => self.spec.overlays[i].stages.push(stage),
+            None => self.spec.stages.push(stage),
+        }
+        self
+    }
+
+    /// Begin authoring a digression/overlay; subsequent `.stage(..)` calls (until
+    /// `.done_overlay()`) populate it. Set its activation guard with `.trigger(..)`
+    /// (an overlay with no trigger never fires — fail-closed).
+    pub fn overlay(mut self, name: impl Into<String>) -> Self {
+        self.spec.overlays.push(OverlaySpec {
+            name: name.into(),
+            // Fail-closed default: never triggers until `.trigger(..)` is set.
+            trigger: Guard::is_true("__overlay_never_triggers__"),
+            stages: Vec::new(),
+            require: Vec::new(),
+            resume: Resume::Previous,
         });
+        self.current_overlay = Some(self.spec.overlays.len() - 1);
+        self
+    }
+
+    /// Set the activation guard of the overlay currently being authored.
+    pub fn trigger(mut self, guard: Guard) -> Self {
+        if let Some(i) = self.current_overlay {
+            self.spec.overlays[i].trigger = guard;
+        }
+        self
+    }
+
+    /// Set the resume policy of the overlay currently being authored.
+    pub fn resume(mut self, resume: Resume) -> Self {
+        if let Some(i) = self.current_overlay {
+            self.spec.overlays[i].resume = resume;
+        }
+        self
+    }
+
+    /// Finish the current overlay; subsequent `.stage(..)` calls target the main
+    /// flow again.
+    pub fn done_overlay(mut self) -> Self {
+        self.current_overlay = None;
         self
     }
 
     fn current(&mut self) -> &mut StageSpec {
-        self.spec
-            .stages
+        let stages = match self.current_overlay {
+            Some(i) => &mut self.spec.overlays[i].stages,
+            None => &mut self.spec.stages,
+        };
+        stages
             .last_mut()
             .expect("call .stage(..) before configuring a stage")
     }
@@ -368,13 +492,18 @@ impl Conversation {
         self
     }
 
-    /// Require these stages for completion (lowers to a Flow `require`).
+    /// Require these stages for completion (lowers to a Flow `require`). Targets
+    /// the active overlay when authoring one, else the main flow.
     pub fn require<I, S>(mut self, steps: I) -> Self
     where
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
-        self.spec.require = steps.into_iter().map(Into::into).collect();
+        let req: Vec<String> = steps.into_iter().map(Into::into).collect();
+        match self.current_overlay {
+            Some(i) => self.spec.overlays[i].require = req,
+            None => self.spec.require = req,
+        }
         self
     }
 
@@ -416,8 +545,8 @@ impl crate::live::Live {
     /// ```
     pub fn converse(self, convo: &CompiledConversation) -> Self {
         let mut live = self.govern(convo.flow().flow().clone());
-        for extract in convo.extractors() {
-            live = live.extract_record(extract.clone());
+        for extract in convo.all_extractors() {
+            live = live.extract_record(extract);
         }
         live
     }
@@ -426,10 +555,139 @@ impl crate::live::Live {
     /// (nothing blocked; deviations recorded) while still registering extractors.
     pub fn converse_observe(self, convo: &CompiledConversation) -> Self {
         let mut live = self.observe(convo.flow().flow().clone());
-        for extract in convo.extractors() {
-            live = live.extract_record(extract.clone());
+        for extract in convo.all_extractors() {
+            live = live.extract_record(extract);
         }
         live
+    }
+}
+
+/// A digression currently suspending the main flow.
+struct ActiveOverlay {
+    name: String,
+    monitor: FlowMonitor,
+    resume: Resume,
+}
+
+/// The runtime above the DAG: the main flow plus its digressions, with
+/// push-on-trigger and resume-on-completion (MVP: nesting depth 1).
+///
+/// While a digression is active, governance — tool admission, postures/grounds,
+/// `explain()` — delegates to the **active** layer, and the main flow's marking is
+/// untouched, so [`Resume::Previous`] resumes exactly where it left off. Driven by
+/// `State`/guards (model-free, deterministic).
+pub struct FlowStack {
+    main_flow: CompiledFlow,
+    main: FlowMonitor,
+    mode: Enforcement,
+    overlays: Vec<CompiledOverlay>,
+    active: Option<ActiveOverlay>,
+    terminated: bool,
+}
+
+impl FlowStack {
+    fn new(convo: &CompiledConversation, mode: Enforcement) -> Self {
+        Self {
+            main_flow: convo.flow.clone(),
+            main: FlowMonitor::compiled(convo.flow.clone(), mode),
+            mode,
+            overlays: convo.overlays.clone(),
+            active: None,
+            terminated: false,
+        }
+    }
+
+    /// The monitor currently driving — the active overlay if any, else the main flow.
+    pub fn current(&self) -> &FlowMonitor {
+        self.active.as_ref().map_or(&self.main, |a| &a.monitor)
+    }
+
+    /// The name of the active digression, if one is suspending the main flow.
+    pub fn active_overlay(&self) -> Option<&str> {
+        self.active.as_ref().map(|a| a.name.as_str())
+    }
+
+    /// Whether the conversation is finished (main complete, or a `Terminate`
+    /// digression ran).
+    pub fn is_complete(&self) -> bool {
+        self.terminated || (self.active.is_none() && self.main.is_complete())
+    }
+
+    /// Index of the first overlay whose trigger holds against the main context.
+    fn triggered(&self, state: &State) -> Option<usize> {
+        self.overlays
+            .iter()
+            .position(|ov| self.main.eval(&ov.trigger, state))
+    }
+
+    /// Advance one turn. Enters a triggered digression (suspending the main flow),
+    /// advances an active digression and resumes when it completes, or advances the
+    /// main flow.
+    pub fn on_turn(&mut self, state: &State) {
+        if self.terminated {
+            return;
+        }
+        match &mut self.active {
+            Some(active) => {
+                active.monitor.on_turn(state);
+                if active.monitor.is_complete() {
+                    let resume = active.resume;
+                    self.active = None;
+                    match resume {
+                        // Main marking was untouched while suspended — nothing to do.
+                        Resume::Previous => {}
+                        Resume::Restart => {
+                            self.main = FlowMonitor::compiled(self.main_flow.clone(), self.mode);
+                        }
+                        Resume::Terminate => self.terminated = true,
+                    }
+                }
+            }
+            None => {
+                if let Some(idx) = self.triggered(state) {
+                    let ov = &self.overlays[idx];
+                    let mut monitor = FlowMonitor::compiled(ov.flow.clone(), self.mode);
+                    // Drive the digression's first turn so single-stage overlays can latch.
+                    monitor.on_turn(state);
+                    if monitor.is_complete() {
+                        match ov.resume {
+                            Resume::Previous => {}
+                            Resume::Restart => {
+                                self.main =
+                                    FlowMonitor::compiled(self.main_flow.clone(), self.mode);
+                            }
+                            Resume::Terminate => self.terminated = true,
+                        }
+                    } else {
+                        self.active = Some(ActiveOverlay {
+                            name: ov.name.clone(),
+                            monitor,
+                            resume: ov.resume,
+                        });
+                    }
+                } else {
+                    self.main.on_turn(state);
+                }
+            }
+        }
+    }
+
+    /// Record a successful tool call against the active layer.
+    pub fn on_tool_ok(&mut self, tool: &str, state: &State) {
+        match &mut self.active {
+            Some(active) => active.monitor.on_tool_ok(tool, state),
+            None => self.main.on_tool_ok(tool, state),
+        }
+    }
+
+    /// Whether `tool` is admitted right now (delegates to the active layer).
+    pub fn admits_tool(&self, tool: &str, state: &State) -> Result<(), String> {
+        self.current().admits_tool(tool, state)
+    }
+
+    /// Explain the active layer's control-plane state.
+    pub fn explain(&self, state: &State) -> FlowExplanation {
+        self.current().explain(state)
     }
 }
 
@@ -451,21 +709,17 @@ fn any_of(guards: Vec<Guard>) -> Option<Guard> {
     Some(Guard::any(guards))
 }
 
-fn compile_spec(
-    spec: ConversationSpec,
-    resolvers: Vec<StageResolver>,
-) -> Result<CompiledConversation, ConversationError> {
-    if spec.stages.is_empty() {
+/// Lower a set of stages (the main flow or an overlay) into a [`CompiledFlow`],
+/// with conversation-level referential checks.
+fn lower_flow(stages: &[StageSpec], require: &[String]) -> Result<CompiledFlow, ConversationError> {
+    if stages.is_empty() {
         return Err(ConversationError::Empty);
     }
-
-    let ids: BTreeSet<&str> = spec.stages.iter().map(|s| s.id.as_str()).collect();
-    if ids.len() != spec.stages.len() {
+    let ids: BTreeSet<&str> = stages.iter().map(|s| s.id.as_str()).collect();
+    if ids.len() != stages.len() {
         return Err(ConversationError::Spec("duplicate stage ids".into()));
     }
-
-    // Referential checks with conversation-level messages (before Flow lowering).
-    for s in &spec.stages {
+    for s in stages {
         for t in &s.next {
             if !ids.contains(t.to.as_str()) {
                 return Err(ConversationError::Spec(format!(
@@ -483,7 +737,7 @@ fn compile_spec(
             }
         }
     }
-    for r in &spec.require {
+    for r in require {
         if !ids.contains(r.as_str()) {
             return Err(ConversationError::Spec(format!(
                 "require references unknown stage '{r}'"
@@ -493,7 +747,7 @@ fn compile_spec(
 
     // Incoming edges: target -> [(source, when)].
     let mut incoming: BTreeMap<&str, Vec<(&str, Guard)>> = BTreeMap::new();
-    for s in &spec.stages {
+    for s in stages {
         for t in &s.next {
             incoming
                 .entry(t.to.as_str())
@@ -503,10 +757,9 @@ fn compile_spec(
     }
 
     let mut fb = Flow::new();
-    for s in &spec.stages {
+    for s in stages {
         fb = fb.step(&s.id);
 
-        // Dependencies: explicit `after` plus the sources of incoming transitions.
         let mut deps: BTreeSet<&str> = s.after.iter().map(String::as_str).collect();
         if let Some(inc) = incoming.get(s.id.as_str()) {
             for (src, _) in inc {
@@ -517,7 +770,6 @@ fn compile_spec(
             fb = fb.after(d);
         }
 
-        // Activation gate: disjunction of the conditions on incoming edges.
         if let Some(inc) = incoming.get(s.id.as_str()) {
             if let Some(gate) = any_of(inc.iter().map(|(_, w)| w.clone()).collect()) {
                 fb = fb.gate(gate);
@@ -531,7 +783,6 @@ fn compile_spec(
             fb = fb.ground(ground.clone());
         }
 
-        // Tool whitelist: authored allow plus any commit tool.
         let mut allow: Vec<String> = s.allow.clone();
         if let Some(c) = &s.commit {
             if !allow.contains(&c.tool) {
@@ -558,10 +809,31 @@ fn compile_spec(
         }
     }
 
-    if !spec.require.is_empty() {
-        fb = fb.require(spec.require.clone());
+    if !require.is_empty() {
+        fb = fb.require(require.to_vec());
     }
 
+    let flow = fb.build().map_err(ConversationError::Flow)?;
+    flow.compile().map_err(ConversationError::Compile)
+}
+
+/// The extractors lowered from a stage list's `collect_frame` frames.
+fn frame_extractors(stages: &[StageSpec]) -> Vec<Extract> {
+    stages
+        .iter()
+        .filter_map(|s| s.frame.as_ref().and_then(FrameSpec::to_extract))
+        .collect()
+}
+
+fn compile_spec(
+    spec: ConversationSpec,
+    resolvers: Vec<StageResolver>,
+) -> Result<CompiledConversation, ConversationError> {
+    // Main flow.
+    let flow = lower_flow(&spec.stages, &spec.require)?;
+
+    // Resolver bindings must reference known main stages.
+    let ids: BTreeSet<&str> = spec.stages.iter().map(|s| s.id.as_str()).collect();
     for r in &resolvers {
         if !ids.contains(r.stage.as_str()) {
             return Err(ConversationError::Spec(format!(
@@ -571,17 +843,8 @@ fn compile_spec(
         }
     }
 
-    let flow = fb.build().map_err(ConversationError::Flow)?;
-    let compiled = flow.compile().map_err(ConversationError::Compile)?;
-
-    // Lower each frame-collecting stage into an extractor that fills its slots.
-    let mut extractors: Vec<Extract> = spec
-        .stages
-        .iter()
-        .filter_map(|s| s.frame.as_ref().and_then(FrameSpec::to_extract))
-        .collect();
-
-    // Lower resolver-slot bindings (grouped by stage) into resolver extractors.
+    // Main extractors: frame recognizers + resolver-slot bindings.
+    let mut extractors = frame_extractors(&spec.stages);
     let mut by_stage: BTreeMap<&str, Vec<&StageResolver>> = BTreeMap::new();
     for r in &resolvers {
         by_stage.entry(r.stage.as_str()).or_default().push(r);
@@ -598,9 +861,34 @@ fn compile_spec(
         extractors.push(builder.build());
     }
 
+    // Overlays: each lowers to its own validated flow + extractors. An overlay
+    // with no explicit `require` is complete when its terminal stages are done —
+    // so completion is meaningful (without it, `is_complete()` is trivially true).
+    let mut overlays = Vec::with_capacity(spec.overlays.len());
+    for ov in &spec.overlays {
+        let require = if ov.require.is_empty() {
+            ov.stages
+                .iter()
+                .filter(|s| s.terminal)
+                .map(|s| s.id.clone())
+                .collect()
+        } else {
+            ov.require.clone()
+        };
+        let ov_flow = lower_flow(&ov.stages, &require)?;
+        overlays.push(CompiledOverlay {
+            name: ov.name.clone(),
+            trigger: ov.trigger.clone(),
+            flow: ov_flow,
+            extractors: frame_extractors(&ov.stages),
+            resume: ov.resume,
+        });
+    }
+
     Ok(CompiledConversation {
-        flow: compiled,
+        flow,
         extractors,
+        overlays,
         spec,
     })
 }
@@ -892,6 +1180,76 @@ mod tests {
 
         // Builds without panic; converse is the one-liner that govern()s + registers.
         let _live = crate::live::Live::builder().converse(&convo);
+    }
+
+    #[test]
+    fn overlay_suspends_main_then_resumes_previous() {
+        // Main: a -> b. FAQ overlay triggered by intent:faq, single terminal stage,
+        // resume Previous. While the overlay runs, the main marking is untouched.
+        let convo = Conversation::new("support")
+            .stage("a")
+            .next("b", Guard::is_true("a_done"))
+            .stage("b")
+            .terminal()
+            .overlay("faq")
+            .trigger(Guard::is_true("intent:faq"))
+            // A gated answer stage so the overlay does not complete in one turn.
+            .stage("answer")
+            .done(Guard::is_true("faq_answered"))
+            .next("faq_end", Guard::is_true("faq_answered"))
+            .stage("faq_end")
+            .terminal()
+            .resume(Resume::Previous)
+            .done_overlay()
+            .compile()
+            .expect("compiles");
+
+        assert_eq!(convo.overlays().len(), 1);
+        let mut stack = convo.stack(Enforcement::Enforce);
+        let state = State::new();
+
+        // Main is active on `a`.
+        assert!(stack.explain(&state).active.contains(&"a".to_string()));
+        assert!(stack.active_overlay().is_none());
+
+        // Intent fires -> digression suspends the main flow and stays active.
+        let _ = state.set("intent:faq", true);
+        stack.on_turn(&state);
+        assert_eq!(stack.active_overlay(), Some("faq"));
+
+        // Answer the FAQ and clear the intent so the overlay completes and resumes.
+        let _ = state.set("faq_answered", true);
+        let _ = state.set("intent:faq", false);
+        stack.on_turn(&state);
+        assert!(stack.active_overlay().is_none());
+
+        // Main resumed exactly where it was: still on `a`, not advanced.
+        assert!(stack.explain(&state).active.contains(&"a".to_string()));
+
+        // Main continues normally afterward.
+        let _ = state.set("a_done", true);
+        stack.on_turn(&state);
+        assert!(stack.current().marking().done.contains("a"));
+    }
+
+    #[test]
+    fn overlay_spec_round_trips_through_json() {
+        let spec = Conversation::new("s")
+            .stage("main")
+            .terminal()
+            .overlay("cancel")
+            .trigger(Guard::is_true("intent:cancel"))
+            .stage("confirm")
+            .terminal()
+            .resume(Resume::Terminate)
+            .done_overlay()
+            .into_spec();
+        let json = serde_json::to_string(&spec).unwrap();
+        let back: ConversationSpec = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.overlays.len(), 1);
+        assert_eq!(back.overlays[0].resume, Resume::Terminate);
+        // Recompiles from the round-tripped spec.
+        assert!(Conversation::from_spec(back).is_ok());
     }
 
     #[test]

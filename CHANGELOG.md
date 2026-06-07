@@ -40,6 +40,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Hierarchical digressions / statecharts above the DAG.** Conversations can now
+  declare **overlays** — named sub-flows triggered by a guard that suspend the main
+  flow, run, and resume: `Conversation::overlay(name).trigger(g).stage(..).resume(..)
+  .done_overlay()`. A serializable `OverlaySpec` (round-trips through JSON) lowers to
+  its own validated `CompiledFlow`. A new runtime `FlowStack` (`CompiledConversation::
+  stack(mode)`) drives the main flow plus at most one active digression with
+  push-on-trigger / resume-on-completion (`Resume::Previous`/`Restart`/`Terminate`);
+  tool admission, postures, and `explain()` delegate to the active layer.
+  `FlowMonitor::eval(guard, state)` exposes guard evaluation for triggers.
 - **`Live::converse(&conversation)`** — one-liner that governs a Live session with
   a compiled conversation's flow and registers the extractors that fill its
   frames' slots (`converse_observe` for observe mode).

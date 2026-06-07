@@ -813,6 +813,13 @@ impl FlowMonitor {
     pub fn mode(&self) -> Enforcement {
         self.mode
     }
+
+    /// Evaluate a [`Guard`] against this monitor's current context (the given
+    /// `state` plus the monitor's marking). Used to test overlay/digression
+    /// triggers without exposing the internal context.
+    pub fn eval(&self, guard: &Guard, state: &State) -> bool {
+        guard.eval(&self.ctx(state))
+    }
     /// The current marking.
     pub fn marking(&self) -> &Marking {
         &self.marking
