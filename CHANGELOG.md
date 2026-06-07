@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (breaking)
 
+- **Reactor: dead effect nouns removed.** Dropped `EffectPolicy::dedupe_key` and
+  `cancel_scope` (never set or read by any rule) and `LiveEffect::TransitionPhase`
+  (never produced; executor no-op'd it) — per the "make it real or delete it"
+  principle, they were deleted rather than left as aspirational fields. Concurrent
+  effect failures are now **supervised**: an error surfaces as `LiveEvent::Error`
+  instead of being silently discarded.
 - **`State` writes are now fallible.** `State::set`, `set_committed`, `set_key`,
   `modify`, and `PrefixedState::set` return `Result<_, StateError>` instead of
   panicking via `expect` on non-serializable input — a public SDK write no longer

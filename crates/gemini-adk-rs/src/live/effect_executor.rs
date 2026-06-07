@@ -53,12 +53,26 @@ impl LiveEffectExecutor {
                 EffectMode::Concurrent => {
                     let executor = self.clone();
                     let timeout = reaction.policy.timeout;
+                    let source = reaction.source;
+                    let effect = reaction.effect;
                     tokio::spawn(async move {
-                        let fut = executor.execute(reaction.effect);
-                        if let Some(timeout) = timeout {
-                            let _ = tokio::time::timeout(timeout, fut).await;
-                        } else {
-                            let _ = fut.await;
+                        let result = match timeout {
+                            Some(timeout) => {
+                                tokio::time::timeout(timeout, executor.execute(effect))
+                                    .await
+                                    .unwrap_or(Err(SessionError::Timeout {
+                                        phase: SessionPhase::Active,
+                                        elapsed: timeout,
+                                    }))
+                            }
+                            None => executor.execute(effect).await,
+                        };
+                        // Supervise: surface concurrent failures rather than
+                        // silently dropping them.
+                        if let Err(err) = result {
+                            let _ = executor.event_tx.send(LiveEvent::Error(format!(
+                                "reaction '{source}' failed: {err}"
+                            )));
                         }
                     });
                 }
@@ -93,7 +107,6 @@ impl LiveEffectExecutor {
                 let _ = self.event_tx.send(event);
                 Ok(())
             }
-            LiveEffect::TransitionPhase(_phase) => Ok(()),
         }
     }
 
@@ -289,6 +302,69 @@ mod tests {
         assert_eq!(
             writer.writes.lock().as_slice(),
             &[Write::ActivityStart, Write::ActivityEnd]
+        );
+    }
+
+    #[tokio::test]
+    async fn concurrent_effect_failure_is_surfaced_as_event() {
+        struct FailWriter;
+        #[async_trait]
+        impl SessionWriter for FailWriter {
+            async fn send_audio(&self, _: Vec<u8>) -> Result<(), SessionError> {
+                Ok(())
+            }
+            async fn send_text(&self, _: String) -> Result<(), SessionError> {
+                Ok(())
+            }
+            async fn send_tool_response(
+                &self,
+                _: Vec<FunctionResponse>,
+            ) -> Result<(), SessionError> {
+                Ok(())
+            }
+            async fn send_client_content(
+                &self,
+                _: Vec<Content>,
+                _: bool,
+            ) -> Result<(), SessionError> {
+                Err(SessionError::NotConnected)
+            }
+            async fn send_video(&self, _: Vec<u8>) -> Result<(), SessionError> {
+                Ok(())
+            }
+            async fn update_instruction(&self, _: String) -> Result<(), SessionError> {
+                Ok(())
+            }
+            async fn signal_activity_start(&self) -> Result<(), SessionError> {
+                Ok(())
+            }
+            async fn signal_activity_end(&self) -> Result<(), SessionError> {
+                Ok(())
+            }
+            async fn disconnect(&self) -> Result<(), SessionError> {
+                Ok(())
+            }
+        }
+
+        let (event_tx, mut rx) = broadcast::channel(8);
+        let executor = LiveEffectExecutor::new(Arc::new(FailWriter), None, event_tx);
+
+        // A concurrent effect that fails must surface as a LiveEvent, not vanish.
+        executor
+            .execute_reactions(vec![Reaction::concurrent(
+                "test",
+                LiveEffect::SendContext(vec![Content::model("x")]),
+            )])
+            .await
+            .unwrap();
+
+        let event = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+            .await
+            .expect("a reaction-failure event within the timeout")
+            .expect("event received");
+        assert!(
+            matches!(&event, LiveEvent::Error(msg) if msg.contains("reaction 'test' failed")),
+            "expected a reaction-failure error event, got {event:?}"
         );
     }
 }
