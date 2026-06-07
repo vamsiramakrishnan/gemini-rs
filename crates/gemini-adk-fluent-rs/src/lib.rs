@@ -43,6 +43,7 @@ pub mod live;
 pub mod live_builders;
 pub mod operators;
 pub mod patterns;
+pub mod simulation;
 pub mod testing;
 
 pub use gemini_adk_rs;
@@ -84,6 +85,7 @@ pub mod prelude {
     pub use crate::live_builders::*;
     pub use crate::operators::*;
     pub use crate::patterns::*;
+    pub use crate::simulation::{Scenario, Sim, SimStep};
     pub use crate::testing::*;
     // Note: gemini_adk_rs::agent::Agent trait is NOT re-exported here because
     // it conflicts with the L2 Agent type alias (= AgentBuilder).

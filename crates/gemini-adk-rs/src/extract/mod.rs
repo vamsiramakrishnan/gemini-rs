@@ -357,6 +357,16 @@ impl Extract {
     pub fn into_extractor(self) -> Arc<dyn TurnExtractor> {
         Arc::new(RecordExtractor::new(self))
     }
+
+    /// The `(field name, state key)` pairs this record promotes. Callers that run
+    /// the extractor and promote the returned record into `State` themselves (e.g.
+    /// the simulation harness) use this to map each field to its state key.
+    pub fn field_state_keys(&self) -> Vec<(String, String)> {
+        self.fields
+            .iter()
+            .map(|f| (f.name.clone(), f.state_key.clone()))
+            .collect()
+    }
 }
 
 /// Builder for an [`Extract`] record.

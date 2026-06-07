@@ -40,6 +40,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Model-free simulation harness.** A deterministic `Sim` drives a compiled
+  conversation with no live API: a fake user speaks (`sim.user(text)` runs the
+  conversation's recognizers to fill slots, respecting validators), slots can be
+  set directly, tools succeed on demand or after a latency (`schedule_tool`), and
+  the `FlowStack` advances turn by turn. Introspect with `active`/`allowed`/
+  `denied`/`slot`/`is_complete`/`explain`. A serializable `Scenario` (`SimStep`s:
+  `user`/`set`/`tool_ok`/`turn`/`expect_*`) runs as a data-driven test (YAML/JSON)
+  and reports the failing step. `Extract::field_state_keys()` exposes the
+  field→state-key mapping for promotion.
 - **Hierarchical digressions / statecharts above the DAG.** Conversations can now
   declare **overlays** — named sub-flows triggered by a guard that suspend the main
   flow, run, and resume: `Conversation::overlay(name).trigger(g).stage(..).resume(..)

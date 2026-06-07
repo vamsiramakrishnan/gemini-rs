@@ -64,9 +64,10 @@ Authored as focused, green commits, in this order:
    overlays, slot-reopen-on-correction, and `Live`-drives-`FlowStack` are
    follow-ups — today `Live::converse` registers overlay extractors and governs
    the main flow.)*
-2. 📋 **Model-free flow simulation** *(pulled up from #6: it makes everything
-   after it testable without live API)* — deterministic fake-user + tool-latency
-   harness; scenario + property tests.
+2. ✅ **Model-free flow simulation** *(pulled up from #6)* — deterministic `Sim`
+   (fake user via recognizers, direct slot set, tool latency) + serializable
+   `Scenario`/`SimStep` runner (YAML/JSON, reports failing step). Makes motifs,
+   repair, and policy testable without live API.
 3. 📋 **Motif stdlib** — `collect_slots` / `confirm_then_commit` / `identity` /
    `disclosure` / `faq_digression` / `payment` / `handoff`, each compiling through
    the validated IR (fail-loud).
