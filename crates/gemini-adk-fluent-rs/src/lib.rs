@@ -45,6 +45,7 @@ pub mod live_builders;
 pub mod motifs;
 pub mod operators;
 pub mod patterns;
+pub mod policy;
 pub mod simulation;
 pub mod testing;
 
@@ -88,6 +89,7 @@ pub mod prelude {
     pub use crate::motifs::Motif;
     pub use crate::operators::*;
     pub use crate::patterns::*;
+    pub use crate::policy::{CommitPolicy, Policy};
     pub use crate::simulation::{Scenario, Sim, SimStep};
     pub use crate::testing::*;
     pub use crate::voice_flow;

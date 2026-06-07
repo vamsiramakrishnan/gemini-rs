@@ -40,6 +40,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Policy aspects.** Reusable, cross-cutting governance attached to a whole
+  conversation via `Conversation::policy(..)`: `Policy::safety_handoff([intents])`
+  (lowers to a `safety` digression that terminates on `intent:{name}`),
+  `Policy::redact([keys])` (recorded for the runtime's logging; surfaced via
+  `CompiledConversation::redacted_fields()`), and `Policy::commit(tool)
+  .idempotency_key(..).compensate_with(..)` (commit governance metadata). All
+  serializable and round-trip through JSON.
 - **Typed graph macro.** `voice_flow! { mod booking { steps: [..]; tools: [..];
   slots: [..]; } }` generates a module of compile-time-checked `&str` name
   constants, so flow code references `booking::collect` etc. — a typo'd name is a

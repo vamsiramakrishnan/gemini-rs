@@ -82,8 +82,12 @@ Authored as focused, green commits, in this order:
    body — stages/transitions/guards in macro syntax — is a follow-up.)*
 6. 📋 **Bidirectional visual devtools loop** — `inspect`/`graph`/`simulate`/
    `replay`/`why` CLI over the spec + traces.
-7. 📋 **Policy overlays as reusable aspects** — PCI/commit/safety policies that
-   lower to tool gates, redaction, confirmation, idempotency, compensation.
+7. ✅ **Policy overlays as reusable aspects** — `Policy::safety_handoff` (→ a
+   terminating `safety` digression), `Policy::redact` (redaction set), and
+   `Policy::commit(..).idempotency_key/.compensate_with` (commit governance), all
+   serializable + applied via `Conversation::policy(..)`. *(Redaction/idempotency
+   runtime enforcement in the logging/dispatch layers is a follow-up; the aspects
+   are recorded + surfaced.)*
 8. 📋 **Voice timing in the graph** — per-stage filler/reprompt/interrupt/
    endpointing/context-delivery as declarative policy lowering to Live settings.
 9. 📋 **NL→flow codegen as a skill** — a harness (Claude Code skill) that drafts a

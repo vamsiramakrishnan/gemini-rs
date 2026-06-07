@@ -238,6 +238,9 @@ pub struct ConversationSpec {
     /// Digressions/overlays that can suspend and resume the main flow.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub overlays: Vec<OverlaySpec>,
+    /// Cross-cutting policy aspects (safety/redaction/commit governance).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub policies: Vec<crate::policy::Policy>,
 }
 
 /// Error compiling a [`ConversationSpec`] into a [`CompiledConversation`].
@@ -291,6 +294,7 @@ pub struct CompiledConversation {
     extractors: Vec<Extract>,
     overlays: Vec<CompiledOverlay>,
     repair: BTreeMap<String, RepairPolicy>,
+    policies: Vec<crate::policy::Policy>,
     spec: ConversationSpec,
 }
 
@@ -302,6 +306,7 @@ impl std::fmt::Debug for CompiledConversation {
             .field("flow", &self.flow)
             .field("extractors", &self.extractors.len())
             .field("overlays", &self.overlays.len())
+            .field("policies", &self.policies)
             .field("spec", &self.spec)
             .finish()
     }
@@ -320,6 +325,17 @@ impl CompiledConversation {
     /// The compiled digressions/overlays.
     pub fn overlays(&self) -> &[CompiledOverlay] {
         &self.overlays
+    }
+    /// The cross-cutting policy aspects attached to this conversation.
+    pub fn policies(&self) -> &[crate::policy::Policy] {
+        &self.policies
+    }
+    /// The set of state keys marked for redaction by `Policy::redact`.
+    pub fn redacted_fields(&self) -> BTreeSet<String> {
+        self.policies
+            .iter()
+            .flat_map(|p| p.redacted_keys().iter().cloned())
+            .collect()
     }
     /// Every extractor (main + overlays) — what [`Live::converse`](crate::live::Live)
     /// registers so slots fill whether the main flow or a digression is active.
@@ -444,6 +460,12 @@ impl Conversation {
     pub fn add_overlay(mut self, overlay: OverlaySpec) -> Self {
         self.spec.overlays.push(overlay);
         self.current_overlay = None;
+        self
+    }
+
+    /// Attach a cross-cutting [`Policy`](crate::policy::Policy) aspect.
+    pub fn policy(mut self, policy: impl Into<crate::policy::Policy>) -> Self {
+        self.spec.policies.push(policy.into());
         self
     }
 
@@ -975,9 +997,35 @@ fn frame_extractors(stages: &[StageSpec]) -> Vec<Extract> {
 }
 
 fn compile_spec(
-    spec: ConversationSpec,
+    mut spec: ConversationSpec,
     resolvers: Vec<StageResolver>,
 ) -> Result<CompiledConversation, ConversationError> {
+    // Apply cross-cutting policies. SafetyHandoff lowers to a `safety` digression
+    // (terminate on intent); Redact/Commit are carried for the runtime.
+    for policy in spec.policies.clone() {
+        if let crate::policy::Policy::SafetyHandoff { intents } = policy {
+            if let Some(trigger) = any_of(
+                intents
+                    .iter()
+                    .map(|i| Guard::is_true(format!("intent:{i}")))
+                    .collect(),
+            ) {
+                spec.overlays.push(OverlaySpec {
+                    name: "safety".into(),
+                    trigger,
+                    stages: vec![StageSpec {
+                        id: "safety_handoff".into(),
+                        say: Some("Safety concern detected — hand off to a human now.".into()),
+                        terminal: true,
+                        ..Default::default()
+                    }],
+                    require: Vec::new(),
+                    resume: Resume::Terminate,
+                });
+            }
+        }
+    }
+
     // Main flow.
     let flow = lower_flow(&spec.stages, &spec.require)?;
 
@@ -1041,11 +1089,14 @@ fn compile_spec(
         .filter_map(|s| s.repair.clone().map(|p| (s.id.clone(), p)))
         .collect();
 
+    let policies = spec.policies.clone();
+
     Ok(CompiledConversation {
         flow,
         extractors,
         overlays,
         repair,
+        policies,
         spec,
     })
 }
@@ -1421,6 +1472,37 @@ mod tests {
         assert_eq!(back.overlays[0].resume, Resume::Terminate);
         // Recompiles from the round-tripped spec.
         assert!(Conversation::from_spec(back).is_ok());
+    }
+
+    #[tokio::test]
+    async fn safety_policy_terminates_on_intent() {
+        use crate::policy::Policy;
+        use crate::simulation::Sim;
+
+        let convo = Conversation::new("support")
+            .policy(Policy::safety_handoff(["self_harm", "abuse"]))
+            .policy(Policy::redact(["card_number"]))
+            .stage("triage")
+            .next("resolve", Guard::is_true("triaged"))
+            .stage("resolve")
+            .terminal()
+            .require(["resolve"])
+            .compile()
+            .expect("compiles");
+
+        // Redaction set is recorded for the runtime.
+        assert!(convo.redacted_fields().contains("card_number"));
+        // SafetyHandoff lowered to a `safety` digression.
+        assert!(convo.overlays().iter().any(|o| o.name == "safety"));
+
+        let mut sim = Sim::new(&convo, Enforcement::Enforce);
+        assert!(sim.active().contains(&"triage".to_string()));
+        assert!(!sim.is_complete());
+
+        // A safety intent fires -> the conversation hands off (terminates).
+        sim.set("intent:abuse", true);
+        sim.turn();
+        assert!(sim.is_complete());
     }
 
     #[tokio::test]
