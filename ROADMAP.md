@@ -68,9 +68,10 @@ Authored as focused, green commits, in this order:
    (fake user via recognizers, direct slot set, tool latency) + serializable
    `Scenario`/`SimStep` runner (YAML/JSON, reports failing step). Makes motifs,
    repair, and policy testable without live API.
-3. 📋 **Motif stdlib** — `collect_slots` / `confirm_then_commit` / `identity` /
-   `disclosure` / `faq_digression` / `payment` / `handoff`, each compiling through
-   the validated IR (fail-loud).
+3. ✅ **Motif stdlib** — `Motif::collect_frame`/`confirm_then_commit`/
+   `identity_verification`/`disclosure`/`say`/`handoff` (→ `StageSpec`) +
+   `faq_digression` (→ `OverlaySpec`), composed via `Conversation::add_stage`/
+   `add_overlay`; all lower through the validated IR (fail-loud).
 4. 📋 **Repair flows first-class** — no-input / no-match / low-confidence /
    correction / barge-in / tool-timeout policies as flow-level concepts.
 5. 📋 **Typed graph macros** — a `voice_flow!` macro generating typed step/slot/

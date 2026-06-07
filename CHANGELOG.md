@@ -40,6 +40,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Motif stdlib.** `Motif` factories for high-confidence flow fragments —
+  `collect_frame::<F>` / `confirm_then_commit` / `identity_verification` /
+  `disclosure` / `say` / `handoff` (→ `StageSpec`) and `faq_digression`
+  (→ `OverlaySpec`) — composed via new `Conversation::add_stage` / `add_overlay`.
+  Motifs lower through the validated IR (a mis-built commit motif fails `compile()`
+  like a hand-written one).
 - **Model-free simulation harness.** A deterministic `Sim` drives a compiled
   conversation with no live API: a fake user speaks (`sim.user(text)` runs the
   conversation's recognizers to fill slots, respecting validators), slots can be

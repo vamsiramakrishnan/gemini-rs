@@ -41,6 +41,7 @@ pub mod compose;
 pub mod conversation;
 pub mod live;
 pub mod live_builders;
+pub mod motifs;
 pub mod operators;
 pub mod patterns;
 pub mod simulation;
@@ -83,6 +84,7 @@ pub mod prelude {
     };
     pub use crate::live::Live;
     pub use crate::live_builders::*;
+    pub use crate::motifs::Motif;
     pub use crate::operators::*;
     pub use crate::patterns::*;
     pub use crate::simulation::{Scenario, Sim, SimStep};

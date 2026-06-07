@@ -362,6 +362,25 @@ impl Conversation {
         self
     }
 
+    /// Append a pre-built [`StageSpec`] (e.g. from a [`Motif`](crate::motifs::Motif)).
+    /// Routes to the active overlay when authoring one, else the main flow.
+    /// Subsequent stage setters (`next`, `say`, …) apply to it.
+    pub fn add_stage(mut self, stage: StageSpec) -> Self {
+        match self.current_overlay {
+            Some(i) => self.spec.overlays[i].stages.push(stage),
+            None => self.spec.stages.push(stage),
+        }
+        self
+    }
+
+    /// Append a pre-built [`OverlaySpec`] (e.g. a `Motif::faq_digression`). Leaves
+    /// overlay-authoring mode (the overlay is already complete).
+    pub fn add_overlay(mut self, overlay: OverlaySpec) -> Self {
+        self.spec.overlays.push(overlay);
+        self.current_overlay = None;
+        self
+    }
+
     fn current(&mut self) -> &mut StageSpec {
         let stages = match self.current_overlay {
             Some(i) => &mut self.spec.overlays[i].stages,
