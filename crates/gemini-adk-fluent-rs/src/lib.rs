@@ -39,6 +39,7 @@ pub mod a2a;
 pub mod builder;
 pub mod compose;
 pub mod conversation;
+pub mod flow_macros;
 pub mod live;
 pub mod live_builders;
 pub mod motifs;
@@ -89,6 +90,7 @@ pub mod prelude {
     pub use crate::patterns::*;
     pub use crate::simulation::{Scenario, Sim, SimStep};
     pub use crate::testing::*;
+    pub use crate::voice_flow;
     // Note: gemini_adk_rs::agent::Agent trait is NOT re-exported here because
     // it conflicts with the L2 Agent type alias (= AgentBuilder).
     // Use gemini_adk_rs::agent::Agent directly if you need the L1 trait.

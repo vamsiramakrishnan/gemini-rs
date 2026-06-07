@@ -77,8 +77,9 @@ Authored as focused, green commits, in this order:
    `repair:{stage}:reprompt`/`:escalate` signals and escalation routes to a handoff
    stage. *(MVP: turn-based stalling; barge-in/tool-timeout variants are
    follow-ups.)*
-5. 📋 **Typed graph macros** — a `voice_flow!` macro generating typed step/slot/
-   tool constants + `build()`.
+5. ✅ **Typed graph macros** — `voice_flow!` generates compile-time-checked
+   step/tool/slot name constants (typos fail the build). *(Full declarative DSL
+   body — stages/transitions/guards in macro syntax — is a follow-up.)*
 6. 📋 **Bidirectional visual devtools loop** — `inspect`/`graph`/`simulate`/
    `replay`/`why` CLI over the spec + traces.
 7. 📋 **Policy overlays as reusable aspects** — PCI/commit/safety policies that

@@ -40,6 +40,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Typed graph macro.** `voice_flow! { mod booking { steps: [..]; tools: [..];
+  slots: [..]; } }` generates a module of compile-time-checked `&str` name
+  constants, so flow code references `booking::collect` etc. — a typo'd name is a
+  build error, not a silently never-matching guard. (Full declarative DSL body is a
+  follow-up; this is the name-checking core.)
 - **Repair flows first-class.** A serializable per-stage `RepairPolicy`
   (`reprompt_after`/`escalate_after`/`escalate_to`) via `Conversation::repair(..)`.
   The runtime raises `repair:{stage}:reprompt` once a stage has been active too long
