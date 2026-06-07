@@ -473,3 +473,238 @@ pub(in crate::live) async fn handle_turn_complete(
         });
     }
 }
+
+#[cfg(test)]
+mod harness {
+    //! Deterministic turn-lifecycle harness.
+    //!
+    //! Drives the real [`handle_turn_complete`] with a recording [`SessionWriter`]
+    //! so the documented ordering "scars" become asserted invariants rather than
+    //! comments — the safety net for the staged turn-pipeline refactor
+    //! (`docs/plans/2026-06-07-turn-tool-pipeline-rfc.md`).
+
+    use super::handle_turn_complete;
+    use crate::live::callbacks::EventCallbacks;
+    use crate::live::computed::ComputedRegistry;
+    use crate::live::context_writer::PendingContext;
+    use crate::live::events::LiveEvent;
+    use crate::live::extractor::TurnExtractor;
+    use crate::live::phase::PhaseMachine;
+    use crate::live::processor::{ControlPlaneConfig, SharedState};
+    use crate::live::steering::{ContextDelivery, SteeringMode};
+    use crate::live::temporal::TemporalRegistry;
+    use crate::live::transcript::TranscriptBuffer;
+    use crate::live::watcher::WatcherRegistry;
+    use crate::state::State;
+
+    use gemini_genai_rs::prelude::{Content, FunctionResponse};
+    use gemini_genai_rs::session::{SessionError, SessionWriter};
+
+    use parking_lot::Mutex;
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use tokio::sync::broadcast;
+
+    /// One observable wire write.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    enum Write {
+        Instruction(String),
+        ClientContent { turns: usize, turn_complete: bool },
+    }
+
+    /// A `SessionWriter` that records the wire writes that matter for the scars.
+    #[derive(Default)]
+    struct RecordingWriter {
+        log: Mutex<Vec<Write>>,
+    }
+
+    #[async_trait::async_trait]
+    impl SessionWriter for RecordingWriter {
+        async fn send_audio(&self, _: Vec<u8>) -> Result<(), SessionError> {
+            Ok(())
+        }
+        async fn send_text(&self, _: String) -> Result<(), SessionError> {
+            Ok(())
+        }
+        async fn send_tool_response(&self, _: Vec<FunctionResponse>) -> Result<(), SessionError> {
+            Ok(())
+        }
+        async fn send_client_content(
+            &self,
+            turns: Vec<Content>,
+            turn_complete: bool,
+        ) -> Result<(), SessionError> {
+            self.log.lock().push(Write::ClientContent {
+                turns: turns.len(),
+                turn_complete,
+            });
+            Ok(())
+        }
+        async fn send_video(&self, _: Vec<u8>) -> Result<(), SessionError> {
+            Ok(())
+        }
+        async fn update_instruction(&self, instruction: String) -> Result<(), SessionError> {
+            self.log.lock().push(Write::Instruction(instruction));
+            Ok(())
+        }
+        async fn signal_activity_start(&self) -> Result<(), SessionError> {
+            Ok(())
+        }
+        async fn signal_activity_end(&self) -> Result<(), SessionError> {
+            Ok(())
+        }
+        async fn disconnect(&self) -> Result<(), SessionError> {
+            Ok(())
+        }
+    }
+
+    /// Fixture: the collaborators a turn-complete invocation needs, with the
+    /// optional subsystems off so a test exercises one path at a time.
+    struct Harness {
+        rec: Arc<RecordingWriter>,
+        writer: Arc<dyn SessionWriter>,
+        shared: SharedState,
+        state: State,
+        transcript: TranscriptBuffer,
+        tracker: HashMap<String, u32>,
+        control: ControlPlaneConfig,
+        callbacks: EventCallbacks,
+        event_tx: broadcast::Sender<LiveEvent>,
+    }
+
+    impl Harness {
+        fn new() -> Self {
+            let rec = Arc::new(RecordingWriter::default());
+            let writer: Arc<dyn SessionWriter> = rec.clone();
+            let mut transcript = TranscriptBuffer::new();
+            transcript.push_input("hello");
+            transcript.push_output("hi");
+            let (event_tx, _rx) = broadcast::channel(16);
+            Self {
+                rec,
+                writer,
+                shared: SharedState {
+                    interrupted: AtomicBool::new(false),
+                    resume_handle: Mutex::new(None),
+                    last_instruction: Mutex::new(None),
+                    pending_context: None,
+                },
+                state: State::new(),
+                transcript,
+                tracker: HashMap::new(),
+                control: ControlPlaneConfig::default(),
+                callbacks: EventCallbacks::default(),
+                event_tx,
+            }
+        }
+
+        async fn run_turn(&mut self) {
+            let extractors: Vec<Arc<dyn TurnExtractor>> = vec![];
+            let computed: Option<ComputedRegistry> = None;
+            let phase: Option<tokio::sync::Mutex<PhaseMachine>> = None;
+            let watchers: Option<WatcherRegistry> = None;
+            let temporal: Option<Arc<TemporalRegistry>> = None;
+            handle_turn_complete(
+                &self.callbacks,
+                &self.writer,
+                &self.shared,
+                &extractors,
+                &self.state,
+                &computed,
+                &phase,
+                &watchers,
+                &temporal,
+                &mut self.transcript,
+                &mut self.tracker,
+                &mut self.control,
+                &self.event_tx,
+            )
+            .await;
+        }
+
+        fn writes(&self) -> Vec<Write> {
+            self.rec.log.lock().clone()
+        }
+    }
+
+    #[tokio::test]
+    async fn turn_state_is_reset_and_count_incremented_and_callback_fires() {
+        let mut h = Harness::new();
+        let _ = h.state.set("turn:scratch", true);
+        let _ = h.state.session().set("turn_count", 5u32);
+        let fired = Arc::new(AtomicBool::new(false));
+        let flag = fired.clone();
+        h.callbacks.on_turn_complete = Some(Arc::new(move || {
+            let flag = flag.clone();
+            Box::pin(async move {
+                flag.store(true, Ordering::SeqCst);
+            })
+        }));
+
+        h.run_turn().await;
+
+        assert_eq!(h.state.get::<bool>("turn:scratch"), None, "turn: cleared");
+        assert_eq!(h.state.session().get::<u32>("turn_count"), Some(6));
+        assert!(fired.load(Ordering::SeqCst), "on_turn_complete fired");
+    }
+
+    #[tokio::test]
+    async fn instruction_is_sent_once_then_deduped() {
+        // The "single resolved_instruction, sent once" + dedup scar.
+        let mut h = Harness::new();
+        h.control.steering_mode = SteeringMode::InstructionUpdate;
+        h.callbacks.instruction_template = Some(Arc::new(|_| Some("SYSTEM".to_string())));
+
+        h.run_turn().await;
+        assert_eq!(h.writes(), vec![Write::Instruction("SYSTEM".into())]);
+
+        // Same instruction next turn -> deduped, not resent.
+        h.run_turn().await;
+        assert_eq!(
+            h.writes(),
+            vec![Write::Instruction("SYSTEM".into())],
+            "identical instruction must not be re-sent"
+        );
+    }
+
+    #[tokio::test]
+    async fn context_injection_delivers_instruction_as_one_batched_frame() {
+        // ContextInjection steering: the instruction is a single context frame,
+        // not an update_instruction and not a burst of frames.
+        let mut h = Harness::new();
+        h.control.steering_mode = SteeringMode::ContextInjection;
+        h.callbacks.instruction_template = Some(Arc::new(|_| Some("CTX".to_string())));
+
+        h.run_turn().await;
+
+        assert_eq!(
+            h.writes(),
+            vec![Write::ClientContent {
+                turns: 1,
+                turn_complete: false
+            }],
+            "exactly one batched context frame, no update_instruction"
+        );
+    }
+
+    #[tokio::test]
+    async fn deferred_context_is_queued_not_sent() {
+        // The deferred-context scar: context is queued for the next user send,
+        // not emitted as an isolated frame during silence.
+        let mut h = Harness::new();
+        let pending = Arc::new(PendingContext::new());
+        h.shared.pending_context = Some(pending.clone());
+        h.control.steering_mode = SteeringMode::ContextInjection;
+        h.control.context_delivery = ContextDelivery::Deferred;
+        h.callbacks.instruction_template = Some(Arc::new(|_| Some("DEFERRED".to_string())));
+
+        h.run_turn().await;
+
+        assert!(
+            h.writes().is_empty(),
+            "nothing sent on the wire in Deferred mode"
+        );
+        assert_eq!(pending.drain_context().len(), 1, "context queued instead");
+    }
+}
