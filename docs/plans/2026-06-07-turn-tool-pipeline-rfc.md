@@ -1,6 +1,35 @@
 # RFC: Typed turn pipeline & unified tool lifecycle
 
-Status: proposed · 2026-06-07 · addresses code-review redline #4 and #7
+Status: **implemented (lightweight realization)** · 2026-06-07 · addresses code-review redline #4 and #7
+
+## Implementation note (what actually shipped)
+
+The decomposition was delivered, but as a **lighter-weight realization** than the
+`TurnStage` trait sketched below — chosen because it carries the same "named,
+individually-tested stages" benefit at lower risk on this untested hot path:
+
+- **#4** — `handle_turn_complete` was decomposed into named async helper
+  functions (`run_turn_extractors`, `evaluate_phase_transition` → `PhaseOutcome`,
+  `project_tool_advisory`, `evaluate_repair`, `project_steering_context`,
+  `govern_flow`, `deliver_instruction_and_context`), each lifted verbatim
+  (behavior-preserving) and pinned by a deterministic `harness` that drives the
+  real `handle_turn_complete` through a recording `SessionWriter`. The
+  trait-object `TurnPipeline`/`StageCaps`/`TurnStage` abstraction (§A) and the
+  `TurnTrace` debug stream (step 5) were **not** built — the named-helper form
+  already gives the execution grammar and the per-stage tests without the
+  dyn-dispatch ceremony. They remain available as a future step if a
+  runtime-introspectable pipeline (replay/why devtools) is wanted.
+- **#7** — the unified gate shipped as `ToolGate::observe_completion(call_id, …)`
+  (the `ToolLifecycle`/`ToolPhase` enum of §B was distilled to the single
+  idempotent gate the invariant actually needs). Inline tools route through it
+  directly; background tools post a `ControlEvent::ToolCompleted` back to the
+  control lane (via a `WeakSender`), which routes them through the same gate. The
+  "gate indirectly on delivered state" hack is closed: `done(called_ok(..))` now
+  works for background tools too.
+
+The original design follows, for context.
+
+---
 
 ## Problem
 

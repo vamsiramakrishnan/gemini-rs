@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Turn lifecycle decomposed into named, tested stages (#4).** The live hot-path
+  `handle_turn_complete` god-function was lifted, one behavior-preserving block at
+  a time, into named async stage helpers (`run_turn_extractors`,
+  `evaluate_phase_transition`, `project_tool_advisory`, `evaluate_repair`,
+  `project_steering_context`, `govern_flow`, `deliver_instruction_and_context`). A
+  deterministic harness drives the real `handle_turn_complete` through a recording
+  `SessionWriter`, turning the documented ordering "scars" (single-send + dedup,
+  batched/deferred context, turn reset) and each stage's effect into asserted
+  invariants. No behavior change. See
+  `docs/plans/2026-06-07-turn-tool-pipeline-rfc.md`.
+- **Background tools advance the governed flow (#7).** Tool completions now pass
+  through a single `ToolGate::observe_completion(call_id, …)` — idempotent per
+  `call_id` — for both inline and background tools. Background tools (which run
+  detached and can't reach the synchronous `FlowMonitor`) post a
+  `ControlEvent::ToolCompleted` back to the control lane, which routes them through
+  the same gate. This closes the prior fracture where background tools could only
+  be gated indirectly on delivered state: `done(called_ok(..))` now works for
+  background tools too. A `before_tool` veto posts no completion, so vetoed tools
+  never advance the flow — matching the inline path.
 - **CI: feature-boundary checks.** Added a job that builds the workspace with
   `--no-default-features` and `--all-features` (both verified green), so the
   feature-heavy SDK can't regress at the extremes. Also: `await_holding_lock` is
