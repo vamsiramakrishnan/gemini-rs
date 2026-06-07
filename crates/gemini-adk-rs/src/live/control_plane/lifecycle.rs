@@ -158,38 +158,16 @@ pub(in crate::live) async fn handle_turn_complete(
         }
     }
 
-    // 7e. Conversation repair (Phase 6)
-    if let Some(ref mut needs_tracker) = control_plane.needs_fulfillment {
-        if let Some(ref pm) = phase_machine {
-            let machine = pm.lock().await;
-            let phase_name = machine.current().to_string();
-            if let Some(phase) = machine.current_phase() {
-                if !phase.needs.is_empty() {
-                    let needs = phase.needs.clone();
-                    drop(machine); // release lock before async work
-                    match needs_tracker.evaluate(&phase_name, &needs, state) {
-                        RepairAction::Nudge {
-                            unfulfilled,
-                            attempt,
-                        } => {
-                            context_buffer.push(gemini_genai_rs::prelude::Content::model(format!(
-                                "I still need to collect: {}. Let me ask about these.",
-                                unfulfilled.join(", ")
-                            )));
-                            if attempt == 1 {
-                                should_prompt = true;
-                            }
-                        }
-                        RepairAction::Escalate { unfulfilled } => {
-                            let _ = state.set("repair:escalation", true);
-                            let _ = state.set("repair:unfulfilled", unfulfilled);
-                        }
-                        RepairAction::None => {}
-                    }
-                }
-            }
-        }
-    }
+    // 7e. Conversation repair (Phase 6). (Extracted so the needs evaluation +
+    // nudge/escalate projection is a named, harness-covered unit — see `harness`
+    // below and docs/plans/2026-06-07-turn-tool-pipeline-rfc.md.)
+    should_prompt |= evaluate_repair(
+        &mut control_plane.needs_fulfillment,
+        phase_machine,
+        state,
+        &mut context_buffer,
+    )
+    .await;
 
     // 7f. Context injection steering (Phase 4)
     if matches!(
@@ -327,6 +305,55 @@ pub(in crate::live) async fn handle_turn_complete(
             }
         });
     }
+}
+
+/// Evaluate conversation repair for the current phase's `needs`.
+///
+/// When the active phase declares unmet `needs`, runs the needs tracker and
+/// projects the outcome: a `Nudge` pushes a "still need to collect" context line
+/// (and, on the first attempt, requests a prompt — returned as `true`); an
+/// `Escalate` latches `repair:escalation` + `repair:unfulfilled` into state.
+/// Behavior-preserving lift of step 7e. Returns whether the model should be
+/// prompted after the batched context.
+async fn evaluate_repair(
+    needs_fulfillment: &mut Option<crate::live::needs::NeedsFulfillment>,
+    phase_machine: &Option<tokio::sync::Mutex<PhaseMachine>>,
+    state: &State,
+    context_buffer: &mut Vec<gemini_genai_rs::prelude::Content>,
+) -> bool {
+    let mut should_prompt = false;
+    if let Some(ref mut needs_tracker) = needs_fulfillment {
+        if let Some(ref pm) = phase_machine {
+            let machine = pm.lock().await;
+            let phase_name = machine.current().to_string();
+            if let Some(phase) = machine.current_phase() {
+                if !phase.needs.is_empty() {
+                    let needs = phase.needs.clone();
+                    drop(machine); // release lock before async work
+                    match needs_tracker.evaluate(&phase_name, &needs, state) {
+                        RepairAction::Nudge {
+                            unfulfilled,
+                            attempt,
+                        } => {
+                            context_buffer.push(gemini_genai_rs::prelude::Content::model(format!(
+                                "I still need to collect: {}. Let me ask about these.",
+                                unfulfilled.join(", ")
+                            )));
+                            if attempt == 1 {
+                                should_prompt = true;
+                            }
+                        }
+                        RepairAction::Escalate { unfulfilled } => {
+                            let _ = state.set("repair:escalation", true);
+                            let _ = state.set("repair:unfulfilled", unfulfilled);
+                        }
+                        RepairAction::None => {}
+                    }
+                }
+            }
+        }
+    }
+    should_prompt
 }
 
 /// Re-latch the governed flow for a turn and project its status.
@@ -594,6 +621,7 @@ mod harness {
     use crate::live::context_writer::PendingContext;
     use crate::live::events::LiveEvent;
     use crate::live::extractor::{ExtractionTrigger, TurnExtractor};
+    use crate::live::needs::{NeedsFulfillment, RepairConfig};
     use crate::live::phase::{Phase, PhaseMachine, Transition};
     use crate::live::processor::{ControlPlaneConfig, SharedState};
     use crate::live::steering::{ContextDelivery, SteeringMode};
@@ -955,6 +983,38 @@ mod harness {
                 .unwrap_or_default()
                 .contains(&"greet".to_string()),
             "completed step latched done"
+        );
+    }
+
+    #[tokio::test]
+    async fn repair_nudges_then_escalates_when_a_need_stays_unmet() {
+        // The repair stage: while the active phase's `needs` go unmet, repair
+        // nudges, then latches `repair:escalation` once the threshold is crossed.
+        let mut gather = Phase::new("gather", "Collect the customer id");
+        gather.needs = vec!["customer_id".to_string()];
+        let mut machine = PhaseMachine::new("gather");
+        machine.add_phase(gather);
+
+        let mut h = Harness::new();
+        h.phase = Some(tokio::sync::Mutex::new(machine));
+        h.control.needs_fulfillment = Some(NeedsFulfillment::new(
+            RepairConfig::new().nudge_after(1).escalate_after(2),
+        ));
+
+        // Turn 1: stall count 1 -> nudge, no escalation yet.
+        h.run_turn().await;
+        assert_eq!(
+            h.state.get::<bool>("repair:escalation"),
+            None,
+            "no escalation after one stall"
+        );
+
+        // Turn 2: stall count 2 -> escalate, signal latched into state.
+        h.run_turn().await;
+        assert_eq!(h.state.get::<bool>("repair:escalation"), Some(true));
+        assert_eq!(
+            h.state.get::<Vec<String>>("repair:unfulfilled"),
+            Some(vec!["customer_id".to_string()])
         );
     }
 }
