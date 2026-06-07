@@ -56,6 +56,17 @@ pub(crate) enum FastEvent {
 pub(crate) enum ControlEvent {
     ToolCall(Vec<gemini_genai_rs::prelude::FunctionCall>),
     ToolCallCancelled(Vec<String>),
+    /// A background tool finished. Posted by the detached background task (which
+    /// can't reach the synchronous `FlowMonitor`) so the control lane can advance
+    /// the governed flow through the same gate as inline tools (#7).
+    ToolCompleted {
+        /// The tool call's correlation id (for once-per-call_id flow dedup).
+        call_id: String,
+        /// The tool name (matches `FunctionCall::name`).
+        name: String,
+        /// Whether the tool completed successfully.
+        ok: bool,
+    },
     Interrupted,
     TurnComplete,
     /// Model finished generating (even if interrupted). Fires before TurnComplete.
@@ -200,9 +211,15 @@ pub(crate) fn spawn_event_processor(
     let ctrl_callbacks = callbacks;
     let ctrl_shared = shared;
     let ctrl_timer_cancel = timer_cancel.clone();
+    // Weak sender handed to the control lane so background tool tasks can post
+    // completions back without keeping the channel open on shutdown (the lane
+    // upgrades it per background spawn; the channel closes once the router and
+    // all in-flight background tasks drop their strong senders).
+    let ctrl_tx_weak = ctrl_tx.downgrade();
     let ctrl_handle = tokio::spawn(async move {
         run_control_lane(
             ctrl_rx,
+            ctrl_tx_weak,
             ctrl_callbacks,
             dispatcher,
             writer,

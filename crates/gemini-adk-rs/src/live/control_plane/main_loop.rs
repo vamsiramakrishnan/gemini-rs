@@ -33,6 +33,7 @@ use super::tool_handler::handle_tool_calls;
 /// TranscriptBuffer is owned exclusively -- no Arc<Mutex<>> needed.
 pub(in crate::live) async fn run_control_lane(
     mut rx: tokio::sync::mpsc::Receiver<ControlEvent>,
+    completion_tx: tokio::sync::mpsc::WeakSender<ControlEvent>,
     callbacks: Arc<EventCallbacks>,
     dispatcher: Option<Arc<ToolDispatcher>>,
     writer: Arc<dyn SessionWriter>,
@@ -107,9 +108,15 @@ pub(in crate::live) async fn run_control_lane(
                     &middleware,
                     &mut control_plane.flow,
                     &mut tool_gate,
+                    &completion_tx,
                     &event_tx,
                 )
                 .await;
+            }
+            ControlEvent::ToolCompleted { call_id, name, ok } => {
+                // A background tool finished — advance the governed flow through
+                // the same gate as inline tools, deduped by call_id (#7).
+                tool_gate.observe_completion(&call_id, &name, ok, &mut control_plane.flow, &state);
             }
             ControlEvent::ToolCallCancelled(ids) => {
                 // Cancel background tasks first
