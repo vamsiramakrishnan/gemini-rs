@@ -18,6 +18,7 @@ use crate::live::phase::PhaseMachine;
 use crate::live::transcript::TranscriptBuffer;
 
 use super::extractors::run_extractors;
+use super::tool_gate::ToolGate;
 
 /// Handle tool calls: phase filtering -> user callback -> auto-dispatch -> interceptor -> send.
 pub(in crate::live) async fn handle_tool_calls(
@@ -36,6 +37,7 @@ pub(in crate::live) async fn handle_tool_calls(
     extractors: &[Arc<dyn TurnExtractor>],
     middleware: &Arc<crate::middleware::MiddlewareChain>,
     flow: &mut Option<crate::flow::FlowMonitor>,
+    tool_gate: &mut ToolGate,
     event_tx: &tokio::sync::broadcast::Sender<LiveEvent>,
 ) {
     // 0. Phase-scoped tool filtering: reject calls not in phase's allowed list
@@ -156,9 +158,15 @@ pub(in crate::live) async fn handle_tool_calls(
                             match disp.call_function(&call.name, call.args.clone()).await {
                                 Ok(result) => {
                                     let _ = middleware.run_after_tool(call, &result).await;
-                                    if let Some(mon) = flow.as_mut() {
-                                        mon.observe_tool(&call.name, true, state);
-                                    }
+                                    // Inline completion advances the governed flow
+                                    // through the single shared gate (#7).
+                                    tool_gate.observe_completion(
+                                        call.id.as_deref().unwrap_or(""),
+                                        &call.name,
+                                        true,
+                                        flow,
+                                        state,
+                                    );
                                     results.push(FunctionResponse {
                                         name: call.name.clone(),
                                         response: result,
@@ -168,9 +176,13 @@ pub(in crate::live) async fn handle_tool_calls(
                                 }
                                 Err(e) => {
                                     let _ = middleware.run_on_tool_error(call, &e).await;
-                                    if let Some(mon) = flow.as_mut() {
-                                        mon.observe_tool(&call.name, false, state);
-                                    }
+                                    tool_gate.observe_completion(
+                                        call.id.as_deref().unwrap_or(""),
+                                        &call.name,
+                                        false,
+                                        flow,
+                                        state,
+                                    );
                                     results.push(FunctionResponse {
                                         name: call.name.clone(),
                                         response: serde_json::json!({"error": e.to_string()}),
@@ -430,6 +442,7 @@ mod tests {
             &[],
             &middleware,
             &mut None,
+            &mut ToolGate::new(),
             &tx,
         )
         .await;

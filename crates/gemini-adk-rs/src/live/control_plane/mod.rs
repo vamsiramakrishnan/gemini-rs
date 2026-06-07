@@ -5,6 +5,7 @@
 mod extractors;
 mod lifecycle;
 mod main_loop;
+mod tool_gate;
 mod tool_handler;
 
 pub(super) use main_loop::run_control_lane;
