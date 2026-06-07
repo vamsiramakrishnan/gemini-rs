@@ -247,6 +247,14 @@ impl McpSessionManager {
     }
 
     #[cfg(feature = "mcp-http")]
+    #[cfg(not(feature = "mcp-http"))]
+    async fn http_request(&self, _id: u64, _req: &Value) -> Result<Value, McpError> {
+        Err(McpError::ConnectionFailed(
+            "SSE/HTTP MCP transport requires the `mcp-http` feature".to_string(),
+        ))
+    }
+
+    #[cfg(feature = "mcp-http")]
     async fn http_request(&self, id: u64, req: &Value) -> Result<Value, McpError> {
         let (url, headers) = match &self.params {
             McpConnectionParams::Sse { url, headers } => (url.clone(), headers.clone()),

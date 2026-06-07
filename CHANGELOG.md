@@ -20,6 +20,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (breaking)
 
+- **`reqwest` is now optional; the REST modules are feature-gated.** The default
+  `gemini-adk-rs` build no longer compiles `reqwest`. A new `http` feature pulls it,
+  and the REST-backed areas now actually gate their modules (fixing "feature
+  declared but not wired"): `vertex-ai-code-executor`, `vertex-ai-sessions`,
+  `vertex-ai-rag` (new — RAG retrieval tool + memory service), `mcp-http` (the SSE
+  transport; stdio MCP still works without it), and `gcs-artifacts` each enable
+  `http`. `VertexAiCodeExecutor`, `VertexAiRag*`, and the MCP HTTP path are behind
+  their features; enable the feature (or `--all-features`) to use them.
 - **Reactor: dead effect nouns removed.** Dropped `EffectPolicy::dedupe_key` and
   `cancel_scope` (never set or read by any rule) and `LiveEffect::TransitionPhase`
   (never produced; executor no-op'd it) — per the "make it real or delete it"

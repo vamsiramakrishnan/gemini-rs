@@ -6,8 +6,10 @@
 
 mod base;
 mod files;
+#[cfg(feature = "vertex-ai-rag")]
 mod vertex_ai_rag;
 
 pub use base::{BaseRetrievalTool, RetrievalResult};
 pub use files::FilesRetrievalTool;
+#[cfg(feature = "vertex-ai-rag")]
 pub use vertex_ai_rag::{VertexAiRagConfig, VertexAiRagRetrievalTool};

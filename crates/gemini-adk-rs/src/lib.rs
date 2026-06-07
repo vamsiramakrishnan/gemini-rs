@@ -168,17 +168,17 @@ pub use optimization::{
 // New re-exports — Code Executors
 pub use code_executors::{
     ContainerCodeExecutor, ContainerCodeExecutorConfig, UnsafeLocalCodeExecutor,
-    VertexAiCodeExecutor, VertexAiCodeExecutorConfig,
 };
+#[cfg(feature = "vertex-ai-code-executor")]
+pub use code_executors::{VertexAiCodeExecutor, VertexAiCodeExecutorConfig};
 
 // New re-exports — Plugins
 pub use plugin::{ContextFilterPlugin, GlobalInstructionPlugin, ReflectRetryToolPlugin};
 
 // New re-exports — Memory
-pub use memory::{
-    VertexAiMemoryBankConfig, VertexAiMemoryBankService, VertexAiRagMemoryConfig,
-    VertexAiRagMemoryService,
-};
+pub use memory::{VertexAiMemoryBankConfig, VertexAiMemoryBankService};
+#[cfg(feature = "vertex-ai-rag")]
+pub use memory::{VertexAiRagMemoryConfig, VertexAiRagMemoryService};
 
 // New re-exports — Sessions
 #[cfg(feature = "postgres-sessions")]
@@ -188,10 +188,9 @@ pub use session::{SqliteSessionConfig, SqliteSessionService};
 pub use session::{VertexAiSessionConfig, VertexAiSessionService};
 
 // New re-exports — Tools
-pub use tools::retrieval::{
-    BaseRetrievalTool, FilesRetrievalTool, RetrievalResult, VertexAiRagConfig,
-    VertexAiRagRetrievalTool,
-};
+pub use tools::retrieval::{BaseRetrievalTool, FilesRetrievalTool, RetrievalResult};
+#[cfg(feature = "vertex-ai-rag")]
+pub use tools::retrieval::{VertexAiRagConfig, VertexAiRagRetrievalTool};
 pub use tools::{
     BashToolPolicy, DiscoveryEngineSearchTool, Example, ExampleTool, ExecuteBashTool, ExitLoopTool,
     GetUserChoiceTool, LoadMemoryTool, PreloadMemoryTool, TransferToAgentTool, UrlContextTool,

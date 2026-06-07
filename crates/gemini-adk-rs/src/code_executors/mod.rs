@@ -12,7 +12,8 @@ pub mod types;
 pub mod unsafe_local;
 /// Utility functions for extracting code blocks and building parts.
 pub mod utils;
-/// Vertex AI managed code executor.
+/// Vertex AI managed code executor (REST; requires `vertex-ai-code-executor`).
+#[cfg(feature = "vertex-ai-code-executor")]
 pub mod vertex_ai;
 
 pub use base::{CodeExecutor, CodeExecutorError};
@@ -20,6 +21,7 @@ pub use built_in::BuiltInCodeExecutor;
 pub use container::{ContainerCodeExecutor, ContainerCodeExecutorConfig};
 pub use types::{CodeExecutionInput, CodeExecutionResult, CodeFile};
 pub use unsafe_local::UnsafeLocalCodeExecutor;
+#[cfg(feature = "vertex-ai-code-executor")]
 pub use vertex_ai::{VertexAiCodeExecutor, VertexAiCodeExecutorConfig};
 
 #[cfg(test)]

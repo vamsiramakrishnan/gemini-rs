@@ -32,8 +32,9 @@ tracing = { version = "0.1", optional = true }
 metrics = { version = "0.24", optional = true }
 # Persistence backends (optional, feature-gated)
 sqlx = { version = "0.8", default-features = false, optional = true }
-# REST-backed services: Vertex AI sessions/RAG memory + retrieval, MCP-over-HTTP
-reqwest = { version = "0.12", features = ["json", "multipart"] }
+# REST-backed services: Vertex AI sessions/RAG memory + retrieval, MCP-over-HTTP.
+# Optional: only compiled when an `http`-pulling feature is enabled.
+reqwest = { version = "0.12", features = ["json", "multipart"], optional = true }
 base64 = "0.22"
 
 [dev-dependencies]
@@ -43,16 +44,21 @@ proptest = "1"
 [features]
 default = []
 gemini-llm = ["gemini-genai-rs/http", "gemini-genai-rs/generate"]
-gcs-artifacts = []
+# Pulls the optional reqwest HTTP client; enabled transitively by the
+# REST-backed feature areas below.
+http = ["dep:reqwest"]
+gcs-artifacts = ["http"]
 tracing-support = ["dep:tracing", "gemini-genai-rs/tracing-support"]
 metrics = ["dep:metrics"]
 database-sessions = ["dep:sqlx", "sqlx/runtime-tokio-rustls", "sqlx/sqlite"]
 postgres-sessions = ["database-sessions", "sqlx/postgres"]
-vertex-ai-sessions = []
+vertex-ai-sessions = ["http"]
 # Vertex AI managed code execution (Code Interpreter Extension over REST)
-vertex-ai-code-executor = []
+vertex-ai-code-executor = ["http"]
+# Vertex AI RAG retrieval tool + memory service (over REST)
+vertex-ai-rag = ["http"]
 # MCP-over-HTTP/SSE transport (stdio transport needs no extra deps)
-mcp-http = []
+mcp-http = ["http"]
 otel = ["gemini-genai-rs/otel", "tracing-support"]
 otel-otlp = ["gemini-genai-rs/otel-otlp", "tracing-support"]
 otel-gcp = ["gemini-genai-rs/otel-gcp", "tracing-support"]

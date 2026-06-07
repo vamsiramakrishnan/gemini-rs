@@ -23,9 +23,9 @@ pub use load_memory::LoadMemoryTool;
 pub use long_running::LongRunningFunctionTool;
 pub use mcp::{McpConnectionParams, McpError, McpSessionManager, McpTool, McpToolset};
 pub use preload_memory::PreloadMemoryTool;
-pub use retrieval::{
-    BaseRetrievalTool, FilesRetrievalTool, RetrievalResult, VertexAiRagRetrievalTool,
-};
+#[cfg(feature = "vertex-ai-rag")]
+pub use retrieval::VertexAiRagRetrievalTool;
+pub use retrieval::{BaseRetrievalTool, FilesRetrievalTool, RetrievalResult};
 pub use transfer_to_agent::TransferToAgentTool;
 pub use url_context::UrlContextTool;
 pub use vertex_ai_search::{DiscoveryEngineSearchTool, VertexAiSearchConfig, VertexAiSearchTool};
