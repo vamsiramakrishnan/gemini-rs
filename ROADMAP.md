@@ -80,8 +80,10 @@ Authored as focused, green commits, in this order:
 5. ✅ **Typed graph macros** — `voice_flow!` generates compile-time-checked
    step/tool/slot name constants (typos fail the build). *(Full declarative DSL
    body — stages/transitions/guards in macro syntax — is a follow-up.)*
-6. 📋 **Bidirectional visual devtools loop** — `inspect`/`graph`/`simulate`/
-   `replay`/`why` CLI over the spec + traces.
+6. ✅ **Visual devtools loop** — `adk flow inspect`/`graph`/`simulate` over a
+   ConversationSpec JSON (summary / Mermaid / model-free scenario run). *(`replay`/
+   `why` over recorded traces are follow-ups; `explain()` already answers "why" in
+   library.)*
 7. ✅ **Policy overlays as reusable aspects** — `Policy::safety_handoff` (→ a
    terminating `safety` digression), `Policy::redact` (redaction set), and
    `Policy::commit(..).idempotency_key/.compensate_with` (commit governance), all

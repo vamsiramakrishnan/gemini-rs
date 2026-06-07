@@ -40,6 +40,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`adk flow` devtools.** A CLI command group over a serializable
+  `ConversationSpec`: `adk flow inspect <spec.json>` (stages/tools/digressions/
+  policies/redaction summary), `adk flow graph <spec.json>` (Mermaid diagram), and
+  `adk flow simulate <spec.json> <scenario.json>` (run a model-free scenario, PASS/
+  FAIL). Closes the draft → inspect → simulate authoring loop with no live API.
 - **`conversation-from-script` skill.** A Claude Code skill
   (`.claude/skills/conversation-from-script/`) that drafts a serializable
   `ConversationSpec` + simulation `Scenario` tests from a call-center script/SOP —
