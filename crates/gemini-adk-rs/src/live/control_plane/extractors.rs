@@ -61,7 +61,7 @@ pub(in crate::live) async fn run_extractors(
         match result {
             Ok((extractor, value)) => {
                 let name = extractor.name().to_string();
-                state.set(&name, &value);
+                let _ = state.set(&name, &value);
                 // Emit top-level extraction event
                 let _ = event_tx.send(LiveEvent::Extraction {
                     name: name.clone(),
@@ -105,7 +105,7 @@ fn promote_extraction_fields(
             if val.is_null() {
                 continue;
             }
-            state.set(field, val.clone());
+            let _ = state.set(field, val.clone());
             let _ = event_tx.send(LiveEvent::Extraction {
                 name: format!("{name}.{field}"),
                 value: val.clone(),
@@ -159,8 +159,8 @@ fn promote_extraction_fields(
             continue;
         }
 
-        state.set(&rule.state_key, val.clone());
-        state.set(
+        let _ = state.set(&rule.state_key, val.clone());
+        let _ = state.set(
             format!("state_meta:{}", rule.state_key),
             json!({
                 "source": "extraction",
@@ -277,7 +277,7 @@ pub(in crate::live) async fn run_extractors_with_window(
         match result {
             Ok((extractor, value)) => {
                 let name = extractor.name().to_string();
-                state.set(&name, &value);
+                let _ = state.set(&name, &value);
                 let _ = event_tx.send(LiveEvent::Extraction {
                     name: name.clone(),
                     value: value.clone(),
@@ -409,7 +409,7 @@ mod tests {
         .await;
         assert!(!state.contains("debt_acknowledged"));
 
-        state.set("presented:debt_details", true);
+        let _ = state.set("presented:debt_details", true);
         let mut second_buffer = buffer_with_turn();
         run_extractors(
             &[extractor],

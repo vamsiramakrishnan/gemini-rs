@@ -34,6 +34,8 @@ pub struct RunResponse {
     pub response: String,
     pub events: Vec<AgentEvent>,
     pub state: HashMap<String, serde_json::Value>,
+    /// Trace id for this run, fetchable via `GET /debug/trace/:id`.
+    pub trace_id: String,
 }
 
 /// A single event from agent execution.
@@ -111,7 +113,7 @@ pub struct EvalRunRequest {
 }
 
 /// Eval result summary.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct EvalResultSummary {
     pub agent: String,
     pub timestamp: String,

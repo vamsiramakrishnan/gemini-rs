@@ -483,7 +483,9 @@ impl DemoApp for Playbook {
                     .initial_phase("greet")
                     // Turn boundary: increment turn counter.
                     .on_turn_boundary(move |state, _writer| async move {
-                        let _turn_count: u32 = state.modify("session:turn_count", 0u32, |n| n + 1);
+                        let _turn_count: u32 = state
+                            .modify("session:turn_count", 0u32, |n| n + 1)
+                            .unwrap_or(0);
                     })
             })
             .await

@@ -187,9 +187,17 @@ fn expand(description: LitStr, func: ItemFn) -> syn::Result<proc_macro2::TokenSt
     let destructure = &field_idents;
     let forward_args = &field_idents;
 
+    // Upstream crates are reached through `gemini_adk_rs::__macros` so the consumer
+    // doesn't need them in scope under those exact names.
+    let serde = quote! { ::gemini_adk_rs::__macros::serde };
+    let schemars = quote! { ::gemini_adk_rs::__macros::schemars };
+    let async_trait = quote! { ::gemini_adk_rs::__macros::async_trait };
+    let serde_json = quote! { ::gemini_adk_rs::__macros::serde_json };
+
     let expanded = quote! {
         // Hidden args struct: drives both deserialization and schema generation.
-        #[derive(::serde::Deserialize, ::schemars::JsonSchema)]
+        #[derive(#serde::Deserialize, #schemars::JsonSchema)]
+        #[serde(crate = "gemini_adk_rs::__macros::serde")]
         #[allow(non_camel_case_types, non_snake_case)]
         struct #args_struct {
             #(#struct_fields),*
@@ -203,7 +211,7 @@ fn expand(description: LitStr, func: ItemFn) -> syn::Result<proc_macro2::TokenSt
         #[allow(non_camel_case_types)]
         #vis struct #tool_struct;
 
-        #[::async_trait::async_trait]
+        #[#async_trait::async_trait]
         impl ::gemini_adk_rs::tool::ToolFunction for #tool_struct {
             fn name(&self) -> &str {
                 #fn_name_str
@@ -213,20 +221,20 @@ fn expand(description: LitStr, func: ItemFn) -> syn::Result<proc_macro2::TokenSt
                 #description
             }
 
-            fn parameters(&self) -> ::core::option::Option<::serde_json::Value> {
-                let root = ::schemars::schema_for!(#args_struct);
+            fn parameters(&self) -> ::core::option::Option<#serde_json::Value> {
+                let root = #schemars::schema_for!(#args_struct);
                 ::core::option::Option::Some(
-                    ::serde_json::to_value(root)
+                    #serde_json::to_value(root)
                         .expect("schemars schema should serialize to JSON"),
                 )
             }
 
             async fn call(
                 &self,
-                args: ::serde_json::Value,
-            ) -> ::core::result::Result<::serde_json::Value, ::gemini_adk_rs::error::ToolError> {
+                args: #serde_json::Value,
+            ) -> ::core::result::Result<#serde_json::Value, ::gemini_adk_rs::error::ToolError> {
                 let #args_struct { #(#destructure),* } =
-                    ::serde_json::from_value(args).map_err(|e| {
+                    #serde_json::from_value(args).map_err(|e| {
                         ::gemini_adk_rs::error::ToolError::InvalidArgs(
                             ::std::format!("Failed to deserialize arguments: {e}"),
                         )
@@ -401,6 +409,202 @@ fn expand_extract(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     })
 }
 
+/// Derive a [`Frame`] impl from a struct's `#[slot(..)]` fields.
+///
+/// Every named field becomes a slot (state key = field name unless overridden).
+/// The generated `fn frame() -> FrameSpec` carries each slot's prompt, reprompt,
+/// confirmation policy, and PII flag — the metadata the conversation compiler and
+/// repair use.
+///
+/// ```ignore
+/// #[derive(Frame)]
+/// #[frame(name = "booking")]
+/// struct Booking {
+///     #[slot(prompt = "For how many people?", confirm = "low_confidence")]
+///     party_size: u8,
+///     #[slot(prompt = "Name?", pii)]
+///     name: String,
+/// }
+/// ```
+///
+/// Field `#[slot(..)]` options: `prompt`, `reprompt`, `confirm`
+/// (`never`/`low_confidence`/`always`), `state` (key override), `pii` (flag).
+/// Container `#[frame(name = "...")]` sets the frame name.
+#[proc_macro_derive(Frame, attributes(slot, frame, recognize))]
+pub fn derive_frame(item: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(item as DeriveInput);
+    match expand_frame(input) {
+        Ok(ts) => ts.into(),
+        Err(e) => e.to_compile_error().into(),
+    }
+}
+
+fn expand_frame(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
+    let ident = &input.ident;
+
+    let fields = match &input.data {
+        Data::Struct(s) => match &s.fields {
+            Fields::Named(named) => &named.named,
+            _ => {
+                return Err(syn::Error::new_spanned(
+                    ident,
+                    "#[derive(Frame)] requires a struct with named fields",
+                ))
+            }
+        },
+        _ => {
+            return Err(syn::Error::new_spanned(
+                ident,
+                "#[derive(Frame)] can only be applied to structs",
+            ))
+        }
+    };
+
+    // Container `#[frame(name = "...")]`.
+    let mut name = to_snake_case(&ident.to_string());
+    for attr in &input.attrs {
+        if attr.path().is_ident("frame") {
+            attr.parse_nested_meta(|meta| {
+                if meta.path.is_ident("name") {
+                    let v: LitStr = meta.value()?.parse()?;
+                    name = v.value();
+                    Ok(())
+                } else {
+                    Err(meta.error("unknown `frame` option (expected `name`)"))
+                }
+            })?;
+        }
+    }
+
+    let all_field_idents: Vec<_> = fields.iter().filter_map(|f| f.ident.clone()).collect();
+
+    let mut slot_exprs = Vec::new();
+    for field in fields {
+        let fname = field.ident.as_ref().expect("named field").to_string();
+        let mut state_key = fname.clone();
+        let mut prompt: Option<String> = None;
+        let mut reprompt: Option<String> = None;
+        let mut confirm = quote! { ::gemini_adk_rs::frame::ConfirmPolicy::Never };
+        let mut pii = false;
+        let mut min: Option<f64> = None;
+        let mut max: Option<f64> = None;
+        let mut non_empty = false;
+
+        // Optional `#[recognize(..)]` (same vocabulary as `#[derive(Extract)]`).
+        let recognizer = match field.attrs.iter().find(|a| a.path().is_ident("recognize")) {
+            Some(attr) => {
+                let r = slot_recognizer_expr(attr)?;
+                quote! { Some(#r) }
+            }
+            None => quote! { None },
+        };
+
+        for attr in &field.attrs {
+            if !attr.path().is_ident("slot") {
+                continue;
+            }
+            attr.parse_nested_meta(|meta| {
+                if meta.path.is_ident("prompt") {
+                    let v: LitStr = meta.value()?.parse()?;
+                    prompt = Some(v.value());
+                } else if meta.path.is_ident("reprompt") {
+                    let v: LitStr = meta.value()?.parse()?;
+                    reprompt = Some(v.value());
+                } else if meta.path.is_ident("state") {
+                    let v: LitStr = meta.value()?.parse()?;
+                    state_key = v.value();
+                } else if meta.path.is_ident("confirm") {
+                    let v: LitStr = meta.value()?.parse()?;
+                    confirm = match v.value().as_str() {
+                        "never" => quote! { ::gemini_adk_rs::frame::ConfirmPolicy::Never },
+                        "low_confidence" => {
+                            quote! { ::gemini_adk_rs::frame::ConfirmPolicy::LowConfidence }
+                        }
+                        "always" => quote! { ::gemini_adk_rs::frame::ConfirmPolicy::Always },
+                        other => {
+                            return Err(meta.error(format!(
+                                "unknown confirm policy '{other}' (expected never/low_confidence/always)"
+                            )))
+                        }
+                    };
+                } else if meta.path.is_ident("pii") {
+                    pii = true;
+                } else if meta.path.is_ident("min") {
+                    min = Some(lit_to_f64(&meta.value()?.parse()?)?);
+                } else if meta.path.is_ident("max") {
+                    max = Some(lit_to_f64(&meta.value()?.parse()?)?);
+                } else if meta.path.is_ident("non_empty") {
+                    non_empty = true;
+                } else {
+                    return Err(meta.error(
+                        "unknown `slot` option (expected prompt/reprompt/state/confirm/pii/min/max/non_empty)",
+                    ));
+                }
+                Ok(())
+            })?;
+        }
+
+        // Lower min/max/non_empty into a serializable SlotValidator.
+        let validate = if min.is_some() || max.is_some() {
+            let min_tok = match min {
+                Some(v) => quote! { Some(#v) },
+                None => quote! { None },
+            };
+            let max_tok = match max {
+                Some(v) => quote! { Some(#v) },
+                None => quote! { None },
+            };
+            quote! { Some(::gemini_adk_rs::frame::SlotValidator::Range { min: #min_tok, max: #max_tok }) }
+        } else if non_empty {
+            quote! { Some(::gemini_adk_rs::frame::SlotValidator::NonEmpty) }
+        } else {
+            quote! { None }
+        };
+
+        let prompt_tok = match prompt {
+            Some(p) => quote! { Some(#p.to_string()) },
+            None => quote! { None },
+        };
+        let reprompt_tok = match reprompt {
+            Some(p) => quote! { Some(#p.to_string()) },
+            None => quote! { None },
+        };
+        slot_exprs.push(quote! {
+            ::gemini_adk_rs::frame::SlotSpec {
+                name: #fname.to_string(),
+                state_key: #state_key.to_string(),
+                prompt: #prompt_tok,
+                reprompt: #reprompt_tok,
+                confirm: #confirm,
+                pii: #pii,
+                recognizer: #recognizer,
+                validate: #validate,
+            }
+        });
+    }
+
+    let doc = format!("The `FrameSpec` derived from `{ident}`'s `#[slot(..)]` fields.");
+    Ok(quote! {
+        impl ::gemini_adk_rs::frame::Frame for #ident {
+            #[doc = #doc]
+            fn frame() -> ::gemini_adk_rs::frame::FrameSpec {
+                ::gemini_adk_rs::frame::FrameSpec {
+                    name: #name.to_string(),
+                    slots: ::std::vec![ #(#slot_exprs),* ],
+                }
+            }
+        }
+
+        impl #ident {
+            #[allow(dead_code)]
+            #[doc(hidden)]
+            fn __frame_mark_fields_used(&self) {
+                #( let _ = &self.#all_field_idents; )*
+            }
+        }
+    })
+}
+
 /// Build the `Recognizer::..` expression for a single `#[recognize(..)]` attr.
 fn recognizer_expr(attr: &syn::Attribute) -> syn::Result<proc_macro2::TokenStream> {
     let r = quote! { ::gemini_adk_rs::extract::Recognizer };
@@ -452,6 +656,74 @@ fn recognizer_expr(attr: &syn::Attribute) -> syn::Result<proc_macro2::TokenStrea
         Meta::List(l) => Err(syn::Error::new_spanned(
             l,
             "unexpected nested list in `#[recognize(..)]`",
+        )),
+    }
+}
+
+/// Build a serializable `SlotRecognizer` expression for a `#[recognize(..)]` attr
+/// on a `#[derive(Frame)]` field (same vocabulary as the Extract derive).
+fn slot_recognizer_expr(attr: &syn::Attribute) -> syn::Result<proc_macro2::TokenStream> {
+    let r = quote! { ::gemini_adk_rs::frame::SlotRecognizer };
+    let meta: Meta = attr.parse_args()?;
+    match meta {
+        Meta::Path(p) => {
+            let id = p
+                .get_ident()
+                .ok_or_else(|| syn::Error::new_spanned(&p, "expected a recognizer name"))?;
+            match id.to_string().as_str() {
+                "integer" => Ok(quote! { #r::Integer }),
+                "money" => Ok(quote! { #r::Money }),
+                "yes_no" => Ok(quote! { #r::YesNo }),
+                "datetime" => Ok(quote! { #r::DateTime }),
+                other => Err(syn::Error::new_spanned(
+                    &p,
+                    format!("unknown recognizer `{other}`"),
+                )),
+            }
+        }
+        Meta::NameValue(nv) => {
+            let id = nv
+                .path
+                .get_ident()
+                .ok_or_else(|| syn::Error::new_spanned(&nv.path, "expected a recognizer name"))?;
+            match id.to_string().as_str() {
+                "integer_near" => {
+                    let a = str_array(&nv.value)?;
+                    Ok(quote! { #r::IntegerNear(::std::vec![ #(#a.to_string()),* ]) })
+                }
+                "one_of" => {
+                    let a = str_array(&nv.value)?;
+                    Ok(quote! { #r::OneOf(::std::vec![ #(#a.to_string()),* ]) })
+                }
+                "fuzzy" => {
+                    let a = str_array(&nv.value)?;
+                    Ok(quote! { #r::Fuzzy(::std::vec![ #(#a.to_string()),* ]) })
+                }
+                "regex" => {
+                    let s = str_lit(&nv.value)?;
+                    Ok(quote! { #r::Regex(#s.to_string()) })
+                }
+                other => Err(syn::Error::new_spanned(
+                    &nv.path,
+                    format!("`{other}` does not take a value"),
+                )),
+            }
+        }
+        Meta::List(l) => Err(syn::Error::new_spanned(
+            l,
+            "unexpected nested list in `#[recognize(..)]`",
+        )),
+    }
+}
+
+/// Parse an integer or float literal into an `f64` (for slot `min`/`max`).
+fn lit_to_f64(lit: &Lit) -> syn::Result<f64> {
+    match lit {
+        Lit::Int(i) => i.base10_parse::<f64>(),
+        Lit::Float(f) => f.base10_parse::<f64>(),
+        other => Err(syn::Error::new_spanned(
+            other,
+            "expected a numeric literal for `min`/`max`",
         )),
     }
 }

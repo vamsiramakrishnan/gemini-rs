@@ -92,10 +92,6 @@ pub struct EffectPolicy {
     pub mode: EffectMode,
     /// Optional maximum time budget for the effect.
     pub timeout: Option<Duration>,
-    /// Optional key used to collapse duplicate queued effects.
-    pub dedupe_key: Option<String>,
-    /// Optional cancellation group for replacing stale concurrent work.
-    pub cancel_scope: Option<String>,
 }
 
 impl Default for EffectPolicy {
@@ -103,8 +99,6 @@ impl Default for EffectPolicy {
         Self {
             mode: EffectMode::Blocking,
             timeout: None,
-            dedupe_key: None,
-            cancel_scope: None,
         }
     }
 }
@@ -137,8 +131,6 @@ pub enum LiveEffect {
     UpdateInstruction(String),
     /// Emit a semantic event for observers.
     Emit(LiveEvent),
-    /// Request a phase transition by name.
-    TransitionPhase(String),
 }
 
 /// A policy-wrapped effect.

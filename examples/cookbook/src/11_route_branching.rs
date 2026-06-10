@@ -99,8 +99,8 @@ async fn main() {
 
     println!("--- Scenario 1: Billing Request ---");
     let state = State::new();
-    state.set("department", "billing");
-    state.set("account_id", "ACC-12345");
+    let _ = state.set("department", "billing");
+    let _ = state.set("account_id", "ACC-12345");
 
     let result = router.run(&state).await.unwrap();
     println!("Router selected: {}\n", result);
@@ -109,8 +109,8 @@ async fn main() {
 
     println!("--- Scenario 2: Technical Support ---");
     let state = State::new();
-    state.set("department", "technical");
-    state.set("issue_description", "Wi-Fi keeps disconnecting");
+    let _ = state.set("department", "technical");
+    let _ = state.set("issue_description", "Wi-Fi keeps disconnecting");
 
     let result = router.run(&state).await.unwrap();
     println!("Router selected: {}\n", result);
@@ -119,8 +119,8 @@ async fn main() {
 
     println!("--- Scenario 3: Sales Intent ---");
     let state = State::new();
-    state.set("wants_to_buy", true);
-    state.set("product_interest", "Enterprise Pro");
+    let _ = state.set("wants_to_buy", true);
+    let _ = state.set("product_interest", "Enterprise Pro");
 
     let result = router.run(&state).await.unwrap();
     println!("Router selected: {}\n", result);
@@ -138,9 +138,9 @@ async fn main() {
 
     println!("--- S:: Predicate Helpers ---");
     let predicate_state = State::new();
-    predicate_state.set("vip", true);
-    predicate_state.set("tier", "gold");
-    predicate_state.set("intent", "upgrade");
+    let _ = predicate_state.set("vip", true);
+    let _ = predicate_state.set("tier", "gold");
+    let _ = predicate_state.set("intent", "upgrade");
 
     let is_vip = S::is_true("vip");
     let is_gold = S::eq("tier", "gold");

@@ -24,6 +24,7 @@ use crate::live::watcher::WatcherRegistry;
 use super::dispatch_callback;
 use super::extractors::run_extractors_with_window;
 use super::lifecycle::handle_turn_complete;
+use super::tool_gate::ToolGate;
 use super::tool_handler::handle_tool_calls;
 
 /// Control lane processor -- handles lifecycle events, tool dispatch,
@@ -32,6 +33,7 @@ use super::tool_handler::handle_tool_calls;
 /// TranscriptBuffer is owned exclusively -- no Arc<Mutex<>> needed.
 pub(in crate::live) async fn run_control_lane(
     mut rx: tokio::sync::mpsc::Receiver<ControlEvent>,
+    completion_tx: tokio::sync::mpsc::WeakSender<ControlEvent>,
     callbacks: Arc<EventCallbacks>,
     dispatcher: Option<Arc<ToolDispatcher>>,
     writer: Arc<dyn SessionWriter>,
@@ -59,6 +61,11 @@ pub(in crate::live) async fn run_control_lane(
     // Track which turn each interval-based extractor last ran on.
     let mut extraction_turn_tracker: std::collections::HashMap<String, u32> =
         std::collections::HashMap::new();
+
+    // The single gate where completed tools advance the governed flow (#7).
+    // Persists across tool-call events so inline and (later) background
+    // completions dedupe by call_id.
+    let mut tool_gate = ToolGate::new();
 
     // Accumulated transcript text for the current turn, used to synthesize the
     // `is_final = true` transcript callbacks at the turn boundary.
@@ -100,9 +107,16 @@ pub(in crate::live) async fn run_control_lane(
                     &extractors,
                     &middleware,
                     &mut control_plane.flow,
+                    &mut tool_gate,
+                    &completion_tx,
                     &event_tx,
                 )
                 .await;
+            }
+            ControlEvent::ToolCompleted { call_id, name, ok } => {
+                // A background tool finished — advance the governed flow through
+                // the same gate as inline tools, deduped by call_id (#7).
+                tool_gate.observe_completion(&call_id, &name, ok, &mut control_plane.flow, &state);
             }
             ControlEvent::ToolCallCancelled(ids) => {
                 // Cancel background tasks first

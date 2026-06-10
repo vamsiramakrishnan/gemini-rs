@@ -180,8 +180,8 @@ mod tests {
     #[test]
     fn state_append_builds_context() {
         let state = State::new();
-        state.set("mood", "calm");
-        state.set("app:score", 0.85f64);
+        let _ = state.set("mood", "calm");
+        let _ = state.set("app:score", 0.85f64);
 
         let modifiers = vec![InstructionModifier::StateAppend(vec![
             "mood".into(),
@@ -197,7 +197,7 @@ mod tests {
     #[test]
     fn conditional_appends_when_true() {
         let state = State::new();
-        state.set("urgent", true);
+        let _ = state.set("urgent", true);
 
         let modifiers = vec![InstructionModifier::Conditional {
             predicate: Arc::new(|s: &State| s.get::<bool>("urgent").unwrap_or(false)),

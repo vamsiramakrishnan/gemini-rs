@@ -22,6 +22,7 @@ pub mod evaluation;
 pub mod events;
 pub mod extract;
 pub mod flow;
+pub mod frame;
 pub mod instruction;
 pub mod live;
 pub mod llm;
@@ -77,9 +78,22 @@ pub use error::{AgentError, AgentResult, ToolError};
 pub use events::{Event, EventActions, EventType, StructuredEvent};
 pub use extract::{Extract, Recognizer, RecordExtractor};
 pub use flow::{
-    render_ground, run as run_on_enter, Flow, FlowMonitor, Guard, Mode as FlowMode, StepAction,
-    Verdict, Violation,
+    render_ground, run as run_on_enter, CompiledFlow, Enforcement as FlowMode, Flow, FlowError,
+    FlowErrors, FlowExplanation, FlowMonitor, Guard, StepAction, ToolPolicy, Verdict, Violation,
 };
+pub use frame::{ConfirmPolicy, Frame, FrameSpec, SlotRecognizer, SlotSpec, SlotValidator};
+/// Re-exports the `#[tool]`/`#[derive(..)]` macros route their generated code
+/// through, so downstream crates don't need the upstream crate names
+/// (`serde`/`schemars`/`async_trait`/`serde_json`) in scope or under those exact
+/// names. Not public API.
+#[doc(hidden)]
+pub mod __macros {
+    pub use async_trait;
+    pub use schemars;
+    pub use serde;
+    pub use serde_json;
+}
+
 /// The `#[tool]` attribute macro — turns an `async fn` into a registrable Gemini tool.
 ///
 /// See the [`gemini_adk_macros_rs::tool`] documentation for details.
@@ -91,6 +105,10 @@ pub use gemini_adk_macros_rs::tool;
 /// See the [`gemini_adk_macros_rs::Extract`](macro@gemini_adk_macros_rs::Extract)
 /// documentation for details.
 pub use gemini_adk_macros_rs::Extract;
+/// Derive macro that generates a [`Frame`](frame::Frame) impl from a struct's
+/// `#[slot(..)]` fields. Shares the name `Frame` with the trait (macro vs type
+/// namespace), so both can be imported together.
+pub use gemini_adk_macros_rs::Frame;
 pub use instruction::inject_session_state;
 pub use live::{
     CallbackMode, EventCallbacks, LiveHandle, LiveSessionBuilder, LlmExtractor, ToolCallSummary,
@@ -113,7 +131,7 @@ pub use runner::Runner;
 pub use session::DatabaseSessionService;
 pub use session::{db_schema, InMemorySessionService, Session, SessionId, SessionService};
 pub use state::PrefixedState;
-pub use state::{State, StateMutation, StateMutationOrigin};
+pub use state::{SlotEvidence, State, StateMutation, StateMutationOrigin};
 pub use text::{
     DispatchTextAgent, FallbackTextAgent, FnTextAgent, JoinTextAgent, LlmTextAgent, LoopTextAgent,
     MapOverTextAgent, ParallelTextAgent, RaceTextAgent, RouteRule, RouteTextAgent,
@@ -150,17 +168,17 @@ pub use optimization::{
 // New re-exports — Code Executors
 pub use code_executors::{
     ContainerCodeExecutor, ContainerCodeExecutorConfig, UnsafeLocalCodeExecutor,
-    VertexAiCodeExecutor, VertexAiCodeExecutorConfig,
 };
+#[cfg(feature = "vertex-ai-code-executor")]
+pub use code_executors::{VertexAiCodeExecutor, VertexAiCodeExecutorConfig};
 
 // New re-exports — Plugins
 pub use plugin::{ContextFilterPlugin, GlobalInstructionPlugin, ReflectRetryToolPlugin};
 
 // New re-exports — Memory
-pub use memory::{
-    VertexAiMemoryBankConfig, VertexAiMemoryBankService, VertexAiRagMemoryConfig,
-    VertexAiRagMemoryService,
-};
+pub use memory::{VertexAiMemoryBankConfig, VertexAiMemoryBankService};
+#[cfg(feature = "vertex-ai-rag")]
+pub use memory::{VertexAiRagMemoryConfig, VertexAiRagMemoryService};
 
 // New re-exports — Sessions
 #[cfg(feature = "postgres-sessions")]
@@ -170,10 +188,9 @@ pub use session::{SqliteSessionConfig, SqliteSessionService};
 pub use session::{VertexAiSessionConfig, VertexAiSessionService};
 
 // New re-exports — Tools
-pub use tools::retrieval::{
-    BaseRetrievalTool, FilesRetrievalTool, RetrievalResult, VertexAiRagConfig,
-    VertexAiRagRetrievalTool,
-};
+pub use tools::retrieval::{BaseRetrievalTool, FilesRetrievalTool, RetrievalResult};
+#[cfg(feature = "vertex-ai-rag")]
+pub use tools::retrieval::{VertexAiRagConfig, VertexAiRagRetrievalTool};
 pub use tools::{
     BashToolPolicy, DiscoveryEngineSearchTool, Example, ExampleTool, ExecuteBashTool, ExitLoopTool,
     GetUserChoiceTool, LoadMemoryTool, PreloadMemoryTool, TransferToAgentTool, UrlContextTool,

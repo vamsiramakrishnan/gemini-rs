@@ -18,6 +18,7 @@ use crate::live::phase::PhaseMachine;
 use crate::live::transcript::TranscriptBuffer;
 
 use super::extractors::run_extractors;
+use super::tool_gate::ToolGate;
 
 /// Handle tool calls: phase filtering -> user callback -> auto-dispatch -> interceptor -> send.
 pub(in crate::live) async fn handle_tool_calls(
@@ -36,6 +37,8 @@ pub(in crate::live) async fn handle_tool_calls(
     extractors: &[Arc<dyn TurnExtractor>],
     middleware: &Arc<crate::middleware::MiddlewareChain>,
     flow: &mut Option<crate::flow::FlowMonitor>,
+    tool_gate: &mut ToolGate,
+    completion_tx: &tokio::sync::mpsc::WeakSender<crate::live::processor::ControlEvent>,
     event_tx: &tokio::sync::broadcast::Sender<LiveEvent>,
 ) {
     // 0. Phase-scoped tool filtering: reject calls not in phase's allowed list
@@ -102,7 +105,7 @@ pub(in crate::live) async fn handle_tool_calls(
                     // once-violated, gated) in Enforce mode; record in Observe.
                     if let Some(mon) = flow.as_mut() {
                         if let Err(reason) = mon.admits_tool(&call.name, state) {
-                            if mon.mode() == crate::flow::Mode::Enforce {
+                            if mon.mode() == crate::flow::Enforcement::Enforce {
                                 results.push(FunctionResponse {
                                     name: call.name.clone(),
                                     response: serde_json::json!({ "error": reason }),
@@ -132,14 +135,15 @@ pub(in crate::live) async fn handle_tool_calls(
                                 scheduling: *scheduling,
                             });
                             bg_spawns.push((call.clone(), formatter.clone()));
-                            // NOTE: a background tool is NOT recorded as flow-ok here.
-                            // Its real outcome (success, `before_tool` veto, failure, or
-                            // cancellation) is only known when the spawned task finishes,
-                            // and that task cannot reach the synchronous `FlowMonitor`.
-                            // Marking it ok now would wrongly latch `done(called_ok(..))`
-                            // and spend `once(..)` for work that may never succeed. Gate
-                            // background-tool steps on their delivered result instead
-                            // (e.g. `done(Guard::resolved(..))` / `captured([..])`).
+                            // A background tool is NOT recorded as flow-ok here: its
+                            // real outcome (success, `before_tool` veto, or failure) is
+                            // only known when the spawned task finishes. The task posts a
+                            // `ControlEvent::ToolCompleted` back to the control lane on
+                            // completion, which advances the flow through the same gate as
+                            // inline tools (#7). A `before_tool` veto posts nothing, so a
+                            // vetoed tool never advances the flow — matching the inline
+                            // path. `Guard::resolved(..)` / `captured([..])` still work for
+                            // gating on the delivered result; `called_ok(..)` now works too.
                         }
                         _ => {
                             // Standard: execute inline, wrapped in middleware hooks.
@@ -156,9 +160,15 @@ pub(in crate::live) async fn handle_tool_calls(
                             match disp.call_function(&call.name, call.args.clone()).await {
                                 Ok(result) => {
                                     let _ = middleware.run_after_tool(call, &result).await;
-                                    if let Some(mon) = flow.as_mut() {
-                                        mon.observe_tool(&call.name, true, state);
-                                    }
+                                    // Inline completion advances the governed flow
+                                    // through the single shared gate (#7).
+                                    tool_gate.observe_completion(
+                                        call.id.as_deref().unwrap_or(""),
+                                        &call.name,
+                                        true,
+                                        flow,
+                                        state,
+                                    );
                                     results.push(FunctionResponse {
                                         name: call.name.clone(),
                                         response: result,
@@ -168,9 +178,13 @@ pub(in crate::live) async fn handle_tool_calls(
                                 }
                                 Err(e) => {
                                     let _ = middleware.run_on_tool_error(call, &e).await;
-                                    if let Some(mon) = flow.as_mut() {
-                                        mon.observe_tool(&call.name, false, state);
-                                    }
+                                    tool_gate.observe_completion(
+                                        call.id.as_deref().unwrap_or(""),
+                                        &call.name,
+                                        false,
+                                        flow,
+                                        state,
+                                    );
                                     results.push(FunctionResponse {
                                         name: call.name.clone(),
                                         response: serde_json::json!({"error": e.to_string()}),
@@ -227,12 +241,14 @@ pub(in crate::live) async fn handle_tool_calls(
         let tracker = background_tracker.clone();
         let mw = middleware.clone();
         let call_id = call.id.clone().unwrap_or_default();
+        let completion_tx = completion_tx.clone();
         let cancel = CancellationToken::new();
 
         let handle = tokio::spawn(async move {
             // A `before_tool` veto blocks execution for background tools too,
             // matching the standard path and the `Live::middleware` contract:
-            // send an error response, skip dispatch, and self-clean.
+            // send an error response, skip dispatch, and self-clean. A vetoed tool
+            // posts no completion, so it never advances the governed flow (#7).
             if let Err(veto) = mw.run_before_tool(&call).await {
                 bg_writer
                     .send_tool_response(vec![FunctionResponse {
@@ -262,6 +278,19 @@ pub(in crate::live) async fn handle_tool_calls(
                 Err(e) => {
                     let _ = mw.run_on_tool_error(&call, e).await;
                 }
+            }
+
+            // Post the completion back to the control lane so it advances the
+            // governed flow through the same gate as inline tools (#7). Best
+            // effort: if the lane has shut down, the upgrade/send simply fails.
+            if let Some(tx) = completion_tx.upgrade() {
+                let _ = tx
+                    .send(crate::live::processor::ControlEvent::ToolCompleted {
+                        call_id: call.id.clone().unwrap_or_default(),
+                        name: call.name.clone(),
+                        ok: result.is_ok(),
+                    })
+                    .await;
             }
 
             let fmt: &dyn crate::live::background_tool::ResultFormatter = formatter
@@ -318,6 +347,9 @@ mod tests {
     use gemini_genai_rs::session::SessionError;
     use serde_json::json;
 
+    use crate::flow::{Enforcement, Flow, FlowMonitor, Guard};
+    use crate::live::background_tool::ToolExecutionMode;
+    use crate::live::processor::ControlEvent;
     use crate::middleware::{Middleware, MiddlewareChain};
     use crate::tool::{SimpleTool, ToolDispatcher};
 
@@ -412,6 +444,8 @@ mod tests {
         let state = State::new();
         let mut transcript = TranscriptBuffer::new();
         let (tx, _rx) = tokio::sync::broadcast::channel(16);
+        let (ctrl_tx, _ctrl_rx) =
+            tokio::sync::mpsc::channel::<crate::live::processor::ControlEvent>(8);
         let call = FunctionCall {
             name: "echo".into(),
             args: json!({ "x": 1 }),
@@ -430,6 +464,8 @@ mod tests {
             &[],
             &middleware,
             &mut None,
+            &mut ToolGate::new(),
+            &ctrl_tx.downgrade(),
             &tx,
         )
         .await;
@@ -476,6 +512,86 @@ mod tests {
             tool_runs.load(Ordering::SeqCst),
             0,
             "tool must not run when before_tool vetoes"
+        );
+    }
+
+    #[tokio::test]
+    async fn background_tool_posts_completion_that_advances_the_flow() {
+        // #7 step B: a background tool can't reach the synchronous FlowMonitor,
+        // so it posts a ToolCompleted back to the control lane, which routes it
+        // through the same gate as inline tools.
+        let tool_runs = Arc::new(AtomicUsize::new(0));
+        let dispatcher = Some(dispatcher_with_counter(tool_runs.clone()));
+        let writer: Arc<dyn SessionWriter> = Arc::new(NoopWriter);
+        let callbacks = EventCallbacks::default();
+        let state = State::new();
+        let mut transcript = TranscriptBuffer::new();
+        let (tx, _rx) = tokio::sync::broadcast::channel(16);
+        let (ctrl_tx, mut ctrl_rx) = tokio::sync::mpsc::channel::<ControlEvent>(8);
+        let middleware = Arc::new(MiddlewareChain::new());
+
+        let mut modes = std::collections::HashMap::new();
+        modes.insert(
+            "echo".to_string(),
+            ToolExecutionMode::Background {
+                formatter: None,
+                scheduling: None,
+            },
+        );
+
+        // A flow whose first step completes on `called_ok("echo")`.
+        let flow_def = Flow::new()
+            .step("run")
+            .done(Guard::called_ok("echo"))
+            .step("end")
+            .after("run")
+            .terminal()
+            .build()
+            .expect("valid flow");
+        let mut flow = Some(FlowMonitor::new(flow_def, Enforcement::Observe));
+        let mut gate = ToolGate::new();
+
+        let call = FunctionCall {
+            name: "echo".into(),
+            args: json!({ "x": 1 }),
+            id: Some("c1".into()),
+        };
+        handle_tool_calls(
+            vec![call],
+            &callbacks,
+            &dispatcher,
+            &writer,
+            &state,
+            &None,
+            &mut transcript,
+            &modes,
+            &None,
+            &[],
+            &middleware,
+            &mut flow,
+            &mut gate,
+            &ctrl_tx.downgrade(),
+            &tx,
+        )
+        .await;
+
+        // The background task runs detached and posts its completion back.
+        let evt = ctrl_rx.recv().await.expect("completion posted");
+        match evt {
+            ControlEvent::ToolCompleted { call_id, name, ok } => {
+                assert_eq!(call_id, "c1");
+                assert_eq!(name, "echo");
+                assert!(ok, "echo succeeded");
+                // Routing it through the gate advances the governed flow.
+                gate.observe_completion(&call_id, &name, ok, &mut flow, &state);
+            }
+            _ => panic!("expected ToolCompleted"),
+        }
+        assert_eq!(tool_runs.load(Ordering::SeqCst), 1, "background tool ran");
+        flow.as_mut().unwrap().on_turn(&state);
+        assert!(
+            flow.as_ref().unwrap().marking().done.contains("run"),
+            "background completion latched the step done"
         );
     }
 }

@@ -47,7 +47,7 @@ impl TextAgent for ParallelTextAgent {
         }
 
         let combined = results.join("\n");
-        state.set("output", &combined);
+        let _ = state.set("output", &combined);
         Ok(combined)
     }
 }

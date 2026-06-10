@@ -82,7 +82,7 @@ mod tests {
     fn get_auth_response_found() {
         let state = State::new();
         let cred = test_credential();
-        state.set("temp:my-oauth-cred", &cred);
+        let _ = state.set("temp:my-oauth-cred", &cred);
 
         let handler = AuthHandler::new(test_config());
         let result = handler.get_auth_response(&state);

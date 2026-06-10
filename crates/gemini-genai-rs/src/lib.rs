@@ -26,7 +26,6 @@ pub mod client;
 pub mod embed;
 #[cfg(feature = "files")]
 pub mod files;
-pub mod turn;
 #[cfg(feature = "generate")]
 pub mod generate;
 #[cfg(feature = "models")]
@@ -40,6 +39,7 @@ pub mod tokens;
 pub mod transport;
 #[cfg(feature = "tunings")]
 pub mod tunings;
+pub mod turn;
 #[cfg(feature = "vad")]
 pub mod vad;
 

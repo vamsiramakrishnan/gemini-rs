@@ -296,10 +296,10 @@ impl LiveSessionBuilder {
 
         // Store initial phase's `needs` metadata for ContextBuilder.
         if let Some(ref pm) = self.phase_machine {
-            state.session().set("phase", pm.current());
+            let _ = state.session().set("phase", pm.current());
             if let Some(phase) = pm.current_phase() {
                 if !phase.needs.is_empty() {
-                    state.set("session:phase_needs", phase.needs.clone());
+                    let _ = state.set("session:phase_needs", phase.needs.clone());
                 }
             }
         }

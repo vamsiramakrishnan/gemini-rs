@@ -34,7 +34,7 @@ impl TextAgent for SequentialTextAgent {
         for child in &self.children {
             last_output = child.run(state).await?;
             // Feed output as input for the next agent.
-            state.set("input", &last_output);
+            let _ = state.set("input", &last_output);
         }
         Ok(last_output)
     }

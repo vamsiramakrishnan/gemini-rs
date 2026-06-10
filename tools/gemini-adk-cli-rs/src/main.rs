@@ -131,6 +131,12 @@ enum Command {
     /// Check environment setup (API keys, toolchain, credentials).
     Doctor,
 
+    /// Conversation-compiler devtools: inspect, graph, and simulate a spec.
+    Flow {
+        #[command(subcommand)]
+        action: FlowAction,
+    },
+
     /// Deploy an agent to a cloud target.
     Deploy {
         /// Deployment target: cloud_run, gke, or agent_engine.
@@ -160,6 +166,27 @@ enum DeployTarget {
     CloudRun,
     Gke,
     AgentEngine,
+}
+
+#[derive(Subcommand)]
+enum FlowAction {
+    /// Print a summary of a compiled conversation spec (JSON file).
+    Inspect {
+        /// Path to a ConversationSpec JSON file.
+        spec: String,
+    },
+    /// Render the governed flow as a Mermaid diagram.
+    Graph {
+        /// Path to a ConversationSpec JSON file.
+        spec: String,
+    },
+    /// Run a model-free Scenario (JSON) against a conversation spec.
+    Simulate {
+        /// Path to a ConversationSpec JSON file.
+        spec: String,
+        /// Path to a Scenario JSON file.
+        scenario: String,
+    },
 }
 
 #[tokio::main]
@@ -260,6 +287,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         Command::Doctor => commands::doctor::run()?,
+
+        Command::Flow { action } => match action {
+            FlowAction::Inspect { spec } => commands::flow::inspect(&spec)?,
+            FlowAction::Graph { spec } => commands::flow::graph(&spec)?,
+            FlowAction::Simulate { spec, scenario } => {
+                commands::flow::simulate(&spec, &scenario).await?
+            }
+        },
 
         Command::Deploy {
             target,

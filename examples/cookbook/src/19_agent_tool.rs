@@ -40,8 +40,8 @@ async fn main() {
             .unwrap_or_else(|| "Unknown".into());
 
         // Write verification result back to state (bidirectional)
-        state.set("verified", true);
-        state.set("verification_method", "knowledge-based");
+        let _ = state.set("verified", true);
+        let _ = state.set("verification_method", "knowledge-based");
 
         Ok(format!(
             "Identity verified for {name}. Method: knowledge-based authentication. \
@@ -51,7 +51,7 @@ async fn main() {
 
     // Wrap the agent as a tool
     let shared_state = State::new();
-    shared_state.set("customer_name", "Alice Johnson");
+    let _ = shared_state.set("customer_name", "Alice Johnson");
 
     let verify_tool = TextAgentTool::new(
         "verify_identity",
@@ -93,14 +93,14 @@ async fn main() {
             .get::<String>("input")
             .unwrap_or_else(|| "general".into());
         let findings = format!("Found 3 relevant papers on: {topic}");
-        state.set("research_findings", &findings);
+        let _ = state.set("research_findings", &findings);
         Ok(findings)
     }));
 
     let analyzer: Arc<dyn TextAgent> = Arc::new(FnTextAgent::new("analyzer", |state| {
         let findings = state.get::<String>("research_findings").unwrap_or_default();
         let analysis = format!("Analysis: {findings} -- Key insight: topic is well-studied.");
-        state.set("analysis_result", &analysis);
+        let _ = state.set("analysis_result", &analysis);
         Ok(analysis)
     }));
 
@@ -146,7 +146,7 @@ async fn main() {
     println!("\n--- Part 3: Multiple Specialist Tools ---");
 
     let tool_state = State::new();
-    tool_state.set("customer_tier", "premium");
+    let _ = tool_state.set("customer_tier", "premium");
 
     // Specialist 1: Payment calculator
     let payment_tool = TextAgentTool::new(
@@ -161,7 +161,7 @@ async fn main() {
                 .and_then(|s| s.parse::<f64>().ok())
                 .unwrap_or(1000.0);
             let monthly = amount / 12.0;
-            state.set("last_calculation", monthly);
+            let _ = state.set("last_calculation", monthly);
             Ok(format!(
                 "Payment plan: ${amount:.2} total = ${monthly:.2}/month for 12 months"
             ))
@@ -177,7 +177,7 @@ async fn main() {
             let tier = state
                 .get::<String>("customer_tier")
                 .unwrap_or_else(|| "basic".into());
-            state.set("account_found", true);
+            let _ = state.set("account_found", true);
             Ok(format!(
                 "Account found. Tier: {tier}. Balance: $5,230.00. \
                  Status: Active."

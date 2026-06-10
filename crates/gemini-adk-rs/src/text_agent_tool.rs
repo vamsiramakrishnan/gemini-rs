@@ -129,9 +129,9 @@ impl ToolFunction for TextAgentTool {
     async fn call(&self, args: serde_json::Value) -> Result<serde_json::Value, ToolError> {
         // 1. Inject tool call args into state
         if let Some(request) = args.get("request").and_then(|r| r.as_str()) {
-            self.state.set("input", request);
+            let _ = self.state.set("input", request);
         }
-        self.state.set("agent_tool_args", &args);
+        let _ = self.state.set("agent_tool_args", &args);
 
         // 2. Run the text agent pipeline
         let result = self
@@ -181,8 +181,8 @@ mod tests {
                 .unwrap_or_else(|| "missing".into());
 
             // Write a value visible to the parent
-            state.set("child_wrote", true);
-            state.set("child_output", "from child agent");
+            let _ = state.set("child_wrote", true);
+            let _ = state.set("child_output", "from child agent");
 
             Ok(format!("Parent said: {parent_val}"))
         }
@@ -226,7 +226,7 @@ mod tests {
     #[tokio::test]
     async fn state_shared_bidirectionally() {
         let state = State::new();
-        state.set("parent_key", "hello from parent");
+        let _ = state.set("parent_key", "hello from parent");
 
         let tool = TextAgentTool::new("stateful", "Stateful tool", StatefulAgent, state.clone());
 

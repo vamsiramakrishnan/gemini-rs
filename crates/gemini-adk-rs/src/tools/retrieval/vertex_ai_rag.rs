@@ -191,7 +191,11 @@ pub(crate) fn build_retrieve_body(
         retrieval_config["topK"] = json!(top_k);
     }
     let mut query_obj = json!({ "text": query });
-    if retrieval_config.as_object().map(|o| !o.is_empty()).unwrap_or(false) {
+    if retrieval_config
+        .as_object()
+        .map(|o| !o.is_empty())
+        .unwrap_or(false)
+    {
         query_obj["ragRetrievalConfig"] = retrieval_config;
     }
 
@@ -303,11 +307,7 @@ impl BaseRetrievalTool for VertexAiRagRetrievalTool {
         "vertex_ai_rag_retrieval"
     }
 
-    async fn retrieve(
-        &self,
-        query: &str,
-        top_k: usize,
-    ) -> Result<Vec<RetrievalResult>, ToolError> {
+    async fn retrieve(&self, query: &str, top_k: usize) -> Result<Vec<RetrievalResult>, ToolError> {
         // Per-call top_k overrides the configured default when set.
         let top_k = self
             .config
@@ -401,7 +401,9 @@ mod tests {
         assert_eq!(body["query"]["text"], "q");
         // No top_k → no ragRetrievalConfig.
         assert!(body["query"].get("ragRetrievalConfig").is_none());
-        assert!(body["vertexRagStore"].get("vectorDistanceThreshold").is_none());
+        assert!(body["vertexRagStore"]
+            .get("vectorDistanceThreshold")
+            .is_none());
     }
 
     #[test]

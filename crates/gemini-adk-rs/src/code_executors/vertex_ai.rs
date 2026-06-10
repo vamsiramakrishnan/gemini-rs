@@ -403,7 +403,9 @@ impl VertexAiCodeExecutor {
             .json(&body)
             .send()
             .await
-            .map_err(|e| CodeExecutorError::ExecutionFailed(format!("execute request failed: {e}")))?;
+            .map_err(|e| {
+                CodeExecutorError::ExecutionFailed(format!("execute request failed: {e}"))
+            })?;
 
         let status = resp.status().as_u16();
         let text = resp.text().await.map_err(|e| {
@@ -426,8 +428,9 @@ impl VertexAiCodeExecutor {
 /// top-level payload with no `content` wrapper.
 #[cfg(feature = "vertex-ai-code-executor")]
 fn parse_execute_content(text: &str) -> Result<ExecuteContent, CodeExecutorError> {
-    let json: serde_json::Value = serde_json::from_str(text)
-        .map_err(|e| CodeExecutorError::ExecutionFailed(format!("parsing execute response: {e}")))?;
+    let json: serde_json::Value = serde_json::from_str(text).map_err(|e| {
+        CodeExecutorError::ExecutionFailed(format!("parsing execute response: {e}"))
+    })?;
 
     let content = json.get("content").unwrap_or(&json);
     let value = match content {
@@ -481,11 +484,7 @@ impl CodeExecutor for VertexAiCodeExecutor {
         {
             let code = Self::code_with_imports(&input.code);
             let content = self
-                .execute_code_interpreter(
-                    &code,
-                    &input.input_files,
-                    input.execution_id.as_deref(),
-                )
+                .execute_code_interpreter(&code, &input.input_files, input.execution_id.as_deref())
                 .await?;
 
             let output_files = content

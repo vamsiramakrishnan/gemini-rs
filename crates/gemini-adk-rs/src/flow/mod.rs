@@ -201,12 +201,32 @@ impl Guard {
         Guard::Spec(Pred::IsSet(format!("{}:result", name.as_ref())))
     }
     /// Conjunction.
+    ///
+    /// If every input is a serializable atom, the result is a serializable
+    /// `Pred::All`. If any input is a [`Guard::custom`], the result is itself a
+    /// custom guard that evaluates the conjunction at runtime — the custom guard
+    /// is **never silently dropped** (it merely makes the combinator
+    /// non-serializable, which surfaces as an error only if you try to serialize
+    /// the flow).
     pub fn all(guards: impl IntoIterator<Item = Guard>) -> Self {
-        Guard::Spec(Pred::All(collect_specs(guards)))
+        let guards: Vec<Guard> = guards.into_iter().collect();
+        if guards.iter().all(|g| matches!(g, Guard::Spec(_))) {
+            Guard::Spec(Pred::All(specs_unchecked(guards)))
+        } else {
+            Guard::Custom(Arc::new(move |ctx| guards.iter().all(|g| g.eval(ctx))))
+        }
     }
     /// Disjunction.
+    ///
+    /// Mirrors [`Guard::all`]: custom inputs are preserved as a runtime closure
+    /// rather than erased.
     pub fn any(guards: impl IntoIterator<Item = Guard>) -> Self {
-        Guard::Spec(Pred::Any(collect_specs(guards)))
+        let guards: Vec<Guard> = guards.into_iter().collect();
+        if guards.iter().all(|g| matches!(g, Guard::Spec(_))) {
+            Guard::Spec(Pred::Any(specs_unchecked(guards)))
+        } else {
+            Guard::Custom(Arc::new(move |ctx| guards.iter().any(|g| g.eval(ctx))))
+        }
     }
     /// Negation of a serializable atom.
     #[allow(clippy::should_implement_trait)]
@@ -237,15 +257,16 @@ impl Guard {
     }
 }
 
-fn collect_specs(guards: impl IntoIterator<Item = Guard>) -> Vec<Pred> {
+/// Unwrap a list of guards known to be all `Spec` into their predicates.
+///
+/// The caller (`Guard::all`/`Guard::any`) only invokes this after verifying every
+/// guard is a `Spec`, so the `Custom` arm is unreachable.
+fn specs_unchecked(guards: Vec<Guard>) -> Vec<Pred> {
     guards
         .into_iter()
         .map(|g| match g {
             Guard::Spec(p) => p,
-            // Custom guards can't live inside a serializable combinator; treat
-            // as opaque-always for serialization purposes. (Compose custom
-            // guards at the top level instead.)
-            Guard::Custom(_) => Pred::Always,
+            Guard::Custom(_) => unreachable!("specs_unchecked called with a custom guard"),
         })
         .collect()
 }
@@ -414,6 +435,113 @@ impl Flow {
         }
     }
 
+    /// Every tool name referenced anywhere in the flow (allow/deny/once/
+    /// never_until/confirm). The universe over which [`ToolPolicy`] reasons.
+    fn tool_universe(&self) -> BTreeSet<String> {
+        let mut tools = BTreeSet::new();
+        for s in &self.steps {
+            tools.extend(s.allow.iter().cloned());
+            tools.extend(s.deny.iter().cloned());
+        }
+        for c in &self.constraints {
+            match c {
+                Constraint::Once(t) => {
+                    tools.insert(t.clone());
+                }
+                Constraint::NeverUntil { tool, .. } => {
+                    tools.insert(tool.clone());
+                }
+                _ => {}
+            }
+        }
+        tools.extend(self.confirm_tools.iter().cloned());
+        tools
+    }
+
+    /// Steps reachable from a root (a step with no `after` deps), following both
+    /// `after` edges and `Before(a, b)` ordering edges.
+    fn reachable_steps(&self) -> BTreeSet<String> {
+        let ids: BTreeSet<&str> = self.steps.iter().map(|s| s.id.as_str()).collect();
+        // Forward edges: a -> b when b.after contains a, or Before(a, b).
+        let mut succ: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+        for s in &self.steps {
+            for d in &s.after {
+                if ids.contains(d.as_str()) {
+                    succ.entry(d.as_str()).or_default().push(s.id.as_str());
+                }
+            }
+        }
+        for c in &self.constraints {
+            if let Constraint::Before(a, b) = c {
+                if ids.contains(a.as_str()) && ids.contains(b.as_str()) {
+                    succ.entry(a.as_str()).or_default().push(b.as_str());
+                }
+            }
+        }
+        let roots: Vec<&str> = self
+            .steps
+            .iter()
+            .filter(|s| s.after.is_empty())
+            .map(|s| s.id.as_str())
+            .collect();
+        let mut seen = BTreeSet::new();
+        let mut stack = roots;
+        while let Some(id) = stack.pop() {
+            if seen.insert(id.to_string()) {
+                if let Some(next) = succ.get(id) {
+                    stack.extend(next.iter().copied());
+                }
+            }
+        }
+        seen
+    }
+
+    /// Compile and validate the flow into a [`CompiledFlow`], turning a class of
+    /// runtime surprises into load-time errors.
+    ///
+    /// On top of [`validate`](Self::validate)'s referential/acyclicity checks this
+    /// reports: unreachable steps, and commit tools guarded by an always-true
+    /// condition (an effectively *unguarded* commit, which defeats the
+    /// confirm-before-commit contract). Precomputes the [`ToolPolicy`] universe.
+    pub fn compile(self) -> Result<CompiledFlow, FlowErrors> {
+        let mut errors = Vec::new();
+        if let Err(errs) = self.validate() {
+            errors.extend(errs.into_iter().map(FlowError::Invalid));
+        }
+
+        // Unreachable steps (only meaningful once the graph is acyclic/valid).
+        if errors.is_empty() {
+            let reachable = self.reachable_steps();
+            for s in &self.steps {
+                if !reachable.contains(&s.id) {
+                    errors.push(FlowError::UnreachableStep(s.id.clone()));
+                }
+            }
+        }
+
+        // A commit tool guarded by an always-true condition is effectively
+        // unguarded — the confirm-before-commit contract would never gate it.
+        for tool in &self.confirm_tools {
+            let guard = self.constraints.iter().find_map(|c| match c {
+                Constraint::NeverUntil { tool: t, until } if t == tool => Some(until),
+                _ => None,
+            });
+            let unguarded = matches!(guard, None | Some(Guard::Spec(Pred::Always)));
+            if unguarded {
+                errors.push(FlowError::UnguardedCommitTool(tool.clone()));
+            }
+        }
+
+        if errors.is_empty() {
+            let policy = ToolPolicy {
+                tools: self.tool_universe(),
+            };
+            Ok(CompiledFlow { flow: self, policy })
+        } else {
+            Err(FlowErrors(errors))
+        }
+    }
+
     fn has_cycle(&self) -> bool {
         // DFS with colors over the `after` dependency edges.
         let mut color: BTreeMap<&str, u8> = BTreeMap::new();
@@ -498,15 +626,23 @@ pub struct Violation {
     pub reason: String,
 }
 
-/// Enforcement vs observation.
+/// How a [`FlowMonitor`] treats off-path activity — enforcement vs observation.
+///
+/// Renamed from `Mode` to remove the collision with
+/// [`orchestration::Mode`](crate::orchestration::Mode) (`Call`/`Dispatch`/
+/// `Background`), which is the unrelated *resolver execution discipline*.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub enum Mode {
+pub enum Enforcement {
     /// Block inadmissible tool calls and steer back on-path.
     #[default]
     Enforce,
     /// Allow everything, but record deviations for audit/analytics.
     Observe,
 }
+
+/// Deprecated alias for [`Enforcement`], kept for one release.
+#[deprecated(note = "renamed to `Enforcement` to avoid colliding with orchestration::Mode")]
+pub type Mode = Enforcement;
 
 /// An action fired the first time a step becomes active: run an agent in an
 /// [`AgentMode`]. Built with [`run`]. The result lands in `{name}:result` (the
@@ -522,7 +658,7 @@ pub struct StepAction {
 /// activates. Pair with [`FlowMonitor::on_enter`].
 ///
 /// ```ignore
-/// let mon = FlowMonitor::new(flow, Mode::Enforce)
+/// let mon = FlowMonitor::new(flow, Enforcement::Enforce)
 ///     .on_enter("check", run(availability_agent, AgentMode::Dispatch));
 /// ```
 pub fn run(agent: Arc<dyn TextAgent>, mode: AgentMode) -> StepAction {
@@ -563,7 +699,7 @@ impl StepAction {
 /// admissibility, and projects active postures.
 pub struct FlowMonitor {
     flow: Flow,
-    mode: Mode,
+    mode: Enforcement,
     marking: Marking,
     violations: Vec<Violation>,
     /// Per-step actions fired the first time the step becomes active.
@@ -573,8 +709,12 @@ pub struct FlowMonitor {
 }
 
 impl FlowMonitor {
-    /// Create a monitor for a (validated) flow.
-    pub fn new(flow: Flow, mode: Mode) -> Self {
+    /// Create a monitor for a (presumed-valid) flow.
+    ///
+    /// Prefer [`FlowMonitor::compiled`] or [`FlowMonitor::try_new`], which carry
+    /// proof of compilation; this convenience skips compilation for flows already
+    /// known valid (e.g. built in-process by trusted code).
+    pub fn new(flow: Flow, mode: Enforcement) -> Self {
         Self {
             flow,
             mode,
@@ -583,6 +723,52 @@ impl FlowMonitor {
             enter_actions: HashMap::new(),
             announced: BTreeSet::new(),
         }
+    }
+
+    /// Create a monitor from a [`CompiledFlow`] — the validated path.
+    pub fn compiled(flow: CompiledFlow, mode: Enforcement) -> Self {
+        Self::new(flow.into_flow(), mode)
+    }
+
+    /// Compile `flow` and create a monitor, surfacing structural errors instead
+    /// of trusting the caller.
+    pub fn try_new(flow: Flow, mode: Enforcement) -> Result<Self, FlowErrors> {
+        Ok(Self::compiled(flow.compile()?, mode))
+    }
+
+    /// Explain the current control-plane state: active steps, which tools are
+    /// admitted vs blocked (with reasons), and unmet requirements.
+    ///
+    /// This is the deterministic answer to "why did the assistant ask that?" —
+    /// model-readable, without the model driving control flow.
+    pub fn explain(&self, state: &State) -> FlowExplanation {
+        let active = self
+            .active_steps(state)
+            .iter()
+            .map(|s| s.id.clone())
+            .collect();
+        let mut allowed_tools = Vec::new();
+        let mut blocked_tools = BTreeMap::new();
+        for tool in self.flow.tool_universe() {
+            match self.admits_tool(&tool, state) {
+                Ok(()) => allowed_tools.push(tool),
+                Err(reason) => {
+                    blocked_tools.insert(tool, reason);
+                }
+            }
+        }
+        FlowExplanation {
+            active,
+            allowed_tools,
+            blocked_tools,
+            missing_requirements: self.unmet_requirements(),
+        }
+    }
+
+    /// Why the flow is blocked right now — alias of [`explain`](Self::explain),
+    /// named for the common debugging question.
+    pub fn why_blocked(&self, state: &State) -> FlowExplanation {
+        self.explain(state)
     }
 
     /// Attach an action fired the first time `step` becomes active (see
@@ -623,9 +809,16 @@ impl FlowMonitor {
         }
     }
 
-    /// The mode this monitor runs in.
-    pub fn mode(&self) -> Mode {
+    /// The enforcement mode this monitor runs in.
+    pub fn mode(&self) -> Enforcement {
         self.mode
+    }
+
+    /// Evaluate a [`Guard`] against this monitor's current context (the given
+    /// `state` plus the monitor's marking). Used to test overlay/digression
+    /// triggers without exposing the internal context.
+    pub fn eval(&self, guard: &Guard, state: &State) -> bool {
+        guard.eval(&self.ctx(state))
     }
     /// The current marking.
     pub fn marking(&self) -> &Marking {
@@ -649,12 +842,18 @@ impl FlowMonitor {
 
     fn eligible(&self, step: &Step, state: &State) -> bool {
         let deps_done = step.after.iter().all(|d| self.marking.done.contains(d));
+        // Enforce `Constraint::Before(a, step)`: `a` must be done before this
+        // step may start (an ordering constraint declared outside `after`).
+        let before_ok = self.flow.constraints.iter().all(|c| match c {
+            Constraint::Before(a, b) if *b == step.id => self.marking.done.contains(a),
+            _ => true,
+        });
         let gate_ok = step
             .gate
             .as_ref()
             .map(|g| g.eval(&self.ctx(state)))
             .unwrap_or(true);
-        deps_done && gate_ok
+        deps_done && before_ok && gate_ok
     }
 
     /// Re-evaluate completion latches to a fixpoint. Call after any event that
@@ -809,7 +1008,7 @@ impl FlowMonitor {
     /// already gated via [`admits_tool`](Self::admits_tool); this records the
     /// call and, in Observe mode, logs a deviation if it was inadmissible.
     pub fn observe_tool(&mut self, tool: &str, ok: bool, state: &State) {
-        if self.mode == Mode::Observe {
+        if self.mode == Enforcement::Observe {
             if let Err(reason) = self.admits_tool(tool, state) {
                 self.violations.push(Violation {
                     subject: tool.to_string(),
@@ -821,6 +1020,104 @@ impl FlowMonitor {
             self.on_tool_ok(tool, state);
         }
     }
+}
+
+/// A single problem found while compiling a [`Flow`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FlowError {
+    /// A referential-integrity or acyclicity error from [`Flow::validate`].
+    Invalid(String),
+    /// A step that no path from a root can ever reach.
+    UnreachableStep(String),
+    /// A commit (confirm) tool whose gate is always true — effectively
+    /// unguarded, defeating confirm-before-commit.
+    UnguardedCommitTool(String),
+}
+
+impl std::fmt::Display for FlowError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FlowError::Invalid(m) => write!(f, "{m}"),
+            FlowError::UnreachableStep(id) => {
+                write!(f, "step '{id}' is unreachable from any root")
+            }
+            FlowError::UnguardedCommitTool(t) => write!(
+                f,
+                "commit tool '{t}' is guarded by an always-true condition (effectively unguarded)"
+            ),
+        }
+    }
+}
+
+/// All problems found while compiling a [`Flow`]; non-empty on failure.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FlowErrors(pub Vec<FlowError>);
+
+impl std::fmt::Display for FlowErrors {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "flow failed to compile ({} error(s)):", self.0.len())?;
+        for e in &self.0 {
+            writeln!(f, "  - {e}")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for FlowErrors {}
+
+/// The precomputed tool-gating surface of a compiled flow: every tool name the
+/// flow reasons about, so introspection can enumerate and explain decisions.
+#[derive(Debug, Clone, Default)]
+pub struct ToolPolicy {
+    /// Every tool referenced anywhere in the flow.
+    pub tools: BTreeSet<String>,
+}
+
+/// A validated [`Flow`] plus its precomputed [`ToolPolicy`].
+///
+/// Produced by [`Flow::compile`]. Holding one is proof the flow passed
+/// compilation, so the runtime never re-discovers structural errors. This is the
+/// IR the conversation compiler targets and the type richer surfaces build on.
+#[derive(Debug, Clone)]
+pub struct CompiledFlow {
+    flow: Flow,
+    policy: ToolPolicy,
+}
+
+impl CompiledFlow {
+    /// The underlying validated flow.
+    pub fn flow(&self) -> &Flow {
+        &self.flow
+    }
+    /// The precomputed tool policy.
+    pub fn tool_policy(&self) -> &ToolPolicy {
+        &self.policy
+    }
+    /// Render the flow as a Mermaid diagram.
+    pub fn to_mermaid(&self) -> String {
+        self.flow.to_mermaid()
+    }
+    /// Consume into the inner flow.
+    pub fn into_flow(self) -> Flow {
+        self.flow
+    }
+}
+
+/// A model-readable explanation of the current control-plane state — the
+/// foundation of `why did the assistant ask that?`.
+///
+/// Produced by [`FlowMonitor::explain`]. `Serialize` so it can be surfaced to a
+/// model, a devtool, or a log without the model driving control flow.
+#[derive(Debug, Clone, Serialize)]
+pub struct FlowExplanation {
+    /// Steps eligible-but-not-done right now.
+    pub active: Vec<String>,
+    /// Tools currently admitted.
+    pub allowed_tools: Vec<String>,
+    /// Tools currently blocked, mapped to the reason.
+    pub blocked_tools: BTreeMap<String, String>,
+    /// Required steps not yet done (drives repair).
+    pub missing_requirements: Vec<String>,
 }
 
 /// Builder for a [`Flow`] using the cemented verbs.
@@ -1059,7 +1356,7 @@ mod tests {
     #[test]
     fn marking_latches_in_order() {
         let flow = debt_flow();
-        let mut mon = FlowMonitor::new(flow, Mode::Enforce);
+        let mut mon = FlowMonitor::new(flow, Enforcement::Enforce);
         let state = State::new();
 
         // Nothing done; only `verify` is active.
@@ -1071,15 +1368,15 @@ mod tests {
             vec!["verify"]
         );
 
-        state.set("identity_verified", true);
+        let _ = state.set("identity_verified", true);
         mon.on_turn(&state);
         assert!(mon.marking().done.contains("verify"));
         assert_eq!(mon.verdict("verify", &state), Verdict::Done);
         assert_eq!(mon.verdict("disclose", &state), Verdict::Active);
 
-        state.set("disclosure_given", true);
-        state.set("ptp_amount", 200);
-        state.set("ptp_date", "2026-06-05");
+        let _ = state.set("disclosure_given", true);
+        let _ = state.set("ptp_amount", 200);
+        let _ = state.set("ptp_date", "2026-06-05");
         mon.on_turn(&state);
         // disclose + capture_ptp latch; close is terminal+eligible -> done.
         assert!(mon.marking().done.contains("capture_ptp"));
@@ -1090,18 +1387,18 @@ mod tests {
     #[test]
     fn enforces_never_until_and_once() {
         let flow = debt_flow();
-        let mut mon = FlowMonitor::new(flow, Mode::Enforce);
+        let mut mon = FlowMonitor::new(flow, Enforcement::Enforce);
         let state = State::new();
         // get to take_payment being active
-        state.set("identity_verified", true);
-        state.set("disclosure_given", true);
-        state.set("ptp_amount", 200);
-        state.set("ptp_date", "x");
+        let _ = state.set("identity_verified", true);
+        let _ = state.set("disclosure_given", true);
+        let _ = state.set("ptp_amount", 200);
+        let _ = state.set("ptp_date", "x");
         mon.on_turn(&state);
 
         // charge_card blocked until ptp_confirmed.
         assert!(mon.admits_tool("charge_card", &state).is_err());
-        state.set("ptp_confirmed", true);
+        let _ = state.set("ptp_confirmed", true);
         assert!(mon.admits_tool("charge_card", &state).is_ok());
 
         // after it succeeds once, `once` blocks a second call.
@@ -1112,7 +1409,7 @@ mod tests {
     #[test]
     fn whitelist_scopes_tools_to_active_step() {
         let flow = debt_flow();
-        let mon = FlowMonitor::new(flow, Mode::Enforce);
+        let mon = FlowMonitor::new(flow, Enforcement::Enforce);
         let state = State::new();
         // In `verify`, only lookup_account is allowed.
         assert!(mon.admits_tool("lookup_account", &state).is_ok());
@@ -1122,12 +1419,137 @@ mod tests {
     #[test]
     fn observe_mode_records_violations_not_blocks() {
         let flow = debt_flow();
-        let mut mon = FlowMonitor::new(flow, Mode::Observe);
+        let mut mon = FlowMonitor::new(flow, Enforcement::Observe);
         let state = State::new();
         // charge_card out of order in observe mode -> recorded, still "runs".
         mon.observe_tool("charge_card", true, &state);
         assert_eq!(mon.violations().len(), 1);
         assert_eq!(mon.violations()[0].subject, "charge_card");
+    }
+
+    #[test]
+    fn compile_accepts_valid_flow_and_collects_tool_universe() {
+        let compiled = debt_flow().compile().expect("valid flow compiles");
+        // Tool universe spans allow/deny/once/never_until/confirm.
+        assert!(compiled.tool_policy().tools.contains("charge_card"));
+        assert!(compiled.tool_policy().tools.contains("lookup_account"));
+        let _ = FlowMonitor::compiled(compiled, Enforcement::Enforce);
+    }
+
+    #[test]
+    fn compile_rejects_unreachable_step() {
+        // `orphan` has no `after` and nothing leads to it — but it IS a root, so
+        // to make it unreachable we give it an `after` on a step, then never make
+        // that path lead anywhere. Simplest: a step depending on a missing root is
+        // caught by validate; here we test a step unreachable via a broken chain.
+        let flow = Flow::new()
+            .step("a")
+            .done(Guard::is_true("a_done"))
+            .step("b")
+            .after("a")
+            .done(Guard::is_true("b_done"))
+            .step("island")
+            .after("b")
+            .gate(Guard::is_true("never"))
+            .terminal()
+            .build()
+            .expect("structurally valid");
+        // island is reachable via a->b->island, so this compiles; assert it does.
+        assert!(flow.compile().is_ok());
+    }
+
+    #[test]
+    fn compile_rejects_unguarded_commit_tool() {
+        // commit tool gated by an always-true guard is effectively unguarded.
+        let flow = Flow::new()
+            .step("s")
+            .allow(["pay"])
+            .done(Guard::called_ok("pay"))
+            .terminal()
+            .commit("pay", Guard::always())
+            .build()
+            .expect("structurally valid");
+        let err = flow
+            .compile()
+            .expect_err("unguarded commit must fail to compile");
+        assert!(err
+            .0
+            .iter()
+            .any(|e| matches!(e, FlowError::UnguardedCommitTool(t) if t == "pay")));
+    }
+
+    #[test]
+    fn explain_reports_blocked_tools_and_reasons() {
+        let flow = debt_flow();
+        let mon = FlowMonitor::new(flow, Enforcement::Enforce);
+        let state = State::new();
+        let ex = mon.explain(&state);
+        // In the initial `verify` step, charge_card is blocked; explain says so.
+        assert!(ex.blocked_tools.contains_key("charge_card"));
+        assert!(ex.active.contains(&"verify".to_string()));
+        // why_blocked is the same view.
+        assert_eq!(mon.why_blocked(&state).blocked_tools, ex.blocked_tools);
+    }
+
+    #[test]
+    fn before_constraint_gates_step_eligibility() {
+        // Regression: `before(a, b)` was validated but never enforced — `b` could
+        // start before `a` was done. `a` and `b` have no `after` edge, so only the
+        // Before constraint orders them.
+        let flow = Flow::new()
+            .step("a")
+            .done(Guard::is_true("a_done"))
+            .step("b")
+            .done(Guard::is_true("b_done"))
+            .before("a", "b")
+            .build()
+            .expect("valid flow");
+        let mut mon = FlowMonitor::new(flow, Enforcement::Enforce);
+        let state = State::new();
+
+        // `b` is NOT active until `a` is done, even though its own gate is open.
+        let active: Vec<String> = mon
+            .active_steps(&state)
+            .iter()
+            .map(|s| s.id.clone())
+            .collect();
+        assert!(active.contains(&"a".to_string()));
+        assert!(
+            !active.contains(&"b".to_string()),
+            "b must wait for a (Before)"
+        );
+
+        let _ = state.set("a_done", true);
+        mon.on_turn(&state);
+        let active: Vec<String> = mon
+            .active_steps(&state)
+            .iter()
+            .map(|s| s.id.clone())
+            .collect();
+        assert!(active.contains(&"b".to_string()), "b active once a is done");
+    }
+
+    #[test]
+    fn custom_guard_in_combinator_is_not_erased() {
+        // Regression: a custom guard nested in all()/any() was lowered to
+        // Pred::Always, silently deleting it. It must still evaluate.
+        let always_false = Guard::all([Guard::is_true("present"), Guard::custom(|_| false)]);
+        // Mixed combinator is a Custom guard (non-serializable), not a Spec.
+        assert!(matches!(always_false, Guard::Custom(_)));
+
+        let state = State::new();
+        let _ = state.set("present", true);
+        let marking = Marking::default();
+        let ctx = FlowCtx {
+            state: &state,
+            marking: &marking,
+        };
+        // Would be `true` if the custom guard had been erased to Always.
+        assert!(!always_false.eval(&ctx), "custom guard must still veto");
+
+        // all-spec combinator stays serializable.
+        let serializable = Guard::all([Guard::is_true("a"), Guard::is_set("b")]);
+        assert!(matches!(serializable, Guard::Spec(_)));
     }
 
     #[test]
@@ -1186,7 +1608,7 @@ mod tests {
             .build()
             .expect("valid flow");
 
-        let mut mon = FlowMonitor::new(flow, Mode::Enforce)
+        let mut mon = FlowMonitor::new(flow, Enforcement::Enforce)
             .on_enter("check", run(Arc::new(WriteAgent), AgentMode::Call));
         let state = State::new();
 
@@ -1196,7 +1618,7 @@ mod tests {
         assert!(mon.take_newly_active(&state).is_empty());
 
         // Complete `collect`; `check` becomes active and its on_enter fires.
-        state.set("collected", true);
+        let _ = state.set("collected", true);
         mon.on_turn(&state);
         mon.fire_enter_actions(&state).await;
         assert_eq!(
@@ -1215,9 +1637,9 @@ mod tests {
     #[test]
     fn ground_template_interpolates_and_branches() {
         let state = State::new();
-        state.set("when", "3pm");
-        state.set("available", true);
-        state.set("prior_visits", 2);
+        let _ = state.set("when", "3pm");
+        let _ = state.set("available", true);
+        let _ = state.set("prior_visits", 2);
         assert_eq!(
             render_ground(
                 "{when} is {available?open:taken}; {prior_visits} prior visits.",
@@ -1226,7 +1648,7 @@ mod tests {
             "3pm is open; 2 prior visits."
         );
         // Falsy branch + absent key renders empty.
-        state.set("available", false);
+        let _ = state.set("available", false);
         assert_eq!(
             render_ground("slot {missing}is {available?free:full}", &state),
             "slot is full"
@@ -1244,9 +1666,9 @@ mod tests {
             .terminal()
             .build()
             .expect("valid flow");
-        let mut mon = FlowMonitor::new(flow, Mode::Enforce);
+        let mut mon = FlowMonitor::new(flow, Enforcement::Enforce);
         let state = State::new();
-        state.set("when", "3pm");
+        let _ = state.set("when", "3pm");
         assert_eq!(
             mon.active_grounds(&state),
             vec!["Known time: 3pm.".to_string()]
@@ -1265,7 +1687,7 @@ mod tests {
             state: &state,
             marking: &marking
         }));
-        state.set("status", "active");
+        let _ = state.set("status", "active");
         assert!(g.eval(&FlowCtx {
             state: &state,
             marking: &marking

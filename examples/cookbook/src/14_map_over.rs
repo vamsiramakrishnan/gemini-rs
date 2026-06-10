@@ -50,7 +50,7 @@ async fn main() {
 
     // Set up state with a list of reviews
     let state = State::new();
-    state.set(
+    let _ = state.set(
         "reviews",
         vec![
             "This product is great!",
@@ -84,7 +84,7 @@ async fn main() {
             "Borrowing: References allow temporary access.",
             "Lifetimes: The compiler tracks reference validity.",
         ];
-        state.set("sections", &sections);
+        let _ = state.set("sections", &sections);
         Ok(format!("Split document into {} sections", sections.len()))
     }));
 
@@ -174,7 +174,7 @@ async fn main() {
         .output_key("discounted_prices");
 
     let state = State::new();
-    state.set(
+    let _ = state.set(
         "products",
         vec![
             serde_json::json!({"name": "Widget A", "price": 29.99}),

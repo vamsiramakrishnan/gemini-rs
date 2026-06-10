@@ -77,7 +77,7 @@ impl ComputedRegistry {
                 let derived_key = format!("derived:{}", var.key);
                 let old_val = state.get_raw(&derived_key);
                 let did_change = old_val.as_ref() != Some(&new_val);
-                state.set(&derived_key, new_val);
+                let _ = state.set(&derived_key, new_val);
                 if did_change {
                     changed.push(var.key.clone());
                 }
@@ -124,7 +124,7 @@ impl ComputedRegistry {
                 let derived_key = format!("derived:{}", var.key);
                 let old_val = state.get_raw(&derived_key);
                 let did_change = old_val.as_ref() != Some(&new_val);
-                state.set(&derived_key, new_val);
+                let _ = state.set(&derived_key, new_val);
                 if did_change {
                     changed.push(var.key.clone());
                 }
@@ -317,7 +317,7 @@ mod tests {
         });
 
         let state = State::new();
-        state.set("app:count", 5);
+        let _ = state.set("app:count", 5);
 
         let changed = registry.recompute(&state);
         assert_eq!(changed, vec!["doubled"]);
@@ -351,7 +351,7 @@ mod tests {
         });
 
         let state = State::new();
-        state.set("app:input", 3);
+        let _ = state.set("app:input", 3);
 
         let changed = registry.recompute(&state);
         // base should be computed first (6), then derived_from_base (106).
@@ -398,7 +398,7 @@ mod tests {
         });
 
         let state = State::new();
-        state.set("app:score", 0.8);
+        let _ = state.set("app:score", 0.8);
 
         // First recompute: level is new, so it changed.
         let changed = registry.recompute(&state);
@@ -409,7 +409,7 @@ mod tests {
         assert!(changed.is_empty());
 
         // Change input so derived value changes.
-        state.set("app:score", 0.2);
+        let _ = state.set("app:score", 0.2);
         let changed = registry.recompute(&state);
         assert_eq!(changed, vec!["level"]);
         assert_eq!(
@@ -449,8 +449,8 @@ mod tests {
         });
 
         let state = State::new();
-        state.set("app:x", 10);
-        state.set("app:y", 20);
+        let _ = state.set("app:x", 10);
+        let _ = state.set("app:y", 20);
 
         // Only app:x changed — should only recompute from_x.
         let changed = registry.recompute_affected(&state, &["app:x".into()]);
@@ -530,13 +530,13 @@ mod tests {
         assert_eq!(state.get_raw("derived:maybe"), None);
 
         // Set flag to false → compute returns None.
-        state.set("app:flag", false);
+        let _ = state.set("app:flag", false);
         let changed = registry.recompute(&state);
         assert!(changed.is_empty());
         assert_eq!(state.get_raw("derived:maybe"), None);
 
         // Set flag to true → compute returns Some.
-        state.set("app:flag", true);
+        let _ = state.set("app:flag", true);
         let changed = registry.recompute(&state);
         assert_eq!(changed, vec!["maybe"]);
         assert_eq!(
@@ -596,7 +596,7 @@ mod tests {
         });
 
         let state = State::new();
-        state.set("app:root", 1);
+        let _ = state.set("app:root", 1);
 
         let changed = registry.recompute(&state);
         assert_eq!(state.get::<i64>("derived:d"), Some(1));
@@ -658,7 +658,7 @@ mod tests {
         });
 
         let state = State::new();
-        state.set("app:root", 2);
+        let _ = state.set("app:root", 2);
 
         // First full recompute to populate.
         registry.recompute(&state);
@@ -666,7 +666,7 @@ mod tests {
         assert_eq!(state.get::<i64>("derived:leaf"), Some(25));
 
         // Now change root, use recompute_affected.
-        state.set("app:root", 3);
+        let _ = state.set("app:root", 3);
         let changed = registry.recompute_affected(&state, &["app:root".into()]);
         // root_derived should be recomputed (depends on app:root).
         assert!(changed.contains(&"root_derived".to_string()));

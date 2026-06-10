@@ -1,17 +1,17 @@
 //! WebSocket transport layer — connection, full-duplex messaging, flow control.
 
 pub mod auth;
+pub mod backpressure;
 pub mod builder;
 pub mod codec;
 pub mod connection;
-pub mod backpressure;
 pub mod ws;
 
 pub use auth::{AuthProvider, GoogleAIAuth, GoogleAITokenAuth, ServiceEndpoint, VertexAIAuth};
+pub use backpressure::{BackpressureConfig, TokenBucket};
 pub use builder::ConnectBuilder;
 pub use codec::{Codec, CodecError, JsonCodec};
 pub use connection::{connect, connect_with};
-pub use backpressure::{BackpressureConfig, TokenBucket};
 pub use ws::{MockTransport, MockTransportError, Transport, TungsteniteTransport};
 
 /// Configuration for the transport layer.

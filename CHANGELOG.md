@@ -7,6 +7,190 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Turn lifecycle decomposed into named, tested stages (#4).** The live hot-path
+  `handle_turn_complete` god-function was lifted, one behavior-preserving block at
+  a time, into named async stage helpers (`run_turn_extractors`,
+  `evaluate_phase_transition`, `project_tool_advisory`, `evaluate_repair`,
+  `project_steering_context`, `govern_flow`, `deliver_instruction_and_context`). A
+  deterministic harness drives the real `handle_turn_complete` through a recording
+  `SessionWriter`, turning the documented ordering "scars" (single-send + dedup,
+  batched/deferred context, turn reset) and each stage's effect into asserted
+  invariants. No behavior change. See
+  `docs/plans/2026-06-07-turn-tool-pipeline-rfc.md`.
+- **Background tools advance the governed flow (#7).** Tool completions now pass
+  through a single `ToolGate::observe_completion(call_id, …)` — idempotent per
+  `call_id` — for both inline and background tools. Background tools (which run
+  detached and can't reach the synchronous `FlowMonitor`) post a
+  `ControlEvent::ToolCompleted` back to the control lane, which routes them through
+  the same gate. This closes the prior fracture where background tools could only
+  be gated indirectly on delivered state: `done(called_ok(..))` now works for
+  background tools too. A `before_tool` veto posts no completion, so vetoed tools
+  never advance the flow — matching the inline path.
+- **CI: feature-boundary checks.** Added a job that builds the workspace with
+  `--no-default-features` and `--all-features` (both verified green), so the
+  feature-heavy SDK can't regress at the extremes. Also: `await_holding_lock` is
+  now enforced (removed from the workspace lint allow-list).
+- **Proc-macro hygiene.** The `#[tool]` macro now routes its generated code
+  through `gemini_adk_rs::__macros` (re-exporting `serde`/`schemars`/`async_trait`/
+  `serde_json`) and sets `#[serde(crate = ..)]`, so downstream crates no longer
+  need those upstream crates as direct dependencies under those exact names.
+
+### Changed (breaking)
+
+- **`reqwest` is now optional; the REST modules are feature-gated.** The default
+  `gemini-adk-rs` build no longer compiles `reqwest`. A new `http` feature pulls it,
+  and the REST-backed areas now actually gate their modules (fixing "feature
+  declared but not wired"): `vertex-ai-code-executor`, `vertex-ai-sessions`,
+  `vertex-ai-rag` (new — RAG retrieval tool + memory service), `mcp-http` (the SSE
+  transport; stdio MCP still works without it), and `gcs-artifacts` each enable
+  `http`. `VertexAiCodeExecutor`, `VertexAiRag*`, and the MCP HTTP path are behind
+  their features; enable the feature (or `--all-features`) to use them.
+- **Reactor: dead effect nouns removed.** Dropped `EffectPolicy::dedupe_key` and
+  `cancel_scope` (never set or read by any rule) and `LiveEffect::TransitionPhase`
+  (never produced; executor no-op'd it) — per the "make it real or delete it"
+  principle, they were deleted rather than left as aspirational fields. Concurrent
+  effect failures are now **supervised**: an error surfaces as `LiveEvent::Error`
+  instead of being silently discarded.
+- **`State` writes are now fallible.** `State::set`, `set_committed`, `set_key`,
+  `modify`, and `PrefixedState::set` return `Result<_, StateError>` instead of
+  panicking via `expect` on non-serializable input — a public SDK write no longer
+  aborts the host process. Call sites must handle the `Result`.
+- **`flow::Mode` renamed to `flow::Enforcement`** (`Enforce`/`Observe`) to remove
+  the collision with `orchestration::Mode` (`Call`/`Dispatch`/`Background`). A
+  deprecated `flow::Mode` alias is kept for one release; the `FlowMode` prelude
+  alias now points at `Enforcement`.
+
+### Fixed
+
+- **`State::modify` is now atomic.** It performs the read-modify-write under a
+  per-key map lock (`DashMap::entry`) instead of a racy `get`→`f`→`set`, so
+  concurrent increments no longer lose updates.
+- **Delta rollback is now correct.** Delta tracking uses tombstones
+  (`DeltaOp::Put`/`Delete`): `remove()` and `clear_prefix()` no longer mutate the
+  committed store, so `rollback()` reliably restores the base state after removals
+  and prefix clears, and `commit()` applies removals.
+- **`Flow` `Before` constraint is now enforced.** `before(a, b)` gates step
+  eligibility (`b` cannot start until `a` is done); previously it was validated but
+  never consulted at runtime.
+- **Custom guards inside `Guard::all`/`any` are no longer silently dropped.** A
+  nested `Guard::custom` is preserved as a runtime closure (making the combinator
+  non-serializable) instead of being lowered to `Pred::Always`, which had silently
+  deleted composed safety guards.
+- **Metadata truth.** Crate READMEs and the main README license section corrected
+  to MIT (matching `LICENSE`); install snippets bumped to `0.7`; documented MSRV
+  aligned with CI (`rust-version = "1.93"`, README badge `1.93+`).
+
+### Added
+
+- **`adk flow` devtools.** A CLI command group over a serializable
+  `ConversationSpec`: `adk flow inspect <spec.json>` (stages/tools/digressions/
+  policies/redaction summary), `adk flow graph <spec.json>` (Mermaid diagram), and
+  `adk flow simulate <spec.json> <scenario.json>` (run a model-free scenario, PASS/
+  FAIL). Closes the draft → inspect → simulate authoring loop with no live API.
+- **`conversation-from-script` skill.** A Claude Code skill
+  (`.claude/skills/conversation-from-script/`) that drafts a serializable
+  `ConversationSpec` + simulation `Scenario` tests from a call-center script/SOP —
+  an authoring assistant (the model drafts; the deterministic control plane
+  governs). Its example spec/scenario JSON are validated by an integration test so
+  the guidance can't drift from what the compiler accepts.
+- **Policy aspects.** Reusable, cross-cutting governance attached to a whole
+  conversation via `Conversation::policy(..)`: `Policy::safety_handoff([intents])`
+  (lowers to a `safety` digression that terminates on `intent:{name}`),
+  `Policy::redact([keys])` (recorded for the runtime's logging; surfaced via
+  `CompiledConversation::redacted_fields()`), and `Policy::commit(tool)
+  .idempotency_key(..).compensate_with(..)` (commit governance metadata). All
+  serializable and round-trip through JSON.
+- **Typed graph macro.** `voice_flow! { mod booking { steps: [..]; tools: [..];
+  slots: [..]; } }` generates a module of compile-time-checked `&str` name
+  constants, so flow code references `booking::collect` etc. — a typo'd name is a
+  build error, not a silently never-matching guard. (Full declarative DSL body is a
+  follow-up; this is the name-checking core.)
+- **Repair flows first-class.** A serializable per-stage `RepairPolicy`
+  (`reprompt_after`/`escalate_after`/`escalate_to`) via `Conversation::repair(..)`.
+  The runtime raises `repair:{stage}:reprompt` once a stage has been active too long
+  without completing and `repair:{stage}:escalate` after the escalate threshold;
+  when `escalate_to` is set, escalation also completes the stage and routes there
+  (deterministic "give up and hand off"). Signals clear when the stage leaves.
+- **Motif stdlib.** `Motif` factories for high-confidence flow fragments —
+  `collect_frame::<F>` / `confirm_then_commit` / `identity_verification` /
+  `disclosure` / `say` / `handoff` (→ `StageSpec`) and `faq_digression`
+  (→ `OverlaySpec`) — composed via new `Conversation::add_stage` / `add_overlay`.
+  Motifs lower through the validated IR (a mis-built commit motif fails `compile()`
+  like a hand-written one).
+- **Model-free simulation harness.** A deterministic `Sim` drives a compiled
+  conversation with no live API: a fake user speaks (`sim.user(text)` runs the
+  conversation's recognizers to fill slots, respecting validators), slots can be
+  set directly, tools succeed on demand or after a latency (`schedule_tool`), and
+  the `FlowStack` advances turn by turn. Introspect with `active`/`allowed`/
+  `denied`/`slot`/`is_complete`/`explain`. A serializable `Scenario` (`SimStep`s:
+  `user`/`set`/`tool_ok`/`turn`/`expect_*`) runs as a data-driven test (YAML/JSON)
+  and reports the failing step. `Extract::field_state_keys()` exposes the
+  field→state-key mapping for promotion.
+- **Hierarchical digressions / statecharts above the DAG.** Conversations can now
+  declare **overlays** — named sub-flows triggered by a guard that suspend the main
+  flow, run, and resume: `Conversation::overlay(name).trigger(g).stage(..).resume(..)
+  .done_overlay()`. A serializable `OverlaySpec` (round-trips through JSON) lowers to
+  its own validated `CompiledFlow`. A new runtime `FlowStack` (`CompiledConversation::
+  stack(mode)`) drives the main flow plus at most one active digression with
+  push-on-trigger / resume-on-completion (`Resume::Previous`/`Restart`/`Terminate`);
+  tool admission, postures, and `explain()` delegate to the active layer.
+  `FlowMonitor::eval(guard, state)` exposes guard evaluation for triggers.
+- **`Live::converse(&conversation)`** — one-liner that governs a Live session with
+  a compiled conversation's flow and registers the extractors that fill its
+  frames' slots (`converse_observe` for observe mode).
+- **Slot validation.** A serializable `SlotValidator` (`Range`/`NonEmpty`/`Regex`/
+  `OneOf`) on slots; `#[slot(min=…, max=…, non_empty)]` in the derive. A recognized
+  value failing its validator is rejected (the slot stays unfilled). Extract gains
+  `ExtractBuilder::validate(predicate)` to attach a post-recognition check.
+- **Resolver-filled slots.** `Conversation::resolve_slot(name, args, ttl, fetch)`
+  fills a slot from an async fetch/agent (bound from `State`), lowering to an
+  Extract resolver field. The closure stays builder-only, so `ConversationSpec`
+  remains serializable.
+- **Typed frames & slots.** A `Frame` trait + `FrameSpec`/`SlotSpec`/`ConfirmPolicy`/
+  `SlotRecognizer` and a `#[derive(Frame)]` macro: declare a struct with
+  `#[slot(prompt=…, reprompt=…, confirm=…, state=…, pii)]` and `#[recognize(…)]`
+  fields and get the slot definition (keys, prompts, confirmation policy, PII
+  flags, recognizers). `FrameSpec::to_extract()` lowers recognizer-bearing slots
+  to an `Extract` record. `Conversation::collect_frame::<F>()` collects a frame's
+  slots in a stage (drives the `captured` completion) **and** lowers its
+  extractor — `CompiledConversation::extractors()` exposes the extractors that
+  fill the slots from the transcript each turn.
+- **Recognizer confidence reaches state.** Deterministic extraction now records
+  `state_meta:{key}` = `{source: "extraction", confidence}` when a recognizer
+  matches, so `State::evidence()` surfaces real per-slot confidence.
+- **Slot evidence.** `State::evidence(key) -> SlotEvidence` aggregates a slot's
+  current value, provenance (`state_meta:{key}.source`), confidence, and the most
+  recent journal write — the basis for principled confirmations ("I heard 6,
+  right?") and stale/low-confidence repair. `StateMutationOrigin` is now serde.
+- **Conversation compiler (Phase 1 MVP).** A serializable `ConversationSpec` and
+  a fluent `Conversation` builder (sugar over the spec) that **compile down to a
+  governed `CompiledFlow`** via `Conversation::compile() -> CompiledConversation`.
+  Authors describe stages that `say`/`ground`, `collect` slots, `commit` tools
+  behind confirmation, and advance via `next(to, when)`; the compiler lowers these
+  to Flow steps, gates, postures, grounding, tool whitelists, and commit
+  constraints. The spec round-trips through JSON (YAML/hot-reload follows for free)
+  and `CompiledConversation::monitor()` yields a ready `FlowMonitor`.
+- **`Flow::compile() -> Result<CompiledFlow, FlowErrors>`** — the validated flow
+  IR the conversation compiler targets. On top of `validate()` it reports
+  unreachable steps and effectively-unguarded commit tools (`FlowError`), and
+  precomputes a `ToolPolicy` (the tool universe). `FlowMonitor::compiled` /
+  `try_new` construct from it; `new` remains for in-process trusted flows.
+- **`FlowMonitor::explain()` / `why_blocked()`** returning a serializable
+  `FlowExplanation` (active steps, allowed/blocked tools with reasons, unmet
+  requirements) — the deterministic answer to "why did the assistant ask that?".
+- **Conversation-compiler RFC** (`docs/plans/2026-06-06-conversation-compiler-rfc.md`)
+  — the plan to author voice behavior (slots/confirm/repair/digress/commit) and
+  compile it down to Flow + Extract + Resolver + Reactor; locks
+  serializable-spec-first and the one-control-structure rule.
+- `State` property test (rollback always restores base) and regression tests for
+  atomic `modify`, rollback-after-remove, and rollback-after-clear-prefix; `Flow`
+  regression tests for `Before` enforcement and custom-guard preservation.
+- **`ROADMAP.md`** — milestone-based plan for post-0.7.0 work, reframed around
+  hardening the primitives into contracts.
+- **Eval REST endpoint wired to `gemini_adk_rs::evaluation`** — `POST /eval/run` now loads an `EvalSet` (inline JSON or file path), maps criteria → deterministic evaluators (`response_match`/`exact_match`/`tool_trajectory`[`_any_order`], with optional `name=threshold`), scores each case (pre-recorded actuals, or live agent runs when actuals are absent), and aggregates a real `EvalResultSummary`. Results are stored on `ServerState` and served from `GET /eval/results`.
+
 ## [0.7.0] - 2026-05-31
 
 ### Added

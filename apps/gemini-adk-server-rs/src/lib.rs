@@ -10,11 +10,13 @@
 //! Used by `gemini-adk-web-rs`, `gemini-adk-api-rs`, and `gemini-adk-cli-rs` — never run directly.
 
 pub mod agents;
+pub mod eval;
 pub mod execution;
 pub mod handlers;
 pub mod router;
 pub mod serve;
 pub mod sessions;
+pub mod trace;
 pub mod types;
 pub mod ws;
 
@@ -42,6 +44,10 @@ pub struct ServerState {
     pub sessions: Arc<dyn SessionStore>,
     /// Artifact store.
     pub artifacts: Arc<parking_lot::RwLock<std::collections::HashMap<String, Vec<ArtifactEntry>>>>,
+    /// Completed evaluation run summaries, newest last.
+    pub eval_results: Arc<parking_lot::RwLock<Vec<EvalResultSummary>>>,
+    /// Recent execution traces, queryable via the debug endpoint.
+    pub traces: Arc<trace::TraceStore>,
 }
 
 impl ServerState {
@@ -51,6 +57,8 @@ impl ServerState {
             agents: Arc::new(agents),
             sessions: Arc::new(InMemorySessionStore::new()),
             artifacts: Arc::new(parking_lot::RwLock::new(std::collections::HashMap::new())),
+            eval_results: Arc::new(parking_lot::RwLock::new(Vec::new())),
+            traces: Arc::new(trace::TraceStore::new()),
         }
     }
 
@@ -58,5 +66,10 @@ impl ServerState {
     pub fn with_session_store(mut self, store: Arc<dyn SessionStore>) -> Self {
         self.sessions = store;
         self
+    }
+
+    /// Record a completed evaluation run summary.
+    pub fn record_eval_result(&self, summary: EvalResultSummary) {
+        self.eval_results.write().push(summary);
     }
 }

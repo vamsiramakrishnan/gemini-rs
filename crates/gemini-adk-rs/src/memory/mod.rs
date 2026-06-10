@@ -5,10 +5,12 @@
 
 mod in_memory;
 mod vertex_ai_memory_bank;
+#[cfg(feature = "vertex-ai-rag")]
 mod vertex_ai_rag;
 
 pub use in_memory::InMemoryMemoryService;
 pub use vertex_ai_memory_bank::{VertexAiMemoryBankConfig, VertexAiMemoryBankService};
+#[cfg(feature = "vertex-ai-rag")]
 pub use vertex_ai_rag::{VertexAiRagMemoryConfig, VertexAiRagMemoryService};
 
 use async_trait::async_trait;

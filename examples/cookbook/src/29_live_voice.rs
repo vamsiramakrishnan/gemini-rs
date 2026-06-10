@@ -147,11 +147,11 @@ fn main() {
     println!("\n--- 5. State Predicates ---\n");
 
     let state = State::new();
-    state.set("greeted", true);
-    state.set("customer_id", "CUST-42");
-    state.set("verified", false);
-    state.set("issue_type", "billing");
-    state.set("resolved", false);
+    let _ = state.set("greeted", true);
+    let _ = state.set("customer_id", "CUST-42");
+    let _ = state.set("verified", false);
+    let _ = state.set("issue_type", "billing");
+    let _ = state.set("resolved", false);
 
     // S module predicates used in phase transitions
     let greeted_check = S::is_true("greeted");

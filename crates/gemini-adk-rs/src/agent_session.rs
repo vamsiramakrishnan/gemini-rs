@@ -286,7 +286,7 @@ mod tests {
     fn state_accessible() {
         let handle = mock_session_handle();
         let session = AgentSession::new(handle);
-        session.state().set("key", "value");
+        let _ = session.state().set("key", "value");
         assert_eq!(
             session.state().get::<String>("key"),
             Some("value".to_string())

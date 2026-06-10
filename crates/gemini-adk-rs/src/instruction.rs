@@ -53,7 +53,7 @@ mod tests {
     #[test]
     fn simple_substitution() {
         let state = State::new();
-        state.set("name", "Alice");
+        let _ = state.set("name", "Alice");
         let result = inject_session_state("Hello, {name}!", &state);
         assert_eq!(result, "Hello, Alice!");
     }
@@ -61,7 +61,7 @@ mod tests {
     #[test]
     fn optional_key_present() {
         let state = State::new();
-        state.set("title", "Dr.");
+        let _ = state.set("title", "Dr.");
         let result = inject_session_state("Hello, {title?} Smith!", &state);
         assert_eq!(result, "Hello, Dr. Smith!");
     }
@@ -83,8 +83,8 @@ mod tests {
     #[test]
     fn multiple_keys() {
         let state = State::new();
-        state.set("first", "Alice");
-        state.set("last", "Smith");
+        let _ = state.set("first", "Alice");
+        let _ = state.set("last", "Smith");
         let result = inject_session_state("{first} {last}", &state);
         assert_eq!(result, "Alice Smith");
     }
@@ -92,7 +92,7 @@ mod tests {
     #[test]
     fn prefix_key() {
         let state = State::new();
-        state.app().set("flag", true);
+        let _ = state.app().set("flag", true);
         let result = inject_session_state("Flag is {app:flag}", &state);
         assert_eq!(result, "Flag is true");
     }
@@ -107,7 +107,7 @@ mod tests {
     #[test]
     fn numeric_value() {
         let state = State::new();
-        state.set("count", 42);
+        let _ = state.set("count", 42);
         let result = inject_session_state("Count: {count}", &state);
         assert_eq!(result, "Count: 42");
     }

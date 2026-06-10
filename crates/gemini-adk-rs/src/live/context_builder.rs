@@ -335,8 +335,8 @@ mod tests {
             .build();
 
         let state = State::new();
-        state.set("name", "Bob");
-        state.set("org", "Google");
+        let _ = state.set("name", "Bob");
+        let _ = state.set("org", "Google");
 
         assert_eq!(
             ctx.render(&state),
@@ -353,7 +353,7 @@ mod tests {
             .build();
 
         let state = State::new();
-        state.set("name", "Bob");
+        let _ = state.set("name", "Bob");
 
         assert_eq!(ctx.render(&state), "[Caller] Name: Bob.");
     }
@@ -366,7 +366,7 @@ mod tests {
             .build();
 
         let state = State::new();
-        state.set("verified", true);
+        let _ = state.set("verified", true);
 
         assert_eq!(ctx.render(&state), "[Status] Identity verified.");
     }
@@ -379,7 +379,7 @@ mod tests {
             .build();
 
         let state = State::new();
-        state.set("verified", false);
+        let _ = state.set("verified", false);
 
         assert_eq!(ctx.render(&state), "");
     }
@@ -392,7 +392,7 @@ mod tests {
             .build();
 
         let state = State::new();
-        state.set("sentiment", "impatient");
+        let _ = state.set("sentiment", "impatient");
 
         assert_eq!(ctx.render(&state), "[Mood] Caller seems impatient.");
     }
@@ -405,7 +405,7 @@ mod tests {
             .build();
 
         let state = State::new();
-        state.set("sentiment", "neutral");
+        let _ = state.set("sentiment", "neutral");
 
         assert_eq!(ctx.render(&state), "");
     }
@@ -425,7 +425,7 @@ mod tests {
             .build();
 
         let state = State::new();
-        state.set("urgency", 0.9_f64);
+        let _ = state.set("urgency", 0.9_f64);
 
         assert_eq!(ctx.render(&state), "[Call] high (0.9)");
     }
@@ -440,8 +440,8 @@ mod tests {
             .build();
 
         let state = State::new();
-        state.set("x", "1");
-        state.set("y", "2");
+        let _ = state.set("x", "1");
+        let _ = state.set("y", "2");
 
         assert_eq!(ctx.render(&state), "[A] X: 1.\n[B] Y: 2.");
     }
@@ -456,7 +456,7 @@ mod tests {
             .build();
 
         let state = State::new();
-        state.set("exists", "yes");
+        let _ = state.set("exists", "yes");
 
         assert_eq!(ctx.render(&state), "[Present] Exists: yes.");
     }
@@ -470,8 +470,8 @@ mod tests {
         let combined = a + b;
 
         let state = State::new();
-        state.set("x", "1");
-        state.set("y", "2");
+        let _ = state.set("x", "1");
+        let _ = state.set("y", "2");
 
         assert_eq!(combined.render(&state), "[A] X: 1.\n[B] Y: 2.");
     }
@@ -484,8 +484,8 @@ mod tests {
             .build();
 
         let state = State::new();
-        state.set("name", "Bob");
-        state.set(
+        let _ = state.set("name", "Bob");
+        let _ = state.set(
             "session:phase_needs",
             vec!["name".to_string(), "org".to_string()],
         );
@@ -504,9 +504,9 @@ mod tests {
             .build();
 
         let state = State::new();
-        state.set("name", "Bob");
-        state.set("org", "Google");
-        state.set(
+        let _ = state.set("name", "Bob");
+        let _ = state.set("org", "Google");
+        let _ = state.set(
             "session:phase_needs",
             vec!["name".to_string(), "org".to_string()],
         );

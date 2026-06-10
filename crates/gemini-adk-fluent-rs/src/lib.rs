@@ -38,10 +38,15 @@
 pub mod a2a;
 pub mod builder;
 pub mod compose;
+pub mod conversation;
+pub mod flow_macros;
 pub mod live;
 pub mod live_builders;
+pub mod motifs;
 pub mod operators;
 pub mod patterns;
+pub mod policy;
+pub mod simulation;
 pub mod testing;
 
 pub use gemini_adk_rs;
@@ -75,11 +80,19 @@ pub mod prelude {
     pub use crate::a2a::{A2AServer, A2aRegistry, RemoteAgent, SkillDeclaration};
     pub use crate::builder::*;
     pub use crate::compose::{Ctx, A, C, E, G, M, P, S, T};
+    pub use crate::conversation::{
+        CommitSpec, CompiledConversation, CompiledOverlay, Conversation, ConversationError,
+        ConversationSpec, FlowStack, OverlaySpec, RepairPolicy, Resume, StageSpec, TransitionSpec,
+    };
     pub use crate::live::Live;
     pub use crate::live_builders::*;
+    pub use crate::motifs::Motif;
     pub use crate::operators::*;
     pub use crate::patterns::*;
+    pub use crate::policy::{CommitPolicy, Policy};
+    pub use crate::simulation::{Scenario, Sim, SimStep};
     pub use crate::testing::*;
+    pub use crate::voice_flow;
     // Note: gemini_adk_rs::agent::Agent trait is NOT re-exported here because
     // it conflicts with the L2 Agent type alias (= AgentBuilder).
     // Use gemini_adk_rs::agent::Agent directly if you need the L1 trait.
@@ -87,24 +100,28 @@ pub mod prelude {
     pub use gemini_adk_rs::error::{AgentError, AgentResult, ToolError};
     pub use gemini_adk_rs::extract::{Recognizer, RecordExtractor};
     pub use gemini_adk_rs::flow::{
-        render_ground, run as run_on_enter, Flow, FlowMonitor, Guard, Mode as FlowMode, StepAction,
-        Verdict, Violation,
+        render_ground, run as run_on_enter, CompiledFlow, Enforcement as FlowMode, Flow, FlowError,
+        FlowErrors, FlowExplanation, FlowMonitor, Guard, StepAction, ToolPolicy, Verdict,
+        Violation,
     };
+    pub use gemini_adk_rs::frame::{
+        ConfirmPolicy, FrameSpec, SlotRecognizer, SlotSpec, SlotValidator,
+    };
+    // Live session surface. Advanced *Contract / formatter types are intentionally
+    // NOT in the prelude (import them from `gemini_adk_rs::live` when needed) —
+    // the prelude carries the common session types, not the whole control plane.
     pub use gemini_adk_rs::live::{
-        CallbackMode, ComputedContract, ContextDelivery, ControlContract, DefaultResultFormatter,
-        DeferredWriter, EventCallbacks, ExtractionTrigger, ExtractorContract, FieldPromotion,
-        FsPersistence, LiveEvent, LiveHandle, LiveSessionBuilder, LlmExtractor, MemoryPersistence,
-        MergePolicy, NeedsFulfillment, PendingContext, PhaseContract, PreparationContract,
-        PromotionContract, RepairAction, RepairConfig, ResultFormatter, RuntimeContract,
-        SessionPersistence, SessionSnapshot, SoftTurnDetector, SteeringMode, ToolContract,
-        ToolExecutionMode, TranscriptBuffer, TranscriptTurn, TransitionContract, TurnExtractor,
-        WatcherContract,
+        CallbackMode, ContextDelivery, DeferredWriter, EventCallbacks, ExtractionTrigger,
+        FieldPromotion, FsPersistence, LiveEvent, LiveHandle, LiveSessionBuilder, LlmExtractor,
+        MemoryPersistence, NeedsFulfillment, PendingContext, RepairAction, RepairConfig,
+        RuntimeContract, SessionPersistence, SessionSnapshot, SoftTurnDetector, SteeringMode,
+        ToolExecutionMode, TranscriptBuffer, TranscriptTurn, TurnExtractor,
     };
     pub use gemini_adk_rs::llm::{BaseLlm, GeminiLlm, GeminiLlmParams, LlmRequest, LlmResponse};
     pub use gemini_adk_rs::orchestration::{
         self, call as call_agent, provenance, Mode as AgentMode, Resolver,
     };
-    pub use gemini_adk_rs::state::{State, StateKey};
+    pub use gemini_adk_rs::state::{SlotEvidence, State, StateKey};
     pub use gemini_adk_rs::text::{
         DispatchTextAgent, FallbackTextAgent, FnTextAgent, JoinTextAgent, LlmTextAgent,
         LoopTextAgent, MapOverTextAgent, ParallelTextAgent, RaceTextAgent, RouteRule,
@@ -135,5 +152,7 @@ pub mod prelude {
     // `#[derive(Extract)]` macro (macro namespace) under one name, so the
     // builder (`Extract::record(..)`) and the derive are both usable.
     pub use gemini_adk_rs::Extract;
+    // The `#[derive(Frame)]` macro — generates a `Frame` impl from `#[slot(..)]`.
+    pub use gemini_adk_rs::Frame;
     pub use gemini_genai_rs::prelude::*;
 }

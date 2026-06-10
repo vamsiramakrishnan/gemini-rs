@@ -106,7 +106,7 @@ mod tests {
         }
 
         async fn run_live(&self, ctx: &mut InvocationContext) -> Result<(), AgentError> {
-            ctx.state().set(&self.key, &self.value);
+            let _ = ctx.state().set(&self.key, &self.value);
             Ok(())
         }
     }

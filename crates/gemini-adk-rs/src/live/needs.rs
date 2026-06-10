@@ -135,8 +135,8 @@ mod tests {
     #[test]
     fn no_action_when_needs_fulfilled() {
         let state = State::new();
-        state.set("customer_id", "C123");
-        state.set("account_number", "A456");
+        let _ = state.set("customer_id", "C123");
+        let _ = state.set("account_number", "A456");
 
         let mut nf = NeedsFulfillment::new(RepairConfig::default());
         let action = nf.evaluate(
@@ -199,7 +199,7 @@ mod tests {
         }
 
         // Fulfill the need
-        state.set("customer_id", "C123");
+        let _ = state.set("customer_id", "C123");
         let action = nf.evaluate("gather", &["customer_id".into()], &state);
         assert_eq!(action, RepairAction::None);
 

@@ -205,10 +205,7 @@ impl MiddlewareChain {
     }
 
     /// Run all `transform_request` hooks in order, mutating the request in place.
-    pub async fn run_transform_request(
-        &self,
-        request: &mut LlmRequest,
-    ) -> Result<(), AgentError> {
+    pub async fn run_transform_request(&self, request: &mut LlmRequest) -> Result<(), AgentError> {
         for m in &self.layers {
             m.transform_request(request).await?;
         }

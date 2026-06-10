@@ -431,15 +431,15 @@ async fn main() {
 
     // Set up state with the application data
     let state = State::new();
-    state.set("applicant_name", "Alice Johnson");
-    state.set("income", 85000.0_f64);
-    state.set("loan_amount", 25000.0_f64);
-    state.set("credit_score", 720_u32);
-    state.set("employment_years", 5_u32);
-    state.set("debt_to_income", 0.29_f64);
-    state.set("loan_type", "personal");
-    state.set("requires_manual_review", false);
-    state.set("input", "Process loan application for Alice Johnson");
+    let _ = state.set("applicant_name", "Alice Johnson");
+    let _ = state.set("income", 85000.0_f64);
+    let _ = state.set("loan_amount", 25000.0_f64);
+    let _ = state.set("credit_score", 720_u32);
+    let _ = state.set("employment_years", 5_u32);
+    let _ = state.set("debt_to_income", 0.29_f64);
+    let _ = state.set("loan_type", "personal");
+    let _ = state.set("requires_manual_review", false);
+    let _ = state.set("input", "Process loan application for Alice Johnson");
 
     println!("Running pipeline...");
     match compiled.run(&state).await {

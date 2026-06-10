@@ -70,21 +70,21 @@ fn main() {
     show_gate(&mon, &state, "charge_card"); // not available yet
 
     println!("\n--- Caller verifies identity ---");
-    state.set("identity_verified", true);
+    let _ = state.set("identity_verified", true);
     mon.on_turn(&state);
     report(&mon, &state);
 
     println!("\n--- Disclosure given, then a promise-to-pay is captured ---");
-    state.set("disclosure_given", true);
-    state.set("ptp_amount", 200);
-    state.set("ptp_date", "2026-06-12");
+    let _ = state.set("disclosure_given", true);
+    let _ = state.set("ptp_amount", 200);
+    let _ = state.set("ptp_date", "2026-06-12");
     mon.on_turn(&state);
     report(&mon, &state);
 
     println!("\n--- Attempt to charge before confirmation (blocked) ---");
     show_gate(&mon, &state, "charge_card");
     println!("    Caller confirms the plan…");
-    state.set("ptp_confirmed", true);
+    let _ = state.set("ptp_confirmed", true);
     show_gate(&mon, &state, "charge_card"); // now admitted
     mon.observe_tool("charge_card", true, &state);
     mon.on_turn(&state);

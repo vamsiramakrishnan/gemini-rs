@@ -65,13 +65,13 @@ async fn main() {
 
     // Test with a successful query
     let state = State::new();
-    state.set("input", "What is Rust?");
+    let _ = state.set("input", "What is Rust?");
     let result = fallback_agent.run(&state).await.unwrap();
     println!("  Success case: {result}");
 
     // Test with a failing query — should fall through to secondary
     let state = State::new();
-    state.set("input", "Please fail gracefully");
+    let _ = state.set("input", "Please fail gracefully");
     let result = fallback_agent.run(&state).await.unwrap();
     println!("  Fallback case: {result}");
 

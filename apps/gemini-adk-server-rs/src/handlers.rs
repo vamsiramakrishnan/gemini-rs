@@ -45,23 +45,46 @@ pub async fn run_agent(
         serde_json::json!({"role": "user", "content": req.message}),
     );
 
-    // Execute the agent to completion and collect the produced events.
-    let outcome =
-        match crate::execution::run_agent_turn(&runnable, &req.message, &prior_state).await {
-            Ok(outcome) => outcome,
-            Err(e) => {
-                let msg = format!("Agent execution failed: {e}");
-                state.sessions.append_event(
-                    &session_id,
-                    serde_json::json!({"role": "error", "content": &msg}),
-                );
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({"error": msg, "session_id": session_id})),
-                )
-                    .into_response();
-            }
-        };
+    // Execute the agent to completion and collect the produced events, recording
+    // a trace span tree for the debug endpoint.
+    let mut trace = crate::trace::TraceBuilder::new("gemini.agent.run");
+    let trace_id = trace.trace_id().to_string();
+    let span_start = std::time::Instant::now();
+    let result = crate::execution::run_agent_turn(&runnable, &req.message, &prior_state).await;
+    let span_dur = span_start.elapsed();
+
+    let outcome = match result {
+        Ok(outcome) => {
+            trace.span(
+                "agent.run",
+                span_start,
+                span_dur,
+                serde_json::json!({"agent": req.agent, "session_id": session_id, "status": "ok"}),
+            );
+            state.traces.record(trace.finish());
+            outcome
+        }
+        Err(e) => {
+            let msg = format!("Agent execution failed: {e}");
+            trace.span(
+                "agent.run",
+                span_start,
+                span_dur,
+                serde_json::json!({"agent": req.agent, "session_id": session_id, "status": "error", "error": &msg}),
+            );
+            trace.fail();
+            state.traces.record(trace.finish());
+            state.sessions.append_event(
+                &session_id,
+                serde_json::json!({"role": "error", "content": &msg}),
+            );
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": msg, "session_id": session_id, "trace_id": trace_id})),
+            )
+                .into_response();
+        }
+    };
 
     // Record the agent response.
     state.sessions.append_event(
@@ -76,6 +99,7 @@ pub async fn run_agent(
         response: outcome.response,
         events: outcome.events,
         state: session_state,
+        trace_id,
     })
     .into_response()
 }
@@ -252,9 +276,18 @@ pub async fn get_artifact_version(
 
 // ── Debug ───────────────────────────────────────────────────────
 
-pub async fn get_trace(Path(trace_id): Path<String>) -> impl IntoResponse {
-    // TODO: Wire up to telemetry span store
-    Json(serde_json::json!({ "trace_id": trace_id, "spans": [] }))
+pub async fn get_trace(
+    Path(trace_id): Path<String>,
+    State(state): State<ServerState>,
+) -> impl IntoResponse {
+    match state.traces.get(&trace_id) {
+        Some(record) => Json(record).into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "trace not found", "trace_id": trace_id })),
+        )
+            .into_response(),
+    }
 }
 
 pub async fn health_check(State(state): State<ServerState>) -> Json<HealthResponse> {
@@ -268,15 +301,20 @@ pub async fn health_check(State(state): State<ServerState>) -> Json<HealthRespon
 
 // ── Eval ────────────────────────────────────────────────────────
 
-pub async fn run_eval(Json(req): Json<EvalRunRequest>) -> impl IntoResponse {
-    // TODO: Wire up to gemini_adk_rs::evaluation
-    Json(serde_json::json!({
-        "agent": req.agent,
-        "status": "submitted",
-        "criteria": req.criteria,
-    }))
+pub async fn run_eval(
+    State(state): State<ServerState>,
+    Json(req): Json<EvalRunRequest>,
+) -> impl IntoResponse {
+    match crate::eval::run_evalset(&state, &req).await {
+        Ok(summary) => Json(summary).into_response(),
+        Err(err) => (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": err })),
+        )
+            .into_response(),
+    }
 }
 
-pub async fn list_eval_results() -> Json<Vec<EvalResultSummary>> {
-    Json(vec![])
+pub async fn list_eval_results(State(state): State<ServerState>) -> Json<Vec<EvalResultSummary>> {
+    Json(state.eval_results.read().clone())
 }

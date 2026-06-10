@@ -79,7 +79,7 @@ impl TextAgent for DispatchTextAgent {
             registry.insert(task_name.clone(), handle);
         }
 
-        state.set(
+        let _ = state.set(
             "_dispatch_status",
             self.children
                 .iter()
@@ -151,7 +151,7 @@ impl TextAgent for JoinTextAgent {
             let result = if let Some(timeout) = self.timeout {
                 match tokio::time::timeout(timeout, handle).await {
                     Ok(Ok(Ok(text))) => {
-                        state.set(format!("_result_{}", task_name), &text);
+                        let _ = state.set(format!("_result_{}", task_name), &text);
                         Ok(text)
                     }
                     Ok(Ok(Err(e))) => Err(AgentError::Other(e)),
@@ -161,7 +161,7 @@ impl TextAgent for JoinTextAgent {
             } else {
                 match handle.await {
                     Ok(Ok(text)) => {
-                        state.set(format!("_result_{}", task_name), &text);
+                        let _ = state.set(format!("_result_{}", task_name), &text);
                         Ok(text)
                     }
                     Ok(Err(e)) => Err(AgentError::Other(e)),
@@ -173,7 +173,7 @@ impl TextAgent for JoinTextAgent {
         }
 
         let combined = results.join("\n");
-        state.set("output", &combined);
+        let _ = state.set("output", &combined);
         Ok(combined)
     }
 }

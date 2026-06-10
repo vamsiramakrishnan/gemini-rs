@@ -85,14 +85,14 @@ fn main() {
 
     // Simulate the RecordExtractor promoting recognized fields into State.
     let _ = order; // (registered on Live in a real session; here we apply the result)
-    state.set("quantity", json!(2));
-    state.set("item", json!("pizza"));
+    let _ = state.set("quantity", json!(2));
+    let _ = state.set("item", json!("pizza"));
     mon.on_turn(&state);
     println!("\n--- After deterministic extraction (quantity + item) ---");
     println!("    take_order: {:?}", mon.verdict("take_order", &state));
     println!("    confirm:    {:?}", mon.verdict("confirm", &state));
 
-    state.set("confirmed", true);
+    let _ = state.set("confirmed", true);
     mon.on_turn(&state);
     println!("\n--- After confirmation ---");
     println!("    confirm:    {:?}", mon.verdict("confirm", &state));

@@ -28,7 +28,7 @@ async fn main() {
 
     // Author agent: writes a draft, improving each iteration
     let author: Arc<dyn TextAgent> = Arc::new(FnTextAgent::new("author", |state| {
-        let iteration = state.modify("draft_count", 0u32, |n| n + 1);
+        let iteration = state.modify("draft_count", 0u32, |n| n + 1).unwrap_or(0);
         let feedback = state
             .get::<String>("feedback")
             .unwrap_or_else(|| "none yet".into());
@@ -37,7 +37,7 @@ async fn main() {
             "Draft v{iteration}: A comprehensive guide to Rust's ownership system. \
              [Incorporating feedback: {feedback}]"
         );
-        state.set("current_draft", &draft);
+        let _ = state.set("current_draft", &draft);
         println!("  Author wrote: {draft}");
         Ok(draft)
     }));
@@ -49,16 +49,16 @@ async fn main() {
 
         // Simulate improving quality — approve after 3 iterations
         if draft_count >= 3 {
-            state.set("approved", true);
+            let _ = state.set("approved", true);
             let review =
                 format!("APPROVED: Draft meets quality standards after {draft_count} revisions.");
             println!("  Reviewer: {review}");
             Ok(review)
         } else {
-            state.set("approved", false);
+            let _ = state.set("approved", false);
             let feedback =
                 format!("Needs more detail on borrowing rules (iteration {draft_count})");
-            state.set("feedback", &feedback);
+            let _ = state.set("feedback", &feedback);
             let review = format!("REVISION NEEDED: {feedback}");
             println!("  Reviewer: {review}");
             Ok(review)

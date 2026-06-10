@@ -528,9 +528,7 @@ mod tests {
         let cfg = test_config();
         assert_eq!(cfg.project, "test");
         assert_eq!(cfg.location, "us-central1");
-        assert!(cfg
-            .retrieve_contexts_url()
-            .ends_with(":retrieveContexts"));
+        assert!(cfg.retrieve_contexts_url().ends_with(":retrieveContexts"));
         assert!(cfg.upload_rag_file_url().ends_with("/ragFiles:upload"));
     }
 
@@ -555,7 +553,10 @@ mod tests {
     #[test]
     fn parse_legacy_plain_display_name() {
         let (a, u, s) = parse_source_display_name("app.user.session").expect("legacy ok");
-        assert_eq!((a.as_str(), u.as_str(), s.as_str()), ("app", "user", "session"));
+        assert_eq!(
+            (a.as_str(), u.as_str(), s.as_str()),
+            ("app", "user", "session")
+        );
     }
 
     #[test]

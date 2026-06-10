@@ -244,10 +244,9 @@ impl AgentSource for ManifestApp {
                     }
                 }
                 ClientMessage::Audio { data } => {
-                    if let Ok(decoded) = base64::Engine::decode(
-                        &base64::engine::general_purpose::STANDARD,
-                        &data,
-                    ) {
+                    if let Ok(decoded) =
+                        base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &data)
+                    {
                         if let Err(e) = handle.send_audio(decoded).await {
                             tracing::warn!("send_audio error: {}", e);
                         }
