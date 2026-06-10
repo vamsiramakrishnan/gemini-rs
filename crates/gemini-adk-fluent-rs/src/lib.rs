@@ -52,6 +52,59 @@ pub mod testing;
 pub use gemini_adk_rs;
 pub use gemini_genai_rs;
 
+// ---------------------------------------------------------------------------
+// Curated submodule homes (gap #9 — prelude hard carve).
+//
+// The kernel `prelude` (below) re-exports only the ~30 types a typical app
+// touches. Everything else lives in these focused, discoverable modules so
+// `use gemini_adk_fluent_rs::prelude::*` stays small and the rest is one
+// `use gemini_adk_fluent_rs::{live, text, tools, …}` away. Import from the
+// highest-level crate you need.
+// ---------------------------------------------------------------------------
+
+/// Text-agent runtime and combinators (carved out of the kernel `prelude`).
+///
+/// `LlmTextAgent`, the sequential/parallel/loop/fallback/route/race/timeout/map
+/// combinators, and the `TextAgent` trait.
+pub mod text {
+    pub use gemini_adk_rs::text::*;
+}
+
+/// Tool definitions, dispatch, toolsets, and the confirmation flow.
+pub mod tools {
+    pub use gemini_adk_rs::confirmation::*;
+    pub use gemini_adk_rs::tool::*;
+    pub use gemini_adk_rs::toolset::*;
+}
+
+/// Concurrent typed state: `State`, `PrefixedState`, `StateKey`, prefix scopes.
+pub mod state {
+    pub use gemini_adk_rs::state::*;
+}
+
+/// Governed-conversation flow primitives: `Flow`, `Step`, `Guard`, `FlowMonitor`.
+pub mod flow {
+    pub use gemini_adk_rs::flow::*;
+}
+
+/// Agent builders, the agent trait, and the operator/pattern combinators.
+///
+/// Note: the L1 [`gemini_adk_rs::agent::Agent`] *trait* is re-exported here as
+/// [`AgentTrait`] to avoid colliding with the L2 [`Agent`](crate::builder::Agent)
+/// builder alias.
+pub mod agents {
+    pub use crate::builder::*;
+    pub use crate::operators::*;
+    pub use crate::patterns::*;
+    #[doc(inline)]
+    pub use gemini_adk_rs::agent::Agent as AgentTrait;
+}
+
+/// L0 wire-protocol types for raw WebSocket access.
+pub mod wire {
+    pub use gemini_genai_rs::prelude::*;
+}
+
 /// Clone multiple bindings for use in `move` closures, reducing Arc/clone boilerplate.
 ///
 /// # Example
@@ -93,9 +146,11 @@ pub mod prelude {
     pub use crate::simulation::{Scenario, Sim, SimStep};
     pub use crate::testing::*;
     pub use crate::voice_flow;
-    // Note: gemini_adk_rs::agent::Agent trait is NOT re-exported here because
-    // it conflicts with the L2 Agent type alias (= AgentBuilder).
-    // Use gemini_adk_rs::agent::Agent directly if you need the L1 trait.
+    // The L1 `gemini_adk_rs::agent::Agent` *trait* collides with the L2 `Agent`
+    // type alias (= AgentBuilder), so it is re-exported under the disambiguated
+    // name `AgentTrait` (also available at `gemini_adk_fluent_rs::agents::AgentTrait`).
+    #[doc(inline)]
+    pub use gemini_adk_rs::agent::Agent as AgentTrait;
     pub use gemini_adk_rs::agent_session::*;
     pub use gemini_adk_rs::error::{AgentError, AgentResult, ToolError};
     pub use gemini_adk_rs::extract::{Recognizer, RecordExtractor};
