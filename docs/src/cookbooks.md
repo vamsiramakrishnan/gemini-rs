@@ -41,26 +41,21 @@ S·C·T·P·M·A operator algebra, and the text-agent combinators — a structur
 detailed doc comments.
 
 ```bash
-cargo run -p example-cookbook --bin 01-simple-agent
+cargo run -p example-cookbook --bin 01-foundations
 cargo run -p example-cookbook --bin 21-full-algebra
 ```
 
-### Crawl (01–10) — Foundations
+### Crawl (01–03) — Foundations
 
-The core builder API and composition primitives. No async runtime required for most examples.
+The core builder API and composition primitives, grouped into three combined
+examples. No async runtime required — they are construction-only and run without
+credentials.
 
 | # | Binary | What it covers |
 |---|--------|----------------|
-| 01 | `01_simple_agent` | `AgentBuilder`: name, model, instruction, temperature, thinking budget, copy-on-write semantics |
-| 02 | `02_agent_with_tools` | `SimpleTool` with raw JSON args; `TypedTool` with auto-generated JSON Schema from `schemars::JsonSchema` |
-| 03 | `03_callbacks` | Event callbacks: `on_text`, `on_audio`, `on_thought`, `on_tool_call`, `on_interrupted`, `on_turn_complete` |
-| 04 | `04_sequential_pipeline` | `>>` operator: multi-step pipelines, state passing between agents, `SequentialTextAgent` |
-| 05 | `05_parallel_fanout` | `\|` operator: concurrent fan-out, `ParallelTextAgent`, merging results |
-| 06 | `06_loop_agent` | `* N` fixed loop; `* until(predicate)` conditional loop; `LoopTextAgent` |
-| 07 | `07_state_transforms` | `S::pick`, `S::rename`, `S::merge`, `S::flatten`, `S::set`, `S::defaults`, `S::drop`, `S::map` |
-| 08 | `08_prompt_composition` | `P::role`, `P::task`, `P::constraint`, `P::format`, `P::example`, `P::guidelines`, `P::with_state`, `P::when` |
-| 09 | `09_tool_composition` | `T::simple \| T::google_search \| T::code_execution \| T::url_context` — `\|` operator for tools |
-| 10 | `10_guards` | `G::rate_limit`, `G::toxicity`, `G::grounded`, `G::hallucination`, `G::llm_judge` — input/output validation |
+| 01 | `01_foundations` | `AgentBuilder` (model, sampling, thinking, copy-on-write, data contracts); `SimpleTool`/`TypedTool`/`ToolDispatcher` + built-in tools; `M::` callbacks/middleware (model/tool hooks, taps, resilience) |
+| 02 | `02_combinators` | `>>` sequential pipelines, `\|` parallel fan-out, `* N` / `* until(pred)` loops; `review_loop`/`fan_out_merge`/`supervised`; `check_contracts` |
+| 03 | `03_composition` | The operator algebra: `S::` state transforms (`>>`), `P::` prompt sections (`+`), `T::` tools (`\|`), `G::` output guards (`\|`) |
 
 ### Walk (11–20) — Multi-Agent Patterns
 

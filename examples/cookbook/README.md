@@ -31,20 +31,15 @@ The building blocks the governed capabilities compose — a **Crawl → Walk →
 path through the builder API, the S·C·T·P·M·A operator algebra, and the
 text-agent combinators.
 
-### Crawl (01–10): Foundations
+### Crawl (01–03): Foundations
+
+Three combined examples that each cover a cluster of related building blocks.
 
 | # | Example | What it covers |
 |---|---------|----------------|
-| 01 | Simple Agent | `AgentBuilder::new().instruction().build()` |
-| 02 | Agent with Tools | `SimpleTool`, `TypedTool`, `google_search()` |
-| 03 | Callbacks | `on_text`, `on_audio`, `on_turn_complete` |
-| 04 | Sequential Pipeline | `agent_a >> agent_b` |
-| 05 | Parallel Fan-out | `agent_a \| agent_b` |
-| 06 | Loop Agent | `agent * 3`, `agent * until(pred)` |
-| 07 | State Transforms | `S::pick`, `S::rename`, `S::merge` |
-| 08 | Prompt Composition | `P::role + P::task + P::format` |
-| 09 | Tool Composition | `T::simple \| T::google_search()` |
-| 10 | Guards | `G::` input/output validation |
+| 01 | Foundations | `AgentBuilder` (model, sampling, copy-on-write, contracts); `SimpleTool`/`TypedTool`/`ToolDispatcher` + built-in tools; `M::` callbacks/middleware |
+| 02 | Combinators | `a >> b` sequential, `a \| b` parallel fan-out, `a * N` / `a * until(pred)` loops; `review_loop`/`fan_out_merge`/`supervised`; `check_contracts` |
+| 03 | Composition | The `S::` (state), `P::` (prompt), `T::` (tools), `G::` (guards) operator algebra |
 
 ### Walk (11–22): Multi-Agent Patterns
 
@@ -76,11 +71,12 @@ text-agent combinators.
 | 29 | Live Voice | Full `Live::builder()` session |
 | 30 | Production Pipeline | Everything combined |
 
-### Fly (31–38): Higher-order capabilities
+### Fly (34–40): Higher-order capabilities
 
-See the capability table at the top — examples 31–38 cover connection,
-callbacks, the `#[tool]` macro, tool governance, persistence, MCP, **Flow**, and
-**Extract**.
+See the capability table at the top — examples 34–40 cover tool governance,
+persistence, MCP, **Flow**, **Extract**, and the booking/screening capstones.
+(Connection helpers, the Live callback catalog, and the `#[tool]` macro now live
+in the user guide: `auth-and-connecting`, `live-callbacks`, and `tools`.)
 
 ## Run any example
 
@@ -91,5 +87,5 @@ cargo run -p example-cookbook --bin 38-extraction
 
 # Live examples read auth from the environment (see connect_from_env):
 export GEMINI_API_KEY="your-key"
-cargo run -p example-cookbook --bin 01-simple-agent
+cargo run -p example-cookbook --bin 01-foundations
 ```
