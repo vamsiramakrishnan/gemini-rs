@@ -48,4 +48,6 @@
 
 # Reference
 
+- [Glossary](./user-guide/glossary.md)
+- [Troubleshooting & FAQ](./user-guide/troubleshooting.md)
 - [API Reference (rustdoc)](./api-reference.md)
