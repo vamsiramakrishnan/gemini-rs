@@ -2,7 +2,9 @@
 //! (`.claude/skills/conversation-from-script/SKILL.md`) so the authoring guidance
 //! cannot drift from what the compiler/runtime actually accept.
 
+use gemini_adk_fluent_rs::conversation::{Conversation, ConversationSpec};
 use gemini_adk_fluent_rs::prelude::*;
+use gemini_adk_fluent_rs::simulation::Scenario;
 
 /// The `ConversationSpec` JSON from the skill.
 const SPEC_JSON: &str = r#"

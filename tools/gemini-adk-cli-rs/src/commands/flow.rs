@@ -6,7 +6,9 @@
 
 use std::fs;
 
+use gemini_adk_fluent_rs::conversation::{CompiledConversation, Conversation, ConversationSpec};
 use gemini_adk_fluent_rs::prelude::*;
+use gemini_adk_fluent_rs::simulation::Scenario;
 
 /// Load and compile a conversation spec from a JSON file.
 fn load(spec_path: &str) -> Result<CompiledConversation, Box<dyn std::error::Error>> {

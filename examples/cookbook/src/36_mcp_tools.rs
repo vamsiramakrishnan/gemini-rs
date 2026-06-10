@@ -32,6 +32,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gemini_adk_fluent_rs::prelude::*;
+use gemini_adk_fluent_rs::tools::Toolset;
 use gemini_adk_rs::tools::mcp::{McpConnectionParams, McpSessionManager, McpToolset};
 
 fn main() {

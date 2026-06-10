@@ -70,11 +70,20 @@ pub mod text {
     pub use gemini_adk_rs::text::*;
 }
 
-/// Tool definitions, dispatch, toolsets, and the confirmation flow.
+/// Tool definitions, dispatch, toolsets, the confirmation flow, and frames.
 pub mod tools {
     pub use gemini_adk_rs::confirmation::*;
+    pub use gemini_adk_rs::extract::{Recognizer, RecordExtractor};
+    pub use gemini_adk_rs::frame::{
+        ConfirmPolicy, FrameSpec, SlotRecognizer, SlotSpec, SlotValidator,
+    };
     pub use gemini_adk_rs::tool::*;
     pub use gemini_adk_rs::toolset::*;
+}
+
+/// LLM abstraction: params, requests/responses, and the registry.
+pub mod llm {
+    pub use gemini_adk_rs::llm::*;
 }
 
 /// Concurrent typed state: `State`, `PrefixedState`, `StateKey`, prefix scopes.
@@ -98,6 +107,10 @@ pub mod agents {
     pub use crate::patterns::*;
     #[doc(inline)]
     pub use gemini_adk_rs::agent::Agent as AgentTrait;
+    pub use gemini_adk_rs::agent_session::*;
+    pub use gemini_adk_rs::orchestration::{
+        self, call as call_agent, provenance, Mode as AgentMode, Resolver,
+    };
 }
 
 /// L0 wire-protocol types for raw WebSocket access.
@@ -128,86 +141,81 @@ macro_rules! let_clone {
     };
 }
 
-/// Convenience re-exports for common types across all layers.
+/// The kernel prelude — the ~40 types a typical application touches.
+///
+/// Gap #9 carved this down from the previous everything-prelude. Anything not
+/// here now lives in a focused submodule and is one import away:
+///
+/// | Need | Import |
+/// |------|--------|
+/// | Full Live control plane (persistence, repair, steering, transcripts, contracts) | `use gemini_adk_fluent_rs::live::*;` |
+/// | Text-agent runtime details | `use gemini_adk_fluent_rs::text::*;` |
+/// | Toolsets, confirmation, frames | `use gemini_adk_fluent_rs::tools::*;` |
+/// | State prefixes / `SlotEvidence` | `use gemini_adk_fluent_rs::state::*;` |
+/// | Full flow vocabulary (`CompiledFlow`, `StepAction`, `Violation`, …) | `use gemini_adk_fluent_rs::flow::*;` |
+/// | Agent trait + operator/pattern internals | `use gemini_adk_fluent_rs::agents::*;` |
+/// | Conversation compiler (`Conversation`, `ConversationSpec`, …) | `use gemini_adk_fluent_rs::conversation::*;` |
+/// | A2A, motifs, policy, simulation, testing, orchestration, credentials, run_config | the same-named module, e.g. `use gemini_adk_fluent_rs::simulation::*;` |
+/// | Raw L0 wire types | `use gemini_adk_fluent_rs::wire::*;` |
 pub mod prelude {
-    pub use crate::a2a::{A2AServer, A2aRegistry, RemoteAgent, SkillDeclaration};
+    // ── Builders, composition algebra, operators, patterns (headline DX) ──
     pub use crate::builder::*;
     pub use crate::compose::{Ctx, A, C, E, G, M, P, S, T};
-    pub use crate::conversation::{
-        CommitSpec, CompiledConversation, CompiledOverlay, Conversation, ConversationError,
-        ConversationSpec, FlowStack, OverlaySpec, RepairPolicy, Resume, StageSpec, TransitionSpec,
-    };
     pub use crate::live::Live;
-    pub use crate::live_builders::*;
-    pub use crate::motifs::Motif;
     pub use crate::operators::*;
     pub use crate::patterns::*;
-    pub use crate::policy::{CommitPolicy, Policy};
-    pub use crate::simulation::{Scenario, Sim, SimStep};
-    pub use crate::testing::*;
-    pub use crate::voice_flow;
+    // Build-time validation DX (contract checking, data-flow inference, harness).
+    pub use crate::testing::{
+        check_contracts, diagnose, infer_data_flow, AgentHarness, ContractViolation, DataFlowEdge,
+    };
+
     // The L1 `gemini_adk_rs::agent::Agent` *trait* collides with the L2 `Agent`
     // type alias (= AgentBuilder), so it is re-exported under the disambiguated
     // name `AgentTrait` (also available at `gemini_adk_fluent_rs::agents::AgentTrait`).
     #[doc(inline)]
     pub use gemini_adk_rs::agent::Agent as AgentTrait;
-    pub use gemini_adk_rs::agent_session::*;
+
+    // ── Errors ──
     pub use gemini_adk_rs::error::{AgentError, AgentResult, ToolError};
-    pub use gemini_adk_rs::extract::{Recognizer, RecordExtractor};
+
+    // ── Governed flow (core vocabulary; full set in `crate::flow`) ──
     pub use gemini_adk_rs::flow::{
-        render_ground, run as run_on_enter, CompiledFlow, Enforcement as FlowMode, Flow, FlowError,
-        FlowErrors, FlowExplanation, FlowMonitor, Guard, StepAction, ToolPolicy, Verdict,
-        Violation,
+        Enforcement as FlowMode, Flow, FlowMonitor, Guard, ToolPolicy, Verdict,
     };
-    pub use gemini_adk_rs::frame::{
-        ConfirmPolicy, FrameSpec, SlotRecognizer, SlotSpec, SlotValidator,
-    };
-    // Live session surface. Advanced *Contract / formatter types are intentionally
-    // NOT in the prelude (import them from `gemini_adk_rs::live` when needed) —
-    // the prelude carries the common session types, not the whole control plane.
+
+    // ── State (prefix scopes + `SlotEvidence` in `crate::state`) ──
+    pub use gemini_adk_rs::state::{State, StateKey};
+
+    // ── LLM (core; params/request/response/registry in `crate::text`) ──
+    pub use gemini_adk_rs::llm::{BaseLlm, GeminiLlm};
+
+    // ── Tools ──
+    pub use gemini_adk_rs::tool::{SimpleTool, ToolDispatcher, ToolFunction, TypedTool};
+    // The `#[tool]` attribute macro — turns an `async fn` into a registrable tool.
+    pub use gemini_adk_rs::tool;
+    // Brings in both the `Extract` struct and the `#[derive(Extract)]` macro.
+    pub use gemini_adk_rs::Extract;
+    // The `#[derive(Frame)]` macro.
+    pub use gemini_adk_rs::Frame;
+
+    // ── Callback contexts (used in `M::` hooks) ──
+    pub use gemini_adk_rs::context::{CallbackContext, ToolContext};
+
+    // ── Common Live session types (full control plane in `crate::live`) ──
     pub use gemini_adk_rs::live::{
-        CallbackMode, ContextDelivery, DeferredWriter, EventCallbacks, ExtractionTrigger,
-        FieldPromotion, FsPersistence, LiveEvent, LiveHandle, LiveSessionBuilder, LlmExtractor,
-        MemoryPersistence, NeedsFulfillment, PendingContext, RepairAction, RepairConfig,
-        RuntimeContract, SessionPersistence, SessionSnapshot, SoftTurnDetector, SteeringMode,
-        ToolExecutionMode, TranscriptBuffer, TranscriptTurn, TurnExtractor,
+        ContextDelivery, EventCallbacks, ExtractionTrigger, FsPersistence, LiveHandle,
+        LlmExtractor, MemoryPersistence, RepairConfig, SessionPersistence, SoftTurnDetector,
+        SteeringMode, TranscriptBuffer, TranscriptTurn, TurnExtractor,
     };
-    pub use gemini_adk_rs::llm::{BaseLlm, GeminiLlm, GeminiLlmParams, LlmRequest, LlmResponse};
-    pub use gemini_adk_rs::orchestration::{
-        self, call as call_agent, provenance, Mode as AgentMode, Resolver,
-    };
-    pub use gemini_adk_rs::state::{SlotEvidence, State, StateKey};
+
+    // ── Text-agent combinators (runtime details in `crate::text`) ──
     pub use gemini_adk_rs::text::{
         DispatchTextAgent, FallbackTextAgent, FnTextAgent, JoinTextAgent, LlmTextAgent,
         LoopTextAgent, MapOverTextAgent, ParallelTextAgent, RaceTextAgent, RouteRule,
         RouteTextAgent, SequentialTextAgent, TapTextAgent, TaskRegistry, TextAgent,
         TimeoutTextAgent,
     };
-    // New ADK-JS parity types
-    pub use gemini_adk_rs::confirmation::{
-        ConfirmationProvider, ConfirmationRequest, StaticConfirmation, ToolConfirmation,
-    };
-    pub use gemini_adk_rs::context::{CallbackContext, ToolContext};
-    pub use gemini_adk_rs::credentials::{
-        AuthCredential, CredentialService, InMemoryCredentialService,
-    };
-    pub use gemini_adk_rs::instruction::inject_session_state;
-    pub use gemini_adk_rs::llm::LlmRegistry;
-    pub use gemini_adk_rs::run_config::{RunConfig, StreamingMode};
-    pub use gemini_adk_rs::text_runner::InMemoryRunner;
-    pub use gemini_adk_rs::toolset::{StaticToolset, Toolset};
-    // Core tool types — surfaced at L2 so application code building tools
-    // doesn't have to reach into the L1 crate directly.
-    pub use gemini_adk_rs::tool::{SimpleTool, ToolDispatcher, ToolFunction, TypedTool};
-    // The `#[tool]` attribute macro — turns an `async fn` into a registrable tool.
-    // Re-exported from L1 (which re-exports it from the proc-macro crate), so the
-    // fluent prelude doesn't need a direct dependency on `gemini-adk-macros-rs`.
-    pub use gemini_adk_rs::tool;
-    // Brings in *both* the `Extract` struct (type namespace) and the
-    // `#[derive(Extract)]` macro (macro namespace) under one name, so the
-    // builder (`Extract::record(..)`) and the derive are both usable.
-    pub use gemini_adk_rs::Extract;
-    // The `#[derive(Frame)]` macro — generates a `Frame` impl from `#[slot(..)]`.
-    pub use gemini_adk_rs::Frame;
+
+    // ── L0 wire protocol (GeminiModel, Voice, Content, Part, Role, …) ──
     pub use gemini_genai_rs::prelude::*;
 }

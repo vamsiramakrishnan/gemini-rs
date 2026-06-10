@@ -7,6 +7,7 @@ use base64::Engine;
 use tokio::sync::mpsc;
 use tracing::warn;
 
+use gemini_adk_fluent_rs::live::{LiveEvent, RuntimeContract};
 use gemini_adk_fluent_rs::prelude::*;
 
 use crate::app::{AppInfo, DemoApp, ServerMessage, WsSender};
