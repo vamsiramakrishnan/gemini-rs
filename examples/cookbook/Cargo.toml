@@ -128,18 +128,6 @@ name = "30-production-pipeline"
 path = "src/30_production_pipeline.rs"
 
 [[bin]]
-name = "31-connect-from-env"
-path = "src/31_connect_from_env.rs"
-
-[[bin]]
-name = "32-live-callbacks"
-path = "src/32_live_callbacks.rs"
-
-[[bin]]
-name = "33-tool-macro"
-path = "src/33_tool_macro.rs"
-
-[[bin]]
 name = "34-tool-policies"
 path = "src/34_tool_policies.rs"
 

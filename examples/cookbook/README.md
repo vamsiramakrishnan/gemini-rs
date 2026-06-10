@@ -16,9 +16,6 @@ synthesis).
 | **Extract** — deterministic facts (no LLM) | `38-extraction` | CPU recognizers fill `State` → drive a `Flow` guard |
 | **Orchestration** — `call`/`dispatch`/`background` | `19-agent-tool`, `26-dispatch-join`, `27-race-timeout` | sub-agents sync/async; results → `State` |
 | **Tool governance** | `34-tool-policies` | `confirm`/`timeout`/`cached` + `ConfirmationProvider` |
-| **`#[tool]` macro** | `33-tool-macro` | `async fn` → registrable tool |
-| **Zero-ceremony connect** | `31-connect-from-env` | platform + creds from env |
-| **Live callbacks** | `32-live-callbacks` | fast-lane vs control-lane catalog |
 | **Persistence** | `35-session-persistence` | snapshot/resume + session store |
 | **MCP tools** | `36-mcp-tools` | stdio/SSE MCP integration |
 | **Capstones** *(combine all three)* | `39-booking`, `40-screening` | Flow × Extract × Orchestration |

@@ -21,9 +21,6 @@ the Flow / Extraction-kit / Orchestration RFCs in `docs/plans/`). **Start here.*
 | **Extract** — deterministic facts (no LLM) | `38_extraction` | CPU recognizers fill `State` → drive a `Flow` guard with no model in the control loop |
 | **Orchestration** — `call`/`dispatch`/`background` | `19_agent_tool`, `26_dispatch_join`, `27_race_timeout` | invoke sub-agents sync/async; results land in `State` |
 | **Tool governance** — `confirm`/`timeout`/`cached` | `34_tool_policies` | per-tool policies + `ConfirmationProvider` enforcement; commit-tool safety |
-| **`#[tool]` macro** | `33_tool_macro` | turn an `async fn` into a registrable tool |
-| **Zero-ceremony connect** | `31_connect_from_env` | platform + credentials resolved from the environment |
-| **Live callbacks** | `32_live_callbacks` | the full fast-lane vs control-lane catalog |
 | **Session persistence** | `35_session_persistence` | snapshot/resume + the session store |
 | **MCP tools** | `36_mcp_tools` | stdio/SSE MCP integration |
 | **Capstones** *(combine all three lenses)* | `39_booking`, `40_screening` | Flow × Extract × Orchestration on real use cases |
@@ -106,9 +103,6 @@ Connection helpers, callback surfaces, macros, governance, and the
 
 | # | Binary | What it covers |
 |---|--------|----------------|
-| 31 | `31_connect_from_env` | `ApiEndpoint::from_env()` / `connect_from_env()`: zero-ceremony platform + credential resolution |
-| 32 | `32_live_callbacks` | Full Live callback catalog: fast-lane vs control-lane, every hook, `_concurrent` variants |
-| 33 | `33_tool_macro` | `#[tool]` attribute macro: turn an `async fn` into a registrable tool with auto-generated JSON Schema |
 | 34 | `34_tool_policies` | `T::cached`, `T::timeout`, `T::confirm`, nested policies, `ConfirmationProvider` enforcement |
 | 35 | `35_session_persistence` | `MemoryPersistence`, `FsPersistence`, `SessionSnapshot` round-trips; `InMemorySessionService` event log |
 | 36 | `36_mcp_tools` | `McpConnectionParams::Stdio/Sse`, `McpSessionManager`, `McpToolset`, `T::mcp()`, JSON-RPC 2.0 lifecycle |
