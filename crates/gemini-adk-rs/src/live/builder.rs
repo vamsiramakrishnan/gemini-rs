@@ -54,6 +54,7 @@ pub struct LiveSessionBuilder {
     soft_turn_timeout: Option<std::time::Duration>,
     steering_mode: SteeringMode,
     context_delivery: ContextDelivery,
+    delivery: super::processor::DeliveryConfig,
     repair_config: Option<RepairConfig>,
     persistence: Option<Arc<dyn SessionPersistence>>,
     session_id: Option<String>,
@@ -81,6 +82,7 @@ impl LiveSessionBuilder {
             soft_turn_timeout: None,
             steering_mode: SteeringMode::default(),
             context_delivery: ContextDelivery::default(),
+            delivery: super::processor::DeliveryConfig::default(),
             repair_config: None,
             persistence: None,
             session_id: None,
@@ -208,6 +210,17 @@ impl LiveSessionBuilder {
         self
     }
 
+    /// Set the fast-lane delivery (backpressure) policy per event class.
+    ///
+    /// Defaults to all-[`Lossless`](super::processor::Delivery::Lossless), which
+    /// preserves the historical `send().await` routing behavior. Opt classes
+    /// into [`LossyDropNewest`](super::processor::Delivery::LossyDropNewest) to
+    /// keep the router from stalling when a fast-lane consumer falls behind.
+    pub fn delivery(mut self, delivery: super::processor::DeliveryConfig) -> Self {
+        self.delivery = delivery;
+        self
+    }
+
     /// Enable the conversation repair protocol.
     ///
     /// Tracks need fulfillment per phase and nudges the model when the
@@ -325,6 +338,7 @@ impl LiveSessionBuilder {
             soft_turn_timeout: self.soft_turn_timeout,
             steering_mode: self.steering_mode,
             context_delivery: self.context_delivery,
+            delivery: self.delivery,
             repair_config: self.repair_config,
             persistence: self.persistence,
             session_id: self.session_id,
@@ -360,6 +374,7 @@ pub(crate) struct SessionPlan {
     soft_turn_timeout: Option<std::time::Duration>,
     steering_mode: SteeringMode,
     context_delivery: ContextDelivery,
+    delivery: super::processor::DeliveryConfig,
     repair_config: Option<RepairConfig>,
     persistence: Option<Arc<dyn SessionPersistence>>,
     session_id: Option<String>,
@@ -421,10 +436,10 @@ pub(crate) fn build_runtime(plan: SessionPlan, session: SessionHandle) -> Sessio
 
     // Store initial phase's `needs` metadata for ContextBuilder.
     if let Some(ref pm) = plan.phase_machine {
-        state.session().set("phase", pm.current());
+        let _ = state.session().set("phase", pm.current());
         if let Some(phase) = pm.current_phase() {
             if !phase.needs.is_empty() {
-                state.set("session:phase_needs", phase.needs.clone());
+                let _ = state.set("session:phase_needs", phase.needs.clone());
             }
         }
     }
@@ -442,6 +457,7 @@ pub(crate) fn build_runtime(plan: SessionPlan, session: SessionHandle) -> Sessio
         soft_turn: plan.soft_turn_timeout.map(SoftTurnDetector::new),
         steering_mode: plan.steering_mode,
         context_delivery: plan.context_delivery,
+        delivery: plan.delivery,
         needs_fulfillment: plan.repair_config.map(NeedsFulfillment::new),
         persistence: plan.persistence,
         session_id: plan.session_id,

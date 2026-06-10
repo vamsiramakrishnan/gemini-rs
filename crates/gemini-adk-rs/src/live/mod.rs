@@ -57,6 +57,7 @@ pub use phase::{
     InstructionModifier, Phase, PhaseInstruction, PhaseMachine, PhasePreparation, PhaseTransition,
     Transition, TransitionEvaluation, TransitionResult, TransitionTrigger,
 };
+pub use processor::{Delivery, DeliveryConfig};
 pub use reactor::{
     EffectMode, EffectPolicy, LiveEffect, LiveReactor, Reaction, ReactorEvent, ReactorRule,
     VoiceRuntimeState,
