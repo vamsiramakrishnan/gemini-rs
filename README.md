@@ -98,7 +98,11 @@ handle.send_text("Hello").await?;
 <p align="center"><img src="docs/assets/diagrams/architecture-stack.svg" alt="Three-crate layered architecture: L2 fluent DX over L1 runtime over L0 wire protocol" width="760"></p>
 
 Each layer depends only on the one below it. Application code imports from the
-highest layer it needs (`gemini_adk_fluent_rs::prelude::*` re-exports all three).
+highest layer it needs. The L2 `prelude` is a curated **kernel** (the ~40 types a
+typical app touches across all three layers); anything beyond it lives in a
+focused submodule — `gemini_adk_fluent_rs::{live, text, tools, state, flow,
+agents, llm, conversation, wire}` — so a glob import stays small. See the
+[migration guide](docs/src/user-guide/migration.md) for the full kernel/submodule map.
 
 > **Where does `Flow` live?** `Flow`, `Extract`, and the `Resolver`
 > orchestration primitives are **L1 runtime** types (`gemini-adk-rs`) — *not* a

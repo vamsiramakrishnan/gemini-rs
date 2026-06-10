@@ -22,6 +22,54 @@ The tradeoff is control. L0 gives you total control over every message. L2
 handles the common patterns automatically but gives you less room to
 customize the event processing loop itself.
 
+## The L2 prelude: kernel + submodule map
+
+`gemini_adk_fluent_rs::prelude` is a **kernel**, not an everything-glob. It
+re-exports the ~40 types a typical application touches; everything else lives in
+a focused, discoverable submodule. Start with the prelude and reach for a
+submodule when the compiler says a name isn't found.
+
+**In the kernel `prelude`:**
+
+- Builders & composition: `AgentBuilder`/`Agent`, the `S·C·T·P·M·A·E·G·Ctx`
+  algebra, operators (`>> | * /`) and patterns (`until`, `review_loop`,
+  `fan_out_merge`, `supervised`), `Live`.
+- State: `State`, `StateKey`.
+- Flow (core): `Flow`, `Guard`, `FlowMonitor`, `FlowMode`, `Verdict`, `ToolPolicy`.
+- Tools (core): `SimpleTool`, `TypedTool`, `ToolFunction`, `ToolDispatcher`,
+  `#[tool]`, `Extract`, `Frame`.
+- LLM (core): `BaseLlm`, `GeminiLlm`.
+- Errors: `AgentError`, `AgentResult`, `ToolError`.
+- Callback contexts: `CallbackContext`, `ToolContext`.
+- Common Live types: `LiveHandle`, `EventCallbacks`, `SteeringMode`,
+  `ContextDelivery`, `RepairConfig`, `SessionPersistence`, `FsPersistence`,
+  `MemoryPersistence`, `TurnExtractor`, `ExtractionTrigger`, `LlmExtractor`,
+  `SoftTurnDetector`, `TranscriptBuffer`, `TranscriptTurn`.
+- Text-agent combinators (`LlmTextAgent`, `SequentialTextAgent`, …).
+- Build-time validation: `check_contracts`, `ContractViolation`, `diagnose`,
+  `infer_data_flow`, `AgentHarness`, `DataFlowEdge`.
+- The L0 wire prelude (`GeminiModel`, `Voice`, `Content`, `Part`, `Role`, …).
+
+**Moved to submodules** (import the named module):
+
+| Symbol(s) | Home |
+|-----------|------|
+| Full Live control plane: `LiveEvent`, `RuntimeContract`, `FieldPromotion`, `DeferredWriter`, `PendingContext`, `NeedsFulfillment`, `RepairAction`, `SessionSnapshot`, `LiveSessionBuilder`, `CallbackMode`, `ToolExecutionMode`, the `*Contract` types, … | `gemini_adk_fluent_rs::live` |
+| Text-agent runtime internals | `gemini_adk_fluent_rs::text` |
+| `Toolset`, `StaticToolset`, `ConfirmationProvider`, `Recognizer`, `RecordExtractor`, `FrameSpec`, `SlotSpec`, … | `gemini_adk_fluent_rs::tools` |
+| `SlotEvidence`, prefix-scope helpers | `gemini_adk_fluent_rs::state` |
+| `CompiledFlow`, `StepAction`, `Violation`, `FlowExplanation`, `run` (on-enter), … | `gemini_adk_fluent_rs::flow` |
+| `AgentTrait` (L1 `Agent` trait), `call_agent`, `AgentMode`, `provenance`, `Resolver`, `agent_session::*` | `gemini_adk_fluent_rs::agents` |
+| `LlmRequest`, `LlmResponse`, `GeminiLlmParams`, `LlmRegistry` | `gemini_adk_fluent_rs::llm` |
+| `Conversation`, `ConversationSpec`, `CompiledConversation`, `FlowStack`, … | `gemini_adk_fluent_rs::conversation` |
+| `A2AServer`, `RemoteAgent`, `SkillDeclaration` | `gemini_adk_fluent_rs::a2a` |
+| `Scenario`, `Sim`, `SimStep` | `gemini_adk_fluent_rs::simulation` |
+| `Motif`, `CommitPolicy`, `Policy` | `gemini_adk_fluent_rs::{motifs, policy}` |
+| Raw L0 wire types | `gemini_adk_fluent_rs::wire` |
+
+> The L1 `Agent` *trait* is exposed as `AgentTrait` (in both `prelude` and
+> `agents`) to avoid colliding with the L2 `Agent` builder alias.
+
 ## L0: Wire Protocol
 
 At L0, you work directly with `SessionHandle`, `SessionEvent`, and
