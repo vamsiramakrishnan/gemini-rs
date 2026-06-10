@@ -99,7 +99,7 @@ pub mod flow {
 /// Agent builders, the agent trait, and the operator/pattern combinators.
 ///
 /// Note: the L1 [`gemini_adk_rs::agent::Agent`] *trait* is re-exported here as
-/// [`AgentTrait`] to avoid colliding with the L2 [`Agent`](crate::builder::Agent)
+/// `AgentTrait` to avoid colliding with the L2 `Agent` (the [`AgentBuilder`](crate::builder::AgentBuilder))
 /// builder alias.
 pub mod agents {
     pub use crate::builder::*;

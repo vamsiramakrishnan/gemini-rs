@@ -262,12 +262,12 @@ impl LiveSessionBuilder {
     /// This is a thin orchestrator over three explicit, behavior-preserving
     /// stages:
     ///
-    /// 1. [`into_plan`](Self::into_plan) — pure derivation/validation of the
-    ///    resolved startup configuration ([`SessionPlan`]); no I/O, no spawning.
+    /// 1. `into_plan` — pure derivation/validation of the resolved startup
+    ///    configuration (`SessionPlan`); no I/O, no spawning.
     /// 2. Connect the L0 transport using the plan's resolved [`SessionConfig`].
-    /// 3. [`build_runtime`] — assemble the runtime wiring (channels, shared
+    /// 3. `build_runtime` — assemble the runtime wiring (channels, shared
     ///    state, dispatcher, control plane) from the plan + connected session.
-    /// 4. [`spawn_lanes`] — spawn the telemetry/event/tool lanes and return the
+    /// 4. `spawn_lanes` — spawn the telemetry/event/tool lanes and return the
     ///    assembled [`LiveHandle`].
     pub async fn connect(self) -> Result<LiveHandle, AgentError> {
         let mut plan = self.into_plan()?;

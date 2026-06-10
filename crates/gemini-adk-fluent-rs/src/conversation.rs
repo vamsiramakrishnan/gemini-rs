@@ -501,7 +501,7 @@ impl Conversation {
         self
     }
 
-    /// Collect the slots of a typed [`Frame`](gemini_adk_rs::frame::Frame) in this
+    /// Collect the slots of a typed [`gemini_adk_rs::frame::Frame`] in this
     /// stage. The frame's slot state-keys drive the `captured` completion; its
     /// metadata (prompts/confirm/pii) is available via `F::frame()` for
     /// confirmation and repair.

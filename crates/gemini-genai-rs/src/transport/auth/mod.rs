@@ -20,7 +20,7 @@ use crate::session::AuthError;
 
 /// Identifies which Gemini API service to connect to.
 ///
-/// Used by [`AuthProvider::rest_url`] to construct the correct REST endpoint URL.
+/// Used by `AuthProvider::rest_url` to construct the correct REST endpoint URL.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ServiceEndpoint {
     /// WebSocket Live/Bidi streaming endpoint.
