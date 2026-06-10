@@ -796,6 +796,8 @@ mod harness {
                     resume_handle: Mutex::new(None),
                     last_instruction: Mutex::new(None),
                     pending_context: None,
+                    delivery: crate::live::processor::DeliveryConfig::default(),
+                    dropped: crate::live::processor::DroppedFrames::default(),
                 },
                 state: State::new(),
                 transcript,
