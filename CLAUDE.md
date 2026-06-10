@@ -580,6 +580,7 @@ let artifacts = A::json_output("report", "Analysis report")
 | `SessionPersistence` / `SessionSnapshot` | Session persistence trait and snapshot type |
 | `FsPersistence` / `MemoryPersistence` | Built-in persistence backends |
 | `ControlPlaneConfig` | Consolidated control plane settings for the processor |
+| `Delivery` / `DeliveryConfig` | Per-event-class fast-lane backpressure policy: `Lossless` (default; awaits) vs `LossyDropNewest` (drops on full). L2: `.delivery(..)`, `.lossy_audio()`, `.lossy_transcript()` |
 | `ExtractionTrigger` | When to run extractors: EveryTurn, Interval, AfterToolCall, OnPhaseChange, OnGenerationComplete |
 | `Flow` / `Step` / `Guard` / `FlowMonitor` | Governed conversation/tool DAG: one declarative spec enforced live (`Live::govern(flow)`) — gates tool calls, projects active-step postures, drives repair. Closed serializable vocabulary; see `docs/user-guide/flow.md` |
 
