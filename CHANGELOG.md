@@ -32,6 +32,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--no-default-features` and `--all-features` (both verified green), so the
   feature-heavy SDK can't regress at the extremes. Also: `await_holding_lock` is
   now enforced (removed from the workspace lint allow-list).
+- **CI/release ratchet.** New `cargo hack check --each-feature` job (every
+  feature of the published crates compiles in isolation), a `cargo deny` job
+  (RustSec advisories, permissive-license allow-list, source whitelist — config
+  in `deny.toml`), `cargo semver-checks` in the release validate job (declared
+  bump must cover the real API delta), and crates are now published **with**
+  tarball verification — the `--no-verify` escape hatch is gone (dependencies
+  are already live on crates.io when each crate publishes).
 - **Proc-macro hygiene.** The `#[tool]` macro now routes its generated code
   through `gemini_adk_rs::__macros` (re-exporting `serde`/`schemars`/`async_trait`/
   `serde_json`) and sets `#[serde(crate = ..)]`, so downstream crates no longer
