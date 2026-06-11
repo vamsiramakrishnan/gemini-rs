@@ -101,8 +101,8 @@ pub mod prelude {
     pub use gemini_adk_rs::extract::{Recognizer, RecordExtractor};
     pub use gemini_adk_rs::flow::{
         render_ground, run as run_on_enter, CompiledFlow, Enforcement as FlowMode, Flow, FlowError,
-        FlowErrors, FlowExplanation, FlowMonitor, Guard, StepAction, ToolPolicy, Verdict,
-        Violation,
+        FlowErrors, FlowExplanation, FlowMonitor, Guard, SharedFlowMonitor, StepAction, ToolPolicy,
+        Verdict, Violation,
     };
     pub use gemini_adk_rs::frame::{
         ConfirmPolicy, FrameSpec, SlotRecognizer, SlotSpec, SlotValidator,

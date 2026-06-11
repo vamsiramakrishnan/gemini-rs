@@ -237,6 +237,27 @@ impl Live {
         self
     }
 
+    /// Govern the session with a pre-compiled
+    /// [`CompiledFlow`](gemini_adk_rs::flow::CompiledFlow) and **enforce** it.
+    ///
+    /// A `CompiledFlow` carries proof that
+    /// [`Flow::compile`](gemini_adk_rs::flow::Flow::compile) (or
+    /// [`Flow::compile_with_tools`](gemini_adk_rs::flow::Flow::compile_with_tools))
+    /// already surfaced its diagnostics, so connect does **not** re-validate or
+    /// re-compile it — compile once at load time, govern many sessions.
+    pub fn govern_compiled(self, flow: gemini_adk_rs::flow::CompiledFlow) -> Self {
+        self.govern(flow.into_flow())
+    }
+
+    /// Attach a pre-compiled
+    /// [`CompiledFlow`](gemini_adk_rs::flow::CompiledFlow) in **observe** mode:
+    /// nothing is blocked, but deviations are recorded for audit/analytics.
+    /// Like [`govern_compiled`](Self::govern_compiled), the flow is not
+    /// re-validated or re-compiled at connect.
+    pub fn observe_compiled(self, flow: gemini_adk_rs::flow::CompiledFlow) -> Self {
+        self.observe(flow.into_flow())
+    }
+
     /// Run an agent the first time the named flow step becomes active.
     ///
     /// The agent reads its inputs from `State` and its result lands in
@@ -332,6 +353,32 @@ mod tests {
             .on_disconnected(|_r| async {})
             .on_error(|_e| async {});
         // Just verify the builder chain compiles
+    }
+
+    #[test]
+    fn govern_compiled_attaches_precompiled_flow_without_recompiling() {
+        use gemini_adk_rs::flow::{Enforcement, Flow, Guard};
+
+        let compiled = Flow::new()
+            .step("greet")
+            .done(Guard::is_true("greeted"))
+            .step("end")
+            .after("greet")
+            .terminal()
+            .build()
+            .expect("valid flow")
+            .compile()
+            .expect("flow compiles");
+
+        // Enforce mode.
+        let live = Live::builder().govern_compiled(compiled.clone());
+        assert!(live.flow.is_some(), "compiled flow attached");
+        assert_eq!(live.flow_mode, Enforcement::Enforce);
+
+        // Observe mode.
+        let live = Live::builder().observe_compiled(compiled);
+        assert!(live.flow.is_some(), "compiled flow attached");
+        assert_eq!(live.flow_mode, Enforcement::Observe);
     }
 
     #[test]
