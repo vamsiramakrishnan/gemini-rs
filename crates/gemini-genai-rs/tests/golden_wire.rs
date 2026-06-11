@@ -150,7 +150,7 @@ fn setup_vertex_ai_golden() {
 fn realtime_audio_input_golden() {
     let config = SessionConfig::new("test-api-key");
     let bytes = JsonCodec
-        .encode_command(&SessionCommand::SendAudio(vec![1, 2, 3, 4].into()), &config)
+        .encode_command(&SessionCommand::SendAudio(vec![1, 2, 3, 4]), &config)
         .unwrap();
     let actual: Value = serde_json::from_slice(&bytes).unwrap();
     assert_golden("client_realtime_audio.json", &actual);
