@@ -148,40 +148,40 @@ verified correctness bugs are fixed; the full compile-time validator remains.
 The pieces for a single deterministic reaction loop already exist; they're
 half-wired.
 
-- 📋 **Finish the reactor effect scheduler.** `EffectPolicy` carries `timeout`,
-  `dedupe_key`, and `cancel_scope`, but the executor only honors blocking/concurrent
-  + timeout, `LiveEffect::TransitionPhase` is a no-op, and concurrent effect errors
-  are fire-and-forget. Honor dedupe/cancel scopes, supervise spawned effects, emit
-  structured reaction failures, make `TransitionPhase` real (or unconstructable). →
-  **Value:** unifies phases, watchers, temporal patterns, repair, and tool gating
-  into one reaction loop instead of policy scattered across callbacks.
+- ✅ **Honest reactor vocabulary.** The dead effect nouns took the "remove" path:
+  `EffectPolicy::dedupe_key`/`cancel_scope` and `LiveEffect::TransitionPhase` were
+  deleted rather than implemented speculatively, and concurrent effect failures
+  are now supervised (surfaced as `LiveEvent::Error`). *(The full unified reaction
+  loop — phases/watchers/temporal/repair on one scheduler — remains the 0.9.0
+  arc; new scheduler nouns get added when a rule actually needs them.)*
 - 💭 **Promote the mutation journal into the substrate.** `State` already records
   `StateMutation` (seq, old/new, origin, ts) with cursors/drain. Have
   watchers/computed/extractors consume cursors instead of re-snapshotting; add an
   optional durable sink. → **Value:** time-travel debugging, deterministic session
   replay, prefix subscriptions, lower CPU, a clean devtools-timeline bridge.
-- 💭 **Explicit lane backpressure.** Define event classes — lossy/coalesce
-  (audio/VAD/progress) vs lossless (tool calls, interruptions, resume, turn
-  boundaries) — use `try_send` + counters for lossy, `send().await` for lossless,
-  expose lane-saturation metrics. → **Value:** makes the "three-lane" promise
-  operational, not just descriptive; correct behavior under voice load.
+- ✅ **Explicit lane backpressure.** Per-event-class delivery policy
+  (`Delivery`/`DeliveryConfig`): `Lossless` default preserves the old byte-for-byte
+  behavior; `LossyDropNewest` opt-in for audio/VAD/progress with drop counters.
+  Exposed at L2 as `.delivery()`/`.lossy_audio()`.
 
 ## Milestone 4 — Make misuse impossible to ship `0.8.x`
 
 Mechanical guardrails so Milestones 1–2 can't regress and the crate stays honest.
 
-- 📋 **Feature diet.** L0 defaults pull ML VAD (`vad-wavekat`), `tokio/full`,
-  `tracing-subscriber`, and a default-TLS stack; L1/L2 also use `tokio/full` and
-  unconditional `reqwest`/`tracing`. Split: `default = ["live"]`, opt-in
-  `vad-wavekat`, `http` behind the REST features, rustls/native-tls mutually
-  selectable, tracing facade separate from subscriber. → **Value:** for an SDK,
-  default compile weight *is* API surface.
-- 📋 **CI/release ratchet.** Add `cargo hack --feature-powerset`,
-  `--all-features` + `--no-default-features` tests, `cargo semver-checks`,
-  `cargo deny`, and package-from-tarball verification (replace `publish
-  --no-verify`). Replace the global `await_holding_lock = allow` with targeted
-  `#[allow(reason=…)]`. → **Value:** catches exactly the feature/lock regressions
-  multi-crate async SDKs ship.
+- ✅ **Feature diet.** L0 defaults are now `["live", "tls-native"]` — ML VAD and
+  the tracing subscriber are opt-in, TLS is selectable (`tls-native`/`tls-rustls`,
+  `reqwest` follows), `reqwest` is optional behind the REST features, all
+  published crates use targeted tokio features instead of `tokio/full`, and the
+  tracing facade (unconditional, tiny) is split from the subscriber machinery
+  (`tracing-subscriber` feature).
+- ✅ **CI/release ratchet.** `cargo hack check --each-feature` (per-feature
+  isolation of the published crates), `cargo deny` (advisories/licenses/sources,
+  `deny.toml`), `cargo semver-checks` in the release validate job, feature
+  extremes (`--no-default-features`/`--all-features`), publish-with-verification
+  (no more `--no-verify`), and `await_holding_lock` enforced. *(Remaining: burn
+  the four style allows — `type_complexity`, `too_many_arguments`,
+  `field_reassign_with_default`, `new_ret_no_self` — down to targeted
+  `#[allow(reason=…)]`.)*
 - 📋 **Golden-wire protocol tests.** JSON fixtures + round-trip serde for setup,
   server messages, tool calls, audio/thinking/transcription parts, and
   Vertex-vs-Google-AI differences; a model/voice catalog with `GeminiModel::Custom`

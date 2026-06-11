@@ -14,11 +14,31 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use async_trait::async_trait;
+use gemini_adk_rs::gemini_genai_rs::prelude::FunctionCall;
 use gemini_adk_rs::text::TextAgent;
-use gemini_adk_rs::{AgentError, GeminiLlm, GeminiLlmParams, LlmTextAgent, State};
+use gemini_adk_rs::{
+    AgentError, BaseLlm, GeminiLlm, GeminiLlmParams, LlmTextAgent, Middleware, State, ToolError,
+};
 
 use crate::agents::AgentEntry;
 use crate::types::AgentEvent;
+
+/// Factory that resolves the LLM backing an agent entry.
+///
+/// The default ([`default_llm`]) constructs a [`GeminiLlm`] with auth resolved
+/// from the environment. Tests (and embedders) can swap it via
+/// [`crate::ServerState::with_llm_factory`] to inject a mock LLM.
+pub type LlmFactory = Arc<dyn Fn(&AgentEntry) -> Arc<dyn BaseLlm> + Send + Sync>;
+
+/// Default LLM resolution: a [`GeminiLlm`] for the entry's model (falling back
+/// to the SDK default when unset), with auth from the environment.
+pub fn default_llm(entry: &AgentEntry) -> Arc<dyn BaseLlm> {
+    Arc::new(GeminiLlm::new(GeminiLlmParams {
+        model: entry.model.clone(),
+        ..Default::default()
+    }))
+}
 
 /// Outcome of running an agent over a single turn.
 pub struct RunOutcome {
@@ -40,17 +60,108 @@ pub struct RunOutcome {
 /// the request/response text path, so they are not attached here. The agent
 /// still runs a real LLM generation.
 pub fn build_text_agent(entry: &AgentEntry) -> Arc<dyn TextAgent> {
-    let llm = GeminiLlm::new(GeminiLlmParams {
-        model: entry.model.clone(),
-        ..Default::default()
-    });
+    build_text_agent_with(entry, default_llm(entry), None)
+}
 
-    let mut agent = LlmTextAgent::new(entry.name.clone(), Arc::new(llm));
+/// Build a runnable text agent with an explicit LLM and optional middleware.
+///
+/// Used by the SSE endpoint to attach a [`ChannelEvents`] middleware that
+/// forwards real lifecycle events to the stream, and by tests to inject a mock
+/// LLM. See [`build_text_agent`] for the default path.
+pub fn build_text_agent_with(
+    entry: &AgentEntry,
+    llm: Arc<dyn BaseLlm>,
+    middleware: Option<Arc<dyn Middleware>>,
+) -> Arc<dyn TextAgent> {
+    let mut agent = LlmTextAgent::new(entry.name.clone(), llm);
     if let Some(instruction) = &entry.instruction {
         agent = agent.instruction(instruction.clone());
     }
+    if let Some(mw) = middleware {
+        agent = agent.add_middleware(mw);
+    }
 
     Arc::new(agent)
+}
+
+/// Middleware that forwards real agent lifecycle events into a channel.
+///
+/// Backs the `POST /run_sse` endpoint: every event it emits corresponds to
+/// something the agent runtime actually did (agent start/completion, tool
+/// dispatch). It never fabricates output — token-level deltas are not emitted
+/// because [`BaseLlm`] has no streaming generation API.
+pub struct ChannelEvents {
+    tx: tokio::sync::mpsc::UnboundedSender<serde_json::Value>,
+}
+
+impl ChannelEvents {
+    /// Create a forwarder that sends event payloads into `tx`.
+    pub fn new(tx: tokio::sync::mpsc::UnboundedSender<serde_json::Value>) -> Self {
+        Self { tx }
+    }
+
+    fn send(&self, payload: serde_json::Value) {
+        // The receiver may have disconnected (client closed the stream) —
+        // dropping the event is the correct behavior then.
+        let _ = self.tx.send(payload);
+    }
+}
+
+#[async_trait]
+impl Middleware for ChannelEvents {
+    fn name(&self) -> &str {
+        "channel-events"
+    }
+
+    async fn on_event(
+        &self,
+        event: &gemini_adk_rs::AgentEvent,
+    ) -> Result<(), gemini_adk_rs::AgentError> {
+        use gemini_adk_rs::AgentEvent as E;
+        let payload = match event {
+            E::AgentStarted { name } => {
+                serde_json::json!({"type": "agent_started", "agent": name})
+            }
+            E::AgentCompleted { name } => {
+                serde_json::json!({"type": "agent_completed", "agent": name})
+            }
+            E::Timeout => serde_json::json!({"type": "timeout"}),
+            _ => return Ok(()),
+        };
+        self.send(payload);
+        Ok(())
+    }
+
+    async fn before_tool(&self, call: &FunctionCall) -> Result<(), AgentError> {
+        self.send(serde_json::json!({
+            "type": "tool_call_started",
+            "tool": call.name,
+            "args": call.args,
+        }));
+        Ok(())
+    }
+
+    async fn after_tool(
+        &self,
+        call: &FunctionCall,
+        result: &serde_json::Value,
+    ) -> Result<(), AgentError> {
+        self.send(serde_json::json!({
+            "type": "tool_call_completed",
+            "tool": call.name,
+            "result": result,
+        }));
+        Ok(())
+    }
+
+    async fn on_tool_error(&self, call: &FunctionCall, err: &ToolError) -> Result<(), AgentError> {
+        self.send(serde_json::json!({
+            "type": "tool_call_failed",
+            "tool": call.name,
+            "error": err.to_string(),
+        }));
+        Ok(())
+    }
 }
 
 /// Run an agent to completion over one turn, mirroring ADK `Runner.run_async`.

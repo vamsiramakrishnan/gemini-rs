@@ -105,6 +105,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Server: real SSE streaming + debug/eval polish.** `POST /run_sse` now
+  streams real execution milestones (`started`, `agent_started/completed`,
+  `tool_call_started/completed/failed`, final `response`) instead of returning a
+  hardcoded fake string; granularity note: `BaseLlm` has no token-level
+  streaming API, so the endpoint streams real lifecycle events rather than
+  fabricated token chunks. Also: `GET /debug/traces` (list recorded traces),
+  HTTP 400 on malformed artifact versions (was `unwrap_or(0)`), and
+  `limit`/`offset` pagination on `GET /eval/results`. Covered by integration
+  tests with a mock LLM.
 - **`adk flow` devtools.** A CLI command group over a serializable
   `ConversationSpec`: `adk flow inspect <spec.json>` (stages/tools/digressions/
   policies/redaction summary), `adk flow graph <spec.json>` (Mermaid diagram), and

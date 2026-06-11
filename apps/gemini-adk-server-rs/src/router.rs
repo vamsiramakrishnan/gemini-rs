@@ -64,6 +64,7 @@ pub fn build_api_router(state: ServerState) -> Router {
             get(handlers::get_artifact_version),
         )
         // Debug
+        .route("/debug/traces", get(handlers::list_traces))
         .route("/debug/trace/:trace_id", get(handlers::get_trace))
         .route("/debug/health", get(handlers::health_check))
         // Eval
