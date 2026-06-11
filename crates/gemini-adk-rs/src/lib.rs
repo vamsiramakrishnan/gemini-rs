@@ -79,7 +79,8 @@ pub use events::{Event, EventActions, EventType, StructuredEvent};
 pub use extract::{Extract, Recognizer, RecordExtractor};
 pub use flow::{
     render_ground, run as run_on_enter, CompiledFlow, Enforcement as FlowMode, Flow, FlowError,
-    FlowErrors, FlowExplanation, FlowMonitor, Guard, StepAction, ToolPolicy, Verdict, Violation,
+    FlowErrors, FlowExplanation, FlowMonitor, Guard, SharedFlowMonitor, StepAction, ToolPolicy,
+    Verdict, Violation,
 };
 pub use frame::{ConfirmPolicy, Frame, FrameSpec, SlotRecognizer, SlotSpec, SlotValidator};
 /// Re-exports the `#[tool]`/`#[derive(..)]` macros route their generated code

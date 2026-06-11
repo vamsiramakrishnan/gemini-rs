@@ -657,7 +657,7 @@ impl crate::live::Live {
     ///     .await?;
     /// ```
     pub fn converse(self, convo: &CompiledConversation) -> Self {
-        let mut live = self.govern(convo.flow().flow().clone());
+        let mut live = self.govern_compiled(convo.flow().clone());
         for extract in convo.all_extractors() {
             live = live.extract_record(extract);
         }
@@ -667,7 +667,7 @@ impl crate::live::Live {
     /// Like [`converse`](Self::converse) but attaches the flow in **observe** mode
     /// (nothing blocked; deviations recorded) while still registering extractors.
     pub fn converse_observe(self, convo: &CompiledConversation) -> Self {
-        let mut live = self.observe(convo.flow().flow().clone());
+        let mut live = self.observe_compiled(convo.flow().clone());
         for extract in convo.all_extractors() {
             live = live.extract_record(extract);
         }

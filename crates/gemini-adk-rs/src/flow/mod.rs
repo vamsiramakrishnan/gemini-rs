@@ -500,22 +500,56 @@ impl Flow {
     /// runtime surprises into load-time errors.
     ///
     /// On top of [`validate`](Self::validate)'s referential/acyclicity checks this
-    /// reports: unreachable steps, and commit tools guarded by an always-true
+    /// reports: unreachable steps, commit tools guarded by an always-true
     /// condition (an effectively *unguarded* commit, which defeats the
-    /// confirm-before-commit contract). Precomputes the [`ToolPolicy`] universe.
+    /// confirm-before-commit contract), `never…until` guards whose `done(step)`
+    /// atoms reference unknown steps (unsatisfiable — the tool would be forbidden
+    /// forever), and ordering cycles across the combined `after` + `before` edges
+    /// (which deadlock every step on the cycle). Precomputes the [`ToolPolicy`]
+    /// universe.
+    ///
+    /// To additionally validate tool names against a known registry, use
+    /// [`compile_with_tools`](Self::compile_with_tools).
     pub fn compile(self) -> Result<CompiledFlow, FlowErrors> {
+        self.compile_internal(None)
+    }
+
+    /// Compile like [`compile`](Self::compile), additionally validating every
+    /// tool name the flow references (step `allow`/`deny`, `once`,
+    /// `never…until`, and commit/confirm tools) against the given registry of
+    /// known tool names.
+    ///
+    /// A referenced tool missing from `tools` is reported as
+    /// [`FlowError::UnknownTool`] — catching typos and drift between a flow
+    /// script and the tools actually registered on the session.
+    ///
+    /// ```ignore
+    /// let compiled = flow.compile_with_tools(&["lookup_account", "charge_card"])?;
+    /// ```
+    pub fn compile_with_tools(self, tools: &[&str]) -> Result<CompiledFlow, FlowErrors> {
+        self.compile_internal(Some(tools))
+    }
+
+    fn compile_internal(self, registry: Option<&[&str]>) -> Result<CompiledFlow, FlowErrors> {
         let mut errors = Vec::new();
         if let Err(errs) = self.validate() {
             errors.extend(errs.into_iter().map(FlowError::Invalid));
         }
 
-        // Unreachable steps (only meaningful once the graph is acyclic/valid).
+        // Graph-shape checks (only meaningful once the graph is acyclic/valid).
         if errors.is_empty() {
+            // Unreachable steps.
             let reachable = self.reachable_steps();
             for s in &self.steps {
                 if !reachable.contains(&s.id) {
                     errors.push(FlowError::UnreachableStep(s.id.clone()));
                 }
+            }
+            // Ordering cycles across the combined `after` + `before(a, b)` edges.
+            // `validate()` only walks `after`; a cycle closed by a `Before`
+            // constraint deadlocks every step on it (none can become eligible).
+            if let Some(cycle) = self.ordering_cycle() {
+                errors.push(FlowError::OrderingCycle(cycle));
             }
         }
 
@@ -532,6 +566,35 @@ impl Flow {
             }
         }
 
+        // An unsatisfiable `never(tool).until(guard)`: the guard's `done(step)`
+        // atom references a step that doesn't exist, so it can never latch and
+        // the tool is forbidden forever. (Step gate/done guards are already
+        // covered by `validate()`; constraints were not.)
+        let ids: BTreeSet<&str> = self.steps.iter().map(|s| s.id.as_str()).collect();
+        for c in &self.constraints {
+            if let Constraint::NeverUntil { tool, until } = c {
+                let mut refs = Vec::new();
+                until.referenced_steps(&mut refs);
+                for r in refs {
+                    if !ids.contains(r.as_str()) {
+                        errors.push(FlowError::UnsatisfiableGuard {
+                            tool: tool.clone(),
+                            step: r,
+                        });
+                    }
+                }
+            }
+        }
+
+        // Dangling tool names vs a known registry (opt-in).
+        if let Some(known) = registry {
+            for tool in self.tool_universe() {
+                if !known.contains(&tool.as_str()) {
+                    errors.push(FlowError::UnknownTool(tool));
+                }
+            }
+        }
+
         if errors.is_empty() {
             let policy = ToolPolicy {
                 tools: self.tool_universe(),
@@ -540,6 +603,60 @@ impl Flow {
         } else {
             Err(FlowErrors(errors))
         }
+    }
+
+    /// Find a cycle over the combined dependency edges (`after` plus
+    /// `before(a, b)` ordering constraints), if any. Returns the step ids on
+    /// the cycle path. `None` when the combined graph is acyclic.
+    fn ordering_cycle(&self) -> Option<Vec<String>> {
+        // Predecessor edges: step -> everything that must be done before it.
+        let mut deps: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+        for s in &self.steps {
+            let entry = deps.entry(s.id.as_str()).or_default();
+            entry.extend(s.after.iter().map(String::as_str));
+        }
+        for c in &self.constraints {
+            if let Constraint::Before(a, b) = c {
+                deps.entry(b.as_str()).or_default().push(a.as_str());
+            }
+        }
+        // DFS with colors; on a back-edge, report the current path suffix.
+        fn dfs<'a>(
+            id: &'a str,
+            deps: &BTreeMap<&'a str, Vec<&'a str>>,
+            color: &mut BTreeMap<&'a str, u8>,
+            path: &mut Vec<&'a str>,
+        ) -> Option<Vec<String>> {
+            color.insert(id, 1);
+            path.push(id);
+            for d in deps.get(id).into_iter().flatten() {
+                match color.get(d).copied() {
+                    Some(1) => {
+                        let start = path.iter().position(|p| p == d).unwrap_or(0);
+                        return Some(path[start..].iter().map(|s| s.to_string()).collect());
+                    }
+                    Some(2) => {}
+                    _ => {
+                        if let Some(cycle) = dfs(d, deps, color, path) {
+                            return Some(cycle);
+                        }
+                    }
+                }
+            }
+            path.pop();
+            color.insert(id, 2);
+            None
+        }
+        let mut color: BTreeMap<&str, u8> = BTreeMap::new();
+        for s in &self.steps {
+            if color.get(s.id.as_str()).copied().unwrap_or(0) == 0 {
+                let mut path = Vec::new();
+                if let Some(cycle) = dfs(&s.id, &deps, &mut color, &mut path) {
+                    return Some(cycle);
+                }
+            }
+        }
+        None
     }
 
     fn has_cycle(&self) -> bool {
@@ -648,6 +765,7 @@ pub type Mode = Enforcement;
 /// [`AgentMode`]. Built with [`run`]. The result lands in `{name}:result` (the
 /// name defaults to the step id), so a *downstream* step can complete on it via
 /// [`Guard::resolved`] — this is how a flow drives orchestration in-session.
+#[derive(Clone)]
 pub struct StepAction {
     name: Option<String>,
     agent: Arc<dyn TextAgent>,
@@ -678,7 +796,7 @@ impl StepAction {
 
     /// Run the action. `Call` awaits inline; `Dispatch`/`Background` spawn it
     /// detached so the turn is never blocked.
-    async fn fire(&self, step_id: &str, state: &State) {
+    pub(crate) async fn fire(&self, step_id: &str, state: &State) {
         let name = self.name.clone().unwrap_or_else(|| step_id.to_string());
         match self.mode {
             AgentMode::Call => {
@@ -694,6 +812,13 @@ impl StepAction {
         }
     }
 }
+
+/// A shared, lock-protected [`FlowMonitor`] — the form in which the Live
+/// control plane owns a governed flow, so runtime surfaces (e.g.
+/// [`LiveHandle::why_blocked`](crate::live::LiveHandle::why_blocked)) can
+/// snapshot it concurrently. All monitor methods are synchronous: lock
+/// briefly and never hold the guard across an `await`.
+pub type SharedFlowMonitor = Arc<parking_lot::Mutex<FlowMonitor>>;
 
 /// Observes the session trace, maintains the [`Marking`], answers tool
 /// admissibility, and projects active postures.
@@ -734,6 +859,14 @@ impl FlowMonitor {
     /// of trusting the caller.
     pub fn try_new(flow: Flow, mode: Enforcement) -> Result<Self, FlowErrors> {
         Ok(Self::compiled(flow.compile()?, mode))
+    }
+
+    /// Wrap this monitor in a [`SharedFlowMonitor`] for shared ownership
+    /// between the control lane (which advances it) and runtime accessors
+    /// (which snapshot it, e.g.
+    /// [`LiveHandle::explain`](crate::live::LiveHandle::explain)).
+    pub fn into_shared(self) -> SharedFlowMonitor {
+        Arc::new(parking_lot::Mutex::new(self))
     }
 
     /// Explain the current control-plane state: active steps, which tools are
@@ -1032,6 +1165,23 @@ pub enum FlowError {
     /// A commit (confirm) tool whose gate is always true — effectively
     /// unguarded, defeating confirm-before-commit.
     UnguardedCommitTool(String),
+    /// A tool referenced by the flow (step `allow`/`deny`, `once`,
+    /// `never…until`, confirm) that is not in the registry given to
+    /// [`Flow::compile_with_tools`].
+    UnknownTool(String),
+    /// A `never(tool).until(guard)` whose guard references a step id that
+    /// doesn't exist — the guard can never latch, so the tool would be
+    /// forbidden forever.
+    UnsatisfiableGuard {
+        /// The tool the constraint gates.
+        tool: String,
+        /// The unknown step id the guard's `done(..)` atom references.
+        step: String,
+    },
+    /// A cycle over the combined `after` + `before(a, b)` ordering edges —
+    /// every step on the cycle waits on another, so none can ever become
+    /// eligible. Contains the step ids on the cycle.
+    OrderingCycle(Vec<String>),
 }
 
 impl std::fmt::Display for FlowError {
@@ -1044,6 +1194,20 @@ impl std::fmt::Display for FlowError {
             FlowError::UnguardedCommitTool(t) => write!(
                 f,
                 "commit tool '{t}' is guarded by an always-true condition (effectively unguarded)"
+            ),
+            FlowError::UnknownTool(t) => write!(
+                f,
+                "flow references tool '{t}' which is not in the provided tool registry"
+            ),
+            FlowError::UnsatisfiableGuard { tool, step } => write!(
+                f,
+                "`never('{tool}').until(..)` references unknown step '{step}' — the guard can \
+                 never hold, so '{tool}' would be forbidden forever"
+            ),
+            FlowError::OrderingCycle(steps) => write!(
+                f,
+                "ordering cycle across `after`/`before` edges: {} (no step on it can ever start)",
+                steps.join(" -> ")
             ),
         }
     }
@@ -1476,6 +1640,72 @@ mod tests {
             .0
             .iter()
             .any(|e| matches!(e, FlowError::UnguardedCommitTool(t) if t == "pay")));
+    }
+
+    #[test]
+    fn compile_with_tools_accepts_a_covering_registry() {
+        let compiled = debt_flow()
+            .compile_with_tools(&["lookup_account", "charge_card", "unrelated_extra"])
+            .expect("registry covers the flow's tool universe");
+        assert!(compiled.tool_policy().tools.contains("charge_card"));
+    }
+
+    #[test]
+    fn compile_with_tools_reports_dangling_tool_names() {
+        // `charge_card` is referenced (allow/once/never_until) but missing from
+        // the registry — a typo/drift the compiler must catch.
+        let err = debt_flow()
+            .compile_with_tools(&["lookup_account"])
+            .expect_err("dangling tool must fail to compile");
+        assert!(err
+            .0
+            .iter()
+            .any(|e| matches!(e, FlowError::UnknownTool(t) if t == "charge_card")));
+        // Plain compile() stays registry-agnostic.
+        assert!(debt_flow().compile().is_ok());
+    }
+
+    #[test]
+    fn compile_rejects_never_until_guard_on_unknown_step() {
+        // `never(pay).until(done("missing"))` can never latch — `pay` would be
+        // forbidden forever. validate() doesn't check constraint guards; compile must.
+        let flow = Flow::new()
+            .step("s")
+            .allow(["pay"])
+            .done(Guard::called_ok("pay"))
+            .never("pay")
+            .until(Guard::done("missing"))
+            .build()
+            .expect("structurally valid for build()");
+        let err = flow.compile().expect_err("unsatisfiable guard must fail");
+        assert!(err.0.iter().any(|e| matches!(
+            e,
+            FlowError::UnsatisfiableGuard { tool, step } if tool == "pay" && step == "missing"
+        )));
+    }
+
+    #[test]
+    fn compile_rejects_before_cycle() {
+        // `after` edges are acyclic, but before(a, b) + before(b, a) closes an
+        // ordering cycle: neither step can ever become eligible. validate()'s
+        // cycle check only walks `after`, so compile must catch this.
+        let flow = Flow::new()
+            .step("a")
+            .done(Guard::is_true("a_done"))
+            .step("b")
+            .done(Guard::is_true("b_done"))
+            .before("a", "b")
+            .before("b", "a")
+            .build()
+            .expect("build() only checks `after` cycles");
+        let err = flow
+            .compile()
+            .expect_err("before-cycle must fail to compile");
+        assert!(err.0.iter().any(|e| matches!(
+            e,
+            FlowError::OrderingCycle(steps)
+                if steps.contains(&"a".to_string()) && steps.contains(&"b".to_string())
+        )));
     }
 
     #[test]

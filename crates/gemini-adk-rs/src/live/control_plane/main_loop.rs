@@ -106,7 +106,7 @@ pub(in crate::live) async fn run_control_lane(
                     &background_tracker,
                     &extractors,
                     &middleware,
-                    &mut control_plane.flow,
+                    &control_plane.flow,
                     &mut tool_gate,
                     &completion_tx,
                     &event_tx,
@@ -116,7 +116,7 @@ pub(in crate::live) async fn run_control_lane(
             ControlEvent::ToolCompleted { call_id, name, ok } => {
                 // A background tool finished — advance the governed flow through
                 // the same gate as inline tools, deduped by call_id (#7).
-                tool_gate.observe_completion(&call_id, &name, ok, &mut control_plane.flow, &state);
+                tool_gate.observe_completion(&call_id, &name, ok, &control_plane.flow, &state);
             }
             ControlEvent::ToolCallCancelled(ids) => {
                 // Cancel background tasks first

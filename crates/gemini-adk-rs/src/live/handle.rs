@@ -9,6 +9,7 @@ use serde::de::DeserializeOwned;
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
+use crate::flow::{FlowExplanation, SharedFlowMonitor};
 use crate::state::State;
 
 use super::context_writer::PendingContext;
@@ -41,6 +42,9 @@ pub struct LiveHandle {
     reactor: Arc<LiveReactor>,
     effect_executor: LiveEffectExecutor,
     input_vad: Arc<Mutex<BackendInputVad>>,
+    /// Governed-flow monitor shared with the control lane (None when the
+    /// session is not governed by a flow).
+    flow: Option<SharedFlowMonitor>,
 }
 
 impl LiveHandle {
@@ -53,6 +57,7 @@ impl LiveHandle {
         telemetry: Arc<SessionTelemetry>,
         event_tx: broadcast::Sender<super::events::LiveEvent>,
         pending_context: Option<Arc<PendingContext>>,
+        flow: Option<SharedFlowMonitor>,
     ) -> Self {
         let reactor = Arc::new(LiveReactor::voice_defaults());
         let effect_executor = LiveEffectExecutor::new(
@@ -73,6 +78,7 @@ impl LiveHandle {
             reactor,
             effect_executor,
             input_vad: Arc::new(Mutex::new(BackendInputVad::default())),
+            flow,
         }
     }
 
@@ -251,5 +257,29 @@ impl LiveHandle {
     /// Convenience: get the latest extraction result by extractor name.
     pub fn extracted<T: DeserializeOwned>(&self, name: &str) -> Option<T> {
         self.state.get(name)
+    }
+
+    /// Snapshot the governed flow's control-plane state: active steps, which
+    /// tools are admitted vs blocked (with reasons), and unmet requirements.
+    ///
+    /// The deterministic answer to "why did the assistant ask that?" — computed
+    /// against the live [`State`] and the marking the control lane maintains.
+    /// Returns `None` when the session is not governed by a flow
+    /// (`Live::govern`/`observe` was not used).
+    ///
+    /// This is a synchronous snapshot: it briefly locks the shared
+    /// [`FlowMonitor`](crate::flow::FlowMonitor) and never blocks on session
+    /// I/O.
+    pub fn explain(&self) -> Option<FlowExplanation> {
+        self.flow
+            .as_ref()
+            .map(|mon| mon.lock().explain(&self.state))
+    }
+
+    /// Why the governed flow is blocked right now — alias of
+    /// [`explain`](Self::explain), named for the common debugging question.
+    /// Returns `None` when the session is not governed by a flow.
+    pub fn why_blocked(&self) -> Option<FlowExplanation> {
+        self.explain()
     }
 }

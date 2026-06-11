@@ -417,6 +417,7 @@ pub(crate) struct SessionRuntime {
     on_usage_cb: Option<Box<dyn Fn(&gemini_genai_rs::prelude::UsageMetadata) + Send + Sync>>,
     live_event_tx: tokio::sync::broadcast::Sender<super::events::LiveEvent>,
     telem_cancel: CancellationToken,
+    flow_monitor: Option<crate::flow::SharedFlowMonitor>,
 }
 
 /// Stage 3 input: construct the runtime wiring from a resolved plan and the
@@ -424,6 +425,9 @@ pub(crate) struct SessionRuntime {
 /// control-plane config (including deferred-context writer wrapping), and the
 /// telemetry handle — but does not spawn any lanes.
 pub(crate) fn build_runtime(plan: SessionPlan, session: SessionHandle) -> SessionRuntime {
+    // Share the governed-flow monitor between the control lane (which
+    // advances it) and the LiveHandle (which snapshots explain/why_blocked).
+    let flow_monitor = plan.flow.map(crate::flow::FlowMonitor::into_shared);
     let mut callbacks = plan.callbacks;
     let on_usage_cb = callbacks.on_usage.take();
     let callbacks = Arc::new(callbacks);
@@ -470,7 +474,7 @@ pub(crate) fn build_runtime(plan: SessionPlan, session: SessionHandle) -> Sessio
             }
             Arc::new(chain)
         },
-        flow: plan.flow,
+        flow: flow_monitor.clone(),
     };
 
     // Create shared PendingContext for deferred delivery.
@@ -527,6 +531,7 @@ pub(crate) fn build_runtime(plan: SessionPlan, session: SessionHandle) -> Sessio
         on_usage_cb,
         live_event_tx,
         telem_cancel,
+        flow_monitor,
     }
 }
 
@@ -626,6 +631,7 @@ pub(crate) async fn spawn_lanes(rt: SessionRuntime) -> Result<LiveHandle, AgentE
         rt.telemetry,
         rt.live_event_tx,
         rt.pending_context,
+        rt.flow_monitor,
     ))
 }
 

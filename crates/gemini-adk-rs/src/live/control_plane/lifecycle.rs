@@ -172,7 +172,7 @@ pub(in crate::live) async fn handle_turn_complete(
     // 7g. Flow governance. (Extracted so the re-latch + status publish + posture
     // /grounding/unmet projection + on-enter firing is a named, harness-covered
     // unit — see `harness` below and docs/plans/2026-06-07-turn-tool-pipeline-rfc.md.)
-    govern_flow(&mut control_plane.flow, state, &mut context_buffer).await;
+    govern_flow(&control_plane.flow, state, &mut context_buffer).await;
 
     // 8. Fire watchers from net state mutations since the cursor.
     if let (Some(ref watchers), Some(cursor)) = (watchers, pre_watcher_cursor) {
@@ -407,38 +407,54 @@ async fn evaluate_repair(
 /// unmet requirements as a repair line, and fires on-enter actions for steps
 /// that just became active. Behavior-preserving lift of step 7g. No-op when no
 /// flow is governing the session.
+///
+/// The monitor is shared with the [`LiveHandle`](crate::live::LiveHandle)
+/// (`explain`/`why_blocked` snapshots), so the lock is held only for the
+/// synchronous re-latch + projection; on-enter actions (which may await an
+/// inline agent) fire after the guard is dropped.
 async fn govern_flow(
-    flow: &mut Option<crate::flow::FlowMonitor>,
+    flow: &Option<crate::flow::SharedFlowMonitor>,
     state: &State,
     context_buffer: &mut Vec<gemini_genai_rs::prelude::Content>,
 ) {
-    if let Some(ref mut mon) = flow {
-        mon.on_turn(state);
-        let done: Vec<String> = mon.marking().done.iter().cloned().collect();
-        let _ = state.set("flow:done", done);
-        let active: Vec<String> = mon
-            .active_steps(state)
-            .iter()
-            .map(|s| s.id.clone())
-            .collect();
-        let _ = state.set("flow:active", active);
-        for posture in mon.active_postures(state) {
-            context_buffer.push(gemini_genai_rs::prelude::Content::model(posture));
-        }
-        // Grounding lines: curated, State-interpolated facts (anti-hallucination).
-        for ground in mon.active_grounds(state) {
-            context_buffer.push(gemini_genai_rs::prelude::Content::model(ground));
-        }
-        let unmet = mon.unmet_requirements();
-        if !unmet.is_empty() {
-            context_buffer.push(gemini_genai_rs::prelude::Content::model(format!(
-                "Before finishing, these still need to happen: {}.",
-                unmet.join(", ")
-            )));
-        }
+    if let Some(mon_arc) = flow {
+        let enter_actions = {
+            let mut mon = mon_arc.lock();
+            mon.on_turn(state);
+            let done: Vec<String> = mon.marking().done.iter().cloned().collect();
+            let _ = state.set("flow:done", done);
+            let active: Vec<String> = mon
+                .active_steps(state)
+                .iter()
+                .map(|s| s.id.clone())
+                .collect();
+            let _ = state.set("flow:active", active);
+            for posture in mon.active_postures(state) {
+                context_buffer.push(gemini_genai_rs::prelude::Content::model(posture));
+            }
+            // Grounding lines: curated, State-interpolated facts (anti-hallucination).
+            for ground in mon.active_grounds(state) {
+                context_buffer.push(gemini_genai_rs::prelude::Content::model(ground));
+            }
+            let unmet = mon.unmet_requirements();
+            if !unmet.is_empty() {
+                context_buffer.push(gemini_genai_rs::prelude::Content::model(format!(
+                    "Before finishing, these still need to happen: {}.",
+                    unmet.join(", ")
+                )));
+            }
+            // Collect on-enter actions for steps that just became active, to
+            // fire below without holding the lock across an await.
+            mon.take_newly_active(state)
+                .into_iter()
+                .filter_map(|id| mon.enter_action(&id).cloned().map(|a| (id, a)))
+                .collect::<Vec<_>>()
+        };
         // Fire on_enter actions for steps that just became active. `Call`
         // actions resolve inline; `Dispatch`/`Background` run detached.
-        mon.fire_enter_actions(state).await;
+        for (id, action) in enter_actions {
+            action.fire(&id, state).await;
+        }
     }
 }
 
@@ -1010,7 +1026,7 @@ mod harness {
             .build()
             .expect("valid flow");
         let mut h = Harness::new();
-        h.control.flow = Some(FlowMonitor::new(flow, Enforcement::Observe));
+        h.control.flow = Some(FlowMonitor::new(flow, Enforcement::Observe).into_shared());
 
         // Not yet greeted -> greet is the active step, nothing done.
         h.run_turn().await;
@@ -1030,6 +1046,42 @@ mod harness {
                 .contains(&"greet".to_string()),
             "completed step latched done"
         );
+    }
+
+    #[tokio::test]
+    async fn shared_monitor_snapshot_observes_control_lane_progress() {
+        // The handle path: a clone of the shared monitor (what `LiveHandle`
+        // holds) answers `why_blocked` against the marking the control lane
+        // advances — without the two ever fighting over ownership.
+        let flow = Flow::new()
+            .step("verify")
+            .allow(["lookup_account"])
+            .done(Guard::is_true("identity_verified"))
+            .step("pay")
+            .after("verify")
+            .allow(["charge_card"])
+            .done(Guard::called_ok("charge_card"))
+            .step("end")
+            .after("pay")
+            .terminal()
+            .build()
+            .expect("valid flow");
+        let shared = FlowMonitor::new(flow, Enforcement::Enforce).into_shared();
+        let mut h = Harness::new();
+        h.control.flow = Some(shared.clone());
+
+        // Before verification, the snapshot reports charge_card blocked.
+        let ex = shared.lock().why_blocked(&h.state);
+        assert!(ex.active.contains(&"verify".to_string()));
+        assert!(ex.blocked_tools.contains_key("charge_card"));
+
+        // The control lane latches `verify` on a turn; the external snapshot
+        // sees the progress: `pay` is active and charge_card is admitted.
+        let _ = h.state.set("identity_verified", true);
+        h.run_turn().await;
+        let ex = shared.lock().why_blocked(&h.state);
+        assert!(ex.active.contains(&"pay".to_string()));
+        assert!(ex.allowed_tools.contains(&"charge_card".to_string()));
     }
 
     #[tokio::test]
