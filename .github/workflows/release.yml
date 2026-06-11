@@ -9,6 +9,8 @@ on:
       - "v[0-9]+.[0-9]+.[0-9]+-*"   # pre-releases: v0.6.0-rc.1
 
 env:
+  # Node 20 is removed from runners 2026-09; fail loud now, not on the flag day.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
 
@@ -23,7 +25,7 @@ jobs:
     name: Validate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.93.1"
@@ -65,7 +67,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: crates-io
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.93.1"
@@ -155,7 +157,7 @@ jobs:
     needs: publish
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
