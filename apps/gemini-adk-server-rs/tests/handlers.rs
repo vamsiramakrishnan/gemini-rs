@@ -226,6 +226,51 @@ async fn run_returns_mock_llm_response_and_records_trace() {
     assert!(state.traces.get(trace_id).is_some(), "trace was recorded");
 }
 
+#[tokio::test]
+async fn run_creates_session_under_the_advertised_id() {
+    let state = mock_state("echo", "hello from the mock model");
+    let app = build_api_router(state.clone());
+
+    let response = app
+        .oneshot(
+            Request::post("/run")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "agent": "echo",
+                        "message": "hi",
+                        "session_id": "client-chosen-id"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // The session must exist under the id the client sent (and the response
+    // advertised) — previously create() generated its own UUID and every
+    // append_event under the advertised id was a silent no-op.
+    let session = state
+        .sessions
+        .get("client-chosen-id")
+        .expect("session exists under the advertised id");
+    assert_eq!(session.id, "client-chosen-id");
+    let events = state.sessions.events("client-chosen-id");
+    assert!(
+        events
+            .iter()
+            .any(|e| e["role"] == "user" && e["content"] == "hi"),
+        "user turn recorded under the advertised id; events: {events:?}"
+    );
+    assert_eq!(
+        state.sessions.count(),
+        1,
+        "no phantom session under a different id"
+    );
+}
+
 // ── POST /run_sse ───────────────────────────────────────────────
 
 #[tokio::test]

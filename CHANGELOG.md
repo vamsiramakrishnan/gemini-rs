@@ -92,6 +92,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Server: sessions are created under the advertised id.** `POST /run` and
+  `POST /run_sse` accepted a client-chosen `session_id` (and advertised it in
+  responses/SSE events) but `SessionStore::create` generated its own UUID — so
+  every `state()` read and `append_event` under the advertised id was a silent
+  no-op and the returned session could not be fetched or continued. Both
+  handlers now use the new idempotent `SessionStore::get_or_create(id, ..)`.
+  Regression-tested.
 - **Single-pass server-message parsing.** `ServerMessage::parse` now
   deserializes each frame once into a key-discriminated raw struct instead of
   up to seven `contains()` scans over the frame followed by a targeted

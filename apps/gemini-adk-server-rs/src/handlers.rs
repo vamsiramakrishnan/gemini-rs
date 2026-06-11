@@ -34,10 +34,10 @@ pub async fn run_agent(
         .session_id
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-    // Ensure session exists.
-    if state.sessions.get(&session_id).is_none() {
-        state.sessions.create(&req.agent, &req.user_id);
-    }
+    // Ensure the session exists under the advertised id.
+    state
+        .sessions
+        .get_or_create(&session_id, &req.agent, &req.user_id);
 
     // Snapshot prior session state so the agent sees accumulated context, then
     // record the user message (mirrors ADK Runner appending the user turn).
@@ -138,10 +138,11 @@ pub async fn run_agent_sse(
         .clone()
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-    // Ensure session exists, then record the user turn (mirrors `POST /run`).
-    if state.sessions.get(&session_id).is_none() {
-        state.sessions.create(&req.agent, &req.user_id);
-    }
+    // Ensure the session exists under the advertised id, then record the
+    // user turn (mirrors `POST /run`).
+    state
+        .sessions
+        .get_or_create(&session_id, &req.agent, &req.user_id);
     let prior_state = state.sessions.state(&session_id);
     state.sessions.append_event(
         &session_id,

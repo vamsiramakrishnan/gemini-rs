@@ -15,6 +15,14 @@ pub trait SessionStore: Send + Sync {
     /// Create a new session. Returns the created session.
     fn create(&self, app: &str, user: &str) -> SessionData;
 
+    /// Get the session with `id`, creating it (under that exact id) if absent.
+    ///
+    /// Handlers that advertise a session id to the client (e.g. in SSE
+    /// `started` events) MUST use this instead of `create()`, which generates
+    /// its own id — otherwise events are appended under an id the client
+    /// never sees.
+    fn get_or_create(&self, id: &str, app: &str, user: &str) -> SessionData;
+
     /// Get a session by ID.
     fn get(&self, id: &str) -> Option<SessionData>;
 
@@ -86,6 +94,29 @@ impl SessionStore for InMemorySessionStore {
             .write()
             .insert(session.id.clone(), session.clone());
         session
+    }
+
+    fn get_or_create(&self, id: &str, app: &str, user: &str) -> SessionData {
+        if let Some(existing) = self.sessions.read().get(id) {
+            return existing.clone();
+        }
+        let now = now_iso8601();
+        let session = SessionData {
+            id: id.to_string(),
+            app_name: app.to_string(),
+            user_id: user.to_string(),
+            state: HashMap::new(),
+            events: vec![],
+            created_at: now.clone(),
+            updated_at: now,
+        };
+        // entry() guards the read/write race: keep the winner if another
+        // request created the same id between our read and this write.
+        self.sessions
+            .write()
+            .entry(id.to_string())
+            .or_insert_with(|| session)
+            .clone()
     }
 
     fn get(&self, id: &str) -> Option<SessionData> {
