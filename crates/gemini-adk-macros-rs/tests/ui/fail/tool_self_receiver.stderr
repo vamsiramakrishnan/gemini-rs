@@ -1,0 +1,5 @@
+error: #[tool] cannot be applied to methods taking `self`
+  --> tests/ui/fail/tool_self_receiver.rs:10:22
+   |
+10 |     async fn current(&self) -> Result<serde_json::Value, gemini_adk_rs::error::ToolError> {
+   |                      ^^^^^
