@@ -92,6 +92,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Single-pass server-message parsing.** `ServerMessage::parse` now
+  deserializes each frame once into a key-discriminated raw struct instead of
+  up to seven `contains()` scans over the frame followed by a targeted
+  re-parse. Behavior pinned by the golden-wire fixtures (including the
+  `toolCallCancellation`-vs-`toolCall` substring trap, which is now structural).
 - **`State::modify` is now atomic.** It performs the read-modify-write under a
   per-key map lock (`DashMap::entry`) instead of a racy `get`→`f`→`set`, so
   concurrent increments no longer lose updates.
@@ -112,6 +117,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Producer-side audio send pacing.** `SessionConfig::audio_pacing(BackpressureConfig)`
+  installs a shared token bucket on `SessionHandle::send_audio`: callers pushing
+  audio faster than the sustained rate wait at the producer instead of
+  overflowing the send queue (the previously-orphaned `TokenBucket` now earns
+  its keep). Off by default; receives are never stalled by pacing.
 - **Golden-wire protocol tests.** Checked-in JSON fixtures pin the wire format
   in both directions: client→server messages (setup, realtime audio, client
   content, tool responses) are serialized and diffed against blessed fixtures

@@ -245,9 +245,10 @@ evolvability. Nothing above this matters if barge-in hangs or snapshots tear.
   disconnect; no `resume`-after-GoAway path exists despite tracked handles.
 - 🚧 **`#[non_exhaustive]`** on `SessionEvent`/`LiveEvent`/`GeminiModel`/`Voice`
   — every new Gemini model or server event is a semver break until this lands.
-- 🚧 **Hot-path elegance.** Kill the double-parse (string-contains + full serde
-  per message), fix the 64-deep control channel that can stall audio under slow
-  tools, wire the orphaned `TokenBucket` send backpressure.
+- ✅ **Hot-path elegance (parse + pacing).** Single-pass server-message parse
+  (golden-fixture pinned) and opt-in producer-side audio pacing
+  (`SessionConfig::audio_pacing`). *(Control-channel depth lands with the
+  concurrency fixes.)*
 - 🚧 **`LiveHandle::stream()`** — `impl Stream<Item = LiveEvent>` so events
   compose with `tokio-stream`; callbacks become sugar.
 

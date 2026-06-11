@@ -53,7 +53,10 @@ where
 
     let state = Arc::new(SessionState::with_events(phase_tx, event_tx.clone()));
 
-    let handle = SessionHandle::new(command_tx, event_tx.clone(), state.clone(), phase_rx);
+    let mut handle = SessionHandle::new(command_tx, event_tx.clone(), state.clone(), phase_rx);
+    if let Some(pacing) = config.audio_pacing.clone() {
+        handle = handle.with_audio_pacing(pacing);
+    }
 
     let task = tokio::spawn(async move {
         session_loop::generic_connection_loop(

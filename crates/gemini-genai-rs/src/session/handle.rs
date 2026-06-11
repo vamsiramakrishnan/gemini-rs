@@ -33,6 +33,12 @@ pub struct SessionHandle {
     /// `Clone` (since `JoinHandle` is not `Clone`). The first call to
     /// [`join()`](Self::join) takes the handle; subsequent calls return `Ok(())`.
     task: Arc<tokio::sync::Mutex<Option<JoinHandle<()>>>>,
+    /// Optional producer-side audio pacing (see [`SessionConfig::audio_pacing`]).
+    ///
+    /// Shared across handle clones so all producers draw from one bucket. The
+    /// tokio mutex is held across the pacing wait deliberately: concurrent
+    /// audio producers serialize, which is the desired backpressure semantic.
+    audio_pacer: Option<Arc<tokio::sync::Mutex<crate::transport::TokenBucket>>>,
 }
 
 impl SessionHandle {
@@ -49,7 +55,19 @@ impl SessionHandle {
             state,
             phase_rx,
             task: Arc::new(tokio::sync::Mutex::new(None)),
+            audio_pacer: None,
         }
+    }
+
+    /// Enable producer-side audio send pacing (token bucket).
+    ///
+    /// Installed by the connection layer when
+    /// [`SessionConfig::audio_pacing`] is set.
+    pub fn with_audio_pacing(mut self, config: crate::transport::BackpressureConfig) -> Self {
+        self.audio_pacer = Some(Arc::new(tokio::sync::Mutex::new(
+            crate::transport::TokenBucket::new(config),
+        )));
+        self
     }
 
     /// Store the connection loop task handle.
@@ -109,7 +127,14 @@ impl SessionHandle {
     }
 
     /// Send audio data (raw PCM16 bytes).
+    ///
+    /// When [`SessionConfig::audio_pacing`] is configured, this paces the
+    /// caller: pushing audio faster than the configured sustained rate waits
+    /// here instead of overflowing the send queue.
     pub async fn send_audio(&self, data: Vec<u8>) -> Result<(), SessionError> {
+        if let Some(pacer) = &self.audio_pacer {
+            pacer.lock().await.consume(data.len()).await;
+        }
         self.send_command(SessionCommand::SendAudio(data)).await
     }
 
@@ -197,7 +222,7 @@ impl std::fmt::Debug for SessionHandle {
 #[async_trait]
 impl SessionWriter for SessionHandle {
     async fn send_audio(&self, data: Vec<u8>) -> Result<(), SessionError> {
-        self.send_command(SessionCommand::SendAudio(data)).await
+        SessionHandle::send_audio(self, data).await
     }
 
     async fn send_text(&self, text: String) -> Result<(), SessionError> {
@@ -264,6 +289,38 @@ impl SessionReader for SessionHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn audio_pacing_throttles_producer_to_sustained_rate() {
+        let (command_tx, mut command_rx) = mpsc::channel(64);
+        let (event_tx, _) = broadcast::channel(16);
+        let (phase_tx, phase_rx) = watch::channel(SessionPhase::Active);
+        let state = Arc::new(SessionState::with_events(phase_tx, event_tx.clone()));
+
+        // 1000-byte burst allowance, 1000 B/s sustained.
+        let handle = SessionHandle::new(command_tx, event_tx, state, phase_rx).with_audio_pacing(
+            crate::transport::BackpressureConfig {
+                bucket_capacity: 1000,
+                refill_rate_bps: 1000,
+            },
+        );
+
+        let start = tokio::time::Instant::now();
+        // First 1000 bytes ride the burst; the next 1000 must wait ~1s.
+        handle.send_audio(vec![0u8; 1000]).await.unwrap();
+        let after_burst = start.elapsed();
+        handle.send_audio(vec![0u8; 1000]).await.unwrap();
+        let after_paced = start.elapsed();
+
+        assert!(after_burst < std::time::Duration::from_millis(50));
+        assert!(
+            after_paced >= std::time::Duration::from_millis(900),
+            "second send should be paced ~1s, was {after_paced:?}"
+        );
+        // Both frames were enqueued.
+        assert!(command_rx.recv().await.is_some());
+        assert!(command_rx.recv().await.is_some());
+    }
 
     #[tokio::test]
     async fn session_handle_join_returns_ok_after_task_completes() {

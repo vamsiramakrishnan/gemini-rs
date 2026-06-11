@@ -488,6 +488,13 @@ pub struct SessionConfig {
     pub input_sample_rate: u32,
     /// Output audio sample rate in Hz (default: 24000).
     pub output_sample_rate: u32,
+    /// Optional send pacing for outbound audio (token-bucket backpressure).
+    ///
+    /// `None` (default) sends audio as fast as the command queue accepts it.
+    /// When set, [`SessionHandle::send_audio`](crate::session::SessionHandle::send_audio)
+    /// paces the *producer*: a caller pushing audio faster than
+    /// `refill_rate_bps` waits, instead of overflowing the send queue.
+    pub audio_pacing: Option<crate::transport::BackpressureConfig>,
 }
 
 impl SessionConfig {
@@ -557,6 +564,7 @@ impl SessionConfig {
             output_audio_format: AudioFormat::Pcm16,
             input_sample_rate: 16000,
             output_sample_rate: 24000,
+            audio_pacing: None,
         }
     }
 
@@ -695,6 +703,16 @@ impl SessionConfig {
     /// This preserves any values the caller already set. In particular, it sets
     /// `TURN_INCLUDES_ONLY_ACTIVITY` so long pauses/silence in a continuous mic
     /// stream are not included in the user's semantic turn.
+    /// Pace outbound audio with a token bucket (producer-side backpressure).
+    ///
+    /// See [`SessionConfig::audio_pacing`]. Use
+    /// [`BackpressureConfig::default`](crate::transport::BackpressureConfig::default)
+    /// for 16 kHz PCM16 rates with a ~250 ms burst allowance.
+    pub fn audio_pacing(mut self, config: crate::transport::BackpressureConfig) -> Self {
+        self.audio_pacing = Some(config);
+        self
+    }
+
     pub fn voice_realtime_defaults(mut self) -> Self {
         let mut ric = self.realtime_input_config.unwrap_or(RealtimeInputConfig {
             automatic_activity_detection: None,
