@@ -70,6 +70,24 @@ submodule when the compiler says a name isn't found.
 > The L1 `Agent` *trait* is exposed as `AgentTrait` (in both `prelude` and
 > `agents`) to avoid colliding with the L2 `Agent` builder alias.
 
+## 0.8 feature changes (slim defaults)
+
+`gemini-genai-rs` default features contracted to `["live", "tls-native"]`:
+
+- **ML VAD is opt-in.** The `wavekat` VAD model is no longer compiled by
+  default. Enable `vad-wavekat` (available as a passthrough feature on
+  `gemini-adk-rs` and `gemini-adk-fluent-rs` too). The lightweight energy VAD
+  (`vad`) is still enabled by `gemini-adk-rs`.
+- **TLS backend is selectable.** `tls-native` (default) or `tls-rustls`; both
+  the WebSocket transport and the optional REST client follow the choice. To go
+  rustls: `default-features = false, features = ["live", "tls-rustls"]`.
+- **Tracing facade vs subscriber.** The `tracing` facade is always compiled
+  (spans/events are no-ops without a subscriber). `TelemetryConfig::init`'s
+  console-logging machinery now sits behind the `tracing-subscriber` feature.
+  The old `tracing-support` feature is a deprecated no-op for one release.
+- **No more `tokio/full`.** The published crates declare only the tokio
+  features they use; applications control their own tokio feature set.
+
 ## L0: Wire Protocol
 
 At L0, you work directly with `SessionHandle`, `SessionEvent`, and

@@ -11,10 +11,17 @@ documentation = "https://docs.rs/gemini-genai-rs"
 readme = "README.md"
 
 [features]
-default = ["live", "vad", "vad-wavekat", "tracing-support"]
+# Slim by default: the live WebSocket protocol plus a TLS backend. Everything
+# heavy (ML VAD model, tracing subscriber, REST surfaces) is opt-in — for an
+# SDK, default compile weight is API surface.
+default = ["live", "tls-native"]
 live = []
 vad = []
 vad-wavekat = ["vad", "dep:wavekat-vad"]
+# TLS backend for the WebSocket (and optional REST) transport. Enable exactly
+# one. With neither, the crate compiles but cannot dial `wss://`/`https://`.
+tls-native = ["tokio-tungstenite/native-tls", "reqwest?/native-tls"]
+tls-rustls = ["tokio-tungstenite/rustls-tls-native-roots", "reqwest?/rustls-tls"]
 http = ["dep:reqwest"]
 generate = ["http"]
 embed = ["http"]
@@ -26,7 +33,13 @@ tunings = ["http"]
 batches = ["http"]
 chats = ["generate"]
 all-apis = ["generate", "embed", "files", "models", "tokens", "caches", "tunings", "batches", "chats"]
-tracing-support = ["dep:tracing", "dep:tracing-subscriber"]
+# The `tracing` facade is an unconditional (tiny) dependency; spans/events are
+# no-ops unless a subscriber is installed. `tracing-subscriber` pulls the
+# fmt/EnvFilter subscriber machinery behind `TelemetryConfig::init`.
+# DEPRECATED(0.8): `tracing-support` is a no-op kept one release for manifest
+# compatibility — the facade and telemetry helpers are always compiled.
+tracing-support = []
+tracing-subscriber = ["dep:tracing-subscriber"]
 metrics = ["dep:metrics", "dep:metrics-exporter-prometheus"]
 # OpenTelemetry feature hierarchy:
 #   otel-base  — shared deps (opentelemetry, opentelemetry_sdk, tracing-opentelemetry)
@@ -37,16 +50,17 @@ otel-base = [
   "dep:opentelemetry",
   "dep:opentelemetry_sdk",
   "dep:tracing-opentelemetry",
-  "tracing-support",
+  "tracing-subscriber",
 ]
 otel-otlp = ["otel-base", "dep:opentelemetry-otlp"]
 otel-gcp = ["otel-base", "dep:opentelemetry-gcloud-trace", "dep:opentelemetry_gcloud_monitoring_exporter"]
 otel = ["otel-otlp"]
 
 [dependencies]
-# Async runtime
-tokio = { version = "1", features = ["full"] }
-tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
+# Async runtime — targeted features only; tests get `full` via dev-dependencies.
+tokio = { version = "1", features = ["rt", "macros", "sync", "time", "net"] }
+# TLS backend is selected via the `tls-native`/`tls-rustls` crate features.
+tokio-tungstenite = { version = "0.24" }
 futures-util = "0.3"
 
 # Serialization
@@ -75,14 +89,15 @@ arc-swap = "1"
 # URL parsing
 url = "2"
 
-# HTTP client (optional, for REST APIs)
-reqwest = { version = "0.12", features = ["json"], optional = true }
+# HTTP client (optional, for REST APIs). TLS comes from `tls-native`/`tls-rustls`.
+reqwest = { version = "0.12", default-features = false, features = ["json"], optional = true }
 
 # Audio (optional)
 wavekat-vad = { version = "0.1.14", optional = true, default-features = true }
 
-# Tracing (optional)
-tracing = { version = "0.1", optional = true }
+# Tracing facade — unconditional: the transport emits spans/events; cost is
+# negligible without a subscriber installed.
+tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"], optional = true }
 
 # Metrics (optional)
@@ -104,6 +119,7 @@ opentelemetry_gcloud_monitoring_exporter = { version = "0.22", features = ["toki
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
 proptest = "1"
+tokio = { version = "1", features = ["full"] }
 tokio-test = "0.4"
 
 [[bench]]

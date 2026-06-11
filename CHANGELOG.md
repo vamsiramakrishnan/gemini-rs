@@ -39,6 +39,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (breaking)
 
+- **Feature diet: slim defaults, selectable TLS, targeted tokio.**
+  `gemini-genai-rs` default features are now `["live", "tls-native"]` — the ML
+  VAD model (`vad-wavekat`) and the tracing *subscriber* are no longer pulled by
+  default. The TLS backend is selectable (`tls-native` default, `tls-rustls`
+  opt-in; `reqwest` follows the same choice), and all three published crates
+  depend on targeted `tokio` features instead of `tokio/full` (tests keep `full`
+  via dev-dependencies). The `tracing` facade is now an unconditional (tiny)
+  dependency — transport spans/events always compile and are no-ops without a
+  subscriber — and the new `tracing-subscriber` feature gates the fmt/EnvFilter
+  machinery behind `TelemetryConfig::init`. `tracing-support` is now a
+  deprecated no-op feature kept one release for manifest compatibility.
+  `gemini-adk-rs` explicitly requires `gemini-genai-rs/vad` (it always used it),
+  and L1/L2 grew `vad-wavekat`/`tls-rustls` passthrough features so applications
+  don't need a direct lower-layer dependency to opt in.
 - **`reqwest` is now optional; the REST modules are feature-gated.** The default
   `gemini-adk-rs` build no longer compiles `reqwest`. A new `http` feature pulls it,
   and the REST-backed areas now actually gate their modules (fixing "feature

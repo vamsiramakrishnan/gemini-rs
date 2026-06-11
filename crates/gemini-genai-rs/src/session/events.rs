@@ -185,10 +185,7 @@ pub async fn recv_event(rx: &mut broadcast::Receiver<SessionEvent>) -> Option<Se
         match rx.recv().await {
             Ok(event) => return Some(event),
             Err(broadcast::error::RecvError::Lagged(n)) => {
-                #[cfg(feature = "tracing-support")]
                 tracing::warn!(skipped = n, "Event subscriber lagged, skipped {n} events");
-                // Without tracing, silently continue
-                let _ = n;
                 continue;
             }
             Err(broadcast::error::RecvError::Closed) => return None,
