@@ -65,6 +65,51 @@ let handle = Live::builder()
 Use `.observe(flow)` instead of `.govern(flow)` to record deviations for audit
 without blocking anything.
 
+## Compile, then govern
+
+`Flow::compile()` turns a class of runtime surprises into load-time errors on
+top of `build()`'s checks: unreachable steps, effectively-unguarded commit
+tools, `never…until` guards whose `done(step)` references a step that doesn't
+exist (the tool would be forbidden forever), and ordering cycles closed by
+`before(a, b)` edges (every step on the cycle deadlocks). It returns a
+`CompiledFlow` — proof the flow passed compilation.
+
+`Flow::compile_with_tools(&[..])` additionally validates every tool name the
+flow references (`allow`/`deny`/`once`/`never…until`/commit) against a registry
+of known tools, catching typos and drift between a flow script and the tools
+actually registered on the session.
+
+```rust,ignore
+// Compile once at load time — diagnostics surface here, not mid-call.
+let compiled = flow.compile_with_tools(&["lookup_account", "charge_card"])?;
+
+// Govern many sessions; connect does NOT re-validate or re-compile.
+let handle = Live::builder()
+    .model(GeminiModel::Gemini2_0FlashLive)
+    .tools(dispatcher)
+    .govern_compiled(compiled)     // or .observe_compiled(compiled)
+    .connect_from_env()
+    .await?;
+```
+
+## Why is it blocked? (`handle.why_blocked()`)
+
+A governed session's handle answers the common debugging question directly —
+which steps are active, which tools are admitted vs blocked (with reasons), and
+what's still required — as a serializable `FlowExplanation` snapshot computed
+against the live session state:
+
+```rust,ignore
+if let Some(ex) = handle.why_blocked() {        // None when not governed
+    println!("active: {:?}", ex.active);
+    println!("blocked: {:?}", ex.blocked_tools); // tool -> reason
+    println!("missing: {:?}", ex.missing_requirements);
+}
+```
+
+`handle.explain()` is the same view under its descriptive name. Both are cheap,
+synchronous snapshots of the monitor the control lane maintains.
+
 ### Driving orchestration on step entry
 
 A step can run an agent the moment it becomes active — the flow *drives*

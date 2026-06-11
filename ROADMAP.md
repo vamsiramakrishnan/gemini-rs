@@ -27,8 +27,9 @@ becomes the bytecode, not the authoring language.** Milestones 1–4 below harde
 the substrate the compiler targets; the compiler arc proper is:
 
 - ✅ **Phase 0 — keystone:** `CompiledFlow` (validated IR + `FlowErrors` +
-  `ToolPolicy`) and `FlowMonitor::explain()`/`why_blocked()`. *(L1 landed; L2
-  surface + richer checks remain — see Milestone 2.)*
+  `ToolPolicy`) and `FlowMonitor::explain()`/`why_blocked()`. *(L1, L2 surface
+  (`govern_compiled`/`handle.why_blocked()`), and richer checks all landed — see
+  Milestone 2.)*
 - ✅ **Phase 1 — compiler MVP:** landed.
   - serializable `ConversationSpec` + `Conversation` builder lowering
     `stage/say/ground/collect/commit/next/require` → `CompiledFlow` (JSON
@@ -139,9 +140,14 @@ verified correctness bugs are fixed; the full compile-time validator remains.
   reports unreachable steps and effectively-unguarded commit tools on top of
   `validate()`, and precomputes a `ToolPolicy`. `FlowMonitor::compiled`/`try_new`
   construct from it. Plus `FlowMonitor::explain()`/`why_blocked()` → a serializable
-  `FlowExplanation` ("why did the assistant ask that?"). *(Remaining: richer
-  checks — unsatisfiable guards, dangling tool names vs a tool registry — and L2
-  `Live::govern(CompiledFlow)` + `handle.why_blocked()`.)*
+  `FlowExplanation` ("why did the assistant ask that?").
+- ✅ **Richer compile checks + L2 compiled-flow surface.** `compile()` also rejects
+  unsatisfiable `never…until` guards (`done(step)` on an unknown step) and
+  ordering cycles closed by `before(a, b)` edges; `Flow::compile_with_tools(&[..])`
+  reports tool names missing from a known registry. L2:
+  `Live::govern_compiled`/`observe_compiled` attach a `CompiledFlow` without
+  re-validating at connect, and `handle.why_blocked()`/`handle.explain()` snapshot
+  the governed monitor's `FlowExplanation` from the live handle.
 
 ## Milestone 3 — Reactive substrate `0.9.0`
 
