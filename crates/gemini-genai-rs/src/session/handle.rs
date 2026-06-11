@@ -33,7 +33,7 @@ pub struct SessionHandle {
     /// `Clone` (since `JoinHandle` is not `Clone`). The first call to
     /// [`join()`](Self::join) takes the handle; subsequent calls return `Ok(())`.
     task: Arc<tokio::sync::Mutex<Option<JoinHandle<()>>>>,
-    /// Optional producer-side audio pacing (see [`SessionConfig::audio_pacing`]).
+    /// Optional producer-side audio pacing (see [`SessionConfig::audio_pacing`](crate::protocol::SessionConfig::audio_pacing)).
     ///
     /// Shared across handle clones so all producers draw from one bucket. The
     /// tokio mutex is held across the pacing wait deliberately: concurrent
@@ -62,7 +62,7 @@ impl SessionHandle {
     /// Enable producer-side audio send pacing (token bucket).
     ///
     /// Installed by the connection layer when
-    /// [`SessionConfig::audio_pacing`] is set.
+    /// [`SessionConfig::audio_pacing`](crate::protocol::SessionConfig::audio_pacing) is set.
     pub fn with_audio_pacing(mut self, config: crate::transport::BackpressureConfig) -> Self {
         self.audio_pacer = Some(Arc::new(tokio::sync::Mutex::new(
             crate::transport::TokenBucket::new(config),
@@ -128,7 +128,7 @@ impl SessionHandle {
 
     /// Send audio data (raw PCM16 bytes).
     ///
-    /// When [`SessionConfig::audio_pacing`] is configured, this paces the
+    /// When [`SessionConfig::audio_pacing`](crate::protocol::SessionConfig::audio_pacing) is configured, this paces the
     /// caller: pushing audio faster than the configured sustained rate waits
     /// here instead of overflowing the send queue.
     pub async fn send_audio(&self, data: Vec<u8>) -> Result<(), SessionError> {
