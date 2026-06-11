@@ -20,7 +20,8 @@ target
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 /target
-Cargo.lock
+# Cargo.lock is committed: reproducible CI for the workspace binaries
+# (apps, CLI) and a pinned baseline for the published crates.
 *.swp
 *.swo
 .env
