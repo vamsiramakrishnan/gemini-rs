@@ -105,7 +105,7 @@ pub use gemini_adk_macros_rs::tool;
 /// See the [`gemini_adk_macros_rs::Extract`](macro@gemini_adk_macros_rs::Extract)
 /// documentation for details.
 pub use gemini_adk_macros_rs::Extract;
-/// Derive macro that generates a [`Frame`](frame::Frame) impl from a struct's
+/// Derive macro that generates a [`frame::Frame`] impl from a struct's
 /// `#[slot(..)]` fields. Shares the name `Frame` with the trait (macro vs type
 /// namespace), so both can be imported together.
 pub use gemini_adk_macros_rs::Frame;

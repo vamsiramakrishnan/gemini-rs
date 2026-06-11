@@ -6,7 +6,7 @@
 //! **Telemetry lane**: SessionSignals + SessionTelemetry (debounced state writes,
 //!   runs on its own broadcast receiver — zero work on the router hot path)
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -36,6 +36,180 @@ use super::steering::{ContextDelivery, SteeringMode};
 use super::telemetry::SessionTelemetry;
 use super::temporal::TemporalRegistry;
 use super::watcher::WatcherRegistry;
+
+/// Backpressure (delivery) policy for a single class of fast-lane events.
+///
+/// The event router forwards fast-lane frames (audio, text, transcripts,
+/// thoughts, VAD, phase) over a bounded channel to the fast-lane consumer. When
+/// that consumer falls behind and the channel fills, the policy decides what the
+/// router does — and crucially, whether the router *blocks*. Because the router
+/// is shared by both the fast lane and the control lane, a blocking fast-lane
+/// send stalls routing for *all* events, including control-lane lifecycle and
+/// tool events. The policy lets callers trade frame durability for router
+/// responsiveness on a per-class basis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Delivery {
+    /// Never drop a frame: `tx.send(ev).await` — the router awaits when the
+    /// channel is full. This is the historical (and default) behavior and is
+    /// byte-for-byte identical to the pre-policy code path. Use it when every
+    /// frame matters and a slow consumer applying backpressure to the router is
+    /// acceptable.
+    #[default]
+    Lossless,
+    /// Drop the *newest* frame on overflow: `tx.try_send(ev)` and, on
+    /// [`TrySendError::Full`](tokio::sync::mpsc::error::TrySendError::Full),
+    /// discard the just-produced frame and bump a dropped-frame counter. The
+    /// router never blocks on this class, so a slow fast-lane consumer can no
+    /// longer stall control-lane routing. Use it for high-frequency, loss-
+    /// tolerant streams (e.g. partial transcripts, thoughts) where freshness of
+    /// already-queued frames matters less than keeping the router moving.
+    ///
+    /// A drop-oldest / latest-only variant is intentionally *not* provided:
+    /// tokio's `mpsc` has no clean "evict the oldest queued item" primitive, so
+    /// implementing it correctly would require a custom ring buffer. That is
+    /// left as future work rather than shipped half-working.
+    LossyDropNewest,
+}
+
+/// Per-event-class delivery (backpressure) policy for the fast lane.
+///
+/// Each fast-lane event class carries its own [`Delivery`] policy. The
+/// [`Default`] impl sets **every** class to [`Delivery::Lossless`], which makes
+/// the whole feature behavior-preserving: with the default config the router
+/// uses the same `send().await` path it always has. Callers opt into lossy
+/// behavior per class via the builder setters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DeliveryConfig {
+    /// Policy for raw PCM audio frames.
+    pub audio: Delivery,
+    /// Policy for incremental text deltas (and text-complete frames).
+    pub text: Delivery,
+    /// Policy for input/output transcript frames (fast-lane callback copy only;
+    /// control-lane accumulation is unaffected and always lossless).
+    pub transcript: Delivery,
+    /// Policy for thought-summary frames.
+    pub thought: Delivery,
+    /// Policy for VAD start/end frames.
+    pub vad: Delivery,
+    /// Policy for phase-changed frames.
+    pub phase: Delivery,
+}
+
+impl Default for DeliveryConfig {
+    fn default() -> Self {
+        Self {
+            audio: Delivery::Lossless,
+            text: Delivery::Lossless,
+            transcript: Delivery::Lossless,
+            thought: Delivery::Lossless,
+            vad: Delivery::Lossless,
+            phase: Delivery::Lossless,
+        }
+    }
+}
+
+impl DeliveryConfig {
+    /// A config with every class set to [`Delivery::Lossless`] (same as
+    /// [`Default`]).
+    pub fn lossless() -> Self {
+        Self::default()
+    }
+
+    /// Set the audio policy.
+    pub fn audio(mut self, d: Delivery) -> Self {
+        self.audio = d;
+        self
+    }
+
+    /// Set the text policy.
+    pub fn text(mut self, d: Delivery) -> Self {
+        self.text = d;
+        self
+    }
+
+    /// Set the transcript policy.
+    pub fn transcript(mut self, d: Delivery) -> Self {
+        self.transcript = d;
+        self
+    }
+
+    /// Set the thought policy.
+    pub fn thought(mut self, d: Delivery) -> Self {
+        self.thought = d;
+        self
+    }
+
+    /// Set the VAD policy.
+    pub fn vad(mut self, d: Delivery) -> Self {
+        self.vad = d;
+        self
+    }
+
+    /// Set the phase policy.
+    pub fn phase(mut self, d: Delivery) -> Self {
+        self.phase = d;
+        self
+    }
+}
+
+/// Per-class counters for fast-lane frames dropped under a lossy policy.
+///
+/// Incremented with a single relaxed atomic add on the router hot path when a
+/// [`Delivery::LossyDropNewest`] send overflows. Reads are for observability /
+/// tests and never gate the hot path.
+#[derive(Debug, Default)]
+pub(crate) struct DroppedFrames {
+    pub audio: AtomicU64,
+    pub text: AtomicU64,
+    pub transcript: AtomicU64,
+    pub thought: AtomicU64,
+    pub vad: AtomicU64,
+    pub phase: AtomicU64,
+}
+
+impl DroppedFrames {
+    /// Total dropped frames across all classes.
+    ///
+    /// Currently only consumed by tests; the per-class atomics are read
+    /// directly elsewhere. Kept test-gated until a handle accessor surfaces it.
+    #[cfg(test)]
+    pub fn total(&self) -> u64 {
+        self.audio.load(Ordering::Relaxed)
+            + self.text.load(Ordering::Relaxed)
+            + self.transcript.load(Ordering::Relaxed)
+            + self.thought.load(Ordering::Relaxed)
+            + self.vad.load(Ordering::Relaxed)
+            + self.phase.load(Ordering::Relaxed)
+    }
+}
+
+/// Forward one fast-lane frame according to its class delivery policy.
+///
+/// - [`Delivery::Lossless`]: `tx.send(ev).await` — awaits when the channel is
+///   full (identical to the pre-policy behavior).
+/// - [`Delivery::LossyDropNewest`]: `tx.try_send(ev)` — on a full channel, drop
+///   the frame and increment `dropped`.
+///
+/// Returns without ever blocking the router under a lossy policy.
+async fn deliver_fast(
+    tx: &mpsc::Sender<FastEvent>,
+    ev: FastEvent,
+    policy: Delivery,
+    dropped: &AtomicU64,
+) {
+    match policy {
+        Delivery::Lossless => {
+            let _ = tx.send(ev).await;
+        }
+        Delivery::LossyDropNewest => {
+            if let Err(mpsc::error::TrySendError::Full(_)) = tx.try_send(ev) {
+                dropped.fetch_add(1, Ordering::Relaxed);
+            }
+            // `TrySendError::Closed` is ignored, matching the `let _ = send`
+            // pattern used elsewhere (the consumer is gone; nothing to do).
+        }
+    }
+}
 
 /// Events routed to the fast lane (sync processing).
 pub(crate) enum FastEvent {
@@ -91,6 +265,10 @@ pub(crate) struct SharedState {
     pub last_instruction: parking_lot::Mutex<Option<String>>,
     /// Pending context buffer for deferred delivery (None when Immediate mode).
     pub pending_context: Option<Arc<PendingContext>>,
+    /// Fast-lane delivery policy per event class.
+    pub delivery: DeliveryConfig,
+    /// Per-class counters for frames dropped under a lossy delivery policy.
+    pub dropped: DroppedFrames,
 }
 
 /// Runs the three-lane event processor.
@@ -125,6 +303,9 @@ pub(crate) struct ControlPlaneConfig {
     /// Optional governed-flow monitor: gates tool calls, projects active-step
     /// postures into steering, and drives repair from unmet requirements.
     pub flow: Option<crate::flow::FlowMonitor>,
+    /// Fast-lane delivery (backpressure) policy per event class. Defaults to
+    /// all-`Lossless`, preserving the historical `send().await` behavior.
+    pub delivery: DeliveryConfig,
 }
 
 impl Default for ControlPlaneConfig {
@@ -140,6 +321,7 @@ impl Default for ControlPlaneConfig {
             pending_context: None,
             middleware: Arc::new(crate::middleware::MiddlewareChain::new()),
             flow: None,
+            delivery: DeliveryConfig::default(),
         }
     }
 }
@@ -165,6 +347,8 @@ pub(crate) fn spawn_event_processor(
         resume_handle: parking_lot::Mutex::new(None),
         last_instruction: parking_lot::Mutex::new(None),
         pending_context: control_plane.pending_context.clone(),
+        delivery: control_plane.delivery,
+        dropped: DroppedFrames::default(),
     });
 
     let timer_cancel = CancellationToken::new();
@@ -347,39 +531,76 @@ async fn route_event(
     ctrl_tx: &mpsc::Sender<ControlEvent>,
     shared: &SharedState,
 ) {
+    let delivery = &shared.delivery;
+    let dropped = &shared.dropped;
     match event {
         // Fast lane events
         SessionEvent::AudioData(data) => {
-            let _ = fast_tx.send(FastEvent::Audio(data)).await;
+            deliver_fast(
+                fast_tx,
+                FastEvent::Audio(data),
+                delivery.audio,
+                &dropped.audio,
+            )
+            .await;
         }
         SessionEvent::TextDelta(text) => {
-            let _ = fast_tx.send(FastEvent::Text(text)).await;
+            deliver_fast(fast_tx, FastEvent::Text(text), delivery.text, &dropped.text).await;
         }
         SessionEvent::TextComplete(text) => {
-            let _ = fast_tx.send(FastEvent::TextComplete(text)).await;
+            deliver_fast(
+                fast_tx,
+                FastEvent::TextComplete(text),
+                delivery.text,
+                &dropped.text,
+            )
+            .await;
         }
-        // Transcripts: fast lane for callbacks, control lane for accumulation
+        // Transcripts: fast lane for callbacks, control lane for accumulation.
+        // The control-lane accumulation send keeps its lossless `send().await`.
         SessionEvent::InputTranscription(text) => {
-            let _ = fast_tx.send(FastEvent::InputTranscript(text.clone())).await;
+            deliver_fast(
+                fast_tx,
+                FastEvent::InputTranscript(text.clone()),
+                delivery.transcript,
+                &dropped.transcript,
+            )
+            .await;
             let _ = ctrl_tx.send(ControlEvent::InputTranscript(text)).await;
         }
         SessionEvent::OutputTranscription(text) => {
-            let _ = fast_tx
-                .send(FastEvent::OutputTranscript(text.clone()))
-                .await;
+            deliver_fast(
+                fast_tx,
+                FastEvent::OutputTranscript(text.clone()),
+                delivery.transcript,
+                &dropped.transcript,
+            )
+            .await;
             let _ = ctrl_tx.send(ControlEvent::OutputTranscript(text)).await;
         }
         SessionEvent::Thought(text) => {
-            let _ = fast_tx.send(FastEvent::Thought(text)).await;
+            deliver_fast(
+                fast_tx,
+                FastEvent::Thought(text),
+                delivery.thought,
+                &dropped.thought,
+            )
+            .await;
         }
         SessionEvent::VoiceActivityStart => {
-            let _ = fast_tx.send(FastEvent::VadStart).await;
+            deliver_fast(fast_tx, FastEvent::VadStart, delivery.vad, &dropped.vad).await;
         }
         SessionEvent::VoiceActivityEnd => {
-            let _ = fast_tx.send(FastEvent::VadEnd).await;
+            deliver_fast(fast_tx, FastEvent::VadEnd, delivery.vad, &dropped.vad).await;
         }
         SessionEvent::PhaseChanged(phase) => {
-            let _ = fast_tx.send(FastEvent::Phase(phase)).await;
+            deliver_fast(
+                fast_tx,
+                FastEvent::Phase(phase),
+                delivery.phase,
+                &dropped.phase,
+            )
+            .await;
         }
         SessionEvent::SessionResumeUpdate(info) => {
             *shared.resume_handle.lock() = Some(info.handle.clone());
@@ -515,6 +736,67 @@ mod tests {
 
     fn dummy_event_tx() -> broadcast::Sender<LiveEvent> {
         broadcast::channel::<LiveEvent>(16).0
+    }
+
+    #[test]
+    fn delivery_config_default_is_all_lossless() {
+        let cfg = DeliveryConfig::default();
+        assert_eq!(cfg.audio, Delivery::Lossless);
+        assert_eq!(cfg.text, Delivery::Lossless);
+        assert_eq!(cfg.transcript, Delivery::Lossless);
+        assert_eq!(cfg.thought, Delivery::Lossless);
+        assert_eq!(cfg.vad, Delivery::Lossless);
+        assert_eq!(cfg.phase, Delivery::Lossless);
+        // The standalone Delivery default must also be Lossless.
+        assert_eq!(Delivery::default(), Delivery::Lossless);
+    }
+
+    #[tokio::test]
+    async fn lossy_drop_newest_does_not_block_and_counts_drops() {
+        // Capacity-1 channel that we fill, so the next send would block under
+        // Lossless. The receiver is held but never drains.
+        let (tx, _rx) = mpsc::channel::<FastEvent>(1);
+        tx.send(FastEvent::VadStart).await.unwrap(); // channel now full
+        let dropped = AtomicU64::new(0);
+
+        // Under LossyDropNewest this must return immediately (not block) and
+        // bump the counter. We bound it with a timeout to prove non-blocking.
+        let res = tokio::time::timeout(
+            Duration::from_millis(100),
+            deliver_fast(&tx, FastEvent::VadEnd, Delivery::LossyDropNewest, &dropped),
+        )
+        .await;
+        assert!(res.is_ok(), "deliver_fast blocked under LossyDropNewest");
+        assert_eq!(dropped.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test]
+    async fn lossless_delivers_on_non_full_channel() {
+        let (tx, mut rx) = mpsc::channel::<FastEvent>(4);
+        let dropped = AtomicU64::new(0);
+
+        deliver_fast(
+            &tx,
+            FastEvent::Text("hello".into()),
+            Delivery::Lossless,
+            &dropped,
+        )
+        .await;
+
+        // No drop, and the value arrives on the receiver.
+        assert_eq!(dropped.load(Ordering::Relaxed), 0);
+        match rx.recv().await {
+            Some(FastEvent::Text(s)) => assert_eq!(s, "hello"),
+            other => panic!("expected Text frame, got {:?}", other.is_some()),
+        }
+    }
+
+    #[test]
+    fn dropped_frames_total_sums_classes() {
+        let d = DroppedFrames::default();
+        d.audio.fetch_add(2, Ordering::Relaxed);
+        d.transcript.fetch_add(3, Ordering::Relaxed);
+        assert_eq!(d.total(), 5);
     }
 
     #[tokio::test]

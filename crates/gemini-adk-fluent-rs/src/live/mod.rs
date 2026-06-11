@@ -35,17 +35,38 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use gemini_adk_rs::live::extractor::TurnExtractor;
-use gemini_adk_rs::live::needs::RepairConfig;
-use gemini_adk_rs::live::persistence::SessionPersistence;
-use gemini_adk_rs::live::steering::{ContextDelivery, SteeringMode};
-use gemini_adk_rs::live::{
+pub use gemini_adk_rs::live::extractor::TurnExtractor;
+pub use gemini_adk_rs::live::needs::RepairConfig;
+pub use gemini_adk_rs::live::persistence::SessionPersistence;
+pub use gemini_adk_rs::live::steering::{ContextDelivery, SteeringMode};
+pub use gemini_adk_rs::live::{
     ComputedRegistry, EventCallbacks, InstructionModifier, Phase, TemporalRegistry,
     ToolExecutionMode, WatcherRegistry,
 };
 use gemini_adk_rs::llm::BaseLlm;
 use gemini_adk_rs::tool::ToolDispatcher;
 use gemini_genai_rs::prelude::*;
+
+// Carve (gap #9): `gemini_adk_fluent_rs::live` is the curated home for the full
+// Live control plane. The kernel `prelude` keeps only `Live` + the headline types;
+// everything else (persistence, steering, repair, transcripts, extraction triggers,
+// soft-turn, runtime contract, …) is re-exported here. (Explicit, rather than a
+// glob, to avoid shadowing the L1/L2 private `callbacks`/`contract` modules.)
+pub use gemini_adk_rs::live::{
+    BackendInputVad, BackendVadSnapshot, BackgroundAgentDispatcher, BackgroundToolTracker,
+    CallbackMode, ComputedContract, ComputedVar, ConsecutiveFailureDetector, ContextBuilder,
+    ControlContract, DefaultResultFormatter, DeferredWriter, EffectMode, EffectPolicy,
+    ExtractionTrigger, ExtractorContract, FieldPromotion, FsPersistence, LiveEffect,
+    LiveEffectExecutor, LiveEvent, LiveHandle, LiveReactor, LiveSessionBuilder, LlmExtractor,
+    MemoryPersistence, MergePolicy, NeedsFulfillment, PatternDetector, PendingContext,
+    PhaseContract, PhaseInstruction, PhaseMachine, PhasePreparation, PhaseTransition, PredicateFn,
+    PreparationContract, PromotionContract, RateDetector, Reaction, ReactorEvent, ReactorRule,
+    RepairAction, ResultFormatter, RuntimeContract, SessionSignals, SessionSnapshot,
+    SessionTelemetry, SessionType, SoftTurnDetector, SustainedDetector, ToolCallSummary,
+    ToolContract, TranscriptBuffer, TranscriptTurn, TranscriptWindow, Transition,
+    TransitionContract, TransitionEvaluation, TransitionResult, TransitionTrigger,
+    TurnCountDetector, VoiceRuntimeState, WatchPredicate, Watcher, WatcherContract,
+};
 
 /// A deferred agent tool registration (resolved at connect time when State is available).
 pub(crate) struct DeferredAgentTool {
@@ -124,6 +145,7 @@ pub struct Live {
     pub(crate) soft_turn_timeout: Option<Duration>,
     pub(crate) steering_mode: SteeringMode,
     pub(crate) context_delivery: ContextDelivery,
+    pub(crate) delivery: gemini_adk_rs::live::DeliveryConfig,
     pub(crate) repair_config: Option<RepairConfig>,
     pub(crate) persistence: Option<Arc<dyn SessionPersistence>>,
     pub(crate) session_id: Option<String>,
@@ -207,6 +229,7 @@ impl Live {
             soft_turn_timeout: None,
             steering_mode: SteeringMode::default(),
             context_delivery: ContextDelivery::default(),
+            delivery: gemini_adk_rs::live::DeliveryConfig::default(),
             repair_config: None,
             persistence: None,
             session_id: None,

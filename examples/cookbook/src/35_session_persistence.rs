@@ -28,6 +28,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use gemini_adk_fluent_rs::live::SessionSnapshot;
 use gemini_adk_fluent_rs::prelude::*;
 use gemini_adk_rs::events::Event;
 use gemini_adk_rs::{InMemorySessionService, Session, SessionService};

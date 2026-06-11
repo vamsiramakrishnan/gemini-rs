@@ -11,6 +11,7 @@ use std::sync::LazyLock;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
+use gemini_adk_fluent_rs::live::FieldPromotion;
 use gemini_adk_fluent_rs::prelude::*;
 use gemini_adk_rs::live::Phase;
 use gemini_adk_rs::state::StateKey;

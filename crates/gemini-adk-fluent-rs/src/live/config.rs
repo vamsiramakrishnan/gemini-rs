@@ -6,7 +6,7 @@ use std::time::Duration;
 use gemini_adk_rs::live::needs::RepairConfig;
 use gemini_adk_rs::live::persistence::SessionPersistence;
 use gemini_adk_rs::live::steering::{ContextDelivery, SteeringMode};
-use gemini_adk_rs::live::{ResultFormatter, ToolExecutionMode};
+use gemini_adk_rs::live::{Delivery, DeliveryConfig, ResultFormatter, ToolExecutionMode};
 use gemini_adk_rs::tool::ToolDispatcher;
 use gemini_genai_rs::prelude::*;
 
@@ -386,6 +386,43 @@ impl Live {
     /// ```
     pub fn context_delivery(mut self, mode: ContextDelivery) -> Self {
         self.context_delivery = mode;
+        self
+    }
+
+    /// Set the fast-lane delivery (backpressure) policy for every event class.
+    ///
+    /// The event router forwards fast-lane frames (audio, text, transcripts,
+    /// thoughts, VAD, phase) to the fast-lane consumer over a bounded channel.
+    /// By default every class is [`Delivery::Lossless`] — the router awaits
+    /// (`send().await`) when the channel is full, which preserves the historical
+    /// behavior. Opt classes into [`Delivery::LossyDropNewest`] to drop the
+    /// newest frame on overflow instead of stalling the router (and thereby
+    /// stalling control-lane routing too).
+    ///
+    /// ```ignore
+    /// use gemini_adk_rs::live::{Delivery, DeliveryConfig};
+    /// Live::builder()
+    ///     .delivery(DeliveryConfig::default()
+    ///         .audio(Delivery::LossyDropNewest)
+    ///         .transcript(Delivery::LossyDropNewest))
+    /// ```
+    pub fn delivery(mut self, delivery: DeliveryConfig) -> Self {
+        self.delivery = delivery;
+        self
+    }
+
+    /// Convenience: set the audio class to [`Delivery::LossyDropNewest`] so the
+    /// router never blocks on a slow audio consumer, dropping the newest PCM
+    /// frame on overflow. Other classes keep their current policy.
+    pub fn lossy_audio(mut self) -> Self {
+        self.delivery.audio = Delivery::LossyDropNewest;
+        self
+    }
+
+    /// Convenience: set the transcript class to [`Delivery::LossyDropNewest`].
+    /// Other classes keep their current policy.
+    pub fn lossy_transcript(mut self) -> Self {
+        self.delivery.transcript = Delivery::LossyDropNewest;
         self
     }
 

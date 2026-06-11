@@ -4,46 +4,18 @@ version = "0.1.0"
 edition.workspace = true
 publish = false
 
-# ── Crawl (01–10): Foundations ──────────────────────────────────────────────
+# ── Crawl (01–03): Foundations ──────────────────────────────────────────────
 [[bin]]
-name = "01-simple-agent"
-path = "src/01_simple_agent.rs"
+name = "01-foundations"
+path = "src/01_foundations.rs"
 
 [[bin]]
-name = "02-agent-with-tools"
-path = "src/02_agent_with_tools.rs"
+name = "02-combinators"
+path = "src/02_combinators.rs"
 
 [[bin]]
-name = "03-callbacks"
-path = "src/03_callbacks.rs"
-
-[[bin]]
-name = "04-sequential-pipeline"
-path = "src/04_sequential_pipeline.rs"
-
-[[bin]]
-name = "05-parallel-fanout"
-path = "src/05_parallel_fanout.rs"
-
-[[bin]]
-name = "06-loop-agent"
-path = "src/06_loop_agent.rs"
-
-[[bin]]
-name = "07-state-transforms"
-path = "src/07_state_transforms.rs"
-
-[[bin]]
-name = "08-prompt-composition"
-path = "src/08_prompt_composition.rs"
-
-[[bin]]
-name = "09-tool-composition"
-path = "src/09_tool_composition.rs"
-
-[[bin]]
-name = "10-guards"
-path = "src/10_guards.rs"
+name = "03-composition"
+path = "src/03_composition.rs"
 
 # ── Walk (11–20): Multi-Agent Patterns ──────────────────────────────────────
 [[bin]]
@@ -126,18 +98,6 @@ path = "src/29_live_voice.rs"
 [[bin]]
 name = "30-production-pipeline"
 path = "src/30_production_pipeline.rs"
-
-[[bin]]
-name = "31-connect-from-env"
-path = "src/31_connect_from_env.rs"
-
-[[bin]]
-name = "32-live-callbacks"
-path = "src/32_live_callbacks.rs"
-
-[[bin]]
-name = "33-tool-macro"
-path = "src/33_tool_macro.rs"
 
 [[bin]]
 name = "34-tool-policies"

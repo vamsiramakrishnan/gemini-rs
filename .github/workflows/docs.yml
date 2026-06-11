@@ -41,6 +41,13 @@ jobs:
       - name: Build mdBook user guide
         run: mdbook build docs
 
+      # ── Link check (internal/relative links only — no flaky network calls) ──
+      - name: Check Markdown links
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: "--offline --no-progress docs/src README.md"
+          fail: true
+
       - name: Check rustdoc (no warnings)
         env:
           RUSTDOCFLAGS: "-D warnings"
