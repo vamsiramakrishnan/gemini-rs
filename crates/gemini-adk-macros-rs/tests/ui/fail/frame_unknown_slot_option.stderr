@@ -1,0 +1,5 @@
+error: unknown `slot` option (expected prompt/reprompt/state/confirm/pii/min/max/non_empty)
+ --> tests/ui/fail/frame_unknown_slot_option.rs:8:30
+  |
+8 |     #[slot(prompt = "Name?", required)]
+  |                              ^^^^^^^^

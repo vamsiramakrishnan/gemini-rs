@@ -1,0 +1,5 @@
+error: unknown recognizer `bogus`
+ --> tests/ui/fail/extract_unknown_recognizer.rs:8:17
+  |
+8 |     #[recognize(bogus)]
+  |                 ^^^^^
