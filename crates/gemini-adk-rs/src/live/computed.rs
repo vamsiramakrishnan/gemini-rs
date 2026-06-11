@@ -13,6 +13,9 @@ use crate::state::State;
 
 use super::contract::ComputedContract;
 
+/// Closure computing a derived value from current state.
+pub type ComputeFn = Arc<dyn Fn(&State) -> Option<Value> + Send + Sync>;
+
 /// A computed state variable: a pure function of other state keys.
 ///
 /// The `compute` closure receives the full [`State`] and returns an optional
@@ -25,7 +28,7 @@ pub struct ComputedVar {
     /// State keys this variable depends on.
     pub dependencies: Vec<String>,
     /// Closure that computes the derived value from current state.
-    pub compute: Arc<dyn Fn(&State) -> Option<Value> + Send + Sync>,
+    pub compute: ComputeFn,
 }
 
 /// Registry of computed variables with dependency-ordered evaluation.

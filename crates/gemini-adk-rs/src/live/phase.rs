@@ -156,8 +156,19 @@ pub struct PhasePreparation {
     /// State keys this preparation is expected to produce.
     pub produces: Vec<String>,
     /// Async effect that can mutate state and/or write context.
-    pub run: Arc<dyn Fn(State, Arc<dyn SessionWriter>) -> BoxFuture<()> + Send + Sync>,
+    pub run: PhaseHook,
 }
+
+/// Sync guard over state: `true` admits the transition/phase.
+pub type StateGuard = Arc<dyn Fn(&State) -> bool + Send + Sync>;
+/// Async phase hook receiving shared state and a session writer.
+pub type PhaseHook = Arc<dyn Fn(State, Arc<dyn SessionWriter>) -> BoxFuture<()> + Send + Sync>;
+/// Context generator run on phase entry (`None` = inject nothing).
+pub type EnterContextFn = Arc<
+    dyn Fn(&State, &TranscriptWindow) -> Option<Vec<gemini_genai_rs::prelude::Content>>
+        + Send
+        + Sync,
+>;
 
 /// A conversation phase with instruction, tools, and transitions.
 pub struct Phase {
@@ -168,11 +179,11 @@ pub struct Phase {
     /// Tool filter — `None` means all tools are allowed.
     pub tools_enabled: Option<Vec<String>>,
     /// Optional guard: phase can only be entered when this returns `true`.
-    pub guard: Option<Arc<dyn Fn(&State) -> bool + Send + Sync>>,
+    pub guard: Option<StateGuard>,
     /// Async callback executed when entering this phase.
-    pub on_enter: Option<Arc<dyn Fn(State, Arc<dyn SessionWriter>) -> BoxFuture<()> + Send + Sync>>,
+    pub on_enter: Option<PhaseHook>,
     /// Async callback executed when leaving this phase.
-    pub on_exit: Option<Arc<dyn Fn(State, Arc<dyn SessionWriter>) -> BoxFuture<()> + Send + Sync>>,
+    pub on_exit: Option<PhaseHook>,
     /// Ordered list of outbound transitions evaluated by the machine.
     pub transitions: Vec<Transition>,
     /// If `true`, `evaluate()` always returns `None` — no transitions out.
@@ -186,13 +197,7 @@ pub struct Phase {
     /// Optional context injection on phase entry.
     /// Returns Content to send as `client_content` (turnComplete: false).
     /// Gives the model conversational continuity across phase transitions.
-    pub on_enter_context: Option<
-        Arc<
-            dyn Fn(&State, &TranscriptWindow) -> Option<Vec<gemini_genai_rs::prelude::Content>>
-                + Send
-                + Sync,
-        >,
-    >,
+    pub on_enter_context: Option<EnterContextFn>,
     /// State keys this phase is responsible for gathering.
     ///
     /// Purely informational — does not affect transitions or enforcement.

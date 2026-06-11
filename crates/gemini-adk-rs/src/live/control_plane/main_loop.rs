@@ -31,6 +31,10 @@ use super::tool_handler::handle_tool_calls;
 /// transcript accumulation, extractors, phases, watchers.
 ///
 /// TranscriptBuffer is owned exclusively -- no Arc<Mutex<>> needed.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "control-lane spawn site: parameters are the owned subsystem handles transferred onto the lane task"
+)]
 pub(in crate::live) async fn run_control_lane(
     mut rx: tokio::sync::mpsc::Receiver<ControlEvent>,
     completion_tx: tokio::sync::mpsc::WeakSender<ControlEvent>,

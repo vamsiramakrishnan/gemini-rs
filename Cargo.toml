@@ -35,11 +35,6 @@ gemini-adk-fluent-rs = { path = "crates/gemini-adk-fluent-rs", version = "0.7.0"
 gemini-adk-server-rs = { path = "apps/gemini-adk-server-rs",   version = "0.7.0" }
 
 [workspace.lints.clippy]
-# Style lints kept off workspace-wide while the builder/config surface is large
-# (tracked for reduction to targeted `#[allow(reason = ..)]`). NOT a correctness
-# smoke alarm: `await_holding_lock` is deliberately left ON (it caught real
-# guard-across-await in tests; the production control plane is clean).
-type_complexity = "allow"
-too_many_arguments = "allow"
-field_reassign_with_default = "allow"
-new_ret_no_self = "allow"
+# All style/correctness lints are ON workspace-wide. The handful of deliberate
+# exceptions (control-plane plumbing fns, builder entry points) carry targeted
+# `#[allow(lint, reason = "…")]` at the site.

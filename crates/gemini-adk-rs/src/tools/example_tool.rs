@@ -90,8 +90,10 @@ mod tests {
             Example::new("What color is the sky?", "Blue"),
         ]);
 
-        let mut request = LlmRequest::default();
-        request.system_instruction = Some("You are helpful.".into());
+        let mut request = LlmRequest {
+            system_instruction: Some("You are helpful.".into()),
+            ..Default::default()
+        };
 
         tool.process_llm_request(&mut request);
         let instruction = request.system_instruction.unwrap();
@@ -104,8 +106,10 @@ mod tests {
     #[test]
     fn empty_examples_noop() {
         let tool = ExampleTool::new(vec![]);
-        let mut request = LlmRequest::default();
-        request.system_instruction = Some("Original".into());
+        let mut request = LlmRequest {
+            system_instruction: Some("Original".into()),
+            ..Default::default()
+        };
 
         tool.process_llm_request(&mut request);
         assert_eq!(request.system_instruction.unwrap(), "Original");

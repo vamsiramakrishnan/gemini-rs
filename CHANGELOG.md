@@ -32,6 +32,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--no-default-features` and `--all-features` (both verified green), so the
   feature-heavy SDK can't regress at the extremes. Also: `await_holding_lock` is
   now enforced (removed from the workspace lint allow-list).
+- **Clippy smoke alarms back on.** The four remaining workspace-wide lint
+  allows (`type_complexity`, `too_many_arguments`, `field_reassign_with_default`,
+  `new_ret_no_self`) are removed. Boxed callback shapes got named public type
+  aliases (`AudioCallback`, `TranscriptCallback`, `ToolCallCallback`,
+  `PhaseHook`, `StateGuard`, …), test sites use struct literals, and the few
+  deliberate exceptions (control-plane plumbing functions, builder entry
+  points) carry targeted `#[allow(lint, reason = "…")]` at the site.
 - **CI/release ratchet.** New `cargo hack check --each-feature` job (every
   feature of the published crates compiles in isolation), a `cargo deny` job
   (RustSec advisories, permissive-license allow-list, source whitelist — config

@@ -51,8 +51,10 @@ mod tests {
     #[test]
     fn injects_memories_into_instruction() {
         let tool = PreloadMemoryTool::new();
-        let mut request = LlmRequest::default();
-        request.system_instruction = Some("You are helpful.".into());
+        let mut request = LlmRequest {
+            system_instruction: Some("You are helpful.".into()),
+            ..Default::default()
+        };
 
         tool.process_llm_request(
             &mut request,
@@ -67,8 +69,10 @@ mod tests {
     #[test]
     fn empty_memories_noop() {
         let tool = PreloadMemoryTool::new();
-        let mut request = LlmRequest::default();
-        request.system_instruction = Some("Original".into());
+        let mut request = LlmRequest {
+            system_instruction: Some("Original".into()),
+            ..Default::default()
+        };
 
         tool.process_llm_request(&mut request, &[]);
         assert_eq!(request.system_instruction.unwrap(), "Original");

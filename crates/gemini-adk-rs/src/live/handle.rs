@@ -48,6 +48,10 @@ pub struct LiveHandle {
 }
 
 impl LiveHandle {
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "crate-internal constructor called once from spawn_lanes; the runtime parts are deliberately enumerated rather than re-bundled"
+    )]
     pub(crate) fn new(
         session: SessionHandle,
         writer: Arc<dyn SessionWriter>,

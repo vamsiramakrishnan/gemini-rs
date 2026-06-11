@@ -256,6 +256,10 @@ pub struct ContextBuilder {
 
 impl ContextBuilder {
     /// Start building a new context with the first section.
+    #[allow(
+        clippy::new_ret_no_self,
+        reason = "ContextBuilder::new() is the builder entry point; it opens the first SectionBuilder"
+    )]
     pub fn new() -> SectionBuilder {
         SectionBuilder {
             label: String::new(),

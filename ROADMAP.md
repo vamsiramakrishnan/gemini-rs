@@ -184,10 +184,9 @@ Mechanical guardrails so Milestones 1–2 can't regress and the crate stays hone
   isolation of the published crates), `cargo deny` (advisories/licenses/sources,
   `deny.toml`), `cargo semver-checks` in the release validate job, feature
   extremes (`--no-default-features`/`--all-features`), publish-with-verification
-  (no more `--no-verify`), and `await_holding_lock` enforced. *(Remaining: burn
-  the four style allows — `type_complexity`, `too_many_arguments`,
-  `field_reassign_with_default`, `new_ret_no_self` — down to targeted
-  `#[allow(reason=…)]`.)*
+  (no more `--no-verify`), and `await_holding_lock` enforced. All four style allows are
+  burned down: callback shapes have named type aliases, and the deliberate
+  exceptions carry targeted `#[allow(lint, reason = "…")]`.
 - ✅ **Golden-wire protocol tests.** Checked-in fixtures for setup/server
   messages/tool calls/audio/thinking/transcription parts and the
   Vertex-vs-Google-AI deltas (`tests/golden_wire.rs`; `GOLDEN_BLESS=1` to
@@ -196,8 +195,11 @@ Mechanical guardrails so Milestones 1–2 can't regress and the crate stays hone
   (matching `LICENSE`); install snippets bumped to `0.7`; MSRV made explicit
   (`rust-version = "1.93"`, badge `1.93+`). *(Remaining: generate crate READMEs
   from one source + test snippets as doctests/trycmd.)*
-- 📋 **Macro hardening.** Add `trybuild` compile-fail tests (bad signatures,
-  non-serializable args, duplicate/undescribed tools) and `insta` schema snapshots
+- ✅ **Macro hardening.** `trybuild` compile-fail UI tests (10 fixtures: bad
+  signatures, missing descriptions, invalid derive attributes, plus pass
+  anchors), path-aware `Option` detection (std/core paths accepted, lookalikes
+  rejected), and a real expansion bug fixed (trailing comma after `Option`
+  params). *(Deferred: `insta` schema snapshots
   for `#[tool]`/`#[derive(Extract)]`. → **Value:** the tool-call surface is too
   important to leave as "JSON plus a closure."
 

@@ -364,6 +364,10 @@ pub struct Flow {
 
 impl Flow {
     /// Start building a flow.
+    #[allow(
+        clippy::new_ret_no_self,
+        reason = "Flow::new() is the builder entry point; a Flow comes from FlowBuilder::build/compile"
+    )]
     pub fn new() -> FlowBuilder {
         FlowBuilder::default()
     }
@@ -1489,8 +1493,7 @@ mod tests {
     #[test]
     fn detects_cycle() {
         // a after b, b after a — build() should reject.
-        let mut flow = Flow::default();
-        flow.steps = vec![
+        let steps = vec![
             Step {
                 id: "a".into(),
                 after: vec!["b".into()],
@@ -1514,6 +1517,10 @@ mod tests {
                 terminal: false,
             },
         ];
+        let flow = Flow {
+            steps,
+            ..Flow::default()
+        };
         assert!(flow.validate().is_err());
     }
 

@@ -14,7 +14,7 @@ use bytes::Bytes;
 use tokio::sync::{broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 
-use gemini_genai_rs::prelude::{SessionEvent, SessionPhase, UsageMetadata};
+use gemini_genai_rs::prelude::{SessionEvent, SessionPhase};
 use gemini_genai_rs::session::SessionWriter;
 
 use crate::state::State;
@@ -329,6 +329,10 @@ impl Default for ControlPlaneConfig {
     }
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "lane spawn site: parameters are the owned subsystem handles split between the fast and control lanes"
+)]
 pub(crate) fn spawn_event_processor(
     mut event_rx: broadcast::Receiver<SessionEvent>,
     callbacks: Arc<EventCallbacks>,
@@ -460,7 +464,7 @@ pub(crate) fn spawn_telemetry_lane(
     signals: SessionSignals,
     telemetry: Arc<SessionTelemetry>,
     cancel: CancellationToken,
-    on_usage: Option<Box<dyn Fn(&UsageMetadata) + Send + Sync>>,
+    on_usage: Option<super::callbacks::UsageCallback>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut debounce = tokio::time::interval(Duration::from_millis(100));
@@ -807,10 +811,12 @@ mod tests {
         let count = Arc::new(AtomicUsize::new(0));
         let count_clone = count.clone();
 
-        let mut callbacks = EventCallbacks::default();
-        callbacks.on_audio = Some(Box::new(move |_| {
-            count_clone.fetch_add(1, Ordering::SeqCst);
-        }));
+        let callbacks = EventCallbacks {
+            on_audio: Some(Box::new(move |_| {
+                count_clone.fetch_add(1, Ordering::SeqCst);
+            })),
+            ..Default::default()
+        };
         let callbacks = Arc::new(callbacks);
 
         let (event_tx, _) = broadcast::channel(16);
@@ -855,10 +861,12 @@ mod tests {
         let count = Arc::new(AtomicUsize::new(0));
         let count_clone = count.clone();
 
-        let mut callbacks = EventCallbacks::default();
-        callbacks.on_audio = Some(Box::new(move |_| {
-            count_clone.fetch_add(1, Ordering::SeqCst);
-        }));
+        let callbacks = EventCallbacks {
+            on_audio: Some(Box::new(move |_| {
+                count_clone.fetch_add(1, Ordering::SeqCst);
+            })),
+            ..Default::default()
+        };
         let callbacks = Arc::new(callbacks);
 
         let (event_tx, _) = broadcast::channel(16);
@@ -904,13 +912,15 @@ mod tests {
         let called = Arc::new(AtomicBool::new(false));
         let called_clone = called.clone();
 
-        let mut callbacks = EventCallbacks::default();
-        callbacks.on_turn_complete = Some(Arc::new(move || {
-            let c = called_clone.clone();
-            Box::pin(async move {
-                c.store(true, Ordering::SeqCst);
-            })
-        }));
+        let callbacks = EventCallbacks {
+            on_turn_complete: Some(Arc::new(move || {
+                let c = called_clone.clone();
+                Box::pin(async move {
+                    c.store(true, Ordering::SeqCst);
+                })
+            })),
+            ..Default::default()
+        };
         let callbacks = Arc::new(callbacks);
 
         let (event_tx, _) = broadcast::channel(16);
@@ -1249,17 +1259,19 @@ mod tests {
         let order = Arc::new(AtomicU32::new(0));
         let order_clone = order.clone();
 
-        let mut callbacks = EventCallbacks::default();
-        // Blocking on_turn_complete sets order to 1
-        callbacks.on_turn_complete = Some(Arc::new(move || {
-            let o = order_clone.clone();
-            Box::pin(async move {
-                // Simulate brief work
-                tokio::time::sleep(Duration::from_millis(10)).await;
-                o.store(1, Ordering::SeqCst);
-            })
-        }));
-        callbacks.on_turn_complete_mode = CallbackMode::Blocking;
+        let callbacks = EventCallbacks {
+            // Blocking on_turn_complete sets order to 1
+            on_turn_complete: Some(Arc::new(move || {
+                let o = order_clone.clone();
+                Box::pin(async move {
+                    // Simulate brief work
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                    o.store(1, Ordering::SeqCst);
+                })
+            })),
+            on_turn_complete_mode: CallbackMode::Blocking,
+            ..Default::default()
+        };
         let callbacks = Arc::new(callbacks);
 
         let (event_tx, _) = broadcast::channel(16);
@@ -1302,15 +1314,17 @@ mod tests {
         let called = Arc::new(AtomicBool::new(false));
         let called_clone = called.clone();
 
-        let mut callbacks = EventCallbacks::default();
-        callbacks.on_turn_complete = Some(Arc::new(move || {
-            let c = called_clone.clone();
-            Box::pin(async move {
-                tokio::time::sleep(Duration::from_millis(10)).await;
-                c.store(true, Ordering::SeqCst);
-            })
-        }));
-        callbacks.on_turn_complete_mode = CallbackMode::Concurrent;
+        let callbacks = EventCallbacks {
+            on_turn_complete: Some(Arc::new(move || {
+                let c = called_clone.clone();
+                Box::pin(async move {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                    c.store(true, Ordering::SeqCst);
+                })
+            })),
+            on_turn_complete_mode: CallbackMode::Concurrent,
+            ..Default::default()
+        };
         let callbacks = Arc::new(callbacks);
 
         let (event_tx, _) = broadcast::channel(16);

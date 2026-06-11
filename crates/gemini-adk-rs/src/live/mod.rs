@@ -54,8 +54,9 @@ pub use input_vad::{BackendInputVad, BackendVadSnapshot};
 pub use needs::{NeedsFulfillment, RepairAction, RepairConfig};
 pub use persistence::{FsPersistence, MemoryPersistence, SessionPersistence, SessionSnapshot};
 pub use phase::{
-    InstructionModifier, Phase, PhaseInstruction, PhaseMachine, PhasePreparation, PhaseTransition,
-    Transition, TransitionEvaluation, TransitionResult, TransitionTrigger,
+    EnterContextFn, InstructionModifier, Phase, PhaseHook, PhaseInstruction, PhaseMachine,
+    PhasePreparation, PhaseTransition, StateGuard, Transition, TransitionEvaluation,
+    TransitionResult, TransitionTrigger,
 };
 pub use processor::{Delivery, DeliveryConfig};
 pub use reactor::{

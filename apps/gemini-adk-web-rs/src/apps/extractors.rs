@@ -13,6 +13,9 @@ use serde_json::Value;
 use gemini_adk_rs::live::{TranscriptTurn, TurnExtractor};
 use gemini_adk_rs::llm::LlmError;
 
+/// Extraction step: (window text, prior state) -> newly extracted keys.
+type ExtractFn = Arc<dyn Fn(&str, &HashMap<String, Value>) -> HashMap<String, Value> + Send + Sync>;
+
 /// A `TurnExtractor` that wraps a regex-based (or any synchronous) extraction
 /// function.
 ///
@@ -27,7 +30,7 @@ use gemini_adk_rs::llm::LlmError;
 pub struct RegexExtractor {
     name: String,
     window_size: usize,
-    extract_fn: Arc<dyn Fn(&str, &HashMap<String, Value>) -> HashMap<String, Value> + Send + Sync>,
+    extract_fn: ExtractFn,
     /// Accumulated extracted state carried across turns.
     state: Mutex<HashMap<String, Value>>,
 }

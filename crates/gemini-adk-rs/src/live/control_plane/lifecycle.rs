@@ -34,6 +34,10 @@ use super::extractors::run_extractors;
 /// accumulated into a single `context_buffer` and sent as ONE
 /// `send_client_content` call, eliminating the burst of separate WebSocket
 /// frames that can confuse the model or clash with concurrent user input.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "turn-boundary stage entry point: each parameter is one control-plane subsystem; bundling them into a struct would just move the list (see the turn-pipeline RFC)"
+)]
 pub(in crate::live) async fn handle_turn_complete(
     callbacks: &EventCallbacks,
     writer: &Arc<dyn SessionWriter>,

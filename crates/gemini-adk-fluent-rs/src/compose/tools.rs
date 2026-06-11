@@ -17,6 +17,13 @@ pub struct ToolComposite {
     pub entries: Vec<ToolCompositeEntry>,
 }
 
+/// Async transformer applied to a tool result value.
+pub type TransformFn = Arc<
+    dyn Fn(serde_json::Value) -> Pin<Box<dyn Future<Output = serde_json::Value> + Send>>
+        + Send
+        + Sync,
+>;
+
 /// An entry in a tool composite.
 #[derive(Clone)]
 pub enum ToolCompositeEntry {
@@ -80,11 +87,7 @@ pub enum ToolCompositeEntry {
         /// The inner tool entry.
         inner: Box<ToolCompositeEntry>,
         /// Transformer function applied to the tool result.
-        transformer: Arc<
-            dyn Fn(serde_json::Value) -> Pin<Box<dyn Future<Output = serde_json::Value> + Send>>
-                + Send
-                + Sync,
-        >,
+        transformer: TransformFn,
     },
 }
 
@@ -349,11 +352,7 @@ impl T {
         F: Fn(serde_json::Value) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = serde_json::Value> + Send + 'static,
     {
-        let f: Arc<
-            dyn Fn(serde_json::Value) -> Pin<Box<dyn Future<Output = serde_json::Value> + Send>>
-                + Send
-                + Sync,
-        > = Arc::new(
+        let f: TransformFn = Arc::new(
             move |v: serde_json::Value| -> Pin<Box<dyn Future<Output = serde_json::Value> + Send>> {
                 Box::pin(f(v))
             },

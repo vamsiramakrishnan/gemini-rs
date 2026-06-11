@@ -21,6 +21,10 @@ use super::extractors::run_extractors;
 use super::tool_gate::ToolGate;
 
 /// Handle tool calls: phase filtering -> user callback -> auto-dispatch -> interceptor -> send.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "tool-lifecycle stage entry point: each parameter is one control-plane subsystem (dispatcher, gate, middleware, transcript)"
+)]
 pub(in crate::live) async fn handle_tool_calls(
     calls: Vec<gemini_genai_rs::prelude::FunctionCall>,
     callbacks: &EventCallbacks,

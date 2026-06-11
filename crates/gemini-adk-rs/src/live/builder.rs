@@ -414,7 +414,7 @@ pub(crate) struct SessionRuntime {
     user_writer: Arc<dyn SessionWriter>,
     event_rx: tokio::sync::broadcast::Receiver<gemini_genai_rs::prelude::SessionEvent>,
     telem_rx: tokio::sync::broadcast::Receiver<gemini_genai_rs::prelude::SessionEvent>,
-    on_usage_cb: Option<Box<dyn Fn(&gemini_genai_rs::prelude::UsageMetadata) + Send + Sync>>,
+    on_usage_cb: Option<super::callbacks::UsageCallback>,
     live_event_tx: tokio::sync::broadcast::Sender<super::events::LiveEvent>,
     telem_cancel: CancellationToken,
     flow_monitor: Option<crate::flow::SharedFlowMonitor>,
