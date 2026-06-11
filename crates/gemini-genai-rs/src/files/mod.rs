@@ -12,8 +12,11 @@ use crate::transport::auth::ServiceEndpoint;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum FileState {
+    /// Upload received, still being processed.
     Processing,
+    /// Ready for use in requests.
     Active,
+    /// Terminated with an error.
     Failed,
 }
 
@@ -82,12 +85,16 @@ pub struct ListFilesResponse {
 #[derive(Debug, thiserror::Error)]
 pub enum FilesError {
     #[error(transparent)]
+    /// Transport-level HTTP failure.
     Http(#[from] HttpError),
     #[error("Failed to parse response: {0}")]
+    /// Response body failed to parse.
     Parse(#[from] serde_json::Error),
     #[error("Auth error: {0}")]
+    /// Authentication/authorization failure.
     Auth(String),
     #[error("IO error: {0}")]
+    /// Local file I/O failure.
     Io(#[from] std::io::Error),
 }
 

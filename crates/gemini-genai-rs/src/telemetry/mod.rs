@@ -176,8 +176,10 @@ impl TelemetryConfig {
                 GCPMetricsExporter, GCPMetricsExporterConfig,
             };
 
-            let mut metrics_cfg = GCPMetricsExporterConfig::default();
-            metrics_cfg.prefix = format!("custom.googleapis.com/{}", self.otel_service_name);
+            let mut metrics_cfg = GCPMetricsExporterConfig {
+                prefix: format!("custom.googleapis.com/{}", self.otel_service_name),
+                ..Default::default()
+            };
             if let Some(ref project_id) = self.otel_gcp_project {
                 metrics_cfg.project_id = Some(project_id.clone());
             }

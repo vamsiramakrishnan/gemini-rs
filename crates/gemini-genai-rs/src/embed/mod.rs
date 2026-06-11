@@ -56,12 +56,19 @@ impl EmbedContentConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum TaskType {
+    /// Embedding for a search query.
     RetrievalQuery,
+    /// Embedding for a document to be retrieved.
     RetrievalDocument,
+    /// Embedding for similarity comparison.
     SemanticSimilarity,
+    /// Embedding used as classifier input.
     Classification,
+    /// Embedding used for clustering.
     Clustering,
+    /// Embedding for question answering.
     QuestionAnswering,
+    /// Embedding for fact verification.
     FactVerification,
 }
 
@@ -85,10 +92,13 @@ pub struct ContentEmbedding {
 #[derive(Debug, thiserror::Error)]
 pub enum EmbedError {
     #[error(transparent)]
+    /// Transport-level HTTP failure.
     Http(#[from] HttpError),
     #[error("Failed to parse response: {0}")]
+    /// Response body failed to parse.
     Parse(#[from] serde_json::Error),
     #[error("Auth error: {0}")]
+    /// Authentication/authorization failure.
     Auth(String),
 }
 

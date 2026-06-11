@@ -97,10 +97,13 @@ pub struct ListCachedContentsResponse {
 #[derive(Debug, thiserror::Error)]
 pub enum CachesError {
     #[error(transparent)]
+    /// Transport-level HTTP failure.
     Http(#[from] HttpError),
     #[error("Failed to parse response: {0}")]
+    /// Response body failed to parse.
     Parse(#[from] serde_json::Error),
     #[error("Auth error: {0}")]
+    /// Authentication/authorization failure.
     Auth(String),
 }
 
