@@ -1,0 +1,59 @@
+{
+  "setup": {
+    "generationConfig": {
+      "responseModalities": [
+        "AUDIO"
+      ],
+      "speechConfig": {
+        "voiceConfig": {
+          "prebuiltVoiceConfig": {
+            "voiceName": "Kore"
+          }
+        }
+      },
+      "thinkingConfig": {
+        "includeThoughts": true,
+        "thinkingBudget": 1024
+      }
+    },
+    "inputAudioTranscription": {},
+    "model": "models/gemini-2.0-flash-live-001",
+    "outputAudioTranscription": {},
+    "sessionResumption": {
+      "handle": "resume-handle-123"
+    },
+    "systemInstruction": {
+      "parts": [
+        {
+          "text": "You are a weather assistant"
+        }
+      ],
+      "role": "system"
+    },
+    "tools": [
+      {
+        "functionDeclarations": [
+          {
+            "behavior": "NON_BLOCKING",
+            "description": "Get weather for a city",
+            "name": "get_weather",
+            "parameters": {
+              "properties": {
+                "city": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "city"
+              ],
+              "type": "object"
+            }
+          }
+        ]
+      },
+      {
+        "googleSearch": {}
+      }
+    ]
+  }
+}

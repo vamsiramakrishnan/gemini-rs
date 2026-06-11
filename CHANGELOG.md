@@ -105,6 +105,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Golden-wire protocol tests.** Checked-in JSON fixtures pin the wire format
+  in both directions: client→server messages (setup, realtime audio, client
+  content, tool responses) are serialized and diffed against blessed fixtures
+  (`GOLDEN_BLESS=1` to re-bless intentional changes), and server→client frames
+  (serverContent with audio/text/thought parts, transcriptions, toolCall,
+  toolCallCancellation, goAway, sessionResumptionUpdate, setupComplete) are
+  hand-written contract fixtures asserted to parse correctly. Platform deltas
+  are pinned explicitly: Vertex AI's qualified model URI and its stripping of
+  `behavior`/`thinkingConfig`/`scheduling`, plus the
+  `GeminiModel::Custom`/`Voice::Custom` forward-compatibility escape hatches.
 - **Server: real SSE streaming + debug/eval polish.** `POST /run_sse` now
   streams real execution milestones (`started`, `agent_started/completed`,
   `tool_call_started/completed/failed`, final `response`) instead of returning a

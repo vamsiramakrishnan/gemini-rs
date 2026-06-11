@@ -1,0 +1,17 @@
+{
+  "toolResponse": {
+    "functionResponses": [
+      {
+        "id": "call-1",
+        "name": "search_kb",
+        "response": {
+          "results": [
+            "a",
+            "b"
+          ]
+        },
+        "scheduling": "WHEN_IDLE"
+      }
+    ]
+  }
+}

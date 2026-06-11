@@ -1,0 +1,8 @@
+{
+  "setupComplete": {
+    "sessionResumption": {
+      "handle": "handle-abc",
+      "resumed": true
+    }
+  }
+}

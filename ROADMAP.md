@@ -182,11 +182,10 @@ Mechanical guardrails so Milestones 1–2 can't regress and the crate stays hone
   the four style allows — `type_complexity`, `too_many_arguments`,
   `field_reassign_with_default`, `new_ret_no_self` — down to targeted
   `#[allow(reason=…)]`.)*
-- 📋 **Golden-wire protocol tests.** JSON fixtures + round-trip serde for setup,
-  server messages, tool calls, audio/thinking/transcription parts, and
-  Vertex-vs-Google-AI differences; a model/voice catalog with `GeminiModel::Custom`
-  escape hatch. → **Value:** the wire layer *will* drift with Gemini releases; make
-  staleness obvious instead of silently wrong.
+- ✅ **Golden-wire protocol tests.** Checked-in fixtures for setup/server
+  messages/tool calls/audio/thinking/transcription parts and the
+  Vertex-vs-Google-AI deltas (`tests/golden_wire.rs`; `GOLDEN_BLESS=1` to
+  re-bless); `GeminiModel::Custom`/`Voice::Custom` escape hatches covered.
 - ✅ **Metadata truth.** Crate READMEs + README license section corrected to MIT
   (matching `LICENSE`); install snippets bumped to `0.7`; MSRV made explicit
   (`rust-version = "1.93"`, badge `1.93+`). *(Remaining: generate crate READMEs

@@ -1,0 +1,11 @@
+{
+  "serverContent": {
+    "inputTranscription": {
+      "text": "what's the weather"
+    },
+    "outputTranscription": {
+      "text": "It is sunny"
+    },
+    "interrupted": true
+  }
+}
