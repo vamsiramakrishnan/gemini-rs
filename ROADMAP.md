@@ -4,6 +4,12 @@
 >
 > Current release: **0.7.0** (2026-05-31).
 
+> **Strategy:** the full competitive analysis and sequencing live in
+> [`docs/plans/2026-06-11-100x-strategy-memo.md`](docs/plans/2026-06-11-100x-strategy-memo.md).
+> One line: *Rasa CALM's enforcement guarantees, on a native speech-to-speech
+> substrate, with the deterministic testing story nobody has — open source, in
+> Rust.* Gemini-native by decision (2026-06-11).
+
 ## Thesis: turn the primitives into hard contracts
 
 gemini-rs already has the rare thing most agent SDKs lack — a coherent
@@ -220,6 +226,78 @@ Mechanical guardrails so Milestones 1–2 can't regress and the crate stays hone
   MCP/A2A/OpenAPI/Search tool sources currently error at connect — implement or
   document.
 - 📋 `extraction.md` user guide + Extract↔Flow interplay section in `flow.md`.
+
+## Milestone 6 — The correctness floor `0.8.0` 🚧
+
+The five production concurrency bugs found by audit (2026-06-11), plus API
+evolvability. Nothing above this matters if barge-in hangs or snapshots tear.
+
+- 🚧 **Background tools cancelled on disconnect.** `BackgroundToolTracker` is
+  never held by `LiveHandle`; orphaned tool tasks can post stale results to a
+  dead (or new) control lane.
+- 🚧 **Lanes aborted on disconnect.** Fast/control `JoinHandle`s are detached,
+  never aborted/awaited — a lane blocked in a slow tool runs forever.
+- 🚧 **Atomic persistence.** `FsPersistence::save` writes directly (no
+  tmp+rename); a crash mid-write corrupts the snapshot unrecoverably.
+- 🚧 **Barge-in beats slow tools.** Inline tool dispatch blocks the control
+  lane; an interruption waits for the tool to finish. Cancellation must win.
+- 🚧 **Graceful drain + GoAway resume.** Deferred context is dropped on
+  disconnect; no `resume`-after-GoAway path exists despite tracked handles.
+- 🚧 **`#[non_exhaustive]`** on `SessionEvent`/`LiveEvent`/`GeminiModel`/`Voice`
+  — every new Gemini model or server event is a semver break until this lands.
+- 🚧 **Hot-path elegance.** Kill the double-parse (string-contains + full serde
+  per message), fix the 64-deep control channel that can stall audio under slow
+  tools, wire the orphaned `TokenBucket` send backpressure.
+- 🚧 **`LiveHandle::stream()`** — `impl Stream<Item = LiveEvent>` so events
+  compose with `tokio-stream`; callbacks become sugar.
+
+## Milestone 7 — The determinism spine `0.9.0` 🚧
+
+The keystone: **any session can be replayed deterministically through the real
+control plane.** (Verified: Sim already runs real FlowStack/extractor code.)
+
+- 🚧 **`RecordingCodec`** wrapping the `Codec` trait — every wire byte recorded.
+- 🚧 **Durable `JournalSink`** — the mutation journal is capped at 1024 entries
+  (a 2-hour call loses 98% of history); add a sink trait + file backend.
+- 🚧 **Replay harness** — feed a recorded wire log through the real processor;
+  diff the mutation journal. `adk record` / `adk replay <session.log>`.
+- 📋 **Injectable clock** — `Instant::now()`/`SystemTime::now()`/timeouts leak
+  nondeterminism into control flow (sites catalogued in audit).
+- 📋 **Recorded LLM/resolver outputs** — tape async resolver results so replay
+  never re-executes a model call.
+- 📋 Promote the mutation journal: watchers/computed/extractors consume cursors
+  (carried over from old Milestone 3).
+
+## Milestone 8 — Conversation CI 📋
+
+The most evidenced bet: every commercial voice-agent tester is LLM-vs-LLM
+(τ²-bench: 90% pass@1 → 57% pass^8). Ours is deterministic and free.
+
+- 📋 GitHub-Action conformance suite: `adk flow simulate` over a scenario
+  corpus on every PR, `why_blocked()` diffs as review artifacts.
+- 📋 Scenario extraction from recorded sessions (incident → regression test).
+- 📋 Strict canned-response mode (per-phase enforced template-only output) —
+  the zero-hallucination guarantee for regulated deployments.
+
+## Milestone 9 — The funnel 📋
+
+- 📋 **Python bindings** (PyO3) over the Rust core — the Pydantic/Polars play;
+  the adoption funnel for the entire Python voice-AI population.
+- 📋 Proof artifacts: published reproducible p99 mic-to-model jitter benchmark
+  vs LiveKit/Pipecat; time-travel debugger UI (journal × wire log) in the web
+  devtools.
+- ❌ **OpenAI Realtime L0: deliberately not pursued** (decision 2026-06-11) —
+  Gemini-native is the identity; the control plane stays provider-agnostic so
+  the option remains open.
+
+## Milestone 10 — Rust-only endgames 💭
+
+- 💭 Single-binary telephony via `rustpbx`/`rsipstack` integration (the
+  governed agent brain in the media path).
+- 💭 WASM edge governance: compiler + Sim in the browser (authoring/validation)
+  and Workers/on-device.
+- 💭 On-device turn detection (smart-turn-v3 is BSD-2/8M params/12ms CPU;
+  Kyutai STT has semantic VAD; sherpa-onnx has official Rust bindings).
 
 ---
 
