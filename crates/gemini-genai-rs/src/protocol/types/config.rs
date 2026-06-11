@@ -698,11 +698,6 @@ impl SessionConfig {
         self
     }
 
-    /// Apply recommended realtime input defaults for voice conversations.
-    ///
-    /// This preserves any values the caller already set. In particular, it sets
-    /// `TURN_INCLUDES_ONLY_ACTIVITY` so long pauses/silence in a continuous mic
-    /// stream are not included in the user's semantic turn.
     /// Pace outbound audio with a token bucket (producer-side backpressure).
     ///
     /// See [`SessionConfig::audio_pacing`]. Use
@@ -713,6 +708,11 @@ impl SessionConfig {
         self
     }
 
+    /// Apply recommended realtime input defaults for voice conversations.
+    ///
+    /// This preserves any values the caller already set. In particular, it sets
+    /// `TURN_INCLUDES_ONLY_ACTIVITY` so long pauses/silence in a continuous mic
+    /// stream are not included in the user's semantic turn.
     pub fn voice_realtime_defaults(mut self) -> Self {
         let mut ric = self.realtime_input_config.unwrap_or(RealtimeInputConfig {
             automatic_activity_detection: None,
