@@ -322,6 +322,10 @@ impl LiveSessionBuilder {
             on_usage_cb,
         );
 
+        // Share the governed-flow monitor between the control lane (which
+        // advances it) and the LiveHandle (which snapshots explain/why_blocked).
+        let flow_monitor = self.flow.map(crate::flow::FlowMonitor::into_shared);
+
         // Build control plane config
         let mut control_plane = ControlPlaneConfig {
             soft_turn: self.soft_turn_timeout.map(SoftTurnDetector::new),
@@ -339,7 +343,7 @@ impl LiveSessionBuilder {
                 }
                 Arc::new(chain)
             },
-            flow: self.flow,
+            flow: flow_monitor.clone(),
         };
 
         // Create shared PendingContext for deferred delivery.
@@ -453,6 +457,7 @@ impl LiveSessionBuilder {
             telemetry,
             live_event_tx,
             pending_context,
+            flow_monitor,
         ))
     }
 }

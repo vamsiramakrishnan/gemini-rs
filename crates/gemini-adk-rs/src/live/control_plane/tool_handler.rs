@@ -36,7 +36,7 @@ pub(in crate::live) async fn handle_tool_calls(
     background_tracker: &Option<Arc<BackgroundToolTracker>>,
     extractors: &[Arc<dyn TurnExtractor>],
     middleware: &Arc<crate::middleware::MiddlewareChain>,
-    flow: &mut Option<crate::flow::FlowMonitor>,
+    flow: &Option<crate::flow::SharedFlowMonitor>,
     tool_gate: &mut ToolGate,
     completion_tx: &tokio::sync::mpsc::WeakSender<crate::live::processor::ControlEvent>,
     event_tx: &tokio::sync::broadcast::Sender<LiveEvent>,
@@ -103,17 +103,25 @@ pub(in crate::live) async fn handle_tool_calls(
                 for call in &allowed_calls {
                     // Flow governance gate: deny inadmissible tools (out-of-order,
                     // once-violated, gated) in Enforce mode; record in Observe.
-                    if let Some(mon) = flow.as_mut() {
-                        if let Err(reason) = mon.admits_tool(&call.name, state) {
-                            if mon.mode() == crate::flow::Enforcement::Enforce {
-                                results.push(FunctionResponse {
-                                    name: call.name.clone(),
-                                    response: serde_json::json!({ "error": reason }),
-                                    id: call.id.clone(),
-                                    scheduling: None,
-                                });
-                                continue;
+                    // Lock scope is the synchronous admissibility check only.
+                    if let Some(mon) = flow {
+                        let denial = {
+                            let mon = mon.lock();
+                            match mon.admits_tool(&call.name, state) {
+                                Err(reason) if mon.mode() == crate::flow::Enforcement::Enforce => {
+                                    Some(reason)
+                                }
+                                _ => None,
                             }
+                        };
+                        if let Some(reason) = denial {
+                            results.push(FunctionResponse {
+                                name: call.name.clone(),
+                                response: serde_json::json!({ "error": reason }),
+                                id: call.id.clone(),
+                                scheduling: None,
+                            });
+                            continue;
                         }
                     }
                     let mode = execution_modes.get(&call.name);
@@ -463,7 +471,7 @@ mod tests {
             &None,
             &[],
             &middleware,
-            &mut None,
+            &None,
             &mut ToolGate::new(),
             &ctrl_tx.downgrade(),
             &tx,
@@ -548,7 +556,7 @@ mod tests {
             .terminal()
             .build()
             .expect("valid flow");
-        let mut flow = Some(FlowMonitor::new(flow_def, Enforcement::Observe));
+        let flow = Some(FlowMonitor::new(flow_def, Enforcement::Observe).into_shared());
         let mut gate = ToolGate::new();
 
         let call = FunctionCall {
@@ -568,7 +576,7 @@ mod tests {
             &None,
             &[],
             &middleware,
-            &mut flow,
+            &flow,
             &mut gate,
             &ctrl_tx.downgrade(),
             &tx,
@@ -583,14 +591,15 @@ mod tests {
                 assert_eq!(name, "echo");
                 assert!(ok, "echo succeeded");
                 // Routing it through the gate advances the governed flow.
-                gate.observe_completion(&call_id, &name, ok, &mut flow, &state);
+                gate.observe_completion(&call_id, &name, ok, &flow, &state);
             }
             _ => panic!("expected ToolCompleted"),
         }
         assert_eq!(tool_runs.load(Ordering::SeqCst), 1, "background tool ran");
-        flow.as_mut().unwrap().on_turn(&state);
+        let mon = flow.as_ref().unwrap();
+        mon.lock().on_turn(&state);
         assert!(
-            flow.as_ref().unwrap().marking().done.contains("run"),
+            mon.lock().marking().done.contains("run"),
             "background completion latched the step done"
         );
     }

@@ -124,7 +124,10 @@ pub(crate) struct ControlPlaneConfig {
     pub middleware: Arc<crate::middleware::MiddlewareChain>,
     /// Optional governed-flow monitor: gates tool calls, projects active-step
     /// postures into steering, and drives repair from unmet requirements.
-    pub flow: Option<crate::flow::FlowMonitor>,
+    /// Shared (`Arc<Mutex<..>>`) so the [`LiveHandle`](super::handle::LiveHandle)
+    /// can snapshot `explain`/`why_blocked` while the control lane advances it.
+    /// Lock briefly; never hold the guard across an `await`.
+    pub flow: Option<crate::flow::SharedFlowMonitor>,
 }
 
 impl Default for ControlPlaneConfig {
