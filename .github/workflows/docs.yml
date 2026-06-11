@@ -42,10 +42,16 @@ jobs:
         run: mdbook build docs
 
       # ── Link check (internal/relative links only — no flaky network calls) ──
+      # The api/gemini_* links resolve only in the deployed site (rustdoc is
+      # merged into target/book/api at deploy time below), so exclude them
+      # from the source-tree offline check.
       - name: Check Markdown links
         uses: lycheeverse/lychee-action@v2
         with:
-          args: "--offline --no-progress docs/src README.md"
+          args: >-
+            --offline --no-progress
+            --exclude 'api/gemini_(genai|adk|adk_fluent)_rs'
+            docs/src README.md
           fail: true
 
       - name: Check rustdoc (no warnings)
