@@ -58,13 +58,13 @@ The default build includes Live WebSocket support, VAD, and tracing.
 
 ```toml
 [dependencies]
-gemini-genai-rs = { version = "0.7", features = ["generate", "tokens"] }
+gemini-genai-rs = { version = "0.8", features = ["generate", "tokens"] }
 ```
 
 **Enable everything:**
 
 ```toml
-gemini-genai-rs = { version = "0.7", features = ["all-apis", "metrics", "opus"] }
+gemini-genai-rs = { version = "0.8", features = ["all-apis", "metrics", "opus"] }
 ```
 
 ## Voice Activity Detection (VAD)

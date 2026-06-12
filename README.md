@@ -854,9 +854,9 @@ the Live WebSocket connection:
 
 ```toml
 [dependencies]
-gemini-genai-rs = { version = "0.7", features = ["generate", "embed", "files"] }
+gemini-genai-rs = { version = "0.8", features = ["generate", "embed", "files"] }
 # Or enable everything:
-# gemini-genai-rs = { version = "0.7", features = ["all-apis"] }
+# gemini-genai-rs = { version = "0.8", features = ["all-apis"] }
 ```
 
 | Feature | API |

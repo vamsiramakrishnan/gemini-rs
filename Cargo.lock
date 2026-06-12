@@ -1200,7 +1200,7 @@ dependencies = [
 
 [[package]]
 name = "gemini-adk-api-rs"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "axum 0.7.9",
  "dotenvy",
@@ -1212,7 +1212,7 @@ dependencies = [
 
 [[package]]
 name = "gemini-adk-cli-rs"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
@@ -1238,7 +1238,7 @@ dependencies = [
 
 [[package]]
 name = "gemini-adk-fluent-rs"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1255,7 +1255,7 @@ dependencies = [
 
 [[package]]
 name = "gemini-adk-macros-rs"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "async-trait",
  "gemini-adk-rs",
@@ -1271,7 +1271,7 @@ dependencies = [
 
 [[package]]
 name = "gemini-adk-rs"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "async-trait",
  "base64",
@@ -1301,7 +1301,7 @@ dependencies = [
 
 [[package]]
 name = "gemini-adk-server-rs"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
@@ -1332,7 +1332,7 @@ dependencies = [
 
 [[package]]
 name = "gemini-adk-web-rs"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
@@ -1358,7 +1358,7 @@ dependencies = [
 
 [[package]]
 name = "gemini-genai-rs"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "arc-swap",
  "async-trait",

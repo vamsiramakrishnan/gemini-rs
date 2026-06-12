@@ -2,7 +2,7 @@
 
 > Status legend: ✅ shipped · 🚧 in progress · 📋 planned · 💭 exploratory
 >
-> Current release: **0.7.0** (2026-05-31).
+> Current release: **0.7.0** (2026-05-31). **0.8.0 staged on this branch** (2026-06-12).
 
 > **Strategy:** the full competitive analysis and sequencing live in
 > [`docs/plans/2026-06-11-100x-strategy-memo.md`](docs/plans/2026-06-11-100x-strategy-memo.md).
@@ -227,7 +227,7 @@ Mechanical guardrails so Milestones 1–2 can't regress and the crate stays hone
   document.
 - 📋 `extraction.md` user guide + Extract↔Flow interplay section in `flow.md`.
 
-## Milestone 6 — The correctness floor `0.8.0` 🚧
+## Milestone 6 — The correctness floor `0.8.0` ✅
 
 The five production concurrency bugs found by audit (2026-06-11), plus API
 evolvability. Nothing above this matters if barge-in hangs or snapshots tear.
