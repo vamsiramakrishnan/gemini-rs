@@ -369,9 +369,18 @@ pub(crate) fn spawn_event_processor(
 
     let timer_cancel = CancellationToken::new();
 
-    // Channels between router and lanes
+    // Channels between router and lanes.
+    //
+    // The control channel matches the fast channel at 512: control events
+    // are routed with a lossless `send().await`, so a *full* control queue
+    // blocks the shared router — and a blocked router stops forwarding audio
+    // frames too, causing playback glitches. Transcript accumulation events
+    // (one per ASR chunk) flow through this channel, so a slow control-lane
+    // consumer (e.g. a blocking turn-complete pipeline) could realistically
+    // fill 64 slots; 512 gives the lane room to fall behind transiently
+    // without starving the fast lane.
     let (fast_tx, fast_rx) = mpsc::channel::<FastEvent>(512);
-    let (ctrl_tx, ctrl_rx) = mpsc::channel::<ControlEvent>(64);
+    let (ctrl_tx, ctrl_rx) = mpsc::channel::<ControlEvent>(512);
 
     // Spawn the router task (reads broadcast, routes to lanes)
     // NOTE: SessionSignals is NOT called here — it runs on the telemetry lane.

@@ -52,6 +52,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   after a `GoAway` (no auto-reconnect). Documented in
   `docs/user-guide/session-persistence.md`.
 
+- **Control channel depth raised 64 → 512.** Control events are routed with a
+  lossless `send().await`, so a full control queue blocks the shared event
+  router — which then stops forwarding audio frames and causes playback
+  glitches. Transcript-chunk accumulation flows through this channel, so 64
+  slots could realistically fill behind a slow control-lane consumer.
+
 ### Changed
 
 - **Turn lifecycle decomposed into named, tested stages (#4).** The live hot-path
