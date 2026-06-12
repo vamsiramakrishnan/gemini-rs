@@ -77,6 +77,18 @@ impl Live {
             self.config = self.config.voice_realtime_defaults();
         }
 
+        // Resolve a `.record_wire(path)` request into a FileWireRecorder now
+        // that we are actually connecting.
+        if let Some(path) = self.record_wire_path.take() {
+            let recorder = FileWireRecorder::create(&path).map_err(|e| {
+                gemini_adk_rs::error::AgentError::Config(format!(
+                    "failed to create wire log at {}: {e}",
+                    path.display()
+                ))
+            })?;
+            self.config = self.config.record_wire(std::sync::Arc::new(recorder));
+        }
+
         let mut builder = LiveSessionBuilder::new(self.config);
 
         // Resolve deferred agent tools: create shared State, register TextAgentTools
