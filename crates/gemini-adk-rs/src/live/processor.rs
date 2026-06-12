@@ -259,6 +259,14 @@ pub(crate) enum ControlEvent {
 pub(crate) struct SharedState {
     /// When true, fast lane suppresses audio callbacks.
     pub interrupted: AtomicBool,
+    /// Barge-in signal for in-flight inline tool dispatch.
+    ///
+    /// Cancelled by the ROUTER the moment an `Interrupted` event arrives,
+    /// then re-armed (replaced with a fresh token) by the control lane once
+    /// it has processed the interruption. The control lane races inline tool
+    /// dispatch against this token, so a user barge-in is never stuck waiting
+    /// behind a slow tool.
+    pub barge_in: parking_lot::Mutex<CancellationToken>,
     /// Latest resume handle from server.
     pub resume_handle: parking_lot::Mutex<Option<String>>,
     /// Last instruction sent via instruction_template (for dedup).
@@ -351,6 +359,7 @@ pub(crate) fn spawn_event_processor(
 ) -> (tokio::task::JoinHandle<()>, tokio::task::JoinHandle<()>) {
     let shared = Arc::new(SharedState {
         interrupted: AtomicBool::new(false),
+        barge_in: parking_lot::Mutex::new(CancellationToken::new()),
         resume_handle: parking_lot::Mutex::new(None),
         last_instruction: parking_lot::Mutex::new(None),
         pending_context: control_plane.pending_context.clone(),
@@ -638,6 +647,10 @@ async fn route_event(
         SessionEvent::Interrupted => {
             // Signal BOTH lanes
             shared.interrupted.store(true, Ordering::Release);
+            // Cancel any in-flight inline tool dispatch immediately: the
+            // control lane may be blocked awaiting a slow tool and would
+            // otherwise not see this interruption until the tool finished.
+            shared.barge_in.lock().cancel();
             let _ = fast_tx.send(FastEvent::Interrupted).await;
             let _ = ctrl_tx.send(ControlEvent::Interrupted).await;
         }
@@ -1312,6 +1325,80 @@ mod tests {
 
         // Blocking mode: callback completed before control lane processed next event
         assert_eq!(order.load(Ordering::SeqCst), 1);
+
+        drop(event_tx);
+        let _ = fast_handle.await;
+        let _ = ctrl_handle.await;
+    }
+
+    #[tokio::test]
+    async fn interruption_beats_slow_inline_tool() {
+        use crate::tool::{SimpleTool, ToolDispatcher};
+
+        // A slow inline tool that blocks the control lane for 5s.
+        let mut dispatcher = ToolDispatcher::new();
+        dispatcher.register(SimpleTool::new("slow", "slow", None, |_args| async move {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            Ok(serde_json::json!({"done": true}))
+        }));
+
+        let interrupted_at = Arc::new(parking_lot::Mutex::new(None::<std::time::Instant>));
+        let flag = interrupted_at.clone();
+        let callbacks = EventCallbacks {
+            on_interrupted: Some(Arc::new(move || {
+                let flag = flag.clone();
+                Box::pin(async move {
+                    *flag.lock() = Some(std::time::Instant::now());
+                })
+            })),
+            ..Default::default()
+        };
+
+        let (event_tx, _) = broadcast::channel(16);
+        let event_rx = event_tx.subscribe();
+        let writer: Arc<dyn SessionWriter> = Arc::new(crate::agent_session::NoOpSessionWriter);
+
+        let (fast_handle, ctrl_handle) = spawn_event_processor(
+            event_rx,
+            Arc::new(callbacks),
+            Some(Arc::new(dispatcher)),
+            writer,
+            vec![],
+            State::new(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            std::collections::HashMap::new(),
+            ControlPlaneConfig::default(),
+            dummy_event_tx(),
+        );
+
+        // Tool call starts the 5s dispatch, then the user barges in.
+        let start = std::time::Instant::now();
+        let _ = event_tx.send(SessionEvent::ToolCall(vec![
+            gemini_genai_rs::prelude::FunctionCall {
+                name: "slow".to_string(),
+                args: serde_json::json!({}),
+                id: Some("fc_slow".to_string()),
+            },
+        ]));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let _ = event_tx.send(SessionEvent::Interrupted);
+
+        // The interruption must be processed long before the tool's 5s —
+        // before the fix it queued behind the blocking dispatch.
+        let mut waited = Duration::ZERO;
+        while interrupted_at.lock().is_none() && waited < Duration::from_secs(2) {
+            tokio::time::sleep(Duration::from_millis(25)).await;
+            waited += Duration::from_millis(25);
+        }
+        let fired = (*interrupted_at.lock()).expect("on_interrupted must fire");
+        assert!(
+            fired.duration_since(start) < Duration::from_secs(2),
+            "interruption must not wait for the slow tool"
+        );
 
         drop(event_tx);
         let _ = fast_handle.await;

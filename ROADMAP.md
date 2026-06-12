@@ -242,8 +242,10 @@ evolvability. Nothing above this matters if barge-in hangs or snapshots tear.
 - ✅ **Atomic persistence.** `FsPersistence::save` writes a sibling tmp file
   and atomically renames it over the destination; a crash mid-write can no
   longer corrupt the snapshot.
-- 🚧 **Barge-in beats slow tools.** Inline tool dispatch blocks the control
-  lane; an interruption waits for the tool to finish. Cancellation must win.
+- ✅ **Barge-in beats slow tools.** Inline tool dispatch races a barge-in
+  token cancelled by the router on `Interrupted`; the cancelled call sends no
+  response, never advances the flow gate, and surfaces
+  `LiveEvent::ToolCancelled`.
 - 🚧 **Graceful drain + GoAway resume.** Deferred context is dropped on
   disconnect; no `resume`-after-GoAway path exists despite tracked handles.
 - 🚧 **`#[non_exhaustive]`** on `SessionEvent`/`LiveEvent`/`GeminiModel`/`Voice`

@@ -30,6 +30,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `rename(2)` is atomic on the same filesystem, so a crash mid-write or a
   concurrent `load` can no longer observe a torn half-written snapshot.
 
+- **Barge-in beats slow inline tools.** Inline tool dispatch in the control
+  lane now races the tool future against a barge-in `CancellationToken` that
+  the event router cancels the moment an `Interrupted` event arrives (the
+  control lane re-arms it after processing the interruption). Previously an
+  interruption queued behind the blocking dispatch and waited for the tool to
+  finish. On cancellation the tool future is dropped at its current await
+  point (tools must be drop-safe), **no** `FunctionResponse` is sent for the
+  cancelled call, the governed-flow `ToolGate` is not advanced, and the new
+  `LiveEvent::ToolCancelled { ids }` is emitted (also emitted for server-sent
+  `ToolCallCancelled` events).
+
 ### Changed
 
 - **Turn lifecycle decomposed into named, tested stages (#4).** The live hot-path

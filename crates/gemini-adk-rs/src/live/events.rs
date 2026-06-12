@@ -95,6 +95,14 @@ pub enum LiveEvent {
         /// Result returned by the tool.
         result: serde_json::Value,
     },
+    /// Tool calls cancelled — either by the server (a `ToolCallCancelled`
+    /// wire event) or locally when a user barge-in interrupted an in-flight
+    /// inline tool. No response is sent for a cancelled call, and a cancelled
+    /// call never advances the governed flow.
+    ToolCancelled {
+        /// IDs of the cancelled tool calls.
+        ids: Vec<String>,
+    },
     /// Model completed a conversational turn.
     TurnComplete,
     /// Model output interrupted by user speech.

@@ -813,6 +813,7 @@ mod harness {
                 writer,
                 shared: SharedState {
                     interrupted: AtomicBool::new(false),
+                    barge_in: Mutex::new(tokio_util::sync::CancellationToken::new()),
                     resume_handle: Mutex::new(None),
                     last_instruction: Mutex::new(None),
                     pending_context: None,
