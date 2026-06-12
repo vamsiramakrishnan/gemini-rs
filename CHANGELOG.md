@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Background tools are cancelled on disconnect.** The `BackgroundToolTracker`
+  is now carried through `SessionRuntime` into `LiveHandle`, and
+  `LiveHandle::disconnect()` cancels every tracked background tool task
+  (cooperative token + task abort) before closing the L0 session. Previously the
+  tracker was only reachable from the control lane, so orphaned tool tasks kept
+  running after disconnect and could post stale `ToolCompleted` events to a dead
+  (or new) control lane.
+
 ### Changed
 
 - **Turn lifecycle decomposed into named, tested stages (#4).** The live hot-path

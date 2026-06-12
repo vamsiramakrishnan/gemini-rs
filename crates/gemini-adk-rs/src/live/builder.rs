@@ -563,7 +563,7 @@ pub(crate) async fn spawn_lanes(rt: SessionRuntime) -> Result<LiveHandle, AgentE
         rt.phase_machine,
         rt.watchers,
         rt.temporal,
-        Some(rt.background_tracker),
+        Some(rt.background_tracker.clone()),
         rt.execution_modes,
         rt.control_plane,
         rt.live_event_tx.clone(),
@@ -632,6 +632,7 @@ pub(crate) async fn spawn_lanes(rt: SessionRuntime) -> Result<LiveHandle, AgentE
         rt.live_event_tx,
         rt.pending_context,
         rt.flow_monitor,
+        rt.background_tracker,
     ))
 }
 

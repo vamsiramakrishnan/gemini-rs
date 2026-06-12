@@ -232,9 +232,10 @@ Mechanical guardrails so Milestones 1–2 can't regress and the crate stays hone
 The five production concurrency bugs found by audit (2026-06-11), plus API
 evolvability. Nothing above this matters if barge-in hangs or snapshots tear.
 
-- 🚧 **Background tools cancelled on disconnect.** `BackgroundToolTracker` is
-  never held by `LiveHandle`; orphaned tool tasks can post stale results to a
-  dead (or new) control lane.
+- ✅ **Background tools cancelled on disconnect.** `BackgroundToolTracker` is
+  now held by `LiveHandle`; `disconnect()` cancels every tracked task so
+  orphaned tools can no longer post stale results to a dead (or new) control
+  lane.
 - 🚧 **Lanes aborted on disconnect.** Fast/control `JoinHandle`s are detached,
   never aborted/awaited — a lane blocked in a slow tool runs forever.
 - 🚧 **Atomic persistence.** `FsPersistence::save` writes directly (no

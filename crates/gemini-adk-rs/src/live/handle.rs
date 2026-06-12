@@ -12,6 +12,7 @@ use tokio::task::JoinHandle;
 use crate::flow::{FlowExplanation, SharedFlowMonitor};
 use crate::state::State;
 
+use super::background_tool::BackgroundToolTracker;
 use super::context_writer::PendingContext;
 use super::effect_executor::LiveEffectExecutor;
 use super::input_vad::{BackendInputVad, BackendVadSnapshot};
@@ -45,6 +46,11 @@ pub struct LiveHandle {
     /// Governed-flow monitor shared with the control lane (None when the
     /// session is not governed by a flow).
     flow: Option<SharedFlowMonitor>,
+    /// Tracker for in-flight background tool tasks. Shared with the control
+    /// lane (which spawns/cancels per-call tasks) so [`disconnect`](Self::disconnect)
+    /// can cancel every outstanding background tool — otherwise orphaned tasks
+    /// could keep running and post stale `ToolCompleted` events after shutdown.
+    background_tracker: Arc<BackgroundToolTracker>,
 }
 
 impl LiveHandle {
@@ -62,6 +68,7 @@ impl LiveHandle {
         event_tx: broadcast::Sender<super::events::LiveEvent>,
         pending_context: Option<Arc<PendingContext>>,
         flow: Option<SharedFlowMonitor>,
+        background_tracker: Arc<BackgroundToolTracker>,
     ) -> Self {
         let reactor = Arc::new(LiveReactor::voice_defaults());
         let effect_executor = LiveEffectExecutor::new(
@@ -83,6 +90,7 @@ impl LiveHandle {
             effect_executor,
             input_vad: Arc::new(Mutex::new(BackendInputVad::default())),
             flow,
+            background_tracker,
         }
     }
 
@@ -218,7 +226,16 @@ impl LiveHandle {
     }
 
     /// Gracefully disconnect the session.
+    ///
+    /// Cancels all in-flight background tool tasks before closing the L0
+    /// session, so orphaned tasks cannot keep running (or post stale
+    /// completions) after shutdown. Background tools are aborted at an await
+    /// point; tool futures must therefore be drop-safe.
     pub async fn disconnect(&self) -> Result<(), SessionError> {
+        // Cancel background tool tasks FIRST: once the session is closing,
+        // their results can no longer be delivered, and leaving them running
+        // would let them post stale ToolCompleted events to a dead lane.
+        self.background_tracker.cancel_all();
         SessionWriter::disconnect(&self.session).await
     }
 
@@ -285,5 +302,65 @@ impl LiveHandle {
     /// Returns `None` when the session is not governed by a flow.
     pub fn why_blocked(&self) -> Option<FlowExplanation> {
         self.explain()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::live::telemetry::SessionTelemetry;
+    use gemini_genai_rs::session::{SessionCommand, SessionState};
+    use tokio_util::sync::CancellationToken;
+
+    /// Build a LiveHandle wired to an in-memory SessionHandle (no transport).
+    /// The command receiver is returned so `disconnect()` sends succeed.
+    fn make_handle() -> (LiveHandle, tokio::sync::mpsc::Receiver<SessionCommand>) {
+        let (command_tx, command_rx) = tokio::sync::mpsc::channel(8);
+        let (event_tx, _) = broadcast::channel(16);
+        let (phase_tx, phase_rx) = tokio::sync::watch::channel(SessionPhase::Active);
+        let state = Arc::new(SessionState::with_events(phase_tx, event_tx.clone()));
+        let session = SessionHandle::new(command_tx, event_tx, state, phase_rx);
+        let writer: Arc<dyn SessionWriter> = Arc::new(session.clone());
+        let fast = tokio::spawn(async {});
+        let ctrl = tokio::spawn(async {});
+        let (live_tx, _) = broadcast::channel(16);
+        let handle = LiveHandle::new(
+            session,
+            writer,
+            fast,
+            ctrl,
+            State::new(),
+            Arc::new(SessionTelemetry::new()),
+            live_tx,
+            None,
+            None,
+            Arc::new(BackgroundToolTracker::new()),
+        );
+        (handle, command_rx)
+    }
+
+    #[tokio::test]
+    async fn disconnect_cancels_background_tool_tasks() {
+        let (handle, _cmd_rx) = make_handle();
+        let tracker = handle.background_tracker.clone();
+
+        // Register a never-finishing background tool task.
+        let token = CancellationToken::new();
+        let t = token.clone();
+        let task = tokio::spawn(async move {
+            t.cancelled().await;
+            std::future::pending::<()>().await;
+        });
+        tracker.spawn("call-1".into(), task, token.clone());
+        assert_eq!(tracker.active_count(), 1);
+
+        handle.disconnect().await.expect("disconnect");
+
+        assert_eq!(
+            tracker.active_count(),
+            0,
+            "disconnect must cancel all tracked background tool tasks"
+        );
+        assert!(token.is_cancelled(), "cooperative token must be cancelled");
     }
 }
