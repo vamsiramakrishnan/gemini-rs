@@ -246,8 +246,10 @@ evolvability. Nothing above this matters if barge-in hangs or snapshots tear.
   token cancelled by the router on `Interrupted`; the cancelled call sends no
   response, never advances the flow gate, and surfaces
   `LiveEvent::ToolCancelled`.
-- 🚧 **Graceful drain + GoAway resume.** Deferred context is dropped on
-  disconnect; no `resume`-after-GoAway path exists despite tracked handles.
+- ✅ **Graceful drain + GoAway resume.** Control-lane exit flushes deferred
+  context and persists a final snapshot synchronously;
+  `LiveHandle::resume_handle()` + `session_resume_from(handle)` make manual
+  resume after GoAway possible (no auto-reconnect).
 - 🚧 **`#[non_exhaustive]`** on `SessionEvent`/`LiveEvent`/`GeminiModel`/`Voice`
   — every new Gemini model or server event is a semver break until this lands.
 - ✅ **Hot-path elegance (parse + pacing).** Single-pass server-message parse

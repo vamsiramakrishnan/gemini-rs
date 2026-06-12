@@ -290,6 +290,27 @@ impl LiveHandle {
         &self.session
     }
 
+    /// Latest session-resumption handle issued by the server, if any.
+    ///
+    /// While session resumption is enabled
+    /// ([`SessionConfig::session_resumption`](gemini_genai_rs::prelude::SessionConfig::session_resumption);
+    /// L2: `Live::builder().session_resume(true)`), the Gemini server
+    /// periodically sends `SessionResumptionUpdate` messages; this returns the
+    /// most recent handle (also captured in persistence snapshots as
+    /// [`SessionSnapshot::resume_handle`](crate::live::persistence::SessionSnapshot::resume_handle)).
+    ///
+    /// To survive a server-initiated `GoAway` or a planned restart, read this
+    /// handle (e.g. from the `on_go_away` callback) and pass it to
+    /// `session_resumption(Some(handle))` on the next connect's
+    /// [`SessionConfig`](gemini_genai_rs::prelude::SessionConfig). No
+    /// automatic reconnect is performed — resumption is an explicit caller
+    /// decision.
+    ///
+    /// Returns `None` when resumption is disabled or no update has arrived yet.
+    pub fn resume_handle(&self) -> Option<String> {
+        self.session.state.resume_handle.lock().clone()
+    }
+
     /// Access the shared State container.
     ///
     /// Extraction results from `TurnExtractor`s are stored here under the
@@ -459,6 +480,16 @@ mod tests {
             telem_cancel.is_cancelled(),
             "telemetry lane must be cancelled on disconnect"
         );
+    }
+
+    #[tokio::test]
+    async fn resume_handle_surfaces_latest_server_handle() {
+        let (handle, _cmd_rx) = make_handle();
+        assert_eq!(handle.resume_handle(), None, "no update yet");
+
+        // Simulate the L0 transport storing a SessionResumptionUpdate.
+        *handle.session.state.resume_handle.lock() = Some("rh-42".into());
+        assert_eq!(handle.resume_handle(), Some("rh-42".to_string()));
     }
 
     #[tokio::test]

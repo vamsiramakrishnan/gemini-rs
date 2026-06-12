@@ -41,6 +41,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `LiveEvent::ToolCancelled { ids }` is emitted (also emitted for server-sent
   `ToolCallCancelled` events).
 
+- **Graceful drain on control-lane exit + manual GoAway resume surface.** When
+  the control lane shuts down it now (1) best-effort flushes any deferred
+  context still queued in `PendingContext` (previously silently dropped on
+  disconnect) and (2) runs a final persistence snapshot **synchronously** — the
+  per-turn save is spawn-and-forget and could lose the last turn when the
+  process exited right after disconnect. New `LiveHandle::resume_handle()`
+  exposes the latest server-issued session-resumption handle, and the L2
+  builder gained `session_resume_from(handle)`, so callers can manually resume
+  after a `GoAway` (no auto-reconnect). Documented in
+  `docs/user-guide/session-persistence.md`.
+
 ### Changed
 
 - **Turn lifecycle decomposed into named, tested stages (#4).** The live hot-path

@@ -1406,6 +1406,57 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn control_lane_exit_persists_final_snapshot_synchronously() {
+        use crate::live::persistence::{MemoryPersistence, SessionPersistence};
+
+        let persistence = Arc::new(MemoryPersistence::new());
+        let control_plane = ControlPlaneConfig {
+            persistence: Some(persistence.clone()),
+            session_id: Some("final-drain".to_string()),
+            ..Default::default()
+        };
+
+        let (event_tx, _) = broadcast::channel(16);
+        let event_rx = event_tx.subscribe();
+        let writer: Arc<dyn SessionWriter> = Arc::new(crate::agent_session::NoOpSessionWriter);
+
+        let (fast_handle, ctrl_handle) = spawn_event_processor(
+            event_rx,
+            Arc::new(EventCallbacks::default()),
+            None,
+            writer,
+            vec![],
+            State::new(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            std::collections::HashMap::new(),
+            control_plane,
+            dummy_event_tx(),
+        );
+
+        // Accumulate state mid-turn — but never reach a TurnComplete, so the
+        // per-turn (spawn-and-forget) save never fires.
+        let _ = event_tx.send(SessionEvent::InputTranscription("last words".to_string()));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // Session ends. The control lane must run a final synchronous save on
+        // exit; before the fix nothing was ever persisted in this scenario.
+        drop(event_tx);
+        let _ = fast_handle.await;
+        let _ = ctrl_handle.await;
+
+        let snap = persistence
+            .load("final-drain")
+            .await
+            .unwrap()
+            .expect("control-lane exit must persist a final snapshot");
+        assert_eq!(snap.turn_count, 0);
+    }
+
+    #[tokio::test]
     async fn lanes_exit_after_terminal_disconnected_event() {
         // The Disconnected event is terminal in L0; the router must exit after
         // routing it (dropping its lane senders) so the lanes can drain and

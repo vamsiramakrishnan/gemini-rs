@@ -336,6 +336,19 @@ impl Live {
         self
     }
 
+    /// Resume a previous session from a server-issued resumption handle.
+    ///
+    /// Capture the handle from the old session before it ends — via
+    /// [`LiveHandle::resume_handle`](gemini_adk_rs::live::LiveHandle::resume_handle)
+    /// (e.g. inside the `on_go_away` callback) or from a persisted
+    /// [`SessionSnapshot`](gemini_adk_rs::live::SessionSnapshot) — and pass it
+    /// here on the next connect. Resumption stays enabled for the new session,
+    /// so fresh handles keep arriving. No automatic reconnect is performed.
+    pub fn session_resume_from(mut self, handle: impl Into<String>) -> Self {
+        self.config = self.config.session_resumption(Some(handle.into()));
+        self
+    }
+
     /// Enable context window compression.
     pub fn context_compression(mut self, trigger_tokens: u32, target_tokens: u32) -> Self {
         self.config = self

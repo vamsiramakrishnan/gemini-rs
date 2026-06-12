@@ -23,7 +23,7 @@ use crate::live::watcher::WatcherRegistry;
 
 use super::dispatch_callback;
 use super::extractors::run_extractors_with_window;
-use super::lifecycle::handle_turn_complete;
+use super::lifecycle::{final_drain, handle_turn_complete};
 use super::tool_gate::ToolGate;
 use super::tool_handler::handle_tool_calls;
 
@@ -265,4 +265,18 @@ pub(in crate::live) async fn run_control_lane(
             }
         }
     }
+
+    // Lane exit (event channel closed): graceful drain. Flush any deferred
+    // context still queued and run a final persistence snapshot synchronously
+    // — the per-turn save is spawn-and-forget and can lose the last turn when
+    // the process exits right after disconnect.
+    final_drain(
+        &writer,
+        &shared,
+        &state,
+        &phase_machine,
+        &mut transcript_buffer,
+        &control_plane,
+    )
+    .await;
 }
