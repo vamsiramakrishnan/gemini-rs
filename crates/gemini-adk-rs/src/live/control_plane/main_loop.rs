@@ -23,7 +23,7 @@ use crate::live::watcher::WatcherRegistry;
 
 use super::dispatch_callback;
 use super::extractors::run_extractors_with_window;
-use super::lifecycle::handle_turn_complete;
+use super::lifecycle::{final_drain, handle_turn_complete};
 use super::tool_gate::ToolGate;
 use super::tool_handler::handle_tool_calls;
 
@@ -98,6 +98,10 @@ pub(in crate::live) async fn run_control_lane(
             }
 
             ControlEvent::ToolCall(calls) => {
+                // Snapshot the current barge-in token: the router cancels it
+                // on `Interrupted`, letting inline dispatch race the user's
+                // interruption instead of blocking the lane behind a slow tool.
+                let barge_in = shared.barge_in.lock().clone();
                 handle_tool_calls(
                     calls,
                     &callbacks,
@@ -113,6 +117,7 @@ pub(in crate::live) async fn run_control_lane(
                     &control_plane.flow,
                     &mut tool_gate,
                     &completion_tx,
+                    &barge_in,
                     &event_tx,
                 )
                 .await;
@@ -130,6 +135,7 @@ pub(in crate::live) async fn run_control_lane(
                 if let Some(ref disp) = dispatcher {
                     disp.cancel_by_ids(&ids).await;
                 }
+                let _ = event_tx.send(LiveEvent::ToolCancelled { ids: ids.clone() });
                 if let Some(cb) = &callbacks.on_tool_cancelled {
                     dispatch_callback!(callbacks.on_tool_cancelled_mode, cb(ids));
                 }
@@ -142,6 +148,10 @@ pub(in crate::live) async fn run_control_lane(
                 }
                 // Resume audio forwarding after interrupt callback completes
                 shared.interrupted.store(false, Ordering::Release);
+                // Re-arm the barge-in token for the next turn: the router
+                // cancelled the previous one the moment the interruption
+                // arrived (so an in-flight inline tool could be raced).
+                *shared.barge_in.lock() = tokio_util::sync::CancellationToken::new();
                 let _ = event_tx.send(LiveEvent::Interrupted);
             }
             ControlEvent::TurnComplete => {
@@ -255,4 +265,18 @@ pub(in crate::live) async fn run_control_lane(
             }
         }
     }
+
+    // Lane exit (event channel closed): graceful drain. Flush any deferred
+    // context still queued and run a final persistence snapshot synchronously
+    // — the per-turn save is spawn-and-forget and can lose the last turn when
+    // the process exits right after disconnect.
+    final_drain(
+        &writer,
+        &shared,
+        &state,
+        &phase_machine,
+        &mut transcript_buffer,
+        &control_plane,
+    )
+    .await;
 }

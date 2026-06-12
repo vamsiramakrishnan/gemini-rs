@@ -232,25 +232,33 @@ Mechanical guardrails so Milestones 1–2 can't regress and the crate stays hone
 The five production concurrency bugs found by audit (2026-06-11), plus API
 evolvability. Nothing above this matters if barge-in hangs or snapshots tear.
 
-- 🚧 **Background tools cancelled on disconnect.** `BackgroundToolTracker` is
-  never held by `LiveHandle`; orphaned tool tasks can post stale results to a
-  dead (or new) control lane.
-- 🚧 **Lanes aborted on disconnect.** Fast/control `JoinHandle`s are detached,
-  never aborted/awaited — a lane blocked in a slow tool runs forever.
-- 🚧 **Atomic persistence.** `FsPersistence::save` writes directly (no
-  tmp+rename); a crash mid-write corrupts the snapshot unrecoverably.
-- 🚧 **Barge-in beats slow tools.** Inline tool dispatch blocks the control
-  lane; an interruption waits for the tool to finish. Cancellation must win.
-- 🚧 **Graceful drain + GoAway resume.** Deferred context is dropped on
-  disconnect; no `resume`-after-GoAway path exists despite tracked handles.
+- ✅ **Background tools cancelled on disconnect.** `BackgroundToolTracker` is
+  now held by `LiveHandle`; `disconnect()` cancels every tracked task so
+  orphaned tools can no longer post stale results to a dead (or new) control
+  lane.
+- ✅ **Lanes aborted on disconnect.** `disconnect()` grace-awaits the
+  fast/control lanes then aborts stragglers, and cancels the telemetry lane;
+  the router exits on the terminal `Disconnected` event so lanes can drain.
+- ✅ **Atomic persistence.** `FsPersistence::save` writes a sibling tmp file
+  and atomically renames it over the destination; a crash mid-write can no
+  longer corrupt the snapshot.
+- ✅ **Barge-in beats slow tools.** Inline tool dispatch races a barge-in
+  token cancelled by the router on `Interrupted`; the cancelled call sends no
+  response, never advances the flow gate, and surfaces
+  `LiveEvent::ToolCancelled`.
+- ✅ **Graceful drain + GoAway resume.** Control-lane exit flushes deferred
+  context and persists a final snapshot synchronously;
+  `LiveHandle::resume_handle()` + `session_resume_from(handle)` make manual
+  resume after GoAway possible (no auto-reconnect).
 - 🚧 **`#[non_exhaustive]`** on `SessionEvent`/`LiveEvent`/`GeminiModel`/`Voice`
   — every new Gemini model or server event is a semver break until this lands.
 - ✅ **Hot-path elegance (parse + pacing).** Single-pass server-message parse
   (golden-fixture pinned) and opt-in producer-side audio pacing
   (`SessionConfig::audio_pacing`). *(Control-channel depth lands with the
   concurrency fixes.)*
-- 🚧 **`LiveHandle::stream()`** — `impl Stream<Item = LiveEvent>` so events
-  compose with `tokio-stream`; callbacks become sugar.
+- ✅ **`LiveHandle::stream()`** — `LiveEventStream` implements
+  `Stream<Item = LiveEvent>` (lag-skipping, ends on close) so events compose
+  with `tokio-stream`; callbacks become sugar.
 
 ## Milestone 7 — The determinism spine `0.9.0` 🚧
 

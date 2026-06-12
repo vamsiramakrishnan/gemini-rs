@@ -259,6 +259,14 @@ pub(crate) enum ControlEvent {
 pub(crate) struct SharedState {
     /// When true, fast lane suppresses audio callbacks.
     pub interrupted: AtomicBool,
+    /// Barge-in signal for in-flight inline tool dispatch.
+    ///
+    /// Cancelled by the ROUTER the moment an `Interrupted` event arrives,
+    /// then re-armed (replaced with a fresh token) by the control lane once
+    /// it has processed the interruption. The control lane races inline tool
+    /// dispatch against this token, so a user barge-in is never stuck waiting
+    /// behind a slow tool.
+    pub barge_in: parking_lot::Mutex<CancellationToken>,
     /// Latest resume handle from server.
     pub resume_handle: parking_lot::Mutex<Option<String>>,
     /// Last instruction sent via instruction_template (for dedup).
@@ -351,6 +359,7 @@ pub(crate) fn spawn_event_processor(
 ) -> (tokio::task::JoinHandle<()>, tokio::task::JoinHandle<()>) {
     let shared = Arc::new(SharedState {
         interrupted: AtomicBool::new(false),
+        barge_in: parking_lot::Mutex::new(CancellationToken::new()),
         resume_handle: parking_lot::Mutex::new(None),
         last_instruction: parking_lot::Mutex::new(None),
         pending_context: control_plane.pending_context.clone(),
@@ -360,9 +369,18 @@ pub(crate) fn spawn_event_processor(
 
     let timer_cancel = CancellationToken::new();
 
-    // Channels between router and lanes
+    // Channels between router and lanes.
+    //
+    // The control channel matches the fast channel at 512: control events
+    // are routed with a lossless `send().await`, so a *full* control queue
+    // blocks the shared router — and a blocked router stops forwarding audio
+    // frames too, causing playback glitches. Transcript accumulation events
+    // (one per ASR chunk) flow through this channel, so a slow control-lane
+    // consumer (e.g. a blocking turn-complete pipeline) could realistically
+    // fill 64 slots; 512 gives the lane room to fall behind transiently
+    // without starving the fast lane.
     let (fast_tx, fast_rx) = mpsc::channel::<FastEvent>(512);
-    let (ctrl_tx, ctrl_rx) = mpsc::channel::<ControlEvent>(64);
+    let (ctrl_tx, ctrl_rx) = mpsc::channel::<ControlEvent>(512);
 
     // Spawn the router task (reads broadcast, routes to lanes)
     // NOTE: SessionSignals is NOT called here — it runs on the telemetry lane.
@@ -373,7 +391,18 @@ pub(crate) fn spawn_event_processor(
         loop {
             match event_rx.recv().await {
                 Ok(event) => {
+                    // `Disconnected` is terminal in L0 (the session loop returns
+                    // after emitting it), so the router exits after routing it.
+                    // Dropping the router's lane senders closes the fast/control
+                    // channels, letting both lanes drain their queues and shut
+                    // down gracefully (final persistence drain, etc.) instead of
+                    // idling forever on a broadcast channel that never closes
+                    // while the `SessionHandle` is alive.
+                    let terminal = matches!(event, SessionEvent::Disconnected(_));
                     route_event(event, &fast_tx_clone, &ctrl_tx_clone, &shared_clone).await;
+                    if terminal {
+                        break;
+                    }
                 }
                 Err(broadcast::error::RecvError::Lagged(n)) => {
                     #[cfg(feature = "tracing-support")]
@@ -627,6 +656,10 @@ async fn route_event(
         SessionEvent::Interrupted => {
             // Signal BOTH lanes
             shared.interrupted.store(true, Ordering::Release);
+            // Cancel any in-flight inline tool dispatch immediately: the
+            // control lane may be blocked awaiting a slow tool and would
+            // otherwise not see this interruption until the tool finished.
+            shared.barge_in.lock().cancel();
             let _ = fast_tx.send(FastEvent::Interrupted).await;
             let _ = ctrl_tx.send(ControlEvent::Interrupted).await;
         }
@@ -1305,6 +1338,175 @@ mod tests {
         drop(event_tx);
         let _ = fast_handle.await;
         let _ = ctrl_handle.await;
+    }
+
+    #[tokio::test]
+    async fn interruption_beats_slow_inline_tool() {
+        use crate::tool::{SimpleTool, ToolDispatcher};
+
+        // A slow inline tool that blocks the control lane for 5s.
+        let mut dispatcher = ToolDispatcher::new();
+        dispatcher.register(SimpleTool::new("slow", "slow", None, |_args| async move {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            Ok(serde_json::json!({"done": true}))
+        }));
+
+        let interrupted_at = Arc::new(parking_lot::Mutex::new(None::<std::time::Instant>));
+        let flag = interrupted_at.clone();
+        let callbacks = EventCallbacks {
+            on_interrupted: Some(Arc::new(move || {
+                let flag = flag.clone();
+                Box::pin(async move {
+                    *flag.lock() = Some(std::time::Instant::now());
+                })
+            })),
+            ..Default::default()
+        };
+
+        let (event_tx, _) = broadcast::channel(16);
+        let event_rx = event_tx.subscribe();
+        let writer: Arc<dyn SessionWriter> = Arc::new(crate::agent_session::NoOpSessionWriter);
+
+        let (fast_handle, ctrl_handle) = spawn_event_processor(
+            event_rx,
+            Arc::new(callbacks),
+            Some(Arc::new(dispatcher)),
+            writer,
+            vec![],
+            State::new(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            std::collections::HashMap::new(),
+            ControlPlaneConfig::default(),
+            dummy_event_tx(),
+        );
+
+        // Tool call starts the 5s dispatch, then the user barges in.
+        let start = std::time::Instant::now();
+        let _ = event_tx.send(SessionEvent::ToolCall(vec![
+            gemini_genai_rs::prelude::FunctionCall {
+                name: "slow".to_string(),
+                args: serde_json::json!({}),
+                id: Some("fc_slow".to_string()),
+            },
+        ]));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let _ = event_tx.send(SessionEvent::Interrupted);
+
+        // The interruption must be processed long before the tool's 5s —
+        // before the fix it queued behind the blocking dispatch.
+        let mut waited = Duration::ZERO;
+        while interrupted_at.lock().is_none() && waited < Duration::from_secs(2) {
+            tokio::time::sleep(Duration::from_millis(25)).await;
+            waited += Duration::from_millis(25);
+        }
+        let fired = (*interrupted_at.lock()).expect("on_interrupted must fire");
+        assert!(
+            fired.duration_since(start) < Duration::from_secs(2),
+            "interruption must not wait for the slow tool"
+        );
+
+        drop(event_tx);
+        let _ = fast_handle.await;
+        let _ = ctrl_handle.await;
+    }
+
+    #[tokio::test]
+    async fn control_lane_exit_persists_final_snapshot_synchronously() {
+        use crate::live::persistence::{MemoryPersistence, SessionPersistence};
+
+        let persistence = Arc::new(MemoryPersistence::new());
+        let control_plane = ControlPlaneConfig {
+            persistence: Some(persistence.clone()),
+            session_id: Some("final-drain".to_string()),
+            ..Default::default()
+        };
+
+        let (event_tx, _) = broadcast::channel(16);
+        let event_rx = event_tx.subscribe();
+        let writer: Arc<dyn SessionWriter> = Arc::new(crate::agent_session::NoOpSessionWriter);
+
+        let (fast_handle, ctrl_handle) = spawn_event_processor(
+            event_rx,
+            Arc::new(EventCallbacks::default()),
+            None,
+            writer,
+            vec![],
+            State::new(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            std::collections::HashMap::new(),
+            control_plane,
+            dummy_event_tx(),
+        );
+
+        // Accumulate state mid-turn — but never reach a TurnComplete, so the
+        // per-turn (spawn-and-forget) save never fires.
+        let _ = event_tx.send(SessionEvent::InputTranscription("last words".to_string()));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // Session ends. The control lane must run a final synchronous save on
+        // exit; before the fix nothing was ever persisted in this scenario.
+        drop(event_tx);
+        let _ = fast_handle.await;
+        let _ = ctrl_handle.await;
+
+        let snap = persistence
+            .load("final-drain")
+            .await
+            .unwrap()
+            .expect("control-lane exit must persist a final snapshot");
+        assert_eq!(snap.turn_count, 0);
+    }
+
+    #[tokio::test]
+    async fn lanes_exit_after_terminal_disconnected_event() {
+        // The Disconnected event is terminal in L0; the router must exit after
+        // routing it (dropping its lane senders) so the lanes can drain and
+        // shut down gracefully — even though the broadcast sender stays alive
+        // for the LiveHandle's lifetime.
+        let callbacks = Arc::new(EventCallbacks::default());
+        let (event_tx, _) = broadcast::channel(16);
+        let event_rx = event_tx.subscribe();
+        let writer: Arc<dyn SessionWriter> = Arc::new(crate::agent_session::NoOpSessionWriter);
+
+        let (fast_handle, ctrl_handle) = spawn_event_processor(
+            event_rx,
+            callbacks,
+            None,
+            writer,
+            vec![],
+            State::new(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            std::collections::HashMap::new(),
+            ControlPlaneConfig::default(),
+            dummy_event_tx(),
+        );
+
+        let _ = event_tx.send(SessionEvent::Disconnected(None));
+
+        // NOTE: event_tx is intentionally kept alive — before the fix the
+        // router only exited on channel close, and both awaits below hung.
+        let joined = tokio::time::timeout(Duration::from_secs(2), async {
+            let _ = fast_handle.await;
+            let _ = ctrl_handle.await;
+        })
+        .await;
+        assert!(
+            joined.is_ok(),
+            "lanes must exit after the terminal Disconnected event"
+        );
+        drop(event_tx);
     }
 
     #[tokio::test]

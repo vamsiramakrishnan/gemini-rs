@@ -1,10 +1,16 @@
 //! Semantic events emitted by the L1 processor.
 //!
-//! Subscribe via `LiveHandle::events()`. Zero-cost when no subscribers.
+//! Subscribe via `LiveHandle::events()` (broadcast receiver) or
+//! `LiveHandle::stream()` (a [`futures::Stream`]). Zero-cost when no
+//! subscribers.
 
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 use bytes::Bytes;
+use futures::Stream;
+use tokio::sync::broadcast;
 
 /// Semantic events emitted by the Live session processor.
 ///
@@ -95,6 +101,14 @@ pub enum LiveEvent {
         /// Result returned by the tool.
         result: serde_json::Value,
     },
+    /// Tool calls cancelled — either by the server (a `ToolCallCancelled`
+    /// wire event) or locally when a user barge-in interrupted an in-flight
+    /// inline tool. No response is sent for a cancelled call, and a cancelled
+    /// call never advances the governed flow.
+    ToolCancelled {
+        /// IDs of the cancelled tool calls.
+        ids: Vec<String>,
+    },
     /// Model completed a conversational turn.
     TurnComplete,
     /// Model output interrupted by user speech.
@@ -128,4 +142,123 @@ pub enum LiveEvent {
         /// Number of response tokens generated.
         response_tokens: u32,
     },
+}
+
+/// A [`futures::Stream`] of [`LiveEvent`]s from a Live session.
+///
+/// Created by [`LiveHandle::stream()`](super::handle::LiveHandle::stream).
+/// Wraps the underlying [`broadcast::Receiver`] with stream semantics:
+///
+/// - **Lagged**: if this subscriber falls behind the broadcast buffer, the
+///   missed events are skipped and the stream continues with the next
+///   available event (no error item is yielded).
+/// - **Closed**: when the session's event channel closes, the stream ends
+///   (`next()` returns `None`).
+///
+/// Composes with all `futures`/`tokio-stream` combinators:
+///
+/// ```rust,ignore
+/// use futures::StreamExt;
+///
+/// let mut stream = handle.stream();
+/// while let Some(ev) = stream.next().await {
+///     match ev {
+///         LiveEvent::TextDelta(t) => print!("{t}"),
+///         LiveEvent::TurnComplete => println!(),
+///         _ => {}
+///     }
+/// }
+/// ```
+pub struct LiveEventStream {
+    inner: Pin<Box<dyn Stream<Item = LiveEvent> + Send>>,
+}
+
+impl LiveEventStream {
+    /// Wrap a broadcast receiver of [`LiveEvent`]s as a stream.
+    pub(crate) fn new(rx: broadcast::Receiver<LiveEvent>) -> Self {
+        let inner = futures::stream::unfold(rx, |mut rx| async move {
+            loop {
+                match rx.recv().await {
+                    Ok(ev) => return Some((ev, rx)),
+                    // Skip lagged (missed) events and keep going.
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    // Channel closed: end the stream.
+                    Err(broadcast::error::RecvError::Closed) => return None,
+                }
+            }
+        });
+        Self {
+            inner: Box::pin(inner),
+        }
+    }
+}
+
+impl Stream for LiveEventStream {
+    type Item = LiveEvent;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.inner.as_mut().poll_next(cx)
+    }
+}
+
+impl std::fmt::Debug for LiveEventStream {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LiveEventStream").finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::StreamExt;
+
+    #[tokio::test]
+    async fn stream_yields_events_in_order_and_ends_on_close() {
+        let (tx, rx) = broadcast::channel::<LiveEvent>(16);
+        let mut stream = LiveEventStream::new(rx);
+
+        tx.send(LiveEvent::VadStart).unwrap();
+        tx.send(LiveEvent::TextDelta("hi".into())).unwrap();
+        tx.send(LiveEvent::TurnComplete).unwrap();
+
+        assert!(matches!(stream.next().await, Some(LiveEvent::VadStart)));
+        match stream.next().await {
+            Some(LiveEvent::TextDelta(t)) => assert_eq!(t, "hi"),
+            other => panic!("expected TextDelta, got {other:?}"),
+        }
+        assert!(matches!(stream.next().await, Some(LiveEvent::TurnComplete)));
+
+        // Closing the channel ends the stream.
+        drop(tx);
+        assert!(stream.next().await.is_none(), "stream ends on Closed");
+    }
+
+    #[tokio::test]
+    async fn stream_skips_lagged_events_and_continues() {
+        // Capacity-2 channel: sending 5 events before polling forces a lag.
+        let (tx, rx) = broadcast::channel::<LiveEvent>(2);
+        let mut stream = LiveEventStream::new(rx);
+
+        for i in 0..5u32 {
+            tx.send(LiveEvent::TextDelta(format!("e{i}"))).unwrap();
+        }
+
+        // The first poll observes the lag, skips it, and yields the oldest
+        // event still buffered (e3), then e4 — no error, no end-of-stream.
+        match stream.next().await {
+            Some(LiveEvent::TextDelta(t)) => assert_eq!(t, "e3"),
+            other => panic!("expected e3 after lag skip, got {other:?}"),
+        }
+        match stream.next().await {
+            Some(LiveEvent::TextDelta(t)) => assert_eq!(t, "e4"),
+            other => panic!("expected e4, got {other:?}"),
+        }
+
+        // The stream is still alive after the lag.
+        tx.send(LiveEvent::TurnComplete).unwrap();
+        assert!(matches!(stream.next().await, Some(LiveEvent::TurnComplete)));
+
+        drop(tx);
+        assert!(stream.next().await.is_none());
+    }
 }

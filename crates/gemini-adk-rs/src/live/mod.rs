@@ -47,7 +47,7 @@ pub use contract::{
     PromotionContract, RuntimeContract, ToolContract, TransitionContract, WatcherContract,
 };
 pub use effect_executor::LiveEffectExecutor;
-pub use events::LiveEvent;
+pub use events::{LiveEvent, LiveEventStream};
 pub use extractor::{ExtractionTrigger, FieldPromotion, LlmExtractor, MergePolicy, TurnExtractor};
 pub use handle::LiveHandle;
 pub use input_vad::{BackendInputVad, BackendVadSnapshot};

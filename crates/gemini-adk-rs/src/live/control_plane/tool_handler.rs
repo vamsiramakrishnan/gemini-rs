@@ -21,6 +21,23 @@ use super::extractors::run_extractors;
 use super::tool_gate::ToolGate;
 
 /// Handle tool calls: phase filtering -> user callback -> auto-dispatch -> interceptor -> send.
+///
+/// # Barge-in cancellation
+///
+/// Inline (standard-mode) dispatch races each tool future against the
+/// `barge_in` token, which the router cancels the moment an `Interrupted`
+/// event arrives. On cancellation the tool future is **dropped at its current
+/// await point** — tools must therefore be drop-safe (no critical sections
+/// that corrupt state when abandoned mid-await). A cancelled call:
+///
+/// - sends **no** `FunctionResponse` back to the model (matching the wire
+///   contract for cancelled calls),
+/// - does **not** advance the governed-flow [`ToolGate`],
+/// - is surfaced as [`LiveEvent::ToolCancelled`].
+///
+/// Remaining inline calls in the same batch short-circuit to cancelled as
+/// well (the token stays cancelled until the control lane processes the
+/// interruption and re-arms it).
 #[allow(
     clippy::too_many_arguments,
     reason = "tool-lifecycle stage entry point: each parameter is one control-plane subsystem (dispatcher, gate, middleware, transcript)"
@@ -43,6 +60,7 @@ pub(in crate::live) async fn handle_tool_calls(
     flow: &Option<crate::flow::SharedFlowMonitor>,
     tool_gate: &mut ToolGate,
     completion_tx: &tokio::sync::mpsc::WeakSender<crate::live::processor::ControlEvent>,
+    barge_in: &CancellationToken,
     event_tx: &tokio::sync::broadcast::Sender<LiveEvent>,
 ) {
     // 0. Phase-scoped tool filtering: reject calls not in phase's allowed list
@@ -92,6 +110,9 @@ pub(in crate::live) async fn handle_tool_calls(
     } else {
         None
     };
+
+    // Inline calls cancelled by a user barge-in (no response is sent for them).
+    let mut cancelled_calls: Vec<String> = Vec::new();
 
     // 2. If no override, auto-dispatch via ToolDispatcher (split standard vs background)
     let (responses, background_spawns) = match responses {
@@ -169,7 +190,25 @@ pub(in crate::live) async fn handle_tool_calls(
                                 });
                                 continue;
                             }
-                            match disp.call_function(&call.name, call.args.clone()).await {
+                            // Race the tool against the barge-in signal so an
+                            // interruption is never stuck behind a slow tool.
+                            // `biased` makes an already-cancelled token win
+                            // without polling the tool future at all.
+                            let dispatched = tokio::select! {
+                                biased;
+                                _ = barge_in.cancelled() => None,
+                                result = disp.call_function(&call.name, call.args.clone()) => {
+                                    Some(result)
+                                }
+                            };
+                            let Some(call_result) = dispatched else {
+                                // Cancelled: the tool future was dropped at its
+                                // current await point. No response, no gate
+                                // advance — the model's turn was interrupted.
+                                cancelled_calls.push(call.id.clone().unwrap_or_default());
+                                continue;
+                            };
+                            match call_result {
                                 Ok(result) => {
                                     let _ = middleware.run_after_tool(call, &result).await;
                                     // Inline completion advances the governed flow
@@ -215,6 +254,14 @@ pub(in crate::live) async fn handle_tool_calls(
             (results, bg_spawns)
         }
     };
+
+    // Surface barge-in cancellations. No response is sent for a cancelled
+    // call and the governed-flow gate was not advanced for it.
+    if !cancelled_calls.is_empty() {
+        let _ = event_tx.send(LiveEvent::ToolCancelled {
+            ids: cancelled_calls,
+        });
+    }
 
     // 3. Run through before_tool_response interceptor
     let responses = if let Some(cb) = &callbacks.before_tool_response {
@@ -478,6 +525,7 @@ mod tests {
             &None,
             &mut ToolGate::new(),
             &ctrl_tx.downgrade(),
+            &CancellationToken::new(),
             &tx,
         )
         .await;
@@ -525,6 +573,198 @@ mod tests {
             0,
             "tool must not run when before_tool vetoes"
         );
+    }
+
+    /// A writer that records tool-response batches (for barge-in assertions).
+    #[derive(Default)]
+    struct RecordingToolWriter {
+        sent: parking_lot::Mutex<Vec<Vec<FunctionResponse>>>,
+    }
+    #[async_trait]
+    impl SessionWriter for RecordingToolWriter {
+        async fn send_audio(&self, _: Vec<u8>) -> Result<(), SessionError> {
+            Ok(())
+        }
+        async fn send_text(&self, _: String) -> Result<(), SessionError> {
+            Ok(())
+        }
+        async fn send_tool_response(
+            &self,
+            responses: Vec<FunctionResponse>,
+        ) -> Result<(), SessionError> {
+            self.sent.lock().push(responses);
+            Ok(())
+        }
+        async fn send_client_content(&self, _: Vec<Content>, _: bool) -> Result<(), SessionError> {
+            Ok(())
+        }
+        async fn send_video(&self, _: Vec<u8>) -> Result<(), SessionError> {
+            Ok(())
+        }
+        async fn update_instruction(&self, _: String) -> Result<(), SessionError> {
+            Ok(())
+        }
+        async fn signal_activity_start(&self) -> Result<(), SessionError> {
+            Ok(())
+        }
+        async fn signal_activity_end(&self) -> Result<(), SessionError> {
+            Ok(())
+        }
+        async fn disconnect(&self) -> Result<(), SessionError> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn barge_in_cancels_slow_inline_tool_without_response_or_flow_advance() {
+        // A slow inline tool that would block the control lane for 10s.
+        let completed = Arc::new(AtomicUsize::new(0));
+        let completed_clone = completed.clone();
+        let mut d = ToolDispatcher::new();
+        d.register(SimpleTool::new("slow", "slow tool", None, move |_args| {
+            let completed = completed_clone.clone();
+            async move {
+                tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                completed.fetch_add(1, Ordering::SeqCst);
+                Ok(json!({ "done": true }))
+            }
+        }));
+        let dispatcher = Some(Arc::new(d));
+
+        let rec = Arc::new(RecordingToolWriter::default());
+        let writer: Arc<dyn SessionWriter> = rec.clone();
+        let callbacks = EventCallbacks::default();
+        let state = State::new();
+        let mut transcript = TranscriptBuffer::new();
+        let (tx, mut live_rx) = tokio::sync::broadcast::channel(16);
+        let (ctrl_tx, _ctrl_rx) = tokio::sync::mpsc::channel::<ControlEvent>(8);
+        let middleware = Arc::new(MiddlewareChain::new());
+
+        // Governed flow: "run" completes on called_ok("slow"). A cancelled
+        // call must NOT advance it.
+        let flow_def = Flow::new()
+            .step("run")
+            .done(Guard::called_ok("slow"))
+            .step("end")
+            .after("run")
+            .terminal()
+            .build()
+            .expect("valid flow");
+        let flow = Some(FlowMonitor::new(flow_def, Enforcement::Observe).into_shared());
+        let mut gate = ToolGate::new();
+
+        // Barge-in fires 50ms into the 10s tool.
+        let barge_in = CancellationToken::new();
+        let trigger = barge_in.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            trigger.cancel();
+        });
+
+        let call = FunctionCall {
+            name: "slow".into(),
+            args: json!({}),
+            id: Some("c1".into()),
+        };
+        let ran = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            handle_tool_calls(
+                vec![call],
+                &callbacks,
+                &dispatcher,
+                &writer,
+                &state,
+                &None,
+                &mut transcript,
+                &std::collections::HashMap::new(),
+                &None,
+                &[],
+                &middleware,
+                &flow,
+                &mut gate,
+                &ctrl_tx.downgrade(),
+                &barge_in,
+                &tx,
+            ),
+        )
+        .await;
+        assert!(
+            ran.is_ok(),
+            "barge-in must win over a slow inline tool (was blocked >2s)"
+        );
+
+        // No response was sent for the cancelled call.
+        assert!(
+            rec.sent.lock().is_empty(),
+            "no FunctionResponse may be sent for a cancelled call"
+        );
+        // The tool never completed (its future was dropped).
+        assert_eq!(completed.load(Ordering::SeqCst), 0);
+
+        // The governed flow was not advanced.
+        let mon = flow.as_ref().unwrap();
+        mon.lock().on_turn(&state);
+        assert!(
+            !mon.lock().marking().done.contains("run"),
+            "a cancelled call must not advance the governed flow"
+        );
+
+        // The cancellation is surfaced as a LiveEvent.
+        let mut saw_cancelled = false;
+        while let Ok(ev) = live_rx.try_recv() {
+            if let LiveEvent::ToolCancelled { ids } = ev {
+                assert_eq!(ids, vec!["c1".to_string()]);
+                saw_cancelled = true;
+            }
+        }
+        assert!(saw_cancelled, "LiveEvent::ToolCancelled must be emitted");
+    }
+
+    #[tokio::test]
+    async fn pre_cancelled_barge_in_skips_inline_dispatch_entirely() {
+        // If the interruption already happened, the biased select must not
+        // even poll the tool future.
+        let ran = Arc::new(AtomicUsize::new(0));
+        let dispatcher = Some(dispatcher_with_counter(ran.clone()));
+        let rec = Arc::new(RecordingToolWriter::default());
+        let writer: Arc<dyn SessionWriter> = rec.clone();
+        let callbacks = EventCallbacks::default();
+        let state = State::new();
+        let mut transcript = TranscriptBuffer::new();
+        let (tx, _rx) = tokio::sync::broadcast::channel(16);
+        let (ctrl_tx, _ctrl_rx) = tokio::sync::mpsc::channel::<ControlEvent>(8);
+        let middleware = Arc::new(MiddlewareChain::new());
+
+        let barge_in = CancellationToken::new();
+        barge_in.cancel();
+
+        let call = FunctionCall {
+            name: "echo".into(),
+            args: json!({}),
+            id: Some("c1".into()),
+        };
+        handle_tool_calls(
+            vec![call],
+            &callbacks,
+            &dispatcher,
+            &writer,
+            &state,
+            &None,
+            &mut transcript,
+            &std::collections::HashMap::new(),
+            &None,
+            &[],
+            &middleware,
+            &None,
+            &mut ToolGate::new(),
+            &ctrl_tx.downgrade(),
+            &barge_in,
+            &tx,
+        )
+        .await;
+
+        assert_eq!(ran.load(Ordering::SeqCst), 0, "tool must not run");
+        assert!(rec.sent.lock().is_empty(), "no response for cancelled call");
     }
 
     #[tokio::test]
@@ -583,6 +823,7 @@ mod tests {
             &flow,
             &mut gate,
             &ctrl_tx.downgrade(),
+            &CancellationToken::new(),
             &tx,
         )
         .await;

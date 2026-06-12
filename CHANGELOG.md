@@ -7,6 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`LiveHandle::stream()`** — semantic events as a `futures::Stream`. The new
+  `LiveEventStream` wraps the `events()` broadcast receiver: lagged (missed)
+  events are skipped and the stream continues, and the stream ends when the
+  session's event channel closes. Composes with all `futures`/`tokio-stream`
+  combinators (`while let Some(ev) = stream.next().await { … }`). Exported from
+  `gemini_adk_rs::live` and `gemini_adk_fluent_rs::live` (not the kernel
+  prelude). Also new: `LiveEvent::ToolCancelled { ids }`,
+  `LiveHandle::resume_handle()`, and the L2 `session_resume_from(handle)`
+  builder setter (see Fixed below).
+
+### Fixed
+
+- **Background tools are cancelled on disconnect.** The `BackgroundToolTracker`
+  is now carried through `SessionRuntime` into `LiveHandle`, and
+  `LiveHandle::disconnect()` cancels every tracked background tool task
+  (cooperative token + task abort) before closing the L0 session. Previously the
+  tracker was only reachable from the control lane, so orphaned tool tasks kept
+  running after disconnect and could post stale `ToolCompleted` events to a dead
+  (or new) control lane.
+
+- **Fast/control/telemetry lanes are shut down on disconnect.**
+  `LiveHandle::disconnect()` now grace-awaits the fast and control lanes
+  (250 ms each) and aborts whatever is still stuck, and cancels the telemetry
+  lane's `CancellationToken`. The event router also exits after routing the
+  terminal `Disconnected` event (closing the lane channels so the lanes can
+  drain and shut down gracefully). Previously the lane `JoinHandle`s were
+  detached on construction — a lane blocked in a slow tool ran forever.
+
+- **`FsPersistence::save` is atomic (tmp + rename).** Snapshots are written to
+  a sibling `<session_id>.json.tmp` and renamed over the destination —
+  `rename(2)` is atomic on the same filesystem, so a crash mid-write or a
+  concurrent `load` can no longer observe a torn half-written snapshot.
+
+- **Barge-in beats slow inline tools.** Inline tool dispatch in the control
+  lane now races the tool future against a barge-in `CancellationToken` that
+  the event router cancels the moment an `Interrupted` event arrives (the
+  control lane re-arms it after processing the interruption). Previously an
+  interruption queued behind the blocking dispatch and waited for the tool to
+  finish. On cancellation the tool future is dropped at its current await
+  point (tools must be drop-safe), **no** `FunctionResponse` is sent for the
+  cancelled call, the governed-flow `ToolGate` is not advanced, and the new
+  `LiveEvent::ToolCancelled { ids }` is emitted (also emitted for server-sent
+  `ToolCallCancelled` events).
+
+- **Graceful drain on control-lane exit + manual GoAway resume surface.** When
+  the control lane shuts down it now (1) best-effort flushes any deferred
+  context still queued in `PendingContext` (previously silently dropped on
+  disconnect) and (2) runs a final persistence snapshot **synchronously** — the
+  per-turn save is spawn-and-forget and could lose the last turn when the
+  process exited right after disconnect. New `LiveHandle::resume_handle()`
+  exposes the latest server-issued session-resumption handle, and the L2
+  builder gained `session_resume_from(handle)`, so callers can manually resume
+  after a `GoAway` (no auto-reconnect). Documented in
+  `docs/user-guide/session-persistence.md`.
+
+- **Control channel depth raised 64 → 512.** Control events are routed with a
+  lossless `send().await`, so a full control queue blocks the shared event
+  router — which then stops forwarding audio frames and causes playback
+  glitches. Transcript-chunk accumulation flows through this channel, so 64
+  slots could realistically fill behind a slow control-lane consumer.
+
 ### Changed
 
 - **Turn lifecycle decomposed into named, tested stages (#4).** The live hot-path

@@ -257,27 +257,13 @@ pub(in crate::live) async fn handle_turn_complete(
     let tc: u32 = state.session().get("turn_count").unwrap_or(0);
     let _ = state.session().set("turn_count", tc + 1);
 
-    // 18. Persist session state (Phase 7 -- fire and forget)
+    // 18. Persist session state (Phase 7 -- fire and forget; a final
+    // *synchronous* snapshot also runs on control-lane exit via
+    // `final_drain`, so the last turn can't be lost to a spawned save racing
+    // process shutdown).
     if let Some(ref persistence) = control_plane.persistence {
-        let phase_name = if let Some(ref pm) = phase_machine {
-            pm.lock().await.current().to_string()
-        } else {
-            String::new()
-        };
-        let snapshot = crate::live::persistence::SessionSnapshot {
-            state: state.to_hashmap(),
-            phase: phase_name,
-            turn_count: tc + 1,
-            transcript_summary: transcript_buffer.format_window(5),
-            resume_handle: shared.resume_handle.lock().clone(),
-            saved_at: {
-                // Simple ISO 8601 timestamp without chrono dependency
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default();
-                format!("{}s", now.as_secs())
-            },
-        };
+        let snapshot =
+            build_snapshot(state, phase_machine, transcript_buffer, shared, tc + 1).await;
         let p = persistence.clone();
         let sid = control_plane
             .session_id
@@ -290,6 +276,83 @@ pub(in crate::live) async fn handle_turn_complete(
                 let _ = e;
             }
         });
+    }
+}
+
+/// Build a [`SessionSnapshot`](crate::live::persistence::SessionSnapshot) of
+/// the current control-plane state (shared by the per-turn spawned save and
+/// the synchronous final save on lane exit).
+async fn build_snapshot(
+    state: &State,
+    phase_machine: &Option<tokio::sync::Mutex<PhaseMachine>>,
+    transcript_buffer: &mut TranscriptBuffer,
+    shared: &SharedState,
+    turn_count: u32,
+) -> crate::live::persistence::SessionSnapshot {
+    let phase_name = if let Some(ref pm) = phase_machine {
+        pm.lock().await.current().to_string()
+    } else {
+        String::new()
+    };
+    crate::live::persistence::SessionSnapshot {
+        state: state.to_hashmap(),
+        phase: phase_name,
+        turn_count,
+        transcript_summary: transcript_buffer.format_window(5),
+        resume_handle: shared.resume_handle.lock().clone(),
+        saved_at: {
+            // Simple ISO 8601 timestamp without chrono dependency
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default();
+            format!("{}s", now.as_secs())
+        },
+    }
+}
+
+/// Graceful drain on control-lane exit.
+///
+/// Runs once, after the control lane's event channel closes (session
+/// disconnected or router gone):
+///
+/// 1. Best-effort flush of any deferred context still queued in
+///    [`PendingContext`](crate::live::context_writer::PendingContext) — under
+///    `ContextDelivery::Deferred` these turns would otherwise be silently
+///    dropped on disconnect.
+/// 2. A final persistence snapshot, **awaited synchronously** (unlike the
+///    per-turn spawn-and-forget save), so state accumulated since the last
+///    turn boundary — or a last turn whose spawned save lost the race with
+///    shutdown — is not lost.
+pub(in crate::live) async fn final_drain(
+    writer: &Arc<dyn SessionWriter>,
+    shared: &SharedState,
+    state: &State,
+    phase_machine: &Option<tokio::sync::Mutex<PhaseMachine>>,
+    transcript_buffer: &mut TranscriptBuffer,
+    control_plane: &ControlPlaneConfig,
+) {
+    // 1. Flush deferred context (best effort; the session may already be gone).
+    if let Some(ref pending) = control_plane.pending_context {
+        let context = pending.drain_context();
+        if !context.is_empty() {
+            writer.send_client_content(context, false).await.ok();
+        }
+    }
+
+    // 2. Final synchronous persistence snapshot.
+    if let Some(ref persistence) = control_plane.persistence {
+        let turn_count = state.session().get::<u32>("turn_count").unwrap_or(0);
+        let snapshot =
+            build_snapshot(state, phase_machine, transcript_buffer, shared, turn_count).await;
+        let sid = control_plane
+            .session_id
+            .clone()
+            .unwrap_or_else(|| "default".to_string());
+        if let Err(e) = persistence.save(&sid, &snapshot).await {
+            #[cfg(feature = "tracing-support")]
+            tracing::warn!("Final session persistence failed: {}", e);
+            let _ = e;
+        }
     }
 }
 
@@ -813,6 +876,7 @@ mod harness {
                 writer,
                 shared: SharedState {
                     interrupted: AtomicBool::new(false),
+                    barge_in: Mutex::new(tokio_util::sync::CancellationToken::new()),
                     resume_handle: Mutex::new(None),
                     last_instruction: Mutex::new(None),
                     pending_context: None,
@@ -1148,6 +1212,55 @@ mod harness {
             Some(vec!["search".to_string()]),
             "new phase's tool set advertised + persisted"
         );
+    }
+
+    #[tokio::test]
+    async fn final_drain_flushes_deferred_context_and_persists_synchronously() {
+        use crate::live::persistence::{MemoryPersistence, SessionPersistence};
+
+        let mut h = Harness::new();
+
+        // Deferred context still queued when the lane exits…
+        let pending = Arc::new(PendingContext::new());
+        pending.extend(vec![Content::model("queued context")]);
+        h.shared.pending_context = Some(pending.clone());
+        h.control.pending_context = Some(pending.clone());
+        h.control.context_delivery = ContextDelivery::Deferred;
+
+        // …and a persistence backend that must be hit synchronously.
+        let p = Arc::new(MemoryPersistence::new());
+        h.control.persistence = Some(p.clone());
+        h.control.session_id = Some("drain-session".into());
+        let _ = h.state.session().set("turn_count", 7u32);
+
+        super::final_drain(
+            &h.writer,
+            &h.shared,
+            &h.state,
+            &h.phase,
+            &mut h.transcript,
+            &h.control,
+        )
+        .await;
+
+        // The queued context was flushed as one frame (not dropped).
+        assert_eq!(
+            h.writes(),
+            vec![Write::ClientContent {
+                turns: 1,
+                turn_complete: false
+            }],
+            "deferred context must be flushed on lane exit"
+        );
+        assert!(pending.drain_context().is_empty(), "queue fully drained");
+
+        // The final snapshot was awaited before final_drain returned.
+        let snap = p
+            .load("drain-session")
+            .await
+            .unwrap()
+            .expect("final snapshot must be persisted synchronously");
+        assert_eq!(snap.turn_count, 7);
     }
 
     #[tokio::test]
