@@ -25,6 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   drain and shut down gracefully). Previously the lane `JoinHandle`s were
   detached on construction — a lane blocked in a slow tool ran forever.
 
+- **`FsPersistence::save` is atomic (tmp + rename).** Snapshots are written to
+  a sibling `<session_id>.json.tmp` and renamed over the destination —
+  `rename(2)` is atomic on the same filesystem, so a crash mid-write or a
+  concurrent `load` can no longer observe a torn half-written snapshot.
+
 ### Changed
 
 - **Turn lifecycle decomposed into named, tested stages (#4).** The live hot-path

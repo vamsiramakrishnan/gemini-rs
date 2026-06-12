@@ -239,8 +239,9 @@ evolvability. Nothing above this matters if barge-in hangs or snapshots tear.
 - ✅ **Lanes aborted on disconnect.** `disconnect()` grace-awaits the
   fast/control lanes then aborts stragglers, and cancels the telemetry lane;
   the router exits on the terminal `Disconnected` event so lanes can drain.
-- 🚧 **Atomic persistence.** `FsPersistence::save` writes directly (no
-  tmp+rename); a crash mid-write corrupts the snapshot unrecoverably.
+- ✅ **Atomic persistence.** `FsPersistence::save` writes a sibling tmp file
+  and atomically renames it over the destination; a crash mid-write can no
+  longer corrupt the snapshot.
 - 🚧 **Barge-in beats slow tools.** Inline tool dispatch blocks the control
   lane; an interruption waits for the tool to finish. Cancellation must win.
 - 🚧 **Graceful drain + GoAway resume.** Deferred context is dropped on

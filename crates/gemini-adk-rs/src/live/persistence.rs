@@ -69,6 +69,10 @@ impl FsPersistence {
     fn path(&self, session_id: &str) -> PathBuf {
         self.dir.join(format!("{}.json", session_id))
     }
+
+    fn tmp_path(&self, session_id: &str) -> PathBuf {
+        self.dir.join(format!("{}.json.tmp", session_id))
+    }
 }
 
 #[async_trait]
@@ -80,7 +84,14 @@ impl SessionPersistence for FsPersistence {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         tokio::fs::create_dir_all(&self.dir).await?;
         let json = serde_json::to_string_pretty(snapshot)?;
-        tokio::fs::write(self.path(session_id), json).await?;
+        // Write to a sibling temp file, then atomically rename over the
+        // destination. `rename(2)` is atomic on the same filesystem, so a
+        // crash mid-write (or a concurrent `load`) only ever observes the
+        // previous complete snapshot or the new complete snapshot — never a
+        // torn half-write.
+        let tmp = self.tmp_path(session_id);
+        tokio::fs::write(&tmp, json).await?;
+        tokio::fs::rename(&tmp, self.path(session_id)).await?;
         Ok(())
     }
 
@@ -224,6 +235,80 @@ mod tests {
 
         // Cleanup
         p.delete("test-session").await.unwrap();
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn fs_persistence_save_is_atomic_and_leaves_no_tmp_file() {
+        let dir = std::env::temp_dir().join(format!(
+            "gemini_rs_test_persistence_atomic_{}",
+            uuid::Uuid::new_v4()
+        ));
+        let p = FsPersistence::new(&dir);
+        let snapshot = SessionSnapshot {
+            state: HashMap::new(),
+            phase: "main".into(),
+            turn_count: 1,
+            transcript_summary: "x".into(),
+            resume_handle: None,
+            saved_at: "now".into(),
+        };
+
+        p.save("atomic-session", &snapshot).await.unwrap();
+
+        assert!(
+            !p.tmp_path("atomic-session").exists(),
+            "tmp file must be renamed away after save"
+        );
+        assert!(p.path("atomic-session").exists());
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn fs_persistence_concurrent_loads_never_observe_torn_snapshot() {
+        // Hammer save() while load()ing concurrently: with the tmp+rename
+        // scheme every load parses; with the old direct `fs::write` a reader
+        // could observe a truncated/partial file mid-write.
+        let dir = std::env::temp_dir().join(format!(
+            "gemini_rs_test_persistence_torn_{}",
+            uuid::Uuid::new_v4()
+        ));
+        let p = std::sync::Arc::new(FsPersistence::new(&dir));
+
+        // A snapshot large enough that a write is not a single tiny syscall.
+        let big = "x".repeat(256 * 1024);
+        let snapshot = SessionSnapshot {
+            state: [("blob".to_string(), Value::String(big))]
+                .into_iter()
+                .collect(),
+            phase: "main".into(),
+            turn_count: 0,
+            transcript_summary: String::new(),
+            resume_handle: None,
+            saved_at: "now".into(),
+        };
+        p.save("torn", &snapshot).await.unwrap();
+
+        let writer = {
+            let p = p.clone();
+            let snapshot = snapshot.clone();
+            tokio::spawn(async move {
+                for _ in 0..50 {
+                    p.save("torn", &snapshot).await.unwrap();
+                }
+            })
+        };
+
+        for _ in 0..200 {
+            let loaded = p
+                .load("torn")
+                .await
+                .expect("load must never observe a torn snapshot");
+            assert!(loaded.is_some(), "snapshot must always be present");
+        }
+
+        writer.await.unwrap();
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 }
