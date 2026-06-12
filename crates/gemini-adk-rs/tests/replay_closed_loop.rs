@@ -130,12 +130,9 @@ async fn run_session(
     replay.release();
     replay.drained().await;
 
-    let mut events = collect_events_until_idle(
-        &mut rx,
-        Duration::from_millis(300),
-        Duration::from_secs(10),
-    )
-    .await;
+    let mut events =
+        collect_events_until_idle(&mut rx, Duration::from_millis(300), Duration::from_secs(10))
+            .await;
 
     if send_user_text {
         // A recorded user-originated frame. Sent after the scripted inbound
@@ -146,12 +143,8 @@ async fn run_session(
             .await
             .expect("send_text over replay transport");
         events.extend(
-            collect_events_until_idle(
-                &mut rx,
-                Duration::from_millis(200),
-                Duration::from_secs(5),
-            )
-            .await,
+            collect_events_until_idle(&mut rx, Duration::from_millis(200), Duration::from_secs(5))
+                .await,
         );
     }
 
@@ -242,7 +235,8 @@ async fn closed_loop_record_then_replay_through_real_processor() {
         .count();
     assert_eq!(inbound_count, 4, "all scripted server frames recorded");
     assert_eq!(
-        outbound_count, 3,
+        outbound_count,
+        3,
         "setup + tool response + user text recorded, got: {:?}",
         wire_log
             .iter()
@@ -258,7 +252,10 @@ async fn closed_loop_record_then_replay_through_real_processor() {
     let (orig_fast, orig_ctrl) = split_lanes(&original.events);
     let (replay_fast, replay_ctrl) = split_lanes(&replayed.events);
     assert_eq!(orig_fast, replay_fast, "fast-lane event sequence differs");
-    assert_eq!(orig_ctrl, replay_ctrl, "control-lane event sequence differs");
+    assert_eq!(
+        orig_ctrl, replay_ctrl,
+        "control-lane event sequence differs"
+    );
 
     // Sanity: the sequences actually exercised text, tool, and turn events.
     assert!(orig_fast.iter().any(|e| e.contains("It is 22C in London")));

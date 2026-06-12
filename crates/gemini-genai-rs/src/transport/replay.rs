@@ -236,7 +236,10 @@ mod tests {
             ReplayTransport::from_frames(vec![br#"{"setupComplete":{}}"#.to_vec()]);
         transport.connect("replay://", vec![]).await.unwrap();
         transport.send(b"{\"setup\":{}}".to_vec()).await.unwrap();
-        transport.send(b"{\"toolResponse\":{}}".to_vec()).await.unwrap();
+        transport
+            .send(b"{\"toolResponse\":{}}".to_vec())
+            .await
+            .unwrap();
 
         let sent = control.outbound_frames();
         assert_eq!(sent.len(), 2);

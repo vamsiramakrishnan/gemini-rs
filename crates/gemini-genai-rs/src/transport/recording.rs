@@ -101,7 +101,7 @@ pub trait WireRecorder: Send + Sync {
 /// Cloneable, `Debug`-friendly handle to a shared [`WireRecorder`].
 ///
 /// Exists so `Option<WireRecorderHandle>` can live on
-/// [`SessionConfig`](crate::protocol::types::SessionConfig) (which derives
+/// [`SessionConfig`] (which derives
 /// `Debug` + `Clone`) without requiring `Debug` from every recorder.
 #[derive(Clone)]
 pub struct WireRecorderHandle(Arc<dyn WireRecorder>);

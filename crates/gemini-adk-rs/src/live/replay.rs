@@ -5,8 +5,7 @@
 //! [`SessionConfig::record_wire`](gemini_genai_rs::prelude::SessionConfig::record_wire)
 //! (every wire byte, both directions, as [`WireEntry`] JSONL). This module
 //! closes the loop: [`replay_session`] opens a
-//! [`ReplayTransport`](gemini_genai_rs::transport::replay::ReplayTransport)
-//! over the log's inbound frames and attaches the same three-lane processor a
+//! [`ReplayTransport`] over the log's inbound frames and attaches the same three-lane processor a
 //! live connection would get — phase machine, extractors, watchers, tool
 //! dispatch, flow governance all run for real. Nothing is mocked above the
 //! transport seam.
@@ -60,8 +59,7 @@ use super::handle::LiveHandle;
 ///
 /// This is the seam that makes replay possible without touching the network:
 /// connect the L0 session over any [`Transport`](gemini_genai_rs::transport::Transport)
-/// (e.g. [`ReplayTransport`](gemini_genai_rs::transport::replay::ReplayTransport)
-/// or [`MockTransport`](gemini_genai_rs::transport::MockTransport)), then hand
+/// (e.g. [`ReplayTransport`] or [`MockTransport`](gemini_genai_rs::transport::MockTransport)), then hand
 /// it here together with a configured [`LiveSessionBuilder`].
 ///
 /// Note: the builder's own `SessionConfig` is *not* re-sent — the setup
