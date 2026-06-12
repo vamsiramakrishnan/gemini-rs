@@ -633,6 +633,7 @@ pub(crate) async fn spawn_lanes(rt: SessionRuntime) -> Result<LiveHandle, AgentE
         rt.pending_context,
         rt.flow_monitor,
         rt.background_tracker,
+        rt.telem_cancel,
     ))
 }
 

@@ -17,6 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   running after disconnect and could post stale `ToolCompleted` events to a dead
   (or new) control lane.
 
+- **Fast/control/telemetry lanes are shut down on disconnect.**
+  `LiveHandle::disconnect()` now grace-awaits the fast and control lanes
+  (250 ms each) and aborts whatever is still stuck, and cancels the telemetry
+  lane's `CancellationToken`. The event router also exits after routing the
+  terminal `Disconnected` event (closing the lane channels so the lanes can
+  drain and shut down gracefully). Previously the lane `JoinHandle`s were
+  detached on construction — a lane blocked in a slow tool ran forever.
+
 ### Changed
 
 - **Turn lifecycle decomposed into named, tested stages (#4).** The live hot-path

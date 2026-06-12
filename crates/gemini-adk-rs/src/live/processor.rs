@@ -373,7 +373,18 @@ pub(crate) fn spawn_event_processor(
         loop {
             match event_rx.recv().await {
                 Ok(event) => {
+                    // `Disconnected` is terminal in L0 (the session loop returns
+                    // after emitting it), so the router exits after routing it.
+                    // Dropping the router's lane senders closes the fast/control
+                    // channels, letting both lanes drain their queues and shut
+                    // down gracefully (final persistence drain, etc.) instead of
+                    // idling forever on a broadcast channel that never closes
+                    // while the `SessionHandle` is alive.
+                    let terminal = matches!(event, SessionEvent::Disconnected(_));
                     route_event(event, &fast_tx_clone, &ctrl_tx_clone, &shared_clone).await;
+                    if terminal {
+                        break;
+                    }
                 }
                 Err(broadcast::error::RecvError::Lagged(n)) => {
                     #[cfg(feature = "tracing-support")]
@@ -1305,6 +1316,50 @@ mod tests {
         drop(event_tx);
         let _ = fast_handle.await;
         let _ = ctrl_handle.await;
+    }
+
+    #[tokio::test]
+    async fn lanes_exit_after_terminal_disconnected_event() {
+        // The Disconnected event is terminal in L0; the router must exit after
+        // routing it (dropping its lane senders) so the lanes can drain and
+        // shut down gracefully — even though the broadcast sender stays alive
+        // for the LiveHandle's lifetime.
+        let callbacks = Arc::new(EventCallbacks::default());
+        let (event_tx, _) = broadcast::channel(16);
+        let event_rx = event_tx.subscribe();
+        let writer: Arc<dyn SessionWriter> = Arc::new(crate::agent_session::NoOpSessionWriter);
+
+        let (fast_handle, ctrl_handle) = spawn_event_processor(
+            event_rx,
+            callbacks,
+            None,
+            writer,
+            vec![],
+            State::new(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            std::collections::HashMap::new(),
+            ControlPlaneConfig::default(),
+            dummy_event_tx(),
+        );
+
+        let _ = event_tx.send(SessionEvent::Disconnected(None));
+
+        // NOTE: event_tx is intentionally kept alive — before the fix the
+        // router only exited on channel close, and both awaits below hung.
+        let joined = tokio::time::timeout(Duration::from_secs(2), async {
+            let _ = fast_handle.await;
+            let _ = ctrl_handle.await;
+        })
+        .await;
+        assert!(
+            joined.is_ok(),
+            "lanes must exit after the terminal Disconnected event"
+        );
+        drop(event_tx);
     }
 
     #[tokio::test]

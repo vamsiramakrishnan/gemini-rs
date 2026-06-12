@@ -8,6 +8,7 @@ use parking_lot::Mutex;
 use serde::de::DeserializeOwned;
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 
 use crate::flow::{FlowExplanation, SharedFlowMonitor};
 use crate::state::State;
@@ -34,8 +35,14 @@ pub struct LiveHandle {
     /// enabled, this is a `DeferredWriter` that flushes pending context.
     /// Otherwise it's the raw `SessionHandle`.
     writer: Arc<dyn SessionWriter>,
-    _fast_task: Arc<JoinHandle<()>>,
-    _ctrl_task: Arc<JoinHandle<()>>,
+    /// Fast-lane task. Held in `Arc<Mutex<Option<..>>>` so `LiveHandle` stays
+    /// `Clone` while [`disconnect`](Self::disconnect) can take ownership to
+    /// grace-await and then abort the lane.
+    fast_task: Arc<Mutex<Option<JoinHandle<()>>>>,
+    /// Control-lane task (same ownership scheme as `fast_task`).
+    ctrl_task: Arc<Mutex<Option<JoinHandle<()>>>>,
+    /// Cancellation token for the telemetry lane, cancelled on disconnect.
+    telem_cancel: CancellationToken,
     state: State,
     telemetry: Arc<SessionTelemetry>,
     event_tx: broadcast::Sender<super::events::LiveEvent>,
@@ -69,6 +76,7 @@ impl LiveHandle {
         pending_context: Option<Arc<PendingContext>>,
         flow: Option<SharedFlowMonitor>,
         background_tracker: Arc<BackgroundToolTracker>,
+        telem_cancel: CancellationToken,
     ) -> Self {
         let reactor = Arc::new(LiveReactor::voice_defaults());
         let effect_executor = LiveEffectExecutor::new(
@@ -80,8 +88,9 @@ impl LiveHandle {
         Self {
             session,
             writer,
-            _fast_task: Arc::new(fast_task),
-            _ctrl_task: Arc::new(ctrl_task),
+            fast_task: Arc::new(Mutex::new(Some(fast_task))),
+            ctrl_task: Arc::new(Mutex::new(Some(ctrl_task))),
+            telem_cancel,
             state,
             telemetry,
             event_tx,
@@ -227,17 +236,46 @@ impl LiveHandle {
 
     /// Gracefully disconnect the session.
     ///
-    /// Cancels all in-flight background tool tasks before closing the L0
-    /// session, so orphaned tasks cannot keep running (or post stale
-    /// completions) after shutdown. Background tools are aborted at an await
-    /// point; tool futures must therefore be drop-safe.
+    /// Shutdown sequence:
+    /// 1. Cancel all in-flight background tool tasks (they are aborted at an
+    ///    await point; tool futures must therefore be drop-safe).
+    /// 2. Close the L0 session. The terminal `Disconnected` event makes the
+    ///    event router exit, which closes the lane channels.
+    /// 3. Grace-await the fast and control lanes (~250 ms each) so they can
+    ///    drain queued events and run their final persistence drain, then
+    ///    abort whatever is still stuck (e.g. a lane blocked in a slow tool).
+    /// 4. Cancel the telemetry lane.
     pub async fn disconnect(&self) -> Result<(), SessionError> {
         // Cancel background tool tasks FIRST: once the session is closing,
         // their results can no longer be delivered, and leaving them running
         // would let them post stale ToolCompleted events to a dead lane.
         self.background_tracker.cancel_all();
-        SessionWriter::disconnect(&self.session).await
+        let result = SessionWriter::disconnect(&self.session).await;
+
+        // Grace-await the lanes, then abort. Taking the JoinHandles out of
+        // their mutexes gives us the ownership `await` requires; a second
+        // disconnect (or a clone's disconnect) simply finds them gone.
+        for lane in [&self.fast_task, &self.ctrl_task] {
+            let task = lane.lock().take();
+            if let Some(mut task) = task {
+                if tokio::time::timeout(Self::LANE_SHUTDOWN_GRACE, &mut task)
+                    .await
+                    .is_err()
+                {
+                    task.abort();
+                }
+            }
+        }
+
+        // Stop the telemetry lane (it runs on its own broadcast receiver and
+        // would otherwise idle on its debounce timer for the handle's lifetime).
+        self.telem_cancel.cancel();
+        result
     }
+
+    /// How long [`disconnect`](Self::disconnect) waits for each lane to drain
+    /// before aborting it.
+    const LANE_SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_millis(250);
 
     /// Wait for the session to end (disconnect, GoAway, or error).
     pub async fn done(&self) -> Result<(), SessionError> {
@@ -314,15 +352,16 @@ mod tests {
 
     /// Build a LiveHandle wired to an in-memory SessionHandle (no transport).
     /// The command receiver is returned so `disconnect()` sends succeed.
-    fn make_handle() -> (LiveHandle, tokio::sync::mpsc::Receiver<SessionCommand>) {
+    fn make_handle_with_lanes(
+        fast: JoinHandle<()>,
+        ctrl: JoinHandle<()>,
+    ) -> (LiveHandle, tokio::sync::mpsc::Receiver<SessionCommand>) {
         let (command_tx, command_rx) = tokio::sync::mpsc::channel(8);
         let (event_tx, _) = broadcast::channel(16);
         let (phase_tx, phase_rx) = tokio::sync::watch::channel(SessionPhase::Active);
         let state = Arc::new(SessionState::with_events(phase_tx, event_tx.clone()));
         let session = SessionHandle::new(command_tx, event_tx, state, phase_rx);
         let writer: Arc<dyn SessionWriter> = Arc::new(session.clone());
-        let fast = tokio::spawn(async {});
-        let ctrl = tokio::spawn(async {});
         let (live_tx, _) = broadcast::channel(16);
         let handle = LiveHandle::new(
             session,
@@ -335,8 +374,22 @@ mod tests {
             None,
             None,
             Arc::new(BackgroundToolTracker::new()),
+            CancellationToken::new(),
         );
         (handle, command_rx)
+    }
+
+    fn make_handle() -> (LiveHandle, tokio::sync::mpsc::Receiver<SessionCommand>) {
+        make_handle_with_lanes(tokio::spawn(async {}), tokio::spawn(async {}))
+    }
+
+    /// Sets a flag when dropped — observes that an aborted task's future was
+    /// actually torn down.
+    struct SetOnDrop(Arc<std::sync::atomic::AtomicBool>);
+    impl Drop for SetOnDrop {
+        fn drop(&mut self) {
+            self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
     }
 
     #[tokio::test]
@@ -362,5 +415,58 @@ mod tests {
             "disconnect must cancel all tracked background tool tasks"
         );
         assert!(token.is_cancelled(), "cooperative token must be cancelled");
+    }
+
+    #[tokio::test]
+    async fn disconnect_aborts_stuck_lanes_within_grace_period() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        // Lanes that never finish on their own (simulating a lane blocked in a
+        // slow tool); drop guards record that abort tore the futures down.
+        let fast_dropped = Arc::new(AtomicBool::new(false));
+        let ctrl_dropped = Arc::new(AtomicBool::new(false));
+        let f = fast_dropped.clone();
+        let c = ctrl_dropped.clone();
+        let fast = tokio::spawn(async move {
+            let _guard = SetOnDrop(f);
+            std::future::pending::<()>().await;
+        });
+        let ctrl = tokio::spawn(async move {
+            let _guard = SetOnDrop(c);
+            std::future::pending::<()>().await;
+        });
+
+        let (handle, _cmd_rx) = make_handle_with_lanes(fast, ctrl);
+        let telem_cancel = handle.telem_cancel.clone();
+
+        // disconnect() must return in bounded time even with stuck lanes.
+        tokio::time::timeout(std::time::Duration::from_secs(2), handle.disconnect())
+            .await
+            .expect("disconnect must not hang on stuck lanes")
+            .expect("disconnect");
+
+        // Give the aborts a beat to take effect, then verify teardown.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(
+            fast_dropped.load(Ordering::SeqCst),
+            "fast lane must be aborted after the grace period"
+        );
+        assert!(
+            ctrl_dropped.load(Ordering::SeqCst),
+            "control lane must be aborted after the grace period"
+        );
+        assert!(
+            telem_cancel.is_cancelled(),
+            "telemetry lane must be cancelled on disconnect"
+        );
+    }
+
+    #[tokio::test]
+    async fn disconnect_is_idempotent_across_clones() {
+        let (handle, _cmd_rx) = make_handle();
+        let clone = handle.clone();
+        handle.disconnect().await.expect("first disconnect");
+        // The clone's disconnect finds the lane handles already taken.
+        clone.disconnect().await.expect("second disconnect");
     }
 }

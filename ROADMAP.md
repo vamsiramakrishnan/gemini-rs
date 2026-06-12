@@ -236,8 +236,9 @@ evolvability. Nothing above this matters if barge-in hangs or snapshots tear.
   now held by `LiveHandle`; `disconnect()` cancels every tracked task so
   orphaned tools can no longer post stale results to a dead (or new) control
   lane.
-- 🚧 **Lanes aborted on disconnect.** Fast/control `JoinHandle`s are detached,
-  never aborted/awaited — a lane blocked in a slow tool runs forever.
+- ✅ **Lanes aborted on disconnect.** `disconnect()` grace-awaits the
+  fast/control lanes then aborts stragglers, and cancels the telemetry lane;
+  the router exits on the terminal `Disconnected` event so lanes can drain.
 - 🚧 **Atomic persistence.** `FsPersistence::save` writes directly (no
   tmp+rename); a crash mid-write corrupts the snapshot unrecoverably.
 - 🚧 **Barge-in beats slow tools.** Inline tool dispatch blocks the control
