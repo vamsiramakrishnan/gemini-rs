@@ -495,6 +495,13 @@ pub struct SessionConfig {
     /// paces the *producer*: a caller pushing audio faster than
     /// `refill_rate_bps` waits, instead of overflowing the send queue.
     pub audio_pacing: Option<crate::transport::BackpressureConfig>,
+    /// Optional wire recorder. When set, [`connect`](crate::transport::connect),
+    /// [`connect_with`](crate::transport::connect_with), and
+    /// [`ConnectBuilder`](crate::transport::ConnectBuilder) wrap the codec in a
+    /// [`RecordingCodec`](crate::transport::RecordingCodec) so every wire byte
+    /// (both directions) is delivered to the recorder. See
+    /// [`SessionConfig::record_wire`].
+    pub wire_recorder: Option<crate::transport::WireRecorderHandle>,
 }
 
 impl SessionConfig {
@@ -565,12 +572,30 @@ impl SessionConfig {
             input_sample_rate: 16000,
             output_sample_rate: 24000,
             audio_pacing: None,
+            wire_recorder: None,
         }
     }
 
     /// Set the Gemini model.
     pub fn model(mut self, model: GeminiModel) -> Self {
         self.model = model;
+        self
+    }
+
+    /// Record every wire byte (both directions) to the given recorder.
+    ///
+    /// All connect paths ([`connect`](crate::transport::connect),
+    /// [`connect_with`](crate::transport::connect_with),
+    /// [`ConnectBuilder`](crate::transport::ConnectBuilder)) honor this by
+    /// wrapping the codec in a [`RecordingCodec`](crate::transport::RecordingCodec).
+    /// Use [`FileWireRecorder`](crate::transport::FileWireRecorder) for a
+    /// durable JSONL log that can be replayed offline with
+    /// [`ReplayTransport`](crate::transport::ReplayTransport).
+    pub fn record_wire(
+        mut self,
+        recorder: std::sync::Arc<dyn crate::transport::WireRecorder>,
+    ) -> Self {
+        self.wire_recorder = Some(crate::transport::WireRecorderHandle::new(recorder));
         self
     }
 
@@ -698,11 +723,6 @@ impl SessionConfig {
         self
     }
 
-    /// Apply recommended realtime input defaults for voice conversations.
-    ///
-    /// This preserves any values the caller already set. In particular, it sets
-    /// `TURN_INCLUDES_ONLY_ACTIVITY` so long pauses/silence in a continuous mic
-    /// stream are not included in the user's semantic turn.
     /// Pace outbound audio with a token bucket (producer-side backpressure).
     ///
     /// See [`SessionConfig::audio_pacing`]. Use
@@ -713,6 +733,11 @@ impl SessionConfig {
         self
     }
 
+    /// Apply recommended realtime input defaults for voice conversations.
+    ///
+    /// This preserves any values the caller already set. In particular, it sets
+    /// `TURN_INCLUDES_ONLY_ACTIVITY` so long pauses/silence in a continuous mic
+    /// stream are not included in the user's semantic turn.
     pub fn voice_realtime_defaults(mut self) -> Self {
         let mut ric = self.realtime_input_config.unwrap_or(RealtimeInputConfig {
             automatic_activity_detection: None,

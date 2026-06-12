@@ -58,6 +58,11 @@ pub mod prelude {
     pub use crate::transport::auth::{
         AuthProvider, GoogleAIAuth, GoogleAITokenAuth, ServiceEndpoint, VertexAIAuth,
     };
+    pub use crate::transport::recording::{
+        read_wire_log, FileWireRecorder, MemoryWireRecorder, RecordingCodec, WireDirection,
+        WireEntry, WireLogError, WireRecorder, WireRecorderHandle,
+    };
+    pub use crate::transport::replay::{ReplayControl, ReplayTransport};
     pub use crate::transport::ws::{MockTransport, Transport, TungsteniteTransport};
     pub use crate::transport::{
         connect, connect_with, Codec, CodecError, ConnectBuilder, JsonCodec, TransportConfig,

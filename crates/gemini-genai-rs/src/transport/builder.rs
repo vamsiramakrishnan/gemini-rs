@@ -61,6 +61,18 @@ impl<T: Transport, C: Codec> ConnectBuilder<T, C> {
         }
     }
 
+    /// Record every wire byte (both directions) to the given recorder.
+    ///
+    /// Equivalent to [`SessionConfig::record_wire`]: the connection wraps the
+    /// codec in a [`RecordingCodec`](crate::transport::recording::RecordingCodec).
+    pub fn record_wire(
+        mut self,
+        recorder: std::sync::Arc<dyn crate::transport::recording::WireRecorder>,
+    ) -> Self {
+        self.config = self.config.record_wire(recorder);
+        self
+    }
+
     /// Use a custom codec implementation.
     pub fn codec<C2: Codec>(self, codec: C2) -> ConnectBuilder<T, C2> {
         ConnectBuilder {
