@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Wire recording (`RecordingCodec`).** Any `Codec` can be wrapped to record
+  every wire byte in both directions — monotonic sequence, direction, and
+  epoch-millis timestamp per `WireEntry`, delivered synchronously to a
+  `WireRecorder`. Built-in backends: `FileWireRecorder` (JSONL, base64
+  payloads, periodic + on-drop flush) and `MemoryWireRecorder`. Install via
+  `SessionConfig::record_wire(..)` / `ConnectBuilder::record_wire(..)` at L0,
+  or `Live::builder().record_wire(path)` / `.wire_recorder(..)` at L2.
+- **Durable `JournalSink` for state mutations.** The in-memory mutation
+  journal stays a bounded ring (1024 entries, still serving `evidence()`);
+  `State::set_journal_sink(..)` / `with_journal_sink(..)` additionally stream
+  every mutation to a sync sink — `FileJournalSink` (JSONL, buffered, periodic
+  + on-drop flush) or `MemoryJournalSink`. `StateMutation` is now serde
+  round-trippable (`timestamp_ms` epoch millis).
+- **Replay harness — any session replayable through the real control plane.**
+  `gemini_genai_rs::transport::replay::ReplayTransport` replays a recorded
+  wire log's inbound frames (gated until `ReplayControl::release()`, drained
+  signal, outbound frames collected for comparison);
+  `gemini_adk_rs::live::replay::{replay_session, attach_session}` drive the
+  log through the REAL three-lane processor — phases, extractors, watchers,
+  and tool dispatch all run for real. A closed-loop integration test
+  (`crates/gemini-adk-rs/tests/replay_closed_loop.rs`) records a scripted
+  session (text exchange, dispatched tool call + response, turn completes)
+  and asserts the replay reproduces per-lane `LiveEvent` sequences, final
+  state, journal per-key values, and byte-identical setup/tool-response
+  frames.
+- **`adk session replay <wire-log> [--journal <journal-log>]`.** Offline
+  replay through the L1 processor with default callbacks: turn-by-turn
+  summary (events, tool calls, final state keys) and, with `--journal`, a
+  CLEAN/DRIFT diff of the recorded journal against the replayed final state
+  (non-zero exit on drift). Replay only re-processes recorded frames — no LLM
+  or tool re-execution. See `docs/user-guide/record-replay.md`.
+
 ### Changed
 
 - **Turn lifecycle decomposed into named, tested stages (#4).** The live hot-path
