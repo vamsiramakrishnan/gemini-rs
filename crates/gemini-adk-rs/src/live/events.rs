@@ -22,6 +22,7 @@ use tokio::sync::broadcast;
 /// Multiple independent subscribers supported. Zero-cost when no subscribers
 /// exist (`broadcast::send` with 0 receivers is a no-op).
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum LiveEvent {
     // -- Fast-lane events (high frequency, sync emission) --
     /// Raw PCM audio from model. Uses `Bytes` (refcounted) — clone is

@@ -680,6 +680,15 @@ async fn route_event(
         SessionEvent::Error(err) => {
             let _ = ctrl_tx.send(ControlEvent::Error(err)).await;
         }
+        // SessionEvent is #[non_exhaustive]: future wire events the runtime
+        // doesn't understand yet are surfaced (not silently dropped) so
+        // applications on an older runtime can observe them.
+        other => {
+            #[cfg(feature = "tracing-support")]
+            tracing::debug!(?other, "unhandled SessionEvent variant (newer wire event?)");
+            #[cfg(not(feature = "tracing-support"))]
+            let _ = other;
+        }
     }
 }
 

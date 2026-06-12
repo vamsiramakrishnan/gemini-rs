@@ -16,6 +16,7 @@ use tokio::sync::broadcast;
 
 /// Events emitted by the session, consumed by application code.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum SessionEvent {
     /// Session connected and setup complete.
     Connected,

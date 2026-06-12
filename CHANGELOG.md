@@ -148,6 +148,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (breaking)
 
+- **`#[non_exhaustive]` on the wire-facing enums.** `SessionEvent`,
+  `LiveEvent`, `GeminiModel`, and `Voice` will all grow as Google ships new
+  models and server events; marking them non-exhaustive makes those additions
+  semver-compatible instead of breaking releases. Downstream `match`es need a
+  wildcard arm; the event router surfaces unknown wire events at debug level
+  instead of silently dropping them.
 - **Feature diet: slim defaults, selectable TLS, targeted tokio.**
   `gemini-genai-rs` default features are now `["live", "tls-native"]` — the ML
   VAD model (`vad-wavekat`) and the tracing *subscriber* are no longer pulled by

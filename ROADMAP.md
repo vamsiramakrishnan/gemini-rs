@@ -250,8 +250,8 @@ evolvability. Nothing above this matters if barge-in hangs or snapshots tear.
   context and persists a final snapshot synchronously;
   `LiveHandle::resume_handle()` + `session_resume_from(handle)` make manual
   resume after GoAway possible (no auto-reconnect).
-- 🚧 **`#[non_exhaustive]`** on `SessionEvent`/`LiveEvent`/`GeminiModel`/`Voice`
-  — every new Gemini model or server event is a semver break until this lands.
+- ✅ **`#[non_exhaustive]`** on `SessionEvent`/`LiveEvent`/`GeminiModel`/`Voice`
+  — new models/server events are now semver-compatible additions.
 - ✅ **Hot-path elegance (parse + pacing).** Single-pass server-message parse
   (golden-fixture pinned) and opt-in producer-side audio pacing
   (`SessionConfig::audio_pacing`). *(Control-channel depth lands with the
