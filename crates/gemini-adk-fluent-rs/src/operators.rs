@@ -254,7 +254,7 @@ impl Composable {
     ///
     /// For other node kinds (single agent, pipeline, fan-out) this is a no-op:
     /// attach `M::` middleware to the agent itself via
-    /// [`AgentBuilder::middleware`](crate::AgentBuilder::middleware) instead.
+    /// [`AgentBuilder::middleware`](crate::builder::AgentBuilder::middleware) instead.
     pub fn middleware(self, composite: MiddlewareComposite) -> Self {
         match self {
             Composable::Loop(l) => Composable::Loop(l.middleware(composite)),

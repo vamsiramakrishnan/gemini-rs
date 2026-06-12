@@ -1,0 +1,49 @@
+# cargo-deny configuration — supply-chain gates for the published crates.
+# Run locally with `cargo deny check`; CI runs it on every PR.
+# https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+all-features = true
+
+[advisories]
+# RustSec advisories: any vulnerability fails the build. Unmaintained warnings
+# only apply to direct/workspace dependencies (transitive churn is noise).
+version = 2
+unmaintained = "workspace"
+yanked = "deny"
+
+[licenses]
+version = 2
+# Permissive licenses only. Copyleft anywhere in the published crates' graph
+# should fail loudly and be a deliberate decision.
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "BSL-1.0",
+  "ISC",
+  "OpenSSL",
+  "Unicode-3.0",
+  # Mozilla CA bundle data shipped by rustls (webpki-roots).
+  "CDLA-Permissive-2.0",
+  "Unlicense",
+  "Zlib",
+]
+# Internal unpublished crates (examples, apps, tools) are not distributed.
+private = { ignore = true }
+# Some allowed licenses (e.g. OpenSSL for `ring`) only appear in certain
+# feature graphs; don't warn when a TLS backend swap drops them.
+unused-allowed-license = "allow"
+
+[bans]
+# Duplicate versions are inevitable in a tree this size; surface but don't fail.
+multiple-versions = "warn"
+wildcards = "deny"
+# Internal path dependencies (apps/examples) don't need version requirements.
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

@@ -62,7 +62,10 @@ pub enum StateMutationOrigin {
 }
 
 /// A single state mutation recorded in the bounded mutation journal.
-#[derive(Debug, Clone, PartialEq)]
+///
+/// Serializes to/from JSON for durable journaling (see [`JournalSink`]);
+/// `timestamp` is encoded as integer milliseconds since the Unix epoch.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct StateMutation {
     /// Monotonic sequence number assigned when the mutation was recorded.
     pub sequence: u64,
@@ -75,9 +78,177 @@ pub struct StateMutation {
     /// Operation that recorded the mutation.
     pub origin: StateMutationOrigin,
     /// Wall-clock time at which the mutation was recorded.
+    /// Serialized as milliseconds since the Unix epoch (`timestamp_ms`).
+    #[serde(rename = "timestamp_ms", with = "systemtime_epoch_millis")]
     pub timestamp: SystemTime,
     /// Whether the mutation was written to a delta-tracked view.
     pub delta: bool,
+}
+
+/// Serde codec mapping [`SystemTime`] to/from integer epoch milliseconds.
+mod systemtime_epoch_millis {
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(t: &SystemTime, ser: S) -> Result<S::Ok, S::Error> {
+        let millis = t
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        ser.serialize_u64(millis)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(de: D) -> Result<SystemTime, D::Error> {
+        let millis = u64::deserialize(de)?;
+        Ok(UNIX_EPOCH + Duration::from_millis(millis))
+    }
+}
+
+/// Synchronous, durable sink for state mutations.
+///
+/// The in-memory mutation journal is a bounded ring (1024 entries) — long
+/// sessions lose history. A `JournalSink` receives every mutation as it is
+/// recorded so it can be persisted in full.
+///
+/// `write` runs on the state-write hot path (under the journal lock): it must
+/// be cheap, must not await, and must not panic — implementations log internal
+/// errors instead of surfacing them.
+pub trait JournalSink: Send + Sync {
+    /// Persist one mutation. Must not panic; log errors internally.
+    fn write(&self, m: &StateMutation);
+}
+
+/// Shared, swappable [`JournalSink`] slot — one slot per [`State`] family
+/// (clones and delta views share it, like the in-memory ring).
+#[derive(Clone, Default)]
+struct JournalSinkSlot(Arc<parking_lot::RwLock<Option<Arc<dyn JournalSink>>>>);
+
+impl std::fmt::Debug for JournalSinkSlot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let installed = self.0.read().is_some();
+        f.debug_tuple("JournalSinkSlot").field(&installed).finish()
+    }
+}
+
+const JOURNAL_FLUSH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// Log a journal-sink internal error without panicking the write path.
+/// Emits a `tracing::warn!` when the `tracing-support` feature is enabled;
+/// otherwise the error is swallowed (journaling is infallible by contract).
+fn journal_log_error(context: &'static str, e: &dyn std::fmt::Display) {
+    #[cfg(feature = "tracing-support")]
+    tracing::warn!(error = %e, "{context}");
+    #[cfg(not(feature = "tracing-support"))]
+    let _ = (context, e);
+}
+
+struct FileJournalInner {
+    writer: std::io::BufWriter<std::fs::File>,
+    last_flush: std::time::Instant,
+}
+
+/// Durable [`JournalSink`] writing one JSON object per line (JSONL).
+///
+/// Writes are buffered behind a `parking_lot::Mutex` and flushed at least
+/// every second and on drop. I/O errors are logged (via `tracing::warn!` when
+/// the `tracing-support` feature is enabled) — journaling never panics a
+/// state write.
+///
+/// ```jsonl
+/// {"sequence":1,"key":"app:last_city","old":null,"new":"London","origin":"set","timestamp_ms":1718000000000,"delta":false}
+/// ```
+pub struct FileJournalSink {
+    inner: parking_lot::Mutex<FileJournalInner>,
+}
+
+impl FileJournalSink {
+    /// Create (truncating) the journal file at `path`.
+    pub fn create(path: impl AsRef<std::path::Path>) -> std::io::Result<Self> {
+        let file = std::fs::File::create(path)?;
+        Ok(Self {
+            inner: parking_lot::Mutex::new(FileJournalInner {
+                writer: std::io::BufWriter::new(file),
+                last_flush: std::time::Instant::now(),
+            }),
+        })
+    }
+
+    /// Flush buffered mutations to disk now.
+    pub fn flush(&self) {
+        let mut inner = self.inner.lock();
+        if let Err(e) = std::io::Write::flush(&mut inner.writer) {
+            journal_log_error("FileJournalSink flush failed", &e);
+        }
+        inner.last_flush = std::time::Instant::now();
+    }
+}
+
+impl JournalSink for FileJournalSink {
+    fn write(&self, m: &StateMutation) {
+        let line = match serde_json::to_string(m) {
+            Ok(line) => line,
+            Err(e) => {
+                journal_log_error("FileJournalSink serialize failed", &e);
+                return;
+            }
+        };
+        let mut inner = self.inner.lock();
+        if let Err(e) = std::io::Write::write_all(&mut inner.writer, line.as_bytes())
+            .and_then(|()| std::io::Write::write_all(&mut inner.writer, b"\n"))
+        {
+            journal_log_error("FileJournalSink write failed", &e);
+            return;
+        }
+        if inner.last_flush.elapsed() >= JOURNAL_FLUSH_INTERVAL {
+            if let Err(e) = std::io::Write::flush(&mut inner.writer) {
+                journal_log_error("FileJournalSink flush failed", &e);
+            }
+            inner.last_flush = std::time::Instant::now();
+        }
+    }
+}
+
+impl Drop for FileJournalSink {
+    fn drop(&mut self) {
+        if let Err(e) = std::io::Write::flush(&mut self.inner.lock().writer) {
+            journal_log_error("FileJournalSink final flush failed", &e);
+        }
+    }
+}
+
+/// In-memory [`JournalSink`] for tests and replay harnesses. Unbounded.
+#[derive(Default)]
+pub struct MemoryJournalSink {
+    entries: parking_lot::Mutex<Vec<StateMutation>>,
+}
+
+impl MemoryJournalSink {
+    /// Create an empty sink.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Snapshot all recorded mutations (in write order).
+    pub fn entries(&self) -> Vec<StateMutation> {
+        self.entries.lock().clone()
+    }
+
+    /// Number of recorded mutations.
+    pub fn len(&self) -> usize {
+        self.entries.lock().len()
+    }
+
+    /// Whether nothing has been recorded yet.
+    pub fn is_empty(&self) -> bool {
+        self.entries.lock().is_empty()
+    }
+}
+
+impl JournalSink for MemoryJournalSink {
+    fn write(&self, m: &StateMutation) {
+        self.entries.lock().push(m.clone());
+    }
 }
 
 /// Error returned by fallible state writes.
@@ -144,6 +315,7 @@ pub struct State {
     mutations: Arc<std::sync::Mutex<VecDeque<StateMutation>>>,
     next_mutation_sequence: Arc<AtomicU64>,
     mutation_capacity: usize,
+    journal_sink: JournalSinkSlot,
     track_delta: bool,
 }
 
@@ -162,6 +334,7 @@ impl State {
             mutations: Arc::new(std::sync::Mutex::new(VecDeque::new())),
             next_mutation_sequence: Arc::new(AtomicU64::new(1)),
             mutation_capacity: DEFAULT_MUTATION_JOURNAL_CAPACITY,
+            journal_sink: JournalSinkSlot::default(),
             track_delta: false,
         }
     }
@@ -175,8 +348,26 @@ impl State {
             mutations: self.mutations.clone(),
             next_mutation_sequence: self.next_mutation_sequence.clone(),
             mutation_capacity: self.mutation_capacity,
+            journal_sink: self.journal_sink.clone(),
             track_delta: true,
         }
+    }
+
+    /// Install a durable [`JournalSink`] that receives every state mutation.
+    ///
+    /// The sink is shared with all clones and delta views of this `State`
+    /// (like the in-memory ring) and is invoked synchronously on the write
+    /// path — keep it cheap. The in-memory ring keeps serving
+    /// [`recent_mutations`](Self::recent_mutations)/[`evidence`](Self::evidence);
+    /// the sink adds unbounded durability.
+    pub fn set_journal_sink(&self, sink: Arc<dyn JournalSink>) {
+        *self.journal_sink.0.write() = Some(sink);
+    }
+
+    /// Builder-style variant of [`set_journal_sink`](Self::set_journal_sink).
+    pub fn with_journal_sink(self, sink: Arc<dyn JournalSink>) -> Self {
+        self.set_journal_sink(sink);
+        self
     }
 
     /// Get a value by key, attempting to deserialize to the requested type.
@@ -819,7 +1010,7 @@ impl State {
             mutations.pop_front();
         }
         let sequence = self.next_mutation_sequence.fetch_add(1, Ordering::Relaxed);
-        mutations.push_back(StateMutation {
+        let mutation = StateMutation {
             sequence,
             key,
             old,
@@ -827,7 +1018,13 @@ impl State {
             origin,
             timestamp: SystemTime::now(),
             delta,
-        });
+        };
+        // Durable sink runs under the journal lock so the file order matches
+        // the ring order exactly. Sinks are sync + cheap by contract.
+        if let Some(sink) = self.journal_sink.0.read().as_ref() {
+            sink.write(&mutation);
+        }
+        mutations.push_back(mutation);
     }
 }
 
@@ -941,6 +1138,120 @@ impl<'a> ReadOnlyPrefixedState<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn journal_sink_receives_every_mutation_in_ring_order() {
+        let state = State::new();
+        let sink = Arc::new(MemoryJournalSink::new());
+        state.set_journal_sink(sink.clone());
+
+        let _ = state.set("a", 1);
+        let _ = state.set("b", "two");
+        state.remove("a");
+
+        let entries = sink.entries();
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries, state.recent_mutations());
+        assert_eq!(entries[0].key, "a");
+        assert_eq!(entries[2].origin, StateMutationOrigin::Remove);
+    }
+
+    #[test]
+    fn journal_sink_is_shared_with_clones_and_delta_views() {
+        let state = State::new();
+        let sink = Arc::new(MemoryJournalSink::new());
+        state.set_journal_sink(sink.clone());
+
+        let clone = state.clone();
+        let _ = clone.set("from_clone", true);
+
+        let tracked = state.with_delta_tracking();
+        let _ = tracked.set("from_delta", 1);
+        tracked.commit();
+
+        let keys: Vec<_> = sink.entries().iter().map(|m| m.key.clone()).collect();
+        assert!(keys.contains(&"from_clone".to_string()));
+        assert!(keys.contains(&"from_delta".to_string()));
+        // Commit re-records the delta write into the committed store.
+        assert!(sink
+            .entries()
+            .iter()
+            .any(|m| m.origin == StateMutationOrigin::Commit));
+    }
+
+    #[test]
+    fn journal_sink_outlives_ring_capacity() {
+        // The ring is bounded; the sink is not.
+        let state = State::new();
+        let sink = Arc::new(MemoryJournalSink::new());
+        state.set_journal_sink(sink.clone());
+
+        for i in 0..(DEFAULT_MUTATION_JOURNAL_CAPACITY + 10) {
+            let _ = state.set(format!("k{i}"), i);
+        }
+
+        assert_eq!(
+            state.recent_mutations().len(),
+            DEFAULT_MUTATION_JOURNAL_CAPACITY
+        );
+        assert_eq!(sink.len(), DEFAULT_MUTATION_JOURNAL_CAPACITY + 10);
+        assert_eq!(sink.entries()[0].key, "k0");
+    }
+
+    #[test]
+    fn state_mutation_serde_round_trip_uses_epoch_millis() {
+        let m = StateMutation {
+            sequence: 42,
+            key: "app:last_city".into(),
+            old: None,
+            new: Some(serde_json::json!("London")),
+            origin: StateMutationOrigin::Set,
+            timestamp: std::time::UNIX_EPOCH + std::time::Duration::from_millis(1_718_000_000_123),
+            delta: false,
+        };
+        let json = serde_json::to_string(&m).unwrap();
+        assert!(json.contains("\"timestamp_ms\":1718000000123"));
+        assert!(json.contains("\"origin\":\"set\""));
+        let back: StateMutation = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, m);
+    }
+
+    #[test]
+    fn file_journal_sink_round_trip() {
+        let dir = std::env::temp_dir().join(format!(
+            "gemini-rs-journal-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("session.journal.jsonl");
+
+        let state = State::new();
+        {
+            let sink = Arc::new(FileJournalSink::create(&path).unwrap());
+            state.set_journal_sink(sink);
+            let _ = state.set("a", 1);
+            let _ = state.set("a", 2);
+            state.remove("a");
+            // Replace the sink so the file sink drops (and flushes).
+            state.set_journal_sink(Arc::new(MemoryJournalSink::new()));
+        }
+
+        let data = std::fs::read_to_string(&path).unwrap();
+        let parsed: Vec<StateMutation> = data
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        assert_eq!(parsed.len(), 3);
+        assert_eq!(parsed[0].new, Some(serde_json::json!(1)));
+        assert_eq!(parsed[2].origin, StateMutationOrigin::Remove);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn set_and_get_string() {

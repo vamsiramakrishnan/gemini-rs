@@ -93,6 +93,36 @@ deliveries for a live "typing" indicator or real-time captions.
 })
 ```
 
+### Fast-lane delivery policy (backpressure)
+
+Internally the router forwards fast-lane events over a bounded channel. By
+default delivery is **lossless** — if a downstream consumer falls behind, the
+router awaits, which is the safe default but can stall routing under sustained
+back-pressure. For voice apps where a dropped frame is better than a stalled
+pipeline, opt into a lossy policy per event class:
+
+```rust,ignore
+use gemini_adk_rs::live::{Delivery, DeliveryConfig};
+
+Live::builder()
+    // Convenience setters for the common cases:
+    .lossy_audio()          // drop newest audio frame instead of stalling
+    .lossy_transcript()
+    // …or configure every class explicitly:
+    .delivery(
+        DeliveryConfig::default()
+            .audio(Delivery::LossyDropNewest)
+            .transcript(Delivery::LossyDropNewest),
+    )
+```
+
+`Delivery::Lossless` (the default for every class) is byte-for-byte the historical
+behavior. `Delivery::LossyDropNewest` uses a non-blocking `try_send` and drops the
+newest frame when the channel is full, bumping an internal dropped-frame counter
+rather than blocking the router. Control-lane events (tool calls, turn/generation
+completion, etc.) are always lossless. Per-class classes are `audio`, `text`,
+`transcript`, `thought`, `vad`, and `phase`.
+
 ## Control-Lane Callbacks (async, may block)
 
 These are registered with async-closure variants. The control lane awaits each

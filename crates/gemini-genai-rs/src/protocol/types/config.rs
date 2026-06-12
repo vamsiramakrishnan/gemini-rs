@@ -488,6 +488,20 @@ pub struct SessionConfig {
     pub input_sample_rate: u32,
     /// Output audio sample rate in Hz (default: 24000).
     pub output_sample_rate: u32,
+    /// Optional send pacing for outbound audio (token-bucket backpressure).
+    ///
+    /// `None` (default) sends audio as fast as the command queue accepts it.
+    /// When set, [`SessionHandle::send_audio`](crate::session::SessionHandle::send_audio)
+    /// paces the *producer*: a caller pushing audio faster than
+    /// `refill_rate_bps` waits, instead of overflowing the send queue.
+    pub audio_pacing: Option<crate::transport::BackpressureConfig>,
+    /// Optional wire recorder. When set, [`connect`](crate::transport::connect),
+    /// [`connect_with`](crate::transport::connect_with), and
+    /// [`ConnectBuilder`](crate::transport::ConnectBuilder) wrap the codec in a
+    /// [`RecordingCodec`](crate::transport::RecordingCodec) so every wire byte
+    /// (both directions) is delivered to the recorder. See
+    /// [`SessionConfig::record_wire`].
+    pub wire_recorder: Option<crate::transport::WireRecorderHandle>,
 }
 
 impl SessionConfig {
@@ -557,12 +571,31 @@ impl SessionConfig {
             output_audio_format: AudioFormat::Pcm16,
             input_sample_rate: 16000,
             output_sample_rate: 24000,
+            audio_pacing: None,
+            wire_recorder: None,
         }
     }
 
     /// Set the Gemini model.
     pub fn model(mut self, model: GeminiModel) -> Self {
         self.model = model;
+        self
+    }
+
+    /// Record every wire byte (both directions) to the given recorder.
+    ///
+    /// All connect paths ([`connect`](crate::transport::connect),
+    /// [`connect_with`](crate::transport::connect_with),
+    /// [`ConnectBuilder`](crate::transport::ConnectBuilder)) honor this by
+    /// wrapping the codec in a [`RecordingCodec`](crate::transport::RecordingCodec).
+    /// Use [`FileWireRecorder`](crate::transport::FileWireRecorder) for a
+    /// durable JSONL log that can be replayed offline with
+    /// [`ReplayTransport`](crate::transport::ReplayTransport).
+    pub fn record_wire(
+        mut self,
+        recorder: std::sync::Arc<dyn crate::transport::WireRecorder>,
+    ) -> Self {
+        self.wire_recorder = Some(crate::transport::WireRecorderHandle::new(recorder));
         self
     }
 
@@ -687,6 +720,16 @@ impl SessionConfig {
         });
         ric.turn_coverage = Some(coverage);
         self.realtime_input_config = Some(ric);
+        self
+    }
+
+    /// Pace outbound audio with a token bucket (producer-side backpressure).
+    ///
+    /// See [`SessionConfig::audio_pacing`]. Use
+    /// [`BackpressureConfig::default`](crate::transport::BackpressureConfig::default)
+    /// for 16 kHz PCM16 rates with a ~250 ms burst allowance.
+    pub fn audio_pacing(mut self, config: crate::transport::BackpressureConfig) -> Self {
+        self.audio_pacing = Some(config);
         self
     }
 

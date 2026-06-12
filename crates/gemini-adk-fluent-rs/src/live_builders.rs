@@ -24,8 +24,8 @@ use std::sync::Arc;
 use serde_json::Value;
 
 use gemini_adk_rs::live::{
-    BoxFuture, InstructionModifier, Phase, PhaseInstruction, PhasePreparation, TranscriptWindow,
-    Transition, WatchPredicate, Watcher,
+    InstructionModifier, Phase, PhaseInstruction, PhasePreparation, TranscriptWindow, Transition,
+    WatchPredicate, Watcher,
 };
 use gemini_adk_rs::State;
 use gemini_genai_rs::prelude::Content;
@@ -135,15 +135,14 @@ pub struct PhaseBuilder {
     name: String,
     instruction: Option<PhaseInstruction>,
     tools_enabled: Option<Vec<String>>,
-    guard: Option<Arc<dyn Fn(&State) -> bool + Send + Sync>>,
-    on_enter: Option<Arc<dyn Fn(State, Arc<dyn SessionWriter>) -> BoxFuture<()> + Send + Sync>>,
-    on_exit: Option<Arc<dyn Fn(State, Arc<dyn SessionWriter>) -> BoxFuture<()> + Send + Sync>>,
+    guard: Option<gemini_adk_rs::live::StateGuard>,
+    on_enter: Option<gemini_adk_rs::live::PhaseHook>,
+    on_exit: Option<gemini_adk_rs::live::PhaseHook>,
     transitions: Vec<Transition>,
     terminal: bool,
     modifiers: Vec<InstructionModifier>,
     prompt_on_enter_flag: bool,
-    on_enter_context_fn:
-        Option<Arc<dyn Fn(&State, &TranscriptWindow) -> Option<Vec<Content>> + Send + Sync>>,
+    on_enter_context_fn: Option<gemini_adk_rs::live::EnterContextFn>,
     needs: Vec<String>,
     requires: Vec<String>,
     preparations: Vec<PhasePreparation>,

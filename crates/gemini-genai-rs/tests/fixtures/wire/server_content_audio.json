@@ -1,0 +1,15 @@
+{
+  "serverContent": {
+    "modelTurn": {
+      "role": "model",
+      "parts": [
+        {
+          "inlineData": {
+            "mimeType": "audio/pcm;rate=24000",
+            "data": "AQIDBA=="
+          }
+        }
+      ]
+    }
+  }
+}

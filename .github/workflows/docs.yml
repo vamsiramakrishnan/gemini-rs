@@ -6,6 +6,10 @@ on:
   push:
     branches: [main]
 
+env:
+  # Node 20 is removed from runners 2026-09; fail loud now, not on the flag day.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 permissions:
   contents: read
   pages: write
@@ -20,7 +24,7 @@ jobs:
     name: Build documentation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: dtolnay/rust-toolchain@master
         with:
@@ -28,10 +32,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       # ── mdBook + plugins ────────────────────────────────────────────────────
+      # Installed from the release tarball directly: no Node action involved
+      # (peaceiris/actions-mdbook is Node 20-only) and faster than the action.
       - name: Install mdBook
-        uses: peaceiris/actions-mdbook@v2
-        with:
-          mdbook-version: "0.4.40"
+        run: |
+          MDBOOK_VERSION="v0.4.40"
+          curl -sfL "https://github.com/rust-lang/mdBook/releases/download/${MDBOOK_VERSION}/mdbook-${MDBOOK_VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
+            | tar -xz -C /usr/local/bin
+          mdbook --version
 
       - name: Install mdBook plugins
         run: |
@@ -40,6 +48,19 @@ jobs:
       # ── Build ───────────────────────────────────────────────────────────────
       - name: Build mdBook user guide
         run: mdbook build docs
+
+      # ── Link check (internal/relative links only — no flaky network calls) ──
+      # The api/gemini_* links resolve only in the deployed site (rustdoc is
+      # merged into target/book/api at deploy time below), so exclude them
+      # from the source-tree offline check.
+      - name: Check Markdown links
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: >-
+            --offline --no-progress
+            --exclude 'api/gemini_(genai|adk|adk_fluent)_rs'
+            docs/src README.md
+          fail: true
 
       - name: Check rustdoc (no warnings)
         env:

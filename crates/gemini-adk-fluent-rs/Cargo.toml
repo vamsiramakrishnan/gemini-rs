@@ -14,7 +14,8 @@ readme = "README.md"
 gemini-genai-rs = { workspace = true }
 gemini-adk-rs  = { workspace = true }
 bytes = "1"
-tokio = { version = "1", features = ["full"] }
+# Targeted features only; tests get `full` via dev-dependencies.
+tokio = { version = "1", features = ["rt", "macros", "sync", "time"] }
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -23,12 +24,16 @@ parking_lot = "0.12"
 tracing = "0.1"
 
 [dev-dependencies]
+tokio = { version = "1", features = ["full"] }
 tokio-test = "0.4"
 
 [features]
 default = []
 gemini-llm = ["gemini-adk-rs/gemini-llm"]
 tracing-support = ["gemini-adk-rs/tracing-support"]
+# Passthroughs so applications don't need lower-layer dependencies.
+vad-wavekat = ["gemini-adk-rs/vad-wavekat"]
+tls-rustls = ["gemini-adk-rs/tls-rustls", "gemini-genai-rs/tls-rustls"]
 otel = ["gemini-adk-rs/otel", "gemini-genai-rs/otel"]
 otel-otlp = ["gemini-adk-rs/otel-otlp", "gemini-genai-rs/otel-otlp"]
 otel-gcp = ["gemini-adk-rs/otel-gcp", "gemini-genai-rs/otel-gcp"]

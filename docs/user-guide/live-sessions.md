@@ -367,12 +367,41 @@ let phase = handle.phase();
 // Subscribe to raw events (for custom processing)
 let mut events = handle.subscribe();
 
+// Latest server-issued resumption handle (see Session Persistence guide)
+let resume = handle.resume_handle();
+
 // Graceful disconnect
 handle.disconnect().await?;
 
 // Wait for session to end naturally
 handle.done().await?;
 ```
+
+### Consuming Events as a Stream
+
+`handle.stream()` exposes the semantic `LiveEvent` flow as a
+`futures::Stream`, so it composes with the full `futures`/`tokio-stream`
+combinator toolbox (callbacks become sugar):
+
+```rust,ignore
+use futures::StreamExt;
+use gemini_adk_fluent_rs::live::LiveEvent;
+
+let mut stream = handle.stream();
+while let Some(ev) = stream.next().await {
+    match ev {
+        LiveEvent::TextDelta(t) => print!("{t}"),
+        LiveEvent::TurnComplete => println!(),
+        LiveEvent::Disconnected { .. } => break,
+        _ => {}
+    }
+}
+```
+
+Each call to `stream()` creates an independent subscriber starting from the
+current point in the event flow. A subscriber that falls behind the broadcast
+buffer skips the missed events and keeps going; the stream ends when the
+session's event channel closes.
 
 ## Vertex AI vs Google AI
 

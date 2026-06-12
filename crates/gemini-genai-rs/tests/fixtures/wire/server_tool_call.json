@@ -1,0 +1,18 @@
+{
+  "toolCall": {
+    "functionCalls": [
+      {
+        "name": "get_weather",
+        "args": {
+          "city": "Paris"
+        },
+        "id": "call-1"
+      },
+      {
+        "name": "get_time",
+        "args": {},
+        "id": "call-2"
+      }
+    ]
+  }
+}

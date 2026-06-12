@@ -8,12 +8,15 @@ use crate::error::AgentError;
 use crate::middleware::MiddlewareChain;
 use crate::state::State;
 
+/// Loop-termination predicate over shared state.
+type UntilFn = Arc<dyn Fn(&State) -> bool + Send + Sync>;
+
 /// Runs a text agent repeatedly until max iterations or a state predicate.
 pub struct LoopTextAgent {
     name: String,
     body: Arc<dyn TextAgent>,
     max: u32,
-    until: Option<Arc<dyn Fn(&State) -> bool + Send + Sync>>,
+    until: Option<UntilFn>,
     middleware: MiddlewareChain,
 }
 

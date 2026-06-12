@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 /// Gemini models that support the Multimodal Live API.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[non_exhaustive]
 pub enum GeminiModel {
     /// Gemini 2.0 Flash Live (gemini-2.0-flash-live-001).
     #[serde(rename = "models/gemini-2.0-flash-live-001")]
@@ -35,6 +36,7 @@ impl std::fmt::Display for GeminiModel {
 
 /// Available voice presets for Gemini Live audio output.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[non_exhaustive]
 pub enum Voice {
     /// Aoede voice preset.
     Aoede,

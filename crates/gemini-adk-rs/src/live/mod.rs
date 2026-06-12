@@ -25,6 +25,7 @@ pub mod persistence;
 pub mod phase;
 pub(crate) mod processor;
 pub mod reactor;
+pub mod replay;
 pub mod session_signals;
 pub mod soft_turn;
 pub mod steering;
@@ -47,20 +48,23 @@ pub use contract::{
     PromotionContract, RuntimeContract, ToolContract, TransitionContract, WatcherContract,
 };
 pub use effect_executor::LiveEffectExecutor;
-pub use events::LiveEvent;
+pub use events::{LiveEvent, LiveEventStream};
 pub use extractor::{ExtractionTrigger, FieldPromotion, LlmExtractor, MergePolicy, TurnExtractor};
 pub use handle::LiveHandle;
 pub use input_vad::{BackendInputVad, BackendVadSnapshot};
 pub use needs::{NeedsFulfillment, RepairAction, RepairConfig};
 pub use persistence::{FsPersistence, MemoryPersistence, SessionPersistence, SessionSnapshot};
 pub use phase::{
-    InstructionModifier, Phase, PhaseInstruction, PhaseMachine, PhasePreparation, PhaseTransition,
-    Transition, TransitionEvaluation, TransitionResult, TransitionTrigger,
+    EnterContextFn, InstructionModifier, Phase, PhaseHook, PhaseInstruction, PhaseMachine,
+    PhasePreparation, PhaseTransition, StateGuard, Transition, TransitionEvaluation,
+    TransitionResult, TransitionTrigger,
 };
+pub use processor::{Delivery, DeliveryConfig};
 pub use reactor::{
     EffectMode, EffectPolicy, LiveEffect, LiveReactor, Reaction, ReactorEvent, ReactorRule,
     VoiceRuntimeState,
 };
+pub use replay::{attach_session, collect_events_until_idle, replay_session, ReplaySession};
 pub use session_signals::{SessionSignals, SessionType};
 pub use soft_turn::SoftTurnDetector;
 pub use steering::{ContextDelivery, SteeringMode};

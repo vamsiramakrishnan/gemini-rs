@@ -1,0 +1,5 @@
+{
+  "toolCallCancellation": {
+    "ids": ["call-1", "call-2"]
+  }
+}

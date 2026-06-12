@@ -2,6 +2,9 @@
 //!
 //! Compose prompt sections additively with `+`.
 
+/// Adapter rewriting a rendered prompt section.
+pub type AdapterFn = std::sync::Arc<dyn Fn(&str) -> String + Send + Sync>;
+
 /// A section of a prompt.
 #[derive(Clone)]
 pub struct PromptSection {
@@ -12,7 +15,7 @@ pub struct PromptSection {
     /// Optional name for this section (used for name-based filtering/reordering).
     pub name: Option<String>,
     /// Optional adapter function for adaptive prompts.
-    pub adapter: Option<std::sync::Arc<dyn Fn(&str) -> String + Send + Sync>>,
+    pub adapter: Option<AdapterFn>,
 }
 
 impl std::fmt::Debug for PromptSection {

@@ -13,7 +13,7 @@ Plus `apps/gemini-adk-web-rs` (Axum Web UI), `apps/gemini-adk-api-rs` (REST API 
 Always import from the highest-level crate you need:
 
 ```rust
-// Full fluent DX (recommended for applications)
+// Kernel DX — the ~40 types a typical application touches (recommended start)
 use gemini_adk_fluent_rs::prelude::*;
 
 // Runtime only (building custom processors)
@@ -22,6 +22,34 @@ use gemini_adk_rs::*;
 // Wire protocol only (raw WebSocket access)
 use gemini_genai_rs::prelude::*;
 ```
+
+### Prelude kernel + submodule homes (gap #9 carve)
+
+The L2 `prelude` is a **kernel**, not an everything-glob: builders, the
+`S·C·T·P·M·A·E·G` algebra, operators/patterns, `Live`, `State`/`StateKey`,
+core errors, core flow (`Flow`/`Guard`/`FlowMonitor`/`FlowMode`/`Verdict`/
+`ToolPolicy`), core tools (`SimpleTool`/`TypedTool`/`ToolFunction`/
+`ToolDispatcher`/`#[tool]`/`Extract`/`Frame`), `BaseLlm`/`GeminiLlm`, callback
+contexts, the common Live session types, the text-agent combinators, build-time
+validation (`check_contracts`/`ContractViolation`/`diagnose`), and the L0 wire
+prelude. Everything else lives in a focused submodule — import what you need:
+
+```rust
+use gemini_adk_fluent_rs::live::*;          // full Live control plane (persistence, repair,
+                                            // steering, transcripts, contracts, soft-turn, …)
+use gemini_adk_fluent_rs::text::*;          // text-agent runtime details
+use gemini_adk_fluent_rs::tools::*;         // toolsets, confirmation, frames, recognizers
+use gemini_adk_fluent_rs::state::*;         // prefix scopes, SlotEvidence
+use gemini_adk_fluent_rs::flow::*;          // full flow vocabulary (CompiledFlow, StepAction, …)
+use gemini_adk_fluent_rs::agents::*;        // AgentTrait, orchestration (call_agent, AgentMode), agent_session
+use gemini_adk_fluent_rs::llm::*;           // LlmRequest/Response/Params/Registry
+use gemini_adk_fluent_rs::conversation::*;  // Conversation, ConversationSpec, CompiledConversation
+use gemini_adk_fluent_rs::wire::*;          // raw L0 wire types
+// a2a, motifs, policy, simulation, testing — the same-named module.
+```
+
+The L1 `Agent` *trait* is re-exported (in `prelude` and `agents`) as
+`AgentTrait` to avoid colliding with the L2 `Agent` builder alias.
 
 ## Core API Patterns
 
@@ -552,6 +580,7 @@ let artifacts = A::json_output("report", "Analysis report")
 | `SessionPersistence` / `SessionSnapshot` | Session persistence trait and snapshot type |
 | `FsPersistence` / `MemoryPersistence` | Built-in persistence backends |
 | `ControlPlaneConfig` | Consolidated control plane settings for the processor |
+| `Delivery` / `DeliveryConfig` | Per-event-class fast-lane backpressure policy: `Lossless` (default; awaits) vs `LossyDropNewest` (drops on full). L2: `.delivery(..)`, `.lossy_audio()`, `.lossy_transcript()` |
 | `ExtractionTrigger` | When to run extractors: EveryTurn, Interval, AfterToolCall, OnPhaseChange, OnGenerationComplete |
 | `Flow` / `Step` / `Guard` / `FlowMonitor` | Governed conversation/tool DAG: one declarative spec enforced live (`Live::govern(flow)`) — gates tool calls, projects active-step postures, drives repair. Closed serializable vocabulary; see `docs/user-guide/flow.md` |
 

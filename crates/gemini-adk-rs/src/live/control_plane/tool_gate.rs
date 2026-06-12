@@ -42,14 +42,14 @@ impl ToolGate {
         call_id: &str,
         name: &str,
         ok: bool,
-        flow: &mut Option<crate::flow::FlowMonitor>,
+        flow: &Option<crate::flow::SharedFlowMonitor>,
         state: &State,
     ) {
         if !call_id.is_empty() && !self.observed.insert(call_id.to_string()) {
             return; // this completion already advanced the flow
         }
-        if let Some(mon) = flow.as_mut() {
-            mon.observe_tool(name, ok, state);
+        if let Some(mon) = flow {
+            mon.lock().observe_tool(name, ok, state);
         }
     }
 }
@@ -57,9 +57,9 @@ impl ToolGate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::flow::{Enforcement, Flow, FlowMonitor, Guard};
+    use crate::flow::{Enforcement, Flow, FlowMonitor, Guard, SharedFlowMonitor};
 
-    fn one_step_flow() -> FlowMonitor {
+    fn one_step_flow() -> SharedFlowMonitor {
         let flow = Flow::new()
             .step("charge")
             .done(Guard::called_ok("charge_card"))
@@ -68,48 +68,50 @@ mod tests {
             .terminal()
             .build()
             .expect("valid flow");
-        FlowMonitor::new(flow, Enforcement::Observe)
+        FlowMonitor::new(flow, Enforcement::Observe).into_shared()
     }
 
     #[test]
     fn observe_completion_advances_flow_once_per_call_id() {
         let state = State::new();
-        let mut flow = Some(one_step_flow());
+        let flow = Some(one_step_flow());
         let mut gate = ToolGate::new();
 
         // First completion advances the flow: `charge` latches done.
-        gate.observe_completion("c1", "charge_card", true, &mut flow, &state);
-        flow.as_mut().unwrap().on_turn(&state);
-        assert!(flow.as_ref().unwrap().marking().done.contains("charge"));
+        gate.observe_completion("c1", "charge_card", true, &flow, &state);
+        let mon = flow.as_ref().unwrap();
+        mon.lock().on_turn(&state);
+        assert!(mon.lock().marking().done.contains("charge"));
 
         // A duplicate completion for the same call_id is a no-op (idempotent).
         // We can't easily observe a second `on_tool_ok` directly, but inserting
         // the id twice must not re-run the observation: assert the guard held.
         let before = gate.observed.len();
-        gate.observe_completion("c1", "charge_card", true, &mut flow, &state);
+        gate.observe_completion("c1", "charge_card", true, &flow, &state);
         assert_eq!(gate.observed.len(), before, "duplicate id not re-inserted");
     }
 
     #[test]
     fn empty_call_id_is_always_observed() {
         let state = State::new();
-        let mut flow = Some(one_step_flow());
+        let flow = Some(one_step_flow());
         let mut gate = ToolGate::new();
 
-        gate.observe_completion("", "charge_card", true, &mut flow, &state);
-        gate.observe_completion("", "charge_card", true, &mut flow, &state);
+        gate.observe_completion("", "charge_card", true, &flow, &state);
+        gate.observe_completion("", "charge_card", true, &flow, &state);
         // Empty ids are never recorded, so the gate stays empty.
         assert!(gate.observed.is_empty());
-        flow.as_mut().unwrap().on_turn(&state);
-        assert!(flow.as_ref().unwrap().marking().done.contains("charge"));
+        let mon = flow.as_ref().unwrap();
+        mon.lock().on_turn(&state);
+        assert!(mon.lock().marking().done.contains("charge"));
     }
 
     #[test]
     fn no_flow_is_a_no_op() {
         let state = State::new();
-        let mut flow: Option<FlowMonitor> = None;
+        let flow: Option<SharedFlowMonitor> = None;
         let mut gate = ToolGate::new();
         // Must not panic when no flow governs the session.
-        gate.observe_completion("c1", "charge_card", true, &mut flow, &state);
+        gate.observe_completion("c1", "charge_card", true, &flow, &state);
     }
 }

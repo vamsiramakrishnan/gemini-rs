@@ -1,0 +1,5 @@
+error: unknown `extract` option (expected `name` or `window`)
+ --> tests/ui/fail/extract_unknown_option.rs:6:11
+  |
+6 | #[extract(window_size = 5)]
+  |           ^^^^^^^^^^^

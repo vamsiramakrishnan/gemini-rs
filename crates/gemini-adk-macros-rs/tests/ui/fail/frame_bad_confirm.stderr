@@ -1,0 +1,5 @@
+error: unknown confirm policy 'sometimes' (expected never/low_confidence/always)
+ --> tests/ui/fail/frame_bad_confirm.rs:8:30
+  |
+8 |     #[slot(prompt = "Name?", confirm = "sometimes")]
+  |                              ^^^^^^^^^^^^^^^^^^^^^

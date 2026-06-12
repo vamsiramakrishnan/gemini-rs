@@ -12,9 +12,13 @@ use crate::transport::auth::ServiceEndpoint;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum TuningJobState {
+    /// State not set by the server.
     StateUnspecified,
+    /// Tuning job is being created.
     Creating,
+    /// Tuned model is ready for use.
     Active,
+    /// Terminated with an error.
     Failed,
 }
 
@@ -107,10 +111,13 @@ pub struct ListTuningJobsResponse {
 #[derive(Debug, thiserror::Error)]
 pub enum TuningsError {
     #[error(transparent)]
+    /// Transport-level HTTP failure.
     Http(#[from] HttpError),
     #[error("Failed to parse response: {0}")]
+    /// Response body failed to parse.
     Parse(#[from] serde_json::Error),
     #[error("Auth error: {0}")]
+    /// Authentication/authorization failure.
     Auth(String),
 }
 

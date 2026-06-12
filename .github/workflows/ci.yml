@@ -7,6 +7,8 @@ on:
     branches: [main]
 
 env:
+  # Node 20 is removed from runners 2026-09; fail loud now, not on the flag day.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
 
@@ -15,7 +17,7 @@ jobs:
     name: Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.93.1"
@@ -27,7 +29,7 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.93.1"
@@ -38,7 +40,7 @@ jobs:
     name: Clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.93.1"
@@ -50,7 +52,7 @@ jobs:
     name: Format
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.93.1"
@@ -58,15 +60,38 @@ jobs:
       - run: cargo fmt --all -- --check
 
   # Feature-boundary checks: a feature-heavy SDK must build at both extremes, not
-  # just the default set. (Next: `cargo hack --feature-powerset` for combinations.)
+  # just the default set. The `hack` job covers each feature individually.
   features:
     name: Feature extremes
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.93.1"
       - uses: Swatinem/rust-cache@v2
       - run: cargo check --workspace --no-default-features
       - run: cargo check --workspace --all-features
+
+  # Per-feature isolation: every feature of the published crates must compile on
+  # its own (catches missing feature deps that the extremes above can't see).
+  hack:
+    name: Feature isolation (cargo-hack)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.93.1"
+      - uses: taiki-e/install-action@cargo-hack
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo hack check --each-feature --no-dev-deps -p gemini-genai-rs -p gemini-adk-rs -p gemini-adk-fluent-rs
+
+  # Supply chain: RustSec advisories, license allow-list, source whitelist.
+  # Configuration lives in deny.toml.
+  deny:
+    name: Supply chain (cargo-deny)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: EmbarkStudios/cargo-deny-action@v2

@@ -1,10 +1,10 @@
 //! Structured logging helpers.
 //!
 //! All log events carry consistent fields (session_id, phase) for correlation.
-//! Feature-gated behind `tracing-support`.
+//! Always compiled: the `tracing` facade is an unconditional dependency;
+//! spans are no-ops unless a subscriber is installed.
 
 /// Log a session lifecycle event.
-#[cfg(feature = "tracing-support")]
 pub fn log_session_event(session_id: &str, phase: &str, event: &str) {
     tracing::info!(
         session_id = session_id,
@@ -15,7 +15,6 @@ pub fn log_session_event(session_id: &str, phase: &str, event: &str) {
 }
 
 /// Log a tool call dispatch.
-#[cfg(feature = "tracing-support")]
 pub fn log_tool_call(session_id: &str, function_name: &str, call_count: usize) {
     tracing::info!(
         session_id = session_id,
@@ -27,7 +26,6 @@ pub fn log_tool_call(session_id: &str, function_name: &str, call_count: usize) {
 }
 
 /// Log a WebSocket error (warn level).
-#[cfg(feature = "tracing-support")]
 pub fn log_ws_error(session_id: &str, error: &str) {
     tracing::warn!(
         session_id = session_id,
@@ -38,7 +36,6 @@ pub fn log_ws_error(session_id: &str, error: &str) {
 }
 
 /// Log a jitter buffer underrun (warn level).
-#[cfg(feature = "tracing-support")]
 pub fn log_jitter_underrun(session_id: &str, depth_ms: f64) {
     tracing::warn!(
         session_id = session_id,
@@ -49,7 +46,6 @@ pub fn log_jitter_underrun(session_id: &str, depth_ms: f64) {
 }
 
 /// Log a reconnection attempt (warn level).
-#[cfg(feature = "tracing-support")]
 pub fn log_reconnection(session_id: &str, attempt: u32, delay_ms: u64) {
     tracing::warn!(
         session_id = session_id,
@@ -61,7 +57,6 @@ pub fn log_reconnection(session_id: &str, attempt: u32, delay_ms: u64) {
 }
 
 /// Log VAD state change (debug level).
-#[cfg(feature = "tracing-support")]
 pub fn log_vad_event(session_id: &str, event: &str) {
     tracing::debug!(
         session_id = session_id,
@@ -72,7 +67,6 @@ pub fn log_vad_event(session_id: &str, event: &str) {
 }
 
 /// Log an HTTP request (info level).
-#[cfg(feature = "tracing-support")]
 pub fn log_http_request(method: &str, url: &str) {
     tracing::info!(
         event = "http_request",
@@ -83,7 +77,6 @@ pub fn log_http_request(method: &str, url: &str) {
 }
 
 /// Log an HTTP response (info level).
-#[cfg(feature = "tracing-support")]
 pub fn log_http_response(status: u16, duration_ms: f64) {
     tracing::info!(
         event = "http_response",
@@ -94,7 +87,6 @@ pub fn log_http_response(status: u16, duration_ms: f64) {
 }
 
 /// Log an HTTP retry attempt (warn level).
-#[cfg(feature = "tracing-support")]
 pub fn log_http_retry(url: &str, attempt: u32, delay_ms: u64) {
     tracing::warn!(
         event = "http_retry",
@@ -104,26 +96,6 @@ pub fn log_http_retry(url: &str, attempt: u32, delay_ms: u64) {
         "HTTP retry"
     );
 }
-
-// No-op stubs when tracing is disabled.
-#[cfg(not(feature = "tracing-support"))]
-pub fn log_session_event(_: &str, _: &str, _: &str) {}
-#[cfg(not(feature = "tracing-support"))]
-pub fn log_tool_call(_: &str, _: &str, _: usize) {}
-#[cfg(not(feature = "tracing-support"))]
-pub fn log_ws_error(_: &str, _: &str) {}
-#[cfg(not(feature = "tracing-support"))]
-pub fn log_jitter_underrun(_: &str, _: f64) {}
-#[cfg(not(feature = "tracing-support"))]
-pub fn log_reconnection(_: &str, _: u32, _: u64) {}
-#[cfg(not(feature = "tracing-support"))]
-pub fn log_vad_event(_: &str, _: &str) {}
-#[cfg(not(feature = "tracing-support"))]
-pub fn log_http_request(_: &str, _: &str) {}
-#[cfg(not(feature = "tracing-support"))]
-pub fn log_http_response(_: u16, _: f64) {}
-#[cfg(not(feature = "tracing-support"))]
-pub fn log_http_retry(_: &str, _: u32, _: u64) {}
 
 #[cfg(test)]
 mod tests {

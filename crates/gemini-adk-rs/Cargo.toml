@@ -11,10 +11,11 @@ documentation = "https://docs.rs/gemini-adk-rs"
 readme = "README.md"
 
 [dependencies]
-gemini-genai-rs = { workspace = true }
+gemini-genai-rs = { workspace = true, features = ["vad"] }
 gemini-adk-macros-rs = { workspace = true }
 bytes = "1"
-tokio = { version = "1", features = ["full"] }
+# Targeted features only; tests get `full` via dev-dependencies.
+tokio = { version = "1", features = ["rt", "macros", "sync", "time", "fs", "io-util", "process"] }
 tokio-util = "0.7"
 async-trait = "0.1"
 schemars = "0.8"
@@ -38,6 +39,7 @@ reqwest = { version = "0.12", features = ["json", "multipart"], optional = true 
 base64 = "0.22"
 
 [dev-dependencies]
+tokio = { version = "1", features = ["full"] }
 tokio-test = "0.4"
 proptest = "1"
 
@@ -49,6 +51,9 @@ gemini-llm = ["gemini-genai-rs/http", "gemini-genai-rs/generate"]
 http = ["dep:reqwest"]
 gcs-artifacts = ["http"]
 tracing-support = ["dep:tracing", "gemini-genai-rs/tracing-support"]
+# Passthroughs so applications don't need a direct gemini-genai-rs dependency.
+vad-wavekat = ["gemini-genai-rs/vad-wavekat"]
+tls-rustls = ["gemini-genai-rs/tls-rustls"]
 metrics = ["dep:metrics"]
 database-sessions = ["dep:sqlx", "sqlx/runtime-tokio-rustls", "sqlx/sqlite"]
 postgres-sessions = ["database-sessions", "sqlx/postgres"]

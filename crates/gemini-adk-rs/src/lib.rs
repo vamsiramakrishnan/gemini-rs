@@ -79,7 +79,8 @@ pub use events::{Event, EventActions, EventType, StructuredEvent};
 pub use extract::{Extract, Recognizer, RecordExtractor};
 pub use flow::{
     render_ground, run as run_on_enter, CompiledFlow, Enforcement as FlowMode, Flow, FlowError,
-    FlowErrors, FlowExplanation, FlowMonitor, Guard, StepAction, ToolPolicy, Verdict, Violation,
+    FlowErrors, FlowExplanation, FlowMonitor, Guard, SharedFlowMonitor, StepAction, ToolPolicy,
+    Verdict, Violation,
 };
 pub use frame::{ConfirmPolicy, Frame, FrameSpec, SlotRecognizer, SlotSpec, SlotValidator};
 /// Re-exports the `#[tool]`/`#[derive(..)]` macros route their generated code
@@ -105,7 +106,7 @@ pub use gemini_adk_macros_rs::tool;
 /// See the [`gemini_adk_macros_rs::Extract`](macro@gemini_adk_macros_rs::Extract)
 /// documentation for details.
 pub use gemini_adk_macros_rs::Extract;
-/// Derive macro that generates a [`Frame`](frame::Frame) impl from a struct's
+/// Derive macro that generates a [`frame::Frame`] impl from a struct's
 /// `#[slot(..)]` fields. Shares the name `Frame` with the trait (macro vs type
 /// namespace), so both can be imported together.
 pub use gemini_adk_macros_rs::Frame;
@@ -131,6 +132,7 @@ pub use runner::Runner;
 pub use session::DatabaseSessionService;
 pub use session::{db_schema, InMemorySessionService, Session, SessionId, SessionService};
 pub use state::PrefixedState;
+pub use state::{FileJournalSink, JournalSink, MemoryJournalSink};
 pub use state::{SlotEvidence, State, StateMutation, StateMutationOrigin};
 pub use text::{
     DispatchTextAgent, FallbackTextAgent, FnTextAgent, JoinTextAgent, LlmTextAgent, LoopTextAgent,

@@ -1,7 +1,8 @@
 //! Observability layer — OpenTelemetry tracing, structured logging, Prometheus metrics.
 //!
 //! All components are feature-gated for zero overhead when disabled:
-//! - `tracing-support`: Console logging via tracing-subscriber
+//! - `tracing-subscriber`: console logging — installs a fmt/EnvFilter subscriber
+//!   via `TelemetryConfig::init` (the `tracing` facade itself is always available)
 //! - `metrics`: Prometheus metric definitions and export
 //! - `otel-otlp`: OTLP trace and metric export to any OTel collector
 //! - `otel-gcp`: Google Cloud-native trace and metric export (Cloud Trace + Cloud Monitoring)
@@ -13,7 +14,8 @@ pub mod spans;
 /// Telemetry configuration.
 #[derive(Debug, Clone)]
 pub struct TelemetryConfig {
-    /// Enable structured logging.
+    /// Enable structured logging. Installing the subscriber requires the
+    /// `tracing-subscriber` crate feature; without it this flag is inert.
     pub logging_enabled: bool,
     /// Log level filter (e.g., "info", "debug", "gemini_genai_rs=debug").
     pub log_filter: String,
@@ -113,7 +115,7 @@ impl TelemetryConfig {
         }
 
         // --- Tracing subscriber ---
-        #[cfg(feature = "tracing-support")]
+        #[cfg(feature = "tracing-subscriber")]
         if self.logging_enabled {
             #[cfg(feature = "otel-otlp")]
             {
@@ -174,8 +176,10 @@ impl TelemetryConfig {
                 GCPMetricsExporter, GCPMetricsExporterConfig,
             };
 
-            let mut metrics_cfg = GCPMetricsExporterConfig::default();
-            metrics_cfg.prefix = format!("custom.googleapis.com/{}", self.otel_service_name);
+            let mut metrics_cfg = GCPMetricsExporterConfig {
+                prefix: format!("custom.googleapis.com/{}", self.otel_service_name),
+                ..Default::default()
+            };
             if let Some(ref project_id) = self.otel_gcp_project {
                 metrics_cfg.project_id = Some(project_id.clone());
             }
@@ -195,7 +199,7 @@ impl TelemetryConfig {
         }
 
         // --- Tracing subscriber ---
-        #[cfg(feature = "tracing-support")]
+        #[cfg(feature = "tracing-subscriber")]
         if self.logging_enabled {
             self.init_tracing_subscriber_with_tracer(otel_tracer)?;
         }
@@ -205,9 +209,9 @@ impl TelemetryConfig {
 
     /// Set up the tracing subscriber with no OTel tracer layer (plain logging mode).
     ///
-    /// Used when `tracing-support` is on but neither `otel-otlp` nor `otel-gcp`
+    /// Used when `tracing-subscriber` is on but neither `otel-otlp` nor `otel-gcp`
     /// provides a tracer, or when called from `init()` without OTLP.
-    #[cfg(feature = "tracing-support")]
+    #[cfg(feature = "tracing-subscriber")]
     #[allow(dead_code)]
     fn init_tracing_subscriber(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.init_tracing_subscriber_with_tracer(None)
@@ -216,7 +220,7 @@ impl TelemetryConfig {
     /// Set up the tracing subscriber, optionally wiring in an OTel tracer layer.
     ///
     /// Shared implementation used by both `init()` (OTLP path) and `init_gcp()`.
-    #[cfg(feature = "tracing-support")]
+    #[cfg(feature = "tracing-subscriber")]
     fn init_tracing_subscriber_with_tracer(
         &self,
         #[cfg(feature = "otel-base")] otel_tracer: Option<opentelemetry_sdk::trace::Tracer>,
@@ -259,7 +263,11 @@ impl TelemetryConfig {
     }
 
     /// Build an OTel resource with the configured service name.
-    #[cfg(feature = "otel-base")]
+    ///
+    /// Gated on the exporter features (not `otel-base`): the only callers are
+    /// the OTLP and GCP provider-construction paths, so under a bare
+    /// `otel-base` build this would be dead code.
+    #[cfg(any(feature = "otel-otlp", feature = "otel-gcp"))]
     pub(crate) fn otel_resource(&self) -> opentelemetry_sdk::Resource {
         use opentelemetry::KeyValue;
         opentelemetry_sdk::Resource::builder_empty()

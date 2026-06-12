@@ -222,31 +222,77 @@ pub enum ServerMessage {
     Unknown(serde_json::Value),
 }
 
+/// Single-pass deserialization target: every known server message is
+/// discriminated by exactly one top-level key, so one serde pass over the
+/// frame replaces the previous string-contains scan + targeted re-parse
+/// (which cost an O(n) `memchr` sweep per candidate key before parsing).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawServerMessage {
+    setup_complete: Option<SetupCompletePayload>,
+    server_content: Option<ServerContentPayload>,
+    usage_metadata: Option<UsageMetadata>,
+    tool_call: Option<ToolCallPayload>,
+    tool_call_cancellation: Option<ToolCallCancellationPayload>,
+    go_away: Option<GoAwayPayload>,
+    session_resumption_update: Option<SessionResumptionUpdatePayload>,
+    voice_activity: Option<VoiceActivityPayload>,
+}
+
 impl ServerMessage {
     /// Parse a server message from a JSON text frame.
     ///
-    /// Uses string-contains routing for O(1) dispatch instead of
-    /// serde(untagged)'s O(N) try-all-variants approach.
+    /// One serde pass: known messages are discriminated by their single
+    /// top-level key; frames with no known key fall back to a raw-value parse
+    /// and surface as [`ServerMessage::Unknown`] (forward compatibility).
     pub fn parse(text: &str) -> Result<Self, serde_json::Error> {
-        if text.contains("\"setupComplete\"") {
-            serde_json::from_str::<SetupCompleteMessage>(text).map(ServerMessage::SetupComplete)
-        } else if text.contains("\"toolCallCancellation\"") {
-            // Must check before "toolCall" since it contains "toolCall" as substring
-            serde_json::from_str::<ToolCallCancellationMessage>(text)
-                .map(ServerMessage::ToolCallCancellation)
-        } else if text.contains("\"toolCall\"") {
-            serde_json::from_str::<ToolCallMessage>(text).map(ServerMessage::ToolCall)
-        } else if text.contains("\"serverContent\"") {
-            serde_json::from_str::<ServerContentMessage>(text)
-                .map(|sc| ServerMessage::ServerContent(Box::new(sc)))
-        } else if text.contains("\"goAway\"") {
-            serde_json::from_str::<GoAwayMessage>(text).map(ServerMessage::GoAway)
-        } else if text.contains("\"sessionResumptionUpdate\"") {
-            serde_json::from_str::<SessionResumptionUpdateMessage>(text)
-                .map(ServerMessage::SessionResumptionUpdate)
-        } else if text.contains("\"voiceActivity\"") {
-            serde_json::from_str::<VoiceActivityMessage>(text).map(ServerMessage::VoiceActivity)
+        let raw: RawServerMessage = match serde_json::from_str(text) {
+            Ok(raw) => raw,
+            // A known key with an unexpected payload shape should surface as
+            // a parse error (matching the previous targeted-parse behavior),
+            // but a frame that isn't an object at all falls through to Unknown.
+            Err(e) => {
+                return if text.trim_start().starts_with('{') {
+                    Err(e)
+                } else {
+                    serde_json::from_str::<serde_json::Value>(text).map(ServerMessage::Unknown)
+                };
+            }
+        };
+
+        if let Some(setup_complete) = raw.setup_complete {
+            Ok(ServerMessage::SetupComplete(SetupCompleteMessage {
+                setup_complete,
+            }))
+        } else if let Some(tool_call_cancellation) = raw.tool_call_cancellation {
+            Ok(ServerMessage::ToolCallCancellation(
+                ToolCallCancellationMessage {
+                    tool_call_cancellation,
+                },
+            ))
+        } else if let Some(tool_call) = raw.tool_call {
+            Ok(ServerMessage::ToolCall(ToolCallMessage { tool_call }))
+        } else if let Some(server_content) = raw.server_content {
+            Ok(ServerMessage::ServerContent(Box::new(
+                ServerContentMessage {
+                    server_content,
+                    usage_metadata: raw.usage_metadata,
+                },
+            )))
+        } else if let Some(go_away) = raw.go_away {
+            Ok(ServerMessage::GoAway(GoAwayMessage { go_away }))
+        } else if let Some(session_resumption_update) = raw.session_resumption_update {
+            Ok(ServerMessage::SessionResumptionUpdate(
+                SessionResumptionUpdateMessage {
+                    session_resumption_update,
+                },
+            ))
+        } else if let Some(voice_activity) = raw.voice_activity {
+            Ok(ServerMessage::VoiceActivity(VoiceActivityMessage {
+                voice_activity,
+            }))
         } else {
+            // No known key: unknown message type (forward compatibility).
             serde_json::from_str::<serde_json::Value>(text).map(ServerMessage::Unknown)
         }
     }

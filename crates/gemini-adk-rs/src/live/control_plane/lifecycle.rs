@@ -34,6 +34,10 @@ use super::extractors::run_extractors;
 /// accumulated into a single `context_buffer` and sent as ONE
 /// `send_client_content` call, eliminating the burst of separate WebSocket
 /// frames that can confuse the model or clash with concurrent user input.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "turn-boundary stage entry point: each parameter is one control-plane subsystem; bundling them into a struct would just move the list (see the turn-pipeline RFC)"
+)]
 pub(in crate::live) async fn handle_turn_complete(
     callbacks: &EventCallbacks,
     writer: &Arc<dyn SessionWriter>,
@@ -172,7 +176,7 @@ pub(in crate::live) async fn handle_turn_complete(
     // 7g. Flow governance. (Extracted so the re-latch + status publish + posture
     // /grounding/unmet projection + on-enter firing is a named, harness-covered
     // unit — see `harness` below and docs/plans/2026-06-07-turn-tool-pipeline-rfc.md.)
-    govern_flow(&mut control_plane.flow, state, &mut context_buffer).await;
+    govern_flow(&control_plane.flow, state, &mut context_buffer).await;
 
     // 8. Fire watchers from net state mutations since the cursor.
     if let (Some(ref watchers), Some(cursor)) = (watchers, pre_watcher_cursor) {
@@ -253,27 +257,13 @@ pub(in crate::live) async fn handle_turn_complete(
     let tc: u32 = state.session().get("turn_count").unwrap_or(0);
     let _ = state.session().set("turn_count", tc + 1);
 
-    // 18. Persist session state (Phase 7 -- fire and forget)
+    // 18. Persist session state (Phase 7 -- fire and forget; a final
+    // *synchronous* snapshot also runs on control-lane exit via
+    // `final_drain`, so the last turn can't be lost to a spawned save racing
+    // process shutdown).
     if let Some(ref persistence) = control_plane.persistence {
-        let phase_name = if let Some(ref pm) = phase_machine {
-            pm.lock().await.current().to_string()
-        } else {
-            String::new()
-        };
-        let snapshot = crate::live::persistence::SessionSnapshot {
-            state: state.to_hashmap(),
-            phase: phase_name,
-            turn_count: tc + 1,
-            transcript_summary: transcript_buffer.format_window(5),
-            resume_handle: shared.resume_handle.lock().clone(),
-            saved_at: {
-                // Simple ISO 8601 timestamp without chrono dependency
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default();
-                format!("{}s", now.as_secs())
-            },
-        };
+        let snapshot =
+            build_snapshot(state, phase_machine, transcript_buffer, shared, tc + 1).await;
         let p = persistence.clone();
         let sid = control_plane
             .session_id
@@ -286,6 +276,83 @@ pub(in crate::live) async fn handle_turn_complete(
                 let _ = e;
             }
         });
+    }
+}
+
+/// Build a [`SessionSnapshot`](crate::live::persistence::SessionSnapshot) of
+/// the current control-plane state (shared by the per-turn spawned save and
+/// the synchronous final save on lane exit).
+async fn build_snapshot(
+    state: &State,
+    phase_machine: &Option<tokio::sync::Mutex<PhaseMachine>>,
+    transcript_buffer: &mut TranscriptBuffer,
+    shared: &SharedState,
+    turn_count: u32,
+) -> crate::live::persistence::SessionSnapshot {
+    let phase_name = if let Some(ref pm) = phase_machine {
+        pm.lock().await.current().to_string()
+    } else {
+        String::new()
+    };
+    crate::live::persistence::SessionSnapshot {
+        state: state.to_hashmap(),
+        phase: phase_name,
+        turn_count,
+        transcript_summary: transcript_buffer.format_window(5),
+        resume_handle: shared.resume_handle.lock().clone(),
+        saved_at: {
+            // Simple ISO 8601 timestamp without chrono dependency
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default();
+            format!("{}s", now.as_secs())
+        },
+    }
+}
+
+/// Graceful drain on control-lane exit.
+///
+/// Runs once, after the control lane's event channel closes (session
+/// disconnected or router gone):
+///
+/// 1. Best-effort flush of any deferred context still queued in
+///    [`PendingContext`](crate::live::context_writer::PendingContext) — under
+///    `ContextDelivery::Deferred` these turns would otherwise be silently
+///    dropped on disconnect.
+/// 2. A final persistence snapshot, **awaited synchronously** (unlike the
+///    per-turn spawn-and-forget save), so state accumulated since the last
+///    turn boundary — or a last turn whose spawned save lost the race with
+///    shutdown — is not lost.
+pub(in crate::live) async fn final_drain(
+    writer: &Arc<dyn SessionWriter>,
+    shared: &SharedState,
+    state: &State,
+    phase_machine: &Option<tokio::sync::Mutex<PhaseMachine>>,
+    transcript_buffer: &mut TranscriptBuffer,
+    control_plane: &ControlPlaneConfig,
+) {
+    // 1. Flush deferred context (best effort; the session may already be gone).
+    if let Some(ref pending) = control_plane.pending_context {
+        let context = pending.drain_context();
+        if !context.is_empty() {
+            writer.send_client_content(context, false).await.ok();
+        }
+    }
+
+    // 2. Final synchronous persistence snapshot.
+    if let Some(ref persistence) = control_plane.persistence {
+        let turn_count = state.session().get::<u32>("turn_count").unwrap_or(0);
+        let snapshot =
+            build_snapshot(state, phase_machine, transcript_buffer, shared, turn_count).await;
+        let sid = control_plane
+            .session_id
+            .clone()
+            .unwrap_or_else(|| "default".to_string());
+        if let Err(e) = persistence.save(&sid, &snapshot).await {
+            #[cfg(feature = "tracing-support")]
+            tracing::warn!("Final session persistence failed: {}", e);
+            let _ = e;
+        }
     }
 }
 
@@ -407,38 +474,54 @@ async fn evaluate_repair(
 /// unmet requirements as a repair line, and fires on-enter actions for steps
 /// that just became active. Behavior-preserving lift of step 7g. No-op when no
 /// flow is governing the session.
+///
+/// The monitor is shared with the [`LiveHandle`](crate::live::LiveHandle)
+/// (`explain`/`why_blocked` snapshots), so the lock is held only for the
+/// synchronous re-latch + projection; on-enter actions (which may await an
+/// inline agent) fire after the guard is dropped.
 async fn govern_flow(
-    flow: &mut Option<crate::flow::FlowMonitor>,
+    flow: &Option<crate::flow::SharedFlowMonitor>,
     state: &State,
     context_buffer: &mut Vec<gemini_genai_rs::prelude::Content>,
 ) {
-    if let Some(ref mut mon) = flow {
-        mon.on_turn(state);
-        let done: Vec<String> = mon.marking().done.iter().cloned().collect();
-        let _ = state.set("flow:done", done);
-        let active: Vec<String> = mon
-            .active_steps(state)
-            .iter()
-            .map(|s| s.id.clone())
-            .collect();
-        let _ = state.set("flow:active", active);
-        for posture in mon.active_postures(state) {
-            context_buffer.push(gemini_genai_rs::prelude::Content::model(posture));
-        }
-        // Grounding lines: curated, State-interpolated facts (anti-hallucination).
-        for ground in mon.active_grounds(state) {
-            context_buffer.push(gemini_genai_rs::prelude::Content::model(ground));
-        }
-        let unmet = mon.unmet_requirements();
-        if !unmet.is_empty() {
-            context_buffer.push(gemini_genai_rs::prelude::Content::model(format!(
-                "Before finishing, these still need to happen: {}.",
-                unmet.join(", ")
-            )));
-        }
+    if let Some(mon_arc) = flow {
+        let enter_actions = {
+            let mut mon = mon_arc.lock();
+            mon.on_turn(state);
+            let done: Vec<String> = mon.marking().done.iter().cloned().collect();
+            let _ = state.set("flow:done", done);
+            let active: Vec<String> = mon
+                .active_steps(state)
+                .iter()
+                .map(|s| s.id.clone())
+                .collect();
+            let _ = state.set("flow:active", active);
+            for posture in mon.active_postures(state) {
+                context_buffer.push(gemini_genai_rs::prelude::Content::model(posture));
+            }
+            // Grounding lines: curated, State-interpolated facts (anti-hallucination).
+            for ground in mon.active_grounds(state) {
+                context_buffer.push(gemini_genai_rs::prelude::Content::model(ground));
+            }
+            let unmet = mon.unmet_requirements();
+            if !unmet.is_empty() {
+                context_buffer.push(gemini_genai_rs::prelude::Content::model(format!(
+                    "Before finishing, these still need to happen: {}.",
+                    unmet.join(", ")
+                )));
+            }
+            // Collect on-enter actions for steps that just became active, to
+            // fire below without holding the lock across an await.
+            mon.take_newly_active(state)
+                .into_iter()
+                .filter_map(|id| mon.enter_action(&id).cloned().map(|a| (id, a)))
+                .collect::<Vec<_>>()
+        };
         // Fire on_enter actions for steps that just became active. `Call`
         // actions resolve inline; `Dispatch`/`Background` run detached.
-        mon.fire_enter_actions(state).await;
+        for (id, action) in enter_actions {
+            action.fire(&id, state).await;
+        }
     }
 }
 
@@ -793,9 +876,12 @@ mod harness {
                 writer,
                 shared: SharedState {
                     interrupted: AtomicBool::new(false),
+                    barge_in: Mutex::new(tokio_util::sync::CancellationToken::new()),
                     resume_handle: Mutex::new(None),
                     last_instruction: Mutex::new(None),
                     pending_context: None,
+                    delivery: crate::live::processor::DeliveryConfig::default(),
+                    dropped: crate::live::processor::DroppedFrames::default(),
                 },
                 state: State::new(),
                 transcript,
@@ -1008,7 +1094,7 @@ mod harness {
             .build()
             .expect("valid flow");
         let mut h = Harness::new();
-        h.control.flow = Some(FlowMonitor::new(flow, Enforcement::Observe));
+        h.control.flow = Some(FlowMonitor::new(flow, Enforcement::Observe).into_shared());
 
         // Not yet greeted -> greet is the active step, nothing done.
         h.run_turn().await;
@@ -1028,6 +1114,42 @@ mod harness {
                 .contains(&"greet".to_string()),
             "completed step latched done"
         );
+    }
+
+    #[tokio::test]
+    async fn shared_monitor_snapshot_observes_control_lane_progress() {
+        // The handle path: a clone of the shared monitor (what `LiveHandle`
+        // holds) answers `why_blocked` against the marking the control lane
+        // advances — without the two ever fighting over ownership.
+        let flow = Flow::new()
+            .step("verify")
+            .allow(["lookup_account"])
+            .done(Guard::is_true("identity_verified"))
+            .step("pay")
+            .after("verify")
+            .allow(["charge_card"])
+            .done(Guard::called_ok("charge_card"))
+            .step("end")
+            .after("pay")
+            .terminal()
+            .build()
+            .expect("valid flow");
+        let shared = FlowMonitor::new(flow, Enforcement::Enforce).into_shared();
+        let mut h = Harness::new();
+        h.control.flow = Some(shared.clone());
+
+        // Before verification, the snapshot reports charge_card blocked.
+        let ex = shared.lock().why_blocked(&h.state);
+        assert!(ex.active.contains(&"verify".to_string()));
+        assert!(ex.blocked_tools.contains_key("charge_card"));
+
+        // The control lane latches `verify` on a turn; the external snapshot
+        // sees the progress: `pay` is active and charge_card is admitted.
+        let _ = h.state.set("identity_verified", true);
+        h.run_turn().await;
+        let ex = shared.lock().why_blocked(&h.state);
+        assert!(ex.active.contains(&"pay".to_string()));
+        assert!(ex.allowed_tools.contains(&"charge_card".to_string()));
     }
 
     #[tokio::test]
@@ -1090,6 +1212,55 @@ mod harness {
             Some(vec!["search".to_string()]),
             "new phase's tool set advertised + persisted"
         );
+    }
+
+    #[tokio::test]
+    async fn final_drain_flushes_deferred_context_and_persists_synchronously() {
+        use crate::live::persistence::{MemoryPersistence, SessionPersistence};
+
+        let mut h = Harness::new();
+
+        // Deferred context still queued when the lane exits…
+        let pending = Arc::new(PendingContext::new());
+        pending.extend(vec![Content::model("queued context")]);
+        h.shared.pending_context = Some(pending.clone());
+        h.control.pending_context = Some(pending.clone());
+        h.control.context_delivery = ContextDelivery::Deferred;
+
+        // …and a persistence backend that must be hit synchronously.
+        let p = Arc::new(MemoryPersistence::new());
+        h.control.persistence = Some(p.clone());
+        h.control.session_id = Some("drain-session".into());
+        let _ = h.state.session().set("turn_count", 7u32);
+
+        super::final_drain(
+            &h.writer,
+            &h.shared,
+            &h.state,
+            &h.phase,
+            &mut h.transcript,
+            &h.control,
+        )
+        .await;
+
+        // The queued context was flushed as one frame (not dropped).
+        assert_eq!(
+            h.writes(),
+            vec![Write::ClientContent {
+                turns: 1,
+                turn_complete: false
+            }],
+            "deferred context must be flushed on lane exit"
+        );
+        assert!(pending.drain_context().is_empty(), "queue fully drained");
+
+        // The final snapshot was awaited before final_drain returned.
+        let snap = p
+            .load("drain-session")
+            .await
+            .unwrap()
+            .expect("final snapshot must be persisted synchronously");
+        assert_eq!(snap.turn_count, 7);
     }
 
     #[tokio::test]

@@ -172,10 +172,11 @@ fn expand(description: LitStr, func: ItemFn) -> syn::Result<proc_macro2::TokenSt
         .zip(field_types.iter())
         .map(|(ident, ty)| {
             // `Option<T>` fields default to `None` when absent from the JSON.
+            // No trailing comma here — `#(#struct_fields),*` adds the separators.
             if is_option(ty) {
                 quote! {
                     #[serde(default)]
-                    #ident: #ty,
+                    #ident: #ty
                 }
             } else {
                 quote! { #ident: #ty }
@@ -778,13 +779,38 @@ fn to_snake_case(s: &str) -> String {
 }
 
 /// Returns `true` if `ty` is syntactically an `Option<...>`.
+///
+/// Accepts the prelude name (`Option`) and the spelled-out std/core paths
+/// (`option::Option`, `std::option::Option`, `core::option::Option`, with or
+/// without a leading `::`). The full path is checked — a user type like
+/// `my::Option` does NOT match. Purely syntactic: a type alias or renamed
+/// import of `Option` is invisible to the macro, as with any derive.
 fn is_option(ty: &Type) -> bool {
-    if let Type::Path(TypePath { qself: None, path }) = ty {
-        if let Some(seg) = path.segments.last() {
-            return seg.ident == "Option";
-        }
+    let Type::Path(TypePath { qself: None, path }) = ty else {
+        return false;
+    };
+    // Only the final `Option` segment may carry generic arguments.
+    if path
+        .segments
+        .iter()
+        .rev()
+        .skip(1)
+        .any(|seg| !seg.arguments.is_none())
+    {
+        return false;
     }
-    false
+    let idents: Vec<&syn::Ident> = path.segments.iter().map(|seg| &seg.ident).collect();
+    match idents.as_slice() {
+        // `Option<T>` / `option::Option<T>` resolve via the prelude only when
+        // the path is relative.
+        [opt] => path.leading_colon.is_none() && *opt == "Option",
+        [module, opt] => path.leading_colon.is_none() && *module == "option" && *opt == "Option",
+        // `std::option::Option<T>` / `core::option::Option<T>`, `::`-rooted or not.
+        [root, module, opt] => {
+            (*root == "std" || *root == "core") && *module == "option" && *opt == "Option"
+        }
+        _ => false,
+    }
 }
 
 /// Convert a `snake_case` identifier to `PascalCase`.
@@ -802,4 +828,30 @@ fn to_pascal_case(s: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_option;
+    use syn::parse_quote;
+
+    #[test]
+    fn is_option_accepts_std_core_paths() {
+        assert!(is_option(&parse_quote!(Option<String>)));
+        assert!(is_option(&parse_quote!(option::Option<String>)));
+        assert!(is_option(&parse_quote!(std::option::Option<String>)));
+        assert!(is_option(&parse_quote!(core::option::Option<String>)));
+        assert!(is_option(&parse_quote!(::std::option::Option<String>)));
+        assert!(is_option(&parse_quote!(::core::option::Option<String>)));
+    }
+
+    #[test]
+    fn is_option_rejects_lookalikes() {
+        assert!(!is_option(&parse_quote!(String)));
+        assert!(!is_option(&parse_quote!(Vec<Option<String>>)));
+        assert!(!is_option(&parse_quote!(my::Option<String>)));
+        assert!(!is_option(&parse_quote!(my::option::Option<String>)));
+        assert!(!is_option(&parse_quote!(::option::Option<String>)));
+        assert!(!is_option(&parse_quote!(<T as Trait>::Option)));
+    }
 }

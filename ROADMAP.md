@@ -2,7 +2,13 @@
 
 > Status legend: ✅ shipped · 🚧 in progress · 📋 planned · 💭 exploratory
 >
-> Current release: **0.7.0** (2026-05-31).
+> Current release: **0.7.0** (2026-05-31). **0.8.0 staged on this branch** (2026-06-12).
+
+> **Strategy:** the full competitive analysis and sequencing live in
+> [`docs/plans/2026-06-11-100x-strategy-memo.md`](docs/plans/2026-06-11-100x-strategy-memo.md).
+> One line: *Rasa CALM's enforcement guarantees, on a native speech-to-speech
+> substrate, with the deterministic testing story nobody has — open source, in
+> Rust.* Gemini-native by decision (2026-06-11).
 
 ## Thesis: turn the primitives into hard contracts
 
@@ -27,8 +33,9 @@ becomes the bytecode, not the authoring language.** Milestones 1–4 below harde
 the substrate the compiler targets; the compiler arc proper is:
 
 - ✅ **Phase 0 — keystone:** `CompiledFlow` (validated IR + `FlowErrors` +
-  `ToolPolicy`) and `FlowMonitor::explain()`/`why_blocked()`. *(L1 landed; L2
-  surface + richer checks remain — see Milestone 2.)*
+  `ToolPolicy`) and `FlowMonitor::explain()`/`why_blocked()`. *(L1, L2 surface
+  (`govern_compiled`/`handle.why_blocked()`), and richer checks all landed — see
+  Milestone 2.)*
 - ✅ **Phase 1 — compiler MVP:** landed.
   - serializable `ConversationSpec` + `Conversation` builder lowering
     `stage/say/ground/collect/commit/next/require` → `CompiledFlow` (JSON
@@ -139,60 +146,66 @@ verified correctness bugs are fixed; the full compile-time validator remains.
   reports unreachable steps and effectively-unguarded commit tools on top of
   `validate()`, and precomputes a `ToolPolicy`. `FlowMonitor::compiled`/`try_new`
   construct from it. Plus `FlowMonitor::explain()`/`why_blocked()` → a serializable
-  `FlowExplanation` ("why did the assistant ask that?"). *(Remaining: richer
-  checks — unsatisfiable guards, dangling tool names vs a tool registry — and L2
-  `Live::govern(CompiledFlow)` + `handle.why_blocked()`.)*
+  `FlowExplanation` ("why did the assistant ask that?").
+- ✅ **Richer compile checks + L2 compiled-flow surface.** `compile()` also rejects
+  unsatisfiable `never…until` guards (`done(step)` on an unknown step) and
+  ordering cycles closed by `before(a, b)` edges; `Flow::compile_with_tools(&[..])`
+  reports tool names missing from a known registry. L2:
+  `Live::govern_compiled`/`observe_compiled` attach a `CompiledFlow` without
+  re-validating at connect, and `handle.why_blocked()`/`handle.explain()` snapshot
+  the governed monitor's `FlowExplanation` from the live handle.
 
 ## Milestone 3 — Reactive substrate `0.9.0`
 
 The pieces for a single deterministic reaction loop already exist; they're
 half-wired.
 
-- 📋 **Finish the reactor effect scheduler.** `EffectPolicy` carries `timeout`,
-  `dedupe_key`, and `cancel_scope`, but the executor only honors blocking/concurrent
-  + timeout, `LiveEffect::TransitionPhase` is a no-op, and concurrent effect errors
-  are fire-and-forget. Honor dedupe/cancel scopes, supervise spawned effects, emit
-  structured reaction failures, make `TransitionPhase` real (or unconstructable). →
-  **Value:** unifies phases, watchers, temporal patterns, repair, and tool gating
-  into one reaction loop instead of policy scattered across callbacks.
+- ✅ **Honest reactor vocabulary.** The dead effect nouns took the "remove" path:
+  `EffectPolicy::dedupe_key`/`cancel_scope` and `LiveEffect::TransitionPhase` were
+  deleted rather than implemented speculatively, and concurrent effect failures
+  are now supervised (surfaced as `LiveEvent::Error`). *(The full unified reaction
+  loop — phases/watchers/temporal/repair on one scheduler — remains the 0.9.0
+  arc; new scheduler nouns get added when a rule actually needs them.)*
 - 💭 **Promote the mutation journal into the substrate.** `State` already records
   `StateMutation` (seq, old/new, origin, ts) with cursors/drain. Have
   watchers/computed/extractors consume cursors instead of re-snapshotting; add an
   optional durable sink. → **Value:** time-travel debugging, deterministic session
   replay, prefix subscriptions, lower CPU, a clean devtools-timeline bridge.
-- 💭 **Explicit lane backpressure.** Define event classes — lossy/coalesce
-  (audio/VAD/progress) vs lossless (tool calls, interruptions, resume, turn
-  boundaries) — use `try_send` + counters for lossy, `send().await` for lossless,
-  expose lane-saturation metrics. → **Value:** makes the "three-lane" promise
-  operational, not just descriptive; correct behavior under voice load.
+- ✅ **Explicit lane backpressure.** Per-event-class delivery policy
+  (`Delivery`/`DeliveryConfig`): `Lossless` default preserves the old byte-for-byte
+  behavior; `LossyDropNewest` opt-in for audio/VAD/progress with drop counters.
+  Exposed at L2 as `.delivery()`/`.lossy_audio()`.
 
 ## Milestone 4 — Make misuse impossible to ship `0.8.x`
 
 Mechanical guardrails so Milestones 1–2 can't regress and the crate stays honest.
 
-- 📋 **Feature diet.** L0 defaults pull ML VAD (`vad-wavekat`), `tokio/full`,
-  `tracing-subscriber`, and a default-TLS stack; L1/L2 also use `tokio/full` and
-  unconditional `reqwest`/`tracing`. Split: `default = ["live"]`, opt-in
-  `vad-wavekat`, `http` behind the REST features, rustls/native-tls mutually
-  selectable, tracing facade separate from subscriber. → **Value:** for an SDK,
-  default compile weight *is* API surface.
-- 📋 **CI/release ratchet.** Add `cargo hack --feature-powerset`,
-  `--all-features` + `--no-default-features` tests, `cargo semver-checks`,
-  `cargo deny`, and package-from-tarball verification (replace `publish
-  --no-verify`). Replace the global `await_holding_lock = allow` with targeted
-  `#[allow(reason=…)]`. → **Value:** catches exactly the feature/lock regressions
-  multi-crate async SDKs ship.
-- 📋 **Golden-wire protocol tests.** JSON fixtures + round-trip serde for setup,
-  server messages, tool calls, audio/thinking/transcription parts, and
-  Vertex-vs-Google-AI differences; a model/voice catalog with `GeminiModel::Custom`
-  escape hatch. → **Value:** the wire layer *will* drift with Gemini releases; make
-  staleness obvious instead of silently wrong.
+- ✅ **Feature diet.** L0 defaults are now `["live", "tls-native"]` — ML VAD and
+  the tracing subscriber are opt-in, TLS is selectable (`tls-native`/`tls-rustls`,
+  `reqwest` follows), `reqwest` is optional behind the REST features, all
+  published crates use targeted tokio features instead of `tokio/full`, and the
+  tracing facade (unconditional, tiny) is split from the subscriber machinery
+  (`tracing-subscriber` feature).
+- ✅ **CI/release ratchet.** `cargo hack check --each-feature` (per-feature
+  isolation of the published crates), `cargo deny` (advisories/licenses/sources,
+  `deny.toml`), `cargo semver-checks` in the release validate job, feature
+  extremes (`--no-default-features`/`--all-features`), publish-with-verification
+  (no more `--no-verify`), and `await_holding_lock` enforced. All four style allows are
+  burned down: callback shapes have named type aliases, and the deliberate
+  exceptions carry targeted `#[allow(lint, reason = "…")]`.
+- ✅ **Golden-wire protocol tests.** Checked-in fixtures for setup/server
+  messages/tool calls/audio/thinking/transcription parts and the
+  Vertex-vs-Google-AI deltas (`tests/golden_wire.rs`; `GOLDEN_BLESS=1` to
+  re-bless); `GeminiModel::Custom`/`Voice::Custom` escape hatches covered.
 - ✅ **Metadata truth.** Crate READMEs + README license section corrected to MIT
   (matching `LICENSE`); install snippets bumped to `0.7`; MSRV made explicit
   (`rust-version = "1.93"`, badge `1.93+`). *(Remaining: generate crate READMEs
   from one source + test snippets as doctests/trycmd.)*
-- 📋 **Macro hardening.** Add `trybuild` compile-fail tests (bad signatures,
-  non-serializable args, duplicate/undescribed tools) and `insta` schema snapshots
+- ✅ **Macro hardening.** `trybuild` compile-fail UI tests (10 fixtures: bad
+  signatures, missing descriptions, invalid derive attributes, plus pass
+  anchors), path-aware `Option` detection (std/core paths accepted, lookalikes
+  rejected), and a real expansion bug fixed (trailing comma after `Option`
+  params). *(Deferred: `insta` schema snapshots
   for `#[tool]`/`#[derive(Extract)]`. → **Value:** the tool-call surface is too
   important to leave as "JSON plus a closure."
 
@@ -213,6 +226,94 @@ Mechanical guardrails so Milestones 1–2 can't regress and the crate stays hone
   MCP/A2A/OpenAPI/Search tool sources currently error at connect — implement or
   document.
 - 📋 `extraction.md` user guide + Extract↔Flow interplay section in `flow.md`.
+
+## Milestone 6 — The correctness floor `0.8.0` ✅
+
+The five production concurrency bugs found by audit (2026-06-11), plus API
+evolvability. Nothing above this matters if barge-in hangs or snapshots tear.
+
+- ✅ **Background tools cancelled on disconnect.** `BackgroundToolTracker` is
+  now held by `LiveHandle`; `disconnect()` cancels every tracked task so
+  orphaned tools can no longer post stale results to a dead (or new) control
+  lane.
+- ✅ **Lanes aborted on disconnect.** `disconnect()` grace-awaits the
+  fast/control lanes then aborts stragglers, and cancels the telemetry lane;
+  the router exits on the terminal `Disconnected` event so lanes can drain.
+- ✅ **Atomic persistence.** `FsPersistence::save` writes a sibling tmp file
+  and atomically renames it over the destination; a crash mid-write can no
+  longer corrupt the snapshot.
+- ✅ **Barge-in beats slow tools.** Inline tool dispatch races a barge-in
+  token cancelled by the router on `Interrupted`; the cancelled call sends no
+  response, never advances the flow gate, and surfaces
+  `LiveEvent::ToolCancelled`.
+- ✅ **Graceful drain + GoAway resume.** Control-lane exit flushes deferred
+  context and persists a final snapshot synchronously;
+  `LiveHandle::resume_handle()` + `session_resume_from(handle)` make manual
+  resume after GoAway possible (no auto-reconnect).
+- ✅ **`#[non_exhaustive]`** on `SessionEvent`/`LiveEvent`/`GeminiModel`/`Voice`
+  — new models/server events are now semver-compatible additions.
+- ✅ **Hot-path elegance (parse + pacing).** Single-pass server-message parse
+  (golden-fixture pinned) and opt-in producer-side audio pacing
+  (`SessionConfig::audio_pacing`). *(Control-channel depth lands with the
+  concurrency fixes.)*
+- ✅ **`LiveHandle::stream()`** — `LiveEventStream` implements
+  `Stream<Item = LiveEvent>` (lag-skipping, ends on close) so events compose
+  with `tokio-stream`; callbacks become sugar.
+
+## Milestone 7 — The determinism spine `0.9.0` 🚧
+
+The keystone: **any session can be replayed deterministically through the real
+control plane.** (Verified: Sim already runs real FlowStack/extractor code.)
+
+- ✅ **`RecordingCodec`** wrapping the `Codec` trait — every wire byte recorded.
+  Installed via `SessionConfig::record_wire` / `Live::builder().record_wire(path)`;
+  `FileWireRecorder` (JSONL) + `MemoryWireRecorder` backends.
+- ✅ **Durable `JournalSink`** — the mutation journal is capped at 1024 entries
+  (a 2-hour call loses 98% of history); add a sink trait + file backend.
+  `State::set_journal_sink` + `FileJournalSink`/`MemoryJournalSink`; the ring
+  stays for `evidence()`.
+- ✅ **Replay harness** — feed a recorded wire log through the real processor;
+  diff the mutation journal. `gemini_adk_rs::live::replay::replay_session` +
+  `adk session replay <wire-log> [--journal <journal-log>]` (CLEAN/DRIFT);
+  closed-loop record→replay test asserts per-lane events, final state, and
+  byte-identical setup/tool-response frames.
+- 📋 **Injectable clock** — `Instant::now()`/`SystemTime::now()`/timeouts leak
+  nondeterminism into control flow (sites catalogued in audit).
+- 📋 **Recorded LLM/resolver outputs** — tape async resolver results so replay
+  never re-executes a model call.
+- 📋 Promote the mutation journal: watchers/computed/extractors consume cursors
+  (carried over from old Milestone 3).
+
+## Milestone 8 — Conversation CI 📋
+
+The most evidenced bet: every commercial voice-agent tester is LLM-vs-LLM
+(τ²-bench: 90% pass@1 → 57% pass^8). Ours is deterministic and free.
+
+- 📋 GitHub-Action conformance suite: `adk flow simulate` over a scenario
+  corpus on every PR, `why_blocked()` diffs as review artifacts.
+- 📋 Scenario extraction from recorded sessions (incident → regression test).
+- 📋 Strict canned-response mode (per-phase enforced template-only output) —
+  the zero-hallucination guarantee for regulated deployments.
+
+## Milestone 9 — The funnel 📋
+
+- 📋 **Python bindings** (PyO3) over the Rust core — the Pydantic/Polars play;
+  the adoption funnel for the entire Python voice-AI population.
+- 📋 Proof artifacts: published reproducible p99 mic-to-model jitter benchmark
+  vs LiveKit/Pipecat; time-travel debugger UI (journal × wire log) in the web
+  devtools.
+- ❌ **OpenAI Realtime L0: deliberately not pursued** (decision 2026-06-11) —
+  Gemini-native is the identity; the control plane stays provider-agnostic so
+  the option remains open.
+
+## Milestone 10 — Rust-only endgames 💭
+
+- 💭 Single-binary telephony via `rustpbx`/`rsipstack` integration (the
+  governed agent brain in the media path).
+- 💭 WASM edge governance: compiler + Sim in the browser (authoring/validation)
+  and Workers/on-device.
+- 💭 On-device turn detection (smart-turn-v3 is BSD-2/8M params/12ms CPU;
+  Kyutai STT has semantic VAD; sherpa-onnx has official Rust bindings).
 
 ---
 

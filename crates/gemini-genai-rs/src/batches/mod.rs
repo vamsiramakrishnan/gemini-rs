@@ -12,12 +12,19 @@ use crate::transport::auth::ServiceEndpoint;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum BatchJobState {
+    /// State not set by the server.
     StateUnspecified,
+    /// Queued, not yet started.
     Pending,
+    /// Currently executing.
     Running,
+    /// Completed successfully.
     Succeeded,
+    /// Terminated with an error.
     Failed,
+    /// Cancellation requested, still winding down.
     Cancelling,
+    /// Cancelled before completion.
     Cancelled,
 }
 
@@ -109,10 +116,13 @@ pub struct ListBatchJobsResponse {
 #[derive(Debug, thiserror::Error)]
 pub enum BatchesError {
     #[error(transparent)]
+    /// Transport-level HTTP failure.
     Http(#[from] HttpError),
     #[error("Failed to parse response: {0}")]
+    /// Response body failed to parse.
     Parse(#[from] serde_json::Error),
     #[error("Auth error: {0}")]
+    /// Authentication/authorization failure.
     Auth(String),
 }
 

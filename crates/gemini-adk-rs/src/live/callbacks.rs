@@ -55,6 +55,39 @@ pub enum CallbackMode {
     Concurrent,
 }
 
+// ── Named callback types ──────────────────────────────────────────────────
+// These aliases are the vocabulary of the callback registry: every field
+// below (and the corresponding L2 setters) is one of these shapes.
+
+/// Fast-lane sync callback over a raw audio chunk.
+pub type AudioCallback = Box<dyn Fn(&Bytes) + Send + Sync>;
+/// Fast-lane sync callback over a text payload (delta, accumulated text, thought).
+pub type TextCallback = Box<dyn Fn(&str) + Send + Sync>;
+/// Fast-lane sync callback over a transcript chunk with its `is_final` flag.
+pub type TranscriptCallback = Box<dyn Fn(&str, bool) + Send + Sync>;
+/// Fast-lane sync callback with no payload (VAD start/end).
+pub type SignalCallback = Box<dyn Fn() + Send + Sync>;
+/// Fast-lane sync callback over a session phase change.
+pub type PhaseCallback = Box<dyn Fn(SessionPhase) + Send + Sync>;
+/// Fast-lane sync callback over usage metadata.
+pub type UsageCallback = Box<dyn Fn(&UsageMetadata) + Send + Sync>;
+
+/// Control-lane async callback with no payload.
+pub type AsyncCallback = Arc<dyn Fn() -> BoxFuture<()> + Send + Sync>;
+/// Control-lane async callback over one payload value.
+pub type AsyncCallbackWith<T> = Arc<dyn Fn(T) -> BoxFuture<()> + Send + Sync>;
+/// Control-lane async callback over two payload values.
+pub type AsyncCallbackWith2<A, B> = Arc<dyn Fn(A, B) -> BoxFuture<()> + Send + Sync>;
+/// Tool-call override: return `Some(responses)` to reply, `None` to defer to
+/// auto-dispatch via the registered `ToolDispatcher`.
+pub type ToolCallCallback =
+    Arc<dyn Fn(Vec<FunctionCall>, State) -> BoxFuture<Option<Vec<FunctionResponse>>> + Send + Sync>;
+/// Middleware over outgoing tool responses (inspect/rewrite before send).
+pub type BeforeToolResponseCallback =
+    Arc<dyn Fn(Vec<FunctionResponse>, State) -> BoxFuture<Vec<FunctionResponse>> + Send + Sync>;
+/// Sync state-reactive instruction generator (`None` = leave unchanged).
+pub type InstructionFn = Arc<dyn Fn(&State) -> Option<String> + Send + Sync>;
+
 /// Typed callback registry for Live session events.
 ///
 /// Callbacks are divided into two lanes:
@@ -63,67 +96,61 @@ pub enum CallbackMode {
 pub struct EventCallbacks {
     // -- Fast lane (sync callbacks) --
     /// Called for each audio chunk from the model (PCM16 24kHz).
-    pub on_audio: Option<Box<dyn Fn(&Bytes) + Send + Sync>>,
+    pub on_audio: Option<AudioCallback>,
     /// Called for each incremental text delta from the model.
-    pub on_text: Option<Box<dyn Fn(&str) + Send + Sync>>,
+    pub on_text: Option<TextCallback>,
     /// Called when the model completes a text response.
-    pub on_text_complete: Option<Box<dyn Fn(&str) + Send + Sync>>,
+    pub on_text_complete: Option<TextCallback>,
     /// Called for input (user speech) transcription updates.
-    pub on_input_transcript: Option<Box<dyn Fn(&str, bool) + Send + Sync>>,
+    pub on_input_transcript: Option<TranscriptCallback>,
     /// Called for output (model speech) transcription updates.
-    pub on_output_transcript: Option<Box<dyn Fn(&str, bool) + Send + Sync>>,
+    pub on_output_transcript: Option<TranscriptCallback>,
     /// Called when the model emits a thought/reasoning summary (when includeThoughts is enabled).
-    pub on_thought: Option<Box<dyn Fn(&str) + Send + Sync>>,
+    pub on_thought: Option<TextCallback>,
     /// Called when server-side VAD detects voice activity start.
-    pub on_vad_start: Option<Box<dyn Fn() + Send + Sync>>,
+    pub on_vad_start: Option<SignalCallback>,
     /// Called when server-side VAD detects voice activity end.
-    pub on_vad_end: Option<Box<dyn Fn() + Send + Sync>>,
+    pub on_vad_end: Option<SignalCallback>,
     /// Called on session phase transitions.
-    pub on_phase: Option<Box<dyn Fn(SessionPhase) + Send + Sync>>,
+    pub on_phase: Option<PhaseCallback>,
     /// Called when server sends token usage metadata.
-    pub on_usage: Option<Box<dyn Fn(&UsageMetadata) + Send + Sync>>,
+    pub on_usage: Option<UsageCallback>,
 
     // -- Control lane (async callbacks) --
     /// Called when the model is interrupted by barge-in.
-    pub on_interrupted: Option<Arc<dyn Fn() -> BoxFuture<()> + Send + Sync>>,
+    pub on_interrupted: Option<AsyncCallback>,
     /// Called when model requests tool execution.
     /// Return `None` to use auto-dispatch (ToolDispatcher), `Some` to override.
     /// Receives State for natural state promotion from tool results.
-    pub on_tool_call: Option<
-        Arc<
-            dyn Fn(Vec<FunctionCall>, State) -> BoxFuture<Option<Vec<FunctionResponse>>>
-                + Send
-                + Sync,
-        >,
-    >,
+    pub on_tool_call: Option<ToolCallCallback>,
     /// Called when server cancels pending tool calls.
-    pub on_tool_cancelled: Option<Arc<dyn Fn(Vec<String>) -> BoxFuture<()> + Send + Sync>>,
+    pub on_tool_cancelled: Option<AsyncCallbackWith<Vec<String>>>,
     /// Called when the model completes its turn.
-    pub on_turn_complete: Option<Arc<dyn Fn() -> BoxFuture<()> + Send + Sync>>,
+    pub on_turn_complete: Option<AsyncCallback>,
     /// Called when the model finishes generating its full intended response,
     /// before any interruption truncation (the wire `GenerationComplete`).
-    pub on_generation_complete: Option<Arc<dyn Fn() -> BoxFuture<()> + Send + Sync>>,
+    pub on_generation_complete: Option<AsyncCallback>,
     /// Called when server sends GoAway (session ending soon).
-    pub on_go_away: Option<Arc<dyn Fn(Duration) -> BoxFuture<()> + Send + Sync>>,
+    pub on_go_away: Option<AsyncCallbackWith<Duration>>,
     /// Called when session setup completes (connected).
     ///
     /// Receives a `SessionWriter` for sending messages on connect (e.g. greeting prompts).
-    pub on_connected: Option<Arc<dyn Fn(Arc<dyn SessionWriter>) -> BoxFuture<()> + Send + Sync>>,
+    pub on_connected: Option<AsyncCallbackWith<Arc<dyn SessionWriter>>>,
     /// Called when session disconnects.
-    pub on_disconnected: Option<Arc<dyn Fn(Option<String>) -> BoxFuture<()> + Send + Sync>>,
+    pub on_disconnected: Option<AsyncCallbackWith<Option<String>>>,
     /// Called after session resumes from GoAway.
-    pub on_resumed: Option<Arc<dyn Fn() -> BoxFuture<()> + Send + Sync>>,
+    pub on_resumed: Option<AsyncCallback>,
     /// Called on non-fatal errors.
-    pub on_error: Option<Arc<dyn Fn(String) -> BoxFuture<()> + Send + Sync>>,
+    pub on_error: Option<AsyncCallbackWith<String>>,
     /// Called when agent transfer occurs (from, to).
-    pub on_transfer: Option<Arc<dyn Fn(String, String) -> BoxFuture<()> + Send + Sync>>,
+    pub on_transfer: Option<AsyncCallbackWith2<String, String>>,
     /// Called when a TurnExtractor produces a result (extractor_name, value).
-    pub on_extracted: Option<Arc<dyn Fn(String, serde_json::Value) -> BoxFuture<()> + Send + Sync>>,
+    pub on_extracted: Option<AsyncCallbackWith2<String, serde_json::Value>>,
     /// Called when a TurnExtractor fails (extractor_name, error_message).
     ///
     /// By default, extraction failures are logged via `tracing::warn!`.
     /// Register this callback to implement custom error handling (retry, alert, etc.).
-    pub on_extraction_error: Option<Arc<dyn Fn(String, String) -> BoxFuture<()> + Send + Sync>>,
+    pub on_extraction_error: Option<AsyncCallbackWith2<String, String>>,
 
     // -- Callback modes (control-lane only) --
     /// Execution mode for [`on_turn_complete`](Self::on_turn_complete).
@@ -155,17 +182,14 @@ pub struct EventCallbacks {
     /// Receives the tool responses and shared State. Returns (potentially modified)
     /// responses. Use this to rewrite, augment, or filter tool results based on
     /// conversation state.
-    pub before_tool_response: Option<
-        Arc<dyn Fn(Vec<FunctionResponse>, State) -> BoxFuture<Vec<FunctionResponse>> + Send + Sync>,
-    >,
+    pub before_tool_response: Option<BeforeToolResponseCallback>,
 
     /// Called at turn boundaries (after extractors, before `on_turn_complete`).
     ///
     /// Receives shared State and a SessionWriter for injecting content into
     /// the conversation. Use this for context stuffing, K/V injection, condensed
     /// state summaries, or any outbound content interleaving.
-    pub on_turn_boundary:
-        Option<Arc<dyn Fn(State, Arc<dyn SessionWriter>) -> BoxFuture<()> + Send + Sync>>,
+    pub on_turn_boundary: Option<AsyncCallbackWith2<State, Arc<dyn SessionWriter>>>,
 
     /// State-reactive system instruction template (full replacement).
     ///
@@ -174,7 +198,7 @@ pub struct EventCallbacks {
     /// Returns `None` to leave the instruction unchanged.
     ///
     /// This is sync (no async) because instruction generation should be fast.
-    pub instruction_template: Option<Arc<dyn Fn(&State) -> Option<String> + Send + Sync>>,
+    pub instruction_template: Option<InstructionFn>,
 
     /// State-reactive instruction amendment (additive, not replacement).
     ///
@@ -185,7 +209,7 @@ pub struct EventCallbacks {
     /// Unlike `instruction_template` (which replaces the entire instruction),
     /// this only adds to the phase instruction — the developer never needs to
     /// know or repeat the base instruction.
-    pub instruction_amendment: Option<Arc<dyn Fn(&State) -> Option<String> + Send + Sync>>,
+    pub instruction_amendment: Option<InstructionFn>,
 }
 
 impl Default for EventCallbacks {
@@ -323,8 +347,10 @@ mod tests {
 
     #[test]
     fn debug_shows_registered() {
-        let mut cb = EventCallbacks::default();
-        cb.on_audio = Some(Box::new(|_| {}));
+        let cb = EventCallbacks {
+            on_audio: Some(Box::new(|_| {})),
+            ..Default::default()
+        };
         let debug = format!("{:?}", cb);
         assert!(debug.contains("on_audio: true"));
         assert!(debug.contains("on_text: false"));

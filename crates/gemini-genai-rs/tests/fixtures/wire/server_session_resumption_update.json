@@ -1,0 +1,7 @@
+{
+  "sessionResumptionUpdate": {
+    "newHandle": "handle-next",
+    "resumable": true,
+    "lastConsumedClientMessageIndex": "17"
+  }
+}

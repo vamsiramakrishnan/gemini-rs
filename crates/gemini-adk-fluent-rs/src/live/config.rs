@@ -6,7 +6,7 @@ use std::time::Duration;
 use gemini_adk_rs::live::needs::RepairConfig;
 use gemini_adk_rs::live::persistence::SessionPersistence;
 use gemini_adk_rs::live::steering::{ContextDelivery, SteeringMode};
-use gemini_adk_rs::live::{ResultFormatter, ToolExecutionMode};
+use gemini_adk_rs::live::{Delivery, DeliveryConfig, ResultFormatter, ToolExecutionMode};
 use gemini_adk_rs::tool::ToolDispatcher;
 use gemini_genai_rs::prelude::*;
 
@@ -73,6 +73,41 @@ impl Live {
     /// Set the temperature.
     pub fn temperature(mut self, temp: f32) -> Self {
         self.config = self.config.temperature(temp);
+        self
+    }
+
+    // -- Wire recording --
+
+    /// Record every wire byte (both directions) to a JSONL log at `path`.
+    ///
+    /// The log is written by a
+    /// [`FileWireRecorder`] created at connect time (a connect error is returned if the file cannot
+    /// be created). Replay it offline with `adk session replay <path>` or
+    /// [`gemini_adk_rs::live::replay::replay_session`].
+    ///
+    /// ```ignore
+    /// let handle = Live::builder()
+    ///     .model(GeminiModel::Gemini2_0FlashLive)
+    ///     .record_wire("/tmp/session.wire.jsonl")
+    ///     .connect_from_env()
+    ///     .await?;
+    /// ```
+    pub fn record_wire(mut self, path: impl Into<std::path::PathBuf>) -> Self {
+        self.record_wire_path = Some(path.into());
+        self
+    }
+
+    /// Record every wire byte to a custom
+    /// [`WireRecorder`] implementation.
+    ///
+    /// Overrides (and is overridden by) the most recent of this and
+    /// [`record_wire`](Self::record_wire).
+    pub fn wire_recorder(
+        mut self,
+        recorder: Arc<dyn gemini_genai_rs::prelude::WireRecorder>,
+    ) -> Self {
+        self.record_wire_path = None;
+        self.config = self.config.record_wire(recorder);
         self
     }
 
@@ -336,6 +371,19 @@ impl Live {
         self
     }
 
+    /// Resume a previous session from a server-issued resumption handle.
+    ///
+    /// Capture the handle from the old session before it ends — via
+    /// [`LiveHandle::resume_handle`](gemini_adk_rs::live::LiveHandle::resume_handle)
+    /// (e.g. inside the `on_go_away` callback) or from a persisted
+    /// [`SessionSnapshot`](gemini_adk_rs::live::SessionSnapshot) — and pass it
+    /// here on the next connect. Resumption stays enabled for the new session,
+    /// so fresh handles keep arriving. No automatic reconnect is performed.
+    pub fn session_resume_from(mut self, handle: impl Into<String>) -> Self {
+        self.config = self.config.session_resumption(Some(handle.into()));
+        self
+    }
+
     /// Enable context window compression.
     pub fn context_compression(mut self, trigger_tokens: u32, target_tokens: u32) -> Self {
         self.config = self
@@ -386,6 +434,43 @@ impl Live {
     /// ```
     pub fn context_delivery(mut self, mode: ContextDelivery) -> Self {
         self.context_delivery = mode;
+        self
+    }
+
+    /// Set the fast-lane delivery (backpressure) policy for every event class.
+    ///
+    /// The event router forwards fast-lane frames (audio, text, transcripts,
+    /// thoughts, VAD, phase) to the fast-lane consumer over a bounded channel.
+    /// By default every class is [`Delivery::Lossless`] — the router awaits
+    /// (`send().await`) when the channel is full, which preserves the historical
+    /// behavior. Opt classes into [`Delivery::LossyDropNewest`] to drop the
+    /// newest frame on overflow instead of stalling the router (and thereby
+    /// stalling control-lane routing too).
+    ///
+    /// ```ignore
+    /// use gemini_adk_rs::live::{Delivery, DeliveryConfig};
+    /// Live::builder()
+    ///     .delivery(DeliveryConfig::default()
+    ///         .audio(Delivery::LossyDropNewest)
+    ///         .transcript(Delivery::LossyDropNewest))
+    /// ```
+    pub fn delivery(mut self, delivery: DeliveryConfig) -> Self {
+        self.delivery = delivery;
+        self
+    }
+
+    /// Convenience: set the audio class to [`Delivery::LossyDropNewest`] so the
+    /// router never blocks on a slow audio consumer, dropping the newest PCM
+    /// frame on overflow. Other classes keep their current policy.
+    pub fn lossy_audio(mut self) -> Self {
+        self.delivery.audio = Delivery::LossyDropNewest;
+        self
+    }
+
+    /// Convenience: set the transcript class to [`Delivery::LossyDropNewest`].
+    /// Other classes keep their current policy.
+    pub fn lossy_transcript(mut self) -> Self {
+        self.delivery.transcript = Delivery::LossyDropNewest;
         self
     }
 

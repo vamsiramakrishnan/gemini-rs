@@ -7,6 +7,105 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.8.0] - 2026-06-12
+
+### Added
+
+- **`LiveHandle::stream()`** — semantic events as a `futures::Stream`. The new
+  `LiveEventStream` wraps the `events()` broadcast receiver: lagged (missed)
+  events are skipped and the stream continues, and the stream ends when the
+  session's event channel closes. Composes with all `futures`/`tokio-stream`
+  combinators (`while let Some(ev) = stream.next().await { … }`). Exported from
+  `gemini_adk_rs::live` and `gemini_adk_fluent_rs::live` (not the kernel
+  prelude). Also new: `LiveEvent::ToolCancelled { ids }`,
+  `LiveHandle::resume_handle()`, and the L2 `session_resume_from(handle)`
+  builder setter (see Fixed below).
+
+- **Wire recording (`RecordingCodec`).** Any `Codec` can be wrapped to record
+  every wire byte in both directions — monotonic sequence, direction, and
+  epoch-millis timestamp per `WireEntry`, delivered synchronously to a
+  `WireRecorder`. Built-in backends: `FileWireRecorder` (JSONL, base64
+  payloads, periodic + on-drop flush) and `MemoryWireRecorder`. Install via
+  `SessionConfig::record_wire(..)` / `ConnectBuilder::record_wire(..)` at L0,
+  or `Live::builder().record_wire(path)` / `.wire_recorder(..)` at L2.
+- **Durable `JournalSink` for state mutations.** The in-memory mutation
+  journal stays a bounded ring (1024 entries, still serving `evidence()`);
+  `State::set_journal_sink(..)` / `with_journal_sink(..)` additionally stream
+  every mutation to a sync sink — `FileJournalSink` (JSONL, buffered, periodic
+  + on-drop flush) or `MemoryJournalSink`. `StateMutation` is now serde
+  round-trippable (`timestamp_ms` epoch millis).
+- **Replay harness — any session replayable through the real control plane.**
+  `gemini_genai_rs::transport::replay::ReplayTransport` replays a recorded
+  wire log's inbound frames (gated until `ReplayControl::release()`, drained
+  signal, outbound frames collected for comparison);
+  `gemini_adk_rs::live::replay::{replay_session, attach_session}` drive the
+  log through the REAL three-lane processor — phases, extractors, watchers,
+  and tool dispatch all run for real. A closed-loop integration test
+  (`crates/gemini-adk-rs/tests/replay_closed_loop.rs`) records a scripted
+  session (text exchange, dispatched tool call + response, turn completes)
+  and asserts the replay reproduces per-lane `LiveEvent` sequences, final
+  state, journal per-key values, and byte-identical setup/tool-response
+  frames.
+- **`adk session replay <wire-log> [--journal <journal-log>]`.** Offline
+  replay through the L1 processor with default callbacks: turn-by-turn
+  summary (events, tool calls, final state keys) and, with `--journal`, a
+  CLEAN/DRIFT diff of the recorded journal against the replayed final state
+  (non-zero exit on drift). Replay only re-processes recorded frames — no LLM
+  or tool re-execution. See `docs/user-guide/record-replay.md`.
+
+### Fixed
+
+- **Background tools are cancelled on disconnect.** The `BackgroundToolTracker`
+  is now carried through `SessionRuntime` into `LiveHandle`, and
+  `LiveHandle::disconnect()` cancels every tracked background tool task
+  (cooperative token + task abort) before closing the L0 session. Previously the
+  tracker was only reachable from the control lane, so orphaned tool tasks kept
+  running after disconnect and could post stale `ToolCompleted` events to a dead
+  (or new) control lane.
+
+- **Fast/control/telemetry lanes are shut down on disconnect.**
+  `LiveHandle::disconnect()` now grace-awaits the fast and control lanes
+  (250 ms each) and aborts whatever is still stuck, and cancels the telemetry
+  lane's `CancellationToken`. The event router also exits after routing the
+  terminal `Disconnected` event (closing the lane channels so the lanes can
+  drain and shut down gracefully). Previously the lane `JoinHandle`s were
+  detached on construction — a lane blocked in a slow tool ran forever.
+
+- **`FsPersistence::save` is atomic (tmp + rename).** Snapshots are written to
+  a sibling `<session_id>.json.tmp` and renamed over the destination —
+  `rename(2)` is atomic on the same filesystem, so a crash mid-write or a
+  concurrent `load` can no longer observe a torn half-written snapshot.
+
+- **Barge-in beats slow inline tools.** Inline tool dispatch in the control
+  lane now races the tool future against a barge-in `CancellationToken` that
+  the event router cancels the moment an `Interrupted` event arrives (the
+  control lane re-arms it after processing the interruption). Previously an
+  interruption queued behind the blocking dispatch and waited for the tool to
+  finish. On cancellation the tool future is dropped at its current await
+  point (tools must be drop-safe), **no** `FunctionResponse` is sent for the
+  cancelled call, the governed-flow `ToolGate` is not advanced, and the new
+  `LiveEvent::ToolCancelled { ids }` is emitted (also emitted for server-sent
+  `ToolCallCancelled` events).
+
+- **Graceful drain on control-lane exit + manual GoAway resume surface.** When
+  the control lane shuts down it now (1) best-effort flushes any deferred
+  context still queued in `PendingContext` (previously silently dropped on
+  disconnect) and (2) runs a final persistence snapshot **synchronously** — the
+  per-turn save is spawn-and-forget and could lose the last turn when the
+  process exited right after disconnect. New `LiveHandle::resume_handle()`
+  exposes the latest server-issued session-resumption handle, and the L2
+  builder gained `session_resume_from(handle)`, so callers can manually resume
+  after a `GoAway` (no auto-reconnect). Documented in
+  `docs/user-guide/session-persistence.md`.
+
+- **Control channel depth raised 64 → 512.** Control events are routed with a
+  lossless `send().await`, so a full control queue blocks the shared event
+  router — which then stops forwarding audio frames and causes playback
+  glitches. Transcript-chunk accumulation flows through this channel, so 64
+  slots could realistically fill behind a slow control-lane consumer.
+
 ### Changed
 
 - **Turn lifecycle decomposed into named, tested stages (#4).** The live hot-path
@@ -32,6 +131,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--no-default-features` and `--all-features` (both verified green), so the
   feature-heavy SDK can't regress at the extremes. Also: `await_holding_lock` is
   now enforced (removed from the workspace lint allow-list).
+- **Clippy smoke alarms back on.** The four remaining workspace-wide lint
+  allows (`type_complexity`, `too_many_arguments`, `field_reassign_with_default`,
+  `new_ret_no_self`) are removed. Boxed callback shapes got named public type
+  aliases (`AudioCallback`, `TranscriptCallback`, `ToolCallCallback`,
+  `PhaseHook`, `StateGuard`, …), test sites use struct literals, and the few
+  deliberate exceptions (control-plane plumbing functions, builder entry
+  points) carry targeted `#[allow(lint, reason = "…")]` at the site.
+- **CI/release ratchet.** New `cargo hack check --each-feature` job (every
+  feature of the published crates compiles in isolation), a `cargo deny` job
+  (RustSec advisories, permissive-license allow-list, source whitelist — config
+  in `deny.toml`), `cargo semver-checks` in the release validate job (declared
+  bump must cover the real API delta), and crates are now published **with**
+  tarball verification — the `--no-verify` escape hatch is gone (dependencies
+  are already live on crates.io when each crate publishes).
 - **Proc-macro hygiene.** The `#[tool]` macro now routes its generated code
   through `gemini_adk_rs::__macros` (re-exporting `serde`/`schemars`/`async_trait`/
   `serde_json`) and sets `#[serde(crate = ..)]`, so downstream crates no longer
@@ -39,6 +152,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (breaking)
 
+- **`#[non_exhaustive]` on the wire-facing enums.** `SessionEvent`,
+  `LiveEvent`, `GeminiModel`, and `Voice` will all grow as Google ships new
+  models and server events; marking them non-exhaustive makes those additions
+  semver-compatible instead of breaking releases. Downstream `match`es need a
+  wildcard arm; the event router surfaces unknown wire events at debug level
+  instead of silently dropping them.
+- **Feature diet: slim defaults, selectable TLS, targeted tokio.**
+  `gemini-genai-rs` default features are now `["live", "tls-native"]` — the ML
+  VAD model (`vad-wavekat`) and the tracing *subscriber* are no longer pulled by
+  default. The TLS backend is selectable (`tls-native` default, `tls-rustls`
+  opt-in; `reqwest` follows the same choice), and all three published crates
+  depend on targeted `tokio` features instead of `tokio/full` (tests keep `full`
+  via dev-dependencies). The `tracing` facade is now an unconditional (tiny)
+  dependency — transport spans/events always compile and are no-ops without a
+  subscriber — and the new `tracing-subscriber` feature gates the fmt/EnvFilter
+  machinery behind `TelemetryConfig::init`. `tracing-support` is now a
+  deprecated no-op feature kept one release for manifest compatibility.
+  `gemini-adk-rs` explicitly requires `gemini-genai-rs/vad` (it always used it),
+  and L1/L2 grew `vad-wavekat`/`tls-rustls` passthrough features so applications
+  don't need a direct lower-layer dependency to opt in.
 - **`reqwest` is now optional; the REST modules are feature-gated.** The default
   `gemini-adk-rs` build no longer compiles `reqwest`. A new `http` feature pulls it,
   and the REST-backed areas now actually gate their modules (fixing "feature
@@ -64,6 +197,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Server: sessions are created under the advertised id.** `POST /run` and
+  `POST /run_sse` accepted a client-chosen `session_id` (and advertised it in
+  responses/SSE events) but `SessionStore::create` generated its own UUID — so
+  every `state()` read and `append_event` under the advertised id was a silent
+  no-op and the returned session could not be fetched or continued. Both
+  handlers now use the new idempotent `SessionStore::get_or_create(id, ..)`.
+  Regression-tested.
+- **Single-pass server-message parsing.** `ServerMessage::parse` now
+  deserializes each frame once into a key-discriminated raw struct instead of
+  up to seven `contains()` scans over the frame followed by a targeted
+  re-parse. Behavior pinned by the golden-wire fixtures (including the
+  `toolCallCancellation`-vs-`toolCall` substring trap, which is now structural).
 - **`State::modify` is now atomic.** It performs the read-modify-write under a
   per-key map lock (`DashMap::entry`) instead of a racy `get`→`f`→`set`, so
   concurrent increments no longer lose updates.
@@ -84,6 +229,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Producer-side audio send pacing.** `SessionConfig::audio_pacing(BackpressureConfig)`
+  installs a shared token bucket on `SessionHandle::send_audio`: callers pushing
+  audio faster than the sustained rate wait at the producer instead of
+  overflowing the send queue (the previously-orphaned `TokenBucket` now earns
+  its keep). Off by default; receives are never stalled by pacing.
+- **Golden-wire protocol tests.** Checked-in JSON fixtures pin the wire format
+  in both directions: client→server messages (setup, realtime audio, client
+  content, tool responses) are serialized and diffed against blessed fixtures
+  (`GOLDEN_BLESS=1` to re-bless intentional changes), and server→client frames
+  (serverContent with audio/text/thought parts, transcriptions, toolCall,
+  toolCallCancellation, goAway, sessionResumptionUpdate, setupComplete) are
+  hand-written contract fixtures asserted to parse correctly. Platform deltas
+  are pinned explicitly: Vertex AI's qualified model URI and its stripping of
+  `behavior`/`thinkingConfig`/`scheduling`, plus the
+  `GeminiModel::Custom`/`Voice::Custom` forward-compatibility escape hatches.
+- **Server: real SSE streaming + debug/eval polish.** `POST /run_sse` now
+  streams real execution milestones (`started`, `agent_started/completed`,
+  `tool_call_started/completed/failed`, final `response`) instead of returning a
+  hardcoded fake string; granularity note: `BaseLlm` has no token-level
+  streaming API, so the endpoint streams real lifecycle events rather than
+  fabricated token chunks. Also: `GET /debug/traces` (list recorded traces),
+  HTTP 400 on malformed artifact versions (was `unwrap_or(0)`), and
+  `limit`/`offset` pagination on `GET /eval/results`. Covered by integration
+  tests with a mock LLM.
 - **`adk flow` devtools.** A CLI command group over a serializable
   `ConversationSpec`: `adk flow inspect <spec.json>` (stages/tools/digressions/
   policies/redaction summary), `adk flow graph <spec.json>` (Mermaid diagram), and

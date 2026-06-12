@@ -5,10 +5,11 @@ use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
     response::{
-        sse::{Event, Sse},
-        IntoResponse, Json,
+        sse::{Event, KeepAlive, Sse},
+        IntoResponse, Json, Response,
     },
 };
+use std::sync::Arc;
 
 // ── Agent Execution ─────────────────────────────────────────────
 
@@ -25,17 +26,18 @@ pub async fn run_agent(
     };
 
     // Build a runnable agent from the registry entry (clone the metadata so we
-    // don't hold a borrow across the await point).
-    let runnable = crate::execution::build_text_agent(agent);
+    // don't hold a borrow across the await point). The LLM comes from the
+    // state's factory so embedders/tests can swap the provider.
+    let runnable = crate::execution::build_text_agent_with(agent, (state.llm_factory)(agent), None);
 
     let session_id = req
         .session_id
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-    // Ensure session exists.
-    if state.sessions.get(&session_id).is_none() {
-        state.sessions.create(&req.agent, &req.user_id);
-    }
+    // Ensure the session exists under the advertised id.
+    state
+        .sessions
+        .get_or_create(&session_id, &req.agent, &req.user_id);
 
     // Snapshot prior session state so the agent sees accumulated context, then
     // record the user message (mirrors ADK Runner appending the user turn).
@@ -104,26 +106,143 @@ pub async fn run_agent(
     .into_response()
 }
 
+/// `POST /run_sse` — execute an agent and stream real lifecycle events.
+///
+/// Emits Server-Sent Events as the run progresses, in order:
+///
+/// - `started` — run accepted; carries `session_id` and `trace_id`
+/// - `agent_started` / `agent_completed` — agent lifecycle (from the runtime's
+///   middleware events)
+/// - `tool_call_started` / `tool_call_completed` / `tool_call_failed` — fired
+///   per tool dispatch when the agent calls tools
+/// - `response` — the final agent text, or `error` on failure
+///
+/// Note on granularity: the agent runtime's [`gemini_adk_rs::BaseLlm`] exposes
+/// only a request/response `generate()` — there is no token-level streaming
+/// API — so this endpoint streams the real execution milestones above rather
+/// than fabricated token chunks.
 pub async fn run_agent_sse(
     State(state): State<ServerState>,
     Json(req): Json<RunRequest>,
-) -> Sse<futures::stream::Once<futures::future::Ready<Result<Event, axum::Error>>>> {
-    let agent_name = state
-        .agents
-        .get(&req.agent)
-        .map(|a| a.name.clone())
-        .unwrap_or_else(|| req.agent.clone());
+) -> Response {
+    let Some(entry) = state.agents.get(&req.agent).cloned() else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": format!("Agent '{}' not found", req.agent)})),
+        )
+            .into_response();
+    };
 
-    let event = Event::default().event("message").data(
-        serde_json::json!({
-            "type": "response",
-            "agent": agent_name,
-            "text": format!("Streaming response for: {}", req.message),
-        })
-        .to_string(),
+    let session_id = req
+        .session_id
+        .clone()
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+    // Ensure the session exists under the advertised id, then record the
+    // user turn (mirrors `POST /run`).
+    state
+        .sessions
+        .get_or_create(&session_id, &req.agent, &req.user_id);
+    let prior_state = state.sessions.state(&session_id);
+    state.sessions.append_event(
+        &session_id,
+        serde_json::json!({"role": "user", "content": req.message}),
     );
 
-    Sse::new(futures::stream::once(futures::future::ready(Ok(event))))
+    // Lifecycle events flow through this channel: the `ChannelEvents`
+    // middleware forwards runtime events, and the driver task adds the
+    // `started` / `response` / `error` envelope events.
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<serde_json::Value>();
+
+    let runnable = crate::execution::build_text_agent_with(
+        &entry,
+        (state.llm_factory)(&entry),
+        Some(Arc::new(crate::execution::ChannelEvents::new(tx.clone()))),
+    );
+
+    let mut trace = crate::trace::TraceBuilder::new("gemini.agent.run_sse");
+    let trace_id = trace.trace_id().to_string();
+
+    let _ = tx.send(serde_json::json!({
+        "type": "started",
+        "agent": req.agent,
+        "session_id": session_id,
+        "trace_id": trace_id,
+    }));
+
+    // Drive the agent in a background task; the response streams as it runs.
+    let sessions = state.sessions.clone();
+    let traces = state.traces.clone();
+    let agent_name = req.agent.clone();
+    let message = req.message.clone();
+    tokio::spawn(async move {
+        let span_start = std::time::Instant::now();
+        let result = crate::execution::run_agent_turn(&runnable, &message, &prior_state).await;
+        let span_dur = span_start.elapsed();
+
+        match result {
+            Ok(outcome) => {
+                trace.span(
+                    "agent.run",
+                    span_start,
+                    span_dur,
+                    serde_json::json!({"agent": agent_name, "session_id": session_id, "status": "ok"}),
+                );
+                traces.record(trace.finish());
+                sessions.append_event(
+                    &session_id,
+                    serde_json::json!({"role": "agent", "content": &outcome.response}),
+                );
+                let _ = tx.send(serde_json::json!({
+                    "type": "response",
+                    "agent": agent_name,
+                    "session_id": session_id,
+                    "trace_id": trace_id,
+                    "text": outcome.response,
+                }));
+            }
+            Err(e) => {
+                let msg = format!("Agent execution failed: {e}");
+                trace.span(
+                    "agent.run",
+                    span_start,
+                    span_dur,
+                    serde_json::json!({"agent": agent_name, "session_id": session_id, "status": "error", "error": &msg}),
+                );
+                trace.fail();
+                traces.record(trace.finish());
+                sessions.append_event(
+                    &session_id,
+                    serde_json::json!({"role": "error", "content": &msg}),
+                );
+                let _ = tx.send(serde_json::json!({
+                    "type": "error",
+                    "agent": agent_name,
+                    "session_id": session_id,
+                    "trace_id": trace_id,
+                    "error": msg,
+                }));
+            }
+        }
+        // `tx` (and the middleware's clone, held by `runnable`) drop here,
+        // closing the channel and terminating the SSE stream.
+    });
+
+    let stream = futures::stream::unfold(rx, |mut rx| async move {
+        rx.recv().await.map(|payload| {
+            let name = payload
+                .get("type")
+                .and_then(|t| t.as_str())
+                .unwrap_or("message")
+                .to_string();
+            let event = Event::default().event(name).data(payload.to_string());
+            (Ok::<_, std::convert::Infallible>(event), rx)
+        })
+    });
+
+    Sse::new(stream)
+        .keep_alive(KeepAlive::default())
+        .into_response()
 }
 
 // ── Agent Discovery ─────────────────────────────────────────────
@@ -146,7 +265,7 @@ pub async fn get_agent(
 
 pub async fn list_sessions(
     Path((app, user)): Path<(String, String)>,
-    Query(query): Query<SessionQuery>,
+    Query(query): Query<PageQuery>,
     State(state): State<ServerState>,
 ) -> Json<Vec<SessionData>> {
     Json(state.sessions.list(&app, &user, query.limit, query.offset))
@@ -263,7 +382,20 @@ pub async fn get_artifact_version(
     State(state): State<ServerState>,
 ) -> impl IntoResponse {
     let key = format!("{session_id}:{name}");
-    let ver: usize = version.parse().unwrap_or(0);
+    let ver: usize = match version.parse() {
+        Ok(v) => v,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": format!(
+                        "invalid artifact version '{version}': expected a non-negative integer"
+                    ),
+                })),
+            )
+                .into_response();
+        }
+    };
     let artifacts = state.artifacts.read();
     match artifacts
         .get(&key)
@@ -275,6 +407,11 @@ pub async fn get_artifact_version(
 }
 
 // ── Debug ───────────────────────────────────────────────────────
+
+/// `GET /debug/traces` — list all retained execution traces, oldest first.
+pub async fn list_traces(State(state): State<ServerState>) -> Json<Vec<crate::trace::TraceRecord>> {
+    Json(state.traces.list())
+}
 
 pub async fn get_trace(
     Path(trace_id): Path<String>,
@@ -315,6 +452,20 @@ pub async fn run_eval(
     }
 }
 
-pub async fn list_eval_results(State(state): State<ServerState>) -> Json<Vec<EvalResultSummary>> {
-    Json(state.eval_results.read().clone())
+/// `GET /eval/results` — list eval run summaries with `limit`/`offset`
+/// pagination (same parameters as session listing; default limit 50).
+pub async fn list_eval_results(
+    Query(query): Query<PageQuery>,
+    State(state): State<ServerState>,
+) -> Json<Vec<EvalResultSummary>> {
+    Json(
+        state
+            .eval_results
+            .read()
+            .iter()
+            .skip(query.offset)
+            .take(query.limit)
+            .cloned()
+            .collect(),
+    )
 }

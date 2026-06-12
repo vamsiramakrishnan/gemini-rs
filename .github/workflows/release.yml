@@ -9,6 +9,8 @@ on:
       - "v[0-9]+.[0-9]+.[0-9]+-*"   # pre-releases: v0.6.0-rc.1
 
 env:
+  # Node 20 is removed from runners 2026-09; fail loud now, not on the flag day.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
 
@@ -23,7 +25,7 @@ jobs:
     name: Validate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.93.1"
@@ -33,10 +35,16 @@ jobs:
       - run: cargo test --workspace
       - run: cargo clippy --workspace --all-targets -- -D warnings
       # Pre-publish verification — only verify L0 (independent crate).
-      # Dependent crates (L1+) can't dry-run until L0 is on crates.io,
-      # so we verify them with --no-verify during actual publish (Job 2).
+      # Dependent crates (L1+) can't dry-run until L0 is on crates.io; they are
+      # verified from their packaged tarball during actual publish (Job 2).
       - name: Verify L0 crate manifest
         run: cargo publish -p gemini-genai-rs --dry-run
+      # SemVer ratchet: the declared version bump must cover the actual API
+      # delta vs the latest published release (0.x minor may break; patch may not).
+      - name: SemVer check vs published baseline
+        uses: obi1kenobi/cargo-semver-checks-action@v2
+        with:
+          package: gemini-genai-rs, gemini-adk-rs, gemini-adk-fluent-rs
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Job 2 — Publish: crates.io in strict dependency order
@@ -59,7 +67,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: crates-io
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.93.1"
@@ -87,7 +95,9 @@ jobs:
           fi
 
           echo "Publishing $CRATE@$VERSION ..."
-          cargo publish -p "$CRATE" --no-verify
+          # Verify from the packaged tarball: dependencies are on crates.io by
+          # this point (the helper polls the index between crates).
+          cargo publish -p "$CRATE"
 
           # Poll until the crate appears on static.crates.io (max 240s with backoff)
           echo "Waiting for $CRATE@$VERSION to appear on crates.io..."
@@ -147,7 +157,7 @@ jobs:
     needs: publish
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 

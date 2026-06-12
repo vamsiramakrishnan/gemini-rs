@@ -1,0 +1,23 @@
+{
+  "serverContent": {
+    "modelTurn": {
+      "role": "model",
+      "parts": [
+        {
+          "text": "Considering the forecast sources",
+          "thought": true
+        },
+        {
+          "text": "It is sunny."
+        }
+      ]
+    },
+    "generationComplete": true,
+    "turnComplete": true
+  },
+  "usageMetadata": {
+    "promptTokenCount": 10,
+    "responseTokenCount": 42,
+    "totalTokenCount": 52
+  }
+}

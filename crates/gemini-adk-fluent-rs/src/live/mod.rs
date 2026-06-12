@@ -35,17 +35,42 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use gemini_adk_rs::live::extractor::TurnExtractor;
-use gemini_adk_rs::live::needs::RepairConfig;
-use gemini_adk_rs::live::persistence::SessionPersistence;
-use gemini_adk_rs::live::steering::{ContextDelivery, SteeringMode};
-use gemini_adk_rs::live::{
+pub use gemini_adk_rs::live::extractor::TurnExtractor;
+pub use gemini_adk_rs::live::needs::RepairConfig;
+pub use gemini_adk_rs::live::persistence::SessionPersistence;
+pub use gemini_adk_rs::live::steering::{ContextDelivery, SteeringMode};
+pub use gemini_adk_rs::live::{
     ComputedRegistry, EventCallbacks, InstructionModifier, Phase, TemporalRegistry,
     ToolExecutionMode, WatcherRegistry,
 };
 use gemini_adk_rs::llm::BaseLlm;
 use gemini_adk_rs::tool::ToolDispatcher;
 use gemini_genai_rs::prelude::*;
+
+// Carve (gap #9): `gemini_adk_fluent_rs::live` is the curated home for the full
+// Live control plane. The kernel `prelude` keeps only `Live` + the headline types;
+// everything else (persistence, steering, repair, transcripts, extraction triggers,
+// soft-turn, runtime contract, …) is re-exported here. (Explicit, rather than a
+// glob, to avoid shadowing the L1/L2 private `callbacks`/`contract` modules.)
+pub use gemini_adk_rs::live::{
+    BackendInputVad, BackendVadSnapshot, BackgroundAgentDispatcher, BackgroundToolTracker,
+    CallbackMode, ComputedContract, ComputedVar, ConsecutiveFailureDetector, ContextBuilder,
+    ControlContract, DefaultResultFormatter, DeferredWriter, EffectMode, EffectPolicy,
+    ExtractionTrigger, ExtractorContract, FieldPromotion, FsPersistence, LiveEffect,
+    LiveEffectExecutor, LiveEvent, LiveEventStream, LiveHandle, LiveReactor, LiveSessionBuilder,
+    LlmExtractor, MemoryPersistence, MergePolicy, NeedsFulfillment, PatternDetector,
+    PendingContext, PhaseContract, PhaseInstruction, PhaseMachine, PhasePreparation,
+    PhaseTransition, PredicateFn, PreparationContract, PromotionContract, RateDetector, Reaction,
+    ReactorEvent, ReactorRule, RepairAction, ResultFormatter, RuntimeContract, SessionSignals,
+    SessionSnapshot, SessionTelemetry, SessionType, SoftTurnDetector, SustainedDetector,
+    ToolCallSummary, ToolContract, TranscriptBuffer, TranscriptTurn, TranscriptWindow, Transition,
+    TransitionContract, TransitionEvaluation, TransitionResult, TransitionTrigger,
+    TurnCountDetector, VoiceRuntimeState, WatchPredicate, Watcher, WatcherContract,
+};
+// Offline record/replay harness (Milestone 7 determinism spine).
+pub use gemini_adk_rs::live::replay::{
+    attach_session, collect_events_until_idle, replay_session, ReplaySession,
+};
 
 /// A deferred agent tool registration (resolved at connect time when State is available).
 pub(crate) struct DeferredAgentTool {
@@ -124,6 +149,7 @@ pub struct Live {
     pub(crate) soft_turn_timeout: Option<Duration>,
     pub(crate) steering_mode: SteeringMode,
     pub(crate) context_delivery: ContextDelivery,
+    pub(crate) delivery: gemini_adk_rs::live::DeliveryConfig,
     pub(crate) repair_config: Option<RepairConfig>,
     pub(crate) persistence: Option<Arc<dyn SessionPersistence>>,
     pub(crate) session_id: Option<String>,
@@ -143,6 +169,8 @@ pub struct Live {
         Arc<dyn gemini_adk_rs::text::TextAgent>,
         gemini_adk_rs::orchestration::Mode,
     )>,
+    // Wire-log path: a FileWireRecorder is created here at connect time.
+    pub(crate) record_wire_path: Option<std::path::PathBuf>,
 }
 
 impl Live {
@@ -207,6 +235,7 @@ impl Live {
             soft_turn_timeout: None,
             steering_mode: SteeringMode::default(),
             context_delivery: ContextDelivery::default(),
+            delivery: gemini_adk_rs::live::DeliveryConfig::default(),
             repair_config: None,
             persistence: None,
             session_id: None,
@@ -217,6 +246,7 @@ impl Live {
             flow: None,
             flow_mode: gemini_adk_rs::flow::Enforcement::Enforce,
             flow_actions: Vec::new(),
+            record_wire_path: None,
         }
     }
 
@@ -235,6 +265,27 @@ impl Live {
         self.flow = Some(flow);
         self.flow_mode = gemini_adk_rs::flow::Enforcement::Observe;
         self
+    }
+
+    /// Govern the session with a pre-compiled
+    /// [`CompiledFlow`](gemini_adk_rs::flow::CompiledFlow) and **enforce** it.
+    ///
+    /// A `CompiledFlow` carries proof that
+    /// [`Flow::compile`](gemini_adk_rs::flow::Flow::compile) (or
+    /// [`Flow::compile_with_tools`](gemini_adk_rs::flow::Flow::compile_with_tools))
+    /// already surfaced its diagnostics, so connect does **not** re-validate or
+    /// re-compile it — compile once at load time, govern many sessions.
+    pub fn govern_compiled(self, flow: gemini_adk_rs::flow::CompiledFlow) -> Self {
+        self.govern(flow.into_flow())
+    }
+
+    /// Attach a pre-compiled
+    /// [`CompiledFlow`](gemini_adk_rs::flow::CompiledFlow) in **observe** mode:
+    /// nothing is blocked, but deviations are recorded for audit/analytics.
+    /// Like [`govern_compiled`](Self::govern_compiled), the flow is not
+    /// re-validated or re-compiled at connect.
+    pub fn observe_compiled(self, flow: gemini_adk_rs::flow::CompiledFlow) -> Self {
+        self.observe(flow.into_flow())
     }
 
     /// Run an agent the first time the named flow step becomes active.
@@ -332,6 +383,32 @@ mod tests {
             .on_disconnected(|_r| async {})
             .on_error(|_e| async {});
         // Just verify the builder chain compiles
+    }
+
+    #[test]
+    fn govern_compiled_attaches_precompiled_flow_without_recompiling() {
+        use gemini_adk_rs::flow::{Enforcement, Flow, Guard};
+
+        let compiled = Flow::new()
+            .step("greet")
+            .done(Guard::is_true("greeted"))
+            .step("end")
+            .after("greet")
+            .terminal()
+            .build()
+            .expect("valid flow")
+            .compile()
+            .expect("flow compiles");
+
+        // Enforce mode.
+        let live = Live::builder().govern_compiled(compiled.clone());
+        assert!(live.flow.is_some(), "compiled flow attached");
+        assert_eq!(live.flow_mode, Enforcement::Enforce);
+
+        // Observe mode.
+        let live = Live::builder().observe_compiled(compiled);
+        assert!(live.flow.is_some(), "compiled flow attached");
+        assert_eq!(live.flow_mode, Enforcement::Observe);
     }
 
     #[test]

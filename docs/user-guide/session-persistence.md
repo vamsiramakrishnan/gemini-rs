@@ -105,6 +105,49 @@ seeks the phase machine to the saved phase, and fires `on_resumed`. The
 `resume_handle` in the snapshot is forwarded to the Gemini server so the
 conversation history is not lost.
 
+A final snapshot is also written **synchronously** when the control lane shuts
+down (disconnect or server close), so state accumulated since the last turn
+boundary is captured even if the process exits immediately afterwards.
+
+### Manual resume after GoAway (server-side handles)
+
+Independent of snapshots, the Gemini server itself supports session
+resumption: with resumption enabled it periodically issues opaque handles, and
+presenting the latest handle on the next connect continues the **server-side**
+conversation (model context included).
+
+`LiveHandle::resume_handle()` exposes the latest handle at any time — most
+usefully inside `on_go_away`, which fires when the server announces it will
+close the connection soon:
+
+```rust,ignore
+// Session 1: enable resumption and capture the handle.
+let handle = Live::builder()
+    .session_resume(true)
+    .on_go_away(|time_left| async move {
+        println!("Server closing in {time_left:?} — capture the resume handle now");
+    })
+    .connect_from_env()
+    .await?;
+
+// ... conversation runs; the server keeps issuing fresh handles ...
+
+let resume = handle.resume_handle();   // Option<String>
+handle.disconnect().await?;
+
+// Session 2: present the handle on the next connect.
+let mut builder = Live::builder().instruction("…");
+if let Some(h) = resume {
+    builder = builder.session_resume_from(h);   // resumption stays enabled
+}
+let handle = builder.connect_from_env().await?;
+```
+
+The SDK performs **no automatic reconnect** — when and whether to resume is an
+explicit application decision. The same handle is also captured in every
+persistence snapshot (`SessionSnapshot::resume_handle`), so a process restart
+can resume from storage instead of memory.
+
 ### Custom persistence backends
 
 Implement the `SessionPersistence` trait to target Redis, Firestore, DynamoDB,

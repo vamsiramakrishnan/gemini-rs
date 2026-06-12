@@ -59,11 +59,14 @@ pub struct SessionData {
     pub updated_at: String,
 }
 
-/// Query parameters for session listing.
+/// Pagination query parameters shared by list endpoints
+/// (session listing, eval results).
 #[derive(Debug, Deserialize)]
-pub struct SessionQuery {
+pub struct PageQuery {
+    /// Maximum number of items to return (default 50).
     #[serde(default = "default_limit")]
     pub limit: usize,
+    /// Number of items to skip from the start of the collection.
     #[serde(default)]
     pub offset: usize,
 }

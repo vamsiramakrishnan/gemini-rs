@@ -98,7 +98,7 @@ string. Parameters of any `Deserialize + JsonSchema` type are supported.
 (Per-parameter doc descriptions are not extracted yet — use `TypedTool` with a
 documented args struct when you need them.)
 
-See cookbook example `33_tool_macro` for a runnable demonstration.
+See the `#[tool]` macro section above for a runnable demonstration.
 
 ## ToolFunction Trait
 
@@ -465,5 +465,4 @@ state promotion, or result augmentation:
 - [Text Agent Combinators](./text-agents.md) — using `TextAgentTool` to call agent pipelines as tools
 - [cookbook 02 — agent with tools](../../examples/cookbook/src/02_agent_with_tools.rs)
 - [cookbook 09 — tool composition](../../examples/cookbook/src/09_tool_composition.rs)
-- [cookbook 33 — tool macro](../../examples/cookbook/src/33_tool_macro.rs)
 ```
