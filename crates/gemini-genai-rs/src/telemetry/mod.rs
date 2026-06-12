@@ -263,7 +263,11 @@ impl TelemetryConfig {
     }
 
     /// Build an OTel resource with the configured service name.
-    #[cfg(feature = "otel-base")]
+    ///
+    /// Gated on the exporter features (not `otel-base`): the only callers are
+    /// the OTLP and GCP provider-construction paths, so under a bare
+    /// `otel-base` build this would be dead code.
+    #[cfg(any(feature = "otel-otlp", feature = "otel-gcp"))]
     pub(crate) fn otel_resource(&self) -> opentelemetry_sdk::Resource {
         use opentelemetry::KeyValue;
         opentelemetry_sdk::Resource::builder_empty()
