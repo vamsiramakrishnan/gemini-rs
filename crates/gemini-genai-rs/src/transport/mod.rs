@@ -5,6 +5,8 @@ pub mod backpressure;
 pub mod builder;
 pub mod codec;
 pub mod connection;
+pub mod recording;
+pub mod replay;
 pub mod ws;
 
 pub use auth::{AuthProvider, GoogleAIAuth, GoogleAITokenAuth, ServiceEndpoint, VertexAIAuth};
@@ -12,6 +14,11 @@ pub use backpressure::{BackpressureConfig, TokenBucket};
 pub use builder::ConnectBuilder;
 pub use codec::{Codec, CodecError, JsonCodec};
 pub use connection::{connect, connect_with};
+pub use recording::{
+    parse_wire_log, read_wire_log, FileWireRecorder, MemoryWireRecorder, RecordingCodec,
+    WireDirection, WireEntry, WireLogError, WireRecorder, WireRecorderHandle,
+};
+pub use replay::{OutboundFrames, ReplayControl, ReplayTransport, ReplayTransportError};
 pub use ws::{MockTransport, MockTransportError, Transport, TungsteniteTransport};
 
 /// Configuration for the transport layer.

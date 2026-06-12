@@ -25,6 +25,7 @@ pub mod persistence;
 pub mod phase;
 pub(crate) mod processor;
 pub mod reactor;
+pub mod replay;
 pub mod session_signals;
 pub mod soft_turn;
 pub mod steering;
@@ -63,6 +64,7 @@ pub use reactor::{
     EffectMode, EffectPolicy, LiveEffect, LiveReactor, Reaction, ReactorEvent, ReactorRule,
     VoiceRuntimeState,
 };
+pub use replay::{attach_session, collect_events_until_idle, replay_session, ReplaySession};
 pub use session_signals::{SessionSignals, SessionType};
 pub use soft_turn::SoftTurnDetector;
 pub use steering::{ContextDelivery, SteeringMode};

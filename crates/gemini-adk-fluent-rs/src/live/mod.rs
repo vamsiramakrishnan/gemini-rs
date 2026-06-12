@@ -67,6 +67,10 @@ pub use gemini_adk_rs::live::{
     TransitionContract, TransitionEvaluation, TransitionResult, TransitionTrigger,
     TurnCountDetector, VoiceRuntimeState, WatchPredicate, Watcher, WatcherContract,
 };
+// Offline record/replay harness (Milestone 7 determinism spine).
+pub use gemini_adk_rs::live::replay::{
+    attach_session, collect_events_until_idle, replay_session, ReplaySession,
+};
 
 /// A deferred agent tool registration (resolved at connect time when State is available).
 pub(crate) struct DeferredAgentTool {
@@ -165,6 +169,8 @@ pub struct Live {
         Arc<dyn gemini_adk_rs::text::TextAgent>,
         gemini_adk_rs::orchestration::Mode,
     )>,
+    // Wire-log path: a FileWireRecorder is created here at connect time.
+    pub(crate) record_wire_path: Option<std::path::PathBuf>,
 }
 
 impl Live {
@@ -240,6 +246,7 @@ impl Live {
             flow: None,
             flow_mode: gemini_adk_rs::flow::Enforcement::Enforce,
             flow_actions: Vec::new(),
+            record_wire_path: None,
         }
     }
 

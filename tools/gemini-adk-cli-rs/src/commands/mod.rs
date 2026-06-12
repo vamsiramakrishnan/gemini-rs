@@ -6,4 +6,5 @@ pub mod eval;
 pub mod flow;
 pub mod replay;
 pub mod run;
+pub mod session;
 pub mod web;

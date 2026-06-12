@@ -137,6 +137,12 @@ enum Command {
         action: FlowAction,
     },
 
+    /// Session record/replay utilities (wire logs from `record_wire(..)`).
+    Session {
+        #[command(subcommand)]
+        action: SessionAction,
+    },
+
     /// Deploy an agent to a cloud target.
     Deploy {
         /// Deployment target: cloud_run, gke, or agent_engine.
@@ -166,6 +172,23 @@ enum DeployTarget {
     CloudRun,
     Gke,
     AgentEngine,
+}
+
+#[derive(Subcommand)]
+enum SessionAction {
+    /// Replay a recorded wire log offline through the real L1 processor.
+    ///
+    /// Re-processes the recorded frames only — no LLM re-execution, no tool
+    /// re-execution. Prints a turn-by-turn summary (events, tool calls, final
+    /// state keys); with --journal, diffs the replayed final state against the
+    /// recorded mutation journal and reports CLEAN or DRIFT.
+    Replay {
+        /// Path to a wire log (JSONL) recorded via `record_wire(..)`.
+        wire_log: String,
+        /// Optional state-mutation journal (JSONL) written by FileJournalSink.
+        #[arg(long)]
+        journal: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -287,6 +310,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         Command::Doctor => commands::doctor::run()?,
+
+        Command::Session { action } => match action {
+            SessionAction::Replay { wire_log, journal } => {
+                commands::session::replay(&wire_log, journal.as_deref()).await?
+            }
+        },
 
         Command::Flow { action } => match action {
             FlowAction::Inspect { spec } => commands::flow::inspect(&spec)?,

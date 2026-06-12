@@ -22,6 +22,7 @@
 - [State Management](./user-guide/state.md)
 - [State Watchers & Temporal Patterns](./user-guide/watchers.md)
 - [Session Persistence & Resumption](./user-guide/session-persistence.md)
+- [Record & Replay](./user-guide/record-replay.md)
 
 # Tools & Extraction
 

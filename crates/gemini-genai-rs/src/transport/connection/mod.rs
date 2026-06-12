@@ -58,18 +58,40 @@ where
         handle = handle.with_audio_pacing(pacing);
     }
 
-    let task = tokio::spawn(async move {
-        session_loop::generic_connection_loop(
-            config,
-            transport_config,
-            state,
-            command_rx,
-            event_tx,
-            transport,
+    // Honor a config-installed wire recorder by wrapping the codec. The
+    // boxed indirection keeps `connect_with` generic while letting the
+    // recorder be a runtime decision.
+    let task = if let Some(recorder) = config.wire_recorder.clone() {
+        let codec: Box<dyn Codec> = Box::new(crate::transport::recording::RecordingCodec::new(
             codec,
-        )
-        .await;
-    });
+            recorder.recorder(),
+        ));
+        tokio::spawn(async move {
+            session_loop::generic_connection_loop(
+                config,
+                transport_config,
+                state,
+                command_rx,
+                event_tx,
+                transport,
+                codec,
+            )
+            .await;
+        })
+    } else {
+        tokio::spawn(async move {
+            session_loop::generic_connection_loop(
+                config,
+                transport_config,
+                state,
+                command_rx,
+                event_tx,
+                transport,
+                codec,
+            )
+            .await;
+        })
+    };
     handle.set_task(task);
 
     Ok(handle)

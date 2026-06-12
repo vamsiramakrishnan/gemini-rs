@@ -76,6 +76,41 @@ impl Live {
         self
     }
 
+    // -- Wire recording --
+
+    /// Record every wire byte (both directions) to a JSONL log at `path`.
+    ///
+    /// The log is written by a
+    /// [`FileWireRecorder`] created at connect time (a connect error is returned if the file cannot
+    /// be created). Replay it offline with `adk session replay <path>` or
+    /// [`gemini_adk_rs::live::replay::replay_session`].
+    ///
+    /// ```ignore
+    /// let handle = Live::builder()
+    ///     .model(GeminiModel::Gemini2_0FlashLive)
+    ///     .record_wire("/tmp/session.wire.jsonl")
+    ///     .connect_from_env()
+    ///     .await?;
+    /// ```
+    pub fn record_wire(mut self, path: impl Into<std::path::PathBuf>) -> Self {
+        self.record_wire_path = Some(path.into());
+        self
+    }
+
+    /// Record every wire byte to a custom
+    /// [`WireRecorder`] implementation.
+    ///
+    /// Overrides (and is overridden by) the most recent of this and
+    /// [`record_wire`](Self::record_wire).
+    pub fn wire_recorder(
+        mut self,
+        recorder: Arc<dyn gemini_genai_rs::prelude::WireRecorder>,
+    ) -> Self {
+        self.record_wire_path = None;
+        self.config = self.config.record_wire(recorder);
+        self
+    }
+
     // -- Tools --
 
     /// Set the tool dispatcher (auto-dispatches tool calls).

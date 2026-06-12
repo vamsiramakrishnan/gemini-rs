@@ -265,11 +265,18 @@ evolvability. Nothing above this matters if barge-in hangs or snapshots tear.
 The keystone: **any session can be replayed deterministically through the real
 control plane.** (Verified: Sim already runs real FlowStack/extractor code.)
 
-- 🚧 **`RecordingCodec`** wrapping the `Codec` trait — every wire byte recorded.
-- 🚧 **Durable `JournalSink`** — the mutation journal is capped at 1024 entries
+- ✅ **`RecordingCodec`** wrapping the `Codec` trait — every wire byte recorded.
+  Installed via `SessionConfig::record_wire` / `Live::builder().record_wire(path)`;
+  `FileWireRecorder` (JSONL) + `MemoryWireRecorder` backends.
+- ✅ **Durable `JournalSink`** — the mutation journal is capped at 1024 entries
   (a 2-hour call loses 98% of history); add a sink trait + file backend.
-- 🚧 **Replay harness** — feed a recorded wire log through the real processor;
-  diff the mutation journal. `adk record` / `adk replay <session.log>`.
+  `State::set_journal_sink` + `FileJournalSink`/`MemoryJournalSink`; the ring
+  stays for `evidence()`.
+- ✅ **Replay harness** — feed a recorded wire log through the real processor;
+  diff the mutation journal. `gemini_adk_rs::live::replay::replay_session` +
+  `adk session replay <wire-log> [--journal <journal-log>]` (CLEAN/DRIFT);
+  closed-loop record→replay test asserts per-lane events, final state, and
+  byte-identical setup/tool-response frames.
 - 📋 **Injectable clock** — `Instant::now()`/`SystemTime::now()`/timeouts leak
   nondeterminism into control flow (sites catalogued in audit).
 - 📋 **Recorded LLM/resolver outputs** — tape async resolver results so replay

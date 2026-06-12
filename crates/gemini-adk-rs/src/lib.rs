@@ -132,6 +132,7 @@ pub use runner::Runner;
 pub use session::DatabaseSessionService;
 pub use session::{db_schema, InMemorySessionService, Session, SessionId, SessionService};
 pub use state::PrefixedState;
+pub use state::{FileJournalSink, JournalSink, MemoryJournalSink};
 pub use state::{SlotEvidence, State, StateMutation, StateMutationOrigin};
 pub use text::{
     DispatchTextAgent, FallbackTextAgent, FnTextAgent, JoinTextAgent, LlmTextAgent, LoopTextAgent,
