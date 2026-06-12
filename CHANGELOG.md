@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`LiveHandle::stream()`** — semantic events as a `futures::Stream`. The new
+  `LiveEventStream` wraps the `events()` broadcast receiver: lagged (missed)
+  events are skipped and the stream continues, and the stream ends when the
+  session's event channel closes. Composes with all `futures`/`tokio-stream`
+  combinators (`while let Some(ev) = stream.next().await { … }`). Exported from
+  `gemini_adk_rs::live` and `gemini_adk_fluent_rs::live` (not the kernel
+  prelude). Also new: `LiveEvent::ToolCancelled { ids }`,
+  `LiveHandle::resume_handle()`, and the L2 `session_resume_from(handle)`
+  builder setter (see Fixed below).
+
 ### Fixed
 
 - **Background tools are cancelled on disconnect.** The `BackgroundToolTracker`

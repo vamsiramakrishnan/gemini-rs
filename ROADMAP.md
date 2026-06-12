@@ -256,8 +256,9 @@ evolvability. Nothing above this matters if barge-in hangs or snapshots tear.
   (golden-fixture pinned) and opt-in producer-side audio pacing
   (`SessionConfig::audio_pacing`). *(Control-channel depth lands with the
   concurrency fixes.)*
-- 🚧 **`LiveHandle::stream()`** — `impl Stream<Item = LiveEvent>` so events
-  compose with `tokio-stream`; callbacks become sugar.
+- ✅ **`LiveHandle::stream()`** — `LiveEventStream` implements
+  `Stream<Item = LiveEvent>` (lag-skipping, ends on close) so events compose
+  with `tokio-stream`; callbacks become sugar.
 
 ## Milestone 7 — The determinism spine `0.9.0` 🚧
 

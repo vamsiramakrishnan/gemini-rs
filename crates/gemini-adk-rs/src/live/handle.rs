@@ -334,6 +334,33 @@ impl LiveHandle {
         self.event_tx.subscribe()
     }
 
+    /// Subscribe to semantic events as a [`futures::Stream`].
+    ///
+    /// Stream-flavored sibling of [`events`](Self::events): each call creates
+    /// an independent subscriber starting from the current point in the event
+    /// flow. If the subscriber falls behind the broadcast buffer, the missed
+    /// events are skipped and the stream continues; the stream ends when the
+    /// session's event channel closes. See
+    /// [`LiveEventStream`](super::events::LiveEventStream).
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use futures::StreamExt;
+    ///
+    /// let mut stream = handle.stream();
+    /// while let Some(ev) = stream.next().await {
+    ///     match ev {
+    ///         LiveEvent::TextDelta(t) => print!("{t}"),
+    ///         LiveEvent::TurnComplete => println!(),
+    ///         _ => {}
+    ///     }
+    /// }
+    /// ```
+    pub fn stream(&self) -> super::events::LiveEventStream {
+        super::events::LiveEventStream::new(self.event_tx.subscribe())
+    }
+
     /// Convenience: get the latest extraction result by extractor name.
     pub fn extracted<T: DeserializeOwned>(&self, name: &str) -> Option<T> {
         self.state.get(name)
