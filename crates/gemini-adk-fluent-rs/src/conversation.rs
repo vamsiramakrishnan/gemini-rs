@@ -115,6 +115,32 @@ impl ResolverRegistry {
         self.fetchers.contains_key(name)
     }
 
+    /// A registry that stubs every resolver declared anywhere in `spec` (stages
+    /// and overlays) with a no-op returning JSON `null`.
+    ///
+    /// For **structural validation and deterministic simulation**, the resolver
+    /// *implementations* are irrelevant — a resolver is an external fetch, so in
+    /// a model-free test its output is supplied via a scenario `set` step (like
+    /// a tool result via `tool_ok`), and the stub is never actually invoked when
+    /// the slot is pre-set. Real implementations bind at deploy time via
+    /// [`Conversation::from_spec_with_resolvers`].
+    pub fn stubbing(spec: &ConversationSpec) -> Self {
+        let mut reg = Self::new();
+        let stages = spec
+            .stages
+            .iter()
+            .chain(spec.overlays.iter().flat_map(|o| o.stages.iter()));
+        for stage in stages {
+            for r in &stage.resolve {
+                let name = r.resolver_name().to_string();
+                if !reg.contains(&name) {
+                    reg.add(name, |_args| async { Ok(serde_json::Value::Null) });
+                }
+            }
+        }
+        reg
+    }
+
     fn get(&self, name: &str) -> Option<SlotFetch> {
         self.fetchers.get(name).cloned()
     }
@@ -784,6 +810,22 @@ impl Conversation {
         Self::from_spec_with_resolvers(spec, &ResolverRegistry::new())
     }
 
+    /// Compile a [`ConversationSpec`] with its declared resolvers **stubbed**
+    /// (each returns JSON `null`) — for structural validation, model-free
+    /// simulation, and CI, where resolver outputs are supplied by scenario
+    /// `set` steps rather than live fetches.
+    ///
+    /// Use this (not [`from_spec`](Self::from_spec)) when compiling a spec from
+    /// untrusted JSON for testing/authoring; use
+    /// [`from_spec_with_resolvers`](Self::from_spec_with_resolvers) at deploy
+    /// time to bind real implementations.
+    pub fn from_spec_stubbing_resolvers(
+        spec: ConversationSpec,
+    ) -> Result<CompiledConversation, ConversationError> {
+        let registry = ResolverRegistry::stubbing(&spec);
+        Self::from_spec_with_resolvers(spec, &registry)
+    }
+
     /// Compile a [`ConversationSpec`] and bind its declared named-resolver slots
     /// from `registry`. This makes a JSON spec + a resolver registry a complete
     /// deployable unit.
@@ -1419,6 +1461,33 @@ mod tests {
                 .any(|(_, k)| k == "availability")),
             "a resolver extractor filling 'availability' was compiled in"
         );
+    }
+
+    #[tokio::test]
+    async fn resolver_spec_is_validatable_and_simulatable_without_a_registry() {
+        // The exact shape the CLI/Python/CI data-plane sees: a resolver slot
+        // with no implementation available.
+        let json = r#"{ "name": "r", "stages": [
+            { "id": "check",
+              "resolve": [{ "slot": "avail", "resolver": "lookup", "args": ["x"] }],
+              "next": [{ "to": "done", "when": { "captured": ["avail"] } }] },
+            { "id": "done", "terminal": true } ], "require": ["done"] }"#;
+        let spec: ConversationSpec = serde_json::from_str(json).unwrap();
+
+        // Strict path (no registry) errors — as it should at deploy time.
+        assert!(Conversation::from_spec(spec.clone()).is_err());
+
+        // Stubbing path compiles for structural validation + simulation.
+        let convo = Conversation::from_spec_stubbing_resolvers(spec)
+            .expect("stubbed resolvers compile for testing");
+
+        // A scenario supplies the resolver's output via `set` (the stub fetch is
+        // never invoked when the slot is pre-set), and the flow completes.
+        use crate::simulation::Sim;
+        let mut sim = Sim::new(&convo, gemini_adk_rs::flow::Enforcement::Enforce);
+        sim.set("avail", serde_json::json!({ "open": true }));
+        sim.turn();
+        assert!(sim.is_complete(), "resolver slot supplied by set completes");
     }
 
     #[test]

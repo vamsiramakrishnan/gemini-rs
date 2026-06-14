@@ -76,7 +76,7 @@ fn spec_schema() -> String {
 #[pyfunction]
 fn validate_spec(spec_json: &str) -> PyResult<String> {
     let spec = parse_spec(spec_json)?;
-    let report = match Conversation::from_spec(spec) {
+    let report = match Conversation::from_spec_stubbing_resolvers(spec) {
         Ok(_) => serde_json::json!({ "valid": true }),
         Err(e) => serde_json::json!({ "valid": false, "error": e }),
     };
@@ -88,7 +88,7 @@ fn validate_spec(spec_json: &str) -> PyResult<String> {
 #[pyfunction]
 fn compile_spec(spec_json: &str) -> PyResult<u64> {
     let spec = parse_spec(spec_json)?;
-    let convo = Conversation::from_spec(spec).map_err(|e| {
+    let convo = Conversation::from_spec_stubbing_resolvers(spec).map_err(|e| {
         let detail = serde_json::to_string(&e).unwrap_or_else(|_| e.to_string());
         PyValueError::new_err(detail)
     })?;

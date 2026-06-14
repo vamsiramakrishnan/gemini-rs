@@ -14,7 +14,7 @@ use gemini_adk_fluent_rs::simulation::Scenario;
 fn load(spec_path: &str) -> Result<CompiledConversation, Box<dyn std::error::Error>> {
     let raw = fs::read_to_string(spec_path)?;
     let spec: ConversationSpec = serde_json::from_str(&raw)?;
-    Conversation::from_spec(spec).map_err(|e| e.to_string().into())
+    Conversation::from_spec_stubbing_resolvers(spec).map_err(|e| e.to_string().into())
 }
 
 /// A human-readable summary of a compiled conversation.
@@ -90,7 +90,7 @@ pub fn schema() -> Result<(), Box<dyn std::error::Error>> {
 pub fn validate(spec_path: &str) -> Result<(), Box<dyn std::error::Error>> {
     let raw = fs::read_to_string(spec_path)?;
     let spec: ConversationSpec = serde_json::from_str(&raw)?;
-    match Conversation::from_spec(spec) {
+    match Conversation::from_spec_stubbing_resolvers(spec) {
         Ok(_) => {
             println!("{}", serde_json::json!({ "valid": true }));
             Ok(())
@@ -153,7 +153,8 @@ pub async fn ci(dir: &str, json: bool) -> Result<(), Box<dyn std::error::Error>>
         let compiled = spec
             .map_err(|e| serde_json::Value::String(format!("invalid JSON: {e}")))
             .and_then(|s| {
-                Conversation::from_spec(s).map_err(|e| serde_json::to_value(&e).unwrap_or_default())
+                Conversation::from_spec_stubbing_resolvers(s)
+                    .map_err(|e| serde_json::to_value(&e).unwrap_or_default())
             });
         let convo = match compiled {
             Ok(c) => c,
