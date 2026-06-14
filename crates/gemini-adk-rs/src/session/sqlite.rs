@@ -75,7 +75,21 @@ impl SqliteSessionService {
     }
 
     #[cfg(not(feature = "database-sessions"))]
-    fn build_backend(_config: &SqliteSessionConfig) -> Backend {
+    fn build_backend(config: &SqliteSessionConfig) -> Backend {
+        // Without the feature there is no SQLite backend: fall back to in-memory,
+        // but LOUDLY — silently dropping a configured DB path would lose every
+        // session on restart with no signal.
+        static WARN_ONCE: std::sync::Once = std::sync::Once::new();
+        WARN_ONCE.call_once(|| {
+            let msg = format!(
+                "SqliteSessionService: the `database-sessions` feature is not                  enabled — ignoring db_path '{}' and using in-memory storage                  (sessions are lost on restart)",
+                config.db_path.to_string_lossy()
+            );
+            #[cfg(feature = "tracing-support")]
+            tracing::warn!(target: "gemini_adk_rs::session", "{msg}");
+            #[cfg(not(feature = "tracing-support"))]
+            eprintln!("warning: {msg}");
+        });
         super::InMemorySessionService::new()
     }
 

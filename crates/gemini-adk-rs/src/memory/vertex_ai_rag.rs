@@ -496,14 +496,23 @@ impl MemoryService for VertexAiRagMemoryService {
         Ok(parse_scoped_contexts(contexts, None))
     }
 
-    /// Deletion of individual RAG files by key is not supported.
+    /// Deleting an individual RAG file by key is not supported by the retrieval
+    /// API — returns [`MemoryError::Unsupported`] rather than silently
+    /// succeeding (which would mask data that was never removed).
     async fn delete(&self, _session_id: &str, _key: &str) -> Result<(), MemoryError> {
-        Ok(())
+        Err(MemoryError::Unsupported(
+            "VertexAiRagMemoryService cannot delete individual entries (semantic              retrieval API); manage the corpus via the Vertex AI admin API"
+                .into(),
+        ))
     }
 
-    /// Clearing a corpus is a destructive admin operation — not performed here.
+    /// Clearing a corpus is a destructive admin operation performed out of band —
+    /// returns [`MemoryError::Unsupported`] rather than silently succeeding.
     async fn clear(&self, _session_id: &str) -> Result<(), MemoryError> {
-        Ok(())
+        Err(MemoryError::Unsupported(
+            "VertexAiRagMemoryService cannot clear a corpus (destructive admin              operation); use the Vertex AI admin API"
+                .into(),
+        ))
     }
 }
 
