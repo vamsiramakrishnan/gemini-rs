@@ -1,0 +1,12 @@
+{
+  "name": "cannot_book_without_confirmation",
+  "steps": [
+    { "expect_active": ["collect"] },
+    { "expect_denied": "book" },
+    { "set": { "key": "party_size", "value": 2 } },
+    { "set": { "key": "slot", "value": "friday" } },
+    "turn",
+    { "expect_active": ["confirm"] },
+    { "expect_denied": "book" }
+  ]
+}

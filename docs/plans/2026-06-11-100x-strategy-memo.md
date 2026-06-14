@@ -97,7 +97,7 @@ regression test; every recorded session becomes an eval.
   stays open at ~4-6 eng-months if the calculus changes; the research backing
   it is preserved above for that day.
 
-### Phase 3 — Conversation CI (the most evidenced bet, ~2-3 eng-months)
+### Phase 3 — Conversation CI (the most evidenced bet) — ✅ CORE SHIPPED (`adk flow ci` + Action + corpus; 2026-06-14)
 Package `adk flow simulate` + scenario corpus + `why_blocked()` diffs as a
 GitHub-Action conformance suite. Pitch writes itself: their tests pass 57% of
 the time when run eight times (τ²-bench pass^8); ours pass 100% in

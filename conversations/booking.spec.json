@@ -1,0 +1,23 @@
+{
+  "name": "booking",
+  "stages": [
+    {
+      "id": "collect",
+      "say": "Help the user book a table.",
+      "collect": ["party_size", "slot"],
+      "next": [{ "to": "confirm", "when": { "captured": ["party_size", "slot"] } }],
+      "repair": { "reprompt_after": 2, "escalate_after": 4, "escalate_to": "handoff" }
+    },
+    {
+      "id": "confirm",
+      "ground": "Party of {party_size} at {slot}.",
+      "allow": ["book"],
+      "commit": { "tool": "book", "when": { "is_true": "user_confirmed" } },
+      "next": [{ "to": "done", "when": { "called_ok": "book" } }]
+    },
+    { "id": "done", "terminal": true },
+    { "id": "handoff", "terminal": true }
+  ],
+  "require": ["done"],
+  "policies": [{ "kind": "redact", "keys": ["card_number"] }]
+}

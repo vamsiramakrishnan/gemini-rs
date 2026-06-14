@@ -210,6 +210,14 @@ enum FlowAction {
         /// Path to a Scenario JSON file.
         scenario: String,
     },
+    /// Conversation CI: compile every spec in a directory and run its scenarios.
+    Ci {
+        /// Directory holding `*.spec.json` + `*.scenario.json` files (recursive).
+        dir: String,
+        /// Emit a machine-readable JSON report instead of the human summary.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[tokio::main]
@@ -323,6 +331,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             FlowAction::Simulate { spec, scenario } => {
                 commands::flow::simulate(&spec, &scenario).await?
             }
+            FlowAction::Ci { dir, json } => commands::flow::ci(&dir, json).await?,
         },
 
         Command::Deploy {
