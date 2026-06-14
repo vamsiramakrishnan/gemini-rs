@@ -71,7 +71,7 @@ struct StageResolver {
 }
 
 /// A transition: advance to `to` when `when` holds.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TransitionSpec {
     /// Target stage id.
     pub to: String,
@@ -80,7 +80,7 @@ pub struct TransitionSpec {
 }
 
 /// A confirm-before-act tool, gated by `when`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CommitSpec {
     /// The committing tool (e.g. `book`, `charge_card`).
     pub tool: String,
@@ -89,7 +89,7 @@ pub struct CommitSpec {
 }
 
 /// One authored conversation stage.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct StageSpec {
     /// Unique stage id.
     pub id: String,
@@ -140,7 +140,9 @@ fn reprompt_flag(stage: &str) -> String {
 }
 
 /// How the main flow continues after a digression (overlay) completes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum Resume {
     /// Resume the main flow exactly where it was suspended (history state).
@@ -164,7 +166,7 @@ fn default_escalate_after() -> u32 {
 /// active `reprompt_after` turns without completing, and `repair:{stage}:escalate`
 /// after `escalate_after`. When `escalate_to` is set, escalation also *completes*
 /// the stage and routes to that stage — a deterministic "give up and hand off".
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepairPolicy {
     /// Turns the stage may be active before a reprompt signal is raised.
     #[serde(default = "default_reprompt_after")]
@@ -206,7 +208,7 @@ impl RepairPolicy {
 
 /// A digression (overlay): a named sub-flow that suspends the main flow when its
 /// `trigger` holds, runs to completion, then resumes per `resume`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OverlaySpec {
     /// Overlay name.
     pub name: String,
@@ -225,7 +227,7 @@ pub struct OverlaySpec {
 
 /// The serializable authoring spec — the single source of truth from which the
 /// typed builder, YAML, and (later) codegen all derive.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ConversationSpec {
     /// Conversation name.
     pub name: String,
@@ -270,6 +272,45 @@ impl std::fmt::Display for ConversationError {
 }
 
 impl std::error::Error for ConversationError {}
+
+/// The JSON Schema for a [`ConversationSpec`], as a pretty-printed string.
+///
+/// This is the machine-readable authoring contract: a web form, an IDE, or an
+/// LLM/skill drafting a spec targets this schema. Generated from the same
+/// `#[derive(JsonSchema)]` types the runtime compiles, so it cannot drift.
+pub fn conversation_spec_schema() -> String {
+    let schema = schemars::schema_for!(ConversationSpec);
+    serde_json::to_string_pretty(&schema).expect("schema serialization is infallible")
+}
+
+impl serde::Serialize for ConversationError {
+    /// A machine-readable diagnostic so authoring tools (web/CLI/skills) can
+    /// render structured errors. Shape:
+    /// `{ "kind": "compile", "errors": [ { "kind": "unreachable_step", ... } ] }`.
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut m = s.serialize_map(None)?;
+        m.serialize_entry("message", &self.to_string())?;
+        match self {
+            ConversationError::Empty => {
+                m.serialize_entry("kind", "empty")?;
+            }
+            ConversationError::Spec(msg) => {
+                m.serialize_entry("kind", "spec")?;
+                m.serialize_entry("detail", msg)?;
+            }
+            ConversationError::Flow(errs) => {
+                m.serialize_entry("kind", "flow")?;
+                m.serialize_entry("errors", errs)?;
+            }
+            ConversationError::Compile(e) => {
+                m.serialize_entry("kind", "compile")?;
+                m.serialize_entry("errors", &e.0)?;
+            }
+        }
+        m.end()
+    }
+}
 
 /// A compiled digression: its trigger, lowered flow, extractors, and resume policy.
 #[derive(Clone)]
@@ -1197,6 +1238,48 @@ mod tests {
         let back: ConversationSpec = serde_json::from_str(&json).expect("deserialize spec");
         let recompiled = Conversation::from_spec(back).expect("recompile from spec");
         assert_eq!(recompiled.flow().flow().steps.len(), 4);
+    }
+
+    #[test]
+    fn conversation_spec_schema_is_valid_json_with_expected_shape() {
+        let schema_str = conversation_spec_schema();
+        let schema: serde_json::Value =
+            serde_json::from_str(&schema_str).expect("schema is valid JSON");
+        // The root describes ConversationSpec; its `stages` property must exist
+        // (proves the transitive JsonSchema derives wired through StageSpec).
+        assert_eq!(schema["title"], "ConversationSpec");
+        assert!(
+            schema["properties"]["stages"].is_object(),
+            "schema exposes the stages property: {schema}"
+        );
+        // The closed atom set (Pred, via Guard) must appear in $defs.
+        assert!(
+            schema["definitions"]["Pred"].is_object() || schema["$defs"]["Pred"].is_object(),
+            "Pred atom schema is present"
+        );
+    }
+
+    #[test]
+    fn conversation_error_serializes_machine_readable() {
+        // An unguarded commit is rejected at compile with a Compile error.
+        let err = Conversation::new("x")
+            .stage("s")
+            .commit("pay", Guard::always())
+            .done(Guard::called_ok("pay"))
+            .next("done", Guard::called_ok("pay"))
+            .stage("done")
+            .terminal()
+            .compile()
+            .expect_err("unguarded commit must fail");
+        let json = serde_json::to_value(&err).expect("error serializes");
+        assert_eq!(json["kind"], "compile");
+        assert!(json["message"].is_string());
+        // The structured per-error list carries the tagged FlowError diagnostics.
+        let errors = json["errors"].as_array().expect("errors array");
+        assert!(
+            errors.iter().any(|e| e["kind"] == "unguarded_commit_tool"),
+            "structured FlowError kinds present: {json}"
+        );
     }
 
     #[test]

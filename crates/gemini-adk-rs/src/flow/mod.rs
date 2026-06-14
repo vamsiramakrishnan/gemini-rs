@@ -438,6 +438,21 @@ impl<'de> Deserialize<'de> for Guard {
     }
 }
 
+// A serializable guard is exactly a `Pred` atom on the wire (the `Custom`
+// variant is code-only and rejected by `Serialize`), so its JSON Schema is
+// `Pred`'s. Inline the `Pred` subschema wherever a `Guard` appears.
+impl schemars::JsonSchema for Guard {
+    fn is_referenceable() -> bool {
+        false
+    }
+    fn schema_name() -> String {
+        "Guard".to_string()
+    }
+    fn json_schema(generator: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+        generator.subschema_for::<Pred>()
+    }
+}
+
 impl std::fmt::Debug for Guard {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -1707,7 +1722,8 @@ enum Denial {
 }
 
 /// A single problem found while compiling a [`Flow`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", content = "detail", rename_all = "snake_case")]
 pub enum FlowError {
     /// A referential-integrity or acyclicity error from [`Flow::validate`].
     Invalid(String),
@@ -1765,7 +1781,7 @@ impl std::fmt::Display for FlowError {
 }
 
 /// All problems found while compiling a [`Flow`]; non-empty on failure.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct FlowErrors(pub Vec<FlowError>);
 
 impl std::fmt::Display for FlowErrors {

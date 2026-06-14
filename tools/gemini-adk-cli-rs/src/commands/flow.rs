@@ -69,6 +69,45 @@ pub fn graph(spec_path: &str) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// `adk flow schema` — print the JSON Schema for a `ConversationSpec`.
+///
+/// This is the machine-readable contract an authoring tool, form, or LLM
+/// targets when drafting a spec.
+pub fn schema() -> Result<(), Box<dyn std::error::Error>> {
+    println!(
+        "{}",
+        gemini_adk_fluent_rs::conversation::conversation_spec_schema()
+    );
+    Ok(())
+}
+
+/// `adk flow validate <spec.json>` — compile the spec and report errors as JSON.
+///
+/// Prints `{"valid": true}` on success, or a structured diagnostic
+/// (`{"valid": false, "error": { "kind": ..., "errors": [...] }}`) on failure,
+/// and exits non-zero so it can gate CI. Errors are machine-readable so a web
+/// UI can render them.
+pub fn validate(spec_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let raw = fs::read_to_string(spec_path)?;
+    let spec: ConversationSpec = serde_json::from_str(&raw)?;
+    match Conversation::from_spec(spec) {
+        Ok(_) => {
+            println!("{}", serde_json::json!({ "valid": true }));
+            Ok(())
+        }
+        Err(e) => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "valid": false,
+                    "error": e,
+                }))?
+            );
+            Err("spec failed to compile".into())
+        }
+    }
+}
+
 /// `adk flow simulate <spec.json> <scenario.json>` — run a model-free scenario.
 pub async fn simulate(
     spec_path: &str,

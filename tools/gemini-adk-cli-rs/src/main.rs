@@ -203,6 +203,13 @@ enum FlowAction {
         /// Path to a ConversationSpec JSON file.
         spec: String,
     },
+    /// Print the JSON Schema for a ConversationSpec (the authoring contract).
+    Schema,
+    /// Compile a spec and report errors as JSON (exits non-zero on failure).
+    Validate {
+        /// Path to a ConversationSpec JSON file.
+        spec: String,
+    },
     /// Run a model-free Scenario (JSON) against a conversation spec.
     Simulate {
         /// Path to a ConversationSpec JSON file.
@@ -328,6 +335,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Command::Flow { action } => match action {
             FlowAction::Inspect { spec } => commands::flow::inspect(&spec)?,
             FlowAction::Graph { spec } => commands::flow::graph(&spec)?,
+            FlowAction::Schema => commands::flow::schema()?,
+            FlowAction::Validate { spec } => commands::flow::validate(&spec)?,
             FlowAction::Simulate { spec, scenario } => {
                 commands::flow::simulate(&spec, &scenario).await?
             }
