@@ -5,14 +5,60 @@
 
 use std::sync::Arc;
 
+use futures::stream::{self, BoxStream, StreamExt};
+
 use crate::artifacts::{ArtifactService, InMemoryArtifactService};
 use crate::error::AgentError;
-use crate::events::Event;
+use crate::events::{Event, EventActions};
 use crate::memory::{InMemoryMemoryService, MemoryService};
 use crate::plugin::{Plugin, PluginManager};
 use crate::session::{InMemorySessionService, SessionId, SessionService};
 use crate::state::State;
 use crate::text::TextAgent;
+
+/// An item yielded by [`InMemoryRunner::run_stream`].
+///
+/// Mirrors ADK-Python's `Runner.run_async()` event stream. Most items are
+/// [`RunEvent::Event`] carrying a persisted [`Event`]; a terminal
+/// [`RunEvent::Error`] is yielded if setup or the agent run fails, after which
+/// the stream ends.
+#[derive(Debug)]
+pub enum RunEvent {
+    /// A structured event produced during the run (user input, agent response,
+    /// state deltas). Boxed to keep the enum small (the error variant is tiny).
+    Event(Box<Event>),
+    /// A terminal error. No further items follow.
+    Error(AgentError),
+}
+
+impl RunEvent {
+    /// Construct an event item.
+    fn event_item(event: Event) -> Self {
+        RunEvent::Event(Box::new(event))
+    }
+
+    /// Borrow the inner [`Event`], if this is an event item.
+    pub fn event(&self) -> Option<&Event> {
+        match self {
+            RunEvent::Event(e) => Some(e),
+            RunEvent::Error(_) => None,
+        }
+    }
+}
+
+/// Internal driver state for the [`InMemoryRunner::run_stream`] state machine.
+enum RunStep {
+    /// Create/load the session, replay deltas, emit the user event.
+    Start,
+    /// Run the agent and emit its response event.
+    Run {
+        session_id: SessionId,
+        state: State,
+        baseline: std::collections::HashMap<String, serde_json::Value>,
+    },
+    /// Stream complete.
+    Done,
+}
 
 /// Runs TextAgents with full service wiring (session, memory, artifacts, plugins).
 ///
@@ -71,63 +117,207 @@ impl InMemoryRunner {
     /// 3. Runs the agent
     /// 4. Persists the result as an event in the session
     /// 5. Returns the agent's text output
+    ///
+    /// This is a thin convenience wrapper over [`run_stream`](Self::run_stream):
+    /// it drains the event stream and returns the final response text (or the
+    /// surfaced error). Both methods share the exact same execution path.
     pub async fn run(
         &self,
         prompt: &str,
         user_id: &str,
         session_id: Option<&SessionId>,
     ) -> Result<String, AgentError> {
-        // 1. Create or load session
-        let session = match session_id {
-            Some(id) => self
-                .session_service
-                .get_session(id)
-                .await
-                .map_err(|e| AgentError::Other(format!("Session error: {e}")))?
-                .ok_or_else(|| AgentError::Other(format!("Session not found: {id}")))?,
-            None => self
-                .session_service
-                .create_session(&self.app_name, user_id)
-                .await
-                .map_err(|e| AgentError::Other(format!("Session create error: {e}")))?,
-        };
-
-        // 2. Build state and set input
-        let state = State::new();
-
-        // Load existing events to rebuild state (state deltas)
-        let events = self
-            .session_service
-            .get_events(&session.id)
-            .await
-            .map_err(|e| AgentError::Other(format!("Events error: {e}")))?;
-        for event in &events {
-            for (key, value) in &event.actions.state_delta {
-                let _ = state.set(key.clone(), value.clone());
+        let mut stream = self.run_stream(prompt, user_id, session_id).await;
+        let mut last_response: Option<String> = None;
+        while let Some(item) = stream.next().await {
+            match item {
+                RunEvent::Error(e) => return Err(e),
+                RunEvent::Event(ev) => {
+                    // The final response event is authored by the root agent.
+                    if ev.author == self.root_agent.name() {
+                        last_response = ev.content.clone();
+                    }
+                }
             }
         }
+        Ok(last_response.unwrap_or_default())
+    }
 
-        let _ = state.set("input", prompt);
+    /// Run the agent as an event stream, mirroring ADK-Python's
+    /// `Runner.run_async()` which yields a `Stream<Event>`.
+    ///
+    /// Yields [`RunEvent`] items as they happen, backed by the **same**
+    /// execution path as [`run`](Self::run):
+    ///
+    /// 1. a user event carrying the prompt (also persisted to the session),
+    /// 2. zero or more agent events surfacing state deltas produced during the
+    ///    run (one per changed key, so eval harnesses and UIs can observe
+    ///    mutations), and
+    /// 3. a final response event authored by the root agent (also persisted).
+    ///
+    /// Setup failures (session create/load, event persistence) and agent
+    /// failures are surfaced as a terminal [`RunEvent::Error`] rather than a
+    /// `Result`, so the item type stays a plain event. After an error the
+    /// stream ends.
+    ///
+    /// `run(prompt, user, session)` is equivalent to draining this stream and
+    /// returning the last response event's content.
+    pub async fn run_stream<'a>(
+        &'a self,
+        prompt: &'a str,
+        user_id: &'a str,
+        session_id: Option<&'a SessionId>,
+    ) -> BoxStream<'a, RunEvent> {
+        // Snapshot a pre-run state baseline so we can diff state deltas the
+        // agent produced. The agent only exposes a final `String`, so the
+        // honestly-observable mid-run signal is the set of state keys it wrote.
+        let prompt = prompt.to_string();
+        let user_id = user_id.to_string();
+        let session_id = session_id.cloned();
 
-        // Persist user input event
-        let user_event = Event::new("user", Some(prompt.to_string()));
-        self.session_service
-            .append_event(&session.id, user_event)
-            .await
-            .map_err(|e| AgentError::Other(format!("Event append error: {e}")))?;
+        stream::unfold(RunStep::Start, move |step| {
+            let prompt = prompt.clone();
+            let user_id = user_id.clone();
+            let session_id = session_id.clone();
+            async move {
+                match step {
+                    RunStep::Start => {
+                        // 1. Create or load session.
+                        let session = match &session_id {
+                            Some(id) => match self.session_service.get_session(id).await {
+                                Ok(Some(s)) => s,
+                                Ok(None) => {
+                                    return Some((
+                                        RunEvent::Error(AgentError::Other(format!(
+                                            "Session not found: {id}"
+                                        ))),
+                                        RunStep::Done,
+                                    ));
+                                }
+                                Err(e) => {
+                                    return Some((
+                                        RunEvent::Error(AgentError::Other(format!(
+                                            "Session error: {e}"
+                                        ))),
+                                        RunStep::Done,
+                                    ));
+                                }
+                            },
+                            None => match self
+                                .session_service
+                                .create_session(&self.app_name, &user_id)
+                                .await
+                            {
+                                Ok(s) => s,
+                                Err(e) => {
+                                    return Some((
+                                        RunEvent::Error(AgentError::Other(format!(
+                                            "Session create error: {e}"
+                                        ))),
+                                        RunStep::Done,
+                                    ));
+                                }
+                            },
+                        };
 
-        // 3. Run agent
-        let result = self.root_agent.run(&state).await?;
+                        // 2. Build state and replay prior deltas.
+                        let state = State::new();
+                        let prior = match self.session_service.get_events(&session.id).await {
+                            Ok(evs) => evs,
+                            Err(e) => {
+                                return Some((
+                                    RunEvent::Error(AgentError::Other(format!(
+                                        "Events error: {e}"
+                                    ))),
+                                    RunStep::Done,
+                                ));
+                            }
+                        };
+                        for event in &prior {
+                            for (key, value) in &event.actions.state_delta {
+                                let _ = state.set(key.clone(), value.clone());
+                            }
+                        }
+                        let _ = state.set("input", &prompt);
 
-        // 4. Persist result event
-        let result_event = Event::new(self.root_agent.name(), Some(result.clone()));
-        self.session_service
-            .append_event(&session.id, result_event)
-            .await
-            .map_err(|e| AgentError::Other(format!("Event append error: {e}")))?;
+                        // Snapshot keys present before the agent runs.
+                        let baseline = state.to_hashmap();
 
-        // 5. Return result
-        Ok(result)
+                        // Persist the user event.
+                        let user_event = Event::new("user", Some(prompt.clone()));
+                        if let Err(e) = self
+                            .session_service
+                            .append_event(&session.id, user_event.clone())
+                            .await
+                        {
+                            return Some((
+                                RunEvent::Error(AgentError::Other(format!(
+                                    "Event append error: {e}"
+                                ))),
+                                RunStep::Done,
+                            ));
+                        }
+
+                        // Emit the user event, carry state into the next step.
+                        Some((
+                            RunEvent::event_item(user_event),
+                            RunStep::Run {
+                                session_id: session.id,
+                                state,
+                                baseline,
+                            },
+                        ))
+                    }
+                    RunStep::Run {
+                        session_id,
+                        state,
+                        baseline,
+                    } => {
+                        // 3. Run the agent (same path as `run`).
+                        let result = match self.root_agent.run(&state).await {
+                            Ok(r) => r,
+                            Err(e) => return Some((RunEvent::Error(e), RunStep::Done)),
+                        };
+
+                        // Diff state to surface deltas the agent produced.
+                        let after = state.to_hashmap();
+                        let mut delta = std::collections::HashMap::new();
+                        for (key, value) in &after {
+                            if key == "input" {
+                                continue;
+                            }
+                            if baseline.get(key) != Some(value) {
+                                delta.insert(key.clone(), value.clone());
+                            }
+                        }
+
+                        let result_event = Event::new(self.root_agent.name(), Some(result.clone()))
+                            .with_actions(EventActions {
+                                state_delta: delta,
+                                ..Default::default()
+                            });
+
+                        // 4. Persist the result event.
+                        if let Err(e) = self
+                            .session_service
+                            .append_event(&session_id, result_event.clone())
+                            .await
+                        {
+                            return Some((
+                                RunEvent::Error(AgentError::Other(format!(
+                                    "Event append error: {e}"
+                                ))),
+                                RunStep::Done,
+                            ));
+                        }
+
+                        Some((RunEvent::event_item(result_event), RunStep::Done))
+                    }
+                    RunStep::Done => None,
+                }
+            }
+        })
+        .boxed()
     }
 
     /// Run without persistence (one-shot, ephemeral).
@@ -243,5 +433,111 @@ mod tests {
 
         let sessions = custom_svc.list_sessions("app", "u1").await.unwrap();
         assert_eq!(sessions.len(), 1);
+    }
+
+    /// A mock agent that writes a state delta and echoes — exercises the
+    /// state-delta-surfacing path of `run_stream`.
+    fn delta_agent() -> Arc<dyn TextAgent> {
+        Arc::new(FnTextAgent::new("worker", |state| {
+            let input: String = state.get("input").unwrap_or_default();
+            let _ = state.set("turn_count", 1u32);
+            Ok(format!("Handled: {input}"))
+        }))
+    }
+
+    #[tokio::test]
+    async fn run_stream_yields_user_then_final_event() {
+        let runner = InMemoryRunner::new(echo_agent(), "test-app");
+        let mut stream = runner.run_stream("Hello", "user-1", None).await;
+
+        let mut events = Vec::new();
+        while let Some(item) = stream.next().await {
+            match item {
+                RunEvent::Event(e) => events.push(e),
+                RunEvent::Error(e) => panic!("unexpected error: {e}"),
+            }
+        }
+
+        // First a user event, then the agent's final response event.
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].author, "user");
+        assert_eq!(events[0].content.as_deref(), Some("Hello"));
+        assert_eq!(events[1].author, "echo");
+        assert_eq!(events[1].content.as_deref(), Some("Echo: Hello"));
+    }
+
+    #[tokio::test]
+    async fn run_stream_surfaces_state_delta_on_final_event() {
+        let runner = InMemoryRunner::new(delta_agent(), "test-app");
+        let mut stream = runner.run_stream("go", "user-1", None).await;
+
+        let mut events = Vec::new();
+        while let Some(item) = stream.next().await {
+            if let RunEvent::Event(e) = item {
+                events.push(e);
+            }
+        }
+
+        let final_event = events.last().expect("final event");
+        assert_eq!(final_event.author, "worker");
+        assert_eq!(
+            final_event.actions.state_delta.get("turn_count"),
+            Some(&serde_json::json!(1))
+        );
+    }
+
+    #[tokio::test]
+    async fn run_stream_drains_to_same_result_as_run() {
+        let runner = InMemoryRunner::new(echo_agent(), "test-app");
+
+        // Draining the stream's final response equals what `run` returns.
+        let mut stream = runner.run_stream("Hi", "user-1", None).await;
+        let mut last = None;
+        while let Some(item) = stream.next().await {
+            if let RunEvent::Event(e) = item {
+                if e.author == "echo" {
+                    last = e.content.clone();
+                }
+            }
+        }
+        assert_eq!(last.as_deref(), Some("Echo: Hi"));
+    }
+
+    #[tokio::test]
+    async fn run_stream_persists_events_like_run() {
+        let runner = InMemoryRunner::new(echo_agent(), "test-app");
+        let mut stream = runner.run_stream("Hello", "user-1", None).await;
+        while stream.next().await.is_some() {}
+        drop(stream);
+
+        let sessions = runner
+            .session_service_ref()
+            .list_sessions("test-app", "user-1")
+            .await
+            .unwrap();
+        assert_eq!(sessions.len(), 1);
+        let events = runner
+            .session_service_ref()
+            .get_events(&sessions[0].id)
+            .await
+            .unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].author, "user");
+        assert_eq!(events[1].author, "echo");
+    }
+
+    #[tokio::test]
+    async fn run_stream_emits_error_for_missing_session() {
+        let runner = InMemoryRunner::new(echo_agent(), "test-app");
+        let fake_id = SessionId::new();
+        let mut stream = runner.run_stream("Hello", "user-1", Some(&fake_id)).await;
+
+        let mut saw_error = false;
+        while let Some(item) = stream.next().await {
+            if let RunEvent::Error(_) = item {
+                saw_error = true;
+            }
+        }
+        assert!(saw_error);
     }
 }
