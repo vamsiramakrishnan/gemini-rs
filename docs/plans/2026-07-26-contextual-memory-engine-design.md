@@ -560,6 +560,16 @@ regenerate them; only a restatement does.
   qualifier is what distinguishes them.
 - **Deletion by topic is lexical**, and a command naming no target deletes
   nothing rather than guessing.
+- **The Live path is covered for text-in/audio-out only.** `live_session_e2e`
+  connects a real WebSocket session, states a fact over the wire and reads the
+  model's *output transcription* — the three things an application does that no
+  text-path test touches. VAD, barge-in and partial-transcript speculation still
+  have no live coverage; they need a real microphone stream.
+
+  Those tests resolve the model from `GEMINI_LIVE_MODEL` rather than a
+  `GeminiModel` variant, because both named Live variants have been retired
+  server-side. See the `live_model` doc comment for how to list what a key can
+  actually reach.
 
 ---
 
