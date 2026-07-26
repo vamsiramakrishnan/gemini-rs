@@ -16,12 +16,13 @@
 
 use std::sync::Arc;
 
-use gemini_adk_fluent_rs::compose::{P, T};
+use gemini_adk_fluent_rs::compose::T;
 use gemini_adk_fluent_rs::live::Live;
+use gemini_adk_rs::flow::{Enforcement, Flow, FlowMonitor, Guard};
 use gemini_adk_rs::state::State;
 use gemini_genai_rs::prelude::{GeminiModel, Voice};
 
-use gemini_memory_rs::core::{SessionId, TurnId, UserId};
+use gemini_memory_rs::core::{SessionId, UserId};
 use gemini_memory_rs::engine::MemoryEngine;
 use gemini_memory_rs::runtime::{LiveMemoryExt, MemorySlot, MemoryTurnExtractor};
 
@@ -34,10 +35,36 @@ use gemini_adk_rs::live::transcript::TranscriptTurn;
 /// and the flow gate on. This mapping is the entire contract between the two.
 fn slots() -> Vec<MemorySlot> {
     vec![
-        MemorySlot::new("dietary_identity", "user.diet"),
-        MemorySlot::new("preference", "user.venue"),
-        MemorySlot::new("spouse", "user.partner"),
+        MemorySlot::new("dietary_identity", "user:diet"),
+        MemorySlot::new("preference", "user:venue"),
+        MemorySlot::new("spouse", "user:partner"),
     ]
+}
+
+/// The flow the session is governed by.
+///
+/// Ordinary flow code that knows nothing about memory. `know_diet` completes on
+/// a slot memory fills, and the booking tool is forbidden until both slots
+/// exist — so the model cannot book a table before the dietary constraint is
+/// established, whether that fact arrives this minute or came back from last
+/// month.
+fn flow_spec() -> Flow {
+    Flow::new()
+        .step("know_diet")
+        .posture("Establish what they can eat before proposing anywhere.")
+        .ground("Known diet: {user:diet}")
+        .done(Guard::captured(["user:diet"]))
+        .step("choose_venue")
+        .after("know_diet")
+        .done(Guard::captured(["user:venue"]))
+        .step("book")
+        .after("choose_venue")
+        .allow(["book_table"])
+        .done(Guard::called_ok("book_table"))
+        .never("book_table")
+        .until(Guard::captured(["user:diet", "user:venue"]))
+        .build()
+        .expect("the flow above is structurally valid")
 }
 
 #[tokio::main]
@@ -57,25 +84,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .instruction("You are B, a companion. Be brief and concrete.")
         .with_memory_slots(session.clone(), slots())
         .with_tools(T::google_search())
+        .govern(flow_spec())
         // Gathering: only entered while something is still unknown. For a
         // returning user memory has already filled these, so the phase is
         // skipped entirely and they are never asked twice.
         .phase("gather")
         .instruction("Find out what you still need, one question at a time.")
-        .needs(&["user.diet", "user.venue"])
+        .needs(&["user:diet", "user:venue"])
         .transition("suggest", |s: &State| {
-            s.contains("user.diet") && s.contains("user.venue")
+            s.contains("user:diet") && s.contains("user:venue")
         })
         .done()
         // Suggesting: a hard gate. The phase cannot be entered until the facts
         // exist, whether they came from this conversation or from memory.
         .phase("suggest")
-        .requires(&["user.diet"])
+        .requires(&["user:diet"])
         .dynamic_instruction(|s: &State| {
             let diet: String = s
-                .get("user.diet")
+                .get("user:diet")
                 .unwrap_or_else(|| "no restrictions".into());
-            let venue: String = s.get("user.venue").unwrap_or_else(|| "anywhere".into());
+            let venue: String = s.get("user:venue").unwrap_or_else(|| "anywhere".into());
             format!("Suggest somewhere for dinner. Diet: {diet}. Venue preference: {venue}.")
         })
         .done()
@@ -83,22 +111,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Phase-wide prompt composition reads the same slots, so every phase
         // instruction carries what memory knows without repeating itself.
         .phase_defaults(|p| {
-            p.with_state(&["user.diet", "user.partner"]).when(
-                |s: &State| s.contains("user.diet"),
+            p.with_state(&["user:diet", "user:partner"]).when(
+                |s: &State| s.contains("user:diet"),
                 "You already know their dietary preference. Do not ask again.",
             )
         });
-    let _ = P::constraint("Never re-ask for something already known.");
 
     // ── What that buys, demonstrated offline ────────────────────────────────
     //
     // Drive one turn through the same extractor the Live pipeline drives, and
-    // watch the slots fill.
+    // watch the slots fill. A second monitor over the same flow stands in for
+    // the one the governed session owns, so the effect on the flow is visible
+    // without connecting.
     let extractor = MemoryTurnExtractor::new(session.clone()).slots(slots());
+    let mut monitor = FlowMonitor::try_new(flow_spec(), Enforcement::Enforce)
+        .map_err(|e| format!("flow does not compile: {e:?}"))?;
     let state = State::new();
 
-    println!("before: user.diet = {:?}", state.get::<String>("user.diet"));
-    println!("        gather phase needs it, so B would ask.\n");
+    println!("before: user:diet = {:?}", state.get::<String>("user:diet"));
+    println!("        gather phase needs it, so B would ask.");
+    println!(
+        "        flow is waiting on {:?}; book_table is {}\n",
+        monitor.explain(&state).active,
+        match monitor.admits_tool("book_table", &state) {
+            Ok(()) => "admitted".to_string(),
+            Err(reason) => format!("blocked — {reason}"),
+        }
+    );
 
     extractor
         .extract_with_state(
@@ -113,15 +152,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .await?;
 
+    // The turn boundary is where the control lane advances the flow.
+    monitor.on_turn(&state);
+
     println!(
-        "after:  user.diet  = {:?}",
-        state.get::<String>("user.diet")
+        "after:  user:diet  = {:?}",
+        state.get::<String>("user:diet")
     );
     println!(
-        "        user.venue = {:?}",
-        state.get::<String>("user.venue")
+        "        user:venue = {:?}",
+        state.get::<String>("user:venue")
     );
-    println!("        both `needs` satisfied → the machine advances to `suggest`.\n");
+    println!("        both `needs` satisfied → the machine advances to `suggest`.");
+    println!(
+        "        flow advanced to {:?}; book_table is {}\n",
+        monitor.explain(&state).active,
+        match monitor.admits_tool("book_table", &state) {
+            Ok(()) => "admitted".to_string(),
+            Err(reason) => format!("blocked — {reason}"),
+        }
+    );
 
     // Next session, the same slots fill from durable memory before a word is
     // spoken — which is the whole point.
@@ -146,15 +196,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("next week, first turn:");
     println!(
-        "        user.diet  = {:?}",
-        returning_state.get::<String>("user.diet")
+        "        user:diet  = {:?}",
+        returning_state.get::<String>("user:diet")
     );
     println!(
-        "        user.venue = {:?}",
-        returning_state.get::<String>("user.venue")
+        "        user:venue = {:?}",
+        returning_state.get::<String>("user:venue")
     );
     println!("        `gather` is skipped; B goes straight to suggesting.");
 
-    let _ = TurnId(1);
+    // The same flow, over a session that has said nothing yet: the gate that was
+    // shut a moment ago is already open, because the facts came back with the
+    // user.
+    let mut returning_monitor = FlowMonitor::try_new(flow_spec(), Enforcement::Enforce)
+        .map_err(|e| format!("flow does not compile: {e:?}"))?;
+    returning_monitor.on_turn(&returning_state);
+    println!(
+        "        flow already at {:?}; book_table is {}",
+        returning_monitor.explain(&returning_state).active,
+        match returning_monitor.admits_tool("book_table", &returning_state) {
+            Ok(()) => "admitted".to_string(),
+            Err(reason) => format!("blocked — {reason}"),
+        }
+    );
+
     Ok(())
 }

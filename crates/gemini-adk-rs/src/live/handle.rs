@@ -6,7 +6,7 @@ use gemini_genai_rs::prelude::{FunctionResponse, SessionEvent, SessionPhase, Vad
 use gemini_genai_rs::session::{SessionError, SessionHandle, SessionWriter};
 use parking_lot::Mutex;
 use serde::de::DeserializeOwned;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
@@ -17,6 +17,7 @@ use super::background_tool::BackgroundToolTracker;
 use super::context_writer::PendingContext;
 use super::effect_executor::LiveEffectExecutor;
 use super::input_vad::{BackendInputVad, BackendVadSnapshot};
+use super::processor::ControlEvent;
 use super::reactor::{LiveReactor, ReactorEvent, VoiceRuntimeState};
 use super::telemetry::SessionTelemetry;
 
@@ -58,6 +59,14 @@ pub struct LiveHandle {
     /// can cancel every outstanding background tool — otherwise orphaned tasks
     /// could keep running and post stale `ToolCompleted` events after shutdown.
     background_tracker: Arc<BackgroundToolTracker>,
+    /// Control-lane sender used by [`send_text`](Self::send_text) to record the
+    /// typed turn on the transcript, so a text-driven session is visible to
+    /// extractors exactly as a spoken one is.
+    ///
+    /// Deliberately a [`WeakSender`](mpsc::WeakSender): the control channel must
+    /// still close once the router drops its strong sender, or the lane would
+    /// never drain and shut down.
+    ctrl_tx: Option<mpsc::WeakSender<ControlEvent>>,
 }
 
 impl LiveHandle {
@@ -100,7 +109,15 @@ impl LiveHandle {
             input_vad: Arc::new(Mutex::new(BackendInputVad::default())),
             flow,
             background_tracker,
+            ctrl_tx: None,
         }
+    }
+
+    /// Attach the control-lane sender used to record typed turns on the
+    /// transcript. Called once from the builder's `spawn_lanes`.
+    pub(crate) fn with_control_sender(mut self, ctrl_tx: mpsc::WeakSender<ControlEvent>) -> Self {
+        self.ctrl_tx = Some(ctrl_tx);
+        self
     }
 
     /// Send audio data (raw PCM16 16kHz bytes).
@@ -130,9 +147,26 @@ impl LiveHandle {
     ///
     /// When deferred context delivery is enabled, any pending model-role
     /// context turns are flushed to the wire before the text message.
+    ///
+    /// The text is also recorded on the session transcript as the user side of
+    /// the current turn, through the same internal control event that ASR of
+    /// audio produces. Without this a text-driven session would hand every
+    /// [`TurnExtractor`](super::extractor::TurnExtractor) an empty user turn,
+    /// since the transcript's user side is otherwise written only by ASR.
+    /// Routing through the control event rather than poking the buffer keeps a
+    /// typed turn and a spoken one the *same* event downstream.
     pub async fn send_text(&self, text: impl Into<String>) -> Result<(), SessionError> {
+        let text = text.into();
         self.telemetry.record_text_send();
-        self.writer.send_text(text.into()).await
+        self.writer.send_text(text.clone()).await?;
+
+        // Record only after a *successful* send: a turn the model never
+        // received is not part of the conversation.
+        if let Some(tx) = self.ctrl_tx.as_ref().and_then(mpsc::WeakSender::upgrade) {
+            let _ = tx.send(ControlEvent::InputTranscript(text)).await;
+        }
+
+        Ok(())
     }
 
     /// Send a video/image frame (raw JPEG bytes).

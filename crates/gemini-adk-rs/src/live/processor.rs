@@ -356,7 +356,11 @@ pub(crate) fn spawn_event_processor(
     execution_modes: std::collections::HashMap<String, super::background_tool::ToolExecutionMode>,
     control_plane: ControlPlaneConfig,
     live_event_tx: broadcast::Sender<LiveEvent>,
-) -> (tokio::task::JoinHandle<()>, tokio::task::JoinHandle<()>) {
+) -> (
+    tokio::task::JoinHandle<()>,
+    tokio::task::JoinHandle<()>,
+    mpsc::WeakSender<ControlEvent>,
+) {
     let shared = Arc::new(SharedState {
         interrupted: AtomicBool::new(false),
         barge_in: parking_lot::Mutex::new(CancellationToken::new()),
@@ -480,7 +484,13 @@ pub(crate) fn spawn_event_processor(
         }
     }
 
-    (fast_handle, ctrl_handle)
+    // Handed to `LiveHandle` so `send_text` can record a typed turn on the
+    // transcript. Deliberately *weak*: the control channel must still close when
+    // the router and all in-flight background tasks drop their strong senders,
+    // otherwise the lane would never drain and shut down (see `ctrl_tx_weak`).
+    let ctrl_tx_handle = ctrl_tx.downgrade();
+
+    (fast_handle, ctrl_handle, ctrl_tx_handle)
 }
 
 /// Spawns the telemetry lane — processes events on its own broadcast receiver.
@@ -866,7 +876,7 @@ mod tests {
 
         let writer: Arc<dyn SessionWriter> = Arc::new(crate::agent_session::NoOpSessionWriter);
 
-        let (fast_handle, ctrl_handle) = spawn_event_processor(
+        let (fast_handle, ctrl_handle, _ctrl_tx) = spawn_event_processor(
             event_rx,
             callbacks,
             None,
@@ -916,7 +926,7 @@ mod tests {
 
         let writer: Arc<dyn SessionWriter> = Arc::new(crate::agent_session::NoOpSessionWriter);
 
-        let (fast_handle, ctrl_handle) = spawn_event_processor(
+        let (fast_handle, ctrl_handle, _ctrl_tx) = spawn_event_processor(
             event_rx,
             callbacks,
             None,
@@ -970,7 +980,7 @@ mod tests {
 
         let writer: Arc<dyn SessionWriter> = Arc::new(crate::agent_session::NoOpSessionWriter);
 
-        let (fast_handle, ctrl_handle) = spawn_event_processor(
+        let (fast_handle, ctrl_handle, _ctrl_tx) = spawn_event_processor(
             event_rx,
             callbacks,
             None,
@@ -1007,7 +1017,7 @@ mod tests {
         let writer: Arc<dyn SessionWriter> = Arc::new(crate::agent_session::NoOpSessionWriter);
 
         let state = State::new();
-        let (fast_handle, ctrl_handle) = spawn_event_processor(
+        let (fast_handle, ctrl_handle, _ctrl_tx) = spawn_event_processor(
             event_rx,
             callbacks,
             None,
@@ -1078,7 +1088,7 @@ mod tests {
 
         let extractors: Vec<Arc<dyn TurnExtractor>> = vec![Arc::new(FixedExtractor)];
 
-        let (fast_handle, ctrl_handle) = spawn_event_processor(
+        let (fast_handle, ctrl_handle, _ctrl_tx) = spawn_event_processor(
             event_rx,
             callbacks,
             None,
@@ -1110,6 +1120,128 @@ mod tests {
         drop(event_tx);
         let _ = fast_handle.await;
         let _ = ctrl_handle.await;
+    }
+
+    /// Text pushed through the returned control sender lands on the *user* side
+    /// of the transcript, so extractors see a typed turn exactly as they see a
+    /// spoken one.
+    ///
+    /// This is the plumbing `LiveHandle::send_text` uses. Before it existed the
+    /// transcript's user side was written only by `SessionEvent::InputTranscription`
+    /// (ASR of audio), so a text-driven session handed every extractor an empty
+    /// user turn.
+    #[tokio::test]
+    async fn control_sender_records_text_on_transcript() {
+        use crate::live::extractor::TurnExtractor;
+        use crate::live::transcript::TranscriptTurn;
+        use crate::llm::LlmError;
+
+        /// Records the user side of the window it was handed.
+        struct WindowRecorder(Arc<parking_lot::Mutex<Vec<String>>>);
+
+        #[async_trait::async_trait]
+        impl TurnExtractor for WindowRecorder {
+            fn name(&self) -> &str {
+                "WindowRecorder"
+            }
+            fn window_size(&self) -> usize {
+                3
+            }
+            async fn extract(
+                &self,
+                turns: &[TranscriptTurn],
+            ) -> Result<serde_json::Value, LlmError> {
+                self.0.lock().extend(turns.iter().map(|t| t.user.clone()));
+                Ok(serde_json::json!({}))
+            }
+        }
+
+        let seen = Arc::new(parking_lot::Mutex::new(Vec::new()));
+
+        let (event_tx, _) = broadcast::channel(16);
+        let event_rx = event_tx.subscribe();
+        let writer: Arc<dyn SessionWriter> = Arc::new(crate::agent_session::NoOpSessionWriter);
+        let extractors: Vec<Arc<dyn TurnExtractor>> = vec![Arc::new(WindowRecorder(seen.clone()))];
+
+        let (fast_handle, ctrl_handle, ctrl_tx) = spawn_event_processor(
+            event_rx,
+            Arc::new(EventCallbacks::default()),
+            None,
+            writer,
+            extractors,
+            State::new(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            std::collections::HashMap::new(),
+            ControlPlaneConfig::default(),
+            dummy_event_tx(),
+        );
+
+        // No `InputTranscription` event at all — this is the text path.
+        let tx = ctrl_tx.upgrade().expect("control lane is alive");
+        tx.send(ControlEvent::InputTranscript("I am pescatarian".into()))
+            .await
+            .expect("control lane accepts the typed turn");
+        drop(tx);
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let _ = event_tx.send(SessionEvent::TurnComplete);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        assert_eq!(
+            seen.lock().as_slice(),
+            ["I am pescatarian"],
+            "typed turn must reach the extractor's transcript window"
+        );
+
+        drop(event_tx);
+        let _ = fast_handle.await;
+        let _ = ctrl_handle.await;
+    }
+
+    /// The control sender handed to `LiveHandle` must be *weak*: a strong one
+    /// would keep the control channel open forever, so the lane would never
+    /// drain and shut down when the router exits.
+    #[tokio::test]
+    async fn control_sender_does_not_keep_lane_alive() {
+        let (event_tx, _) = broadcast::channel(16);
+        let event_rx = event_tx.subscribe();
+        let writer: Arc<dyn SessionWriter> = Arc::new(crate::agent_session::NoOpSessionWriter);
+
+        let (fast_handle, ctrl_handle, ctrl_tx) = spawn_event_processor(
+            event_rx,
+            Arc::new(EventCallbacks::default()),
+            None,
+            writer,
+            vec![],
+            State::new(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            std::collections::HashMap::new(),
+            ControlPlaneConfig::default(),
+            dummy_event_tx(),
+        );
+
+        // Hold the handle's sender across shutdown, as `LiveHandle` does.
+        drop(event_tx);
+
+        tokio::time::timeout(Duration::from_secs(2), ctrl_handle)
+            .await
+            .expect("control lane must shut down while the handle's sender is held")
+            .expect("control lane joined cleanly");
+
+        assert!(
+            ctrl_tx.upgrade().is_none(),
+            "control channel must be closed once the router is gone"
+        );
+
+        let _ = fast_handle.await;
     }
 
     #[tokio::test]
@@ -1238,7 +1370,7 @@ mod tests {
         let (event_tx, _) = broadcast::channel(16);
         let event_rx = event_tx.subscribe();
 
-        let (fast_handle, ctrl_handle) = spawn_event_processor(
+        let (fast_handle, ctrl_handle, _ctrl_tx) = spawn_event_processor(
             event_rx,
             callbacks,
             Some(Arc::new(dispatcher)),
@@ -1321,7 +1453,7 @@ mod tests {
 
         let writer: Arc<dyn SessionWriter> = Arc::new(crate::agent_session::NoOpSessionWriter);
 
-        let (fast_handle, ctrl_handle) = spawn_event_processor(
+        let (fast_handle, ctrl_handle, _ctrl_tx) = spawn_event_processor(
             event_rx,
             callbacks,
             None,
@@ -1376,7 +1508,7 @@ mod tests {
         let event_rx = event_tx.subscribe();
         let writer: Arc<dyn SessionWriter> = Arc::new(crate::agent_session::NoOpSessionWriter);
 
-        let (fast_handle, ctrl_handle) = spawn_event_processor(
+        let (fast_handle, ctrl_handle, _ctrl_tx) = spawn_event_processor(
             event_rx,
             Arc::new(callbacks),
             Some(Arc::new(dispatcher)),
@@ -1438,7 +1570,7 @@ mod tests {
         let event_rx = event_tx.subscribe();
         let writer: Arc<dyn SessionWriter> = Arc::new(crate::agent_session::NoOpSessionWriter);
 
-        let (fast_handle, ctrl_handle) = spawn_event_processor(
+        let (fast_handle, ctrl_handle, _ctrl_tx) = spawn_event_processor(
             event_rx,
             Arc::new(EventCallbacks::default()),
             None,
@@ -1485,7 +1617,7 @@ mod tests {
         let event_rx = event_tx.subscribe();
         let writer: Arc<dyn SessionWriter> = Arc::new(crate::agent_session::NoOpSessionWriter);
 
-        let (fast_handle, ctrl_handle) = spawn_event_processor(
+        let (fast_handle, ctrl_handle, _ctrl_tx) = spawn_event_processor(
             event_rx,
             callbacks,
             None,
@@ -1543,7 +1675,7 @@ mod tests {
 
         let writer: Arc<dyn SessionWriter> = Arc::new(crate::agent_session::NoOpSessionWriter);
 
-        let (fast_handle, ctrl_handle) = spawn_event_processor(
+        let (fast_handle, ctrl_handle, _ctrl_tx) = spawn_event_processor(
             event_rx,
             callbacks,
             None,

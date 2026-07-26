@@ -306,7 +306,7 @@ async fn a_slot_filled_from_memory_is_indistinguishable_from_one_the_user_just_f
     let engine = engine();
     let session = session(&engine);
     let extractor = MemoryTurnExtractor::new(session.clone())
-        .slots([MemorySlot::new("dietary_identity", "user.diet")]);
+        .slots([MemorySlot::new("dietary_identity", "user:diet")]);
     let state = State::new();
 
     extractor
@@ -314,10 +314,10 @@ async fn a_slot_filled_from_memory_is_indistinguishable_from_one_the_user_just_f
         .await
         .unwrap();
 
-    // This is exactly what `phase.needs(&["user.diet"])` and a `Flow` guard
+    // This is exactly what `phase.needs(&["user:diet"])` and a `Flow` guard
     // read, which is what stops a returning user being asked twice.
     assert_eq!(
-        state.get::<String>("user.diet").as_deref(),
+        state.get::<String>("user:diet").as_deref(),
         Some("pescatarian")
     );
 }
@@ -327,7 +327,7 @@ async fn slot_projection_survives_a_correction_within_the_session() {
     let engine = engine();
     let session = session(&engine);
     let extractor = MemoryTurnExtractor::new(session.clone())
-        .slots([MemorySlot::new("dietary_identity", "user.diet")]);
+        .slots([MemorySlot::new("dietary_identity", "user:diet")]);
 
     extractor
         .extract_with_state(&[turn(1, "I am vegetarian")], &State::new())
@@ -345,7 +345,7 @@ async fn slot_projection_survives_a_correction_within_the_session() {
         .await
         .unwrap();
     assert_eq!(
-        later.get::<String>("user.diet").as_deref(),
+        later.get::<String>("user:diet").as_deref(),
         Some("pescatarian"),
         "the slot still held the corrected-away value"
     );

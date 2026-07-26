@@ -117,28 +117,43 @@ reads it:
 
 | Mechanism | What a filled slot does |
 |-----------|-------------------------|
-| `phase.needs(&["user.diet"])` | A returning user is not asked again |
-| `phase.requires(&["user.diet"])` | A hard gate a memory can open |
+| `phase.needs(&["user:diet"])` | A returning user is not asked again |
+| `phase.requires(&["user:diet"])` | A hard gate a memory can open |
 | `Flow` guard `done(captured([...]))` | The step advances on memory alone |
-| `P::with_state(&["user.diet"])` | The value appears in the phase instruction |
+| `P::with_state(&["user:diet"])` | The value appears in the phase instruction |
 | watchers, repair | Read the same keys, unchanged |
 
 ```rust
 Live::builder()
     .with_memory_slots(session, [
-        MemorySlot::new("dietary_identity", "user.diet"),
-        MemorySlot::new("venue_preference", "user.venue"),
+        MemorySlot::new("dietary_identity", "user:diet"),
+        MemorySlot::new("venue_preference", "user:venue"),
     ])
     .phase("gather")
-        .needs(&["user.diet", "user.venue"])   // skipped for a returning user
+        .needs(&["user:diet", "user:venue"])   // skipped for a returning user
         .done()
     .phase("suggest")
-        .requires(&["user.diet"])              // opened by memory
+        .requires(&["user:diet"])              // opened by memory
         .done()
 ```
 
 Slots promote with `KeepKnown`, so what the live conversation established always
 beats what memory recalls.
+
+Each row of that table is asserted against a *driven* `PhaseMachine` and
+`FlowMonitor` in `tests/governed_integration.rs` — a real `requires` gate that
+stays shut until memory opens it, a real `Guard::captured` that admits a tool
+only once the slot exists. Asserting the slot's value alone would prove the
+extractor writes a key, not that any gate reads it.
+
+**Slot keys use the platform's `scope:key` convention** — `user:diet`, not
+`user.diet`. The gates are indifferent: `needs`, `requires` and `Guard::is_set`
+route through `State::contains`, which treats the key as an opaque string, so
+either form satisfies them. The colon buys composition with the prefix scopes,
+so `state.user().get::<String>("diet")` finds the slot instead of silently
+reading `None`. `derived:` would be semantically apt and functionally wrong: its
+fallback exists only in `get`/`with`, and `contains` has none, so a `derived:`
+slot would be invisible to exactly the gates memory exists to satisfy.
 
 ### Turn lifecycle
 
@@ -545,6 +560,19 @@ regenerate them; only a restatement does.
   qualifier is what distinguishes them.
 - **Deletion by topic is lexical**, and a command naming no target deletes
   nothing rather than guessing.
+- **The Live path is covered for text-in/audio-out only.** `live_session_e2e`
+  connects a real WebSocket session, states a fact over the wire and reads the
+  model's *output transcription* — the three things an application does that no
+  text-path test touches. VAD, barge-in and partial-transcript speculation still
+  have no live coverage; they need a real microphone stream.
+
+  Those tests resolve the model from `GEMINI_LIVE_MODEL` rather than a
+  `GeminiModel` variant, because the native-audio Live model is named
+  differently on each platform — `gemini-2.5-flash-native-audio-preview-12-2025`
+  on Google AI, `gemini-2.5-flash-native-audio` on Vertex AI — and neither named
+  variant in the enum is served on Google AI at all. The default is the AI
+  Studio name, since that is what these tests run against. See the `live_model`
+  doc comment for how to list what a key can actually reach.
 
 ---
 

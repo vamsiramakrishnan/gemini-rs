@@ -681,7 +681,7 @@ just release-status
 ## Best Practices
 
 - Import from `gemini_adk_fluent_rs::prelude::*` for application code -- it re-exports all three layers.
-- Use `TypedTool` over `SimpleTool` when possible -- auto-generated schemas prevent drift.
+- Use `TypedTool` over `SimpleTool` when possible -- auto-generated schemas prevent drift. It narrows the derived draft-07 schema to the API's subset (inlines subschemas, strips `$schema`/`definitions`, collapses `Option<T>`'s `"type": ["string","null"]` union, flattens `oneOf`-of-`enum`). Hand-written `SimpleTool` schemas get no such treatment -- a union type is rejected outright and closes a Live session mid-handshake; a `$ref` or `oneOf` is silently ignored, so the constraint stops applying.
 - Use `State::modify()` for atomic read-modify-write instead of separate `get()` + `set()`.
 - Use `StateKey<T>` constants for frequently accessed keys to prevent typos.
 - Use `state.with()` for zero-copy borrows when you only need to inspect a value.
@@ -695,6 +695,8 @@ just release-status
 ## Common Mistakes
 
 - **Wrong audio model**: Native audio model (`Gemini2_0FlashLive`) only supports `Modality::Audio` output, NOT `Modality::Text`. Use `.text_only()` for text-only mode with `Gemini2_0FlashLive`.
+- **Live model names differ by platform**: the native-audio Live model is `gemini-2.5-flash-native-audio-preview-12-2025` on **Google AI (AI Studio)** but `gemini-2.5-flash-native-audio` on **Vertex AI**. There is no single constant that works on both, so pass `GeminiModel::Custom("models/…")` chosen per platform rather than a named variant.
+- **Stale `GeminiModel` variants**: neither named Live variant works on Google AI — `Gemini2_0FlashLive` (`gemini-2.0-flash-live-001`) and `GeminiLive2_5FlashNativeAudio` (`gemini-live-2.5-flash-native-audio`) both draw *"not found for API version v1beta, or is not supported for bidiGenerateContent"*. Confirm what a key can reach: `curl "https://generativelanguage.googleapis.com/v1beta/models?key=$GEMINI_API_KEY" | jq -r '.models[] | select(.supportedGenerationMethods[]? == "bidiGenerateContent") | .name'`. (Verified against Google AI only; the Vertex catalog was not exercised.)
 - **Vertex AI binary frames**: Vertex AI sends Binary WebSocket frames (not Text) -- handled automatically by `TungsteniteTransport`.
 - **Vertex AI endpoint**: Use `wss://aiplatform.googleapis.com/...` (NOT `global-aiplatform.googleapis.com`).
 - **API versions**: Google AI = `v1beta`, Vertex AI = `v1beta1` -- handled by `Platform` enum.

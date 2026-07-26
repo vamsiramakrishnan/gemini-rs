@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
 
-use gemini_genai_rs::prelude::{ConnectBuilder, SessionConfig, SessionPhase};
-use gemini_genai_rs::session::{SessionHandle, SessionWriter};
+use gemini_genai_rs::prelude::{ConnectBuilder, SessionConfig, SessionEvent, SessionPhase};
+use gemini_genai_rs::session::{SessionError, SessionHandle, SessionWriter};
 
 use crate::error::AgentError;
 use crate::state::State;
@@ -280,8 +280,27 @@ impl LiveSessionBuilder {
             .await
             .map_err(AgentError::Session)?;
 
-        // Wait for Active phase
-        session.wait_for_phase(SessionPhase::Active).await;
+        // Wait for Active phase — or for the session to give up trying.
+        //
+        // `wait_for_phase` alone waits forever: the L0 session loop retries the
+        // setup handshake `max_reconnect_attempts` times, then emits
+        // `Disconnected` and returns, but the phase watch stays alive because
+        // the handle holds it. Active never arrives and nothing ever wakes the
+        // waiter — so a permanently unacceptable setup (a retired model name is
+        // the common one) wedges `connect()` with no error, forever. Racing the
+        // terminal event turns that into a returned failure.
+        let mut events = session.subscribe();
+        tokio::select! {
+            () = session.wait_for_phase(SessionPhase::Active) => {}
+            failure = wait_for_connect_failure(&mut events) => {
+                return Err(AgentError::Session(SessionError::SetupFailed(
+                    gemini_genai_rs::session::SetupError::ServerRejected {
+                        code: None,
+                        message: failure,
+                    },
+                )));
+            }
+        }
 
         let runtime = build_runtime(plan, session);
         spawn_lanes(runtime).await
@@ -537,6 +556,41 @@ pub(crate) fn build_runtime(plan: SessionPlan, session: SessionHandle) -> Sessio
 
 /// Stage 4: spawn the telemetry lane, event processor, and periodic telemetry
 /// emitter, send any greeting, and assemble the [`LiveHandle`].
+/// Resolve once the session has definitively failed to come up, returning a
+/// message that names the cause.
+///
+/// The L0 loop reports each failed setup attempt as `Error` and only says
+/// `Disconnected` when it stops retrying, so the last `Error` carries the real
+/// reason ("Setup failed: …") while `Disconnected` carries only "max attempts
+/// exceeded". Both are reported: the terminal event proves it is over, the
+/// retained error says why.
+///
+/// Pends forever if the session comes up normally — the caller races it against
+/// the phase wait.
+async fn wait_for_connect_failure(
+    events: &mut tokio::sync::broadcast::Receiver<SessionEvent>,
+) -> String {
+    let mut last_error: Option<String> = None;
+    loop {
+        match events.recv().await {
+            Ok(SessionEvent::Error(msg)) => last_error = Some(msg),
+            Ok(SessionEvent::Disconnected(reason)) => {
+                let reason = reason.unwrap_or_else(|| "connection closed".to_string());
+                return match last_error {
+                    Some(err) => format!("{reason} ({err})"),
+                    None => reason,
+                };
+            }
+            Ok(_) => {}
+            // The sender is gone, which is itself terminal.
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                return last_error.unwrap_or_else(|| "session ended during setup".to_string());
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+        }
+    }
+}
+
 pub(crate) async fn spawn_lanes(rt: SessionRuntime) -> Result<LiveHandle, AgentError> {
     use super::events::LiveEvent;
 
@@ -552,7 +606,7 @@ pub(crate) async fn spawn_lanes(rt: SessionRuntime) -> Result<LiveHandle, AgentE
 
     // Spawn fast + control lanes (no session_signals, no transcript mutex)
     let greeting_writer = rt.user_writer.clone();
-    let (fast_handle, ctrl_handle) = spawn_event_processor(
+    let (fast_handle, ctrl_handle, ctrl_tx) = spawn_event_processor(
         rt.event_rx,
         rt.callbacks,
         rt.dispatcher,
@@ -634,7 +688,8 @@ pub(crate) async fn spawn_lanes(rt: SessionRuntime) -> Result<LiveHandle, AgentE
         rt.flow_monitor,
         rt.background_tracker,
         rt.telem_cancel,
-    ))
+    )
+    .with_control_sender(ctrl_tx))
 }
 
 #[cfg(test)]

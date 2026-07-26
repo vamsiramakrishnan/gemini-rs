@@ -69,14 +69,14 @@ pub trait LiveMemoryExt: Sized {
     ///     .with_memory_slots(
     ///         session,
     ///         [
-    ///             MemorySlot::new("dietary_identity", "user.diet"),
-    ///             MemorySlot::new("venue_preference", "user.venue"),
+    ///             MemorySlot::new("dietary_identity", "user:diet"),
+    ///             MemorySlot::new("venue_preference", "user:venue"),
     ///         ],
     ///     )
     ///     // Satisfied from memory for a returning user, so they are not
     ///     // asked again for something they already told us.
     ///     .phase("plan_dinner")
-    ///         .needs(&["user.diet", "user.venue"])
+    ///         .needs(&["user:diet", "user:venue"])
     ///         .done();
     /// # }
     /// ```
@@ -146,10 +146,10 @@ mod tests {
             .instruction("You are a companion.")
             .with_memory_slots(
                 session(),
-                [MemorySlot::new("dietary_identity", "user.diet")],
+                [MemorySlot::new("dietary_identity", "user:diet")],
             )
             .phase("plan")
-            .needs(&["user.diet"])
+            .needs(&["user:diet"])
             .done()
             .initial_phase("plan");
     }

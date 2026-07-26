@@ -209,7 +209,17 @@ async fn wait_for_setup<T: Transport, C: Codec>(
             },
             Ok(None) => {
                 tracing::warn!("Server closed connection during setup (no setupComplete received)");
-                return Err(SessionError::SetupFailed(SetupError::Timeout));
+                // A close during the handshake is a rejection, not a timeout.
+                // Reporting it as `Timeout` sends the reader looking for a slow
+                // network when the server in fact answered immediately and said
+                // no — a retired model name is the usual cause, and the close
+                // frame carries that text (logged by the transport).
+                return Err(SessionError::SetupFailed(SetupError::ServerRejected {
+                    code: None,
+                    message: "server closed the connection during setup without sending \
+                              setupComplete — check the model name and credentials"
+                        .to_string(),
+                }));
             }
             Err(e) => {
                 return Err(SessionError::WebSocket(WebSocketError::ProtocolError(
