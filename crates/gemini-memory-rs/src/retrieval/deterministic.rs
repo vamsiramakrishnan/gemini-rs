@@ -206,11 +206,75 @@ const KINSHIP_TERMS: &[&str] = &[
 ];
 
 /// Words that carry no topical signal even though they survive tokenization.
+///
+/// Two groups. The first is ordinary function words. The second is the
+/// vocabulary of *asking* — "remember", "preference", "like" — which the plan
+/// already captures as an intent and a signal. Leaving those in the query text
+/// makes every preference record match every preference question, because
+/// "preference" is a word each of them contains by construction rather than
+/// because it is what the user is asking about.
 const NON_TOPICAL: &[&str] = &[
-    "i", "me", "my", "we", "us", "our", "you", "your", "he", "she", "they", "them", "what", "when",
-    "where", "who", "how", "why", "should", "would", "could", "can", "get", "got", "go", "going",
-    "want", "need", "think", "know", "tell", "say", "said", "some", "any", "this", "there", "just",
-    "about", "s", "t", "m", "re", "ve", "ll", "d",
+    // Function words.
+    "i",
+    "me",
+    "my",
+    "we",
+    "us",
+    "our",
+    "you",
+    "your",
+    "he",
+    "she",
+    "they",
+    "them",
+    "what",
+    "when",
+    "where",
+    "who",
+    "how",
+    "why",
+    "should",
+    "would",
+    "could",
+    "can",
+    "get",
+    "got",
+    "go",
+    "going",
+    "want",
+    "need",
+    "think",
+    "some",
+    "any",
+    "this",
+    "there",
+    "just",
+    "about",
+    "did",
+    "does",
+    "do",
+    "s",
+    "t",
+    "m",
+    "re",
+    "ve",
+    "ll",
+    "d",
+    // The vocabulary of asking, already captured as intent.
+    "remember",
+    "memory",
+    "recall",
+    "remind",
+    "know",
+    "tell",
+    "told",
+    "say",
+    "said",
+    "preference",
+    "like",
+    "love",
+    "hate",
+    "prefer",
 ];
 
 /// The rule-based planner.

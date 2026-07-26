@@ -219,15 +219,46 @@ impl IndexedMemory {
 
 /// Split text into normalized, indexable terms.
 ///
-/// Deliberately simple: lowercase, split on anything non-alphanumeric, and drop
-/// stop words. A personal memory corpus is small enough that stemming buys
-/// little and costs recall precision on names.
+/// Lowercase, split on anything non-alphanumeric, fold regular plurals, and
+/// drop stop words. Deliberately not a stemmer: a personal corpus is full of
+/// names, and aggressive stemming conflates them ("Rhea" and "rhe") for very
+/// little recall. Plural folding is the one exception, because "restaurants"
+/// and "restaurant" are the same word to every user who says either.
+///
+/// Paraphrases with no shared term at all ("diet" against a record indexed
+/// under "dietary") are deliberately out of scope here — that is what record
+/// aliases and the semantic fallback exist for.
 pub fn tokenize(text: &str) -> Vec<String> {
     text.split(|c: char| !c.is_alphanumeric())
         .filter(|t| !t.is_empty())
-        .map(|t| t.to_lowercase())
+        .map(|t| singularize(&t.to_lowercase()))
         .filter(|t| !is_stop_word(t))
         .collect()
+}
+
+/// Fold regular English plurals onto their singular form.
+fn singularize(token: &str) -> String {
+    if token.len() <= 3 {
+        return token.to_string();
+    }
+    if let Some(stem) = token.strip_suffix("ies") {
+        return format!("{stem}y");
+    }
+    for suffix in ["ches", "shes", "sses", "xes", "zes"] {
+        if let Some(stem) = token.strip_suffix("es") {
+            if token.ends_with(suffix) {
+                return stem.to_string();
+            }
+        }
+    }
+    if token.ends_with('s')
+        && !token.ends_with("ss")
+        && !token.ends_with("us")
+        && !token.ends_with("is")
+    {
+        return token[..token.len() - 1].to_string();
+    }
+    token.to_string()
 }
 
 /// Words carrying no retrieval signal in a personal-memory corpus.
@@ -289,6 +320,22 @@ mod tests {
             vec!["user", "pescatarian"]
         );
         assert!(tokenize("   ").is_empty());
+    }
+
+    #[test]
+    fn regular_plurals_fold_onto_their_singular() {
+        assert_eq!(tokenize("restaurants"), tokenize("restaurant"));
+        assert_eq!(tokenize("preferences"), tokenize("preference"));
+        assert_eq!(tokenize("allergies"), vec!["allergy"]);
+        assert_eq!(tokenize("lunches"), vec!["lunch"]);
+    }
+
+    #[test]
+    fn plural_folding_leaves_names_and_short_words_alone() {
+        assert_eq!(tokenize("Rhea"), vec!["rhea"]);
+        assert_eq!(tokenize("Kushal"), vec!["kushal"]);
+        assert_eq!(tokenize("gas"), vec!["gas"]);
+        assert_eq!(tokenize("this"), vec!["this"]);
     }
 
     #[test]

@@ -248,10 +248,14 @@ impl MemoryObservationExtractor for RuleBasedObservationExtractor {
             .iter()
             .find(|(phrase, _)| normalized.contains(phrase))
         {
-            let remainder = normalized
+            let raw_remainder = normalized
                 .split_once(phrase)
                 .map(|(_, rest)| rest.trim().to_string())
                 .unwrap_or_default();
+            // "remember that I am pescatarian now" carries the fact "the user
+            // is pescatarian" — stripping the self-reference is what lets it
+            // fingerprint against the same fact stated plainly.
+            let remainder = strip_self_reference(&raw_remainder);
             observations.push(build(
                 &context,
                 &evidence,
@@ -399,9 +403,33 @@ fn command_statement(intent: MutationIntent, remainder: &str) -> String {
         MutationIntent::Forget => format!("The user asked to forget: {remainder}."),
         MutationIntent::Delete => format!("The user asked to delete everything about {remainder}."),
         MutationIntent::List => "The user asked what is remembered about them.".to_string(),
-        MutationIntent::Correct => format!("The user corrected: {remainder}."),
-        MutationIntent::Remember => format!("The user asked to remember: {remainder}."),
+        // A correction or an instruction to remember carries a fact. Rendering
+        // it as "the user corrected: pescatarian" would store the act rather
+        // than the content, and the model would recall the act.
+        MutationIntent::Correct | MutationIntent::Remember => statement_for("", remainder),
     }
+}
+
+/// Strip the first-person framing from a command's payload.
+///
+/// "remember that I am pescatarian now" and "I am pescatarian" describe the
+/// same fact; without this they fingerprint differently and reconcile as a
+/// contradiction rather than as reinforcement.
+fn strip_self_reference(remainder: &str) -> String {
+    let mut value = remainder.trim();
+    for prefix in ["that i am ", "that im ", "that i ", "i am ", "im ", "that "] {
+        if let Some(stripped) = value.strip_prefix(prefix) {
+            value = stripped.trim();
+            break;
+        }
+    }
+    for suffix in [" from now on", " anymore", " any more", " now"] {
+        if let Some(stripped) = value.strip_suffix(suffix) {
+            value = stripped.trim();
+            break;
+        }
+    }
+    value.to_string()
 }
 
 /// Derive a canonical predicate from the topic of a statement.
@@ -487,6 +515,31 @@ mod tests {
         );
         assert_eq!(observations[0].explicitness, Explicitness::ExplicitCommand);
         assert_eq!(observations[0].confidence, 1.0);
+    }
+
+    #[tokio::test]
+    async fn a_command_stores_the_fact_rather_than_the_act_of_commanding() {
+        let commanded = extract("please remember that I am pescatarian now").await;
+        assert_eq!(commanded[0].canonical_statement, "The user is pescatarian.");
+        assert_eq!(commanded[0].predicate.as_str(), "dietary_identity");
+
+        // And it fingerprints identically to the same fact stated plainly, so
+        // the two reinforce instead of contradicting.
+        let stated = extract("I am pescatarian").await;
+        assert_eq!(commanded[0].fingerprint(), stated[0].fingerprint());
+    }
+
+    #[tokio::test]
+    async fn a_correction_reads_as_the_corrected_fact() {
+        let observations = extract("actually I am pescatarian").await;
+        assert_eq!(
+            observations[0].mutation_intent,
+            Some(MutationIntent::Correct)
+        );
+        assert_eq!(
+            observations[0].canonical_statement,
+            "The user is pescatarian."
+        );
     }
 
     #[tokio::test]

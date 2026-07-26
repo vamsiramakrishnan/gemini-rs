@@ -8,7 +8,7 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use parking_lot::RwLock;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use super::assembler::ContextAssembler;
@@ -149,6 +149,7 @@ pub struct LocalMemoryRetriever {
     config: RetrievalConfig,
     semantic: Option<Arc<dyn SemanticFallback>>,
     cache: RwLock<HashMap<String, PreparedMemorySnapshot>>,
+    suppressed: RwLock<HashSet<String>>,
 }
 
 impl LocalMemoryRetriever {
@@ -165,7 +166,24 @@ impl LocalMemoryRetriever {
             config,
             semantic: None,
             cache: RwLock::new(HashMap::new()),
+            suppressed: RwLock::new(HashSet::new()),
         }
+    }
+
+    /// Hide canonical records in the given `subject|predicate` windows.
+    ///
+    /// When the user states something outright mid-conversation, the durable
+    /// record it contradicts must stop being retrieved *now* — not after
+    /// reconciliation. Otherwise B answers a correction by repeating the thing
+    /// it was just corrected about.
+    pub fn suppress_windows(&self, windows: HashSet<String>) {
+        *self.suppressed.write() = windows;
+        self.invalidate_cache();
+    }
+
+    /// The windows currently hidden from canonical retrieval.
+    pub fn suppressed_windows(&self) -> HashSet<String> {
+        self.suppressed.read().clone()
     }
 
     /// Attach a semantic fallback backend.
@@ -289,6 +307,26 @@ impl LocalMemoryRetriever {
         }
     }
 
+    /// Drop canonical candidates the session has superseded in conversation.
+    fn drop_suppressed(&self, candidates: &mut Vec<FusedCandidate>) {
+        let suppressed = self.suppressed.read();
+        if suppressed.is_empty() {
+            return;
+        }
+        let canonical = self.canonical.read();
+        candidates.retain(|candidate| {
+            if candidate.hit.origin != crate::bm25::MemoryOrigin::Canonical {
+                return true;
+            }
+            match canonical.get(&candidate.hit.id) {
+                Some(doc) => {
+                    !suppressed.contains(&format!("{}|{}", doc.subject_form, doc.predicate))
+                }
+                None => true,
+            }
+        });
+    }
+
     async fn execute(
         &self,
         plan: &RetrievalPlan,
@@ -297,6 +335,7 @@ impl LocalMemoryRetriever {
     ) -> PreparedMemorySnapshot {
         let rankings = self.run_lexical(plan, now);
         let mut candidates = reciprocal_rank_fusion(&rankings);
+        self.drop_suppressed(&mut candidates);
 
         if self.needs_semantic_fallback(&candidates) {
             self.extend_with_semantic(plan, &mut candidates, budget, now)

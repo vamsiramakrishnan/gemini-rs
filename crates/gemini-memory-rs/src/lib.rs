@@ -66,14 +66,16 @@
 
 pub mod bm25;
 pub mod core;
+pub mod engine;
+pub mod evals;
 pub mod ingestion;
 pub mod okf;
 pub mod reconcile;
 pub mod retrieval;
+pub mod runtime;
 pub mod transcript;
 
 /// The types a typical application touches.
-#[cfg(any())]
 pub mod prelude {
     pub use crate::bm25::{MemoryIndex, SearchExplanation, SearchHit};
     pub use crate::core::{
@@ -85,9 +87,9 @@ pub mod prelude {
     pub use crate::engine::{MemoryEngine, MemorySession};
     pub use crate::ingestion::{SessionCandidate, SessionCandidateStatus, SessionMemoryOverlay};
     pub use crate::okf::{MemoryRepository, OkfDocument};
-    pub use crate::reconcile::{ProposedMutation, ResolvedMutation};
+    pub use crate::reconcile::{ProposedMemory, ResolutionKind, ResolvedMutation};
     pub use crate::retrieval::{
         MemoryRetriever, PreparedMemorySnapshot, RetrievalPlan, RetrievedMemory,
     };
-    pub use crate::runtime::{keys, MemoryRuntimeEvent};
+    pub use crate::runtime::{keys, MemoryEventSender, MemoryRuntimeEvent};
 }

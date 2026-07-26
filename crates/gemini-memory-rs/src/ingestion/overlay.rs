@@ -12,7 +12,8 @@ use super::ledger::{SessionCandidate, SessionCandidateStatus};
 use crate::bm25::{IndexedMemory, MemoryIndex};
 use crate::core::{
     stable_hash, CanonicalMemory, EvidenceCounters, MemoryId, MemorySource, MemoryStatus,
-    PrivacyMetadata, RetrievalMetadata, SensitivityClass, SessionId, TemporalMetadata, UserId,
+    MutationIntent, PrivacyMetadata, RetrievalMetadata, SensitivityClass, SessionId,
+    TemporalMetadata, UserId,
 };
 
 /// The searchable projection of the session ledger.
@@ -66,6 +67,18 @@ impl SessionMemoryOverlay {
                 continue;
             }
             if candidate.status == SessionCandidateStatus::Suppressed {
+                continue;
+            }
+            // "forget that", "what do you remember" and friends are commands
+            // *about* memory. They belong in the ledger so consolidation can
+            // act on them, but they are not facts about the user and must
+            // never be handed back as recalled context.
+            if matches!(
+                candidate.mutation_intent,
+                Some(MutationIntent::List)
+                    | Some(MutationIntent::Forget)
+                    | Some(MutationIntent::Delete)
+            ) {
                 continue;
             }
             let provisional = provisional_memory(candidate, owner, session_id, now);
