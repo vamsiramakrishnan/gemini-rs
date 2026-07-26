@@ -147,6 +147,11 @@
 //! approximate index, and it is now a measurement rather than an assumption:
 //! the goal is 768's quality at something nearer 256's scan cost.
 //!
+//! `quantization_probe` follows that through and finds it available: a packed
+//! binary index over these same vectors scans in 63µs against float32's 1 ms,
+//! and an exact rerank of its top 50 restores the float32 ranking exactly. At
+//! 16,000 records that is 1.3 ms against the exact scan's 15.2 ms.
+//!
 //! # Why the fusion is the engine's own
 //!
 //! The fusion is [`reciprocal_rank_fusion`] from the crate itself — the same
@@ -169,6 +174,7 @@ use std::time::Instant;
 
 use common::corpus::{self, PROBES};
 use common::paraphrase::{self, Mode, Tier};
+use common::views::{curated, predicate, structural, structural_view};
 use common::{file_backed_engine, have_api_key, skip, ScratchDir};
 
 use gemini_memory_rs::bm25::{
@@ -252,60 +258,6 @@ impl View {
             View::Full => "full",
         }
     }
-}
-
-/// What the frontmatter knows, written out as prose.
-///
-/// The fields are already there and already indexed by BM25 with their own
-/// weights; the embedding was throwing all of them away. This costs nothing to
-/// produce — no model, no author, no judgement.
-fn structural(memory: &CanonicalMemory) -> String {
-    let mut lines = vec![
-        format!("About: {}", memory.subject.display),
-        predicate(memory),
-    ];
-    if !memory.retrieval.entities.is_empty() {
-        lines.push(format!(
-            "Mentions: {}",
-            memory.retrieval.entities.join(", ")
-        ));
-    }
-    if let Some(location) = &memory.retrieval.location {
-        lines.push(format!("Place: {location}"));
-    }
-    if let Some(qualifier) = &memory.qualifier {
-        lines.push(format!("When: {qualifier}"));
-    }
-    lines.push(format!("Holds: {:?}", memory.temporal_scope));
-    lines.join("\n")
-}
-
-/// The line that names the attribute this record is about.
-///
-/// A statement says the *value* — "The user's usual coffee order is a cortado"
-/// — and only implies the attribute. The predicate names it outright, which is
-/// what a question asks by.
-fn predicate(memory: &CanonicalMemory) -> String {
-    format!(
-        "Kind: {:?} {}",
-        memory.kind,
-        memory.predicate.as_str().replace('_', " ")
-    )
-}
-
-/// The aliases and tags the record already carries.
-fn curated(memory: &CanonicalMemory) -> String {
-    let mut lines = Vec::new();
-    if !memory.retrieval.aliases.is_empty() {
-        lines.push(format!(
-            "Also asked as: {}",
-            memory.retrieval.aliases.join(", ")
-        ));
-    }
-    if !memory.retrieval.tags.is_empty() {
-        lines.push(format!("Topics: {}", memory.retrieval.tags.join(", ")));
-    }
-    lines.join("\n")
 }
 
 /// The text a record is embedded as, for one view.
@@ -1056,10 +1008,7 @@ async fn whether_wider_embeddings_earn_their_keep() {
 
     // The structural view needs no enrichment model, so this test is
     // independent of the flash-lite cache the main probe builds.
-    let texts: Vec<String> = active
-        .iter()
-        .map(|m| format!("{}\n{}", m.statement, structural(m)))
-        .collect();
+    let texts: Vec<String> = active.iter().map(|m| structural_view(m)).collect();
     let questions: Vec<String> = paraphrase::all()
         .map(|(_, p)| p.query.to_string())
         .collect();

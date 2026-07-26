@@ -12,6 +12,7 @@ pub mod corpus;
 #[cfg(feature = "gemini-llm")]
 pub mod live;
 pub mod paraphrase;
+pub mod views;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
