@@ -149,7 +149,7 @@ impl LiveHandle {
     /// context turns are flushed to the wire before the text message.
     ///
     /// The text is also recorded on the session transcript as the user side of
-    /// the current turn — the same [`ControlEvent::InputTranscript`] that ASR of
+    /// the current turn, through the same internal control event that ASR of
     /// audio produces. Without this a text-driven session would hand every
     /// [`TurnExtractor`](super::extractor::TurnExtractor) an empty user turn,
     /// since the transcript's user side is otherwise written only by ASR.
