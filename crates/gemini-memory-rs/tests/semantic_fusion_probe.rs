@@ -110,6 +110,43 @@
 //! rank one is the trade, and it is the right one only because five records
 //! reach the model rather than one.
 //!
+//! # Does the extra width earn its keep?
+//!
+//! 768 was picked off Google's own recommendation rather than anything measured
+//! here. [`whether_wider_embeddings_earn_their_keep`] runs the winning
+//! configuration — structural view, fused with BM25 at 2:1 — at four widths,
+//! changing nothing else:
+//!
+//! | width | top-1 | top-5 | MRR | scan @1.2k | scan @16k | RAM @16k |
+//! |---|---|---|---|---|---|---|
+//! | 256 | 53/93 | 72/93 | 0.659 | 373µs | 5 ms | 16 MB |
+//! | **768** | 64/93 | **79/93** | 0.752 | 1 ms | 15 ms | 49 MB |
+//! | 1536 | 68/93 | 77/93 | 0.777 | 2 ms | 31 ms | 98 MB |
+//! | 3072 | 67/93 | **79/93** | 0.778 | 5 ms | 61 ms | 196 MB |
+//!
+//! **3072 does not earn it.** Four times the memory and four times the scan for
+//! the *same* 79 in the top five. The top-1 column moves by three or four
+//! questions across 768, 1536 and 3072 — which on 93 questions is not a signal
+//! anyone should spend 150 MB on — and top-5 is the metric that matters, since
+//! `max_memories` is 5 and the model reads all five.
+//!
+//! Going the other way does cost. 256 gives up eleven questions at top-1 and
+//! seven at top-5, so the width is doing real work below 768; it just stops
+//! doing any above it.
+//!
+//! `serving_latency_probe` measures the embedding *call* as flat across widths
+//! — 253ms at 768, 263ms at 3072 — so width is paid entirely in memory and scan
+//! time, never in API latency. There is no latency argument for going narrow
+//! and no quality argument for going wide. 768 stands.
+//!
+//! ## The finding that outlives the width question
+//!
+//! An exact flat scan stops fitting the 10 ms interactive budget somewhere
+//! between 1,200 records and 16,000 — at *every* width except 256, which only
+//! fits by giving up seven questions. That is the case for quantization or an
+//! approximate index, and it is now a measurement rather than an assumption:
+//! the goal is 768's quality at something nearer 256's scan cost.
+//!
 //! # Why the fusion is the engine's own
 //!
 //! The fusion is [`reciprocal_rank_fusion`] from the crate itself — the same
@@ -343,7 +380,13 @@ impl<T: serde::Serialize + serde::de::DeserializeOwned> Cache<T> {
 
 /// One embedding call, with the retries an experiment needs and a production
 /// client would do properly.
-async fn embed_one(client: &reqwest::Client, key: &str, text: &str, task: &str) -> Vec<f32> {
+async fn embed_one(
+    client: &reqwest::Client,
+    key: &str,
+    text: &str,
+    task: &str,
+    dims: usize,
+) -> Vec<f32> {
     let url = format!(
         "https://generativelanguage.googleapis.com/v1beta/models/{EMBEDDING_MODEL}:embedContent"
     );
@@ -351,7 +394,7 @@ async fn embed_one(client: &reqwest::Client, key: &str, text: &str, task: &str) 
         "model": format!("models/{EMBEDDING_MODEL}"),
         "content": { "parts": [{ "text": text }] },
         "taskType": task,
-        "outputDimensionality": DIMENSIONS,
+        "outputDimensionality": dims,
     });
     let json = call(client, key, &url, &body, "embed").await;
     let values = json["embedding"]["values"]
@@ -733,7 +776,7 @@ async fn what_a_semantic_layer_would_buy() {
             let (client, key, task, text) =
                 (client.clone(), key.clone(), task.clone(), text.clone());
             set.spawn(async move {
-                let vector = embed_one(&client, &key, &text, &task).await;
+                let vector = embed_one(&client, &key, &text, &task, DIMENSIONS).await;
                 (task, text, vector)
             });
         }
@@ -965,5 +1008,222 @@ async fn what_a_semantic_layer_would_buy() {
         built.top_five,
         best_view.top_five,
         overall.tallies[LEXICAL].top_five,
+    );
+}
+
+// ─── does the extra width earn its keep? ────────────────────────────────────
+
+/// The widths worth comparing, and what each costs per record.
+///
+/// `gemini-embedding-2` is a Matryoshka model: the 3072-dimension vector is
+/// trained so that its prefixes are themselves usable embeddings, and asking
+/// for a narrower output is meant to cost quality gently rather than
+/// catastrophically. "Gently" is a claim, and 768 was chosen off the back of
+/// Google's own recommendation rather than anything measured here.
+const SWEEP_WIDTHS: &[usize] = &[768, 256, 1536, 3072];
+
+/// Whether paying four times the storage and four times the scan buys anything.
+///
+/// This runs the *winning* configuration — the structural view, fused with BM25
+/// at 2:1 — at each width, over the same 93 questions and the same 1,199
+/// records. Only the number of dimensions changes, so any difference is the
+/// width and nothing else.
+///
+/// The costs it is being weighed against are concrete. At 16,000 records, which
+/// `memory_at_scale` treats as a year of heavy use, `f32` vectors come to 16 MB
+/// at 256d, 49 MB at 768d, 98 MB at 1536d and 197 MB at 3072d. An exact flat
+/// scan is linear in the width, and `serving_latency_probe` measures the
+/// embedding call itself as flat across widths — so the width is paid in memory
+/// and in scan time, not in API latency.
+#[tokio::test]
+async fn whether_wider_embeddings_earn_their_keep() {
+    if !have_api_key() {
+        return skip("whether_wider_embeddings_earn_their_keep");
+    }
+
+    let scratch = ScratchDir::new("semantic-width");
+    let engine = file_backed_engine("usr_corpus", scratch.path());
+    corpus::install(&engine).await;
+    let records = corpus::installed(&engine).await;
+    let active: Vec<&CanonicalMemory> = records
+        .iter()
+        .filter(|m| m.status == MemoryStatus::Active)
+        .collect();
+    let index = MemoryIndex::build(active.iter().map(|m| IndexedMemory::from_canonical(m)));
+
+    let client = reqwest::Client::new();
+    let key = api_key();
+
+    // The structural view needs no enrichment model, so this test is
+    // independent of the flash-lite cache the main probe builds.
+    let texts: Vec<String> = active
+        .iter()
+        .map(|m| format!("{}\n{}", m.statement, structural(m)))
+        .collect();
+    let questions: Vec<String> = paraphrase::all()
+        .map(|(_, p)| p.query.to_string())
+        .collect();
+
+    let mut vectors: Cache<Vec<f32>> = Cache::open("semantic-width-embeddings.json");
+    let cache_key = |dims: usize, task: &str, text: &str| {
+        stable_hash(&format!("{EMBEDDING_MODEL}|{dims}|{task}|{text}"))
+    };
+
+    let mut report = format!(
+        "\ndoes width earn its keep? structural view fused with BM25 at 2:1,\n\
+         {} questions over {} records, only the dimension count changing\n\n",
+        questions.len(),
+        active.len(),
+    );
+    report.push_str(&format!(
+        "{:<8} {:<9} {:<9} {:<8} {:<12} {:<12} {:<9} {}\n",
+        "width", "top-1", "top-5", "MRR", "scan@1.2k", "scan@16k", "RAM@16k", "vs 768 top-5"
+    ));
+    let mut measurements: Vec<(usize, usize, usize, std::time::Duration)> = Vec::new();
+
+    let mut baseline_top_five = 0usize;
+    for &dims in SWEEP_WIDTHS {
+        // ── embed everything at this width, cached ──
+        let mut work: Vec<(String, String)> = texts
+            .iter()
+            .map(|t| ("RETRIEVAL_DOCUMENT".to_string(), t.clone()))
+            .chain(
+                questions
+                    .iter()
+                    .map(|q| ("RETRIEVAL_QUERY".to_string(), q.clone())),
+            )
+            .collect();
+        work.retain(|(task, text)| !vectors.entries.contains_key(&cache_key(dims, task, text)));
+        work.sort();
+        work.dedup();
+        for chunk in work.chunks(EMBED_CONCURRENCY) {
+            let mut set = tokio::task::JoinSet::new();
+            for (task, text) in chunk {
+                let (client, key, task, text) =
+                    (client.clone(), key.clone(), task.clone(), text.clone());
+                set.spawn(async move {
+                    let vector = embed_one(&client, &key, &text, &task, dims).await;
+                    (task, text, vector)
+                });
+            }
+            while let Some(joined) = set.join_next().await {
+                let (task, text, vector) = joined.expect("embedding task");
+                vectors
+                    .entries
+                    .insert(cache_key(dims, &task, &text), vector);
+                vectors.calls += 1;
+            }
+            vectors.flush();
+        }
+
+        let get = |task: &str, text: &str| -> &[f32] {
+            vectors
+                .entries
+                .get(&cache_key(dims, task, text))
+                .map(Vec::as_slice)
+                .unwrap_or_else(|| panic!("embedding missing at {dims}d for {task} {text:?}"))
+        };
+        let indexed: Vec<(MemoryId, String, Vec<f32>)> = active
+            .iter()
+            .zip(&texts)
+            .map(|(m, text)| {
+                (
+                    m.id.clone(),
+                    m.statement.clone(),
+                    get("RETRIEVAL_DOCUMENT", text).to_vec(),
+                )
+            })
+            .collect();
+
+        // ── ask everything, exactly as the recommended configuration would ──
+        let mut tally = Tally::default();
+        let mut scan_time = std::time::Duration::ZERO;
+        for (probe_name, phrasing) in paraphrase::all() {
+            let probe = PROBES
+                .iter()
+                .find(|p| p.name == probe_name)
+                .unwrap_or_else(|| panic!("no probe named {probe_name}"));
+            let vector = get("RETRIEVAL_QUERY", phrasing.query);
+
+            let lexical_hits = lexical(&index, phrasing.query);
+            let started = Instant::now();
+            let semantic_hits = semantic(vector, &indexed);
+            scan_time += started.elapsed();
+
+            let fused = fuse(&[&lexical_hits, &semantic_hits, &semantic_hits]);
+            tally.record(rank_of(&fused, probe.target));
+        }
+
+        let bytes_at_16k = 16_000u64 * dims as u64 * 4;
+        let delta = if dims == 768 {
+            baseline_top_five = tally.top_five;
+            "baseline".to_string()
+        } else if baseline_top_five == 0 {
+            "—".to_string()
+        } else {
+            format!("{:+}", tally.top_five as i64 - baseline_top_five as i64)
+        };
+        // The scan is a full pass over every vector, so it is linear in both
+        // the record count and the width. Projecting it to the corpus size
+        // `memory_at_scale` treats as a year of heavy use is the number that
+        // decides whether an exact scan is viable at all.
+        let per_query = scan_time / tally.asked.max(1) as u32;
+        let at_16k = per_query * (16_000 / active.len().max(1) as u32);
+        measurements.push((dims, tally.first, tally.top_five, at_16k));
+        report.push_str(&format!(
+            "{:<8} {:<9} {:<9} {:<8.3} {:<12} {:<12} {:<9} {}\n",
+            dims,
+            format!("{}/{}", tally.first, tally.asked),
+            format!("{}/{}", tally.top_five, tally.asked),
+            tally.mrr(),
+            format!("{per_query:.0?}"),
+            format!("{at_16k:.0?}"),
+            format!("{} MB", bytes_at_16k / 1_000_000),
+            delta,
+        ));
+    }
+
+    let interactive =
+        gemini_memory_rs::core::RetrievalConfig::default().immediate_semantic_timeout_ms;
+    report.push_str(&format!(
+        "\nagainst the {interactive}ms interactive semantic budget, at 16,000 records:\n"
+    ));
+    for (dims, _, _, at_16k) in &measurements {
+        report.push_str(&format!(
+            "  {dims:<5} {:>8.0?}  {}\n",
+            at_16k,
+            if at_16k.as_millis() as u64 <= interactive {
+                "fits"
+            } else {
+                "DOES NOT FIT — needs quantization or an approximate index"
+            }
+        ));
+    }
+    report.push_str(&format!(
+        "\n{} embedding calls this run; the rest were cached.\n",
+        vectors.calls
+    ));
+    eprintln!("{report}");
+
+    // The claim the default rests on: above 768 the width stops buying
+    // anything on the metric the product runs on. If a future embedding model
+    // changes that, this fails and the default deserves revisiting.
+    let best_top_five = measurements
+        .iter()
+        .map(|(_, _, t, _)| *t)
+        .max()
+        .unwrap_or(0);
+    let at_768 = measurements
+        .iter()
+        .find(|(d, _, _, _)| *d == 768)
+        .map(|(_, _, t, _)| *t)
+        .expect("768 measured");
+    assert!(
+        at_768 + 1 >= best_top_five,
+        "768d put {at_768} of {} answers in the top five while some wider setting \
+         managed {best_top_five}. The default width is now leaving quality on the \
+         table; the four-times storage and scan cost of 3072d may finally be \
+         earning it.\n{report}",
+        questions.len(),
     );
 }
