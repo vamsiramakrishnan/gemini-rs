@@ -543,7 +543,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_plan_that_needs_no_memory_returns_an_empty_snapshot_without_searching() {
+    async fn a_plan_with_nothing_to_search_with_returns_an_empty_snapshot() {
+        let (retriever, _, _) = retriever();
+        let snapshot = retriever
+            .prepare(RetrievalRequest::new(plan_for("what do you think")))
+            .await
+            .unwrap();
+        assert!(snapshot.is_empty());
+        assert_eq!(retriever.cached_len(), 0, "a skip plan is not cached");
+    }
+
+    #[tokio::test]
+    async fn a_world_knowledge_question_searches_and_finds_nothing() {
+        // The other half of the same contract, and the reason the planner does
+        // not need to recognise "what is the capital of France" as general
+        // knowledge: the query runs against a personal corpus that contains no
+        // matching term, so it scores nothing. Identical observable outcome to
+        // a skip, without needing to understand the sentence to get there.
         let (retriever, _, _) = retriever();
         let snapshot = retriever
             .prepare(RetrievalRequest::new(plan_for(
@@ -551,8 +567,11 @@ mod tests {
             )))
             .await
             .unwrap();
-        assert!(snapshot.is_empty());
-        assert_eq!(retriever.cached_len(), 0, "a skip plan is not cached");
+        assert!(
+            snapshot.is_empty(),
+            "a question the corpus knows nothing about produced context: {:?}",
+            snapshot.facts
+        );
     }
 
     #[tokio::test]

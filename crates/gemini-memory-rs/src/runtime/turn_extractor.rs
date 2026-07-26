@@ -379,12 +379,30 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_turn_that_asks_nothing_prepares_nothing() {
-        // Preparation is speculative, not unconditional: a statement is not a
-        // question, and searching memory for it would be pure cost.
+    async fn a_turn_that_only_states_something_prepares_that_something() {
+        // Preparation runs on every turn, because a local BM25 pass costs tens
+        // of microseconds and guessing which utterances "deserve" one costs
+        // recall. What a self-statement retrieves is its own fact — which is
+        // what the model should have in hand on the turn after it was told.
         let session = session();
         MemoryTurnExtractor::new(session.clone())
             .extract(&[turn(1, "I am pescatarian")])
+            .await
+            .unwrap();
+        let prepared = session.prepared_snapshot();
+        assert!(prepared
+            .facts
+            .iter()
+            .any(|f| f.statement.to_lowercase().contains("pescatarian")));
+    }
+
+    #[tokio::test]
+    async fn a_turn_with_no_content_words_prepares_nothing() {
+        // The one skip the planner can make without understanding language:
+        // there is nothing to search *with*.
+        let session = session();
+        MemoryTurnExtractor::new(session.clone())
+            .extract(&[turn(1, "what do you think")])
             .await
             .unwrap();
         assert!(session.prepared_snapshot().is_empty());

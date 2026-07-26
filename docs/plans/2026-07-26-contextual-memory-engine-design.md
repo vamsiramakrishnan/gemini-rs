@@ -339,19 +339,38 @@ Honest list.
 ## Language
 
 Ingestion is code-switch native — Hinglish, Tanglish and Devanagari all extract
-correctly, because the extraction model does that work. Retrieval needed
-explicit engineering:
+correctly, because the extraction model does that work.
 
-- The rule-based planner recognises code-switched recall, recommendation,
-  preference and kinship phrasing. Without it, "mujhe yaad dilao, mera khaana ka
-  preference kya hai" was read as needing no memory at all.
-- Romanized Hindi and Tamil function words are stop words. Without that, `hai`,
-  `nahi` and `enakku` are treated as high-signal content terms and dominate
-  ranking in exactly the sentences where real content words are rarest.
-- Every stored fact carries model-generated **search terms** in both the user's
-  language and English. Lexical retrieval can only match words that are present,
-  so a fact stored as "The user is vegetarian" is unreachable from a Hindi
-  question about `khaana` unless the fact itself carries that vocabulary.
+Retrieval was first made to work the obvious way: Hindi and Tamil recall
+phrases, romanized function words as stop words, a kinship table. It passed,
+and it was wrong. The lists were load-bearing because the planner used them to
+decide *whether to search at all*, so every phrasing missing from a list was a
+question that silently got no memory — and no list is ever finished. The rule
+planner was being asked to be a language model.
+
+The lists are gone. Three properties replace them, none of which name a
+language:
+
+- **Search unless there is nothing to search with.** A local BM25 pass costs
+  tens of microseconds, so the planner no longer rules on whether a question
+  "needs" memory — a judgement it cannot make. It strips function words and
+  searches. The only skip left is the lexical one: an utterance with no content
+  words has no query to run.
+- **An absent term is free.** `hai` and `enakku` do not need to be stop words.
+  A term no document contains has no postings, contributes no score, and IDF
+  discounts the ones that appear everywhere. Removing them by hand bought
+  nothing that the index was not already doing.
+- **Entities come from the corpus.** `wife` resolves to `rhea` because the fact
+  about Rhea lists it as an alias, written by the extraction model in whatever
+  language the user spoke. A relationship the engine has never heard of has no
+  memories to retrieve, so failing to spot it costs nothing.
+
+Every stored fact still carries model-generated **search terms** in both the
+user's language and English; lexical retrieval can only match words that are
+present. That is where the language knowledge lives now — in the corpus, from
+the model that read the speech, rather than in a table shipped in the binary.
+The remaining phrase tables are hints only: a missed match costs a little
+ranking quality on that turn, never the memory.
 
 The remaining gap is a question in one language about a fact stored before this
 change, whose search terms are English-only. Recompiling the corpus does not

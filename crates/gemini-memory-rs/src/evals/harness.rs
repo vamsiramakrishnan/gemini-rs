@@ -38,7 +38,8 @@ pub struct RetrievalCaseResult {
     pub recall: f32,
     /// Reciprocal rank of the first relevant record.
     pub reciprocal_rank: f32,
-    /// Whether the skip decision matched the expectation.
+    /// Whether the context the case produced matched the expectation: facts
+    /// for a case that needs memory, nothing for one that does not.
     pub skip_correct: bool,
     /// Whether any forbidden record was returned.
     pub leaked_forbidden: bool,
@@ -172,7 +173,6 @@ async fn run_retrieval_case(
 ) -> Result<RetrievalCaseResult, MemoryError> {
     let now = Utc::now();
     let plan = planner.plan(case.query, TurnId(1), 1, now);
-    let planned_memory = plan.requires_memory;
     let snapshot = retriever.prepare(RetrievalRequest { plan, now }).await?;
 
     let returned: Vec<String> = snapshot
@@ -188,7 +188,11 @@ async fn run_retrieval_case(
         precision: metrics::precision(&returned, &relevant),
         recall: metrics::recall(&returned, &relevant),
         reciprocal_rank: metrics::reciprocal_rank(&returned, &relevant),
-        skip_correct: planned_memory == case.expects_memory,
+        // The observable contract, not the internal flag. A question that
+        // needs no memory must surface no facts; whether the planner declined
+        // to search or searched and scored nothing is invisible from outside,
+        // and only one of those two is a decision the planner can get right.
+        skip_correct: returned.is_empty() != case.expects_memory,
         leaked_forbidden: returned.iter().any(|r| forbidden.contains(r)),
         tokens: usize::from(snapshot.token_count),
         returned,

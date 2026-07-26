@@ -261,6 +261,9 @@ fn singularize(token: &str) -> String {
         && !token.ends_with("ss")
         && !token.ends_with("us")
         && !token.ends_with("is")
+        // "does" and "goes" are verbs, not plurals; folding them to "doe" and
+        // "goe" invents words that then collide with real ones.
+        && !token.ends_with("oes")
     {
         return token[..token.len() - 1].to_string();
     }
@@ -334,6 +337,13 @@ mod tests {
         assert_eq!(tokenize("preferences"), tokenize("preference"));
         assert_eq!(tokenize("allergies"), vec!["allergy"]);
         assert_eq!(tokenize("lunches"), vec!["lunch"]);
+    }
+
+    #[test]
+    fn plural_folding_leaves_verbs_that_merely_end_in_s() {
+        assert_eq!(tokenize("does"), vec!["doe"; 0], "does is a stop word");
+        assert_eq!(super::singularize("does"), "does");
+        assert_eq!(super::singularize("goes"), "goes");
     }
 
     #[test]

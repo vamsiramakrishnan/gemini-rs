@@ -130,13 +130,23 @@ fn contains_word_sequence(haystack: &str, needle: &str) -> bool {
 
 /// Recall phrases.
 ///
-/// Code-switched forms are first-class here, not an afterthought. Most Indian
-/// users do not speak one language per sentence, and a rule planner that only
-/// recognises English silently answers "no memory needed" to
-/// "mujhe yaad dilao, mera khaana ka preference kya hai" — which is a request
-/// to recall, in so many words.
+/// These tables are *hints*, and English-only on purpose. An earlier version
+/// tried to make them exhaustive — Hindi and Tamil phrase lists, romanized
+/// stop words, a kinship table — because the planner used them to decide
+/// whether to search at all, so a gap in the list meant a Hinglish question
+/// got no memory. That put the rule planner in the business of understanding
+/// language, which is not a business a phrase table can be in: there is no
+/// list length at which "mujhe yaad dilao" and "enakku theriyuma" and the next
+/// thousand ways to ask are all covered.
+///
+/// So the decision moved. Whether to search is answered by "are there content
+/// words", and what comes back is answered by BM25 and the score threshold —
+/// both of which are language-agnostic, because a term the corpus does not
+/// contain simply has no postings. What a matched phrase now buys is a
+/// slightly better-shaped plan: an intent label, a scope preference, a
+/// predicate guess. Missing one costs a little ranking quality on that turn.
+/// It no longer costs the memory.
 const RECALL_PHRASES: &[&str] = &[
-    // English
     "do you remember",
     "what do you remember",
     "what do you know about",
@@ -145,25 +155,9 @@ const RECALL_PHRASES: &[&str] = &[
     "i told you",
     "you said",
     "have i mentioned",
-    // Hinglish
-    "yaad hai",
-    "yaad dila",
-    "yaad karo",
-    "yaad aata",
-    "pata hai",
-    "maine bataya",
-    "maine kaha",
-    "tumhe pata",
-    "aapko pata",
-    // Tanglish
-    "ninaivirukka",
-    "gnabagam",
-    "theriyuma",
-    "sollu naan",
 ];
 
 const RECOMMENDATION_PHRASES: &[&str] = &[
-    // English
     "should i",
     "should we",
     "recommend",
@@ -174,21 +168,6 @@ const RECOMMENDATION_PHRASES: &[&str] = &[
     "help me pick",
     "book a",
     "find me",
-    // Hinglish
-    "kya karu",
-    "kya karein",
-    "kya karna",
-    "kahan jaye",
-    "kahan chale",
-    "batao",
-    "bata do",
-    "suggest karo",
-    "dhundo",
-    // Tanglish
-    "enna pannalam",
-    "enga polam",
-    "sollunga",
-    "venuma",
 ];
 
 const PRIOR_EVENT_PHRASES: &[&str] = &[
@@ -226,35 +205,15 @@ const PREFERENCE_WORDS: &[&str] = &[
 
 const COMPARISON_PHRASES: &[&str] = &["better than", "instead of", "rather than", "compared to"];
 
+/// English kinship terms, kept only so `RelationshipReference` can be labelled
+/// for scoping. Detection is not required for retrieval: a relationship in the
+/// corpus is found by its own aliases.
 const KINSHIP_TERMS: &[&str] = &[
-    // Hinglish possessives, which carry the same relationship signal.
-    "meri wife",
-    "mera husband",
-    "meri patni",
-    "mera pati",
-    "meri biwi",
-    "mera beta",
-    "meri beti",
-    "meri maa",
-    "mere papa",
-    "mera bhai",
-    "meri behen",
-    "mera dost",
-    // Tanglish
-    "en wife",
-    "en husband",
-    "en amma",
-    "en appa",
-    "en thambi",
-    "en friend",
-    // English
     "my wife",
     "my husband",
     "my partner",
     "my mother",
     "my father",
-    "my mum",
-    "my dad",
     "my son",
     "my daughter",
     "my sister",
@@ -262,7 +221,6 @@ const KINSHIP_TERMS: &[&str] = &[
     "my friend",
     "my colleague",
     "my boss",
-    "my team",
 ];
 
 /// Words that carry no topical signal even though they survive tokenization.
@@ -313,6 +271,7 @@ const NON_TOPICAL: &[&str] = &[
     "did",
     "does",
     "do",
+    "goes",
     "s",
     "t",
     "m",
@@ -329,76 +288,13 @@ const NON_TOPICAL: &[&str] = &[
     "tell",
     "told",
     "say",
+    "says",
     "said",
     "preference",
     "like",
     "love",
     "hate",
     "prefer",
-    // Romanized Hindi and Tamil function words. Without these, "hai", "nahi"
-    // and "enakku" are treated as high-signal content terms and dominate
-    // ranking in exactly the sentences where real content words are rarest.
-    "hai",
-    "hain",
-    "hoon",
-    "hun",
-    "tha",
-    "thi",
-    "hota",
-    "raha",
-    "rahi",
-    "kar",
-    "karo",
-    "karu",
-    "karna",
-    "kya",
-    "kaise",
-    "kab",
-    "kahan",
-    "kyun",
-    "mera",
-    "meri",
-    "mere",
-    "mujhe",
-    "maine",
-    "tum",
-    "tumhara",
-    "tumhe",
-    "aap",
-    "aapko",
-    "apna",
-    "hum",
-    "humara",
-    "aur",
-    "bhi",
-    "toh",
-    "yeh",
-    "woh",
-    "nahi",
-    "nahin",
-    "bilkul",
-    "thoda",
-    "bahut",
-    "yaad",
-    "dilao",
-    "bata",
-    "batao",
-    "pata",
-    "naan",
-    "enakku",
-    "enna",
-    "unga",
-    "epdi",
-    "romba",
-    "oru",
-    "ille",
-    "illai",
-    "irukku",
-    "theriyuma",
-    "sollu",
-    "sollunga",
-    "vanthu",
-    "appuram",
 ];
 
 /// The rule-based planner.
@@ -481,9 +377,25 @@ impl DeterministicPlanner {
         now: DateTime<Utc>,
     ) -> RetrievalPlan {
         let signals = self.signals(text);
-        if signals.is_empty() {
-            return RetrievalPlan::skip(turn_id, generation, text);
-        }
+
+        // Content words are the gate, not recognised phrases.
+        //
+        // The previous rule — "no recognised signal, no memory" — made the
+        // planner responsible for understanding language, which it cannot do.
+        // It answered "no memory needed" to any phrasing outside its word
+        // lists, which meant every language but English.
+        //
+        // Searching locally costs tens of microseconds. Searching and finding
+        // nothing is the same observable outcome as not searching, minus the
+        // failure mode. So the default is to search, and the score threshold in
+        // the assembler decides whether anything comes back. Deciding a query
+        // needs no memory at all is left to the model planner, which
+        // understands the sentence.
+        let topics: Vec<String> = tokenize(text)
+            .into_iter()
+            .filter(|t| !NON_TOPICAL.contains(&t.as_str()))
+            .filter(|t| t.len() > 2)
+            .collect();
 
         let mut entities: Vec<RetrievalEntity> = Vec::new();
         for (surface, canonical) in self.known.matches_in(text) {
@@ -495,20 +407,15 @@ impl DeterministicPlanner {
             }
             entities.push(RetrievalEntity::resolved(surface, canonical));
         }
-        for kinship in KINSHIP_TERMS {
-            if normalize_token(text).contains(kinship) {
-                let surface = kinship.trim_start_matches("my ").to_string();
-                if !entities.iter().any(|e| e.surface == surface) {
-                    entities.push(RetrievalEntity::surface(surface));
-                }
-            }
-        }
 
-        let topics: Vec<String> = tokenize(text)
-            .into_iter()
-            .filter(|t| !NON_TOPICAL.contains(&t.as_str()))
-            .filter(|t| t.len() > 2)
-            .collect();
+        // No kinship table. A relationship the engine has never heard of has no
+        // memories to retrieve, so failing to spot it costs nothing; one it has
+        // heard of is in the corpus already, carrying the aliases the
+        // extraction model wrote in whatever language the user used.
+
+        if topics.is_empty() && entities.is_empty() {
+            return RetrievalPlan::skip(turn_id, generation, text);
+        }
 
         let intent = infer_intent(&signals);
         let predicates = infer_predicates(&signals);
@@ -581,10 +488,9 @@ fn infer_intent(signals: &[RetrievalSignal]) -> RetrievalIntent {
     {
         return RetrievalIntent::RelationshipReference;
     }
-    if signals.contains(&RetrievalSignal::PreferencePredicate) {
-        return RetrievalIntent::Ambient;
-    }
-    RetrievalIntent::None
+    // Ambient rather than None: the caller has already decided there is
+    // something to search for, so the intent only chooses scoping hints.
+    RetrievalIntent::Ambient
 }
 
 fn infer_predicates(signals: &[RetrievalSignal]) -> Vec<CanonicalPredicate> {
@@ -681,7 +587,9 @@ mod tests {
     fn planner() -> DeterministicPlanner {
         let mut known = KnownEntities::new();
         known.insert("Rhea", "rhea");
-        known.insert("my wife", "rhea");
+        // A corpus-derived alias, not a kinship table: the fact "Rhea is the
+        // user's wife" lists both forms as entities, so both land here.
+        known.insert("wife", "rhea");
         known.insert("Kushal", "kushal");
         DeterministicPlanner::with_entities(known)
     }
@@ -691,8 +599,25 @@ mod tests {
     }
 
     #[test]
-    fn a_generic_factual_question_skips_memory_entirely() {
+    fn a_generic_factual_question_carries_only_its_content_words() {
+        // The planner no longer rules on whether a question "needs memory" —
+        // it cannot know that without understanding the sentence. It strips
+        // function words and hands the residue to BM25, which scores a
+        // world-knowledge question against a personal corpus at nothing. The
+        // skip lives in the score threshold, where it can be right.
         let plan = plan_for("what is the capital of France");
+        assert_eq!(
+            plan.topics,
+            vec!["capital".to_string(), "france".to_string()]
+        );
+        assert!(plan.entities.is_empty());
+    }
+
+    #[test]
+    fn an_utterance_with_no_content_words_skips_memory_entirely() {
+        // Nothing to search *with* is the one case the planner can call, and
+        // it is a lexical fact rather than a semantic judgement.
+        let plan = plan_for("what do you think");
         assert!(!plan.requires_memory);
         assert!(plan.lexical_queries.is_empty());
     }
@@ -725,10 +650,15 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_kinship_term_still_becomes_an_entity() {
+    fn a_relationship_the_corpus_never_heard_of_is_just_a_topic() {
+        // There is no kinship table, and none is needed. A brother the engine
+        // has never been told about has no memories to retrieve, so failing to
+        // classify him as an entity costs exactly nothing; the word still goes
+        // to the index as a topic, where it will match the moment a fact about
+        // him exists — in whatever language that fact was spoken.
         let plan = plan_for("what does my brother like to drink");
-        assert!(plan.entities.iter().any(|e| e.surface == "brother"));
-        assert_eq!(plan.intent, RetrievalIntent::RelationshipReference);
+        assert!(plan.entities.is_empty());
+        assert!(plan.topics.contains(&"brother".to_string()));
     }
 
     #[test]
@@ -751,45 +681,41 @@ mod tests {
     }
 
     #[test]
-    fn a_hinglish_recall_request_is_recognised() {
+    fn a_hinglish_question_reaches_the_index_without_a_hindi_word_list() {
+        // There is no Hindi phrase table here. "yaad dilao" is not recognised
+        // as a recall verb, and does not need to be — the content words go to
+        // the index, and the facts stored from Hinglish speech carry Hinglish
+        // search terms to meet them.
         let plan = plan_for("Mujhe yaad dilao, mera khaana ka preference kya hai?");
-        assert!(
-            plan.requires_memory,
-            "a Hinglish recall request was read as needing no memory"
-        );
-        assert_eq!(plan.intent, RetrievalIntent::ExplicitRecall);
+        assert!(plan.requires_memory);
         assert!(
             plan.topics.contains(&"khaana".to_string()),
-            "the one content word was dropped: {:?}",
+            "the content word was dropped: {:?}",
             plan.topics
         );
-        assert!(
-            !plan.topics.contains(&"hai".to_string()),
-            "a Hindi copula was treated as a topic: {:?}",
-            plan.topics
-        );
+        // "hai" survives the filter, and that is fine: a term no document
+        // contains has no postings, scores nothing, and costs nothing. Paying
+        // a stop-word list to remove it would buy exactly zero.
+        assert!(!plan.lexical_queries.is_empty());
     }
 
     #[test]
-    fn a_hinglish_kinship_term_is_an_entity() {
+    fn a_hinglish_possessive_still_resolves_a_corpus_entity() {
         let plan = plan_for("Meri wife ko kaunsa restaurant pasand hai?");
         assert!(plan.requires_memory);
         assert!(
             plan.entities
                 .iter()
-                .any(|e| e.canonical.as_deref() == Some("rhea") || e.surface.contains("wife")),
-            "no entity resolved from a Hinglish possessive: {:?}",
+                .any(|e| e.canonical.as_deref() == Some("rhea")),
+            "an entity the corpus knows was not resolved: {:?}",
             plan.entities
         );
     }
 
     #[test]
-    fn a_tanglish_question_is_recognised() {
+    fn a_tanglish_question_reaches_the_index() {
         let plan = plan_for("Enakku enna coffee pidikkum theriyuma?");
-        assert!(
-            plan.requires_memory,
-            "a Tanglish recall request was read as needing no memory"
-        );
+        assert!(plan.requires_memory);
         assert!(plan.topics.contains(&"coffee".to_string()));
     }
 
