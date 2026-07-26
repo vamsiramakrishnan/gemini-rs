@@ -306,6 +306,112 @@ decision, not a fix.
 
 ---
 
+## Storage and index lifecycle
+
+There are exactly two artifacts. Markdown files are the truth; the index is a
+cache that can be thrown away and rebuilt from them.
+
+### Where a fact lives
+
+`category_path` routes a record to a file by status, then by kind. Status wins,
+so a superseded record physically leaves the active file:
+
+```
+users/<user>/profile.md                 Identity
+users/<user>/preferences.md             Preference, LocationPreference
+users/<user>/relationships.md           RelationshipPreference
+users/<user>/routines.md                Routine
+users/<user>/episodes/<YYYY-MM>.md      Episodic, partitioned by month
+users/<user>/staged/patterns.md         Staged (promoted, not yet confirmed)
+users/<user>/superseded/<YYYY-MM>.md    Superseded, Expired
+users/<user>/tombstones/records.md      Deleted
+users/<user>/manifest.json              id → path, status, kind + revision
+```
+
+One file holds many records, concatenated as YAML front matter blocks. The
+front matter is the machine's copy; the `# Fact` / `# Evidence Summary` /
+`# Supersedes` sections below it are the human's, and they are what a user is
+shown when they ask what is remembered.
+
+### Write
+
+Commits are transactional per user namespace and idempotent by key:
+
+1. Apply writes to the in-memory namespace.
+2. Re-materialize every affected file from scratch — a record that changed
+   status is written to its new file and removed from its old one in the same
+   pass, so it can never appear in both.
+3. Write only files whose contents actually changed; delete files no longer
+   wanted. `FsStore` writes to a temp path and renames, so a reader never sees
+   a half-written file.
+4. Write `manifest.json` **last**. It is the commit point: until it lands, the
+   revision has not advanced and a retry re-applies cleanly.
+5. Only then publish the new revision in memory and record the idempotency key.
+
+An optimistic `expected_revision` makes a concurrent commit fail with
+`RevisionConflict` rather than interleave.
+
+### Index
+
+`compile_index` reads the corpus, keeps `Active` records, tokenizes each into
+fielded postings (subject, entities, aliases, predicate, tags, location,
+statement), and swaps the result into an `IndexHandle` whose `generation`
+counter increments. It is a **full rebuild, not incremental** — a plan issued
+against generation *N* is discarded if it lands after *N+1*, which is what
+makes the swap safe without locking readers.
+
+It runs after session completion and after reconciliation, never mid-turn. The
+entity table is rebuilt with it, which is how `wife → rhea` stays current.
+
+Two indexes are searched, not one: the canonical index above, and a session
+overlay holding what the user said in *this* conversation. The overlay shadows
+canonical, so a correction takes effect immediately rather than after the next
+compile.
+
+---
+
+## Latency
+
+Measured, not estimated: `cargo run --release --example latency_budget` for the
+local path, `tests/model_latency_probe.rs` for the model calls. 4-core
+container, `gemini-2.5-flash`.
+
+### The synchronous path — all of it local
+
+| corpus | plan (rules) | search + fuse + assemble | total p50 |
+|---|---|---|---|
+| 10 | 9.3 µs | 4.6 µs | **14 µs** |
+| 100 | 7.3 µs | 16.2 µs | **23 µs** |
+| 1 000 | 9.5 µs | 73.2 µs | **83 µs** |
+| 10 000 | 19.0 µs | 992 µs (p95 9.4 ms) | **1.0 ms** |
+
+A personal corpus is hundreds of facts, so the real answer is **tens of
+microseconds, against a ~20 ms audio frame**. Nothing here needs a budget.
+
+10 000 records is the scaling cliff — p95 reaches 9.4 ms because scoring is
+linear in matching documents. It is far past where a single user's memory goes,
+but it is where sharding would start.
+
+### Everything else is off the path
+
+| stage | p50 | p95 | when |
+|---|---|---|---|
+| index build, 100 records | 573 µs | 620 µs | after a session |
+| index build, 1 000 records | 5.2 ms | 6.4 ms | after a session |
+| index build, 10 000 records | 67 ms | 77 ms | after a session |
+| observation extraction | 2.2 s | 5.2 s | after the user's turn completes |
+| prepare incl. model plan | 1.6 s | 1.8 s | speculatively, during the model's reply |
+
+Both model calls are bounded and degrade rather than block: plan extraction
+races a 4 s deadline with the rule plan already in hand, and observation
+extraction failing raises `ExtractionFailed` without failing the turn.
+
+**Total added to the user-perceived response path: the tens of microseconds in
+the first table.** The seconds in the second table are spent while the model is
+already speaking.
+
+---
+
 ## What is not built
 
 Honest list.
@@ -372,6 +478,45 @@ the model that read the speech, rather than in a table shipped in the binary.
 The remaining phrase tables are hints only: a missed match costs a little
 ranking quality on that turn, never the memory.
 
+### English is the meeting point, on both sides
+
+Two rules that look opposed and are the same rule seen from either end:
+
+- **The canonical record is always English.** `statement`, `predicate`,
+  `value`, `subject`, `qualifier`. Reconciliation is lexical, so the same claim
+  spoken as "I am vegetarian", "main vegetarian hoon" and "मैं शाकाहारी हूँ"
+  must land on one predicate and one value or three restatements reinforce
+  nothing and produce three records. Tested in `canonical_language_e2e`.
+- **The search terms are never normalized to English.** The query arrives in
+  whatever language the user is speaking this turn, and an index holding only
+  English has nothing for it to match.
+
+The bridge is that **both** sides carry English as well as the user's words.
+The retrieval plan expands "mera khaana ka preference" to `khaana, food, diet`;
+the stored fact carries `khaana, food, diet, vegetarian`. They meet on `food`
+and `diet`.
+
+Getting this wrong is subtle and was caught only by the end-to-end tests: an
+earlier prompt told the extractor to keep the user's own words, and it dutifully
+stored `hoon` and `khata` — the words in *that* sentence — instead of `khaana`,
+the word a *later question* would use. Retrieval went to zero. Making the query
+side expand into English too is what removed the dependency on ingestion
+correctly guessing future vocabulary months in advance.
+
+### Predicates come from the corpus, like entities
+
+The extraction model is shown the predicate names already in use for this user
+and told to reuse one when the new fact is about the same thing — *including
+when it contradicts*. Left to name each fact freshly it writes
+`dietary_preference` one session and `dietary_identity` the next, and
+"actually I'm pescatarian now" becomes a second active record instead of
+superseding the first. That was a ~1-in-3 flake on the correction test; it is
+5-for-5 with the corpus vocabulary in the prompt.
+
+This is the entity table's trick applied to predicates, and it is the third
+instance of the same pattern: **the vocabulary comes from the data, not from a
+list in the binary and not from the model's imagination.**
+
 The remaining gap is a question in one language about a fact stored before this
 change, whose search terms are English-only. Recompiling the corpus does not
 regenerate them; only a restatement does.
@@ -382,6 +527,15 @@ regenerate them; only a restatement does.
   under "dietary". This is what record aliases and the semantic fallback are for,
   and the tokenizer says so. Aggressive stemming conflates names, which in a
   personal corpus is worse.
+
+  SPLADE was priced as the fix and measured in `experiments/`. Query-side is out
+  — 21 ms p50 on four idle cores, 64 ms on one, against a synchronous path that
+  currently costs 83 µs. Doc-side is affordable (~21 ms once per record, at
+  consolidation time, cached into the front matter) and its English expansions
+  are genuinely good: `vegetarian → meat, eat, eating, food, animal`. It is not
+  adopted yet because it buys English recall only — the model has no Hindi, so
+  `khaana` expands to WordPiece debris — for the cost of an ONNX Runtime
+  dependency and a 532 MB model.
 - **Refinement detection is lexical.** A more specific restatement refines when
   it strictly contains the incumbent's terms. Semantically-equivalent
   paraphrases that share no vocabulary reconcile as contradictions.

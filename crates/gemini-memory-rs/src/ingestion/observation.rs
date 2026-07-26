@@ -38,11 +38,24 @@ Rules:
   user did not state outright.
 - Recognise explicit memory commands ('remember that…', 'forget…', 'actually, \
   I…') and set mutation_intent accordingly.
-- Fill search_terms with 3-6 short words this fact could later be looked up \
-  by. Include the user's own words in whatever language they spoke, AND the \
-  English equivalents. A user who says 'main vegetarian hoon' may later ask \
-  'mera khaana ka preference kya hai' or 'what do I eat' — the fact has to be \
-  findable from all of them.
+- Reuse a predicate from the 'Predicates already in use' list whenever the new \
+  fact is about the same thing, even when it CONTRADICTS the stored one. A \
+  correction must land on the same predicate as the fact it corrects, or it \
+  becomes a second record instead of replacing the first. Invent a new \
+  predicate only when nothing in the list covers the fact.
+- Write the fact itself in English, always, whatever language the user spoke. \
+  statement, predicate, value, subject and qualifier are the canonical record: \
+  one user saying 'main vegetarian hoon', 'naan vegetarian', and 'I am \
+  vegetarian' must produce the SAME predicate and the SAME value, so that the \
+  three reinforce one memory instead of creating three.
+- search_terms are the exception and must NOT be normalized to English. They \
+  are not a transcription of this sentence — they are your guess at the words \
+  a FUTURE QUESTION would use. Write 4-8 of them: the topic word in the user's \
+  language even when this sentence never used it, its English equivalent, and \
+  the obvious synonyms. A user who says 'main vegetarian hoon' will later ask \
+  'mera khaana ka preference kya hai' or 'what do I eat', so this fact needs \
+  khaana, khana, food, diet, eat — not just the words hoon and khata that \
+  happen to appear above.
 - Return an empty list when the utterance reveals nothing worth keeping. That \
   is the common case.";
 
@@ -55,6 +68,17 @@ pub struct ObservationExtractionContext {
     pub recent_user_turns: Vec<String>,
     /// The preceding assistant turn, for reference resolution only.
     pub recent_assistant_turn: Option<String>,
+    /// Predicates already in use in this user's corpus, most-used first.
+    ///
+    /// Reconciliation matches on subject and predicate, so a correction only
+    /// supersedes the fact it corrects when the two agree on a name. Left to
+    /// invent one per call, the model writes `dietary_preference` on Monday
+    /// and `dietary_identity` on Tuesday, and the correction becomes a second
+    /// active record instead of replacing the first. Showing it the names
+    /// already in use is the same move as learning entities from the corpus:
+    /// the vocabulary comes from the data, not from a list in the binary and
+    /// not from the model's imagination each time.
+    pub known_predicates: Vec<String>,
     /// Who the utterance is attributed to.
     pub speaker: SpeakerAttribution,
     /// The logical session.
@@ -77,6 +101,7 @@ impl ObservationExtractionContext {
             transcript: transcript.into(),
             recent_user_turns: Vec::new(),
             recent_assistant_turn: None,
+            known_predicates: Vec::new(),
             speaker: SpeakerAttribution::User,
             session_id,
             turn_id,
@@ -87,6 +112,12 @@ impl ObservationExtractionContext {
     /// Attribute the utterance to someone other than the enrolled user.
     pub fn attributed_to(mut self, speaker: SpeakerAttribution) -> Self {
         self.speaker = speaker;
+        self
+    }
+
+    /// Offer the predicate names the corpus already uses.
+    pub fn with_known_predicates(mut self, predicates: Vec<String>) -> Self {
+        self.known_predicates = predicates;
         self
     }
 }

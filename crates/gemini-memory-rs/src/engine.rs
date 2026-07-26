@@ -426,12 +426,15 @@ impl MemorySession {
 
         let observations = match self
             .observation_extractor
-            .extract(ObservationExtractionContext::user_turn(
-                transcript,
-                self.session_id.clone(),
-                turn_id,
-                Utc::now(),
-            ))
+            .extract(
+                ObservationExtractionContext::user_turn(
+                    transcript,
+                    self.session_id.clone(),
+                    turn_id,
+                    Utc::now(),
+                )
+                .with_known_predicates(self.known_predicates()),
+            )
             .await
         {
             Ok(observations) => observations,
@@ -599,6 +602,38 @@ impl MemorySession {
             "effective_in_session": accepted,
             "durable_commit": "pending",
         }))
+    }
+
+    /// The predicate names this user's corpus already uses.
+    ///
+    /// Offered to the extraction model so a correction lands on the predicate
+    /// it is correcting. Reconciliation matches on subject and predicate; a
+    /// model free to name each fact afresh writes `dietary_preference` in one
+    /// session and `dietary_identity` in the next, and "actually I'm
+    /// pescatarian now" becomes a second active record rather than superseding
+    /// the first. This is the entity table's trick applied to predicates: the
+    /// vocabulary comes from the corpus.
+    ///
+    /// Bounded, because it goes in a prompt. Session candidates come first —
+    /// a correction usually chases something said minutes ago.
+    pub fn known_predicates(&self) -> Vec<String> {
+        const LIMIT: usize = 60;
+        let mut out: Vec<String> = Vec::new();
+        let mut push = |predicate: &str| {
+            if out.len() < LIMIT && !predicate.is_empty() && !out.iter().any(|p| p == predicate) {
+                out.push(predicate.to_string());
+            }
+        };
+        for candidate in self.ledger.usable_candidates() {
+            push(candidate.predicate.as_str());
+        }
+        let now = Utc::now();
+        for doc in self.canonical.read().documents() {
+            if doc.is_retrievable(now) {
+                push(doc.predicate.as_str());
+            }
+        }
+        out
     }
 
     /// The predicate/value pairs memory can currently assert.

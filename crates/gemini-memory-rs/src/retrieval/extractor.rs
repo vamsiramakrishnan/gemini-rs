@@ -32,7 +32,13 @@ Return only the structured plan. Specifically:
   that the user did not state.
 - Set requires_memory to false for generic factual, visual or world-knowledge \
   questions that do not depend on this user's history.
-- Prefer few, specific search terms over many broad ones.";
+- Prefer few, specific search terms over many broad ones.
+- When the user is not speaking English, put BOTH their words and the English \
+  equivalents in topics and lexical_queries. Stored facts are written in \
+  English and retrieval is literal word matching, so a question about \
+  'khaana' finds nothing unless the plan also carries 'food' and 'diet'. \
+  English on both sides is what makes the two meet; do not rely on the stored \
+  fact having guessed which Hindi or Tamil word would be used months later.";
 
 /// What the extractor is given.
 #[derive(Debug, Clone)]

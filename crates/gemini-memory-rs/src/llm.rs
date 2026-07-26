@@ -221,6 +221,14 @@ impl GeminiObservationExtractor {
             out.push_str(assistant);
             out.push('\n');
         }
+        if !context.known_predicates.is_empty() {
+            out.push_str(
+                "\nPredicates already in use for this user — reuse one when the \
+                          fact is about the same thing, including when it contradicts:\n",
+            );
+            out.push_str(&context.known_predicates.join(", "));
+            out.push('\n');
+        }
         out.push_str(&format!(
             "\nToday is {}.\n\nFinalized user utterance:\n{}\n",
             context.now.format("%A %-d %B %Y"),
@@ -371,6 +379,7 @@ pub fn observation_context(
         transcript: transcript.to_string(),
         recent_user_turns: Vec::new(),
         recent_assistant_turn: None,
+        known_predicates: Vec::new(),
         speaker,
         session_id,
         turn_id,
