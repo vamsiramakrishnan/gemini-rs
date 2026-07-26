@@ -22,19 +22,59 @@
 //!
 //! # Why the fusion is the engine's own
 //!
-//! The fusion here is [`reciprocal_rank_fusion`] from the crate itself, the
-//! same function and the same `1/(60 + rank)` that `LocalMemoryRetriever` uses
-//! to combine its lexical rankings today. A bespoke fusion would measure a
-//! thing we would then have to build; this measures the thing that already
-//! exists, so a good number transfers straight into `SemanticFallback` rather
-//! than having to be re-earned.
+//! The fusion is [`reciprocal_rank_fusion`] from the crate itself — the same
+//! function and the same `1/(60 + rank)` that `LocalMemoryRetriever` already
+//! uses. A bespoke fusion would measure a thing we would then have to build.
+//!
+//! # What it found
+//!
+//! Over 61 questions and 1,199 records, answered by the top result:
+//!
+//! | strategy | top-1 | top-5 |
+//! |---|---|---|
+//! | lexical only | 29/61 | 40/61 |
+//! | semantic, statement embedded | 30/61 | 33/61 |
+//! | **semantic, enriched view embedded** | **43/61** | 46/61 |
+//! | equal-weight RRF over the enriched view | 40/61 | 47/61 |
+//! | **RRF with semantics at double weight** | 42/61 | **47/61** |
+//! | gated — semantics only when lexical is thin | 34/61 | 45/61 |
+//!
+//! Three conclusions, in order of how much they matter.
+//!
+//! **What you embed matters more than how you search it.** Embedding the
+//! statement alone is worth almost nothing over BM25 — 30 against 29. Embedding
+//! the statement together with the aliases and tags that already sit beside it
+//! in the record is worth 43. Same model, same index, same fusion; the only
+//! change is the string handed to the embedder.
+//!
+//! **Gating is the wrong shape once the semantic side is good.** It was the
+//! right answer when the two rankers were evenly matched — it fired on a ninth
+//! of queries and cost nothing. Against an enriched semantic ranker it throws
+//! away most of the gain, because the queries it declines to escalate are
+//! exactly the ones where BM25 is confidently wrong rather than obviously
+//! empty.
+//!
+//! **Equal-weight RRF dilutes the better ranker.** Fusing a 43 with a 29
+//! produces a 40. Weighting semantics 2:1 recovers the top-1 to within one
+//! question of semantic-alone while giving the best top-5 of any strategy —
+//! and the top five is what the model actually reads, since `max_memories` is
+//! 5. That is the configuration to build.
+//!
+//! # The caveat that matters
+//!
+//! The aliases in this corpus were written by the same hand as the questions,
+//! so some of the enrichment gain is an alias containing its own question. The
+//! extractor writes aliases in production, from a prompt that already asks for
+//! "the words a FUTURE QUESTION would use" — so the mechanism is real, but the
+//! honest version of 43/61 needs a corpus whose aliases were written without
+//! sight of the query set. Treat the direction as established and the magnitude
+//! as an upper bound.
 //!
 //! # Cost
 //!
-//! One embedding per record and per question — about 1,240 calls the first
-//! time. Every vector is cached to disk keyed by a content hash, so re-runs
-//! are free and the experiment stays cheap to iterate on. Skips entirely
-//! without an API key.
+//! One embedding per record per representation, and one per question. Every
+//! vector is cached to disk by content hash, so re-runs are free and the fusion
+//! stays cheap to iterate on. Skips entirely without an API key.
 
 #![cfg(feature = "gemini-llm")]
 
@@ -44,13 +84,13 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use common::corpus::{self, PROBES};
-use common::paraphrase::{Tier, PHRASINGS};
+use common::paraphrase::{self, Mode, Tier};
 use common::{file_backed_engine, have_api_key, skip, ScratchDir};
 
 use gemini_memory_rs::bm25::{
     IndexedMemory, MemoryIndex, MemoryOrigin, Query, SearchExplanation, SearchHit,
 };
-use gemini_memory_rs::core::{stable_hash, MemoryId, MemoryStatus};
+use gemini_memory_rs::core::{stable_hash, CanonicalMemory, MemoryId, MemoryStatus};
 use gemini_memory_rs::retrieval::{deterministic::topical_terms, reciprocal_rank_fusion};
 
 /// The embedding model, and the width its vectors are truncated to.
@@ -229,6 +269,33 @@ fn dot(a: &[f32], b: &[f32]) -> f32 {
     a.iter().zip(b).map(|(x, y)| x * y).sum()
 }
 
+/// The text a record is embedded as.
+///
+/// Not the statement alone, which is what the first version of this probe used
+/// and what left `synonym` at 2/8. A statement is one short sentence written for
+/// a model to *read aloud*; the fields that say what a fact might be *asked by*
+/// live beside it. `retrieval.aliases` is documented as "paraphrases the fact
+/// may be asked for by" and BM25 already weights it 2.5 — the embedding was
+/// throwing it away.
+///
+/// A caveat this experiment cannot remove: the aliases in the fixture were
+/// written by the same hand as the questions, so some gain here is the alias
+/// containing the question. The extractor writes these in production, and the
+/// honest version of this number needs a corpus whose aliases were written
+/// without sight of the query set.
+fn enriched(memory: &CanonicalMemory) -> String {
+    let mut text = memory.statement.clone();
+    if !memory.retrieval.aliases.is_empty() {
+        text.push_str("\nAlso asked as: ");
+        text.push_str(&memory.retrieval.aliases.join(", "));
+    }
+    if !memory.retrieval.tags.is_empty() {
+        text.push_str("\nTopics: ");
+        text.push_str(&memory.retrieval.tags.join(", "));
+    }
+    text
+}
+
 // ─── the three retrievers ───────────────────────────────────────────────────
 
 /// Rank by BM25, exactly as the engine does on the tool path.
@@ -309,158 +376,207 @@ impl Tally {
     }
 }
 
+/// The four strategies, tallied along one axis.
+#[derive(Default)]
+struct Row {
+    lexical: Tally,
+    statement: Tally,
+    enriched: Tally,
+    fused: Tally,
+    gated: Tally,
+}
+
+impl Row {
+    fn line(&self, label: &str) -> String {
+        format!(
+            "{:<15} {:<6} {:<9} {:<11} {:<11} {:<11} {}\n",
+            label,
+            self.lexical.asked,
+            self.lexical.cell(),
+            self.statement.cell(),
+            self.enriched.cell(),
+            self.fused.cell(),
+            self.gated.cell(),
+        )
+    }
+}
+
 #[tokio::test]
 async fn what_a_semantic_layer_would_buy() {
     if !have_api_key() {
         return skip("what_a_semantic_layer_would_buy");
     }
 
-    // ── the corpus, and an index over it ──
     let scratch = ScratchDir::new("semantic-probe");
     let engine = file_backed_engine("usr_corpus", scratch.path());
     corpus::install(&engine).await;
     let records = corpus::installed(&engine).await;
-    let active: Vec<_> = records
+    let active: Vec<&CanonicalMemory> = records
         .iter()
         .filter(|m| m.status == MemoryStatus::Active)
         .collect();
     let index = MemoryIndex::build(active.iter().map(|m| IndexedMemory::from_canonical(m)));
 
-    // ── embed everything, once ──
+    // ── embed the corpus twice: as written, and as enriched ──
     let mut embedder = Embedder::new();
     let statements: Vec<String> = active.iter().map(|m| m.statement.clone()).collect();
-    let questions: Vec<String> = PHRASINGS
-        .iter()
-        .flat_map(|p| p.queries.iter().map(|q| (*q).to_string()))
+    let enrichments: Vec<String> = active.iter().map(|m| enriched(m)).collect();
+    let questions: Vec<String> = paraphrase::all()
+        .map(|(_, p)| p.query.to_string())
         .collect();
 
     let started = Instant::now();
     embedder.embed_all(&statements, "RETRIEVAL_DOCUMENT").await;
+    embedder.embed_all(&enrichments, "RETRIEVAL_DOCUMENT").await;
     embedder.embed_all(&questions, "RETRIEVAL_QUERY").await;
     let embed_time = started.elapsed();
 
-    let corpus_vectors: Vec<(MemoryId, String, Vec<f32>)> = active
-        .iter()
-        .map(|m| {
-            (
-                m.id.clone(),
-                m.statement.clone(),
-                embedder.get("RETRIEVAL_DOCUMENT", &m.statement).to_vec(),
-            )
-        })
-        .collect();
+    let vectors = |texts: &[String]| -> Vec<(MemoryId, String, Vec<f32>)> {
+        active
+            .iter()
+            .zip(texts)
+            .map(|(m, text)| {
+                (
+                    m.id.clone(),
+                    m.statement.clone(),
+                    embedder.get("RETRIEVAL_DOCUMENT", text).to_vec(),
+                )
+            })
+            .collect()
+    };
+    let plain_vectors = vectors(&statements);
+    let rich_vectors = vectors(&enrichments);
 
-    // ── ask everything three ways ──
-    let mut lex: [Tally; 5] = Default::default();
-    let mut sem: [Tally; 5] = Default::default();
-    let mut fused: [Tally; 5] = Default::default();
-    let mut gated: [Tally; 5] = Default::default();
-    let mut gate_fired = 0usize;
+    // ── ask everything four ways ──
+    let mut by_tier: Vec<Row> = (0..Tier::COUNT).map(|_| Row::default()).collect();
+    let mut by_mode: Vec<Row> = (0..Mode::COUNT).map(|_| Row::default()).collect();
     let mut rescued: Vec<String> = Vec::new();
     let mut broken: Vec<String> = Vec::new();
+    let mut gate_fired = 0usize;
+    let mut weighted = Tally::default();
     let mut search_time = std::time::Duration::ZERO;
+    let floor = gemini_memory_rs::core::RetrievalConfig::default().minimum_candidate_score;
 
-    for phrasings in PHRASINGS {
+    for (probe_name, phrasing) in paraphrase::all() {
         let probe = PROBES
             .iter()
-            .find(|p| p.name == phrasings.probe)
-            .unwrap_or_else(|| panic!("no probe named {}", phrasings.probe));
+            .find(|p| p.name == probe_name)
+            .unwrap_or_else(|| panic!("no probe named {probe_name}"));
+        let question = phrasing.query;
+        let vector = embedder.get("RETRIEVAL_QUERY", question);
 
-        for (tier, question) in Tier::ALL.iter().zip(phrasings.queries.iter()) {
-            let i = Tier::ALL.iter().position(|t| t == tier).expect("tier");
+        let lexical_hits = lexical(&index, question);
+        let plain_hits = semantic(vector, &plain_vectors);
+        let started = Instant::now();
+        let rich_hits = semantic(vector, &rich_vectors);
+        search_time += started.elapsed();
 
-            let lexical_hits = lexical(&index, question);
-            let started = Instant::now();
-            let semantic_hits =
-                semantic(embedder.get("RETRIEVAL_QUERY", question), &corpus_vectors);
-            search_time += started.elapsed();
+        // The engine's own rule: reach for semantics only when lexical search
+        // found too little, so a query BM25 answered confidently never pays for
+        // a second opinion — and never loses to one.
+        let thin = lexical_hits
+            .first()
+            .is_none_or(|top| top.score < floor * 2.0);
+        if thin {
+            gate_fired += 1;
+        }
+        let fused: Vec<SearchHit> =
+            reciprocal_rank_fusion(&[lexical_hits.clone(), rich_hits.clone()])
+                .into_iter()
+                .map(|c| c.hit)
+                .collect();
+        let gated_hits = if thin { &fused } else { &lexical_hits };
 
-            // The engine's own fusion, over the two rankings.
-            let fused_hits: Vec<SearchHit> =
-                reciprocal_rank_fusion(&[lexical_hits.clone(), semantic_hits.clone()])
-                    .into_iter()
-                    .map(|c| c.hit)
-                    .collect();
+        // Equal-weight RRF treats a strong ranker and a weak one alike. Passing
+        // the semantic ranking twice doubles its reciprocal-rank contribution —
+        // the cheapest way to ask whether the fusion wants weighting rather
+        // than gating.
+        let weighted_hits: Vec<SearchHit> =
+            reciprocal_rank_fusion(&[lexical_hits.clone(), rich_hits.clone(), rich_hits.clone()])
+                .into_iter()
+                .map(|c| c.hit)
+                .collect();
+        weighted.record(rank_of(&weighted_hits, probe.target));
 
-            // The engine's own rule: reach for semantics only when lexical
-            // search found too little. `needs_semantic_fallback` calls that
-            // "every candidate below twice the score floor", so a query BM25
-            // answered confidently never pays for a second opinion — and never
-            // loses to one.
-            let floor = gemini_memory_rs::core::RetrievalConfig::default().minimum_candidate_score;
-            let thin = lexical_hits
-                .first()
-                .is_none_or(|top| top.score < floor * 2.0);
-            if thin {
-                gate_fired += 1;
-            }
-            let gated_hits = if thin { &fused_hits } else { &lexical_hits };
+        let (l, s, e, f, g) = (
+            rank_of(&lexical_hits, probe.target),
+            rank_of(&plain_hits, probe.target),
+            rank_of(&rich_hits, probe.target),
+            rank_of(&fused, probe.target),
+            rank_of(gated_hits, probe.target),
+        );
+        for row in [
+            &mut by_tier[phrasing.tier.index()],
+            &mut by_mode[phrasing.mode.index()],
+        ] {
+            row.lexical.record(l);
+            row.statement.record(s);
+            row.enriched.record(e);
+            row.fused.record(f);
+            row.gated.record(g);
+        }
 
-            let (l, s, f, g) = (
-                rank_of(&lexical_hits, probe.target),
-                rank_of(&semantic_hits, probe.target),
-                rank_of(&fused_hits, probe.target),
-                rank_of(gated_hits, probe.target),
-            );
-            lex[i].record(l);
-            sem[i].record(s);
-            fused[i].record(f);
-            gated[i].record(g);
-
-            match (l == Some(0), g == Some(0)) {
-                (false, true) => rescued.push(format!("[{}] {question:?}", tier.label())),
-                (true, false) => broken.push(format!("[{}] {question:?}", tier.label())),
-                _ => {}
-            }
+        let tag = format!(
+            "[{}/{}] {question:?}",
+            phrasing.tier.label(),
+            phrasing.mode.label()
+        );
+        match (l == Some(0), f == Some(0)) {
+            (false, true) => rescued.push(tag),
+            (true, false) => broken.push(tag),
+            _ => {}
         }
     }
 
     // ── report ──
+    let asked = paraphrase::count();
+    let header =
+        "kind            asked  lexical   sem(plain)  sem(rich)   fused(rich) gated(rich)\n";
     let mut report = format!(
-        "\nwhat a semantic layer buys, on the questions lexical retrieval loses\n\
-         {} records embedded at {DIMENSIONS}d ({EMBEDDING_MODEL}), {} API calls this run, \
-         {embed_time:.1?}\n\
-         flat search over {} vectors: {:?} per question\n\n\
-         tier          asked  lexical  semantic  fused    gated\n",
-        corpus_vectors.len(),
+        "\nwhat a semantic layer buys, over {asked} questions\n\
+         {} records embedded twice at {DIMENSIONS}d ({EMBEDDING_MODEL}); \
+         {} API calls this run, {embed_time:.1?}\n\
+         flat exact search over {} vectors: {:?} per question\n\
+         the gate fired on {gate_fired}/{asked} questions\n\n\
+         by how far the question sits from the record's own words\n{header}",
+        active.len(),
         embedder.calls,
-        corpus_vectors.len(),
-        search_time / 40,
+        active.len(),
+        search_time / asked as u32,
     );
-    for (i, tier) in Tier::ALL.iter().enumerate() {
-        report.push_str(&format!(
-            "{:<13} {:<6} {:<8} {:<9} {:<8} {}\n",
-            tier.label(),
-            lex[i].asked,
-            lex[i].cell(),
-            sem[i].cell(),
-            fused[i].cell(),
-            gated[i].cell(),
-        ));
+    for tier in Tier::ALL {
+        report.push_str(&by_tier[tier.index()].line(tier.label()));
+    }
+    report.push_str(&format!(
+        "\nby what the person was doing when they said it\n{header}"
+    ));
+    for mode in Mode::ALL {
+        report.push_str(&by_mode[mode.index()].line(mode.label()));
     }
 
-    let total = |t: &[Tally; 5]| {
+    let sum = |pick: fn(&Row) -> &Tally| {
         (
-            t.iter().map(|x| x.first).sum::<usize>(),
-            t.iter().map(|x| x.top_five).sum::<usize>(),
-            t.iter().map(|x| x.asked).sum::<usize>(),
+            by_tier.iter().map(|r| pick(r).first).sum::<usize>(),
+            by_tier.iter().map(|r| pick(r).top_five).sum::<usize>(),
         )
     };
-    let (lf, lt, asked) = total(&lex);
-    let (sf, st, _) = total(&sem);
-    let (ff, ft, _) = total(&fused);
-    let (gf, gt, _) = total(&gated);
+    let (lf, lt) = sum(|r| &r.lexical);
+    let (sf, st) = sum(|r| &r.statement);
+    let (ef, et) = sum(|r| &r.enriched);
+    let (ff, ft) = sum(|r| &r.fused);
+    let (gf, gt) = sum(|r| &r.gated);
     report.push_str(&format!(
-        "\nanswered by the top result:  lexical {lf}/{asked}   semantic {sf}/{asked}   \
-         fused {ff}/{asked}   gated {gf}/{asked}\n\
-         answer in the top five:      lexical {lt}/{asked}   semantic {st}/{asked}   \
-         fused {ft}/{asked}   gated {gt}/{asked}\n\
-         the gate fired on {gate_fired}/{asked} questions — the rest never paid for a \
-         second opinion.\n"
+        "\nanswered by the top result:  lexical {lf}/{asked}   sem(plain) {sf}/{asked}   \
+         sem(rich) {ef}/{asked}   fused {ff}/{asked}   gated {gf}/{asked}\n\
+         answer in the top five:      lexical {lt}/{asked}   sem(plain) {st}/{asked}   \
+         sem(rich) {et}/{asked}   fused {ft}/{asked}   gated {gt}/{asked}\n\
+         \nweighted RRF, semantics at double weight: {}/{asked} by the top result, \
+         {}/{asked} in the top five.\n",
+        weighted.first, weighted.top_five
     ));
     if !rescued.is_empty() {
         report.push_str(&format!(
-            "\nrescued by the gated strategy ({}):\n",
+            "\nrescued by unconditional fusion ({}):\n",
             rescued.len()
         ));
         for question in &rescued {
@@ -469,7 +585,7 @@ async fn what_a_semantic_layer_would_buy() {
     }
     if !broken.is_empty() {
         report.push_str(&format!(
-            "\nBROKEN — lexical had these at rank 1 and the gated strategy lost them ({}):\n",
+            "\nBROKEN — lexical had these at rank 1 and fusion lost them ({}):\n",
             broken.len()
         ));
         for question in &broken {
@@ -478,14 +594,10 @@ async fn what_a_semantic_layer_would_buy() {
     }
     eprintln!("{report}");
 
-    // The experiment exists to produce a number, so it asserts only the thing
-    // that would make the number meaningless: fusion must not be worse than
-    // the lexical retriever it is supposed to be augmenting. Everything else
-    // is reported for a human to judge.
     assert!(
-        gf >= lf,
-        "the gated strategy answered fewer questions than lexical retrieval alone \
-         ({gf} vs {lf}) — a fallback that costs you the queries you already answered \
-         is not a fallback\n{report}"
+        ff >= lf && gf >= lf,
+        "a strategy answered fewer questions than lexical retrieval alone (fused \
+         {ff}, gated {gf}, lexical {lf}) — an augmentation that costs you the queries \
+         you already had is not an augmentation\n{report}"
     );
 }
