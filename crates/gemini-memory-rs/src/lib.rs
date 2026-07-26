@@ -66,6 +66,7 @@
 
 pub mod bm25;
 pub mod core;
+pub mod ingestion;
 pub mod okf;
 pub mod retrieval;
 pub mod transcript;
