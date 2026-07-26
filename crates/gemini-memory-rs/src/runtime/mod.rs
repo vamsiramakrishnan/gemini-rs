@@ -1,48 +1,20 @@
 //! Wiring the memory engine into a Gemini Live session.
 //!
-//! Three pieces: [`keys`] names the shared state, [`events`] is the
-//! sub-millisecond bridge from Live's fast lane, and [`control`] is the single
-//! task that does everything the fast lane must not.
-//!
-//! ```no_run
-//! use std::sync::Arc;
-//! use gemini_memory_rs::prelude::*;
-//! use gemini_memory_rs::runtime::{events::channel, control::run_memory_control_loop, tools};
-//!
-//! # async fn wire() -> Result<(), MemoryError> {
-//! # let state = gemini_adk_rs::state::State::new();
-//! let engine = MemoryEngine::in_memory(UserId::new("usr_72ab"));
-//! engine.compile_index().await?;
-//!
-//! let session = Arc::new(engine.begin_session(SessionId::new("ses_01")));
-//! let (sender, receiver) = channel(256);
-//! tokio::spawn(run_memory_control_loop(receiver, session.clone(), state));
-//!
-//! // In `Live::builder()`:
-//! //   .on_input_transcript({
-//! //       let sender = sender.clone();
-//! //       move |text, is_final| { sender.input_transcript(turn, text, is_final); }
-//! //   })
-//! //   .with_tools(tools::recall_context_tool(session.clone()))
-//! let _ = (sender, tools::recall_context_tool(session));
-//! # Ok(())
-//! # }
-//! ```
+//! Memory rides the runtime's own mechanisms rather than adding new ones: it is
+//! a [`TurnExtractor`](gemini_adk_rs::live::extractor::TurnExtractor) on the
+//! existing extraction pipeline, and two tools on the existing dispatcher.
+//! Facts it recalls are projected into governed `State`, where the phase
+//! machine, `Flow` guards, watchers and repair already read.
 
-pub mod control;
-pub mod events;
-pub mod keys;
 #[cfg(feature = "fluent")]
 pub mod live;
 pub mod tools;
 pub mod turn_extractor;
 
-pub use control::{run_memory_control_loop, snapshot_for_turn};
-pub use events::{channel, MemoryEventSender, MemoryRuntimeEvent, DEFAULT_CHANNEL_DEPTH};
 #[cfg(feature = "fluent")]
-pub use live::{memory_tools, LiveMemoryExt, MemoryInstallation};
+pub use live::{memory_tools, LiveMemoryExt};
 pub use tools::{
     manage_memory_tool, recall_context_tool, ManageArgs, RecallArgs, RecallScope, MANAGE_TOOL,
     RECALL_TOOL,
 };
-pub use turn_extractor::{MemoryTurnExtractor, MEMORY_EXTRACTOR_NAME};
+pub use turn_extractor::{MemorySlot, MemoryTurnExtractor, MEMORY_EXTRACTOR_NAME};

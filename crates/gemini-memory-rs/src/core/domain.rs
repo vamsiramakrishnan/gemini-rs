@@ -166,7 +166,23 @@ pub enum TemporalScope {
 }
 
 /// Privacy classification, gating automatic promotion.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, Default)]
+///
+/// Ordered least to most restrictive, so merging evidence can take the
+/// strictest classification any of it carried.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    Default,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum SensitivityClass {
     /// Ordinary personal context.
@@ -674,6 +690,14 @@ pub struct MemoryObservation {
     /// Whether this observation is a memory *command* rather than a statement.
     #[serde(default)]
     pub mutation_intent: Option<MutationIntent>,
+    /// Terms a user might later search this fact by, in any language they use.
+    ///
+    /// Lexical retrieval can only match words that are present. A fact stored
+    /// as "The user is vegetarian" is unreachable from "mera khaana ka
+    /// preference kya hai" — the languages share no token — unless the fact
+    /// carries the vocabulary the question will use. This is that vocabulary.
+    #[serde(default)]
+    pub search_terms: Vec<String>,
 }
 
 impl MemoryObservation {

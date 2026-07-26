@@ -75,7 +75,7 @@ depends on anything above it.
 | `retrieval` | Plans, fusion, budgeted context assembly |
 | `ingestion` | Observation extraction, candidate ledger, session overlay |
 | `reconcile` | Consolidation, conflict resolution, promotion, commit |
-| `runtime` | Live wiring: state keys, fast-lane bridge, control loop, tools |
+| `runtime` | Live wiring: the turn extractor, slot projection, the two tools |
 | `engine` | The facade: `MemoryEngine` (outlives conversations), `MemorySession` |
 | `evals` | Fixture-driven quality harness enforcing the acceptance thresholds |
 
@@ -96,32 +96,65 @@ Server-side rather than on-device, because it buys stable compute, warm indexes,
 durable queues, straightforward identity enforcement, and consistent behaviour
 across glasses and phone.
 
-### The two lanes
+### Integration: memory adds no mechanism of its own
 
-`gemini-rs` separates a synchronous fast lane (sub-millisecond budget) from an
-async control lane. The memory engine lives entirely in the control lane. The
-only thing exposed to fast-lane callbacks is `MemoryEventSender`, whose every
-method is a bounded `try_send` and nothing else — no locks, no parsing, no async,
-never a blocking send.
+Memory rides what the Live runtime already has. It is **one `TurnExtractor` and
+two tools**, and nothing else:
 
-A dropped speculative event costs a little retrieval quality. A blocked audio
-callback costs the conversation. `MemoryRuntimeEvent::is_droppable` encodes which
-is which: partial transcripts may be dropped, nothing else may.
+- the extraction pipeline already accumulates transcripts, segments them by turn
+  boundary, fires extractors under a trigger policy, and promotes their fields
+  into governed `State`;
+- the tool dispatcher already serves function calls.
+
+An earlier revision of this crate carried its own channel, control loop and
+state keys. All of it duplicated the above, and every duplicated mechanism is a
+second place for turn bookkeeping to drift. It was deleted.
+
+The one thing memory adds is **slot projection**, and it is what makes memory
+useful to an application rather than merely present. A remembered fact is
+written into a governed `State` key, and from there every existing mechanism
+reads it:
+
+| Mechanism | What a filled slot does |
+|-----------|-------------------------|
+| `phase.needs(&["user.diet"])` | A returning user is not asked again |
+| `phase.requires(&["user.diet"])` | A hard gate a memory can open |
+| `Flow` guard `done(captured([...]))` | The step advances on memory alone |
+| `P::with_state(&["user.diet"])` | The value appears in the phase instruction |
+| watchers, repair | Read the same keys, unchanged |
+
+```rust
+Live::builder()
+    .with_memory_slots(session, [
+        MemorySlot::new("dietary_identity", "user.diet"),
+        MemorySlot::new("venue_preference", "user.venue"),
+    ])
+    .phase("gather")
+        .needs(&["user.diet", "user.venue"])   // skipped for a returning user
+        .done()
+    .phase("suggest")
+        .requires(&["user.diet"])              // opened by memory
+        .done()
+```
+
+Slots promote with `KeepKnown`, so what the live conversation established always
+beats what memory recalls.
 
 ### Turn lifecycle
 
-1. **VAD start** — freeze the latest prepared snapshot as the answer source for
-   this turn, and advance the generation counter.
-2. **Partial transcripts** — accumulate a stable prefix, and speculate on it when
-   the debounce and new-content gates allow. A recognised entity or an explicit
-   recall phrase bypasses both, because those are the cases where prefetching
-   pays for itself.
-3. **Final transcript** — append the durable transcript event, extract
-   observations, update the ledger and overlay, and re-plan retrieval.
-4. **Tool call** — served from the frozen snapshot when it covers the query,
+1. **Turn boundary** — the pipeline hands the extractor a transcript window.
+2. **Ingest** — the finalized utterance becomes observations, the ledger and
+   overlay update, and the reconciliation cadence advances.
+3. **Prepare** — the *next* turn's retrieval snapshot is built while the model is
+   still speaking. This is the whole latency argument.
+4. **Project** — what memory knows fills the application's slots.
+5. **Tool call** — served from the prepared snapshot when it covers the query,
    otherwise from a bounded local search that never touches the network.
-5. **Turn complete** — run whatever the cadence says is due, and promote the next
-   snapshot.
+
+Speculating on *partial* transcripts is deliberately not done. It would buy
+first-turn latency only, and it cannot be expressed through the extraction
+pipeline, which by construction sees finalized turns. Paying for a second
+runtime to get it was not worth it.
 
 ### Logical versus transport sessions
 
@@ -293,11 +326,36 @@ Honest list.
   generated, so corpus growth and contradiction drift are unmeasured.
 - **Explain CLI.** `SearchExplanation::render` produces the output; no
   `bmem explain-search` binary wraps it.
+- **Idempotency keys do not survive a repository reload.** They are held in
+  process, so retrying an at-least-once transaction after a restart applies it
+  twice and inflates evidence counters. Persisting them in the manifest is the
+  fix; the in-process guarantee holds today, the cross-restart one does not.
 - **Proactive context injection.** V1 deliberately uses tool responses. The
   turn-boundary injection path stays unbuilt until it is validated against real
   Live model behaviour.
 
 ---
+
+## Language
+
+Ingestion is code-switch native — Hinglish, Tanglish and Devanagari all extract
+correctly, because the extraction model does that work. Retrieval needed
+explicit engineering:
+
+- The rule-based planner recognises code-switched recall, recommendation,
+  preference and kinship phrasing. Without it, "mujhe yaad dilao, mera khaana ka
+  preference kya hai" was read as needing no memory at all.
+- Romanized Hindi and Tamil function words are stop words. Without that, `hai`,
+  `nahi` and `enakku` are treated as high-signal content terms and dominate
+  ranking in exactly the sentences where real content words are rarest.
+- Every stored fact carries model-generated **search terms** in both the user's
+  language and English. Lexical retrieval can only match words that are present,
+  so a fact stored as "The user is vegetarian" is unreachable from a Hindi
+  question about `khaana` unless the fact itself carries that vocabulary.
+
+The remaining gap is a question in one language about a fact stored before this
+change, whose search terms are English-only. Recompiling the corpus does not
+regenerate them; only a restatement does.
 
 ## Known limits
 

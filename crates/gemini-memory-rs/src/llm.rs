@@ -137,6 +137,7 @@ impl RetrievalPlanExtractor for GeminiPlanExtractor {
             predicates: Vec::new(),
             lexical_queries: wire.lexical_queries,
             scopes: wire.scopes,
+            kind_filter: Vec::new(),
             temporal: None,
             source_transcript_hash: stable_hash(&context.transcript),
         }
@@ -183,6 +184,10 @@ struct WireObservation {
     /// Set only when the user issued a memory command.
     #[serde(default)]
     mutation_intent: Option<MutationIntent>,
+    /// 3-6 short terms this fact could later be searched by, including the
+    /// user's own words in whatever language they used.
+    #[serde(default)]
+    search_terms: Vec<String>,
 }
 
 /// An observation extractor backed by a Gemini model.
@@ -300,6 +305,7 @@ fn to_observation(
         speaker_attribution: context.speaker,
         sensitivity: wire.sensitivity,
         mutation_intent: wire.mutation_intent,
+        search_terms: wire.search_terms,
     })
 }
 

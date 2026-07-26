@@ -128,7 +128,15 @@ fn contains_word_sequence(haystack: &str, needle: &str) -> bool {
     hay.windows(ned.len()).any(|w| w == ned.as_slice())
 }
 
+/// Recall phrases.
+///
+/// Code-switched forms are first-class here, not an afterthought. Most Indian
+/// users do not speak one language per sentence, and a rule planner that only
+/// recognises English silently answers "no memory needed" to
+/// "mujhe yaad dilao, mera khaana ka preference kya hai" — which is a request
+/// to recall, in so many words.
 const RECALL_PHRASES: &[&str] = &[
+    // English
     "do you remember",
     "what do you remember",
     "what do you know about",
@@ -137,9 +145,25 @@ const RECALL_PHRASES: &[&str] = &[
     "i told you",
     "you said",
     "have i mentioned",
+    // Hinglish
+    "yaad hai",
+    "yaad dila",
+    "yaad karo",
+    "yaad aata",
+    "pata hai",
+    "maine bataya",
+    "maine kaha",
+    "tumhe pata",
+    "aapko pata",
+    // Tanglish
+    "ninaivirukka",
+    "gnabagam",
+    "theriyuma",
+    "sollu naan",
 ];
 
 const RECOMMENDATION_PHRASES: &[&str] = &[
+    // English
     "should i",
     "should we",
     "recommend",
@@ -150,6 +174,21 @@ const RECOMMENDATION_PHRASES: &[&str] = &[
     "help me pick",
     "book a",
     "find me",
+    // Hinglish
+    "kya karu",
+    "kya karein",
+    "kya karna",
+    "kahan jaye",
+    "kahan chale",
+    "batao",
+    "bata do",
+    "suggest karo",
+    "dhundo",
+    // Tanglish
+    "enna pannalam",
+    "enga polam",
+    "sollunga",
+    "venuma",
 ];
 
 const PRIOR_EVENT_PHRASES: &[&str] = &[
@@ -188,6 +227,27 @@ const PREFERENCE_WORDS: &[&str] = &[
 const COMPARISON_PHRASES: &[&str] = &["better than", "instead of", "rather than", "compared to"];
 
 const KINSHIP_TERMS: &[&str] = &[
+    // Hinglish possessives, which carry the same relationship signal.
+    "meri wife",
+    "mera husband",
+    "meri patni",
+    "mera pati",
+    "meri biwi",
+    "mera beta",
+    "meri beti",
+    "meri maa",
+    "mere papa",
+    "mera bhai",
+    "meri behen",
+    "mera dost",
+    // Tanglish
+    "en wife",
+    "en husband",
+    "en amma",
+    "en appa",
+    "en thambi",
+    "en friend",
+    // English
     "my wife",
     "my husband",
     "my partner",
@@ -275,6 +335,70 @@ const NON_TOPICAL: &[&str] = &[
     "love",
     "hate",
     "prefer",
+    // Romanized Hindi and Tamil function words. Without these, "hai", "nahi"
+    // and "enakku" are treated as high-signal content terms and dominate
+    // ranking in exactly the sentences where real content words are rarest.
+    "hai",
+    "hain",
+    "hoon",
+    "hun",
+    "tha",
+    "thi",
+    "hota",
+    "raha",
+    "rahi",
+    "kar",
+    "karo",
+    "karu",
+    "karna",
+    "kya",
+    "kaise",
+    "kab",
+    "kahan",
+    "kyun",
+    "mera",
+    "meri",
+    "mere",
+    "mujhe",
+    "maine",
+    "tum",
+    "tumhara",
+    "tumhe",
+    "aap",
+    "aapko",
+    "apna",
+    "hum",
+    "humara",
+    "aur",
+    "bhi",
+    "toh",
+    "yeh",
+    "woh",
+    "nahi",
+    "nahin",
+    "bilkul",
+    "thoda",
+    "bahut",
+    "yaad",
+    "dilao",
+    "bata",
+    "batao",
+    "pata",
+    "naan",
+    "enakku",
+    "enna",
+    "unga",
+    "epdi",
+    "romba",
+    "oru",
+    "ille",
+    "illai",
+    "irukku",
+    "theriyuma",
+    "sollu",
+    "sollunga",
+    "vanthu",
+    "appuram",
 ];
 
 /// The rule-based planner.
@@ -428,6 +552,7 @@ impl DeterministicPlanner {
             predicates,
             lexical_queries,
             scopes,
+            kind_filter: Vec::new(),
             temporal,
             source_transcript_hash: stable_hash(text),
         }
@@ -623,6 +748,49 @@ mod tests {
             .lexical_queries
             .iter()
             .any(|q| q.contains("rhea") || q.to_lowercase().contains("rhea")));
+    }
+
+    #[test]
+    fn a_hinglish_recall_request_is_recognised() {
+        let plan = plan_for("Mujhe yaad dilao, mera khaana ka preference kya hai?");
+        assert!(
+            plan.requires_memory,
+            "a Hinglish recall request was read as needing no memory"
+        );
+        assert_eq!(plan.intent, RetrievalIntent::ExplicitRecall);
+        assert!(
+            plan.topics.contains(&"khaana".to_string()),
+            "the one content word was dropped: {:?}",
+            plan.topics
+        );
+        assert!(
+            !plan.topics.contains(&"hai".to_string()),
+            "a Hindi copula was treated as a topic: {:?}",
+            plan.topics
+        );
+    }
+
+    #[test]
+    fn a_hinglish_kinship_term_is_an_entity() {
+        let plan = plan_for("Meri wife ko kaunsa restaurant pasand hai?");
+        assert!(plan.requires_memory);
+        assert!(
+            plan.entities
+                .iter()
+                .any(|e| e.canonical.as_deref() == Some("rhea") || e.surface.contains("wife")),
+            "no entity resolved from a Hinglish possessive: {:?}",
+            plan.entities
+        );
+    }
+
+    #[test]
+    fn a_tanglish_question_is_recognised() {
+        let plan = plan_for("Enakku enna coffee pidikkum theriyuma?");
+        assert!(
+            plan.requires_memory,
+            "a Tanglish recall request was read as needing no memory"
+        );
+        assert!(plan.topics.contains(&"coffee".to_string()));
     }
 
     #[test]

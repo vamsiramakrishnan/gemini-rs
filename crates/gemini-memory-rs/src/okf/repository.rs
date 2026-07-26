@@ -517,13 +517,15 @@ impl<S: OkfStore> MemoryRepository for OkfRepository<S> {
             }
         }
 
-        namespace.revision += 1;
-        namespace.written_files = desired;
-        namespace.applied.push(transaction.idempotency_key);
-
+        // The manifest is written *before* any in-memory state is published.
+        // Publishing first and failing here would leave the revision advanced
+        // and the idempotency key recorded, so a retry would take the
+        // already-applied fast path and report success while the manifest
+        // stayed stale for ever.
+        let next_revision = namespace.revision + 1;
         let manifest = MemoryManifest {
             schema_version: MANIFEST_SCHEMA_VERSION,
-            revision: namespace.revision,
+            revision: next_revision,
             records: namespace
                 .records
                 .values()
@@ -543,6 +545,11 @@ impl<S: OkfStore> MemoryRepository for OkfRepository<S> {
                 &serde_json::to_string_pretty(&manifest)?,
             )
             .await?;
+
+        // Every durable write has landed; only now is the commit real.
+        namespace.revision = next_revision;
+        namespace.written_files = desired;
+        namespace.applied.push(transaction.idempotency_key);
 
         Ok(CommitReceipt {
             revision: namespace.revision,

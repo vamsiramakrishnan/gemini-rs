@@ -1,34 +1,66 @@
-//! Memory ingestion as a first-class [`TurnExtractor`].
+//! Memory as a first-class [`TurnExtractor`].
 //!
-//! The runtime already has an out-of-band extraction pipeline: it accumulates
-//! transcripts, segments them by turn boundary, fires extractors after each
-//! turn under a trigger policy, and promotes their results into `State`. Memory
-//! ingestion is exactly that shape, so it plugs into that pipeline rather than
-//! running a second one beside it.
+//! This is the whole runtime integration. The Live runtime already has an
+//! out-of-band extraction pipeline that accumulates transcripts, segments them
+//! by turn boundary, fires extractors under a trigger policy, and **promotes
+//! their fields into governed `State`**. Memory is exactly that shape, so it
+//! rides that pipeline instead of running a second one beside it.
 //!
-//! What this does *not* cover is speculative retrieval on partial transcripts —
-//! a turn extractor by construction only sees finalized turns. That path keeps
-//! its own fast-lane bridge in [`super::events`], which is the honest boundary
-//! between the two mechanisms.
+//! The promotion step is what makes memory useful to an application rather than
+//! merely present. A remembered fact projected into a `State` slot is read by
+//! everything the platform already has:
+//!
+//! - `phase.needs(&["user.diet"])` — satisfied from memory, so a returning user
+//!   is not asked again for something they already said last week;
+//! - `phase.requires(&["user.diet"])` — a hard gate a memory can open;
+//! - `Flow` guards, `done(captured(["user.diet"]))`;
+//! - `P::with_state(&["user.diet"])` — the value in the phase instruction;
+//! - watchers and repair, which read the same keys.
+//!
+//! Each turn the extractor does three things: ingest the finalized utterance,
+//! prepare the next turn's retrieval snapshot, and project what memory knows
+//! into slots.
 
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use std::sync::Arc;
 
-use gemini_adk_rs::live::extractor::{ExtractionTrigger, TurnExtractor};
+use gemini_adk_rs::live::extractor::{ExtractionTrigger, FieldPromotion, TurnExtractor};
 use gemini_adk_rs::live::transcript::TranscriptTurn;
 use gemini_adk_rs::llm::LlmError;
+use gemini_adk_rs::state::State;
 
-use crate::core::TurnId;
+use crate::core::{CanonicalPredicate, TurnId};
 use crate::engine::MemorySession;
 use crate::ingestion::LedgerOutcome;
 
-/// The `State` key the pipeline stores this extractor's summary under.
+/// The `State` key the pipeline stores this extractor's raw summary under.
 pub const MEMORY_EXTRACTOR_NAME: &str = "memory";
 
-/// Drives memory ingestion from the runtime's turn-boundary extraction pipeline.
+/// A mapping from a memory predicate to the governed `State` slot it fills.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MemorySlot {
+    /// The canonical predicate to look for, e.g. `dietary_identity`.
+    pub predicate: CanonicalPredicate,
+    /// The `State` key to fill, e.g. `user.diet`.
+    pub state_key: String,
+}
+
+impl MemorySlot {
+    /// Map `predicate` onto `state_key`.
+    pub fn new(predicate: impl AsRef<str>, state_key: impl Into<String>) -> Self {
+        Self {
+            predicate: CanonicalPredicate::new(predicate),
+            state_key: state_key.into(),
+        }
+    }
+}
+
+/// Drives memory from the runtime's turn-boundary extraction pipeline.
 pub struct MemoryTurnExtractor {
     session: Arc<MemorySession>,
+    slots: Vec<MemorySlot>,
+    promotions: Vec<FieldPromotion>,
     min_words: usize,
     window: usize,
 }
@@ -37,14 +69,39 @@ impl MemoryTurnExtractor {
     /// Ingest from `session`, skipping turns shorter than three words.
     ///
     /// The floor exists because "ok", "yeah" and "mm hmm" are most of a voice
-    /// conversation and none of them are evidence; spending an extraction on
-    /// them is pure cost.
+    /// conversation and none of them are evidence.
     pub fn new(session: Arc<MemorySession>) -> Self {
         Self {
             session,
+            slots: Vec::new(),
+            promotions: Vec::new(),
             min_words: 3,
             window: 3,
         }
+    }
+
+    /// Project memory facts into governed `State` slots.
+    ///
+    /// Each entry maps a canonical predicate to the state key a phase or flow
+    /// reads. A slot filled from memory satisfies `needs`/`requires` exactly as
+    /// one filled by the user would, which is the point: the application does
+    /// not have to know whether it learned something now or last month.
+    ///
+    /// Slots are promoted with `KeepKnown`, so anything the current
+    /// conversation established wins over what memory recalls.
+    pub fn slots(mut self, slots: impl IntoIterator<Item = MemorySlot>) -> Self {
+        self.slots = slots.into_iter().collect();
+        self.promotions = self
+            .slots
+            .iter()
+            .map(|slot| FieldPromotion {
+                field: slot.state_key.clone(),
+                state_key: slot.state_key.clone(),
+                merge: gemini_adk_rs::live::extractor::MergePolicy::KeepKnown,
+                accept: None,
+            })
+            .collect();
+        self
     }
 
     /// Require at least `words` in the user's utterance before extracting.
@@ -57,6 +114,20 @@ impl MemoryTurnExtractor {
     pub fn window(mut self, turns: usize) -> Self {
         self.window = turns;
         self
+    }
+
+    /// The slot values memory can currently fill.
+    fn slot_values(&self) -> Map<String, Value> {
+        let mut out = Map::new();
+        if self.slots.is_empty() {
+            return out;
+        }
+        for (predicate, value) in self.session.known_values() {
+            if let Some(slot) = self.slots.iter().find(|s| s.predicate == predicate) {
+                out.entry(slot.state_key.clone()).or_insert(value);
+            }
+        }
+        out
     }
 }
 
@@ -72,6 +143,10 @@ impl TurnExtractor for MemoryTurnExtractor {
 
     fn trigger(&self) -> ExtractionTrigger {
         ExtractionTrigger::EveryTurn
+    }
+
+    fn promotion_rules(&self) -> &[FieldPromotion] {
+        &self.promotions
     }
 
     fn should_extract(&self, window: &[TranscriptTurn]) -> bool {
@@ -92,37 +167,78 @@ impl TurnExtractor for MemoryTurnExtractor {
             .await
             .map_err(|e| LlmError::Other(e.to_string()))?;
 
-        // Turn completion also drives the reconciliation cadence, so the
-        // pipeline firing this extractor is enough to keep the session ticking.
+        // Turn completion drives the reconciliation cadence, so the pipeline
+        // firing this extractor is enough to keep the session ticking.
         let scheduled = self
             .session
             .on_turn_complete(turn_id)
             .await
             .map_err(|e| LlmError::Other(e.to_string()))?;
 
-        let created = outcomes
-            .iter()
-            .filter(|o| matches!(o, LedgerOutcome::Created(_)))
-            .count();
-        let reinforced = outcomes
-            .iter()
-            .filter(|o| matches!(o, LedgerOutcome::Reinforced { .. }))
-            .count();
-        let rejected = outcomes
-            .iter()
-            .filter(|o| matches!(o, LedgerOutcome::Rejected(_)))
-            .count();
+        // Prepare the *next* turn's context now, while the model is speaking.
+        // This is the "prepare asynchronously, consume synchronously" rule: by
+        // the time a `recall_context` call arrives, the answer is already sat
+        // in the session.
+        let next = TurnId(turn_id.0 + 1);
+        self.session.begin_turn(next);
+        let _ = self.session.prepare(next, &turn.user).await;
 
-        // Returned for observability, not for promotion into state: memory's
-        // authoritative store is the ledger, not a `State` key.
-        Ok(json!({
-            "turn": turn.turn_number,
-            "created": created,
-            "reinforced": reinforced,
-            "rejected": rejected,
-            "session_facts": self.session.ledger().usable_candidates().len(),
-            "scheduled": scheduled.iter().map(|w| format!("{w:?}")).collect::<Vec<_>>(),
-        }))
+        let mut payload = self.slot_values();
+        payload.insert("turn".into(), json!(turn.turn_number));
+        payload.insert(
+            "created".into(),
+            json!(outcomes
+                .iter()
+                .filter(|o| matches!(o, LedgerOutcome::Created(_)))
+                .count()),
+        );
+        payload.insert(
+            "reinforced".into(),
+            json!(outcomes
+                .iter()
+                .filter(|o| matches!(o, LedgerOutcome::Reinforced { .. }))
+                .count()),
+        );
+        payload.insert(
+            "rejected".into(),
+            json!(outcomes
+                .iter()
+                .filter(|o| matches!(o, LedgerOutcome::Rejected(_)))
+                .count()),
+        );
+        payload.insert(
+            "session_facts".into(),
+            json!(self.session.ledger().usable_candidates().len()),
+        );
+        payload.insert(
+            "scheduled".into(),
+            json!(scheduled
+                .iter()
+                .map(|w| format!("{w:?}"))
+                .collect::<Vec<_>>()),
+        );
+        Ok(Value::Object(payload))
+    }
+
+    async fn extract_with_state(
+        &self,
+        window: &[TranscriptTurn],
+        state: &State,
+    ) -> Result<Value, LlmError> {
+        let value = self.extract(window).await?;
+
+        // Slots are also written directly, not only returned for promotion:
+        // an application that registered no promotion rules still gets its
+        // slots, and a phase evaluated in the same turn sees them.
+        for slot in &self.slots {
+            if state.contains(&slot.state_key) {
+                continue;
+            }
+            if let Some(filled) = value.get(&slot.state_key) {
+                let _ = state.set(slot.state_key.clone(), filled.clone());
+            }
+        }
+        Ok(value)
     }
 }
 
@@ -158,8 +274,73 @@ mod tests {
         let summary = extractor.extract(&window).await.unwrap();
 
         assert_eq!(summary["created"], 1);
-        assert_eq!(summary["session_facts"], 1);
         assert_eq!(session.ledger().usable_candidates().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_remembered_fact_fills_the_slot_a_phase_gates_on() {
+        let session = session();
+        let extractor = MemoryTurnExtractor::new(session.clone())
+            .slots([MemorySlot::new("dietary_identity", "user.diet")]);
+        let state = State::new();
+
+        extractor
+            .extract_with_state(&[turn(1, "I am pescatarian")], &state)
+            .await
+            .unwrap();
+
+        // This is what `phase.needs(&["user.diet"])` and a `Flow` guard read.
+        assert_eq!(
+            state.get::<String>("user.diet").as_deref(),
+            Some("pescatarian"),
+            "memory did not fill the slot the application gates on"
+        );
+    }
+
+    #[tokio::test]
+    async fn what_the_conversation_established_wins_over_what_memory_recalls() {
+        let session = session();
+        let extractor = MemoryTurnExtractor::new(session.clone())
+            .slots([MemorySlot::new("dietary_identity", "user.diet")]);
+        let state = State::new();
+        state.set("user.diet", "vegan").unwrap();
+
+        extractor
+            .extract_with_state(&[turn(1, "I am pescatarian")], &state)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            state.get::<String>("user.diet").as_deref(),
+            Some("vegan"),
+            "memory overwrote a slot the live conversation had already set"
+        );
+    }
+
+    #[tokio::test]
+    async fn promotion_rules_are_declared_for_every_slot() {
+        let extractor = MemoryTurnExtractor::new(session()).slots([
+            MemorySlot::new("dietary_identity", "user.diet"),
+            MemorySlot::new("venue_preference", "user.venue"),
+        ]);
+        let keys: Vec<&str> = extractor
+            .promotion_rules()
+            .iter()
+            .map(|r| r.state_key.as_str())
+            .collect();
+        assert_eq!(keys, vec!["user.diet", "user.venue"]);
+    }
+
+    #[tokio::test]
+    async fn a_session_with_no_slots_configured_promotes_nothing() {
+        let extractor = MemoryTurnExtractor::new(session());
+        assert!(extractor.promotion_rules().is_empty());
+        let state = State::new();
+        extractor
+            .extract_with_state(&[turn(1, "I am pescatarian")], &state)
+            .await
+            .unwrap();
+        assert!(state.keys().iter().all(|k| !k.starts_with("user.")));
     }
 
     #[tokio::test]
@@ -172,6 +353,41 @@ mod tests {
             );
         }
         assert!(extractor.should_extract(&[turn(1, "I am pescatarian now")]));
+    }
+
+    #[tokio::test]
+    async fn the_next_turns_context_is_prepared_before_it_is_asked_for() {
+        let session = session();
+        let extractor = MemoryTurnExtractor::new(session.clone());
+
+        extractor
+            .extract(&[turn(1, "I am pescatarian")])
+            .await
+            .unwrap();
+        // A turn that asks something: this is where preparation pays.
+        extractor
+            .extract(&[turn(2, "what do you remember about my dietary preferences")])
+            .await
+            .unwrap();
+
+        // The `recall_context` handler reads this; it must already be filled
+        // by the time the model asks.
+        assert!(
+            !session.prepared_snapshot().is_empty(),
+            "the next turn's context was not prepared during this turn"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_turn_that_asks_nothing_prepares_nothing() {
+        // Preparation is speculative, not unconditional: a statement is not a
+        // question, and searching memory for it would be pure cost.
+        let session = session();
+        MemoryTurnExtractor::new(session.clone())
+            .extract(&[turn(1, "I am pescatarian")])
+            .await
+            .unwrap();
+        assert!(session.prepared_snapshot().is_empty());
     }
 
     #[tokio::test]
@@ -204,6 +420,5 @@ mod tests {
         let extractor = MemoryTurnExtractor::new(session());
         assert_eq!(extractor.name(), MEMORY_EXTRACTOR_NAME);
         assert_eq!(extractor.trigger(), ExtractionTrigger::EveryTurn);
-        assert_eq!(extractor.window_size(), 3);
     }
 }

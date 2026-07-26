@@ -177,6 +177,9 @@ fn derive_tags(candidate: &SessionCandidate) -> Vec<String> {
         .map(str::to_string)
         .collect();
     tags.extend(crate::bm25::tokenize(&candidate.value.display()));
+    for term in &candidate.search_terms {
+        tags.extend(crate::bm25::tokenize(term));
+    }
     tags.retain(|t| !t.is_empty());
     tags.sort();
     tags.dedup();
@@ -214,6 +217,7 @@ mod tests {
             speaker_attribution: SpeakerAttribution::User,
             sensitivity: SensitivityClass::Normal,
             mutation_intent: None,
+            search_terms: Vec::new(),
         }
     }
 

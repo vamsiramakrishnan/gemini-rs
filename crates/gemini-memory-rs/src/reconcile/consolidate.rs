@@ -9,7 +9,6 @@
 use super::proposal::{MemorySelector, ProposedMemory};
 use crate::core::{
     DiscardReason, Explicitness, FactFingerprint, MutationIntent, ProposedPersistence,
-    SensitivityClass,
 };
 use crate::ingestion::{SealedSessionLedger, SessionCandidate};
 
@@ -106,7 +105,7 @@ fn classify(
         persistence,
         expected_expiry: candidate.expected_expiry,
         mutation_intent: candidate.mutation_intent,
-        sensitivity: SensitivityClass::Normal,
+        sensitivity: candidate.sensitivity,
         qualifier: None,
         session_id: session_id.clone(),
         turn_id: candidate.last_seen_turn,
@@ -140,6 +139,12 @@ fn derive_tags(candidate: &SessionCandidate) -> Vec<String> {
         .map(str::to_string)
         .collect();
     tags.extend(crate::bm25::tokenize(&candidate.value.display()));
+    // The vocabulary the user might search by later, in whatever language they
+    // use. Without it a fact stored in English is unreachable from a question
+    // asked in Hindi, because lexical retrieval can only match what is present.
+    for term in &candidate.search_terms {
+        tags.extend(crate::bm25::tokenize(term));
+    }
     tags.retain(|t| !t.is_empty() && t.len() > 1);
     tags.sort();
     tags.dedup();
@@ -165,7 +170,8 @@ mod tests {
     use super::*;
     use crate::core::{
         CanonicalPredicate, EntityRef, IngestionConfig, MemoryKind, MemoryObservation, MemoryValue,
-        ObservationId, SessionId, SpeakerAttribution, TemporalScope, TranscriptEvidence, TurnId,
+        ObservationId, SensitivityClass, SessionId, SpeakerAttribution, TemporalScope,
+        TranscriptEvidence, TurnId,
     };
     use crate::ingestion::{InMemorySessionLedger, SessionLedger};
 
@@ -195,6 +201,7 @@ mod tests {
             speaker_attribution: SpeakerAttribution::User,
             sensitivity: SensitivityClass::Normal,
             mutation_intent: intent,
+            search_terms: Vec::new(),
         }
     }
 

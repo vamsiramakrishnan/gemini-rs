@@ -295,6 +295,7 @@ mod tests {
             speaker_attribution: SpeakerAttribution::User,
             sensitivity: SensitivityClass::Normal,
             mutation_intent: intent,
+            search_terms: Vec::new(),
         }
     }
 

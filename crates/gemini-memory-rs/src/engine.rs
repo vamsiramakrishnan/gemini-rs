@@ -34,6 +34,10 @@ use crate::retrieval::{
 };
 use crate::transcript::GenerationGuard;
 
+/// How long a model-backed retrieval plan may take before the rule-based plan
+/// is used instead.
+pub const PLAN_EXTRACTION_TIMEOUT_MS: u64 = 4_000;
+
 /// Everything that outlives a conversation.
 pub struct MemoryEngine {
     user: UserId,
@@ -43,6 +47,8 @@ pub struct MemoryEngine {
     planner: Arc<RwLock<Arc<DeterministicPlanner>>>,
     events: Arc<dyn MemoryEventLog>,
     plan_extractor: Arc<RwLock<Arc<dyn RetrievalPlanExtractor>>>,
+    /// Whether the caller installed their own plan extractor.
+    caller_supplied_extractor: Arc<std::sync::atomic::AtomicBool>,
     observation_extractor: Arc<dyn MemoryObservationExtractor>,
 }
 
@@ -78,6 +84,7 @@ impl MemoryEngine {
             plan_extractor: Arc::new(RwLock::new(Arc::new(DeterministicPlanExtractor::new(
                 planner,
             )))),
+            caller_supplied_extractor: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             observation_extractor: Arc::new(RuleBasedObservationExtractor::new()),
         }
     }
@@ -88,11 +95,36 @@ impl MemoryEngine {
     /// plan, so an unavailable model degrades retrieval quality rather than
     /// stalling the pipeline.
     pub fn with_plan_extractor(self, extractor: Arc<dyn RetrievalPlanExtractor>) -> Self {
+        // Measured: a constrained-decode plan call is ~2s on gemini-2.5-flash.
+        // The previous 500ms bound meant the model's plan was *never* used —
+        // every query silently fell back to the rule-based planner, which is
+        // English-only, so a Hinglish question retrieved nothing at all.
+        // Planning is speculative and off the response path; a generous bound
+        // costs nothing a user can perceive.
         *self.plan_extractor.write() = Arc::new(crate::retrieval::BoundedPlanExtractor::new(
             extractor,
-            Duration::from_millis(500),
+            Duration::from_millis(PLAN_EXTRACTION_TIMEOUT_MS),
         ));
+        self.caller_supplied_extractor
+            .store(true, std::sync::atomic::Ordering::Release);
         self
+    }
+
+    /// Adopt a refreshed planner, and rebuild the default extractor around it.
+    ///
+    /// The default extractor *owns* a planner rather than reading the shared
+    /// one, so refreshing only the shared handle would leave it planning
+    /// against a stale entity table — and a query justified solely by a known
+    /// entity would wrongly skip memory. A caller-supplied extractor is left
+    /// alone; it is not ours to replace.
+    fn install_planner(&self, planner: Arc<DeterministicPlanner>) {
+        *self.planner.write() = planner.clone();
+        if !self
+            .caller_supplied_extractor
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            *self.plan_extractor.write() = Arc::new(DeterministicPlanExtractor::new(planner));
+        }
     }
 
     /// Use a model-backed observation extractor, under the configured deadline.
@@ -141,11 +173,8 @@ impl MemoryEngine {
         );
 
         let known = KnownEntities::from_index(&index);
-        let planner = Arc::new(DeterministicPlanner::with_entities(known));
-        *self.planner.write() = planner.clone();
-        // Keep the default extractor in step with the refreshed entity table.
-        // A model-backed extractor installed by the caller is left alone.
         self.canonical.replace(index);
+        self.install_planner(Arc::new(DeterministicPlanner::with_entities(known)));
 
         let revision = self.canonical.revision();
         let writer = SessionEventWriter::new(
@@ -182,8 +211,10 @@ impl MemoryEngine {
             retriever,
             planner: self.planner.clone(),
             plan_extractor: self.plan_extractor.clone(),
+            caller_supplied_extractor: self.caller_supplied_extractor.clone(),
             observation_extractor: self.observation_extractor.clone(),
             generation: GenerationGuard::new(),
+            current_turn: RwLock::new(TurnId::ZERO),
             prepared: RwLock::new(PreparedMemorySnapshot::empty(TurnId::ZERO)),
             active: RwLock::new(PreparedMemorySnapshot::empty(TurnId::ZERO)),
             cadence: RwLock::new(CadenceTracker::new(&self.config, Utc::now())),
@@ -228,8 +259,17 @@ pub struct MemorySession {
     retriever: Arc<LocalMemoryRetriever>,
     planner: Arc<RwLock<Arc<DeterministicPlanner>>>,
     plan_extractor: Arc<RwLock<Arc<dyn RetrievalPlanExtractor>>>,
+    caller_supplied_extractor: Arc<std::sync::atomic::AtomicBool>,
     observation_extractor: Arc<dyn MemoryObservationExtractor>,
     generation: GenerationGuard,
+    /// The turn currently in flight.
+    ///
+    /// Distinct from the active snapshot's `source_turn_id`, which names the
+    /// turn the snapshot was *prepared from* — one turn behind, and zero before
+    /// any preparation has happened. Stamping a memory command with that would
+    /// corrupt its provenance and the last-seen ordering that picks between
+    /// competing session candidates.
+    current_turn: RwLock<TurnId>,
     prepared: RwLock<PreparedMemorySnapshot>,
     active: RwLock<PreparedMemorySnapshot>,
     cadence: RwLock<CadenceTracker>,
@@ -266,9 +306,14 @@ impl MemorySession {
     pub fn begin_turn(&self, turn_id: TurnId) -> u64 {
         let prepared = self.prepared.read().clone();
         *self.active.write() = prepared;
+        *self.current_turn.write() = turn_id;
         self.cadence.write().touch(Utc::now());
-        let _ = turn_id;
         self.generation.advance()
+    }
+
+    /// The turn currently in flight.
+    pub fn current_turn(&self) -> TurnId {
+        *self.current_turn.read()
     }
 
     /// The snapshot the current turn is being answered from.
@@ -556,6 +601,39 @@ impl MemorySession {
         }))
     }
 
+    /// The predicate/value pairs memory can currently assert.
+    ///
+    /// Session facts shadow canonical ones: something the user said this
+    /// conversation is a better answer than something recalled from months ago.
+    pub fn known_values(&self) -> Vec<(crate::core::CanonicalPredicate, serde_json::Value)> {
+        let mut out: Vec<(crate::core::CanonicalPredicate, serde_json::Value)> = Vec::new();
+        let mut push = |predicate: crate::core::CanonicalPredicate, value: serde_json::Value| {
+            if !out.iter().any(|(p, _)| p == &predicate) {
+                out.push((predicate, value));
+            }
+        };
+
+        for candidate in self.ledger.usable_candidates() {
+            if candidate.mutation_intent == Some(MutationIntent::List) {
+                continue;
+            }
+            push(
+                candidate.predicate.clone(),
+                serde_json::Value::String(candidate.value.display()),
+            );
+        }
+        let now = Utc::now();
+        for doc in self.canonical.read().documents() {
+            if doc.is_retrievable(now) {
+                push(
+                    doc.predicate.clone(),
+                    serde_json::Value::String(doc.value.clone()),
+                );
+            }
+        }
+        out
+    }
+
     /// Every statement currently retrievable, canonical and provisional.
     pub fn known_statements(&self) -> Vec<String> {
         let mut statements: Vec<String> = self
@@ -623,7 +701,13 @@ impl MemorySession {
         let planner = Arc::new(DeterministicPlanner::with_entities(
             KnownEntities::from_index(&self.canonical.read()),
         ));
-        *self.planner.write() = planner;
+        *self.planner.write() = planner.clone();
+        if !self
+            .caller_supplied_extractor
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            *self.plan_extractor.write() = Arc::new(DeterministicPlanExtractor::new(planner));
+        }
         Ok(())
     }
 }
@@ -670,6 +754,7 @@ fn explicit_observation(
         speaker_attribution: SpeakerAttribution::User,
         sensitivity: SensitivityClass::Normal,
         mutation_intent: Some(intent),
+        search_terms: Vec::new(),
     }
 }
 

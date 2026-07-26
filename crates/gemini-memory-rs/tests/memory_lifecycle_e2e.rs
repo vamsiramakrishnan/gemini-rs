@@ -8,6 +8,8 @@
 //!
 //! Skips when no Gemini API key is configured.
 
+#![cfg(feature = "gemini-llm")]
+
 mod common;
 
 use std::sync::Arc;

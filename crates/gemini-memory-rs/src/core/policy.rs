@@ -463,6 +463,7 @@ mod tests {
             speaker_attribution: SpeakerAttribution::User,
             sensitivity: SensitivityClass::Normal,
             mutation_intent: None,
+            search_terms: Vec::new(),
         }
     }
 

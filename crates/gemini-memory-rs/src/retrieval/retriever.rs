@@ -105,6 +105,13 @@ pub trait SemanticFallback: Send + Sync {
 #[derive(Debug, Default)]
 pub struct IndexHandle {
     index: RwLock<MemoryIndex>,
+    /// Monotonic across replacements.
+    ///
+    /// A rebuilt index derives its revision from how many documents were
+    /// inserted, so swapping one active fact for another can land on the same
+    /// number. Retrieval caches key on this value, so an equal revision after a
+    /// correction would serve a stale-but-fresh-looking snapshot.
+    generation: std::sync::atomic::AtomicU64,
 }
 
 impl IndexHandle {
@@ -117,12 +124,15 @@ impl IndexHandle {
     pub fn with_index(index: MemoryIndex) -> Self {
         Self {
             index: RwLock::new(index),
+            generation: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
     /// Replace the index wholesale, e.g. after a corpus recompile.
     pub fn replace(&self, index: MemoryIndex) {
         *self.index.write() = index;
+        self.generation
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
     }
 
     /// Read the index.
@@ -135,9 +145,14 @@ impl IndexHandle {
         self.index.write()
     }
 
-    /// The index revision.
+    /// A revision that advances on every replacement and every mutation.
     pub fn revision(&self) -> u64 {
-        self.index.read().revision()
+        // Both terms matter: in-place upserts move the inner revision, whole
+        // replacements move the generation.
+        self.generation
+            .load(std::sync::atomic::Ordering::Acquire)
+            .wrapping_mul(1_000_003)
+            .wrapping_add(self.index.read().revision())
     }
 }
 
@@ -204,13 +219,22 @@ impl LocalMemoryRetriever {
 
     fn run_lexical(&self, plan: &RetrievalPlan, now: DateTime<Utc>) -> Vec<Vec<SearchHit>> {
         let entity_forms = plan.entity_forms();
+        // A plan's scopes are deliberately *not* applied as a filter.
+        //
+        // Kinds are assigned by the extraction model and scopes are proposed by
+        // the planning model; making retrieval depend on those two agreeing on
+        // a taxonomy loses recall for no benefit. A dietary fact the extractor
+        // filed as `Identity` is exactly what a plan scoped to `Preference` is
+        // looking for. Only an explicit caller scope — the `recall_context`
+        // argument — restricts kinds, because that is a stated intent rather
+        // than an inference.
         let mut queries: Vec<Query> = plan
             .lexical_queries
             .iter()
             .map(|text| {
                 Query::new(text)
                     .with_entities(entity_forms.clone())
-                    .with_kinds(plan.scopes.clone())
+                    .with_kinds(plan.kind_filter.clone())
                     .with_limit(20)
             })
             .collect();
@@ -218,7 +242,7 @@ impl LocalMemoryRetriever {
             queries.push(
                 Query::new("")
                     .with_entities(entity_forms.clone())
-                    .with_kinds(plan.scopes.clone())
+                    .with_kinds(plan.kind_filter.clone())
                     .with_limit(20),
             );
         }
@@ -324,7 +348,7 @@ impl LocalMemoryRetriever {
         let plan = RetrievalPlan {
             requires_memory: true,
             lexical_queries: vec![query.to_string()],
-            scopes: kinds,
+            kind_filter: kinds,
             ..RetrievalPlan::skip(turn_id, 0, query)
         }
         .normalized();
@@ -364,6 +388,11 @@ impl LocalMemoryRetriever {
         if self.needs_semantic_fallback(&candidates) {
             self.extend_with_semantic(plan, &mut candidates, budget, now)
                 .await;
+            // Re-applied: the fallback appends canonical ids of its own
+            // choosing, and one of them may sit in a window the user corrected
+            // seconds ago. Suppressing only before the extension would let the
+            // superseded fact back in by the side door.
+            self.drop_suppressed(&mut candidates);
         }
 
         let canonical = self.canonical.read();

@@ -133,8 +133,12 @@ pub struct RetrievalPlan {
     pub predicates: Vec<CanonicalPredicate>,
     /// Independent lexical queries to run and fuse.
     pub lexical_queries: Vec<String>,
-    /// Memory kinds worth searching.
+    /// Memory kinds worth searching — a hint used for explanation, never a
+    /// filter. See `kind_filter` for the restricting form.
     pub scopes: Vec<MemoryKind>,
+    /// A hard kind restriction, set only when a caller explicitly asked for one.
+    #[serde(default)]
+    pub kind_filter: Vec<MemoryKind>,
     /// Time window, if the user named one.
     #[serde(default)]
     pub temporal: Option<TemporalConstraint>,
@@ -157,6 +161,7 @@ impl RetrievalPlan {
             predicates: Vec::new(),
             lexical_queries: Vec::new(),
             scopes: Vec::new(),
+            kind_filter: Vec::new(),
             temporal: None,
             source_transcript_hash: stable_hash(transcript),
         }
@@ -243,6 +248,7 @@ mod tests {
             predicates: Vec::new(),
             lexical_queries: lexical.into_iter().map(str::to_string).collect(),
             scopes: Vec::new(),
+            kind_filter: Vec::new(),
             temporal: None,
             source_transcript_hash: "hash".into(),
         }

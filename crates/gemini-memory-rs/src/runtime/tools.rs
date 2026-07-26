@@ -137,7 +137,7 @@ pub fn manage_memory_tool(session: Arc<MemorySession>) -> TypedTool<ManageArgs> 
 }
 
 fn current_turn(session: &MemorySession) -> TurnId {
-    session.active_snapshot().source_turn_id
+    session.current_turn()
 }
 
 #[cfg(test)]

@@ -14,7 +14,8 @@ use std::collections::{BTreeMap, HashSet};
 use crate::core::{
     admit_observation, aggregate_confidence, AdmissionVerdict, DiscardReason, Explicitness,
     FactFingerprint, IngestionConfig, MemoryError, MemoryKind, MemoryObservation, MemoryValue,
-    MutationIntent, ObservationId, ProposedPersistence, SessionId, TemporalScope, TurnId,
+    MutationIntent, ObservationId, ProposedPersistence, SensitivityClass, SessionId, TemporalScope,
+    TurnId,
 };
 
 /// Where a candidate stands within the session.
@@ -97,6 +98,14 @@ pub struct SessionCandidate {
     pub status: SessionCandidateStatus,
     /// Explicit command carried by the evidence, if any.
     pub mutation_intent: Option<MutationIntent>,
+    /// Terms this fact may later be searched by, merged across its evidence.
+    pub search_terms: Vec<String>,
+    /// Privacy classification, carried from the observation.
+    ///
+    /// Dropping this here would let an explicit health or religious statement
+    /// reach the corpus with ordinary privacy metadata, silently bypassing
+    /// every sensitivity-dependent rule downstream.
+    pub sensitivity: SensitivityClass,
     /// When the fact stops holding, for episodic candidates.
     pub expected_expiry: Option<DateTime<Utc>>,
 }
@@ -133,6 +142,8 @@ impl SessionCandidate {
             proposed_persistence: persistence,
             status,
             mutation_intent: observation.mutation_intent,
+            search_terms: observation.search_terms.clone(),
+            sensitivity: observation.sensitivity,
             expected_expiry: observation.expected_expiry,
         }
     }
@@ -168,6 +179,19 @@ impl SessionCandidate {
         );
         if observation.mutation_intent.is_some() {
             self.mutation_intent = observation.mutation_intent;
+        }
+        // The most restrictive classification any evidence carried wins.
+        self.sensitivity = self.sensitivity.max(observation.sensitivity);
+        // Search terms accumulate: each restatement may add the vocabulary of
+        // a different language or a different way of asking.
+        for term in &observation.search_terms {
+            if !self
+                .search_terms
+                .iter()
+                .any(|t| t.eq_ignore_ascii_case(term))
+            {
+                self.search_terms.push(term.clone());
+            }
         }
         if self.status == SessionCandidateStatus::Observed && self.explicitness.is_explicit() {
             self.status = SessionCandidateStatus::ActiveSessionFact;
@@ -469,9 +493,7 @@ impl SessionLedger for InMemorySessionLedger {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{
-        CanonicalPredicate, EntityRef, SensitivityClass, SpeakerAttribution, TranscriptEvidence,
-    };
+    use crate::core::{CanonicalPredicate, EntityRef, SpeakerAttribution, TranscriptEvidence};
 
     fn observation(
         predicate: &str,
@@ -498,6 +520,7 @@ mod tests {
             speaker_attribution: SpeakerAttribution::User,
             sensitivity: SensitivityClass::Normal,
             mutation_intent: None,
+            search_terms: Vec::new(),
         }
     }
 

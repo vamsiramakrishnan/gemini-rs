@@ -1,3 +1,4 @@
+#![cfg(feature = "gemini-llm")]
 //! Shared scaffolding for the live-API integration tests.
 //!
 //! These tests reach the real Gemini API. Without a key they skip rather than

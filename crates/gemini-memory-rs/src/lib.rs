@@ -93,5 +93,5 @@ pub mod prelude {
     pub use crate::retrieval::{
         MemoryRetriever, PreparedMemorySnapshot, RetrievalPlan, RetrievedMemory,
     };
-    pub use crate::runtime::{keys, MemoryEventSender, MemoryRuntimeEvent};
+    pub use crate::runtime::{MemorySlot, MemoryTurnExtractor};
 }

@@ -125,6 +125,11 @@ pub struct IndexedMemory {
     pub expires_at: Option<DateTime<Utc>>,
     /// The sentence handed to the model.
     pub statement: String,
+    /// The value side of the fact, for filling governed state slots.
+    ///
+    /// A slot wants "pescatarian", not "The user is pescatarian." — the
+    /// statement is for the model, the value is for the application.
+    pub value: String,
     /// Normalized subject surface form, for exact-entity boosting.
     pub subject_form: String,
     /// Normalized entity surface forms, for exact-entity boosting.
@@ -189,6 +194,7 @@ impl IndexedMemory {
             valid_from: memory.temporal.valid_from,
             expires_at: memory.temporal.expires_at,
             statement: memory.statement.clone(),
+            value: memory.value.display(),
             subject_form: normalize_token(&memory.subject.display),
             entity_forms,
             fields,
@@ -348,6 +354,13 @@ mod tests {
         assert!(doc.fields[Field::Statement.slot()].contains(&"quiet".to_string()));
         assert!(doc.entity_forms.contains(&"rhea".to_string()));
         assert!(doc.entity_forms.contains(&"my wife".to_string()));
+    }
+
+    #[test]
+    fn the_value_is_kept_separately_from_the_sentence() {
+        let doc = IndexedMemory::from_canonical(&canonical());
+        assert_eq!(doc.value, "quiet restaurants");
+        assert_eq!(doc.statement, "Rhea prefers quiet restaurants.");
     }
 
     #[test]

@@ -38,6 +38,11 @@ Rules:
   user did not state outright.
 - Recognise explicit memory commands ('remember that…', 'forget…', 'actually, \
   I…') and set mutation_intent accordingly.
+- Fill search_terms with 3-6 short words this fact could later be looked up \
+  by. Include the user's own words in whatever language they spoke, AND the \
+  English equivalents. A user who says 'main vegetarian hoon' may later ask \
+  'mera khaana ka preference kya hai' or 'what do I eat' — the fact has to be \
+  findable from all of them.
 - Return an empty list when the utterance reveals nothing worth keeping. That \
   is the common case.";
 
@@ -273,16 +278,16 @@ impl MemoryObservationExtractor for RuleBasedObservationExtractor {
             return Ok(observations);
         }
 
-        if let Some((opener, kind)) = SELF_STATEMENTS
+        // Every matching clause, not just the first. "I'm pescatarian and I
+        // prefer quiet places" is one utterance carrying two facts, and taking
+        // only the leading clause silently drops the other.
+        for (opener, kind) in SELF_STATEMENTS
             .iter()
-            .find(|(opener, _)| starts_clause(&normalized, opener))
+            .filter(|(opener, _)| starts_clause(&normalized, opener))
         {
-            let value = normalized
-                .split_once(opener)
-                .map(|(_, rest)| rest.trim().to_string())
-                .unwrap_or_default();
+            let value = clause_after(&normalized, opener);
             if value.is_empty() {
-                return Ok(observations);
+                continue;
             }
 
             let episodic = EPISODIC_MARKERS.iter().any(|m| normalized.contains(m));
@@ -306,11 +311,28 @@ impl MemoryObservationExtractor for RuleBasedObservationExtractor {
                 SensitivityClass::Normal
             };
 
+            // Openers overlap: "I am allergic to nuts" matches both
+            // `i am allergic to` (value "nuts") and `i am` (value "allergic to
+            // nuts"). They describe the same clause, so only the more specific
+            // one is kept — otherwise a single fact is counted twice.
+            if observations.iter().any(|o: &MemoryObservation| {
+                let existing = o.value.display();
+                existing.contains(&value) || value.contains(&existing)
+            }) {
+                continue;
+            }
+            let predicate = CanonicalPredicate::new(predicate_for(opener, &value));
+            if observations
+                .iter()
+                .any(|o: &MemoryObservation| o.predicate == predicate)
+            {
+                continue;
+            }
             observations.push(build(
                 &context,
                 &evidence,
                 kind,
-                CanonicalPredicate::new(predicate_for(opener, &value)),
+                predicate,
                 MemoryValue::Text(value.clone()),
                 statement_for(opener, &value),
                 Explicitness::ExplicitStatement,
@@ -324,6 +346,24 @@ impl MemoryObservationExtractor for RuleBasedObservationExtractor {
 
         Ok(observations)
     }
+}
+
+/// The clause following `opener`, stopping at the next clause boundary.
+///
+/// Without the stop, "I am pescatarian and I prefer quiet places" would store
+/// the dietary fact with a value of "pescatarian and i prefer quiet places".
+fn clause_after(text: &str, opener: &str) -> String {
+    const SEPARATORS: [&str; 4] = [" and ", " but ", " so ", " because "];
+    let Some((_, rest)) = text.split_once(opener) else {
+        return String::new();
+    };
+    let mut clause = rest.trim();
+    for separator in SEPARATORS {
+        if let Some((head, _)) = clause.split_once(separator) {
+            clause = head.trim();
+        }
+    }
+    clause.to_string()
 }
 
 /// Whether `text` begins with `opener` on a clause boundary.
@@ -378,6 +418,7 @@ fn build(
         speaker_attribution: context.speaker,
         sensitivity,
         mutation_intent,
+        search_terms: Vec::new(),
     }
 }
 
@@ -610,6 +651,47 @@ mod tests {
         let observations = extract("we went out and i do not eat meat").await;
         assert_eq!(observations.len(), 1);
         assert_eq!(observations[0].predicate.as_str(), "dietary_identity");
+    }
+
+    #[tokio::test]
+    async fn one_utterance_carrying_two_facts_yields_two_observations() {
+        let observations = extract("I am pescatarian and I prefer quiet places").await;
+        let predicates: Vec<&str> = observations.iter().map(|o| o.predicate.as_str()).collect();
+        assert!(
+            predicates.contains(&"dietary_identity"),
+            "the dietary fact was dropped: {predicates:?}"
+        );
+        assert!(
+            predicates.contains(&"preference") || predicates.contains(&"venue_preference"),
+            "the venue preference was dropped: {predicates:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn overlapping_openers_yield_one_fact_not_two() {
+        let observations = extract("I am allergic to nuts").await;
+        assert_eq!(
+            observations.len(),
+            1,
+            "the same clause was captured twice: {:?}",
+            observations
+                .iter()
+                .map(|o| (o.predicate.to_string(), o.value.display()))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_clause_value_stops_at_the_conjunction() {
+        let observations = extract("I am pescatarian and I prefer quiet places").await;
+        let dietary = observations
+            .iter()
+            .find(|o| o.predicate.as_str() == "dietary_identity")
+            .expect("dietary fact");
+        assert_eq!(
+            dietary.canonical_statement, "The user is pescatarian.",
+            "the value swallowed the following clause"
+        );
     }
 
     struct Hangs;

@@ -129,9 +129,13 @@ impl MemorySelector {
                 memory.fingerprint().subject_predicate() == prefix.as_str()
             }
             Self::ByTopic(topic) => {
+                // Word-sequence matching, not substring: deletion is
+                // irreversible, topics are often a single short word, and
+                // `contains` would let "forget art" delete a memory about a
+                // shopping cart.
                 let needle = normalize_token(topic);
                 !needle.is_empty()
-                    && (normalize_token(&memory.statement).contains(&needle)
+                    && (contains_word_sequence(&normalize_token(&memory.statement), &needle)
                         || memory
                             .retrieval
                             .tags
@@ -140,6 +144,18 @@ impl MemorySelector {
             }
         }
     }
+}
+
+/// Whether `needle` occurs in `haystack` as a whole word sequence.
+///
+/// Both arguments must already be normalized.
+fn contains_word_sequence(haystack: &str, needle: &str) -> bool {
+    let hay: Vec<&str> = haystack.split_whitespace().collect();
+    let ned: Vec<&str> = needle.split_whitespace().collect();
+    if ned.is_empty() || ned.len() > hay.len() {
+        return false;
+    }
+    hay.windows(ned.len()).any(|w| w == ned.as_slice())
 }
 
 /// What resolution decided to do with a proposal.
@@ -285,6 +301,19 @@ mod tests {
         assert!(MemorySelector::ByTopic("pescatarian".into()).matches(&record));
         assert!(MemorySelector::ByTopic("diet".into()).matches(&record));
         assert!(!MemorySelector::ByTopic("cycling".into()).matches(&record));
+    }
+
+    #[test]
+    fn a_topic_matches_whole_words_only() {
+        // "forget art" must not delete a memory about a shopping cart.
+        let cart = memory("mem_cart", "The user left items in the cart.", &[]);
+        assert!(!MemorySelector::ByTopic("art".into()).matches(&cart));
+        assert!(MemorySelector::ByTopic("cart".into()).matches(&cart));
+
+        // Multi-word topics still match as a sequence.
+        let dinner = memory("mem_d", "The user enjoyed the quiet dinner in Bandra.", &[]);
+        assert!(MemorySelector::ByTopic("quiet dinner".into()).matches(&dinner));
+        assert!(!MemorySelector::ByTopic("dinner quiet".into()).matches(&dinner));
     }
 
     #[test]
