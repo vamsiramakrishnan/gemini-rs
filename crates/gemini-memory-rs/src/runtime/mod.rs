@@ -32,8 +32,17 @@
 pub mod control;
 pub mod events;
 pub mod keys;
+#[cfg(feature = "fluent")]
+pub mod live;
 pub mod tools;
+pub mod turn_extractor;
 
 pub use control::{run_memory_control_loop, snapshot_for_turn};
 pub use events::{channel, MemoryEventSender, MemoryRuntimeEvent, DEFAULT_CHANNEL_DEPTH};
-pub use tools::{manage_memory_tool, recall_context_tool, MANAGE_TOOL, RECALL_TOOL};
+#[cfg(feature = "fluent")]
+pub use live::{memory_tools, LiveMemoryExt, MemoryInstallation};
+pub use tools::{
+    manage_memory_tool, recall_context_tool, ManageArgs, RecallArgs, RecallScope, MANAGE_TOOL,
+    RECALL_TOOL,
+};
+pub use turn_extractor::{MemoryTurnExtractor, MEMORY_EXTRACTOR_NAME};

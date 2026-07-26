@@ -91,6 +91,8 @@ pub struct ReconciliationSelector {
     pub fingerprint: Option<FactFingerprint>,
     /// `subject|predicate` prefix match — the contradiction window.
     pub subject_predicate: Option<String>,
+    /// Subject match — the wider window used to catch predicate drift.
+    pub subject: Option<String>,
     /// Predicate match.
     pub predicate: Option<CanonicalPredicate>,
     /// Restrict to these kinds; empty means any.
@@ -120,6 +122,19 @@ impl ReconciliationSelector {
         }
     }
 
+    /// Look for anything asserted about the same subject, whatever the
+    /// predicate is called.
+    ///
+    /// Extraction models rename predicates between sessions; this is the window
+    /// that lets reconciliation notice the same fact wearing a different name.
+    pub fn by_subject(subject: impl Into<String>) -> Self {
+        Self {
+            subject: Some(subject.into()),
+            limit: 40,
+            ..Default::default()
+        }
+    }
+
     fn matches(&self, memory: &CanonicalMemory) -> bool {
         let status_ok = if self.statuses.is_empty() {
             memory.status == MemoryStatus::Active
@@ -139,6 +154,11 @@ impl ReconciliationSelector {
         }
         if let Some(prefix) = &self.subject_predicate {
             if memory.fingerprint().subject_predicate() != prefix {
+                return false;
+            }
+        }
+        if let Some(subject) = &self.subject {
+            if memory.fingerprint().subject() != subject.as_str() {
                 return false;
             }
         }

@@ -307,6 +307,30 @@ impl LocalMemoryRetriever {
         }
     }
 
+    /// Answer a query directly, restricted to certain memory kinds.
+    ///
+    /// The prepared-snapshot shortcut is deliberately bypassed when a scope is
+    /// given: the snapshot was built speculatively and knows nothing about the
+    /// restriction the model asked for, so serving it would answer a different
+    /// question quickly.
+    pub async fn retrieve_scoped(
+        &self,
+        query: &str,
+        turn_id: TurnId,
+        budget: RetrievalBudget,
+        kinds: Vec<crate::core::MemoryKind>,
+    ) -> Result<PreparedMemorySnapshot, MemoryError> {
+        let now = Utc::now();
+        let plan = RetrievalPlan {
+            requires_memory: true,
+            lexical_queries: vec![query.to_string()],
+            scopes: kinds,
+            ..RetrievalPlan::skip(turn_id, 0, query)
+        }
+        .normalized();
+        Ok(self.execute(&plan, budget, now).await)
+    }
+
     /// Drop canonical candidates the session has superseded in conversation.
     fn drop_suppressed(&self, candidates: &mut Vec<FusedCandidate>) {
         let suppressed = self.suppressed.read();
@@ -394,14 +418,8 @@ impl MemoryRetriever for LocalMemoryRetriever {
         turn_id: TurnId,
         budget: RetrievalBudget,
     ) -> Result<PreparedMemorySnapshot, MemoryError> {
-        let now = Utc::now();
-        let plan = RetrievalPlan {
-            requires_memory: true,
-            lexical_queries: vec![query.to_string()],
-            ..RetrievalPlan::skip(turn_id, 0, query)
-        }
-        .normalized();
-        Ok(self.execute(&plan, budget, now).await)
+        self.retrieve_scoped(query, turn_id, budget, Vec::new())
+            .await
     }
 }
 

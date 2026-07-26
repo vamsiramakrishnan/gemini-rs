@@ -69,6 +69,8 @@ pub mod core;
 pub mod engine;
 pub mod evals;
 pub mod ingestion;
+#[cfg(feature = "gemini-llm")]
+pub mod llm;
 pub mod okf;
 pub mod reconcile;
 pub mod retrieval;

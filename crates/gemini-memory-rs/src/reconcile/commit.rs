@@ -95,7 +95,7 @@ impl MemoryCommitter {
             // The candidate window is the subject-and-predicate neighbourhood,
             // not the whole corpus: reconciliation compares a proposal against
             // what could plausibly be the same fact, and nothing else.
-            let window = self
+            let mut window = self
                 .repository
                 .find_candidates(
                     owner,
@@ -104,6 +104,25 @@ impl MemoryCommitter {
                     ),
                 )
                 .await?;
+
+            // §22.1 step 3: widen before concluding a proposal is novel.
+            // Restricting the window to an exact predicate match means a
+            // renamed predicate looks like a brand-new fact, and the corpus
+            // grows a duplicate every session. Widening by subject is cheaper
+            // and more exact than a lexical search at this corpus size, and
+            // the resolver does the discrimination.
+            let wider = self
+                .repository
+                .find_candidates(
+                    owner,
+                    &ReconciliationSelector::by_subject(proposal.fingerprint.subject().to_string()),
+                )
+                .await?;
+            for candidate in wider {
+                if !window.iter().any(|m| m.id == candidate.id) {
+                    window.push(candidate);
+                }
+            }
 
             let resolved = resolver.resolve(proposal, &window, now);
             report.record(resolved.kind);

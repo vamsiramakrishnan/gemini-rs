@@ -127,6 +127,13 @@ pub struct IngestionConfig {
     /// Extract observations after every finalized user turn.
     pub extract_after_each_final_user_turn: bool,
     /// Soft deadline for observation extraction.
+    ///
+    /// The design proposed 2000ms. Measured against `gemini-2.5-flash` with a
+    /// constrained-decode schema, a single-utterance extraction takes ~1.9s at
+    /// the median — so a 2s deadline fires on roughly half of all turns and
+    /// silently discards their evidence. The default carries real headroom
+    /// instead; extraction is off the response path, so a slower deadline costs
+    /// nothing a user can perceive.
     pub extraction_soft_timeout_ms: u64,
     /// Apply explicit memory commands to the session overlay immediately.
     pub explicit_mutations_immediate: bool,
@@ -138,7 +145,7 @@ impl Default for IngestionConfig {
     fn default() -> Self {
         Self {
             extract_after_each_final_user_turn: true,
-            extraction_soft_timeout_ms: 2000,
+            extraction_soft_timeout_ms: 8000,
             explicit_mutations_immediate: true,
             minimum_observation_confidence: 0.35,
         }

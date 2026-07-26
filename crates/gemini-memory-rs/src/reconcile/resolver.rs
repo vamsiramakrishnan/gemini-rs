@@ -57,7 +57,18 @@ impl Resolver {
             return self.reinforce(same, &proposal, now);
         }
 
-        // 2. Nothing else claims this subject and predicate.
+        // 2. The same fact under a different predicate name.
+        //
+        // Extraction models are not consistent about naming: the same routine
+        // came back as `has_routine` in one session and
+        // `goes_to_gym_before_work` in the next. Fingerprints therefore diverge
+        // and, without this, the corpus accumulates a duplicate per session.
+        // Same subject and same value is the same fact, whatever it was called.
+        if let Some(equivalent) = active.iter().find(|m| is_same_fact_renamed(&proposal, m)) {
+            return self.reinforce(equivalent, &proposal, now);
+        }
+
+        // 3. Nothing else claims this subject and predicate.
         let competing: Vec<&&CanonicalMemory> = active
             .iter()
             .filter(|m| {
@@ -79,17 +90,17 @@ impl Resolver {
             })
             .expect("non-empty");
 
-        // 3. An inference may not overrule something the user said outright.
+        // 4. An inference may not overrule something the user said outright.
         if !proposal.explicitness.is_explicit() && incumbent.source.is_explicit() {
             return ResolvedMutation::discard(fingerprint, DiscardReason::InsufficientEvidence);
         }
 
-        // 4. A more precise restatement of a compatible fact refines it.
+        // 5. A more precise restatement of a compatible fact refines it.
         if is_refinement(&proposal, incumbent) {
             return self.refine(incumbent, proposal, now);
         }
 
-        // 5. Otherwise this contradicts the incumbent and replaces it.
+        // 6. Otherwise this contradicts the incumbent and replaces it.
         self.supersede(incumbent, proposal, now)
     }
 
@@ -223,6 +234,30 @@ impl Resolver {
     }
 }
 
+/// Whether two records assert the same fact under different predicate names.
+///
+/// Requires the subject *and* the value to agree; a shared value under a
+/// different subject ("Rhea is vegetarian" vs "the user is vegetarian") is two
+/// facts, not one.
+fn is_same_fact_renamed(proposal: &ProposedMemory, existing: &CanonicalMemory) -> bool {
+    if proposal.predicate == existing.predicate {
+        return false;
+    }
+    if normalize_token(&proposal.subject.display) != normalize_token(&existing.subject.display) {
+        return false;
+    }
+    if proposal.qualifier != existing.qualifier {
+        return false;
+    }
+    let new_value = proposal.value.normalized();
+    let old_value = existing.value.normalized();
+    if new_value.is_empty() || old_value.is_empty() {
+        return false;
+    }
+    new_value == old_value
+        || normalize_token(&proposal.statement) == normalize_token(&existing.statement)
+}
+
 /// Whether the proposal says the same thing as the incumbent, more precisely.
 ///
 /// The test is lexical containment in either direction: "avoids meat" versus
@@ -352,6 +387,41 @@ mod tests {
 
     fn resolver() -> Resolver {
         Resolver::new(UserId::new("usr_1"))
+    }
+
+    #[test]
+    fn the_same_fact_under_a_renamed_predicate_reinforces() {
+        let incumbent = existing("mem_a", "morning gym", Explicitness::ExplicitStatement);
+        let mut renamed = proposal("morning gym", Explicitness::ExplicitStatement);
+        renamed.predicate = CanonicalPredicate::new("goes_to_gym_before_work");
+        renamed.fingerprint = crate::core::FactFingerprint::new(
+            &renamed.subject,
+            &renamed.predicate,
+            &renamed.value,
+            renamed.temporal_scope,
+        );
+
+        let resolved = resolver().resolve(renamed, std::slice::from_ref(&incumbent), Utc::now());
+        assert_eq!(resolved.kind, ResolutionKind::Reinforce);
+        assert_eq!(resolved.writes[0].id, incumbent.id, "identity is preserved");
+    }
+
+    #[test]
+    fn a_renamed_predicate_about_a_different_subject_is_a_different_fact() {
+        let incumbent = existing("mem_a", "morning gym", Explicitness::ExplicitStatement);
+        let mut other = proposal("morning gym", Explicitness::ExplicitStatement);
+        other.predicate = CanonicalPredicate::new("goes_to_gym_before_work");
+        other.subject = EntityRef::named("Rhea");
+        other.statement = "Rhea goes to the gym before work.".into();
+        other.fingerprint = crate::core::FactFingerprint::new(
+            &other.subject,
+            &other.predicate,
+            &other.value,
+            other.temporal_scope,
+        );
+
+        let resolved = resolver().resolve(other, std::slice::from_ref(&incumbent), Utc::now());
+        assert_eq!(resolved.kind, ResolutionKind::Create);
     }
 
     #[test]

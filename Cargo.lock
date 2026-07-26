@@ -1398,6 +1398,7 @@ version = "0.8.0"
 dependencies = [
  "async-trait",
  "chrono",
+ "gemini-adk-fluent-rs",
  "gemini-adk-rs",
  "gemini-genai-rs",
  "parking_lot",

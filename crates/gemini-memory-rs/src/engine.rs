@@ -335,6 +335,31 @@ impl MemorySession {
         }
     }
 
+    /// Serve a `recall_context` tool call restricted to a scope.
+    ///
+    /// An unrestricted recall may be answered from the frozen snapshot; a
+    /// scoped one always runs a live local search, because the snapshot was
+    /// prepared without knowing the restriction.
+    pub async fn recall_scoped(
+        &self,
+        query: &str,
+        turn_id: TurnId,
+        scope: crate::runtime::tools::RecallScope,
+    ) -> serde_json::Value {
+        let kinds = scope.kinds();
+        if kinds.is_empty() {
+            return self.recall(query, turn_id).await;
+        }
+        match self
+            .retriever
+            .retrieve_scoped(query, turn_id, RetrievalBudget::interactive(), kinds)
+            .await
+        {
+            Ok(snapshot) => snapshot.to_tool_payload(),
+            Err(_) => PreparedMemorySnapshot::empty(turn_id).to_tool_payload(),
+        }
+    }
+
     /// Record a finalized user turn: durable evidence, then extraction.
     ///
     /// The transcript event is appended before extraction runs, so a crash
@@ -354,7 +379,7 @@ impl MemorySession {
             )
             .await?;
 
-        let observations = self
+        let observations = match self
             .observation_extractor
             .extract(ObservationExtractionContext::user_turn(
                 transcript,
@@ -363,10 +388,29 @@ impl MemorySession {
                 Utc::now(),
             ))
             .await
-            .unwrap_or_default();
+        {
+            Ok(observations) => observations,
+            Err(error) => {
+                // Degrade — a failed extraction must never fail the turn — but
+                // record it. Silently returning nothing makes a broken
+                // extractor indistinguishable from a quiet conversation.
+                let _ = self
+                    .events
+                    .append(
+                        Some(turn_id),
+                        MemoryEvent::ExtractionFailed {
+                            stage: "observation".to_string(),
+                            reason: error.to_string(),
+                        },
+                    )
+                    .await;
+                Vec::new()
+            }
+        };
 
         let mut outcomes = Vec::new();
         for observation in observations {
+            let fingerprint = observation.fingerprint();
             if let Some(intent) = observation.mutation_intent {
                 self.events
                     .append(
@@ -380,17 +424,14 @@ impl MemorySession {
             }
             let outcome = self.ledger.append_observation(observation).await?;
             if let LedgerOutcome::Rejected(reason) = &outcome {
+                // The real fingerprint, so the audit trail names the fact that
+                // was refused rather than a placeholder.
                 let _ = self
                     .events
                     .append(
                         Some(turn_id),
                         MemoryEvent::ObservationRejected {
-                            fingerprint: crate::core::FactFingerprint::new(
-                                &crate::core::EntityRef::user(),
-                                &crate::core::CanonicalPredicate::new("rejected"),
-                                &crate::core::MemoryValue::Text(String::new()),
-                                crate::core::TemporalScope::Persistent,
-                            ),
+                            fingerprint: fingerprint.clone(),
                             reason: *reason,
                         },
                     )

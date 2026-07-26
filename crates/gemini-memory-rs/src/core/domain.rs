@@ -397,6 +397,11 @@ impl FactFingerprint {
         &self.0
     }
 
+    /// The subject alone, used to widen the reconciliation candidate window.
+    pub fn subject(&self) -> &str {
+        self.0.split('|').next().unwrap_or(&self.0)
+    }
+
     /// The subject-and-predicate prefix, used to find contradiction candidates.
     pub fn subject_predicate(&self) -> &str {
         let mut parts = self.0.match_indices('|');
@@ -782,6 +787,17 @@ mod tests {
         );
         assert_eq!(a, b);
         assert_eq!(a.as_str(), "user|dietary_identity|pescatarian");
+    }
+
+    #[test]
+    fn fingerprints_expose_their_subject() {
+        let fp = FactFingerprint::new(
+            &EntityRef::named("Rhea"),
+            &CanonicalPredicate::new("venue_preference"),
+            &MemoryValue::Text("quiet".into()),
+            TemporalScope::Persistent,
+        );
+        assert_eq!(fp.subject(), "rhea");
     }
 
     #[test]

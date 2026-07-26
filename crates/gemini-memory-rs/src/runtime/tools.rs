@@ -4,14 +4,22 @@
 //! context, for three reasons: the model's use of a memory is visible in the
 //! transcript, retrieved text is unambiguously data rather than instruction,
 //! and nothing is spent on turns that never needed memory at all.
+//!
+//! Both are [`TypedTool`]s over argument structs, so the JSON Schema the model
+//! is constrained by is generated from the types the handler actually decodes.
+//! `manage_memory`'s `operation` is the domain's own [`MutationIntent`], which
+//! means the tool contract and the ledger cannot disagree about what operations
+//! exist.
 
 use std::sync::Arc;
 
 use gemini_adk_rs::error::ToolError;
-use gemini_adk_rs::tool::SimpleTool;
+use gemini_adk_rs::tool::TypedTool;
+use schemars::JsonSchema;
+use serde::Deserialize;
 use serde_json::json;
 
-use crate::core::{MutationIntent, TurnId};
+use crate::core::{MemoryKind, MutationIntent, TurnId};
 use crate::engine::MemorySession;
 
 /// The recall tool's name.
@@ -33,123 +41,98 @@ pub const MANAGE_DESCRIPTION: &str = "Use ONLY when the user explicitly asks you
 correct, forget or delete something about them, or asks what you remember. Never call this to \
 store something the user did not ask you to store.";
 
-/// JSON Schema for `recall_context`.
-pub fn recall_parameters() -> serde_json::Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "query": {
-                "type": "string",
-                "description": "What to look for, in the user's own terms.",
-            },
-            "scope": {
-                "type": "string",
-                "enum": ["recent", "persistent", "all"],
-                "description": "Restrict to recent events, durable facts, or both.",
-            },
-        },
-        "required": ["query"],
-    })
+/// Which slice of memory a recall should search.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RecallScope {
+    /// Recent events and commitments only.
+    Recent,
+    /// Durable facts only — preferences, relationships, identity, routines.
+    Persistent,
+    /// Everything.
+    #[default]
+    All,
 }
 
-/// JSON Schema for `manage_memory`.
-pub fn manage_parameters() -> serde_json::Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "operation": {
-                "type": "string",
-                "enum": ["remember", "correct", "forget", "delete", "list"],
-            },
-            "statement": {
-                "type": "string",
-                "description": "What to remember, correct or forget, as the user put it.",
-            },
-        },
-        "required": ["operation"],
-    })
+impl RecallScope {
+    /// The memory kinds this scope admits; empty means no restriction.
+    pub fn kinds(self) -> Vec<MemoryKind> {
+        match self {
+            Self::All => Vec::new(),
+            Self::Recent => vec![MemoryKind::Episodic, MemoryKind::Commitment],
+            Self::Persistent => vec![
+                MemoryKind::Identity,
+                MemoryKind::Preference,
+                MemoryKind::Relationship,
+                MemoryKind::RelationshipPreference,
+                MemoryKind::Routine,
+                MemoryKind::CommunicationStyle,
+                MemoryKind::LocationPreference,
+            ],
+        }
+    }
+}
+
+/// Arguments to `recall_context`.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct RecallArgs {
+    /// What to look for, in the user's own terms.
+    pub query: String,
+    /// Restrict to recent events, durable facts, or both.
+    #[serde(default)]
+    pub scope: RecallScope,
+}
+
+/// Arguments to `manage_memory`.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ManageArgs {
+    /// What the user asked for.
+    pub operation: MutationIntent,
+    /// What to remember, correct or forget, as the user put it.
+    #[serde(default)]
+    pub statement: Option<String>,
 }
 
 /// Build the `recall_context` tool for a session.
 ///
 /// The handler is a state read on the happy path: by the time the model asks,
 /// the answer was prepared while it was speaking.
-pub fn recall_context_tool(session: Arc<MemorySession>) -> SimpleTool {
-    SimpleTool::new(
-        RECALL_TOOL,
-        RECALL_DESCRIPTION,
-        Some(recall_parameters()),
-        move |args: serde_json::Value| {
-            let session = session.clone();
-            async move {
-                let query = args
-                    .get("query")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default()
-                    .to_string();
-                if query.trim().is_empty() {
-                    return Ok(json!({ "status": "not_found", "facts": [] }));
-                }
-                let turn = current_turn(&session);
-                Ok(session.recall(&query, turn).await)
+pub fn recall_context_tool(session: Arc<MemorySession>) -> TypedTool<RecallArgs> {
+    TypedTool::new(RECALL_TOOL, RECALL_DESCRIPTION, move |args: RecallArgs| {
+        let session = session.clone();
+        async move {
+            if args.query.trim().is_empty() {
+                return Ok(json!({ "status": "not_found", "facts": [] }));
             }
-        },
-    )
+            let turn = current_turn(&session);
+            Ok(session.recall_scoped(&args.query, turn, args.scope).await)
+        }
+    })
 }
 
 /// Build the `manage_memory` tool for a session.
-pub fn manage_memory_tool(session: Arc<MemorySession>) -> SimpleTool {
-    SimpleTool::new(
-        MANAGE_TOOL,
-        MANAGE_DESCRIPTION,
-        Some(manage_parameters()),
-        move |args: serde_json::Value| {
-            let session = session.clone();
-            async move {
-                let operation = args
-                    .get("operation")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default();
-                let Some(intent) = parse_operation(operation) else {
-                    return Err(ToolError::InvalidArgs(format!(
-                        "unknown memory operation `{operation}`"
-                    )));
-                };
-                let statement = args
-                    .get("statement")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default()
-                    .trim()
-                    .to_string();
+pub fn manage_memory_tool(session: Arc<MemorySession>) -> TypedTool<ManageArgs> {
+    TypedTool::new(MANAGE_TOOL, MANAGE_DESCRIPTION, move |args: ManageArgs| {
+        let session = session.clone();
+        async move {
+            let statement = args.statement.unwrap_or_default().trim().to_string();
 
-                // Every operation but `list` needs something to act on, and
-                // guessing at a deletion target is not recoverable.
-                if statement.is_empty() && intent != MutationIntent::List {
-                    return Ok(json!({
-                        "status": "needs_clarification",
-                        "operation": operation,
-                        "message": "Ask the user what specifically to act on.",
-                    }));
-                }
-
-                let turn = current_turn(&session);
-                session
-                    .apply_explicit_command(intent, &statement, turn)
-                    .await
-                    .map_err(|e| ToolError::ExecutionFailed(e.to_string()))
+            // Every operation but `list` needs something to act on, and
+            // guessing at a deletion target is not recoverable.
+            if statement.is_empty() && args.operation != MutationIntent::List {
+                return Ok(json!({
+                    "status": "needs_clarification",
+                    "operation": args.operation,
+                    "message": "Ask the user what specifically to act on.",
+                }));
             }
-        },
-    )
-}
 
-fn parse_operation(raw: &str) -> Option<MutationIntent> {
-    Some(match raw {
-        "remember" => MutationIntent::Remember,
-        "correct" => MutationIntent::Correct,
-        "forget" => MutationIntent::Forget,
-        "delete" => MutationIntent::Delete,
-        "list" => MutationIntent::List,
-        _ => return None,
+            let turn = current_turn(&session);
+            session
+                .apply_explicit_command(args.operation, &statement, turn)
+                .await
+                .map_err(|e| ToolError::ExecutionFailed(e.to_string()))
+        }
     })
 }
 
@@ -173,6 +156,10 @@ mod tests {
             .await
             .unwrap();
         session
+            .observe_final_transcript(TurnId(2), "I am meeting Kushal for dinner tonight")
+            .await
+            .unwrap();
+        session
     }
 
     #[tokio::test]
@@ -187,6 +174,33 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("pescatarian"));
+    }
+
+    #[tokio::test]
+    async fn scope_restricts_which_kinds_can_come_back() {
+        let tool = recall_context_tool(session().await);
+
+        let recent = tool
+            .call(json!({ "query": "dinner pescatarian", "scope": "recent" }))
+            .await
+            .unwrap();
+        assert!(
+            !recent.to_string().contains("pescatarian"),
+            "a durable preference leaked into a recent-only recall: {recent}"
+        );
+
+        let persistent = tool
+            .call(json!({ "query": "dinner pescatarian", "scope": "persistent" }))
+            .await
+            .unwrap();
+        assert!(persistent.to_string().contains("pescatarian"));
+    }
+
+    #[tokio::test]
+    async fn an_omitted_scope_searches_everything() {
+        let tool = recall_context_tool(session().await);
+        let result = tool.call(json!({ "query": "pescatarian" })).await.unwrap();
+        assert_eq!(result["status"], "found");
     }
 
     #[tokio::test]
@@ -206,14 +220,18 @@ mod tests {
             tool.call(json!({ "query": "   " })).await.unwrap()["status"],
             "not_found"
         );
-        assert_eq!(tool.call(json!({})).await.unwrap()["status"], "not_found");
+    }
+
+    #[tokio::test]
+    async fn a_missing_required_argument_is_a_tool_error() {
+        let tool = recall_context_tool(session().await);
+        assert!(tool.call(json!({})).await.is_err());
     }
 
     #[tokio::test]
     async fn an_explicit_remember_takes_effect_in_session_and_commits_later() {
         let session = session().await;
-        let tool = manage_memory_tool(session.clone());
-        let result = tool
+        let result = manage_memory_tool(session.clone())
             .call(json!({
                 "operation": "remember",
                 "statement": "The user is allergic to shellfish."
@@ -225,7 +243,6 @@ mod tests {
         assert_eq!(result["effective_in_session"], true);
         assert_eq!(result["durable_commit"], "pending");
 
-        // And it is immediately retrievable.
         let recall = recall_context_tool(session)
             .call(json!({ "query": "allergic shellfish" }))
             .await
@@ -248,15 +265,12 @@ mod tests {
     #[tokio::test]
     async fn an_unnamed_deletion_target_asks_rather_than_guesses() {
         let tool = manage_memory_tool(session().await);
-        let result = tool
-            .call(json!({ "operation": "forget", "statement": "" }))
-            .await
-            .unwrap();
+        let result = tool.call(json!({ "operation": "forget" })).await.unwrap();
         assert_eq!(result["status"], "needs_clarification");
     }
 
     #[tokio::test]
-    async fn an_unknown_operation_is_a_tool_error() {
+    async fn an_operation_outside_the_schema_is_a_tool_error() {
         let tool = manage_memory_tool(session().await);
         assert!(tool
             .call(json!({ "operation": "obliterate" }))
@@ -264,11 +278,40 @@ mod tests {
             .is_err());
     }
 
+    #[tokio::test]
+    async fn the_generated_schemas_match_the_handlers() {
+        let schema = recall_context_tool(session().await)
+            .parameters()
+            .expect("recall has parameters");
+        assert!(schema["properties"]["query"].is_object());
+        assert!(schema["properties"]["scope"].is_object());
+
+        // The operation enum is the domain's, so the tool contract and the
+        // ledger cannot disagree about what operations exist.
+        let rendered = manage_memory_tool(session().await)
+            .parameters()
+            .expect("manage has parameters")
+            .to_string();
+        for operation in ["remember", "correct", "forget", "delete", "list"] {
+            assert!(rendered.contains(operation), "schema omits `{operation}`");
+        }
+    }
+
     #[test]
     fn the_tool_descriptions_steer_away_from_indiscriminate_calls() {
         assert!(RECALL_DESCRIPTION.contains("Do not use for"));
         assert!(MANAGE_DESCRIPTION.contains("ONLY when the user explicitly asks"));
-        assert_eq!(recall_parameters()["required"][0], "query");
-        assert_eq!(manage_parameters()["required"][0], "operation");
+    }
+
+    #[test]
+    fn recall_scopes_partition_durable_from_episodic() {
+        assert!(RecallScope::All.kinds().is_empty());
+        assert!(RecallScope::Recent.kinds().contains(&MemoryKind::Episodic));
+        assert!(RecallScope::Persistent
+            .kinds()
+            .contains(&MemoryKind::Preference));
+        assert!(!RecallScope::Persistent
+            .kinds()
+            .contains(&MemoryKind::Episodic));
     }
 }

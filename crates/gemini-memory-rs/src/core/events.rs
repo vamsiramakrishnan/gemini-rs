@@ -28,6 +28,17 @@ pub enum MemoryEvent {
         /// The observation.
         observation: Box<MemoryObservation>,
     },
+    /// An extraction attempt failed outright.
+    ///
+    /// Distinct from "the turn revealed nothing": a systematically failing
+    /// extractor and a quiet conversation look identical from the ledger, and
+    /// only this event tells them apart.
+    ExtractionFailed {
+        /// Which extraction stage failed.
+        stage: String,
+        /// Why.
+        reason: String,
+    },
     /// An observation was refused by policy.
     ObservationRejected {
         /// Fingerprint of the refused candidate, for auditing.
@@ -110,6 +121,7 @@ impl MemoryEvent {
         match self {
             Self::FinalTranscriptRecorded { .. } => "final_transcript_recorded",
             Self::ObservationExtracted { .. } => "observation_extracted",
+            Self::ExtractionFailed { .. } => "extraction_failed",
             Self::ObservationRejected { .. } => "observation_rejected",
             Self::SessionCandidateMerged { .. } => "session_candidate_merged",
             Self::SessionOverlayUpdated { .. } => "session_overlay_updated",

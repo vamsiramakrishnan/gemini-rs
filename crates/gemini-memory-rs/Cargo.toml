@@ -13,6 +13,7 @@ readme = "README.md"
 [dependencies]
 gemini-genai-rs = { workspace = true }
 gemini-adk-rs = { workspace = true }
+gemini-adk-fluent-rs = { workspace = true, optional = true }
 async-trait = "0.1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
 parking_lot = "0.12"
@@ -25,6 +26,15 @@ uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
+gemini-adk-fluent-rs = { workspace = true }
+
+[features]
+default = ["fluent"]
+# One-call installation onto the L2 `Live` builder.
+fluent = ["dep:gemini-adk-fluent-rs"]
+# Model-backed extraction: the retrieval-plan and observation extractors,
+# backed by a Gemini model over HTTP.
+gemini-llm = ["gemini-adk-rs/gemini-llm"]
 
 [lints]
 workspace = true
