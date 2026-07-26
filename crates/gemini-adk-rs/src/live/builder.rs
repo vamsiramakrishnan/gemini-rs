@@ -552,7 +552,7 @@ pub(crate) async fn spawn_lanes(rt: SessionRuntime) -> Result<LiveHandle, AgentE
 
     // Spawn fast + control lanes (no session_signals, no transcript mutex)
     let greeting_writer = rt.user_writer.clone();
-    let (fast_handle, ctrl_handle) = spawn_event_processor(
+    let (fast_handle, ctrl_handle, ctrl_tx) = spawn_event_processor(
         rt.event_rx,
         rt.callbacks,
         rt.dispatcher,
@@ -634,7 +634,8 @@ pub(crate) async fn spawn_lanes(rt: SessionRuntime) -> Result<LiveHandle, AgentE
         rt.flow_monitor,
         rt.background_tracker,
         rt.telem_cancel,
-    ))
+    )
+    .with_control_sender(ctrl_tx))
 }
 
 #[cfg(test)]

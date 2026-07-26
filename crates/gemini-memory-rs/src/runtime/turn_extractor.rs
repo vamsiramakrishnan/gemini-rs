@@ -10,11 +10,11 @@
 //! merely present. A remembered fact projected into a `State` slot is read by
 //! everything the platform already has:
 //!
-//! - `phase.needs(&["user.diet"])` — satisfied from memory, so a returning user
+//! - `phase.needs(&["user:diet"])` — satisfied from memory, so a returning user
 //!   is not asked again for something they already said last week;
-//! - `phase.requires(&["user.diet"])` — a hard gate a memory can open;
-//! - `Flow` guards, `done(captured(["user.diet"]))`;
-//! - `P::with_state(&["user.diet"])` — the value in the phase instruction;
+//! - `phase.requires(&["user:diet"])` — a hard gate a memory can open;
+//! - `Flow` guards, `done(captured(["user:diet"]))`;
+//! - `P::with_state(&["user:diet"])` — the value in the phase instruction;
 //! - watchers and repair, which read the same keys.
 //!
 //! Each turn the extractor does three things: ingest the finalized utterance,
@@ -42,12 +42,24 @@ pub const MEMORY_EXTRACTOR_NAME: &str = "memory";
 pub struct MemorySlot {
     /// The canonical predicate to look for, e.g. `dietary_identity`.
     pub predicate: CanonicalPredicate,
-    /// The `State` key to fill, e.g. `user.diet`.
+    /// The `State` key to fill, e.g. `user:diet`.
     pub state_key: String,
 }
 
 impl MemorySlot {
     /// Map `predicate` onto `state_key`.
+    ///
+    /// Use the platform's `scope:key` convention — `user:diet`, not `user.diet`.
+    /// The gates themselves do not care: `needs`, `requires` and `Guard::is_set`
+    /// route through `State::contains`, which treats the key as an opaque
+    /// string. What the colon buys is composition with the prefix scopes, so
+    /// `state.user().get::<String>("diet")` finds the slot. A dotted key reads
+    /// back `None` there, silently, for a developer doing exactly what the
+    /// platform documentation says.
+    ///
+    /// `derived:` is the wrong home despite fitting semantically: its fallback
+    /// lives only in `get`/`with`, and `contains` has none — so a `derived:`
+    /// slot would be invisible to precisely the gates memory exists to satisfy.
     pub fn new(predicate: impl AsRef<str>, state_key: impl Into<String>) -> Self {
         Self {
             predicate: CanonicalPredicate::new(predicate),
@@ -281,7 +293,7 @@ mod tests {
     async fn a_remembered_fact_fills_the_slot_a_phase_gates_on() {
         let session = session();
         let extractor = MemoryTurnExtractor::new(session.clone())
-            .slots([MemorySlot::new("dietary_identity", "user.diet")]);
+            .slots([MemorySlot::new("dietary_identity", "user:diet")]);
         let state = State::new();
 
         extractor
@@ -289,9 +301,11 @@ mod tests {
             .await
             .unwrap();
 
-        // This is what `phase.needs(&["user.diet"])` and a `Flow` guard read.
+        // This is the key `phase.needs(..)` and a `Flow` guard read; that they
+        // really do read it is asserted against a driven `PhaseMachine` and
+        // `FlowMonitor` in `tests/governed_integration.rs`.
         assert_eq!(
-            state.get::<String>("user.diet").as_deref(),
+            state.get::<String>("user:diet").as_deref(),
             Some("pescatarian"),
             "memory did not fill the slot the application gates on"
         );
@@ -301,9 +315,9 @@ mod tests {
     async fn what_the_conversation_established_wins_over_what_memory_recalls() {
         let session = session();
         let extractor = MemoryTurnExtractor::new(session.clone())
-            .slots([MemorySlot::new("dietary_identity", "user.diet")]);
+            .slots([MemorySlot::new("dietary_identity", "user:diet")]);
         let state = State::new();
-        state.set("user.diet", "vegan").unwrap();
+        state.set("user:diet", "vegan").unwrap();
 
         extractor
             .extract_with_state(&[turn(1, "I am pescatarian")], &state)
@@ -311,7 +325,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            state.get::<String>("user.diet").as_deref(),
+            state.get::<String>("user:diet").as_deref(),
             Some("vegan"),
             "memory overwrote a slot the live conversation had already set"
         );
@@ -320,15 +334,15 @@ mod tests {
     #[tokio::test]
     async fn promotion_rules_are_declared_for_every_slot() {
         let extractor = MemoryTurnExtractor::new(session()).slots([
-            MemorySlot::new("dietary_identity", "user.diet"),
-            MemorySlot::new("venue_preference", "user.venue"),
+            MemorySlot::new("dietary_identity", "user:diet"),
+            MemorySlot::new("venue_preference", "user:venue"),
         ]);
         let keys: Vec<&str> = extractor
             .promotion_rules()
             .iter()
             .map(|r| r.state_key.as_str())
             .collect();
-        assert_eq!(keys, vec!["user.diet", "user.venue"]);
+        assert_eq!(keys, vec!["user:diet", "user:venue"]);
     }
 
     #[tokio::test]
