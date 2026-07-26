@@ -544,8 +544,7 @@ async fn what_reconciliation_does_at_the_end_of_a_conversation() {
 
 // ─── a hazard worth naming ──────────────────────────────────────────────────
 
-/// Two unrelated facts stated in one conversation, and only the second
-/// survives it.
+/// Two unrelated facts stated in one conversation both survive it.
 ///
 /// In-session micro-reconciliation resolves contradictions by keeping the
 /// newest explicit statement in each `subject|predicate` window and suppressing
@@ -560,16 +559,13 @@ async fn what_reconciliation_does_at_the_end_of_a_conversation() {
 /// from the conversation. The pottery class was recallable on turn 1 and gone
 /// by turn 2 — measured, not hypothesised.
 ///
-/// A model-backed extractor writes narrower predicates and collides less often,
-/// which makes this rarer rather than fixed: any two facts that legitimately
-/// share a predicate — two allergies, two children, two regular haunts — are
-/// still one window, and the older one still loses. The domain model already
-/// carries the field that would tell them apart (`CanonicalMemory::qualifier`,
-/// "context qualifier distinguishing coexisting facts"); what is missing is for
-/// the window rule to consult it, or to suppress only on a genuine value
-/// conflict rather than on a shared predicate.
+/// Collapse now applies only where the window is single-valued — a named
+/// attribute like `dietary_identity` holds one answer, so a second value
+/// contradicts the first — or where the user issued an explicit correction.
+/// `preference` and `routine` are the buckets an extractor falls back to when
+/// it could not say which attribute a fact concerns, and two values there are
+/// usually two facts.
 #[tokio::test]
-#[ignore = "known defect: unrelated facts sharing a predicate suppress each other in-session"]
 async fn two_unrelated_habits_in_one_conversation_both_survive_it() {
     let scratch = ScratchDir::new("scale-window");
     let engine = file_backed_engine("usr_window", scratch.path());

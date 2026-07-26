@@ -20,6 +20,7 @@ pub use extractor::{
 };
 pub use fusion::{reciprocal_rank_fusion, FusedCandidate, RRF_K};
 pub use plan::{limits, RetrievalEntity, RetrievalIntent, RetrievalPlan, TemporalConstraint};
+pub(crate) use retriever::non_topical_terms;
 pub use retriever::{
     IndexHandle, LocalMemoryRetriever, MemoryRetriever, RetrievalBudget, RetrievalRequest,
     SemanticFallback,

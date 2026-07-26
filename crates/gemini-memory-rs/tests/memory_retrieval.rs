@@ -271,10 +271,8 @@ async fn a_wrongly_narrowed_scope_hides_the_answer_rather_than_ranking_it_lower(
 // ─── a limitation worth naming ──────────────────────────────────────────────
 
 /// `recall_context` exists to recall context *about this user* — its own
-/// description says so. But a query naming no entity is searched exactly like
-/// one that does, so a bare topic word ranks by lexical match alone and records
-/// about other people can win it. Nothing says a memory lookup is about the
-/// user unless told.
+/// description says so. But a query naming no entity is searched like any
+/// other, so records about other people can take every slot.
 ///
 /// Not hypothetical: driving a live session, the model wrote a bare one-word
 /// query for a question asked in the first person, because the subject is
@@ -282,62 +280,47 @@ async fn a_wrongly_narrowed_scope_hides_the_answer_rather_than_ranking_it_lower(
 /// `max_per_predicate` (2) was filled by two of them, the user's own record
 /// never reached the model, and the model correctly said it did not know.
 ///
-/// The cost is asymmetric. A missing fact is a shrug; the same ranking with a
-/// less careful instruction is an assistant confidently naming someone else's
-/// barber, allergy or errand as yours.
+/// Measured against the 1,200-record corpus, this is **two problems wearing one
+/// name**, and neither is fixable by ranking:
 ///
-/// Two ways out, both ranking decisions rather than test fixes: make a query
-/// that names no subject prefer records whose subject is the user, or give
-/// subject agreement weight proportional to the lexical score instead of the
-/// flat `ENTITY_BASE` of 2.0 — worth ~6% against scores in the tens, and unable
-/// to move a record past a better lexical match.
+/// 1. *Vocabulary gap.* Asked for "hairdresser", the owner's record — which
+///    says **barber** — does not match at all, so it is never a candidate. No
+///    weighting can reorder a record that was not retrieved.
+/// 2. *Better lexical match wins.* Asked for "favourite restaurant", the
+///    spouse's record wins because its alias contains that exact phrase while
+///    the owner's does not. A subject preference large enough to overturn it is
+///    also large enough to answer "what does Rhea like" with the owner's own
+///    preferences.
+///
+/// A proportional subject-preference boost was built and reverted for that
+/// reason: it changed no measured outcome, and tuning it until this test passed
+/// would have been tuning to the fixture. Both cases are asking retrieval to
+/// know that *barber* and *hairdresser* are the same job, and that a question
+/// with no subject is about its owner — which is what the unimplemented
+/// `SemanticFallback` seam is for.
 #[tokio::test]
-#[ignore = "known limitation: a subject-less recall does not default to the user"]
+#[ignore = "needs semantic retrieval: see the note above — ranking cannot fix either half"]
 async fn a_subject_less_recall_does_not_default_to_the_user() {
-    use gemini_memory_rs::core::{EntityRef, MemoryKind};
-
-    let scratch = ScratchDir::new("corpus-subject");
-    let engine = file_backed_engine("usr_subject", scratch.path());
-    let owner = engine.user().clone();
-
-    let mut records = vec![corpus::make(
-        &owner,
-        "mem_mine",
-        MemoryKind::Preference,
-        "barber",
-        EntityRef::user(),
-        "The user's barber is Deepa at Tuloma Salon.",
-        &["barber", "haircut", "salon"],
-        &["who cuts my hair", "hairdresser"],
-    )];
-    for (i, (who, whose)) in [("Rhea", "Anisha"), ("Priya", "Kabini"), ("Devan", "Faraz")]
-        .iter()
-        .enumerate()
-    {
-        records.push(corpus::make(
-            &owner,
-            &format!("mem_theirs_{i}"),
-            MemoryKind::RelationshipPreference,
-            "barber",
-            EntityRef::named(*who),
-            &format!("{who}'s hairdresser is {whose}."),
-            &["barber", "haircut", "salon", "hairdresser", "hair"],
-            &[&format!("who cuts {who}'s hair")],
-        ));
-    }
-    corpus::install_records(&engine, records).await;
-
+    // Against the real corpus, not a hand-built handful: with four documents
+    // BM25's IDF for a near-universal term is ~0.1, everything falls below the
+    // score floor, and the test measures the fixture rather than the engine.
+    let (_scratch, engine) = seeded("corpus-subject").await;
     let session = session(&engine);
-    let facts = payload_statements(&session.recall("hairdresser", TurnId(1)).await);
 
-    assert!(
-        facts.first().is_some_and(|top| says(top, "deepa")),
-        "a recall that names nobody answered with someone else's hairdresser rather \
-         than the user's own: {facts:?}"
-    );
+    for (query, expect) in [
+        ("hairdresser", "deepa"),
+        ("favourite restaurant", "bellagrove"),
+    ] {
+        let facts = payload_statements(&session.recall(query, TurnId(1)).await);
+        assert!(
+            facts.first().is_some_and(|top| says(top, expect)),
+            "`{query}` names nobody, so it is about the owner — answered with \
+             someone else's instead: {facts:?}"
+        );
+    }
 }
 
-/// A correction the user was told had been applied, which was not.
+/// A correction the user is told has been applied is actually applied.
 ///
 /// `manage_memory(correct, …)` returns `{"status":"accepted",
 /// "effective_in_session":true}` and the assistant says so out loud. The
@@ -345,24 +328,21 @@ async fn a_subject_less_recall_does_not_default_to_the_user() {
 /// of the conversation — the engine suppresses the whole `subject|predicate`
 /// window so a correction cannot be answered with the thing just corrected.
 ///
-/// It is not hidden, because the two do not agree on a predicate. The rule-based
-/// command path names the fact from a small topic table and falls back to a bare
-/// `preference`, so the window it suppresses is `user|preference` while the
-/// record lives at `user|beverage_preference`. Nothing matches, nothing is
-/// suppressed, and the next recall returns the old value *and* the new one — two
-/// contradicting facts handed to a model that was told both are current.
+/// It was not, until this test existed. The two did not agree on a predicate:
+/// `explicit_observation` named every correction `preference` regardless of
+/// what it concerned, so the window suppressed was `user|preference` while the
+/// record lived at `user|beverage_preference`. Nothing matched, nothing was
+/// hidden, and the next recall returned the old value *and* the new one — two
+/// contradicting facts handed to a model told both were current.
 ///
-/// Observed end to end against the live API: asked for the coffee order, told
-/// "a cortado"; corrected to a doppio; the assistant replied "I've corrected
-/// that for you"; asked again, it said "a cortado".
+/// Observed end to end against the live API before the fix: asked for the
+/// coffee order, told "a cortado"; corrected to a doppio; the assistant replied
+/// "I've corrected that for you"; asked again, it said "a cortado".
 ///
-/// The engine already has the mechanism that prevents this — `known_predicates`
-/// exists so a correction lands on the predicate it is correcting, and the
-/// extraction prompt spends a paragraph on it — but the `manage_memory` path
-/// never consults it. Resolving the target window from the corpus before
-/// suppressing, rather than inventing a predicate from the text, is the fix.
+/// The fix resolves the target predicate from the corpus before building the
+/// observation — the same trick `known_predicates` plays for the extraction
+/// model, applied to the path that never asks a model anything.
 #[tokio::test]
-#[ignore = "known defect: an explicit correction does not suppress the record it corrects"]
 async fn an_explicit_correction_hides_the_record_it_corrects() {
     use gemini_memory_rs::core::MutationIntent;
 
@@ -400,9 +380,14 @@ async fn an_explicit_correction_hides_the_record_it_corrects() {
         after.iter().any(|s| says(s, "doppio")),
         "the corrected value is not being served: {after:?}"
     );
+    // The record itself, not the word. A correction that quotes what it
+    // replaces — "a doppio now, not a cortado" — is good context; the durable
+    // record still asserting the old value as current is not.
     assert!(
-        !after.iter().any(|s| says(s, "cortado")),
-        "the superseded value is still served alongside its own correction, one turn \
-         after the user was told the correction had been applied: {after:?}"
+        !after
+            .iter()
+            .any(|s| s.contains("usual coffee order is a cortado")),
+        "the superseded record is still served alongside its own correction, one \
+         turn after the user was told the correction had been applied: {after:?}"
     );
 }

@@ -588,6 +588,7 @@ impl MemorySession {
         let observation = explicit_observation(
             intent,
             statement,
+            self.resolve_target_predicate(intent, statement),
             self.session_id.clone(),
             turn_id,
             Utc::now(),
@@ -602,6 +603,51 @@ impl MemorySession {
             "effective_in_session": accepted,
             "durable_commit": "pending",
         }))
+    }
+
+    /// The predicate the corpus already uses for the fact a command is about.
+    ///
+    /// An explicit "remember that…" or "correct that…" arrives as a sentence,
+    /// not as a triple, and the fact it concerns already has a name in the
+    /// corpus. Finding that name is what makes the command land on the record
+    /// it means: reconciliation matches on `subject|predicate`, and so does the
+    /// in-session suppression that hides a durable fact the user has just
+    /// contradicted. A command filed under a predicate of its own supersedes
+    /// nothing and hides nothing — it becomes a second, contradicting record.
+    ///
+    /// This is the same trick `known_predicates` plays for the extraction
+    /// model, applied to the path that never asks a model anything: the
+    /// vocabulary comes from the corpus rather than from a constant.
+    ///
+    /// Deliberately conservative. A weak match is worse than no match, because
+    /// hijacking the wrong window suppresses a fact the user never mentioned, so
+    /// the hit has to clear the same score floor the assembler uses before its
+    /// predicate is adopted.
+    fn resolve_target_predicate(
+        &self,
+        intent: MutationIntent,
+        statement: &str,
+    ) -> Option<crate::core::CanonicalPredicate> {
+        use crate::bm25::Query;
+
+        // A deletion names what to remove, not a fact to restate, and it is
+        // routed by its own `memory_removal` predicate.
+        if matches!(
+            intent,
+            MutationIntent::Forget | MutationIntent::Delete | MutationIntent::List
+        ) {
+            return None;
+        }
+
+        let query = Query::new(statement)
+            .with_boost_only(crate::retrieval::non_topical_terms(statement))
+            .with_limit(1);
+        let canonical = self.canonical.read();
+        let hit = canonical.search(&query, Utc::now()).into_iter().next()?;
+        if hit.score < self.config.retrieval.minimum_candidate_score {
+            return None;
+        }
+        canonical.get(&hit.id).map(|doc| doc.predicate.clone())
     }
 
     /// The predicate names this user's corpus already uses.
@@ -754,6 +800,7 @@ impl MemorySession {
 fn explicit_observation(
     intent: MutationIntent,
     statement: &str,
+    target: Option<crate::core::CanonicalPredicate>,
     session_id: SessionId,
     turn_id: TurnId,
     now: chrono::DateTime<Utc>,
@@ -764,10 +811,22 @@ fn explicit_observation(
         TranscriptEvidence,
     };
 
+    // A correction has to land on the predicate of the fact it corrects.
+    //
+    // Reconciliation matches on `subject|predicate`, and so does the in-session
+    // suppression that hides a durable record the user has just contradicted.
+    // Naming the new fact `preference` regardless of what it is about — which
+    // is what this did — means the window suppressed (`user|preference`) is
+    // never the window the record lives in (`user|beverage_preference`), so the
+    // correction is accepted, reported as effective, and the next recall serves
+    // the old value alongside the new one. `target` is the predicate the corpus
+    // already uses for this fact, resolved before the observation is built.
     let predicate = match intent {
-        MutationIntent::Forget | MutationIntent::Delete => "memory_removal",
-        MutationIntent::List => "memory_listing",
-        _ => "preference",
+        MutationIntent::Forget | MutationIntent::Delete => "memory_removal".to_string(),
+        MutationIntent::List => "memory_listing".to_string(),
+        _ => target
+            .map(|p| p.as_str().to_string())
+            .unwrap_or_else(|| "preference".to_string()),
     };
 
     crate::core::MemoryObservation {
@@ -775,7 +834,7 @@ fn explicit_observation(
         session_id,
         turn_id,
         subject: EntityRef::user(),
-        predicate: CanonicalPredicate::new(predicate),
+        predicate: CanonicalPredicate::new(&predicate),
         value: MemoryValue::Text(statement.to_string()),
         canonical_statement: statement.to_string(),
         kind: MemoryKind::Preference,

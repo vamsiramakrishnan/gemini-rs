@@ -27,7 +27,7 @@ use crate::retrieval::deterministic::topical_terms;
 /// almost every record. They are excellent at saying whose memory to prefer and
 /// useless at saying which memory is relevant, so the index is told to let them
 /// rank a record but never admit one. See [`Query::boost_only`].
-fn non_topical_terms(query: &str) -> Vec<String> {
+pub(crate) fn non_topical_terms(query: &str) -> Vec<String> {
     let topical: HashSet<String> = topical_terms(query).into_iter().collect();
     crate::bm25::tokenize(query)
         .into_iter()
