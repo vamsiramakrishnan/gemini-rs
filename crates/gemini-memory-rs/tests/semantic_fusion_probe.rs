@@ -29,21 +29,86 @@
 //! was an upper bound rather than a measurement — an alias may simply have
 //! contained its own question.
 //!
-//! This version separates the two by embedding each record five ways, and the
+//! This version separates the two by embedding each record six ways, and the
 //! difference between them is *who wrote the text*:
 //!
 //! | view | what it embeds | authorship |
 //! |---|---|---|
 //! | `statement` | the sentence shown to the model | fixture |
 //! | `curated` | statement + `retrieval.aliases` + `retrieval.tags` | fixture — **saw the query set** |
-//! | `structural` | statement + subject, predicate, kind, scope, entities | machine, from frontmatter |
+//! | `predicate` | statement + `Kind: Preference coffee order` | machine, from frontmatter |
+//! | `structural` | `predicate` + subject, entities, scope | machine, from frontmatter |
 //! | `generated` | statement + questions an LLM says it answers | model, **from the statement alone** |
 //! | `full` | curated + structural + generated | mixed |
 //!
-//! `generated` is the honest one. A separate model is shown one statement and
-//! asked what questions it answers; it never sees the corpus, the probes, or a
-//! single line of [`common::paraphrase`]. Whatever it recovers is recoverable
-//! in production, because production has exactly the same information.
+//! `generated` is the authorship-clean one. A separate model is shown one
+//! statement and asked what questions it answers; it never sees the corpus, the
+//! probes, or a single line of [`common::paraphrase`]. Whatever it recovers is
+//! recoverable in production, because an ingestion-time enricher has exactly
+//! the same information.
+//!
+//! # What it found
+//!
+//! Over 93 questions and 1,199 records:
+//!
+//! | strategy | top-1 | top-5 | MRR |
+//! |---|---|---|---|
+//! | lexical only | 42/93 | 58/93 | 0.536 |
+//! | semantic, statement | 41/93 | 48/93 | 0.486 |
+//! | semantic, curated | 57/93 | 66/93 | 0.666 |
+//! | semantic, predicate | 53/93 | 66/93 | 0.636 |
+//! | **semantic, structural** | **66/93** | 73/93 | 0.748 |
+//! | semantic, generated | 31/93 | 47/93 | 0.430 |
+//! | semantic, full | 52/93 | 65/93 | 0.628 |
+//! | RRF, lexical + structural | 61/93 | 79/93 | 0.734 |
+//! | **RRF, structural at double weight** | 64/93 | **79/93** | **0.752** |
+//! | RRF, generated at double weight | 38/93 | 57/93 | 0.509 |
+//! | gated — semantics only when lexical is thin | 51/93 | 69/93 | 0.642 |
+//!
+//! **The frontmatter is the enrichment.** The best view costs nothing: no
+//! author, no model call, no second pass at ingestion. It is the fields the
+//! record already carries — subject, predicate, kind, entities, temporal scope
+//! — written out as a few lines of prose and embedded alongside the statement.
+//! It beats BM25 by half again (66 against 42), and it beats the hand-written
+//! aliases that had the query set in view while they were written (57).
+//!
+//! The `predicate` row is the ablation that says where the gain comes from. A
+//! statement gives the *value* — "The user's usual coffee order is a cortado" —
+//! and only implies the *attribute*; a question asks by the attribute. Adding
+//! the single line that names it is worth 12 of the 25 points (41 → 53), and
+//! the subject, entities and scope lines are worth the other 13 (53 → 66). So
+//! it is not that structured boilerplate helps the geometry — every one of
+//! those fields carries retrievable signal that the statement had left implicit.
+//!
+//! **More context is not more signal.** The LLM-written view is the worst
+//! strategy measured — 31/93, below the statement alone at 41 — and adding it
+//! to everything else drags `full` (52) below `curated` (57). Six generated
+//! questions run six times the length of the statement, and most of them are
+//! generic: *book me a trim*, *remind me about my appointment*. Those collide
+//! across a thousand records and drown the one sentence that distinguishes
+//! them. This matters because "enrich each memory with an LLM" is the first
+//! thing a reasonable person tries, and it is worse than doing nothing.
+//!
+//! **Fusion is still worth it, for the metric that matters.** Structural alone
+//! has the best top-1 (66 against 64), but `max_memories` is 5 — the model
+//! reads five records and picks, so the operative question is whether the
+//! answer is in the top five at all. There, fusing BM25 back in is worth six
+//! questions (79 against 73), and it has the best MRR of anything measured.
+//! Weighting the stronger ranker 2:1 beats equal weight on top-1 by three and
+//! ties it on top-5, so 2:1 over the structural view is the configuration to
+//! build.
+//!
+//! Gating is the wrong shape (51/93, 69/93): the queries it declines to
+//! escalate are exactly the ones where BM25 is confidently wrong rather than
+//! obviously empty.
+//!
+//! What BM25 contributes is the exact-token case — `Fennelmark`, `Thornbury` —
+//! which a dense retriever cannot represent and an inverted index gets for
+//! free. It is not free in both directions: at 2:1 the `echo` tier slips from
+//! 8/8 to 7/8, and "the user's barber" is one of four questions BM25 had at
+//! rank 1 that fusion loses. Six recovered in the top five for four lost at
+//! rank one is the trade, and it is the right one only because five records
+//! reach the model rather than one.
 //!
 //! # Why the fusion is the engine's own
 //!
@@ -109,9 +174,14 @@ enum View {
     /// Statement plus the aliases and tags the fixture author wrote. Carries
     /// the leakage caveat — these were written with the query set in view.
     Curated,
-    /// Statement plus what the frontmatter already knows: subject, predicate,
-    /// kind, temporal scope, entities. Nobody wrote any of it for retrieval;
-    /// it is the record's own structure, spelled out in words.
+    /// Statement plus the one line of frontmatter that names the *attribute*:
+    /// `Kind: Preference coffee order`. The ablation that separates "the
+    /// predicate carries topical signal" from "any structured boilerplate
+    /// helps", since [`View::Structural`] adds both at once.
+    Predicate,
+    /// Statement plus everything the frontmatter already knows: subject,
+    /// predicate, kind, temporal scope, entities. Nobody wrote any of it for
+    /// retrieval; it is the record's own structure, spelled out in words.
     Structural,
     /// Statement plus questions a model says it answers, written from the
     /// statement alone. The authorship-clean view.
@@ -121,14 +191,15 @@ enum View {
 }
 
 impl View {
-    const ALL: [View; 5] = [
+    const ALL: [View; 6] = [
         View::Statement,
         View::Curated,
+        View::Predicate,
         View::Structural,
         View::Generated,
         View::Full,
     ];
-    const COUNT: usize = 5;
+    const COUNT: usize = 6;
 
     fn index(self) -> usize {
         Self::ALL.iter().position(|v| *v == self).expect("view")
@@ -138,6 +209,7 @@ impl View {
         match self {
             View::Statement => "statement",
             View::Curated => "curated",
+            View::Predicate => "predicate",
             View::Structural => "structural",
             View::Generated => "generated",
             View::Full => "full",
@@ -151,12 +223,10 @@ impl View {
 /// weights; the embedding was throwing all of them away. This costs nothing to
 /// produce — no model, no author, no judgement.
 fn structural(memory: &CanonicalMemory) -> String {
-    let mut lines = vec![format!("About: {}", memory.subject.display)];
-    lines.push(format!(
-        "Kind: {:?} {}",
-        memory.kind,
-        memory.predicate.as_str().replace('_', " ")
-    ));
+    let mut lines = vec![
+        format!("About: {}", memory.subject.display),
+        predicate(memory),
+    ];
     if !memory.retrieval.entities.is_empty() {
         lines.push(format!(
             "Mentions: {}",
@@ -171,6 +241,19 @@ fn structural(memory: &CanonicalMemory) -> String {
     }
     lines.push(format!("Holds: {:?}", memory.temporal_scope));
     lines.join("\n")
+}
+
+/// The line that names the attribute this record is about.
+///
+/// A statement says the *value* — "The user's usual coffee order is a cortado"
+/// — and only implies the attribute. The predicate names it outright, which is
+/// what a question asks by.
+fn predicate(memory: &CanonicalMemory) -> String {
+    format!(
+        "Kind: {:?} {}",
+        memory.kind,
+        memory.predicate.as_str().replace('_', " ")
+    )
 }
 
 /// The aliases and tags the record already carries.
@@ -200,6 +283,7 @@ fn render(view: View, memory: &CanonicalMemory, generated: &HashMap<String, Stri
     match view {
         View::Statement => {}
         View::Curated => parts.push(curated(memory)),
+        View::Predicate => parts.push(predicate(memory)),
         View::Structural => parts.push(structural(memory)),
         View::Generated => parts.push(questions()),
         View::Full => {
@@ -442,24 +526,36 @@ fn fuse(rankings: &[&Vec<SearchHit>]) -> Vec<SearchHit> {
 
 /// The strategies, in report order. Views first, then what you can build from
 /// them.
-const STRATEGIES: [&str; 10] = [
+///
+/// The fusions run over [`View::Structural`] rather than the richest view, and
+/// the choice is not made by looking at the scores: structural is the only view
+/// that costs nothing — no author, no model call, no second pass at ingestion —
+/// so it is the one worth building whether or not it wins. That it also wins is
+/// the finding.
+///
+/// `RRF 2:1 gen` is kept for the opposite reason. Fusing BM25 with the
+/// LLM-written view is the thing a reasonable person tries first, and it is
+/// worse than BM25 alone. A negative result nobody measures gets rediscovered
+/// every six months.
+const STRATEGIES: [&str; 11] = [
     "lexical",
     "sem: statement",
     "sem: curated",
+    "sem: predicate",
     "sem: structural",
     "sem: generated",
     "sem: full",
     "RRF equal",
-    "RRF 2:1 full",
+    "RRF 2:1 struct",
     "RRF 2:1 gen",
     "gated",
 ];
 const LEXICAL: usize = 0;
 const SEM: usize = 1; // .. SEM + View::COUNT
-const RRF_EQUAL: usize = 6;
-const RRF_FULL: usize = 7;
-const RRF_GEN: usize = 8;
-const GATED: usize = 9;
+const RRF_EQUAL: usize = 7;
+const RRF_STRUCT: usize = 8;
+const RRF_GEN: usize = 9;
+const GATED: usize = 10;
 
 #[derive(Default, Clone, Copy)]
 struct Tally {
@@ -516,15 +612,15 @@ impl Default for Row {
     }
 }
 
-/// The strategies the per-tier and per-mode tables show. The full ten-column
-/// grid is unreadable at 12 modes; these are the ones that carry the argument.
+/// The strategies the per-tier and per-mode tables show. The full grid is
+/// unreadable at 12 modes; these are the ones that carry the argument.
 const BREAKDOWN: [usize; 6] = [
     LEXICAL,
     SEM + 1, // curated
-    SEM + 2, // structural
-    SEM + 3, // generated
-    SEM + 4, // full
-    RRF_FULL,
+    SEM + 3, // structural
+    SEM + 4, // generated
+    SEM + 5, // full
+    RRF_STRUCT,
 ];
 
 impl Row {
@@ -699,7 +795,7 @@ async fn what_a_semantic_layer_would_buy() {
             per_view.push(semantic(vector, &indexed[view.index()]));
             search_time += started.elapsed();
         }
-        let full_hits = &per_view[View::Full.index()];
+        let struct_hits = &per_view[View::Structural.index()];
         let gen_hits = &per_view[View::Generated.index()];
 
         // The engine's own rule: reach for semantics only when lexical search
@@ -716,8 +812,8 @@ async fn what_a_semantic_layer_would_buy() {
         // the semantic ranking twice doubles its reciprocal-rank contribution —
         // the cheapest way to ask whether the fusion wants weighting rather
         // than gating.
-        let equal = fuse(&[&lexical_hits, full_hits]);
-        let weighted_full = fuse(&[&lexical_hits, full_hits, full_hits]);
+        let equal = fuse(&[&lexical_hits, struct_hits]);
+        let weighted_struct = fuse(&[&lexical_hits, struct_hits, struct_hits]);
         let weighted_gen = fuse(&[&lexical_hits, gen_hits, gen_hits]);
         let gated = if thin { &equal } else { &lexical_hits };
 
@@ -727,7 +823,7 @@ async fn what_a_semantic_layer_would_buy() {
             ranks[SEM + view.index()] = rank_of(&per_view[view.index()], probe.target);
         }
         ranks[RRF_EQUAL] = rank_of(&equal, probe.target);
-        ranks[RRF_FULL] = rank_of(&weighted_full, probe.target);
+        ranks[RRF_STRUCT] = rank_of(&weighted_struct, probe.target);
         ranks[RRF_GEN] = rank_of(&weighted_gen, probe.target);
         ranks[GATED] = rank_of(gated, probe.target);
 
@@ -746,7 +842,7 @@ async fn what_a_semantic_layer_would_buy() {
             phrasing.tier.label(),
             phrasing.mode.label()
         );
-        match (ranks[LEXICAL] == Some(0), ranks[RRF_FULL] == Some(0)) {
+        match (ranks[LEXICAL] == Some(0), ranks[RRF_STRUCT] == Some(0)) {
             (false, true) => rescued.push(tag),
             (true, false) => broken.push(tag),
             _ => {}
@@ -811,7 +907,7 @@ async fn what_a_semantic_layer_would_buy() {
 
     if !rescued.is_empty() {
         report.push_str(&format!(
-            "\nrescued by weighted fusion over the full view ({}):\n",
+            "\nrescued by weighted fusion over the structural view ({}):\n",
             rescued.len()
         ));
         for question in &rescued {
@@ -827,10 +923,23 @@ async fn what_a_semantic_layer_would_buy() {
             report.push_str(&format!("  {question}\n"));
         }
     }
+
+    // The negative result, said out loud rather than left in a table. If a
+    // better enrichment prompt ever turns this line around, the module docs
+    // above are stale and this is where you find out.
+    let lex = overall.tallies[LEXICAL].first;
+    let gen = overall.tallies[RRF_GEN].first;
+    report.push_str(&format!(
+        "\nfusing BM25 with the LLM-written view answers {gen}/{asked} against BM25's own \
+         {lex}.\n\
+         The generated text is six times the length of the statement and most of it is \
+         generic —\n\"book me a trim\", \"remind me about my appointment\" — so it collides \
+         across records and\ndrowns the one sentence that distinguishes them. More context \
+         is not more signal.\n"
+    ));
     eprintln!("{report}");
 
-    let lex = overall.tallies[LEXICAL].first;
-    for strategy in [RRF_EQUAL, RRF_FULL, RRF_GEN, GATED] {
+    for strategy in [SEM + View::Structural.index(), RRF_EQUAL, RRF_STRUCT, GATED] {
         assert!(
             overall.tallies[strategy].first >= lex,
             "{} answered {} of {asked} against lexical retrieval's {lex} — an \
@@ -840,4 +949,21 @@ async fn what_a_semantic_layer_would_buy() {
             overall.tallies[strategy].first,
         );
     }
+
+    // The metric the product actually runs on: `max_memories` is 5, so a
+    // question whose answer is in the top five is a question the model can
+    // answer. Guarding top-1 alone would let a change that quietly drops
+    // answers from rank 4 to rank 9 pass.
+    let built = &overall.tallies[RRF_STRUCT];
+    let best_view = &overall.tallies[SEM + View::Structural.index()];
+    assert!(
+        built.top_five >= best_view.top_five && built.top_five > overall.tallies[LEXICAL].top_five,
+        "the configuration this file recommends — RRF with the structural view at double \
+         weight — put {} of {asked} answers in the top five, against {} for the structural \
+         view alone and {} for BM25 alone. Fusing is only worth its second index while it \
+         beats both.\n{report}",
+        built.top_five,
+        best_view.top_five,
+        overall.tallies[LEXICAL].top_five,
+    );
 }
