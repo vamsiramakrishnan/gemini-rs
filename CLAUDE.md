@@ -6,7 +6,7 @@ Three-crate layered stack for the Gemini Multimodal Live API:
 
 <p align="center"><img src="docs/assets/diagrams/architecture-stack.svg" alt="Three-crate layered stack: L2 fluent DX over L1 runtime over L0 wire protocol" width="760"></p>
 
-Plus `apps/gemini-adk-web-rs` (Axum Web UI), `apps/gemini-adk-api-rs` (REST API server), `examples/agents`, `examples/voice-chat`, `examples/tool-calling`, `examples/transcription`, `examples/text-chat`, and `tools/gemini-adk-transpiler-rs`.
+Plus `crates/gemini-memory-rs` (contextual memory engine for Live sessions — OKF Markdown memory, local BM25 retrieval, session ingestion and reconciliation), `apps/gemini-adk-web-rs` (Axum Web UI), `apps/gemini-adk-api-rs` (REST API server), `examples/agents`, `examples/voice-chat`, `examples/tool-calling`, `examples/transcription`, `examples/text-chat`, and `tools/gemini-adk-transpiler-rs`.
 
 ## Import Guidance
 
@@ -15,6 +15,9 @@ Always import from the highest-level crate you need:
 ```rust
 // Kernel DX — the ~40 types a typical application touches (recommended start)
 use gemini_adk_fluent_rs::prelude::*;
+
+// Contextual memory for Live sessions (optional, independent of the L0/L1/L2 stack)
+use gemini_memory_rs::prelude::*;
 
 // Runtime only (building custom processors)
 use gemini_adk_rs::*;
@@ -710,6 +713,7 @@ crates/
   gemini-genai-rs/          L0 wire protocol (gemini_genai_rs)
   gemini-adk-rs/            L1 agent runtime (gemini_adk_rs)
   gemini-adk-fluent-rs/     L2 fluent DX (gemini_adk_fluent_rs)
+  gemini-memory-rs/         Contextual memory engine (gemini_memory_rs)
 apps/
   gemini-adk-web-rs/           Interactive web UI for agent development (adk web)
   gemini-adk-api-rs/    Standalone REST API server (adk api_server)
