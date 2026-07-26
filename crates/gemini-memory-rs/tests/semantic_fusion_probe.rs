@@ -332,6 +332,16 @@ impl<T: serde::Serialize + serde::de::DeserializeOwned> Cache<T> {
 
 /// One embedding call, with the retries an experiment needs and a production
 /// client would do properly.
+///
+/// `task` is passed as `RETRIEVAL_DOCUMENT` for records and `RETRIEVAL_QUERY`
+/// for questions, and on this model that does nothing: `gemini-embedding-2`
+/// returns byte-identical vectors whatever is passed, while
+/// `gemini-embedding-001` honours it. Pinned in
+/// `query_rewrite_probe::task_type_is_a_no_op_on_gemini_embedding_2`.
+///
+/// Left in because it costs nothing, is correct on the older model, and would
+/// resume working if this one ever honoured it. No measurement here is
+/// affected — both sides passed the same ignored parameter.
 async fn embed_one(
     client: &reqwest::Client,
     key: &str,
@@ -379,7 +389,10 @@ async fn enrich_one(client: &reqwest::Client, key: &str, statement: &str) -> Str
     );
     let body = serde_json::json!({
         "contents": [{ "role": "user", "parts": [{ "text": enrichment_prompt(statement) }] }],
-        "generationConfig": { "temperature": 0.4, "maxOutputTokens": 2048 },
+        // No `temperature`. Gemini models are tuned for their own default and
+        // pinning it — at 0 or anywhere else — measures a configuration nobody
+        // should ship.
+        "generationConfig": { "maxOutputTokens": 2048 },
     });
     let json = call(client, key, &url, &body, "enrich").await;
     json["candidates"][0]["content"]["parts"]

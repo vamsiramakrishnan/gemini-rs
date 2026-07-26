@@ -60,10 +60,17 @@
 //!
 //! | condition | `about` | `kind` | `attribute` | `about`+`kind` | `about`+`attribute` |
 //! |---|---|---|---|---|---|
-//! | cold, no map | 51% | 4% | 2% | 3% | 2% |
-//! | with memory map | 68% | 14% | **68%** | 14% | **49%** |
+//! | cold, no map | 49% | 3% | 2% | 2% | 2% |
+//! | with memory map | 67% | 14% | **69%** | 14% | **48%** |
 //!
-//! `attribute` goes from 2% to 68% — thirty-four times better. That is the
+//! Sampling is left at the model's default throughout. Pinning temperature to 0
+//! looks like the careful choice for a structured-output task and is not: these
+//! models are tuned around their own default, and a run at 0 measures a
+//! configuration nobody should ship. Re-running at the default moved every
+//! figure here by a point, which is the reassuring outcome — the finding was
+//! not a sampling artefact.
+//!
+//! `attribute` goes from 2% to 69% — thirty-four times better. That is the
 //! vocabulary gap closing exactly as hoped: a model cannot guess that a
 //! haircut is filed under `barber` or a coffee order under
 //! `beverage_preference`, and it does not have to guess when the values are in
@@ -87,10 +94,10 @@
 //!
 //! | condition | filter | accuracy | expected fused top-5 |
 //! |---|---|---|---|
-//! | cold | `about`+`kind` | 3% | 77.4/93 — worse than not filtering |
+//! | cold | `about`+`kind` | 2% | 77.3/93 — worse than not filtering |
 //! | cold | `about`+`attribute` | 2% | 78.3/93 — worse than not filtering |
 //! | map | `about`+`kind` | 14% | 78.8/93 — worse than not filtering |
-//! | **map** | **`about`+`attribute`** | **49%** | **84.4/93 — better** |
+//! | **map** | **`about`+`attribute`** | **48%** | **84.3/93 — better** |
 //!
 //! Without the map, no filter is worth writing: the model is below break-even
 //! on every combination, and the feature would be a net loss. With it, and on
@@ -219,8 +226,11 @@ async fn ask(client: &reqwest::Client, key: &str, prompt: &str) -> Option<serde_
         format!("https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent");
     let body = serde_json::json!({
         "contents": [{ "role": "user", "parts": [{ "text": prompt }] }],
+        // Temperature is deliberately unset. Pinning it to 0 looks like the
+        // careful choice for a structured-output task and is not: these models
+        // are tuned around their own default, and a run at 0 measures a
+        // configuration that should never ship.
         "generationConfig": {
-            "temperature": 0.0,
             "maxOutputTokens": 2048,
             "responseMimeType": "application/json",
         },
@@ -371,7 +381,11 @@ async fn does_a_memory_map_make_the_model_write_better_filters() {
 
         for (with_map, tally) in [(false, &mut cold), (true, &mut mapped)] {
             let prompt = prompt_for(phrasing.query, with_map.then_some(map.as_str()));
-            let cache_key = stable_hash(&format!("{MODEL}|{prompt}"));
+            // The generation config is part of the key. Without it, changing a
+            // sampling setting silently reuses answers produced under the old
+            // one — which is exactly how a stale number outlives the change
+            // that should have invalidated it.
+            let cache_key = stable_hash(&format!("{MODEL}|default-sampling|{prompt}"));
             let answer = match cache.get(&cache_key) {
                 Some(cached) => cached.clone(),
                 None => {

@@ -249,7 +249,10 @@ async fn generate_once(
     );
     let body = serde_json::json!({
         "contents": [{ "role": "user", "parts": [{ "text": prompt }] }],
-        "generationConfig": { "temperature": 0.4, "maxOutputTokens": max_tokens },
+        // Unset on purpose: see `semantic_fusion_probe`. Pinning temperature
+        // would also make these latencies a measurement of a setting rather
+        // than of the model.
+        "generationConfig": { "maxOutputTokens": max_tokens },
     });
 
     let started = Instant::now();
