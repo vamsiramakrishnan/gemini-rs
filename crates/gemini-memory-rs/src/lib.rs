@@ -64,8 +64,11 @@
 //! # }
 //! ```
 
+pub mod bm25;
 pub mod core;
 pub mod okf;
+pub mod retrieval;
+pub mod transcript;
 
 /// The types a typical application touches.
 #[cfg(any())]
