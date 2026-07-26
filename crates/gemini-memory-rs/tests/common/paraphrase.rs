@@ -94,10 +94,26 @@ pub enum Mode {
     /// Hindi–English mixing, ordinary speech for the market this is built for,
     /// and it produces queries with almost no English content words.
     CodeSwitched,
+    /// Names an *event* and expects an attribute back: "anniversary dinner",
+    /// "we're having people over". The corpus holds no record about the
+    /// occasion — the link from occasion to preference is the retrieval.
+    Occasion,
+    /// States a restriction and expects the fact behind it: "somewhere I can
+    /// actually eat". The answer is what makes the constraint true.
+    Constraint,
+    /// Picks one out of a set: "which of us can't have sesame". The answer is a
+    /// record whose distinguishing value the question already names.
+    Comparative,
+    /// Anchored in time rather than in topic: "what did I say I'd do this
+    /// weekend". Needs the temporal window a plan computes and then discards.
+    Temporal,
+    /// Points at a thing by history rather than name: "that place we went to",
+    /// "the gym I joined".
+    Referential,
 }
 
 impl Mode {
-    pub const ALL: [Mode; 7] = [
+    pub const ALL: [Mode; 12] = [
         Mode::Question,
         Mode::Command,
         Mode::InSitu,
@@ -105,8 +121,13 @@ impl Mode {
         Mode::Verify,
         Mode::Terse,
         Mode::CodeSwitched,
+        Mode::Occasion,
+        Mode::Constraint,
+        Mode::Comparative,
+        Mode::Temporal,
+        Mode::Referential,
     ];
-    pub const COUNT: usize = 7;
+    pub const COUNT: usize = 12;
 
     pub fn index(self) -> usize {
         Self::ALL.iter().position(|m| *m == self).expect("mode")
@@ -121,6 +142,11 @@ impl Mode {
             Mode::Verify => "verify",
             Mode::Terse => "terse",
             Mode::CodeSwitched => "code-switched",
+            Mode::Occasion => "occasion",
+            Mode::Constraint => "constraint",
+            Mode::Comparative => "comparative",
+            Mode::Temporal => "temporal",
+            Mode::Referential => "referential",
         }
     }
 }
@@ -148,7 +174,10 @@ const fn p(tier: Tier, mode: Mode, query: &'static str) -> Phrasing {
     Phrasing { tier, mode, query }
 }
 
-use Mode::{CodeSwitched, Command, InSitu, Planning, Question, Terse, Verify};
+use Mode::{
+    CodeSwitched, Command, Comparative, Constraint, InSitu, Occasion, Planning, Question,
+    Referential, Temporal, Terse, Verify,
+};
 use Tier::{Direct, Echo, Indirect, Inferential, Synonym};
 
 /// The query set.
@@ -160,6 +189,10 @@ pub const PHRASINGS: &[Phrasings] = &[
     Phrasings {
         probe: "coffee_order",
         queries: &[
+            p(Indirect, Occasion, "I'm doing a coffee run for the office"),
+            p(Inferential, Constraint, "nothing too milky, what suits me"),
+            p(Direct, Comparative, "which of us drinks a cortado"),
+            p(Indirect, Referential, "the drink I always end up with"),
             p(Echo, Question, "the user's usual coffee order"),
             p(Direct, Question, "what coffee do I usually order"),
             p(Synonym, Question, "my go-to drink at a cafe"),
@@ -182,6 +215,14 @@ pub const PHRASINGS: &[Phrasings] = &[
     Phrasings {
         probe: "allergy",
         queries: &[
+            p(
+                Indirect,
+                Occasion,
+                "we're having people over, anything to avoid",
+            ),
+            p(Indirect, Constraint, "somewhere I can actually eat"),
+            p(Direct, Comparative, "which of us can't have sesame"),
+            p(Inferential, Referential, "that thing that makes me ill"),
             p(Echo, Question, "the user's food allergy"),
             p(Direct, Question, "what food am I allergic to"),
             p(Synonym, Question, "which ingredient do I have to avoid"),
@@ -204,6 +245,22 @@ pub const PHRASINGS: &[Phrasings] = &[
     Phrasings {
         probe: "spouse_restaurant",
         queries: &[
+            p(
+                Indirect,
+                Occasion,
+                "anniversary dinner, where should I book",
+            ),
+            p(Indirect, Constraint, "a place that works for Rhea"),
+            p(
+                Inferential,
+                Referential,
+                "that restaurant we went to for her birthday",
+            ),
+            p(
+                Indirect,
+                Temporal,
+                "where did we eat the last time she chose",
+            ),
             p(Echo, Question, "Rhea's favourite restaurant"),
             p(Direct, Question, "where does Rhea like to eat"),
             p(
@@ -229,6 +286,10 @@ pub const PHRASINGS: &[Phrasings] = &[
     Phrasings {
         probe: "gift_idea",
         queries: &[
+            p(Indirect, Occasion, "her birthday is next month, ideas"),
+            p(Inferential, Constraint, "something she'd actually use"),
+            p(Inferential, Referential, "the thing she keeps mentioning"),
+            p(Direct, Temporal, "what has Rhea been hinting at lately"),
             p(
                 Echo,
                 Question,
@@ -253,6 +314,10 @@ pub const PHRASINGS: &[Phrasings] = &[
     Phrasings {
         probe: "climbing_gym",
         queries: &[
+            p(Indirect, Occasion, "free evening, fancy a climb"),
+            p(Inferential, Referential, "the place I joined for climbing"),
+            p(Direct, Comparative, "which of my gyms is the climbing one"),
+            p(Indirect, Temporal, "where have I been training this year"),
             p(Echo, Question, "the user's climbing gym"),
             p(Direct, Question, "which gym do I climb at"),
             p(Synonym, Question, "where do I train on the wall"),
@@ -269,6 +334,14 @@ pub const PHRASINGS: &[Phrasings] = &[
     Phrasings {
         probe: "corrected_barber",
         queries: &[
+            p(Indirect, Occasion, "wedding next week, I need a cut"),
+            p(
+                Inferential,
+                Referential,
+                "the person who did my hair last time",
+            ),
+            p(Direct, Temporal, "who has been cutting my hair recently"),
+            p(Inferential, Constraint, "someone who knows how I like it"),
             p(Echo, Question, "the user's barber"),
             p(Direct, Question, "who cuts my hair"),
             p(Synonym, Question, "who is my hairdresser"),
@@ -281,6 +354,10 @@ pub const PHRASINGS: &[Phrasings] = &[
     Phrasings {
         probe: "errand",
         queries: &[
+            p(Direct, Temporal, "what did I say I'd do this weekend"),
+            p(Direct, Temporal, "when is the cake pickup"),
+            p(Inferential, Referential, "the bakery for Priya's thing"),
+            p(Indirect, Occasion, "Priya's celebration, what's my job"),
             p(
                 Echo,
                 Question,
@@ -309,6 +386,10 @@ pub const PHRASINGS: &[Phrasings] = &[
     Phrasings {
         probe: "possession",
         queries: &[
+            p(Inferential, Referential, "the bike I bought last year"),
+            p(Direct, Comparative, "which of us rides a Thornbury"),
+            p(Indirect, Constraint, "spares that fit what I ride"),
+            p(Indirect, Occasion, "weekend ride, what am I taking"),
             p(Echo, Question, "the user's bicycle"),
             p(Direct, Question, "what bike do I ride"),
             p(Synonym, Question, "what make is my cycle"),

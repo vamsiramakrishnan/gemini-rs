@@ -16,8 +16,9 @@
 //!
 //! # The method
 //!
-//! Every needle in the corpus is asked for five times, in five registers a
-//! person might use:
+//! Every needle in the corpus is asked for a dozen times over, along two axes.
+//! The first is **difficulty** — how far the question sits from the words of
+//! the record that answers it:
 //!
 //! | Tier | What it is | Example, for "The user's usual coffee order is a cortado." |
 //! |---|---|---|
@@ -26,6 +27,13 @@
 //! | `Synonym` | the same idea, different vocabulary | "my go-to drink at a cafe" |
 //! | `Indirect` | the situation described rather than the attribute named | "I'm at the counter, what do I normally get" |
 //! | `Inferential` | needs a step of reasoning to connect | "order me the same as always" |
+//!
+//! The second is **what the person was doing**, which is the axis a product
+//! cares about: a well-formed question, a hands-full command, a thing pointed
+//! at, an occasion named instead of a topic, a constraint stated instead of a
+//! fact, a comparison, a time window, a referring phrase. Those produce very
+//! different query strings, and the difference between them is larger than the
+//! difference between tiers. See [`common::paraphrase::Mode`].
 //!
 //! # Why the tiers are not just my opinion
 //!

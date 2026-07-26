@@ -2,7 +2,7 @@
 //!
 //! # The question
 //!
-//! `memory_paraphrase` establishes that lexical retrieval answers 17 of 40
+//! `memory_paraphrase` establishes that lexical retrieval answers 42 of 93
 //! questions when they are not phrased like the records that answer them, and
 //! that recall tracks content-word overlap because overlap is the only signal
 //! BM25 has. The obvious conclusion is "add embeddings" — but obvious is not
@@ -17,8 +17,33 @@
 //! - fusing the two might be worse than either, if one ranking is confident
 //!   and wrong.
 //!
-//! So this asks all three questions at once: lexical alone, semantic alone, and
-//! the two fused — over the same forty questions, against the same corpus.
+//! So this asks all three at once — lexical alone, semantic alone, and the two
+//! fused — over the same 93 questions and the same corpus.
+//!
+//! # The second question: what do you embed?
+//!
+//! An earlier run of this file established that *what* you embed matters more
+//! than how you search it: the statement alone barely beat BM25, while the
+//! statement plus the record's aliases and tags beat it by half again. But
+//! those aliases were written by the same hand as the questions, so the number
+//! was an upper bound rather than a measurement — an alias may simply have
+//! contained its own question.
+//!
+//! This version separates the two by embedding each record five ways, and the
+//! difference between them is *who wrote the text*:
+//!
+//! | view | what it embeds | authorship |
+//! |---|---|---|
+//! | `statement` | the sentence shown to the model | fixture |
+//! | `curated` | statement + `retrieval.aliases` + `retrieval.tags` | fixture — **saw the query set** |
+//! | `structural` | statement + subject, predicate, kind, scope, entities | machine, from frontmatter |
+//! | `generated` | statement + questions an LLM says it answers | model, **from the statement alone** |
+//! | `full` | curated + structural + generated | mixed |
+//!
+//! `generated` is the honest one. A separate model is shown one statement and
+//! asked what questions it answers; it never sees the corpus, the probes, or a
+//! single line of [`common::paraphrase`]. Whatever it recovers is recoverable
+//! in production, because production has exactly the same information.
 //!
 //! # Why the fusion is the engine's own
 //!
@@ -26,55 +51,12 @@
 //! function and the same `1/(60 + rank)` that `LocalMemoryRetriever` already
 //! uses. A bespoke fusion would measure a thing we would then have to build.
 //!
-//! # What it found
-//!
-//! Over 61 questions and 1,199 records, answered by the top result:
-//!
-//! | strategy | top-1 | top-5 |
-//! |---|---|---|
-//! | lexical only | 29/61 | 40/61 |
-//! | semantic, statement embedded | 30/61 | 33/61 |
-//! | **semantic, enriched view embedded** | **43/61** | 46/61 |
-//! | equal-weight RRF over the enriched view | 40/61 | 47/61 |
-//! | **RRF with semantics at double weight** | 42/61 | **47/61** |
-//! | gated — semantics only when lexical is thin | 34/61 | 45/61 |
-//!
-//! Three conclusions, in order of how much they matter.
-//!
-//! **What you embed matters more than how you search it.** Embedding the
-//! statement alone is worth almost nothing over BM25 — 30 against 29. Embedding
-//! the statement together with the aliases and tags that already sit beside it
-//! in the record is worth 43. Same model, same index, same fusion; the only
-//! change is the string handed to the embedder.
-//!
-//! **Gating is the wrong shape once the semantic side is good.** It was the
-//! right answer when the two rankers were evenly matched — it fired on a ninth
-//! of queries and cost nothing. Against an enriched semantic ranker it throws
-//! away most of the gain, because the queries it declines to escalate are
-//! exactly the ones where BM25 is confidently wrong rather than obviously
-//! empty.
-//!
-//! **Equal-weight RRF dilutes the better ranker.** Fusing a 43 with a 29
-//! produces a 40. Weighting semantics 2:1 recovers the top-1 to within one
-//! question of semantic-alone while giving the best top-5 of any strategy —
-//! and the top five is what the model actually reads, since `max_memories` is
-//! 5. That is the configuration to build.
-//!
-//! # The caveat that matters
-//!
-//! The aliases in this corpus were written by the same hand as the questions,
-//! so some of the enrichment gain is an alias containing its own question. The
-//! extractor writes aliases in production, from a prompt that already asks for
-//! "the words a FUTURE QUESTION would use" — so the mechanism is real, but the
-//! honest version of 43/61 needs a corpus whose aliases were written without
-//! sight of the query set. Treat the direction as established and the magnitude
-//! as an upper bound.
-//!
 //! # Cost
 //!
-//! One embedding per record per representation, and one per question. Every
-//! vector is cached to disk by content hash, so re-runs are free and the fusion
-//! stays cheap to iterate on. Skips entirely without an API key.
+//! One embedding per record per view, one per question, and one flash-lite
+//! completion per record for the `generated` view. Everything is cached to disk
+//! by content hash, so re-runs are free and the fusion stays cheap to iterate
+//! on. Skips entirely without an API key.
 
 #![cfg(feature = "gemini-llm")]
 
@@ -103,103 +85,175 @@ use gemini_memory_rs::retrieval::{deterministic::topical_terms, reciprocal_rank_
 const EMBEDDING_MODEL: &str = "gemini-embedding-2";
 const DIMENSIONS: usize = 768;
 
-/// How many records and questions to embed at once.
-const CONCURRENCY: usize = 16;
+/// The model that writes the `generated` view.
+///
+/// Deliberately the cheapest one that can write a sentence: this runs once per
+/// record at ingestion time in production, so if it only pays for itself at
+/// flash prices it does not pay for itself.
+const ENRICHMENT_MODEL: &str = "gemini-2.5-flash-lite";
+
+/// How many records and questions to embed at once, and how many to enrich.
+const EMBED_CONCURRENCY: usize = 16;
+const ENRICH_CONCURRENCY: usize = 8;
 
 /// How many results each retriever proposes before fusion.
 const CANDIDATES: usize = 20;
 
-// ─── embedding ──────────────────────────────────────────────────────────────
+// ─── what gets embedded ─────────────────────────────────────────────────────
 
-/// A disk-backed cache of embeddings, keyed by task type and content.
+/// One way of turning a record into the text handed to the embedder.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum View {
+    /// The statement alone: one sentence, written to be read aloud.
+    Statement,
+    /// Statement plus the aliases and tags the fixture author wrote. Carries
+    /// the leakage caveat — these were written with the query set in view.
+    Curated,
+    /// Statement plus what the frontmatter already knows: subject, predicate,
+    /// kind, temporal scope, entities. Nobody wrote any of it for retrieval;
+    /// it is the record's own structure, spelled out in words.
+    Structural,
+    /// Statement plus questions a model says it answers, written from the
+    /// statement alone. The authorship-clean view.
+    Generated,
+    /// Everything at once.
+    Full,
+}
+
+impl View {
+    const ALL: [View; 5] = [
+        View::Statement,
+        View::Curated,
+        View::Structural,
+        View::Generated,
+        View::Full,
+    ];
+    const COUNT: usize = 5;
+
+    fn index(self) -> usize {
+        Self::ALL.iter().position(|v| *v == self).expect("view")
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            View::Statement => "statement",
+            View::Curated => "curated",
+            View::Structural => "structural",
+            View::Generated => "generated",
+            View::Full => "full",
+        }
+    }
+}
+
+/// What the frontmatter knows, written out as prose.
+///
+/// The fields are already there and already indexed by BM25 with their own
+/// weights; the embedding was throwing all of them away. This costs nothing to
+/// produce — no model, no author, no judgement.
+fn structural(memory: &CanonicalMemory) -> String {
+    let mut lines = vec![format!("About: {}", memory.subject.display)];
+    lines.push(format!(
+        "Kind: {:?} {}",
+        memory.kind,
+        memory.predicate.as_str().replace('_', " ")
+    ));
+    if !memory.retrieval.entities.is_empty() {
+        lines.push(format!(
+            "Mentions: {}",
+            memory.retrieval.entities.join(", ")
+        ));
+    }
+    if let Some(location) = &memory.retrieval.location {
+        lines.push(format!("Place: {location}"));
+    }
+    if let Some(qualifier) = &memory.qualifier {
+        lines.push(format!("When: {qualifier}"));
+    }
+    lines.push(format!("Holds: {:?}", memory.temporal_scope));
+    lines.join("\n")
+}
+
+/// The aliases and tags the record already carries.
+fn curated(memory: &CanonicalMemory) -> String {
+    let mut lines = Vec::new();
+    if !memory.retrieval.aliases.is_empty() {
+        lines.push(format!(
+            "Also asked as: {}",
+            memory.retrieval.aliases.join(", ")
+        ));
+    }
+    if !memory.retrieval.tags.is_empty() {
+        lines.push(format!("Topics: {}", memory.retrieval.tags.join(", ")));
+    }
+    lines.join("\n")
+}
+
+/// The text a record is embedded as, for one view.
+fn render(view: View, memory: &CanonicalMemory, generated: &HashMap<String, String>) -> String {
+    let questions = || {
+        generated
+            .get(&memory.statement)
+            .cloned()
+            .unwrap_or_default()
+    };
+    let mut parts = vec![memory.statement.clone()];
+    match view {
+        View::Statement => {}
+        View::Curated => parts.push(curated(memory)),
+        View::Structural => parts.push(structural(memory)),
+        View::Generated => parts.push(questions()),
+        View::Full => {
+            parts.push(curated(memory));
+            parts.push(structural(memory));
+            parts.push(questions());
+        }
+    }
+    parts.retain(|p| !p.trim().is_empty());
+    parts.join("\n")
+}
+
+// ─── talking to the API ─────────────────────────────────────────────────────
+
+fn api_key() -> String {
+    ["GEMINI_API_KEY", "GOOGLE_GENAI_API_KEY", "GOOGLE_API_KEY"]
+        .iter()
+        .find_map(|k| std::env::var(k).ok())
+        .filter(|v| !v.trim().is_empty())
+        .expect("an API key, checked by the caller")
+}
+
+/// A disk-backed cache of API results, keyed by content.
 ///
 /// The point of the cache is that this experiment is meant to be re-run while
-/// the fusion is tuned. Paying for 1,240 embeddings once is cheap; paying every
-/// time would make people stop measuring.
-struct Embedder {
-    client: reqwest::Client,
-    key: String,
-    cache: HashMap<String, Vec<f32>>,
+/// the fusion is tuned. Paying for six thousand embeddings and twelve hundred
+/// completions once is cheap; paying every time would make people stop
+/// measuring.
+struct Cache<T> {
+    entries: HashMap<String, T>,
     path: std::path::PathBuf,
     calls: usize,
 }
 
-impl Embedder {
-    fn new() -> Self {
-        let key = ["GEMINI_API_KEY", "GOOGLE_GENAI_API_KEY", "GOOGLE_API_KEY"]
-            .iter()
-            .find_map(|k| std::env::var(k).ok())
-            .filter(|v| !v.trim().is_empty())
-            .expect("an API key, checked by the caller");
+impl<T: serde::Serialize + serde::de::DeserializeOwned> Cache<T> {
+    fn open(name: &str) -> Self {
         // Beside the build directory rather than in a scratch dir: this is
         // meant to survive between runs.
-        let path = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
-            .join("semantic-probe-embeddings.json");
-        let cache = std::fs::read_to_string(&path)
+        let path = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(name);
+        let entries = std::fs::read_to_string(&path)
             .ok()
             .and_then(|raw| serde_json::from_str(&raw).ok())
             .unwrap_or_default();
         Self {
-            client: reqwest::Client::new(),
-            key,
-            cache,
+            entries,
             path,
             calls: 0,
         }
     }
 
-    fn cache_key(task: &str, text: &str) -> String {
-        stable_hash(&format!("{EMBEDDING_MODEL}|{DIMENSIONS}|{task}|{text}"))
-    }
-
-    /// Embed `texts`, filling the cache for anything not already held.
-    ///
-    /// `task` is `RETRIEVAL_DOCUMENT` for corpus statements and
-    /// `RETRIEVAL_QUERY` for questions. The asymmetry matters: the model
-    /// embeds a stored fact and a question about it into deliberately
-    /// different points, and using one task type for both is the most common
-    /// way to leave quality on the table.
-    async fn embed_all(&mut self, texts: &[String], task: &str) {
-        let missing: Vec<String> = texts
-            .iter()
-            .filter(|t| !self.cache.contains_key(&Self::cache_key(task, t)))
-            .cloned()
-            .collect();
-        if missing.is_empty() {
-            return;
-        }
-
-        for chunk in missing.chunks(CONCURRENCY) {
-            let mut set = tokio::task::JoinSet::new();
-            for text in chunk {
-                let (client, key, text, task) = (
-                    self.client.clone(),
-                    self.key.clone(),
-                    text.clone(),
-                    task.to_string(),
-                );
-                set.spawn(async move {
-                    let vector = embed_one(&client, &key, &text, &task).await;
-                    (Self::cache_key(&task, &text), vector)
-                });
-            }
-            while let Some(joined) = set.join_next().await {
-                let (key, vector) = joined.expect("embedding task");
-                self.cache.insert(key, vector);
-                self.calls += 1;
-            }
-        }
-
-        if let Ok(raw) = serde_json::to_string(&self.cache) {
+    fn flush(&self) {
+        if let Ok(raw) = serde_json::to_string(&self.entries) {
             let _ = std::fs::write(&self.path, raw);
         }
-    }
-
-    fn get(&self, task: &str, text: &str) -> &[f32] {
-        self.cache
-            .get(&Self::cache_key(task, text))
-            .map(Vec::as_slice)
-            .unwrap_or_else(|| panic!("embedding missing for {task} {text:?}"))
     }
 }
 
@@ -215,34 +269,87 @@ async fn embed_one(client: &reqwest::Client, key: &str, text: &str, task: &str) 
         "taskType": task,
         "outputDimensionality": DIMENSIONS,
     });
+    let json = call(client, key, &url, &body, "embed").await;
+    let values = json["embedding"]["values"]
+        .as_array()
+        .unwrap_or_else(|| panic!("no embedding in {json}"));
+    normalize(values.iter().filter_map(|v| v.as_f64()).map(|v| v as f32))
+}
 
+/// The prompt that writes the `generated` view.
+///
+/// It is shown one statement and nothing else. No corpus, no probe list, no
+/// sight of the query set — which is the entire point, because that is exactly
+/// what an ingestion-time enricher would have.
+fn enrichment_prompt(statement: &str) -> String {
+    format!(
+        "A voice assistant remembers this fact about its user:\n\n{statement}\n\n\
+         Write six short questions or requests this fact would answer, as the user \
+         would actually say them out loud — including clipped ones, ones that name \
+         an occasion instead of the topic, and ones that refer to the thing \
+         indirectly. Use different words from the fact wherever you can. \
+         One per line, no numbering, no other text."
+    )
+}
+
+/// One completion, returning the raw text.
+async fn enrich_one(client: &reqwest::Client, key: &str, statement: &str) -> String {
+    let url = format!(
+        "https://generativelanguage.googleapis.com/v1beta/models/\
+         {ENRICHMENT_MODEL}:generateContent"
+    );
+    let body = serde_json::json!({
+        "contents": [{ "role": "user", "parts": [{ "text": enrichment_prompt(statement) }] }],
+        "generationConfig": { "temperature": 0.4, "maxOutputTokens": 2048 },
+    });
+    let json = call(client, key, &url, &body, "enrich").await;
+    json["candidates"][0]["content"]["parts"]
+        .as_array()
+        .map(|parts| {
+            parts
+                .iter()
+                .filter_map(|p| p["text"].as_str())
+                .collect::<Vec<_>>()
+                .join("")
+        })
+        .unwrap_or_default()
+        .trim()
+        .to_string()
+}
+
+/// A POST with backoff. Both endpoints rate-limit, and an experiment that dies
+/// two thirds of the way through a corpus tells you nothing.
+async fn call(
+    client: &reqwest::Client,
+    key: &str,
+    url: &str,
+    body: &serde_json::Value,
+    what: &str,
+) -> serde_json::Value {
     let mut backoff = std::time::Duration::from_millis(500);
-    for attempt in 0..5 {
+    for attempt in 0..6 {
         let response = client
-            .post(&url)
+            .post(url)
             .header("x-goog-api-key", key)
-            .json(&body)
+            .json(body)
             .send()
             .await;
         match response {
             Ok(response) if response.status().is_success() => {
-                let json: serde_json::Value = response.json().await.expect("embedding json");
-                let values = json["embedding"]["values"]
-                    .as_array()
-                    .unwrap_or_else(|| panic!("no embedding in {json}"));
-                return normalize(values.iter().filter_map(|v| v.as_f64()).map(|v| v as f32));
+                return response.json().await.expect("json body");
             }
-            Ok(response) if attempt < 4 => {
+            Ok(response) if attempt < 5 => {
                 let status = response.status();
                 let detail = response.text().await.unwrap_or_default();
+                let detail: String = detail.chars().take(200).collect();
                 eprintln!(
-                    "embed {status} (attempt {}), retrying: {detail}",
+                    "{what} {status} (attempt {}), retrying: {detail}",
                     attempt + 1
                 );
             }
-            Ok(response) => panic!("embedding failed: {}", response.status()),
-            Err(e) if attempt < 4 => eprintln!("embed error (attempt {}): {e}", attempt + 1),
-            Err(e) => panic!("embedding failed: {e}"),
+            Ok(response) => panic!("{what} failed: {}", response.status()),
+            Err(e) if attempt < 5 => eprintln!("{what} error (attempt {}): {e}", attempt + 1),
+            Err(e) => panic!("{what} failed: {e}"),
         }
         tokio::time::sleep(backoff).await;
         backoff *= 2;
@@ -269,34 +376,7 @@ fn dot(a: &[f32], b: &[f32]) -> f32 {
     a.iter().zip(b).map(|(x, y)| x * y).sum()
 }
 
-/// The text a record is embedded as.
-///
-/// Not the statement alone, which is what the first version of this probe used
-/// and what left `synonym` at 2/8. A statement is one short sentence written for
-/// a model to *read aloud*; the fields that say what a fact might be *asked by*
-/// live beside it. `retrieval.aliases` is documented as "paraphrases the fact
-/// may be asked for by" and BM25 already weights it 2.5 — the embedding was
-/// throwing it away.
-///
-/// A caveat this experiment cannot remove: the aliases in the fixture were
-/// written by the same hand as the questions, so some gain here is the alias
-/// containing the question. The extractor writes these in production, and the
-/// honest version of this number needs a corpus whose aliases were written
-/// without sight of the query set.
-fn enriched(memory: &CanonicalMemory) -> String {
-    let mut text = memory.statement.clone();
-    if !memory.retrieval.aliases.is_empty() {
-        text.push_str("\nAlso asked as: ");
-        text.push_str(&memory.retrieval.aliases.join(", "));
-    }
-    if !memory.retrieval.tags.is_empty() {
-        text.push_str("\nTopics: ");
-        text.push_str(&memory.retrieval.tags.join(", "));
-    }
-    text
-}
-
-// ─── the three retrievers ───────────────────────────────────────────────────
+// ─── the retrievers ─────────────────────────────────────────────────────────
 
 /// Rank by BM25, exactly as the engine does on the tool path.
 fn lexical(index: &MemoryIndex, question: &str) -> Vec<SearchHit> {
@@ -350,13 +430,49 @@ fn rank_of(hits: &[SearchHit], target: &str) -> Option<usize> {
     hits.iter().position(|h| h.id.as_str() == target)
 }
 
+fn fuse(rankings: &[&Vec<SearchHit>]) -> Vec<SearchHit> {
+    let owned: Vec<Vec<SearchHit>> = rankings.iter().map(|r| (*r).clone()).collect();
+    reciprocal_rank_fusion(&owned)
+        .into_iter()
+        .map(|c| c.hit)
+        .collect()
+}
+
 // ─── the measurement ────────────────────────────────────────────────────────
+
+/// The strategies, in report order. Views first, then what you can build from
+/// them.
+const STRATEGIES: [&str; 10] = [
+    "lexical",
+    "sem: statement",
+    "sem: curated",
+    "sem: structural",
+    "sem: generated",
+    "sem: full",
+    "RRF equal",
+    "RRF 2:1 full",
+    "RRF 2:1 gen",
+    "gated",
+];
+const LEXICAL: usize = 0;
+const SEM: usize = 1; // .. SEM + View::COUNT
+const RRF_EQUAL: usize = 6;
+const RRF_FULL: usize = 7;
+const RRF_GEN: usize = 8;
+const GATED: usize = 9;
 
 #[derive(Default, Clone, Copy)]
 struct Tally {
     asked: usize,
     first: usize,
     top_five: usize,
+    /// Summed reciprocal rank, for MRR.
+    ///
+    /// Top-1 is what the answer depends on and top-5 is what the model reads,
+    /// but neither distinguishes rank 6 from rank 20 — and a fusion that moves
+    /// answers from 14 to 6 is on its way somewhere, while one that leaves them
+    /// at 14 is not.
+    rr: f64,
 }
 
 impl Tally {
@@ -370,35 +486,65 @@ impl Tally {
             Some(r) if r < 5 => self.top_five += 1,
             _ => {}
         }
+        if let Some(r) = rank {
+            self.rr += 1.0 / (r + 1) as f64;
+        }
     }
     fn cell(&self) -> String {
         format!("{}/{}", self.first, self.asked)
     }
+    fn mrr(&self) -> f64 {
+        if self.asked == 0 {
+            0.0
+        } else {
+            self.rr / self.asked as f64
+        }
+    }
 }
 
-/// The four strategies, tallied along one axis.
-#[derive(Default)]
+/// Every strategy, tallied along one axis.
+#[derive(Clone, Copy)]
 struct Row {
-    lexical: Tally,
-    statement: Tally,
-    enriched: Tally,
-    fused: Tally,
-    gated: Tally,
+    tallies: [Tally; STRATEGIES.len()],
 }
+
+impl Default for Row {
+    fn default() -> Self {
+        Self {
+            tallies: [Tally::default(); STRATEGIES.len()],
+        }
+    }
+}
+
+/// The strategies the per-tier and per-mode tables show. The full ten-column
+/// grid is unreadable at 12 modes; these are the ones that carry the argument.
+const BREAKDOWN: [usize; 6] = [
+    LEXICAL,
+    SEM + 1, // curated
+    SEM + 2, // structural
+    SEM + 3, // generated
+    SEM + 4, // full
+    RRF_FULL,
+];
 
 impl Row {
     fn line(&self, label: &str) -> String {
-        format!(
-            "{:<15} {:<6} {:<9} {:<11} {:<11} {:<11} {}\n",
-            label,
-            self.lexical.asked,
-            self.lexical.cell(),
-            self.statement.cell(),
-            self.enriched.cell(),
-            self.fused.cell(),
-            self.gated.cell(),
-        )
+        let mut out = format!("{:<15} {:<6}", label, self.tallies[LEXICAL].asked);
+        for strategy in BREAKDOWN {
+            out.push_str(&format!(" {:<11}", self.tallies[strategy].cell()));
+        }
+        out.push('\n');
+        out
     }
+}
+
+fn breakdown_header() -> String {
+    let mut out = format!("{:<15} {:<6}", "kind", "asked");
+    for strategy in BREAKDOWN {
+        out.push_str(&format!(" {:<11}", STRATEGIES[strategy]));
+    }
+    out.push('\n');
+    out
 }
 
 #[tokio::test]
@@ -417,43 +563,124 @@ async fn what_a_semantic_layer_would_buy() {
         .collect();
     let index = MemoryIndex::build(active.iter().map(|m| IndexedMemory::from_canonical(m)));
 
-    // ── embed the corpus twice: as written, and as enriched ──
-    let mut embedder = Embedder::new();
+    let client = reqwest::Client::new();
+    let key = api_key();
+
+    // ── write the generated view: one completion per record, from the
+    //    statement alone ──
+    let mut written: Cache<String> = Cache::open("semantic-probe-enrichment.json");
     let statements: Vec<String> = active.iter().map(|m| m.statement.clone()).collect();
-    let enrichments: Vec<String> = active.iter().map(|m| enriched(m)).collect();
+    let enrich_started = Instant::now();
+    let missing: Vec<String> = statements
+        .iter()
+        .filter(|s| !written.entries.contains_key(*s))
+        .cloned()
+        .collect();
+    for chunk in missing.chunks(ENRICH_CONCURRENCY) {
+        let mut set = tokio::task::JoinSet::new();
+        for statement in chunk {
+            let (client, key, statement) = (client.clone(), key.clone(), statement.clone());
+            set.spawn(async move {
+                let text = enrich_one(&client, &key, &statement).await;
+                (statement, text)
+            });
+        }
+        while let Some(joined) = set.join_next().await {
+            let (statement, text) = joined.expect("enrichment task");
+            written.entries.insert(statement, text);
+            written.calls += 1;
+        }
+        written.flush();
+    }
+    let enrich_time = enrich_started.elapsed();
+    let generated = written.entries.clone();
+    let blank = generated.values().filter(|v| v.trim().is_empty()).count();
+
+    // ── embed the corpus once per view, and the questions once ──
+    let mut vectors: Cache<Vec<f32>> = Cache::open("semantic-probe-embeddings.json");
+    let cache_key = |task: &str, text: &str| {
+        stable_hash(&format!("{EMBEDDING_MODEL}|{DIMENSIONS}|{task}|{text}"))
+    };
+    let views: Vec<Vec<String>> = View::ALL
+        .iter()
+        .map(|view| {
+            active
+                .iter()
+                .map(|m| render(*view, m, &generated))
+                .collect()
+        })
+        .collect();
     let questions: Vec<String> = paraphrase::all()
         .map(|(_, p)| p.query.to_string())
         .collect();
 
-    let started = Instant::now();
-    embedder.embed_all(&statements, "RETRIEVAL_DOCUMENT").await;
-    embedder.embed_all(&enrichments, "RETRIEVAL_DOCUMENT").await;
-    embedder.embed_all(&questions, "RETRIEVAL_QUERY").await;
-    let embed_time = started.elapsed();
-
-    let vectors = |texts: &[String]| -> Vec<(MemoryId, String, Vec<f32>)> {
-        active
+    let embed_started = Instant::now();
+    let mut work: Vec<(String, String)> = Vec::new();
+    for texts in &views {
+        work.extend(
+            texts
+                .iter()
+                .map(|t| ("RETRIEVAL_DOCUMENT".to_string(), t.clone())),
+        );
+    }
+    work.extend(
+        questions
             .iter()
-            .zip(texts)
-            .map(|(m, text)| {
-                (
-                    m.id.clone(),
-                    m.statement.clone(),
-                    embedder.get("RETRIEVAL_DOCUMENT", text).to_vec(),
-                )
-            })
-            .collect()
-    };
-    let plain_vectors = vectors(&statements);
-    let rich_vectors = vectors(&enrichments);
+            .map(|q| ("RETRIEVAL_QUERY".to_string(), q.clone())),
+    );
+    work.retain(|(task, text)| !vectors.entries.contains_key(&cache_key(task, text)));
+    work.sort();
+    work.dedup();
+    for chunk in work.chunks(EMBED_CONCURRENCY) {
+        let mut set = tokio::task::JoinSet::new();
+        for (task, text) in chunk {
+            let (client, key, task, text) =
+                (client.clone(), key.clone(), task.clone(), text.clone());
+            set.spawn(async move {
+                let vector = embed_one(&client, &key, &text, &task).await;
+                (task, text, vector)
+            });
+        }
+        while let Some(joined) = set.join_next().await {
+            let (task, text, vector) = joined.expect("embedding task");
+            vectors.entries.insert(cache_key(&task, &text), vector);
+            vectors.calls += 1;
+        }
+        vectors.flush();
+    }
+    let embed_time = embed_started.elapsed();
 
-    // ── ask everything four ways ──
-    let mut by_tier: Vec<Row> = (0..Tier::COUNT).map(|_| Row::default()).collect();
-    let mut by_mode: Vec<Row> = (0..Mode::COUNT).map(|_| Row::default()).collect();
+    let get = |task: &str, text: &str| -> &[f32] {
+        vectors
+            .entries
+            .get(&cache_key(task, text))
+            .map(Vec::as_slice)
+            .unwrap_or_else(|| panic!("embedding missing for {task} {text:?}"))
+    };
+    let indexed: Vec<Vec<(MemoryId, String, Vec<f32>)>> = views
+        .iter()
+        .map(|texts| {
+            active
+                .iter()
+                .zip(texts)
+                .map(|(m, text)| {
+                    (
+                        m.id.clone(),
+                        m.statement.clone(),
+                        get("RETRIEVAL_DOCUMENT", text).to_vec(),
+                    )
+                })
+                .collect()
+        })
+        .collect();
+
+    // ── ask everything every way ──
+    let mut by_tier: Vec<Row> = vec![Row::default(); Tier::COUNT];
+    let mut by_mode: Vec<Row> = vec![Row::default(); Mode::COUNT];
+    let mut overall = Row::default();
     let mut rescued: Vec<String> = Vec::new();
     let mut broken: Vec<String> = Vec::new();
     let mut gate_fired = 0usize;
-    let mut weighted = Tally::default();
     let mut search_time = std::time::Duration::ZERO;
     let floor = gemini_memory_rs::core::RetrievalConfig::default().minimum_candidate_score;
 
@@ -463,13 +690,17 @@ async fn what_a_semantic_layer_would_buy() {
             .find(|p| p.name == probe_name)
             .unwrap_or_else(|| panic!("no probe named {probe_name}"));
         let question = phrasing.query;
-        let vector = embedder.get("RETRIEVAL_QUERY", question);
+        let vector = get("RETRIEVAL_QUERY", question);
 
         let lexical_hits = lexical(&index, question);
-        let plain_hits = semantic(vector, &plain_vectors);
-        let started = Instant::now();
-        let rich_hits = semantic(vector, &rich_vectors);
-        search_time += started.elapsed();
+        let mut per_view: Vec<Vec<SearchHit>> = Vec::with_capacity(View::COUNT);
+        for view in View::ALL {
+            let started = Instant::now();
+            per_view.push(semantic(vector, &indexed[view.index()]));
+            search_time += started.elapsed();
+        }
+        let full_hits = &per_view[View::Full.index()];
+        let gen_hits = &per_view[View::Generated.index()];
 
         // The engine's own rule: reach for semantics only when lexical search
         // found too little, so a query BM25 answered confidently never pays for
@@ -480,40 +711,34 @@ async fn what_a_semantic_layer_would_buy() {
         if thin {
             gate_fired += 1;
         }
-        let fused: Vec<SearchHit> =
-            reciprocal_rank_fusion(&[lexical_hits.clone(), rich_hits.clone()])
-                .into_iter()
-                .map(|c| c.hit)
-                .collect();
-        let gated_hits = if thin { &fused } else { &lexical_hits };
 
         // Equal-weight RRF treats a strong ranker and a weak one alike. Passing
         // the semantic ranking twice doubles its reciprocal-rank contribution —
         // the cheapest way to ask whether the fusion wants weighting rather
         // than gating.
-        let weighted_hits: Vec<SearchHit> =
-            reciprocal_rank_fusion(&[lexical_hits.clone(), rich_hits.clone(), rich_hits.clone()])
-                .into_iter()
-                .map(|c| c.hit)
-                .collect();
-        weighted.record(rank_of(&weighted_hits, probe.target));
+        let equal = fuse(&[&lexical_hits, full_hits]);
+        let weighted_full = fuse(&[&lexical_hits, full_hits, full_hits]);
+        let weighted_gen = fuse(&[&lexical_hits, gen_hits, gen_hits]);
+        let gated = if thin { &equal } else { &lexical_hits };
 
-        let (l, s, e, f, g) = (
-            rank_of(&lexical_hits, probe.target),
-            rank_of(&plain_hits, probe.target),
-            rank_of(&rich_hits, probe.target),
-            rank_of(&fused, probe.target),
-            rank_of(gated_hits, probe.target),
-        );
+        let mut ranks = [None; STRATEGIES.len()];
+        ranks[LEXICAL] = rank_of(&lexical_hits, probe.target);
+        for view in View::ALL {
+            ranks[SEM + view.index()] = rank_of(&per_view[view.index()], probe.target);
+        }
+        ranks[RRF_EQUAL] = rank_of(&equal, probe.target);
+        ranks[RRF_FULL] = rank_of(&weighted_full, probe.target);
+        ranks[RRF_GEN] = rank_of(&weighted_gen, probe.target);
+        ranks[GATED] = rank_of(gated, probe.target);
+
         for row in [
             &mut by_tier[phrasing.tier.index()],
             &mut by_mode[phrasing.mode.index()],
+            &mut overall,
         ] {
-            row.lexical.record(l);
-            row.statement.record(s);
-            row.enriched.record(e);
-            row.fused.record(f);
-            row.gated.record(g);
+            for (tally, rank) in row.tallies.iter_mut().zip(ranks) {
+                tally.record(rank);
+            }
         }
 
         let tag = format!(
@@ -521,7 +746,7 @@ async fn what_a_semantic_layer_would_buy() {
             phrasing.tier.label(),
             phrasing.mode.label()
         );
-        match (l == Some(0), f == Some(0)) {
+        match (ranks[LEXICAL] == Some(0), ranks[RRF_FULL] == Some(0)) {
             (false, true) => rescued.push(tag),
             (true, false) => broken.push(tag),
             _ => {}
@@ -530,20 +755,50 @@ async fn what_a_semantic_layer_would_buy() {
 
     // ── report ──
     let asked = paraphrase::count();
-    let header =
-        "kind            asked  lexical   sem(plain)  sem(rich)   fused(rich) gated(rich)\n";
     let mut report = format!(
-        "\nwhat a semantic layer buys, over {asked} questions\n\
-         {} records embedded twice at {DIMENSIONS}d ({EMBEDDING_MODEL}); \
-         {} API calls this run, {embed_time:.1?}\n\
-         flat exact search over {} vectors: {:?} per question\n\
-         the gate fired on {gate_fired}/{asked} questions\n\n\
-         by how far the question sits from the record's own words\n{header}",
+        "\nwhat a semantic layer buys, over {asked} questions and {} records\n\
+         {} views embedded at {DIMENSIONS}d ({EMBEDDING_MODEL}); \
+         {} embedding calls this run, {embed_time:.1?}\n\
+         {} enrichment completions ({ENRICHMENT_MODEL}), {enrich_time:.1?}, {blank} came back empty\n\
+         flat exact search over {} vectors: {:?} per question per view\n\
+         the gate fired on {gate_fired}/{asked} questions\n\n",
         active.len(),
-        embedder.calls,
+        View::COUNT,
+        vectors.calls,
+        written.calls,
         active.len(),
-        search_time / asked as u32,
+        search_time / (asked * View::COUNT) as u32,
     );
+
+    for view in View::ALL {
+        let sample = render(view, active[0], &generated);
+        report.push_str(&format!(
+            "{:<11} {} chars/record, e.g. {:?}\n",
+            view.label(),
+            views[view.index()].iter().map(String::len).sum::<usize>() / active.len(),
+            sample.replace('\n', " ⏎ "),
+        ));
+    }
+
+    report.push_str(&format!(
+        "\n{:<16} {:<9} {:<9} {}\n",
+        "strategy", "top-1", "top-5", "MRR"
+    ));
+    for (i, name) in STRATEGIES.iter().enumerate() {
+        let t = &overall.tallies[i];
+        report.push_str(&format!(
+            "{:<16} {:<9} {:<9} {:.3}\n",
+            name,
+            format!("{}/{asked}", t.first),
+            format!("{}/{asked}", t.top_five),
+            t.mrr(),
+        ));
+    }
+
+    let header = breakdown_header();
+    report.push_str(&format!(
+        "\nby how far the question sits from the record's own words\n{header}"
+    ));
     for tier in Tier::ALL {
         report.push_str(&by_tier[tier.index()].line(tier.label()));
     }
@@ -554,29 +809,9 @@ async fn what_a_semantic_layer_would_buy() {
         report.push_str(&by_mode[mode.index()].line(mode.label()));
     }
 
-    let sum = |pick: fn(&Row) -> &Tally| {
-        (
-            by_tier.iter().map(|r| pick(r).first).sum::<usize>(),
-            by_tier.iter().map(|r| pick(r).top_five).sum::<usize>(),
-        )
-    };
-    let (lf, lt) = sum(|r| &r.lexical);
-    let (sf, st) = sum(|r| &r.statement);
-    let (ef, et) = sum(|r| &r.enriched);
-    let (ff, ft) = sum(|r| &r.fused);
-    let (gf, gt) = sum(|r| &r.gated);
-    report.push_str(&format!(
-        "\nanswered by the top result:  lexical {lf}/{asked}   sem(plain) {sf}/{asked}   \
-         sem(rich) {ef}/{asked}   fused {ff}/{asked}   gated {gf}/{asked}\n\
-         answer in the top five:      lexical {lt}/{asked}   sem(plain) {st}/{asked}   \
-         sem(rich) {et}/{asked}   fused {ft}/{asked}   gated {gt}/{asked}\n\
-         \nweighted RRF, semantics at double weight: {}/{asked} by the top result, \
-         {}/{asked} in the top five.\n",
-        weighted.first, weighted.top_five
-    ));
     if !rescued.is_empty() {
         report.push_str(&format!(
-            "\nrescued by unconditional fusion ({}):\n",
+            "\nrescued by weighted fusion over the full view ({}):\n",
             rescued.len()
         ));
         for question in &rescued {
@@ -594,10 +829,15 @@ async fn what_a_semantic_layer_would_buy() {
     }
     eprintln!("{report}");
 
-    assert!(
-        ff >= lf && gf >= lf,
-        "a strategy answered fewer questions than lexical retrieval alone (fused \
-         {ff}, gated {gf}, lexical {lf}) — an augmentation that costs you the queries \
-         you already had is not an augmentation\n{report}"
-    );
+    let lex = overall.tallies[LEXICAL].first;
+    for strategy in [RRF_EQUAL, RRF_FULL, RRF_GEN, GATED] {
+        assert!(
+            overall.tallies[strategy].first >= lex,
+            "{} answered {} of {asked} against lexical retrieval's {lex} — an \
+             augmentation that costs you the queries you already had is not an \
+             augmentation\n{report}",
+            STRATEGIES[strategy],
+            overall.tallies[strategy].first,
+        );
+    }
 }
