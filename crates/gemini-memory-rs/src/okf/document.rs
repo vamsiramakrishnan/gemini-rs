@@ -94,7 +94,7 @@ impl OkfDocument {
     /// Records are delimited by `---` fences in pairs: open, front matter,
     /// close, body, then the next record's open fence. A body line that is
     /// exactly `---` would therefore be read as a record boundary, so
-    /// [`render_many`] refuses to write one.
+    /// [`Self::render_many`] refuses to write one.
     pub fn parse_many(source: &str, path: &str) -> Result<Vec<Self>, MemoryError> {
         let source = source.trim_start_matches('\u{feff}');
         let lines: Vec<&str> = source.lines().collect();
