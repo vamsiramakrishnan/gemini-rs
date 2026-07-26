@@ -5,6 +5,7 @@ members = [
     "crates/gemini-adk-macros-rs",
     "crates/gemini-adk-rs",
     "crates/gemini-adk-fluent-rs",
+    "crates/gemini-memory-rs",
     "apps/gemini-adk-server-rs",
     "apps/gemini-adk-web-rs",
     "apps/gemini-adk-api-rs",
@@ -32,6 +33,7 @@ gemini-genai-rs      = { path = "crates/gemini-genai-rs",      version = "0.8.0"
 gemini-adk-macros-rs = { path = "crates/gemini-adk-macros-rs", version = "0.8.0" }
 gemini-adk-rs        = { path = "crates/gemini-adk-rs",        version = "0.8.0" }
 gemini-adk-fluent-rs = { path = "crates/gemini-adk-fluent-rs", version = "0.8.0" }
+gemini-memory-rs     = { path = "crates/gemini-memory-rs",     version = "0.8.0" }
 gemini-adk-server-rs = { path = "apps/gemini-adk-server-rs",   version = "0.8.0" }
 
 [workspace.lints.clippy]
