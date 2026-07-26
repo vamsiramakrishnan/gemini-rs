@@ -348,6 +348,11 @@ Commits are transactional per user namespace and idempotent by key:
    revision has not advanced and a retry re-applies cleanly.
 5. Only then publish the new revision in memory and record the idempotency key.
 
+The manifest carries the last 256 idempotency keys, so the at-least-once
+guarantee survives a restart. Reconciliation retried against a freshly opened
+repository recognises a transaction that already landed instead of applying it
+a second time and re-reinforcing the same evidence.
+
 An optimistic `expected_revision` makes a concurrent commit fail with
 `RevisionConflict` rather than interleave.
 
@@ -432,10 +437,6 @@ Honest list.
   generated, so corpus growth and contradiction drift are unmeasured.
 - **Explain CLI.** `SearchExplanation::render` produces the output; no
   `bmem explain-search` binary wraps it.
-- **Idempotency keys do not survive a repository reload.** They are held in
-  process, so retrying an at-least-once transaction after a restart applies it
-  twice and inflates evidence counters. Persisting them in the manifest is the
-  fix; the in-process guarantee holds today, the cross-restart one does not.
 - **Proactive context injection.** V1 deliberately uses tool responses. The
   turn-boundary injection path stays unbuilt until it is validated against real
   Live model behaviour.

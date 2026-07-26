@@ -236,7 +236,26 @@ pub struct MemoryManifest {
     pub records: Vec<ManifestEntry>,
     /// Deletions, without content.
     pub tombstones: Vec<Tombstone>,
+    /// Idempotency keys of commits already applied, most recent last.
+    ///
+    /// Durable, because the retry guarantee has to survive a restart to be
+    /// worth anything. Reconciliation is at-least-once: if the process dies
+    /// between a successful commit and the caller learning about it, the retry
+    /// arrives at a fresh repository. Without these keys it applies a second
+    /// time, advancing the revision and re-reinforcing evidence — so a crash
+    /// silently inflates a memory's confidence.
+    ///
+    /// Bounded: a key only has to outlive the retry window of the transaction
+    /// that produced it, and the manifest is rewritten on every commit.
+    #[serde(default)]
+    pub applied: Vec<String>,
 }
+
+/// How many idempotency keys the manifest carries forward.
+///
+/// Retries follow a failed commit within seconds; keeping the last few hundred
+/// covers that by a wide margin without letting the manifest grow forever.
+const APPLIED_KEY_HISTORY: usize = 256;
 
 impl Default for MemoryManifest {
     fn default() -> Self {
@@ -245,6 +264,7 @@ impl Default for MemoryManifest {
             revision: 0,
             records: Vec::new(),
             tombstones: Vec::new(),
+            applied: Vec::new(),
         }
     }
 }
@@ -337,7 +357,7 @@ impl<S: OkfStore> OkfRepository<S> {
             revision: manifest.revision,
             records,
             tombstones: manifest.tombstones,
-            applied: Vec::new(),
+            applied: manifest.applied,
             written_files,
         };
         Ok(())
@@ -523,6 +543,14 @@ impl<S: OkfStore> MemoryRepository for OkfRepository<S> {
         // already-applied fast path and report success while the manifest
         // stayed stale for ever.
         let next_revision = namespace.revision + 1;
+        // The key this commit is about to apply goes into the same manifest
+        // write. Recording it only in memory would mean a restart forgets that
+        // this transaction already landed, and the retry would apply it twice.
+        let mut applied = namespace.applied.clone();
+        applied.push(transaction.idempotency_key.clone());
+        if applied.len() > APPLIED_KEY_HISTORY {
+            applied.drain(..applied.len() - APPLIED_KEY_HISTORY);
+        }
         let manifest = MemoryManifest {
             schema_version: MANIFEST_SCHEMA_VERSION,
             revision: next_revision,
@@ -538,6 +566,7 @@ impl<S: OkfStore> MemoryRepository for OkfRepository<S> {
                 })
                 .collect(),
             tombstones: namespace.tombstones.clone(),
+            applied: applied.clone(),
         };
         self.store
             .write(
@@ -549,7 +578,7 @@ impl<S: OkfStore> MemoryRepository for OkfRepository<S> {
         // Every durable write has landed; only now is the commit real.
         namespace.revision = next_revision;
         namespace.written_files = desired;
-        namespace.applied.push(transaction.idempotency_key);
+        namespace.applied = applied;
 
         Ok(CommitReceipt {
             revision: namespace.revision,
@@ -731,6 +760,42 @@ mod tests {
         let second = repo.commit(tx()).await.unwrap();
         assert_eq!(first.revision, second.revision);
         assert!(second.written.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_retried_commit_is_applied_once_across_a_restart() {
+        // Reconciliation is at-least-once. If the process dies between a
+        // successful commit and the caller learning about it, the retry meets
+        // a freshly opened repository — which must still recognise the key, or
+        // the transaction applies twice and re-reinforces the same evidence.
+        let store = Arc::new(MemoryStore::new());
+        let user = UserId::new("usr_1");
+        let tx = || {
+            MemoryTransaction::new(user.clone(), "same-key").put(memory(
+                "mem_a",
+                MemoryKind::Preference,
+                "a",
+            ))
+        };
+
+        let first = OkfRepository::new(store.clone())
+            .commit(tx())
+            .await
+            .unwrap();
+
+        // A brand-new repository over the same store: nothing in memory.
+        let reopened = OkfRepository::new(store.clone());
+        let retried = reopened.commit(tx()).await.unwrap();
+
+        assert_eq!(
+            retried.revision, first.revision,
+            "the retry advanced the revision, so it was applied a second time"
+        );
+        assert!(
+            retried.written.is_empty(),
+            "the retry rewrote records: {:?}",
+            retried.written
+        );
     }
 
     #[tokio::test]
