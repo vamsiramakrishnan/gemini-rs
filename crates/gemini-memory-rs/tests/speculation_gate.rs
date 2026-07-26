@@ -6,25 +6,8 @@
 //! `semantic_fusion_probe` establishes that embedding the record's own
 //! frontmatter answers 66 of 93 paraphrased questions against BM25's 42. That
 //! measures an *index*. It says nothing about whether the engine would ever
-//! show the model what that index found, and the engine has four separate
-//! places where it might not:
-//!
-//! 1. [`MemoryEngine::begin_session`] constructs `LocalMemoryRetriever::new`
-//!    directly, so `with_semantic_fallback` cannot be called on the retriever a
-//!    session actually uses.
-//! 2. `RetrievalBudget::interactive()` — the budget `recall_context` runs under
-//!    — sets `semantic_ms: 0`, so the tool path never consults the backend even
-//!    when one is installed.
-//! 3. On the speculative path, where it does run, `needs_semantic_fallback`
-//!    gates it behind "lexical found too little", and results are appended
-//!    *below* every lexical hit as "a safety net, not a competing opinion".
-//! 4. The snapshot that speculation produces is then served only if
-//!    [`PreparedMemorySnapshot::satisfies`] returns true — a **lexical** overlap
-//!    test, on precisely the questions a semantic layer exists to answer.
-//!
-//! Each was a reasonable decision when written, and the fusion probe's numbers
-//! contradict all four. This file measures them rather than arguing about them,
-//! because the fix is worth building only if it moves something.
+//! show the model what that index found, and the engine had five separate
+//! places where it would not.
 //!
 //! # The method
 //!
@@ -36,6 +19,51 @@
 //! no embedding model can.
 //!
 //! Everything is deterministic and local: no API key, no network, no model.
+//!
+//! # What it found, and what changed
+//!
+//! With a perfect backend installed, over 93 questions and 1,199 records:
+//!
+//! | | before | after |
+//! |---|---|---|
+//! | answered on the `recall_context` path | 58/93 | **93/93** |
+//! | answered on the speculative path | 71/93 | **93/93** |
+//! | times the seam consulted the backend | 13 of 186 | 186 of 186 |
+//!
+//! 58 is exactly what BM25 answers alone: the tool path was not degrading the
+//! semantic backend, it was never once asking it. Five causes, each fixed by
+//! the commit this file accompanies:
+//!
+//! 1. `MemoryEngine::begin_session` built `LocalMemoryRetriever::new` directly,
+//!    so `with_semantic_fallback` could not be called on the retriever a session
+//!    actually uses — no application could install a backend at all. There is
+//!    now `MemoryEngine::with_semantic_fallback`.
+//! 2. `RetrievalBudget::interactive()` set `semantic_ms: 0`. The reasoning was
+//!    sound for a remote backend and wrong for a local one, so it is now a
+//!    deadline (`immediate_semantic_timeout_ms`, 10 ms) rather than a
+//!    prohibition: a local scan replies inside it, a network call times out and
+//!    the lexical results stand, which is what the zero achieved anyway.
+//! 3. `needs_semantic_fallback` asked the backend only when lexical search came
+//!    back thin — 13 of 93 questions. All 13 were rescued; the 80 it declined
+//!    were declined because BM25 was *confident*, which is the failure mode
+//!    rather than the safe case. The gate is gone.
+//! 4. Semantic hits were appended below every lexical hit, "a safety net, not a
+//!    competing opinion". The opinion is measurably the better one, so it is now
+//!    fused as a ranking at 2:1 — the weighting `semantic_fusion_probe`
+//!    measured at 79/93 in the top five.
+//! 5. `recall` served the prepared snapshot *or* a live search, choosing with
+//!    [`PreparedMemorySnapshot::satisfies`] — a lexical overlap test that
+//!    refuses 65 of 93 snapshots **that already contain the answer**, and
+//!    refuses hardest exactly where speculation is most valuable (0 of 6 asked
+//!    in-situ, 1 of 20 needing inference). A refusal now demotes the snapshot to
+//!    one ranking of two instead of discarding it.
+//!
+//! The 93/93 is the *plumbing* being transparent, not a claim about retrieval
+//! quality: an oracle is not available in production. What it means is that
+//! whatever a real backend knows now reaches the model, so the remaining
+//! quality question belongs entirely to the backend. The `gate lets in` column
+//! stays in the report as a live measurement of how often the fast path fires,
+//! which is a latency question rather than a correctness one now.
 
 mod common;
 
@@ -334,26 +362,56 @@ async fn how_often_a_perfect_semantic_layer_would_reach_the_model() {
     }
     eprintln!("{report}");
 
-    // Deliberately not asserted as a target — this is the "before" measurement,
-    // and the numbers it prints are the case for the change. What *is* asserted
-    // is that the measurement is measuring something: an oracle that is never
-    // consulted, or a corpus where every question is already answered, would
-    // make the whole file a ceremony.
+    // First, that the measurement can fail at all. An oracle nobody consults or
+    // a corpus BM25 already answers would make every column agree and the file
+    // a ceremony.
     assert!(
         overall.lexical_only.passed < asked,
         "BM25 alone already answers every question, so nothing here can \
          distinguish the conditions — the query set has stopped being hard\n{report}"
     );
+    assert_eq!(
+        oracle.calls(),
+        asked * 2,
+        "the seam declined to consult the semantic backend on some queries. \
+         There is no longer a gate that should do that: it was measured asking \
+         on 13 of 93 questions and rescuing all 13.\n{report}"
+    );
+
+    // Then the guarantee the five fixes exist to provide: whatever the backend
+    // knows, the model gets. This is a statement about plumbing, not about
+    // retrieval quality — the oracle is perfect precisely so that anything less
+    // than everything is the engine's fault.
+    for (label, tally) in [
+        ("the recall_context path", &overall.oracle_interactive),
+        ("the speculative path", &overall.oracle_speculative),
+    ] {
+        assert_eq!(
+            tally.passed,
+            asked,
+            "{label} lost {} of {asked} answers a perfect semantic backend had \
+             already found. Something between the backend and the payload is \
+             discarding results — a reinstated gate, a ranking that cannot \
+             compete, a budget of zero, or the per-predicate cap.\n{report}",
+            asked - tally.passed,
+        );
+    }
 }
 
-/// The gate, stated as a claim rather than a table.
+/// Why a `satisfies` refusal must never again discard the snapshot.
 ///
-/// A snapshot that literally contains the answer is refused for a large share
-/// of the questions a semantic layer exists to answer, because `satisfies`
-/// tests **word overlap with the question** — the one signal these questions
-/// were built not to carry.
+/// `satisfies` tests word overlap between the question and the prepared
+/// statements. That is the right question for "can I skip the search entirely"
+/// and the wrong one for "is this snapshot any good", because the questions a
+/// semantic layer exists to answer are exactly the ones carrying no overlap.
+///
+/// This pins the premise of the fusion in [`gemini_memory_rs::retrieval::fuse_snapshots`]:
+/// while `satisfies` still refuses correct snapshots in bulk, discarding one on
+/// refusal throws away answers. If the day comes that this test fails —
+/// `satisfies` having become semantic itself — the fusion is no longer load
+/// bearing and both can be revisited.
 #[tokio::test]
-async fn the_snapshot_gate_refuses_snapshots_that_hold_the_answer() {
+async fn the_snapshot_gate_still_refuses_snapshots_that_hold_the_answer() {
     let records = corpus_records().await;
     let active: Vec<&CanonicalMemory> = records
         .iter()
@@ -378,9 +436,10 @@ async fn the_snapshot_gate_refuses_snapshots_that_hold_the_answer() {
 
     assert!(
         !refused.is_empty(),
-        "expected the lexical gate to refuse some correct snapshots; if this \
-         now passes, `satisfies` has been fixed and this test should be \
-         inverted into a regression guard"
+        "`satisfies` no longer refuses any correct snapshot. That would be good \
+         news, and it means the fusion in `fuse_snapshots` has stopped being \
+         load bearing — revisit both rather than leaving this test asserting a \
+         premise that no longer holds."
     );
     eprintln!(
         "\n`satisfies` refuses {} of {} correct snapshots, e.g.:\n  {}\n",
@@ -397,38 +456,38 @@ async fn the_snapshot_gate_refuses_snapshots_that_hold_the_answer() {
 
 /// Which transcript the snapshot in front of the model was actually built from.
 ///
-/// `TurnExtractor` runs `begin_turn(next)` and *then* `prepare(next, …)`, and
-/// `begin_turn` promotes whatever `prepare` wrote last time. So the snapshot
-/// serving turn N was built from the transcript of turn N−2, not N−1: the
-/// freshest speculation always sits in `prepared` for a whole turn before
-/// anyone can read it.
+/// `begin_turn` promotes whatever `prepare` wrote last, so the order of those
+/// two calls decides how stale the model's context is. `TurnExtractor` used to
+/// run `begin_turn(next)` and *then* `prepare(next, …)`, which published the
+/// previous round's speculation and left the fresh one sitting unread in
+/// `prepared` for a whole turn: the snapshot serving turn N was built from the
+/// transcript of turn N−2.
 ///
-/// This is not a style point. It is the difference between a user saying
-/// "I'm meeting Rhea for dinner" and being understood on the next sentence, or
-/// on the one after that.
+/// This is not a style point. It is the difference between a user saying "I'm
+/// meeting Rhea for dinner" and being understood on the next sentence, or on
+/// the one after that.
+///
+/// This test pins the corrected order by asserting the *consequence* rather
+/// than the call sequence, so it fails if anyone reintroduces the delay by any
+/// route.
 #[tokio::test]
-async fn the_active_snapshot_is_two_turns_behind_the_transcript_that_built_it() {
+async fn the_snapshot_serving_a_turn_was_built_from_the_previous_utterance() {
     let scratch = ScratchDir::new("speculation-staleness");
     let engine = file_backed_engine("usr_corpus", scratch.path());
     corpus::install(&engine).await;
     let session = engine.begin_session(SessionId::new("ses_staleness"));
 
-    // Turn 1 is about the bicycle; turn 2 is about the barber. Reproduce the
-    // production call order exactly: begin the next turn, then speculate on
-    // what was just said.
+    // Turn 1 is about the bicycle; turn 2 is about the barber.
     let bicycle = probe("possession");
     let barber = probe("corrected_barber");
 
-    session.begin_turn(TurnId(1));
+    // The production call order: speculate on what was just said, then open
+    // the turn that will read it.
     session.prepare(TurnId(1), bicycle.ask).await.unwrap();
+    session.begin_turn(TurnId(1));
 
-    session.begin_turn(TurnId(2));
     session.prepare(TurnId(2), barber.ask).await.unwrap();
-
-    // Turn 2 is in flight. The user talked about the barber a moment ago and
-    // about the bicycle before that.
-    let serving_turn_2 = session.active_snapshot();
-    let waiting = session.prepared_snapshot();
+    session.begin_turn(TurnId(2));
 
     let statements = |s: &PreparedMemorySnapshot| {
         s.facts
@@ -437,34 +496,36 @@ async fn the_active_snapshot_is_two_turns_behind_the_transcript_that_built_it() 
             .collect::<Vec<_>>()
             .join(" | ")
     };
-    let active_text = statements(&serving_turn_2);
-    let waiting_text = statements(&waiting);
+    let active_text = statements(&session.active_snapshot());
 
-    eprintln!(
-        "\nturn 2 is in flight.\n  \
-         serving the model : {active_text}\n  \
-         sat in `prepared` : {waiting_text}\n"
-    );
+    eprintln!("\nturn 2 is in flight. serving the model: {active_text}\n");
 
     assert!(
-        says_any(&waiting_text, barber.expect).is_some(),
-        "the speculation built from the most recent utterance should have found \
-         the barber record; it holds: {waiting_text}"
+        says_any(&active_text, barber.expect).is_some(),
+        "turn 2 is being served context built from turn 1's utterance or \
+         earlier. The speculation from the utterance immediately before it — \
+         about the barber — never reached the model.\n  serving: {active_text}"
     );
     assert!(
-        says_any(&active_text, barber.expect).is_none(),
-        "the barber speculation reached the model on the same turn it was \
-         built — the off-by-one this test documents has been fixed, and the \
-         test should be inverted into a regression guard.\n  \
-         active: {active_text}"
+        says_any(&active_text, bicycle.expect).is_none(),
+        "turn 2 is still holding turn 1's bicycle context, so the promotion is \
+         not replacing the snapshot.\n  serving: {active_text}"
     );
 }
 
-/// What the model is handed today, end to end, when speculation is on-topic.
+/// What the model is handed end to end when speculation is on-topic, with **no
+/// semantic backend at all**.
 ///
 /// The warm case is the friendliest one the product ever sees: the user
-/// mentioned the subject in the previous breath. If the answer does not reach
-/// the model here, the speculative path is not carrying the product.
+/// mentioned the subject in the previous breath. It is also where the single
+/// largest win in this change shows up, and it costs nothing — no embeddings,
+/// no model, no second index.
+///
+/// It measured 59 of 93 while a `satisfies` refusal discarded the prepared
+/// snapshot and fell back to a lexical search, and 81 of 93 once a refusal
+/// demotes the snapshot to one ranking of two instead. Twenty-two questions,
+/// bought purely by not throwing away work the engine had already done. That is
+/// the argument that the gate was the bug rather than the ranking.
 #[tokio::test]
 async fn end_to_end_recall_when_the_speculation_was_on_topic() {
     let scratch = ScratchDir::new("speculation-warm");
@@ -506,9 +567,17 @@ async fn end_to_end_recall_when_the_speculation_was_on_topic() {
          in the payload.\n{} missed.\n",
         missed.len()
     );
+    // A floor rather than the measured 81, because this runs through the whole
+    // engine and a few questions sit near the per-predicate cap. But it is well
+    // above the 58 that BM25 alone manages and the 59 this measured while a
+    // refusal discarded the snapshot, so a regression to either shows up here.
     assert!(
-        answered > 0,
-        "no question was answered end to end even with on-topic speculation — \
-         the harness is broken rather than the engine"
+        answered >= 70,
+        "on-topic speculation put the answer in front of the model for only \
+         {answered} of {asked} questions. It measured 81 once a `satisfies` \
+         refusal stopped discarding the prepared snapshot; 58 is what lexical \
+         search manages with no speculation at all, so a number near that means \
+         the snapshot is being thrown away again.\nmissed:\n  {}",
+        missed.join("\n  ")
     );
 }

@@ -184,6 +184,64 @@ impl PreparedMemorySnapshot {
     }
 }
 
+/// Merge a live search with a prepared snapshot, ranked by RRF.
+///
+/// Serving one *or* the other is a choice the engine used to make with
+/// [`PreparedMemorySnapshot::satisfies`], and it made it badly: measured
+/// against snapshots that already held the answer, `satisfies` refused 65 of 93
+/// paraphrased questions, discarding a correct snapshot in favour of a lexical
+/// search that could not find one. Neither ranking is reliably better, so
+/// neither gets to win outright.
+///
+/// The same `1/(60 + rank)` the retriever already fuses lexical rankings with,
+/// so a fact both agree on rises and a fact only one found still gets a place.
+/// A stale prepared snapshot contributes nothing — it is a snapshot of a
+/// conversation that has moved on.
+pub fn fuse_snapshots(
+    live: &PreparedMemorySnapshot,
+    prepared: &PreparedMemorySnapshot,
+    max_memories: usize,
+    now: DateTime<Utc>,
+) -> PreparedMemorySnapshot {
+    if prepared.is_empty() || !prepared.is_fresh(now) {
+        return live.clone();
+    }
+    if live.is_empty() {
+        return prepared.clone();
+    }
+
+    let k = crate::retrieval::fusion::RRF_K as f64;
+    let mut scores: Vec<(f64, RetrievedMemory)> = Vec::new();
+    for ranking in [&live.facts, &prepared.facts] {
+        for (rank, fact) in ranking.iter().enumerate() {
+            let contribution = 1.0 / (k + rank as f64 + 1.0);
+            match scores
+                .iter_mut()
+                .find(|(_, f)| f.memory_id == fact.memory_id)
+            {
+                Some((score, _)) => *score += contribution,
+                None => scores.push((contribution, fact.clone())),
+            }
+        }
+    }
+    scores.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    scores.truncate(max_memories);
+
+    let facts: Vec<RetrievedMemory> = scores.into_iter().map(|(_, fact)| fact).collect();
+    let token_count = facts
+        .iter()
+        .map(RetrievedMemory::token_cost)
+        .sum::<usize>()
+        .min(u16::MAX as usize) as u16;
+    PreparedMemorySnapshot {
+        facts: Arc::from(facts),
+        token_count,
+        // Provenance follows the live search: it is the one that answered the
+        // question the model actually asked.
+        ..live.clone()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

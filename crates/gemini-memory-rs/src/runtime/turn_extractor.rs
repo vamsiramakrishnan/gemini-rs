@@ -191,9 +191,17 @@ impl TurnExtractor for MemoryTurnExtractor {
         // This is the "prepare asynchronously, consume synchronously" rule: by
         // the time a `recall_context` call arrives, the answer is already sat
         // in the session.
+        //
+        // Prepare *then* begin, in that order. `begin_turn` promotes whatever
+        // `prepare` wrote last, so beginning first published the speculation
+        // from the previous round and left this one sitting unread in
+        // `prepared` for a whole turn: the snapshot serving turn N was built
+        // from the transcript of turn N−2. That is the difference between
+        // someone saying "I'm meeting Rhea for dinner" and being understood on
+        // the next sentence, or on the one after that.
         let next = TurnId(turn_id.0 + 1);
-        self.session.begin_turn(next);
         let _ = self.session.prepare(next, &turn.user).await;
+        self.session.begin_turn(next);
 
         let mut payload = self.slot_values();
         payload.insert("turn".into(), json!(turn.turn_number));

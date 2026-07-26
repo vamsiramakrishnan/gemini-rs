@@ -28,9 +28,9 @@ use crate::ingestion::{
 use crate::okf::{MemoryRepository, OkfRepository};
 use crate::reconcile::{consolidate, MemoryCommitter, ReconciliationReport};
 use crate::retrieval::{
-    context_for, DeterministicPlanExtractor, DeterministicPlanner, IndexHandle, KnownEntities,
-    LocalMemoryRetriever, MemoryRetriever, PreparedMemorySnapshot, RetrievalBudget,
-    RetrievalPlanExtractor, RetrievalRequest,
+    context_for, fuse_snapshots, DeterministicPlanExtractor, DeterministicPlanner, IndexHandle,
+    KnownEntities, LocalMemoryRetriever, MemoryRetriever, PreparedMemorySnapshot, RetrievalBudget,
+    RetrievalPlanExtractor, RetrievalRequest, SemanticFallback,
 };
 use crate::transcript::GenerationGuard;
 
@@ -50,6 +50,8 @@ pub struct MemoryEngine {
     /// Whether the caller installed their own plan extractor.
     caller_supplied_extractor: Arc<std::sync::atomic::AtomicBool>,
     observation_extractor: Arc<dyn MemoryObservationExtractor>,
+    /// The optional paraphrase-tolerant backend, shared by every session.
+    semantic: Option<Arc<dyn SemanticFallback>>,
 }
 
 impl MemoryEngine {
@@ -86,7 +88,24 @@ impl MemoryEngine {
             )))),
             caller_supplied_extractor: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             observation_extractor: Arc::new(RuleBasedObservationExtractor::new()),
+            semantic: None,
         }
+    }
+
+    /// Attach a paraphrase-tolerant retrieval backend.
+    ///
+    /// Every session opened afterwards consults it. Without this the seam was
+    /// unreachable in practice: `LocalMemoryRetriever::with_semantic_fallback`
+    /// existed, but [`MemoryEngine::begin_session`] built the retriever itself
+    /// and never called it, so no application could install one.
+    ///
+    /// The backend is asked on both the speculative and the tool path, under
+    /// the deadlines in [`crate::core::RetrievalConfig`]. A backend slower than
+    /// `immediate_semantic_timeout_ms` simply times out on the tool path and
+    /// still contributes through speculation.
+    pub fn with_semantic_fallback(mut self, fallback: Arc<dyn SemanticFallback>) -> Self {
+        self.semantic = Some(fallback);
+        self
     }
 
     /// Use a model-backed retrieval-plan extractor.
@@ -191,11 +210,15 @@ impl MemoryEngine {
     /// Begin a logical conversation.
     pub fn begin_session(&self, session_id: SessionId) -> MemorySession {
         let overlay_handle = Arc::new(IndexHandle::new());
-        let retriever = Arc::new(LocalMemoryRetriever::new(
+        let mut retriever = LocalMemoryRetriever::new(
             self.canonical.clone(),
             overlay_handle.clone(),
             self.config.retrieval.clone(),
-        ));
+        );
+        if let Some(semantic) = &self.semantic {
+            retriever = retriever.with_semantic_fallback(semantic.clone());
+        }
+        let retriever = Arc::new(retriever);
 
         MemorySession {
             user: self.user.clone(),
@@ -360,22 +383,41 @@ impl MemorySession {
 
     /// Serve a `recall_context` tool call.
     ///
-    /// Reads the frozen snapshot when it covers the query, and falls back to a
-    /// live lexical search when speculation missed. The fallback is bounded and
-    /// never reaches the network.
+    /// Reads the frozen snapshot when it plainly covers the query, and
+    /// otherwise runs a live local search and **fuses the snapshot into it**.
+    /// The search is bounded and never reaches the network.
+    ///
+    /// The fusion is the part worth explaining. `satisfies` decides the fast
+    /// path by word overlap between the question and the prepared statements —
+    /// which is the right test for "can I skip the search entirely" and the
+    /// wrong one for "is this snapshot any good". Measured against snapshots
+    /// that *already contained the answer*, it refused 65 of 93 paraphrased
+    /// questions, and refused hardest exactly where speculation is most
+    /// valuable: 0 of 6 asked in-situ, 1 of 20 needing a step of inference.
+    /// Every one of those refusals threw away a correct answer and replaced it
+    /// with a lexical search that could not find one.
+    ///
+    /// So a refusal no longer discards the snapshot; it demotes it to one
+    /// ranking among two. That also gives the speculative path somewhere to
+    /// deliver: it runs with a 100 ms semantic budget where this path has 10,
+    /// so a remote backend's results reach the model here or nowhere.
     pub async fn recall(&self, query: &str, turn_id: TurnId) -> serde_json::Value {
         let now = Utc::now();
         let active = self.active_snapshot();
         if active.satisfies(query, now) {
             return active.to_tool_payload();
         }
+        let budget = RetrievalBudget::interactive_with(&self.config.retrieval);
         match self
             .retriever
-            .retrieve_immediate(query, turn_id, RetrievalBudget::interactive())
+            .retrieve_immediate(query, turn_id, budget)
             .await
         {
-            Ok(snapshot) => snapshot.to_tool_payload(),
-            // Memory failure degrades to "nothing found"; it never fails a turn.
+            Ok(live) => fuse_snapshots(&live, &active, self.config.retrieval.max_memories, now)
+                .to_tool_payload(),
+            // Memory failure degrades to whatever was already prepared, and to
+            // "nothing found" if that is empty. It never fails a turn.
+            Err(_) if !active.is_empty() => active.to_tool_payload(),
             Err(_) => PreparedMemorySnapshot::empty(turn_id).to_tool_payload(),
         }
     }

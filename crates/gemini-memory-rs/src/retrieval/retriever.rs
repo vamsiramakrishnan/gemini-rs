@@ -66,20 +66,34 @@ pub struct RetrievalBudget {
 impl RetrievalBudget {
     /// The budget for a synchronous fallback on the tool-call path.
     ///
-    /// Semantic search is disabled here: this path is already the unhappy one,
-    /// and a network round trip would turn a slow answer into a late one.
+    /// Semantic search gets a short deadline rather than none. It used to get
+    /// none, on the reasoning that a network round trip would turn a slow
+    /// answer into a late one — true of a remote backend, and the reason the
+    /// deadline is short. But it also meant a *local* backend was never asked:
+    /// measured against a perfect semantic oracle, this path answered exactly
+    /// as many questions as BM25 alone, because the oracle was never once
+    /// consulted. A deadline keeps the latency guarantee and stops throwing
+    /// away the one path that could answer.
     pub fn interactive() -> Self {
-        let config = RetrievalConfig::default();
+        Self::interactive_with(&RetrievalConfig::default())
+    }
+
+    /// The interactive budget under a specific configuration.
+    pub fn interactive_with(config: &RetrievalConfig) -> Self {
         Self {
             lexical_ms: config.immediate_lexical_timeout_ms,
-            semantic_ms: 0,
+            semantic_ms: config.immediate_semantic_timeout_ms,
         }
     }
 
     /// The budget for speculative preparation, where semantic fallback is worth
     /// attempting because nothing is waiting on it.
     pub fn speculative() -> Self {
-        let config = RetrievalConfig::default();
+        Self::speculative_with(&RetrievalConfig::default())
+    }
+
+    /// The speculative budget under a specific configuration.
+    pub fn speculative_with(config: &RetrievalConfig) -> Self {
         Self {
             lexical_ms: config.immediate_lexical_timeout_ms * 4,
             semantic_ms: config.semantic_fallback_timeout_ms,
@@ -284,26 +298,38 @@ impl LocalMemoryRetriever {
         rankings
     }
 
-    /// Whether lexical results are thin enough to justify a semantic attempt.
-    fn needs_semantic_fallback(&self, candidates: &[FusedCandidate]) -> bool {
-        candidates.is_empty()
-            || candidates
-                .iter()
-                .all(|c| c.hit.score < self.config.minimum_candidate_score * 2.0)
-    }
-
-    async fn extend_with_semantic(
+    /// Ask the semantic backend, as a ranking that competes on merit.
+    ///
+    /// Two decisions here were reversed by measurement, and both were reversed
+    /// for the same reason: the semantic side is the *stronger* ranker, not a
+    /// weaker one worth consulting in emergencies.
+    ///
+    /// **It is no longer gated.** The gate asked the backend only when lexical
+    /// search had found little, which fired on 13 of 93 paraphrased questions.
+    /// All 13 were rescued — every single call was worth making — while the
+    /// other 80 were declined because BM25 had returned something confident.
+    /// Confident and wrong is the failure this was supposed to catch.
+    ///
+    /// **It is no longer appended below the lexical hits.** Embedding a
+    /// record's own frontmatter answers 66 of those 93 questions against BM25's
+    /// 42; ranking that beneath every lexical hit discards the better opinion
+    /// by construction. The ranking is fused instead, weighted 2:1 — the
+    /// configuration `semantic_fusion_probe` measured at 79/93 in the top five,
+    /// against 73 for semantics alone and 58 for BM25 alone.
+    ///
+    /// Returns the semantic ranking, empty if there is no backend, no budget,
+    /// no query, or the deadline passes.
+    async fn semantic_ranking(
         &self,
         plan: &RetrievalPlan,
-        candidates: &mut Vec<FusedCandidate>,
         budget: RetrievalBudget,
         now: DateTime<Utc>,
-    ) {
+    ) -> Vec<SearchHit> {
         let (Some(semantic), true) = (self.semantic.as_ref(), budget.semantic_ms > 0) else {
-            return;
+            return Vec::new();
         };
         let Some(query) = plan.lexical_queries.first() else {
-            return;
+            return Vec::new();
         };
 
         let deadline = std::time::Duration::from_millis(budget.semantic_ms);
@@ -311,26 +337,22 @@ impl LocalMemoryRetriever {
         let Ok(Ok(ids)) = result else {
             // A failed or slow fallback is not an error: the lexical results
             // stand, and the caller never learns the difference.
-            return;
+            return Vec::new();
         };
 
         let canonical = self.canonical.read();
-        for (rank, id) in ids.iter().enumerate() {
-            if candidates.iter().any(|c| c.id() == id) {
-                continue;
-            }
-            let Some(doc) = canonical.get(id) else {
-                continue;
-            };
-            if !doc.is_retrievable(now) {
-                continue;
-            }
-            // Ranked below every lexical hit: semantic recall is a safety net,
-            // not a competing opinion about relevance.
-            candidates.push(FusedCandidate {
-                hit: SearchHit {
+        ids.iter()
+            .filter_map(|id| {
+                let doc = canonical.get(id)?;
+                if !doc.is_retrievable(now) {
+                    return None;
+                }
+                // The score is nominal: RRF ranks by position, and a dense
+                // similarity is not comparable with a BM25 score anyway.
+                let score = self.config.minimum_candidate_score * 2.0;
+                Some(SearchHit {
                     id: id.clone(),
-                    score: self.config.minimum_candidate_score * 1.5,
+                    score,
                     statement: doc.statement.clone(),
                     kind: doc.kind,
                     origin: doc.origin,
@@ -339,14 +361,11 @@ impl LocalMemoryRetriever {
                         components: Vec::new(),
                         boosts: Vec::new(),
                         lexical_score: 0.0,
-                        final_score: self.config.minimum_candidate_score * 1.5,
+                        final_score: score,
                     },
-                },
-                rrf_score: 0.0,
-                appearances: 1,
-                best_rank: rank + 100,
-            });
-        }
+                })
+            })
+            .collect()
     }
 
     /// Answer a query directly, restricted to certain memory kinds.
@@ -399,19 +418,21 @@ impl LocalMemoryRetriever {
         budget: RetrievalBudget,
         now: DateTime<Utc>,
     ) -> PreparedMemorySnapshot {
-        let rankings = self.run_lexical(plan, now);
-        let mut candidates = reciprocal_rank_fusion(&rankings);
-        self.drop_suppressed(&mut candidates);
-
-        if self.needs_semantic_fallback(&candidates) {
-            self.extend_with_semantic(plan, &mut candidates, budget, now)
-                .await;
-            // Re-applied: the fallback appends canonical ids of its own
-            // choosing, and one of them may sit in a window the user corrected
-            // seconds ago. Suppressing only before the extension would let the
-            // superseded fact back in by the side door.
-            self.drop_suppressed(&mut candidates);
+        let mut rankings = self.run_lexical(plan, now);
+        let semantic = self.semantic_ranking(plan, budget, now).await;
+        if !semantic.is_empty() {
+            // Twice, which is how you weight a ranking in RRF: each appearance
+            // contributes its own 1/(60 + rank). Measured at 79/93 in the top
+            // five against 73 for semantics alone and 58 for lexical alone.
+            rankings.push(semantic.clone());
+            rankings.push(semantic);
         }
+        let mut candidates = reciprocal_rank_fusion(&rankings);
+        // Suppression runs after the fusion rather than before it: the semantic
+        // backend returns ids of its own choosing, and one of them may sit in a
+        // window the user corrected seconds ago. Filtering only the lexical
+        // side would let the superseded fact back in by the side door.
+        self.drop_suppressed(&mut candidates);
 
         let canonical = self.canonical.read();
         let overlay = self.overlay.read();
@@ -725,8 +746,73 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_interactive_budget_never_reaches_for_the_network() {
-        assert_eq!(RetrievalBudget::interactive().semantic_ms, 0);
-        assert!(RetrievalBudget::speculative().semantic_ms > 0);
+    async fn the_interactive_budget_bounds_the_semantic_call_rather_than_forbidding_it() {
+        let interactive = RetrievalBudget::interactive();
+        let speculative = RetrievalBudget::speculative();
+
+        // It used to be zero. Zero meant a *local* backend — an in-process
+        // vector scan costing well under a millisecond — was never asked, and
+        // measured against a perfect oracle this path answered exactly as many
+        // questions as BM25 alone.
+        assert!(
+            interactive.semantic_ms > 0,
+            "the tool path must at least ask; a backend that cannot answer in \
+             time will time out on its own"
+        );
+        // But it stays a fraction of the speculative budget: nothing is waiting
+        // on speculation, and the model is waiting on this.
+        assert!(
+            interactive.semantic_ms * 4 <= speculative.semantic_ms,
+            "the interactive deadline ({}ms) has drifted close to the \
+             speculative one ({}ms) — the point of the split is that only one \
+             of them has somebody waiting",
+            interactive.semantic_ms,
+            speculative.semantic_ms,
+        );
+    }
+
+    #[tokio::test]
+    async fn a_zero_interactive_deadline_restores_the_old_behaviour() {
+        let config = RetrievalConfig {
+            immediate_semantic_timeout_ms: 0,
+            ..RetrievalConfig::default()
+        };
+        assert_eq!(RetrievalBudget::interactive_with(&config).semantic_ms, 0);
+    }
+
+    /// The gate is gone, and this is what replaces the argument for it.
+    ///
+    /// It used to consult the backend only when lexical search came back thin,
+    /// which fired on 13 of 93 paraphrased questions — and rescued all 13. The
+    /// 80 it declined were declined because BM25 had returned something
+    /// confident, which is the failure mode, not the safe case.
+    #[tokio::test]
+    async fn the_semantic_backend_is_consulted_even_when_lexical_search_is_confident() {
+        let (retriever, canonical, overlay) = retriever();
+        drop(retriever);
+        let retriever = LocalMemoryRetriever::new(canonical, overlay, RetrievalConfig::default())
+            .with_semantic_fallback(Arc::new(StubSemantic {
+                ids: vec![MemoryId::new("mem_quiet")],
+            }));
+
+        // "pescatarian" is a confident lexical hit on mem_diet — precisely the
+        // case the old gate declined to escalate.
+        let snapshot = retriever
+            .retrieve_immediate("pescatarian", TurnId(4), RetrievalBudget::speculative())
+            .await
+            .unwrap();
+        assert!(
+            snapshot
+                .facts
+                .iter()
+                .any(|f| f.memory_id.as_str() == "mem_quiet"),
+            "a confident lexical hit suppressed the semantic ranking entirely; \
+             got {:?}",
+            snapshot
+                .facts
+                .iter()
+                .map(|f| f.memory_id.as_str())
+                .collect::<Vec<_>>()
+        );
     }
 }

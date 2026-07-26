@@ -98,6 +98,20 @@ pub struct RetrievalConfig {
     pub immediate_lexical_timeout_ms: u64,
     /// Deadline for the optional semantic fallback.
     pub semantic_fallback_timeout_ms: u64,
+    /// Deadline for the semantic fallback on the *tool* path, where the model
+    /// is waiting. Zero disables it there.
+    ///
+    /// This was a prohibition rather than a deadline, on the reasoning that a
+    /// network round trip would turn a slow answer into a late one. That is
+    /// right for a remote backend and wrong for a local one: an in-process
+    /// vector scan over a few thousand records costs well under a millisecond,
+    /// and refusing to ask it cost every question a semantic layer exists to
+    /// answer. A deadline gets both — a local backend replies inside it, a
+    /// remote one times out and the lexical results stand, which is exactly
+    /// what the old zero achieved for the remote case.
+    ///
+    /// Set to 0 to restore the previous behaviour.
+    pub immediate_semantic_timeout_ms: u64,
     /// Minimum fused score for a candidate to be considered a hit at all.
     pub minimum_candidate_score: f32,
     /// Maximum candidates of the same predicate unless explicitly requested.
@@ -114,6 +128,10 @@ impl Default for RetrievalConfig {
             max_tokens: 500,
             immediate_lexical_timeout_ms: 15,
             semantic_fallback_timeout_ms: 100,
+            // Sized against the measured cost of an exact flat scan — 708µs
+            // over 1,199 vectors at 768d, ~9ms extrapolated to 16,000 — so a
+            // local backend fits and a network one does not.
+            immediate_semantic_timeout_ms: 10,
             minimum_candidate_score: 0.5,
             max_per_predicate: 2,
         }

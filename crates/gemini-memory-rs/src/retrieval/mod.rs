@@ -26,5 +26,5 @@ pub use retriever::{
     SemanticFallback,
 };
 pub use snapshot::{
-    estimate_tokens, PreparedMemorySnapshot, RetrievedMemory, SNAPSHOT_TTL_SECONDS,
+    estimate_tokens, fuse_snapshots, PreparedMemorySnapshot, RetrievedMemory, SNAPSHOT_TTL_SECONDS,
 };

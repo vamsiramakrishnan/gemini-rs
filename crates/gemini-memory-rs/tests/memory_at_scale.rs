@@ -278,16 +278,45 @@ async fn recall_latency_across_corpus_sizes() {
         gemini_memory_rs::core::RetrievalConfig::default().immediate_lexical_timeout_ms
     );
 
-    // Sublinear, with margin. Growth in step with the corpus would mean every
-    // query walks every record — which is what happened while the corpus's own
-    // subject form was an ordinary search term, and cost 100× for 64× the
-    // records.
-    assert!(
-        cost_growth < corpus_growth * 0.75,
-        "recall cost grew {cost_growth:.1}× while the corpus grew {corpus_growth:.0}× \
-         ({small_cost:?} at {smallest} records, {large_cost:?} at {largest}) — that is \
-         close enough to linear that retrieval is no longer behaving like an index"
+    // The growth ratio is reported and deliberately *not* asserted on.
+    //
+    // It used to be: sublinear, with a quarter of margin. That bar was
+    // measuring the fixture rather than the index. The corpus generator cycles
+    // thirteen record shapes, so a topical term's posting list grows in exact
+    // proportion to the corpus and walking it is linear by construction — real
+    // corpora are Zipfian and behave far better, but this one cannot. The
+    // assertion passed only in debug, where fixed per-query overhead is large
+    // at 250 records and unchanged at 16,000 and so dilutes the ratio; in
+    // release, with 47µs at the small end, there is nothing to dilute it with
+    // and the measured ratio sits at 59–64× against a threshold of 64. Rerun it
+    // three times and it passes twice.
+    //
+    // An assertion that close to its own noise floor is worse than none: it
+    // teaches whoever hits it to rerun until green, which is how a real
+    // regression gets waved through. The shape stays in the report, where a
+    // human can see it, and the assertions below are the ones that hold.
+    //
+    // Nothing is lost by dropping it. The failure it was written for — the
+    // corpus's own subject form being an ordinary search term, so every query
+    // walked and sorted every record — cost 118ms at 16,000 records against a
+    // 15ms deadline. The per-size deadline check catches that by a factor of
+    // eight, and catches it as the thing anyone actually cares about.
+    let _ = (cost_growth, corpus_growth, smallest, small_cost);
+
+    // The requirement the product actually has, asserted at every size rather
+    // than only the largest. `recall` runs while the user waits for the model,
+    // and the engine's own lexical deadline is the number that matters.
+    let deadline = Duration::from_millis(
+        gemini_memory_rs::core::RetrievalConfig::default().immediate_lexical_timeout_ms,
     );
+    for (size, cost) in &measured {
+        assert!(
+            *cost < deadline,
+            "median recall at {size} records is {cost:?}, past the engine's own \
+             {deadline:?} lexical deadline — retrieval is now the thing the user \
+             is waiting for"
+        );
+    }
     assert!(
         large_cost < Duration::from_millis(50),
         "a recall at {largest} records costs {large_cost:?}, and it happens while the \
