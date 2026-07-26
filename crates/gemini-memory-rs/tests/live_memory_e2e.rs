@@ -27,7 +27,9 @@
 //!
 //! Skips when no Gemini API key is configured.
 
-#![cfg(feature = "gemini-llm")]
+// Needs `gemini-llm` for model-backed extraction and `fluent` for the L2
+// `Live` builder these drive; `gemini-llm` alone does not compile.
+#![cfg(all(feature = "gemini-llm", feature = "fluent"))]
 
 mod common;
 
