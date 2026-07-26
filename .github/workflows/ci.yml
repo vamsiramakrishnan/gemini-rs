@@ -85,7 +85,7 @@ jobs:
           toolchain: "1.93.1"
       - uses: taiki-e/install-action@cargo-hack
       - uses: Swatinem/rust-cache@v2
-      - run: cargo hack check --each-feature --no-dev-deps -p gemini-genai-rs -p gemini-adk-rs -p gemini-adk-fluent-rs
+      - run: cargo hack check --each-feature --no-dev-deps -p gemini-genai-rs -p gemini-adk-rs -p gemini-adk-fluent-rs -p gemini-memory-rs
 
   # Supply chain: RustSec advisories, license allow-list, source whitelist.
   # Configuration lives in deny.toml.
