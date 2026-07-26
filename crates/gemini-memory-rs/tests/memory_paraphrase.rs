@@ -39,13 +39,25 @@
 //!
 //! The report prints, for each tier, the **measured content-word overlap**
 //! between the question and the record that answers it — the objective quantity
-//! the labels are only a proxy for. And the labels turn out to be the weaker
-//! predictor: `synonym` scores worse than `inferential`, because swapping every
-//! content word strips more signal than adding a reasoning step does. Sorted by
-//! the overlap column instead, recall is monotonic. That is the finding rather
-//! than an inconvenience: a lexical index has exactly one signal, and its
-//! quality is a function of how much of that signal the question happens to
-//! carry.
+//! the labels are only a proxy for. Recall tracks that column and not the
+//! ordering of the labels:
+//!
+//! | tier | overlap | answered@1 |
+//! |---|---|---|
+//! | `echo` | 68% | 100% |
+//! | `direct` | 28% | 77% |
+//! | `indirect` | 11% | 26% |
+//! | `synonym` | 3% | 17% |
+//! | `inferential` | 6% | 15% |
+//!
+//! Sorted by overlap, recall is monotonic apart from the bottom two, which are
+//! two and three questions out of twelve and twenty and are not distinguishable
+//! from each other. Note where `synonym` sits: swapping every content word
+//! strips *more* signal than adding a step of reasoning does, so the tier that
+//! sounds easiest to a person is among the hardest for the index. That is the
+//! finding rather than an inconvenience — a lexical index has exactly one
+//! signal, and its quality is a function of how much of that signal the
+//! question happens to carry.
 //!
 //! # What this file asserts
 //!
