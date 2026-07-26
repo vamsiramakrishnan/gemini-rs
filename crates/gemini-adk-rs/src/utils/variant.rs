@@ -15,16 +15,28 @@ pub enum GoogleLlmVariant {
 /// [`GoogleLlmVariant::GeminiApi`] otherwise (including when the variable
 /// is unset).
 pub fn get_google_llm_variant() -> GoogleLlmVariant {
-    match std::env::var("GOOGLE_GENAI_USE_VERTEXAI") {
-        Ok(val) => {
-            let lower = val.to_lowercase();
+    classify(std::env::var("GOOGLE_GENAI_USE_VERTEXAI").ok().as_deref())
+}
+
+/// The rule itself, separated from where the value comes from.
+///
+/// This exists so the rule can be tested without touching the process
+/// environment. Environment variables are global mutable state shared by every
+/// thread in the test binary, and `cargo test` runs tests in parallel: a set of
+/// tests that each set the same variable and then read it back will pass
+/// locally for months and fail on a busier machine, having read a value another
+/// test wrote microseconds earlier.
+fn classify(value: Option<&str>) -> GoogleLlmVariant {
+    match value {
+        Some(value) => {
+            let lower = value.to_lowercase();
             if lower == "true" || lower == "1" {
                 GoogleLlmVariant::VertexAi
             } else {
                 GoogleLlmVariant::GeminiApi
             }
         }
-        Err(_) => GoogleLlmVariant::GeminiApi,
+        None => GoogleLlmVariant::GeminiApi,
     }
 }
 
@@ -32,80 +44,56 @@ pub fn get_google_llm_variant() -> GoogleLlmVariant {
 mod tests {
     use super::*;
 
-    /// Helper: run a closure with `GOOGLE_GENAI_USE_VERTEXAI` set to `val`,
-    /// then restore the previous state. Tests using this must run serially
-    /// (the `#[serial]` attribute is not strictly needed here because each
-    /// test uses a unique value and env var reads are atomic, but callers
-    /// should be aware of the global-state nature of env vars).
-    fn with_env_var<F: FnOnce()>(val: Option<&str>, f: F) {
-        // Save old value
-        let old = std::env::var("GOOGLE_GENAI_USE_VERTEXAI").ok();
-        // Set / remove
-        match val {
-            Some(v) => std::env::set_var("GOOGLE_GENAI_USE_VERTEXAI", v),
+    /// The rule, exhaustively, with no global state involved.
+    ///
+    /// These replace seven tests that each set `GOOGLE_GENAI_USE_VERTEXAI` and
+    /// read it back. That worked whenever the scheduler happened to keep them
+    /// apart and failed when it did not — on CI, `vertex_ai_true_lowercase`
+    /// asserted `VertexAi` and got `GeminiApi`, having read the value a
+    /// concurrent test had just written. The helper's own comment argued it was
+    /// safe "because each test uses a unique value"; the values were unique but
+    /// the *variable* was one, shared by every thread in the binary.
+    #[test]
+    fn truthy_values_select_vertex() {
+        for value in ["true", "TRUE", "True", "1"] {
+            assert_eq!(
+                classify(Some(value)),
+                GoogleLlmVariant::VertexAi,
+                "{value:?} should select Vertex"
+            );
+        }
+    }
+
+    #[test]
+    fn everything_else_selects_the_gemini_api() {
+        for value in ["false", "0", "", "yes", "vertex", "TRUEISH"] {
+            assert_eq!(
+                classify(Some(value)),
+                GoogleLlmVariant::GeminiApi,
+                "{value:?} should select the Gemini API"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unset_variable_selects_the_gemini_api() {
+        assert_eq!(classify(None), GoogleLlmVariant::GeminiApi);
+    }
+
+    /// One test that the wiring reads the variable at all.
+    ///
+    /// Deliberately the only test in this module that touches the environment,
+    /// which is what makes it safe: with a single writer there is nobody to
+    /// race. It asserts the plumbing, not the rule — the rule is covered above.
+    #[test]
+    fn the_variable_is_the_one_that_is_read() {
+        let restore = std::env::var("GOOGLE_GENAI_USE_VERTEXAI").ok();
+        std::env::set_var("GOOGLE_GENAI_USE_VERTEXAI", "true");
+        let observed = get_google_llm_variant();
+        match restore {
+            Some(value) => std::env::set_var("GOOGLE_GENAI_USE_VERTEXAI", value),
             None => std::env::remove_var("GOOGLE_GENAI_USE_VERTEXAI"),
         }
-        f();
-        // Restore
-        match old {
-            Some(v) => std::env::set_var("GOOGLE_GENAI_USE_VERTEXAI", v),
-            None => std::env::remove_var("GOOGLE_GENAI_USE_VERTEXAI"),
-        }
-    }
-
-    #[test]
-    fn vertex_ai_true_lowercase() {
-        with_env_var(Some("true"), || {
-            assert_eq!(get_google_llm_variant(), GoogleLlmVariant::VertexAi);
-        });
-    }
-
-    #[test]
-    fn vertex_ai_true_uppercase() {
-        with_env_var(Some("TRUE"), || {
-            assert_eq!(get_google_llm_variant(), GoogleLlmVariant::VertexAi);
-        });
-    }
-
-    #[test]
-    fn vertex_ai_one() {
-        with_env_var(Some("1"), || {
-            assert_eq!(get_google_llm_variant(), GoogleLlmVariant::VertexAi);
-        });
-    }
-
-    #[test]
-    fn gemini_api_false() {
-        with_env_var(Some("false"), || {
-            assert_eq!(get_google_llm_variant(), GoogleLlmVariant::GeminiApi);
-        });
-    }
-
-    #[test]
-    fn gemini_api_zero() {
-        with_env_var(Some("0"), || {
-            assert_eq!(get_google_llm_variant(), GoogleLlmVariant::GeminiApi);
-        });
-    }
-
-    #[test]
-    fn gemini_api_unset() {
-        with_env_var(None, || {
-            assert_eq!(get_google_llm_variant(), GoogleLlmVariant::GeminiApi);
-        });
-    }
-
-    #[test]
-    fn gemini_api_empty_string() {
-        with_env_var(Some(""), || {
-            assert_eq!(get_google_llm_variant(), GoogleLlmVariant::GeminiApi);
-        });
-    }
-
-    #[test]
-    fn vertex_ai_mixed_case() {
-        with_env_var(Some("True"), || {
-            assert_eq!(get_google_llm_variant(), GoogleLlmVariant::VertexAi);
-        });
+        assert_eq!(observed, GoogleLlmVariant::VertexAi);
     }
 }
