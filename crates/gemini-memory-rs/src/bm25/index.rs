@@ -42,6 +42,25 @@ pub struct Query {
     pub entities: Vec<String>,
     /// Restrict to these kinds; empty means any.
     pub kinds: Vec<MemoryKind>,
+    /// Terms that may *rank* a hit but never *admit* one.
+    ///
+    /// A memory lookup is nearly always phrased about its owner — "what's my
+    /// usual coffee", or, when a model writes the query, "the user's usual
+    /// coffee". Those words are the corpus's own subject form and its aliases,
+    /// so they have a posting in almost every record. Treated as ordinary
+    /// terms they cost two things at once: precision, because a question the
+    /// corpus cannot answer still matches everything and comes back with five
+    /// arbitrary facts; and time, because every query then walks the whole
+    /// corpus and sorts it. Measured, that was a recall going from 1 ms at 250
+    /// records to 118 ms at 16,000 — superlinear, and eight times past the
+    /// engine's own 15 ms lexical deadline.
+    ///
+    /// Listing them here keeps what they are good for and drops what they are
+    /// not. They still contribute their score to a record some *topical* term
+    /// already matched, which is what lets "what coating do I have" prefer the
+    /// owner's record over forty belonging to other people. They no longer put
+    /// a record into the running on their own.
+    pub boost_only: Vec<String>,
     /// Maximum hits to return.
     pub limit: usize,
 }
@@ -53,6 +72,7 @@ impl Query {
             text: text.into(),
             entities: Vec::new(),
             kinds: Vec::new(),
+            boost_only: Vec::new(),
             limit: 20,
         }
     }
@@ -74,6 +94,16 @@ impl Query {
     /// Restrict the search to certain memory kinds.
     pub fn with_kinds(mut self, kinds: Vec<MemoryKind>) -> Self {
         self.kinds = kinds;
+        self
+    }
+
+    /// Mark terms that may rank a hit but never admit one.
+    pub fn with_boost_only<I, S>(mut self, terms: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.boost_only = terms.into_iter().map(Into::into).collect();
         self
     }
 
@@ -251,13 +281,27 @@ impl MemoryIndex {
             return Vec::new();
         }
 
+        // Two passes. Terms that carry topic put records into the running;
+        // terms that only say *whose* memory this is are scored afterwards,
+        // against the records already there. See `Query::boost_only`.
+        let (admitting, ranking): (Vec<&String>, Vec<&String>) = terms
+            .iter()
+            .partition(|term| !query.boost_only.iter().any(|b| b == *term));
+
         let mut accumulated: HashMap<usize, Vec<ScoreComponent>> = HashMap::new();
-        for term in &terms {
+        for (term, admits) in admitting
+            .iter()
+            .map(|t| (*t, true))
+            .chain(ranking.iter().map(|t| (*t, false)))
+        {
             let Some(postings) = self.postings.get(term) else {
                 continue;
             };
             let idf = self.idf(term);
             for posting in postings {
+                if !admits && !accumulated.contains_key(&posting.doc) {
+                    continue;
+                }
                 let Some(doc) = self.docs[posting.doc].as_ref() else {
                     continue;
                 };

@@ -223,6 +223,7 @@ const SELF_STATEMENTS: &[(&str, MemoryKind)] = &[
     ("i always", MemoryKind::Routine),
     ("i usually", MemoryKind::Routine),
     ("i have started", MemoryKind::Routine),
+    ("ive started", MemoryKind::Routine),
     ("i prefer", MemoryKind::Preference),
     ("i love", MemoryKind::Preference),
     ("i like", MemoryKind::Preference),
@@ -264,6 +265,28 @@ const SENSITIVE_MARKERS: &[&str] = &[
     "political",
 ];
 
+/// Normalize an utterance for phrase matching.
+///
+/// [`normalize_token`] turns every non-alphanumeric character into a separator.
+/// That is right for identifiers and fingerprints and wrong for a spoken
+/// sentence: it splits "I'm" into "i m" and "don't" into "don t", so the
+/// contracted forms this module's tables are *written in* — `im`, `im allergic
+/// to`, `dont forget` — could never match, and every one of them was dead.
+///
+/// It matters more here than it looks. This is a voice product; a transcript of
+/// someone talking is mostly contractions, so the effect was that "I'm allergic
+/// to sesame" produced no evidence at all while "I am allergic to sesame"
+/// produced a durable fact. Eliding the apostrophe first is the smallest change
+/// that makes the tables reachable, and it leaves `normalize_token` — which
+/// fingerprints the existing corpus — untouched.
+fn normalize_utterance(raw: &str) -> String {
+    let elided: String = raw
+        .chars()
+        .filter(|c| !matches!(c, '\'' | '\u{2019}' | '\u{02BC}'))
+        .collect();
+    normalize_token(&elided)
+}
+
 #[async_trait]
 impl MemoryObservationExtractor for RuleBasedObservationExtractor {
     async fn extract(
@@ -276,7 +299,7 @@ impl MemoryObservationExtractor for RuleBasedObservationExtractor {
             return Ok(Vec::new());
         }
 
-        let normalized = normalize_token(&context.transcript);
+        let normalized = normalize_utterance(&context.transcript);
         let evidence = TranscriptEvidence::new(&context.transcript);
         let mut observations = Vec::new();
 
@@ -527,7 +550,7 @@ fn predicate_for(opener: &str, value: &str) -> String {
     match opener {
         "i live in" => "residence".to_string(),
         "i work at" => "employer".to_string(),
-        "i always" | "i usually" | "i have started" => "routine".to_string(),
+        "i always" | "i usually" | "i have started" | "ive started" => "routine".to_string(),
         _ => "preference".to_string(),
     }
 }
@@ -543,7 +566,7 @@ fn statement_for(opener: &str, value: &str) -> String {
         "i live in" => "The user lives in",
         "i always" => "The user always",
         "i usually" => "The user usually",
-        "i have started" => "The user has started",
+        "i have started" | "ive started" => "The user has started",
         "i am allergic to" | "im allergic to" => "The user is allergic to",
         _ => "The user is",
     };
@@ -675,6 +698,39 @@ mod tests {
         assert!(extract("what i am asking is whether it is open")
             .await
             .is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_contracted_utterance_carries_the_same_fact_as_its_expanded_form() {
+        // This is a voice product: a transcript of someone speaking is mostly
+        // contractions. `normalize_token` turns an apostrophe into a separator,
+        // so "I'm" arrived as "i m" and every contracted opener in the tables
+        // above — `im`, `im allergic to`, `dont forget` — was unreachable. The
+        // effect was silent and total: "I am allergic to sesame" became a
+        // durable fact and "I'm allergic to sesame" became nothing at all.
+        for (contracted, expanded) in [
+            ("I'm allergic to sesame", "I am allergic to sesame"),
+            (
+                "I've started swimming on Tuesdays",
+                "I have started swimming on Tuesdays",
+            ),
+        ] {
+            let (short, long) = (extract(contracted).await, extract(expanded).await);
+            assert!(
+                !short.is_empty(),
+                "`{contracted}` produced no observation while `{expanded}` did"
+            );
+            assert_eq!(
+                short[0].predicate, long[0].predicate,
+                "`{contracted}` and `{expanded}` are the same fact and must land on \
+                 the same predicate, or a correction will not supersede what it corrects"
+            );
+            assert_eq!(
+                short[0].value, long[0].value,
+                "`{contracted}` and `{expanded}` must carry the same value, or they \
+                 fingerprint differently and reinforce nothing"
+            );
+        }
     }
 
     #[tokio::test]

@@ -17,6 +17,23 @@ use super::plan::RetrievalPlan;
 use super::snapshot::PreparedMemorySnapshot;
 use crate::bm25::{MemoryIndex, Query, SearchHit};
 use crate::core::{MemoryError, MemoryId, RetrievalConfig, TurnId};
+use crate::retrieval::deterministic::topical_terms;
+
+/// The words of a query that carry no topic: what is left after the topical
+/// terms are taken out.
+///
+/// These are the words a memory lookup is *always* phrased with — "what", "the
+/// user's", "my" — plus the corpus's own subject form, which has a posting in
+/// almost every record. They are excellent at saying whose memory to prefer and
+/// useless at saying which memory is relevant, so the index is told to let them
+/// rank a record but never admit one. See [`Query::boost_only`].
+fn non_topical_terms(query: &str) -> Vec<String> {
+    let topical: HashSet<String> = topical_terms(query).into_iter().collect();
+    crate::bm25::tokenize(query)
+        .into_iter()
+        .filter(|term| !topical.contains(term))
+        .collect()
+}
 
 /// A request to prepare context for a turn.
 #[derive(Debug, Clone)]
@@ -235,6 +252,7 @@ impl LocalMemoryRetriever {
                 Query::new(text)
                     .with_entities(entity_forms.clone())
                     .with_kinds(plan.kind_filter.clone())
+                    .with_boost_only(non_topical_terms(text))
                     .with_limit(20)
             })
             .collect();

@@ -42,14 +42,31 @@ correct, forget or delete something about them, or asks what you remember. Never
 store something the user did not ask you to store.";
 
 /// Which slice of memory a recall should search.
+///
+/// These doc comments are not documentation for a reader; they are the schema
+/// descriptions the *model* chooses from, and the choice is a hard filter. A
+/// model that picks the wrong slice does not get a worse answer, it gets no
+/// answer — while lower-relevance records from the slice it did pick come back
+/// looking like the best memory has. So each variant says what it *excludes*,
+/// in the vocabulary of a question rather than of this crate's taxonomy.
+///
+/// Observed before that was true: asked "what did I promise to bring to the
+/// housewarming", the model chose `persistent` — a promise feels like a durable
+/// fact — which filters out `Commitment`, the kind the answer was filed under.
+/// The commitment was excluded, another guest's plans came back instead, and
+/// the model correctly reported that it did not know.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RecallScope {
-    /// Recent events and commitments only.
+    /// Only memories with a time attached: things that happened, plans,
+    /// promises and commitments. Excludes standing facts about the person.
     Recent,
-    /// Durable facts only — preferences, relationships, identity, routines.
+    /// Only timeless facts: identity, preferences, relationships, routines,
+    /// how they like to be spoken to. Excludes anything that happened, and
+    /// excludes every promise, plan and commitment.
     Persistent,
-    /// Everything.
+    /// Everything. Choose this unless the question is explicitly limited to one
+    /// of the other two.
     #[default]
     All,
 }
@@ -78,7 +95,22 @@ impl RecallScope {
 pub struct RecallArgs {
     /// What to look for, in the user's own terms.
     pub query: String,
-    /// Restrict to recent events, durable facts, or both.
+    /// Which slice of memory to search.
+    ///
+    /// Every value is spelled out here rather than on the variants because
+    /// **per-variant descriptions do not reach the model**: narrowing the
+    /// derived schema to the API's subset flattens `oneOf`-of-`enum` down to a
+    /// bare `{"enum": [...]}`, and the doc comment on each variant goes with
+    /// it. This field's description is the only text the model actually reads
+    /// about what the values mean, so it carries all of it.
+    ///
+    /// Omit unless the question is explicitly about one slice — narrowing
+    /// wrongly excludes the answer outright rather than ranking it lower, and
+    /// plausible records from the chosen slice arrive in its place. `recent`:
+    /// only memories with a time attached — things that happened, plans,
+    /// promises, commitments. `persistent`: only timeless facts — identity,
+    /// preferences, relationships, routines; excludes everything that happened
+    /// and every promise. `all`: everything, and the right choice by default.
     #[serde(default)]
     pub scope: RecallScope,
 }
@@ -295,6 +327,45 @@ mod tests {
         for operation in ["remember", "correct", "forget", "delete", "list"] {
             assert!(rendered.contains(operation), "schema omits `{operation}`");
         }
+    }
+
+    #[tokio::test]
+    async fn what_each_scope_means_survives_into_the_schema() {
+        // Schema narrowing flattens `oneOf`-of-`enum` to a bare `enum`, which
+        // drops the doc comment on every variant — so anything said about a
+        // value on the variant itself never reaches the model. It has to live
+        // in the field description, and this is what says so.
+        //
+        // It matters because a wrong `scope` is a hard filter, not a worse
+        // ranking: the answer is excluded while plausible records from the
+        // chosen slice arrive in its place. A live run lost a commitment
+        // exactly this way, the model having reasoned that a promise is a
+        // durable fact.
+        let scope = recall_context_tool(session().await)
+            .parameters()
+            .expect("recall has parameters")["properties"]["scope"]["description"]
+            .as_str()
+            .expect("the scope argument is described")
+            .to_lowercase();
+
+        for value in ["recent", "persistent", "all"] {
+            assert!(
+                scope.contains(value),
+                "`{value}` is a value the model must choose between, and this \
+                 description is the only place it can learn what the value \
+                 means: {scope}"
+            );
+        }
+        assert!(
+            scope.contains("excludes"),
+            "the description must say what narrowing leaves out, or the model \
+             cannot tell that it costs the answer: {scope}"
+        );
+        assert!(
+            scope.contains("omit unless"),
+            "the description must tell the model to leave the scope unset by \
+             default: {scope}"
+        );
     }
 
     #[test]
