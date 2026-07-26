@@ -41,12 +41,23 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// The Live model these tests drive.
 ///
-/// Resolved from the environment rather than pinned to a [`GeminiModel`]
-/// variant: live model names are previews and get retired, and neither named
-/// variant in the enum (`gemini-2.0-flash-live-001`,
-/// `gemini-live-2.5-flash-native-audio`) is still served — the API answers
-/// "not found for API version v1beta, or is not supported for
-/// bidiGenerateContent" for both. List what a key can actually reach with:
+/// **The name differs by platform**, which is why this is resolved at runtime
+/// rather than pinned to a [`GeminiModel`] variant:
+///
+/// | Platform | Native-audio Live model |
+/// |---|---|
+/// | Google AI (AI Studio) | `gemini-2.5-flash-native-audio-preview-12-2025` |
+/// | Vertex AI | `gemini-2.5-flash-native-audio` |
+///
+/// These tests run against Google AI, so they default to the AI Studio name.
+/// Override with `GEMINI_LIVE_MODEL` to point at Vertex, a different preview,
+/// or a newer release.
+///
+/// Neither named variant in the enum works here: `Gemini2_0FlashLive`
+/// (`gemini-2.0-flash-live-001`) and `GeminiLive2_5FlashNativeAudio`
+/// (`gemini-live-2.5-flash-native-audio`) both draw "not found for API version
+/// v1beta, or is not supported for bidiGenerateContent" from Google AI. List
+/// what a key can actually reach with:
 ///
 /// ```text
 /// curl "https://generativelanguage.googleapis.com/v1beta/models?key=$GEMINI_API_KEY" \
@@ -55,7 +66,7 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
 fn live_model() -> GeminiModel {
     GeminiModel::Custom(
         std::env::var("GEMINI_LIVE_MODEL")
-            .unwrap_or_else(|_| "models/gemini-2.5-flash-native-audio-latest".to_string()),
+            .unwrap_or_else(|_| "models/gemini-2.5-flash-native-audio-preview-12-2025".to_string()),
     )
 }
 

@@ -567,9 +567,12 @@ regenerate them; only a restatement does.
   have no live coverage; they need a real microphone stream.
 
   Those tests resolve the model from `GEMINI_LIVE_MODEL` rather than a
-  `GeminiModel` variant, because both named Live variants have been retired
-  server-side. See the `live_model` doc comment for how to list what a key can
-  actually reach.
+  `GeminiModel` variant, because the native-audio Live model is named
+  differently on each platform — `gemini-2.5-flash-native-audio-preview-12-2025`
+  on Google AI, `gemini-2.5-flash-native-audio` on Vertex AI — and neither named
+  variant in the enum is served on Google AI at all. The default is the AI
+  Studio name, since that is what these tests run against. See the `live_model`
+  doc comment for how to list what a key can actually reach.
 
 ---
 
