@@ -99,6 +99,50 @@
 //! plus a rerank rather than 2-bit alone, because the rerank costs 40 µs and
 //! buys back twelve questions at top-1.
 //!
+//! # Price and performance, not performance
+//!
+//! Speed and quality are two axes of a three-axis decision. The third is what
+//! it costs to run, and a configuration that is fast and accurate and needs
+//! 200 MB resident per user is not obviously better than one that is slower and
+//! needs 2 MB. So every configuration is priced on the quality the *product*
+//! sees — fused top-5, BM25 at 2:1 with the semantic ranking — against what it
+//! costs to serve, per user per month at 16,000 records:
+//!
+//! | configuration | fused@5 | MRR | RAM | SSD | scan@16k | $/user/mo | $/added Q |
+//! |---|---|---|---|---|---|---|---|
+//! | float32 768d resident | 79/93 | 0.752 | 49 MB | — | 15.2 ms | $0.158 | $0.0075 |
+//! | 1-bit resident | 77/93 | 0.691 | 2 MB | — | 829 µs | $0.013 | $0.0007 |
+//! | **1-bit resident + SSD rerank** | **78/93** | **0.763** | **2 MB** | 49 MB | **1.5 ms** | **$0.021** | **$0.0011** |
+//! | 1-bit + rerank, all resident | 78/93 | 0.763 | 51 MB | — | 1.5 ms | $0.165 | $0.0082 |
+//!
+//! BM25 alone answers 58 of 93 and costs nothing extra, so the last column
+//! prices each configuration on the questions it *adds* to that — which is the
+//! only comparison that means anything, since the lexical index is already
+//! built and paid for.
+//!
+//! **Quantization is seven times cheaper for a difference this corpus cannot
+//! resolve.** Fused top-5 across the three serious options is 79, 77 and 78 out
+//! of 93. Those differ by one or two questions on a 93-question set; that is
+//! not a quality gap, it is noise. What is not noise is $0.158 against $0.021 —
+//! and at a million users, $158k a month of RAM against $21k.
+//!
+//! **Reranking from SSD is the configuration to build.** It has the best MRR of
+//! anything measured, including exact float32, because the rerank reorders a
+//! candidate set the fusion then reads differently. It keeps 2 MB resident and
+//! pays fifty random reads. Holding the floats in RAM instead costs eight times
+//! as much for identical quality — the test flags it as dominated, by float32
+//! itself.
+//!
+//! **The API is not what this costs.** Embeddings come to $0.0063 per user per
+//! month at 667 new records and 900 queries. Memory outweighs tokens by a
+//! factor of three at the *quantized* price and by twenty-five at float32, so
+//! anyone optimising the token bill here is optimising the wrong line.
+//!
+//! One assumption worth naming: the model prices each user's index as resident,
+//! which is the right shape for a consumer product with a per-user corpus but
+//! implies either multi-tenancy or paging at fleet scale. A design that pages
+//! cold users out changes the RAM term and nothing else in the table.
+//!
 //! Runs entirely off the embeddings already cached by `semantic_fusion_probe`.
 //! No API key, no network — but it skips if that cache has not been built,
 //! since it has nothing of its own to embed.
@@ -114,10 +158,46 @@ use std::time::{Duration, Instant};
 
 use common::corpus::{self, PROBES};
 use common::paraphrase::{self};
+use common::rank::{as_hits, fuse, lexical, rank_of, CANDIDATES};
 use common::views::structural_view;
 use common::{file_backed_engine, ScratchDir};
 
-use gemini_memory_rs::core::{stable_hash, CanonicalMemory, MemoryStatus};
+use gemini_memory_rs::bm25::{IndexedMemory, MemoryIndex, SearchHit};
+use gemini_memory_rs::core::{stable_hash, CanonicalMemory, MemoryId, MemoryStatus};
+
+// ─── what each configuration costs to run ───────────────────────────────────
+//
+// Published rates, so the arithmetic can be re-checked rather than trusted.
+// The ratios between configurations are what matter and they are insensitive
+// to modest drift in any of these.
+
+/// `gemini-embedding-2` text input, $/1M tokens.
+/// <https://ai.google.dev/gemini-api/docs/pricing>
+const EMBED_USD_PER_MTOK: f64 = 0.20;
+
+/// RAM, $/GB-month. Derived from GCE `n2-standard-4` in us-central1 at
+/// $0.19/hour for 4 vCPU + 16 GB, which splits to roughly $0.031611 per
+/// vCPU-hour and $0.004237 per GB-hour; ×730 hours gives $3.09/GB-month.
+const RAM_USD_PER_GB_MONTH: f64 = 3.09;
+
+/// Persistent SSD, $/GB-month. Where the float vectors live when a
+/// configuration reranks from disk rather than holding them resident.
+const SSD_USD_PER_GB_MONTH: f64 = 0.17;
+
+/// The corpus size the price model is built at — a year of heavy use, per
+/// `memory_at_scale`.
+const RECORDS: f64 = 16_000.0;
+
+/// Tokens in one structural view, and in one query. Measured off the corpus:
+/// the view runs about 136 characters and a query about 40, and the API bills
+/// roughly four characters to the token.
+const TOKENS_PER_RECORD: f64 = 34.0;
+const TOKENS_PER_QUERY: f64 = 10.0;
+
+/// How much of the corpus arrives each month, and how often it is queried.
+/// Sixteen thousand records over two years, and thirty recalls a day.
+const NEW_RECORDS_PER_MONTH: f64 = RECORDS / 24.0;
+const QUERIES_PER_MONTH: f64 = 30.0 * 30.0;
 
 /// Must match `semantic_fusion_probe`, since this reads its cache.
 const EMBEDDING_MODEL: &str = "gemini-embedding-2";
@@ -477,6 +557,16 @@ struct Outcome {
     top_one: usize,
     top_five: usize,
     reciprocal: f64,
+    /// The same, after fusing with BM25 at 2:1 — what the product serves.
+    ///
+    /// Semantic-only numbers say what the quantizer did to the vectors. These
+    /// say whether anyone would notice, and they are the ones the price model
+    /// divides by. A method can lose a third of its neighbour fidelity and cost
+    /// the product nothing, or lose a little and cost it a lot; only this
+    /// column can tell which.
+    fused_top_one: usize,
+    fused_top_five: usize,
+    fused_reciprocal: f64,
     asked: usize,
     scan: Duration,
 }
@@ -554,6 +644,25 @@ async fn what_quantizing_the_vectors_actually_costs() {
         query_vectors.push(vector.clone());
     }
 
+    // BM25 over the same corpus, so every configuration can be scored the way
+    // the product serves it rather than in isolation.
+    let index = MemoryIndex::build(active.iter().map(|m| IndexedMemory::from_canonical(m)));
+    let ids: Vec<MemoryId> = active.iter().map(|m| m.id.clone()).collect();
+    let lexical_rankings: Vec<Vec<SearchHit>> = questions
+        .iter()
+        .map(|(_, query)| lexical(&index, query))
+        .collect();
+    let target_ids: Vec<&str> = questions
+        .iter()
+        .map(|(probe_name, _)| {
+            PROBES
+                .iter()
+                .find(|p| p.name == *probe_name)
+                .unwrap_or_else(|| panic!("no probe named {probe_name}"))
+                .target
+        })
+        .collect();
+
     let target_of: HashMap<&str, usize> = questions
         .iter()
         .map(|(probe_name, _)| {
@@ -575,10 +684,18 @@ async fn what_quantizing_the_vectors_actually_costs() {
     let mut exact = Outcome::default();
     for (i, query) in query_vectors.iter().enumerate() {
         let started = Instant::now();
-        let hits = exact_search(query, &vectors, RECALL_AT.max(5));
+        let hits = exact_search(query, &vectors, CANDIDATES);
         exact.scan += started.elapsed();
         let target = target_of[questions[i].0];
-        score(&mut exact, &hits, target, 1.0);
+        score(
+            &mut exact,
+            &hits,
+            target,
+            1.0,
+            &lexical_rankings[i],
+            &ids,
+            target_ids[i],
+        );
         exact_lists.push(hits.iter().map(|(i, _)| *i).collect::<Vec<_>>());
     }
 
@@ -601,8 +718,8 @@ async fn what_quantizing_the_vectors_actually_costs() {
 
     let mut results: Vec<(String, usize, f64, usize)> = Vec::new();
     for bits in [4u32, 3, 2, 1] {
-        let index = Quantized::build(&vectors, bits);
-        let bytes = index.bytes_per_record();
+        let quantized = Quantized::build(&vectors, bits);
+        let bytes = quantized.bytes_per_record();
 
         let mut plain = Outcome::default();
         let mut reranked = Outcome::default();
@@ -610,19 +727,30 @@ async fn what_quantizing_the_vectors_actually_costs() {
             let target = target_of[questions[i].0];
 
             let started = Instant::now();
-            let hits = index.search(query, RECALL_AT.max(5));
+            let hits = quantized.search(query, CANDIDATES);
             plain.scan += started.elapsed();
-            score(&mut plain, &hits, target, recall_of(&hits, &exact_lists[i]));
+            score(
+                &mut plain,
+                &hits,
+                target,
+                recall_of(&hits, &exact_lists[i]),
+                &lexical_rankings[i],
+                &ids,
+                target_ids[i],
+            );
 
             let started = Instant::now();
-            let shortlist = index.search(query, RERANK_DEPTH);
-            let rescored = rerank(&shortlist, query, &vectors, RECALL_AT.max(5));
+            let shortlist = quantized.search(query, RERANK_DEPTH);
+            let rescored = rerank(&shortlist, query, &vectors, CANDIDATES);
             reranked.scan += started.elapsed();
             score(
                 &mut reranked,
                 &rescored,
                 target,
                 recall_of(&rescored, &exact_lists[i]),
+                &lexical_rankings[i],
+                &ids,
+                target_ids[i],
             );
         }
 
@@ -646,24 +774,30 @@ async fn what_quantizing_the_vectors_actually_costs() {
     for (i, query) in query_vectors.iter().enumerate() {
         let target = target_of[questions[i].0];
         let started = Instant::now();
-        let hits = packed.search(query, RECALL_AT.max(5));
+        let hits = packed.search(query, CANDIDATES);
         binary.scan += started.elapsed();
         score(
             &mut binary,
             &hits,
             target,
             recall_of(&hits, &exact_lists[i]),
+            &lexical_rankings[i],
+            &ids,
+            target_ids[i],
         );
 
         let started = Instant::now();
         let shortlist = packed.search(query, RERANK_DEPTH);
-        let rescored = rerank(&shortlist, query, &vectors, RECALL_AT.max(5));
+        let rescored = rerank(&shortlist, query, &vectors, CANDIDATES);
         binary_reranked.scan += started.elapsed();
         score(
             &mut binary_reranked,
             &rescored,
             target,
             recall_of(&rescored, &exact_lists[i]),
+            &lexical_rankings[i],
+            &ids,
+            target_ids[i],
         );
     }
     report.push_str(&binary.row("1-bit packed (popcount)", packed.bytes_per_record()));
@@ -683,6 +817,137 @@ async fn what_quantizing_the_vectors_actually_costs() {
             questions.len(),
         ));
     }
+    // ── price / performance ──
+    //
+    // Speed and quality are two axes of a three-axis decision, and the third is
+    // what it costs to run. A configuration that is fast and accurate and needs
+    // 200 MB of resident memory per user is not obviously better than one that
+    // is slower and needs 2 MB, and nothing above can tell you which to pick.
+    let bm25_only = {
+        let mut baseline = 0usize;
+        for (i, _) in questions.iter().enumerate() {
+            if rank_of(&lexical_rankings[i], target_ids[i]).is_some_and(|r| r < 5) {
+                baseline += 1;
+            }
+        }
+        baseline
+    };
+
+    let monthly_embedding = (NEW_RECORDS_PER_MONTH * TOKENS_PER_RECORD
+        + QUERIES_PER_MONTH * TOKENS_PER_QUERY)
+        / 1_000_000.0
+        * EMBED_USD_PER_MTOK;
+
+    report.push_str(&format!(
+        "\n\nprice / performance, per user per month at {:.0} records\n\
+         quality is FUSED top-5 — BM25 at 2:1 with the semantic ranking, what the model is served\n\
+         BM25 alone answers {bm25_only}/{} and costs nothing extra, so every configuration is\n\
+         priced on the questions it adds to that\n\n\
+         {:<26} {:<9} {:<7} {:<9} {:<9} {:<10} {:<10} {}\n",
+        RECORDS,
+        questions.len(),
+        "configuration",
+        "fused@5",
+        "MRR",
+        "RAM",
+        "SSD",
+        "scan@16k",
+        "$/user/mo",
+        "$ per added Q",
+    ));
+
+    let mut priced: Vec<(String, usize, f64, f64)> = Vec::new();
+    let mut price_row = |label: &str, outcome: &Outcome, resident: f64, on_ssd: f64| {
+        let ram_gb = resident * RECORDS / 1e9;
+        let ssd_gb = on_ssd * RECORDS / 1e9;
+        let monthly =
+            ram_gb * RAM_USD_PER_GB_MONTH + ssd_gb * SSD_USD_PER_GB_MONTH + monthly_embedding;
+        let added = outcome.fused_top_five as i64 - bm25_only as i64;
+        let per_added = if added > 0 {
+            format!("${:.4}", monthly / added as f64)
+        } else {
+            "— (no gain)".to_string()
+        };
+        let scan = Duration::from_secs_f64(
+            (outcome.scan.as_secs_f64() / outcome.asked.max(1) as f64)
+                * (RECORDS / active.len() as f64),
+        );
+        priced.push((
+            label.to_string(),
+            outcome.fused_top_five,
+            monthly,
+            added as f64,
+        ));
+        format!(
+            "{label:<26} {:<9} {:<7.3} {:<9} {:<9} {:<10} {:<10} {per_added}\n",
+            format!("{}/{}", outcome.fused_top_five, outcome.asked),
+            outcome.fused_reciprocal / outcome.asked.max(1) as f64,
+            format!("{:.0} MB", ram_gb * 1000.0),
+            if ssd_gb > 0.0 {
+                format!("{:.0} MB", ssd_gb * 1000.0)
+            } else {
+                "—".to_string()
+            },
+            format!("{scan:.1?}"),
+            format!("${monthly:.3}"),
+        )
+    };
+
+    report.push_str(&price_row(
+        "float32 768d resident",
+        &exact,
+        (WIDTH * 4) as f64,
+        0.0,
+    ));
+    report.push_str(&price_row(
+        "1-bit resident",
+        &binary,
+        packed.bytes_per_record() as f64,
+        0.0,
+    ));
+    report.push_str(&price_row(
+        "1-bit resident + SSD rerank",
+        &binary_reranked,
+        packed.bytes_per_record() as f64,
+        (WIDTH * 4) as f64,
+    ));
+    report.push_str(&price_row(
+        "1-bit + rerank, all resident",
+        &binary_reranked,
+        (packed.bytes_per_record() + WIDTH * 4) as f64,
+        0.0,
+    ));
+
+    // Dominance: a configuration nobody should choose is one that another beats
+    // on quality *and* on price. Saying so beats leaving it to the reader.
+    report.push_str("\ndominated configurations (something is better on both axes):\n");
+    let mut any_dominated = false;
+    for (label, quality, cost, _) in &priced {
+        if let Some((better, _, cheaper, _)) = priced
+            .iter()
+            .find(|(l, q, c, _)| l != label && q >= quality && c < cost)
+        {
+            any_dominated = true;
+            report.push_str(&format!(
+                "  {label} — {better} matches or beats it at ${cheaper:.3} against ${cost:.3}\n"
+            ));
+        }
+    }
+    if !any_dominated {
+        report.push_str("  none; every row is on the frontier\n");
+    }
+
+    report.push_str(&format!(
+        "\nembedding API is ${monthly_embedding:.4}/user/month at {:.0} new records and \
+         {:.0} queries —\nsmall enough that memory, not tokens, is what this costs to run. \
+         At a million users\nthe float32 configuration is ${:.0}k/month of RAM and the \
+         quantized one ${:.0}k.\n",
+        NEW_RECORDS_PER_MONTH,
+        QUERIES_PER_MONTH,
+        priced[0].2 * 1e6 / 1000.0,
+        priced[2].2 * 1e6 / 1000.0,
+    ));
+
     // The question that started this: an exact scan does not fit the 10 ms
     // interactive budget at 16,000 records. Project every measured scan there.
     let interactive =
@@ -740,6 +1005,25 @@ async fn what_quantizing_the_vectors_actually_costs() {
         "every quantized configuration returned nothing — the implementation is \
          broken rather than the idea\n{report}"
     );
+
+    // The price/performance claim, guarded. `priced` is in the order the rows
+    // were added: float32 resident, 1-bit resident, 1-bit + SSD rerank.
+    let (float32_cost, float32_quality) = (priced[0].2, priced[0].1);
+    let (quantized_cost, quantized_quality) = (priced[2].2, priced[2].1);
+    assert!(
+        quantized_cost * 2.0 < float32_cost,
+        "the quantized configuration costs ${quantized_cost:.3}/user/month against \
+         float32's ${float32_cost:.3} — less than the halving that makes the extra \
+         moving parts worth carrying\n{report}"
+    );
+    assert!(
+        quantized_quality + 2 >= float32_quality,
+        "the quantized configuration answers {quantized_quality} of {} against \
+         float32's {float32_quality}. Cheap is only interesting while the quality \
+         difference stays inside what {} questions can resolve.\n{report}",
+        questions.len(),
+        questions.len(),
+    );
 }
 
 fn recall_of(hits: &[(usize, f32)], exact: &[usize]) -> f64 {
@@ -754,7 +1038,16 @@ fn recall_of(hits: &[(usize, f32)], exact: &[usize]) -> f64 {
     found as f64 / RECALL_AT.min(exact.len()) as f64
 }
 
-fn score(outcome: &mut Outcome, hits: &[(usize, f32)], target: usize, recall: f64) {
+#[allow(clippy::too_many_arguments)]
+fn score(
+    outcome: &mut Outcome,
+    hits: &[(usize, f32)],
+    target: usize,
+    recall: f64,
+    lexical_hits: &Vec<SearchHit>,
+    ids: &[MemoryId],
+    target_id: &str,
+) {
     outcome.asked += 1;
     outcome.recall += recall;
     if let Some(rank) = hits.iter().position(|(i, _)| *i == target) {
@@ -764,6 +1057,20 @@ fn score(outcome: &mut Outcome, hits: &[(usize, f32)], target: usize, recall: f6
         }
         if rank < 5 {
             outcome.top_five += 1;
+        }
+    }
+
+    // The production configuration: BM25 fused with the semantic ranking at
+    // 2:1, the weighting `semantic_fusion_probe` recommends.
+    let semantic = as_hits(hits, ids);
+    let fused = fuse(&[lexical_hits, &semantic, &semantic]);
+    if let Some(rank) = rank_of(&fused, target_id) {
+        outcome.fused_reciprocal += 1.0 / (rank + 1) as f64;
+        if rank == 0 {
+            outcome.fused_top_one += 1;
+        }
+        if rank < 5 {
+            outcome.fused_top_five += 1;
         }
     }
 }
