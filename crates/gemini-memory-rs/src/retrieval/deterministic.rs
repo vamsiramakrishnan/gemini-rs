@@ -483,6 +483,8 @@ impl DeterministicPlanner {
             lexical_queries,
             scopes,
             kind_filter: Vec::new(),
+            subject_hint: None,
+            predicate_hint: None,
             temporal,
             source_transcript_hash: stable_hash(text),
         }

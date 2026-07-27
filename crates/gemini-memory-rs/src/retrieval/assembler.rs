@@ -202,6 +202,8 @@ mod tests {
             lexical_queries: vec!["food".into()],
             scopes: Vec::new(),
             kind_filter: Vec::new(),
+            subject_hint: None,
+            predicate_hint: None,
             temporal: None,
             source_transcript_hash: "h".into(),
         }

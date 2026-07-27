@@ -380,16 +380,85 @@ impl LocalMemoryRetriever {
         turn_id: TurnId,
         budget: RetrievalBudget,
         kinds: Vec<crate::core::MemoryKind>,
+        about: Option<String>,
+        attribute: Option<String>,
     ) -> Result<PreparedMemorySnapshot, MemoryError> {
         let now = Utc::now();
+        let blank = |value: Option<String>| value.filter(|v| !v.trim().is_empty());
         let plan = RetrievalPlan {
             requires_memory: true,
             lexical_queries: vec![query.to_string()],
             kind_filter: kinds,
+            subject_hint: blank(about),
+            predicate_hint: blank(attribute),
             ..RetrievalPlan::skip(turn_id, 0, query)
         }
         .normalized();
         Ok(self.execute(&plan, budget, now).await)
+    }
+
+    /// Boost records matching the caller's `about`/`attribute` hints.
+    ///
+    /// For each ranking already collected, this appends a copy containing only
+    /// the records that match. A matching record therefore earns its
+    /// `1/(60 + rank)` twice over and roughly doubles its fused weight, while a
+    /// record that does not match keeps everything it had. Nothing is removed.
+    ///
+    /// That "nothing is removed" is the entire design, and it is the third
+    /// place in this crate where the same lesson was learned by measurement.
+    /// `needs_semantic_fallback` gated the semantic backend and cost 80% of its
+    /// value; `satisfies` gated the prepared snapshot and discarded 65 of 93
+    /// correct ones; and a *hard* version of this filter answers 0 of 93 when
+    /// the hint is wrong, because the answer never enters the candidate set.
+    /// The soft version costs one question in the same case.
+    ///
+    /// A hint matching nothing produces empty rankings, which contribute
+    /// nothing and leave the unfiltered result exactly as it was. That is the
+    /// degradation path, and it is why a model guessing badly is survivable.
+    fn apply_hints(&self, plan: &RetrievalPlan, rankings: &mut Vec<Vec<SearchHit>>) {
+        let subject = plan
+            .subject_hint
+            .as_deref()
+            .map(crate::core::normalize_token)
+            .filter(|s| !s.is_empty());
+        let predicate = plan
+            .predicate_hint
+            .as_deref()
+            .map(crate::core::normalize_token)
+            .filter(|s| !s.is_empty());
+        if subject.is_none() && predicate.is_none() {
+            return;
+        }
+
+        let canonical = self.canonical.read();
+        let matches = |hit: &SearchHit| -> bool {
+            let Some(doc) = canonical.get(&hit.id) else {
+                // Overlay hits are not in the canonical index. A fact learned
+                // seconds ago is the one thing most likely to be what the model
+                // is asking about, so an unresolvable id is boosted rather than
+                // dropped — the failure mode of the alternative is silently
+                // demoting the freshest record in memory.
+                return true;
+            };
+            if let Some(subject) = &subject {
+                if &doc.subject_form != subject {
+                    return false;
+                }
+            }
+            if let Some(predicate) = &predicate {
+                if &crate::core::normalize_token(doc.predicate.as_str()) != predicate {
+                    return false;
+                }
+            }
+            true
+        };
+
+        let boosted: Vec<Vec<SearchHit>> = rankings
+            .iter()
+            .map(|ranking| ranking.iter().filter(|h| matches(h)).cloned().collect())
+            .filter(|ranking: &Vec<SearchHit>| !ranking.is_empty())
+            .collect();
+        rankings.extend(boosted);
     }
 
     /// Drop canonical candidates the session has superseded in conversation.
@@ -427,6 +496,7 @@ impl LocalMemoryRetriever {
             rankings.push(semantic.clone());
             rankings.push(semantic);
         }
+        self.apply_hints(plan, &mut rankings);
         let mut candidates = reciprocal_rank_fusion(&rankings);
         // Suppression runs after the fusion rather than before it: the semantic
         // backend returns ids of its own choosing, and one of them may sit in a
@@ -486,7 +556,7 @@ impl MemoryRetriever for LocalMemoryRetriever {
         turn_id: TurnId,
         budget: RetrievalBudget,
     ) -> Result<PreparedMemorySnapshot, MemoryError> {
-        self.retrieve_scoped(query, turn_id, budget, Vec::new())
+        self.retrieve_scoped(query, turn_id, budget, Vec::new(), None, None)
             .await
     }
 }
@@ -786,6 +856,107 @@ mod tests {
     /// which fired on 13 of 93 paraphrased questions — and rescued all 13. The
     /// 80 it declined were declined because BM25 had returned something
     /// confident, which is the failure mode, not the safe case.
+    /// The property the whole design rests on: a wrong hint must not be able to
+    /// remove the answer.
+    ///
+    /// Measured, a *hard* version of this filter answers 0 of 93 questions when
+    /// the hint is wrong — the answer is absent from the candidate set every
+    /// single time — while the soft version costs one. If this test ever fails,
+    /// the filter has become a gate and the feature is worse than not having it.
+    #[tokio::test]
+    async fn a_wrong_hint_reorders_the_results_without_removing_the_answer() {
+        let (retriever, canonical, _overlay) = retriever();
+        canonical
+            .write()
+            .upsert(IndexedMemory::from_canonical(&record(
+                "mem_coffee",
+                MemoryKind::Preference,
+                "user",
+                "The user drinks cortados.",
+            )));
+
+        let unhinted = retriever
+            .retrieve_scoped(
+                "cortados",
+                TurnId(1),
+                RetrievalBudget::interactive(),
+                Vec::new(),
+                None,
+                None,
+            )
+            .await
+            .expect("retrieval");
+        assert!(
+            !unhinted.facts.is_empty(),
+            "the baseline must find the record for this test to mean anything"
+        );
+
+        let misdirected = retriever
+            .retrieve_scoped(
+                "cortados",
+                TurnId(1),
+                RetrievalBudget::interactive(),
+                Vec::new(),
+                Some("somebody-else-entirely".into()),
+                Some("an-attribute-that-does-not-exist".into()),
+            )
+            .await
+            .expect("retrieval");
+        assert_eq!(
+            misdirected.facts.len(),
+            unhinted.facts.len(),
+            "a hint matching nothing must leave the unfiltered result standing, \
+             not empty it"
+        );
+    }
+
+    /// And a right hint has to actually do something, or the field is theatre.
+    #[tokio::test]
+    async fn a_matching_hint_promotes_its_record_above_a_rival() {
+        let (retriever, canonical, _overlay) = retriever();
+        // Two records the query matches equally well, distinguished only by
+        // whose fact it is.
+        canonical
+            .write()
+            .upsert(IndexedMemory::from_canonical(&record(
+                "mem_rival",
+                MemoryKind::Preference,
+                "rhea",
+                "Rhea drinks cortados.",
+            )));
+        canonical
+            .write()
+            .upsert(IndexedMemory::from_canonical(&record(
+                "mem_target",
+                MemoryKind::Preference,
+                "user",
+                "The user drinks cortados.",
+            )));
+
+        let hinted = retriever
+            .retrieve_scoped(
+                "cortados",
+                TurnId(1),
+                RetrievalBudget::interactive(),
+                Vec::new(),
+                Some("user".into()),
+                None,
+            )
+            .await
+            .expect("retrieval");
+        let first = hinted.facts.first().expect("a result");
+        assert_eq!(
+            first.memory_id.as_str(),
+            "mem_target",
+            "the record whose subject matches the hint should rank first; got {:?}",
+            hinted
+                .facts
+                .iter()
+                .map(|m| m.memory_id.as_str())
+                .collect::<Vec<_>>()
+        );
+    }
+
     #[tokio::test]
     async fn the_semantic_backend_is_consulted_even_when_lexical_search_is_confident() {
         let (retriever, canonical, overlay) = retriever();

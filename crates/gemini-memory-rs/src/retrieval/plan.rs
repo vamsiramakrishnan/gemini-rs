@@ -139,6 +139,29 @@ pub struct RetrievalPlan {
     /// A hard kind restriction, set only when a caller explicitly asked for one.
     #[serde(default)]
     pub kind_filter: Vec<MemoryKind>,
+    /// Whose fact the caller believes this is — the subject surface form.
+    ///
+    /// A *hint*, never a restriction: records matching it are boosted in the
+    /// fusion, records that do not are still returned. That asymmetry is the
+    /// whole design, and it is measured. Over 93 questions, a correct
+    /// `about`+`attribute` pair applied softly takes top-5 from 79 to 91; a
+    /// wrong one costs one question. Applied as a hard filter, a correct pair
+    /// reaches the same 91 and a **wrong one returns nothing at all** — 0 of
+    /// 93, with the answer absent from the candidate set every single time.
+    ///
+    /// Break-even follows from that: filtering softly beats not filtering once
+    /// the caller is right 8% of the time, where filtering hard needs 87%. See
+    /// `tests/filter_dsl_probe.rs`.
+    #[serde(default)]
+    pub subject_hint: Option<String>,
+    /// Which attribute of the subject — the canonical predicate.
+    ///
+    /// Same soft semantics as [`subject_hint`](Self::subject_hint), and the
+    /// more valuable of the two: a model shown
+    /// [`memory_map`](crate::retrieval::memory_map) names the right predicate
+    /// 69% of the time against 2% without it.
+    #[serde(default)]
+    pub predicate_hint: Option<String>,
     /// Time window, if the user named one.
     #[serde(default)]
     pub temporal: Option<TemporalConstraint>,
@@ -162,6 +185,8 @@ impl RetrievalPlan {
             lexical_queries: Vec::new(),
             scopes: Vec::new(),
             kind_filter: Vec::new(),
+            subject_hint: None,
+            predicate_hint: None,
             temporal: None,
             source_transcript_hash: stable_hash(transcript),
         }
@@ -249,6 +274,8 @@ mod tests {
             lexical_queries: lexical.into_iter().map(str::to_string).collect(),
             scopes: Vec::new(),
             kind_filter: Vec::new(),
+            subject_hint: None,
+            predicate_hint: None,
             temporal: None,
             source_transcript_hash: "hash".into(),
         }

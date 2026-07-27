@@ -252,7 +252,7 @@ async fn a_wrongly_narrowed_scope_hides_the_answer_rather_than_ranking_it_lower(
 
     let narrowed = payload_statements(
         &session
-            .recall_scoped(query, TurnId(1), RecallScope::Persistent)
+            .recall_scoped(query, TurnId(1), RecallScope::Persistent, None, None)
             .await,
     );
     assert!(

@@ -113,6 +113,25 @@ pub struct RecallArgs {
     /// and every promise. `all`: everything, and the right choice by default.
     #[serde(default)]
     pub scope: RecallScope,
+    /// Whose fact this is.
+    ///
+    /// Use a value from the memory map in your instructions, or omit it. This
+    /// narrows nothing away — a record that does not match is ranked lower, not
+    /// removed — so a wrong guess costs about one result, while a right one is
+    /// worth several. Guessing is better than omitting.
+    ///
+    /// Distinct from who the question *mentions*: "where am I collecting
+    /// Priya's cake" is a fact about the user that mentions Priya, so `about`
+    /// is the user.
+    #[serde(default)]
+    pub about: Option<String>,
+    /// Which attribute of them — for example a coffee order, a barber, an
+    /// allergy.
+    ///
+    /// Use a value from the memory map in your instructions, or omit it. Same
+    /// soft behaviour as `about`, and the more useful of the two.
+    #[serde(default)]
+    pub attribute: Option<String>,
 }
 
 /// Arguments to `manage_memory`.
@@ -137,7 +156,9 @@ pub fn recall_context_tool(session: Arc<MemorySession>) -> TypedTool<RecallArgs>
                 return Ok(json!({ "status": "not_found", "facts": [] }));
             }
             let turn = current_turn(&session);
-            Ok(session.recall_scoped(&args.query, turn, args.scope).await)
+            Ok(session
+                .recall_scoped(&args.query, turn, args.scope, args.about, args.attribute)
+                .await)
         }
     })
 }

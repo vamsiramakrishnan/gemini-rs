@@ -422,24 +422,41 @@ impl MemorySession {
         }
     }
 
-    /// Serve a `recall_context` tool call restricted to a scope.
+    /// Serve a `recall_context` tool call restricted to a scope or narrowed by
+    /// the caller's `about`/`attribute` hints.
     ///
-    /// An unrestricted recall may be answered from the frozen snapshot; a
-    /// scoped one always runs a live local search, because the snapshot was
-    /// prepared without knowing the restriction.
+    /// An unrestricted, unhinted recall may be answered from the frozen
+    /// snapshot. Anything else runs a live local search, because the snapshot
+    /// was prepared speculatively and knows neither the restriction nor the
+    /// hints — serving it would answer a different question quickly.
+    ///
+    /// The hints only ever reorder. See
+    /// [`RetrievalPlan::subject_hint`](crate::retrieval::RetrievalPlan::subject_hint)
+    /// for why they must not do more than that.
     pub async fn recall_scoped(
         &self,
         query: &str,
         turn_id: TurnId,
         scope: crate::runtime::tools::RecallScope,
+        about: Option<String>,
+        attribute: Option<String>,
     ) -> serde_json::Value {
         let kinds = scope.kinds();
-        if kinds.is_empty() {
+        let hinted = about.as_ref().is_some_and(|v| !v.trim().is_empty())
+            || attribute.as_ref().is_some_and(|v| !v.trim().is_empty());
+        if kinds.is_empty() && !hinted {
             return self.recall(query, turn_id).await;
         }
         match self
             .retriever
-            .retrieve_scoped(query, turn_id, RetrievalBudget::interactive(), kinds)
+            .retrieve_scoped(
+                query,
+                turn_id,
+                RetrievalBudget::interactive(),
+                kinds,
+                about,
+                attribute,
+            )
             .await
         {
             Ok(snapshot) => snapshot.to_tool_payload(),

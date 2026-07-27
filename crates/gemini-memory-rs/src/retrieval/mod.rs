@@ -6,14 +6,17 @@
 
 pub mod assembler;
 pub mod deterministic;
+pub mod embedding;
 pub mod extractor;
 pub mod fusion;
 pub mod plan;
 pub mod retriever;
 pub mod snapshot;
+pub mod vocabulary;
 
 pub use assembler::ContextAssembler;
 pub use deterministic::{DeterministicPlanner, KnownEntities, RetrievalSignal};
+pub use embedding::{embedding_text, frontmatter_prose, predicate_line};
 pub use extractor::{
     context_for, retrieval_plan_schema, BoundedPlanExtractor, DeterministicPlanExtractor,
     RetrievalExtractionContext, RetrievalPlanExtractor, RETRIEVAL_PLAN_INSTRUCTION,
@@ -28,3 +31,4 @@ pub use retriever::{
 pub use snapshot::{
     estimate_tokens, fuse_snapshots, PreparedMemorySnapshot, RetrievedMemory, SNAPSHOT_TTL_SECONDS,
 };
+pub use vocabulary::{memory_map, memory_map_with_limit, DEFAULT_LIMIT as MEMORY_MAP_LIMIT};
