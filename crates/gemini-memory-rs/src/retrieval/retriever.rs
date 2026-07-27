@@ -127,6 +127,31 @@ pub trait MemoryRetriever: Send + Sync {
 pub trait SemanticFallback: Send + Sync {
     /// Return record ids in descending relevance.
     async fn search(&self, query: &str, limit: usize) -> Result<Vec<MemoryId>, MemoryError>;
+
+    /// Bring the backend in line with the active corpus.
+    ///
+    /// Called after the canonical index is recompiled — that is, after a
+    /// session seals and reconciliation has decided what is true. `active` is
+    /// the **entire desired state**: every active record paired with the text
+    /// it should be findable by, from
+    /// [`embedding_text`](crate::retrieval::embedding_text).
+    ///
+    /// Passing the whole set rather than a diff is deliberate. A diff has to be
+    /// right, and the cost of getting it wrong is a vector store that quietly
+    /// disagrees with the corpus — which is the failure this method exists to
+    /// prevent, reintroduced by the fix for it. A backend given the full set
+    /// can reconcile idempotently and embed only what it does not already hold.
+    ///
+    /// Default is a no-op, so an existing implementation keeps compiling and
+    /// keeps its current behaviour: an index that never learns about
+    /// corrections. That is the *safe* failure — `semantic_ranking` resolves
+    /// every returned id against the canonical index and drops what is no
+    /// longer retrievable, so a stale backend loses facts rather than serving
+    /// wrong ones — but it is still a failure, and it lands hardest on
+    /// corrected facts, which are the ones a user has shown they care about.
+    async fn reconcile(&self, _active: &[(MemoryId, String)]) -> Result<(), MemoryError> {
+        Ok(())
+    }
 }
 
 /// Shared, swappable index state.
@@ -230,6 +255,15 @@ impl LocalMemoryRetriever {
     /// The windows currently hidden from canonical retrieval.
     pub fn suppressed_windows(&self) -> HashSet<String> {
         self.suppressed.read().clone()
+    }
+
+    /// The semantic backend, if one was installed.
+    ///
+    /// Exposed so the engine can call [`SemanticFallback::reconcile`] after a
+    /// commit — the vector store has to be told what reconciliation decided, or
+    /// it keeps answering from the corpus as it was before the correction.
+    pub fn semantic(&self) -> Option<&Arc<dyn SemanticFallback>> {
+        self.semantic.as_ref()
     }
 
     /// Attach a semantic fallback backend.

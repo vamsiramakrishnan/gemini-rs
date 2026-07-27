@@ -82,8 +82,19 @@ struct Entry {
 
 /// A semantic index built ahead of time and searched in process.
 pub struct PrecomputedSemanticIndex {
-    entries: Vec<Entry>,
-    words: usize,
+    /// Behind a lock so [`SemanticFallback::reconcile`] can bring the index in
+    /// line with the corpus after a correction, without the engine having to
+    /// rebuild and swap the whole thing.
+    entries: parking_lot::RwLock<Vec<Entry>>,
+    /// Words per packed code, learned from the first vector the index sees.
+    ///
+    /// Not fixed at construction because an index legitimately starts empty —
+    /// a new user's first fact arrives through
+    /// [`SemanticFallback::reconcile`], not through the constructor. Deriving
+    /// the width only from the constructor left such an index with a zero-word
+    /// code, which packs every vector to nothing and scores every record
+    /// identically: a cold-start index that silently ranked at random.
+    words: std::sync::atomic::AtomicUsize,
     embedder: std::sync::Arc<dyn Embedder>,
     rerank: bool,
 }
@@ -137,8 +148,8 @@ impl PrecomputedSemanticIndex {
             })
             .collect();
         Self {
-            entries,
-            words,
+            entries: parking_lot::RwLock::new(entries),
+            words: std::sync::atomic::AtomicUsize::new(words),
             embedder,
             rerank: true,
         }
@@ -151,7 +162,7 @@ impl PrecomputedSemanticIndex {
     /// user and there are many users; not worth it otherwise.
     pub fn without_rerank(mut self) -> Self {
         self.rerank = false;
-        for entry in &mut self.entries {
+        for entry in self.entries.get_mut().iter_mut() {
             entry.exact = Vec::new();
             entry.exact.shrink_to_fit();
         }
@@ -160,12 +171,12 @@ impl PrecomputedSemanticIndex {
 
     /// How many records are indexed.
     pub fn len(&self) -> usize {
-        self.entries.len()
+        self.entries.read().len()
     }
 
     /// Whether the index holds nothing.
     pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
+        self.entries.read().is_empty()
     }
 
     /// Bytes held per record, packed codes plus float vectors if reranking.
@@ -174,12 +185,17 @@ impl PrecomputedSemanticIndex {
     /// a number a caller can assert on is more useful than a claim in a doc
     /// comment.
     pub fn bytes_per_record(&self) -> usize {
+        let words = self.words.load(std::sync::atomic::Ordering::Acquire);
         let floats = if self.rerank {
-            self.entries.first().map(|e| e.exact.len() * 4).unwrap_or(0)
+            self.entries
+                .read()
+                .first()
+                .map(|e| e.exact.len() * 4)
+                .unwrap_or(0)
         } else {
             0
         };
-        self.words * 8 + floats
+        words * 8 + floats
     }
 
     /// Rank ids against an already-embedded query.
@@ -187,15 +203,16 @@ impl PrecomputedSemanticIndex {
     /// Separated from [`search`](Self::search) so the scan can be measured, and
     /// used, without a network call in the way.
     pub fn search_vector(&self, query: &[f32], limit: usize) -> Vec<MemoryId> {
-        if self.entries.is_empty() || limit == 0 {
+        let entries = self.entries.read();
+        let words = self.words.load(std::sync::atomic::Ordering::Acquire);
+        if entries.is_empty() || limit == 0 || words == 0 {
             return Vec::new();
         }
-        let probe = pack(query, self.words);
+        let probe = pack(query, words);
 
         // Agreeing bits, which for sign-quantized unit vectors ranks the same
         // way cosine does up to the quantization error the rerank then undoes.
-        let mut scored: Vec<(usize, u32)> = self
-            .entries
+        let mut scored: Vec<(usize, u32)> = entries
             .iter()
             .enumerate()
             .map(|(i, entry)| {
@@ -223,7 +240,7 @@ impl PrecomputedSemanticIndex {
             return scored
                 .into_iter()
                 .take(limit)
-                .map(|(i, _)| self.entries[i].id.clone())
+                .map(|(i, _)| entries[i].id.clone())
                 .collect();
         }
 
@@ -232,7 +249,7 @@ impl PrecomputedSemanticIndex {
         let mut reranked: Vec<(usize, f32)> = scored
             .into_iter()
             .map(|(i, _)| {
-                let score = self.entries[i]
+                let score = entries[i]
                     .exact
                     .iter()
                     .zip(query)
@@ -245,7 +262,7 @@ impl PrecomputedSemanticIndex {
         reranked
             .into_iter()
             .take(limit)
-            .map(|(i, _)| self.entries[i].id.clone())
+            .map(|(i, _)| entries[i].id.clone())
             .collect()
     }
 }
@@ -263,6 +280,59 @@ fn pack(vector: &[f32], words: usize) -> Vec<u64> {
 
 #[async_trait]
 impl SemanticFallback for PrecomputedSemanticIndex {
+    /// Bring the index in line with the active corpus.
+    ///
+    /// Idempotent by construction: `active` is the whole desired state, so this
+    /// embeds the ids it does not hold, drops the ids no longer present, and
+    /// leaves the rest alone. Calling it twice costs one pass over a hash set
+    /// the second time.
+    ///
+    /// Only genuinely new records are embedded, which is the difference between
+    /// a correction costing one 259 ms round trip and costing one per record in
+    /// the corpus. The lock is not held across any of those awaits — embedding
+    /// happens first, and the index is only taken for the swap at the end — so
+    /// a recall running concurrently sees either the old set or the new one and
+    /// never blocks on the network.
+    async fn reconcile(&self, active: &[(MemoryId, String)]) -> Result<(), MemoryError> {
+        let known: std::collections::HashSet<MemoryId> = {
+            let entries = self.entries.read();
+            entries.iter().map(|e| e.id.clone()).collect()
+        };
+        let wanted: std::collections::HashSet<MemoryId> =
+            active.iter().map(|(id, _)| id.clone()).collect();
+
+        let mut fresh = Vec::new();
+        for (id, text) in active {
+            if !known.contains(id) {
+                fresh.push((id.clone(), self.embedder.embed(text).await?));
+            }
+        }
+
+        // An index that started empty learns its width here, from the first
+        // vector it is ever given.
+        if let Some((_, first)) = fresh.first() {
+            let _ = self.words.compare_exchange(
+                0,
+                first.len().div_ceil(64),
+                std::sync::atomic::Ordering::AcqRel,
+                std::sync::atomic::Ordering::Acquire,
+            );
+        }
+        let words = self.words.load(std::sync::atomic::Ordering::Acquire);
+
+        let mut entries = self.entries.write();
+        entries.retain(|entry| wanted.contains(&entry.id));
+        for (id, vector) in fresh {
+            let packed = pack(&vector, words);
+            entries.push(Entry {
+                id,
+                exact: if self.rerank { vector } else { Vec::new() },
+                packed,
+            });
+        }
+        Ok(())
+    }
+
     /// Embed the query, then scan.
     ///
     /// The embed is the only network call, and on the interactive path it is
@@ -401,6 +471,117 @@ mod tests {
     fn asking_for_more_than_exists_returns_what_exists() {
         let built = index(3, 768);
         assert_eq!(built.search_vector(&vector(1, 768), 50).len(), 3);
+    }
+
+    /// Reconcile is the path a correction takes into the index, so its
+    /// contract is worth pinning directly rather than only through the
+    /// end-to-end test.
+    #[tokio::test]
+    async fn reconcile_adds_what_is_new_and_drops_what_is_gone() {
+        let mut table = HashMap::new();
+        table.insert("fresh record".to_string(), vector(999, 768));
+        let built = PrecomputedSemanticIndex::from_vectors(
+            vec![
+                (MemoryId::new("mem_keep"), vector(1, 768)),
+                (MemoryId::new("mem_retire"), vector(2, 768)),
+            ],
+            std::sync::Arc::new(StaticEmbedder::new(table)),
+        );
+        assert_eq!(built.len(), 2);
+
+        // The desired state: keep one, retire one, add one.
+        built
+            .reconcile(&[
+                (MemoryId::new("mem_keep"), "already held".into()),
+                (MemoryId::new("mem_new"), "fresh record".into()),
+            ])
+            .await
+            .expect("reconcile");
+
+        assert_eq!(built.len(), 2, "one retired, one added");
+        let ids = built.search_vector(&vector(999, 768), 10);
+        let ids: Vec<&str> = ids.iter().map(|i| i.as_str()).collect();
+        assert!(ids.contains(&"mem_new"), "the new record was not embedded");
+        assert!(
+            ids.contains(&"mem_keep"),
+            "a still-active record was dropped"
+        );
+        assert!(
+            !ids.contains(&"mem_retire"),
+            "a record no longer active is still in the index"
+        );
+    }
+
+    /// The already-held record's text is deliberately absent from the
+    /// embedder's table, so this fails loudly if reconcile re-embeds it. That
+    /// is the difference between a correction costing one round trip and one
+    /// per record in the corpus.
+    #[tokio::test]
+    async fn reconcile_does_not_re_embed_what_it_already_holds() {
+        let built = PrecomputedSemanticIndex::from_vectors(
+            vec![(MemoryId::new("mem_keep"), vector(1, 768))],
+            std::sync::Arc::new(StaticEmbedder::new(HashMap::new())),
+        );
+        built
+            .reconcile(&[(MemoryId::new("mem_keep"), "never embeddable".into())])
+            .await
+            .expect("reconcile must not embed a record it already holds");
+        assert_eq!(built.len(), 1);
+    }
+
+    /// Reconciling twice with the same desired state must be a no-op.
+    #[tokio::test]
+    async fn reconcile_is_idempotent() {
+        let mut table = HashMap::new();
+        table.insert("one".to_string(), vector(7, 768));
+        let built = PrecomputedSemanticIndex::from_vectors(
+            Vec::new(),
+            std::sync::Arc::new(StaticEmbedder::new(table)),
+        );
+        let desired = [(MemoryId::new("mem_one"), "one".to_string())];
+        built.reconcile(&desired).await.expect("first");
+        let after_first = built.len();
+        built.reconcile(&desired).await.expect("second");
+        assert_eq!(
+            built.len(),
+            after_first,
+            "the second pass changed the index"
+        );
+    }
+
+    /// The cold-start path: an index that starts empty and receives its first
+    /// fact through reconcile must be searchable afterwards.
+    ///
+    /// This failed when the code width was fixed at construction — an empty
+    /// index had zero words, packed every vector to nothing, and scored every
+    /// record identically. It ranked at random and said nothing about it, which
+    /// is precisely the shape of bug a new user would hit and nobody would see.
+    #[tokio::test]
+    async fn an_index_that_starts_empty_becomes_searchable_after_its_first_fact() {
+        let mut table = HashMap::new();
+        table.insert("first fact".to_string(), vector(11, 768));
+        table.insert("second fact".to_string(), vector(22, 768));
+        let built = PrecomputedSemanticIndex::from_vectors(
+            Vec::new(),
+            std::sync::Arc::new(StaticEmbedder::new(table)),
+        );
+        assert!(built.is_empty());
+
+        built
+            .reconcile(&[
+                (MemoryId::new("mem_first"), "first fact".into()),
+                (MemoryId::new("mem_second"), "second fact".into()),
+            ])
+            .await
+            .expect("reconcile");
+
+        assert_eq!(built.len(), 2);
+        let hits = built.search_vector(&vector(22, 768), 1);
+        assert_eq!(
+            hits.first().map(|id| id.as_str()),
+            Some("mem_second"),
+            "an index built empty must rank properly once it has been filled"
+        );
     }
 
     #[tokio::test]

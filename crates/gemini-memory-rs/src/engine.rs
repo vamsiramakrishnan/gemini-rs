@@ -838,6 +838,38 @@ impl MemorySession {
                 .filter(|m| m.status == MemoryStatus::Active)
                 .map(IndexedMemory::from_canonical),
         ));
+
+        // The semantic backend is recompiled too, and for the same reason the
+        // lexical index is: reconciliation has just decided what is true, and a
+        // retriever holding the previous answer is a retriever that has stopped
+        // agreeing with memory.
+        //
+        // It is passed the whole active set rather than a diff — see
+        // `SemanticFallback::reconcile` — and a well-behaved backend embeds only
+        // what it does not already hold, so the cost of a correction is one
+        // embedding rather than one per record.
+        //
+        // A failure here is logged rather than propagated. The lexical index and
+        // the durable record are already correct at this point; refusing to
+        // finish a recompile because a vector store was unreachable would turn a
+        // degraded semantic layer into a failed commit, and the degradation is
+        // the safe direction — `semantic_ranking` drops ids that no longer
+        // resolve, so a stale backend loses facts rather than serving wrong ones.
+        if let Some(semantic) = self.retriever.semantic() {
+            let active: Vec<(crate::core::MemoryId, String)> = records
+                .iter()
+                .filter(|m| m.status == MemoryStatus::Active)
+                .map(|m| (m.id.clone(), crate::retrieval::embedding_text(m)))
+                .collect();
+            // Failure is swallowed on purpose. By this point the durable record
+            // and the lexical index are already correct, so refusing to finish
+            // the recompile because a vector store was unreachable would turn a
+            // degraded semantic layer into a failed commit. The degradation is
+            // also the safe direction: `semantic_ranking` drops ids that no
+            // longer resolve, so a backend left behind loses facts rather than
+            // serving wrong ones.
+            let _ = semantic.reconcile(&active).await;
+        }
         let planner = Arc::new(DeterministicPlanner::with_entities(
             KnownEntities::from_index(&self.canonical.read()),
         ));
