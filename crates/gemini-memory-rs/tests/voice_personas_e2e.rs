@@ -106,34 +106,56 @@ const QUESTION: &str = "What's my usual coffee order?";
 
 // ─── (a) the new user ───────────────────────────────────────────────────────
 
-/// # Status: not yet passing, and the reason is not memory
+/// # Status: not passing, and now localised to the SDK session loop
 ///
-/// Both personas currently get an empty transcript and no answer: the session
-/// connects, 2.37 s of valid speech goes out as paced 20 ms frames, and the
-/// model never responds. The audio itself is verified good — 16 kHz mono, peak
-/// 27391, healthy RMS — so synthesis and resampling are not the problem.
+/// Both personas get an empty transcript and no answer: the session connects,
+/// 2.37 s of valid speech goes out as 154 paced 20 ms frames, and the model
+/// never answers.
 ///
-/// Two causes were found and fixed on the way here, neither sufficient:
+/// The cause is **not** the API, the audio, the MIME type, the model, or the
+/// activity configuration. All of those were ruled out by replaying the exact
+/// same audio over a raw WebSocket, outside this SDK: that probe gets the full
+/// input transcript ("What's my usual coffee order?") and a full spoken answer.
+/// Replaying the SDK's own setup message — `realtimeInputConfig` with
+/// `TURN_INCLUDES_ONLY_ACTIVITY` and all — through the same probe still works,
+/// so the setup is not it either. Instrumenting the codec shows the SDK's
+/// outgoing frames are identical in shape to the probe's:
+/// `{"realtimeInput":{"audio":{"mimeType":"audio/pcm;rate=16000","data":…}}}`.
+///
+/// What the instrumentation *did* show is the shape of the real defect. Across
+/// one test run the server sent:
+///
+/// | message | count |
+/// |---|---|
+/// | `setupComplete` | **3** |
+/// | `inputTranscription` | 1 (a single partial, `" It'"`) |
+/// | everything else | 0 |
+///
+/// Three setup handshakes for one `connect()`, and a single partial transcript.
+/// The L0 session loop retries the setup handshake up to
+/// `max_reconnect_attempts` times, so the socket is being re-established while
+/// the utterance is still streaming — which is exactly why no turn ever
+/// completes. Audio arrives, gets partially transcribed, and the connection it
+/// arrived on goes away before the turn closes.
+///
+/// Two defects were found and fixed on the way here, neither sufficient:
 ///
 /// 1. `AudioFormat::Pcm16` declared `audio/pcm` where the Live API requires
-///    `audio/pcm;rate=16000`. That is a real defect in the wire crate and it is
-///    fixed — a bare type is accepted by the socket and then transcribed as
-///    silence, so it would have broken audio input for every caller. Nothing
-///    caught it because every other Live test in this workspace drives sessions
-///    with `send_text`.
+///    `audio/pcm;rate=16000`. A real defect in the wire crate, fixed — a bare
+///    type is accepted by the socket and then transcribed as silence, so it
+///    would have broken audio input for every caller. Nothing caught it because
+///    every other Live test drives sessions with `send_text`.
 /// 2. `say` stopped sending packets at the end of the utterance rather than
-///    streaming trailing silence. Server VAD segments on what it *hears*, so a
-///    client that goes quiet on the socket looks stalled rather than finished.
+///    streaming trailing silence.
 ///
-/// What has not been ruled out, in the order worth trying: whether this model
-/// accepts realtime input audio at all on Google AI as opposed to Vertex;
-/// whether an explicit `activityStart`/`activityEnd` signal is required rather
-/// than relying on automatic detection; and whether the session needs
-/// `realtime_input_config` set explicitly instead of left to the server default.
+/// The remaining question is narrow: **what closes the socket mid-utterance?**
+/// Worth looking at whether the send path's token-bucket pacer stalls long
+/// enough to trip a server-side idle timeout, and whether a transport error is
+/// being swallowed into a reconnect rather than surfaced.
 ///
 /// Marked `#[ignore]` rather than deleted or weakened: the assertions are the
-/// right ones and the fixture works, so this should be run by hand while that
-/// is chased rather than quietly passing on a lowered bar.
+/// right ones, the fixture is verified working against the raw API, and the
+/// defect is in the code under test.
 ///
 /// A user the system has never met asks about themselves.
 ///
