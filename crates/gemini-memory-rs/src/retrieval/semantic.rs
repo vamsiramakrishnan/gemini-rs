@@ -1,6 +1,6 @@
 //! A precomputed, quantized semantic index.
 //!
-//! [`SemanticFallback`](super::SemanticFallback) says *what* the engine needs —
+//! [`SemanticFallback`] says *what* the engine needs —
 //! ids in relevance order — and nothing about how to get them. This is the
 //! in-process implementation, built once from the corpus and searched without a
 //! network call.
@@ -21,7 +21,7 @@
 //! pretend otherwise: it takes an [`Embedder`], and whether that fits the
 //! caller's budget is the caller's architecture decision. A local model fits; a
 //! remote one is for the speculative path, where nobody is waiting, and even
-//! then only if the budget is raised past 259 ms. See [`Self::search`].
+//! then only if the budget is raised past 259 ms. See [`PrecomputedSemanticIndex::search`].
 //!
 //! # Why it is quantized
 //!
@@ -43,7 +43,7 @@
 //! which are not. Priced out, that is $0.021 per user per month against $0.158.
 //!
 //! The float vectors are kept for the rerank. A deployment that cannot afford
-//! them resident can drop to [`Self::without_rerank`] and lose about one
+//! them resident can drop to [`PrecomputedSemanticIndex::without_rerank`] and lose about one
 //! question in 93, or hold them on SSD and fault in fifty per query.
 
 use std::collections::HashMap;
