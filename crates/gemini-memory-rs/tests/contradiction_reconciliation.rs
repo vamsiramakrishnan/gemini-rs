@@ -295,7 +295,7 @@ async fn a_stale_semantic_index_cannot_serve_a_superseded_fact() {
         before
             .iter()
             .zip(&texts)
-            .map(|(m, t)| (m.id.clone(), seeded_vector(t)))
+            .map(|(m, t)| (m.id.clone(), t.clone(), seeded_vector(t)))
             .collect(),
         embedder_over(&texts),
     );
@@ -400,7 +400,11 @@ async fn a_correction_reaches_the_semantic_index_and_the_old_fact_leaves_it() {
 
     let all_texts: Vec<String> = after.iter().map(embedding_text).collect();
     let index = PrecomputedSemanticIndex::from_vectors(
-        vec![(original_id.clone(), seeded_vector(&original_text))],
+        vec![(
+            original_id.clone(),
+            original_text.clone(),
+            seeded_vector(&original_text),
+        )],
         embedder_over(&all_texts),
     );
     let held_before: Vec<String> = vec![original_id.as_str().to_string()];

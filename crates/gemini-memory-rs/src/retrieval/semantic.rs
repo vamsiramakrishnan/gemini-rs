@@ -74,6 +74,14 @@ pub trait Embedder: Send + Sync {
 /// One record's vector, in both representations.
 struct Entry {
     id: MemoryId,
+    /// Hash of the text this vector was built from.
+    ///
+    /// The whole basis of persistence being safe. A vector is only reusable
+    /// while the text that produced it is unchanged, and a record's text
+    /// changes whenever its statement or frontmatter does — which is exactly
+    /// what a correction is. Keying on the id alone would restore a vector for
+    /// the old wording of a fact and never notice.
+    hash: String,
     /// Sign bits of the vector, packed 64 to a word. What the scan reads.
     packed: Vec<u64>,
     /// The full vector, for the exact rerank. Empty when reranking is off.
@@ -97,6 +105,8 @@ pub struct PrecomputedSemanticIndex {
     words: std::sync::atomic::AtomicUsize,
     embedder: std::sync::Arc<dyn Embedder>,
     rerank: bool,
+    /// Where vectors survive a restart, if anywhere.
+    store: Option<std::sync::Arc<dyn VectorStore>>,
 }
 
 impl PrecomputedSemanticIndex {
@@ -123,7 +133,11 @@ impl PrecomputedSemanticIndex {
             vectors.push(embedder.embed(&embedding_text(record)).await?);
         }
         Ok(Self::from_vectors(
-            active.iter().map(|m| m.id.clone()).zip(vectors).collect(),
+            active
+                .iter()
+                .zip(vectors)
+                .map(|(m, v)| (m.id.clone(), embedding_text(m), v))
+                .collect(),
             embedder,
         ))
     }
@@ -133,16 +147,23 @@ impl PrecomputedSemanticIndex {
     /// The path for a caller that already batches its embedding — concurrently,
     /// or in a nightly job — rather than awaiting one record at a time as
     /// [`build`](Self::build) does.
+    ///
+    /// Each entry is `(id, the text that was embedded, the vector)`. The text is
+    /// required rather than convenient: the index hashes it so that
+    /// [`SemanticFallback::reconcile`] can tell an unchanged record from one
+    /// whose wording has moved. Without it every reconcile would re-embed the
+    /// whole corpus, which is the cost this type exists to avoid.
     pub fn from_vectors(
-        vectors: Vec<(MemoryId, Vec<f32>)>,
+        vectors: Vec<(MemoryId, String, Vec<f32>)>,
         embedder: std::sync::Arc<dyn Embedder>,
     ) -> Self {
-        let width = vectors.first().map(|(_, v)| v.len()).unwrap_or(0);
+        let width = vectors.first().map(|(_, _, v)| v.len()).unwrap_or(0);
         let words = width.div_ceil(64);
         let entries = vectors
             .into_iter()
-            .map(|(id, vector)| Entry {
+            .map(|(id, text, vector)| Entry {
                 id,
+                hash: crate::core::stable_hash(&text),
                 packed: pack(&vector, words),
                 exact: vector,
             })
@@ -152,7 +173,50 @@ impl PrecomputedSemanticIndex {
             words: std::sync::atomic::AtomicUsize::new(words),
             embedder,
             rerank: true,
+            store: None,
         }
+    }
+
+    /// Keep vectors in `store`, and load whatever it already holds.
+    ///
+    /// This is the constructor a long-lived process wants. Without it every
+    /// start pays one embedding round trip per record — 259 ms each, so an hour
+    /// and a quarter at 16,000 records before the first semantic answer, again
+    /// on every deploy and every replica.
+    ///
+    /// A stored vector is only trusted while the text that produced it is
+    /// unchanged; [`SemanticFallback::reconcile`] checks the hash and
+    /// re-embeds anything that has moved. So a restore is a fast start, never a
+    /// stale one.
+    pub async fn restore(
+        store: std::sync::Arc<dyn VectorStore>,
+        embedder: std::sync::Arc<dyn Embedder>,
+    ) -> Result<Self, MemoryError> {
+        let saved = store.load().await?;
+        let width = saved.first().map(|(_, _, v)| v.len()).unwrap_or(0);
+        let words = width.div_ceil(64);
+        let entries = saved
+            .into_iter()
+            .map(|(id, hash, vector)| Entry {
+                id,
+                hash,
+                packed: pack(&vector, words),
+                exact: vector,
+            })
+            .collect();
+        Ok(Self {
+            entries: parking_lot::RwLock::new(entries),
+            words: std::sync::atomic::AtomicUsize::new(words),
+            embedder,
+            rerank: true,
+            store: Some(store),
+        })
+    }
+
+    /// Attach a store to an index built in memory.
+    pub fn with_store(mut self, store: std::sync::Arc<dyn VectorStore>) -> Self {
+        self.store = Some(store);
+        self
     }
 
     /// Drop the float vectors, keeping only the packed codes.
@@ -278,6 +342,129 @@ fn pack(vector: &[f32], words: usize) -> Vec<u64> {
     packed
 }
 
+// ─── persistence ────────────────────────────────────────────────────────────
+
+/// Somewhere to keep vectors between processes.
+///
+/// Without this the index is rebuilt from nothing on every start, and rebuilding
+/// means one embedding round trip per record: 259 ms each, measured, so a
+/// 16,000-record corpus is over an hour of wall-clock before the first question
+/// can be answered semantically. That is not a slow start, it is an unusable
+/// one, and it recurs on every deploy and every replica.
+#[async_trait]
+pub trait VectorStore: Send + Sync {
+    /// Every vector held, as `(id, text hash, vector)`.
+    async fn load(&self) -> Result<Vec<(MemoryId, String, Vec<f32>)>, MemoryError>;
+
+    /// Persist one vector against the hash of the text that produced it.
+    async fn save(&self, id: &MemoryId, hash: &str, vector: &[f32]) -> Result<(), MemoryError>;
+
+    /// Forget a record's vector.
+    async fn remove(&self, id: &MemoryId) -> Result<(), MemoryError>;
+}
+
+/// Vectors kept beside the records, in the same store the OKF Markdown uses.
+///
+/// One document per record, holding the text hash and the vector as hex. Hex
+/// rather than base64 because it needs no dependency and round-trips exactly;
+/// the cost is 8 characters per dimension, so a 768-wide vector is about 6 kB
+/// and a 16,000-record corpus is roughly 98 MB — around three times the
+/// Markdown it accompanies. That is the honest price of not re-embedding, and
+/// it buys back an hour of cold start.
+pub struct OkfVectorStore<S: crate::okf::OkfStore> {
+    store: std::sync::Arc<S>,
+    prefix: String,
+}
+
+impl<S: crate::okf::OkfStore> OkfVectorStore<S> {
+    /// Keep vectors under `vectors/` in the given store.
+    pub fn new(store: std::sync::Arc<S>) -> Self {
+        Self {
+            store,
+            prefix: "vectors".to_string(),
+        }
+    }
+
+    fn path(&self, id: &MemoryId) -> String {
+        format!("{}/{}.vec", self.prefix, id.as_str())
+    }
+}
+
+/// `f32` little-endian bytes as lowercase hex.
+fn to_hex(vector: &[f32]) -> String {
+    let mut out = String::with_capacity(vector.len() * 8);
+    for value in vector {
+        for byte in value.to_le_bytes() {
+            out.push(char::from_digit((byte >> 4) as u32, 16).unwrap_or('0'));
+            out.push(char::from_digit((byte & 0x0f) as u32, 16).unwrap_or('0'));
+        }
+    }
+    out
+}
+
+/// The inverse. Returns `None` for anything malformed rather than a partial
+/// vector — a truncated vector would rank silently wrongly.
+fn from_hex(hex: &str) -> Option<Vec<f32>> {
+    if !hex.len().is_multiple_of(8) {
+        return None;
+    }
+    let bytes: Option<Vec<u8>> = hex
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            let hi = (pair[0] as char).to_digit(16)?;
+            let lo = (pair[1] as char).to_digit(16)?;
+            Some(((hi << 4) | lo) as u8)
+        })
+        .collect();
+    Some(
+        bytes?
+            .chunks_exact(4)
+            .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .collect(),
+    )
+}
+
+#[async_trait]
+impl<S: crate::okf::OkfStore> VectorStore for OkfVectorStore<S> {
+    async fn load(&self) -> Result<Vec<(MemoryId, String, Vec<f32>)>, MemoryError> {
+        let mut out = Vec::new();
+        for path in self.store.list(&self.prefix).await? {
+            let Some(body) = self.store.read(&path).await? else {
+                continue;
+            };
+            let Some((hash, hex)) = body.split_once('\n') else {
+                continue;
+            };
+            let Some(vector) = from_hex(hex.trim()) else {
+                // A corrupt file is skipped rather than failed on: the record
+                // simply gets re-embedded, which is slow but correct. Failing
+                // the load would make one bad file cost the whole index.
+                continue;
+            };
+            let id = path
+                .rsplit('/')
+                .next()
+                .and_then(|f| f.strip_suffix(".vec"))
+                .map(MemoryId::new);
+            if let Some(id) = id {
+                out.push((id, hash.to_string(), vector));
+            }
+        }
+        Ok(out)
+    }
+
+    async fn save(&self, id: &MemoryId, hash: &str, vector: &[f32]) -> Result<(), MemoryError> {
+        self.store
+            .write(&self.path(id), &format!("{hash}\n{}", to_hex(vector)))
+            .await
+    }
+
+    async fn remove(&self, id: &MemoryId) -> Result<(), MemoryError> {
+        self.store.remove(&self.path(id)).await
+    }
+}
+
 #[async_trait]
 impl SemanticFallback for PrecomputedSemanticIndex {
     /// Bring the index in line with the active corpus.
@@ -294,23 +481,46 @@ impl SemanticFallback for PrecomputedSemanticIndex {
     /// a recall running concurrently sees either the old set or the new one and
     /// never blocks on the network.
     async fn reconcile(&self, active: &[(MemoryId, String)]) -> Result<(), MemoryError> {
-        let known: std::collections::HashSet<MemoryId> = {
+        // What is already held, and for which wording. A record whose text has
+        // changed is *not* a hit: its stored vector describes the old wording,
+        // which is precisely the situation a correction creates.
+        let held: std::collections::HashMap<MemoryId, String> = {
             let entries = self.entries.read();
-            entries.iter().map(|e| e.id.clone()).collect()
+            entries
+                .iter()
+                .map(|e| (e.id.clone(), e.hash.clone()))
+                .collect()
         };
         let wanted: std::collections::HashSet<MemoryId> =
             active.iter().map(|(id, _)| id.clone()).collect();
 
-        let mut fresh = Vec::new();
+        let mut fresh: Vec<(MemoryId, String, Vec<f32>)> = Vec::new();
         for (id, text) in active {
-            if !known.contains(id) {
-                fresh.push((id.clone(), self.embedder.embed(text).await?));
+            let hash = crate::core::stable_hash(text);
+            if held.get(id) == Some(&hash) {
+                continue;
+            }
+            // Embedding is the expensive step — 259 ms of network — so it is the
+            // last resort, after both the in-memory index and the store.
+            let vector = self.embedder.embed(text).await?;
+            if let Some(store) = &self.store {
+                store.save(id, &hash, &vector).await?;
+            }
+            fresh.push((id.clone(), hash, vector));
+        }
+
+        // A record dropped from the corpus loses its stored vector too;
+        // otherwise the store grows forever and a restored index would
+        // resurrect facts the user has superseded.
+        if let Some(store) = &self.store {
+            for (id, _) in held.iter().filter(|(id, _)| !wanted.contains(id)) {
+                store.remove(id).await?;
             }
         }
 
         // An index that started empty learns its width here, from the first
         // vector it is ever given.
-        if let Some((_, first)) = fresh.first() {
+        if let Some((_, _, first)) = fresh.first() {
             let _ = self.words.compare_exchange(
                 0,
                 first.len().div_ceil(64),
@@ -322,10 +532,14 @@ impl SemanticFallback for PrecomputedSemanticIndex {
 
         let mut entries = self.entries.write();
         entries.retain(|entry| wanted.contains(&entry.id));
-        for (id, vector) in fresh {
+        for (id, hash, vector) in fresh {
+            // Replace rather than duplicate: a re-embedded record is already in
+            // `entries` under its old hash.
+            entries.retain(|e| e.id != id);
             let packed = pack(&vector, words);
             entries.push(Entry {
                 id,
+                hash,
                 exact: if self.rerank { vector } else { Vec::new() },
                 packed,
             });
@@ -335,12 +549,12 @@ impl SemanticFallback for PrecomputedSemanticIndex {
 
     /// Embed the query, then scan.
     ///
-    /// The embed is the only network call, and on the interactive path it is
-    /// almost certainly too slow — 259 ms measured against a 10 ms budget. The
-    /// retriever bounds this with a timeout and treats a miss as "no semantic
+    /// The embed is the only network call on this path, and on the interactive
+    /// budget it is almost certainly too slow — 259 ms measured against 10 ms.
+    /// The retriever bounds it with a timeout and treats a miss as "no semantic
     /// opinion", so an over-budget embedder degrades to lexical results rather
-    /// than delaying the turn. That is a real degradation, not a free one:
-    /// with a remote embedder the semantic layer effectively only runs on the
+    /// than delaying the turn. That is a real degradation, not a free one: with
+    /// a remote embedder the semantic layer effectively only runs on the
     /// speculative path, and only if that budget is raised past the round trip.
     async fn search(&self, query: &str, limit: usize) -> Result<Vec<MemoryId>, MemoryError> {
         let vector = self.embedder.embed(query).await?;
@@ -400,10 +614,11 @@ mod tests {
     }
 
     fn index(count: usize, width: usize) -> PrecomputedSemanticIndex {
-        let vectors: Vec<(MemoryId, Vec<f32>)> = (0..count)
+        let vectors: Vec<(MemoryId, String, Vec<f32>)> = (0..count)
             .map(|i| {
                 (
                     MemoryId::new(format!("mem_{i}")),
+                    format!("record {i}"),
                     vector(i as u64 + 1, width),
                 )
             })
@@ -482,8 +697,16 @@ mod tests {
         table.insert("fresh record".to_string(), vector(999, 768));
         let built = PrecomputedSemanticIndex::from_vectors(
             vec![
-                (MemoryId::new("mem_keep"), vector(1, 768)),
-                (MemoryId::new("mem_retire"), vector(2, 768)),
+                (
+                    MemoryId::new("mem_keep"),
+                    "already held".into(),
+                    vector(1, 768),
+                ),
+                (
+                    MemoryId::new("mem_retire"),
+                    "retired".into(),
+                    vector(2, 768),
+                ),
             ],
             std::sync::Arc::new(StaticEmbedder::new(table)),
         );
@@ -519,7 +742,11 @@ mod tests {
     #[tokio::test]
     async fn reconcile_does_not_re_embed_what_it_already_holds() {
         let built = PrecomputedSemanticIndex::from_vectors(
-            vec![(MemoryId::new("mem_keep"), vector(1, 768))],
+            vec![(
+                MemoryId::new("mem_keep"),
+                "never embeddable".into(),
+                vector(1, 768),
+            )],
             std::sync::Arc::new(StaticEmbedder::new(HashMap::new())),
         );
         built
@@ -582,6 +809,134 @@ mod tests {
             Some("mem_second"),
             "an index built empty must rank properly once it has been filled"
         );
+    }
+
+    /// Hex has to round-trip exactly, or a restored index ranks by corrupted
+    /// vectors and says nothing about it.
+    #[test]
+    fn vectors_survive_the_hex_round_trip_bit_for_bit() {
+        let original = vector(5, 768);
+        let restored = from_hex(&to_hex(&original)).expect("valid hex");
+        assert_eq!(original, restored);
+    }
+
+    #[test]
+    fn malformed_hex_is_rejected_rather_than_truncated() {
+        assert!(from_hex("abc").is_none(), "odd length");
+        assert!(from_hex("zzzzzzzz").is_none(), "not hex");
+        assert!(from_hex("abcdef").is_none(), "not a whole f32");
+    }
+
+    /// The point of persistence: a restart must not re-embed.
+    ///
+    /// The embedder's table is deliberately empty, so any embedding attempt is
+    /// an error rather than a slow success — which is what makes this a test of
+    /// the cache and not of the network.
+    #[tokio::test]
+    async fn a_restored_index_answers_without_embedding_anything() {
+        let store = std::sync::Arc::new(OkfVectorStore::new(std::sync::Arc::new(
+            crate::okf::MemoryStore::default(),
+        )));
+        let mut table = HashMap::new();
+        table.insert("the only fact".to_string(), vector(3, 768));
+
+        // First process: embeds once and persists.
+        let first = PrecomputedSemanticIndex::from_vectors(
+            Vec::new(),
+            std::sync::Arc::new(StaticEmbedder::new(table)),
+        )
+        .with_store(store.clone());
+        first
+            .reconcile(&[(MemoryId::new("mem_one"), "the only fact".into())])
+            .await
+            .expect("first reconcile");
+        assert_eq!(first.len(), 1);
+
+        // Second process: same store, an embedder that can embed nothing.
+        let second = PrecomputedSemanticIndex::restore(
+            store.clone(),
+            std::sync::Arc::new(StaticEmbedder::new(HashMap::new())),
+        )
+        .await
+        .expect("restore");
+        assert_eq!(second.len(), 1, "the vector did not survive the restart");
+        second
+            .reconcile(&[(MemoryId::new("mem_one"), "the only fact".into())])
+            .await
+            .expect("a restored vector must not be re-embedded");
+
+        let hits = second.search_vector(&vector(3, 768), 1);
+        assert_eq!(hits.first().map(|i| i.as_str()), Some("mem_one"));
+    }
+
+    /// And the safety property that makes the cache trustworthy: a record whose
+    /// text has changed must be re-embedded, not restored from its old vector.
+    ///
+    /// This is exactly a correction. Keying the store on the id alone would
+    /// restore the vector for the wording the user just replaced.
+    #[tokio::test]
+    async fn a_record_whose_text_changed_is_re_embedded_rather_than_restored() {
+        let store = std::sync::Arc::new(OkfVectorStore::new(std::sync::Arc::new(
+            crate::okf::MemoryStore::default(),
+        )));
+        let mut table = HashMap::new();
+        table.insert("the original wording".to_string(), vector(11, 768));
+        table.insert("the corrected wording".to_string(), vector(22, 768));
+        let embedder = std::sync::Arc::new(StaticEmbedder::new(table));
+
+        let index = PrecomputedSemanticIndex::from_vectors(Vec::new(), embedder.clone())
+            .with_store(store.clone());
+        index
+            .reconcile(&[(MemoryId::new("mem_one"), "the original wording".into())])
+            .await
+            .expect("first");
+
+        // Same id, new text — a correction.
+        index
+            .reconcile(&[(MemoryId::new("mem_one"), "the corrected wording".into())])
+            .await
+            .expect("second");
+
+        assert_eq!(index.len(), 1, "the record must not be duplicated");
+        let hits = index.search_vector(&vector(22, 768), 1);
+        assert_eq!(
+            hits.first().map(|i| i.as_str()),
+            Some("mem_one"),
+            "the index still holds the vector for the superseded wording"
+        );
+    }
+
+    /// A record dropped from the corpus must lose its stored vector, or a
+    /// restore resurrects facts the user superseded.
+    #[tokio::test]
+    async fn retiring_a_record_removes_it_from_the_store_too() {
+        let backing = std::sync::Arc::new(crate::okf::MemoryStore::default());
+        let store = std::sync::Arc::new(OkfVectorStore::new(backing.clone()));
+        let mut table = HashMap::new();
+        table.insert("kept".to_string(), vector(1, 768));
+        table.insert("dropped".to_string(), vector(2, 768));
+
+        let index = PrecomputedSemanticIndex::from_vectors(
+            Vec::new(),
+            std::sync::Arc::new(StaticEmbedder::new(table)),
+        )
+        .with_store(store.clone());
+        index
+            .reconcile(&[
+                (MemoryId::new("mem_kept"), "kept".into()),
+                (MemoryId::new("mem_dropped"), "dropped".into()),
+            ])
+            .await
+            .expect("first");
+        assert_eq!(store.load().await.expect("load").len(), 2);
+
+        index
+            .reconcile(&[(MemoryId::new("mem_kept"), "kept".into())])
+            .await
+            .expect("second");
+        let remaining = store.load().await.expect("load");
+        assert_eq!(remaining.len(), 1, "the dropped vector is still on disk");
+        assert_eq!(remaining[0].0.as_str(), "mem_kept");
     }
 
     #[tokio::test]
