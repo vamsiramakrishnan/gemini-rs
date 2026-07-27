@@ -2,7 +2,7 @@
   "realtimeInput": {
     "audio": {
       "data": "AQIDBA==",
-      "mimeType": "audio/pcm"
+      "mimeType": "audio/pcm;rate=16000"
     }
   }
 }

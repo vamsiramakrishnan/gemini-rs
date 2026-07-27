@@ -11,6 +11,7 @@ pub mod extractor;
 pub mod fusion;
 pub mod plan;
 pub mod retriever;
+pub mod semantic;
 pub mod snapshot;
 pub mod vocabulary;
 
@@ -28,6 +29,7 @@ pub use retriever::{
     IndexHandle, LocalMemoryRetriever, MemoryRetriever, RetrievalBudget, RetrievalRequest,
     SemanticFallback,
 };
+pub use semantic::{Embedder, PrecomputedSemanticIndex, StaticEmbedder, RERANK_DEPTH};
 pub use snapshot::{
     estimate_tokens, fuse_snapshots, PreparedMemorySnapshot, RetrievedMemory, SNAPSHOT_TTL_SECONDS,
 };

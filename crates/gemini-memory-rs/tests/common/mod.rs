@@ -14,6 +14,7 @@ pub mod live;
 pub mod paraphrase;
 pub mod rank;
 pub mod views;
+pub mod voice;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
