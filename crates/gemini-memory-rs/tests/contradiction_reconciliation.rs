@@ -447,6 +447,63 @@ async fn a_correction_reaches_the_semantic_index_and_the_old_fact_leaves_it() {
     );
 }
 
+// ─── (e) the vocabulary the model filters by ────────────────────────────────
+
+/// The memory map tracks the corpus, including facts learned mid-conversation.
+///
+/// `recall_context` takes `about` and `attribute`, and those are worth nothing
+/// unless the model can name the values. Measured, a model asked cold names the
+/// right predicate 2% of the time — below the 8% at which a soft filter starts
+/// paying for itself — and 69% when shown this list.
+///
+/// The map is delivered as an instruction amendment rather than in the tool
+/// schema, because Live fixes tool declarations at connect while the corpus
+/// keeps growing. This asserts the consequence of that choice: a fact committed
+/// after connect is filterable, not merely retrievable.
+#[tokio::test]
+async fn the_memory_map_names_the_values_a_correction_introduces() {
+    if !have_api_key() {
+        return skip("the_memory_map_names_the_values_a_correction_introduces");
+    }
+    let scratch = ScratchDir::new("contradiction-map");
+    let engine = model_backed_engine("usr_contradiction", scratch.path());
+
+    let asking = engine.begin_session(SessionId::new("ses_map"));
+    let before = asking.memory_map();
+    assert!(
+        before.is_empty(),
+        "a user with no memory has no vocabulary to filter by, and offering an \
+         empty list invites the model to narrow by nothing: {before:?}"
+    );
+
+    state_then_contradict(&engine).await;
+
+    let after = asking.memory_map();
+    let report = format!("\ncontradiction, memory map\n  before: {before:?}\n  after:  {after}\n");
+    eprintln!("{report}");
+
+    assert!(
+        after.contains("about:"),
+        "the map must name the subjects that exist{report}"
+    );
+    assert!(
+        after.contains("attribute:"),
+        "the map must name the predicates that exist{report}"
+    );
+    // The correction's predicate is what a follow-up question would filter by.
+    let records = records_of(&engine).await;
+    let live = records
+        .iter()
+        .find(|m| m.status == MemoryStatus::Active)
+        .expect("an active record");
+    assert!(
+        after.contains(live.predicate.as_str()),
+        "the active record's predicate {:?} is missing from the map, so the \
+         model cannot filter by the fact it just learned{report}",
+        live.predicate.as_str()
+    );
+}
+
 /// Concatenate every Markdown file under a directory.
 fn read_all_markdown(root: &std::path::Path) -> String {
     let mut out = String::new();

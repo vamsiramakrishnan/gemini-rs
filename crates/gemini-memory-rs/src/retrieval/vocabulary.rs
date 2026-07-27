@@ -85,7 +85,41 @@ pub fn memory_map_with_limit(records: &[CanonicalMemory], limit: usize) -> Strin
             .or_default() += 1;
         *predicates.entry(memory.predicate.as_str()).or_default() += 1;
     }
+    assemble(subjects, predicates, limit)
+}
 
+/// The same map, built from the live BM25 index rather than a record list.
+///
+/// This is the form the runtime uses. The canonical index is already resident,
+/// so the map costs one pass over memory rather than a repository read — which
+/// matters because it has to be rebuilt whenever the corpus changes, and the
+/// corpus changes mid-conversation.
+pub fn memory_map_from_index(index: &crate::bm25::MemoryIndex, limit: usize) -> String {
+    let now = chrono::Utc::now();
+    let mut subjects: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut predicates: BTreeMap<&str, usize> = BTreeMap::new();
+    for doc in index.documents() {
+        // `is_retrievable` rather than a status check, because it also drops
+        // records that have expired — exactly as unavailable as superseded
+        // ones, and exactly as wrong to advertise as filterable values.
+        if !doc.is_retrievable(now) {
+            continue;
+        }
+        *subjects.entry(doc.subject_form.as_str()).or_default() += 1;
+        *predicates.entry(doc.predicate.as_str()).or_default() += 1;
+    }
+    assemble(subjects, predicates, limit)
+}
+
+/// Render the two vocabularies into the block the model reads.
+fn assemble(
+    subjects: BTreeMap<&str, usize>,
+    predicates: BTreeMap<&str, usize>,
+    limit: usize,
+) -> String {
+    if subjects.is_empty() && predicates.is_empty() {
+        return String::new();
+    }
     let mut map = String::from(
         "The values that exist in this user's memory. When you call \
          recall_context, `about` and `attribute` must come from these lists — \
@@ -199,6 +233,57 @@ mod tests {
             .collect();
         let map = memory_map_with_limit(&records, 3);
         assert!(map.contains("and 7 more"), "{map}");
+    }
+
+    /// The runtime path: the map built from the live index must say the same
+    /// thing as the map built from records, or the thing measured and the thing
+    /// shipped are different maps.
+    #[test]
+    fn the_index_backed_map_agrees_with_the_record_backed_one() {
+        let records = vec![
+            record("user", "barber", "The user's barber is Deepa."),
+            record("user", "beverage_preference", "The user drinks cortados."),
+            record("Rhea", "barber", "Rhea's barber is Sam."),
+        ];
+        let index = crate::bm25::MemoryIndex::build(
+            records
+                .iter()
+                .map(crate::bm25::IndexedMemory::from_canonical),
+        );
+        assert_eq!(
+            memory_map_from_index(&index, DEFAULT_LIMIT),
+            memory_map(&records),
+            "the two builders must not drift; the experiments measured one and \
+             the runtime serves the other"
+        );
+    }
+
+    /// A superseded record is dropped by the index, so it cannot reach the map.
+    #[test]
+    fn the_index_backed_map_omits_records_that_are_not_retrievable() {
+        let mut stale = record("Priya", "barber", "Priya's barber was Sam.");
+        stale.status = MemoryStatus::Superseded;
+        let records = [
+            record("user", "barber", "The user's barber is Deepa."),
+            stale,
+        ];
+        let index = crate::bm25::MemoryIndex::build(
+            records
+                .iter()
+                .map(crate::bm25::IndexedMemory::from_canonical),
+        );
+        let map = memory_map_from_index(&index, DEFAULT_LIMIT);
+        assert!(
+            !map.contains("priya"),
+            "a superseded record must not be offered as a filter value: {map}"
+        );
+        assert!(map.contains("user"), "{map}");
+    }
+
+    #[test]
+    fn an_empty_index_renders_nothing_to_concatenate() {
+        let index = crate::bm25::MemoryIndex::new();
+        assert!(memory_map_from_index(&index, DEFAULT_LIMIT).is_empty());
     }
 
     #[test]

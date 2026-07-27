@@ -98,10 +98,32 @@ impl LiveMemoryExt for Live {
         slots: impl IntoIterator<Item = MemorySlot>,
     ) -> Self {
         let extractor = MemoryTurnExtractor::new(session.clone()).slots(slots);
+        let vocabulary = session.clone();
         self.with_tools(memory_tools(session))
             // Registering an extractor also enables transcription, so callers
             // need not remember to turn it on.
             .extractor(Arc::new(extractor))
+            // The memory map, delivered as an amendment rather than folded into
+            // the caller's instruction.
+            //
+            // `recall_context` takes `about` and `attribute`, and those are
+            // worth nothing unless the model can name the values. Measured over
+            // 93 questions, a model asked cold names the right predicate 2% of
+            // the time — below the 8% at which a soft filter starts paying for
+            // itself — and 69% when shown this list. End to end that is an
+            // expected 78.3 of 93 against 84.3.
+            //
+            // An amendment, for three reasons. It composes with whatever
+            // instruction the caller wrote instead of replacing it. It is
+            // re-evaluated, so a corpus that grows mid-session is reflected
+            // rather than frozen at connect — which matters because Live fixes
+            // tool declarations at connect and this could not live in the
+            // schema for that reason. And it returns `None` for an empty
+            // corpus, so a new user is not handed an empty list to filter by.
+            .instruction_amendment(move |_state| {
+                let map = vocabulary.memory_map();
+                (!map.is_empty()).then_some(map)
+            })
     }
 }
 

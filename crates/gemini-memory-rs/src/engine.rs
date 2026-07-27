@@ -221,6 +221,7 @@ impl MemoryEngine {
         let retriever = Arc::new(retriever);
 
         MemorySession {
+            memory_map: RwLock::new((u64::MAX, String::new())),
             user: self.user.clone(),
             session_id: session_id.clone(),
             config: self.config.clone(),
@@ -298,6 +299,13 @@ pub struct MemorySession {
     cadence: RwLock<CadenceTracker>,
     events: SessionEventWriter,
     canonical: Arc<IndexHandle>,
+    /// The memory map, and the index revision it was built from.
+    ///
+    /// Cached because the map is read once per turn by the instruction
+    /// amendment, and rebuilding it is a pass over every record — at 16,000
+    /// records that is real work to repeat for an answer that only changes when
+    /// the corpus does.
+    memory_map: RwLock<(u64, String)>,
 }
 
 impl MemorySession {
@@ -314,6 +322,34 @@ impl MemorySession {
     /// The retriever serving this session.
     pub fn retriever(&self) -> &Arc<LocalMemoryRetriever> {
         &self.retriever
+    }
+
+    /// The vocabulary a model needs in order to fill `recall_context`'s
+    /// `about` and `attribute` fields.
+    ///
+    /// Put this in the system instruction. Without it a model names the right
+    /// predicate 2% of the time, which is below the 8% at which filtering
+    /// starts paying for itself; with it, 69%. It is a few hundred tokens and
+    /// bounded by the user's vocabulary rather than by how much they have
+    /// accumulated — 282 tokens at 16,000 records. See
+    /// [`crate::retrieval::vocabulary`].
+    ///
+    /// Recomputed only when the canonical index has moved, so calling this
+    /// every turn is cheap.
+    pub fn memory_map(&self) -> String {
+        let revision = self.canonical.revision();
+        {
+            let cached = self.memory_map.read();
+            if cached.0 == revision {
+                return cached.1.clone();
+            }
+        }
+        let fresh = crate::retrieval::vocabulary::memory_map_from_index(
+            &self.canonical.read(),
+            crate::retrieval::MEMORY_MAP_LIMIT,
+        );
+        *self.memory_map.write() = (revision, fresh.clone());
+        fresh
     }
 
     /// The runtime configuration this session was opened with.
