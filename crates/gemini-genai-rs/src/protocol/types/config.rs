@@ -687,6 +687,25 @@ impl SessionConfig {
         self
     }
 
+    /// Whether the *server* is detecting speech boundaries.
+    ///
+    /// True unless the caller explicitly disabled automatic detection, because
+    /// that is the API's own default: omitting `realtimeInputConfig` entirely
+    /// leaves server VAD on.
+    ///
+    /// This gates explicit `activityStart` / `activityEnd` signalling. The two
+    /// are mutually exclusive on the wire — sending an activity signal while
+    /// automatic detection is on draws a close frame, code 1007, *"Explicit
+    /// activity control is not supported when automatic activity detection is
+    /// enabled"*, and the session dies mid-utterance.
+    pub fn automatic_activity_detection_enabled(&self) -> bool {
+        self.realtime_input_config
+            .as_ref()
+            .and_then(|c| c.automatic_activity_detection.as_ref())
+            .and_then(|d| d.disabled)
+            != Some(true)
+    }
+
     /// Configure server-side VAD.
     pub fn server_vad(mut self, detection: AutomaticActivityDetection) -> Self {
         let mut ric = self.realtime_input_config.unwrap_or(RealtimeInputConfig {

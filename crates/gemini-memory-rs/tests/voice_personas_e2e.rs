@@ -106,56 +106,38 @@ const QUESTION: &str = "What's my usual coffee order?";
 
 // ─── (a) the new user ───────────────────────────────────────────────────────
 
-/// # Status: not passing, and now localised to the SDK session loop
+/// # These pass now, and finding out why they did not was the point
 ///
-/// Both personas get an empty transcript and no answer: the session connects,
-/// 2.37 s of valid speech goes out as 154 paced 20 ms frames, and the model
-/// never answers.
-///
-/// The cause is **not** the API, the audio, the MIME type, the model, or the
-/// activity configuration. All of those were ruled out by replaying the exact
-/// same audio over a raw WebSocket, outside this SDK: that probe gets the full
-/// input transcript ("What's my usual coffee order?") and a full spoken answer.
-/// Replaying the SDK's own setup message — `realtimeInputConfig` with
-/// `TURN_INCLUDES_ONLY_ACTIVITY` and all — through the same probe still works,
-/// so the setup is not it either. Instrumenting the codec shows the SDK's
-/// outgoing frames are identical in shape to the probe's:
-/// `{"realtimeInput":{"audio":{"mimeType":"audio/pcm;rate=16000","data":…}}}`.
-///
-/// What the instrumentation *did* show is the shape of the real defect. Across
-/// one test run the server sent:
-///
-/// | message | count |
-/// |---|---|
-/// | `setupComplete` | **3** |
-/// | `inputTranscription` | 1 (a single partial, `" It'"`) |
-/// | everything else | 0 |
-///
-/// Three setup handshakes for one `connect()`, and a single partial transcript.
-/// The L0 session loop retries the setup handshake up to
-/// `max_reconnect_attempts` times, so the socket is being re-established while
-/// the utterance is still streaming — which is exactly why no turn ever
-/// completes. Audio arrives, gets partially transcribed, and the connection it
-/// arrived on goes away before the turn closes.
-///
-/// Two defects were found and fixed on the way here, neither sufficient:
+/// Both personas hung: the session connected, 2.37 s of valid speech went out
+/// as 154 paced 20 ms frames, and the model never answered. Three defects were
+/// in the way, and only the third explains the hang.
 ///
 /// 1. `AudioFormat::Pcm16` declared `audio/pcm` where the Live API requires
-///    `audio/pcm;rate=16000`. A real defect in the wire crate, fixed — a bare
-///    type is accepted by the socket and then transcribed as silence, so it
-///    would have broken audio input for every caller. Nothing caught it because
-///    every other Live test drives sessions with `send_text`.
+///    `audio/pcm;rate=16000`. A bare type is accepted by the socket and then
+///    transcribed as silence.
 /// 2. `say` stopped sending packets at the end of the utterance rather than
-///    streaming trailing silence.
+///    streaming trailing silence, so server VAD had no pause to segment on.
+/// 3. **The SDK killed its own connection.** `LiveHandle::send_audio` runs
+///    client-side VAD and calls `user_speech_started` on the first speech
+///    frame, which reaches the wire as `activityStart`. Server VAD is on by
+///    default, and the two are mutually exclusive: the server replied with a
+///    close frame — code 1007, *"Explicit activity control is not supported
+///    when automatic activity detection is enabled"* — and the session loop
+///    reconnected, straight into the same wall on the next utterance.
 ///
-/// The remaining question is narrow: **what closes the socket mid-utterance?**
-/// Worth looking at whether the send path's token-bucket pacer stalls long
-/// enough to trip a server-side idle timeout, and whether a transport error is
-/// being swallowed into a reconnect rather than surfaced.
+/// Every one of those broke audio input for **every caller of this SDK**, and
+/// none of them could be caught by the tests that existed, because every Live
+/// test in this workspace drove sessions with `send_text`. Text never runs
+/// VAD, so text never signals activity, so text never trips the close.
 ///
-/// Marked `#[ignore]` rather than deleted or weakened: the assertions are the
-/// right ones, the fixture is verified working against the raw API, and the
-/// defect is in the code under test.
+/// Getting there took ruling things out in the right order: a raw-WebSocket
+/// probe replaying the same audio outside the SDK proved the API, model, mime
+/// type and activity config were all fine; codec instrumentation proved the
+/// outgoing frames were identical; and the close frame — logged through
+/// `tracing`, which the harness had no subscriber for — carried the answer in
+/// plain words the whole time. The harness now prints `Observed::report`, so
+/// the next session-level failure says what it was rather than timing out
+/// silently.
 ///
 /// A user the system has never met asks about themselves.
 ///
@@ -163,7 +145,6 @@ const QUESTION: &str = "What's my usual coffee order?";
 /// and it is wrong in the way that matters most — confidently, about them, on
 /// their first use of the feature.
 #[tokio::test]
-#[ignore = "spoken input returns an empty transcript; see the note above"]
 async fn a_user_with_no_history_is_told_so_rather_than_invented_for() {
     if !have_api_key() {
         return skip("a_user_with_no_history_is_told_so_rather_than_invented_for");
@@ -205,7 +186,9 @@ async fn a_user_with_no_history_is_told_so_rather_than_invented_for() {
         .collect();
     let report = format!(
         "\nnew user, spoken\n  said:      {QUESTION:?}\n  answered:  {answer:?}\n  \
-         tools:     {tools:?}\n  turn:      {elapsed:.1?}\n  transcript: {heard}\n"
+         tools:     {tools:?}\n  turn:      {elapsed:.1?}\n  transcript: {heard}\n  \
+         session:   {}\n",
+        observed.report(),
     );
     eprintln!("{report}");
     handle.disconnect().await.ok();
@@ -238,7 +221,6 @@ async fn a_user_with_no_history_is_told_so_rather_than_invented_for() {
 /// here through synthesis, VAD segmentation and ASR — the path the product
 /// actually runs.
 #[tokio::test]
-#[ignore = "spoken input returns an empty transcript; see the note above"]
 async fn a_user_with_a_long_history_gets_their_own_fact_back() {
     if !have_api_key() {
         return skip("a_user_with_a_long_history_gets_their_own_fact_back");
@@ -282,8 +264,9 @@ async fn a_user_with_a_long_history_gets_their_own_fact_back() {
     let report = format!(
         "\nlong-time user, spoken\n  corpus:    indexed in {index_time:.1?}\n  \
          said:      {QUESTION:?}\n  answered:  {answer:?}\n  tools:     {tools:?}\n  \
-         turn:      {elapsed:.1?}\n  transcript: {}\n",
-        observed.transcript()
+         turn:      {elapsed:.1?}\n  transcript: {}\n  session:   {}\n",
+        observed.transcript(),
+        observed.report(),
     );
     eprintln!("{report}");
     handle.disconnect().await.ok();
