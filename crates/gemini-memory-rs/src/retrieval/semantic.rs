@@ -366,11 +366,30 @@ pub trait VectorStore: Send + Sync {
 /// Vectors kept beside the records, in the same store the OKF Markdown uses.
 ///
 /// One document per record, holding the text hash and the vector as hex. Hex
-/// rather than base64 because it needs no dependency and round-trips exactly;
-/// the cost is 8 characters per dimension, so a 768-wide vector is about 6 kB
-/// and a 16,000-record corpus is roughly 98 MB — around three times the
-/// Markdown it accompanies. That is the honest price of not re-embedding, and
-/// it buys back an hour of cold start.
+/// rather than base64 because it needs no dependency and round-trips exactly.
+///
+/// The cost is worth stating precisely rather than as a rule of thumb, because
+/// it is the largest thing this type adds to a deployment:
+///
+/// | part | bytes |
+/// |---|---|
+/// | text hash (`stable_hash`, 16 hex chars) | 16 |
+/// | newline | 1 |
+/// | vector, 768 × `f32` at 8 hex chars each | 6,144 |
+/// | **per record** | **6,161** |
+/// | **at 16,000 records** | **98.6 MB** |
+///
+/// Against the Markdown it accompanies, which `memory_at_scale` measures at
+/// 20,259 KiB for the same 16,000 records, that is **about 4.75×** — so the
+/// vectors dominate the storage footprint rather than merely adding to it.
+/// Base64 would cut the vector to 4,096 bytes and the total to about 66 MB, a
+/// third off, in exchange for a dependency; `f16` would roughly halve it again
+/// at some precision loss. Neither is done here, and both are the obvious first
+/// moves if this footprint ever becomes the binding constraint.
+///
+/// What it buys is the whole reason to pay it: without persistence a restart
+/// re-embeds every record at 259 ms each, which is over an hour at this corpus
+/// size, on every deploy and every replica.
 pub struct OkfVectorStore<S: crate::okf::OkfStore> {
     store: std::sync::Arc<S>,
     prefix: String,
