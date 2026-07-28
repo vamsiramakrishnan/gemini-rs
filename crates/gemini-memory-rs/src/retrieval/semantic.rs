@@ -365,31 +365,64 @@ pub trait VectorStore: Send + Sync {
 
 /// Vectors kept beside the records, in the same store the OKF Markdown uses.
 ///
-/// One document per record, holding the text hash and the vector as hex. Hex
-/// rather than base64 because it needs no dependency and round-trips exactly.
+/// One document per record, holding the text hash and the vector as base64
+/// `f16`. That encoding is worth explaining, because it is the largest thing
+/// this type adds to a deployment and an earlier revision wrote it the obvious
+/// way — lowercase hex `f32` — at three times the size.
 ///
-/// The cost is worth stating precisely rather than as a rule of thumb, because
-/// it is the largest thing this type adds to a deployment:
+/// | encoding | vector bytes | per record | at 16,000 | × the Markdown |
+/// |---|---|---|---|---|
+/// | hex `f32` (what this used to write) | 6,144 | 6,161 | 98.6 MB | 4.75× |
+/// | base64 `f32` | 4,096 | 4,113 | 65.8 MB | 3.17× |
+/// | hex `f16` | 3,072 | 3,089 | 49.4 MB | 2.38× |
+/// | **base64 `f16` (what ships)** | **2,048** | **2,065** | **33.0 MB** | **1.59×** |
 ///
-/// | part | bytes |
-/// |---|---|
-/// | text hash (`stable_hash`, 16 hex chars) | 16 |
-/// | newline | 1 |
-/// | vector, 768 × `f32` at 8 hex chars each | 6,144 |
-/// | **per record** | **6,161** |
-/// | **at 16,000 records** | **98.6 MB** |
+/// The Markdown column compares against the records these annotate, which
+/// `memory_at_scale` measures at 20,259 KiB for the same 16,000. Hex `f32` made
+/// the vectors nearly five times the corpus they describe; base64 `f16` makes
+/// them about one and a half.
 ///
-/// Against the Markdown it accompanies, which `memory_at_scale` measures at
-/// 20,259 KiB for the same 16,000 records, that is **about 4.75×** — so the
-/// vectors dominate the storage footprint rather than merely adding to it.
-/// Base64 would cut the vector to 4,096 bytes and the total to about 66 MB, a
-/// third off, in exchange for a dependency; `f16` would roughly halve it again
-/// at some precision loss. Neither is done here, and both are the obvious first
-/// moves if this footprint ever becomes the binding constraint.
+/// # Why `f16` is free here, measured rather than assumed
 ///
-/// What it buys is the whole reason to pay it: without persistence a restart
-/// re-embeds every record at 259 ms each, which is over an hour at this corpus
-/// size, on every deploy and every replica.
+/// `f16` keeps 10 mantissa bits against `f32`'s 23, so the obvious worry is
+/// that a lossy store quietly degrades retrieval. It does not, and the reason
+/// is that [`PrecomputedSemanticIndex`] reads these floats for exactly two
+/// things with very different sensitivities:
+///
+/// - **The packed scan is sign bits**, and `f16` preserves sign. Over 920,832
+///   coordinates of a real corpus, zero flipped — so the shortlist the rerank
+///   sees is bit-identical, not merely similar. The one way it could flip is a
+///   coordinate below `f16`'s smallest subnormal (2⁻²⁴ ≈ 6e-8) underflowing to
+///   `-0.0`, which the packer reads as non-negative; three coordinates underflowed
+///   on that corpus and all three were positive. The probe asserts on the count
+///   rather than trusting the argument.
+/// - **The rerank is a dot product**, where rounding *could* reorder
+///   candidates. Over 93 questions it did not move the answer's rank once.
+///
+/// `tests/storage_encoding_probe.rs` runs both stores through this crate's own
+/// `search_vector` and reports identical top-1 (64/93), top-5 (71/93) and MRR
+/// (0.727), and identical fused numbers against BM25 at 2:1 (65/93, 79/93,
+/// 0.760). Worst coordinate movement is 1.2e-4. Five questions reorder *within*
+/// the top five, all among non-answers.
+///
+/// So this is a 3× saving for no measured quality cost — but the measurement is
+/// on one 1,199-record corpus at 768 dimensions, and the property it rests on
+/// is that embedding coordinates sit comfortably inside `f16`'s normal range.
+/// A model whose vectors are not L2-normalised, or are far wider, deserves a
+/// re-run of that probe before the same conclusion is assumed.
+///
+/// # Reading what an older version wrote
+///
+/// A payload tagged `f16b64:` is base64 `f16`; anything else is the legacy
+/// lowercase-hex `f32`, and is decoded as such. That matters more than a format
+/// flag usually does: without it, upgrading would invalidate every stored
+/// vector and re-embedding a 16,000-record corpus is over an hour of wall
+/// clock. Existing stores therefore keep their old size until each record is
+/// next rewritten, which happens when its text changes.
+///
+/// What all of this buys is the whole reason to pay it: without persistence a
+/// restart re-embeds every record at 259 ms each, which is over an hour at this
+/// corpus size, on every deploy and every replica.
 pub struct OkfVectorStore<S: crate::okf::OkfStore> {
     store: std::sync::Arc<S>,
     prefix: String,
@@ -409,7 +442,127 @@ impl<S: crate::okf::OkfStore> OkfVectorStore<S> {
     }
 }
 
-/// `f32` little-endian bytes as lowercase hex.
+/// Marks a payload as base64 `f16`. Anything without it is the lowercase-hex
+/// `f32` an earlier version wrote, and is still readable.
+const F16_B64: &str = "f16b64:";
+
+/// Nearest `f16`, ties to even.
+///
+/// Written out rather than taking `half` as a dependency: it is one fixed
+/// standard, it is forty lines, and it is exhaustively pinned over all 65,536
+/// bit patterns by `every_f16_survives_a_round_trip` below.
+fn to_f16(value: f32) -> u16 {
+    let bits = value.to_bits();
+    let sign = ((bits >> 16) & 0x8000) as u16;
+    let exponent = ((bits >> 23) & 0xff) as i32;
+    let mantissa = bits & 0x007f_ffff;
+
+    if exponent == 0xff {
+        // Infinity keeps its sign; NaN keeps a set mantissa bit so it stays NaN.
+        return sign | 0x7c00 | if mantissa != 0 { 0x0200 } else { 0 };
+    }
+    let unbiased = exponent - 127;
+    if unbiased > 15 {
+        return sign | 0x7c00; // beyond f16's largest normal
+    }
+    if unbiased < -24 {
+        return sign; // below its smallest subnormal, but the sign survives
+    }
+
+    // Normal and subnormal differ only in how many mantissa bits are dropped
+    // and whether the implicit leading 1 has to be restored, so the rounding
+    // below is written once.
+    let (mut significand, shift, mut biased) = if unbiased < -14 {
+        (mantissa | 0x0080_0000, (-unbiased - 1) as u32, 0i32)
+    } else {
+        (mantissa, 13u32, unbiased + 15)
+    };
+    let dropped = significand & ((1 << shift) - 1);
+    significand >>= shift;
+    let halfway = 1u32 << (shift - 1);
+    if dropped > halfway || (dropped == halfway && significand & 1 == 1) {
+        significand += 1;
+        // Rounding up can carry out of the mantissa, which is a clean increment
+        // of the exponent. For a subnormal it is promotion to the smallest
+        // normal, and the bit lands in the exponent field on its own.
+        if significand & 0x0400 != 0 && biased > 0 {
+            significand = 0;
+            biased += 1;
+            if biased >= 0x1f {
+                return sign | 0x7c00;
+            }
+        }
+    }
+    if biased == 0 {
+        return sign | significand as u16;
+    }
+    sign | ((biased as u16) << 10) | (significand as u16 & 0x03ff)
+}
+
+/// The value read back. Exact in this direction — every `f16` is an `f32`.
+fn from_f16(bits: u16) -> f32 {
+    let sign = ((bits & 0x8000) as u32) << 16;
+    let exponent = ((bits >> 10) & 0x1f) as u32;
+    let mantissa = (bits & 0x03ff) as u32;
+
+    if exponent == 0 {
+        if mantissa == 0 {
+            return f32::from_bits(sign);
+        }
+        // Subnormal: shift until the leading bit is explicit, charging each
+        // shift to the exponent.
+        let mut shifted = mantissa;
+        let mut steps = 0u32;
+        while shifted & 0x0400 == 0 {
+            shifted <<= 1;
+            steps += 1;
+        }
+        let biased = (127 - 14 - steps as i32) as u32;
+        return f32::from_bits(sign | (biased << 23) | ((shifted & 0x03ff) << 13));
+    }
+    if exponent == 0x1f {
+        return f32::from_bits(sign | 0x7f80_0000 | (mantissa << 13));
+    }
+    f32::from_bits(sign | ((exponent + 127 - 15) << 23) | (mantissa << 13))
+}
+
+/// The payload line: `f16` little-endian bytes, base64, behind [`F16_B64`].
+fn encode(vector: &[f32]) -> String {
+    let mut bytes = Vec::with_capacity(vector.len() * 2);
+    for value in vector {
+        bytes.extend_from_slice(&to_f16(*value).to_le_bytes());
+    }
+    format!(
+        "{F16_B64}{}",
+        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes)
+    )
+}
+
+/// The inverse, accepting either format. Returns `None` for anything malformed
+/// rather than a partial vector — a truncated vector would rank silently
+/// wrongly.
+fn decode(payload: &str) -> Option<Vec<f32>> {
+    let Some(body) = payload.strip_prefix(F16_B64) else {
+        return from_hex(payload);
+    };
+    let bytes =
+        base64::Engine::decode(&base64::engine::general_purpose::STANDARD, body.as_bytes()).ok()?;
+    if !bytes.len().is_multiple_of(2) {
+        return None;
+    }
+    Some(
+        bytes
+            .chunks_exact(2)
+            .map(|pair| from_f16(u16::from_le_bytes([pair[0], pair[1]])))
+            .collect(),
+    )
+}
+
+/// `f32` little-endian bytes as lowercase hex — what earlier versions wrote.
+///
+/// Kept only so a legacy store can be constructed in a test and proved to still
+/// load; nothing writes this format any more.
+#[cfg(test)]
 fn to_hex(vector: &[f32]) -> String {
     let mut out = String::with_capacity(vector.len() * 8);
     for value in vector {
@@ -421,8 +574,7 @@ fn to_hex(vector: &[f32]) -> String {
     out
 }
 
-/// The inverse. Returns `None` for anything malformed rather than a partial
-/// vector — a truncated vector would rank silently wrongly.
+/// Decode the legacy lowercase-hex `f32` payload.
 fn from_hex(hex: &str) -> Option<Vec<f32>> {
     if !hex.len().is_multiple_of(8) {
         return None;
@@ -452,10 +604,10 @@ impl<S: crate::okf::OkfStore> VectorStore for OkfVectorStore<S> {
             let Some(body) = self.store.read(&path).await? else {
                 continue;
             };
-            let Some((hash, hex)) = body.split_once('\n') else {
+            let Some((hash, payload)) = body.split_once('\n') else {
                 continue;
             };
-            let Some(vector) = from_hex(hex.trim()) else {
+            let Some(vector) = decode(payload.trim()) else {
                 // A corrupt file is skipped rather than failed on: the record
                 // simply gets re-embedded, which is slow but correct. Failing
                 // the load would make one bad file cost the whole index.
@@ -475,7 +627,7 @@ impl<S: crate::okf::OkfStore> VectorStore for OkfVectorStore<S> {
 
     async fn save(&self, id: &MemoryId, hash: &str, vector: &[f32]) -> Result<(), MemoryError> {
         self.store
-            .write(&self.path(id), &format!("{hash}\n{}", to_hex(vector)))
+            .write(&self.path(id), &format!("{hash}\n{}", encode(vector)))
             .await
     }
 
@@ -830,20 +982,127 @@ mod tests {
         );
     }
 
-    /// Hex has to round-trip exactly, or a restored index ranks by corrupted
-    /// vectors and says nothing about it.
+    /// The stored format is lossy, so "round-trips exactly" is the wrong bar.
+    /// What has to hold is that it round-trips to the *nearest `f16`* — the
+    /// value is stable under a second trip, and every coordinate lands within
+    /// one `f16` step of where it started.
     #[test]
-    fn vectors_survive_the_hex_round_trip_bit_for_bit() {
+    fn vectors_survive_the_round_trip_to_the_nearest_f16() {
         let original = vector(5, 768);
-        let restored = from_hex(&to_hex(&original)).expect("valid hex");
-        assert_eq!(original, restored);
+        let restored = decode(&encode(&original)).expect("valid payload");
+        assert_eq!(restored.len(), original.len());
+        for (before, after) in original.iter().zip(&restored) {
+            // f16 carries 11 significant bits, so a relative step is 2⁻¹⁰.
+            let tolerance = before.abs() * 2f32.powi(-10) + f32::MIN_POSITIVE;
+            assert!(
+                (before - after).abs() <= tolerance,
+                "{before} stored and read back as {after}, further than one f16 step"
+            );
+            assert_eq!(
+                before >= &0.0,
+                after >= &0.0,
+                "sign must survive: the packed scan is nothing but sign bits"
+            );
+        }
+        // Idempotent, so a record rewritten without changing does not drift
+        // further each time it is saved.
+        assert_eq!(
+            decode(&encode(&restored)).expect("valid payload"),
+            restored,
+            "storing an already-stored vector must not move it again"
+        );
+    }
+
+    /// Every `f16` bit pattern has to survive `f16` → `f32` → `f16`, which is
+    /// the property the idempotence above rests on. Exhaustive, because it can
+    /// be: there are only 65,536 of them.
+    #[test]
+    fn every_f16_survives_a_round_trip() {
+        for bits in 0u16..=u16::MAX {
+            let value = from_f16(bits);
+            if value.is_nan() {
+                continue;
+            }
+            assert_eq!(
+                to_f16(value),
+                bits,
+                "f16 {bits:#06x} ({value}) did not survive"
+            );
+        }
+        // Ties to even, which is what keeps the rounding unbiased — a converter
+        // that always rounded away from zero would pass the loop above and
+        // quietly stretch every vector.
+        assert_eq!(from_f16(to_f16(1.0 + 2f32.powi(-11))), 1.0);
+        assert_eq!(from_f16(to_f16(0.1)), 0.099_975_586);
+        // Out of range in both directions, sign intact at the bottom.
+        assert!(from_f16(to_f16(70_000.0)).is_infinite());
+        assert!(from_f16(to_f16(-1e-9)).is_sign_negative());
+    }
+
+    /// Rounding has to be unbiased, or every dot product bends the same way.
+    ///
+    /// Worth its own test because a converter that truncated toward zero would
+    /// pass the exhaustive round trip above — truncation is still idempotent —
+    /// while quietly shrinking every vector it stored.
+    #[test]
+    fn rounding_is_unbiased_rather_than_toward_zero() {
+        // At the scale a normalised 768d coordinate actually occupies: around
+        // 1/sqrt(768) ≈ 0.036.
+        let mut state = 0x2545_F491_4F6C_DD1Du64;
+        let (mut drift, mut magnitude) = (0.0f64, 0.0f64);
+        for _ in 0..100_000 {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            let value = ((state >> 11) as f64 / (1u64 << 53) as f64 - 0.5) as f32 * 0.1;
+            let error = (from_f16(to_f16(value)) - value) as f64;
+            drift += error;
+            magnitude += error.abs();
+        }
+        assert!(
+            drift.abs() < magnitude * 0.05,
+            "rounding drifted {drift:.3e} against {magnitude:.3e} of total error — \
+             that is a bias, not noise"
+        );
+    }
+
+    /// A store written before the format changed must still load, or upgrading
+    /// silently invalidates every vector and re-embedding a 16,000-record
+    /// corpus is over an hour of wall clock.
+    #[test]
+    fn a_legacy_hex_payload_still_decodes() {
+        let original = vector(7, 768);
+        let restored = decode(&to_hex(&original)).expect("legacy hex must still load");
+        assert_eq!(
+            original, restored,
+            "the legacy format was exact and must still decode exactly"
+        );
     }
 
     #[test]
-    fn malformed_hex_is_rejected_rather_than_truncated() {
+    fn malformed_payloads_are_rejected_rather_than_truncated() {
         assert!(from_hex("abc").is_none(), "odd length");
         assert!(from_hex("zzzzzzzz").is_none(), "not hex");
         assert!(from_hex("abcdef").is_none(), "not a whole f32");
+        assert!(decode("f16b64:!!!!").is_none(), "not base64");
+        assert!(
+            decode(&format!("{F16_B64}{}", "AAAAA")).is_none(),
+            "not a whole f16"
+        );
+    }
+
+    /// The saving that motivated the change, asserted rather than claimed.
+    #[test]
+    fn the_encoding_is_a_third_of_what_hex_f32_cost() {
+        let original = vector(11, 768);
+        let now = encode(&original).len();
+        let before = to_hex(&original).len();
+        assert_eq!(before, 768 * 8, "hex f32 is 8 characters per coordinate");
+        assert!(
+            now * 3 <= before + F16_B64.len() * 3,
+            "base64 f16 is {now} characters against hex f32's {before}; the point of \
+             the change was a threefold saving"
+        );
     }
 
     /// The point of persistence: a restart must not re-embed.
