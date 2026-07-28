@@ -107,6 +107,26 @@ pub struct PrecomputedSemanticIndex {
     rerank: bool,
     /// Where vectors survive a restart, if anywhere.
     store: Option<std::sync::Arc<dyn VectorStore>>,
+    /// Serialises [`SemanticFallback::reconcile`] against itself.
+    ///
+    /// `reconcile` takes a *whole desired state*: it reads what is held, awaits
+    /// embedding for what is missing, then replaces the set. One engine hands
+    /// the same backend to every session it opens, so two sessions finishing
+    /// turns at once run that read-await-replace concurrently — and the one
+    /// that finishes last wins with a corpus snapshot it took first. An older
+    /// snapshot landing second `retain`s away records the newer one added, and
+    /// removes their vectors from the store too, leaving the semantic index
+    /// behind the repository until something happens to reconcile again.
+    ///
+    /// An async mutex rather than a sync one because the guarded region awaits
+    /// the network. Searches are deliberately *not* behind it — they take the
+    /// `entries` read lock as before, so a recall never waits on an embedding
+    /// round trip.
+    ///
+    /// It guards `applied` as well as the read-await-replace, because the two
+    /// have to be atomic together: check the revision, then apply, with nothing
+    /// landing in between.
+    reconciling: tokio::sync::Mutex<u64>,
 }
 
 impl PrecomputedSemanticIndex {
@@ -174,6 +194,7 @@ impl PrecomputedSemanticIndex {
             embedder,
             rerank: true,
             store: None,
+            reconciling: tokio::sync::Mutex::new(0),
         }
     }
 
@@ -210,6 +231,7 @@ impl PrecomputedSemanticIndex {
             embedder,
             rerank: true,
             store: Some(store),
+            reconciling: tokio::sync::Mutex::new(0),
         })
     }
 
@@ -651,10 +673,36 @@ impl SemanticFallback for PrecomputedSemanticIndex {
     /// happens first, and the index is only taken for the swap at the end — so
     /// a recall running concurrently sees either the old set or the new one and
     /// never blocks on the network.
-    async fn reconcile(&self, active: &[(MemoryId, String)]) -> Result<(), MemoryError> {
+    async fn reconcile(
+        &self,
+        active: &[(MemoryId, String)],
+        revision: u64,
+    ) -> Result<(), MemoryError> {
+        // Held for the whole operation, not just the write, and it carries the
+        // newest revision applied so far.
+        //
+        // Two things have to be true and neither is free. The calls must not
+        // interleave — `active` is a whole desired state, so a `retain` running
+        // against a set read before another call finished deletes that call's
+        // records from the index and from the store. And a call must not apply
+        // a *stale* set even when it does not interleave, which serialising
+        // alone does not prevent: two sessions sealing at once both snapshot
+        // the corpus first, and if the older snapshot takes the lock second it
+        // is still older. So the revision is checked here and recorded on
+        // success, under the same guard.
+        let mut applied = self.reconciling.lock().await;
+        // `<` not `<=`: re-applying the same revision is idempotent and
+        // harmless, and a caller with nothing to order by passes 0 every time.
+        if revision != 0 && revision < *applied {
+            return Ok(());
+        }
+
         // What is already held, and for which wording. A record whose text has
         // changed is *not* a hit: its stored vector describes the old wording,
         // which is precisely the situation a correction creates.
+        //
+        // Read *after* taking the lock, so it reflects any reconcile that just
+        // finished rather than a snapshot from before the wait.
         let held: std::collections::HashMap<MemoryId, String> = {
             let entries = self.entries.read();
             entries
@@ -715,6 +763,7 @@ impl SemanticFallback for PrecomputedSemanticIndex {
                 packed,
             });
         }
+        *applied = (*applied).max(revision);
         Ok(())
     }
 
@@ -885,10 +934,13 @@ mod tests {
 
         // The desired state: keep one, retire one, add one.
         built
-            .reconcile(&[
-                (MemoryId::new("mem_keep"), "already held".into()),
-                (MemoryId::new("mem_new"), "fresh record".into()),
-            ])
+            .reconcile(
+                &[
+                    (MemoryId::new("mem_keep"), "already held".into()),
+                    (MemoryId::new("mem_new"), "fresh record".into()),
+                ],
+                0,
+            )
             .await
             .expect("reconcile");
 
@@ -921,9 +973,84 @@ mod tests {
             std::sync::Arc::new(StaticEmbedder::new(HashMap::new())),
         );
         built
-            .reconcile(&[(MemoryId::new("mem_keep"), "never embeddable".into())])
+            .reconcile(&[(MemoryId::new("mem_keep"), "never embeddable".into())], 0)
             .await
             .expect("reconcile must not embed a record it already holds");
+        assert_eq!(built.len(), 1);
+    }
+
+    /// A stale corpus snapshot must not undo a newer one.
+    ///
+    /// The scenario is two sessions on one engine sealing at nearly the same
+    /// moment: each snapshots the corpus, then reconciles. Session A saw two
+    /// records; session B, starting later, saw three. If A's call lands second
+    /// — which is entirely ordinary, since the two race through an embedding
+    /// round trip — a backend that simply applies whatever it is handed
+    /// `retain`s away B's third record and deletes its vector from the store.
+    ///
+    /// Serialising the calls does not prevent this: A's snapshot is stale
+    /// whenever it is applied, not only when it interleaves. Ordering by
+    /// revision does.
+    #[tokio::test]
+    async fn a_reconcile_from_an_older_corpus_does_not_undo_a_newer_one() {
+        let mut table = HashMap::new();
+        for (i, text) in ["first fact", "second fact", "third fact"]
+            .iter()
+            .enumerate()
+        {
+            table.insert((*text).to_string(), vector(i as u64 + 1, 768));
+        }
+        let built = PrecomputedSemanticIndex::from_vectors(
+            Vec::new(),
+            std::sync::Arc::new(StaticEmbedder::new(table)),
+        );
+
+        let older = vec![
+            (MemoryId::new("mem_first"), "first fact".to_string()),
+            (MemoryId::new("mem_second"), "second fact".to_string()),
+        ];
+        let newer = vec![
+            (MemoryId::new("mem_first"), "first fact".to_string()),
+            (MemoryId::new("mem_second"), "second fact".to_string()),
+            (MemoryId::new("mem_third"), "third fact".to_string()),
+        ];
+
+        // The newer corpus lands first...
+        built.reconcile(&newer, 7).await.expect("newer");
+        assert_eq!(built.len(), 3);
+
+        // ...and the older one, still in flight, lands second.
+        built.reconcile(&older, 5).await.expect("older");
+        assert_eq!(
+            built.len(),
+            3,
+            "a reconcile from revision 5 removed a record that revision 7 had \
+             already added — the stale snapshot won"
+        );
+
+        // And the index is not frozen: a genuinely newer state still applies.
+        let newest = vec![(MemoryId::new("mem_first"), "first fact".to_string())];
+        built.reconcile(&newest, 9).await.expect("newest");
+        assert_eq!(built.len(), 1, "revision 9 should apply");
+    }
+
+    /// Revision `0` means "nothing to order by" and must not gate anything —
+    /// otherwise the first call would set a floor that silently rejects the
+    /// rest.
+    #[tokio::test]
+    async fn revision_zero_disables_the_ordering_check() {
+        let mut table = HashMap::new();
+        table.insert("only fact".to_string(), vector(4, 768));
+        let built = PrecomputedSemanticIndex::from_vectors(
+            Vec::new(),
+            std::sync::Arc::new(StaticEmbedder::new(table)),
+        );
+        let desired = vec![(MemoryId::new("mem_one"), "only fact".to_string())];
+        built.reconcile(&desired, 12).await.expect("first");
+        built
+            .reconcile(&desired, 0)
+            .await
+            .expect("an unordered reconcile must still apply");
         assert_eq!(built.len(), 1);
     }
 
@@ -937,9 +1064,9 @@ mod tests {
             std::sync::Arc::new(StaticEmbedder::new(table)),
         );
         let desired = [(MemoryId::new("mem_one"), "one".to_string())];
-        built.reconcile(&desired).await.expect("first");
+        built.reconcile(&desired, 0).await.expect("first");
         let after_first = built.len();
-        built.reconcile(&desired).await.expect("second");
+        built.reconcile(&desired, 0).await.expect("second");
         assert_eq!(
             built.len(),
             after_first,
@@ -966,10 +1093,13 @@ mod tests {
         assert!(built.is_empty());
 
         built
-            .reconcile(&[
-                (MemoryId::new("mem_first"), "first fact".into()),
-                (MemoryId::new("mem_second"), "second fact".into()),
-            ])
+            .reconcile(
+                &[
+                    (MemoryId::new("mem_first"), "first fact".into()),
+                    (MemoryId::new("mem_second"), "second fact".into()),
+                ],
+                0,
+            )
             .await
             .expect("reconcile");
 
@@ -1125,7 +1255,7 @@ mod tests {
         )
         .with_store(store.clone());
         first
-            .reconcile(&[(MemoryId::new("mem_one"), "the only fact".into())])
+            .reconcile(&[(MemoryId::new("mem_one"), "the only fact".into())], 0)
             .await
             .expect("first reconcile");
         assert_eq!(first.len(), 1);
@@ -1139,7 +1269,7 @@ mod tests {
         .expect("restore");
         assert_eq!(second.len(), 1, "the vector did not survive the restart");
         second
-            .reconcile(&[(MemoryId::new("mem_one"), "the only fact".into())])
+            .reconcile(&[(MemoryId::new("mem_one"), "the only fact".into())], 0)
             .await
             .expect("a restored vector must not be re-embedded");
 
@@ -1165,13 +1295,19 @@ mod tests {
         let index = PrecomputedSemanticIndex::from_vectors(Vec::new(), embedder.clone())
             .with_store(store.clone());
         index
-            .reconcile(&[(MemoryId::new("mem_one"), "the original wording".into())])
+            .reconcile(
+                &[(MemoryId::new("mem_one"), "the original wording".into())],
+                0,
+            )
             .await
             .expect("first");
 
         // Same id, new text — a correction.
         index
-            .reconcile(&[(MemoryId::new("mem_one"), "the corrected wording".into())])
+            .reconcile(
+                &[(MemoryId::new("mem_one"), "the corrected wording".into())],
+                0,
+            )
             .await
             .expect("second");
 
@@ -1200,16 +1336,19 @@ mod tests {
         )
         .with_store(store.clone());
         index
-            .reconcile(&[
-                (MemoryId::new("mem_kept"), "kept".into()),
-                (MemoryId::new("mem_dropped"), "dropped".into()),
-            ])
+            .reconcile(
+                &[
+                    (MemoryId::new("mem_kept"), "kept".into()),
+                    (MemoryId::new("mem_dropped"), "dropped".into()),
+                ],
+                0,
+            )
             .await
             .expect("first");
         assert_eq!(store.load().await.expect("load").len(), 2);
 
         index
-            .reconcile(&[(MemoryId::new("mem_kept"), "kept".into())])
+            .reconcile(&[(MemoryId::new("mem_kept"), "kept".into())], 0)
             .await
             .expect("second");
         let remaining = store.load().await.expect("load");

@@ -285,6 +285,16 @@ pub(crate) struct SharedState {
 /// The telemetry lane is spawned separately via [`spawn_telemetry_lane`].
 /// Configuration for the control plane's new capabilities.
 pub(crate) struct ControlPlaneConfig {
+    /// The connect-time system instruction, as text.
+    ///
+    /// What an `instruction_amendment` composes onto when no phase supplies a
+    /// base. Amendments are additive by contract, so they need something to be
+    /// added to; a session with no phase machine has no phase instruction, and
+    /// before this was carried the amendment was computed each turn and then
+    /// silently discarded. Sending the amendment alone was not an option —
+    /// under `SteeringMode::InstructionUpdate` that replaces the system
+    /// instruction, so it would have deleted the caller's own prompt.
+    pub base_instruction: Option<String>,
     /// Soft turn detector for proactive silence awareness.
     pub soft_turn: Option<SoftTurnDetector>,
     /// Steering mode for phase instruction delivery.
@@ -322,6 +332,7 @@ pub(crate) struct ControlPlaneConfig {
 impl Default for ControlPlaneConfig {
     fn default() -> Self {
         Self {
+            base_instruction: None,
             soft_turn: None,
             steering_mode: SteeringMode::default(),
             context_delivery: ContextDelivery::default(),

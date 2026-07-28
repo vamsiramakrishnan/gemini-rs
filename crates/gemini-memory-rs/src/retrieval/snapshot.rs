@@ -197,10 +197,20 @@ impl PreparedMemorySnapshot {
 /// so a fact both agree on rises and a fact only one found still gets a place.
 /// A stale prepared snapshot contributes nothing — it is a snapshot of a
 /// conversation that has moved on.
+/// `max_tokens` is a hard cap, not a target. Both inputs were assembled under
+/// it independently, which does *not* make their union compliant: two
+/// single-fact snapshots of 400 tokens each fuse to 800 under a 500 cap. The
+/// count limit alone cannot catch that — it is a limit on a different quantity
+/// — so the budget is reapplied here, the same way [`ContextAssembler`] applies
+/// it, and for the same reason: whatever this returns is what fills the model's
+/// context.
+///
+/// [`ContextAssembler`]: crate::retrieval::ContextAssembler
 pub fn fuse_snapshots(
     live: &PreparedMemorySnapshot,
     prepared: &PreparedMemorySnapshot,
     max_memories: usize,
+    max_tokens: usize,
     now: DateTime<Utc>,
 ) -> PreparedMemorySnapshot {
     if prepared.is_empty() || !prepared.is_fresh(now) {
@@ -227,12 +237,22 @@ pub fn fuse_snapshots(
     scores.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
     scores.truncate(max_memories);
 
-    let facts: Vec<RetrievedMemory> = scores.into_iter().map(|(_, fact)| fact).collect();
-    let token_count = facts
-        .iter()
-        .map(RetrievedMemory::token_cost)
-        .sum::<usize>()
-        .min(u16::MAX as usize) as u16;
+    // Fill in fused order until the next fact would break the budget, then
+    // stop. `break` rather than `continue`: skipping an expensive fact to fit a
+    // cheaper one behind it would serve a lower-ranked memory in place of a
+    // higher-ranked one, which is the fusion silently disagreeing with itself.
+    // Running out of budget is a truncation, not a re-ranking.
+    let mut facts: Vec<RetrievedMemory> = Vec::with_capacity(scores.len());
+    let mut tokens = 0usize;
+    for (_, fact) in scores {
+        let cost = fact.token_cost();
+        if tokens + cost > max_tokens {
+            break;
+        }
+        tokens += cost;
+        facts.push(fact);
+    }
+    let token_count = tokens.min(u16::MAX as usize) as u16;
     PreparedMemorySnapshot {
         facts: Arc::from(facts),
         token_count,
@@ -276,6 +296,76 @@ mod tests {
             fact("The user is pescatarian.", MemoryOrigin::SessionOverlay).presented_statement(),
             "The user mentioned that the user is pescatarian."
         );
+    }
+
+    /// The cap `ContextAssembler` enforces has to survive fusion.
+    ///
+    /// Both inputs are individually legal — one fact each, comfortably under a
+    /// generous cap — and their union is not. Before the budget was reapplied
+    /// here, fusion truncated by *count* and then summed whatever it kept, so
+    /// two compliant snapshots produced a non-compliant one and the guarantee
+    /// the assembler makes stopped holding the moment speculation was involved.
+    #[test]
+    fn fusing_two_compliant_snapshots_does_not_exceed_the_token_cap() {
+        let long = "The user has a standing preference that every dinner \
+                    reservation be somewhere quiet enough to hold a conversation \
+                    without raising a voice, ideally with outdoor seating.";
+        let mut live_fact = fact(long, MemoryOrigin::Canonical);
+        live_fact.memory_id = MemoryId::new("mem_live");
+        let mut prepared_fact = fact(long, MemoryOrigin::Canonical);
+        prepared_fact.memory_id = MemoryId::new("mem_prepared");
+
+        let each = live_fact.token_cost();
+        assert!(each > 0, "the fixture fact must cost something");
+        // A cap that either fact fits inside and both together do not.
+        let cap = each + each / 2;
+
+        let fused = fuse_snapshots(
+            &snapshot(vec![live_fact]),
+            &snapshot(vec![prepared_fact]),
+            10,
+            cap,
+            Utc::now(),
+        );
+        assert!(
+            usize::from(fused.token_count) <= cap,
+            "fused snapshot is {} tokens against a {cap}-token cap",
+            fused.token_count
+        );
+        assert_eq!(
+            fused.facts.len(),
+            1,
+            "the budget should have stopped at the first fact"
+        );
+        // The reported count has to match what is actually carried, or the cap
+        // is enforced against a number nobody is serving.
+        assert_eq!(
+            usize::from(fused.token_count),
+            fused
+                .facts
+                .iter()
+                .map(RetrievedMemory::token_cost)
+                .sum::<usize>(),
+        );
+    }
+
+    /// A cap generous enough for both must not drop either — otherwise the fix
+    /// above would "pass" by always truncating.
+    #[test]
+    fn a_cap_that_fits_both_keeps_both() {
+        let mut live_fact = fact("The user drinks cortados.", MemoryOrigin::Canonical);
+        live_fact.memory_id = MemoryId::new("mem_live");
+        let mut prepared_fact = fact("Rhea prefers quiet places.", MemoryOrigin::Canonical);
+        prepared_fact.memory_id = MemoryId::new("mem_prepared");
+
+        let fused = fuse_snapshots(
+            &snapshot(vec![live_fact]),
+            &snapshot(vec![prepared_fact]),
+            10,
+            10_000,
+            Utc::now(),
+        );
+        assert_eq!(fused.facts.len(), 2);
     }
 
     #[test]

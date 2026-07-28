@@ -200,8 +200,22 @@ pub(in crate::live) async fn handle_turn_complete(
         }
     }
 
-    // 10. Instruction amendment (additive -- appends to phase instruction)
+    // 10. Instruction amendment (additive -- appends to the base instruction)
     // Only applies when there was NO phase transition (transition already includes modifiers)
+    //
+    // The base is the current phase's instruction when there is a phase machine,
+    // and the connect-time system instruction when there is not. That fallback
+    // is load-bearing rather than tidy: `Live::builder().instruction(..)` with
+    // no phases is the ordinary shape of a session, and without it every
+    // amendment in such a session was computed and then thrown away, because
+    // `base` was `None` and the `if let` simply did not fire. Nothing reported
+    // it — the callback ran, so it looked wired.
+    //
+    // The concrete casualty was `gemini-memory-rs`, which delivers its memory
+    // map this way. Measured, that map takes a model's ability to name a
+    // `recall_context` filter from 2% to 69%; in a no-phase session it was
+    // never delivered, so the filters it exists to enable were being written
+    // blind.
     if transition_result.is_none() {
         if let Some(ref amendment_fn) = callbacks.instruction_amendment {
             if let Some(amendment_text) = amendment_fn(state) {
@@ -213,7 +227,13 @@ pub(in crate::live) async fn handle_turn_complete(
                 } else {
                     None
                 };
-                if let Some(base_instruction) = base {
+                // Falling back to the session instruction, not to sending the
+                // amendment alone: under `SteeringMode::InstructionUpdate` the
+                // resolved instruction *replaces* the system instruction, so an
+                // amendment on its own would delete the caller's prompt.
+                if let Some(base_instruction) =
+                    base.or_else(|| control_plane.base_instruction.clone())
+                {
                     resolved_instruction =
                         Some(format!("{}\n\n{}", base_instruction, amendment_text));
                 }
@@ -919,6 +939,74 @@ mod harness {
         fn writes(&self) -> Vec<Write> {
             self.rec.log.lock().clone()
         }
+    }
+
+    /// An amendment must reach the model in a session with no phase machine.
+    ///
+    /// This is the ordinary shape of a Live session —
+    /// `Live::builder().instruction(..)` and no phases — and the amendment was
+    /// silently dropped in it: the base came only from `current_phase()`, so
+    /// with no phase there was no base, and the `if let` did not fire. The
+    /// callback still ran, so from outside it looked wired.
+    ///
+    /// Asserted on the wire rather than on a variable, because "computed" was
+    /// never the thing in doubt.
+    #[tokio::test]
+    async fn an_amendment_reaches_the_model_without_a_phase_machine() {
+        let mut h = Harness::new();
+        h.control.base_instruction = Some("You are a companion.".to_string());
+        h.callbacks.instruction_amendment =
+            Some(Arc::new(|_state| Some("Known values: coffee.".to_string())));
+
+        h.run_turn().await;
+
+        let sent: Vec<String> = h
+            .writes()
+            .into_iter()
+            .filter_map(|w| match w {
+                Write::Instruction(text) => Some(text),
+                Write::ClientContent { .. } => None,
+            })
+            .collect();
+        assert_eq!(
+            sent.len(),
+            1,
+            "expected exactly one instruction update, got {sent:?}"
+        );
+        // Composed onto the session instruction, not replacing it: under
+        // `InstructionUpdate` the resolved instruction *is* the system
+        // instruction, so sending the amendment alone would delete the
+        // caller's prompt.
+        assert!(
+            sent[0].contains("You are a companion."),
+            "the caller's own instruction was dropped: {:?}",
+            sent[0]
+        );
+        assert!(
+            sent[0].contains("Known values: coffee."),
+            "the amendment never reached the model: {:?}",
+            sent[0]
+        );
+    }
+
+    /// With no session instruction there is nothing to compose onto, and the
+    /// amendment must not be sent alone — that would replace the model's
+    /// instruction with a fragment.
+    #[tokio::test]
+    async fn an_amendment_alone_never_replaces_the_system_instruction() {
+        let mut h = Harness::new();
+        h.control.base_instruction = None;
+        h.callbacks.instruction_amendment =
+            Some(Arc::new(|_state| Some("Known values: coffee.".to_string())));
+
+        h.run_turn().await;
+
+        assert!(
+            !h.writes()
+                .iter()
+                .any(|w| matches!(w, Write::Instruction(_))),
+            "an amendment with no base was sent as the whole instruction"
+        );
     }
 
     #[tokio::test]

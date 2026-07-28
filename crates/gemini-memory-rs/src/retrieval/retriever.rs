@@ -149,7 +149,27 @@ pub trait SemanticFallback: Send + Sync {
     /// longer retrievable, so a stale backend loses facts rather than serving
     /// wrong ones — but it is still a failure, and it lands hardest on
     /// corrected facts, which are the ones a user has shown they care about.
-    async fn reconcile(&self, _active: &[(MemoryId, String)]) -> Result<(), MemoryError> {
+    ///
+    /// # `revision` orders concurrent callers
+    ///
+    /// One engine hands the same backend to every session it opens, so two
+    /// sessions sealing at the same moment both call this — each with a corpus
+    /// snapshot taken before it started. Because `active` is a whole desired
+    /// state rather than a diff, the call that *finishes* last wins, and if
+    /// that is the one that *started* first it silently removes every record
+    /// the other added, vectors and all.
+    ///
+    /// Serialising the calls does not fix that: the loser's snapshot is stale
+    /// whenever it is applied, not only when it interleaves. So callers pass
+    /// the canonical index revision the snapshot was taken from — monotonic per
+    /// engine — and an implementation must ignore a revision it has already
+    /// passed. Pass `0` if there is nothing meaningful to order by; that
+    /// disables the check rather than breaking it.
+    async fn reconcile(
+        &self,
+        _active: &[(MemoryId, String)],
+        _revision: u64,
+    ) -> Result<(), MemoryError> {
         Ok(())
     }
 }

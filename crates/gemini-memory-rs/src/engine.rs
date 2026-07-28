@@ -195,7 +195,35 @@ impl MemoryEngine {
         self.canonical.replace(index);
         self.install_planner(Arc::new(DeterministicPlanner::with_entities(known)));
 
+        // The semantic backend is brought along, for the same reason
+        // `MemorySession::recompile_canonical` brings it along: this function's
+        // whole job is to make the retrieval layer agree with the repository,
+        // and a semantic index left behind is a retrieval layer that does not.
+        //
+        // Without this the two compile paths disagreed. A session finishing a
+        // turn reconciled the backend; an engine compiling its index did not —
+        // so the startup sequence this crate documents (`restore` a persisted
+        // index, then `compile_index`) produced a lexical index in step with
+        // the corpus and a semantic one that could be missing every record
+        // added since the vectors were last written, until some later session
+        // happened to reconcile.
+        //
+        // Failure is swallowed for the reason spelled out on the session path:
+        // the durable record and the lexical index are already correct here, so
+        // failing the compile because a vector store was unreachable would turn
+        // a degraded semantic layer into a failed refresh. `semantic_ranking`
+        // drops ids that no longer resolve, so a backend left behind loses
+        // facts rather than serving wrong ones.
         let revision = self.canonical.revision();
+        if let Some(semantic) = &self.semantic {
+            let active: Vec<(crate::core::MemoryId, String)> = records
+                .iter()
+                .filter(|m| m.status == MemoryStatus::Active)
+                .map(|m| (m.id.clone(), crate::retrieval::embedding_text(m)))
+                .collect();
+            let _ = semantic.reconcile(&active, revision).await;
+        }
+
         let writer = SessionEventWriter::new(
             self.events.clone(),
             self.user.clone(),
@@ -449,8 +477,14 @@ impl MemorySession {
             .retrieve_immediate(query, turn_id, budget)
             .await
         {
-            Ok(live) => fuse_snapshots(&live, &active, self.config.retrieval.max_memories, now)
-                .to_tool_payload(),
+            Ok(live) => fuse_snapshots(
+                &live,
+                &active,
+                self.config.retrieval.max_memories,
+                self.config.retrieval.max_tokens,
+                now,
+            )
+            .to_tool_payload(),
             // Memory failure degrades to whatever was already prepared, and to
             // "nothing found" if that is empty. It never fails a turn.
             Err(_) if !active.is_empty() => active.to_tool_payload(),
@@ -488,7 +522,15 @@ impl MemorySession {
             .retrieve_scoped(
                 query,
                 turn_id,
-                RetrievalBudget::interactive(),
+                // The session's configuration, not the default one. A
+                // deployment that sets `immediate_semantic_timeout_ms` to zero
+                // means it on every recall, and a scoped or hinted question is
+                // not a different kind of recall — it is the same recall with a
+                // narrower plan. The unscoped path above already reads the
+                // config; these two disagreeing meant a caller could disable
+                // semantic work on the tool path and still have it run,
+                // whenever the model happened to fill in `about` or a scope.
+                RetrievalBudget::interactive_with(&self.config.retrieval),
                 kinds,
                 about,
                 attribute,
@@ -904,7 +946,7 @@ impl MemorySession {
             // also the safe direction: `semantic_ranking` drops ids that no
             // longer resolve, so a backend left behind loses facts rather than
             // serving wrong ones.
-            let _ = semantic.reconcile(&active).await;
+            let _ = semantic.reconcile(&active, self.canonical.revision()).await;
         }
         let planner = Arc::new(DeterministicPlanner::with_entities(
             KnownEntities::from_index(&self.canonical.read()),
@@ -1004,6 +1046,184 @@ mod tests {
 
     fn engine() -> MemoryEngine {
         MemoryEngine::in_memory(UserId::new("usr_1"))
+    }
+
+    /// One active canonical record, for seeding a repository directly.
+    fn seed_record(id: &str) -> crate::core::CanonicalMemory {
+        use crate::core::{
+            CanonicalPredicate, EntityRef, Explicitness, MemoryId, MemoryKind, MemorySource,
+            MemoryValue, RetrievalMetadata, TemporalMetadata, TemporalScope,
+        };
+        crate::core::CanonicalMemory {
+            id: MemoryId::new(id),
+            owner: UserId::new("usr_1"),
+            kind: MemoryKind::Preference,
+            predicate: CanonicalPredicate::new("dietary_identity"),
+            status: MemoryStatus::Active,
+            confidence: 0.9,
+            subject: EntityRef::named("user"),
+            value: MemoryValue::Text("pescatarian".into()),
+            statement: "The user is pescatarian.".into(),
+            evidence_summary: "stated".into(),
+            source: MemorySource::from_explicitness(
+                Explicitness::ExplicitStatement,
+                SessionId::new("ses_seed"),
+                TurnId(1),
+            ),
+            temporal: TemporalMetadata::created_at(Utc::now()),
+            retrieval: RetrievalMetadata {
+                subject: crate::core::normalize_token("user"),
+                ..Default::default()
+            },
+            temporal_scope: TemporalScope::Persistent,
+            qualifier: None,
+            evidence: Default::default(),
+            privacy: Default::default(),
+            supersedes: Vec::new(),
+            superseded_by: None,
+        }
+    }
+
+    /// A backend that records what it was asked to reconcile against.
+    #[derive(Default)]
+    struct RecordingSemantic {
+        seen: parking_lot::Mutex<Vec<Vec<String>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl SemanticFallback for RecordingSemantic {
+        async fn search(
+            &self,
+            _query: &str,
+            _limit: usize,
+        ) -> Result<Vec<crate::core::MemoryId>, MemoryError> {
+            Ok(Vec::new())
+        }
+        async fn reconcile(
+            &self,
+            active: &[(crate::core::MemoryId, String)],
+            _revision: u64,
+        ) -> Result<(), MemoryError> {
+            self.seen
+                .lock()
+                .push(active.iter().map(|(id, _)| id.to_string()).collect());
+            Ok(())
+        }
+    }
+
+    /// `compile_index` must bring the semantic backend along.
+    ///
+    /// Both compile paths exist to make retrieval agree with the repository,
+    /// and only one of them used to reconcile. That left the documented startup
+    /// sequence — restore a persisted index, then `compile_index` — with a
+    /// lexical index in step and a semantic one that could be missing every
+    /// record written since the vectors were last saved, until some later
+    /// session happened to seal.
+    #[tokio::test]
+    async fn compiling_the_index_reconciles_the_semantic_backend() {
+        let recorder = Arc::new(RecordingSemantic::default());
+        let engine =
+            MemoryEngine::in_memory(UserId::new("usr_1")).with_semantic_fallback(recorder.clone());
+
+        // Seed the repository directly rather than through a session. That is
+        // the situation this path exists for — a process starting against a
+        // corpus it did not just write, restoring a persisted index and
+        // compiling — and going through a session would let the session's own
+        // reconcile do the work and prove nothing about this one.
+        engine
+            .repository()
+            .commit(
+                crate::okf::MemoryTransaction::new(engine.user().clone(), "tx-seed")
+                    .put(seed_record("mem_seed")),
+            )
+            .await
+            .expect("seed commit");
+
+        let before = recorder.seen.lock().len();
+        engine.compile_index().await.expect("compile");
+        let seen = recorder.seen.lock();
+        assert!(
+            seen.len() > before,
+            "compile_index did not reconcile the semantic backend at all"
+        );
+        assert!(
+            !seen.last().expect("a reconcile happened").is_empty(),
+            "compile_index reconciled against an empty corpus: {seen:?}"
+        );
+    }
+
+    /// A scoped or hinted recall must honour the session's own deadlines.
+    ///
+    /// `recall` read the configured budget and `recall_scoped` built a default
+    /// one, so a deployment that set `immediate_semantic_timeout_ms` to zero to
+    /// keep semantic work off the tool path still got the default 10 ms
+    /// whenever the model filled in a scope or a hint — which, now that the
+    /// memory map tells it what the hint values are, is most of the time.
+    ///
+    /// Asserted by whether the backend was *consulted*, not by comparing two
+    /// budget constructors: the bug was which constructor the call site used,
+    /// and a test that calls the right one itself cannot see that.
+    #[tokio::test]
+    async fn a_zero_semantic_deadline_is_honoured_on_the_scoped_path_too() {
+        #[derive(Default)]
+        struct CountingSemantic {
+            searches: std::sync::atomic::AtomicUsize,
+        }
+        #[async_trait::async_trait]
+        impl SemanticFallback for CountingSemantic {
+            async fn search(
+                &self,
+                _query: &str,
+                _limit: usize,
+            ) -> Result<Vec<crate::core::MemoryId>, MemoryError> {
+                self.searches
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(Vec::new())
+            }
+        }
+
+        let mut config = MemoryRuntimeConfig::default();
+        // The deployment's decision: no semantic work on the tool path.
+        config.retrieval.immediate_semantic_timeout_ms = 0;
+
+        let backend = Arc::new(CountingSemantic::default());
+        let engine = MemoryEngine::new(
+            UserId::new("usr_1"),
+            Arc::new(OkfRepository::in_memory()),
+            Arc::new(InMemoryEventLog::new()),
+            config,
+        )
+        .with_semantic_fallback(backend.clone());
+        engine
+            .repository()
+            .commit(
+                crate::okf::MemoryTransaction::new(engine.user().clone(), "tx-seed")
+                    .put(seed_record("mem_seed")),
+            )
+            .await
+            .expect("seed commit");
+        engine.compile_index().await.expect("compile");
+
+        let session = engine.begin_session(SessionId::new("ses_1"));
+        session.begin_turn(TurnId(1));
+        // A hinted recall — the shape `recall_context` produces once the model
+        // can name a filter value.
+        let _ = session
+            .recall_scoped(
+                "what does the user eat",
+                TurnId(1),
+                crate::runtime::tools::RecallScope::All,
+                Some("user".to_string()),
+                None,
+            )
+            .await;
+
+        assert_eq!(
+            backend.searches.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "the semantic backend was consulted despite a zero deadline — the \
+             scoped path built a default budget instead of the configured one"
+        );
     }
 
     #[tokio::test]
