@@ -6,6 +6,18 @@ use gemini_genai_rs::prelude::*;
 
 use super::Live;
 
+/// Fold builder-registered ambient tools into the flow's own list.
+///
+/// Idempotent and duplicate-free, because an application may name a tool the
+/// flow already declares — or an extension may be installed twice.
+pub(crate) fn merge_ambient(flow: &mut gemini_adk_rs::flow::Flow, ambient: &[String]) {
+    for tool in ambient {
+        if !flow.ambient.contains(tool) {
+            flow.ambient.push(tool.clone());
+        }
+    }
+}
+
 impl Live {
     /// Connect using a Google AI API key.
     pub async fn connect_google_ai(
@@ -173,7 +185,10 @@ impl Live {
         for layer in self.middleware_layers {
             builder = builder.middleware(layer);
         }
-        if let Some(flow) = self.flow {
+        if let Some(mut flow) = self.flow {
+            // Merged here rather than in `govern`/`ambient_tools` so the two
+            // compose regardless of the order the caller wrote them in.
+            merge_ambient(&mut flow, &self.ambient_tools);
             let mut monitor = gemini_adk_rs::flow::FlowMonitor::new(flow, self.flow_mode);
             for (step, agent, mode) in self.flow_actions {
                 monitor = monitor.on_enter(step, gemini_adk_rs::flow::run(agent, mode));
@@ -341,5 +356,59 @@ mod tests {
     fn uses_audio_output_respects_text_only() {
         let config = SessionConfig::new("key").text_only();
         assert!(!uses_audio_output(&config));
+    }
+
+    // ─── ambient tool merge ─────────────────────────────────────────────────
+
+    use gemini_adk_rs::flow::{Flow, Guard};
+
+    fn whitelisting_flow() -> Flow {
+        Flow::new()
+            .step("book")
+            .allow(["book_table"])
+            .done(Guard::called_ok("book_table"))
+            .build()
+            .expect("flow is structurally valid")
+    }
+
+    #[test]
+    fn merge_ambient_adds_registered_tools() {
+        let mut flow = whitelisting_flow();
+        merge_ambient(&mut flow, &["recall_context".to_string()]);
+        assert_eq!(flow.ambient, ["recall_context"]);
+    }
+
+    #[test]
+    fn merge_ambient_does_not_duplicate() {
+        // The flow already declares it and an extension registers it too.
+        let mut flow = Flow::new()
+            .ambient(["recall_context"])
+            .step("book")
+            .allow(["book_table"])
+            .done(Guard::called_ok("book_table"))
+            .build()
+            .expect("flow is structurally valid");
+        merge_ambient(&mut flow, &["recall_context".to_string()]);
+        merge_ambient(&mut flow, &["recall_context".to_string()]);
+        assert_eq!(
+            flow.ambient,
+            ["recall_context"],
+            "merging is idempotent, so an extension installed twice is harmless"
+        );
+    }
+
+    #[test]
+    fn ambient_tools_registers_regardless_of_govern_order() {
+        // The whole reason the merge happens at connect: an application may
+        // write `.govern(..)` before or after the extension that needs ambient
+        // tools, and neither order may lose the registration.
+        let before = Live::builder()
+            .govern(whitelisting_flow())
+            .ambient_tools(["recall_context"]);
+        let after = Live::builder()
+            .ambient_tools(["recall_context"])
+            .govern(whitelisting_flow());
+        assert_eq!(before.ambient_tool_names(), ["recall_context"]);
+        assert_eq!(after.ambient_tool_names(), ["recall_context"]);
     }
 }

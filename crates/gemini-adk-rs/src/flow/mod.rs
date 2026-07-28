@@ -360,6 +360,16 @@ pub struct Flow {
     /// Tools that require confirmation when reached (set by `commit`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub confirm_tools: Vec<String>,
+    /// Cross-cutting tools exempt from step `allow` whitelists.
+    ///
+    /// A step's `allow` list excludes by omission, which is correct for the
+    /// domain tools a step is *about* and wrong for infrastructure no step is
+    /// about — memory recall, escalation, logging. Naming a tool here says "this
+    /// is not part of any step's repertoire", not "this is ungovernable":
+    /// `deny`, `once` and `never(..).until(..)` all still bind, because each of
+    /// those *names* the tool and so is a decision about it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ambient: Vec<String>,
 }
 
 impl Flow {
@@ -459,6 +469,7 @@ impl Flow {
             }
         }
         tools.extend(self.confirm_tools.iter().cloned());
+        tools.extend(self.ambient.iter().cloned());
         tools
     }
 
@@ -1130,6 +1141,11 @@ impl FlowMonitor {
         if active.iter().any(|s| s.deny.iter().any(|d| d == tool)) {
             return Err(format!("'{tool}' is not available in the current step"));
         }
+        // An ambient tool is exempt from the whitelist's exclusion-by-omission,
+        // having already cleared every constraint that names it explicitly.
+        if self.flow.ambient.iter().any(|a| a == tool) {
+            return Ok(());
+        }
         let restricting: Vec<&&Step> = active.iter().filter(|s| !s.allow.is_empty()).collect();
         if !restricting.is_empty()
             && !restricting
@@ -1294,6 +1310,7 @@ pub struct FlowBuilder {
     steps: Vec<Step>,
     constraints: Vec<Constraint>,
     confirm_tools: Vec<String>,
+    ambient: Vec<String>,
 }
 
 impl FlowBuilder {
@@ -1396,6 +1413,33 @@ impl FlowBuilder {
         ));
         self
     }
+    /// Exempt cross-cutting tools from every step's `allow` whitelist.
+    ///
+    /// Flow-level, and order-independent with respect to `.step(..)`. Use it for
+    /// tools that serve the conversation rather than any one step of it —
+    /// memory recall, escalation, logging. A tool named here still obeys
+    /// `deny`, `once` and `never(..).until(..)`; see [`Flow::ambient`].
+    ///
+    /// ```
+    /// # use gemini_adk_rs::flow::{Flow, Guard};
+    /// let flow = Flow::new()
+    ///     .ambient(["recall_context"])
+    ///     .step("book")
+    ///     .allow(["book_table"])
+    ///     .done(Guard::called_ok("book_table"))
+    ///     .build()
+    ///     .unwrap();
+    /// assert_eq!(flow.ambient, ["recall_context"]);
+    /// ```
+    pub fn ambient<I, S>(mut self, tools: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.ambient.extend(tools.into_iter().map(Into::into));
+        self
+    }
+
     /// Forbid a tool until a guard holds (`never(tool).until(guard)`).
     pub fn never(self, tool: impl Into<String>) -> NeverBuilder {
         NeverBuilder {
@@ -1422,6 +1466,7 @@ impl FlowBuilder {
             steps: self.steps,
             constraints: self.constraints,
             confirm_tools: self.confirm_tools,
+            ambient: self.ambient,
         };
         flow.validate()?;
         Ok(flow)
@@ -1929,5 +1974,148 @@ mod tests {
             state: &state,
             marking: &marking
         }));
+    }
+
+    // ─── ambient tools ──────────────────────────────────────────────────────
+    //
+    // A step's `allow` list is a whitelist, so it excludes by omission: every
+    // tool the author did not think to name is denied for the duration. That is
+    // right for domain tools — naming `charge_card` is a statement that this is
+    // the step where money moves — and wrong for cross-cutting infrastructure
+    // that no step is *about*. Memory recall is the motivating case: a flow
+    // author writing `.allow(["book_table"])` is saying "book here, don't search
+    // the catalogue", not "stop remembering who the caller is".
+    //
+    // `ambient` names those tools once, at flow level. They are exempt from the
+    // whitelist's implicit exclusion and from nothing else: a constraint that
+    // *names* the tool still binds, because naming it is a deliberate act.
+
+    fn ambient_flow() -> Flow {
+        Flow::new()
+            .ambient(["recall_context"])
+            .step("gather")
+            .allow(["ask_diet"])
+            .done(Guard::is_set("user:diet"))
+            .step("book")
+            .after("gather")
+            .allow(["book_table"])
+            .done(Guard::called_ok("book_table"))
+            .build()
+            .expect("flow is structurally valid")
+    }
+
+    #[test]
+    fn an_ambient_tool_survives_a_step_whitelist() {
+        let mon = FlowMonitor::new(ambient_flow(), Enforcement::Enforce);
+        let state = State::new();
+        assert_eq!(
+            mon.admits_tool("ask_diet", &state),
+            Ok(()),
+            "the step's own tool is admitted"
+        );
+        assert!(
+            mon.admits_tool("book_table", &state).is_err(),
+            "a later step's tool is still excluded by `gather`'s whitelist"
+        );
+        assert_eq!(
+            mon.admits_tool("recall_context", &state),
+            Ok(()),
+            "an ambient tool must not be caught by a whitelist that never meant to exclude it"
+        );
+    }
+
+    #[test]
+    fn an_ambient_tool_is_still_denied_when_a_step_names_it() {
+        // `deny` names the tool, so it is a decision about that tool rather than
+        // a side effect of listing others. Ambient must not override it.
+        let flow = Flow::new()
+            .ambient(["recall_context"])
+            .step("sensitive")
+            .deny(["recall_context"])
+            .done(Guard::is_true("done"))
+            .build()
+            .expect("flow is structurally valid");
+        let mon = FlowMonitor::new(flow, Enforcement::Enforce);
+        assert!(
+            mon.admits_tool("recall_context", &State::new()).is_err(),
+            "an explicit `deny` outranks ambient"
+        );
+    }
+
+    #[test]
+    fn an_ambient_tool_still_obeys_never_until() {
+        let flow = Flow::new()
+            .ambient(["manage_memory"])
+            .step("verify")
+            .done(Guard::is_true("verified"))
+            .never("manage_memory")
+            .until(Guard::is_true("verified"))
+            .build()
+            .expect("flow is structurally valid");
+        let mon = FlowMonitor::new(flow, Enforcement::Enforce);
+        let state = State::new();
+        assert!(
+            mon.admits_tool("manage_memory", &state).is_err(),
+            "`never(..).until(..)` names the tool; ambient must not unlock it"
+        );
+        let _ = state.set("verified", true);
+        assert_eq!(
+            mon.admits_tool("manage_memory", &state),
+            Ok(()),
+            "once the guard holds the constraint stops binding"
+        );
+    }
+
+    #[test]
+    fn an_ambient_tool_still_obeys_once() {
+        let flow = Flow::new()
+            .ambient(["summarize"])
+            .step("work")
+            .done(Guard::called_ok("summarize"))
+            .once("summarize")
+            .build()
+            .expect("flow is structurally valid");
+        let mut mon = FlowMonitor::new(flow, Enforcement::Enforce);
+        let state = State::new();
+        assert_eq!(mon.admits_tool("summarize", &state), Ok(()));
+        mon.observe_tool("summarize", true, &state);
+        assert!(
+            mon.admits_tool("summarize", &state).is_err(),
+            "`once` names the tool; ambient must not exempt it"
+        );
+    }
+
+    #[test]
+    fn ambient_tools_join_the_tool_universe() {
+        // Otherwise `compile_with_tools` would report a registry that covers the
+        // flow as complete while an ambient tool it never heard of gets called.
+        let flow = ambient_flow();
+        assert!(
+            flow.tool_universe().contains("recall_context"),
+            "an ambient tool is part of the flow's tool universe"
+        );
+        assert!(
+            ambient_flow()
+                .compile_with_tools(&["ask_diet", "book_table"])
+                .is_err(),
+            "a registry missing the ambient tool must not compile clean"
+        );
+        assert!(
+            ambient_flow()
+                .compile_with_tools(&["ask_diet", "book_table", "recall_context"])
+                .is_ok(),
+            "a covering registry compiles"
+        );
+    }
+
+    #[test]
+    fn a_flow_with_no_ambient_tools_is_unchanged() {
+        // The whole point is that this is additive: a flow that never mentions
+        // `ambient` must gate exactly as it did before the field existed.
+        let mon = FlowMonitor::new(debt_flow(), Enforcement::Enforce);
+        let state = State::new();
+        assert_eq!(mon.admits_tool("lookup_account", &state), Ok(()));
+        assert!(mon.admits_tool("charge_card", &state).is_err());
+        assert!(mon.admits_tool("anything_else", &state).is_err());
     }
 }

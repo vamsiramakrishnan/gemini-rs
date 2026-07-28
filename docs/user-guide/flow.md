@@ -146,6 +146,44 @@ sub-agent or fetch, and guards gate on either — all reading the same `State`.
     (e.g. "never transfer a spam caller", and recall that a `terminal()` step
     latches done immediately and is therefore never active), use a global
     `never(tool).until(guard)` constraint instead of a step `deny`.
+  - **`allow` excludes by omission**, which is what you want for the domain tools
+    a step is *about* and not for infrastructure no step is about. Name those
+    with `ambient([tools])` — see below.
+
+### Ambient tools
+
+A step's `allow` list is a whitelist, so every tool the author did not think to
+name is denied while that step is active. Writing `.allow(["book_table"])` means
+"book here, don't search the catalogue" — it does not mean "stop remembering who
+the caller is", but that is what it did to any cross-cutting tool.
+
+`ambient` names those tools once, at flow level:
+
+```rust
+Flow::new()
+    .ambient(["recall_context", "manage_memory"])
+    .step("book")
+        .allow(["book_table"])     // recall still available here
+        .done(Guard::called_ok("book_table"))
+```
+
+Ambient is an exemption from *exclusion by omission* and nothing more. Anything
+that **names** the tool still binds, because naming it is a deliberate act:
+
+| Still applies to an ambient tool | Why |
+|---|---|
+| `deny([tool])` | the step named it |
+| `once(tool)` | the constraint named it |
+| `never(tool).until(guard)` | the constraint named it |
+
+So a flow can hold `ambient(MEMORY_TOOLS)` *and* `never("manage_memory").until(verified)`
+— reads stay available, writes wait for identity. Ambient tools also join the
+flow's tool universe, so `compile_with_tools` still catches a registry that does
+not cover them.
+
+Extensions register their own: `Live::with_memory(..)` calls
+`.ambient_tools(MEMORY_TOOLS)` for you, and the registration is merged into the
+flow at connect, so it composes with `.govern(..)` written on either side of it.
 - **Speech is shaped softly, proactively.** The active step's `posture` is
   injected as turn-boundary steering *before* the model speaks — you never block
   speech mid-stream in a voice session.
@@ -163,6 +201,7 @@ sub-agent or fetch, and guards gate on either — all reading the same `State`.
 | `posture(text)` | instruction imposed while active |
 | `ground(template)` | curated, `State`-interpolated fact line projected while active (anti-hallucination) — `{key}` / `{key?yes:no}` |
 | `allow([tools])` / `deny([tools])` | tool whitelist/blacklist while active |
+| `ambient([tools])` | cross-cutting tools exempt from every step's `allow` whitelist |
 | `terminal()` | a step that completes on eligibility |
 | `once(tool)` | a tool may run at most once |
 | `before(a, b)` | ordering invariant |

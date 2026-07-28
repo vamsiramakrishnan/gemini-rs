@@ -28,6 +28,17 @@ pub const RECALL_TOOL: &str = "recall_context";
 /// The memory-management tool's name.
 pub const MANAGE_TOOL: &str = "manage_memory";
 
+/// Every tool the memory subsystem installs.
+///
+/// These serve the conversation rather than any one step of it, so a governed
+/// [`Flow`](gemini_adk_rs::flow::Flow) should treat them as
+/// [ambient](gemini_adk_rs::flow::Flow::ambient) — otherwise a step that
+/// whitelists its own tools silently switches memory off for its duration.
+/// [`with_memory`](super::LiveMemoryExt::with_memory) registers them for you;
+/// pass them to [`Flow::ambient`](gemini_adk_rs::flow::FlowBuilder::ambient)
+/// directly when driving the engine without the `Live` builder.
+pub const MEMORY_TOOLS: [&str; 2] = [RECALL_TOOL, MANAGE_TOOL];
+
 /// The recall tool's description.
 ///
 /// Deliberately narrow: a description that invites the model to call it for

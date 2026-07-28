@@ -163,6 +163,9 @@ pub struct Live {
     // Governed flow (DAG) + its enforcement mode.
     pub(crate) flow: Option<gemini_adk_rs::flow::Flow>,
     pub(crate) flow_mode: gemini_adk_rs::flow::Enforcement,
+    /// Merged into the flow's own `ambient` list at connect, so an extension
+    /// that registers cross-cutting tools composes with `govern` in either order.
+    pub(crate) ambient_tools: Vec<String>,
     // Per-step on_enter actions: run an agent in a mode when a step activates.
     pub(crate) flow_actions: Vec<(
         String,
@@ -245,6 +248,7 @@ impl Live {
             confirmation_provider: None,
             flow: None,
             flow_mode: gemini_adk_rs::flow::Enforcement::Enforce,
+            ambient_tools: Vec::new(),
             flow_actions: Vec::new(),
             record_wire_path: None,
         }
@@ -257,6 +261,33 @@ impl Live {
         self.flow = Some(flow);
         self.flow_mode = gemini_adk_rs::flow::Enforcement::Enforce;
         self
+    }
+
+    /// Register cross-cutting tools as
+    /// [ambient](gemini_adk_rs::flow::Flow::ambient): exempt from every step's
+    /// `allow` whitelist, still bound by anything that names them.
+    ///
+    /// Merged into the governing flow at connect, so this composes with
+    /// [`govern`](Self::govern) in **either order**. Without a flow it is inert.
+    ///
+    /// Extensions that install their own tools should call this rather than
+    /// making the application remember to widen every step — `with_memory` does
+    /// exactly that for `recall_context` and `manage_memory`.
+    pub fn ambient_tools<I, S>(mut self, tools: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.ambient_tools.extend(tools.into_iter().map(Into::into));
+        self
+    }
+
+    /// The cross-cutting tools registered via [`ambient_tools`](Self::ambient_tools).
+    ///
+    /// Introspection for extensions and tests: the flow's own `ambient` list is
+    /// not included, because the two are only merged at connect.
+    pub fn ambient_tool_names(&self) -> &[String] {
+        &self.ambient_tools
     }
 
     /// Attach a [`Flow`](gemini_adk_rs::flow::Flow) in **observe** mode: nothing
