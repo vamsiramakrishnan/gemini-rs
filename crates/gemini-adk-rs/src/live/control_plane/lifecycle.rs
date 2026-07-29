@@ -801,6 +801,9 @@ mod harness {
     #[derive(Default)]
     struct RecordingWriter {
         log: Mutex<Vec<Write>>,
+        /// Flattened text of each `send_client_content` batch, in send order.
+        /// The batch *is* the steering, so the order within it is a contract.
+        batches: Mutex<Vec<Vec<String>>>,
     }
 
     #[async_trait::async_trait]
@@ -819,6 +822,21 @@ mod harness {
             turns: Vec<Content>,
             turn_complete: bool,
         ) -> Result<(), SessionError> {
+            self.batches.lock().push(
+                turns
+                    .iter()
+                    .map(|t| {
+                        t.parts
+                            .iter()
+                            .filter_map(|p| match p {
+                                gemini_genai_rs::prelude::Part::Text { text } => Some(text.clone()),
+                                _ => None,
+                            })
+                            .collect::<Vec<_>>()
+                            .join("")
+                    })
+                    .collect(),
+            );
             self.log.lock().push(Write::ClientContent {
                 turns: turns.len(),
                 turn_complete,
@@ -938,6 +956,11 @@ mod harness {
 
         fn writes(&self) -> Vec<Write> {
             self.rec.log.lock().clone()
+        }
+
+        /// The steering batches sent this run, each as its ordered turn texts.
+        fn batches(&self) -> Vec<Vec<String>> {
+            self.rec.batches.lock().clone()
         }
     }
 
@@ -1166,6 +1189,111 @@ mod harness {
             Some("main"),
             "new phase persisted to state"
         );
+    }
+
+    /// Phases and flows are **independent, additive** steering, not one lowered
+    /// onto the other, and both reach the model on the same turn.
+    ///
+    /// The documentation claimed `Flow` "lowers onto" the phase machine, which
+    /// the control plane does not do: `phase_machine` and `flow` are separate
+    /// `Option`s and step 7f (phase steering) and 7g (flow governance) both
+    /// append to one `context_buffer`. Configure both and the model receives
+    /// both, in this order:
+    ///
+    /// ```text
+    ///   7d tool advisory
+    ///   7e repair nudge
+    ///   7f phase steering context   (modifiers, under ContextInjection)
+    ///   7g flow posture → ground → unmet requirements
+    ///      resolved phase instruction  (last, under ContextInjection)
+    /// ```
+    ///
+    /// The two run on **different cadences**, which is what keeps them from
+    /// fighting: a flow posture is re-projected every turn while the phase
+    /// instruction is seeded only when a transition fires. On a quiet turn the
+    /// model therefore hears the flow and not the phase.
+    #[tokio::test]
+    async fn a_quiet_turn_carries_the_flow_posture_and_no_phase_instruction() {
+        let flow = Flow::new()
+            .step("collect")
+            .posture("FLOW-POSTURE")
+            .done(Guard::is_true("collected"))
+            .build()
+            .expect("valid flow");
+
+        let mut machine = PhaseMachine::new("greeting");
+        machine.add_phase(Phase::new("greeting", "PHASE-INSTRUCTION"));
+
+        let mut h = Harness::new();
+        h.control.steering_mode = SteeringMode::ContextInjection;
+        h.control.flow = Some(FlowMonitor::new(flow, Enforcement::Observe).into_shared());
+        h.phase = Some(tokio::sync::Mutex::new(machine));
+
+        h.run_turn().await;
+
+        let sent: Vec<String> = h.batches().into_iter().flatten().collect();
+        assert!(
+            sent.iter().any(|t| t.contains("FLOW-POSTURE")),
+            "the active step's posture is projected every turn: {sent:?}"
+        );
+        assert!(
+            !sent.iter().any(|t| t.contains("PHASE-INSTRUCTION")),
+            "a phase instruction is seeded by a transition, not re-sent on \
+             every turn — re-sending it would churn the model's framing: {sent:?}"
+        );
+    }
+
+    /// On a **transition** turn both do reach the model, and the phase
+    /// instruction lands after the flow posture — nearest the user's next turn,
+    /// so the phase persona is the most recent framing the model reads.
+    ///
+    /// Pinned because it is a real precedence decision that nothing else states.
+    #[tokio::test]
+    async fn on_a_transition_the_phase_instruction_follows_the_flow_posture() {
+        let flow = Flow::new()
+            .step("collect")
+            .posture("FLOW-POSTURE")
+            .done(Guard::is_true("collected"))
+            .build()
+            .expect("valid flow");
+
+        let mut machine = PhaseMachine::new("greeting");
+        let mut greeting = Phase::new("greeting", "GREETING-INSTRUCTION");
+        greeting.transitions = vec![Transition {
+            target: "main".into(),
+            guard: Arc::new(|s: &State| s.get::<bool>("advance").unwrap_or(false)),
+            description: None,
+        }];
+        machine.add_phase(greeting);
+        machine.add_phase(Phase::new("main", "PHASE-INSTRUCTION"));
+
+        let mut h = Harness::new();
+        h.control.steering_mode = SteeringMode::ContextInjection;
+        h.control.flow = Some(FlowMonitor::new(flow, Enforcement::Observe).into_shared());
+        h.phase = Some(tokio::sync::Mutex::new(machine));
+        let _ = h.state.set("advance", true);
+
+        h.run_turn().await;
+
+        let batches = h.batches();
+        let batch = batches
+            .iter()
+            .find(|b| b.iter().any(|t| t.contains("PHASE-INSTRUCTION")))
+            .unwrap_or_else(|| panic!("the new phase's instruction must be sent: {batches:?}"));
+
+        let posture_at = batch.iter().position(|t| t.contains("FLOW-POSTURE"));
+        let instruction_at = batch
+            .iter()
+            .position(|t| t.contains("PHASE-INSTRUCTION"))
+            .expect("present by construction");
+
+        if let Some(posture_at) = posture_at {
+            assert!(
+                posture_at < instruction_at,
+                "the phase instruction must land after the flow posture, so the \
+                 phase framing is the most recent thing the model reads: {batch:?}"
+            );
+        }
     }
 
     #[tokio::test]

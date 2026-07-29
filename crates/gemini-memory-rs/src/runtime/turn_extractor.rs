@@ -49,23 +49,115 @@ pub struct MemorySlot {
 impl MemorySlot {
     /// Map `predicate` onto `state_key`.
     ///
-    /// Use the platform's `scope:key` convention — `user:diet`, not `user.diet`.
-    /// The gates themselves do not care: `needs`, `requires` and `Guard::is_set`
-    /// route through `State::contains`, which treats the key as an opaque
-    /// string. What the colon buys is composition with the prefix scopes, so
-    /// `state.user().get::<String>("diet")` finds the slot. A dotted key reads
-    /// back `None` there, silently, for a developer doing exactly what the
-    /// platform documentation says.
+    /// The key must use the platform's `scope:key` convention — `user:diet`,
+    /// not `user.diet`. The gates themselves do not care: `needs`, `requires`
+    /// and `Guard::is_set` route through `State::contains`, which treats the key
+    /// as an opaque string. What the colon buys is composition with the prefix
+    /// scopes, so `state.user().get::<String>("diet")` finds the slot. A dotted
+    /// key would read back `None` there — silently, for a developer doing
+    /// exactly what the platform documentation says.
     ///
-    /// `derived:` is the wrong home despite fitting semantically: its fallback
-    /// lives only in `get`/`with`, and `contains` has none — so a `derived:`
-    /// slot would be invisible to precisely the gates memory exists to satisfy.
+    /// That is a programming error knowable at construction, so this **panics**
+    /// on a malformed key rather than documenting the trap and handing it over.
+    /// Use [`try_new`](Self::try_new) where the key is not a literal.
+    ///
+    /// The predicate is *not* checked against the corpus: a slot naming a fact
+    /// the user has not stated yet is the normal case, and for a brand-new user
+    /// every slot is.
+    ///
+    /// ```
+    /// # use gemini_memory_rs::runtime::MemorySlot;
+    /// MemorySlot::new("dietary_identity", "user:diet");            // fine
+    /// assert!(MemorySlot::try_new("dietary_identity", "user.diet").is_err());
+    /// assert!(MemorySlot::try_new("dietary_identity", "derived:diet").is_err());
+    /// ```
     pub fn new(predicate: impl AsRef<str>, state_key: impl Into<String>) -> Self {
-        Self {
-            predicate: CanonicalPredicate::new(predicate),
-            state_key: state_key.into(),
-        }
+        Self::try_new(predicate, state_key).unwrap_or_else(|e| panic!("{e}"))
     }
+
+    /// [`new`](Self::new) without the panic, for keys built at runtime.
+    ///
+    /// Use this when the slot comes from configuration or user input; use
+    /// `new` for the literals in application code, where a bad key is a
+    /// programming error worth failing on immediately.
+    pub fn try_new(
+        predicate: impl AsRef<str>,
+        state_key: impl Into<String>,
+    ) -> Result<Self, MemorySlotError> {
+        let predicate = predicate.as_ref();
+        let state_key = state_key.into();
+        if predicate.trim().is_empty() {
+            return Err(MemorySlotError::EmptyPredicate);
+        }
+        validate_state_key(&state_key)?;
+        Ok(Self {
+            predicate: CanonicalPredicate::new(predicate),
+            state_key,
+        })
+    }
+}
+
+/// The `State` scopes a slot key may be written under.
+///
+/// `derived:` is deliberately absent: its fallback lives only in `get`/`with`,
+/// and `contains` — which backs `needs`, `requires` and `Guard::is_set` — has
+/// none, so a `derived:` slot would be invisible to exactly the gates memory
+/// exists to satisfy.
+const WRITABLE_SCOPES: [&str; 6] = ["user", "app", "session", "turn", "bg", "temp"];
+
+/// Why a [`MemorySlot`] could not be built.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum MemorySlotError {
+    /// A slot with no predicate matches nothing.
+    #[error("a memory slot needs a predicate to look for")]
+    EmptyPredicate,
+    /// The key carries no `scope:` prefix at all.
+    #[error(
+        "memory slot key `{0}` has no scope prefix — use `scope:key` (e.g. `user:diet`). \
+         A key without one is readable via `state.get(..)` but never composes with \
+         `state.user()`, so a developer following the platform's prefix conventions \
+         reads `None` and is given no hint why."
+    )]
+    MissingScope(String),
+    /// The prefix is not one of the platform's scopes.
+    #[error(
+        "memory slot key `{key}` uses unknown scope `{scope}:` — expected one of {expected}. \
+         (`derived:` is excluded on purpose: `State::contains` has no `derived` fallback, \
+         so such a slot is invisible to `needs`, `requires` and `Guard::is_set`.)"
+    )]
+    UnknownScope {
+        /// The offending key.
+        key: String,
+        /// The scope that was not recognised.
+        scope: String,
+        /// The scopes that are.
+        expected: String,
+    },
+    /// A `scope:` with nothing after it.
+    #[error("memory slot key `{0}` has a scope but no name after it")]
+    EmptyName(String),
+}
+
+/// Enforce the `scope:key` convention the gates depend on.
+fn validate_state_key(key: &str) -> Result<(), MemorySlotError> {
+    let Some((scope, name)) = key.split_once(':') else {
+        return Err(MemorySlotError::MissingScope(key.to_string()));
+    };
+    if !WRITABLE_SCOPES.contains(&scope) {
+        return Err(MemorySlotError::UnknownScope {
+            key: key.to_string(),
+            scope: scope.to_string(),
+            expected: WRITABLE_SCOPES
+                .iter()
+                .map(|s| format!("`{s}:`"))
+                .collect::<Vec<_>>()
+                .join(", "),
+        });
+    }
+    if name.trim().is_empty() {
+        return Err(MemorySlotError::EmptyName(key.to_string()));
+    }
+    Ok(())
 }
 
 /// Drives memory from the runtime's turn-boundary extraction pipeline.
@@ -268,6 +360,76 @@ mod tests {
     use crate::core::{SessionId, UserId};
     use crate::engine::MemoryEngine;
     use std::time::Instant;
+
+    // ─── slot key validation ────────────────────────────────────────────────
+    //
+    // This module used to explain the dotted-key trap in a doc comment and then
+    // accept one anyway. The failure it described is silent and remote from its
+    // cause: the slot is written, `state.get(..)` finds it, and only
+    // `state.user().get(..)` — the composition the platform documents — comes
+    // back `None`. Cheaper to refuse at construction.
+
+    #[test]
+    fn a_well_formed_slot_is_accepted() {
+        for scope in WRITABLE_SCOPES {
+            let key = format!("{scope}:diet");
+            assert!(
+                MemorySlot::try_new("dietary_identity", &key).is_ok(),
+                "`{key}` is a writable scope and must be accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn a_dotted_key_is_refused_with_the_fix_in_the_message() {
+        let err = MemorySlot::try_new("dietary_identity", "user.diet")
+            .expect_err("a dotted key never composes with `state.user()`");
+        assert!(matches!(err, MemorySlotError::MissingScope(_)));
+        let msg = err.to_string();
+        assert!(
+            msg.contains("scope:key") && msg.contains("user:diet"),
+            "the error must show the shape that works: {msg}"
+        );
+    }
+
+    #[test]
+    fn the_derived_scope_is_refused_because_contains_has_no_fallback() {
+        let err = MemorySlot::try_new("dietary_identity", "derived:diet")
+            .expect_err("`derived:` is invisible to the gates memory exists to satisfy");
+        assert!(matches!(err, MemorySlotError::UnknownScope { .. }));
+        assert!(
+            err.to_string().contains("contains"),
+            "the error should say why, not just that: {err}"
+        );
+    }
+
+    #[test]
+    fn empty_pieces_are_refused() {
+        assert!(matches!(
+            MemorySlot::try_new("", "user:diet"),
+            Err(MemorySlotError::EmptyPredicate)
+        ));
+        assert!(matches!(
+            MemorySlot::try_new("dietary_identity", "user:"),
+            Err(MemorySlotError::EmptyName(_))
+        ));
+    }
+
+    #[test]
+    #[should_panic(expected = "scope:key")]
+    fn new_panics_on_a_malformed_literal() {
+        // `new` is for literals in application code, where a bad key is a
+        // programming error and failing on first run beats failing silently
+        // for the lifetime of the deployment.
+        let _ = MemorySlot::new("dietary_identity", "user.diet");
+    }
+
+    #[test]
+    fn a_predicate_absent_from_the_corpus_is_still_valid() {
+        // Every slot is aspirational for a new user; validating predicates
+        // against the corpus would make memory unusable on day one.
+        assert!(MemorySlot::try_new("never_stated_yet", "user:whatever").is_ok());
+    }
 
     fn turn(number: u32, user: &str) -> TranscriptTurn {
         TranscriptTurn {

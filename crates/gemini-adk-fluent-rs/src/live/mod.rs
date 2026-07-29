@@ -29,6 +29,12 @@ mod config;
 mod connect;
 mod contract;
 mod extraction;
+mod introspect;
+
+/// The ambient-tool merge `connect` performs, exposed so
+/// [`check_live`](crate::testing::check_live) checks the same flow the session
+/// will actually run rather than the one the caller wrote.
+pub(crate) use connect::merge_ambient as merge_ambient_for_check;
 mod phases;
 
 use std::collections::HashMap;
@@ -166,6 +172,10 @@ pub struct Live {
     /// Merged into the flow's own `ambient` list at connect, so an extension
     /// that registers cross-cutting tools composes with `govern` in either order.
     pub(crate) ambient_tools: Vec<String>,
+    /// Set by `govern_compiled`/`observe_compiled`, whose documented contract is
+    /// that a `CompiledFlow` already surfaced its diagnostics and connect will
+    /// not re-check it. Connect validates the flow only when this is false.
+    pub(crate) flow_precompiled: bool,
     // Per-step on_enter actions: run an agent in a mode when a step activates.
     pub(crate) flow_actions: Vec<(
         String,
@@ -249,6 +259,7 @@ impl Live {
             flow: None,
             flow_mode: gemini_adk_rs::flow::Enforcement::Enforce,
             ambient_tools: Vec::new(),
+            flow_precompiled: false,
             flow_actions: Vec::new(),
             record_wire_path: None,
         }
@@ -260,6 +271,7 @@ impl Live {
     pub fn govern(mut self, flow: gemini_adk_rs::flow::Flow) -> Self {
         self.flow = Some(flow);
         self.flow_mode = gemini_adk_rs::flow::Enforcement::Enforce;
+        self.flow_precompiled = false;
         self
     }
 
@@ -295,6 +307,7 @@ impl Live {
     pub fn observe(mut self, flow: gemini_adk_rs::flow::Flow) -> Self {
         self.flow = Some(flow);
         self.flow_mode = gemini_adk_rs::flow::Enforcement::Observe;
+        self.flow_precompiled = false;
         self
     }
 
@@ -307,7 +320,9 @@ impl Live {
     /// already surfaced its diagnostics, so connect does **not** re-validate or
     /// re-compile it — compile once at load time, govern many sessions.
     pub fn govern_compiled(self, flow: gemini_adk_rs::flow::CompiledFlow) -> Self {
-        self.govern(flow.into_flow())
+        let mut live = self.govern(flow.into_flow());
+        live.flow_precompiled = true;
+        live
     }
 
     /// Attach a pre-compiled
@@ -316,7 +331,9 @@ impl Live {
     /// Like [`govern_compiled`](Self::govern_compiled), the flow is not
     /// re-validated or re-compiled at connect.
     pub fn observe_compiled(self, flow: gemini_adk_rs::flow::CompiledFlow) -> Self {
-        self.observe(flow.into_flow())
+        let mut live = self.observe(flow.into_flow());
+        live.flow_precompiled = true;
+        live
     }
 
     /// Run an agent the first time the named flow step becomes active.

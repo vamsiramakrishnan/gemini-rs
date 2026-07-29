@@ -190,6 +190,41 @@ flow at connect, so it composes with `.govern(..)` written on either side of it.
 - **Repair from real gaps.** Unmet `require` steps are surfaced at the turn
   boundary so the model gathers what's missing.
 
+## Phases and flows together
+
+A `Flow` does **not** compile down to a `PhaseMachine`. They are independent
+subsystems — the control plane holds each as its own `Option` — and configuring
+both is supported and sometimes right. What you need to know is the cadence and
+the order, because both steer the same model on the same turn.
+
+**Different cadences.** A flow's active-step `posture` is re-projected on
+*every* turn boundary. A phase's `instruction` is seeded only when a
+*transition* fires. So a quiet turn carries the flow's posture and no phase
+instruction — which is what stops the two from churning against each other.
+
+**Deterministic order.** Everything projected at a turn boundary is accumulated
+into one batch and sent as a single frame, in this order:
+
+```
+1. tool availability advisory      (on phase transition, if enabled)
+2. repair nudge / escalation       (unmet `needs`)
+3. phase steering context          (modifiers, under ContextInjection)
+4. flow posture → ground → unmet requirements
+5. resolved phase instruction      (transition turns, under ContextInjection)
+```
+
+The phase instruction lands **last**, nearest the user's next turn, so on a
+transition the phase persona is the most recent framing the model reads. Under
+the default `SteeringMode::InstructionUpdate` step 5 goes to the *system
+instruction* instead of the batch, so the two never share a channel at all.
+
+**Which to reach for.** Use phases when the conversation has personas or stages
+that change how the assistant *speaks*. Use a flow when there are obligations
+and orderings that must be *enforced* — gated tools, required steps, an audit
+trail. Reach for both when you have both, and expect them to add rather than
+arbitrate: nothing resolves a contradiction between a posture and a phase
+instruction, so do not write one.
+
 ## Verbs (the closed vocabulary)
 
 | Verb | Meaning |
@@ -228,6 +263,7 @@ real traces can be scored for conformance.
 ## See also
 
 - [Per-Tool Policies](./tool-policies.md) — `confirm`/`timeout`/`cached`; commit-tools
-- [Phase System](./phases.md) — the lower-level stage machine `Flow` lowers onto
+- [Phase System](./phases.md) — the other steering mechanism; independent of
+  `Flow` and composable with it (see [Phases and flows together](#phases-and-flows-together))
 - [Tool System](./tools.md) — defining the tools a flow gates
 - cookbook [37 — governed flow](../../examples/cookbook/src/37_governed_flow.rs)

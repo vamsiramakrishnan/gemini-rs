@@ -17,4 +17,4 @@ pub use tools::{
     manage_memory_tool, recall_context_tool, ManageArgs, RecallArgs, RecallScope, MANAGE_TOOL,
     MEMORY_TOOLS, RECALL_TOOL,
 };
-pub use turn_extractor::{MemorySlot, MemoryTurnExtractor, MEMORY_EXTRACTOR_NAME};
+pub use turn_extractor::{MemorySlot, MemorySlotError, MemoryTurnExtractor, MEMORY_EXTRACTOR_NAME};
