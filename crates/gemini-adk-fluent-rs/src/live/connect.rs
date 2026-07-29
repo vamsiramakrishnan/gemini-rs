@@ -1,7 +1,6 @@
 //! Connection methods for `Live`.
 
 use gemini_adk_rs::live::{LiveHandle, LiveSessionBuilder, PhaseMachine};
-use gemini_adk_rs::State;
 use gemini_genai_rs::prelude::*;
 
 use super::Live;
@@ -105,10 +104,18 @@ impl Live {
         let builder_config_tools = self.config.tools.clone();
         let mut builder = LiveSessionBuilder::new(self.config);
 
-        // Resolve deferred agent tools: create shared State, register TextAgentTools
+        // The session's `State`. A caller-supplied one is used as-is so tools
+        // they already built around it write where the flow monitor and phase
+        // machine read; otherwise agent tools get a fresh one as before.
+        let shared_state = self.state.clone();
+        if let Some(ref state) = shared_state {
+            builder = builder.with_state(state.clone());
+        }
+
+        // Resolve deferred agent tools: register TextAgentTools against it.
         let mut dispatcher = self.dispatcher;
         if !self.deferred_agent_tools.is_empty() {
-            let state = State::new();
+            let state = shared_state.clone().unwrap_or_default();
             let d = dispatcher.get_or_insert_with(gemini_adk_rs::tool::ToolDispatcher::new);
             for deferred in self.deferred_agent_tools {
                 d.register(gemini_adk_rs::TextAgentTool::from_arc(

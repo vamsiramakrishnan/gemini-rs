@@ -51,6 +51,7 @@ pub use gemini_adk_rs::live::{
 };
 use gemini_adk_rs::llm::BaseLlm;
 use gemini_adk_rs::tool::ToolDispatcher;
+use gemini_adk_rs::State;
 use gemini_genai_rs::prelude::*;
 
 // Carve (gap #9): `gemini_adk_fluent_rs::live` is the curated home for the full
@@ -176,6 +177,8 @@ pub struct Live {
     /// that a `CompiledFlow` already surfaced its diagnostics and connect will
     /// not re-check it. Connect validates the flow only when this is false.
     pub(crate) flow_precompiled: bool,
+    /// Caller-supplied session `State`, so tools and flow guards can share one.
+    pub(crate) state: Option<State>,
     // Per-step on_enter actions: run an agent in a mode when a step activates.
     pub(crate) flow_actions: Vec<(
         String,
@@ -260,6 +263,7 @@ impl Live {
             flow_mode: gemini_adk_rs::flow::Enforcement::Enforce,
             ambient_tools: Vec::new(),
             flow_precompiled: false,
+            state: None,
             flow_actions: Vec::new(),
             record_wire_path: None,
         }
@@ -272,6 +276,35 @@ impl Live {
         self.flow = Some(flow);
         self.flow_mode = gemini_adk_rs::flow::Enforcement::Enforce;
         self.flow_precompiled = false;
+        self
+    }
+
+    /// Use a `State` you already hold as the session's state.
+    ///
+    /// Without this a tool closure captures whatever `State` the caller made,
+    /// the session runs on a different one, and the two never meet — so a tool
+    /// that writes `identity_verified` and a `Guard::is_true("identity_verified")`
+    /// that reads it are talking about different maps. The guard never fires,
+    /// the flow never advances, and every subsequent tool is refused by a gate
+    /// whose condition was in fact satisfied.
+    ///
+    /// That is the ordinary shape of a governed flow — tools write the facts,
+    /// guards read them — so this is how you make it work:
+    ///
+    /// ```no_run
+    /// # use gemini_adk_fluent_rs::live::Live;
+    /// # use gemini_adk_rs::State;
+    /// let state = State::new();
+    /// Live::builder()
+    ///     .with_state(state.clone())   // the session runs on this
+    ///     .with_tools(my_tools(state)); // and so do the tools
+    /// # fn my_tools(_: State) -> gemini_adk_fluent_rs::compose::tools::ToolComposite { todo!() }
+    /// ```
+    ///
+    /// `agent_tool` already shares state with the agents it wraps; this is the
+    /// same guarantee for ordinary tools.
+    pub fn with_state(mut self, state: State) -> Self {
+        self.state = Some(state);
         self
     }
 

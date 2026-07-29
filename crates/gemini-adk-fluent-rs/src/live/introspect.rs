@@ -16,6 +16,7 @@
 
 use gemini_adk_rs::flow::{Enforcement, Flow};
 use gemini_adk_rs::live::Phase;
+use gemini_adk_rs::State;
 use gemini_genai_rs::prelude::Tool;
 
 use super::Live;
@@ -120,6 +121,12 @@ impl Live {
         self.persistence.is_some()
     }
 
+    /// The caller-supplied session `State`, if [`with_state`](Live::with_state)
+    /// was called.
+    pub fn shared_state(&self) -> Option<&State> {
+        self.state.as_ref()
+    }
+
     /// How many additive teardown hooks are registered, via
     /// [`on_teardown`](Live::on_teardown).
     ///
@@ -211,6 +218,24 @@ mod tests {
     }
 
     #[test]
+    fn a_shared_state_is_the_one_the_session_will_run_on() {
+        // The gap this closes: tools capture a `State` the caller built, the
+        // session ran on a different one, and a `Guard::is_true(..)` reading a
+        // key a tool had written never fired — so a governed flow stalled at
+        // its first step with every downstream tool refused by a gate whose
+        // condition was in fact satisfied.
+        let state = gemini_adk_rs::State::new();
+        let _ = state.set("identity_verified", true);
+        let live = Live::builder().with_state(state.clone());
+        assert_eq!(
+            live.shared_state()
+                .and_then(|s| s.get::<bool>("identity_verified")),
+            Some(true),
+            "the builder must hold the caller's own state, not a copy or a fresh one"
+        );
+    }
+
+    #[test]
     fn an_unconfigured_builder_reports_nothing() {
         let live = Live::builder();
         assert!(live.flow().is_none());
@@ -219,5 +244,6 @@ mod tests {
         assert!(live.watched_keys().is_empty());
         assert_eq!(live.extractor_count(), 0);
         assert!(!live.has_persistence());
+        assert!(live.shared_state().is_none());
     }
 }
