@@ -46,6 +46,24 @@ pub struct ReportInput<'a> {
     pub transcript: &'a [TurnRecord],
 }
 
+/// The one-line verdict.
+///
+/// A failed model-speech probe is counted in `fail` but does not block, so the
+/// headline has to distinguish the two — otherwise a behaviour finding reads
+/// identically to a bypassed gate, and the reader has to scroll to learn which
+/// one they are looking at.
+fn verdict(e: &Evaluation, fail: usize) -> String {
+    let blocking = e.blocking_failures().len();
+    match (fail, blocking) {
+        (0, _) => "No functional or adversarial failures.".to_string(),
+        (_, 0) => format!(
+            "No blocking failures. {fail} model-speech finding{} — behaviour, not a bypassed gate.",
+            if fail == 1 { "" } else { "s" }
+        ),
+        _ => "**Failures present — see below.**".to_string(),
+    }
+}
+
 /// Render the report as Markdown.
 pub fn markdown(input: &ReportInput<'_>) -> String {
     let e = input.evaluation;
@@ -59,14 +77,10 @@ pub fn markdown(input: &ReportInput<'_>) -> String {
         input.model, input.run_at
     );
 
-    let verdict = if fail == 0 {
-        "No functional or adversarial failures."
-    } else {
-        "**Failures present — see below.**"
-    };
     let _ = writeln!(
         s,
-        "{verdict} {pass} passed, {fail} failed, {not_reached} not reached.\n"
+        "{} {pass} passed, {fail} failed, {not_reached} not reached.\n",
+        verdict(e, fail)
     );
 
     if !e.blocking_failures().is_empty() {
@@ -282,11 +296,7 @@ blockquote {{ margin:.5rem 0; padding-left:.9rem; border-left:3px solid var(--li
         title = esc(input.title),
         model = esc(input.model),
         run_at = esc(input.run_at),
-        verdict = if fail == 0 {
-            "No functional or adversarial failures."
-        } else {
-            "Failures present."
-        },
+        verdict = esc(&verdict(e, fail).replace("**", "")),
         pass = pass,
         fail = fail,
         not_reached = not_reached,
