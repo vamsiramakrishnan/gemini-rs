@@ -681,13 +681,31 @@ async fn run_turn_extractors(
     }
 }
 
+/// The suppression key for a steering turn: its text, when it is only text.
+///
+/// A turn carrying anything else is never suppressed — equality of the rendered
+/// text is not equality of the content, and silently dropping a turn because its
+/// caption matched would lose the payload.
+fn steering_key(content: &gemini_genai_rs::prelude::Content) -> Option<String> {
+    let mut text = String::new();
+    for part in &content.parts {
+        match part {
+            gemini_genai_rs::prelude::Part::Text { text: t } => text.push_str(t),
+            _ => return None,
+        }
+    }
+    Some(text)
+}
+
 /// Deliver the resolved instruction and any batched context turns for a turn.
 ///
-/// Encodes three invariants (asserted by the `harness` tests):
+/// Encodes four invariants (asserted by the `harness` tests):
 /// - the instruction is delivered **once** and deduped against the last sent
 ///   (InstructionUpdate/Hybrid), or accumulated as a context frame
 ///   (ContextInjection);
 /// - on-enter context and prompt from a phase transition join the same batch;
+/// - a steering line identical to the previous turn's is suppressed, because the
+///   conversation it is appended to has no way to retract the earlier copy;
 /// - delivery is `Immediate` (one `send_client_content`) or `Deferred` (queued in
 ///   `PendingContext` for the next user send), never a burst of isolated frames.
 async fn deliver_instruction_and_context(
@@ -726,6 +744,38 @@ async fn deliver_instruction_and_context(
         if tr.prompt_on_enter {
             should_prompt = true;
         }
+    }
+
+    // Repeat suppression, against the previous turn's steering.
+    //
+    // `send_client_content` appends to the server-side conversation, and nothing
+    // can retract what it appends. So a step that stays active across N turns
+    // used to deposit N verbatim copies of its imperative posture into history,
+    // in the model's own voice — and by the time the step latched, the stale
+    // orders outnumbered the live one. Re-sending unchanged steering does not
+    // reinforce it; it accumulates directives whose preconditions have expired.
+    //
+    // Keyed against the previous turn only, so steering that oscillates because
+    // its underlying condition genuinely oscillated is still delivered, and a
+    // step that advances is never muted.
+    let keys: Vec<Option<String>> = context_buffer.iter().map(steering_key).collect();
+    {
+        let mut last = shared.last_context.lock();
+        let mut kept = Vec::with_capacity(context_buffer.len());
+        for (content, key) in std::mem::take(&mut context_buffer)
+            .into_iter()
+            .zip(keys.iter())
+        {
+            let repeated = key.as_ref().is_some_and(|k| last.iter().any(|p| p == k));
+            if !repeated {
+                kept.push(content);
+            }
+        }
+        // What the model's standing steering *is* this turn, not what was newly
+        // sent: storing the post-suppression set would let a line suppressed on
+        // one turn be re-sent on the next, which is the behaviour being fixed.
+        *last = keys.into_iter().flatten().collect();
+        context_buffer = kept;
     }
 
     // Context delivery — Immediate (one atomic frame now) or Deferred (queued in
@@ -917,6 +967,7 @@ mod harness {
                     barge_in: Mutex::new(tokio_util::sync::CancellationToken::new()),
                     resume_handle: Mutex::new(None),
                     last_instruction: Mutex::new(None),
+                    last_context: Mutex::new(Vec::new()),
                     pending_context: None,
                     delivery: crate::live::processor::DeliveryConfig::default(),
                     dropped: crate::live::processor::DroppedFrames::default(),
@@ -1240,6 +1291,99 @@ mod harness {
             !sent.iter().any(|t| t.contains("PHASE-INSTRUCTION")),
             "a phase instruction is seeded by a transition, not re-sent on \
              every turn — re-sending it would churn the model's framing: {sent:?}"
+        );
+    }
+
+    /// A posture that has not changed is projected **once**, not once per turn.
+    ///
+    /// Every projection is a permanent `model`-role turn in the server-side
+    /// conversation: `send_client_content` appends, and nothing can retract it.
+    /// So a step that stays active across N turns used to deposit N verbatim
+    /// copies of its imperative into history, in the model's own voice.
+    ///
+    /// That is what made the governed collections call re-ask for card digits
+    /// after it had already verified them. `verify`'s posture ("Ask for the last
+    /// four digits… Do not discuss the account… until that returns verified")
+    /// went in on every turn verification took, so by the time the step latched
+    /// the history held several self-attributed orders to ask, against a single
+    /// later one to move on. The model followed the majority.
+    ///
+    /// The instruction channel already deduped against `last_instruction`, and
+    /// the tool advisory already deduped against `active_tools` — the two
+    /// channels carrying standing behavioural directives were the two without
+    /// it.
+    #[tokio::test]
+    async fn an_unchanged_posture_is_projected_once_not_once_per_turn() {
+        let flow = Flow::new()
+            .step("verify")
+            .posture("Ask for the last four digits.")
+            .done(Guard::is_true("identity_verified"))
+            .build()
+            .expect("valid flow");
+
+        let mut h = Harness::new();
+        h.control.flow = Some(FlowMonitor::new(flow, Enforcement::Observe).into_shared());
+
+        // Four turns of the caller stalling before the digits arrive.
+        for _ in 0..4 {
+            h.run_turn().await;
+        }
+
+        let projections = h
+            .batches()
+            .into_iter()
+            .flatten()
+            .filter(|t| t.contains("Ask for the last four digits."))
+            .count();
+        assert_eq!(
+            projections, 1,
+            "the posture is unchanged across all four turns, so it belongs in \
+             the conversation once; {projections} copies is {projections} \
+             standing orders the model must weigh against whatever comes next"
+        );
+    }
+
+    /// Suppression is against the *previous* turn, not for all time: when the
+    /// step advances, the new posture must reach the model.
+    ///
+    /// The failure mode this guards is a dedup that mutes too much — a flow
+    /// whose steering goes silent after the first turn is worse than one that
+    /// repeats itself, because nothing downstream reports it.
+    #[tokio::test]
+    async fn a_changed_posture_still_reaches_the_model() {
+        let flow = Flow::new()
+            .step("verify")
+            .posture("Ask for the last four digits.")
+            .done(Guard::is_true("identity_verified"))
+            .step("disclose")
+            .after("verify")
+            .posture("Read the disclosure.")
+            .done(Guard::is_true("disclosure_given"))
+            .build()
+            .expect("valid flow");
+
+        let mut h = Harness::new();
+        h.control.flow = Some(FlowMonitor::new(flow, Enforcement::Observe).into_shared());
+
+        h.run_turn().await;
+        h.run_turn().await;
+        let _ = h.state.set("identity_verified", true);
+        h.run_turn().await;
+
+        let sent: Vec<String> = h.batches().into_iter().flatten().collect();
+        assert_eq!(
+            sent.iter()
+                .filter(|t| t.contains("Ask for the last four digits."))
+                .count(),
+            1,
+            "the verify posture repeated: {sent:?}"
+        );
+        assert_eq!(
+            sent.iter()
+                .filter(|t| t.contains("Read the disclosure."))
+                .count(),
+            1,
+            "the step advanced and its posture never reached the model: {sent:?}"
         );
     }
 

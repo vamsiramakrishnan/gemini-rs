@@ -271,6 +271,15 @@ pub(crate) struct SharedState {
     pub resume_handle: parking_lot::Mutex<Option<String>>,
     /// Last instruction sent via instruction_template (for dedup).
     pub last_instruction: parking_lot::Mutex<Option<String>>,
+    /// Steering lines projected on the previous turn boundary, for repeat
+    /// suppression.
+    ///
+    /// Context turns are *appended* to the server-side conversation and cannot
+    /// be retracted, so re-sending an unchanged steering line does not
+    /// re-emphasise it — it adds a second standing directive the model has to
+    /// weigh against everything that follows. Holding the previous turn's lines
+    /// lets an unchanged one be dropped while a changed one still lands.
+    pub last_context: parking_lot::Mutex<Vec<String>>,
     /// Pending context buffer for deferred delivery (None when Immediate mode).
     pub pending_context: Option<Arc<PendingContext>>,
     /// Fast-lane delivery policy per event class.
@@ -377,6 +386,7 @@ pub(crate) fn spawn_event_processor(
         barge_in: parking_lot::Mutex::new(CancellationToken::new()),
         resume_handle: parking_lot::Mutex::new(None),
         last_instruction: parking_lot::Mutex::new(None),
+        last_context: parking_lot::Mutex::new(Vec::new()),
         pending_context: control_plane.pending_context.clone(),
         delivery: control_plane.delivery,
         dropped: DroppedFrames::default(),
