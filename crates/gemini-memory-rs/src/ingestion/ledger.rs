@@ -352,6 +352,23 @@ impl InMemorySessionLedger {
         // Within one `subject|predicate` window, the newest explicit statement
         // wins and older competing values are suppressed. A user who says
         // "actually, pescatarian" has not left two beliefs behind.
+        //
+        // Only where the window is single-valued, though. `dietary_identity`
+        // holds one answer, so a second value contradicts the first; `routine`
+        // and `preference` are the buckets an extractor uses when it could not
+        // say *which* attribute a fact is about, so two values there are
+        // usually two facts. Collapsing those lost data mid-conversation: "I've
+        // started a pottery class on Thursdays" and "I always take the metro to
+        // work" both land on `user|routine`, and the second silently deleted
+        // the first — measured, recallable on turn 1 and gone by turn 2.
+        //
+        // The residual case is "I prefer window seats" followed by "actually,
+        // aisle": a real correction inside an unclassified window, which now
+        // leaves both. That is a symptom of the coarse vocabulary rather than
+        // of this rule — a model-backed extractor writes `seat_preference` and
+        // the window is single-valued again — and leaving two facts is the
+        // better failure, because the alternative deletes one the user never
+        // retracted.
         let mut by_window: BTreeMap<String, Vec<FactFingerprint>> = BTreeMap::new();
         for (fingerprint, candidate) in state.candidates.iter() {
             if candidate.status == SessionCandidateStatus::Rejected {
@@ -365,6 +382,18 @@ impl InMemorySessionLedger {
 
         for (_, fingerprints) in by_window {
             if fingerprints.len() < 2 {
+                continue;
+            }
+            // An explicit correction collapses its window whatever the
+            // predicate is named: the user said outright that one replaces the
+            // other.
+            let corrected = fingerprints.iter().any(|f| {
+                state.candidates[f].mutation_intent == Some(crate::core::MutationIntent::Correct)
+            });
+            let single_valued = fingerprints
+                .iter()
+                .any(|f| is_single_valued(state.candidates[f].predicate.as_str()));
+            if !corrected && !single_valued {
                 continue;
             }
             let winner = fingerprints
@@ -488,6 +517,16 @@ impl SessionLedger for InMemorySessionLedger {
             sealed_at: Utc::now(),
         })
     }
+}
+
+/// The predicates that are not really predicates: an extractor's "something
+/// about the user, unclassified" buckets.
+///
+/// A second value in a named window — `dietary_identity`, `residence`,
+/// `employer` — contradicts the first. A second value in one of these is
+/// usually just a second fact.
+fn is_single_valued(predicate: &str) -> bool {
+    !matches!(predicate, "preference" | "routine")
 }
 
 #[cfg(test)]

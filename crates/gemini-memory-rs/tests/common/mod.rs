@@ -1,11 +1,20 @@
-#![cfg(feature = "gemini-llm")]
-//! Shared scaffolding for the live-API integration tests.
+//! Shared scaffolding for the integration tests.
 //!
-//! These tests reach the real Gemini API. Without a key they skip rather than
-//! fail, so `cargo test --workspace` stays meaningful on a machine — or a CI
-//! runner — that has no credentials.
+//! Some of these tests reach the real Gemini API. Without a key they skip
+//! rather than fail, so `cargo test --workspace` stays meaningful on a machine
+//! — or a CI runner — that has no credentials. The parts that need no model at
+//! all (scratch directories, corpus rendering, the haystack fixture) are not
+//! gated, so a retrieval test can use them on a default build.
 
 #![allow(dead_code)]
+
+pub mod corpus;
+#[cfg(feature = "gemini-llm")]
+pub mod live;
+pub mod paraphrase;
+pub mod rank;
+pub mod views;
+pub mod voice;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -14,6 +23,7 @@ use gemini_memory_rs::core::{
     CanonicalMemory, MemoryEvent, MemoryRuntimeConfig, MemoryStatus, SessionId, UserId,
 };
 use gemini_memory_rs::engine::MemoryEngine;
+#[cfg(feature = "gemini-llm")]
 use gemini_memory_rs::llm::{extraction_llm, GeminiObservationExtractor, GeminiPlanExtractor};
 use gemini_memory_rs::okf::{FsStore, OkfRepository};
 
@@ -62,17 +72,26 @@ impl Drop for ScratchDir {
     }
 }
 
-/// An engine backed by real files and real model-driven extraction.
-pub fn model_backed_engine(user: &str, root: &Path) -> MemoryEngine {
-    let llm = extraction_llm(EXTRACTION_MODEL);
+/// An engine backed by real files, with the bundled deterministic extractors.
+///
+/// The corpus is written and read back as OKF Markdown, which is the part worth
+/// exercising; nothing here reaches the network.
+pub fn file_backed_engine(user: &str, root: &Path) -> MemoryEngine {
     MemoryEngine::new(
         UserId::new(user),
         Arc::new(OkfRepository::new(Arc::new(FsStore::new(root)))),
         Arc::new(gemini_memory_rs::core::InMemoryEventLog::new()),
         MemoryRuntimeConfig::default(),
     )
-    .with_plan_extractor(Arc::new(GeminiPlanExtractor::new(llm.clone())))
-    .with_observation_extractor(Arc::new(GeminiObservationExtractor::new(llm)))
+}
+
+/// An engine backed by real files and real model-driven extraction.
+#[cfg(feature = "gemini-llm")]
+pub fn model_backed_engine(user: &str, root: &Path) -> MemoryEngine {
+    let llm = extraction_llm(EXTRACTION_MODEL);
+    file_backed_engine(user, root)
+        .with_plan_extractor(Arc::new(GeminiPlanExtractor::new(llm.clone())))
+        .with_observation_extractor(Arc::new(GeminiObservationExtractor::new(llm)))
 }
 
 /// Every canonical Markdown file under a root, concatenated with headers.

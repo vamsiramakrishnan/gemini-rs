@@ -38,6 +38,23 @@ pub trait Transport: Send + 'static {
 
     /// Close the transport.
     async fn close(&mut self) -> Result<(), Self::Error>;
+
+    /// Why the peer closed the connection, if it said.
+    ///
+    /// Read after [`recv`](Self::recv) returns `Ok(None)`. A server-initiated
+    /// close on the Live API carries a status code and a reason — a context
+    /// window exhausted, an invalid argument, a quota — and without this the
+    /// only thing that survives is the fact of the close. That is the difference
+    /// between a session that "just dropped" and one that dropped for a stated
+    /// reason: a governed voice evaluation lost several turns to a close whose
+    /// reason had been logged at `warn` and then discarded, so it was never
+    /// diagnosed.
+    ///
+    /// Defaults to `None` so an existing transport implementation keeps
+    /// compiling; it merely reports nothing.
+    fn close_reason(&self) -> Option<String> {
+        None
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -55,6 +72,9 @@ type WsStream =
 pub struct TungsteniteTransport {
     ws_write: Option<futures_util::stream::SplitSink<WsStream, Message>>,
     ws_read: Option<futures_util::stream::SplitStream<WsStream>>,
+    /// Code and reason from the peer's close frame, kept so the session loop can
+    /// report *why* the connection ended rather than only that it did.
+    close_reason: Option<String>,
 }
 
 impl TungsteniteTransport {
@@ -63,6 +83,7 @@ impl TungsteniteTransport {
         Self {
             ws_write: None,
             ws_read: None,
+            close_reason: None,
         }
     }
 }
@@ -150,6 +171,14 @@ impl Transport for TungsteniteTransport {
                 Some(Ok(Message::Close(frame))) => {
                     if let Some(ref cf) = frame {
                         tracing::warn!(code = %cf.code, reason = %cf.reason, "WebSocket close frame received");
+                        // Kept, not merely logged: a `warn` is invisible unless
+                        // the application configured a subscriber, and the
+                        // reason is the only account of why the session ended.
+                        self.close_reason = Some(if cf.reason.is_empty() {
+                            format!("server closed the connection ({})", cf.code)
+                        } else {
+                            format!("server closed the connection ({}): {}", cf.code, cf.reason)
+                        });
                     }
                     return Ok(None);
                 }
@@ -171,6 +200,10 @@ impl Transport for TungsteniteTransport {
         self.ws_read = None;
         Ok(())
     }
+
+    fn close_reason(&self) -> Option<String> {
+        self.close_reason.clone()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -188,6 +221,8 @@ pub struct MockTransport {
     recv_queue: std::collections::VecDeque<Vec<u8>>,
     /// Whether connect() has been called (and close() has not).
     connected: bool,
+    /// Scripted peer close reason, surfaced by [`Transport::close_reason`].
+    close_reason: Option<String>,
 }
 
 impl MockTransport {
@@ -197,12 +232,19 @@ impl MockTransport {
             sent: Vec::new(),
             recv_queue: std::collections::VecDeque::new(),
             connected: false,
+            close_reason: None,
         }
     }
 
     /// Queue a message to be returned by [`Transport::recv`].
     pub fn script_recv(&mut self, data: Vec<u8>) {
         self.recv_queue.push_back(data);
+    }
+
+    /// Script the reason the peer gives for closing, so a test can assert that
+    /// it reaches the application rather than being swallowed.
+    pub fn script_close_reason(&mut self, reason: impl Into<String>) {
+        self.close_reason = Some(reason.into());
     }
 
     /// Take all sent data (for assertions). Drains the internal buffer.
@@ -273,6 +315,10 @@ impl Transport for MockTransport {
         self.connected = false;
         Ok(())
     }
+
+    fn close_reason(&self) -> Option<String> {
+        self.close_reason.clone()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -282,6 +328,32 @@ impl Transport for MockTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A transport that says nothing about why it closed still compiles and
+    /// still reports nothing — the default keeps third-party implementations
+    /// working rather than forcing them to answer a question they cannot.
+    #[test]
+    fn a_transport_that_says_nothing_reports_nothing() {
+        assert_eq!(MockTransport::new().close_reason(), None);
+    }
+
+    /// When the peer gives a reason, it survives to the caller.
+    ///
+    /// It used to be logged at `warn` and dropped: `recv` returned a bare
+    /// `Ok(None)` and the session loop turned that into the literal string
+    /// "Transport closed". A `warn` is invisible without a configured
+    /// subscriber, so in practice the only account of why a session ended was
+    /// discarded at the point it was produced — which is why a governed voice
+    /// evaluation lost turns to a close it could never diagnose.
+    #[test]
+    fn a_stated_close_reason_survives_to_the_caller() {
+        let mut transport = MockTransport::new();
+        transport.script_close_reason("server closed the connection (1011): quota exceeded");
+        assert_eq!(
+            transport.close_reason().as_deref(),
+            Some("server closed the connection (1011): quota exceeded")
+        );
+    }
 
     #[tokio::test]
     async fn mock_transport_round_trip() {

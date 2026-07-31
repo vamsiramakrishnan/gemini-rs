@@ -342,8 +342,25 @@ impl LiveSessionBuilder {
             }
         }
 
+        // The instruction the caller set at connect, kept as text so an
+        // `instruction_amendment` has something to compose onto in a session
+        // with no phase machine. Without it such an amendment was computed and
+        // then dropped — see the note in `control_plane::lifecycle` step 10.
+        let base_instruction = config.system_instruction.as_ref().map(|content| {
+            content
+                .parts
+                .iter()
+                .filter_map(|part| match part {
+                    gemini_genai_rs::prelude::Part::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        });
+
         Ok(SessionPlan {
             config: Some(config),
+            base_instruction,
             callbacks: self.callbacks,
             dispatcher: self.dispatcher,
             extractors: self.extractors,
@@ -380,6 +397,9 @@ pub(crate) struct SessionPlan {
     /// Resolved session config (background-tool `NonBlocking` already applied).
     /// `Some` until the transport is opened; `connect` takes it out.
     config: Option<SessionConfig>,
+    /// The connect-time system instruction as text, for amendments to compose
+    /// onto when there is no phase to supply a base.
+    base_instruction: Option<String>,
     callbacks: EventCallbacks,
     dispatcher: Option<Arc<ToolDispatcher>>,
     extractors: Vec<Arc<dyn TurnExtractor>>,
@@ -485,6 +505,7 @@ pub(crate) fn build_runtime(plan: SessionPlan, session: SessionHandle) -> Sessio
         persistence: plan.persistence,
         session_id: plan.session_id,
         tool_advisory: plan.tool_advisory,
+        base_instruction: plan.base_instruction,
         pending_context: None, // set after PendingContext is created below
         middleware: {
             let mut chain = crate::middleware::MiddlewareChain::new();

@@ -237,6 +237,35 @@ impl Live {
         self
     }
 
+    /// Register an **additive** teardown hook, run on disconnect before
+    /// [`on_disconnected`](Self::on_disconnected).
+    ///
+    /// Every other callback setter replaces: calling `.on_disconnected(..)`
+    /// twice keeps only the second, silently. That is workable for an
+    /// application and unusable for an extension, which cannot know whether the
+    /// application will register a handler after it. Hooks registered here
+    /// accumulate instead, so `with_memory(..)` and the application's own
+    /// `on_disconnected` both run regardless of the order they were written in.
+    ///
+    /// Hooks are awaited in registration order before the session finishes
+    /// tearing down, so this is the seam for flushing durable state. Keep them
+    /// bounded — a hook that hangs delays disconnect.
+    ///
+    /// ```no_run
+    /// # use gemini_adk_fluent_rs::live::Live;
+    /// Live::builder().on_teardown(|| async { /* flush */ });
+    /// ```
+    pub fn on_teardown<F, Fut>(mut self, f: F) -> Self
+    where
+        F: Fn() -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        self.callbacks
+            .on_teardown
+            .push(Arc::new(move || Box::pin(f())));
+        self
+    }
+
     /// Called after the session resumes following a GoAway disconnect.
     ///
     /// Use to re-subscribe to external streams, reset UI state, or log

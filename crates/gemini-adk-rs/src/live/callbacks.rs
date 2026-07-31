@@ -138,6 +138,21 @@ pub struct EventCallbacks {
     pub on_connected: Option<AsyncCallbackWith<Arc<dyn SessionWriter>>>,
     /// Called when session disconnects.
     pub on_disconnected: Option<AsyncCallbackWith<Option<String>>>,
+    /// Teardown hooks run on disconnect, **before** `on_disconnected`.
+    ///
+    /// Additive, unlike every other callback here. Each of those is a single
+    /// `Option` that the last registration silently replaces, which is fine for
+    /// an application — it has one place to write its handler — and unusable for
+    /// an extension: `.with_memory(s).on_disconnected(f)` would drop the
+    /// extension's hook, and the reverse order would drop the application's,
+    /// with nothing reporting either.
+    ///
+    /// Extensions that must flush durable state at end of session register here
+    /// (`gemini-memory-rs` reconciles its session ledger this way). Hooks run in
+    /// registration order and are awaited before `on_disconnected` fires, so the
+    /// application's own handler observes a settled world. A hook that panics or
+    /// hangs delays disconnect — keep them bounded.
+    pub on_teardown: Vec<AsyncCallback>,
     /// Called after session resumes from GoAway.
     pub on_resumed: Option<AsyncCallback>,
     /// Called on non-fatal errors.
@@ -233,6 +248,7 @@ impl Default for EventCallbacks {
             on_go_away: None,
             on_connected: None,
             on_disconnected: None,
+            on_teardown: Vec::new(),
             on_resumed: None,
             on_error: None,
             on_transfer: None,

@@ -219,6 +219,12 @@ pub(in crate::live) async fn run_control_lane(
                 let _ = event_tx.send(LiveEvent::Disconnected {
                     reason: reason.clone(),
                 });
+                // Teardown first, and always awaited: these flush durable state
+                // (memory reconciliation, for one), so the application's own
+                // handler should observe a settled world rather than race it.
+                for hook in &callbacks.on_teardown {
+                    hook().await;
+                }
                 if let Some(cb) = &callbacks.on_disconnected {
                     dispatch_callback!(callbacks.on_disconnected_mode, cb(reason));
                 }

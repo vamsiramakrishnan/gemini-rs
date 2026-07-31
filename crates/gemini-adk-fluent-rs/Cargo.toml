@@ -26,6 +26,14 @@ tracing = "0.1"
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
 tokio-test = "0.4"
+# `debt_collection_eval` synthesises the caller's side with Gemini TTS and
+# drives it into a real Live session as PCM, because a governed flow that holds
+# under typed input and not under speech is a flow that does not hold.
+reqwest = { version = "0.12", default-features = false, features = [
+    "json",
+    "rustls-tls-native-roots",
+] }
+parking_lot = "0.12"
 
 [features]
 default = []

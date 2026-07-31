@@ -102,6 +102,29 @@ impl Codec for JsonCodec {
                 };
                 serde_json::to_vec(&msg).map_err(|e| CodecError::Serialize(e.to_string()))
             }
+            // Explicit activity signals are suppressed unless the caller turned
+            // *off* automatic detection. The two are mutually exclusive on the
+            // wire: sending one while server VAD is enabled draws a close frame
+            // — code 1007, "Explicit activity control is not supported when
+            // automatic activity detection is enabled" — and the session dies.
+            //
+            // This is not a hypothetical. `LiveHandle::send_audio` runs
+            // client-side VAD and calls `user_speech_started` on the first
+            // speech frame, which lands here as `ActivityStart`. With server VAD
+            // on by default, *every* audio session was killed the moment the
+            // user began speaking: the socket closed, the loop reconnected, the
+            // next utterance killed it again. Text sessions were unaffected,
+            // which is why nothing caught it — every Live test in this workspace
+            // drove sessions with `send_text`.
+            //
+            // An empty encoding is the codec's existing idiom for "this does not
+            // belong on this wire"; the session loop skips empty payloads.
+            SessionCommand::ActivityStart if config.automatic_activity_detection_enabled() => {
+                Ok(Vec::new())
+            }
+            SessionCommand::ActivityEnd if config.automatic_activity_detection_enabled() => {
+                Ok(Vec::new())
+            }
             SessionCommand::ActivityStart => {
                 let msg = ActivitySignalMessage {
                     realtime_input: ActivitySignalPayload {
@@ -308,37 +331,62 @@ mod tests {
     }
 
     #[test]
-    fn json_codec_encode_activity_start() {
+    fn manual_activity_signals_are_suppressed_under_automatic_detection() {
+        // The default config leaves server VAD on, and the two are mutually
+        // exclusive on the wire: emitting one draws a 1007 close and kills the
+        // session mid-utterance. An empty encoding is the codec's idiom for
+        // "not on this wire"; the session loop skips it.
         let codec = JsonCodec;
         let config = test_config();
-        let cmd = SessionCommand::ActivityStart;
-        let bytes = codec.encode_command(&cmd, &config).unwrap();
-        let json = String::from_utf8(bytes).unwrap();
-        assert!(
-            json.contains("\"activityStart\""),
-            "should contain activityStart"
-        );
-        assert!(
-            !json.contains("\"activityEnd\""),
-            "should not contain activityEnd"
-        );
+        assert!(config.automatic_activity_detection_enabled());
+
+        for cmd in [SessionCommand::ActivityStart, SessionCommand::ActivityEnd] {
+            let bytes = codec.encode_command(&cmd, &config).unwrap();
+            assert!(
+                bytes.is_empty(),
+                "explicit activity control must not reach the wire while the \
+                 server is detecting activity itself; got {:?}",
+                String::from_utf8_lossy(&bytes)
+            );
+        }
     }
 
     #[test]
-    fn json_codec_encode_activity_end() {
+    fn manual_activity_signals_are_sent_when_automatic_detection_is_off() {
         let codec = JsonCodec;
-        let config = test_config();
-        let cmd = SessionCommand::ActivityEnd;
-        let bytes = codec.encode_command(&cmd, &config).unwrap();
-        let json = String::from_utf8(bytes).unwrap();
-        assert!(
-            json.contains("\"activityEnd\""),
-            "should contain activityEnd"
-        );
-        assert!(
-            !json.contains("\"activityStart\""),
-            "should not contain activityStart"
-        );
+        let mut config = test_config();
+        config.realtime_input_config = Some(crate::protocol::types::RealtimeInputConfig {
+            automatic_activity_detection: Some(
+                crate::protocol::types::AutomaticActivityDetection {
+                    disabled: Some(true),
+                    start_of_speech_sensitivity: None,
+                    end_of_speech_sensitivity: None,
+                    prefix_padding_ms: None,
+                    silence_duration_ms: None,
+                },
+            ),
+            activity_handling: None,
+            turn_coverage: None,
+        });
+        assert!(!config.automatic_activity_detection_enabled());
+
+        let json = String::from_utf8(
+            codec
+                .encode_command(&SessionCommand::ActivityStart, &config)
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(json.contains("\"activityStart\""), "{json}");
+        assert!(!json.contains("\"activityEnd\""), "{json}");
+
+        let json = String::from_utf8(
+            codec
+                .encode_command(&SessionCommand::ActivityEnd, &config)
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(json.contains("\"activityEnd\""), "{json}");
+        assert!(!json.contains("\"activityStart\""), "{json}");
     }
 
     #[test]

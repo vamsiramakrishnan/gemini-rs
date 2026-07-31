@@ -200,8 +200,22 @@ pub(in crate::live) async fn handle_turn_complete(
         }
     }
 
-    // 10. Instruction amendment (additive -- appends to phase instruction)
+    // 10. Instruction amendment (additive -- appends to the base instruction)
     // Only applies when there was NO phase transition (transition already includes modifiers)
+    //
+    // The base is the current phase's instruction when there is a phase machine,
+    // and the connect-time system instruction when there is not. That fallback
+    // is load-bearing rather than tidy: `Live::builder().instruction(..)` with
+    // no phases is the ordinary shape of a session, and without it every
+    // amendment in such a session was computed and then thrown away, because
+    // `base` was `None` and the `if let` simply did not fire. Nothing reported
+    // it — the callback ran, so it looked wired.
+    //
+    // The concrete casualty was `gemini-memory-rs`, which delivers its memory
+    // map this way. Measured, that map takes a model's ability to name a
+    // `recall_context` filter from 2% to 69%; in a no-phase session it was
+    // never delivered, so the filters it exists to enable were being written
+    // blind.
     if transition_result.is_none() {
         if let Some(ref amendment_fn) = callbacks.instruction_amendment {
             if let Some(amendment_text) = amendment_fn(state) {
@@ -213,7 +227,13 @@ pub(in crate::live) async fn handle_turn_complete(
                 } else {
                     None
                 };
-                if let Some(base_instruction) = base {
+                // Falling back to the session instruction, not to sending the
+                // amendment alone: under `SteeringMode::InstructionUpdate` the
+                // resolved instruction *replaces* the system instruction, so an
+                // amendment on its own would delete the caller's prompt.
+                if let Some(base_instruction) =
+                    base.or_else(|| control_plane.base_instruction.clone())
+                {
                     resolved_instruction =
                         Some(format!("{}\n\n{}", base_instruction, amendment_text));
                 }
@@ -661,13 +681,31 @@ async fn run_turn_extractors(
     }
 }
 
+/// The suppression key for a steering turn: its text, when it is only text.
+///
+/// A turn carrying anything else is never suppressed — equality of the rendered
+/// text is not equality of the content, and silently dropping a turn because its
+/// caption matched would lose the payload.
+fn steering_key(content: &gemini_genai_rs::prelude::Content) -> Option<String> {
+    let mut text = String::new();
+    for part in &content.parts {
+        match part {
+            gemini_genai_rs::prelude::Part::Text { text: t } => text.push_str(t),
+            _ => return None,
+        }
+    }
+    Some(text)
+}
+
 /// Deliver the resolved instruction and any batched context turns for a turn.
 ///
-/// Encodes three invariants (asserted by the `harness` tests):
+/// Encodes four invariants (asserted by the `harness` tests):
 /// - the instruction is delivered **once** and deduped against the last sent
 ///   (InstructionUpdate/Hybrid), or accumulated as a context frame
 ///   (ContextInjection);
 /// - on-enter context and prompt from a phase transition join the same batch;
+/// - a steering line identical to the previous turn's is suppressed, because the
+///   conversation it is appended to has no way to retract the earlier copy;
 /// - delivery is `Immediate` (one `send_client_content`) or `Deferred` (queued in
 ///   `PendingContext` for the next user send), never a burst of isolated frames.
 async fn deliver_instruction_and_context(
@@ -706,6 +744,38 @@ async fn deliver_instruction_and_context(
         if tr.prompt_on_enter {
             should_prompt = true;
         }
+    }
+
+    // Repeat suppression, against the previous turn's steering.
+    //
+    // `send_client_content` appends to the server-side conversation, and nothing
+    // can retract what it appends. So a step that stays active across N turns
+    // used to deposit N verbatim copies of its imperative posture into history,
+    // in the model's own voice — and by the time the step latched, the stale
+    // orders outnumbered the live one. Re-sending unchanged steering does not
+    // reinforce it; it accumulates directives whose preconditions have expired.
+    //
+    // Keyed against the previous turn only, so steering that oscillates because
+    // its underlying condition genuinely oscillated is still delivered, and a
+    // step that advances is never muted.
+    let keys: Vec<Option<String>> = context_buffer.iter().map(steering_key).collect();
+    {
+        let mut last = shared.last_context.lock();
+        let mut kept = Vec::with_capacity(context_buffer.len());
+        for (content, key) in std::mem::take(&mut context_buffer)
+            .into_iter()
+            .zip(keys.iter())
+        {
+            let repeated = key.as_ref().is_some_and(|k| last.iter().any(|p| p == k));
+            if !repeated {
+                kept.push(content);
+            }
+        }
+        // What the model's standing steering *is* this turn, not what was newly
+        // sent: storing the post-suppression set would let a line suppressed on
+        // one turn be re-sent on the next, which is the behaviour being fixed.
+        *last = keys.into_iter().flatten().collect();
+        context_buffer = kept;
     }
 
     // Context delivery — Immediate (one atomic frame now) or Deferred (queued in
@@ -781,6 +851,9 @@ mod harness {
     #[derive(Default)]
     struct RecordingWriter {
         log: Mutex<Vec<Write>>,
+        /// Flattened text of each `send_client_content` batch, in send order.
+        /// The batch *is* the steering, so the order within it is a contract.
+        batches: Mutex<Vec<Vec<String>>>,
     }
 
     #[async_trait::async_trait]
@@ -799,6 +872,21 @@ mod harness {
             turns: Vec<Content>,
             turn_complete: bool,
         ) -> Result<(), SessionError> {
+            self.batches.lock().push(
+                turns
+                    .iter()
+                    .map(|t| {
+                        t.parts
+                            .iter()
+                            .filter_map(|p| match p {
+                                gemini_genai_rs::prelude::Part::Text { text } => Some(text.clone()),
+                                _ => None,
+                            })
+                            .collect::<Vec<_>>()
+                            .join("")
+                    })
+                    .collect(),
+            );
             self.log.lock().push(Write::ClientContent {
                 turns: turns.len(),
                 turn_complete,
@@ -879,6 +967,7 @@ mod harness {
                     barge_in: Mutex::new(tokio_util::sync::CancellationToken::new()),
                     resume_handle: Mutex::new(None),
                     last_instruction: Mutex::new(None),
+                    last_context: Mutex::new(Vec::new()),
                     pending_context: None,
                     delivery: crate::live::processor::DeliveryConfig::default(),
                     dropped: crate::live::processor::DroppedFrames::default(),
@@ -919,6 +1008,79 @@ mod harness {
         fn writes(&self) -> Vec<Write> {
             self.rec.log.lock().clone()
         }
+
+        /// The steering batches sent this run, each as its ordered turn texts.
+        fn batches(&self) -> Vec<Vec<String>> {
+            self.rec.batches.lock().clone()
+        }
+    }
+
+    /// An amendment must reach the model in a session with no phase machine.
+    ///
+    /// This is the ordinary shape of a Live session —
+    /// `Live::builder().instruction(..)` and no phases — and the amendment was
+    /// silently dropped in it: the base came only from `current_phase()`, so
+    /// with no phase there was no base, and the `if let` did not fire. The
+    /// callback still ran, so from outside it looked wired.
+    ///
+    /// Asserted on the wire rather than on a variable, because "computed" was
+    /// never the thing in doubt.
+    #[tokio::test]
+    async fn an_amendment_reaches_the_model_without_a_phase_machine() {
+        let mut h = Harness::new();
+        h.control.base_instruction = Some("You are a companion.".to_string());
+        h.callbacks.instruction_amendment =
+            Some(Arc::new(|_state| Some("Known values: coffee.".to_string())));
+
+        h.run_turn().await;
+
+        let sent: Vec<String> = h
+            .writes()
+            .into_iter()
+            .filter_map(|w| match w {
+                Write::Instruction(text) => Some(text),
+                Write::ClientContent { .. } => None,
+            })
+            .collect();
+        assert_eq!(
+            sent.len(),
+            1,
+            "expected exactly one instruction update, got {sent:?}"
+        );
+        // Composed onto the session instruction, not replacing it: under
+        // `InstructionUpdate` the resolved instruction *is* the system
+        // instruction, so sending the amendment alone would delete the
+        // caller's prompt.
+        assert!(
+            sent[0].contains("You are a companion."),
+            "the caller's own instruction was dropped: {:?}",
+            sent[0]
+        );
+        assert!(
+            sent[0].contains("Known values: coffee."),
+            "the amendment never reached the model: {:?}",
+            sent[0]
+        );
+    }
+
+    /// With no session instruction there is nothing to compose onto, and the
+    /// amendment must not be sent alone — that would replace the model's
+    /// instruction with a fragment.
+    #[tokio::test]
+    async fn an_amendment_alone_never_replaces_the_system_instruction() {
+        let mut h = Harness::new();
+        h.control.base_instruction = None;
+        h.callbacks.instruction_amendment =
+            Some(Arc::new(|_state| Some("Known values: coffee.".to_string())));
+
+        h.run_turn().await;
+
+        assert!(
+            !h.writes()
+                .iter()
+                .any(|w| matches!(w, Write::Instruction(_))),
+            "an amendment with no base was sent as the whole instruction"
+        );
     }
 
     #[tokio::test]
@@ -1078,6 +1240,204 @@ mod harness {
             Some("main"),
             "new phase persisted to state"
         );
+    }
+
+    /// Phases and flows are **independent, additive** steering, not one lowered
+    /// onto the other, and both reach the model on the same turn.
+    ///
+    /// The documentation claimed `Flow` "lowers onto" the phase machine, which
+    /// the control plane does not do: `phase_machine` and `flow` are separate
+    /// `Option`s and step 7f (phase steering) and 7g (flow governance) both
+    /// append to one `context_buffer`. Configure both and the model receives
+    /// both, in this order:
+    ///
+    /// ```text
+    ///   7d tool advisory
+    ///   7e repair nudge
+    ///   7f phase steering context   (modifiers, under ContextInjection)
+    ///   7g flow posture → ground → unmet requirements
+    ///      resolved phase instruction  (last, under ContextInjection)
+    /// ```
+    ///
+    /// The two run on **different cadences**, which is what keeps them from
+    /// fighting: a flow posture is re-projected every turn while the phase
+    /// instruction is seeded only when a transition fires. On a quiet turn the
+    /// model therefore hears the flow and not the phase.
+    #[tokio::test]
+    async fn a_quiet_turn_carries_the_flow_posture_and_no_phase_instruction() {
+        let flow = Flow::new()
+            .step("collect")
+            .posture("FLOW-POSTURE")
+            .done(Guard::is_true("collected"))
+            .build()
+            .expect("valid flow");
+
+        let mut machine = PhaseMachine::new("greeting");
+        machine.add_phase(Phase::new("greeting", "PHASE-INSTRUCTION"));
+
+        let mut h = Harness::new();
+        h.control.steering_mode = SteeringMode::ContextInjection;
+        h.control.flow = Some(FlowMonitor::new(flow, Enforcement::Observe).into_shared());
+        h.phase = Some(tokio::sync::Mutex::new(machine));
+
+        h.run_turn().await;
+
+        let sent: Vec<String> = h.batches().into_iter().flatten().collect();
+        assert!(
+            sent.iter().any(|t| t.contains("FLOW-POSTURE")),
+            "the active step's posture is projected every turn: {sent:?}"
+        );
+        assert!(
+            !sent.iter().any(|t| t.contains("PHASE-INSTRUCTION")),
+            "a phase instruction is seeded by a transition, not re-sent on \
+             every turn — re-sending it would churn the model's framing: {sent:?}"
+        );
+    }
+
+    /// A posture that has not changed is projected **once**, not once per turn.
+    ///
+    /// Every projection is a permanent `model`-role turn in the server-side
+    /// conversation: `send_client_content` appends, and nothing can retract it.
+    /// So a step that stays active across N turns used to deposit N verbatim
+    /// copies of its imperative into history, in the model's own voice.
+    ///
+    /// That is what made the governed collections call re-ask for card digits
+    /// after it had already verified them. `verify`'s posture ("Ask for the last
+    /// four digits… Do not discuss the account… until that returns verified")
+    /// went in on every turn verification took, so by the time the step latched
+    /// the history held several self-attributed orders to ask, against a single
+    /// later one to move on. The model followed the majority.
+    ///
+    /// The instruction channel already deduped against `last_instruction`, and
+    /// the tool advisory already deduped against `active_tools` — the two
+    /// channels carrying standing behavioural directives were the two without
+    /// it.
+    #[tokio::test]
+    async fn an_unchanged_posture_is_projected_once_not_once_per_turn() {
+        let flow = Flow::new()
+            .step("verify")
+            .posture("Ask for the last four digits.")
+            .done(Guard::is_true("identity_verified"))
+            .build()
+            .expect("valid flow");
+
+        let mut h = Harness::new();
+        h.control.flow = Some(FlowMonitor::new(flow, Enforcement::Observe).into_shared());
+
+        // Four turns of the caller stalling before the digits arrive.
+        for _ in 0..4 {
+            h.run_turn().await;
+        }
+
+        let projections = h
+            .batches()
+            .into_iter()
+            .flatten()
+            .filter(|t| t.contains("Ask for the last four digits."))
+            .count();
+        assert_eq!(
+            projections, 1,
+            "the posture is unchanged across all four turns, so it belongs in \
+             the conversation once; {projections} copies is {projections} \
+             standing orders the model must weigh against whatever comes next"
+        );
+    }
+
+    /// Suppression is against the *previous* turn, not for all time: when the
+    /// step advances, the new posture must reach the model.
+    ///
+    /// The failure mode this guards is a dedup that mutes too much — a flow
+    /// whose steering goes silent after the first turn is worse than one that
+    /// repeats itself, because nothing downstream reports it.
+    #[tokio::test]
+    async fn a_changed_posture_still_reaches_the_model() {
+        let flow = Flow::new()
+            .step("verify")
+            .posture("Ask for the last four digits.")
+            .done(Guard::is_true("identity_verified"))
+            .step("disclose")
+            .after("verify")
+            .posture("Read the disclosure.")
+            .done(Guard::is_true("disclosure_given"))
+            .build()
+            .expect("valid flow");
+
+        let mut h = Harness::new();
+        h.control.flow = Some(FlowMonitor::new(flow, Enforcement::Observe).into_shared());
+
+        h.run_turn().await;
+        h.run_turn().await;
+        let _ = h.state.set("identity_verified", true);
+        h.run_turn().await;
+
+        let sent: Vec<String> = h.batches().into_iter().flatten().collect();
+        assert_eq!(
+            sent.iter()
+                .filter(|t| t.contains("Ask for the last four digits."))
+                .count(),
+            1,
+            "the verify posture repeated: {sent:?}"
+        );
+        assert_eq!(
+            sent.iter()
+                .filter(|t| t.contains("Read the disclosure."))
+                .count(),
+            1,
+            "the step advanced and its posture never reached the model: {sent:?}"
+        );
+    }
+
+    /// On a **transition** turn both do reach the model, and the phase
+    /// instruction lands after the flow posture — nearest the user's next turn,
+    /// so the phase persona is the most recent framing the model reads.
+    ///
+    /// Pinned because it is a real precedence decision that nothing else states.
+    #[tokio::test]
+    async fn on_a_transition_the_phase_instruction_follows_the_flow_posture() {
+        let flow = Flow::new()
+            .step("collect")
+            .posture("FLOW-POSTURE")
+            .done(Guard::is_true("collected"))
+            .build()
+            .expect("valid flow");
+
+        let mut machine = PhaseMachine::new("greeting");
+        let mut greeting = Phase::new("greeting", "GREETING-INSTRUCTION");
+        greeting.transitions = vec![Transition {
+            target: "main".into(),
+            guard: Arc::new(|s: &State| s.get::<bool>("advance").unwrap_or(false)),
+            description: None,
+        }];
+        machine.add_phase(greeting);
+        machine.add_phase(Phase::new("main", "PHASE-INSTRUCTION"));
+
+        let mut h = Harness::new();
+        h.control.steering_mode = SteeringMode::ContextInjection;
+        h.control.flow = Some(FlowMonitor::new(flow, Enforcement::Observe).into_shared());
+        h.phase = Some(tokio::sync::Mutex::new(machine));
+        let _ = h.state.set("advance", true);
+
+        h.run_turn().await;
+
+        let batches = h.batches();
+        let batch = batches
+            .iter()
+            .find(|b| b.iter().any(|t| t.contains("PHASE-INSTRUCTION")))
+            .unwrap_or_else(|| panic!("the new phase's instruction must be sent: {batches:?}"));
+
+        let posture_at = batch.iter().position(|t| t.contains("FLOW-POSTURE"));
+        let instruction_at = batch
+            .iter()
+            .position(|t| t.contains("PHASE-INSTRUCTION"))
+            .expect("present by construction");
+
+        if let Some(posture_at) = posture_at {
+            assert!(
+                posture_at < instruction_at,
+                "the phase instruction must land after the flow posture, so the \
+                 phase framing is the most recent thing the model reads: {batch:?}"
+            );
+        }
     }
 
     #[tokio::test]

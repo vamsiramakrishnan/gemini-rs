@@ -1,10 +1,21 @@
 //! Connection methods for `Live`.
 
 use gemini_adk_rs::live::{LiveHandle, LiveSessionBuilder, PhaseMachine};
-use gemini_adk_rs::State;
 use gemini_genai_rs::prelude::*;
 
 use super::Live;
+
+/// Fold builder-registered ambient tools into the flow's own list.
+///
+/// Idempotent and duplicate-free, because an application may name a tool the
+/// flow already declares — or an extension may be installed twice.
+pub(crate) fn merge_ambient(flow: &mut gemini_adk_rs::flow::Flow, ambient: &[String]) {
+    for tool in ambient {
+        if !flow.ambient.contains(tool) {
+            flow.ambient.push(tool.clone());
+        }
+    }
+}
 
 impl Live {
     /// Connect using a Google AI API key.
@@ -89,12 +100,22 @@ impl Live {
             self.config = self.config.record_wire(std::sync::Arc::new(recorder));
         }
 
+        // Config-level tool declarations, captured before `config` moves.
+        let builder_config_tools = self.config.tools.clone();
         let mut builder = LiveSessionBuilder::new(self.config);
 
-        // Resolve deferred agent tools: create shared State, register TextAgentTools
+        // The session's `State`. A caller-supplied one is used as-is so tools
+        // they already built around it write where the flow monitor and phase
+        // machine read; otherwise agent tools get a fresh one as before.
+        let shared_state = self.state.clone();
+        if let Some(ref state) = shared_state {
+            builder = builder.with_state(state.clone());
+        }
+
+        // Resolve deferred agent tools: register TextAgentTools against it.
         let mut dispatcher = self.dispatcher;
         if !self.deferred_agent_tools.is_empty() {
-            let state = State::new();
+            let state = shared_state.clone().unwrap_or_default();
             let d = dispatcher.get_or_insert_with(gemini_adk_rs::tool::ToolDispatcher::new);
             for deferred in self.deferred_agent_tools {
                 d.register(gemini_adk_rs::TextAgentTool::from_arc(
@@ -121,6 +142,21 @@ impl Live {
                 .get_or_insert_with(gemini_adk_rs::tool::ToolDispatcher::new)
                 .set_confirmation_provider(provider);
         }
+
+        // Capture the resolved tool names before the dispatcher moves into the
+        // builder. This is the only point where the set is complete: MCP/A2A/
+        // OpenAPI tools exist only after the handshakes above.
+        let resolved_tool_names: Vec<String> = {
+            let mut names = super::introspect::declaration_names(&builder_config_tools);
+            if let Some(d) = &dispatcher {
+                names.extend(super::introspect::declaration_names(
+                    &d.to_tool_declarations(),
+                ));
+            }
+            names.sort();
+            names.dedup();
+            names
+        };
 
         if let Some(dispatcher) = dispatcher {
             builder = builder.dispatcher(dispatcher);
@@ -173,7 +209,33 @@ impl Live {
         for layer in self.middleware_layers {
             builder = builder.middleware(layer);
         }
-        if let Some(flow) = self.flow {
+        if let Some(mut flow) = self.flow {
+            // Merged here rather than in `govern`/`ambient_tools` so the two
+            // compose regardless of the order the caller wrote them in.
+            merge_ambient(&mut flow, &self.ambient_tools);
+            // A flow names tools as strings, and a name that matches nothing is
+            // not inert: an `allow` whitelist containing only a typo denies
+            // every tool for as long as that step is active, silently and for
+            // the rest of the session. The registry to check against only
+            // exists here, after the deferred handshakes above.
+            //
+            // Skipped for `govern_compiled`/`observe_compiled`, whose contract
+            // is that the caller already surfaced these diagnostics via
+            // `Flow::compile`/`compile_with_tools` and connect will not repeat
+            // the work.
+            if !self.flow_precompiled {
+                let registry: Vec<&str> = resolved_tool_names.iter().map(String::as_str).collect();
+                flow.clone()
+                    .compile_with_tools(&registry)
+                    .map_err(|errors| {
+                        gemini_adk_rs::error::AgentError::Config(format!(
+                            "governing flow does not match this session's tools: {errors}. \
+                             Registered tools: [{}]. Use `Flow::compile_with_tools` at load \
+                             time and `govern_compiled` to check this yourself.",
+                            registry.join(", ")
+                        ))
+                    })?;
+            }
             let mut monitor = gemini_adk_rs::flow::FlowMonitor::new(flow, self.flow_mode);
             for (step, agent, mode) in self.flow_actions {
                 monitor = monitor.on_enter(step, gemini_adk_rs::flow::run(agent, mode));
@@ -341,5 +403,179 @@ mod tests {
     fn uses_audio_output_respects_text_only() {
         let config = SessionConfig::new("key").text_only();
         assert!(!uses_audio_output(&config));
+    }
+
+    // ─── ambient tool merge ─────────────────────────────────────────────────
+
+    use gemini_adk_rs::flow::{Flow, Guard};
+
+    fn whitelisting_flow() -> Flow {
+        Flow::new()
+            .step("book")
+            .allow(["book_table"])
+            .done(Guard::called_ok("book_table"))
+            .build()
+            .expect("flow is structurally valid")
+    }
+
+    #[test]
+    fn merge_ambient_adds_registered_tools() {
+        let mut flow = whitelisting_flow();
+        merge_ambient(&mut flow, &["recall_context".to_string()]);
+        assert_eq!(flow.ambient, ["recall_context"]);
+    }
+
+    #[test]
+    fn merge_ambient_does_not_duplicate() {
+        // The flow already declares it and an extension registers it too.
+        let mut flow = Flow::new()
+            .ambient(["recall_context"])
+            .step("book")
+            .allow(["book_table"])
+            .done(Guard::called_ok("book_table"))
+            .build()
+            .expect("flow is structurally valid");
+        merge_ambient(&mut flow, &["recall_context".to_string()]);
+        merge_ambient(&mut flow, &["recall_context".to_string()]);
+        assert_eq!(
+            flow.ambient,
+            ["recall_context"],
+            "merging is idempotent, so an extension installed twice is harmless"
+        );
+    }
+
+    // ─── connect-time flow validation ───────────────────────────────────────
+    //
+    // These run to a real `connect_google_ai` with a junk key. That is safe and
+    // deliberate: validation happens before `builder.connect()`, so a `Config`
+    // error proves the check fired *and* that it fired before any socket was
+    // opened. A `Session` error would mean the flow was accepted and the
+    // failure came from the network instead.
+
+    fn book_tool() -> crate::compose::tools::ToolComposite {
+        crate::compose::T::simple("book_table", "Book a table", |_| async {
+            Ok(serde_json::json!({"ok": true}))
+        })
+    }
+
+    #[tokio::test]
+    async fn a_flow_naming_an_unregistered_tool_is_refused_at_connect() {
+        let flow = Flow::new()
+            .step("book")
+            .allow(["book_tabel"]) // typo: the registered tool is `book_table`
+            .done(Guard::called_ok("book_tabel"))
+            .build()
+            .expect("structurally valid — the name is the problem, not the shape");
+
+        let err = Live::builder()
+            .with_tools(book_tool())
+            .govern(flow)
+            .connect_google_ai("not-a-real-key")
+            .await
+            .err()
+            .expect("a flow naming a tool that does not exist must not connect");
+
+        let msg = err.to_string();
+        assert!(
+            msg.contains("book_tabel"),
+            "the error must name the tool that does not exist: {msg}"
+        );
+        assert!(
+            msg.contains("book_table"),
+            "and list what is registered, so the typo is visible: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_flow_matching_the_registered_tools_passes_validation() {
+        // Reaches the network and fails there — which is the proof that the
+        // flow check passed rather than short-circuiting.
+        let flow = Flow::new()
+            .step("book")
+            .allow(["book_table"])
+            .done(Guard::called_ok("book_table"))
+            .build()
+            .expect("valid");
+
+        let err = Live::builder()
+            .with_tools(book_tool())
+            .govern(flow)
+            .connect_google_ai("not-a-real-key")
+            .await
+            .err()
+            .expect("the key is junk, so this still fails — just not on the flow");
+
+        assert!(
+            !err.to_string().contains("governing flow"),
+            "a flow whose tools all exist must clear validation: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn ambient_tools_count_as_registered_for_validation() {
+        // `ambient` joins the tool universe, so an ambient tool that is really
+        // registered must satisfy the check rather than trip it.
+        let flow = Flow::new()
+            .ambient(["book_table"])
+            .step("book")
+            .done(Guard::called_ok("book_table"))
+            .build()
+            .expect("valid");
+
+        let err = Live::builder()
+            .with_tools(book_tool())
+            .govern(flow)
+            .connect_google_ai("not-a-real-key")
+            .await
+            .err()
+            .expect("junk key");
+
+        assert!(
+            !err.to_string().contains("governing flow"),
+            "an ambient tool that exists must not be reported missing: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_precompiled_flow_is_not_revalidated() {
+        // `govern_compiled` documents that connect does not re-check. Honour it
+        // even when the flow would fail the check, or the documented
+        // compile-once-govern-many path would silently stop working.
+        let compiled = Flow::new()
+            .step("book")
+            .allow(["book_tabel"])
+            .done(Guard::called_ok("book_tabel"))
+            .build()
+            .expect("valid shape")
+            .compile()
+            .expect("compiles without a tool registry");
+
+        let err = Live::builder()
+            .with_tools(book_tool())
+            .govern_compiled(compiled)
+            .connect_google_ai("not-a-real-key")
+            .await
+            .err()
+            .expect("junk key");
+
+        assert!(
+            !err.to_string().contains("governing flow"),
+            "a pre-compiled flow must not be re-validated at connect: {err}"
+        );
+    }
+
+    #[test]
+    fn ambient_tools_registers_regardless_of_govern_order() {
+        // The whole reason the merge happens at connect: an application may
+        // write `.govern(..)` before or after the extension that needs ambient
+        // tools, and neither order may lose the registration.
+        let before = Live::builder()
+            .govern(whitelisting_flow())
+            .ambient_tools(["recall_context"]);
+        let after = Live::builder()
+            .ambient_tools(["recall_context"])
+            .govern(whitelisting_flow());
+        assert_eq!(before.ambient_tool_names(), ["recall_context"]);
+        assert_eq!(after.ambient_tool_names(), ["recall_context"]);
     }
 }

@@ -262,7 +262,16 @@ async fn generic_run_session<T: Transport, C: Codec>(
                         }
                         // Skip unparseable messages
                     }
-                    Ok(None) => return DisconnectReason::Error("Transport closed".into()),
+                    // The peer's stated reason when it gave one — a bare
+                    // "transport closed" is the fact of the close with the
+                    // account of it thrown away.
+                    Ok(None) => {
+                        return DisconnectReason::Error(
+                            transport
+                                .close_reason()
+                                .unwrap_or_else(|| "transport closed".into()),
+                        )
+                    }
                     Err(e) => return DisconnectReason::Error(e.to_string()),
                 }
             }

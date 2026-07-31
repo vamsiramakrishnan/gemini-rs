@@ -29,6 +29,12 @@ mod config;
 mod connect;
 mod contract;
 mod extraction;
+mod introspect;
+
+/// The ambient-tool merge `connect` performs, exposed so
+/// [`check_live`](crate::testing::check_live) checks the same flow the session
+/// will actually run rather than the one the caller wrote.
+pub(crate) use connect::merge_ambient as merge_ambient_for_check;
 mod phases;
 
 use std::collections::HashMap;
@@ -45,6 +51,7 @@ pub use gemini_adk_rs::live::{
 };
 use gemini_adk_rs::llm::BaseLlm;
 use gemini_adk_rs::tool::ToolDispatcher;
+use gemini_adk_rs::State;
 use gemini_genai_rs::prelude::*;
 
 // Carve (gap #9): `gemini_adk_fluent_rs::live` is the curated home for the full
@@ -163,6 +170,15 @@ pub struct Live {
     // Governed flow (DAG) + its enforcement mode.
     pub(crate) flow: Option<gemini_adk_rs::flow::Flow>,
     pub(crate) flow_mode: gemini_adk_rs::flow::Enforcement,
+    /// Merged into the flow's own `ambient` list at connect, so an extension
+    /// that registers cross-cutting tools composes with `govern` in either order.
+    pub(crate) ambient_tools: Vec<String>,
+    /// Set by `govern_compiled`/`observe_compiled`, whose documented contract is
+    /// that a `CompiledFlow` already surfaced its diagnostics and connect will
+    /// not re-check it. Connect validates the flow only when this is false.
+    pub(crate) flow_precompiled: bool,
+    /// Caller-supplied session `State`, so tools and flow guards can share one.
+    pub(crate) state: Option<State>,
     // Per-step on_enter actions: run an agent in a mode when a step activates.
     pub(crate) flow_actions: Vec<(
         String,
@@ -245,6 +261,9 @@ impl Live {
             confirmation_provider: None,
             flow: None,
             flow_mode: gemini_adk_rs::flow::Enforcement::Enforce,
+            ambient_tools: Vec::new(),
+            flow_precompiled: false,
+            state: None,
             flow_actions: Vec::new(),
             record_wire_path: None,
         }
@@ -256,7 +275,64 @@ impl Live {
     pub fn govern(mut self, flow: gemini_adk_rs::flow::Flow) -> Self {
         self.flow = Some(flow);
         self.flow_mode = gemini_adk_rs::flow::Enforcement::Enforce;
+        self.flow_precompiled = false;
         self
+    }
+
+    /// Use a `State` you already hold as the session's state.
+    ///
+    /// Without this a tool closure captures whatever `State` the caller made,
+    /// the session runs on a different one, and the two never meet — so a tool
+    /// that writes `identity_verified` and a `Guard::is_true("identity_verified")`
+    /// that reads it are talking about different maps. The guard never fires,
+    /// the flow never advances, and every subsequent tool is refused by a gate
+    /// whose condition was in fact satisfied.
+    ///
+    /// That is the ordinary shape of a governed flow — tools write the facts,
+    /// guards read them — so this is how you make it work:
+    ///
+    /// ```no_run
+    /// # use gemini_adk_fluent_rs::live::Live;
+    /// # use gemini_adk_rs::State;
+    /// let state = State::new();
+    /// Live::builder()
+    ///     .with_state(state.clone())   // the session runs on this
+    ///     .with_tools(my_tools(state)); // and so do the tools
+    /// # fn my_tools(_: State) -> gemini_adk_fluent_rs::compose::tools::ToolComposite { todo!() }
+    /// ```
+    ///
+    /// `agent_tool` already shares state with the agents it wraps; this is the
+    /// same guarantee for ordinary tools.
+    pub fn with_state(mut self, state: State) -> Self {
+        self.state = Some(state);
+        self
+    }
+
+    /// Register cross-cutting tools as
+    /// [ambient](gemini_adk_rs::flow::Flow::ambient): exempt from every step's
+    /// `allow` whitelist, still bound by anything that names them.
+    ///
+    /// Merged into the governing flow at connect, so this composes with
+    /// [`govern`](Self::govern) in **either order**. Without a flow it is inert.
+    ///
+    /// Extensions that install their own tools should call this rather than
+    /// making the application remember to widen every step — `with_memory` does
+    /// exactly that for `recall_context` and `manage_memory`.
+    pub fn ambient_tools<I, S>(mut self, tools: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.ambient_tools.extend(tools.into_iter().map(Into::into));
+        self
+    }
+
+    /// The cross-cutting tools registered via [`ambient_tools`](Self::ambient_tools).
+    ///
+    /// Introspection for extensions and tests: the flow's own `ambient` list is
+    /// not included, because the two are only merged at connect.
+    pub fn ambient_tool_names(&self) -> &[String] {
+        &self.ambient_tools
     }
 
     /// Attach a [`Flow`](gemini_adk_rs::flow::Flow) in **observe** mode: nothing
@@ -264,6 +340,7 @@ impl Live {
     pub fn observe(mut self, flow: gemini_adk_rs::flow::Flow) -> Self {
         self.flow = Some(flow);
         self.flow_mode = gemini_adk_rs::flow::Enforcement::Observe;
+        self.flow_precompiled = false;
         self
     }
 
@@ -276,7 +353,9 @@ impl Live {
     /// already surfaced its diagnostics, so connect does **not** re-validate or
     /// re-compile it — compile once at load time, govern many sessions.
     pub fn govern_compiled(self, flow: gemini_adk_rs::flow::CompiledFlow) -> Self {
-        self.govern(flow.into_flow())
+        let mut live = self.govern(flow.into_flow());
+        live.flow_precompiled = true;
+        live
     }
 
     /// Attach a pre-compiled
@@ -285,7 +364,9 @@ impl Live {
     /// Like [`govern_compiled`](Self::govern_compiled), the flow is not
     /// re-validated or re-compiled at connect.
     pub fn observe_compiled(self, flow: gemini_adk_rs::flow::CompiledFlow) -> Self {
-        self.observe(flow.into_flow())
+        let mut live = self.observe(flow.into_flow());
+        live.flow_precompiled = true;
+        live
     }
 
     /// Run an agent the first time the named flow step becomes active.

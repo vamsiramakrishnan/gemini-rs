@@ -19,7 +19,9 @@ use gemini_adk_rs::live::transcript::TranscriptTurn;
 use gemini_adk_rs::state::State;
 use gemini_memory_rs::core::{SessionId, UserId};
 use gemini_memory_rs::engine::{MemoryEngine, MemorySession};
-use gemini_memory_rs::runtime::{MemorySlot, MemoryTurnExtractor};
+use gemini_memory_rs::runtime::{
+    MemorySlot, MemoryTurnExtractor, MANAGE_TOOL, MEMORY_TOOLS, RECALL_TOOL,
+};
 
 /// The slot every case here gates on.
 const DIET: &str = "user:diet";
@@ -278,6 +280,117 @@ async fn a_returning_user_passes_the_gate_on_their_first_turn() {
         "a fact from a previous session must open the gate on turn one; state holds {:?}",
         state.get::<String>(DIET)
     );
+}
+
+// ─── memory's own tools under a governing flow ──────────────────────────────
+
+/// A step's `allow` list excludes by omission. Memory's tools are not part of
+/// any step's repertoire, so without `ambient` a flow that whitelists its own
+/// tools switches recall off for the duration — and silently, because the model
+/// simply stops being told what it knows.
+///
+/// This drives the same `admits_tool` the control lane's tool gate calls
+/// (`control_plane/tool_handler.rs`), so it is the gate itself, not a
+/// restatement of it.
+#[tokio::test]
+async fn a_whitelisting_step_blocks_memory_tools_without_ambient() {
+    let flow = Flow::new()
+        .step("book")
+        .allow(["book_table"])
+        .done(Guard::called_ok("book_table"))
+        .build()
+        .expect("flow is structurally valid");
+    let monitor = FlowMonitor::try_new(flow, Enforcement::Enforce).expect("flow compiles");
+
+    for tool in MEMORY_TOOLS {
+        assert!(
+            monitor.admits_tool(tool, &State::new()).is_err(),
+            "this is the friction `ambient` exists to remove: '{tool}' is denied \
+             by a whitelist that was never about memory"
+        );
+    }
+}
+
+/// The same flow, with memory's tools declared ambient — which is what
+/// `Live::with_memory` registers on the application's behalf.
+#[tokio::test]
+async fn ambient_memory_tools_survive_a_whitelisting_step() {
+    let flow = Flow::new()
+        .ambient(MEMORY_TOOLS)
+        .step("book")
+        .allow(["book_table"])
+        .done(Guard::called_ok("book_table"))
+        .build()
+        .expect("flow is structurally valid");
+    let monitor = FlowMonitor::try_new(flow, Enforcement::Enforce).expect("flow compiles");
+
+    let state = State::new();
+    for tool in MEMORY_TOOLS {
+        assert_eq!(
+            monitor.admits_tool(tool, &state),
+            Ok(()),
+            "'{tool}' must stay available while a step whitelists its own tools"
+        );
+    }
+    assert!(
+        monitor.admits_tool("some_other_tool", &state).is_err(),
+        "ambient must not widen the whitelist for anything else"
+    );
+}
+
+/// Ambient is an exemption from exclusion-by-omission, not a licence. A flow
+/// that deliberately forbids memory writes until identity is verified must
+/// still be obeyed — otherwise `ambient` would be a hole in the governance
+/// model rather than a correction to it.
+#[tokio::test]
+async fn a_flow_can_still_gate_memory_writes_deliberately() {
+    let flow = Flow::new()
+        .ambient(MEMORY_TOOLS)
+        .step("verify")
+        .done(Guard::is_true("identity_verified"))
+        .never(MANAGE_TOOL)
+        .until(Guard::is_true("identity_verified"))
+        .build()
+        .expect("flow is structurally valid");
+    let monitor = FlowMonitor::try_new(flow, Enforcement::Enforce).expect("flow compiles");
+
+    let state = State::new();
+    assert!(
+        monitor.admits_tool(MANAGE_TOOL, &state).is_err(),
+        "an unverified caller must not be able to write to memory"
+    );
+    assert_eq!(
+        monitor.admits_tool(RECALL_TOOL, &state),
+        Ok(()),
+        "reading is not what was forbidden"
+    );
+
+    let _ = state.set("identity_verified", true);
+    assert_eq!(
+        monitor.admits_tool(MANAGE_TOOL, &state),
+        Ok(()),
+        "once verified, the constraint stops binding"
+    );
+}
+
+/// `with_memory` must register the tools itself. Asserted through the builder
+/// rather than by rebuilding the flow by hand, so deleting that line fails here
+/// instead of passing quietly.
+#[cfg(feature = "fluent")]
+#[test]
+fn with_memory_registers_its_tools_as_ambient() {
+    use gemini_adk_fluent_rs::live::Live;
+    use gemini_memory_rs::runtime::LiveMemoryExt;
+
+    let engine = engine();
+    let builder = Live::builder().with_memory(session(&engine));
+    for tool in MEMORY_TOOLS {
+        assert!(
+            builder.ambient_tool_names().iter().any(|t| t == tool),
+            "`with_memory` must register '{tool}' so the application does not \
+             have to widen every step of its flow"
+        );
+    }
 }
 
 // ─── the key convention itself ──────────────────────────────────────────────

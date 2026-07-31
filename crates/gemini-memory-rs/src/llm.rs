@@ -122,6 +122,12 @@ impl RetrievalPlanExtractor for GeminiPlanExtractor {
         let wire: WirePlan = parse_json(&response.text())?;
 
         Ok(RetrievalPlan {
+            // The planner never sets the hints. They narrow retrieval, and this
+            // is an inference from the transcript rather than a caller's stated
+            // intent — the same reason `run_lexical` refuses to apply a plan's
+            // scopes as a filter. Only `recall_context` fills them.
+            subject_hint: None,
+            predicate_hint: None,
             plan_id: PlanId::generate(),
             turn_id: context.turn_id,
             generation: context.generation,

@@ -146,11 +146,84 @@ sub-agent or fetch, and guards gate on either — all reading the same `State`.
     (e.g. "never transfer a spam caller", and recall that a `terminal()` step
     latches done immediately and is therefore never active), use a global
     `never(tool).until(guard)` constraint instead of a step `deny`.
+  - **`allow` excludes by omission**, which is what you want for the domain tools
+    a step is *about* and not for infrastructure no step is about. Name those
+    with `ambient([tools])` — see below.
+
+### Ambient tools
+
+A step's `allow` list is a whitelist, so every tool the author did not think to
+name is denied while that step is active. Writing `.allow(["book_table"])` means
+"book here, don't search the catalogue" — it does not mean "stop remembering who
+the caller is", but that is what it did to any cross-cutting tool.
+
+`ambient` names those tools once, at flow level:
+
+```rust
+Flow::new()
+    .ambient(["recall_context", "manage_memory"])
+    .step("book")
+        .allow(["book_table"])     // recall still available here
+        .done(Guard::called_ok("book_table"))
+```
+
+Ambient is an exemption from *exclusion by omission* and nothing more. Anything
+that **names** the tool still binds, because naming it is a deliberate act:
+
+| Still applies to an ambient tool | Why |
+|---|---|
+| `deny([tool])` | the step named it |
+| `once(tool)` | the constraint named it |
+| `never(tool).until(guard)` | the constraint named it |
+
+So a flow can hold `ambient(MEMORY_TOOLS)` *and* `never("manage_memory").until(verified)`
+— reads stay available, writes wait for identity. Ambient tools also join the
+flow's tool universe, so `compile_with_tools` still catches a registry that does
+not cover them.
+
+Extensions register their own: `Live::with_memory(..)` calls
+`.ambient_tools(MEMORY_TOOLS)` for you, and the registration is merged into the
+flow at connect, so it composes with `.govern(..)` written on either side of it.
 - **Speech is shaped softly, proactively.** The active step's `posture` is
   injected as turn-boundary steering *before* the model speaks — you never block
   speech mid-stream in a voice session.
 - **Repair from real gaps.** Unmet `require` steps are surfaced at the turn
   boundary so the model gathers what's missing.
+
+## Phases and flows together
+
+A `Flow` does **not** compile down to a `PhaseMachine`. They are independent
+subsystems — the control plane holds each as its own `Option` — and configuring
+both is supported and sometimes right. What you need to know is the cadence and
+the order, because both steer the same model on the same turn.
+
+**Different cadences.** A flow's active-step `posture` is re-projected on
+*every* turn boundary. A phase's `instruction` is seeded only when a
+*transition* fires. So a quiet turn carries the flow's posture and no phase
+instruction — which is what stops the two from churning against each other.
+
+**Deterministic order.** Everything projected at a turn boundary is accumulated
+into one batch and sent as a single frame, in this order:
+
+```
+1. tool availability advisory      (on phase transition, if enabled)
+2. repair nudge / escalation       (unmet `needs`)
+3. phase steering context          (modifiers, under ContextInjection)
+4. flow posture → ground → unmet requirements
+5. resolved phase instruction      (transition turns, under ContextInjection)
+```
+
+The phase instruction lands **last**, nearest the user's next turn, so on a
+transition the phase persona is the most recent framing the model reads. Under
+the default `SteeringMode::InstructionUpdate` step 5 goes to the *system
+instruction* instead of the batch, so the two never share a channel at all.
+
+**Which to reach for.** Use phases when the conversation has personas or stages
+that change how the assistant *speaks*. Use a flow when there are obligations
+and orderings that must be *enforced* — gated tools, required steps, an audit
+trail. Reach for both when you have both, and expect them to add rather than
+arbitrate: nothing resolves a contradiction between a posture and a phase
+instruction, so do not write one.
 
 ## Verbs (the closed vocabulary)
 
@@ -163,6 +236,7 @@ sub-agent or fetch, and guards gate on either — all reading the same `State`.
 | `posture(text)` | instruction imposed while active |
 | `ground(template)` | curated, `State`-interpolated fact line projected while active (anti-hallucination) — `{key}` / `{key?yes:no}` |
 | `allow([tools])` / `deny([tools])` | tool whitelist/blacklist while active |
+| `ambient([tools])` | cross-cutting tools exempt from every step's `allow` whitelist |
 | `terminal()` | a step that completes on eligibility |
 | `once(tool)` | a tool may run at most once |
 | `before(a, b)` | ordering invariant |
@@ -189,6 +263,7 @@ real traces can be scored for conformance.
 ## See also
 
 - [Per-Tool Policies](./tool-policies.md) — `confirm`/`timeout`/`cached`; commit-tools
-- [Phase System](./phases.md) — the lower-level stage machine `Flow` lowers onto
+- [Phase System](./phases.md) — the other steering mechanism; independent of
+  `Flow` and composable with it (see [Phases and flows together](#phases-and-flows-together))
 - [Tool System](./tools.md) — defining the tools a flow gates
 - cookbook [37 — governed flow](../../examples/cookbook/src/37_governed_flow.rs)

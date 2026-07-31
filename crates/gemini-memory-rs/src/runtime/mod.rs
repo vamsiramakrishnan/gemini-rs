@@ -15,6 +15,6 @@ pub mod turn_extractor;
 pub use live::{memory_tools, LiveMemoryExt};
 pub use tools::{
     manage_memory_tool, recall_context_tool, ManageArgs, RecallArgs, RecallScope, MANAGE_TOOL,
-    RECALL_TOOL,
+    MEMORY_TOOLS, RECALL_TOOL,
 };
-pub use turn_extractor::{MemorySlot, MemoryTurnExtractor, MEMORY_EXTRACTOR_NAME};
+pub use turn_extractor::{MemorySlot, MemorySlotError, MemoryTurnExtractor, MEMORY_EXTRACTOR_NAME};

@@ -166,7 +166,8 @@ pub mod prelude {
     pub use crate::patterns::*;
     // Build-time validation DX (contract checking, data-flow inference, harness).
     pub use crate::testing::{
-        check_contracts, diagnose, infer_data_flow, AgentHarness, ContractViolation, DataFlowEdge,
+        check_contracts, check_live, diagnose, infer_data_flow, AgentHarness, ContractViolation,
+        DataFlowEdge, LiveViolation,
     };
 
     // The L1 `gemini_adk_rs::agent::Agent` *trait* collides with the L2 `Agent`

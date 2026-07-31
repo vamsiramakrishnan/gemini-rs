@@ -11,111 +11,27 @@
 //! Reading a text-modality response would exercise a path no deployment uses.
 //!
 //! Skips when no Gemini API key is configured.
+//!
+//! The corpus here is deliberately tiny — this file is about the wiring. For
+//! retrieval against a corpus large enough to be wrong about, see
+//! `haystack_live_e2e.rs`.
 
-#![cfg(feature = "gemini-llm")]
+// Needs `gemini-llm` for model-backed extraction and `fluent` for the L2
+// `Live` builder these drive; `gemini-llm` alone does not compile.
+#![cfg(all(feature = "gemini-llm", feature = "fluent"))]
 
 mod common;
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use std::time::Duration;
-
-use parking_lot::Mutex;
-use tokio::sync::Notify;
 
 use gemini_adk_fluent_rs::live::Live;
-use gemini_genai_rs::prelude::GeminiModel;
 use gemini_memory_rs::core::{SessionId, TurnId};
 use gemini_memory_rs::engine::{MemoryEngine, MemorySession};
 use gemini_memory_rs::runtime::{LiveMemoryExt, MemorySlot};
 
+use common::live::{connect, Observed};
 use common::{have_api_key, model_backed_engine, skip, ScratchDir};
-
-/// How long to wait for the model to finish a turn. Voice turns are slower than
-/// text ones and the extractor runs an out-of-band model call at the boundary.
-const TURN_TIMEOUT: Duration = Duration::from_secs(90);
-
-/// Cap on the handshake, so a rejected setup fails loudly instead of retrying
-/// behind a wait that never resolves.
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
-
-/// The Live model these tests drive.
-///
-/// **The name differs by platform**, which is why this is resolved at runtime
-/// rather than pinned to a [`GeminiModel`] variant:
-///
-/// | Platform | Native-audio Live model |
-/// |---|---|
-/// | Google AI (AI Studio) | `gemini-2.5-flash-native-audio-preview-12-2025` |
-/// | Vertex AI | `gemini-2.5-flash-native-audio` |
-///
-/// These tests run against Google AI, so they default to the AI Studio name.
-/// Override with `GEMINI_LIVE_MODEL` to point at Vertex, a different preview,
-/// or a newer release.
-///
-/// Neither named variant in the enum works here: `Gemini2_0FlashLive`
-/// (`gemini-2.0-flash-live-001`) and `GeminiLive2_5FlashNativeAudio`
-/// (`gemini-live-2.5-flash-native-audio`) both draw "not found for API version
-/// v1beta, or is not supported for bidiGenerateContent" from Google AI. List
-/// what a key can actually reach with:
-///
-/// ```text
-/// curl "https://generativelanguage.googleapis.com/v1beta/models?key=$GEMINI_API_KEY" \
-///   | jq -r '.models[] | select(.supportedGenerationMethods[]? == "bidiGenerateContent") | .name'
-/// ```
-fn live_model() -> GeminiModel {
-    GeminiModel::Custom(
-        std::env::var("GEMINI_LIVE_MODEL")
-            .unwrap_or_else(|_| "models/gemini-2.5-flash-native-audio-preview-12-2025".to_string()),
-    )
-}
-
-/// What a session observed while it ran.
-#[derive(Default)]
-struct Observed {
-    /// Finalized output transcripts, one per turn.
-    spoken: Mutex<Vec<String>>,
-    /// Tool names that produced a response.
-    tools: Mutex<Vec<String>>,
-    /// Bytes of PCM received — proof the session really is in voice mode.
-    audio_bytes: AtomicUsize,
-    /// Errors reported by the server or processor.
-    errors: Mutex<Vec<String>>,
-    /// Fired at every turn boundary.
-    turn: Notify,
-}
-
-impl Observed {
-    /// Wait for one turn to complete, or report what was seen if it never does.
-    async fn await_turn(&self, what: &str) {
-        if tokio::time::timeout(TURN_TIMEOUT, self.turn.notified())
-            .await
-            .is_err()
-        {
-            panic!(
-                "no turn completed within {TURN_TIMEOUT:?} while {what}\n  spoken: {:?}\n  tools: {:?}\n  errors: {:?}",
-                self.spoken.lock(),
-                self.tools.lock(),
-                self.errors.lock()
-            );
-        }
-    }
-
-    /// Everything the model said, lowercased and joined.
-    fn transcript(&self) -> String {
-        self.spoken.lock().join(" ").to_lowercase()
-    }
-
-    fn report(&self) -> String {
-        format!(
-            "spoken: {:?}\n  tools: {:?}\n  audio bytes: {}\n  errors: {:?}",
-            self.spoken.lock(),
-            self.tools.lock(),
-            self.audio_bytes.load(Ordering::Relaxed),
-            self.errors.lock()
-        )
-    }
-}
 
 fn slots() -> Vec<MemorySlot> {
     vec![
@@ -125,66 +41,18 @@ fn slots() -> Vec<MemorySlot> {
 }
 
 /// Connect a voice session with memory installed, wired to an [`Observed`].
-async fn connect(
+async fn connect_with_memory(
     session: Arc<MemorySession>,
     instruction: &str,
     observed: Arc<Observed>,
 ) -> Result<gemini_adk_rs::live::LiveHandle, gemini_adk_rs::error::AgentError> {
-    let (spoken, tools, audio, errors, turn) = (
-        observed.clone(),
-        observed.clone(),
-        observed.clone(),
-        observed.clone(),
-        observed.clone(),
-    );
-
-    let connecting = Live::builder()
-        .model(live_model())
-        .instruction(instruction)
-        // Input transcription feeds ingestion; output transcription is what the
-        // assertions read, since the model answers in audio.
-        .transcription(true, true)
-        .with_memory_slots(session, slots())
-        .on_output_transcript(move |text, is_final| {
-            if is_final && !text.trim().is_empty() {
-                spoken.spoken.lock().push(text.to_string());
-            }
-        })
-        .on_audio(move |data| {
-            audio.audio_bytes.fetch_add(data.len(), Ordering::Relaxed);
-        })
-        // `on_tool_call` returns a value, so it has no `_concurrent` variant and
-        // intercepting it would displace the dispatcher under test. This observes
-        // the same calls without standing in for anything.
-        .before_tool_response(move |responses, _state| {
-            let tools = tools.clone();
-            async move {
-                tools
-                    .tools
-                    .lock()
-                    .extend(responses.iter().map(|r| r.name.clone()));
-                responses
-            }
-        })
-        .on_error(move |msg| {
-            let errors = errors.clone();
-            async move {
-                errors.errors.lock().push(msg);
-            }
-        })
-        .on_turn_complete(move || {
-            let turn = turn.clone();
-            async move {
-                turn.turn.notify_one();
-            }
-        })
-        .connect_from_env();
-
-    tokio::time::timeout(CONNECT_TIMEOUT, connecting)
-        .await
-        .unwrap_or_else(|_| {
-            panic!("connect did not settle within {CONNECT_TIMEOUT:?} — see `live_model`")
-        })
+    connect(
+        Live::builder()
+            .instruction(instruction)
+            .with_memory_slots(session, slots()),
+        observed,
+    )
+    .await
 }
 
 /// Seed durable memory the way a previous conversation would have, then make it
@@ -218,7 +86,7 @@ async fn a_session_connects_with_the_memory_tools_declared() {
     let session = Arc::new(engine.begin_session(SessionId::new("ses_live")));
 
     let observed = Arc::new(Observed::default());
-    let handle = connect(
+    let handle = connect_with_memory(
         session,
         "You are a brief dinner companion. Answer in one short sentence.",
         observed.clone(),
@@ -226,8 +94,9 @@ async fn a_session_connects_with_the_memory_tools_declared() {
     .await
     .expect("a session with the memory tools declared must connect");
 
+    let mark = observed.mark();
     handle.send_text("Hello there.").await.expect("send");
-    observed.await_turn("greeting the model").await;
+    observed.await_answer(mark, "greeting the model").await;
 
     handle.disconnect().await.ok();
 
@@ -269,7 +138,7 @@ async fn a_remembered_fact_reaches_the_models_spoken_answer() {
 
     let session = Arc::new(engine.begin_session(SessionId::new("ses_today")));
     let observed = Arc::new(Observed::default());
-    let handle = connect(
+    let handle = connect_with_memory(
         session,
         "You are a dinner companion. You have tools that recall what you know \
          about this person — use them before answering questions about their \
@@ -279,12 +148,13 @@ async fn a_remembered_fact_reaches_the_models_spoken_answer() {
     .await
     .expect("connect");
 
+    let mark = observed.mark();
     handle
         .send_text("Remind me — what do I eat? Say it in a few words.")
         .await
         .expect("send");
     observed
-        .await_turn("asking about the remembered diet")
+        .await_answer(mark, "asking about the remembered diet")
         .await;
 
     handle.disconnect().await.ok();
@@ -314,7 +184,7 @@ async fn a_fact_stated_over_the_wire_becomes_durable_memory() {
     let session = Arc::new(engine.begin_session(SessionId::new("ses_stating")));
 
     let observed = Arc::new(Observed::default());
-    let handle = connect(
+    let handle = connect_with_memory(
         session.clone(),
         "You are a brief dinner companion. Acknowledge what you're told in one \
          short sentence.",
@@ -323,11 +193,14 @@ async fn a_fact_stated_over_the_wire_becomes_durable_memory() {
     .await
     .expect("connect");
 
+    let mark = observed.mark();
     handle
         .send_text("Something you should know: I'm allergic to shellfish.")
         .await
         .expect("send");
-    observed.await_turn("stating a fact over the wire").await;
+    observed
+        .await_answer(mark, "stating a fact over the wire")
+        .await;
 
     handle.disconnect().await.ok();
 

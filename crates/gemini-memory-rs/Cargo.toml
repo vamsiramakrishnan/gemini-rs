@@ -15,23 +15,33 @@ gemini-genai-rs = { workspace = true }
 gemini-adk-rs = { workspace = true }
 gemini-adk-fluent-rs = { workspace = true, optional = true }
 async-trait = "0.1"
+base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
 parking_lot = "0.12"
 schemars = { version = "0.8", features = ["chrono"] }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 thiserror = "2"
+# Only used behind `fluent`, whose dependency tree already carries it: a failed
+# end-of-session reconciliation must be reported somewhere, not swallowed.
+tracing = { version = "0.1", optional = true }
 tokio = { version = "1", features = ["rt", "macros", "sync", "time", "fs", "io-util"] }
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
 gemini-adk-fluent-rs = { workspace = true }
+# For `semantic_fusion_probe`, which calls the embeddings endpoint directly to
+# measure what a semantic layer would buy before one is built.
+reqwest = { version = "0.12", default-features = false, features = [
+    "json",
+    "rustls-tls-native-roots",
+] }
 
 [features]
 default = ["fluent"]
 # One-call installation onto the L2 `Live` builder.
-fluent = ["dep:gemini-adk-fluent-rs"]
+fluent = ["dep:gemini-adk-fluent-rs", "dep:tracing"]
 # Model-backed extraction: the retrieval-plan and observation extractors,
 # backed by a Gemini model over HTTP.
 gemini-llm = ["gemini-adk-rs/gemini-llm"]

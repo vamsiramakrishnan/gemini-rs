@@ -70,11 +70,29 @@ pub enum AudioFormat {
     Opus,
 }
 
+/// The sample rate the Live API takes on the way in.
+///
+/// Fixed rather than configurable because the API states it natively accepts
+/// 16 kHz and resamples anything else — so the only rate worth declaring is the
+/// one callers are told to send.
+pub const LIVE_INPUT_SAMPLE_RATE: u32 = 16_000;
+
 impl AudioFormat {
-    /// MIME type string for this format.
+    /// MIME type string for this format, as the realtime input contract needs it.
+    ///
+    /// The `rate` parameter on PCM is **required**, not decorative. The Live API
+    /// documents realtime input as `audio/pcm;rate=16000`, and a bare
+    /// `audio/pcm` is accepted by the socket and then silently transcribed as
+    /// nothing: the session stays open, no error is returned, the input
+    /// transcript comes back empty and the model never answers.
+    ///
+    /// That is exactly how this was found. Every audio test in the workspace
+    /// drove sessions with `send_text`, so nothing exercised this path until a
+    /// test fed real synthesised speech and got a 94-second turn with an empty
+    /// transcript back.
     pub fn mime_type(&self) -> &'static str {
         match self {
-            Self::Pcm16 => "audio/pcm",
+            Self::Pcm16 => "audio/pcm;rate=16000",
             Self::Opus => "audio/opus",
         }
     }
@@ -149,6 +167,27 @@ pub enum FunctionResponseScheduling {
     WhenIdle,
     /// Model integrates the result silently without notifying the user.
     Silent,
+}
+
+#[cfg(test)]
+mod audio_format_tests {
+    use super::*;
+
+    /// The rate parameter is required by the Live API and its absence fails
+    /// silently — empty transcript, no error, no answer. Pinned so it cannot
+    /// be "tidied" back to a bare `audio/pcm`.
+    #[test]
+    fn pcm_declares_its_sample_rate() {
+        assert_eq!(
+            AudioFormat::Pcm16.mime_type(),
+            "audio/pcm;rate=16000",
+            "realtime input must declare the rate; a bare audio/pcm is accepted \
+             by the socket and then transcribed as silence"
+        );
+        assert!(AudioFormat::Pcm16
+            .mime_type()
+            .contains(&LIVE_INPUT_SAMPLE_RATE.to_string()));
+    }
 }
 
 #[cfg(test)]

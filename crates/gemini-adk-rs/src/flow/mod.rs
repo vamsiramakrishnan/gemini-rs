@@ -79,6 +79,27 @@ impl Pred {
         }
     }
 
+    /// This predicate as a short prose clause. See [`Guard::describe`].
+    fn describe(&self) -> String {
+        fn join(ps: &[Pred], sep: &str) -> String {
+            ps.iter().map(Pred::describe).collect::<Vec<_>>().join(sep)
+        }
+        match self {
+            Pred::Always => "nothing".to_string(),
+            Pred::IsTrue(k) => format!("'{k}' must be true"),
+            Pred::IsSet(k) => format!("'{k}' must be known"),
+            Pred::Eq(k, v) => format!("'{k}' must be {v}"),
+            Pred::Captured(fields) => {
+                format!("these must be known: {}", fields.join(", "))
+            }
+            Pred::CalledOk(t) => format!("'{t}' must have run successfully"),
+            Pred::Done(s) => format!("step '{s}' must be complete"),
+            Pred::All(ps) => join(ps, " and "),
+            Pred::Any(ps) => join(ps, " or "),
+            Pred::Not(p) => format!("it must not be the case that {}", p.describe()),
+        }
+    }
+
     /// Step ids referenced by `Done(..)` atoms (for validation).
     fn referenced_steps(&self, out: &mut Vec<String>) {
         match self {
@@ -237,6 +258,22 @@ impl Guard {
             Guard::Custom(f) => Guard::Custom(Arc::new(move |ctx| !f(ctx))),
         }
     }
+    /// This guard as a short prose clause, for telling a model what a refusal
+    /// is waiting on.
+    ///
+    /// A refusal that names only the tool leaves the model to guess the
+    /// precondition, and a wrong guess is indistinguishable from a wrong model:
+    /// in the governed collections evaluation, `record_promise_to_pay` was
+    /// refused with "not available in the current step", and the model — with
+    /// nothing else to go on — decided it must need to re-verify the caller and
+    /// asked for the card digits it had already checked.
+    pub fn describe(&self) -> String {
+        match self {
+            Guard::Spec(p) => p.describe(),
+            Guard::Custom(_) => "a condition set by the application".to_string(),
+        }
+    }
+
     /// A bespoke closure over `(state, marking)`. Not serializable.
     pub fn custom(f: impl Fn(&FlowCtx) -> bool + Send + Sync + 'static) -> Self {
         Guard::Custom(Arc::new(f))
@@ -360,6 +397,16 @@ pub struct Flow {
     /// Tools that require confirmation when reached (set by `commit`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub confirm_tools: Vec<String>,
+    /// Cross-cutting tools exempt from step `allow` whitelists.
+    ///
+    /// A step's `allow` list excludes by omission, which is correct for the
+    /// domain tools a step is *about* and wrong for infrastructure no step is
+    /// about — memory recall, escalation, logging. Naming a tool here says "this
+    /// is not part of any step's repertoire", not "this is ungovernable":
+    /// `deny`, `once` and `never(..).until(..)` all still bind, because each of
+    /// those *names* the tool and so is a decision about it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ambient: Vec<String>,
 }
 
 impl Flow {
@@ -459,6 +506,7 @@ impl Flow {
             }
         }
         tools.extend(self.confirm_tools.iter().cloned());
+        tools.extend(self.ambient.iter().cloned());
         tools
     }
 
@@ -1109,11 +1157,23 @@ impl FlowMonitor {
     /// Decide whether a tool call may proceed. `Ok(())` admits it; `Err(reason)`
     /// denies it (the caller blocks in Enforce mode, or records in Observe).
     pub fn admits_tool(&self, tool: &str, state: &State) -> Result<(), String> {
+        match self.admissibility(tool, state) {
+            Ok(()) => Ok(()),
+            Err(denial) => Err(self.render_denial(tool, &denial, state)),
+        }
+    }
+
+    /// The admissibility decision, before it is put into words.
+    ///
+    /// Split from [`admits_tool`](Self::admits_tool) so that rendering a refusal
+    /// can itself ask what *is* admissible without recursing: this function never
+    /// renders, so `render_denial` may call it over the whole tool universe.
+    fn admissibility(&self, tool: &str, state: &State) -> Result<(), Denial> {
         // 1. once(tool)
         for c in &self.flow.constraints {
             if let Constraint::Once(t) = c {
                 if t == tool && self.marking.tool_ok.contains_key(tool) {
-                    return Err(format!("'{tool}' may run at most once"));
+                    return Err(Denial::OnceExhausted);
                 }
             }
         }
@@ -1121,14 +1181,19 @@ impl FlowMonitor {
         for c in &self.flow.constraints {
             if let Constraint::NeverUntil { tool: t, until } = c {
                 if t == tool && !until.eval(&self.ctx(state)) {
-                    return Err(format!("'{tool}' is not permitted yet"));
+                    return Err(Denial::NotYet(until.describe()));
                 }
             }
         }
         // 3. active allow/deny (whitelist while any active step restricts).
         let active = self.active_steps(state);
-        if active.iter().any(|s| s.deny.iter().any(|d| d == tool)) {
-            return Err(format!("'{tool}' is not available in the current step"));
+        if let Some(step) = active.iter().find(|s| s.deny.iter().any(|d| d == tool)) {
+            return Err(Denial::DeniedByStep(step.id.clone()));
+        }
+        // An ambient tool is exempt from the whitelist's exclusion-by-omission,
+        // having already cleared every constraint that names it explicitly.
+        if self.flow.ambient.iter().any(|a| a == tool) {
+            return Ok(());
         }
         let restricting: Vec<&&Step> = active.iter().filter(|s| !s.allow.is_empty()).collect();
         if !restricting.is_empty()
@@ -1136,9 +1201,74 @@ impl FlowMonitor {
                 .iter()
                 .any(|s| s.allow.iter().any(|a| a == tool))
         {
-            return Err(format!("'{tool}' is not available in the current step"));
+            return Err(Denial::NotInStep(
+                restricting.iter().map(|s| s.id.clone()).collect(),
+            ));
         }
         Ok(())
+    }
+
+    /// Put a refusal into words the model can act on.
+    ///
+    /// A refusal reaches the model as a tool error, and it is the only thing the
+    /// model learns about the gate. "'X' is not available in the current step"
+    /// names what failed and nothing about what would succeed, so the model is
+    /// left to infer the precondition — and in the governed collections
+    /// evaluation it inferred wrongly, re-asking a verified caller for their card
+    /// digits after `record_promise_to_pay` was refused. The monitor knows the
+    /// active step, what that step is waiting for, and which tools *are*
+    /// admitted; every refusal now carries it.
+    fn render_denial(&self, tool: &str, denial: &Denial, state: &State) -> String {
+        let head = match denial {
+            Denial::OnceExhausted => {
+                // Nothing to redirect to: the answer is "you already did this".
+                return format!(
+                    "'{tool}' has already run and may run only once in this \
+                     conversation. Do not call it again."
+                );
+            }
+            Denial::NotYet(condition) => {
+                format!("'{tool}' is not permitted yet — first, {condition}.")
+            }
+            Denial::DeniedByStep(step) => {
+                format!("'{tool}' is not allowed during the current step ('{step}').")
+            }
+            Denial::NotInStep(steps) => format!(
+                "'{tool}' is not part of the current step ({}).",
+                steps
+                    .iter()
+                    .map(|s| format!("'{s}'"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        };
+
+        // What the model may do instead. Drawn from the flow's own tool
+        // universe, so it never invents a tool the session has not declared.
+        let available: Vec<String> = self
+            .flow
+            .tool_universe()
+            .into_iter()
+            .filter(|t| self.admissibility(t, state).is_ok())
+            .collect();
+
+        let mut out = head;
+        if available.is_empty() {
+            out.push_str(" No tool is available right now — continue the conversation instead.");
+        } else {
+            out.push_str(" Available now: ");
+            out.push_str(&available.join(", "));
+            out.push('.');
+        }
+        // The posture is the step's own words for what it wants; repeating it
+        // here means the redirection and the reason arrive together, rather than
+        // the model having to reconcile an error with steering sent earlier.
+        let postures = self.active_postures(state);
+        if let Some(first) = postures.first() {
+            out.push(' ');
+            out.push_str(first);
+        }
+        out
     }
 
     /// Observe a tool call for conformance. In Enforce mode the caller has
@@ -1157,6 +1287,24 @@ impl FlowMonitor {
             self.on_tool_ok(tool, state);
         }
     }
+}
+
+/// Why a tool call was refused, before it is rendered into prose.
+///
+/// Structured rather than a string so the renderer can add the redirection —
+/// what *is* available, and what the active step is waiting for — which is the
+/// half a model needs and the old message never carried.
+enum Denial {
+    /// A `once(tool)` constraint, already spent.
+    OnceExhausted,
+    /// A `never(tool).until(guard)` whose guard has not latched; carries the
+    /// rendered guard.
+    NotYet(String),
+    /// The named active step lists the tool in `deny`.
+    DeniedByStep(String),
+    /// Active steps restrict by `allow` and none of them names the tool;
+    /// carries the restricting step ids.
+    NotInStep(Vec<String>),
 }
 
 /// A single problem found while compiling a [`Flow`].
@@ -1294,6 +1442,7 @@ pub struct FlowBuilder {
     steps: Vec<Step>,
     constraints: Vec<Constraint>,
     confirm_tools: Vec<String>,
+    ambient: Vec<String>,
 }
 
 impl FlowBuilder {
@@ -1396,6 +1545,33 @@ impl FlowBuilder {
         ));
         self
     }
+    /// Exempt cross-cutting tools from every step's `allow` whitelist.
+    ///
+    /// Flow-level, and order-independent with respect to `.step(..)`. Use it for
+    /// tools that serve the conversation rather than any one step of it —
+    /// memory recall, escalation, logging. A tool named here still obeys
+    /// `deny`, `once` and `never(..).until(..)`; see [`Flow::ambient`].
+    ///
+    /// ```
+    /// # use gemini_adk_rs::flow::{Flow, Guard};
+    /// let flow = Flow::new()
+    ///     .ambient(["recall_context"])
+    ///     .step("book")
+    ///     .allow(["book_table"])
+    ///     .done(Guard::called_ok("book_table"))
+    ///     .build()
+    ///     .unwrap();
+    /// assert_eq!(flow.ambient, ["recall_context"]);
+    /// ```
+    pub fn ambient<I, S>(mut self, tools: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.ambient.extend(tools.into_iter().map(Into::into));
+        self
+    }
+
     /// Forbid a tool until a guard holds (`never(tool).until(guard)`).
     pub fn never(self, tool: impl Into<String>) -> NeverBuilder {
         NeverBuilder {
@@ -1422,6 +1598,7 @@ impl FlowBuilder {
             steps: self.steps,
             constraints: self.constraints,
             confirm_tools: self.confirm_tools,
+            ambient: self.ambient,
         };
         flow.validate()?;
         Ok(flow)
@@ -1449,6 +1626,151 @@ impl NeverBuilder {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// A refusal must say what would succeed, not only what failed.
+    ///
+    /// The old message was "'X' is not available in the current step" — the
+    /// tool's own name and nothing else. The model cannot act on that: it knows
+    /// the call was rejected but not what the gate is holding out for, so it
+    /// guesses. In the governed collections evaluation it guessed identity
+    /// verification and re-asked a caller it had already verified for their card
+    /// digits, which read as the model losing the tool result when in fact the
+    /// gate had told it nothing.
+    #[test]
+    fn a_refusal_names_what_is_available_instead() {
+        let state = State::new();
+        let mon = FlowMonitor::new(debt_flow(), Enforcement::Enforce);
+
+        let reason = mon
+            .admits_tool("charge_card", &state)
+            .expect_err("charge_card is gated behind verification");
+
+        assert!(
+            reason.contains("lookup_account"),
+            "a refusal must point at the tool that would make progress: {reason}"
+        );
+        assert!(
+            reason.contains("ptp_confirmed"),
+            "a refusal must name the condition it is waiting on: {reason}"
+        );
+    }
+
+    /// The step's own posture rides along, so the reason and the redirection
+    /// arrive in one payload rather than the model having to reconcile an error
+    /// with steering sent on an earlier turn.
+    #[test]
+    fn a_refusal_carries_the_active_steps_posture() {
+        let state = State::new();
+        let mon = FlowMonitor::new(debt_flow(), Enforcement::Enforce);
+
+        let reason = mon
+            .admits_tool("charge_card", &state)
+            .expect_err("charge_card is gated behind verification");
+
+        assert!(
+            reason.contains("Verify the caller's identity."),
+            "the active step's posture belongs in the refusal: {reason}"
+        );
+    }
+
+    /// A spent `once` is the one refusal with nothing to redirect to: the answer
+    /// is "you already did this", and offering alternatives would invite a
+    /// retry under another name.
+    #[test]
+    fn a_spent_once_constraint_does_not_offer_alternatives() {
+        let state = State::new();
+        let flow = Flow::new()
+            .step("pay")
+            .allow(["charge_card"])
+            .done(Guard::called_ok("charge_card"))
+            .once("charge_card")
+            .build()
+            .expect("valid flow");
+        let mut mon = FlowMonitor::new(flow, Enforcement::Enforce);
+        mon.on_tool_ok("charge_card", &state);
+
+        let reason = mon
+            .admits_tool("charge_card", &state)
+            .expect_err("once is spent");
+
+        assert!(
+            reason.contains("already run"),
+            "a spent `once` must say so plainly: {reason}"
+        );
+        assert!(
+            !reason.contains("Available now"),
+            "nothing to redirect to — offering a menu invites a retry: {reason}"
+        );
+    }
+
+    /// The redirection is computed against live state, so it changes as the
+    /// conversation progresses rather than describing the flow's opening move
+    /// forever.
+    #[test]
+    fn the_redirection_tracks_the_conversation() {
+        let state = State::new();
+        let mon = FlowMonitor::new(debt_flow(), Enforcement::Enforce);
+
+        let before = mon
+            .admits_tool("charge_card", &state)
+            .expect_err("gated before the promise is confirmed");
+        assert!(
+            before.contains("ptp_confirmed") && before.contains("lookup_account"),
+            "{before}"
+        );
+
+        // Verification lands and the call moves on to the disclosure step. The
+        // same constraint still blocks `charge_card`, but where the caller *is*
+        // has changed, and the refusal has to change with it.
+        let _ = state.set("identity_verified", true);
+        let mut mon = mon;
+        mon.on_turn(&state);
+        let after = mon
+            .admits_tool("charge_card", &state)
+            .expect_err("the promise is still unconfirmed");
+
+        assert!(
+            after.contains("Give the disclosure."),
+            "the refusal must carry the posture of the step that is now active, \
+             not the one that was active when the session opened: {after}"
+        );
+        assert!(
+            !after.contains("Verify the caller's identity."),
+            "a completed step's posture must not keep riding along on refusals — \
+             that is how a verified caller gets asked to verify again: {after}"
+        );
+        assert_ne!(
+            before, after,
+            "the refusal did not change when the flow advanced"
+        );
+    }
+
+    /// Guard prose is what makes a refusal legible; pinned so the atoms do not
+    /// silently start rendering as debug output.
+    #[test]
+    fn guards_describe_themselves_in_prose() {
+        assert_eq!(
+            Guard::is_true("verified").describe(),
+            "'verified' must be true"
+        );
+        assert_eq!(
+            Guard::captured(["amount", "date"]).describe(),
+            "these must be known: amount, date"
+        );
+        assert_eq!(
+            Guard::called_ok("disclose").describe(),
+            "'disclose' must have run successfully"
+        );
+        assert_eq!(
+            Guard::all([Guard::is_true("a"), Guard::done("b")]).describe(),
+            "'a' must be true and step 'b' must be complete"
+        );
+        assert_eq!(
+            Guard::custom(|_| true).describe(),
+            "a condition set by the application",
+            "a custom guard has no readable spec, and must not pretend otherwise"
+        );
+    }
 
     fn debt_flow() -> Flow {
         Flow::new()
@@ -1929,5 +2251,148 @@ mod tests {
             state: &state,
             marking: &marking
         }));
+    }
+
+    // ─── ambient tools ──────────────────────────────────────────────────────
+    //
+    // A step's `allow` list is a whitelist, so it excludes by omission: every
+    // tool the author did not think to name is denied for the duration. That is
+    // right for domain tools — naming `charge_card` is a statement that this is
+    // the step where money moves — and wrong for cross-cutting infrastructure
+    // that no step is *about*. Memory recall is the motivating case: a flow
+    // author writing `.allow(["book_table"])` is saying "book here, don't search
+    // the catalogue", not "stop remembering who the caller is".
+    //
+    // `ambient` names those tools once, at flow level. They are exempt from the
+    // whitelist's implicit exclusion and from nothing else: a constraint that
+    // *names* the tool still binds, because naming it is a deliberate act.
+
+    fn ambient_flow() -> Flow {
+        Flow::new()
+            .ambient(["recall_context"])
+            .step("gather")
+            .allow(["ask_diet"])
+            .done(Guard::is_set("user:diet"))
+            .step("book")
+            .after("gather")
+            .allow(["book_table"])
+            .done(Guard::called_ok("book_table"))
+            .build()
+            .expect("flow is structurally valid")
+    }
+
+    #[test]
+    fn an_ambient_tool_survives_a_step_whitelist() {
+        let mon = FlowMonitor::new(ambient_flow(), Enforcement::Enforce);
+        let state = State::new();
+        assert_eq!(
+            mon.admits_tool("ask_diet", &state),
+            Ok(()),
+            "the step's own tool is admitted"
+        );
+        assert!(
+            mon.admits_tool("book_table", &state).is_err(),
+            "a later step's tool is still excluded by `gather`'s whitelist"
+        );
+        assert_eq!(
+            mon.admits_tool("recall_context", &state),
+            Ok(()),
+            "an ambient tool must not be caught by a whitelist that never meant to exclude it"
+        );
+    }
+
+    #[test]
+    fn an_ambient_tool_is_still_denied_when_a_step_names_it() {
+        // `deny` names the tool, so it is a decision about that tool rather than
+        // a side effect of listing others. Ambient must not override it.
+        let flow = Flow::new()
+            .ambient(["recall_context"])
+            .step("sensitive")
+            .deny(["recall_context"])
+            .done(Guard::is_true("done"))
+            .build()
+            .expect("flow is structurally valid");
+        let mon = FlowMonitor::new(flow, Enforcement::Enforce);
+        assert!(
+            mon.admits_tool("recall_context", &State::new()).is_err(),
+            "an explicit `deny` outranks ambient"
+        );
+    }
+
+    #[test]
+    fn an_ambient_tool_still_obeys_never_until() {
+        let flow = Flow::new()
+            .ambient(["manage_memory"])
+            .step("verify")
+            .done(Guard::is_true("verified"))
+            .never("manage_memory")
+            .until(Guard::is_true("verified"))
+            .build()
+            .expect("flow is structurally valid");
+        let mon = FlowMonitor::new(flow, Enforcement::Enforce);
+        let state = State::new();
+        assert!(
+            mon.admits_tool("manage_memory", &state).is_err(),
+            "`never(..).until(..)` names the tool; ambient must not unlock it"
+        );
+        let _ = state.set("verified", true);
+        assert_eq!(
+            mon.admits_tool("manage_memory", &state),
+            Ok(()),
+            "once the guard holds the constraint stops binding"
+        );
+    }
+
+    #[test]
+    fn an_ambient_tool_still_obeys_once() {
+        let flow = Flow::new()
+            .ambient(["summarize"])
+            .step("work")
+            .done(Guard::called_ok("summarize"))
+            .once("summarize")
+            .build()
+            .expect("flow is structurally valid");
+        let mut mon = FlowMonitor::new(flow, Enforcement::Enforce);
+        let state = State::new();
+        assert_eq!(mon.admits_tool("summarize", &state), Ok(()));
+        mon.observe_tool("summarize", true, &state);
+        assert!(
+            mon.admits_tool("summarize", &state).is_err(),
+            "`once` names the tool; ambient must not exempt it"
+        );
+    }
+
+    #[test]
+    fn ambient_tools_join_the_tool_universe() {
+        // Otherwise `compile_with_tools` would report a registry that covers the
+        // flow as complete while an ambient tool it never heard of gets called.
+        let flow = ambient_flow();
+        assert!(
+            flow.tool_universe().contains("recall_context"),
+            "an ambient tool is part of the flow's tool universe"
+        );
+        assert!(
+            ambient_flow()
+                .compile_with_tools(&["ask_diet", "book_table"])
+                .is_err(),
+            "a registry missing the ambient tool must not compile clean"
+        );
+        assert!(
+            ambient_flow()
+                .compile_with_tools(&["ask_diet", "book_table", "recall_context"])
+                .is_ok(),
+            "a covering registry compiles"
+        );
+    }
+
+    #[test]
+    fn a_flow_with_no_ambient_tools_is_unchanged() {
+        // The whole point is that this is additive: a flow that never mentions
+        // `ambient` must gate exactly as it did before the field existed.
+        let mon = FlowMonitor::new(debt_flow(), Enforcement::Enforce);
+        let state = State::new();
+        assert_eq!(mon.admits_tool("lookup_account", &state), Ok(()));
+        assert!(mon.admits_tool("charge_card", &state).is_err());
+        assert!(mon.admits_tool("anything_else", &state).is_err());
     }
 }

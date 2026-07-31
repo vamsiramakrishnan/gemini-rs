@@ -295,7 +295,34 @@ const NON_TOPICAL: &[&str] = &[
     "love",
     "hate",
     "prefer",
+    // The corpus's own subject form.
+    //
+    // Every record about the user carries `user` in its subject field, which
+    // is weighted 3.0 — so as a query term it matches most of the corpus and
+    // discriminates within none of it. It reaches queries at all because the
+    // `recall_context` argument is written by the model, which naturally
+    // phrases a memory lookup in the third person ("the user's usual coffee
+    // order"). Left in, a question memory has no answer to still clears the
+    // score floor on the strength of the word "user" alone, and the model is
+    // handed five arbitrary facts to improvise from.
+    "user",
 ];
+
+/// The topical terms of an utterance or query.
+///
+/// What survives after function words, the vocabulary of asking, and the
+/// corpus's own subject form are removed. Short tokens go too: at two
+/// characters a token is almost always a fragment of a contraction.
+///
+/// Shared by the planner and by the synchronous tool path so the two cannot
+/// drift into disagreeing about what a query is made of.
+pub fn topical_terms(text: &str) -> Vec<String> {
+    tokenize(text)
+        .into_iter()
+        .filter(|t| !NON_TOPICAL.contains(&t.as_str()))
+        .filter(|t| t.len() > 2)
+        .collect()
+}
 
 /// The rule-based planner.
 #[derive(Debug, Default)]
@@ -391,11 +418,7 @@ impl DeterministicPlanner {
         // the assembler decides whether anything comes back. Deciding a query
         // needs no memory at all is left to the model planner, which
         // understands the sentence.
-        let topics: Vec<String> = tokenize(text)
-            .into_iter()
-            .filter(|t| !NON_TOPICAL.contains(&t.as_str()))
-            .filter(|t| t.len() > 2)
-            .collect();
+        let topics: Vec<String> = topical_terms(text);
 
         let mut entities: Vec<RetrievalEntity> = Vec::new();
         for (surface, canonical) in self.known.matches_in(text) {
@@ -460,6 +483,8 @@ impl DeterministicPlanner {
             lexical_queries,
             scopes,
             kind_filter: Vec::new(),
+            subject_hint: None,
+            predicate_hint: None,
             temporal,
             source_transcript_hash: stable_hash(text),
         }

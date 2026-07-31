@@ -271,6 +271,15 @@ pub(crate) struct SharedState {
     pub resume_handle: parking_lot::Mutex<Option<String>>,
     /// Last instruction sent via instruction_template (for dedup).
     pub last_instruction: parking_lot::Mutex<Option<String>>,
+    /// Steering lines projected on the previous turn boundary, for repeat
+    /// suppression.
+    ///
+    /// Context turns are *appended* to the server-side conversation and cannot
+    /// be retracted, so re-sending an unchanged steering line does not
+    /// re-emphasise it — it adds a second standing directive the model has to
+    /// weigh against everything that follows. Holding the previous turn's lines
+    /// lets an unchanged one be dropped while a changed one still lands.
+    pub last_context: parking_lot::Mutex<Vec<String>>,
     /// Pending context buffer for deferred delivery (None when Immediate mode).
     pub pending_context: Option<Arc<PendingContext>>,
     /// Fast-lane delivery policy per event class.
@@ -285,6 +294,16 @@ pub(crate) struct SharedState {
 /// The telemetry lane is spawned separately via [`spawn_telemetry_lane`].
 /// Configuration for the control plane's new capabilities.
 pub(crate) struct ControlPlaneConfig {
+    /// The connect-time system instruction, as text.
+    ///
+    /// What an `instruction_amendment` composes onto when no phase supplies a
+    /// base. Amendments are additive by contract, so they need something to be
+    /// added to; a session with no phase machine has no phase instruction, and
+    /// before this was carried the amendment was computed each turn and then
+    /// silently discarded. Sending the amendment alone was not an option —
+    /// under `SteeringMode::InstructionUpdate` that replaces the system
+    /// instruction, so it would have deleted the caller's own prompt.
+    pub base_instruction: Option<String>,
     /// Soft turn detector for proactive silence awareness.
     pub soft_turn: Option<SoftTurnDetector>,
     /// Steering mode for phase instruction delivery.
@@ -322,6 +341,7 @@ pub(crate) struct ControlPlaneConfig {
 impl Default for ControlPlaneConfig {
     fn default() -> Self {
         Self {
+            base_instruction: None,
             soft_turn: None,
             steering_mode: SteeringMode::default(),
             context_delivery: ContextDelivery::default(),
@@ -366,6 +386,7 @@ pub(crate) fn spawn_event_processor(
         barge_in: parking_lot::Mutex::new(CancellationToken::new()),
         resume_handle: parking_lot::Mutex::new(None),
         last_instruction: parking_lot::Mutex::new(None),
+        last_context: parking_lot::Mutex::new(Vec::new()),
         pending_context: control_plane.pending_context.clone(),
         delivery: control_plane.delivery,
         dropped: DroppedFrames::default(),
