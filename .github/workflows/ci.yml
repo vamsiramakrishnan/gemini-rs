@@ -35,6 +35,12 @@ jobs:
           toolchain: "1.93.1"
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace
+      # `cargo test --workspace` uses default features, so every test file
+      # behind `#![cfg(feature = "...")]` is invisible to it — a whole suite can
+      # stop compiling without CI noticing, which is exactly what happened to
+      # `contradiction_reconciliation`. Compile them; don't run them (the
+      # model-backed ones need an API key and would cost money per push).
+      - run: cargo check --workspace --all-features --all-targets
 
   clippy:
     name: Clippy

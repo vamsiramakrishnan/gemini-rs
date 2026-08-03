@@ -28,7 +28,30 @@ use gemini_memory_rs::llm::{extraction_llm, GeminiObservationExtractor, GeminiPl
 use gemini_memory_rs::okf::{FsStore, OkfRepository};
 
 /// The extraction model these tests drive.
-pub const EXTRACTION_MODEL: &str = "gemini-2.5-flash";
+///
+/// Extraction wants the smallest model that still holds the schema: it runs on
+/// every finalized turn, off the voice path but inside the window before the
+/// user says something else. Override with `GEMINI_EXTRACTION_MODEL` to A/B a
+/// different one against the same suites.
+#[cfg(feature = "gemini-llm")]
+pub fn extraction_model() -> String {
+    std::env::var("GEMINI_EXTRACTION_MODEL")
+        .unwrap_or_else(|_| gemini_memory_rs::llm::DEFAULT_TRANSCRIPT_MODEL.to_string())
+}
+
+/// The model driving *retrieval plans*, which defaults to [`extraction_model`].
+///
+/// Split from observation extraction because the two jobs are not equally hard.
+/// Observation extraction reads an utterance that is already in front of it;
+/// planning has to canonicalise the *question* into the English search terms the
+/// stored fact was canonicalised into, with nothing but the question to go on.
+/// A model can be entirely adequate at the first and unreliable at the second,
+/// so `GEMINI_PLAN_MODEL` allows pinning them independently.
+#[cfg(feature = "gemini-llm")]
+pub fn plan_model() -> String {
+    std::env::var("GEMINI_PLAN_MODEL")
+        .unwrap_or_else(|_| gemini_memory_rs::llm::DEFAULT_EXTRACTION_MODEL.to_string())
+}
 
 /// Whether a Gemini API key is configured.
 pub fn have_api_key() -> bool {
@@ -88,10 +111,11 @@ pub fn file_backed_engine(user: &str, root: &Path) -> MemoryEngine {
 /// An engine backed by real files and real model-driven extraction.
 #[cfg(feature = "gemini-llm")]
 pub fn model_backed_engine(user: &str, root: &Path) -> MemoryEngine {
-    let llm = extraction_llm(EXTRACTION_MODEL);
+    let observations = extraction_llm(&extraction_model());
+    let plans = extraction_llm(&plan_model());
     file_backed_engine(user, root)
-        .with_plan_extractor(Arc::new(GeminiPlanExtractor::new(llm.clone())))
-        .with_observation_extractor(Arc::new(GeminiObservationExtractor::new(llm)))
+        .with_plan_extractor(Arc::new(GeminiPlanExtractor::new(plans)))
+        .with_observation_extractor(Arc::new(GeminiObservationExtractor::new(observations)))
 }
 
 /// Every canonical Markdown file under a root, concatenated with headers.
