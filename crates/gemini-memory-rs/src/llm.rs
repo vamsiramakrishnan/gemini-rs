@@ -45,8 +45,45 @@ pub fn extraction_llm(model: &str) -> Arc<dyn BaseLlm> {
     ))
 }
 
-/// The default extraction model.
+/// The default extraction model — the one retrieval *planning* uses.
+///
+/// Planning is the harder of the two jobs and keeps the larger model. See
+/// [`DEFAULT_TRANSCRIPT_MODEL`] for why they are separate.
 pub const DEFAULT_EXTRACTION_MODEL: &str = "gemini-2.5-flash";
+
+/// The default model for extracting observations from a **transcript**.
+///
+/// Smaller than [`DEFAULT_EXTRACTION_MODEL`], because the two jobs are not
+/// equally hard. Reading an utterance that is already in front of you is easier
+/// than canonicalising a *question* into the English search terms the stored
+/// fact was canonicalised into — planning has only the question to go on, and
+/// that is where a smaller model actually degrades.
+///
+/// Measured by holding observations at `gemini-3.5-flash-lite` and varying only
+/// the plan model, over `code_switched_e2e`'s cross-lingual retrieval case
+/// (a Hinglish question against an English-canonicalised fact), n=10 runs each:
+///
+/// | Plan model | Passes |
+/// |---|---|
+/// | `gemini-2.5-flash` | 8/10 |
+/// | `gemini-3.5-flash-lite` | 3/10 |
+///
+/// The fact stores correctly either way — it is the *question* that fails to
+/// canonicalise, so the query and the record never meet. Ingestion showed no
+/// such gap, which is what makes the split worth having rather than just
+/// downgrading everything.
+///
+/// Latency, from `model_latency_probe` (p50):
+///
+/// | | `gemini-2.5-flash` | `gemini-3.5-flash-lite` |
+/// |---|---|---|
+/// | observation extraction | 2144 ms | 1115 ms |
+/// | prepare incl. model plan | 1812 ms | 1150 ms |
+///
+/// Note the 2/10 residual: this case is flaky under **every** configuration
+/// including the previous all-`gemini-2.5-flash` default. Treat these as rates,
+/// not verdicts, and do not read a single green run as a fix.
+pub const DEFAULT_TRANSCRIPT_MODEL: &str = "gemini-3.5-flash-lite";
 
 // ─── retrieval plans ────────────────────────────────────────────────────────
 
@@ -207,9 +244,9 @@ impl GeminiObservationExtractor {
         Self { llm }
     }
 
-    /// Build one from the environment using the default extraction model.
+    /// Build one from the environment using [`DEFAULT_TRANSCRIPT_MODEL`].
     pub fn from_env() -> Self {
-        Self::new(extraction_llm(DEFAULT_EXTRACTION_MODEL))
+        Self::new(extraction_llm(DEFAULT_TRANSCRIPT_MODEL))
     }
 
     fn prompt(context: &ObservationExtractionContext) -> String {

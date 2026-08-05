@@ -415,7 +415,10 @@ async fn a_correction_reaches_the_semantic_index_and_the_old_fact_leaves_it() {
         .filter(|m| m.status == MemoryStatus::Active)
         .map(|m| (m.id.clone(), embedding_text(m)))
         .collect();
-    index.reconcile(&active).await.expect("reconcile");
+    // Revision `0` is the documented escape for a caller with nothing to order
+    // by: this index is built here and reconciled once, so there is no second
+    // snapshot that could arrive stale.
+    index.reconcile(&active, 0).await.expect("reconcile");
 
     // Query by the correction's own text: it can only be found if it was
     // embedded and added.
