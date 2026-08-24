@@ -633,6 +633,74 @@ html, body {
 }
 .fs-chat-input input:focus { outline: none; border-color: var(--brand); }
 
+/* ── Gallery menu ────────────────────────────────────────────── */
+.fs-menu-items { min-width: 300px; max-width: 340px; }
+.fs-menu-items button { display: grid; gap: 1px; padding: 8px 10px; }
+.fs-menu-title { font-weight: 600; font-size: 12.5px; }
+.fs-menu-industry {
+  font-family: var(--fs-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-4);
+}
+.fs-menu-summary { font-size: 11px; color: var(--text-3); line-height: 1.4; white-space: normal; }
+
+/* ── Code pane ───────────────────────────────────────────────── */
+.fs-code {
+  margin: 0;
+  border: 1px solid var(--border-2);
+  border-radius: var(--fs-radius);
+  padding: 10px;
+  font-family: var(--fs-mono);
+  font-size: 11px;
+  line-height: 1.55;
+  overflow: auto;
+  flex: 1 1 auto;
+  min-height: 220px;
+  white-space: pre;
+  color: var(--text-1);
+  background: var(--bg-card);
+  tab-size: 4;
+}
+.fs-code-small { flex: 0 0 auto; min-height: 0; max-height: 140px; }
+
+/* ── Preview bar ─────────────────────────────────────────────── */
+.fs-preview-bar {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-2);
+  border-radius: var(--fs-radius);
+  padding: 6px 8px;
+  max-width: 70%;
+}
+.fs-preview-bar select {
+  border: 1px solid var(--border-2);
+  border-radius: var(--fs-radius);
+  padding: 4px 6px;
+  font-size: 12px;
+  font-family: inherit;
+  background: var(--bg-card);
+  color: var(--text-1);
+  max-width: 200px;
+}
+.fs-preview-pos { font-family: var(--fs-mono); font-size: 11px; color: var(--text-3); white-space: nowrap; }
+.fs-preview-event {
+  font-family: var(--fs-mono);
+  font-size: 11px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fs-preview-event.failed { color: var(--error); }
+
 /* ── Diagnostics panel ───────────────────────────────────────── */
 .fs-diagnostics {
   position: fixed;

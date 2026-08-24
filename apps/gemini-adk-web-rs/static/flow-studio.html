@@ -18,16 +18,14 @@
       <div class="fs-topbar-actions">
         <div class="fs-menu">
           <button class="fs-btn" id="fs-examples-btn">Examples</button>
-          <div class="fs-menu-items" id="fs-examples-menu">
-            <button data-example="collections">Debt collection</button>
-            <button data-example="restaurant">Restaurant booking</button>
-          </div>
+          <div class="fs-menu-items" id="fs-examples-menu"></div>
         </div>
         <button class="fs-btn" id="fs-new-btn" title="Start a blank flow">New</button>
         <button class="fs-btn" id="fs-add-step-btn" title="Add a step node">Add step</button>
         <button class="fs-btn" id="fs-layout-btn" title="Auto-arrange the DAG">Auto layout</button>
         <button class="fs-btn" id="fs-validate-btn" title="Compile the flow server-side">Validate</button>
         <button class="fs-btn" id="fs-tests-btn" title="Replay the spec's embedded tests offline — no API key needed">Tests</button>
+        <button class="fs-btn" id="fs-preview-btn" title="Scrub through an embedded test on the canvas — offline, no API key">Preview</button>
         <button class="fs-btn fs-btn-primary" id="fs-run-btn" title="Run this flow as a live session">Run</button>
       </div>
     </header>
@@ -46,6 +44,14 @@
           <p>The exported JSON is exactly what <code>Live::builder().govern(flow)</code> loads.
              Or start from an example in the toolbar.</p>
         </div>
+        <div class="fs-preview-bar" id="fs-preview-bar" hidden>
+          <select id="fs-preview-test" title="Embedded test to replay"></select>
+          <button class="fs-btn" id="fs-preview-prev" title="Previous event">&minus;</button>
+          <span class="fs-preview-pos" id="fs-preview-pos">0/0</span>
+          <button class="fs-btn" id="fs-preview-next" title="Next event">&plus;</button>
+          <span class="fs-preview-event" id="fs-preview-event"></span>
+          <button class="fs-btn" id="fs-preview-exit" title="Leave preview">Exit</button>
+        </div>
         <div class="fs-zoom">
           <button id="fs-zoom-out" title="Zoom out">&minus;</button>
           <button id="fs-zoom-reset" title="Reset zoom">100%</button>
@@ -60,6 +66,7 @@
           <button class="fs-tab" data-tab="flow">Flow</button>
           <button class="fs-tab" data-tab="app">App</button>
           <button class="fs-tab" data-tab="json">JSON</button>
+          <button class="fs-tab" data-tab="code">Code</button>
           <button class="fs-tab" data-tab="run">Run</button>
         </nav>
 
@@ -85,6 +92,18 @@
           </div>
           <textarea id="fs-json-text" class="fs-json-text" spellcheck="false"></textarea>
           <div class="fs-json-status" id="fs-json-status"></div>
+        </section>
+
+        <section class="fs-pane" id="fs-pane-code">
+          <div class="fs-json-actions">
+            <button class="fs-btn" id="fs-code-copy">Copy main.rs</button>
+            <button class="fs-btn" id="fs-code-download">Download main.rs</button>
+          </div>
+          <div class="fs-help" style="font-size:11px;color:var(--text-4)">The program this document is
+            equivalent to — every spec field lowers to a builder call. Regenerated on each visit.</div>
+          <pre class="fs-code" id="fs-code-main"></pre>
+          <div class="fs-section-title">Cargo.toml</div>
+          <pre class="fs-code fs-code-small" id="fs-code-cargo"></pre>
         </section>
 
         <section class="fs-pane" id="fs-pane-run">

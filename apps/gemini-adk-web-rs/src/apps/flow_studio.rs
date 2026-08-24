@@ -138,13 +138,48 @@ mod tests {
 
     #[test]
     fn bundled_examples_compile_and_pass_their_tests() {
-        assert_example_valid(
-            "collections",
-            include_str!("../../static/examples/flows/collections.json"),
-        );
-        assert_example_valid(
-            "restaurant",
-            include_str!("../../static/examples/flows/restaurant.json"),
-        );
+        // Every gallery entry: listed in the manifest, compiles through the
+        // real flow compiler, and passes its own embedded tests.
+        let manifest: serde_json::Value =
+            serde_json::from_str(include_str!("../../static/examples/flows/index.json"))
+                .expect("manifest parses");
+        let entries = manifest["examples"].as_array().expect("examples array");
+        let sources: [(&str, &str); 6] = [
+            (
+                "collections.json",
+                include_str!("../../static/examples/flows/collections.json"),
+            ),
+            (
+                "clinic-intake.json",
+                include_str!("../../static/examples/flows/clinic-intake.json"),
+            ),
+            (
+                "telco-support.json",
+                include_str!("../../static/examples/flows/telco-support.json"),
+            ),
+            (
+                "call-screening.json",
+                include_str!("../../static/examples/flows/call-screening.json"),
+            ),
+            (
+                "returns-desk.json",
+                include_str!("../../static/examples/flows/returns-desk.json"),
+            ),
+            (
+                "restaurant.json",
+                include_str!("../../static/examples/flows/restaurant.json"),
+            ),
+        ];
+        assert_eq!(entries.len(), sources.len(), "manifest and bundle drifted");
+        for (file, json) in sources {
+            assert!(
+                entries.iter().any(|e| e["file"] == file),
+                "{file} missing from index.json"
+            );
+            assert_example_valid(file, json);
+            // Every gallery spec carries its own conformance tests.
+            let spec = SessionSpec::from_value(serde_json::from_str(json).unwrap()).unwrap();
+            assert!(!spec.tests.is_empty(), "{file} has no embedded tests");
+        }
     }
 }

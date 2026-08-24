@@ -20,9 +20,13 @@
 //!   callbacks) are added on the returned builder after `apply`, exactly as
 //!   before; the spec never pretends to serialize them.
 
+mod codegen;
 mod simulate;
 
-pub use simulate::{run_tests, SimEvent, SpecTest, TestExpectation, TestReport, TestStepResult};
+pub use simulate::{
+    run_tests, trace_test, SimEvent, SimSnapshot, SpecTest, TestExpectation, TestReport,
+    TestStepResult,
+};
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

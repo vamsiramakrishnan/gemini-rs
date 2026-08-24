@@ -95,6 +95,111 @@ pub struct TestReport {
     pub events: usize,
 }
 
+/// One per-event snapshot of the flow's state during a scripted replay — the
+/// Studio's Preview scrubber steps through these, lighting up the DAG exactly
+/// as a live session would, with no model and no API key.
+#[derive(Debug, Clone, Serialize)]
+pub struct SimSnapshot {
+    /// Event index in the script (0 = state before any event).
+    pub index: usize,
+    /// Human-readable event label ("start", "tool: charge_card", …).
+    pub event: String,
+    /// Assertion failures at this event (empty when none).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub failures: Vec<String>,
+    /// Steps done after this event.
+    pub done: Vec<String>,
+    /// Whether the flow is complete after this event.
+    pub complete: bool,
+    /// The full explanation (active steps, admitted/blocked tools, unmet
+    /// requirements, per-step guard truth trees) after this event.
+    #[serde(flatten)]
+    pub explanation: gemini_adk_rs::flow::FlowExplanation,
+}
+
+/// Replay one named test and return a snapshot after every event (plus an
+/// initial "start" snapshot), for scrubbing. Errors when the flow cannot be
+/// built or the test name is unknown.
+pub fn trace_test(spec: &SessionSpec, test_name: &str) -> Result<Vec<SimSnapshot>, Vec<String>> {
+    let flow = spec.effective_flow()?;
+    let test = spec
+        .tests
+        .iter()
+        .find(|t| t.name == test_name)
+        .ok_or_else(|| vec![format!("no test named '{test_name}' in the spec")])?;
+    Ok(replay(spec, flow, test))
+}
+
+/// The shared replay engine: run the script through a fresh monitor, snapshot
+/// after every event.
+fn replay(
+    spec: &SessionSpec,
+    flow: gemini_adk_rs::flow::Flow,
+    test: &SpecTest,
+) -> Vec<SimSnapshot> {
+    let state = State::new();
+    let mut monitor = FlowMonitor::new(flow, Enforcement::Enforce);
+    monitor.relatch(&state);
+
+    let snapshot = |index: usize,
+                    event: String,
+                    failures: Vec<String>,
+                    monitor: &FlowMonitor,
+                    state: &State| SimSnapshot {
+        index,
+        event,
+        failures,
+        done: monitor.marking().done.iter().cloned().collect(),
+        complete: monitor.is_complete(),
+        explanation: monitor.explain(state),
+    };
+
+    let mut snapshots = vec![snapshot(0, "start".into(), Vec::new(), &monitor, &state)];
+    for (index, event) in test.script.iter().enumerate() {
+        let mut failures = Vec::new();
+        let label = match event {
+            SimEvent::User(text) => {
+                monitor.on_turn(&state);
+                format!("user: {text}")
+            }
+            SimEvent::Tool(name) => {
+                match monitor.admits_tool(name, &state) {
+                    Ok(()) => {
+                        spec.apply_tool_state(name, &state);
+                        monitor.on_tool_ok(name, &state);
+                    }
+                    Err(reason) => {
+                        let anticipated = matches!(
+                            test.script.get(index + 1),
+                            Some(SimEvent::Expect(e)) if e.blocked.iter().any(|t| t == name)
+                        );
+                        if !anticipated {
+                            failures.push(format!("tool '{name}' was blocked: {reason}"));
+                        }
+                    }
+                }
+                format!("tool: {name}")
+            }
+            SimEvent::Set(map) => {
+                for (key, value) in map {
+                    let _ = state.set(key, value.clone());
+                }
+                monitor.relatch(&state);
+                format!(
+                    "set: {}",
+                    map.keys().cloned().collect::<Vec<_>>().join(", ")
+                )
+            }
+            SimEvent::Expect(expect) => {
+                check(expect, &monitor, &state, &mut failures);
+                "expect".to_string()
+            }
+        };
+        snapshots.push(snapshot(index + 1, label, failures, &monitor, &state));
+    }
+    snapshots
+}
+
 /// Run every embedded test in the spec against its effective flow.
 pub fn run_tests(spec: &SessionSpec) -> Vec<TestReport> {
     let flow = match spec.effective_flow() {
@@ -124,62 +229,16 @@ pub fn run_tests(spec: &SessionSpec) -> Vec<TestReport> {
 }
 
 fn run_one(spec: &SessionSpec, flow: gemini_adk_rs::flow::Flow, test: &SpecTest) -> TestReport {
-    let state = State::new();
-    let mut monitor = FlowMonitor::new(flow, Enforcement::Enforce);
-    monitor.relatch(&state);
-    let mut failures: Vec<TestStepResult> = Vec::new();
-
-    for (index, event) in test.script.iter().enumerate() {
-        let mut step_failures = Vec::new();
-        let label = match event {
-            SimEvent::User(text) => {
-                monitor.on_turn(&state);
-                format!("user: {text}")
-            }
-            SimEvent::Tool(name) => {
-                match monitor.admits_tool(name, &state) {
-                    Ok(()) => {
-                        spec.apply_tool_state(name, &state);
-                        monitor.on_tool_ok(name, &state);
-                    }
-                    Err(reason) => {
-                        // A blocked call is only a failure if the script did
-                        // not anticipate it: the next event asserting
-                        // `blocked` containing this tool absolves it.
-                        let anticipated = matches!(
-                            test.script.get(index + 1),
-                            Some(SimEvent::Expect(e)) if e.blocked.iter().any(|t| t == name)
-                        );
-                        if !anticipated {
-                            step_failures.push(format!("tool '{name}' was blocked: {reason}"));
-                        }
-                    }
-                }
-                format!("tool: {name}")
-            }
-            SimEvent::Set(map) => {
-                for (key, value) in map {
-                    let _ = state.set(key, value.clone());
-                }
-                monitor.relatch(&state);
-                format!(
-                    "set: {}",
-                    map.keys().cloned().collect::<Vec<_>>().join(", ")
-                )
-            }
-            SimEvent::Expect(expect) => {
-                check(expect, &monitor, &state, &mut step_failures);
-                "expect".to_string()
-            }
-        };
-        if !step_failures.is_empty() {
-            failures.push(TestStepResult {
-                index,
-                event: label,
-                failures: step_failures,
-            });
-        }
-    }
+    let failures: Vec<TestStepResult> = replay(spec, flow, test)
+        .into_iter()
+        .skip(1) // the "start" snapshot carries no event
+        .filter(|s| !s.failures.is_empty())
+        .map(|s| TestStepResult {
+            index: s.index - 1,
+            event: s.event,
+            failures: s.failures,
+        })
+        .collect();
 
     TestReport {
         name: test.name.clone(),
@@ -318,6 +377,25 @@ mod tests {
         );
         assert!(!reports[2].passed, "wrong expectation fails");
         assert!(reports[2].failures[0].failures[0].contains("expected step 'pay' done"));
+    }
+
+    #[test]
+    fn trace_snapshots_every_event() {
+        let spec = spec_with_tests();
+        let snapshots = super::trace_test(&spec, "happy path").expect("traces");
+        // start + 5 script events.
+        assert_eq!(snapshots.len(), 6);
+        assert_eq!(snapshots[0].event, "start");
+        assert!(snapshots[0]
+            .explanation
+            .active
+            .contains(&"verify".to_string()));
+        // After verify_identity (event 2), verify is done and pay is active.
+        assert!(snapshots[2].done.contains(&"verify".to_string()));
+        assert!(snapshots[2].explanation.active.contains(&"pay".to_string()));
+        // Final snapshot: complete.
+        assert!(snapshots[5].complete);
+        assert!(super::trace_test(&spec, "no such test").is_err());
     }
 
     #[test]

@@ -1,0 +1,112 @@
+{
+  "name": "telco-support",
+  "description": "Telecom technical support: authenticate, run a line diagnostic, resolve or raise a ticket — diagnostics gated behind authentication.",
+  "instruction": "You are the technical support assistant for Northwire Broadband. Authenticate the account first, then diagnose before promising anything. Raise a ticket when the line test fails.",
+  "greeting": "Greet the caller, say you're Northwire support, and ask for their account number and postcode.",
+  "modality": "text",
+  "tools": [
+    {
+      "name": "authenticate_account",
+      "description": "Verify the caller against account number and postcode.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "account_number": { "type": "string" },
+          "postcode": { "type": "string" }
+        },
+        "required": ["account_number"]
+      },
+      "response": { "authenticated": true, "plan": "Fibre 500" },
+      "set_state": { "authenticated": true }
+    },
+    {
+      "name": "run_line_test",
+      "description": "Run a remote diagnostic on the caller's line.",
+      "response": { "status": "degraded", "sync_speed_mbps": 61, "expected_mbps": 500 },
+      "set_state": { "line_tested": true, "line_ok": false }
+    },
+    {
+      "name": "send_reset_signal",
+      "description": "Push a remote reset to the caller's router.",
+      "response": { "sent": true },
+      "set_state": { "reset_sent": true }
+    },
+    {
+      "name": "create_ticket",
+      "description": "Raise an engineer ticket with the diagnostic attached.",
+      "parameters": {
+        "type": "object",
+        "properties": { "summary": { "type": "string" } }
+      },
+      "response": { "ticket": "NW-88412", "sla_hours": 48 },
+      "set_state": { "ticket_raised": true }
+    }
+  ],
+  "flow": {
+    "steps": [
+      {
+        "id": "authenticate",
+        "posture": "Authenticate the account before discussing line details.",
+        "allow": ["authenticate_account"],
+        "done": { "is_true": "authenticated" }
+      },
+      {
+        "id": "diagnose",
+        "after": ["authenticate"],
+        "posture": "Run the line test and read the result back honestly — never promise a fix before the diagnostic.",
+        "allow": ["run_line_test"],
+        "done": { "is_true": "line_tested" },
+        "ground": "Line test {line_tested?complete:not yet run}."
+      },
+      {
+        "id": "resolve",
+        "after": ["diagnose"],
+        "posture": "Try a remote reset first. If the line is still degraded, raise an engineer ticket and give the reference and SLA.",
+        "allow": ["send_reset_signal", "create_ticket"],
+        "done": { "any": [{ "is_true": "line_ok" }, { "is_true": "ticket_raised" }] }
+      },
+      {
+        "id": "wrap_up",
+        "after": ["resolve"],
+        "terminal": true
+      }
+    ],
+    "constraints": [
+      { "once": "create_ticket" },
+      { "never_until": { "tool": "create_ticket", "until": { "is_true": "line_tested" } } },
+      { "require": ["wrap_up"] }
+    ]
+  },
+  "tests": [
+    {
+      "name": "degraded line ends in a ticket",
+      "script": [
+        { "expect": { "active": ["authenticate"], "blocked": ["create_ticket"] } },
+        { "tool": "authenticate_account" },
+        { "tool": "run_line_test" },
+        { "expect": { "done": ["authenticate", "diagnose"], "active": ["resolve"] } },
+        { "tool": "send_reset_signal" },
+        { "tool": "create_ticket" },
+        { "expect": { "done": ["resolve", "wrap_up"], "complete": true } }
+      ]
+    },
+    {
+      "name": "no ticket without a diagnostic",
+      "script": [
+        { "tool": "authenticate_account" },
+        { "tool": "create_ticket" },
+        { "expect": { "blocked": ["create_ticket"], "complete": false } }
+      ]
+    },
+    {
+      "name": "ticket is single-use",
+      "script": [
+        { "tool": "authenticate_account" },
+        { "tool": "run_line_test" },
+        { "tool": "create_ticket" },
+        { "tool": "create_ticket" },
+        { "expect": { "blocked": ["create_ticket"], "done": ["resolve"] } }
+      ]
+    }
+  ]
+}

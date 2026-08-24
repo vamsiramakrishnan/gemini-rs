@@ -1,0 +1,135 @@
+{
+  "name": "clinic-intake",
+  "description": "Healthcare patient intake: identify, triage symptoms, schedule — with a hard emergency escalation gate.",
+  "instruction": "You are the intake assistant for Cedar Grove Clinic. Be calm and precise. Never give medical advice; gather information and schedule. If symptoms sound like an emergency, escalate immediately.",
+  "greeting": "Welcome the caller to Cedar Grove Clinic and ask for their full name and date of birth.",
+  "modality": "text",
+  "tools": [
+    {
+      "name": "find_patient",
+      "description": "Look up the patient record from name and date of birth.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "date_of_birth": { "type": "string" }
+        },
+        "required": ["name"]
+      },
+      "response": { "found": true, "patient_id": "P-2210" },
+      "set_state": { "patient_identified": true }
+    },
+    {
+      "name": "record_symptoms",
+      "description": "Record the patient's reported symptoms and their severity.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "symptoms": { "type": "string" },
+          "severity": { "type": "string", "description": "mild, moderate, severe, or emergency" }
+        },
+        "required": ["symptoms", "severity"]
+      },
+      "response": { "recorded": true },
+      "set_state": { "symptoms_recorded": true, "severity": "moderate" }
+    },
+    {
+      "name": "escalate_emergency",
+      "description": "Transfer immediately to the on-call nurse line.",
+      "response": { "transferred": true },
+      "set_state": { "escalated": true }
+    },
+    {
+      "name": "book_appointment",
+      "description": "Book the next suitable appointment slot.",
+      "parameters": {
+        "type": "object",
+        "properties": { "preferred_time": { "type": "string" } }
+      },
+      "response": { "booked": true, "slot": "Thursday 10:20", "reference": "CG-5531" }
+    }
+  ],
+  "extract": [
+    {
+      "name": "triage",
+      "instruction": "From the caller's description, extract symptoms and whether they describe an emergency (chest pain, difficulty breathing, stroke signs).",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "symptoms": { "type": "string" },
+          "is_emergency": { "type": "boolean" }
+        }
+      },
+      "promote": [
+        { "field": "is_emergency", "policy": "true_only" }
+      ]
+    }
+  ],
+  "flow": {
+    "steps": [
+      {
+        "id": "identify",
+        "posture": "Identify the patient before discussing anything medical.",
+        "allow": ["find_patient"],
+        "done": { "is_true": "patient_identified" }
+      },
+      {
+        "id": "triage",
+        "after": ["identify"],
+        "posture": "Ask what brings them in today. Record symptoms and severity. If anything sounds like an emergency, stop and escalate.",
+        "allow": ["record_symptoms", "escalate_emergency"],
+        "done": { "any": [{ "is_true": "symptoms_recorded" }, { "is_true": "escalated" }] },
+        "ground": "Patient is {patient_identified?identified:NOT identified}."
+      },
+      {
+        "id": "schedule",
+        "after": ["triage"],
+        "gate": { "not": { "is_true": "is_emergency" } },
+        "posture": "Offer the next suitable appointment and confirm the booking reference back.",
+        "allow": ["book_appointment"],
+        "done": { "called_ok": "book_appointment" }
+      },
+      {
+        "id": "close",
+        "after": ["triage"],
+        "terminal": true
+      }
+    ],
+    "constraints": [
+      { "never_until": { "tool": "book_appointment", "until": { "is_true": "symptoms_recorded" } } },
+      { "once": "book_appointment" },
+      { "require": ["close"] }
+    ],
+    "ambient": ["escalate_emergency"]
+  },
+  "tests": [
+    {
+      "name": "routine visit books an appointment",
+      "script": [
+        { "expect": { "active": ["identify"], "blocked": ["book_appointment"] } },
+        { "tool": "find_patient" },
+        { "tool": "record_symptoms" },
+        { "expect": { "done": ["identify", "triage"], "allowed": ["book_appointment"] } },
+        { "tool": "book_appointment" },
+        { "expect": { "done": ["schedule", "close"], "complete": true } }
+      ]
+    },
+    {
+      "name": "emergency blocks scheduling",
+      "script": [
+        { "tool": "find_patient" },
+        { "set": { "is_emergency": true } },
+        { "tool": "escalate_emergency" },
+        { "expect": { "done": ["triage"], "blocked": ["book_appointment"] } }
+      ]
+    },
+    {
+      "name": "no booking before triage",
+      "script": [
+        { "tool": "find_patient" },
+        { "tool": "book_appointment" },
+        { "expect": { "blocked": ["book_appointment"], "complete": false } }
+      ]
+    }
+  ]
+}

@@ -36,6 +36,35 @@
       "response": { "notes": "Prefers window seating; celebrated an anniversary here in May." }
     }
   ],
+  "tests": [
+    {
+      "name": "party books a table",
+      "script": [
+        { "expect": { "active": ["gather"], "blocked": ["book_table"] } },
+        { "tool": "capture_party" },
+        { "tool": "check_availability" },
+        { "expect": { "done": ["gather", "check"], "allowed": ["book_table"] } },
+        { "tool": "book_table" },
+        { "expect": { "done": ["book", "farewell"], "complete": true } }
+      ]
+    },
+    {
+      "name": "no booking before availability",
+      "script": [
+        { "tool": "capture_party" },
+        { "tool": "book_table" },
+        { "expect": { "blocked": ["book_table"], "complete": false } }
+      ]
+    },
+    {
+      "name": "memory recall stays ambient",
+      "script": [
+        { "expect": { "allowed": ["recall_context"] } },
+        { "tool": "capture_party" },
+        { "expect": { "allowed": ["recall_context"] } }
+      ]
+    }
+  ],
   "flow": {
     "steps": [
       {

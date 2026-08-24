@@ -60,6 +60,8 @@ async fn main() {
         .route("/flows", get(flow_studio_page))
         .route("/api/flows/validate", post(validate_flow))
         .route("/api/flows/test", post(test_flow))
+        .route("/api/flows/simulate", post(simulate_flow))
+        .route("/api/flows/codegen", post(codegen_flow))
         .route("/api/flows/schema", get(flow_schema))
         .route("/api/apps", get(list_apps))
         .route("/ws/:name", get(ws_upgrade))
@@ -200,6 +202,43 @@ async fn test_flow(Json(value): Json<serde_json::Value>) -> Json<serde_json::Val
 /// autocomplete and for validating machine-authored specs.
 async fn flow_schema() -> Json<serde_json::Value> {
     Json(gemini_adk_fluent_rs::spec::SessionSpec::json_schema())
+}
+
+/// Replay one embedded test event-by-event and return per-event flow
+/// snapshots — the Studio's Preview scrubber. Body: `{"spec": …, "test": name}`.
+async fn simulate_flow(Json(body): Json<serde_json::Value>) -> Json<serde_json::Value> {
+    let test = body
+        .get("test")
+        .and_then(|t| t.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let spec_value = body.get("spec").cloned().unwrap_or(serde_json::Value::Null);
+    let result = match gemini_adk_fluent_rs::spec::SessionSpec::from_value(spec_value) {
+        Ok(spec) => match gemini_adk_fluent_rs::spec::trace_test(&spec, &test) {
+            Ok(snapshots) => serde_json::json!({
+                "valid": true,
+                "errors": [],
+                "snapshots": serde_json::to_value(snapshots).unwrap_or_default(),
+            }),
+            Err(errors) => serde_json::json!({"valid": false, "errors": errors, "snapshots": []}),
+        },
+        Err(message) => serde_json::json!({"valid": false, "errors": [message], "snapshots": []}),
+    };
+    Json(result)
+}
+
+/// Generate the standalone Rust application a spec is equivalent to.
+async fn codegen_flow(Json(value): Json<serde_json::Value>) -> Json<serde_json::Value> {
+    let result = match gemini_adk_fluent_rs::spec::SessionSpec::from_value(value) {
+        Ok(spec) => serde_json::json!({
+            "valid": true,
+            "errors": [],
+            "main_rs": spec.to_rust(),
+            "cargo_toml": spec.to_cargo_toml(),
+        }),
+        Err(message) => serde_json::json!({"valid": false, "errors": [message]}),
+    };
+    Json(result)
 }
 
 async fn app_page(Path(name): Path<String>, State(state): State<AppState>) -> impl IntoResponse {

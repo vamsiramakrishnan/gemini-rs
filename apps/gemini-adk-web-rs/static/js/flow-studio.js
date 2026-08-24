@@ -1091,16 +1091,141 @@
   const examplesMenu = document.querySelector('.fs-menu');
   $('fs-examples-btn').addEventListener('click', (e) => { examplesMenu.classList.toggle('open'); e.stopPropagation(); });
   document.addEventListener('click', () => examplesMenu.classList.remove('open'));
-  $('fs-examples-menu').querySelectorAll('button').forEach((b) => {
-    b.addEventListener('click', async () => {
-      try {
-        const res = await fetch(`/static/examples/flows/${b.dataset.example}.json`);
-        applyJson(await res.text(), { fromImport: true });
-        validate({ silent: true });
-      } catch (err) {
-        showDiagnostics([{ kind: 'err', m: `Could not load example: ${err.message}` }]);
+
+  // The gallery is data-driven: /static/examples/flows/index.json lists every
+  // bundled industry scenario.
+  async function loadGallery() {
+    try {
+      const res = await fetch('/static/examples/flows/index.json');
+      const manifest = await res.json();
+      const menu = $('fs-examples-menu');
+      menu.innerHTML = '';
+      for (const entry of manifest.examples || []) {
+        const item = document.createElement('button');
+        item.innerHTML = `<span class="fs-menu-title">${esc(entry.title)}</span>`
+          + `<span class="fs-menu-industry">${esc(entry.industry)}</span>`
+          + `<span class="fs-menu-summary">${esc(entry.summary)}</span>`;
+        item.title = entry.summary;
+        item.addEventListener('click', async () => {
+          try {
+            const spec = await fetch(`/static/examples/flows/${entry.file}`);
+            applyJson(await spec.text(), { fromImport: true });
+            validate({ silent: true });
+          } catch (err) {
+            showDiagnostics([{ kind: 'err', m: `Could not load example: ${err.message}` }]);
+          }
+        });
+        menu.append(item);
       }
+    } catch (_) { /* gallery unavailable — menu stays empty */ }
+  }
+  loadGallery();
+
+  // ── Code tab: the program this document is equivalent to ───────
+  async function refreshCode() {
+    try {
+      const res = await fetch('/api/flows/codegen', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(exportSpec()),
+      });
+      const out = await res.json();
+      if (out.valid) {
+        $('fs-code-main').textContent = out.main_rs;
+        $('fs-code-cargo').textContent = out.cargo_toml;
+      } else {
+        $('fs-code-main').textContent = `// spec did not parse:\n// ${(out.errors || []).join('\n// ')}`;
+        $('fs-code-cargo').textContent = '';
+      }
+    } catch (err) {
+      $('fs-code-main').textContent = `// codegen unavailable: ${err.message}`;
+    }
+  }
+  $('fs-code-copy').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText($('fs-code-main').textContent); } catch (_) { /* no-op */ }
+  });
+  $('fs-code-download').addEventListener('click', () => {
+    const blob = new Blob([$('fs-code-main').textContent], { type: 'text/plain' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'main.rs';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+
+  // ── Preview: scrub an embedded test on the canvas, offline ─────
+  let preview = null; // { snapshots, index }
+
+  async function fetchPreview(testName) {
+    const res = await fetch('/api/flows/simulate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ spec: exportSpec(), test: testName }),
     });
+    const out = await res.json();
+    if (!out.valid) {
+      showDiagnostics((out.errors || []).map((m) => ({ kind: 'err', m })));
+      return null;
+    }
+    return out.snapshots;
+  }
+
+  function renderPreview() {
+    if (!preview) return;
+    const snapshot = preview.snapshots[preview.index];
+    liveStatus = snapshot;
+    renderCanvas();
+    renderRunFlowState();
+    $('fs-preview-pos').textContent = `${preview.index}/${preview.snapshots.length - 1}`;
+    const failures = (snapshot.failures || []);
+    $('fs-preview-event').textContent = failures.length
+      ? `${snapshot.event} — ${failures[0]}`
+      : snapshot.event;
+    $('fs-preview-event').classList.toggle('failed', failures.length > 0);
+  }
+
+  async function enterPreview() {
+    const tests = spec.tests || [];
+    if (!tests.length) {
+      showDiagnostics([{
+        kind: 'warn',
+        m: 'No tests to preview. Add a "tests" array (JSON tab) and Preview will scrub it on the canvas.',
+      }]);
+      return;
+    }
+    const select = $('fs-preview-test');
+    select.innerHTML = '';
+    for (const t of tests) {
+      const option = document.createElement('option');
+      option.value = t.name;
+      option.textContent = t.name;
+      select.append(option);
+    }
+    const snapshots = await fetchPreview(tests[0].name);
+    if (!snapshots) return;
+    preview = { snapshots, index: 0 };
+    $('fs-preview-bar').hidden = false;
+    renderPreview();
+  }
+
+  function exitPreview() {
+    preview = null;
+    liveStatus = null;
+    $('fs-preview-bar').hidden = true;
+    renderCanvas();
+  }
+
+  $('fs-preview-btn').addEventListener('click', () => (preview ? exitPreview() : enterPreview()));
+  $('fs-preview-exit').addEventListener('click', exitPreview);
+  $('fs-preview-prev').addEventListener('click', () => {
+    if (preview && preview.index > 0) { preview.index -= 1; renderPreview(); }
+  });
+  $('fs-preview-next').addEventListener('click', () => {
+    if (preview && preview.index < preview.snapshots.length - 1) { preview.index += 1; renderPreview(); }
+  });
+  $('fs-preview-test').addEventListener('change', async (e) => {
+    const snapshots = await fetchPreview(e.target.value);
+    if (snapshots) { preview = { snapshots, index: 0 }; renderPreview(); }
   });
 
   // ── Tabs ───────────────────────────────────────────────────────
@@ -1110,6 +1235,7 @@
     if (name === 'json') syncJsonPane();
     if (name === 'flow') renderFlowForm();
     if (name === 'app') renderAppForm();
+    if (name === 'code') refreshCode();
   }
   document.querySelectorAll('.fs-tab').forEach((t) => t.addEventListener('click', () => switchTab(t.dataset.tab)));
 

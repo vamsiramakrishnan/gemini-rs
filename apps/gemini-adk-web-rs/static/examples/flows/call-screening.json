@@ -1,0 +1,123 @@
+{
+  "name": "call-screening",
+  "description": "Front-desk call screening: identify the caller and intent, filter spam, then transfer or take a message — transfer hard-gated on the spam verdict.",
+  "instruction": "You are the screening assistant for the office of Dr. Elena Ruiz. Find out who is calling and why. Politely end sales and robocalls. Transfer genuine calls; otherwise take a message.",
+  "greeting": "Answer as Dr. Ruiz's office and ask who is calling and what it concerns.",
+  "modality": "text",
+  "tools": [
+    {
+      "name": "record_caller",
+      "description": "Record the caller's name and stated reason.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "caller_name": { "type": "string" },
+          "reason": { "type": "string" }
+        },
+        "required": ["caller_name", "reason"]
+      },
+      "response": { "recorded": true },
+      "set_state": { "caller_recorded": true }
+    },
+    {
+      "name": "mark_legitimate",
+      "description": "Mark the call as legitimate (not spam or sales).",
+      "response": { "ok": true },
+      "set_state": { "screened_ok": true }
+    },
+    {
+      "name": "transfer_call",
+      "description": "Transfer the caller through to Dr. Ruiz.",
+      "response": { "transferred": true }
+    },
+    {
+      "name": "take_message",
+      "description": "Take a message for a callback.",
+      "parameters": {
+        "type": "object",
+        "properties": { "message": { "type": "string" } }
+      },
+      "response": { "saved": true },
+      "set_state": { "message_taken": true }
+    }
+  ],
+  "extract": [
+    {
+      "name": "screening",
+      "instruction": "Classify the call: is this a sales, robocall, or solicitation attempt?",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "is_spam": { "type": "boolean" },
+          "intent": { "type": "string" }
+        }
+      },
+      "promote": [
+        { "field": "is_spam", "policy": "true_only" }
+      ]
+    }
+  ],
+  "flow": {
+    "steps": [
+      {
+        "id": "screen",
+        "posture": "Get the caller's name and reason. Record them. Decide if the call is genuine; mark it legitimate only when you are confident.",
+        "allow": ["record_caller", "mark_legitimate"],
+        "done": { "all": [
+          { "is_true": "caller_recorded" },
+          { "any": [{ "is_true": "screened_ok" }, { "is_true": "is_spam" }] }
+        ] }
+      },
+      {
+        "id": "route",
+        "after": ["screen"],
+        "posture": "Transfer a legitimate call; take a message otherwise. Never transfer a call you have not cleared.",
+        "allow": ["transfer_call", "take_message"],
+        "done": { "any": [{ "called_ok": "transfer_call" }, { "is_true": "message_taken" }] },
+        "ground": "Screening: {screened_ok?cleared:not cleared}{is_spam? — flagged as spam:}."
+      },
+      {
+        "id": "goodbye",
+        "after": ["route"],
+        "terminal": true
+      }
+    ],
+    "constraints": [
+      { "never_until": { "tool": "transfer_call", "until": { "all": [{ "is_true": "screened_ok" }, { "not": { "is_true": "is_spam" } }] } } },
+      { "once": "transfer_call" },
+      { "require": ["goodbye"] }
+    ]
+  },
+  "tests": [
+    {
+      "name": "genuine caller gets transferred",
+      "script": [
+        { "tool": "record_caller" },
+        { "tool": "mark_legitimate" },
+        { "expect": { "done": ["screen"], "allowed": ["transfer_call"] } },
+        { "tool": "transfer_call" },
+        { "expect": { "done": ["route", "goodbye"], "complete": true } }
+      ]
+    },
+    {
+      "name": "spam can never be transferred",
+      "script": [
+        { "tool": "record_caller" },
+        { "tool": "mark_legitimate" },
+        { "set": { "is_spam": true } },
+        { "tool": "transfer_call" },
+        { "expect": { "blocked": ["transfer_call"] } },
+        { "tool": "take_message" },
+        { "expect": { "done": ["route", "goodbye"], "complete": true } }
+      ]
+    },
+    {
+      "name": "unscreened calls cannot transfer",
+      "script": [
+        { "tool": "record_caller" },
+        { "tool": "transfer_call" },
+        { "expect": { "blocked": ["transfer_call"], "complete": false } }
+      ]
+    }
+  ]
+}
