@@ -1,7 +1,7 @@
 //! Data-driven flow applications — the backend of the Flow Studio.
 //!
 //! A [`FlowAppSpec`] is a single JSON document that turns a governed
-//! [`Flow`](gemini_adk_rs::flow::Flow) into a *runnable application*: the flow
+//! [`Flow`] into a *runnable application*: the flow
 //! DAG itself plus the session framing (instruction, greeting, modality) and a
 //! set of declarative [mock tools](MockToolSpec) that let the conversation be
 //! modeled end-to-end without writing any Rust. Each mock tool returns a canned

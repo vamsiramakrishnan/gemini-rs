@@ -1,7 +1,7 @@
 //! Flow Studio — run a JSON-authored, flow-governed session.
 //!
 //! The browser's Flow Studio editor (`/flows`) composes a
-//! [`FlowAppSpec`](gemini_adk_server_rs::flow_app::FlowAppSpec) — a governed
+//! [`FlowAppSpec`] — a governed
 //! flow DAG plus instruction, greeting, and declarative mock tools — and sends
 //! it in the `config` field of the Start message. This app compiles the flow,
 //! wires the mock tools onto a shared [`State`], governs the Live session with
