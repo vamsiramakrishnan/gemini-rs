@@ -9,6 +9,7 @@
 - [Setup and Running](./setup-and-running.md)
 - [Authentication & Connecting](./user-guide/auth-and-connecting.md)
 - [Architecture Overview](./user-guide/architecture.md)
+- [The Layer Contract (L0 · L1 · L2)](./user-guide/layers.md)
 - [Migration Guide: L0 → L1 → L2](./user-guide/migration.md)
 - [Best Practices & Common Mistakes](./user-guide/best-practices.md)
 

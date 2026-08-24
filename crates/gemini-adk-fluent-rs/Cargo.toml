@@ -27,6 +27,9 @@ reqwest = { version = "0.12", default-features = false, features = [
     "json",
     "rustls-tls-native-roots",
 ], optional = true }
+# Optional: native microphone/speaker duplex for `voice::Talk` (`voice-io`).
+cpal = { version = "0.15", optional = true }
+thiserror = { version = "2", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
@@ -45,6 +48,9 @@ default = []
 gemini-llm = ["gemini-adk-rs/gemini-llm"]
 # HTTP tool bindings in `spec` (SessionSpec `tools[].http`).
 http-tools = ["dep:reqwest"]
+# Native microphone/speaker duplex (`voice::Talk::talk`). Needs system audio
+# headers (Linux: libasound2-dev).
+voice-io = ["dep:cpal", "dep:thiserror", "tokio/signal"]
 tracing-support = ["gemini-adk-rs/tracing-support"]
 # Passthroughs so applications don't need lower-layer dependencies.
 vad-wavekat = ["gemini-adk-rs/vad-wavekat"]

@@ -33,6 +33,7 @@ pub mod optimization;
 pub mod orchestration;
 pub mod planners;
 pub mod plugin;
+pub mod primitives;
 pub mod processors;
 pub mod router;
 pub mod run_config;
