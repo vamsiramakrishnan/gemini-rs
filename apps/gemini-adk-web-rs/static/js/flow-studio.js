@@ -161,6 +161,7 @@
     const pos = layout[step.id] || { x: 0, y: 0 };
     el.style.left = `${pos.x}px`;
     el.style.top = `${pos.y}px`;
+    if (step.terminal) el.classList.add('terminal');
     if (step.id === selectedId) el.classList.add('selected');
     if (liveStatus) {
       if (liveStatus.done?.includes(step.id)) el.classList.add('flow-done');
@@ -181,7 +182,7 @@
       <div class="fs-node-head"><span class="fs-node-id">${esc(step.id)}</span>${tag}</div>
       <div class="fs-node-body">
         ${step.posture ? `<div class="fs-node-posture">${esc(step.posture)}</div>` : ''}
-        ${step.done ? `<div class="fs-node-guard">${esc(guardSummary(step.done))}</div>` : ''}
+        ${step.done ? `<div class="fs-node-guard"><span class="fs-k">done</span>${esc(guardSummary(step.done))}</div>` : ''}
         ${tools ? `<div class="fs-node-tools">${tools}</div>` : ''}
       </div>
       <div class="fs-port" title="Drag to another step: it will run after this one"></div>
@@ -216,7 +217,7 @@
 
   function renderEdges() {
     let svg = '<defs><marker id="fs-arrow" viewBox="0 0 10 10" refX="9" refY="5" '
-      + 'markerWidth="7" markerHeight="7" orient="auto-start-reverse">'
+      + 'markerWidth="6" markerHeight="6" orient="auto-start-reverse">'
       + '<path d="M 0 0 L 10 5 L 0 10 z" class="fs-edge-arrow"/></marker></defs>';
     for (const step of steps()) {
       for (const dep of step.after || []) {
@@ -560,7 +561,7 @@
           ed.style.flex = '1';
           const rm = document.createElement('button');
           rm.className = 'fs-icon-btn';
-          rm.textContent = '✕';
+          rm.textContent = '\u00d7';
           rm.title = 'Remove clause';
           rm.addEventListener('click', () => { v.splice(idx, 1); onChange(g); render(g); });
           row.append(ed, rm);
@@ -612,7 +613,7 @@
     sel.style.flex = '1';
     const add = document.createElement('button');
     add.className = 'fs-btn';
-    add.textContent = '+ Add';
+    add.textContent = 'Add';
     add.addEventListener('click', () => {
       const kind = sel.value;
       const fresh = kind === 'once' ? { once: '' }
@@ -636,7 +637,7 @@
     head.innerHTML = `<span class="fs-card-title">${esc(kind)}</span>`;
     const rm = document.createElement('button');
     rm.className = 'fs-icon-btn';
-    rm.textContent = '✕';
+    rm.textContent = '\u00d7';
     rm.addEventListener('click', () => { spec.flow.constraints.splice(idx, 1); softCommit(); renderFlowForm(); });
     head.append(rm);
     card.append(head);
@@ -692,7 +693,7 @@
 
     const add = document.createElement('button');
     add.className = 'fs-btn';
-    add.textContent = '+ Add tool';
+    add.textContent = 'Add tool';
     add.addEventListener('click', () => {
       spec.tools.push({ name: `tool_${spec.tools.length + 1}`, description: '', set_state: {} });
       softCommit();
@@ -719,7 +720,7 @@
     head.innerHTML = `<span class="fs-card-title">${esc(t.name || '(unnamed)')}</span>`;
     const rm = document.createElement('button');
     rm.className = 'fs-icon-btn';
-    rm.textContent = '✕';
+    rm.textContent = '\u00d7';
     rm.addEventListener('click', () => { spec.tools.splice(idx, 1); softCommit(); renderAppForm(); });
     head.append(rm);
     card.append(head);
@@ -833,11 +834,12 @@
         ...(v.errors || []).map((m) => ({ kind: 'err', m })),
         ...(v.warnings || []).map((m) => ({ kind: 'warn', m })),
       ];
-      if (v.valid) setBadge(items.length ? 'warn' : 'ok', items.length ? `valid · ${items.length} warning(s)` : 'valid ✓');
-      else setBadge('err', `${(v.errors || []).length} error(s)`);
+      const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+      if (v.valid) setBadge(items.length ? 'warn' : 'ok', items.length ? `valid · ${plural(items.length, 'warning')}` : 'valid');
+      else setBadge('err', plural((v.errors || []).length, 'error'));
       if (!silent) {
         showDiagnostics(v.valid
-          ? (items.length ? items : [{ kind: 'ok', m: `Flow compiles: ${v.steps} step(s), tools: ${(v.tools || []).join(', ') || 'none'}.` }])
+          ? (items.length ? items : [{ kind: 'ok', m: `Flow compiles — ${plural(v.steps, 'step')}; tools: ${(v.tools || []).join(', ') || 'none'}.` }])
           : items);
       }
       return v;
@@ -878,7 +880,9 @@
   function setRunConnected(connected) {
     $('fs-chat-text').disabled = !connected;
     $('fs-chat-send').disabled = !connected;
-    $('fs-run-btn').textContent = connected ? '■ Stop' : '▶ Run';
+    const runBtn = $('fs-run-btn');
+    runBtn.textContent = connected ? 'Stop' : 'Run';
+    runBtn.classList.toggle('running', connected);
     $('fs-run-flowstate').hidden = !connected && !liveStatus;
   }
 
@@ -944,7 +948,7 @@
         currentModelMsg = null;
         break;
       case 'toolCallEvent':
-        chatMsg('tool', `⚙ ${msg.name}(${truncate(msg.args, 120)}) → ${truncate(msg.result, 160)}`);
+        chatMsg('tool', `${msg.name}(${truncate(msg.args, 120)}) → ${truncate(msg.result, 160)}`);
         break;
       case 'flowStatus':
         liveStatus = msg.status || null;
@@ -964,7 +968,7 @@
     $('fs-run-flowstate').hidden = false;
     $('fs-run-active').textContent = (liveStatus.active || []).join(', ') || '—';
     $('fs-run-allowed').textContent = (liveStatus.allowed_tools || []).join(', ') || '—';
-    $('fs-run-missing').textContent = (liveStatus.missing_requirements || []).join(', ') || 'none — flow complete ✓';
+    $('fs-run-missing').textContent = (liveStatus.missing_requirements || []).join(', ') || 'none';
     const blocked = $('fs-run-blocked');
     const entries = Object.entries(liveStatus.blocked_tools || {});
     blocked.innerHTML = entries.length

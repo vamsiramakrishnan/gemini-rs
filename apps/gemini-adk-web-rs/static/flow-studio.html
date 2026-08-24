@@ -11,23 +11,23 @@
   <div id="studio">
     <!-- ── Top bar ─────────────────────────────────────────────── -->
     <header class="fs-topbar">
-      <a class="fs-logo" href="/">⟵ ADK Web</a>
+      <a class="fs-logo" href="/">ADK Web</a>
       <span class="fs-title">Flow Studio</span>
       <input id="fs-app-name" class="fs-name-input" placeholder="untitled-flow" spellcheck="false">
       <span id="fs-validation-badge" class="fs-badge fs-badge-idle" title="Validation status">not validated</span>
       <div class="fs-topbar-actions">
         <div class="fs-menu">
-          <button class="fs-btn" id="fs-examples-btn">Examples ▾</button>
+          <button class="fs-btn" id="fs-examples-btn">Examples</button>
           <div class="fs-menu-items" id="fs-examples-menu">
             <button data-example="collections">Debt collection</button>
             <button data-example="restaurant">Restaurant booking</button>
           </div>
         </div>
         <button class="fs-btn" id="fs-new-btn" title="Start a blank flow">New</button>
-        <button class="fs-btn" id="fs-add-step-btn" title="Add a step node">+ Step</button>
+        <button class="fs-btn" id="fs-add-step-btn" title="Add a step node">Add step</button>
         <button class="fs-btn" id="fs-layout-btn" title="Auto-arrange the DAG">Auto layout</button>
         <button class="fs-btn" id="fs-validate-btn" title="Compile the flow server-side">Validate</button>
-        <button class="fs-btn fs-btn-primary" id="fs-run-btn" title="Run this flow as a live session">▶ Run</button>
+        <button class="fs-btn fs-btn-primary" id="fs-run-btn" title="Run this flow as a live session">Run</button>
       </div>
     </header>
 
@@ -39,17 +39,16 @@
           <div class="fs-nodes" id="fs-nodes"></div>
         </div>
         <div class="fs-canvas-hint" id="fs-canvas-hint">
-          <p><strong>Draw your conversation as a DAG.</strong></p>
-          <p>Add steps, then drag from a node's <span class="fs-hint-port">●</span> port onto another
-             node to say “this comes after that”. Click a node to edit its posture, tools, and
-             completion guard. Export the JSON — it is exactly what
-             <code>Live::builder().govern(flow)</code> loads.</p>
-          <p>Or load an example from the toolbar.</p>
+          <p>Add a step, then drag from its right port onto another node to declare an
+             <code>after</code> dependency. Click a node to edit its posture, tools, and
+             completion guard.</p>
+          <p>The exported JSON is exactly what <code>Live::builder().govern(flow)</code> loads.
+             Or start from an example in the toolbar.</p>
         </div>
         <div class="fs-zoom">
-          <button id="fs-zoom-out" title="Zoom out">−</button>
+          <button id="fs-zoom-out" title="Zoom out">&minus;</button>
           <button id="fs-zoom-reset" title="Reset zoom">100%</button>
-          <button id="fs-zoom-in" title="Zoom in">+</button>
+          <button id="fs-zoom-in" title="Zoom in">&plus;</button>
         </div>
       </div>
 
@@ -88,7 +87,7 @@
         </section>
 
         <section class="fs-pane" id="fs-pane-run">
-          <div class="fs-run-status" id="fs-run-status">Not connected. Press <strong>▶ Run</strong> to
+          <div class="fs-run-status" id="fs-run-status">Not connected. Press <strong>Run</strong> to
             start a live session governed by this flow.</div>
           <div class="fs-run-flowstate" id="fs-run-flowstate" hidden>
             <div class="fs-run-block"><span class="fs-run-label">Active</span><span id="fs-run-active">—</span></div>
@@ -109,7 +108,7 @@
     <div class="fs-diagnostics" id="fs-diagnostics" hidden>
       <div class="fs-diagnostics-head">
         <span id="fs-diagnostics-title">Diagnostics</span>
-        <button id="fs-diagnostics-close">✕</button>
+        <button id="fs-diagnostics-close" title="Close">&times;</button>
       </div>
       <ul id="fs-diagnostics-list"></ul>
     </div>
