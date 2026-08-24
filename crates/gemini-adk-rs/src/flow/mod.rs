@@ -38,7 +38,7 @@ pub struct FlowCtx<'a> {
 }
 
 /// A serializable predicate atom — the closed set of guard primitives.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Pred {
     /// Always true.
@@ -109,6 +109,60 @@ impl Pred {
             _ => {}
         }
     }
+
+    /// State keys this predicate reads (`is_true`/`is_set`/`eq`/`captured`
+    /// atoms, recursively). `called_ok`/`done` reference tools/steps, not
+    /// state, and are excluded.
+    fn referenced_state_keys(&self, out: &mut BTreeSet<String>) {
+        match self {
+            Pred::IsTrue(k) | Pred::IsSet(k) | Pred::Eq(k, _) => {
+                out.insert(k.clone());
+            }
+            Pred::Captured(fields) => out.extend(fields.iter().cloned()),
+            Pred::All(ps) | Pred::Any(ps) => {
+                ps.iter().for_each(|p| p.referenced_state_keys(out));
+            }
+            Pred::Not(p) => p.referenced_state_keys(out),
+            _ => {}
+        }
+    }
+
+    /// Evaluate to a [`GuardTrace`]: the predicate tree with each node's prose
+    /// description and its truth value under `ctx`. The atom-granular answer
+    /// to "why is this step not done?".
+    fn explain(&self, ctx: &FlowCtx) -> GuardTrace {
+        let children = match self {
+            Pred::All(ps) | Pred::Any(ps) => ps.iter().map(|p| p.explain(ctx)).collect(),
+            Pred::Not(p) => vec![p.explain(ctx)],
+            _ => Vec::new(),
+        };
+        GuardTrace {
+            desc: match self {
+                // Composite nodes describe only the connective; the operands
+                // carry their own descriptions as children.
+                Pred::All(_) => "all of".to_string(),
+                Pred::Any(_) => "any of".to_string(),
+                Pred::Not(_) => "not".to_string(),
+                atom => atom.describe(),
+            },
+            holds: self.eval(ctx),
+            children,
+        }
+    }
+}
+
+/// A [`Guard`] evaluated to a truth tree: each predicate node with its prose
+/// description and whether it currently holds. Serializable, so a devtool can
+/// render exactly which atom a stuck step is waiting on.
+#[derive(Clone, Debug, Serialize, schemars::JsonSchema)]
+pub struct GuardTrace {
+    /// Prose description of this node (from [`Guard::describe`] vocabulary).
+    pub desc: String,
+    /// Whether this node currently holds.
+    pub holds: bool,
+    /// Operand traces for `all`/`any`/`not`; empty for atoms.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub children: Vec<GuardTrace>,
 }
 
 /// Render a grounding template against `state`.
@@ -287,10 +341,53 @@ impl Guard {
         }
     }
 
+    /// Evaluate against state alone, with an empty [`Marking`].
+    ///
+    /// For contexts outside a governed flow (phase transitions, watcher
+    /// conditions) where no marking exists: `called_ok`/`done` atoms evaluate
+    /// `false` there — a validator should reject them in such positions.
+    pub fn eval_state(&self, state: &State) -> bool {
+        let marking = Marking::default();
+        self.eval(&FlowCtx {
+            state,
+            marking: &marking,
+        })
+    }
+
+    /// Evaluate to a [`GuardTrace`] — the predicate tree with per-node truth
+    /// values. A [`Guard::custom`] yields a single opaque node.
+    pub fn explain_trace(&self, ctx: &FlowCtx) -> GuardTrace {
+        match self {
+            Guard::Spec(p) => p.explain(ctx),
+            Guard::Custom(f) => GuardTrace {
+                desc: "a condition set by the application".to_string(),
+                holds: f(ctx),
+                children: Vec::new(),
+            },
+        }
+    }
+
     fn referenced_steps(&self, out: &mut Vec<String>) {
         if let Guard::Spec(p) = self {
             p.referenced_steps(out);
         }
+    }
+
+    fn referenced_state_keys(&self, out: &mut BTreeSet<String>) {
+        if let Guard::Spec(p) = self {
+            p.referenced_state_keys(out);
+        }
+    }
+}
+
+impl schemars::JsonSchema for Guard {
+    fn schema_name() -> String {
+        "Guard".to_string()
+    }
+    fn json_schema(generator: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+        // A Guard serializes exactly as its Pred (custom guards refuse to
+        // serialize), so the schema is Pred's.
+        Pred::json_schema(generator)
     }
 }
 
@@ -335,7 +432,7 @@ impl std::fmt::Debug for Guard {
 }
 
 /// A node in the flow DAG — the only node type.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Step {
     /// Unique step id.
     pub id: String,
@@ -368,7 +465,7 @@ pub struct Step {
 }
 
 /// A cross-cutting flow constraint.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Constraint {
     /// A tool may complete at most once.
@@ -387,7 +484,7 @@ pub enum Constraint {
 }
 
 /// A governed conversation/tool DAG.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Flow {
     /// The steps (DAG nodes).
     pub steps: Vec<Step>,
@@ -508,6 +605,30 @@ impl Flow {
         tools.extend(self.confirm_tools.iter().cloned());
         tools.extend(self.ambient.iter().cloned());
         tools
+    }
+
+    /// Every state key any guard in the flow reads (`is_true`/`is_set`/`eq`/
+    /// `captured` atoms in step gates, completion guards, and `never…until`
+    /// constraints).
+    ///
+    /// A key in this set that nothing in the session *writes* — no tool, no
+    /// extractor, no promotion — can never latch, which is the dominant silent
+    /// failure in data-authored flows. Validators diff this set against the
+    /// declared writers to catch it at load time, the way
+    /// [`compile_with_tools`](Self::compile_with_tools) catches tool typos.
+    pub fn state_keys_read(&self) -> BTreeSet<String> {
+        let mut keys = BTreeSet::new();
+        for s in &self.steps {
+            for g in s.gate.iter().chain(s.done.iter()) {
+                g.referenced_state_keys(&mut keys);
+            }
+        }
+        for c in &self.constraints {
+            if let Constraint::NeverUntil { until, .. } = c {
+                until.referenced_state_keys(&mut keys);
+            }
+        }
+        keys
     }
 
     /// Steps reachable from a root (a step with no `after` deps), following both
@@ -927,10 +1048,16 @@ impl FlowMonitor {
     /// This is the deterministic answer to "why did the assistant ask that?" —
     /// model-readable, without the model driving control flow.
     pub fn explain(&self, state: &State) -> FlowExplanation {
-        let active = self
-            .active_steps(state)
+        let active_steps = self.active_steps(state);
+        let active: Vec<String> = active_steps.iter().map(|s| s.id.clone()).collect();
+        let ctx = self.ctx(state);
+        let active_progress = active_steps
             .iter()
-            .map(|s| s.id.clone())
+            .filter_map(|s| {
+                s.done
+                    .as_ref()
+                    .map(|g| (s.id.clone(), g.explain_trace(&ctx)))
+            })
             .collect();
         let mut allowed_tools = Vec::new();
         let mut blocked_tools = BTreeMap::new();
@@ -947,6 +1074,7 @@ impl FlowMonitor {
             allowed_tools,
             blocked_tools,
             missing_requirements: self.unmet_requirements(),
+            active_progress,
         }
     }
 
@@ -997,6 +1125,33 @@ impl FlowMonitor {
     /// The enforcement mode this monitor runs in.
     pub fn mode(&self) -> Enforcement {
         self.mode
+    }
+
+    /// Replace a step's posture in place. Returns `false` if no such step.
+    ///
+    /// Postures are re-projected at every turn boundary, so an edit takes
+    /// effect on the next turn — the safe subset of live spec editing. The
+    /// DAG, guards, and tool gates are structural and stay fixed.
+    pub fn set_posture(&mut self, step_id: &str, posture: Option<String>) -> bool {
+        match self.flow.steps.iter_mut().find(|s| s.id == step_id) {
+            Some(step) => {
+                step.posture = posture;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Replace a step's grounding template in place. Returns `false` if no
+    /// such step. Same next-turn semantics as [`set_posture`](Self::set_posture).
+    pub fn set_ground(&mut self, step_id: &str, ground: Option<String>) -> bool {
+        match self.flow.steps.iter_mut().find(|s| s.id == step_id) {
+            Some(step) => {
+                step.ground = ground;
+                true
+            }
+            None => false,
+        }
     }
 
     /// Evaluate a [`Guard`] against this monitor's current context (the given
@@ -1434,6 +1589,10 @@ pub struct FlowExplanation {
     pub blocked_tools: BTreeMap<String, String>,
     /// Required steps not yet done (drives repair).
     pub missing_requirements: Vec<String>,
+    /// Per-active-step completion-guard truth trees: exactly which atom each
+    /// stuck step is waiting on. Terminal steps (no `done` guard) are absent.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub active_progress: BTreeMap<String, GuardTrace>,
 }
 
 /// Builder for a [`Flow`] using the cemented verbs.
@@ -2394,5 +2553,83 @@ mod tests {
         assert_eq!(mon.admits_tool("lookup_account", &state), Ok(()));
         assert!(mon.admits_tool("charge_card", &state).is_err());
         assert!(mon.admits_tool("anything_else", &state).is_err());
+    }
+
+    #[test]
+    fn explain_trace_reports_per_atom_truth() {
+        let state = State::new();
+        let _ = state.set("ptp_amount", 200);
+        let marking = Marking::default();
+        let ctx = FlowCtx {
+            state: &state,
+            marking: &marking,
+        };
+        let guard = Guard::all([
+            Guard::captured(["ptp_amount", "ptp_date"]),
+            Guard::is_true("confirmed"),
+        ]);
+        let trace = guard.explain_trace(&ctx);
+        assert!(!trace.holds);
+        assert_eq!(trace.desc, "all of");
+        assert_eq!(trace.children.len(), 2);
+        // `captured` is a single atom (one node); `is_true` is false.
+        assert!(!trace.children[0].holds, "ptp_date missing");
+        assert!(!trace.children[1].holds);
+        // JSON-serializable for devtools.
+        assert!(serde_json::to_value(&trace).is_ok());
+    }
+
+    #[test]
+    fn explanation_carries_active_step_progress() {
+        let mon = FlowMonitor::new(debt_flow(), Enforcement::Enforce);
+        let state = State::new();
+        let ex = mon.explain(&state);
+        let verify = ex.active_progress.get("verify").expect("verify is active");
+        assert!(!verify.holds);
+        assert!(verify.desc.contains("identity_verified"));
+    }
+
+    #[test]
+    fn state_keys_read_covers_guards_and_constraints() {
+        let keys = debt_flow().state_keys_read();
+        for k in [
+            "identity_verified",
+            "disclosure_given",
+            "ptp_amount",
+            "ptp_date",
+        ] {
+            assert!(keys.contains(k), "missing read key {k}");
+        }
+        // Tool/step references are not state keys.
+        assert!(!keys.contains("charge_card"));
+    }
+
+    #[test]
+    fn posture_updates_take_effect_in_place() {
+        let mut mon = FlowMonitor::new(debt_flow(), Enforcement::Enforce);
+        let state = State::new();
+        assert!(mon.set_posture("verify", Some("New posture.".into())));
+        assert!(!mon.set_posture("no_such_step", None));
+        assert_eq!(
+            mon.active_postures(&state),
+            vec!["New posture.".to_string()]
+        );
+    }
+
+    #[test]
+    fn eval_state_treats_marking_atoms_as_false() {
+        let state = State::new();
+        let _ = state.set("ready", true);
+        assert!(Guard::is_true("ready").eval_state(&state));
+        assert!(!Guard::called_ok("any_tool").eval_state(&state));
+    }
+
+    #[test]
+    fn flow_json_schema_generates() {
+        let schema = serde_json::to_value(schemars::schema_for!(Flow)).expect("schema");
+        let text = schema.to_string();
+        // The Guard schema must surface the Pred atoms.
+        assert!(text.contains("is_true"));
+        assert!(text.contains("never_until"));
     }
 }

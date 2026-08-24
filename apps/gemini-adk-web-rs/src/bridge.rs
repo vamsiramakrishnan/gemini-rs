@@ -290,6 +290,16 @@ impl SessionBridge {
                         self.send_voice_runtime_state(handle);
                     }
                 }
+                ClientMessage::UpdateFlowPostures { postures, grounds } => {
+                    for (step, text) in postures {
+                        let posture = (!text.trim().is_empty()).then_some(text);
+                        handle.update_step_posture(&step, posture);
+                    }
+                    for (step, text) in grounds {
+                        let ground = (!text.trim().is_empty()).then_some(text);
+                        handle.update_step_ground(&step, ground);
+                    }
+                }
                 ClientMessage::Stop => {
                     let _ = handle.disconnect().await;
                     break;
@@ -483,6 +493,16 @@ impl SessionBridge {
                         });
                     } else {
                         self.send_voice_runtime_state(handle);
+                    }
+                }
+                ClientMessage::UpdateFlowPostures { postures, grounds } => {
+                    for (step, text) in postures {
+                        let posture = (!text.trim().is_empty()).then_some(text);
+                        handle.update_step_posture(&step, posture);
+                    }
+                    for (step, text) in grounds {
+                        let ground = (!text.trim().is_empty()).then_some(text);
+                        handle.update_step_ground(&step, ground);
                     }
                 }
                 ClientMessage::Stop => {

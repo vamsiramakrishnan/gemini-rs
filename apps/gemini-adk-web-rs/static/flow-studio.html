@@ -27,6 +27,7 @@
         <button class="fs-btn" id="fs-add-step-btn" title="Add a step node">Add step</button>
         <button class="fs-btn" id="fs-layout-btn" title="Auto-arrange the DAG">Auto layout</button>
         <button class="fs-btn" id="fs-validate-btn" title="Compile the flow server-side">Validate</button>
+        <button class="fs-btn" id="fs-tests-btn" title="Replay the spec's embedded tests offline — no API key needed">Tests</button>
         <button class="fs-btn fs-btn-primary" id="fs-run-btn" title="Run this flow as a live session">Run</button>
       </div>
     </header>
@@ -94,6 +95,7 @@
             <div class="fs-run-block"><span class="fs-run-label">Allowed tools</span><span id="fs-run-allowed">—</span></div>
             <div class="fs-run-block"><span class="fs-run-label">Blocked tools</span><div id="fs-run-blocked">—</div></div>
             <div class="fs-run-block"><span class="fs-run-label">Still required</span><span id="fs-run-missing">—</span></div>
+            <div class="fs-run-block fs-run-block-col"><span class="fs-run-label">Waiting on</span><div id="fs-run-progress">—</div></div>
           </div>
           <div class="fs-chat" id="fs-chat"></div>
           <form class="fs-chat-input" id="fs-chat-form">

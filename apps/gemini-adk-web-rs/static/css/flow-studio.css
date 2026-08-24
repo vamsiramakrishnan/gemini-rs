@@ -553,6 +553,29 @@ html, body {
 }
 #fs-run-blocked .fs-blocked-row { color: var(--error); }
 #fs-run-blocked .fs-blocked-row span { color: var(--text-4); }
+.fs-run-block-col { grid-template-columns: 1fr; gap: 4px; }
+
+/* Guard truth trees: which atom a stuck step is waiting on. */
+.fs-trace-step { font-weight: 700; margin-top: 2px; }
+.fs-trace-node {
+  position: relative;
+  padding-left: 14px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.fs-trace-node::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 5.5px;
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+}
+.fs-trace-node.holds { color: var(--text-4); }
+.fs-trace-node.holds::before { background: var(--success); }
+.fs-trace-node.waiting { color: var(--text-2); }
+.fs-trace-node.waiting::before { background: var(--warning); }
 
 .fs-chat {
   flex: 1 1 auto;

@@ -276,6 +276,18 @@ pub enum ClientMessage {
         /// Base64 payload.
         data: String,
     },
+    /// Live-edit governed step postures and grounding templates mid-session.
+    /// Postures are re-projected at every turn boundary, so an edit steers
+    /// the next turn — the safe, structural-change-free subset of live spec
+    /// editing. Ignored when the session is not flow-governed.
+    UpdateFlowPostures {
+        /// Step id → new posture text (empty string clears it).
+        #[serde(default)]
+        postures: HashMap<String, String>,
+        /// Step id → new grounding template (empty string clears it).
+        #[serde(default)]
+        grounds: HashMap<String, String>,
+    },
     /// The browser finished playing buffered audio.
     PlaybackDrained,
     /// The browser detected the user started speaking.

@@ -1,12 +1,14 @@
-//! Flow Studio — run a JSON-authored, flow-governed session.
+//! Flow Studio — run a JSON-authored, spec-driven session.
 //!
-//! The browser's Flow Studio editor (`/flows`) composes a
-//! [`FlowAppSpec`] — a governed
-//! flow DAG plus instruction, greeting, and declarative mock tools — and sends
-//! it in the `config` field of the Start message. This app compiles the flow,
-//! wires the mock tools onto a shared [`State`], governs the Live session with
-//! the flow, and pushes a [`ServerMessage::FlowStatus`] snapshot after every
-//! turn and tool call so the editor can light up the DAG live.
+//! The browser's Flow Studio editor (`/flows`) composes a [`SessionSpec`] —
+//! a governed flow DAG plus instruction, greeting, declarative tools
+//! (mock/HTTP/MCP), extraction, phases, and watchers — and sends it in the
+//! `config` field of the Start message. This app applies the spec to a Live
+//! builder ([`SessionSpec::apply`]) and pushes a
+//! [`ServerMessage::FlowStatus`] snapshot (with per-step guard truth trees)
+//! after every turn and tool call so the editor can light up the DAG live.
+//! Posture edits arrive mid-session as `UpdateFlowPostures` and steer the
+//! next turn.
 
 use async_trait::async_trait;
 use tokio::sync::{broadcast, mpsc};
@@ -14,13 +16,13 @@ use tracing::info;
 
 use gemini_adk_fluent_rs::live::LiveEvent;
 use gemini_adk_fluent_rs::prelude::*;
-use gemini_adk_server_rs::flow_app::{FlowAppSpec, FlowModality};
+use gemini_adk_fluent_rs::spec::{SessionSpec, SpecResources};
 
 use crate::app::{AppError, ClientMessage, DemoApp, ServerMessage, WsSender};
 use crate::bridge::SessionBridge;
 use crate::demo_meta;
 
-/// Runs flow applications authored as JSON in the Flow Studio editor.
+/// Runs session specs authored as JSON in the Flow Studio editor.
 pub struct FlowStudio;
 
 /// Snapshot the governed flow's status into a `FlowStatus` message.
@@ -45,13 +47,13 @@ fn send_flow_status(tx: &WsSender, handle: &LiveHandle) {
 impl DemoApp for FlowStudio {
     demo_meta! {
         name: "flow-studio",
-        description: "Runs flow applications authored as JSON in the drag-and-drop Flow Studio",
+        description: "Runs session specs authored as JSON in the drag-and-drop Flow Studio",
         category: Showcase,
         features: ["flow", "tools", "text"],
         tips: [
-            "Author the flow in the Studio editor at /flows, then press Run",
-            "Watch steps light up as their completion guards latch",
-            "Blocked tools are denied live — ask for a gated action to see enforcement",
+            "Author the spec in the Studio editor at /flows, then press Run",
+            "Watch steps light up as their completion guards latch — hover for the per-atom truth tree",
+            "Edit a posture while connected: the change steers the very next turn",
         ],
         try_saying: [
             "Let's get started",
@@ -73,50 +75,23 @@ impl DemoApp for FlowStudio {
                 |live, start| {
                     let config = start.config.clone().ok_or_else(|| {
                         AppError::Session(
-                            "flow-studio requires a flow app spec in Start.config".into(),
+                            "flow-studio requires a session spec in Start.config".into(),
                         )
                     })?;
-                    let spec = FlowAppSpec::from_value(config).map_err(AppError::Session)?;
+                    let spec = SessionSpec::from_value(config).map_err(AppError::Session)?;
 
-                    let validation = spec.validate();
-                    if !validation.valid {
-                        return Err(AppError::Session(format!(
-                            "flow failed to compile: {}",
-                            validation.errors.join("; ")
-                        )));
-                    }
-
-                    let state = State::new();
-                    let dispatcher = spec.build_dispatcher(&state);
-
-                    let mut live = live
-                        .model(super::live_model())
-                        .with_state(state)
-                        .instruction(if spec.instruction.is_empty() {
-                            "Follow the conversation flow you are given.".to_string()
-                        } else {
-                            spec.instruction.clone()
-                        })
-                        .govern(spec.flow.clone());
-
-                    if !spec.tools.is_empty() {
-                        live = live.tools(dispatcher);
-                    }
-                    if let Some(greeting) = &spec.greeting {
-                        live = live.greeting(greeting.clone());
-                    }
-                    live = match spec.modality {
-                        FlowModality::Text => live.text_only(),
-                        FlowModality::Audio => live.voice(super::resolve_voice(
-                            spec.voice.as_deref().or(start.voice.as_deref()),
-                        )),
+                    let resources = SpecResources {
+                        extraction_llm: (!spec.extract.is_empty())
+                            .then(super::build_extraction_llm),
                     };
-                    Ok(live)
+                    let state = State::new();
+                    spec.apply(live.model(super::live_model()), &state, &resources)
+                        .map_err(AppError::Session)
                 },
                 move |handle| {
                     // Push an initial snapshot, then one after every turn
-                    // boundary and tool execution, so the editor's DAG tracks
-                    // the live marking.
+                    // boundary, tool execution, and extraction, so the
+                    // editor's DAG tracks the live marking.
                     send_flow_status(&status_tx, handle);
                     let mut events = handle.events();
                     let handle = handle.clone();
@@ -141,21 +116,28 @@ impl DemoApp for FlowStudio {
 
 #[cfg(test)]
 mod tests {
-    use gemini_adk_server_rs::flow_app::FlowAppSpec;
+    use gemini_adk_fluent_rs::spec::SessionSpec;
 
     fn assert_example_valid(name: &str, json: &str) {
         let value: serde_json::Value = serde_json::from_str(json).expect("well-formed JSON");
-        let spec = FlowAppSpec::from_value(value).expect("parses as FlowAppSpec");
+        let spec = SessionSpec::from_value(value).expect("parses as SessionSpec");
         let validation = spec.validate();
         assert!(
             validation.valid,
             "example '{name}' failed to compile: {:?}",
             validation.errors
         );
+        for report in spec.run_tests() {
+            assert!(
+                report.passed,
+                "example '{name}' test '{}' failed: {:?}",
+                report.name, report.failures
+            );
+        }
     }
 
     #[test]
-    fn bundled_examples_compile() {
+    fn bundled_examples_compile_and_pass_their_tests() {
         assert_example_valid(
             "collections",
             include_str!("../../static/examples/flows/collections.json"),

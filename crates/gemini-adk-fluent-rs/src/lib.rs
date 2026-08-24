@@ -47,6 +47,7 @@ pub mod operators;
 pub mod patterns;
 pub mod policy;
 pub mod simulation;
+pub mod spec;
 pub mod testing;
 
 pub use gemini_adk_rs;

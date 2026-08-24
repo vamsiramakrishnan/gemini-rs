@@ -384,11 +384,27 @@
       renameStep(step.id, to);
     }, { mono: true }), 'Renames propagate to dependencies, constraints, and guards.'));
 
-    form.append(field('Posture', textArea(step.posture, (v) => { step.posture = v || null; softCommit(); },
-      { placeholder: 'Instruction imposed on the model while this step is active' })));
+    const postureInput = textArea(step.posture, (v) => { step.posture = v || null; softCommit(); },
+      { placeholder: 'Instruction imposed on the model while this step is active' });
+    // Live edit: while a session runs, a committed posture edit steers the
+    // very next turn.
+    postureInput.addEventListener('change', () => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'updateFlowPostures', postures: { [step.id]: step.posture || '' } }));
+        chatMsg('system', `posture of '${step.id}' updated live`);
+      }
+    });
+    form.append(field('Posture', postureInput,
+      ws ? 'Session running — edits apply on the next turn.' : undefined));
 
-    form.append(field('Ground template', textInput(step.ground, (v) => { step.ground = v || null; softCommit(); },
-      { mono: true, placeholder: 'e.g. Balance is {balance_usd}.' }),
+    const groundInput = textInput(step.ground, (v) => { step.ground = v || null; softCommit(); },
+      { mono: true, placeholder: 'e.g. Balance is {balance_usd}.' });
+    groundInput.addEventListener('change', () => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'updateFlowPostures', grounds: { [step.id]: step.ground || '' } }));
+      }
+    });
+    form.append(field('Ground template', groundInput,
       'State-interpolated fact line projected while active. {key} or {key?yes:no}.'));
 
     form.append(field('Allowed tools', textInput(csv(step.allow), (v) => { step.allow = parseCsv(v); softCommit(); },
@@ -865,6 +881,48 @@
   $('fs-validation-badge').addEventListener('click', () => validate());
   $('fs-validate-btn').addEventListener('click', () => validate());
 
+  // ── Embedded tests (offline replay through the real flow monitor) ──
+  async function runSpecTests() {
+    const testCount = (spec.tests || []).length;
+    if (!testCount) {
+      showDiagnostics([{
+        kind: 'warn',
+        m: 'No tests in this spec. Add a "tests" array (JSON tab): scripted tool/set/expect '
+          + 'events replayed offline through the real flow monitor — no API key needed.',
+      }]);
+      return;
+    }
+    try {
+      const res = await fetch('/api/flows/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(exportSpec()),
+      });
+      const result = await res.json();
+      if (!result.valid) {
+        showDiagnostics((result.errors || []).map((m) => ({ kind: 'err', m })));
+        return;
+      }
+      const items = [];
+      for (const report of result.reports || []) {
+        if (report.passed) {
+          items.push({ kind: 'ok', m: `${report.name} — passed (${report.events} events)` });
+        } else {
+          items.push({ kind: 'err', m: `${report.name} — failed` });
+          for (const step of report.failures || []) {
+            for (const failure of step.failures || []) {
+              items.push({ kind: 'err', m: `  at event ${step.index} (${step.event}): ${failure}` });
+            }
+          }
+        }
+      }
+      showDiagnostics(items);
+    } catch (err) {
+      showDiagnostics([{ kind: 'err', m: `Could not reach /api/flows/test: ${err.message}` }]);
+    }
+  }
+  $('fs-tests-btn').addEventListener('click', runSpecTests);
+
   // ── Run (live session over /ws/flow-studio) ────────────────────
   function chatMsg(cls, text) {
     const el = document.createElement('div');
@@ -974,6 +1032,21 @@
     blocked.innerHTML = entries.length
       ? entries.map(([t, r]) => `<div class="fs-blocked-row">${esc(t)} <span>— ${esc(r)}</span></div>`).join('')
       : '—';
+    // Per-active-step guard truth trees: exactly which atom each stuck step
+    // is waiting on.
+    const progress = $('fs-run-progress');
+    const traces = Object.entries(liveStatus.active_progress || {});
+    progress.innerHTML = traces.length
+      ? traces.map(([stepId, trace]) =>
+          `<div class="fs-trace-step">${esc(stepId)}</div>${traceHtml(trace)}`).join('')
+      : '—';
+  }
+
+  function traceHtml(node, depth = 0) {
+    const cls = node.holds ? 'holds' : 'waiting';
+    let html = `<div class="fs-trace-node ${cls}" style="margin-left:${depth * 14}px">${esc(node.desc)}</div>`;
+    for (const child of node.children || []) html += traceHtml(child, depth + 1);
+    return html;
   }
 
   $('fs-run-btn').addEventListener('click', () => (ws ? stopRun() : startRun()));

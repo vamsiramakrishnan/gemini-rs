@@ -2,10 +2,12 @@
 
 Because every [`Guard`] atom is a named, parameterized predicate, a `Flow` is
 fully serializable — the same DAG you build with `Flow::new()…build()` in Rust
-round-trips through JSON. This page documents that JSON format, the
-**flow app** document that turns a flow into a runnable application without
-writing code, and the **Flow Studio** — the drag-and-drop editor shipped with
-`gemini-adk-web-rs` that reads and writes these documents.
+round-trips through JSON. This page documents that JSON format; the
+**`SessionSpec`** document (`gemini_adk_fluent_rs::spec`) that turns a flow
+into a complete runnable application — tools, extraction, phases, watchers,
+fragments, and an embedded test suite — without writing code; and the
+**Flow Studio**, the drag-and-drop editor shipped with `gemini-adk-web-rs`
+that reads, writes, validates, tests, and live-runs these documents.
 
 ## Loading a flow from JSON
 
@@ -98,11 +100,11 @@ snake_case):
 | `{ "never_until": { "tool": t, "until": g } }` | Forbid `t` until `g` holds |
 | `{ "require": ["a", "b"] }` | Steps required for flow completion |
 
-## Flow app documents — a runnable application as one JSON file
+## `SessionSpec` — a runnable application as one JSON file
 
-A **flow app spec** (`FlowAppSpec` in `gemini-adk-server-rs`) wraps a flow with
-everything a governed Live session needs — instruction, greeting, modality, and
-a set of *declarative mock tools*:
+A **session spec** (`gemini_adk_fluent_rs::spec::SessionSpec`; re-exported by
+`gemini-adk-server-rs` as `FlowAppSpec` for compatibility) wraps a flow with
+everything a governed Live session needs:
 
 ```json
 {
@@ -119,20 +121,140 @@ a set of *declarative mock tools*:
       "set_state": { "identity_verified": true }
     }
   ],
+  "extract": [ … ],
+  "phases": [ … ],
+  "watch": [ … ],
+  "fragments": { … }, "use_fragments": [ … ],
+  "tests": [ … ],
   "flow": { "steps": [ … ], "constraints": [ … ] }
 }
 ```
 
-Each mock tool returns its canned `response` (default `{"ok": true}`) and
-writes its `set_state` entries into the session `State` when called. Because
-flow guards read the same state, `is_true`/`captured` conditions latch exactly
-as they would against real tool implementations — the whole conversation can be
-modeled, enforced, and demoed before a single real tool exists. Swap the mock
-dispatcher for a real `ToolDispatcher` later; the flow JSON does not change.
+In Rust, `SessionSpec::apply(live, &state, &resources)` configures a `Live`
+builder from the document; code-only concerns (callbacks, custom guards,
+middleware) are added on the returned builder afterwards. `GET
+/api/flows/schema` serves the document's own JSON Schema — for editor
+autocomplete, and for validating machine-authored specs at generation time.
 
-App-level fields: `name`, `description`, `instruction`, `greeting` (model
-speaks first when set), `modality` (`"text"` | `"audio"`), `voice`, `tools`,
-`flow`.
+### Tools: mock, HTTP, MCP
+
+A declared tool without a binding is a **mock**: it returns its canned
+`response` (default `{"ok": true}`) and writes `set_state` into the session
+`State`. Because flow guards read the same state, `is_true`/`captured`
+conditions latch exactly as against real implementations — model, enforce, and
+demo the whole conversation before any real tool exists.
+
+Add an `"http"` binding and the same tool performs a request instead
+(`http-tools` feature; `{args.field}` / `{state.key}` interpolate into the
+URL, headers, and body; `save_response_as` stores the response under a state
+key; `set_state` still applies, so guards latch identically):
+
+```json
+{ "name": "check_availability",
+  "http": { "method": "GET", "url": "https://api.example.com/slots?guests={args.party_size}" },
+  "save_response_as": "availability", "set_state": { "availability_checked": true } }
+```
+
+MCP toolsets plug in the whole ecosystem with one line, resolved at connect
+time:
+
+```json
+"mcp": ["http://localhost:3000/mcp"]
+```
+
+### Extraction: the flow advances from speech alone
+
+`extract` entries run an out-of-band model against the transcript, fill a JSON
+schema, and **promote** fields into the bare state keys guards read — so a
+`captured(["ptp_amount","ptp_date"])` guard latches with no tool call
+anywhere:
+
+```json
+"extract": [{
+  "name": "promise_to_pay",
+  "instruction": "Extract the payment amount and date the caller agrees to.",
+  "schema": { "type": "object", "properties": {
+    "ptp_amount": { "type": "number" }, "ptp_date": { "type": "string" } } },
+  "trigger": "every_turn",
+  "promote": [ { "field": "ptp_amount" },
+               { "field": "ptp_date", "policy": "overwrite" } ]
+}]
+```
+
+Promotion policies: `keep_known` (default), `overwrite`, `true_only`,
+`non_empty`; `"to"` renames the target key. (`Live::extract_json` is the
+code-level equivalent.) Running extraction needs a model:
+`SpecResources.extraction_llm`.
+
+### Phases and watchers, over the same guard vocabulary
+
+Phase transitions and watcher conditions reuse the closed `Guard` atoms;
+handlers are closed `EffectSpec`s (`set` state, inject `context`):
+
+```json
+"phases": [
+  { "name": "greeting", "instruction": "Welcome the caller.",
+    "transitions": [ { "to": "main", "when": { "is_true": "greeted" } } ],
+    "on_enter": [ { "set": { "entered": true } } ] },
+  { "name": "main", "tools": ["search"], "needs": ["topic"], "terminal": false }
+],
+"initial_phase": "greeting",
+"watch": [
+  { "key": "app:score", "condition": { "crossed_above": 0.9 },
+    "set": { "alert": true } }
+]
+```
+
+Phase guards evaluate against state alone (there is no flow marking at a
+phase boundary), so `called_ok`/`done` atoms there are a validation *error* —
+latch a state key instead.
+
+### Fragments: reusable flow modules
+
+Declare a flow fragment once, splice it anywhere under a namespace — step ids
+become `{namespace}/{id}` and internal `after`/`done(step)`/constraint
+references are rewritten:
+
+```json
+"fragments": { "verify": { "steps": [ … ] } },
+"use_fragments": [ { "fragment": "verify", "namespace": "v", "after": ["greet"] } ],
+"flow": { "steps": [ { "id": "book", "after": ["v/confirm"], … } ] }
+```
+
+This is how a compliance team owns `disclosure` once and every flow imports it.
+
+### Embedded tests: conformance without an API key
+
+`tests` script conversations as data and assert flow state at checkpoints. The
+script replays through the *real* `FlowMonitor` with the declared tools' mock
+semantics — offline, no model, CI-friendly (`POST /api/flows/test`, the
+Studio's **Tests** button, or `spec.run_tests()`):
+
+```json
+"tests": [{ "name": "premature charge is blocked", "script": [
+  { "tool": "charge_card" },
+  { "expect": { "blocked": ["charge_card"], "complete": false } }
+]}]
+```
+
+Events: `{"user": "…"}` (turn boundary), `{"tool": "name"}` (mock semantics +
+completion, or a failure if the flow blocks it unexpectedly), `{"set": {…}}`
+(stands in for extraction), `{"expect": {done, active, allowed, blocked,
+state, complete}}`.
+
+### Validation: everything that can fail, fails at load time
+
+`SessionSpec::validate` runs the flow compiler with the declared tools as the
+registry, checks fragments splice, rejects marking atoms in phase guards — and
+diffs the state keys guards **read** against the keys the session **writes**
+(tool `set_state`, extraction promotions, phase/watcher effects). A guard
+waiting on a key nothing sets is the dominant silent failure in data-authored
+flows; it now surfaces as a warning with a did-you-mean suggestion:
+
+```
+a guard reads state key 'identity_verifed' but no tool, extractor, phase, or
+watcher writes it (it can never latch) — did you mean identity_verified?
+```
 
 ## The Flow Studio
 
@@ -155,14 +277,24 @@ The Studio is a drag-and-drop editor over exactly this document:
 - **Validate** — `POST /api/flows/validate` runs the real compiler
   (`Flow::compile_with_tools`) server-side and reports every diagnostic:
   unknown tools, unreachable steps, unguarded commit tools, ordering cycles,
-  plus advisory warnings.
+  unwritten guard keys (with did-you-mean suggestions), plus advisory
+  warnings.
+- **Tests** — replays the spec's embedded test suite offline through the real
+  flow monitor (`POST /api/flows/test`) and reports each script's result. No
+  API key involved.
 - **Run** — starts a live session in the `flow-studio` app
   (`/ws/flow-studio`), passing the spec in the Start message's `config`
-  field. The session is governed by the flow (`.govern(..)`), the mock tools
-  are wired to shared state, and after every turn and tool call the server
-  pushes a `flowStatus` snapshot — active steps light up blue and done steps
-  green on your canvas while you chat, and the Run tab lists admitted tools,
-  blocked tools (with reasons, from `why_blocked()`), and unmet requirements.
+  field. The session is configured by `SessionSpec::apply` (governance,
+  tools, extraction, phases, watchers), and after every turn, tool call, and
+  extraction the server pushes a `flowStatus` snapshot — active steps light
+  up blue and done steps green on your canvas while you chat, and the Run tab
+  lists admitted tools, blocked tools (with reasons, from `why_blocked()`),
+  unmet requirements, and each active step's **guard truth tree**: exactly
+  which atom it is waiting on.
+- **Live posture editing** — while a session runs, committing a posture or
+  ground edit in the step inspector sends `updateFlowPostures`; the monitor
+  re-projects postures at every turn boundary, so the change steers the very
+  next turn.
 
 Two examples ship with the Studio (toolbar → Examples): a governed
 debt-collection call and a restaurant booking flow.

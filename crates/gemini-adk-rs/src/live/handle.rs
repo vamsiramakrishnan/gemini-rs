@@ -423,6 +423,29 @@ impl LiveHandle {
     pub fn why_blocked(&self) -> Option<FlowExplanation> {
         self.explain()
     }
+
+    /// Replace a governed step's posture mid-session. Returns `true` when the
+    /// session is governed and the step exists.
+    ///
+    /// Postures are re-projected at every turn boundary, so the edit steers
+    /// the very next turn. This is the *safe* subset of live spec editing:
+    /// the DAG, guards, and tool gates stay fixed (tool declarations cannot
+    /// change mid-session at the wire level anyway).
+    pub fn update_step_posture(&self, step_id: &str, posture: Option<String>) -> bool {
+        self.flow
+            .as_ref()
+            .map(|mon| mon.lock().set_posture(step_id, posture))
+            .unwrap_or(false)
+    }
+
+    /// Replace a governed step's grounding template mid-session. Same
+    /// semantics as [`update_step_posture`](Self::update_step_posture).
+    pub fn update_step_ground(&self, step_id: &str, ground: Option<String>) -> bool {
+        self.flow
+            .as_ref()
+            .map(|mon| mon.lock().set_ground(step_id, ground))
+            .unwrap_or(false)
+    }
 }
 
 #[cfg(test)]

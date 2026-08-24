@@ -44,6 +44,54 @@
       "response": { "charged": true, "confirmation": "TXN-83921" }
     }
   ],
+  "extract": [
+    {
+      "name": "promise_to_pay",
+      "instruction": "Extract the payment amount and date the caller agrees to, once both are stated.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "ptp_amount": { "type": "number", "description": "Agreed payment amount in USD" },
+          "ptp_date": { "type": "string", "description": "Agreed payment date" }
+        }
+      },
+      "promote": [
+        { "field": "ptp_amount" },
+        { "field": "ptp_date" }
+      ]
+    }
+  ],
+  "tests": [
+    {
+      "name": "happy path reaches close",
+      "script": [
+        { "expect": { "active": ["verify"], "blocked": ["charge_card"], "complete": false } },
+        { "tool": "verify_identity" },
+        { "expect": { "done": ["verify"], "active": ["disclose"], "state": { "identity_verified": true } } },
+        { "tool": "lookup_balance" },
+        { "tool": "record_promise_to_pay" },
+        { "expect": { "done": ["negotiate"], "active": ["take_payment"], "allowed": ["charge_card"] } },
+        { "tool": "charge_card" },
+        { "expect": { "done": ["take_payment", "close"], "complete": true } }
+      ]
+    },
+    {
+      "name": "premature charge is blocked",
+      "script": [
+        { "tool": "charge_card" },
+        { "expect": { "blocked": ["charge_card"], "complete": false } }
+      ]
+    },
+    {
+      "name": "extraction alone advances negotiate",
+      "script": [
+        { "tool": "verify_identity" },
+        { "tool": "lookup_balance" },
+        { "set": { "ptp_amount": 150, "ptp_date": "next friday" } },
+        { "expect": { "done": ["negotiate"] } }
+      ]
+    }
+  ],
   "flow": {
     "steps": [
       {

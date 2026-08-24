@@ -59,6 +59,8 @@ async fn main() {
         .route("/app/:name", get(app_page))
         .route("/flows", get(flow_studio_page))
         .route("/api/flows/validate", post(validate_flow))
+        .route("/api/flows/test", post(test_flow))
+        .route("/api/flows/schema", get(flow_schema))
         .route("/api/apps", get(list_apps))
         .route("/ws/:name", get(ws_upgrade))
         .route("/favicon.ico", get(favicon))
@@ -145,13 +147,13 @@ async fn flow_studio_page() -> impl IntoResponse {
     Html(include_str!("../static/flow-studio.html"))
 }
 
-/// Validate a flow app spec (or a bare flow) and return structured diagnostics.
+/// Validate a session spec (or a bare flow) and return structured diagnostics.
 ///
 /// Accepts the same JSON the Flow Studio edits and `flow-studio` sessions run:
-/// a [`gemini_adk_server_rs::flow_app::FlowAppSpec`], or a bare `{"steps": …}`
+/// a [`gemini_adk_fluent_rs::spec::SessionSpec`], or a bare `{"steps": …}`
 /// flow document.
 async fn validate_flow(Json(value): Json<serde_json::Value>) -> Json<serde_json::Value> {
-    let result = match gemini_adk_server_rs::flow_app::FlowAppSpec::from_value(value) {
+    let result = match gemini_adk_fluent_rs::spec::SessionSpec::from_value(value) {
         Ok(spec) => serde_json::to_value(spec.validate()).unwrap_or_default(),
         Err(message) => serde_json::json!({
             "valid": false,
@@ -163,6 +165,41 @@ async fn validate_flow(Json(value): Json<serde_json::Value>) -> Json<serde_json:
         }),
     };
     Json(result)
+}
+
+/// Run a spec's embedded conformance tests offline — scripted conversations
+/// replayed through the real flow monitor, no model or API key involved.
+async fn test_flow(Json(value): Json<serde_json::Value>) -> Json<serde_json::Value> {
+    let result = match gemini_adk_fluent_rs::spec::SessionSpec::from_value(value) {
+        Ok(spec) => {
+            let validation = spec.validate();
+            if !validation.valid {
+                serde_json::json!({
+                    "valid": false,
+                    "errors": validation.errors,
+                    "reports": [],
+                })
+            } else {
+                serde_json::json!({
+                    "valid": true,
+                    "errors": [],
+                    "reports": serde_json::to_value(spec.run_tests()).unwrap_or_default(),
+                })
+            }
+        }
+        Err(message) => serde_json::json!({
+            "valid": false,
+            "errors": [message],
+            "reports": [],
+        }),
+    };
+    Json(result)
+}
+
+/// The JSON Schema of the session spec document itself — for editor
+/// autocomplete and for validating machine-authored specs.
+async fn flow_schema() -> Json<serde_json::Value> {
+    Json(gemini_adk_fluent_rs::spec::SessionSpec::json_schema())
 }
 
 async fn app_page(Path(name): Path<String>, State(state): State<AppState>) -> impl IntoResponse {

@@ -1307,6 +1307,7 @@ dependencies = [
  "async-trait",
  "axum 0.7.9",
  "futures",
+ "gemini-adk-fluent-rs",
  "gemini-adk-rs",
  "parking_lot",
  "serde",
