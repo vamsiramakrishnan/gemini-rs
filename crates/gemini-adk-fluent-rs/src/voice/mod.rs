@@ -13,7 +13,7 @@
 //!   channel, and turns an interruption into an explicit [`Playback::Flush`]
 //!   so stale audio is dropped, not played. Works with any audio backend —
 //!   or none (tests drive it with plain channels).
-//! - [`Talk::talk`] *(feature `voice-io`)* — the whole loop on the system's
+//! - `Talk::talk` *(feature `voice-io`)* — the whole loop on the system's
 //!   default microphone and speakers via `cpal`, with drain signaling wired
 //!   back into the session's voice reactor. Ctrl-C or session end stops it.
 //!
@@ -82,7 +82,7 @@ impl VoicePump {
 ///   arrives as [`Playback::Flush`].
 ///
 /// The pump owns no devices: pair it with `cpal` streams
-/// ([`Talk::talk`] does exactly that), a WebSocket bridge, a test harness —
+/// (`Talk::talk` does exactly that), a WebSocket bridge, a test harness —
 /// anything that can fill and drain a channel.
 pub fn pump(
     handle: &LiveHandle,
