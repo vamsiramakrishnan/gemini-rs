@@ -4,7 +4,7 @@ use axum::{
     extract::{Path, State, WebSocketUpgrade},
     middleware::{self, Next},
     response::{Html, IntoResponse, Json, Response},
-    routing::get,
+    routing::{get, post},
     Router,
 };
 use tokio::sync::broadcast;
@@ -57,6 +57,8 @@ async fn main() {
     let app = Router::new()
         .route("/", get(landing_page))
         .route("/app/:name", get(app_page))
+        .route("/flows", get(flow_studio_page))
+        .route("/api/flows/validate", post(validate_flow))
         .route("/api/apps", get(list_apps))
         .route("/ws/:name", get(ws_upgrade))
         .route("/favicon.ico", get(favicon))
@@ -136,6 +138,31 @@ async fn favicon() -> impl IntoResponse {
 
 async fn landing_page() -> impl IntoResponse {
     Html(include_str!("../static/index.html"))
+}
+
+/// The Flow Studio — a drag-and-drop editor for JSON-authored governed flows.
+async fn flow_studio_page() -> impl IntoResponse {
+    Html(include_str!("../static/flow-studio.html"))
+}
+
+/// Validate a flow app spec (or a bare flow) and return structured diagnostics.
+///
+/// Accepts the same JSON the Flow Studio edits and `flow-studio` sessions run:
+/// a [`gemini_adk_server_rs::flow_app::FlowAppSpec`], or a bare `{"steps": …}`
+/// flow document.
+async fn validate_flow(Json(value): Json<serde_json::Value>) -> Json<serde_json::Value> {
+    let result = match gemini_adk_server_rs::flow_app::FlowAppSpec::from_value(value) {
+        Ok(spec) => serde_json::to_value(spec.validate()).unwrap_or_default(),
+        Err(message) => serde_json::json!({
+            "valid": false,
+            "errors": [message],
+            "warnings": [],
+            "mermaid": "",
+            "tools": [],
+            "steps": 0,
+        }),
+    };
+    Json(result)
 }
 
 async fn app_page(Path(name): Path<String>, State(state): State<AppState>) -> impl IntoResponse {

@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Flow Studio — gemini-rs ADK</title>
+  <link rel="stylesheet" href="/static/css/design-system.css">
+  <link rel="stylesheet" href="/static/css/flow-studio.css">
+</head>
+<body>
+  <div id="studio">
+    <!-- ── Top bar ─────────────────────────────────────────────── -->
+    <header class="fs-topbar">
+      <a class="fs-logo" href="/">⟵ ADK Web</a>
+      <span class="fs-title">Flow Studio</span>
+      <input id="fs-app-name" class="fs-name-input" placeholder="untitled-flow" spellcheck="false">
+      <span id="fs-validation-badge" class="fs-badge fs-badge-idle" title="Validation status">not validated</span>
+      <div class="fs-topbar-actions">
+        <div class="fs-menu">
+          <button class="fs-btn" id="fs-examples-btn">Examples ▾</button>
+          <div class="fs-menu-items" id="fs-examples-menu">
+            <button data-example="collections">Debt collection</button>
+            <button data-example="restaurant">Restaurant booking</button>
+          </div>
+        </div>
+        <button class="fs-btn" id="fs-new-btn" title="Start a blank flow">New</button>
+        <button class="fs-btn" id="fs-add-step-btn" title="Add a step node">+ Step</button>
+        <button class="fs-btn" id="fs-layout-btn" title="Auto-arrange the DAG">Auto layout</button>
+        <button class="fs-btn" id="fs-validate-btn" title="Compile the flow server-side">Validate</button>
+        <button class="fs-btn fs-btn-primary" id="fs-run-btn" title="Run this flow as a live session">▶ Run</button>
+      </div>
+    </header>
+
+    <div class="fs-main">
+      <!-- ── Canvas ────────────────────────────────────────────── -->
+      <div class="fs-canvas-wrap" id="fs-canvas-wrap">
+        <div class="fs-canvas" id="fs-canvas">
+          <svg class="fs-edges" id="fs-edges"></svg>
+          <div class="fs-nodes" id="fs-nodes"></div>
+        </div>
+        <div class="fs-canvas-hint" id="fs-canvas-hint">
+          <p><strong>Draw your conversation as a DAG.</strong></p>
+          <p>Add steps, then drag from a node's <span class="fs-hint-port">●</span> port onto another
+             node to say “this comes after that”. Click a node to edit its posture, tools, and
+             completion guard. Export the JSON — it is exactly what
+             <code>Live::builder().govern(flow)</code> loads.</p>
+          <p>Or load an example from the toolbar.</p>
+        </div>
+        <div class="fs-zoom">
+          <button id="fs-zoom-out" title="Zoom out">−</button>
+          <button id="fs-zoom-reset" title="Reset zoom">100%</button>
+          <button id="fs-zoom-in" title="Zoom in">+</button>
+        </div>
+      </div>
+
+      <!-- ── Sidebar ───────────────────────────────────────────── -->
+      <aside class="fs-sidebar" id="fs-sidebar">
+        <nav class="fs-tabs">
+          <button class="fs-tab active" data-tab="step">Step</button>
+          <button class="fs-tab" data-tab="flow">Flow</button>
+          <button class="fs-tab" data-tab="app">App</button>
+          <button class="fs-tab" data-tab="json">JSON</button>
+          <button class="fs-tab" data-tab="run">Run</button>
+        </nav>
+
+        <section class="fs-pane active" id="fs-pane-step">
+          <div class="fs-empty" id="fs-step-empty">Select a step on the canvas to edit it.</div>
+          <div id="fs-step-form" hidden></div>
+        </section>
+
+        <section class="fs-pane" id="fs-pane-flow">
+          <div id="fs-flow-form"></div>
+        </section>
+
+        <section class="fs-pane" id="fs-pane-app">
+          <div id="fs-app-form"></div>
+        </section>
+
+        <section class="fs-pane" id="fs-pane-json">
+          <div class="fs-json-actions">
+            <button class="fs-btn" id="fs-json-apply">Apply</button>
+            <button class="fs-btn" id="fs-json-copy">Copy</button>
+            <button class="fs-btn" id="fs-json-download">Download</button>
+            <label class="fs-btn fs-file-btn">Import<input type="file" id="fs-json-import" accept=".json" hidden></label>
+          </div>
+          <textarea id="fs-json-text" class="fs-json-text" spellcheck="false"></textarea>
+          <div class="fs-json-status" id="fs-json-status"></div>
+        </section>
+
+        <section class="fs-pane" id="fs-pane-run">
+          <div class="fs-run-status" id="fs-run-status">Not connected. Press <strong>▶ Run</strong> to
+            start a live session governed by this flow.</div>
+          <div class="fs-run-flowstate" id="fs-run-flowstate" hidden>
+            <div class="fs-run-block"><span class="fs-run-label">Active</span><span id="fs-run-active">—</span></div>
+            <div class="fs-run-block"><span class="fs-run-label">Allowed tools</span><span id="fs-run-allowed">—</span></div>
+            <div class="fs-run-block"><span class="fs-run-label">Blocked tools</span><div id="fs-run-blocked">—</div></div>
+            <div class="fs-run-block"><span class="fs-run-label">Still required</span><span id="fs-run-missing">—</span></div>
+          </div>
+          <div class="fs-chat" id="fs-chat"></div>
+          <form class="fs-chat-input" id="fs-chat-form">
+            <input id="fs-chat-text" placeholder="Say something…" autocomplete="off" disabled>
+            <button class="fs-btn fs-btn-primary" id="fs-chat-send" disabled>Send</button>
+          </form>
+        </section>
+      </aside>
+    </div>
+
+    <!-- ── Validation results drawer ───────────────────────────── -->
+    <div class="fs-diagnostics" id="fs-diagnostics" hidden>
+      <div class="fs-diagnostics-head">
+        <span id="fs-diagnostics-title">Diagnostics</span>
+        <button id="fs-diagnostics-close">✕</button>
+      </div>
+      <ul id="fs-diagnostics-list"></ul>
+    </div>
+  </div>
+
+  <script src="/static/js/flow-studio.js"></script>
+</body>
+</html>

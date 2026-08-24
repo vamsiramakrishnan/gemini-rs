@@ -324,6 +324,27 @@ impl SessionBridge {
     where
         F: FnOnce(Live, &crate::apps::StartParams) -> Live,
     {
+        self.run_with(app, rx, |live, start| Ok(configure(live, start)), |_| {})
+            .await
+    }
+
+    /// Like [`run`](Self::run), with two extra seams for data-driven apps:
+    /// `configure` may fail (e.g. an invalid JSON spec in `Start.config` —
+    /// the error is reported to the browser instead of connecting), and
+    /// `after_connect` receives the connected [`LiveHandle`] so the app can
+    /// spawn its own observers (e.g. a flow-status pusher) before the event
+    /// loop starts.
+    pub async fn run_with<F, G>(
+        &self,
+        app: &dyn DemoApp,
+        rx: &mut mpsc::UnboundedReceiver<crate::app::ClientMessage>,
+        configure: F,
+        after_connect: G,
+    ) -> Result<(), crate::app::AppError>
+    where
+        F: FnOnce(Live, &crate::apps::StartParams) -> Result<Live, crate::app::AppError>,
+        G: FnOnce(&LiveHandle),
+    {
         use crate::app::AppError;
         use tokio::sync::broadcast;
 
@@ -335,10 +356,18 @@ impl SessionBridge {
             .map_err(|e| AppError::Connection(e.to_string()))?;
 
         // 3. Let app configure builder (DOMAIN ONLY)
-        let builder = configure(
+        let builder = match configure(
             Live::builder().telemetry_interval(std::time::Duration::from_secs(2)),
             &start,
-        );
+        ) {
+            Ok(builder) => builder,
+            Err(e) => {
+                let _ = self.tx.send(ServerMessage::Error {
+                    message: e.to_string(),
+                });
+                return Err(e);
+            }
+        };
         let contract = builder.describe_contract();
 
         // 4. Connect
@@ -353,6 +382,7 @@ impl SessionBridge {
         self.send_runtime_contract(contract);
         send_phase_snapshot(&self.tx, &handle);
         self.send_voice_runtime_state(&handle);
+        after_connect(&handle);
 
         // 6. Spawn event forwarder (LiveEvent -> ServerMessage -> WebSocket)
         let mut events = handle.events();

@@ -1,0 +1,75 @@
+{
+  "name": "restaurant-booking",
+  "description": "Table booking: gather party details, check availability, book, confirm.",
+  "instruction": "You are the booking assistant for Trattoria Rustica. Help the caller book a table. Use the tools for availability and booking — never invent availability.",
+  "greeting": "Welcome the caller to Trattoria Rustica and ask when they would like to dine and for how many people.",
+  "modality": "text",
+  "tools": [
+    {
+      "name": "capture_party",
+      "description": "Record the party size and requested date/time.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "party_size": { "type": "integer" },
+          "datetime": { "type": "string", "description": "Requested date and time" }
+        },
+        "required": ["party_size", "datetime"]
+      },
+      "response": { "recorded": true },
+      "set_state": { "party_size": 2, "requested_time": "recorded" }
+    },
+    {
+      "name": "check_availability",
+      "description": "Check table availability for the requested time.",
+      "response": { "available": true, "options": ["19:00", "19:30", "21:00"] },
+      "set_state": { "availability_checked": true }
+    },
+    {
+      "name": "book_table",
+      "description": "Book the table for the confirmed time.",
+      "response": { "booked": true, "reference": "TR-2044" }
+    },
+    {
+      "name": "recall_context",
+      "description": "Recall the caller's stored preferences.",
+      "response": { "notes": "Prefers window seating; celebrated an anniversary here in May." }
+    }
+  ],
+  "flow": {
+    "steps": [
+      {
+        "id": "gather",
+        "posture": "Find out the party size and the requested date and time, then record them.",
+        "allow": ["capture_party"],
+        "done": { "captured": ["party_size", "requested_time"] }
+      },
+      {
+        "id": "check",
+        "after": ["gather"],
+        "posture": "Check availability for the requested time and offer the options.",
+        "allow": ["check_availability"],
+        "done": { "is_true": "availability_checked" },
+        "ground": "Party of {party_size}."
+      },
+      {
+        "id": "book",
+        "after": ["check"],
+        "posture": "Book the table for the option the caller picks, then read back the reference.",
+        "allow": ["book_table"],
+        "done": { "called_ok": "book_table" }
+      },
+      {
+        "id": "farewell",
+        "after": ["book"],
+        "terminal": true
+      }
+    ],
+    "constraints": [
+      { "once": "book_table" },
+      { "never_until": { "tool": "book_table", "until": { "is_true": "availability_checked" } } },
+      { "require": ["farewell"] }
+    ],
+    "ambient": ["recall_context"]
+  }
+}

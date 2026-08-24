@@ -205,6 +205,14 @@ pub enum ServerMessage {
         /// Response tokens.
         response_tokens: u32,
     },
+    /// Governed-flow status snapshot (active steps, admitted/blocked tools,
+    /// unmet requirements, done steps). Sent by flow-governed apps at connect
+    /// and after every turn/tool event so a UI can light up the DAG live.
+    FlowStatus {
+        /// Serialized [`FlowExplanation`](gemini_adk_rs::flow::FlowExplanation)
+        /// plus a `done` step list.
+        status: serde_json::Value,
+    },
     /// Voice reactor state snapshot for devtools.
     VoiceRuntimeState {
         /// Whether the user is speaking.
@@ -251,6 +259,12 @@ pub enum ClientMessage {
         /// Voice override.
         #[serde(default)]
         voice: Option<String>,
+        /// App-specific configuration payload. For data-driven apps (e.g. the
+        /// Flow Studio) this carries the JSON document — a
+        /// [`FlowAppSpec`](crate::flow_app::FlowAppSpec) — that defines the
+        /// session to run. Apps that take no config ignore it.
+        #[serde(default)]
+        config: Option<serde_json::Value>,
     },
     /// A text turn from the user.
     Text {

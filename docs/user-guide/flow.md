@@ -253,6 +253,12 @@ Because every guard atom is a named, parameterized predicate, a `Flow` is fully
 serializable — so the script can be authored as data (e.g. RON/JSON) and edited
 by compliance or ops without a recompile. `flow.to_mermaid()` renders the DAG.
 
+See [Flows as JSON](./flow-json.md) for the JSON format reference, the
+`FlowAppSpec` document that packages a flow into a runnable application (with
+declarative mock tools), and the **Flow Studio** — the drag-and-drop editor at
+`/flows` in `gemini-adk-web-rs` that authors, validates, and live-runs these
+documents.
+
 ## Observability
 
 The monitor publishes status into state (`flow:done`, `flow:active`) and exposes

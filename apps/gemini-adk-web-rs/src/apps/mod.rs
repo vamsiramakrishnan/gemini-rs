@@ -6,6 +6,7 @@ mod clinic;
 #[allow(unused)]
 mod debt_collection;
 pub mod extractors;
+mod flow_studio;
 mod guardrails;
 mod playbook;
 #[allow(unused)]
@@ -36,6 +37,7 @@ pub fn register_all(registry: &mut AppRegistry) {
     registry.register(call_screening::CallScreening);
     registry.register(restaurant::Restaurant);
     registry.register(clinic::Clinic);
+    registry.register(flow_studio::FlowStudio);
 }
 
 /// Parameters extracted from the browser's Start message.
@@ -43,6 +45,8 @@ pub struct StartParams {
     pub system_instruction: Option<String>,
     pub model: Option<String>,
     pub voice: Option<String>,
+    /// App-specific configuration payload (e.g. a Flow Studio app spec).
+    pub config: Option<serde_json::Value>,
 }
 
 /// Wait for the Start message from the browser.
@@ -56,10 +60,12 @@ pub async fn wait_for_start(
             system_instruction,
             model,
             voice,
+            config,
         }) => Ok(StartParams {
             system_instruction,
             model,
             voice,
+            config,
         }),
         Some(_) => Err(AppError::Session("Expected Start message".into())),
         None => Err(AppError::Connection(
