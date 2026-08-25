@@ -34,6 +34,8 @@ jobs:
         with:
           toolchain: "1.93.1"
       - uses: Swatinem/rust-cache@v2
+      # `voice-io` (cpal) needs system audio headers to compile.
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - run: cargo test --workspace
       # `cargo test --workspace` uses default features, so every test file
       # behind `#![cfg(feature = "...")]` is invisible to it — a whole suite can
@@ -76,6 +78,8 @@ jobs:
         with:
           toolchain: "1.93.1"
       - uses: Swatinem/rust-cache@v2
+      # `voice-io` (cpal) needs system audio headers to compile.
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - run: cargo check --workspace --no-default-features
       - run: cargo check --workspace --all-features
 
@@ -91,6 +95,8 @@ jobs:
           toolchain: "1.93.1"
       - uses: taiki-e/install-action@cargo-hack
       - uses: Swatinem/rust-cache@v2
+      # `voice-io` (cpal) needs system audio headers to compile.
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - run: cargo hack check --each-feature --no-dev-deps -p gemini-genai-rs -p gemini-adk-rs -p gemini-adk-fluent-rs -p gemini-memory-rs
 
   # Supply chain: RustSec advisories, license allow-list, source whitelist.

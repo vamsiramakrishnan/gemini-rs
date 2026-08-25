@@ -159,6 +159,37 @@ impl Live {
         self
     }
 
+    /// Like [`extract_turns`](Self::extract_turns), but schema-as-data: no
+    /// Rust type required. The extraction result is stored in `State` under
+    /// `name`; pair with
+    /// [`FieldPromotion`](gemini_adk_rs::live::extractor::FieldPromotion)
+    /// rules via [`extractor`](Self::extractor) (or a
+    /// [`SessionSpec`](crate::spec::SessionSpec) `extract` entry, which wires
+    /// promotions declaratively) to land individual fields in the bare keys
+    /// flow guards read.
+    ///
+    /// This is the piece that lets a JSON-authored flow advance from speech
+    /// alone: extraction fills the state that `captured`/`is_true` guards
+    /// latch on, with no tool call anywhere.
+    pub fn extract_json(
+        mut self,
+        llm: Arc<dyn BaseLlm>,
+        name: impl Into<String>,
+        schema: serde_json::Value,
+        prompt: impl Into<String>,
+    ) -> Self {
+        self.config = self
+            .config
+            .enable_input_transcription()
+            .enable_output_transcription();
+        self.warm_up_llms.push(llm.clone());
+        let extractor = LlmExtractor::new(name.into(), llm, prompt.into(), 3)
+            .with_schema(schema)
+            .with_min_words(3);
+        self.extractors.push(Arc::new(extractor));
+        self
+    }
+
     /// Add a custom `TurnExtractor` implementation.
     pub fn extractor(mut self, extractor: Arc<dyn TurnExtractor>) -> Self {
         // Auto-enable transcription

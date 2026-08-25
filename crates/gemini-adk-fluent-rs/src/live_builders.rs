@@ -584,15 +584,31 @@ impl WatchBuilder {
     /// Set the action and finish building the watcher, returning the `Live` builder.
     ///
     /// The action receives `(old_value, new_value, state)`.
-    pub fn then<F, Fut>(mut self, f: F) -> Live
+    pub fn then<F, Fut>(self, f: F) -> Live
     where
         F: Fn(Value, Value, State) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        self.then_with_writer(move |old, new, state, _writer| f(old, new, state))
+    }
+
+    /// Like [`then`](Self::then), but the action also receives the live
+    /// session writer — so a watcher can inject steering context or prompt
+    /// the model, not only mutate state.
+    ///
+    /// The action receives `(old_value, new_value, state, writer)`.
+    pub fn then_with_writer<F, Fut>(mut self, f: F) -> Live
+    where
+        F: Fn(Value, Value, State, Arc<dyn gemini_genai_rs::session::SessionWriter>) -> Fut
+            + Send
+            + Sync
+            + 'static,
         Fut: Future<Output = ()> + Send + 'static,
     {
         let watcher = Watcher {
             key: self.key,
             predicate: self.predicate.unwrap_or(WatchPredicate::Changed),
-            action: Arc::new(move |old, new, state| Box::pin(f(old, new, state))),
+            action: Arc::new(move |old, new, state, writer| Box::pin(f(old, new, state, writer))),
             blocking: self.blocking,
         };
         self.live.add_watcher(watcher);

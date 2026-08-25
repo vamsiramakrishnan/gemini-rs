@@ -8,11 +8,15 @@
 
 #[cfg(feature = "fluent")]
 pub mod live;
+#[cfg(feature = "fluent")]
+pub mod spec_binding;
 pub mod tools;
 pub mod turn_extractor;
 
 #[cfg(feature = "fluent")]
 pub use live::{memory_tools, LiveMemoryExt};
+#[cfg(feature = "fluent")]
+pub use spec_binding::SessionMemoryBinding;
 pub use tools::{
     manage_memory_tool, recall_context_tool, ManageArgs, RecallArgs, RecallScope, MANAGE_TOOL,
     MEMORY_TOOLS, RECALL_TOOL,

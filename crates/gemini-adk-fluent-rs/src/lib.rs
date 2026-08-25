@@ -46,8 +46,12 @@ pub mod motifs;
 pub mod operators;
 pub mod patterns;
 pub mod policy;
+pub mod primitives;
 pub mod simulation;
+pub mod spec;
+pub mod telephony;
 pub mod testing;
+pub mod voice;
 
 pub use gemini_adk_rs;
 pub use gemini_genai_rs;
@@ -158,6 +162,10 @@ macro_rules! let_clone {
 /// | A2A, motifs, policy, simulation, testing, orchestration, credentials, run_config | the same-named module, e.g. `use gemini_adk_fluent_rs::simulation::*;` |
 /// | Raw L0 wire types | `use gemini_adk_fluent_rs::wire::*;` |
 pub mod prelude {
+    // ── Voice I/O: `.talk()` on a connected handle (feature `voice-io`) ──
+    #[cfg(feature = "voice-io")]
+    pub use crate::voice::Talk;
+
     // ── Builders, composition algebra, operators, patterns (headline DX) ──
     pub use crate::builder::*;
     pub use crate::compose::{Ctx, A, C, E, G, M, P, S, T};

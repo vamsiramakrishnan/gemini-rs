@@ -231,6 +231,8 @@ instruction, so do not write one.
 |---|---|
 | `step(id)` | declare a node |
 | `after(dep)` | add a dependency (call repeatedly for several) |
+| `after_when(dep, Guard)` | a **conditional edge** — satisfied only while the guard holds (branching) |
+| `join_any()` | any one satisfied edge makes the step eligible (the merge after a branch) |
 | `gate(Guard)` | extra eligibility beyond dependencies |
 | `done(Guard)` | completion condition (required for non-terminal steps) |
 | `posture(text)` | instruction imposed while active |
@@ -242,6 +244,7 @@ instruction, so do not write one.
 | `before(a, b)` | ordering invariant |
 | `never(tool).until(Guard)` | forbid a tool until a guard holds |
 | `require([steps])` | steps that must be done for completion |
+| `reset([steps]).when(Guard)` | un-latch steps on the guard's rising edge — the loop primitive (`called_ok` evidence for those steps is forgiven; the DAG stays acyclic) |
 | `commit(tool, until)` | sugar: `once` + `never…until` + confirmation |
 
 Guard atoms: `is_true`, `is_set`, `eq`, `captured`, `called_ok`, `done`, `all`,
@@ -252,6 +255,12 @@ Guard atoms: `is_true`, `is_set`, `eq`, `captured`, `called_ok`, `done`, `all`,
 Because every guard atom is a named, parameterized predicate, a `Flow` is fully
 serializable — so the script can be authored as data (e.g. RON/JSON) and edited
 by compliance or ops without a recompile. `flow.to_mermaid()` renders the DAG.
+
+See [Flows as JSON](./flow-json.md) for the JSON format reference, the
+`FlowAppSpec` document that packages a flow into a runnable application (with
+declarative mock tools), and the **Flow Studio** — the drag-and-drop editor at
+`/flows` in `gemini-adk-web-rs` that authors, validates, and live-runs these
+documents.
 
 ## Observability
 

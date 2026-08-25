@@ -9,6 +9,7 @@
 - [Setup and Running](./setup-and-running.md)
 - [Authentication & Connecting](./user-guide/auth-and-connecting.md)
 - [Architecture Overview](./user-guide/architecture.md)
+- [The Layer Contract (L0 · L1 · L2)](./user-guide/layers.md)
 - [Migration Guide: L0 → L1 → L2](./user-guide/migration.md)
 - [Best Practices & Common Mistakes](./user-guide/best-practices.md)
 
@@ -16,6 +17,7 @@
 
 - [Voice & Live Sessions](./user-guide/live-sessions.md)
 - [Live Callbacks: Fast Lane vs Control Lane](./user-guide/live-callbacks.md)
+- [Telephony: Answering Phone Calls](./user-guide/telephony.md)
 - [Phase System](./user-guide/phases.md)
 - [Phase Transitions Deep Dive](./user-guide/phase-transitions-deep-dive.md)
 - [Steering Modes](./user-guide/steering-modes.md)
@@ -34,6 +36,7 @@
 # Composition & Patterns
 
 - [Governed Flows (conversation/tool DAGs)](./user-guide/flow.md)
+- [Flows as JSON & the Flow Studio](./user-guide/flow-json.md)
 - [Agent Orchestration](./user-guide/orchestration.md)
 - [Text Agent Combinators](./user-guide/text-agents.md)
 - [S·C·T·P·M·A Operator Algebra](./user-guide/composition.md)

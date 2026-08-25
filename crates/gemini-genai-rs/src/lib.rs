@@ -30,6 +30,7 @@ pub mod files;
 pub mod generate;
 #[cfg(feature = "models")]
 pub mod models;
+pub mod primitives;
 pub mod protocol;
 pub mod quick;
 pub mod session;

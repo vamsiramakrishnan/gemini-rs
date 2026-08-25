@@ -308,8 +308,10 @@ The most evidenced bet: every commercial voice-agent tester is LLM-vs-LLM
 
 ## Milestone 10 — Rust-only endgames 💭
 
-- 💭 Single-binary telephony via `rustpbx`/`rsipstack` integration (the
-  governed agent brain in the media path).
+- 🚧 Single-binary telephony: **shipped** — `telephony::sip::SipAgent`
+  (feature `sip`) answers raw SIP calls in-process (rsipstack signalling +
+  built-in RTP/SDP/G.711), alongside the Twilio Media Streams connector.
+  Remaining: SIP registration, SRTP, RFC 4733 DTMF.
 - 💭 WASM edge governance: compiler + Sim in the browser (authoring/validation)
   and Workers/on-device.
 - 💭 On-device turn detection (smart-turn-v3 is BSD-2/8M params/12ms CPU;

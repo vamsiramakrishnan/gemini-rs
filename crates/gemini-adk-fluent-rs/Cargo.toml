@@ -13,6 +13,7 @@ readme = "README.md"
 [dependencies]
 gemini-genai-rs = { workspace = true }
 gemini-adk-rs  = { workspace = true }
+base64 = "0.22"
 bytes = "1"
 # Targeted features only; tests get `full` via dev-dependencies.
 tokio = { version = "1", features = ["rt", "macros", "sync", "time"] }
@@ -22,6 +23,17 @@ serde_json = "1"
 schemars = "0.8"
 parking_lot = "0.12"
 tracing = "0.1"
+# Optional: HTTP tool bindings for spec-driven sessions (`http-tools`).
+reqwest = { version = "0.12", default-features = false, features = [
+    "json",
+    "rustls-tls-native-roots",
+], optional = true }
+# Optional: native microphone/speaker duplex for `voice::Talk` (`voice-io`).
+cpal = { version = "0.15", optional = true }
+# Optional: in-process SIP signalling for `telephony::sip` (`sip`).
+rsipstack = { version = "0.6", optional = true }
+tokio-util = { version = "0.7", optional = true }
+thiserror = { version = "2", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
@@ -38,6 +50,14 @@ parking_lot = "0.12"
 [features]
 default = []
 gemini-llm = ["gemini-adk-rs/gemini-llm"]
+# HTTP tool bindings in `spec` (SessionSpec `tools[].http`).
+http-tools = ["dep:reqwest"]
+# Native microphone/speaker duplex (`voice::Talk::talk`). Needs system audio
+# headers (Linux: libasound2-dev).
+voice-io = ["dep:cpal", "dep:thiserror", "tokio/signal"]
+# In-process SIP agent (`telephony::sip::SipAgent`) — answer raw SIP calls
+# (rsipstack signalling + built-in RTP/SDP/G.711 media).
+sip = ["dep:rsipstack", "dep:tokio-util", "tokio/net", "tokio/rt-multi-thread"]
 tracing-support = ["gemini-adk-rs/tracing-support"]
 # Passthroughs so applications don't need lower-layer dependencies.
 vad-wavekat = ["gemini-adk-rs/vad-wavekat"]
