@@ -110,6 +110,16 @@ impl Pred {
         }
     }
 
+    /// Tool names referenced by `called_ok` atoms (for reset forgiveness).
+    fn referenced_tools(&self, out: &mut Vec<String>) {
+        match self {
+            Pred::CalledOk(t) => out.push(t.clone()),
+            Pred::All(ps) | Pred::Any(ps) => ps.iter().for_each(|p| p.referenced_tools(out)),
+            Pred::Not(p) => p.referenced_tools(out),
+            _ => {}
+        }
+    }
+
     /// State keys this predicate reads (`is_true`/`is_set`/`eq`/`captured`
     /// atoms, recursively). `called_ok`/`done` reference tools/steps, not
     /// state, and are excluded.
@@ -378,6 +388,12 @@ impl Guard {
             p.referenced_state_keys(out);
         }
     }
+
+    fn referenced_tools(&self, out: &mut Vec<String>) {
+        if let Guard::Spec(p) = self {
+            p.referenced_tools(out);
+        }
+    }
 }
 
 impl schemars::JsonSchema for Guard {
@@ -431,14 +447,127 @@ impl std::fmt::Debug for Guard {
     }
 }
 
+/// A dependency edge into a step.
+///
+/// In JSON, a plain string (`"verify"`) is an unconditional edge — satisfied
+/// once the source step is done. An object (`{"step": "triage", "when":
+/// {"is_true": "routine"}}`) is a **conditional edge**: satisfied only while
+/// the source is done *and* the guard holds. Conditional edges out of one
+/// source into sibling steps are how a flow branches; pair them with
+/// [`Join::Any`] on the merge step. Unconditional edges serialize back to the
+/// plain string form, so existing documents round-trip unchanged.
+#[derive(Clone, Debug)]
+pub struct Edge {
+    /// The source step this edge depends on.
+    pub step: String,
+    /// Optional condition; the edge is satisfied only while it holds.
+    pub when: Option<Guard>,
+}
+
+impl Edge {
+    /// An unconditional edge from `step`.
+    pub fn to(step: impl Into<String>) -> Self {
+        Edge {
+            step: step.into(),
+            when: None,
+        }
+    }
+    /// A conditional edge from `step`, satisfied only while `when` holds.
+    pub fn when(step: impl Into<String>, when: Guard) -> Self {
+        Edge {
+            step: step.into(),
+            when: Some(when),
+        }
+    }
+}
+
+impl<S: Into<String>> From<S> for Edge {
+    fn from(step: S) -> Self {
+        Edge::to(step)
+    }
+}
+
+impl Serialize for Edge {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        match &self.when {
+            // Unconditional edges keep the original plain-string form.
+            None => self.step.serialize(s),
+            Some(when) => {
+                use serde::ser::SerializeStruct;
+                let mut out = s.serialize_struct("Edge", 2)?;
+                out.serialize_field("step", &self.step)?;
+                out.serialize_field("when", when)?;
+                out.end()
+            }
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Edge {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Repr {
+            Simple(String),
+            Conditional {
+                step: String,
+                #[serde(default)]
+                when: Option<Guard>,
+            },
+        }
+        Ok(match Repr::deserialize(d)? {
+            Repr::Simple(step) => Edge { step, when: None },
+            Repr::Conditional { step, when } => Edge { step, when },
+        })
+    }
+}
+
+impl schemars::JsonSchema for Edge {
+    fn schema_name() -> String {
+        "Edge".to_string()
+    }
+    fn json_schema(generator: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+        #[derive(schemars::JsonSchema)]
+        #[serde(untagged)]
+        #[allow(dead_code)]
+        enum EdgeSchema {
+            Simple(String),
+            Conditional { step: String, when: Option<Pred> },
+        }
+        EdgeSchema::json_schema(generator)
+    }
+}
+
+/// How a step's dependency edges combine.
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum Join {
+    /// Every edge must be satisfied (the default — a synchronizing join).
+    #[default]
+    All,
+    /// Any one satisfied edge suffices — the merge node after a branch.
+    Any,
+}
+
+impl Join {
+    fn is_all(&self) -> bool {
+        *self == Join::All
+    }
+}
+
 /// A node in the flow DAG — the only node type.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Step {
     /// Unique step id.
     pub id: String,
-    /// Dependency step ids; this step is only eligible once all are done.
+    /// Dependency edges; how they combine is set by `join`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub after: Vec<String>,
+    pub after: Vec<Edge>,
+    /// How the `after` edges combine: `all` (default) or `any`.
+    #[serde(default, skip_serializing_if = "Join::is_all")]
+    pub join: Join,
     /// Extra eligibility predicate beyond dependencies.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gate: Option<Guard>,
@@ -481,6 +610,20 @@ pub enum Constraint {
     },
     /// These steps must be done for the flow to be complete.
     Require(Vec<String>),
+    /// Un-latch the named steps when the guard *becomes* true (rising edge) —
+    /// the loop primitive. The DAG stays acyclic and statically checkable;
+    /// iteration is explicit marking surgery instead of back-edges.
+    ///
+    /// A reset also forgives the completion evidence the steps' `done` guards
+    /// reference: `called_ok` counts for those tools are cleared (so a `once`
+    /// on such a tool permits one run per latch-cycle). State keys the guards
+    /// read are the application's to clear — a reset never touches [`State`].
+    Reset {
+        /// The steps to un-latch.
+        steps: Vec<String>,
+        /// Fires on this guard's rising edge.
+        when: Guard,
+    },
 }
 
 /// A governed conversation/tool DAG.
@@ -529,8 +672,23 @@ impl Flow {
         }
         for s in &self.steps {
             for d in &s.after {
-                if !ids.contains(d.as_str()) {
-                    errs.push(format!("step '{}' depends on unknown step '{}'", s.id, d));
+                if !ids.contains(d.step.as_str()) {
+                    errs.push(format!(
+                        "step '{}' depends on unknown step '{}'",
+                        s.id, d.step
+                    ));
+                }
+                if let Some(when) = &d.when {
+                    let mut refs = Vec::new();
+                    when.referenced_steps(&mut refs);
+                    for r in refs {
+                        if !ids.contains(r.as_str()) {
+                            errs.push(format!(
+                                "step '{}' edge condition references unknown step '{r}'",
+                                s.id
+                            ));
+                        }
+                    }
                 }
             }
             if !s.terminal && s.done.is_none() {
@@ -567,6 +725,13 @@ impl Flow {
                             errs.push(format!(
                                 "constraint `require` references unknown step '{r}'"
                             ));
+                        }
+                    }
+                }
+                Constraint::Reset { steps, .. } => {
+                    for r in steps {
+                        if !ids.contains(r.as_str()) {
+                            errs.push(format!("constraint `reset` references unknown step '{r}'"));
                         }
                     }
                 }
@@ -622,10 +787,17 @@ impl Flow {
             for g in s.gate.iter().chain(s.done.iter()) {
                 g.referenced_state_keys(&mut keys);
             }
+            for e in &s.after {
+                if let Some(when) = &e.when {
+                    when.referenced_state_keys(&mut keys);
+                }
+            }
         }
         for c in &self.constraints {
-            if let Constraint::NeverUntil { until, .. } = c {
-                until.referenced_state_keys(&mut keys);
+            match c {
+                Constraint::NeverUntil { until, .. } => until.referenced_state_keys(&mut keys),
+                Constraint::Reset { when, .. } => when.referenced_state_keys(&mut keys),
+                _ => {}
             }
         }
         keys
@@ -639,8 +811,8 @@ impl Flow {
         let mut succ: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
         for s in &self.steps {
             for d in &s.after {
-                if ids.contains(d.as_str()) {
-                    succ.entry(d.as_str()).or_default().push(s.id.as_str());
+                if ids.contains(d.step.as_str()) {
+                    succ.entry(d.step.as_str()).or_default().push(s.id.as_str());
                 }
             }
         }
@@ -786,7 +958,7 @@ impl Flow {
         let mut deps: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
         for s in &self.steps {
             let entry = deps.entry(s.id.as_str()).or_default();
-            entry.extend(s.after.iter().map(String::as_str));
+            entry.extend(s.after.iter().map(|e| e.step.as_str()));
         }
         for c in &self.constraints {
             if let Constraint::Before(a, b) = c {
@@ -839,11 +1011,11 @@ impl Flow {
             color.insert(id, 1);
             if let Some(step) = flow.step(id) {
                 for d in &step.after {
-                    match color.get(d.as_str()).copied() {
+                    match color.get(d.step.as_str()).copied() {
                         Some(1) => return true,
                         Some(2) => {}
                         _ => {
-                            if dfs(flow, d, color) {
+                            if dfs(flow, &d.step, color) {
                                 return true;
                             }
                         }
@@ -874,7 +1046,13 @@ impl Flow {
         }
         for s in &self.steps {
             for d in &s.after {
-                out.push_str(&format!("    {d} --> {}\n", s.id));
+                match &d.when {
+                    Some(when) => {
+                        let label = when.describe().replace('|', "/");
+                        out.push_str(&format!("    {} -->|{label}| {}\n", d.step, s.id));
+                    }
+                    None => out.push_str(&format!("    {} --> {}\n", d.step, s.id)),
+                }
             }
         }
         out
@@ -1004,6 +1182,9 @@ pub struct FlowMonitor {
     enter_actions: HashMap<String, StepAction>,
     /// Steps whose `on_enter` action has already fired (fire-once).
     announced: BTreeSet<String>,
+    /// Previous guard values for `Constraint::Reset` rising-edge detection,
+    /// in constraint order.
+    reset_prev: Vec<bool>,
 }
 
 impl FlowMonitor {
@@ -1020,6 +1201,7 @@ impl FlowMonitor {
             violations: Vec::new(),
             enter_actions: HashMap::new(),
             announced: BTreeSet::new(),
+            reset_prev: Vec::new(),
         }
     }
 
@@ -1181,7 +1363,19 @@ impl FlowMonitor {
     }
 
     fn eligible(&self, step: &Step, state: &State) -> bool {
-        let deps_done = step.after.iter().all(|d| self.marking.done.contains(d));
+        let ctx = self.ctx(state);
+        let edge_ok = |e: &Edge| {
+            self.marking.done.contains(&e.step)
+                && e.when.as_ref().map(|g| g.eval(&ctx)).unwrap_or(true)
+        };
+        let deps_done = if step.after.is_empty() {
+            true
+        } else {
+            match step.join {
+                Join::All => step.after.iter().all(edge_ok),
+                Join::Any => step.after.iter().any(edge_ok),
+            }
+        };
         // Enforce `Constraint::Before(a, step)`: `a` must be done before this
         // step may start (an ordering constraint declared outside `after`).
         let before_ok = self.flow.constraints.iter().all(|c| match c {
@@ -1198,7 +1392,13 @@ impl FlowMonitor {
 
     /// Re-evaluate completion latches to a fixpoint. Call after any event that
     /// can change state or the marking (turn boundary, tool completion).
+    ///
+    /// [`Constraint::Reset`] constraints are applied first, on their guard's
+    /// rising edge: the named steps un-latch, their `on_enter` re-arms, and
+    /// the `called_ok` evidence their completion guards reference is forgiven
+    /// — the loop primitive over an otherwise monotonic marking.
     pub fn relatch(&mut self, state: &State) {
+        self.apply_resets(state);
         loop {
             let mut newly_done: Vec<String> = Vec::new();
             for s in &self.flow.steps {
@@ -1225,6 +1425,52 @@ impl FlowMonitor {
             }
             for id in newly_done {
                 self.marking.done.insert(id);
+            }
+        }
+    }
+
+    /// Apply [`Constraint::Reset`] constraints on their guards' rising edges.
+    fn apply_resets(&mut self, state: &State) {
+        // Evaluate all guards first (immutable borrow), then mutate.
+        let mut edges: Vec<(usize, bool)> = Vec::new();
+        {
+            let ctx = self.ctx(state);
+            for (i, c) in self.flow.constraints.iter().enumerate() {
+                if let Constraint::Reset { when, .. } = c {
+                    edges.push((i, when.eval(&ctx)));
+                }
+            }
+        }
+        for (slot, (index, now)) in edges.into_iter().enumerate() {
+            let prev = self.reset_prev.get(slot).copied().unwrap_or(false);
+            if self.reset_prev.len() <= slot {
+                self.reset_prev.resize(slot + 1, false);
+            }
+            self.reset_prev[slot] = now;
+            if !now || prev {
+                continue;
+            }
+            let Constraint::Reset { steps, .. } = &self.flow.constraints[index] else {
+                continue;
+            };
+            let steps = steps.clone();
+            for step_id in &steps {
+                if !self.marking.done.remove(step_id) {
+                    continue;
+                }
+                self.announced.remove(step_id);
+                // Forgive the completion evidence this step's done guard
+                // references, so `called_ok` (and any `once` on those tools)
+                // count per latch-cycle. State keys stay the app's to clear.
+                if let Some(step) = self.flow.steps.iter().find(|s| &s.id == step_id) {
+                    let mut tools = Vec::new();
+                    if let Some(done) = &step.done {
+                        done.referenced_tools(&mut tools);
+                    }
+                    for tool in tools {
+                        self.marking.tool_ok.remove(&tool);
+                    }
+                }
             }
         }
     }
@@ -1297,11 +1543,9 @@ impl FlowMonitor {
             }
         }
         // Skipped: a successor is done but this step never completed.
-        let bypassed = self
-            .flow
-            .steps
-            .iter()
-            .any(|s| s.after.iter().any(|d| d == step_id) && self.marking.done.contains(&s.id));
+        let bypassed = self.flow.steps.iter().any(|s| {
+            s.after.iter().any(|d| d.step == step_id) && self.marking.done.contains(&s.id)
+        });
         if bypassed {
             Verdict::Skipped
         } else {
@@ -1616,6 +1860,7 @@ impl FlowBuilder {
         self.steps.push(Step {
             id: id.into(),
             after: Vec::new(),
+            join: Join::default(),
             gate: None,
             done: None,
             posture: None,
@@ -1628,7 +1873,20 @@ impl FlowBuilder {
     }
     /// Add a dependency (call multiple times for multiple deps).
     pub fn after(mut self, dep: impl Into<String>) -> Self {
-        self.current().after.push(dep.into());
+        self.current().after.push(Edge::to(dep));
+        self
+    }
+    /// Add a **conditional** dependency: satisfied only while `when` holds.
+    /// Conditional edges out of one source are how a flow branches; pair with
+    /// [`join_any`](Self::join_any) on the merge step.
+    pub fn after_when(mut self, dep: impl Into<String>, when: Guard) -> Self {
+        self.current().after.push(Edge::when(dep, when));
+        self
+    }
+    /// Any one satisfied edge makes this step eligible (the merge node after
+    /// a branch). Default is `all` — a synchronizing join.
+    pub fn join_any(mut self) -> Self {
+        self.current().join = Join::Any;
         self
     }
     /// Extra eligibility guard beyond dependencies.
@@ -1731,6 +1989,20 @@ impl FlowBuilder {
         self
     }
 
+    /// Un-latch `steps` whenever the guard given to
+    /// [`when`](ResetBuilder::when) *becomes* true — the loop primitive.
+    /// See [`Constraint::Reset`] for the exact forgiveness semantics.
+    pub fn reset<I, S>(self, steps: I) -> ResetBuilder
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        ResetBuilder {
+            builder: self,
+            steps: steps.into_iter().map(Into::into).collect(),
+        }
+    }
+
     /// Forbid a tool until a guard holds (`never(tool).until(guard)`).
     pub fn never(self, tool: impl Into<String>) -> NeverBuilder {
         NeverBuilder {
@@ -1778,6 +2050,23 @@ impl NeverBuilder {
             until: guard,
         });
         self.fb
+    }
+}
+
+/// Intermediate for `reset(steps).when(guard)`.
+pub struct ResetBuilder {
+    builder: FlowBuilder,
+    steps: Vec<String>,
+}
+
+impl ResetBuilder {
+    /// Fire the reset on this guard's rising edge.
+    pub fn when(mut self, guard: Guard) -> FlowBuilder {
+        self.builder.constraints.push(Constraint::Reset {
+            steps: self.steps,
+            when: guard,
+        });
+        self.builder
     }
 }
 
@@ -1978,6 +2267,7 @@ mod tests {
             Step {
                 id: "a".into(),
                 after: vec!["b".into()],
+                join: Join::default(),
                 gate: None,
                 done: Some(Guard::always()),
                 posture: None,
@@ -1989,6 +2279,7 @@ mod tests {
             Step {
                 id: "b".into(),
                 after: vec!["a".into()],
+                join: Join::default(),
                 gate: None,
                 done: Some(Guard::always()),
                 posture: None,
@@ -2622,6 +2913,107 @@ mod tests {
         let _ = state.set("ready", true);
         assert!(Guard::is_true("ready").eval_state(&state));
         assert!(!Guard::called_ok("any_tool").eval_state(&state));
+    }
+
+    #[test]
+    fn conditional_edges_branch_and_any_join_merges() {
+        // decide ─(routine)→ schedule ─┐
+        //        ─(emergency)→ escalate ─┴→ close (join: any)
+        let flow = Flow::new()
+            .step("decide")
+            .done(Guard::is_set("severity"))
+            .step("schedule")
+            .after_when("decide", Guard::eq("severity", "routine"))
+            .done(Guard::called_ok("book"))
+            .allow(["book"])
+            .step("escalate")
+            .after_when("decide", Guard::eq("severity", "emergency"))
+            .done(Guard::called_ok("transfer"))
+            .allow(["transfer"])
+            .step("close")
+            .after("schedule")
+            .after("escalate")
+            .join_any()
+            .terminal()
+            .build()
+            .expect("valid");
+        let mut mon = FlowMonitor::new(flow, Enforcement::Enforce);
+        let state = State::new();
+        let _ = state.set("severity", "routine");
+        mon.relatch(&state);
+        let active: Vec<String> = mon.explain(&state).active;
+        assert!(
+            active.contains(&"schedule".to_string()),
+            "routine branch opens"
+        );
+        assert!(
+            !active.contains(&"escalate".to_string()),
+            "emergency branch stays closed"
+        );
+        // Merge via any-join: schedule alone completing closes the flow.
+        mon.on_tool_ok("book", &state);
+        assert!(mon.marking().done.contains("close"), "any-join merged");
+    }
+
+    #[test]
+    fn reset_unlatches_on_rising_edge_and_forgives_called_ok() {
+        let flow = Flow::new()
+            .step("pay")
+            .allow(["charge"])
+            .done(Guard::called_ok("charge"))
+            .once("charge")
+            .reset(["pay"])
+            .when(Guard::is_true("declined"))
+            .build()
+            .expect("valid");
+        let mut mon = FlowMonitor::new(flow, Enforcement::Enforce);
+        let state = State::new();
+        mon.relatch(&state);
+        mon.on_tool_ok("charge", &state);
+        assert!(mon.marking().done.contains("pay"));
+        assert!(mon.admits_tool("charge", &state).is_err(), "once spent");
+
+        // Decline: rising edge un-latches pay and forgives the charge.
+        let _ = state.set("declined", true);
+        mon.relatch(&state);
+        assert!(!mon.marking().done.contains("pay"), "un-latched");
+        assert!(
+            mon.admits_tool("charge", &state).is_ok(),
+            "once counts per latch-cycle"
+        );
+
+        // Still-true guard does not re-fire (edge, not level).
+        mon.on_tool_ok("charge", &state);
+        mon.relatch(&state);
+        assert!(
+            mon.marking().done.contains("pay"),
+            "second charge latches again"
+        );
+    }
+
+    #[test]
+    fn edge_serde_keeps_plain_strings_and_round_trips_conditions() {
+        let flow = Flow::new()
+            .step("a")
+            .terminal()
+            .step("b")
+            .after("a")
+            .after_when("a", Guard::is_true("x"))
+            .join_any()
+            .terminal()
+            .build()
+            .expect("valid");
+        let json = serde_json::to_value(&flow).expect("serialize");
+        // Unconditional edge stays the original plain string.
+        assert_eq!(json["steps"][1]["after"][0], serde_json::json!("a"));
+        assert_eq!(
+            json["steps"][1]["after"][1],
+            serde_json::json!({"step": "a", "when": {"is_true": "x"}})
+        );
+        assert_eq!(json["steps"][1]["join"], serde_json::json!("any"));
+        let back: Flow = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(back.steps[1].after.len(), 2);
+        assert!(back.steps[1].after[1].when.is_some());
     }
 
     #[test]

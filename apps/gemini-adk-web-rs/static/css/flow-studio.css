@@ -182,7 +182,17 @@ html, body {
 .fs-nodes { position: absolute; top: 0; left: 0; }
 
 .fs-edge { stroke: var(--border-3); stroke-width: 1.5; fill: none; cursor: pointer; }
-.fs-edge:hover { stroke: var(--error); stroke-width: 2; }
+.fs-edge:hover { stroke: var(--brand); stroke-width: 2; }
+.fs-edge.conditional { stroke-dasharray: 6 4; }
+.fs-edge-label {
+  font-family: var(--fs-mono);
+  font-size: 9.5px;
+  fill: var(--text-3);
+  paint-order: stroke;
+  stroke: var(--bg-root);
+  stroke-width: 3px;
+  pointer-events: none;
+}
 .fs-edge-ghost { stroke: var(--brand); stroke-width: 1.5; stroke-dasharray: 5 4; fill: none; }
 .fs-edge-arrow { fill: var(--border-3); }
 

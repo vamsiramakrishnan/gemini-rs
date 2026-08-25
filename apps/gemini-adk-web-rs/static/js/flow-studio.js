@@ -18,6 +18,7 @@
     modality: 'text',
     voice: null,
     tools: [],
+    patterns: [],
     flow: { steps: [], constraints: [], ambient: [] },
   });
 
@@ -39,6 +40,9 @@
   // ── Helpers ────────────────────────────────────────────────────
   const steps = () => spec.flow.steps;
   const findStep = (id) => steps().find((s) => s.id === id);
+  // `after` entries are strings (unconditional) or {step, when} (conditional).
+  const depStep = (d) => (typeof d === 'string' ? d : d.step);
+  const depWhen = (d) => (typeof d === 'string' ? null : (d.when || null));
 
   function guardSummary(g) {
     if (g == null) return '';
@@ -97,6 +101,7 @@
     spec.flow.steps = spec.flow.steps || [];
     spec.flow.constraints = spec.flow.constraints || [];
     spec.flow.ambient = spec.flow.ambient || [];
+    spec.patterns = spec.patterns || [];
     spec.modality = spec.modality || 'text';
     for (const s of steps()) {
       s.after = s.after || [];
@@ -126,7 +131,7 @@
       if (seen.has(id)) return 0; // cycle — validation reports it
       seen.add(id);
       const s = findStep(id);
-      const deps = (s?.after || []).filter((d) => ids.includes(d));
+      const deps = (s?.after || []).map(depStep).filter((d) => ids.includes(d));
       const d = deps.length ? Math.max(...deps.map((x) => depthOf(x, seen))) + 1 : 0;
       depth[id] = d;
       return d;
@@ -221,21 +226,40 @@
       + '<path d="M 0 0 L 10 5 L 0 10 z" class="fs-edge-arrow"/></marker></defs>';
     for (const step of steps()) {
       for (const dep of step.after || []) {
-        if (!findStep(dep)) continue;
-        const a = nodeAnchor(dep, 'out');
+        const from = depStep(dep);
+        if (!findStep(from)) continue;
+        const when = depWhen(dep);
+        const a = nodeAnchor(from, 'out');
         const b = nodeAnchor(step.id, 'in');
-        svg += `<path class="fs-edge" data-from="${esc(dep)}" data-to="${esc(step.id)}" `
-          + `d="${edgePath(a, b)}" marker-end="url(#fs-arrow)"><title>${esc(dep)} → ${esc(step.id)} (click to remove)</title></path>`;
+        const cls = when ? 'fs-edge conditional' : 'fs-edge';
+        const title = when
+          ? `${from} → ${step.id} when ${guardSummary(when)} (click to edit)`
+          : `${from} → ${step.id} (click to edit)`;
+        svg += `<path class="${cls}" data-from="${esc(from)}" data-to="${esc(step.id)}" `
+          + `d="${edgePath(a, b)}" marker-end="url(#fs-arrow)"><title>${esc(title)}</title></path>`;
+        if (when) {
+          const mx = 0.125 * a.x + 0.375 * (a.x + Math.max(40, Math.abs(b.x - a.x) / 2))
+            + 0.375 * (b.x - Math.max(40, Math.abs(b.x - a.x) / 2)) + 0.125 * b.x;
+          const my = 0.125 * a.y + 0.375 * a.y + 0.375 * b.y + 0.125 * b.y;
+          svg += `<text class="fs-edge-label" x="${mx}" y="${my - 6}" text-anchor="middle">`
+            + `${esc(truncate(guardSummary(when), 34))}</text>`;
+        }
       }
     }
     svg += '<path id="fs-ghost-edge" class="fs-edge-ghost" d="" style="display:none"/>';
     edgesSvg.innerHTML = svg;
     edgesSvg.querySelectorAll('.fs-edge').forEach((p) => {
       p.addEventListener('click', (e) => {
+        // Shift+click removes; plain click opens the target step's edge list.
         const to = findStep(p.dataset.to);
-        if (to) to.after = to.after.filter((d) => d !== p.dataset.from);
-        commit();
-        if (selectedId === p.dataset.to) renderStepForm();
+        if (!to) return;
+        if (e.shiftKey) {
+          to.after = to.after.filter((d) => depStep(d) !== p.dataset.from);
+          commit();
+          if (selectedId === p.dataset.to) renderStepForm();
+        } else {
+          selectStep(p.dataset.to);
+        }
         e.stopPropagation();
       });
     });
@@ -293,7 +317,7 @@
       if (g) g.style.display = 'none';
       if (target) {
         const t = findStep(target);
-        if (t && !t.after.includes(fromId)) t.after.push(fromId);
+        if (t && !t.after.some((d) => depStep(d) === fromId)) t.after.push(fromId);
         commit();
         if (selectedId === target) renderStepForm();
       }
@@ -437,9 +461,43 @@
     gateWrap.append(guardEditor(step.gate, (g) => { step.gate = g; softCommit(); }, 'none'));
     form.append(field('Gate (extra eligibility)', gateWrap, 'Optional guard beyond dependencies.'));
 
-    form.append(field('Runs after', textInput(csv(step.after), (v) => { step.after = parseCsv(v); softCommit(); },
-      { mono: true, placeholder: 'step ids' }),
-      'Dependency edges. You can also drag between nodes on the canvas.'));
+    // Incoming edges: source + optional condition per edge, plus the join mode.
+    const edgesWrap = document.createElement('div');
+    (step.after || []).forEach((dep, idx) => {
+      const row = document.createElement('div');
+      row.className = 'fs-card';
+      const head = document.createElement('div');
+      head.className = 'fs-card-head';
+      head.innerHTML = `<span class="fs-card-title">after ${esc(depStep(dep))}</span>`;
+      const rm = document.createElement('button');
+      rm.className = 'fs-icon-btn';
+      rm.textContent = '\u00d7';
+      rm.title = 'Remove edge';
+      rm.addEventListener('click', () => { step.after.splice(idx, 1); commit(); renderStepForm(); });
+      head.append(rm);
+      row.append(head);
+      const gw = document.createElement('div');
+      gw.append(guardEditor(depWhen(dep), (g) => {
+        // null → plain string edge; guard → conditional object edge.
+        step.after[idx] = g ? { step: depStep(dep), when: g } : depStep(dep);
+        softCommit();
+      }, 'unconditional'));
+      row.append(field('Condition', gw, 'Edge satisfied only while this holds.'));
+      edgesWrap.append(row);
+    });
+    if ((step.after || []).length) {
+      const join = document.createElement('select');
+      join.innerHTML = '<option value="all">all — every edge must be satisfied</option>'
+        + '<option value="any">any — one satisfied edge suffices (merge after a branch)</option>';
+      join.value = step.join === 'any' ? 'any' : 'all';
+      join.addEventListener('change', () => {
+        if (join.value === 'any') step.join = 'any'; else delete step.join;
+        softCommit();
+      });
+      edgesWrap.append(field('Join', join));
+    }
+    form.append(field('Incoming edges', edgesWrap,
+      'Drag between nodes on the canvas to add one; give an edge a condition to branch.'));
 
     const del = document.createElement('button');
     del.className = 'fs-btn fs-btn-danger';
@@ -462,7 +520,12 @@
     const step = findStep(from);
     if (!step) return;
     step.id = to;
-    for (const s of steps()) s.after = (s.after || []).map((d) => (d === from ? to : d));
+    for (const s of steps()) {
+      s.after = (s.after || []).map((d) => {
+        if (typeof d === 'string') return d === from ? to : d;
+        return d.step === from ? { ...d, step: to } : d;
+      });
+    }
     for (const s of steps()) {
       if (s.gate) s.gate = walkGuardRename(s.gate, from, to);
       if (s.done) s.done = walkGuardRename(s.done, from, to);
@@ -481,7 +544,7 @@
 
   function deleteStep(id) {
     spec.flow.steps = steps().filter((s) => s.id !== id);
-    for (const s of steps()) s.after = (s.after || []).filter((d) => d !== id);
+    for (const s of steps()) s.after = (s.after || []).filter((d) => depStep(d) !== id);
     delete layout[id];
     if (selectedId === id) selectedId = null;
     commit();
@@ -625,7 +688,8 @@
     sel.innerHTML = '<option value="once">once — a tool may run at most once</option>'
       + '<option value="never_until">never…until — forbid a tool until a guard holds</option>'
       + '<option value="before">before — ordering invariant between two steps</option>'
-      + '<option value="require">require — steps needed for completion</option>';
+      + '<option value="require">require — steps needed for completion</option>'
+      + '<option value="reset">reset — un-latch steps when a guard becomes true (loops)</option>';
     sel.style.flex = '1';
     const add = document.createElement('button');
     add.className = 'fs-btn';
@@ -635,6 +699,7 @@
       const fresh = kind === 'once' ? { once: '' }
         : kind === 'never_until' ? { never_until: { tool: '', until: { is_true: '' } } }
         : kind === 'before' ? { before: ['', ''] }
+        : kind === 'reset' ? { reset: { steps: [], when: { is_true: '' } } }
         : { require: [] };
       spec.flow.constraints.push(fresh);
       softCommit();
@@ -642,6 +707,82 @@
     });
     addRow.append(sel, add);
     form.append(addRow);
+
+    const ptitle = document.createElement('div');
+    ptitle.className = 'fs-section-title';
+    ptitle.textContent = 'Temporal patterns';
+    form.append(ptitle);
+    (spec.patterns || []).forEach((pat, idx) => form.append(patternCard(pat, idx)));
+    const addPattern = document.createElement('button');
+    addPattern.className = 'fs-btn';
+    addPattern.textContent = 'Add pattern';
+    addPattern.addEventListener('click', () => {
+      spec.patterns.push({ name: `pattern_${spec.patterns.length + 1}`, when: { is_true: '' }, turns: 3, effects: [] });
+      softCommit();
+      renderFlowForm();
+    });
+    form.append(addPattern);
+  }
+
+  function patternCard(pat, idx) {
+    const card = document.createElement('div');
+    card.className = 'fs-card';
+    const head = document.createElement('div');
+    head.className = 'fs-card-head';
+    head.innerHTML = `<span class="fs-card-title">${esc(pat.name)}</span>`;
+    const rm = document.createElement('button');
+    rm.className = 'fs-icon-btn';
+    rm.textContent = '\u00d7';
+    rm.addEventListener('click', () => { spec.patterns.splice(idx, 1); softCommit(); renderFlowForm(); });
+    head.append(rm);
+    card.append(head);
+    card.append(field('Name', textInput(pat.name, (v) => {
+      pat.name = v.trim();
+      head.querySelector('.fs-card-title').textContent = pat.name;
+      softCommit();
+    }, { mono: true })));
+    const gw = document.createElement('div');
+    gw.append(guardEditor(pat.when, (g) => { pat.when = g ?? { is_true: '' }; softCommit(); }));
+    card.append(field('While this holds', gw));
+    const mode = document.createElement('select');
+    mode.innerHTML = '<option value="turns">for consecutive turns</option>'
+      + '<option value="sustained">for sustained seconds</option>';
+    mode.value = pat.sustained_secs != null ? 'sustained' : 'turns';
+    const amount = textInput(String(pat.sustained_secs ?? pat.turns ?? 3), (v) => {
+      const n = parseInt(v, 10);
+      if (Number.isNaN(n)) return;
+      if (mode.value === 'sustained') { pat.sustained_secs = n; delete pat.turns; }
+      else { pat.turns = n; delete pat.sustained_secs; }
+      softCommit();
+    }, { mono: true });
+    mode.addEventListener('change', () => {
+      const n = parseInt(amount.value, 10) || 3;
+      if (mode.value === 'sustained') { pat.sustained_secs = n; delete pat.turns; }
+      else { pat.turns = n; delete pat.sustained_secs; }
+      softCommit();
+    });
+    const row = document.createElement('div');
+    row.className = 'fs-row';
+    row.append(mode, amount);
+    card.append(field('Fires after', row));
+    const setEffect = (pat.effects || []).find((e) => e.set)?.set;
+    const contextEffect = (pat.effects || []).find((e) => typeof e.context === 'string')?.context;
+    const rebuildEffects = (setMap, contextText) => {
+      pat.effects = [];
+      if (setMap && Object.keys(setMap).length) pat.effects.push({ set: setMap });
+      if (contextText) pat.effects.push({ context: contextText });
+      softCommit();
+    };
+    let currentSet = setEffect || null;
+    let currentContext = contextEffect || '';
+    card.append(jsonField('Set state (JSON)', setEffect,
+      (v) => { currentSet = v || null; rebuildEffects(currentSet, currentContext); },
+      '{"needs_help": true}'));
+    card.append(field('Context to inject', textInput(contextEffect, (v) => {
+      currentContext = v;
+      rebuildEffects(currentSet, currentContext);
+    }, { placeholder: 'Steering text sent to the model when the pattern fires' })));
+    return card;
   }
 
   function constraintCard(c, idx) {
@@ -670,6 +811,12 @@
       const gw = document.createElement('div');
       gw.append(guardEditor(c.never_until.until, (g) => { c.never_until.until = g ?? { is_true: '' }; softCommit(); }));
       card.append(field('Until', gw));
+    } else if (kind === 'reset') {
+      card.append(field('Steps to un-latch', textInput(csv(c.reset.steps), (v) => { c.reset.steps = parseCsv(v); softCommit(); }, { mono: true })));
+      const gw = document.createElement('div');
+      gw.append(guardEditor(c.reset.when, (g) => { c.reset.when = g ?? { is_true: '' }; softCommit(); }));
+      card.append(field('When (rising edge)', gw,
+        'Fires when this becomes true; called_ok evidence for the steps\u2019 done guards is forgiven.'));
     }
     return card;
   }

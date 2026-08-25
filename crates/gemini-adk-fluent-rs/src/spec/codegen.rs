@@ -115,6 +115,9 @@ impl SessionSpec {
         for watch in &self.watch {
             out.push_str(&gen_watch(watch));
         }
+        for pattern in &self.patterns {
+            out.push_str(&gen_pattern(pattern));
+        }
         if self.modality == SpecModality::Text {
             out.push_str("        .on_text(|t| print!(\"{t}\"))\n");
             out.push_str("        .on_turn_complete(|| async { println!(); })\n");
@@ -232,7 +235,22 @@ fn gen_flow(flow: &Flow) -> String {
     for step in &flow.steps {
         let _ = writeln!(out, "        .step({})", rust_str(&step.id));
         for dep in &step.after {
-            let _ = writeln!(out, "        .after({})", rust_str(dep));
+            match &dep.when {
+                Some(when) => {
+                    let _ = writeln!(
+                        out,
+                        "        .after_when({}, {})",
+                        rust_str(&dep.step),
+                        gen_guard(when)
+                    );
+                }
+                None => {
+                    let _ = writeln!(out, "        .after({})", rust_str(&dep.step));
+                }
+            }
+        }
+        if step.join == gemini_adk_rs::flow::Join::Any {
+            out.push_str("        .join_any()\n");
         }
         if let Some(posture) = &step.posture {
             let _ = writeln!(out, "        .posture({})", rust_str(posture));
@@ -274,6 +292,14 @@ fn gen_flow(flow: &Flow) -> String {
             }
             Constraint::Require(steps) => {
                 let _ = writeln!(out, "        .require({})", str_array(steps));
+            }
+            Constraint::Reset { steps, when } => {
+                let _ = writeln!(
+                    out,
+                    "        .reset({}).when({})",
+                    str_array(steps),
+                    gen_guard(when)
+                );
             }
         }
     }
@@ -424,6 +450,48 @@ fn gen_phase(phase: &super::PhaseSpec) -> String {
         out.push_str("            .terminal()\n");
     }
     out.push_str("            .done()\n");
+    out
+}
+
+fn gen_pattern(pattern: &super::PatternSpec) -> String {
+    let mut out = String::new();
+    let guard = gen_guard(&pattern.when);
+    let (method, arg) = match (pattern.sustained_secs, pattern.turns) {
+        (Some(secs), _) => (
+            "when_sustained",
+            format!("std::time::Duration::from_secs({secs})"),
+        ),
+        (_, Some(turns)) => ("when_turns", turns.to_string()),
+        _ => ("when_turns", "1".to_string()),
+    };
+    let _ = writeln!(
+        out,
+        "        .{method}({}, move |s: &State| {guard}.eval_state(s), {arg},",
+        rust_str(&pattern.name)
+    );
+    out.push_str("            move |state, _writer| async move {\n");
+    for effect in &pattern.effects {
+        match effect {
+            EffectSpec::Set(map) => {
+                for (key, value) in map {
+                    let _ = writeln!(
+                        out,
+                        "                let _ = state.set({}, json!({}));",
+                        rust_str(key),
+                        compact(value)
+                    );
+                }
+            }
+            EffectSpec::Context(text) => {
+                let _ = writeln!(
+                    out,
+                    "                let _ = _writer.send_client_content(vec![Content::model({})], false).await;",
+                    rust_str(text)
+                );
+            }
+        }
+    }
+    out.push_str("            })\n");
     out
 }
 

@@ -302,6 +302,29 @@ pub struct WatchSpec {
     pub set: BTreeMap<String, Value>,
 }
 
+/// A data-driven temporal pattern: fire effects when a state condition holds
+/// continuously — for a duration (`sustained_secs`) or a number of
+/// consecutive turns (`turns`). Exactly one of the two must be set.
+///
+/// This is the "the caller has sounded confused for 30 seconds" /
+/// "we've been stuck on this for 3 turns" reactor, as data.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PatternSpec {
+    /// Pattern name (diagnostic identity).
+    pub name: String,
+    /// Condition over session state (no marking atoms).
+    pub when: Guard,
+    /// Fire after the condition holds this many seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sustained_secs: Option<u64>,
+    /// Fire after the condition holds for this many consecutive turns.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turns: Option<u32>,
+    /// Effects when the pattern fires (`set` state and/or inject `context`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub effects: Vec<EffectSpec>,
+}
+
 /// Splice a named flow fragment into the session's flow under a namespace.
 ///
 /// Every step id inside the fragment becomes `{namespace}/{id}`; internal
@@ -363,6 +386,9 @@ pub struct SessionSpec {
     /// State watchers.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub watch: Vec<WatchSpec>,
+    /// Temporal patterns (sustained / consecutive-turn conditions).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub patterns: Vec<PatternSpec>,
     /// Reusable flow fragments, spliced via `use_fragments`.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub fragments: BTreeMap<String, Flow>,
@@ -475,6 +501,13 @@ impl SessionSpec {
         for w in &self.watch {
             keys.extend(w.set.keys().cloned());
         }
+        for p in &self.patterns {
+            for eff in &p.effects {
+                if let EffectSpec::Set(map) = eff {
+                    keys.extend(map.keys().cloned());
+                }
+            }
+        }
         keys
     }
 
@@ -505,6 +538,21 @@ impl SessionSpec {
         if let Some(initial) = &self.initial_phase {
             if !self.phases.iter().any(|p| &p.name == initial) {
                 errors.push(format!("initial_phase '{initial}' is not a declared phase"));
+            }
+        }
+        for pattern in &self.patterns {
+            match (pattern.sustained_secs, pattern.turns) {
+                (Some(_), Some(_)) | (None, None) => errors.push(format!(
+                    "pattern '{}' must set exactly one of sustained_secs or turns",
+                    pattern.name
+                )),
+                _ => {}
+            }
+            if guard_uses_marking(&pattern.when) {
+                errors.push(format!(
+                    "pattern '{}' uses a called_ok/done atom — pattern guards see state only",
+                    pattern.name
+                ));
             }
         }
         for p in &self.phases {
@@ -779,6 +827,45 @@ impl SessionSpec {
             live = live.initial_phase(initial.clone());
         }
 
+        // Temporal patterns.
+        for pattern in &self.patterns {
+            let guard = pattern.when.clone();
+            let condition = move |s: &State| guard.eval_state(s);
+            let effects = pattern.effects.clone();
+            let action = move |state: State,
+                               writer: std::sync::Arc<
+                dyn gemini_genai_rs::prelude::SessionWriter,
+            >| {
+                let effects = effects.clone();
+                async move {
+                    for effect in &effects {
+                        match effect {
+                            EffectSpec::Set(map) => {
+                                for (key, value) in map {
+                                    let _ = state.set(key, value.clone());
+                                }
+                            }
+                            EffectSpec::Context(text) => {
+                                let _ = writer
+                                    .send_client_content(vec![Content::model(text.clone())], false)
+                                    .await;
+                            }
+                        }
+                    }
+                }
+            };
+            if let Some(secs) = pattern.sustained_secs {
+                live = live.when_sustained(
+                    pattern.name.clone(),
+                    condition,
+                    std::time::Duration::from_secs(secs),
+                    action,
+                );
+            } else if let Some(turns) = pattern.turns {
+                live = live.when_turns(pattern.name.clone(), condition, turns, action);
+            }
+        }
+
         // Watchers.
         for w in &self.watch {
             let builder = live.watch(w.key.clone());
@@ -947,23 +1034,34 @@ fn splice_fragment(
             ));
             continue;
         }
-        let mut after: Vec<String> = step
+        let mut after: Vec<gemini_adk_rs::flow::Edge> = step
             .after
             .iter()
-            .map(|d| {
-                if internal.contains(d.as_str()) {
-                    prefix(d)
+            .map(|d| gemini_adk_rs::flow::Edge {
+                step: if internal.contains(d.step.as_str()) {
+                    prefix(&d.step)
                 } else {
-                    d.clone()
-                }
+                    d.step.clone()
+                },
+                when: d
+                    .when
+                    .clone()
+                    .map(|g| rewrite_guard_steps(g, &internal, ns)),
             })
             .collect();
         if step.after.is_empty() {
-            after.extend(directive.after.iter().cloned());
+            after.extend(
+                directive
+                    .after
+                    .iter()
+                    .cloned()
+                    .map(gemini_adk_rs::flow::Edge::to),
+            );
         }
         flow.steps.push(Step {
             id: new_id,
             after,
+            join: step.join,
             gate: step
                 .gate
                 .clone()
@@ -1009,6 +1107,19 @@ fn splice_fragment(
                     })
                     .collect(),
             ),
+            Constraint::Reset { steps, when } => Constraint::Reset {
+                steps: steps
+                    .iter()
+                    .map(|r| {
+                        if internal.contains(r.as_str()) {
+                            prefix(r)
+                        } else {
+                            r.clone()
+                        }
+                    })
+                    .collect(),
+                when: rewrite_guard_steps(when.clone(), &internal, ns),
+            },
         });
     }
     for tool in &fragment.ambient {

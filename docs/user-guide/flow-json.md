@@ -91,6 +91,33 @@ snake_case):
 | `{ "any": [g, …] }` | `Guard::any([...])` |
 | `{ "not": g }` | `Guard::not(g)` |
 
+### Graph edges: branching, merging, and loops
+
+`after` entries are plain strings (unconditional) **or conditional edges** —
+objects whose guard must hold for the edge to be satisfied. Conditional edges
+out of one source are how a flow branches; `"join": "any"` on the merge step
+accepts whichever branch completes. The canvas renders conditional edges
+dashed with their guard as the label:
+
+```json
+{ "id": "schedule",
+  "after": [ { "step": "triage", "when": { "not": { "is_true": "is_emergency" } } } ] },
+{ "id": "close",
+  "after": [ "schedule", { "step": "triage", "when": { "is_true": "is_emergency" } } ],
+  "join": "any", "terminal": true }
+```
+
+Loops are **not** back-edges — the DAG stays acyclic and statically
+checkable. Iteration is explicit marking surgery: a `reset` constraint
+un-latches steps on its guard's *rising edge*, re-arms their `on_enter`, and
+forgives the `called_ok` evidence their completion guards reference (so a
+`once` on such a tool counts per latch-cycle; state keys stay the
+application's to clear):
+
+```json
+{ "reset": { "steps": ["diagnose"], "when": { "is_true": "retest_requested" } } }
+```
+
 ### Constraints
 
 | JSON | Meaning |
@@ -99,6 +126,7 @@ snake_case):
 | `{ "before": ["a", "b"] }` | Step `a` must be done before `b` starts |
 | `{ "never_until": { "tool": t, "until": g } }` | Forbid `t` until `g` holds |
 | `{ "require": ["a", "b"] }` | Steps required for flow completion |
+| `{ "reset": { "steps": [...], "when": g } }` | Un-latch steps on `g`'s rising edge (loops) |
 
 ## `SessionSpec` — a runnable application as one JSON file
 
@@ -208,6 +236,18 @@ handlers are closed `EffectSpec`s (`set` state, inject `context`):
 Phase guards evaluate against state alone (there is no flow marking at a
 phase boundary), so `called_ok`/`done` atoms there are a validation *error* —
 latch a state key instead.
+
+**Temporal patterns** fire when a condition holds continuously — for wall
+seconds or consecutive turns — the "sounded confused for 30 seconds" reactor,
+as data:
+
+```json
+"patterns": [{
+  "name": "stuck", "when": { "is_true": "repeating" }, "turns": 3,
+  "effects": [ { "set": { "needs_help": true } },
+               { "context": "The caller seems stuck — offer to summarize the options." } ]
+}]
+```
 
 ### Fragments: reusable flow modules
 
