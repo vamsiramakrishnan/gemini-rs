@@ -1,9 +1,70 @@
 {
   "name": "restaurant-booking",
-  "description": "Table booking: gather party details, check availability, book, confirm.",
-  "instruction": "You are the booking assistant for Trattoria Rustica. Help the caller book a table. Use the tools for availability and booking — never invent availability.",
+  "description": "Table booking with durable memory: gather party details, check availability, book — remembering diet and seating across visits.",
+  "instruction": "You are the booking assistant for Trattoria Rustica. Help the caller book a table. Use the tools for availability and booking — never invent availability. Use what you remember about the caller, and never ask again for something you already know.",
   "greeting": "Welcome the caller to Trattoria Rustica and ask when they would like to dine and for how many people.",
   "modality": "text",
+  "state": {
+    "party_size": {
+      "type": "number",
+      "description": "How many guests the caller is booking for."
+    },
+    "requested_time": {
+      "type": "string",
+      "description": "The requested date and time, as recorded."
+    },
+    "availability_checked": {
+      "type": "boolean",
+      "default": false,
+      "description": "A real availability lookup has run for the requested time."
+    },
+    "user:diet": {
+      "type": "string",
+      "description": "Remembered dietary identity, projected from memory."
+    },
+    "user:seating": {
+      "type": "string",
+      "description": "Remembered seating preference, projected from memory."
+    }
+  },
+  "computed": [
+    {
+      "key": "large_party",
+      "from": { "gte": [{ "key": "party_size" }, { "const": 6 }] },
+      "description": "Six or more guests — the set-menu policy applies."
+    }
+  ],
+  "memory": {
+    "slots": [
+      { "predicate": "dietary_identity", "to": "user:diet" },
+      { "predicate": "seating_preference", "to": "user:seating" }
+    ]
+  },
+  "watch": [
+    {
+      "key": "large_party",
+      "condition": "became_true",
+      "effects": [
+        { "context": "The party is six or more: mention the set-menu policy before booking." },
+        { "remember": "Books for large parties ({state.party_size} guests)" }
+      ]
+    }
+  ],
+  "patterns": [
+    {
+      "name": "undecided",
+      "when": { "not": { "is_true": "availability_checked" } },
+      "turns": 4,
+      "effects": [
+        { "prompt": "The caller has not settled on a time after several turns. Briefly offer tonight's two most popular slots to help them decide." }
+      ]
+    }
+  ],
+  "runtime": {
+    "temperature": 0.6,
+    "steering": "context_injection",
+    "repair": { "nudge_after": 2, "escalate_after": 4 }
+  },
   "tools": [
     {
       "name": "capture_party",
@@ -29,11 +90,6 @@
       "name": "book_table",
       "description": "Book the table for the confirmed time.",
       "response": { "booked": true, "reference": "TR-2044" }
-    },
-    {
-      "name": "recall_context",
-      "description": "Recall the caller's stored preferences.",
-      "response": { "notes": "Prefers window seating; celebrated an anniversary here in May." }
     }
   ],
   "tests": [
@@ -63,6 +119,15 @@
         { "tool": "capture_party" },
         { "expect": { "allowed": ["recall_context"] } }
       ]
+    },
+    {
+      "name": "large parties compute their flag",
+      "script": [
+        { "tool": "capture_party" },
+        { "expect": { "state": { "derived:large_party": false } } },
+        { "set": { "party_size": 7 } },
+        { "expect": { "state": { "derived:large_party": true } } }
+      ]
     }
   ],
   "flow": {
@@ -79,7 +144,7 @@
         "posture": "Check availability for the requested time and offer the options.",
         "allow": ["check_availability"],
         "done": { "is_true": "availability_checked" },
-        "ground": "Party of {party_size}."
+        "ground": "Party of {party_size}. Diet: {user:diet?known:not on file}."
       },
       {
         "id": "book",
@@ -99,6 +164,6 @@
       { "never_until": { "tool": "book_table", "until": { "is_true": "availability_checked" } } },
       { "require": ["farewell"] }
     ],
-    "ambient": ["recall_context"]
+    "ambient": ["recall_context", "manage_memory"]
   }
 }

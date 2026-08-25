@@ -150,8 +150,11 @@ everything a governed Live session needs:
     }
   ],
   "extract": [ … ],
+  "state": { … }, "computed": [ … ],
+  "memory": { … },
   "phases": [ … ],
-  "watch": [ … ],
+  "watch": [ … ], "patterns": [ … ],
+  "runtime": { … },
   "fragments": { … }, "use_fragments": [ … ],
   "tests": [ … ],
   "flow": { "steps": [ … ], "constraints": [ … ] }
@@ -214,10 +217,75 @@ Promotion policies: `keep_known` (default), `overwrite`, `true_only`,
 code-level equivalent.) Running extraction needs a model:
 `SpecResources.extraction_llm`.
 
-### Phases and watchers, over the same guard vocabulary
+### State dictionary and computed variables
 
-Phase transitions and watcher conditions reuse the closed `Guard` atoms;
-handlers are closed `EffectSpec`s (`set` state, inject `context`):
+The `state` section is the session's **data dictionary**: declare each key's
+type, meaning, and starting value. Declaring it is optional, but once present
+it powers autocomplete in the Studio's guard editors, undeclared-key warnings
+at validation, typed `StateKey` constants in generated code, and `default`
+seeding at connect:
+
+```json
+"state": {
+  "party_size":          { "type": "number",  "description": "Guests in the party." },
+  "availability_checked": { "type": "boolean", "default": false }
+}
+```
+
+`computed` entries are **derived variables as data** — the counterpart to
+`Guard` for values. A closed expression vocabulary (`key`, `const`, `add`,
+`mul`, `sub`, `div`, `min`, `max`, `eq`, `gt`, `gte`, `lt`, `lte`, `all`,
+`any`, `not`, `if`, `coalesce`, `concat`, `count_true`) evaluates over state;
+the result is written to `derived:{key}`, dependencies are inferred from the
+expression, dependency cycles are load-time errors, and guards read the result
+by its bare key (the `derived:` fallback):
+
+```json
+"computed": [{
+  "key": "large_party",
+  "from": { "gte": [ { "key": "party_size" }, { "const": 6 } ] }
+}]
+```
+
+A step can then `done`/`gate` on `{"is_true": "large_party"}`, a watcher can
+watch it, and the offline simulator recomputes it after every event — the same
+semantics in the live runtime, the simulator, and generated code.
+
+### Durable memory
+
+The `memory` section installs the memory subsystem (`gemini-memory-rs`)
+declaratively: the ambient `recall_context` / `manage_memory` tools, turn
+ingestion and end-of-session reconciliation, and **slots** that project
+remembered facts into governed state keys — where `needs`, `captured`, and
+every guard read them exactly as if the caller had just said it, so a
+returning caller is never asked twice:
+
+```json
+"memory": {
+  "slots": [
+    { "predicate": "dietary_identity", "to": "user:diet" },
+    { "predicate": "seating_preference", "to": "user:seating" }
+  ]
+}
+```
+
+At apply time the engine arrives through `SpecResources.memory` — any
+`MemoryBinding` implementation; `gemini_memory_rs::runtime::SessionMemoryBinding`
+wraps a `MemorySession`. The Studio provisions an in-process engine per run
+automatically. The `remember` effect (below) writes through the same binding.
+
+### Phases, watchers, and patterns over the same guard vocabulary
+
+Phase transitions, watcher conditions, and pattern conditions reuse the closed
+`Guard` atoms; handlers are closed `EffectSpec`s — one vocabulary honored
+identically wherever effects fire:
+
+| Effect | Meaning |
+|---|---|
+| `{"set": {…}}` | write state keys |
+| `{"context": "…"}` | inject a model-role steering turn (read, not answered) |
+| `{"prompt": "…"}` | inject text **and** ask the model to respond now — the "make the model speak" effect |
+| `{"remember": "…"}` | durably remember a note (`{state.key}` interpolates; needs the `memory` section) |
 
 ```json
 "phases": [
@@ -228,10 +296,15 @@ handlers are closed `EffectSpec`s (`set` state, inject `context`):
 ],
 "initial_phase": "greeting",
 "watch": [
-  { "key": "app:score", "condition": { "crossed_above": 0.9 },
-    "set": { "alert": true } }
+  { "key": "large_party", "condition": "became_true",
+    "effects": [ { "context": "Mention the set-menu policy." },
+                 { "remember": "Books for large parties ({state.party_size} guests)" } ] }
 ]
 ```
+
+Watchers receive the live session writer, so the full effect vocabulary
+applies — a watcher can steer, prompt, or remember, not only mutate state.
+(`set` remains as sugar for a leading `{"set": …}` effect.)
 
 Phase guards evaluate against state alone (there is no flow marking at a
 phase boundary), so `called_ok`/`done` atoms there are a validation *error* —
@@ -248,6 +321,34 @@ as data:
                { "context": "The caller seems stuck — offer to summarize the options." } ]
 }]
 ```
+
+### Runtime tuning: the control plane as data
+
+Everything that is configuration rather than conversation lives in one
+`runtime` section; every field lowers to a `Live` builder setter, and omitted
+fields keep the builder's defaults:
+
+```json
+"runtime": {
+  "temperature": 0.6,
+  "thinking_budget": 1024, "include_thoughts": true,
+  "transcription": { "input": true, "output": true },
+  "proactive_audio": true,
+  "vad": { "start_sensitivity": "high", "end_sensitivity": "low",
+           "silence_duration_ms": 400 },
+  "soft_turn_timeout_ms": 1500,
+  "steering": "context_injection",
+  "context_delivery": "deferred",
+  "repair": { "nudge_after": 2, "escalate_after": 5 },
+  "persistence": { "fs": { "dir": "/var/sessions" } },
+  "session_id": "user-123"
+}
+```
+
+Per-tool async calling rides on the tool declaration itself:
+`"background": true` marks a tool non-blocking (the model keeps speaking while
+it runs), and `"scheduling": "interrupt" | "when_idle" | "silent"` picks how
+the async response lands (scheduling implies background).
 
 ### Fragments: reusable flow modules
 

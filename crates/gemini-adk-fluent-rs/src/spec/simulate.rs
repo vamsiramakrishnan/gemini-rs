@@ -138,6 +138,11 @@ fn replay(
     test: &SpecTest,
 ) -> Vec<SimSnapshot> {
     let state = State::new();
+    // Mirror `apply()`: declared defaults are seeded and computed variables
+    // recompute after every state change, so guards over derived keys latch
+    // exactly as they do live.
+    spec.seed_state_defaults(&state);
+    spec.recompute_computed(&state);
     let mut monitor = FlowMonitor::new(flow, Enforcement::Enforce);
     monitor.relatch(&state);
 
@@ -159,6 +164,7 @@ fn replay(
         let mut failures = Vec::new();
         let label = match event {
             SimEvent::User(text) => {
+                spec.recompute_computed(&state);
                 monitor.on_turn(&state);
                 format!("user: {text}")
             }
@@ -166,6 +172,7 @@ fn replay(
                 match monitor.admits_tool(name, &state) {
                     Ok(()) => {
                         spec.apply_tool_state(name, &state);
+                        spec.recompute_computed(&state);
                         monitor.on_tool_ok(name, &state);
                     }
                     Err(reason) => {
@@ -184,6 +191,7 @@ fn replay(
                 for (key, value) in map {
                     let _ = state.set(key, value.clone());
                 }
+                spec.recompute_computed(&state);
                 monitor.relatch(&state);
                 format!(
                     "set: {}",
@@ -396,6 +404,36 @@ mod tests {
         // Final snapshot: complete.
         assert!(snapshots[5].complete);
         assert!(super::trace_test(&spec, "no such test").is_err());
+    }
+
+    #[test]
+    fn computed_variables_latch_guards_in_replay() {
+        let spec = SessionSpec::from_value(json!({
+            "instruction": "x",
+            "state": {"attempts": {"type": "number", "default": 0}},
+            "tools": [{"name": "record_score", "set_state": {"score": 0.9}}],
+            "computed": [{"key": "high_risk",
+                          "from": {"gt": [{"key": "score"}, {"const": 0.5}]}}],
+            "flow": {"steps": [
+                {"id": "assess", "posture": "Assess.", "allow": ["record_score"],
+                 "done": {"is_true": "high_risk"}},
+                {"id": "wrap", "after": ["assess"], "terminal": true}
+            ], "constraints": [{"require": ["wrap"]}]},
+            "tests": [{"name": "risk computes", "script": [
+                {"expect": {"active": ["assess"],
+                            "state": {"attempts": 0}}},
+                {"tool": "record_score"},
+                {"expect": {"done": ["assess", "wrap"], "complete": true,
+                            "state": {"derived:high_risk": true}}}
+            ]}]
+        }))
+        .expect("parses");
+        let reports = spec.run_tests();
+        assert!(
+            reports[0].passed,
+            "computed guard latches offline: {:?}",
+            reports[0].failures
+        );
     }
 
     #[test]

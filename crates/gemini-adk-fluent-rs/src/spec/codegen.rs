@@ -14,7 +14,8 @@ use gemini_adk_rs::flow::{Constraint, Flow, Guard, Pred};
 use serde_json::Value;
 
 use super::{
-    EffectSpec, PromotePolicy, SessionSpec, SpecModality, ToolSpec, TriggerSpec, WatchCondition,
+    ContextDeliverySpec, EffectSpec, PersistenceSpec, PromotePolicy, RuntimeSpec, SessionSpec,
+    SpecModality, StateType, SteeringSpec, ToolSpec, TriggerSpec, WatchCondition,
 };
 
 impl SessionSpec {
@@ -42,13 +43,81 @@ impl SessionSpec {
                 "use gemini_adk_fluent_rs::gemini_adk_rs::live::extractor::{\n    \
                  ExtractionTrigger, FieldPromotion, LlmExtractor,\n};\n",
             );
+        }
+        if !self.computed.is_empty() {
+            out.push_str("use gemini_adk_fluent_rs::gemini_adk_rs::expr::Expr;\n");
+        }
+        if let Some(runtime) = &self.runtime {
+            let mut live_imports = Vec::new();
+            if runtime.steering.is_some() {
+                live_imports.push("SteeringMode");
+            }
+            if runtime.context_delivery.is_some() {
+                live_imports.push("ContextDelivery");
+            }
+            if runtime.repair.is_some() {
+                live_imports.push("RepairConfig");
+            }
+            match runtime.persistence {
+                Some(PersistenceSpec::Fs { .. }) => live_imports.push("FsPersistence"),
+                Some(PersistenceSpec::Memory) => live_imports.push("MemoryPersistence"),
+                None => {}
+            }
+            if !live_imports.is_empty() {
+                let _ = writeln!(
+                    out,
+                    "use gemini_adk_fluent_rs::live::{{{}}};",
+                    live_imports.join(", ")
+                );
+            }
+        }
+        if self.memory.is_some() {
+            out.push_str("use gemini_memory_rs::prelude::*;\n");
+            out.push_str("use gemini_memory_rs::runtime::LiveMemoryExt;\n");
+        }
+        let needs_arc = !self.extract.is_empty()
+            || self.memory.is_some()
+            || self
+                .runtime
+                .as_ref()
+                .is_some_and(|r| r.persistence.is_some());
+        if needs_arc {
             out.push_str("use std::sync::Arc;\n");
         }
         out.push('\n');
+        if !self.state.is_empty() {
+            out.push_str(&gen_state_keys(&self.state));
+            out.push('\n');
+        }
         out.push_str(
             "#[tokio::main]\nasync fn main() -> Result<(), Box<dyn std::error::Error>> {\n",
         );
-        out.push_str("    let state = State::new();\n\n");
+        out.push_str("    let state = State::new();\n");
+        for (key, field) in &self.state {
+            if let Some(default) = &field.default {
+                let _ = writeln!(
+                    out,
+                    "    let _ = state.set({}, json!({}));",
+                    rust_str(key),
+                    compact(default)
+                );
+            }
+        }
+        out.push('\n');
+        if self.memory.is_some() {
+            out.push_str("    // ── Memory ─────────────────────────────────────────────\n");
+            out.push_str(
+                "    // In-process engine for local runs; swap the repository and event\n    \
+                 // log for durable backends in production.\n",
+            );
+            out.push_str(
+                "    let memory_engine = MemoryEngine::in_memory(UserId::new(\"local-user\"));\n",
+            );
+            out.push_str(
+                "    let memory = Arc::new(memory_engine.begin_session(SessionId::new(\
+                 \"session-1\")));\n\n",
+            );
+        }
 
         if !self.tools.is_empty() {
             out.push_str("    // ── Tools ──────────────────────────────────────────────\n");
@@ -102,6 +171,55 @@ impl SessionSpec {
         }
         if !flow.steps.is_empty() {
             out.push_str("        .govern(flow)\n");
+        }
+        for computed in &self.computed {
+            out.push_str(&gen_computed(computed));
+        }
+        if let Some(memory) = &self.memory {
+            if memory.slots.is_empty() {
+                out.push_str("        .with_memory(memory.clone())\n");
+            } else {
+                let slots: Vec<String> = memory
+                    .slots
+                    .iter()
+                    .map(|s| {
+                        format!(
+                            "MemorySlot::new({}, {})",
+                            rust_str(&s.predicate),
+                            rust_str(&s.to)
+                        )
+                    })
+                    .collect();
+                let _ = writeln!(
+                    out,
+                    "        .with_memory_slots(memory.clone(), [{}])",
+                    slots.join(", ")
+                );
+            }
+        }
+        for tool in &self.tools {
+            match (tool.background, tool.scheduling) {
+                (_, Some(scheduling)) => {
+                    let variant = match scheduling {
+                        super::SchedulingSpec::Interrupt => "Interrupt",
+                        super::SchedulingSpec::WhenIdle => "WhenIdle",
+                        super::SchedulingSpec::Silent => "Silent",
+                    };
+                    let _ = writeln!(
+                        out,
+                        "        .tool_background_with_scheduling({}, \
+                         FunctionResponseScheduling::{variant})",
+                        rust_str(&tool.name)
+                    );
+                }
+                (true, None) => {
+                    let _ = writeln!(out, "        .tool_background({})", rust_str(&tool.name));
+                }
+                (false, None) => {}
+            }
+        }
+        if let Some(runtime) = &self.runtime {
+            out.push_str(&gen_runtime(runtime));
         }
         for extract in &self.extract {
             out.push_str(&gen_extract(extract));
@@ -160,10 +278,15 @@ impl SessionSpec {
         } else {
             r#", features = ["gemini-llm"]"#
         };
+        let memory_dep = if self.memory.is_some() {
+            "gemini-memory-rs = \"0.8\"\n"
+        } else {
+            ""
+        };
         format!(
             "[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n\
              [dependencies]\ngemini-adk-fluent-rs = {{ version = \"0.8\"{features} }}\n\
-             tokio = {{ version = \"1\", features = [\"full\"] }}\n\
+             {memory_dep}tokio = {{ version = \"1\", features = [\"full\"] }}\n\
              serde_json = \"1\"\n"
         )
     }
@@ -422,28 +545,8 @@ fn gen_phase(phase: &super::PhaseSpec) -> String {
         );
     }
     if !phase.on_enter.is_empty() {
-        out.push_str("            .on_enter(move |state, _writer| async move {\n");
-        for effect in &phase.on_enter {
-            match effect {
-                EffectSpec::Set(map) => {
-                    for (key, value) in map {
-                        let _ = writeln!(
-                            out,
-                            "                let _ = state.set({}, json!({}));",
-                            rust_str(key),
-                            compact(value)
-                        );
-                    }
-                }
-                EffectSpec::Context(text) => {
-                    let _ = writeln!(
-                        out,
-                        "                let _ = _writer.send_client_content(vec![Content::model({})], false).await;",
-                        rust_str(text)
-                    );
-                }
-            }
-        }
+        out.push_str("            .on_enter(move |_state, _writer| async move {\n");
+        out.push_str(&gen_effects(&phase.on_enter, "                "));
         out.push_str("            })\n");
     }
     if phase.terminal {
@@ -469,14 +572,25 @@ fn gen_pattern(pattern: &super::PatternSpec) -> String {
         "        .{method}({}, move |s: &State| {guard}.eval_state(s), {arg},",
         rust_str(&pattern.name)
     );
-    out.push_str("            move |state, _writer| async move {\n");
-    for effect in &pattern.effects {
+    out.push_str("            move |_state, _writer| async move {\n");
+    out.push_str(&gen_effects(&pattern.effects, "                "));
+    out.push_str("            })\n");
+    out
+}
+
+/// The closed effect vocabulary as executable lines. `remember` becomes a
+/// documented seam (like an HTTP binding): the spec-driven runtime routes it
+/// through the session's `MemoryBinding`; a generated app names the note and
+/// leaves the engine call to the application.
+fn gen_effects(effects: &[EffectSpec], indent: &str) -> String {
+    let mut out = String::new();
+    for effect in effects {
         match effect {
             EffectSpec::Set(map) => {
                 for (key, value) in map {
                     let _ = writeln!(
                         out,
-                        "                let _ = state.set({}, json!({}));",
+                        "{indent}let _ = _state.set({}, json!({}));",
                         rust_str(key),
                         compact(value)
                     );
@@ -485,13 +599,194 @@ fn gen_pattern(pattern: &super::PatternSpec) -> String {
             EffectSpec::Context(text) => {
                 let _ = writeln!(
                     out,
-                    "                let _ = _writer.send_client_content(vec![Content::model({})], false).await;",
+                    "{indent}let _ = _writer.send_client_content(vec![Content::model({})], false).await;",
                     rust_str(text)
+                );
+            }
+            EffectSpec::Prompt(text) => {
+                let _ = writeln!(
+                    out,
+                    "{indent}let _ = _writer.send_client_content(vec![Content::model({})], true).await;",
+                    rust_str(text)
+                );
+            }
+            EffectSpec::Remember(note) => {
+                let _ = writeln!(
+                    out,
+                    "{indent}// remember (durable): {} — route through your memory engine\n\
+                     {indent}// (`MemorySession::apply_explicit_command`, see gemini-memory-rs).",
+                    rust_str(note)
                 );
             }
         }
     }
-    out.push_str("            })\n");
+    out
+}
+
+/// A computed variable: the expression rides along as data (its JSON is the
+/// source of truth in both phrasings) and evaluates through `Expr::eval`.
+fn gen_computed(computed: &super::ComputedSpec) -> String {
+    let mut out = String::new();
+    let expr_json = serde_json::to_value(&computed.from).unwrap_or(Value::Null);
+    let deps: Vec<String> = computed.from.keys_read().into_iter().collect();
+    let _ = writeln!(
+        out,
+        "        .computed({}, &{}, {{",
+        rust_str(&computed.key),
+        str_array(&deps)
+    );
+    let _ = writeln!(
+        out,
+        "            let expr: Expr = serde_json::from_value(json!({}))",
+        compact(&expr_json)
+    );
+    out.push_str("                .expect(\"expression validated in the Flow Studio\");\n");
+    out.push_str("            move |s: &State| expr.eval(s)\n        })\n");
+    out
+}
+
+/// The declared state dictionary as typed key constants.
+fn gen_state_keys(state: &std::collections::BTreeMap<String, super::StateFieldSpec>) -> String {
+    let mut out = String::new();
+    out.push_str("/// Typed keys for the declared state dictionary.\n");
+    out.push_str("#[allow(dead_code)]\nmod keys {\n");
+    out.push_str("    use gemini_adk_fluent_rs::prelude::StateKey;\n\n");
+    for (key, field) in state {
+        let rust_type = match field.kind {
+            Some(StateType::Boolean) => "bool",
+            Some(StateType::Number) => "f64",
+            Some(StateType::String) => "String",
+            _ => "serde_json::Value",
+        };
+        if !field.description.is_empty() {
+            let _ = writeln!(out, "    /// {}", field.description);
+        }
+        let _ = writeln!(
+            out,
+            "    pub const {}: StateKey<{rust_type}> = StateKey::new({});",
+            const_name(key),
+            rust_str(key)
+        );
+    }
+    out.push_str("}\n");
+    out
+}
+
+/// `session:turn_count` → `SESSION_TURN_COUNT`.
+fn const_name(key: &str) -> String {
+    let mut out = String::with_capacity(key.len());
+    for c in key.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c.to_ascii_uppercase());
+        } else {
+            out.push('_');
+        }
+    }
+    if out.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+        out.insert(0, '_');
+    }
+    out
+}
+
+/// The `runtime` section as its builder setters.
+fn gen_runtime(runtime: &RuntimeSpec) -> String {
+    let mut out = String::new();
+    if let Some(t) = runtime.temperature {
+        let _ = writeln!(out, "        .temperature({t:?})");
+    }
+    if let Some(budget) = runtime.thinking_budget {
+        let _ = writeln!(out, "        .thinking({budget})");
+    }
+    if runtime.include_thoughts == Some(true) {
+        out.push_str("        .include_thoughts()\n");
+    }
+    if let Some(t) = runtime.transcription {
+        let _ = writeln!(out, "        .transcription({}, {})", t.input, t.output);
+    }
+    if let Some(enabled) = runtime.proactive_audio {
+        let _ = writeln!(out, "        .proactive_audio({enabled})");
+    }
+    if let Some(vad) = &runtime.vad {
+        out.push_str("        .vad(AutomaticActivityDetection {\n");
+        let sens = |s: super::SensitivitySpec| match s {
+            super::SensitivitySpec::Low => "Sensitivity::SensitivityLow",
+            super::SensitivitySpec::Medium => "Sensitivity::SensitivityMedium",
+            super::SensitivitySpec::High => "Sensitivity::SensitivityHigh",
+        };
+        let _ = writeln!(
+            out,
+            "            start_of_speech_sensitivity: {},",
+            vad.start_sensitivity
+                .map_or("None".to_string(), |s| format!("Some({})", sens(s)))
+        );
+        let _ = writeln!(
+            out,
+            "            end_of_speech_sensitivity: {},",
+            vad.end_sensitivity
+                .map_or("None".to_string(), |s| format!("Some({})", sens(s)))
+        );
+        let _ = writeln!(
+            out,
+            "            prefix_padding_ms: {:?},",
+            vad.prefix_padding_ms
+        );
+        let _ = writeln!(
+            out,
+            "            silence_duration_ms: {:?},",
+            vad.silence_duration_ms
+        );
+        out.push_str("            disabled: None,\n        })\n");
+    }
+    if let Some(ms) = runtime.soft_turn_timeout_ms {
+        let _ = writeln!(
+            out,
+            "        .soft_turn_timeout(std::time::Duration::from_millis({ms}))"
+        );
+    }
+    if let Some(steering) = runtime.steering {
+        let variant = match steering {
+            SteeringSpec::InstructionUpdate => "InstructionUpdate",
+            SteeringSpec::ContextInjection => "ContextInjection",
+            SteeringSpec::Hybrid => "Hybrid",
+        };
+        let _ = writeln!(out, "        .steering_mode(SteeringMode::{variant})");
+    }
+    if let Some(delivery) = runtime.context_delivery {
+        let variant = match delivery {
+            ContextDeliverySpec::Immediate => "Immediate",
+            ContextDeliverySpec::Deferred => "Deferred",
+        };
+        let _ = writeln!(out, "        .context_delivery(ContextDelivery::{variant})");
+    }
+    if let Some(repair) = runtime.repair {
+        let _ = writeln!(
+            out,
+            "        .repair(RepairConfig {{ nudge_after: {}, escalate_after: {} }})",
+            repair.nudge_after, repair.escalate_after
+        );
+    }
+    match &runtime.persistence {
+        Some(PersistenceSpec::Fs { dir }) => {
+            let _ = writeln!(
+                out,
+                "        .persistence(Arc::new(FsPersistence::new({})))",
+                rust_str(dir)
+            );
+        }
+        Some(PersistenceSpec::Memory) => {
+            out.push_str("        .persistence(Arc::new(MemoryPersistence::new()))\n");
+        }
+        None => {}
+    }
+    if let Some(id) = &runtime.session_id {
+        let _ = writeln!(out, "        .session_id({})", rust_str(id));
+    }
+    if runtime.lossy_audio {
+        out.push_str("        .lossy_audio()\n");
+    }
+    if runtime.lossy_transcript {
+        out.push_str("        .lossy_transcript()\n");
+    }
     out
 }
 
@@ -513,15 +808,22 @@ fn gen_watch(watch: &super::WatchSpec) -> String {
         WatchCondition::BecameFalse => "            .became_false()".to_string(),
     };
     let _ = writeln!(out, "{condition}");
-    out.push_str("            .then(move |_old, _new, state| async move {\n");
+    if watch.effects.is_empty() {
+        out.push_str("            .then(move |_old, _new, _state| async move {\n");
+    } else {
+        out.push_str(
+            "            .then_with_writer(move |_old, _new, _state, _writer| async move {\n",
+        );
+    }
     for (key, value) in &watch.set {
         let _ = writeln!(
             out,
-            "                let _ = state.set({}, json!({}));",
+            "                let _ = _state.set({}, json!({}));",
             rust_str(key),
             compact(value)
         );
     }
+    out.push_str(&gen_effects(&watch.effects, "                "));
     out.push_str("            })\n");
     out
 }
@@ -655,5 +957,65 @@ mod tests {
     #[test]
     fn string_escaping_is_sound() {
         assert_eq!(super::rust_str("say \"hi\"\n"), "\"say \\\"hi\\\"\\n\"");
+    }
+
+    #[test]
+    fn new_sections_generate_their_wiring() {
+        let spec = SessionSpec::from_value(json!({
+            "name": "concierge",
+            "instruction": "Help the guest.",
+            "state": {
+                "verified": {"type": "boolean", "default": false,
+                             "description": "Identity has been checked."},
+                "session:turn_count": {"type": "number"}
+            },
+            "computed": [{"key": "high_risk",
+                          "from": {"gt": [{"key": "score"}, {"const": 0.5}]}}],
+            "memory": {"slots": [{"predicate": "dietary_identity", "to": "user:diet"}]},
+            "tools": [
+                {"name": "record_score", "set_state": {"score": 0.9}},
+                {"name": "log_event", "scheduling": "silent"}
+            ],
+            "runtime": {
+                "temperature": 0.4,
+                "soft_turn_timeout_ms": 1500,
+                "steering": "context_injection",
+                "repair": {"nudge_after": 2, "escalate_after": 5},
+                "persistence": {"fs": {"dir": "/tmp/sessions"}},
+                "session_id": "guest-1"
+            },
+            "patterns": [{"name": "stuck", "when": {"is_true": "confused"}, "turns": 3,
+                          "effects": [{"prompt": "Offer to help."},
+                                       {"remember": "guest got stuck"}]}],
+            "flow": {"steps": [
+                {"id": "assess", "posture": "Assess.",
+                 "allow": ["record_score", "log_event"],
+                 "done": {"is_true": "high_risk"}}
+            ]}
+        }))
+        .expect("parses");
+        let code = spec.to_rust();
+        for fragment in [
+            "mod keys {",
+            "pub const VERIFIED: StateKey<bool> = StateKey::new(\"verified\");",
+            "pub const SESSION_TURN_COUNT: StateKey<f64> = StateKey::new(\"session:turn_count\");",
+            "let _ = state.set(\"verified\", json!(false));",
+            ".computed(\"high_risk\", &[\"score\"], {",
+            "serde_json::from_value(json!({\"gt\":[{\"key\":\"score\"},{\"const\":0.5}]}))",
+            "MemoryEngine::in_memory(UserId::new(\"local-user\"))",
+            ".with_memory_slots(memory.clone(), [MemorySlot::new(\"dietary_identity\", \"user:diet\")])",
+            ".tool_background_with_scheduling(\"log_event\", FunctionResponseScheduling::Silent)",
+            ".temperature(0.4)",
+            ".soft_turn_timeout(std::time::Duration::from_millis(1500))",
+            ".steering_mode(SteeringMode::ContextInjection)",
+            ".repair(RepairConfig { nudge_after: 2, escalate_after: 5 })",
+            ".persistence(Arc::new(FsPersistence::new(\"/tmp/sessions\")))",
+            ".session_id(\"guest-1\")",
+            "send_client_content(vec![Content::model(\"Offer to help.\")], true)",
+            "// remember (durable): \"guest got stuck\"",
+        ] {
+            assert!(code.contains(fragment), "missing fragment: {fragment}\n---\n{code}");
+        }
+        assert!(spec.to_cargo_toml().contains("gemini-memory-rs"));
     }
 }

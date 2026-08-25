@@ -1468,6 +1468,7 @@ dependencies = [
  "gemini-adk-rs",
  "gemini-adk-server-rs",
  "gemini-genai-rs",
+ "gemini-memory-rs",
  "parking_lot",
  "regex",
  "schemars 0.8.22",

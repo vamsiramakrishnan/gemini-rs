@@ -10,6 +10,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use gemini_genai_rs::session::SessionWriter;
 use serde_json::Value;
 
 use super::BoxFuture;
@@ -21,6 +22,10 @@ use super::contract::WatcherContract;
 
 /// Custom predicate function type for state change watchers.
 pub type PredicateFn = Arc<dyn Fn(&Value, &Value) -> bool + Send + Sync>;
+
+/// Action fired by a watcher: `(old, new, state, writer)` → future.
+pub type WatcherActionFn =
+    Arc<dyn Fn(Value, Value, State, Arc<dyn SessionWriter>) -> BoxFuture<()> + Send + Sync>;
 
 /// Condition under which a watcher fires, evaluated against (old, new) values.
 pub enum WatchPredicate {
@@ -88,8 +93,10 @@ pub struct Watcher {
     pub key: String,
     /// The condition under which this watcher fires.
     pub predicate: WatchPredicate,
-    /// Async action receiving (old_value, new_value, state).
-    pub action: Arc<dyn Fn(Value, Value, State) -> BoxFuture<()> + Send + Sync>,
+    /// Async action receiving (old_value, new_value, state, writer). The
+    /// writer is the live session's — a watcher can steer or prompt the
+    /// model, not only mutate state.
+    pub action: WatcherActionFn,
     /// If `true`, the processor awaits this action sequentially on the control
     /// lane. If `false`, the processor spawns it concurrently.
     pub blocking: bool,
@@ -166,6 +173,7 @@ impl WatcherRegistry {
         &self,
         diffs: &[(String, Value, Value)],
         state: &State,
+        writer: &Arc<dyn SessionWriter>,
     ) -> (Vec<BoxFuture<()>>, Vec<BoxFuture<()>>) {
         let mut blocking = Vec::new();
         let mut concurrent = Vec::new();
@@ -173,7 +181,8 @@ impl WatcherRegistry {
         for (key, old, new) in diffs {
             for watcher in &self.watchers {
                 if watcher.key == *key && watcher.predicate.matches(old, new) {
-                    let fut = (watcher.action)(old.clone(), new.clone(), state.clone());
+                    let fut =
+                        (watcher.action)(old.clone(), new.clone(), state.clone(), writer.clone());
                     if watcher.blocking {
                         blocking.push(fut);
                     } else {
@@ -195,6 +204,7 @@ impl WatcherRegistry {
         &self,
         mutations: &[StateMutation],
         state: &State,
+        writer: &Arc<dyn SessionWriter>,
     ) -> (Vec<BoxFuture<()>>, Vec<BoxFuture<()>>) {
         let mut net: HashMap<String, (Option<Value>, Option<Value>)> = HashMap::new();
 
@@ -221,7 +231,7 @@ impl WatcherRegistry {
             })
             .collect();
 
-        self.evaluate(&diffs, state)
+        self.evaluate(&diffs, state, writer)
     }
 }
 
@@ -243,6 +253,11 @@ mod tests {
     use serde_json::json;
     use std::sync::atomic::{AtomicU32, Ordering};
 
+    /// Helper: the writer handed to fired actions (accepts everything).
+    fn writer() -> Arc<dyn SessionWriter> {
+        Arc::new(crate::test_helpers::MockWriter)
+    }
+
     /// Helper: create a watcher that increments a shared counter when fired.
     fn counting_watcher(
         key: &str,
@@ -253,7 +268,7 @@ mod tests {
         Watcher {
             key: key.to_string(),
             predicate,
-            action: Arc::new(move |_old, _new, _state| {
+            action: Arc::new(move |_old, _new, _state, _writer| {
                 let c = counter.clone();
                 Box::pin(async move {
                     c.fetch_add(1, Ordering::SeqCst);
@@ -268,7 +283,7 @@ mod tests {
         Watcher {
             key: key.to_string(),
             predicate,
-            action: Arc::new(|old, new, state| {
+            action: Arc::new(|old, new, state, _writer| {
                 Box::pin(async move {
                     let _ = state.set("recorded_old", old);
                     let _ = state.set("recorded_new", new);
@@ -294,7 +309,7 @@ mod tests {
         let state = State::new();
         let diffs = vec![("x".to_string(), json!(1), json!(2))];
 
-        let (blocking, concurrent) = registry.evaluate(&diffs, &state);
+        let (blocking, concurrent) = registry.evaluate(&diffs, &state, &writer());
         assert!(blocking.is_empty());
         assert_eq!(concurrent.len(), 1);
 
@@ -320,7 +335,7 @@ mod tests {
         let state = State::new();
         let diffs = vec![("status".to_string(), json!("inactive"), json!("active"))];
 
-        let (_, concurrent) = registry.evaluate(&diffs, &state);
+        let (_, concurrent) = registry.evaluate(&diffs, &state, &writer());
         assert_eq!(concurrent.len(), 1);
 
         for fut in concurrent {
@@ -345,7 +360,7 @@ mod tests {
         let state = State::new();
         let diffs = vec![("status".to_string(), json!("inactive"), json!("pending"))];
 
-        let (blocking, concurrent) = registry.evaluate(&diffs, &state);
+        let (blocking, concurrent) = registry.evaluate(&diffs, &state, &writer());
         assert!(blocking.is_empty());
         assert!(concurrent.is_empty());
         assert_eq!(counter.load(Ordering::SeqCst), 0);
@@ -368,7 +383,7 @@ mod tests {
         // Old is "draft" — should fire.
         let diffs = vec![("mode".to_string(), json!("draft"), json!("published"))];
 
-        let (_, concurrent) = registry.evaluate(&diffs, &state);
+        let (_, concurrent) = registry.evaluate(&diffs, &state, &writer());
         assert_eq!(concurrent.len(), 1);
 
         for fut in concurrent {
@@ -378,7 +393,7 @@ mod tests {
 
         // Old is NOT "draft" — should not fire.
         let diffs2 = vec![("mode".to_string(), json!("published"), json!("archived"))];
-        let (b, c) = registry.evaluate(&diffs2, &state);
+        let (b, c) = registry.evaluate(&diffs2, &state, &writer());
         assert!(b.is_empty());
         assert!(c.is_empty());
         assert_eq!(counter.load(Ordering::SeqCst), 1);
@@ -401,7 +416,7 @@ mod tests {
         // 95 -> 105: crosses above 100
         let diffs = vec![("temp".to_string(), json!(95.0), json!(105.0))];
 
-        let (_, concurrent) = registry.evaluate(&diffs, &state);
+        let (_, concurrent) = registry.evaluate(&diffs, &state, &writer());
         assert_eq!(concurrent.len(), 1);
 
         for fut in concurrent {
@@ -427,7 +442,7 @@ mod tests {
         // 110 -> 120: both above 100, no crossing
         let diffs = vec![("temp".to_string(), json!(110.0), json!(120.0))];
 
-        let (blocking, concurrent) = registry.evaluate(&diffs, &state);
+        let (blocking, concurrent) = registry.evaluate(&diffs, &state, &writer());
         assert!(blocking.is_empty());
         assert!(concurrent.is_empty());
         assert_eq!(counter.load(Ordering::SeqCst), 0);
@@ -450,7 +465,7 @@ mod tests {
         // 25 -> 15: crosses below 20
         let diffs = vec![("battery".to_string(), json!(25.0), json!(15.0))];
 
-        let (_, concurrent) = registry.evaluate(&diffs, &state);
+        let (_, concurrent) = registry.evaluate(&diffs, &state, &writer());
         assert_eq!(concurrent.len(), 1);
 
         for fut in concurrent {
@@ -475,7 +490,7 @@ mod tests {
         let state = State::new();
         let diffs = vec![("flag".to_string(), json!(false), json!(true))];
 
-        let (_, concurrent) = registry.evaluate(&diffs, &state);
+        let (_, concurrent) = registry.evaluate(&diffs, &state, &writer());
         assert_eq!(concurrent.len(), 1);
 
         for fut in concurrent {
@@ -500,7 +515,7 @@ mod tests {
         let state = State::new();
         let diffs = vec![("flag".to_string(), json!(true), json!(false))];
 
-        let (_, concurrent) = registry.evaluate(&diffs, &state);
+        let (_, concurrent) = registry.evaluate(&diffs, &state, &writer());
         assert_eq!(concurrent.len(), 1);
 
         for fut in concurrent {
@@ -532,7 +547,7 @@ mod tests {
         // 5 -> 10: exactly doubled
         let diffs = vec![("score".to_string(), json!(5.0), json!(10.0))];
 
-        let (_, concurrent) = registry.evaluate(&diffs, &state);
+        let (_, concurrent) = registry.evaluate(&diffs, &state, &writer());
         assert_eq!(concurrent.len(), 1);
 
         for fut in concurrent {
@@ -542,7 +557,7 @@ mod tests {
 
         // 5 -> 11: not doubled
         let diffs2 = vec![("score".to_string(), json!(5.0), json!(11.0))];
-        let (b, c) = registry.evaluate(&diffs2, &state);
+        let (b, c) = registry.evaluate(&diffs2, &state, &writer());
         assert!(b.is_empty());
         assert!(c.is_empty());
     }
@@ -574,7 +589,7 @@ mod tests {
         let state = State::new();
         let diffs = vec![("x".to_string(), json!(1), json!(2))];
 
-        let (blocking, concurrent) = registry.evaluate(&diffs, &state);
+        let (blocking, concurrent) = registry.evaluate(&diffs, &state, &writer());
         assert_eq!(blocking.len(), 1);
         assert_eq!(concurrent.len(), 1);
 
@@ -607,7 +622,7 @@ mod tests {
         // Diff is for key "y", but watcher observes "x"
         let diffs = vec![("y".to_string(), json!(1), json!(2))];
 
-        let (blocking, concurrent) = registry.evaluate(&diffs, &state);
+        let (blocking, concurrent) = registry.evaluate(&diffs, &state, &writer());
         assert!(blocking.is_empty());
         assert!(concurrent.is_empty());
     }
@@ -630,7 +645,8 @@ mod tests {
         let _ = state.set("x", 3);
         let _ = state.set("ignored", 10);
 
-        let (_, concurrent) = registry.evaluate_mutations(&state.mutations_since(cursor), &state);
+        let (_, concurrent) =
+            registry.evaluate_mutations(&state.mutations_since(cursor), &state, &writer());
         assert_eq!(concurrent.len(), 1);
         for fut in concurrent {
             fut.await;
@@ -656,7 +672,7 @@ mod tests {
         let _ = state.set("x", 1);
 
         let (blocking, concurrent) =
-            registry.evaluate_mutations(&state.mutations_since(cursor), &state);
+            registry.evaluate_mutations(&state.mutations_since(cursor), &state, &writer());
         assert!(blocking.is_empty());
         assert!(concurrent.is_empty());
     }
@@ -722,7 +738,7 @@ mod tests {
         let state = State::new();
         let diffs = vec![("x".to_string(), json!(1), json!(42))];
 
-        let (_, concurrent) = registry.evaluate(&diffs, &state);
+        let (_, concurrent) = registry.evaluate(&diffs, &state, &writer());
         // Both watchers should fire
         assert_eq!(concurrent.len(), 2);
 
@@ -734,7 +750,7 @@ mod tests {
 
         // Now only watcher A should fire (new != 42)
         let diffs2 = vec![("x".to_string(), json!(42), json!(99))];
-        let (_, concurrent2) = registry.evaluate(&diffs2, &state);
+        let (_, concurrent2) = registry.evaluate(&diffs2, &state, &writer());
         assert_eq!(concurrent2.len(), 1);
 
         for fut in concurrent2 {
@@ -754,7 +770,7 @@ mod tests {
         let state = State::new();
         let diffs = vec![("val".to_string(), json!("before"), json!("after"))];
 
-        let (_, concurrent) = registry.evaluate(&diffs, &state);
+        let (_, concurrent) = registry.evaluate(&diffs, &state, &writer());
         assert_eq!(concurrent.len(), 1);
 
         for fut in concurrent {
@@ -779,7 +795,7 @@ mod tests {
         let state = State::new();
         let diffs = vec![("x".to_string(), json!("low"), json!("high"))];
 
-        let (blocking, concurrent) = registry.evaluate(&diffs, &state);
+        let (blocking, concurrent) = registry.evaluate(&diffs, &state, &writer());
         assert!(blocking.is_empty());
         assert!(concurrent.is_empty());
     }
@@ -799,7 +815,7 @@ mod tests {
         // "truthy" string is not json bool true
         let diffs = vec![("x".to_string(), json!(0), json!("true"))];
 
-        let (blocking, concurrent) = registry.evaluate(&diffs, &state);
+        let (blocking, concurrent) = registry.evaluate(&diffs, &state, &writer());
         assert!(blocking.is_empty());
         assert!(concurrent.is_empty());
     }
@@ -818,7 +834,7 @@ mod tests {
         let state = State::new();
         let diffs: Vec<(String, Value, Value)> = vec![];
 
-        let (blocking, concurrent) = registry.evaluate(&diffs, &state);
+        let (blocking, concurrent) = registry.evaluate(&diffs, &state, &writer());
         assert!(blocking.is_empty());
         assert!(concurrent.is_empty());
     }

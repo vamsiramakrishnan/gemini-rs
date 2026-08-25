@@ -182,7 +182,7 @@ pub(in crate::live) async fn handle_turn_complete(
     if let (Some(ref watchers), Some(cursor)) = (watchers, pre_watcher_cursor) {
         let mutations = state.mutations_since(cursor);
         if !mutations.is_empty() {
-            let (blocking, concurrent) = watchers.evaluate_mutations(&mutations, state);
+            let (blocking, concurrent) = watchers.evaluate_mutations(&mutations, state, writer);
             for action in blocking {
                 action.await;
             }

@@ -18,6 +18,9 @@
     modality: 'text',
     voice: null,
     tools: [],
+    state: {},
+    computed: [],
+    watch: [],
     patterns: [],
     flow: { steps: [], constraints: [], ambient: [] },
   });
@@ -102,6 +105,9 @@
     spec.flow.constraints = spec.flow.constraints || [];
     spec.flow.ambient = spec.flow.ambient || [];
     spec.patterns = spec.patterns || [];
+    spec.state = spec.state || {};
+    spec.computed = spec.computed || [];
+    spec.watch = spec.watch || [];
     spec.modality = spec.modality || 'text';
     for (const s of steps()) {
       s.after = s.after || [];
@@ -116,10 +122,35 @@
     normalizeSpec();
     if (relayout) autoLayout();
     renderCanvas();
+    refreshStateKeys();
     setBadge('idle', 'not validated');
     const jsonText = $('fs-json-text');
     if (document.activeElement !== jsonText) syncJsonPane();
     persist();
+  }
+
+  /** Every state key the document declares or writes — feeds the guard
+      editors' autocomplete datalist. */
+  function refreshStateKeys() {
+    const list = $('fs-state-keys');
+    if (!list) return;
+    const keys = new Set(Object.keys(spec.state || {}));
+    for (const t of spec.tools || []) {
+      for (const k of Object.keys(t.set_state || {})) keys.add(k);
+      if (t.save_response_as) keys.add(t.save_response_as);
+    }
+    for (const c of spec.computed || []) keys.add(c.key);
+    for (const e of spec.extract || []) {
+      keys.add(e.name);
+      for (const p of e.promote || []) keys.add(p.to || p.field);
+    }
+    for (const m of (spec.memory && spec.memory.slots) || []) keys.add(m.to);
+    list.innerHTML = '';
+    [...keys].sort().forEach((k) => {
+      const o = document.createElement('option');
+      o.value = k;
+      list.append(o);
+    });
   }
 
   // ── Auto-layout (topological layering) ─────────────────────────
@@ -602,12 +633,14 @@
       if (['is_true', 'is_set', 'called_ok', 'done'].includes(k)) {
         const i = document.createElement('input');
         i.placeholder = k === 'called_ok' ? 'tool name' : k === 'done' ? 'step id' : 'state key';
+        if (k === 'is_true' || k === 'is_set') i.setAttribute('list', 'fs-state-keys');
         i.value = v;
         i.addEventListener('input', () => setArg(i.value));
         root.append(i);
       } else if (k === 'eq') {
         const key = document.createElement('input');
         key.placeholder = 'state key';
+        key.setAttribute('list', 'fs-state-keys');
         key.value = v[0];
         key.addEventListener('input', () => { v[0] = key.value; onChange(g); });
         const val = document.createElement('input');
@@ -722,6 +755,26 @@
       renderFlowForm();
     });
     form.append(addPattern);
+
+    const wtitle = document.createElement('div');
+    wtitle.className = 'fs-section-title';
+    wtitle.textContent = 'State watchers';
+    form.append(wtitle);
+    const whelp = document.createElement('div');
+    whelp.className = 'fs-help';
+    whelp.style.marginBottom = '8px';
+    whelp.textContent = 'React the moment a key changes — set state, steer, prompt, or remember.';
+    form.append(whelp);
+    (spec.watch || []).forEach((w, idx) => form.append(watcherCard(w, idx)));
+    const addWatch = document.createElement('button');
+    addWatch.className = 'fs-btn';
+    addWatch.textContent = 'Add watcher';
+    addWatch.addEventListener('click', () => {
+      spec.watch.push({ key: '', condition: 'changed', effects: [] });
+      softCommit();
+      renderFlowForm();
+    });
+    form.append(addWatch);
   }
 
   function patternCard(pat, idx) {
@@ -765,23 +818,151 @@
     row.className = 'fs-row';
     row.append(mode, amount);
     card.append(field('Fires after', row));
-    const setEffect = (pat.effects || []).find((e) => e.set)?.set;
-    const contextEffect = (pat.effects || []).find((e) => typeof e.context === 'string')?.context;
-    const rebuildEffects = (setMap, contextText) => {
-      pat.effects = [];
-      if (setMap && Object.keys(setMap).length) pat.effects.push({ set: setMap });
-      if (contextText) pat.effects.push({ context: contextText });
+    pat.effects = pat.effects || [];
+    card.append(field('Effects', effectsEditor(pat.effects, () => softCommit())));
+    return card;
+  }
+
+  // ── Effects editor (the closed effect vocabulary) ──────────────
+  const EFFECT_KINDS = [
+    ['set', 'set state'],
+    ['context', 'inject context'],
+    ['prompt', 'prompt the model'],
+    ['remember', 'remember (durable)'],
+  ];
+
+  function effectsEditor(effects, onChange) {
+    const root = document.createElement('div');
+    const render = () => {
+      root.innerHTML = '';
+      effects.forEach((eff, idx) => {
+        const row = document.createElement('div');
+        row.className = 'fs-effect';
+        const kind = Object.keys(eff)[0] || 'set';
+        const sel = document.createElement('select');
+        for (const [k, label] of EFFECT_KINDS) {
+          const o = document.createElement('option');
+          o.value = k;
+          o.textContent = label;
+          if (k === kind) o.selected = true;
+          sel.append(o);
+        }
+        sel.addEventListener('change', () => {
+          effects[idx] = sel.value === 'set' ? { set: {} } : { [sel.value]: '' };
+          onChange();
+          render();
+        });
+        const rm = document.createElement('button');
+        rm.className = 'fs-icon-btn';
+        rm.textContent = '×';
+        rm.title = 'Remove effect';
+        rm.addEventListener('click', () => { effects.splice(idx, 1); onChange(); render(); });
+        const head = document.createElement('div');
+        head.className = 'fs-row';
+        sel.style.flex = '1';
+        head.append(sel, rm);
+        row.append(head);
+        if (kind === 'set') {
+          const t = textArea(Object.keys(eff.set || {}).length ? JSON.stringify(eff.set, null, 2) : '', (v) => {
+            const trimmed = v.trim();
+            if (!trimmed) { eff.set = {}; onChange(); t.style.borderColor = ''; return; }
+            try { eff.set = JSON.parse(trimmed); t.style.borderColor = ''; onChange(); }
+            catch (_) { t.style.borderColor = 'var(--error)'; }
+          }, { mono: true, placeholder: '{"needs_help": true}' });
+          row.append(t);
+        } else {
+          const placeholder = kind === 'context'
+            ? 'Steering text the model reads before its next response'
+            : kind === 'prompt'
+              ? 'Text the model responds to now — it speaks'
+              : 'Durable note; {state.key} interpolates ("caller prefers {state.slot}")';
+          row.append(textInput(eff[kind], (v) => { eff[kind] = v; onChange(); }, { placeholder }));
+        }
+        root.append(row);
+      });
+      const add = document.createElement('button');
+      add.className = 'fs-guard-add';
+      add.textContent = '+ effect';
+      add.addEventListener('click', () => { effects.push({ set: {} }); onChange(); render(); });
+      root.append(add);
+    };
+    render();
+    return root;
+  }
+
+  function watcherCard(w, idx) {
+    const card = document.createElement('div');
+    card.className = 'fs-card';
+    const head = document.createElement('div');
+    head.className = 'fs-card-head';
+    head.innerHTML = `<span class="fs-card-title">${esc(w.key || '(key)')}</span>`;
+    const rm = document.createElement('button');
+    rm.className = 'fs-icon-btn';
+    rm.textContent = '×';
+    rm.addEventListener('click', () => { spec.watch.splice(idx, 1); softCommit(); renderFlowForm(); });
+    head.append(rm);
+    card.append(head);
+    const key = textInput(w.key, (v) => {
+      w.key = v.trim();
+      head.querySelector('.fs-card-title').textContent = w.key || '(key)';
+      softCommit();
+    }, { mono: true, placeholder: 'state key to observe' });
+    key.setAttribute('list', 'fs-state-keys');
+    card.append(field('Watched key', key));
+
+    const kinds = [
+      ['changed', 'changed (any)'],
+      ['changed_to', 'changed to value'],
+      ['crossed_above', 'crossed above'],
+      ['crossed_below', 'crossed below'],
+      ['became_true', 'became true'],
+      ['became_false', 'became false'],
+    ];
+    const kind = typeof w.condition === 'string' ? w.condition : Object.keys(w.condition || {})[0] || 'changed';
+    const sel = document.createElement('select');
+    for (const [k, label] of kinds) {
+      const o = document.createElement('option');
+      o.value = k;
+      o.textContent = label;
+      if (k === kind) o.selected = true;
+      sel.append(o);
+    }
+    const valueInput = textInput(
+      typeof w.condition === 'object' && w.condition ? JSON.stringify(Object.values(w.condition)[0]) : '',
+      (v) => {
+        try {
+          const parsed = JSON.parse(v);
+          w.condition = { [sel.value]: parsed };
+          valueInput.style.borderColor = '';
+          softCommit();
+        } catch (_) { valueInput.style.borderColor = 'var(--error)'; }
+      },
+      { mono: true, placeholder: sel.value === 'changed_to' ? 'JSON value, e.g. "done"' : 'number, e.g. 0.9' },
+    );
+    const applyKind = () => {
+      const k = sel.value;
+      if (k === 'changed' || k === 'became_true' || k === 'became_false') {
+        w.condition = k;
+        valueInput.style.display = 'none';
+      } else {
+        const parsed = (() => { try { return JSON.parse(valueInput.value); } catch (_) { return k === 'changed_to' ? '' : 0; } })();
+        w.condition = { [k]: parsed };
+        valueInput.style.display = '';
+      }
       softCommit();
     };
-    let currentSet = setEffect || null;
-    let currentContext = contextEffect || '';
-    card.append(jsonField('Set state (JSON)', setEffect,
-      (v) => { currentSet = v || null; rebuildEffects(currentSet, currentContext); },
-      '{"needs_help": true}'));
-    card.append(field('Context to inject', textInput(contextEffect, (v) => {
-      currentContext = v;
-      rebuildEffects(currentSet, currentContext);
-    }, { placeholder: 'Steering text sent to the model when the pattern fires' })));
+    sel.addEventListener('change', applyKind);
+    if (kind === 'changed' || kind === 'became_true' || kind === 'became_false') valueInput.style.display = 'none';
+    const row = document.createElement('div');
+    row.className = 'fs-row';
+    sel.style.flex = '1';
+    valueInput.style.flex = '1';
+    row.append(sel, valueInput);
+    card.append(field('Condition', row));
+
+    w.effects = w.effects || [];
+    card.append(field('Effects', effectsEditor(w.effects, () => softCommit()),
+      'Watchers see the live session — they can set state, steer, prompt, or remember.'));
     return card;
   }
 
@@ -863,6 +1044,315 @@
       renderAppForm();
     });
     form.append(add);
+
+    renderStateSection(form);
+    renderComputedSection(form);
+    renderMemorySection(form);
+    renderRuntimeSection(form);
+  }
+
+  // ── State dictionary ───────────────────────────────────────────
+  function renderStateSection(form) {
+    const title = document.createElement('div');
+    title.className = 'fs-section-title';
+    title.textContent = 'State dictionary';
+    form.append(title);
+    const help = document.createElement('div');
+    help.className = 'fs-help';
+    help.style.marginBottom = '8px';
+    help.textContent = 'Declare the session’s keys: type, meaning, starting value. '
+      + 'Powers autocomplete in every guard editor and typed keys in generated code.';
+    form.append(help);
+
+    Object.entries(spec.state || {}).forEach(([key, fieldSpec]) => {
+      const card = document.createElement('div');
+      card.className = 'fs-card';
+      const head = document.createElement('div');
+      head.className = 'fs-card-head';
+      head.innerHTML = `<span class="fs-card-title">${esc(key)}</span>`;
+      const rm = document.createElement('button');
+      rm.className = 'fs-icon-btn';
+      rm.textContent = '×';
+      rm.addEventListener('click', () => { delete spec.state[key]; softCommit(); renderAppForm(); });
+      head.append(rm);
+      card.append(head);
+      card.append(field('Key', textInput(key, (v) => {
+        const nk = v.trim();
+        if (!nk || nk === key) return;
+        spec.state[nk] = spec.state[key];
+        delete spec.state[key];
+        softCommit();
+        renderAppForm();
+      }, { mono: true })));
+      const type = document.createElement('select');
+      type.innerHTML = '<option value="">(untyped)</option>'
+        + ['boolean', 'number', 'string', 'object', 'array']
+          .map((t) => `<option value="${t}">${t}</option>`).join('');
+      type.value = fieldSpec.type || '';
+      type.addEventListener('change', () => {
+        if (type.value) fieldSpec.type = type.value; else delete fieldSpec.type;
+        softCommit();
+      });
+      card.append(field('Type', type));
+      card.append(field('Default', textInput(
+        fieldSpec.default === undefined ? '' : JSON.stringify(fieldSpec.default),
+        (v) => {
+          const trimmed = v.trim();
+          if (!trimmed) { delete fieldSpec.default; softCommit(); return; }
+          try { fieldSpec.default = JSON.parse(trimmed); softCommit(); } catch (_) { /* keep typing */ }
+        }, { mono: true, placeholder: 'JSON, e.g. false or 0' })));
+      card.append(field('Description', textInput(fieldSpec.description, (v) => {
+        if (v) fieldSpec.description = v; else delete fieldSpec.description;
+        softCommit();
+      })));
+      form.append(card);
+    });
+    const add = document.createElement('button');
+    add.className = 'fs-btn';
+    add.textContent = 'Add state key';
+    add.addEventListener('click', () => {
+      let n = 1;
+      while (spec.state[`key_${n}`]) n += 1;
+      spec.state[`key_${n}`] = { type: 'boolean' };
+      softCommit();
+      renderAppForm();
+    });
+    form.append(add);
+  }
+
+  // ── Computed variables ─────────────────────────────────────────
+  function renderComputedSection(form) {
+    const title = document.createElement('div');
+    title.className = 'fs-section-title';
+    title.textContent = 'Computed variables';
+    form.append(title);
+    const help = document.createElement('div');
+    help.className = 'fs-help';
+    help.style.marginBottom = '8px';
+    help.textContent = 'Pure expressions over state, recomputed automatically — guards read the '
+      + 'result by its key. Atoms: key, const, add, mul, sub, div, min, max, eq, gt, gte, lt, '
+      + 'lte, all, any, not, if, coalesce, concat, count_true.';
+    form.append(help);
+
+    (spec.computed || []).forEach((c, idx) => {
+      const card = document.createElement('div');
+      card.className = 'fs-card';
+      const head = document.createElement('div');
+      head.className = 'fs-card-head';
+      head.innerHTML = `<span class="fs-card-title">${esc(c.key || '(key)')}</span>`;
+      const rm = document.createElement('button');
+      rm.className = 'fs-icon-btn';
+      rm.textContent = '×';
+      rm.addEventListener('click', () => { spec.computed.splice(idx, 1); softCommit(); renderAppForm(); });
+      head.append(rm);
+      card.append(head);
+      card.append(field('Key', textInput(c.key, (v) => {
+        c.key = v.trim();
+        head.querySelector('.fs-card-title').textContent = c.key || '(key)';
+        softCommit();
+      }, { mono: true })));
+      card.append(jsonField('Expression', c.from,
+        (v) => { c.from = v || { key: '' }; softCommit(); },
+        '{"gt": [{"key": "score"}, {"const": 0.5}]}'));
+      card.append(field('Description', textInput(c.description, (v) => {
+        if (v) c.description = v; else delete c.description;
+        softCommit();
+      })));
+      form.append(card);
+    });
+    const add = document.createElement('button');
+    add.className = 'fs-btn';
+    add.textContent = 'Add computed variable';
+    add.addEventListener('click', () => {
+      spec.computed.push({ key: `derived_${spec.computed.length + 1}`, from: { key: '' } });
+      softCommit();
+      renderAppForm();
+    });
+    form.append(add);
+  }
+
+  // ── Memory ─────────────────────────────────────────────────────
+  function renderMemorySection(form) {
+    const title = document.createElement('div');
+    title.className = 'fs-section-title';
+    title.textContent = 'Durable memory';
+    form.append(title);
+
+    const toggleRow = document.createElement('div');
+    toggleRow.className = 'fs-row';
+    const toggle = document.createElement('input');
+    toggle.type = 'checkbox';
+    toggle.checked = !!spec.memory;
+    toggle.addEventListener('change', () => {
+      if (toggle.checked) spec.memory = spec.memory || { slots: [] };
+      else delete spec.memory;
+      softCommit();
+      renderAppForm();
+    });
+    const toggleLabel = document.createElement('label');
+    toggleLabel.className = 'fs-help';
+    toggleLabel.textContent = 'Remember across sessions — installs the ambient recall_context / '
+      + 'manage_memory tools, turn ingestion, and the `remember` effect.';
+    toggleRow.append(toggle, toggleLabel);
+    form.append(toggleRow);
+
+    if (!spec.memory) return;
+    spec.memory.slots = spec.memory.slots || [];
+    const help = document.createElement('div');
+    help.className = 'fs-help';
+    help.style.margin = '8px 0';
+    help.textContent = 'Slots project remembered facts into state keys, where needs and guards '
+      + 'read them — a returning caller isn’t asked twice.';
+    form.append(help);
+    spec.memory.slots.forEach((slot, idx) => {
+      const row = document.createElement('div');
+      row.className = 'fs-row';
+      const pred = textInput(slot.predicate, (v) => { slot.predicate = v.trim(); softCommit(); },
+        { mono: true, placeholder: 'predicate (dietary_identity)' });
+      const to = textInput(slot.to, (v) => { slot.to = v.trim(); softCommit(); },
+        { mono: true, placeholder: 'state key (user:diet)' });
+      to.setAttribute('list', 'fs-state-keys');
+      const rm = document.createElement('button');
+      rm.className = 'fs-icon-btn';
+      rm.textContent = '×';
+      rm.addEventListener('click', () => { spec.memory.slots.splice(idx, 1); softCommit(); renderAppForm(); });
+      pred.style.flex = '1';
+      to.style.flex = '1';
+      row.append(pred, to, rm);
+      form.append(row);
+    });
+    const add = document.createElement('button');
+    add.className = 'fs-btn';
+    add.textContent = 'Add memory slot';
+    add.addEventListener('click', () => {
+      spec.memory.slots.push({ predicate: '', to: '' });
+      softCommit();
+      renderAppForm();
+    });
+    form.append(add);
+  }
+
+  // ── Runtime tuning ─────────────────────────────────────────────
+  function renderRuntimeSection(form) {
+    const title = document.createElement('div');
+    title.className = 'fs-section-title';
+    title.textContent = 'Runtime tuning';
+    form.append(title);
+    const rt = () => { spec.runtime = spec.runtime || {}; return spec.runtime; };
+    const setOrClear = (key, value) => {
+      const r = rt();
+      if (value === undefined || value === '' || value === null || Number.isNaN(value)) delete r[key];
+      else r[key] = value;
+      if (!Object.keys(r).length) delete spec.runtime;
+      softCommit();
+    };
+    const r = spec.runtime || {};
+
+    const numField = (label, key, placeholder, parse = parseFloat, help) => {
+      form.append(field(label, textInput(r[key] != null ? String(r[key]) : '', (v) => {
+        setOrClear(key, v.trim() === '' ? undefined : parse(v));
+      }, { mono: true, placeholder }), help));
+    };
+    numField('Temperature', 'temperature', 'model default');
+    numField('Thinking budget (tokens)', 'thinking_budget', 'off', (v) => parseInt(v, 10));
+    numField('Soft-turn timeout (ms)', 'soft_turn_timeout_ms', 'off', (v) => parseInt(v, 10),
+      'Run extractors/watchers when the model chooses silence this long after the caller stops.');
+
+    const selField = (label, key, options, help) => {
+      const sel = document.createElement('select');
+      sel.innerHTML = '<option value="">(default)</option>'
+        + options.map((o) => `<option value="${o}">${o.replaceAll('_', ' ')}</option>`).join('');
+      sel.value = r[key] || '';
+      sel.addEventListener('change', () => setOrClear(key, sel.value || undefined));
+      form.append(field(label, sel, help));
+    };
+    selField('Steering mode', 'steering', ['instruction_update', 'context_injection', 'hybrid'],
+      'context_injection avoids instruction re-processing spikes on phase transitions.');
+    selField('Context delivery', 'context_delivery', ['immediate', 'deferred'],
+      'deferred queues steering until the next user send — no isolated frames mid-silence.');
+
+    const boolField = (label, key) => {
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = r[key] === true;
+      cb.addEventListener('change', () => setOrClear(key, cb.checked ? true : undefined));
+      form.append(field(label, cb));
+    };
+    boolField('Proactive audio (model may stay silent)', 'proactive_audio');
+    boolField('Include thought summaries', 'include_thoughts');
+    boolField('Lossy audio delivery', 'lossy_audio');
+
+    // VAD sensitivities.
+    const vadRow = document.createElement('div');
+    vadRow.className = 'fs-row';
+    const vadSel = (key, label) => {
+      const sel = document.createElement('select');
+      sel.innerHTML = `<option value="">${label}: default</option>`
+        + ['low', 'medium', 'high'].map((o) => `<option value="${o}">${label}: ${o}</option>`).join('');
+      sel.value = (r.vad || {})[key] || '';
+      sel.style.flex = '1';
+      sel.addEventListener('change', () => {
+        const vad = { ...(rt().vad || {}) };
+        if (sel.value) vad[key] = sel.value; else delete vad[key];
+        setOrClear('vad', Object.keys(vad).length ? vad : undefined);
+      });
+      return sel;
+    };
+    vadRow.append(vadSel('start_sensitivity', 'speech start'), vadSel('end_sensitivity', 'speech end'));
+    form.append(field('Voice activity detection', vadRow));
+    const silence = textInput(
+      (r.vad || {}).silence_duration_ms != null ? String(r.vad.silence_duration_ms) : '',
+      (v) => {
+        const n = parseInt(v, 10);
+        const vad = { ...(rt().vad || {}) };
+        if (Number.isNaN(n)) delete vad.silence_duration_ms; else vad.silence_duration_ms = n;
+        setOrClear('vad', Object.keys(vad).length ? vad : undefined);
+      },
+      { mono: true, placeholder: 'default' },
+    );
+    form.append(field('VAD silence before end-of-speech (ms)', silence));
+
+    // Repair thresholds.
+    const repairRow = document.createElement('div');
+    repairRow.className = 'fs-row';
+    const nudge = textInput(r.repair ? String(r.repair.nudge_after) : '', (v) => {
+      const n = parseInt(v, 10);
+      if (Number.isNaN(n)) { setOrClear('repair', undefined); return; }
+      setOrClear('repair', { nudge_after: n, escalate_after: r.repair?.escalate_after ?? n * 2 });
+    }, { mono: true, placeholder: 'nudge after N turns' });
+    const escalate = textInput(r.repair ? String(r.repair.escalate_after) : '', (v) => {
+      const n = parseInt(v, 10);
+      if (Number.isNaN(n) || !rt().repair) return;
+      setOrClear('repair', { nudge_after: rt().repair.nudge_after, escalate_after: n });
+    }, { mono: true, placeholder: 'escalate after N turns' });
+    nudge.style.flex = '1';
+    escalate.style.flex = '1';
+    repairRow.append(nudge, escalate);
+    form.append(field('Conversation repair', repairRow,
+      'Nudge, then escalate, when a phase’s needed keys stay unfilled.'));
+
+    // Persistence.
+    const persistRow = document.createElement('div');
+    persistRow.className = 'fs-row';
+    const backend = document.createElement('select');
+    backend.innerHTML = '<option value="">no persistence</option>'
+      + '<option value="memory">in-memory</option><option value="fs">filesystem</option>';
+    backend.value = r.persistence ? (r.persistence === 'memory' ? 'memory' : 'fs') : '';
+    const dir = textInput(r.persistence && r.persistence.fs ? r.persistence.fs.dir : '', (v) => {
+      if (backend.value === 'fs') setOrClear('persistence', { fs: { dir: v } });
+    }, { mono: true, placeholder: '/var/sessions' });
+    dir.style.display = backend.value === 'fs' ? '' : 'none';
+    backend.addEventListener('change', () => {
+      dir.style.display = backend.value === 'fs' ? '' : 'none';
+      setOrClear('persistence', backend.value === '' ? undefined
+        : backend.value === 'memory' ? 'memory' : { fs: { dir: dir.value || '/tmp/sessions' } });
+    });
+    backend.style.flex = '1';
+    dir.style.flex = '1';
+    persistRow.append(backend, dir);
+    form.append(field('Session persistence', persistRow));
+    form.append(field('Session id', textInput(r.session_id, (v) => setOrClear('session_id', v.trim() || undefined),
+      { mono: true, placeholder: 'stable id for resume' })));
   }
 
   function jsonField(labelText, value, apply, placeholder) {
@@ -926,6 +1416,18 @@
       if (t.description === '') delete t.description;
     }
     if (!clean.description) delete clean.description;
+    if (clean.state && !Object.keys(clean.state).length) delete clean.state;
+    if (!clean.computed?.length) delete clean.computed;
+    if (!clean.watch?.length) delete clean.watch;
+    for (const w of clean.watch || []) {
+      if (w.set && !Object.keys(w.set).length) delete w.set;
+      if (!w.effects?.length) delete w.effects;
+    }
+    for (const p of clean.patterns || []) {
+      if (!p.effects?.length) delete p.effects;
+    }
+    if (clean.memory && !clean.memory.slots?.length) clean.memory = {};
+    if (clean.runtime && !Object.keys(clean.runtime).length) delete clean.runtime;
     return clean;
   }
 

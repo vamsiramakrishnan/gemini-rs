@@ -83,6 +83,21 @@ impl DemoApp for FlowStudio {
                     let resources = SpecResources {
                         extraction_llm: (!spec.extract.is_empty())
                             .then(super::build_extraction_llm),
+                        // An in-process engine per Studio session: `memory`
+                        // specs run for real (ambient tools, slots, remember
+                        // effects), scoped to the connection.
+                        memory: spec.memory.as_ref().map(|_| {
+                            let engine = gemini_memory_rs::prelude::MemoryEngine::in_memory(
+                                gemini_memory_rs::prelude::UserId::new("studio-user"),
+                            );
+                            let session = std::sync::Arc::new(engine.begin_session(
+                                gemini_memory_rs::prelude::SessionId::new("studio-session"),
+                            ));
+                            std::sync::Arc::new(
+                                gemini_memory_rs::runtime::SessionMemoryBinding::new(session),
+                            )
+                                as std::sync::Arc<dyn gemini_adk_fluent_rs::spec::MemoryBinding>
+                        }),
                     };
                     let state = State::new();
                     spec.apply(live.model(super::live_model()), &state, &resources)

@@ -441,6 +441,15 @@ html, body {
 }
 .fs-row .fs-grow { flex: 1; }
 
+.fs-effect {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 0;
+  border-top: 1px dashed var(--border);
+}
+.fs-effect:first-child { border-top: 0; }
+
 .fs-card {
   border: 1px solid var(--border-1);
   border-radius: var(--fs-radius);

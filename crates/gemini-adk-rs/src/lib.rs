@@ -20,6 +20,7 @@ pub mod credentials;
 pub mod error;
 pub mod evaluation;
 pub mod events;
+pub mod expr;
 pub mod extract;
 pub mod flow;
 pub mod frame;

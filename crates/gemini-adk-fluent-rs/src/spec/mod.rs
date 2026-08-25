@@ -34,12 +34,17 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use gemini_adk_rs::expr::Expr;
 use gemini_adk_rs::flow::{Constraint, Flow, Guard, Pred, Step};
 use gemini_adk_rs::live::extractor::{ExtractionTrigger, FieldPromotion, LlmExtractor};
+use gemini_adk_rs::live::{ContextDelivery, RepairConfig, SteeringMode};
 use gemini_adk_rs::llm::BaseLlm;
 use gemini_adk_rs::state::State;
 use gemini_adk_rs::tool::{SimpleTool, ToolDispatcher};
-use gemini_genai_rs::prelude::{Content, Voice};
+use gemini_genai_rs::prelude::{
+    AutomaticActivityDetection, Content, FunctionResponseScheduling, Sensitivity, SessionWriter,
+    Voice,
+};
 
 use crate::compose::tools::T;
 use crate::live::Live;
@@ -110,6 +115,36 @@ pub struct ToolSpec {
     /// Execute as an HTTP request instead of returning the canned response.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub http: Option<HttpBinding>,
+    /// Run non-blocking: the model keeps speaking while the tool executes
+    /// (`behavior: NonBlocking` on the wire; Google AI only, stripped on
+    /// Vertex). Implied by `scheduling`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub background: bool,
+    /// How the async response is delivered (implies `background`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scheduling: Option<SchedulingSpec>,
+}
+
+/// Delivery mode for a background tool's response.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SchedulingSpec {
+    /// Halt current output and report immediately.
+    Interrupt,
+    /// Wait until the model finishes its current output.
+    WhenIdle,
+    /// Integrate silently without notifying the user.
+    Silent,
+}
+
+impl SchedulingSpec {
+    fn to_wire(self) -> FunctionResponseScheduling {
+        match self {
+            SchedulingSpec::Interrupt => FunctionResponseScheduling::Interrupt,
+            SchedulingSpec::WhenIdle => FunctionResponseScheduling::WhenIdle,
+            SchedulingSpec::Silent => FunctionResponseScheduling::Silent,
+        }
+    }
 }
 
 /// How extracted fields are promoted into bare state keys.
@@ -217,15 +252,23 @@ fn default_window() -> usize {
     3
 }
 
-/// A serializable side effect for phase entry and watcher actions — the
-/// closed-effect counterpart to [`Guard`]'s closed predicates.
+/// A serializable side effect for phase entry, watcher, and pattern actions —
+/// the closed-effect counterpart to [`Guard`]'s closed predicates. One
+/// vocabulary, honored identically wherever effects fire.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum EffectSpec {
     /// Write these state keys.
     Set(BTreeMap<String, Value>),
-    /// Inject a model-role context turn (steering text).
+    /// Inject a model-role context turn (steering text the model reads before
+    /// its next response — it does not answer it directly).
     Context(String),
+    /// Inject the text as a model-role turn **and** ask the model to respond
+    /// now — the "make the model speak" effect (proactive check-in, nudge).
+    Prompt(String),
+    /// Durably remember a note (`{state.key}` templates interpolated) through
+    /// the session's memory binding. Requires the spec's `memory` section.
+    Remember(String),
 }
 
 /// A data-driven phase transition: fire `when` the guard holds over state.
@@ -290,16 +333,22 @@ pub enum WatchCondition {
     BecameFalse,
 }
 
-/// A data-driven state watcher: when `key` satisfies the condition, apply the
-/// effects (only [`EffectSpec::Set`] — watchers have no session writer).
+/// A data-driven state watcher: when `key` satisfies the condition, run the
+/// effects. Watchers receive the live session writer, so the full
+/// [`EffectSpec`] vocabulary applies — a watcher can set state, inject
+/// context, prompt the model, or remember durably.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WatchSpec {
     /// Watched state key.
     pub key: String,
     /// Trigger condition.
     pub condition: WatchCondition,
-    /// State keys written when it fires.
+    /// State keys written when it fires (sugar for an [`EffectSpec::Set`]).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub set: BTreeMap<String, Value>,
+    /// Effects fired in order after `set`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub effects: Vec<EffectSpec>,
 }
 
 /// A data-driven temporal pattern: fire effects when a state condition holds
@@ -323,6 +372,245 @@ pub struct PatternSpec {
     /// Effects when the pattern fires (`set` state and/or inject `context`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub effects: Vec<EffectSpec>,
+}
+
+/// A computed (derived) state variable authored as data: `key` is written to
+/// `derived:{key}` whenever the [`Expr`] evaluates to a value. Dependencies
+/// are inferred from the expression's [`Expr::keys_read`], so the runtime's
+/// dependency-ordered [`ComputedRegistry`](gemini_adk_rs::live::ComputedRegistry)
+/// invariants hold with nothing extra to declare. Guards read the result by
+/// its bare key (the `derived:` fallback).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ComputedSpec {
+    /// Result key (written as `derived:{key}`).
+    pub key: String,
+    /// The expression computing the value.
+    pub from: Expr,
+    /// Human-readable note.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
+}
+
+/// Declared JSON type of a state key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum StateType {
+    /// JSON boolean.
+    Boolean,
+    /// JSON number.
+    Number,
+    /// JSON string.
+    String,
+    /// JSON object.
+    Object,
+    /// JSON array.
+    Array,
+}
+
+impl StateType {
+    fn matches(self, value: &Value) -> bool {
+        matches!(
+            (self, value),
+            (StateType::Boolean, Value::Bool(_))
+                | (StateType::Number, Value::Number(_))
+                | (StateType::String, Value::String(_))
+                | (StateType::Object, Value::Object(_))
+                | (StateType::Array, Value::Array(_))
+        )
+    }
+}
+
+/// One declared state key: its type, meaning, and optional starting value.
+///
+/// The `state` section is the session's data dictionary. Declaring it is
+/// optional, but once present it powers editor autocomplete, key-existence
+/// warnings for every guard/effect/tool reference, typed key constants in
+/// generated code, and `default` seeding at connect.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct StateFieldSpec {
+    /// Declared JSON type.
+    #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<StateType>,
+    /// What this key means.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
+    /// Initial value seeded at connect when the key is unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<Value>,
+}
+
+/// Project one remembered fact into a governed state slot: when memory holds
+/// a value for `predicate`, it is written to the `to` state key — where
+/// `needs`, `captured`, and every other guard reads it exactly as if the
+/// caller had just said it.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct MemorySlotSpec {
+    /// Memory predicate (e.g. `dietary_identity`).
+    pub predicate: String,
+    /// Target state key (must not be `derived:` — that prefix is read-only).
+    pub to: String,
+}
+
+/// The session's durable-memory declaration. Installing it wires the memory
+/// subsystem in through a [`MemoryBinding`] supplied in [`SpecResources`]:
+/// the `recall_context` / `manage_memory` tools (ambient, so step `allow`
+/// lists don't switch recall off), turn ingestion, end-of-session
+/// reconciliation, and the slot projections below. [`EffectSpec::Remember`]
+/// writes through the same binding.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct MemorySpec {
+    /// Remembered facts projected into state slots.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub slots: Vec<MemorySlotSpec>,
+}
+
+/// Speech-detection sensitivity for [`VadSpec`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SensitivitySpec {
+    /// Fewer false positives; may miss soft speech.
+    Low,
+    /// Balanced.
+    Medium,
+    /// Catches everything; more false positives.
+    High,
+}
+
+impl SensitivitySpec {
+    fn to_wire(self) -> Sensitivity {
+        match self {
+            SensitivitySpec::Low => Sensitivity::SensitivityLow,
+            SensitivitySpec::Medium => Sensitivity::SensitivityMedium,
+            SensitivitySpec::High => Sensitivity::SensitivityHigh,
+        }
+    }
+}
+
+/// Voice-activity-detection tuning — the knobs that decide how eagerly the
+/// session hears speech start and stop.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct VadSpec {
+    /// Sensitivity for detecting speech onset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_sensitivity: Option<SensitivitySpec>,
+    /// Sensitivity for detecting end of speech.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_sensitivity: Option<SensitivitySpec>,
+    /// Milliseconds of audio kept before speech onset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefix_padding_ms: Option<u32>,
+    /// Milliseconds of silence before end-of-speech triggers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub silence_duration_ms: Option<u32>,
+}
+
+/// Input/output transcription toggles.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TranscriptionSpec {
+    /// Transcribe the user's speech.
+    #[serde(default = "default_true")]
+    pub input: bool,
+    /// Transcribe the model's audio output.
+    #[serde(default = "default_true")]
+    pub output: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// How phase instructions are steered to the model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SteeringSpec {
+    /// Replace the system instruction on phase transitions (default).
+    InstructionUpdate,
+    /// Set the instruction once; deliver phase steering as context turns.
+    ContextInjection,
+    /// Both.
+    Hybrid,
+}
+
+/// When batched context turns hit the wire.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ContextDeliverySpec {
+    /// Send immediately during TurnComplete (default).
+    Immediate,
+    /// Queue and flush with the next user send (voice-glitch avoidance).
+    Deferred,
+}
+
+/// Conversation-repair thresholds (unmet phase `needs`).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepairSpec {
+    /// Turns without progress before the first nudge.
+    pub nudge_after: u32,
+    /// Turns without progress before escalation.
+    pub escalate_after: u32,
+}
+
+/// Session persistence backend.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PersistenceSpec {
+    /// Filesystem snapshots under the given directory.
+    Fs {
+        /// Snapshot directory (created if missing).
+        dir: String,
+    },
+    /// In-memory (tests, ephemeral sessions).
+    Memory,
+}
+
+/// Control-plane and voice tuning — every session capability that is
+/// configuration rather than conversation, in one section. Everything here
+/// lowers to a `Live` builder setter; omitted fields keep the builder's
+/// defaults.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RuntimeSpec {
+    /// Sampling temperature.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
+    /// Thinking budget in tokens (Google AI only; stripped on Vertex).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_budget: Option<u32>,
+    /// Receive thought summaries (requires `thinking_budget`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub include_thoughts: Option<bool>,
+    /// Input/output transcription.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transcription: Option<TranscriptionSpec>,
+    /// Let the model choose to stay silent (proactive audio).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proactive_audio: Option<bool>,
+    /// Voice-activity-detection tuning.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vad: Option<VadSpec>,
+    /// Fire a soft turn when the model stays silent this long after VAD end.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub soft_turn_timeout_ms: Option<u64>,
+    /// How phase instructions reach the model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub steering: Option<SteeringSpec>,
+    /// When context turns hit the wire.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_delivery: Option<ContextDeliverySpec>,
+    /// Conversation-repair thresholds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repair: Option<RepairSpec>,
+    /// Session persistence backend.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub persistence: Option<PersistenceSpec>,
+    /// Stable session id (resume across restarts; requires `persistence`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    /// Drop audio chunks instead of applying backpressure when consumers lag.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub lossy_audio: bool,
+    /// Drop transcript deltas instead of applying backpressure.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub lossy_transcript: bool,
 }
 
 /// Splice a named flow fragment into the session's flow under a namespace.
@@ -377,6 +665,20 @@ pub struct SessionSpec {
     /// Out-of-band extraction pipelines.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub extract: Vec<ExtractSpec>,
+    /// Declared state keys — the session's data dictionary.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub state: BTreeMap<String, StateFieldSpec>,
+    /// Computed (derived) state variables.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub computed: Vec<ComputedSpec>,
+    /// Durable memory: slots projected into state, `remember` effects, and
+    /// the ambient recall/manage tools. Requires a [`MemoryBinding`] in
+    /// [`SpecResources`] at apply time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory: Option<MemorySpec>,
+    /// Control-plane and voice tuning.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<RuntimeSpec>,
     /// Conversation phases.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub phases: Vec<PhaseSpec>,
@@ -420,11 +722,33 @@ pub struct SpecValidation {
     pub steps: usize,
 }
 
-/// External resources a spec cannot carry: model handles.
+/// The seam through which a memory engine plugs into a spec-driven session.
+///
+/// The spec's `memory` section is pure data; the engine that honors it lives
+/// above this crate (`gemini-memory-rs` implements this trait over its
+/// `MemorySession`). `apply` calls [`install`](Self::install) once to wire
+/// tools/ingestion/slots, and routes every [`EffectSpec::Remember`] through
+/// [`remember`](Self::remember).
+pub trait MemoryBinding: Send + Sync {
+    /// Wire the memory subsystem onto the builder per the spec's declaration.
+    fn install(&self, live: Live, memory: &MemorySpec) -> Live;
+    /// Durably remember a note (fire-and-forget; implementations may commit
+    /// asynchronously).
+    fn remember(&self, note: String);
+}
+
+/// Tool names a [`MemoryBinding`] installs (ambient on the flow).
+pub const MEMORY_TOOL_NAMES: [&str; 2] = ["recall_context", "manage_memory"];
+
+/// External resources a spec cannot carry: model handles and capability
+/// bindings.
 #[derive(Default)]
 pub struct SpecResources {
     /// The OOB model backing `extract` entries. Required when any are present.
     pub extraction_llm: Option<Arc<dyn BaseLlm>>,
+    /// The memory engine honoring the spec's `memory` section. Required when
+    /// that section is present.
+    pub memory: Option<Arc<dyn MemoryBinding>>,
 }
 
 impl SessionSpec {
@@ -500,6 +824,11 @@ impl SessionSpec {
         }
         for w in &self.watch {
             keys.extend(w.set.keys().cloned());
+            for eff in &w.effects {
+                if let EffectSpec::Set(map) = eff {
+                    keys.extend(map.keys().cloned());
+                }
+            }
         }
         for p in &self.patterns {
             for eff in &p.effects {
@@ -508,7 +837,77 @@ impl SessionSpec {
                 }
             }
         }
+        for c in &self.computed {
+            // A computed var writes `derived:{key}`, and guards read it by
+            // either name thanks to the `derived:` fallback.
+            keys.insert(c.key.clone());
+            keys.insert(format!("derived:{}", c.key));
+        }
+        if let Some(memory) = &self.memory {
+            for slot in &memory.slots {
+                keys.extend([slot.to.clone()]);
+            }
+        }
+        for (key, field) in &self.state {
+            if field.default.is_some() {
+                keys.insert(key.clone());
+            }
+        }
         keys
+    }
+
+    /// Every [`EffectSpec`] anywhere in the document, with a location label.
+    fn all_effects(&self) -> Vec<(String, &EffectSpec)> {
+        let mut out = Vec::new();
+        for p in &self.phases {
+            for eff in &p.on_enter {
+                out.push((format!("phase '{}'", p.name), eff));
+            }
+        }
+        for w in &self.watch {
+            for eff in &w.effects {
+                out.push((format!("watch '{}'", w.key), eff));
+            }
+        }
+        for p in &self.patterns {
+            for eff in &p.effects {
+                out.push((format!("pattern '{}'", p.name), eff));
+            }
+        }
+        out
+    }
+
+    /// Re-evaluate every computed variable in dependency order, writing
+    /// results to `derived:{key}`. Used by the offline simulator so guards
+    /// over computed keys latch exactly as they do live. Validation forbids
+    /// cycles, so iterating to a fixed point terminates.
+    pub(crate) fn recompute_computed(&self, state: &State) {
+        for _ in 0..self.computed.len() {
+            let mut changed = false;
+            for c in &self.computed {
+                if let Some(value) = c.from.eval(state) {
+                    let derived = format!("derived:{}", c.key);
+                    if state.get_raw(&derived).as_ref() != Some(&value) {
+                        let _ = state.set(&derived, value);
+                        changed = true;
+                    }
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+    }
+
+    /// Seed declared `state` defaults for keys not yet set.
+    pub(crate) fn seed_state_defaults(&self, state: &State) {
+        for (key, field) in &self.state {
+            if let Some(default) = &field.default {
+                if state.get_raw(key).is_none() {
+                    let _ = state.set(key, default.clone());
+                }
+            }
+        }
     }
 
     /// Validate the whole document: flow compilation (with the declared tool
@@ -578,6 +977,148 @@ impl SessionSpec {
             }
         }
 
+        // Computed variables: unique keys, no dependency cycles (Kahn over the
+        // computed subset; a bare read and a `derived:` read are the same
+        // dependency).
+        {
+            let computed_keys: std::collections::BTreeSet<&str> =
+                self.computed.iter().map(|c| c.key.as_str()).collect();
+            if computed_keys.len() != self.computed.len() {
+                errors.push("computed variables declare a duplicate key".into());
+            }
+            let normalize = |k: &str| k.strip_prefix("derived:").unwrap_or(k).to_string();
+            let mut in_degree: BTreeMap<&str, usize> =
+                computed_keys.iter().map(|k| (*k, 0)).collect();
+            let mut dependents: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+            for c in &self.computed {
+                for dep in c.from.keys_read() {
+                    let dep = normalize(&dep);
+                    if dep != c.key && computed_keys.contains(dep.as_str()) {
+                        let dep_key = *computed_keys.get(dep.as_str()).unwrap();
+                        dependents.entry(dep_key).or_default().push(c.key.as_str());
+                        *in_degree.entry(c.key.as_str()).or_default() += 1;
+                    }
+                    if dep == c.key {
+                        errors.push(format!("computed '{}' reads its own key", c.key));
+                    }
+                }
+            }
+            let mut queue: Vec<&str> = in_degree
+                .iter()
+                .filter(|(_, d)| **d == 0)
+                .map(|(k, _)| *k)
+                .collect();
+            let mut visited = 0usize;
+            while let Some(key) = queue.pop() {
+                visited += 1;
+                for dependent in dependents.get(key).cloned().unwrap_or_default() {
+                    let d = in_degree.get_mut(dependent).unwrap();
+                    *d -= 1;
+                    if *d == 0 {
+                        queue.push(dependent);
+                    }
+                }
+            }
+            if visited != computed_keys.len() {
+                let cycle: Vec<&str> = in_degree
+                    .iter()
+                    .filter(|(_, d)| **d > 0)
+                    .map(|(k, _)| *k)
+                    .collect();
+                errors.push(format!(
+                    "computed variables form a dependency cycle: {}",
+                    cycle.join(", ")
+                ));
+            }
+        }
+
+        // Effects: `remember` needs the memory section; memory slots must not
+        // target the read-only `derived:` scope.
+        for (location, effect) in self.all_effects() {
+            if matches!(effect, EffectSpec::Remember(_)) && self.memory.is_none() {
+                errors.push(format!(
+                    "{location} uses a `remember` effect but the spec has no `memory` section"
+                ));
+            }
+        }
+        if let Some(memory) = &self.memory {
+            for slot in &memory.slots {
+                if slot.to.starts_with("derived:") {
+                    errors.push(format!(
+                        "memory slot '{}' targets read-only key '{}' — the `derived:` scope \
+                         belongs to computed variables",
+                        slot.predicate, slot.to
+                    ));
+                }
+            }
+        }
+
+        // Declared state dictionary: defaults must match their declared type;
+        // once a dictionary exists, undeclared keys are worth flagging.
+        for (key, field) in &self.state {
+            if let (Some(kind), Some(default)) = (field.kind, &field.default) {
+                if !kind.matches(default) {
+                    warnings.push(format!(
+                        "state key '{key}' declares type {kind:?} but its default is {default}"
+                    ));
+                }
+            }
+        }
+        if !self.state.is_empty() {
+            let declared: std::collections::BTreeSet<&str> =
+                self.state.keys().map(String::as_str).collect();
+            let mut undeclared = std::collections::BTreeSet::new();
+            for key in self.state_keys_written() {
+                let bare = key.strip_prefix("derived:").unwrap_or(&key);
+                if !declared.contains(bare) && !self.computed.iter().any(|c| c.key == bare) {
+                    undeclared.insert(key.clone());
+                }
+            }
+            for key in &undeclared {
+                warnings.push(format!(
+                    "state key '{key}' is written but not declared in the `state` section"
+                ));
+            }
+        }
+
+        // Computed inputs: like guard reads, a dependency nothing writes can
+        // never produce a value.
+        {
+            let written = self.state_keys_written();
+            for c in &self.computed {
+                for dep in c.from.keys_read() {
+                    let bare = dep.strip_prefix("derived:").unwrap_or(&dep);
+                    if !written.contains(&dep)
+                        && !written.contains(bare)
+                        && !dep.ends_with(":result")
+                    {
+                        warnings.push(format!(
+                            "computed '{}' reads state key '{dep}' but nothing writes it",
+                            c.key
+                        ));
+                    }
+                }
+            }
+        }
+
+        // Runtime coherence.
+        if let Some(runtime) = &self.runtime {
+            if runtime.include_thoughts == Some(true) && runtime.thinking_budget.is_none() {
+                warnings.push(
+                    "runtime.include_thoughts is set without runtime.thinking_budget — no \
+                     thoughts will arrive"
+                        .into(),
+                );
+            }
+            if runtime.session_id.is_some() && runtime.persistence.is_none() {
+                warnings.push(
+                    "runtime.session_id is set without runtime.persistence — nothing will be \
+                     snapshotted"
+                        .into(),
+                );
+            }
+        }
+
         // Flow compilation, with declared tools as the registry. MCP tool
         // names are unknown until connect, so their presence downgrades the
         // unknown-tool check to a warning-free plain compile.
@@ -592,7 +1133,12 @@ impl SessionSpec {
                 }
                 flow.clone().compile()
             } else {
-                let names = self.tool_names();
+                let mut names = self.tool_names();
+                if self.memory.is_some() {
+                    // The memory binding installs its tools at connect; the
+                    // flow may reference or gate them.
+                    names.extend(MEMORY_TOOL_NAMES.iter().map(|s| s.to_string()));
+                }
                 let refs: Vec<&str> = names.iter().map(String::as_str).collect();
                 flow.clone().compile_with_tools(&refs)
             };
@@ -722,6 +1268,12 @@ impl SessionSpec {
                 "spec declares extraction but SpecResources.extraction_llm is not set".into(),
             );
         }
+        if self.memory.is_some() && resources.memory.is_none() {
+            return Err("spec declares memory but SpecResources.memory is not set".into());
+        }
+
+        // Seed declared defaults before anything reads state.
+        self.seed_state_defaults(state);
 
         let mut live = live
             .with_state(state.clone())
@@ -751,6 +1303,40 @@ impl SessionSpec {
         let flow = self.effective_flow().map_err(|e| e.join("; "))?;
         if !flow.steps.is_empty() {
             live = live.govern(flow);
+        }
+
+        // Computed (derived) state variables — dependencies inferred from the
+        // expression, so the registry's topological ordering holds.
+        for c in &self.computed {
+            let expr = c.from.clone();
+            let deps: Vec<String> = expr.keys_read().into_iter().collect();
+            let dep_refs: Vec<&str> = deps.iter().map(String::as_str).collect();
+            live = live.computed(c.key.clone(), &dep_refs, move |s| expr.eval(s));
+        }
+
+        // Memory: install through the binding (tools, ingestion, slots).
+        let memory_binding = resources.memory.clone();
+        if let (Some(memory), Some(binding)) = (&self.memory, &memory_binding) {
+            live = binding.install(live, memory);
+        }
+
+        // Background tools (async function calling).
+        for tool in &self.tools {
+            match (tool.background, tool.scheduling) {
+                (_, Some(scheduling)) => {
+                    live = live
+                        .tool_background_with_scheduling(tool.name.clone(), scheduling.to_wire());
+                }
+                (true, None) => {
+                    live = live.tool_background(tool.name.clone());
+                }
+                (false, None) => {}
+            }
+        }
+
+        // Control-plane and voice tuning.
+        if let Some(runtime) = &self.runtime {
+            live = apply_runtime(live, runtime);
         }
 
         // Extraction.
@@ -798,26 +1384,12 @@ impl SessionSpec {
             }
             if !p.on_enter.is_empty() {
                 let effects = p.on_enter.clone();
+                let memory = memory_binding.clone();
                 builder = builder.on_enter(move |state, writer| {
                     let effects = effects.clone();
+                    let memory = memory.clone();
                     async move {
-                        for effect in &effects {
-                            match effect {
-                                EffectSpec::Set(map) => {
-                                    for (key, value) in map {
-                                        let _ = state.set(key, value.clone());
-                                    }
-                                }
-                                EffectSpec::Context(text) => {
-                                    let _ = writer
-                                        .send_client_content(
-                                            vec![Content::model(text.clone())],
-                                            false,
-                                        )
-                                        .await;
-                                }
-                            }
-                        }
+                        run_effects(&effects, &state, &writer, memory.as_ref()).await;
                     }
                 });
             }
@@ -832,26 +1404,12 @@ impl SessionSpec {
             let guard = pattern.when.clone();
             let condition = move |s: &State| guard.eval_state(s);
             let effects = pattern.effects.clone();
-            let action = move |state: State,
-                               writer: std::sync::Arc<
-                dyn gemini_genai_rs::prelude::SessionWriter,
-            >| {
+            let memory = memory_binding.clone();
+            let action = move |state: State, writer: Arc<dyn SessionWriter>| {
                 let effects = effects.clone();
+                let memory = memory.clone();
                 async move {
-                    for effect in &effects {
-                        match effect {
-                            EffectSpec::Set(map) => {
-                                for (key, value) in map {
-                                    let _ = state.set(key, value.clone());
-                                }
-                            }
-                            EffectSpec::Context(text) => {
-                                let _ = writer
-                                    .send_client_content(vec![Content::model(text.clone())], false)
-                                    .await;
-                            }
-                        }
-                    }
+                    run_effects(&effects, &state, &writer, memory.as_ref()).await;
                 }
             };
             if let Some(secs) = pattern.sustained_secs {
@@ -878,18 +1436,128 @@ impl SessionSpec {
                 WatchCondition::BecameFalse => builder.became_false(),
             };
             let sets = w.set.clone();
-            live = builder.then(move |_old, _new, state| {
+            let effects = w.effects.clone();
+            let memory = memory_binding.clone();
+            live = builder.then_with_writer(move |_old, _new, state, writer| {
                 let sets = sets.clone();
+                let effects = effects.clone();
+                let memory = memory.clone();
                 async move {
                     for (key, value) in &sets {
                         let _ = state.set(key, value.clone());
                     }
+                    run_effects(&effects, &state, &writer, memory.as_ref()).await;
                 }
             });
         }
 
         Ok(live)
     }
+}
+
+/// Execute a list of closed effects — the one executor behind phase
+/// `on_enter`, watcher, and pattern actions, so every surface honors the
+/// vocabulary identically.
+async fn run_effects(
+    effects: &[EffectSpec],
+    state: &State,
+    writer: &Arc<dyn SessionWriter>,
+    memory: Option<&Arc<dyn MemoryBinding>>,
+) {
+    for effect in effects {
+        match effect {
+            EffectSpec::Set(map) => {
+                for (key, value) in map {
+                    let _ = state.set(key, value.clone());
+                }
+            }
+            EffectSpec::Context(text) => {
+                let _ = writer
+                    .send_client_content(vec![Content::model(text.clone())], false)
+                    .await;
+            }
+            EffectSpec::Prompt(text) => {
+                let _ = writer
+                    .send_client_content(vec![Content::model(text.clone())], true)
+                    .await;
+            }
+            EffectSpec::Remember(template) => {
+                if let Some(binding) = memory {
+                    binding.remember(interpolate(template, &Value::Null, state));
+                }
+            }
+        }
+    }
+}
+
+/// Lower the `runtime` section onto the builder.
+fn apply_runtime(mut live: Live, runtime: &RuntimeSpec) -> Live {
+    if let Some(t) = runtime.temperature {
+        live = live.temperature(t);
+    }
+    if let Some(budget) = runtime.thinking_budget {
+        live = live.thinking(budget);
+    }
+    if runtime.include_thoughts == Some(true) {
+        live = live.include_thoughts();
+    }
+    if let Some(t) = runtime.transcription {
+        live = live.transcription(t.input, t.output);
+    }
+    if let Some(enabled) = runtime.proactive_audio {
+        live = live.proactive_audio(enabled);
+    }
+    if let Some(vad) = &runtime.vad {
+        live = live.vad(AutomaticActivityDetection {
+            disabled: None,
+            start_of_speech_sensitivity: vad.start_sensitivity.map(SensitivitySpec::to_wire),
+            end_of_speech_sensitivity: vad.end_sensitivity.map(SensitivitySpec::to_wire),
+            prefix_padding_ms: vad.prefix_padding_ms,
+            silence_duration_ms: vad.silence_duration_ms,
+        });
+    }
+    if let Some(ms) = runtime.soft_turn_timeout_ms {
+        live = live.soft_turn_timeout(std::time::Duration::from_millis(ms));
+    }
+    if let Some(steering) = runtime.steering {
+        live = live.steering_mode(match steering {
+            SteeringSpec::InstructionUpdate => SteeringMode::InstructionUpdate,
+            SteeringSpec::ContextInjection => SteeringMode::ContextInjection,
+            SteeringSpec::Hybrid => SteeringMode::Hybrid,
+        });
+    }
+    if let Some(delivery) = runtime.context_delivery {
+        live = live.context_delivery(match delivery {
+            ContextDeliverySpec::Immediate => ContextDelivery::Immediate,
+            ContextDeliverySpec::Deferred => ContextDelivery::Deferred,
+        });
+    }
+    if let Some(repair) = runtime.repair {
+        live = live.repair(RepairConfig {
+            nudge_after: repair.nudge_after,
+            escalate_after: repair.escalate_after,
+        });
+    }
+    if let Some(persistence) = &runtime.persistence {
+        live = match persistence {
+            PersistenceSpec::Fs { dir } => {
+                live.persistence(Arc::new(gemini_adk_rs::live::FsPersistence::new(dir)))
+            }
+            PersistenceSpec::Memory => {
+                live.persistence(Arc::new(gemini_adk_rs::live::MemoryPersistence::new()))
+            }
+        };
+    }
+    if let Some(id) = &runtime.session_id {
+        live = live.session_id(id.clone());
+    }
+    if runtime.lossy_audio {
+        live = live.lossy_audio();
+    }
+    if runtime.lossy_transcript {
+        live = live.lossy_transcript();
+    }
+    live
 }
 
 /// Build one declared tool as a [`SimpleTool`] bound to `state`.
@@ -936,7 +1604,6 @@ fn build_tool(tool: &ToolSpec, state: &State) -> SimpleTool {
 }
 
 /// Interpolate `{args.field}` and `{state.key}` templates in a string.
-#[cfg_attr(not(any(feature = "http-tools", test)), allow(dead_code))]
 fn interpolate(template: &str, args: &Value, state: &State) -> String {
     let mut out = String::with_capacity(template.len());
     let mut rest = template;
@@ -1363,6 +2030,228 @@ mod tests {
             .expect("tool runs");
         assert_eq!(out, json!({"ok": true}));
         assert_eq!(state.get::<bool>("identity_verified"), Some(true));
+    }
+
+    #[test]
+    fn computed_cycles_are_load_time_errors() {
+        let spec = SessionSpec::from_value(json!({
+            "instruction": "x",
+            "flow": {"steps": [{"id": "only", "terminal": true}]},
+            "computed": [
+                {"key": "a", "from": {"add": [{"key": "b"}, {"const": 1}]}},
+                {"key": "b", "from": {"add": [{"key": "derived:a"}, {"const": 1}]}}
+            ]
+        }))
+        .expect("parses");
+        let v = spec.validate();
+        assert!(!v.valid);
+        assert!(v.errors.iter().any(|e| e.contains("dependency cycle")));
+
+        let self_read = SessionSpec::from_value(json!({
+            "instruction": "x",
+            "flow": {"steps": [{"id": "only", "terminal": true}]},
+            "computed": [{"key": "a", "from": {"key": "a"}}]
+        }))
+        .expect("parses");
+        assert!(self_read
+            .validate()
+            .errors
+            .iter()
+            .any(|e| e.contains("reads its own key")));
+    }
+
+    #[test]
+    fn computed_keys_satisfy_guard_reads_and_deps_are_checked() {
+        let spec = SessionSpec::from_value(json!({
+            "instruction": "x",
+            "tools": [{"name": "record", "set_state": {"score": 0.8}}],
+            "computed": [{"key": "high_risk",
+                          "from": {"gt": [{"key": "score"}, {"const": 0.5}]}}],
+            "flow": {"steps": [
+                {"id": "assess", "posture": "Assess.", "allow": ["record"],
+                 "done": {"is_true": "high_risk"}}
+            ]}
+        }))
+        .expect("parses");
+        let v = spec.validate();
+        assert!(v.valid, "errors: {:?}", v.errors);
+        assert!(
+            v.warnings.iter().all(|w| !w.contains("can never latch")),
+            "computed key covers the guard read: {:?}",
+            v.warnings
+        );
+
+        let mut dangling = spec.clone();
+        dangling.computed[0].from =
+            serde_json::from_value(json!({"gt": [{"key": "scoer"}, {"const": 0.5}]})).unwrap();
+        let v = dangling.validate();
+        assert!(v
+            .warnings
+            .iter()
+            .any(|w| w.contains("computed 'high_risk' reads state key 'scoer'")));
+    }
+
+    #[test]
+    fn remember_requires_the_memory_section() {
+        let spec = SessionSpec::from_value(json!({
+            "instruction": "x",
+            "flow": {"steps": [{"id": "only", "terminal": true}]},
+            "patterns": [{"name": "note", "when": {"is_true": "flag"}, "turns": 2,
+                          "effects": [{"remember": "caller likes {state.thing}"}]}]
+        }))
+        .expect("parses");
+        let v = spec.validate();
+        assert!(!v.valid);
+        assert!(v.errors.iter().any(|e| e.contains("no `memory` section")));
+    }
+
+    #[test]
+    fn memory_slots_join_written_keys_and_reject_derived_targets() {
+        let spec = SessionSpec::from_value(json!({
+            "instruction": "x",
+            "memory": {"slots": [{"predicate": "dietary_identity", "to": "user:diet"}]},
+            "flow": {"steps": [
+                {"id": "plan", "posture": "Plan dinner.",
+                 "done": {"is_set": "user:diet"}}
+            ]}
+        }))
+        .expect("parses");
+        let v = spec.validate();
+        assert!(v.valid, "errors: {:?}", v.errors);
+        assert!(v.warnings.iter().all(|w| !w.contains("can never latch")));
+
+        let mut bad = spec.clone();
+        bad.memory.as_mut().unwrap().slots[0].to = "derived:diet".into();
+        assert!(bad
+            .validate()
+            .errors
+            .iter()
+            .any(|e| e.contains("read-only key")));
+    }
+
+    #[test]
+    fn memory_section_requires_a_binding_at_apply() {
+        let spec = SessionSpec::from_value(json!({
+            "instruction": "x",
+            "memory": {},
+            "flow": {"steps": [{"id": "only", "terminal": true}]}
+        }))
+        .expect("parses");
+        let err = spec
+            .apply(Live::builder(), &State::new(), &SpecResources::default())
+            .err()
+            .expect("memory binding required");
+        assert!(err.contains("SpecResources.memory"));
+
+        struct NullBinding;
+        impl MemoryBinding for NullBinding {
+            fn install(&self, live: Live, _memory: &MemorySpec) -> Live {
+                live
+            }
+            fn remember(&self, _note: String) {}
+        }
+        let resources = SpecResources {
+            memory: Some(Arc::new(NullBinding)),
+            ..Default::default()
+        };
+        assert!(spec
+            .apply(Live::builder(), &State::new(), &resources)
+            .is_ok());
+    }
+
+    #[test]
+    fn state_dictionary_seeds_defaults_and_flags_undeclared_writes() {
+        let spec = SessionSpec::from_value(json!({
+            "instruction": "x",
+            "state": {
+                "attempts": {"type": "number", "default": 0,
+                             "description": "Verification attempts so far."},
+                "verified": {"type": "boolean", "default": "yes"}
+            },
+            "tools": [{"name": "verify", "set_state": {"verified": true, "vip": true}}],
+            "flow": {"steps": [
+                {"id": "v", "posture": "Verify.", "allow": ["verify"],
+                 "done": {"is_true": "verified"}}
+            ]}
+        }))
+        .expect("parses");
+        let v = spec.validate();
+        assert!(v.valid, "errors: {:?}", v.errors);
+        assert!(
+            v.warnings
+                .iter()
+                .any(|w| w.contains("'verified' declares type Boolean")),
+            "type-mismatched default warns: {:?}",
+            v.warnings
+        );
+        assert!(
+            v.warnings
+                .iter()
+                .any(|w| w.contains("'vip' is written but not declared")),
+            "undeclared write warns: {:?}",
+            v.warnings
+        );
+
+        let state = State::new();
+        spec.seed_state_defaults(&state);
+        assert_eq!(state.get::<i64>("attempts"), Some(0));
+    }
+
+    #[test]
+    fn runtime_section_lowers_onto_the_builder() {
+        let spec = SessionSpec::from_value(json!({
+            "instruction": "x",
+            "flow": {"steps": [{"id": "only", "terminal": true}]},
+            "runtime": {
+                "temperature": 0.4,
+                "thinking_budget": 1024,
+                "include_thoughts": true,
+                "transcription": {"input": true, "output": false},
+                "proactive_audio": true,
+                "vad": {"start_sensitivity": "high", "silence_duration_ms": 400},
+                "soft_turn_timeout_ms": 1500,
+                "steering": "context_injection",
+                "context_delivery": "deferred",
+                "repair": {"nudge_after": 2, "escalate_after": 5},
+                "persistence": "memory",
+                "session_id": "user-1",
+                "lossy_audio": true
+            }
+        }))
+        .expect("parses");
+        let v = spec.validate();
+        assert!(v.valid, "errors: {:?}", v.errors);
+        assert!(spec
+            .apply(Live::builder(), &State::new(), &SpecResources::default())
+            .is_ok());
+
+        let mut incoherent = spec.clone();
+        incoherent.runtime.as_mut().unwrap().thinking_budget = None;
+        assert!(incoherent
+            .validate()
+            .warnings
+            .iter()
+            .any(|w| w.contains("include_thoughts")));
+    }
+
+    #[test]
+    fn background_tools_and_scheduling_parse_and_apply() {
+        let spec = SessionSpec::from_value(json!({
+            "instruction": "x",
+            "tools": [
+                {"name": "search_kb", "background": true},
+                {"name": "log_event", "scheduling": "silent"}
+            ],
+            "flow": {"steps": [
+                {"id": "s", "posture": "Serve.", "allow": ["search_kb", "log_event"],
+                 "done": {"called_ok": "search_kb"}}
+            ]}
+        }))
+        .expect("parses");
+        assert!(spec.validate().valid);
+        assert!(spec
+            .apply(Live::builder(), &State::new(), &SpecResources::default())
+            .is_ok());
     }
 
     #[test]
