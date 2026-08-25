@@ -49,6 +49,7 @@ pub mod policy;
 pub mod primitives;
 pub mod simulation;
 pub mod spec;
+pub mod telephony;
 pub mod testing;
 pub mod voice;
 

@@ -15,6 +15,7 @@ members = [
     "examples/tool-calling",
     "examples/transcription",
     "examples/cookbook",
+    "examples/telephony",
     "tools/gemini-adk-transpiler-rs",
     "tools/gemini-adk-cli-rs",
 ]

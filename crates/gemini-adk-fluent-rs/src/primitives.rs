@@ -28,6 +28,7 @@
 //! | The algebra | [`S`], [`C`], [`T`], [`P`], [`M`], [`A`], [`E`], [`G`] |
 //! | Session as data | [`SessionSpec`], [`SpecResources`], [`SpecTest`], [`run_tests`] |
 //! | Proof before connect | [`check_contracts`], [`ContractViolation`] |
+//! | Telephony | [`TwilioCall`] (·attach — a phone call on the same pump as a microphone) |
 //! | Ergonomics | [`let_clone!`](crate::let_clone) |
 //!
 //! Five lines to a governed voice application (add the `voice-io` feature for
@@ -58,6 +59,7 @@ pub use crate::compose::tools::T;
 
 pub use crate::spec::{run_tests, SessionSpec, SpecResources, SpecTest};
 
+pub use crate::telephony::TwilioCall;
 pub use crate::testing::{check_contracts, ContractViolation};
 
 #[cfg(test)]
@@ -69,6 +71,7 @@ mod contract {
         use super::*;
         fn is_type<T: ?Sized>() {}
         is_type::<Live>();
+        is_type::<TwilioCall>();
         is_type::<AgentBuilder>();
         is_type::<Pipeline>();
         is_type::<FanOut>();

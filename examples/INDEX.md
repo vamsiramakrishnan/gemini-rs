@@ -67,6 +67,7 @@ cargo run -p example-text-chat       # http://127.0.0.1:3001
 cargo run -p example-voice-chat      # http://127.0.0.1:3002
 cargo run -p example-tool-calling    # http://127.0.0.1:3003
 cargo run -p example-transcription   # http://127.0.0.1:3004
+cargo run -p example-telephony       # 0.0.0.0:8080 — Twilio voice webhook + Media Streams
 ```
 
 ### Multi-app Web UI
@@ -115,6 +116,14 @@ Comprehensive showcase of every Gemini Live API configuration property. The most
 - **Port:** 3004
 - **Layer:** L0 (`gemini_genai_rs::prelude::*`)
 - **Features:** Input/output transcription, activity handling (`StartOfActivityInterrupts`), turn coverage, server VAD with automatic sensitivity, context window compression (2048 tokens), session resumption, affective dialog
+
+### telephony (L2 Fluent)
+
+A phone agent: axum server exposing the Twilio voice webhook (`POST /twiml`) and the Media Streams WebSocket (`/media`) — one governed Live session per call, with barge-in mapped to Twilio's `clear` and DTMF digits landing in session state.
+
+- **Layer:** L2 (`gemini_adk_fluent_rs::telephony`, `voice::pump`)
+- **Run:** `cargo run -p example-telephony`, tunnel with `ngrok http 8080`, point the number's voice webhook at `https://<host>/twiml`
+- **Features:** G.711 μ-law transcode, 8 kHz ↔ 16/24 kHz resampling, `clear` on interruption, `telephony:dtmf*` state keys
 
 ### agents (L1/L2 Runtime + Fluent)
 

@@ -1048,6 +1048,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-telephony"
+version = "0.1.0"
+dependencies = [
+ "axum 0.7.9",
+ "dotenvy",
+ "gemini-adk-fluent-rs",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "example-text-chat"
 version = "0.1.0"
 dependencies = [
@@ -1362,6 +1374,7 @@ name = "gemini-adk-fluent-rs"
 version = "0.8.0"
 dependencies = [
  "async-trait",
+ "base64",
  "bytes",
  "cpal",
  "gemini-adk-rs",

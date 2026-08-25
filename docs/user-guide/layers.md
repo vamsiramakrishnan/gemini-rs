@@ -81,6 +81,7 @@ equivalent.
 | Session as data | `SessionSpec`, `SpecResources`, `SpecTest`, `run_tests` |
 | Proof before connect | `check_contracts`, `ContractViolation` |
 | Voice I/O | `voice::pump`, `voice::Playback`, `voice::Talk` *(feature `voice-io`)* |
+| Telephony | `telephony::TwilioCall`, `telephony::g711` — a phone call on the same pump |
 
 ## Voice applications: five lines to a conversation
 

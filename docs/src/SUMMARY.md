@@ -17,6 +17,7 @@
 
 - [Voice & Live Sessions](./user-guide/live-sessions.md)
 - [Live Callbacks: Fast Lane vs Control Lane](./user-guide/live-callbacks.md)
+- [Telephony: Answering Phone Calls](./user-guide/telephony.md)
 - [Phase System](./user-guide/phases.md)
 - [Phase Transitions Deep Dive](./user-guide/phase-transitions-deep-dive.md)
 - [Steering Modes](./user-guide/steering-modes.md)
