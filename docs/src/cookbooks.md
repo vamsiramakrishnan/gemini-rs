@@ -103,6 +103,38 @@ Connection helpers, callback surfaces, macros, governance, and the
 | 36 | `36_mcp_tools` | `McpConnectionParams::Stdio/Sse`, `McpSessionManager`, `McpToolset`, `T::mcp()`, JSON-RPC 2.0 lifecycle |
 | 37 | `37_governed_flow` | **`Flow`** — a governed conversation/tool DAG: gate tools, project postures, `once`/`never…until`, mermaid |
 | 38 | `38_extraction` | **`Extract`** — CPU recognizers (`integer`/`money`/`one_of`/`fuzzy`/`yes_no`) fill State and drive a Flow guard, no LLM |
+| 39 | `39_booking` | **Capstone** — Flow × Extract × Orchestration on a table-booking scenario |
+| 40 | `40_screening` | **Capstone** — governed call screening: spam verdict gates the transfer |
+
+---
+
+## Flow Studio cookbooks (`SessionSpec` as JSON)
+
+Six industry scenarios ship as complete JSON documents in the
+[Flow Studio](./flow-studio.md) gallery — mock tools, governance constraints,
+and embedded conformance tests that replay through the real flow monitor in
+CI, no API key needed:
+
+| Cookbook | Industry | Highlights |
+|----------|----------|------------|
+| Debt collection | Financial services | compliance gates, `once` payment, declarative extraction |
+| Patient intake | Healthcare | conditional emergency edge + `any` join |
+| Line support | Telecom | `reset` loop — a re-test reopens the diagnostic |
+| Call screening | Front desk | spam-verdict-gated transfer |
+| Returns desk | E-commerce | eligibility-gated single refund |
+| Table booking | Hospitality | ambient memory, computed state |
+
+The documents live in `apps/gemini-adk-web-rs/static/examples/flows/`; import
+them into the Studio or feed them to `SessionSpec` directly.
+
+## Telephony examples
+
+| Example | What it shows |
+|---------|---------------|
+| `examples/telephony` | A phone agent behind **Twilio Media Streams**: axum TwiML webhook + media WebSocket, G.711 bridged to the voice pump, one Live session per call |
+| `examples/sip-agent` | A **carrier-free SIP agent** (feature `sip`): binds UDP 5060, answers INVITEs with SDP + symmetric RTP — dial it from any softphone or PBX |
+
+See the [Telephony guide](./user-guide/telephony.md).
 
 ---
 

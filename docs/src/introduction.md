@@ -1,38 +1,48 @@
 # gemini-rs
 
-Full Rust SDK for the Gemini Multimodal Live API — wire protocol, agent runtime, and fluent DX in three layered crates.
+Full Rust SDK for the Gemini Multimodal Live API — wire protocol, agent
+runtime, and fluent DX in three layered crates. Voice agents that are
+**governed, testable, and authorable as data**.
 
-```text
-┌─────────────────────────────────────────────────────┐
-│  gemini-adk-fluent-rs (L2 — Fluent DX)                    │
-│  AgentBuilder · Live · S·C·T·P·M·A · .govern/.on_enter │
-├─────────────────────────────────────────────────────┤
-│  gemini-adk-rs (L1 — Agent Runtime)                       │
-│  Agent · Tools · State · Phases · TextAgent · LLM  │
-│  Governed Agents: Flow · Extract · Resolver        │
-├─────────────────────────────────────────────────────┤
-│  gemini-genai-rs (L0 — Wire Protocol)                     │
-│  Transport · Session · Protocol · VAD · Buffers    │
-└─────────────────────────────────────────────────────┘
-```
+<p align="center"><img src="./assets/diagrams/architecture-stack.svg" alt="Three-crate layered architecture: L2 fluent DX over L1 runtime over L0 wire protocol" width="720"></p>
+
+| Crate | Layer | Use it when… |
+|-------|-------|--------------|
+| `gemini-adk-fluent-rs` | **L2 — Fluent DX** | You're building an application: `Live::builder()`, `AgentBuilder`, the S·C·T·P·M·A algebra, `SessionSpec`, voice I/O, telephony. **Start here.** |
+| `gemini-adk-rs` | **L1 — Agent runtime** | You need the runtime directly: `State`, phases, tool dispatch, `Flow`, extraction, watchers, combinators, telemetry. |
+| `gemini-genai-rs` | **L0 — Wire protocol** | You need raw WebSocket access, custom transports, or the feature-gated REST APIs. |
+
+Plus `gemini-memory-rs`, a [contextual memory engine](./memory.md) for Live
+sessions, independent of the stack.
 
 > **Governed Agents** — `Flow` (control DAG), `Extract` (deterministic + async
 > fact resolution), and `Resolver` (orchestration) are **L1 runtime primitives**,
-> *not* a layer above the fluent API. L2 surfaces them ergonomically
-> (`Live::govern`, `.extract_record`, `.on_enter`). They compose over one shared
-> `State` spine — see the [Governed Flows](./user-guide/flow.md),
-> [Extraction](./user-guide/extraction.md), and
-> [Agent Orchestration](./user-guide/orchestration.md) chapters.
+> surfaced ergonomically at L2 (`Live::govern`, `.extract_record`, `.on_enter`).
+> They compose over one shared `State` spine — see
+> [Governed Flows](./user-guide/flow.md), [Extraction](./user-guide/extraction.md),
+> and [Agent Orchestration](./user-guide/orchestration.md).
 
-## Quick Start
+## Quick start
+
+A voice agent in five lines *(feature `voice-io`)*:
 
 ```rust,ignore
 use gemini_adk_fluent_rs::prelude::*;
 
-// `connect_from_env()` resolves Google AI vs Vertex AI from the environment —
-// no auth ceremony. See "Authentication & Connecting" for the variables it reads.
+Live::builder()
+    .instruction("You are a helpful concierge.")
+    .greeting("Greet the caller.")
+    .connect_from_env().await?     // Google AI or Vertex — resolved from env
+    .talk().await?;                // microphone in, speakers out, barge-in handled
+```
+
+Or with explicit callbacks:
+
+```rust,ignore
+use gemini_adk_fluent_rs::prelude::*;
+
 let handle = Live::builder()
-    .model(GeminiModel::Gemini2_0FlashLive)   // native-audio Live model
+    .model(GeminiModel::Gemini2_0FlashLive)
     .voice(Voice::Kore)
     .instruction("You are a helpful voice assistant.")
     .on_audio(|pcm| { /* play audio */ })
@@ -46,22 +56,38 @@ handle.disconnect().await?;
 
 New here? Start with [Setup and Running](./setup-and-running.md) and
 [Authentication & Connecting](./user-guide/auth-and-connecting.md), then browse
-the [cookbook](./cookbooks.md) (Crawl → Walk → Run).
+the [cookbook](./cookbooks.md) (Crawl → Walk → Run → Governed).
 
-## Guide Structure
+## Sessions as data — and the Flow Studio
 
-This book is organized into six sections:
+A whole governed session — flow DAG, tools, extraction, phases, watchers,
+computed state, memory, runtime tuning, and an embedded test suite — can be
+one JSON document (`SessionSpec`). It validates, simulates, and code-generates
+offline, and the [Flow Studio](./flow-studio.md) is a drag-and-drop editor
+over exactly that document:
 
-- **Getting Started** — Local setup, architecture overview, migration guide, and best practices
-- **Voice & Live Sessions** — Building real-time voice agents with phases, state, and watchers
-- **Tools & Extraction** — Tool system, deterministic + LLM extraction, MCP
-- **Composition & Patterns** — Governed Flows, Agent Orchestration, text-agent combinators, S·C·T·P·M·A operators, middleware
-- **Examples** — 40 progressive cookbook examples (Crawl/Walk/Run/Governed) plus interactive `gemini-adk-web-rs` demos
-- **ADK Web UI** — Design system, dark/light mode, DevTools panels, and the cookbook browser
+<p align="center"><img src="./assets/studio/flow-studio.gif" alt="Flow Studio click-through: load a cookbook, drag nodes, validate, run embedded tests, scrub a simulated session, read the generated Rust" width="860"></p>
 
-## API Reference
+See [Flows as JSON](./user-guide/flow-json.md) for the format and
+[the Studio tour](./flow-studio.md) for the editor.
 
-For detailed type and method documentation, see the [rustdoc API reference](./api/gemini_genai_rs/index.html).
+## Guide structure
+
+- **Getting Started** — setup, authentication, architecture, the layer
+  contract, migration, best practices
+- **Voice & Live Sessions** — live sessions and callbacks, voice I/O,
+  telephony (Twilio + SIP), phases, steering, state, watchers, persistence,
+  record & replay
+- **Tools & Extraction** — tool system, per-tool policies, MCP, extraction
+- **Composition & Patterns** — governed flows, flows as JSON, the Flow Studio,
+  orchestration, text agents, the operator algebra, middleware
+- **Memory** — the durable memory engine and its declarative binding
+- **Examples** — 40 progressive cookbook examples plus the interactive Web UI
+
+## API reference
+
+For detailed type and method documentation, see the
+[rustdoc API reference](./api/gemini_genai_rs/index.html).
 
 | Crate | Layer | API Docs |
 |-------|-------|----------|

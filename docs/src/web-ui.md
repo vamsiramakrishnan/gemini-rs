@@ -1,11 +1,13 @@
 # ADK Web UI
 
 `gemini-adk-web-rs` is the interactive development environment for building and debugging Gemini Live agents.
-It runs a single Axum server at `http://localhost:25125` that hosts all demo apps and a shared DevTools panel.
+It runs a single Axum server at `http://localhost:25125` that hosts all demo apps, a shared DevTools panel,
+and the [Flow Studio](./flow-studio.md) — the drag-and-drop editor for governed sessions — at `/flows`.
 
 ```bash
 cargo run -p gemini-adk-web-rs
-# → http://127.0.0.1:25125
+# → http://127.0.0.1:25125          (apps + DevTools)
+# → http://127.0.0.1:25125/flows   (Flow Studio)
 ```
 
 ---
