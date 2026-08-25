@@ -1,344 +1,149 @@
 # gemini-rs
 
-> Full Rust SDK for the Gemini Multimodal Live API — wire protocol, agent runtime, and fluent DX in three layered crates. Voice agents that are **governed, testable, and authorable as data**.
+### The model improvises. The conversation must not.
 
 [![CI](https://github.com/vamsiramakrishnan/gemini-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/vamsiramakrishnan/gemini-rs/actions/workflows/ci.yml)
 [![Docs](https://github.com/vamsiramakrishnan/gemini-rs/actions/workflows/docs.yml/badge.svg)](https://github.com/vamsiramakrishnan/gemini-rs/actions/workflows/docs.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![crates.io](https://img.shields.io/crates/v/gemini-genai-rs.svg)](https://crates.io/crates/gemini-genai-rs)
-[![Rust](https://img.shields.io/badge/rust-1.93%2B-orange.svg)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/rust-1.93%2B-orange.svg)](rust-toolchain.toml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**[User guide](https://vamsiramakrishnan.github.io/gemini-rs/)** ·
-**[API reference](https://vamsiramakrishnan.github.io/gemini-rs/api/gemini_genai_rs/index.html)** ·
-**[Cookbook (40 examples)](https://vamsiramakrishnan.github.io/gemini-rs/cookbooks.html)** ·
-**[Flow Studio](#flow-studio--build-governed-agents-visually)**
+**v0.8 · pre-1.0 · MIT** · [book](https://vamsiramakrishnan.github.io/gemini-rs/) · [API reference](https://vamsiramakrishnan.github.io/gemini-rs/api/gemini_genai_rs/index.html)
 
-<p align="center"><img src="docs/assets/studio/flow-studio.gif" alt="Flow Studio click-through: load a cookbook, drag nodes, validate, run embedded tests, scrub a simulated session, read the generated Rust" width="900"></p>
+A live voice model will happily book the table before checking availability, charge the card before verifying identity, and skip the disclosure it was told to read. Not because the prompt was wrong — because a prompt is advice, and advice is not enforcement.
 
-<p align="center"><em>Flow Studio — the drag-and-drop editor for governed sessions. Everything it does, the SDK does in code or JSON.</em></p>
+The usual fix is a longer prompt. The longer prompt is also advice.
 
----
+gemini-rs is a full Rust SDK for the Gemini Multimodal Live API that treats the conversation as a contract. You declare the flow — steps, completion guards, tool gates, ordering constraints — and the runtime enforces it while the model speaks: a tool the flow has not admitted does not execute, whatever the model intends. The same contract is a JSON document you can validate, simulate, test, and code-generate offline, and a canvas you can edit by hand.
 
-## A voice agent in five lines
+## Five lines to try it
 
 ```rust
-use gemini_adk_fluent_rs::prelude::*;
-
 Live::builder()
     .instruction("You are a helpful concierge.")
     .greeting("Greet the caller.")
-    .connect_from_env().await?     // Google AI or Vertex — resolved from env
-    .talk().await?;                // microphone in, speakers out, barge-in handled
+    .connect_from_env().await?     // GEMINI_API_KEY, or Vertex env vars
+    .talk().await?;                // mic in, speakers out, barge-in handled
 ```
 
-`connect_from_env()` reads `GEMINI_API_KEY` (Google AI) or the
-`GOOGLE_GENAI_USE_VERTEXAI` / `GOOGLE_CLOUD_PROJECT` variables (Vertex AI) —
-no auth ceremony. `talk()` (feature `voice-io`) runs the full duplex audio
-loop on the default devices: resampling both directions, interruptions
-flushing the speaker buffer instead of playing stale audio.
+`cargo add gemini-adk-fluent-rs`, export `GEMINI_API_KEY`, done. `talk()` (feature `voice-io`) runs the duplex audio loop on the default devices; an interruption flushes the speaker buffer instead of playing stale speech. `connect_from_env()` resolves Google AI vs Vertex AI from the environment — both platforms, one code path, unsupported wire fields stripped automatically.
 
-The same session, **governed** — a declarative DAG the runtime enforces live,
-with deterministic extraction filling its guards and an agent orchestrated on
-step entry:
+## One call, walked through
+
+`examples/voice-spec-demo` places a real phone-style call with no human in the room: Gemini TTS plays the caller, Gemini Live answers as the agent, and one JSON document governs the agent. The document is the restaurant cookbook from the Flow Studio gallery, edited by hand — because the document the Studio edits is just JSON.
+
+```text
+$ cargo run -p example-voice-spec-demo
+spec `trattoria-voice` valid: true
+  embedded test `party books a table`: passed (6 events)
+  embedded test `no booking before availability`: passed (3 events)
+connected: models/gemini-2.5-flash-native-audio-preview-12-2025
+  [flow] done: [] · active: [gather] · admitted tools: [capture_party]
+[caller] Hi! I'd like a table for two tomorrow at seven in the evening.
+  [flow] done: [check, gather] · active: [book] · admitted tools: [book_table]
+[caller] Seven thirty works perfectly. Please book it.
+  [flow] done: [book, check, farewell, gather] · active: []
+wrote voice-spec-demo.wav — 27.3s of call audio
+```
+
+Read the trace, not the adjectives. Before the call, the document's embedded tests replay through the real flow monitor — offline, no API key. During the call, `book_table` is not admitted until an availability check has actually run; the constraint `never book_table until availability_checked` is enforced by the runtime, not requested of the model. The full log is checked in at [`examples/voice-spec-demo/run-receipt.txt`](examples/voice-spec-demo/run-receipt.txt); the document is [`spec.json`](examples/voice-spec-demo/spec.json) beside it.
+
+The contract, in the fluent phrasing:
 
 ```rust
 let flow = Flow::new()
-    .step("collect").done(Guard::captured(["party_size", "slot"]))
-    .step("check").after("collect")
-        .ground("Party of {party_size} at {slot}; availability: {check:result}.")
-        .done(Guard::resolved("check"))
-    .step("book").after("check").allow(["book"]).done(Guard::called_ok("book"))
-    .never("book").until(Guard::resolved("check")).once("book")
+    .step("gather").allow(["capture_party"])
+        .done(Guard::captured(["party_size", "requested_time"]))
+    .step("check").after("gather").allow(["check_availability"])
+        .done(Guard::is_true("availability_checked"))
+        .ground("Party of {party_size}.")
+    .step("book").after("check").allow(["book_table"])
+        .done(Guard::called_ok("book_table"))
+    .step("farewell").after("book").terminal()
+    .once("book_table")
+    .never("book_table").until(Guard::is_true("availability_checked"))
     .build()?;
 
-Live::builder()
-    .govern(flow)                                            // enforce the DAG
-    .extract_record(Booking::extract())                      // #[derive(Extract)] — CPU recognizers, no model
-    .on_enter("check", availability_agent, AgentMode::Call)  // result → check:result
-    .connect_from_env().await?
-    .talk().await?;
+Live::builder().govern(flow).connect_from_env().await?.talk().await?;
 ```
 
-And the same session **as data** — a JSON document that validates, simulates,
-tests, and code-generates without an API key ([format reference](https://vamsiramakrishnan.github.io/gemini-rs/user-guide/flow-json.html)):
+Guards are a closed, serializable vocabulary — `is_true`, `captured`, `called_ok`, `resolved`, composed with any/all — which is why the same flow round-trips between Rust, JSON, and the canvas without loss, and why a stuck step can explain itself: the runtime prints the truth value of every atom it is waiting on.
 
-```json
-{
-  "name": "booking",
-  "instruction": "You take table reservations.",
-  "tools": [{ "name": "book", "description": "Commit the booking",
-              "response": { "ok": true }, "set_state": { "booked": true } }],
-  "flow": {
-    "steps": [
-      { "id": "collect", "done": { "captured": ["party_size", "slot"] } },
-      { "id": "book", "after": ["collect"], "allow": ["book"],
-        "done": { "called_ok": "book" } }
-    ],
-    "constraints": [{ "once": "book" }]
-  },
-  "tests": [{ "name": "happy path", "script": [
-    { "set": { "party_size": 4, "slot": "19:00" } },
-    { "tool": "book" },
-    { "expect": { "done": ["collect", "book"] } }
-  ]}]
-}
-```
+## The document is the program
 
-`SessionSpec::validate()` compiles it (with did-you-mean diagnostics on state
-keys), `simulate` replays the embedded tests through the real flow monitor,
-`apply()` configures a live session from it, and `to_rust()` prints the
-equivalent fluent program.
+Everything a session is — flow, tools (mock, HTTP, MCP), extraction schemas, phases, watchers, computed state, memory slots, runtime tuning, and its own test suite — serializes into one `SessionSpec` document. `validate()` compiles it with did-you-mean diagnostics on state keys. `simulate` replays the embedded tests. `to_rust()` prints the equivalent fluent program; generated cookbook apps compile under `-D warnings`. Nothing here is Studio magic: the Studio is one client of the document.
 
----
+<p align="center"><img src="docs/assets/studio/flow-studio.gif" alt="Flow Studio click-through: load a cookbook from the gallery, drag a node, validate, run the embedded tests, scrub a simulated session on the canvas, read the generated Rust" width="900"></p>
 
-## Choose your altitude
+The Flow Studio (`cargo run -p gemini-adk-web-rs` → `/flows`) is the same document on a canvas. Conditional edges render dashed with their guard as the label; the badge is the compiler's verdict; the Preview scrubber is the offline simulator driving the canvas; the Code tab is `to_rust()`.
 
-<p align="center"><img src="docs/assets/diagrams/architecture-stack.svg" alt="Three-crate layered architecture: L2 fluent DX over L1 runtime over L0 wire protocol" width="760"></p>
+<p align="center"><img src="docs/assets/studio/canvas.png" alt="The clinic-intake DAG on the Studio canvas: a dashed conditional emergency edge labeled is_true(is_emergency) into a terminal close step, a green valid badge, and compile diagnostics naming the four steps and four tools" width="900"></p>
 
-| Crate | Layer | You want it when… |
-|-------|-------|-------------------|
-| [`gemini-adk-fluent-rs`](crates/gemini-adk-fluent-rs) | **L2 — Fluent DX** | You're building an application. `Live::builder()`, `AgentBuilder`, operator algebra, `SessionSpec`, voice I/O, telephony. **Start here.** |
-| [`gemini-adk-rs`](crates/gemini-adk-rs) | **L1 — Agent runtime** | You're building custom processors or need the runtime directly: `State`, phases, tool dispatch, `Flow`, extraction, watchers, combinators, telemetry. |
-| [`gemini-genai-rs`](crates/gemini-genai-rs) | **L0 — Wire protocol** | You need raw WebSocket access, custom transports, or the feature-gated REST APIs (`generate`, `embed`, `files`, …). |
+<p align="center"><img src="docs/assets/studio/preview.png" alt="The offline simulator scrubbing event 3 of 6 of an embedded test: identify and triage latched done, schedule active, the three conformance tests reported passed in the diagnostics console" width="900"></p>
 
-Each layer depends only on the one below; every layer is independently usable.
-The L2 `prelude` is a curated kernel (~40 types); everything else lives in
-focused submodules (`live`, `text`, `tools`, `state`, `flow`, `agents`, `llm`,
-`spec`, `voice`, `telephony`, `wire`). Plus
-[`gemini-memory-rs`](crates/gemini-memory-rs) — a contextual memory engine for
-Live sessions (OKF Markdown memory, local BM25 retrieval, session
-reconciliation), independent of the stack.
+Six industry cookbooks ship in the gallery — healthcare intake, debt collection, telecom support, call screening, returns desk, table booking — each with embedded conformance tests. A CI test walks the gallery and requires every cookbook to compile and pass its own tests. The tour lives in [the Flow Studio chapter](https://vamsiramakrishnan.github.io/gemini-rs/flow-studio.html).
 
-See **[The Layer Contract](https://vamsiramakrishnan.github.io/gemini-rs/user-guide/layers.html)** —
-each layer's promises are named in code (`primitives` modules) and enforced by
-compile-time drift tests.
+## The expensive callback is the one that blocks
 
----
+Live audio does not wait. Every session event is routed through three lanes with different latency contracts: a **fast lane** (sync, sub-millisecond — audio chunks, text deltas, transcripts, VAD), a **control lane** (async — tool calls, turn boundaries, extraction, phase transitions), and a **telemetry lane** (lock-free counters, off the hot path). The fast-lane contract is enforced by convention and documented per callback; a blocked audio callback costs the conversation, so hooks that need to block get a `_concurrent` variant that detaches instead.
 
-## What's in the box
+The same discipline shapes the audio path. `voice::pump()` is the device-independent duplex core: feed microphone frames at any sample rate on one channel, receive playback at any rate on another, and an interruption arrives as an explicit `Playback::Flush` — stale audio is dropped, never played. `talk()` is `pump()` on cpal devices. Telephony is `pump()` on a phone line.
 
-Every capability below is production code with tests, a book chapter, and in
-most cases a runnable example.
+## A phone line is just another pump
 
-| Capability | One line | Book chapter |
-|------------|----------|--------------|
-| **Live voice sessions** | Full-duplex audio/text with typed callbacks on a three-lane processor (fast / control / telemetry) | [Live Sessions](https://vamsiramakrishnan.github.io/gemini-rs/user-guide/live-sessions.html) · [Callbacks](https://vamsiramakrishnan.github.io/gemini-rs/user-guide/live-callbacks.html) |
-| **Governed flows** | One declarative DAG gates tools, steers the model per step, and explains itself (`Guard` truth traces) | [Governed Flows](https://vamsiramakrishnan.github.io/gemini-rs/user-guide/flow.html) |
-| **Sessions as JSON** | `SessionSpec`: the whole session as one document — validate, simulate, test, codegen, run | [Flows as JSON](https://vamsiramakrishnan.github.io/gemini-rs/user-guide/flow-json.html) |
-| **Flow Studio** | Drag-and-drop editor over `SessionSpec` with offline test replay and live runs | [Flow Studio](#flow-studio--build-governed-agents-visually) |
-| **Extraction** | Deterministic CPU recognizers (`#[derive(Extract)]`) + out-of-band LLM extractors + async field resolvers | [Extraction](https://vamsiramakrishnan.github.io/gemini-rs/user-guide/extraction.html) |
-| **Phases & steering** | Guard-based conversation phases; instruction update vs context injection vs hybrid steering | [Phases](https://vamsiramakrishnan.github.io/gemini-rs/user-guide/phases.html) · [Steering](https://vamsiramakrishnan.github.io/gemini-rs/user-guide/steering-modes.html) |
-| **State** | Concurrent typed KV spine with prefix scopes, typed keys, computed variables, delta tracking | [State](https://vamsiramakrishnan.github.io/gemini-rs/user-guide/state.html) |
-| **Watchers & temporal patterns** | React to state changes, sustained conditions, and N-turn patterns — watchers can steer the model | [Watchers](https://vamsiramakrishnan.github.io/gemini-rs/user-guide/watchers.html) |
-| **Tools** | `TypedTool` (schema from Rust types), per-tool policies (`confirm`/`timeout`/`cached`), background execution, MCP servers | [Tools](https://vamsiramakrishnan.github.io/gemini-rs/user-guide/tools.html) · [Policies](https://vamsiramakrishnan.github.io/gemini-rs/user-guide/tool-policies.html) · [MCP](https://vamsiramakrishnan.github.io/gemini-rs/user-guide/mcp-tools.html) |
-| **Telephony** | Answer real phone calls: Twilio Media Streams connector, or a carrier-free in-process SIP agent (G.711/RTP/SDP) | [Telephony](https://vamsiramakrishnan.github.io/gemini-rs/user-guide/telephony.html) |
-| **Voice I/O** | Device-independent duplex `pump()` + `talk()` on cpal — barge-in as an explicit `Flush` | [Layers](https://vamsiramakrishnan.github.io/gemini-rs/user-guide/layers.html) |
-| **Text agents** | Combinator pipelines (`>>` `\|` `/` `*`) over an LLM core, dispatchable from live sessions | [Text Agents](https://vamsiramakrishnan.github.io/gemini-rs/user-guide/text-agents.html) · [Orchestration](https://vamsiramakrishnan.github.io/gemini-rs/user-guide/orchestration.html) |
-| **Composition algebra** | Eight namespaces — `S` state, `C` context, `T` tools, `P` prompt, `M` middleware, `A` artifacts, `E` eval, `G` guards | [Composition](https://vamsiramakrishnan.github.io/gemini-rs/user-guide/composition.html) · [Middleware](https://vamsiramakrishnan.github.io/gemini-rs/user-guide/middleware.html) |
-| **Persistence & repair** | Session snapshots (fs/memory/custom), resumption, conversation repair nudges | [Persistence](https://vamsiramakrishnan.github.io/gemini-rs/user-guide/session-persistence.html) |
-| **Durable memory** | `gemini-memory-rs`: remembered facts projected into governed state, declaratively bound in a spec | [crate README](crates/gemini-memory-rs) |
-| **Observability** | Auto-collected session signals in state + lock-free telemetry counters; record & replay | [Record & Replay](https://vamsiramakrishnan.github.io/gemini-rs/user-guide/record-replay.html) |
+Two runnable ends, one audio core:
 
----
+**Twilio Media Streams** — the SDK speaks the protocol and bridges G.711 μ-law to the session at 8 kHz; barge-in becomes Twilio's `clear`, DTMF lands in session state where flow guards read it ([`examples/telephony`](examples/telephony)).
 
-## Flow Studio — build governed agents visually
-
-`cargo run -p gemini-adk-web-rs` → **http://localhost:25125/flows**
-
-Flow Studio is a design surface over `SessionSpec`: everything you do on the
-canvas is the JSON document, and everything in the document is the fluent Rust
-program. No Studio-only semantics exist.
-
-| | |
-|---|---|
-| <img src="docs/assets/studio/canvas.png" alt="Flow Studio canvas: the clinic-intake DAG with a labeled conditional emergency edge, a selected terminal step, and compile diagnostics"> | <img src="docs/assets/studio/step-editor.png" alt="Step editor: posture, ground template, allowed tools, and an any-of completion guard editor"> |
-| **Canvas** — drag-and-drop DAG with conditional edges (dashed, guard-labeled), joins, and reset loops. Server-side compile diagnostics on every change. | **Structured editors** — posture, ground templates, tool allow/deny lists, closed-vocabulary guard editors with state-key autocomplete. |
-| <img src="docs/assets/studio/preview.png" alt="Preview: scrubbing an embedded test event by event while done and active steps light up on the canvas"> | <img src="docs/assets/studio/code.png" alt="Code tab: the generated main.rs the document is equivalent to"> |
-| **Tests & Preview** — every cookbook embeds conformance tests; replay them through the real flow monitor and scrub event-by-event, offline, no API key. | **Code** — the generated `main.rs` + `Cargo.toml` the document lowers to. Generated cookbook apps compile under `-D warnings`. |
-
-Six industry cookbooks ship in the gallery (healthcare intake, debt
-collection, telecom support, call screening, returns desk, table booking),
-each with embedded tests that run in CI. The **Run** tab drives a live session
-against the canvas: active steps light up, guard truth trees show exactly
-which atom a stuck step is waiting on, and postures can be edited mid-session.
-
----
-
-## Answer a phone call
-
-**Via Twilio** (Media Streams over WebSocket — the SDK bridges G.711 μ-law to
-the session's voice pump; barge-in becomes Twilio's `clear`, DTMF lands in
-state where flow guards read it):
+**No carrier at all** (feature `sip`) — an in-process SIP agent over [rsipstack](https://github.com/restsend/rsipstack): SDP negotiation, symmetric RTP, G.711 inside the SDK. Any softphone or PBX extension dials it directly:
 
 ```rust
-use gemini_adk_fluent_rs::telephony::twilio::TwilioCall;
-
-let mut call = TwilioCall::attach(&session);
-loop {
-    tokio::select! {
-        Some(Ok(Message::Text(text))) = ws.recv() =>
-            { if call.from_twilio.send(text).await.is_err() { break; } }
-        Some(frame) = call.to_twilio.recv() => ws.send(Message::Text(frame)).await?,
-        else => break,
-    }
-}
-```
-
-**Or with no carrier at all** (feature `sip`): an in-process SIP agent over
-[rsipstack] — SDP negotiation, symmetric RTP, and G.711 handled inside the
-SDK. Any softphone, PBX extension, or SIP trunk dials it directly:
-
-```rust
-use gemini_adk_fluent_rs::telephony::sip::SipAgent;
-
 let mut agent = SipAgent::bind("0.0.0.0:5060".parse()?).await?;
 while let Some(incoming) = agent.next_call().await {
     let session = Live::builder()
         .instruction("Answer the phone politely.")
-        .greeting("Greet the caller.")
         .connect_from_env().await?;
     let call = incoming.answer(&session).await?;   // SDP answer + RTP starts
     tokio::spawn(async move { call.ended().await; });
 }
 ```
 
-Runnable ends: [`examples/telephony`](examples/telephony) (Twilio webhook +
-media WS) and [`examples/sip-agent`](examples/sip-agent) (dial
-`sip:gemini@<host>` from Linphone/Zoiper). Full guide:
-[Telephony](https://vamsiramakrishnan.github.io/gemini-rs/user-guide/telephony.html).
+Deliberately deferred: SIP registration, SRTP, RFC 4733 DTMF. The [telephony chapter](https://vamsiramakrishnan.github.io/gemini-rs/user-guide/telephony.html) has the decision table.
 
-[rsipstack]: https://github.com/restsend/rsipstack
+## Choose your altitude
 
----
+Three crates, each depending only on the one below, each usable alone:
 
-## Quick start
+| Crate | Layer | The contract |
+|---|---|---|
+| [`gemini-adk-fluent-rs`](crates/gemini-adk-fluent-rs) | L2 · authoring | Two equivalent phrasings — fluent chain and JSON document. Never invents runtime semantics. |
+| [`gemini-adk-rs`](crates/gemini-adk-rs) | L1 · runtime | State, flows, tools, extraction, phases, watchers. Gives meaning and enforcement; never hides a decision. |
+| [`gemini-genai-rs`](crates/gemini-genai-rs) | L0 · wire | A duplex authenticated frame stream, both platforms. Never interprets the conversation. |
 
-```bash
-cargo add gemini-adk-fluent-rs            # applications (L2 re-exports L1+L0)
-export GEMINI_API_KEY="your-key"          # or Vertex: GOOGLE_GENAI_USE_VERTEXAI=true + project vars
-```
+Each layer's promise is named in code — `primitives` modules with compile-time drift tests, so a renamed or removed primitive breaks the contract at build time, not in a reader's mental model. [`gemini-memory-rs`](crates/gemini-memory-rs) sits beside the stack: durable memory as human-readable Markdown, prepared asynchronously, consumed synchronously, projected into governed state where guards read it.
 
-**Text session:**
+Beyond flows, the L1/L2 surface covers the rest of a production session: typed tools with schemas derived from Rust types, per-tool policies (`confirm`/`timeout`/`cached`), background tool execution, MCP servers, out-of-band LLM extraction plus deterministic CPU recognizers (`#[derive(Extract)]` — no model in the control loop), phases with three steering modes, state watchers and temporal patterns, session persistence and repair, and text-agent combinators (`>>` `|` `/` `*`) with an eight-namespace composition algebra. Every one has a [book chapter](https://vamsiramakrishnan.github.io/gemini-rs/).
 
-```rust
-use gemini_adk_fluent_rs::prelude::*;
+## What the tests hold
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let handle = Live::builder()
-        .model(GeminiModel::Gemini2_0FlashLive)
-        .instruction("You are a friendly assistant.")
-        .on_text(|t| print!("{t}"))
-        .on_turn_complete(|| async { println!("\n---") })
-        .connect_from_env()
-        .await?;
-
-    handle.send_text("What is the speed of light?").await?;
-    tokio::signal::ctrl_c().await?;
-    handle.disconnect().await?;
-    Ok(())
-}
-```
-
-**Voice session with the full control plane:**
-
-```rust
-let handle = Live::builder()
-    .model(GeminiModel::Custom("models/gemini-2.5-flash-native-audio-preview-12-2025".into()))
-    .voice(Voice::Kore)
-    .instruction("You are a weather assistant.")
-    .greeting("Greet the user and ask how you can help.")
-    .tools(dispatcher)                     // TypedTool: schema derived from Rust types
-    .transcription(true, true)
-    .thinking(1024).include_thoughts()     // Google AI only; auto-stripped on Vertex
-    .on_audio(|pcm| { let _ = speaker.try_send(pcm.clone()); })
-    .on_input_transcript(|t, is_final| if is_final { println!("[user] {t}") })
-    .on_interrupted(|| async { playback.flush().await })
-    .connect_from_env()
-    .await?;
-```
-
-**Wire level only (L0):**
-
-```rust
-use gemini_genai_rs::prelude::*;
-
-let session = gemini_genai_rs::quick_connect("API_KEY", "gemini-2.0-flash-live-001").await?;
-session.send_text("Hello").await?;
-let mut events = session.subscribe();
-while let Ok(event) = events.recv().await {
-    if let SessionEvent::TextDelta(ref t) = event { print!("{t}"); }
-    if let SessionEvent::TurnComplete = event { break; }
-}
-```
-
-Both platforms are first-class: Google AI (API key) and Vertex AI (binary
-frames, `v1beta1`, endpoint quirks) are handled by the same code, and
-platform-specific features (thinking, async tool calling) are auto-stripped
-where unsupported. See
-[Authentication & Connecting](https://vamsiramakrishnan.github.io/gemini-rs/user-guide/auth-and-connecting.html).
-
----
-
-## Examples
+- 2,500+ workspace tests, none requiring an API key — including G.711 codec conformance against known wire values, RTP wire layouts, SDP offer/answer round-trips, a raw-UDP SIP signalling integration test, guard truth-trace suites, and codegen goldens.
+- Every gallery cookbook compiles through the real flow compiler and passes its own embedded tests, in CI.
+- Generated apps compile as standalone crates under `RUSTFLAGS="-D warnings"`.
+- Layer contracts are drift-tested; docs build with `RUSTDOCFLAGS="-D warnings"`.
 
 ```bash
-cp .env.example .env                      # set GEMINI_API_KEY or Vertex vars
-
-cargo run -p example-cookbook --bin 37-governed-flow   # no credentials needed
-cargo run -p gemini-adk-web-rs                         # Web UI + Flow Studio → :25125
-cargo run -p text-chat                                 # standalone demos → :3001…
+cargo test --workspace          # ~2,500 tests, no credentials
+cargo run -p example-cookbook --bin 37-governed-flow    # governed flow, no credentials
+cargo run -p gemini-adk-web-rs  # Web UI + Flow Studio → :25125
 ```
 
-| Where | What |
-|-------|------|
-| [`examples/cookbook`](examples/cookbook) | **40 progressive binaries** — Crawl (builders, combinators, algebra) → Walk (multi-agent patterns) → Run (advanced) → **Governed** (`37`–`40`: Flow, Extract, orchestration capstones; run with no credentials) |
-| [`apps/gemini-adk-web-rs`](apps/gemini-adk-web-rs) | Multi-app Web UI: 13 showcase apps (voice chat, guardrails, playbook, clinic, debt collection, …) with a shared DevTools panel — plus **Flow Studio** at `/flows` |
-| [`examples/telephony`](examples/telephony) · [`examples/sip-agent`](examples/sip-agent) | Phone agents: Twilio Media Streams / carrier-free SIP |
-| [`examples/voice-chat`](examples/voice-chat) · [`text-chat`](examples/text-chat) · [`tool-calling`](examples/tool-calling) · [`transcription`](examples/transcription) · [`agents`](examples/agents) | Focused standalone demos per layer |
-| [`examples/INDEX.md`](examples/INDEX.md) | The full annotated index |
-
----
+[`examples/`](examples/INDEX.md) holds 40 progressive cookbook binaries (builders → combinators → multi-agent → governed capstones), the telephony and SIP agents, the TTS-driven call above, and focused per-layer demos. [`apps/gemini-adk-web-rs`](apps/gemini-adk-web-rs) bundles 13 showcase apps with a shared DevTools panel.
 
 ## Documentation
 
-- **[The book](https://vamsiramakrishnan.github.io/gemini-rs/)** — 30+ chapters:
-  getting started, architecture, every subsystem in depth, troubleshooting,
-  glossary. Built from [`docs/`](docs) and deployed on every push to `main`.
-- **[API reference](https://vamsiramakrishnan.github.io/gemini-rs/api/gemini_genai_rs/index.html)** —
-  rustdoc for all published crates, same site.
-- **[CLAUDE.md](CLAUDE.md)** / **[GEMINI.md](GEMINI.md)** — the condensed
-  agent-facing map of the codebase (also a good human cheat sheet).
-- **[ROADMAP.md](ROADMAP.md)** · **[CHANGELOG.md](CHANGELOG.md)** ·
-  **[CONTRIBUTING.md](CONTRIBUTING.md)**
+The [book](https://vamsiramakrishnan.github.io/gemini-rs/) is the reference — 30+ chapters from setup to the layer contract, deployed from [`docs/`](docs) on every push to `main`, with the merged [rustdoc API reference](https://vamsiramakrishnan.github.io/gemini-rs/api/gemini_genai_rs/index.html) beside it. [CLAUDE.md](CLAUDE.md) is the condensed map of the codebase. [ROADMAP.md](ROADMAP.md) says what is deliberately not built yet.
 
----
-
-## Development
-
-```bash
-cargo build --workspace                   # build everything
-cargo test  --workspace                   # ~2,500 tests, no API key required
-cargo clippy --workspace --all-targets -- -D warnings
-cargo fmt --all -- --check
-mdbook build docs                         # the book (mdbook 0.4+)
-```
-
-System deps (Linux): `pkg-config libssl-dev build-essential`, plus
-`libasound2-dev` for the opt-in `voice-io` feature. Opt-in features on L2:
-`voice-io` (cpal devices), `sip` (in-process SIP agent), `http-tools`
-(declarative HTTP tool bindings). Releases go through `just release <version>`
-(branch → validate → publish L0→L1→L2 → GitHub Release); see
-[CONTRIBUTING.md](CONTRIBUTING.md).
-
-```
-crates/   gemini-genai-rs (L0) · gemini-adk-rs (L1) · gemini-adk-fluent-rs (L2) · gemini-memory-rs
-apps/     gemini-adk-web-rs (Web UI + Flow Studio) · gemini-adk-api-rs (REST server)
-examples/ cookbook (40) · telephony · sip-agent · voice-chat · text-chat · tool-calling · transcription · agents
-tools/    gemini-adk-cli-rs · gemini-adk-transpiler-rs
-```
-
----
+Building locally: Rust 1.93+, `pkg-config libssl-dev` (plus `libasound2-dev` for `voice-io`); `cargo build --workspace`; `mdbook build docs` for the book. Releases go through `just release <version>` — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

@@ -1,8 +1,13 @@
 # gemini-rs
 
-Full Rust SDK for the Gemini Multimodal Live API — wire protocol, agent
-runtime, and fluent DX in three layered crates. Voice agents that are
-**governed, testable, and authorable as data**.
+**The model improvises. The conversation must not.**
+
+gemini-rs is a full Rust SDK for the Gemini Multimodal Live API — wire
+protocol, agent runtime, and fluent DX in three layered crates. It treats a
+conversation as a contract: you declare the flow — steps, completion guards,
+tool gates, ordering constraints — and the runtime enforces it while the
+model speaks. The same contract is a JSON document that validates, simulates,
+tests, and code-generates offline, and a canvas you can edit by hand.
 
 <p align="center"><img src="./assets/diagrams/architecture-stack.svg" alt="Three-crate layered architecture: L2 fluent DX over L1 runtime over L0 wire protocol" width="720"></p>
 
