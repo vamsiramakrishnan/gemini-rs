@@ -1,0 +1,227 @@
+//! RTP (RFC 3550) — the media framing of every SIP call.
+//!
+//! A raw SIP/PSTN leg carries audio as RTP packets over UDP: a 12-byte fixed
+//! header (sequence number, timestamp, SSRC) followed by the codec payload —
+//! for telephone audio, G.711 μ-law (payload type 0, `PCMU`) or A-law
+//! (payload type 8, `PCMA`) at 8 kHz, conventionally 20 ms (160 samples) per
+//! packet.
+//!
+//! This module is the pure layer: [`build`] and [`parse`] move between packet
+//! bytes and structured form (tolerating padding, CSRCs, and header
+//! extensions on the way in), and [`RtpSender`] carries the tiny amount of
+//! state a sender needs (sequence, timestamp, SSRC). No sockets — the `sip`
+//! feature's media loop drives it over UDP, and tests drive it with byte
+//! arrays.
+
+/// RTP payload type for G.711 μ-law at 8 kHz (RFC 3551 static assignment).
+pub const PT_PCMU: u8 = 0;
+/// RTP payload type for G.711 A-law at 8 kHz (RFC 3551 static assignment).
+pub const PT_PCMA: u8 = 8;
+
+/// Samples per packet at the conventional 20 ms packetisation (8 kHz mono).
+pub const SAMPLES_PER_PACKET: usize = 160;
+
+/// One parsed RTP packet (header fields we care about + payload bytes).
+#[derive(Debug, Clone, PartialEq)]
+pub struct RtpPacket {
+    /// Payload type (e.g. [`PT_PCMU`], [`PT_PCMA`]).
+    pub payload_type: u8,
+    /// Marker bit — set on the first packet after silence (talkspurt start).
+    pub marker: bool,
+    /// Sequence number, increments by one per packet.
+    pub sequence: u16,
+    /// Media timestamp in samples (8 kHz clock for G.711).
+    pub timestamp: u32,
+    /// Synchronisation source identifier.
+    pub ssrc: u32,
+    /// Codec payload bytes.
+    pub payload: Vec<u8>,
+}
+
+/// Build an RTP packet (version 2, no padding/extension/CSRC).
+pub fn build(packet: &RtpPacket) -> Vec<u8> {
+    let mut out = Vec::with_capacity(12 + packet.payload.len());
+    out.push(0x80); // V=2, P=0, X=0, CC=0
+    out.push((packet.payload_type & 0x7F) | if packet.marker { 0x80 } else { 0 });
+    out.extend_from_slice(&packet.sequence.to_be_bytes());
+    out.extend_from_slice(&packet.timestamp.to_be_bytes());
+    out.extend_from_slice(&packet.ssrc.to_be_bytes());
+    out.extend_from_slice(&packet.payload);
+    out
+}
+
+/// Parse an RTP packet, tolerating padding, CSRC entries, and a header
+/// extension. Returns `None` for datagrams that are not well-formed RTP v2 —
+/// a media port sees stray traffic (STUN probes, scans); dropping quietly is
+/// the correct posture.
+pub fn parse(datagram: &[u8]) -> Option<RtpPacket> {
+    if datagram.len() < 12 {
+        return None;
+    }
+    let b0 = datagram[0];
+    if b0 >> 6 != 2 {
+        return None; // not RTP version 2
+    }
+    let has_padding = b0 & 0x20 != 0;
+    let has_extension = b0 & 0x10 != 0;
+    let csrc_count = (b0 & 0x0F) as usize;
+    let b1 = datagram[1];
+
+    let mut offset = 12 + csrc_count * 4;
+    if datagram.len() < offset {
+        return None;
+    }
+    if has_extension {
+        if datagram.len() < offset + 4 {
+            return None;
+        }
+        let ext_words = u16::from_be_bytes([datagram[offset + 2], datagram[offset + 3]]) as usize;
+        offset += 4 + ext_words * 4;
+        if datagram.len() < offset {
+            return None;
+        }
+    }
+    let mut end = datagram.len();
+    if has_padding {
+        let pad = *datagram.last()? as usize;
+        if pad == 0 || offset + pad > end {
+            return None;
+        }
+        end -= pad;
+    }
+
+    Some(RtpPacket {
+        payload_type: b1 & 0x7F,
+        marker: b1 & 0x80 != 0,
+        sequence: u16::from_be_bytes([datagram[2], datagram[3]]),
+        timestamp: u32::from_be_bytes([datagram[4], datagram[5], datagram[6], datagram[7]]),
+        ssrc: u32::from_be_bytes([datagram[8], datagram[9], datagram[10], datagram[11]]),
+        payload: datagram[offset..end].to_vec(),
+    })
+}
+
+/// Sender-side RTP state: sequence, timestamp, and SSRC advance per packet.
+#[derive(Debug)]
+pub struct RtpSender {
+    payload_type: u8,
+    sequence: u16,
+    timestamp: u32,
+    ssrc: u32,
+    /// Set the marker bit on the next packet (start of a talkspurt).
+    mark_next: bool,
+}
+
+impl RtpSender {
+    /// Create a sender for the given payload type and SSRC.
+    ///
+    /// Callers should pick a random-ish SSRC and initial sequence/timestamp;
+    /// determinism here keeps the function pure — randomness is the caller's.
+    pub fn new(payload_type: u8, ssrc: u32, initial_sequence: u16, initial_timestamp: u32) -> Self {
+        Self {
+            payload_type,
+            sequence: initial_sequence,
+            timestamp: initial_timestamp,
+            ssrc,
+            mark_next: true,
+        }
+    }
+
+    /// Frame one payload as an RTP packet and advance sequence/timestamp.
+    ///
+    /// `samples` is the number of media samples the payload covers (for
+    /// G.711, one byte per sample — 160 for a 20 ms packet).
+    pub fn packetize(&mut self, payload: &[u8], samples: u32) -> Vec<u8> {
+        let packet = build(&RtpPacket {
+            payload_type: self.payload_type,
+            marker: self.mark_next,
+            sequence: self.sequence,
+            timestamp: self.timestamp,
+            ssrc: self.ssrc,
+            payload: payload.to_vec(),
+        });
+        self.mark_next = false;
+        self.sequence = self.sequence.wrapping_add(1);
+        self.timestamp = self.timestamp.wrapping_add(samples);
+        packet
+    }
+
+    /// Advance the media clock over a silent gap and mark the next packet as
+    /// the start of a new talkspurt.
+    pub fn skip_silence(&mut self, samples: u32) {
+        self.timestamp = self.timestamp.wrapping_add(samples);
+        self.mark_next = true;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builds_the_canonical_wire_layout() {
+        let bytes = build(&RtpPacket {
+            payload_type: PT_PCMU,
+            marker: true,
+            sequence: 0x0102,
+            timestamp: 0x03040506,
+            ssrc: 0x0708090A,
+            payload: vec![0xFF, 0xFE],
+        });
+        assert_eq!(
+            bytes,
+            vec![
+                0x80, 0x80, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0xFF, 0xFE
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_round_trips_build() {
+        let packet = RtpPacket {
+            payload_type: PT_PCMA,
+            marker: false,
+            sequence: 65_535,
+            timestamp: u32::MAX - 1,
+            ssrc: 42,
+            payload: vec![1, 2, 3, 4],
+        };
+        assert_eq!(parse(&build(&packet)), Some(packet));
+    }
+
+    #[test]
+    fn parse_skips_csrc_extension_and_padding() {
+        // V=2, P=1, X=1, CC=1 · PT=0 · seq 1 · ts 2 · ssrc 3
+        let mut bytes = vec![0xB1, 0x00, 0x00, 0x01, 0, 0, 0, 2, 0, 0, 0, 3];
+        bytes.extend_from_slice(&[9, 9, 9, 9]); // one CSRC
+        bytes.extend_from_slice(&[0xBE, 0xDE, 0x00, 0x01, 0, 0, 0, 0]); // ext: 1 word
+        bytes.extend_from_slice(&[0xAA, 0xBB]); // payload
+        bytes.extend_from_slice(&[0, 0, 3]); // 3 bytes padding (last byte = count)
+        let packet = parse(&bytes).expect("valid despite extras");
+        assert_eq!(packet.payload, vec![0xAA, 0xBB]);
+        assert_eq!(packet.sequence, 1);
+    }
+
+    #[test]
+    fn parse_rejects_garbage() {
+        assert_eq!(parse(&[]), None);
+        assert_eq!(parse(&[0x80; 5]), None); // too short
+        assert_eq!(parse(&[0x00; 20]), None); // version 0 (e.g. STUN)
+    }
+
+    #[test]
+    fn sender_advances_and_marks_talkspurts() {
+        let mut sender = RtpSender::new(PT_PCMU, 7, 100, 1000);
+        let first = parse(&sender.packetize(&[0u8; 160], 160)).unwrap();
+        let second = parse(&sender.packetize(&[0u8; 160], 160)).unwrap();
+        assert!(first.marker, "first packet starts a talkspurt");
+        assert!(!second.marker);
+        assert_eq!(second.sequence, 101);
+        assert_eq!(second.timestamp, 1160);
+
+        sender.skip_silence(800); // 100 ms of silence
+        let resumed = parse(&sender.packetize(&[0u8; 160], 160)).unwrap();
+        assert!(resumed.marker, "resuming after silence re-marks");
+        // 1000 + 2×160 (sent) + 800 (skipped) = 2120.
+        assert_eq!(resumed.timestamp, 2120);
+    }
+}

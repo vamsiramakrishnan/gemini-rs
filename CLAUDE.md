@@ -721,6 +721,7 @@ apps/
   gemini-adk-api-rs/    Standalone REST API server (adk api_server)
 examples/
   agents/            Agent composition examples
+  sip-agent/         Directly-dialed SIP agent (rsipstack + in-process RTP)
   telephony/         Phone-call agent (Twilio Media Streams + TwiML webhook)
   voice-chat/        Voice chat example
   tool-calling/      Tool calling example

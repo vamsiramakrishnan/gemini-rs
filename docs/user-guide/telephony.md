@@ -99,13 +99,60 @@ monotonicity and bounded quantisation error. Combined with
 [`voice::resample`], they are the building blocks for any other telephone
 transport.
 
-## Scope: what "SIP support" means here
+## Raw SIP — no carrier in the path (feature `sip`)
 
-Twilio (and services like it — Vonage, Telnyx have equivalent stream APIs)
-terminates SIP/PSTN for you and hands audio over a WebSocket; this module
-speaks that hand-off. Terminating **raw SIP/RTP in-process** (no
-carrier-stream service in the path) is a different engineering problem —
-SIP signalling, RTP/SRTP, jitter at the network layer — tracked on the
-roadmap as the `rustpbx`/`rsipstack` integration ("single-binary
-telephony"). The seam is ready for it: any transport that can produce PCM16
-frames and consume `Playback` instructions attaches to the same pump.
+`telephony::sip` terminates the call **in-process**: SIP signalling via
+[`rsipstack`](https://docs.rs/rsipstack) (the stack under the `rustpbx`
+PBX), and G.711-over-RTP media built from this crate's own pure layers
+(`telephony::rtp`, `telephony::sdp`, `telephony::g711`). Any SIP endpoint —
+a softphone, an Asterisk/FreeSWITCH extension, a provider's SIP trunk —
+dials the agent directly:
+
+```rust,ignore
+use gemini_adk_fluent_rs::telephony::sip::SipAgent;
+
+let mut agent = SipAgent::bind("0.0.0.0:5060".parse()?).await?;
+while let Some(incoming) = agent.next_call().await {
+    println!("call from {}", incoming.from);       // screen before answering
+    let session = Live::builder()
+        .instruction("Answer the phone politely.")
+        .greeting("Greet the caller.")
+        .connect_from_env().await?;
+    let call = incoming.answer(&session).await?;   // SDP answer + RTP starts
+    tokio::spawn(async move { call.ended().await; });
+}
+```
+
+What `answer` does: picks the offer's preferred G.711 law (μ-law or A-law),
+binds an RTP socket, sends the SDP answer in the 200 OK, and runs a paced
+20 ms media loop on the same `voice::pump`. Media is **symmetric RTP** — it
+sends toward the offer's address but re-latches onto the source of the
+first arriving packet, so NATted softphones work. Barge-in on raw RTP has
+no carrier buffer to clear: the agent *is* the buffer, and `Playback::Flush`
+drops it. The caller hanging up (BYE) resolves `call.ended()`;
+`call.hangup()` sends BYE the other way.
+
+`examples/sip-agent` is the runnable end:
+
+```bash
+export GEMINI_API_KEY=...
+cargo run -p example-sip-agent    # 0.0.0.0:5060/udp
+# From Linphone/Zoiper on the same network: call sip:gemini@<host>
+```
+
+Deliberately not there yet: SIP registration (the agent is a
+directly-dialed UAS), SRTP, and RFC 4733 DTMF (the Twilio path has DTMF via
+its protocol). The signalling layer is covered by an in-repo integration
+test that drives a hand-written SIP UAC against a bound agent
+(OPTIONS → 200, INVITE → ringing → surfaced call → reject → final
+failure).
+
+## Choosing a path
+
+| | Twilio Media Streams | Raw SIP (`sip` feature) |
+|---|---|---|
+| Who terminates PSTN | Twilio (also Vonage/Telnyx equivalents) | your SIP trunk / PBX |
+| Transport | WebSocket you host | UDP SIP + RTP in-process |
+| Barge-in | `clear` message to carrier | drop own RTP buffer |
+| DTMF | ✓ (`telephony:dtmf*` state) | not yet (RFC 4733 planned) |
+| Extra dependency | none (any WS server) | `rsipstack` |

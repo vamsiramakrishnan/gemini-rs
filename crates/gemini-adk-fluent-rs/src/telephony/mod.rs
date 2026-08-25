@@ -15,6 +15,11 @@
 //! call.
 
 pub mod g711;
+pub mod rtp;
+pub mod sdp;
 pub mod twilio;
+
+#[cfg(feature = "sip")]
+pub mod sip;
 
 pub use twilio::{Inbound, StartMeta, TwilioCall, TwilioError, TWILIO_HZ};
