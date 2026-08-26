@@ -284,10 +284,140 @@ hr {
   margin-bottom: 0.5rem;
 }
 
+/* ── Hero (homepage) ──────────────────────────────────────────────────────── */
+.hero {
+  margin: -1rem -1rem 2.5rem -1rem;
+  padding: 3.5rem 2rem 3rem;
+  border-radius: var(--radius-lg);
+  background:
+    radial-gradient(circle at 15% 20%, var(--brand-glow), transparent 55%),
+    radial-gradient(circle at 85% 0%, rgba(52, 211, 153, 0.12), transparent 50%);
+  text-align: center;
+}
+.hero-mark {
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 1.25rem;
+  display: block;
+  border-radius: 14px;
+  box-shadow: 0 8px 24px var(--brand-glow);
+}
+.hero-eyebrow {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--brand);
+  background: var(--brand-glow);
+  padding: 0.3rem 0.85rem;
+  border-radius: 999px;
+  margin-bottom: 1rem;
+}
+.hero h1 {
+  border-bottom: none !important;
+  font-size: 2.6rem !important;
+  margin: 0 0 1rem !important;
+  padding: 0 !important;
+}
+.hero-sub {
+  max-width: 640px;
+  margin: 0 auto 1.75rem;
+  font-size: 1.15rem;
+  line-height: 1.6;
+  opacity: 0.85;
+}
+.hero-cta {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.hero-cta a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.65rem 1.4rem;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 0.95rem;
+  text-decoration: none !important;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.hero-cta a.primary {
+  background: linear-gradient(135deg, var(--brand), var(--brand-light));
+  color: #fff !important;
+  box-shadow: 0 6px 20px var(--brand-glow);
+}
+.hero-cta a.secondary {
+  border: 1px solid var(--brand);
+  color: var(--brand) !important;
+  background: transparent;
+}
+.ayu .hero-cta a.secondary,
+.coal .hero-cta a.secondary,
+.navy .hero-cta a.secondary {
+  color: #a5b4fc !important;
+  border-color: #a5b4fc;
+}
+.hero-cta a:hover {
+  transform: translateY(-2px);
+}
+
+/* ── Stat / feature strip ─────────────────────────────────────────────────── */
+.stat-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 1rem;
+  margin: 2rem 0;
+  text-align: center;
+}
+.stat-row .stat b {
+  display: block;
+  font-size: 1.6rem;
+  font-weight: 800;
+  background: linear-gradient(135deg, var(--brand), var(--brand-light));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.stat-row .stat span {
+  font-size: 0.8rem;
+  opacity: 0.7;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 1rem;
+  margin: 1.5rem 0 2rem;
+}
+.card-grid .card {
+  border: 1px solid var(--brand-glow);
+  border-radius: var(--radius-lg);
+  padding: 1.1rem 1.3rem;
+  background: var(--sidebar-bg, rgba(127,127,127,0.04));
+}
+.card-grid .card h4 {
+  margin: 0 0 0.4rem !important;
+  font-size: 1rem;
+}
+.card-grid .card p {
+  margin: 0;
+  font-size: 0.88rem;
+  opacity: 0.8;
+  line-height: 1.55;
+}
+
 /* ── Mobile tweaks ────────────────────────────────────────────────────────── */
 @media (max-width: 768px) {
   h1 { font-size: 1.6rem; }
   h2 { font-size: 1.3rem; }
   pre { border-radius: var(--radius) !important; }
   table { font-size: 0.85rem; }
+  .hero { padding: 2.5rem 1.25rem 2rem; margin: -1rem -1rem 2rem -1rem; }
+  .hero h1 { font-size: 1.9rem !important; }
+  .hero-sub { font-size: 1rem; }
 }
