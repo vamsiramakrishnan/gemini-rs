@@ -971,6 +971,7 @@ mod harness {
                     pending_context: None,
                     delivery: crate::live::processor::DeliveryConfig::default(),
                     dropped: crate::live::processor::DroppedFrames::default(),
+                    redactor: None,
                 },
                 state: State::new(),
                 transcript,

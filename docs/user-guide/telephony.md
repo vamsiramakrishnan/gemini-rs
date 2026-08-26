@@ -141,11 +141,36 @@ cargo run -p example-sip-agent    # 0.0.0.0:5060/udp
 ```
 
 Deliberately not there yet: SIP registration (the agent is a
-directly-dialed UAS), SRTP, and RFC 4733 DTMF (the Twilio path has DTMF via
+directly-dialed UAS) and SRTP (the Twilio path additionally has DTMF via
 its protocol). The signalling layer is covered by an in-repo integration
 test that drives a hand-written SIP UAC against a bound agent
 (OPTIONS → 200, INVITE → ringing → surfaced call → reject → final
 failure).
+
+## Bringing your own transport
+
+Twilio and raw SIP are two connectors on one seam. A contact-center
+platform that exposes a virtual-agent slot — a gRPC bidirectional audio
+stream (as in Cisco Webex CC's BYoVA or Genesys AudioHook style
+integrations), a proprietary media WebSocket, anything that can move
+20 ms audio frames both ways — becomes a third connector by composing the
+same parts:
+
+1. **Audio**: decode inbound frames to mono PCM16 and feed
+   [`voice::pump`](../api/gemini_adk_fluent_rs/voice/fn.pump.html) (or
+   `pump_processed`, for a denoiser chain) at the transport's native
+   rate; encode `Playback::Chunk` back out; treat `Playback::Flush` as
+   the platform's "stop playback" action — that is barge-in.
+2. **Semantics**: land keypresses and call identity through
+   [`telephony::bridge`](../api/gemini_adk_fluent_rs/telephony/bridge/index.html)
+   (`record_dtmf`, the shared `telephony:` state keys), so flows and
+   guards behave identically across transports.
+3. **Hardening**: attach the latency filler and the handoff recorder from
+   the same module — see [Hardening a Voice Deployment](./hardening.md).
+
+`TwilioCall::attach` (~100 lines) is the reference: it owns no socket,
+speaks its platform's dialect at the edges, and delegates everything else
+to the shared components. A new connector should look like it.
 
 ## Choosing a path
 
@@ -154,5 +179,5 @@ failure).
 | Who terminates PSTN | Twilio (also Vonage/Telnyx equivalents) | your SIP trunk / PBX |
 | Transport | WebSocket you host | UDP SIP + RTP in-process |
 | Barge-in | `clear` message to carrier | drop own RTP buffer |
-| DTMF | ✓ (`telephony:dtmf*` state) | not yet (RFC 4733 planned) |
+| DTMF | ✓ (`telephony:dtmf*` state) | ✓ (RFC 4733, same state keys) |
 | Extra dependency | none (any WS server) | `rsipstack` |

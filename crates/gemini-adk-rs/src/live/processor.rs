@@ -286,6 +286,9 @@ pub(crate) struct SharedState {
     pub delivery: DeliveryConfig,
     /// Per-class counters for frames dropped under a lossy delivery policy.
     pub dropped: DroppedFrames,
+    /// Transcript redaction, applied at the router before either lane sees
+    /// the text. `None` = pass through untouched.
+    pub redactor: Option<Arc<crate::live::redaction::TranscriptRedactor>>,
 }
 
 /// Runs the three-lane event processor.
@@ -336,6 +339,9 @@ pub(crate) struct ControlPlaneConfig {
     /// Fast-lane delivery (backpressure) policy per event class. Defaults to
     /// all-`Lossless`, preserving the historical `send().await` behavior.
     pub delivery: DeliveryConfig,
+    /// Transcript redaction applied at the router, before either lane sees
+    /// the text. `None` = pass through.
+    pub redactor: Option<Arc<crate::live::redaction::TranscriptRedactor>>,
 }
 
 impl Default for ControlPlaneConfig {
@@ -353,6 +359,7 @@ impl Default for ControlPlaneConfig {
             middleware: Arc::new(crate::middleware::MiddlewareChain::new()),
             flow: None,
             delivery: DeliveryConfig::default(),
+            redactor: None,
         }
     }
 }
@@ -390,6 +397,7 @@ pub(crate) fn spawn_event_processor(
         pending_context: control_plane.pending_context.clone(),
         delivery: control_plane.delivery,
         dropped: DroppedFrames::default(),
+        redactor: control_plane.redactor.clone(),
     });
 
     let timer_cancel = CancellationToken::new();
@@ -615,6 +623,10 @@ async fn route_event(
             deliver_fast(fast_tx, FastEvent::Text(text), delivery.text, &dropped.text).await;
         }
         SessionEvent::TextComplete(text) => {
+            let text = match &shared.redactor {
+                Some(redactor) => redactor.redact(text),
+                None => text,
+            };
             deliver_fast(
                 fast_tx,
                 FastEvent::TextComplete(text),
@@ -626,6 +638,10 @@ async fn route_event(
         // Transcripts: fast lane for callbacks, control lane for accumulation.
         // The control-lane accumulation send keeps its lossless `send().await`.
         SessionEvent::InputTranscription(text) => {
+            let text = match &shared.redactor {
+                Some(redactor) => redactor.redact(text),
+                None => text,
+            };
             deliver_fast(
                 fast_tx,
                 FastEvent::InputTranscript(text.clone()),
@@ -636,6 +652,10 @@ async fn route_event(
             let _ = ctrl_tx.send(ControlEvent::InputTranscript(text)).await;
         }
         SessionEvent::OutputTranscription(text) => {
+            let text = match &shared.redactor {
+                Some(redactor) => redactor.redact(text),
+                None => text,
+            };
             deliver_fast(
                 fast_tx,
                 FastEvent::OutputTranscript(text.clone()),

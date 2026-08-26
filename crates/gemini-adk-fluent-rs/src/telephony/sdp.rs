@@ -21,6 +21,10 @@ pub struct AudioOffer {
     pub port: u16,
     /// Payload types offered on the audio line, in preference order.
     pub payload_types: Vec<u8>,
+    /// The dynamic payload type the offer maps to `telephone-event/8000`
+    /// (RFC 4733 DTMF), when present. Echoed in the answer so the caller
+    /// sends keypresses as events instead of in-band tones.
+    pub telephone_event_pt: Option<u8>,
 }
 
 impl AudioOffer {
@@ -42,6 +46,7 @@ pub fn parse_audio_offer(sdp: &str) -> Option<AudioOffer> {
     let mut session_host: Option<String> = None;
     let mut audio: Option<(u16, Vec<u8>)> = None;
     let mut media_host: Option<String> = None;
+    let mut telephone_event_pt: Option<u8> = None;
     let mut in_audio = false;
 
     for line in sdp.lines() {
@@ -53,6 +58,16 @@ pub fn parse_audio_offer(sdp: &str) -> Option<AudioOffer> {
                 media_host = Some(host);
             } else if session_host.is_none() {
                 session_host = Some(host);
+            }
+        } else if let Some(rest) = line.strip_prefix("a=rtpmap:") {
+            // a=rtpmap:101 telephone-event/8000
+            if in_audio && telephone_event_pt.is_none() {
+                let mut parts = rest.split_whitespace();
+                if let (Some(pt), Some(codec)) = (parts.next(), parts.next()) {
+                    if codec.eq_ignore_ascii_case("telephone-event/8000") {
+                        telephone_event_pt = pt.parse().ok();
+                    }
+                }
             }
         } else if let Some(rest) = line.strip_prefix("m=") {
             let mut parts = rest.split_whitespace();
@@ -74,18 +89,28 @@ pub fn parse_audio_offer(sdp: &str) -> Option<AudioOffer> {
         return None; // port 0 means the stream is refused
     }
     let host = media_host.or(session_host)?;
+    // Only meaningful if the audio line actually lists that payload type.
+    let telephone_event_pt = telephone_event_pt.filter(|pt| payload_types.contains(pt));
     Some(AudioOffer {
         host,
         port,
         payload_types,
+        telephone_event_pt,
     })
 }
 
-/// Print an SDP answer committing to one G.711 codec.
+/// Print an SDP answer committing to one G.711 codec, optionally accepting
+/// RFC 4733 telephone events (DTMF) on the payload type the offer proposed.
 ///
 /// `session_id` doubles as the `o=` version; pass something unique per call
 /// (a timestamp, a counter). `host`/`port` are where we will receive RTP.
-pub fn audio_answer(session_id: u64, host: &str, port: u16, payload_type: u8) -> String {
+pub fn audio_answer(
+    session_id: u64,
+    host: &str,
+    port: u16,
+    payload_type: u8,
+    telephone_event_pt: Option<u8>,
+) -> String {
     let codec_name = if payload_type == PT_PCMA {
         "PCMA"
     } else {
@@ -97,8 +122,18 @@ pub fn audio_answer(session_id: u64, host: &str, port: u16, payload_type: u8) ->
     let _ = writeln!(out, "s=gemini-rs");
     let _ = writeln!(out, "c=IN IP4 {host}");
     let _ = writeln!(out, "t=0 0");
-    let _ = writeln!(out, "m=audio {port} RTP/AVP {payload_type}");
-    let _ = writeln!(out, "a=rtpmap:{payload_type} {codec_name}/8000");
+    match telephone_event_pt {
+        Some(te) => {
+            let _ = writeln!(out, "m=audio {port} RTP/AVP {payload_type} {te}");
+            let _ = writeln!(out, "a=rtpmap:{payload_type} {codec_name}/8000");
+            let _ = writeln!(out, "a=rtpmap:{te} telephone-event/8000");
+            let _ = writeln!(out, "a=fmtp:{te} 0-15");
+        }
+        None => {
+            let _ = writeln!(out, "m=audio {port} RTP/AVP {payload_type}");
+            let _ = writeln!(out, "a=rtpmap:{payload_type} {codec_name}/8000");
+        }
+    }
     let _ = writeln!(out, "a=ptime:20");
     let _ = writeln!(out, "a=sendrecv");
     // SDP requires CRLF line endings on the wire.
@@ -127,6 +162,16 @@ mod tests {
         assert_eq!(offer.payload_types, vec![8, 0, 101]);
         // Offer prefers A-law; we honor its order.
         assert_eq!(offer.g711_payload_type(), Some(PT_PCMA));
+        // RFC 4733 DTMF offered on payload type 101.
+        assert_eq!(offer.telephone_event_pt, Some(101));
+    }
+
+    #[test]
+    fn telephone_event_requires_the_media_line_to_list_it() {
+        // rtpmap alone is not enough — the m= line must carry the type.
+        let sdp = "v=0\r\nc=IN IP4 192.0.2.1\r\nm=audio 4000 RTP/AVP 0\r\n\
+                   a=rtpmap:101 telephone-event/8000\r\n";
+        assert_eq!(parse_audio_offer(sdp).unwrap().telephone_event_pt, None);
     }
 
     #[test]
@@ -162,14 +207,27 @@ mod tests {
 
     #[test]
     fn answer_is_wellformed_and_crlf_terminated() {
-        let answer = audio_answer(7, "203.0.113.9", 40_000, PT_PCMU);
+        let answer = audio_answer(7, "203.0.113.9", 40_000, PT_PCMU, None);
         assert!(answer.contains("m=audio 40000 RTP/AVP 0\r\n"));
         assert!(answer.contains("a=rtpmap:0 PCMU/8000\r\n"));
         assert!(answer.contains("c=IN IP4 203.0.113.9\r\n"));
         assert!(!answer.contains("\n\n"));
+        assert!(!answer.contains("telephone-event"));
         // Round-trip: our own answer parses as an offer.
         let parsed = parse_audio_offer(&answer).unwrap();
         assert_eq!(parsed.port, 40_000);
+        assert_eq!(parsed.g711_payload_type(), Some(PT_PCMU));
+    }
+
+    #[test]
+    fn answer_echoes_telephone_event_negotiation() {
+        let answer = audio_answer(7, "203.0.113.9", 40_000, PT_PCMU, Some(101));
+        assert!(answer.contains("m=audio 40000 RTP/AVP 0 101\r\n"));
+        assert!(answer.contains("a=rtpmap:101 telephone-event/8000\r\n"));
+        assert!(answer.contains("a=fmtp:101 0-15\r\n"));
+        // Round-trip: our own answer advertises the event type back.
+        let parsed = parse_audio_offer(&answer).unwrap();
+        assert_eq!(parsed.telephone_event_pt, Some(101));
         assert_eq!(parsed.g711_payload_type(), Some(PT_PCMU));
     }
 }

@@ -463,6 +463,6 @@ state promotion, or result augmentation:
 - [Per-Tool Policies](./tool-policies.md) — timeout, caching, confirmation, and background execution
 - [MCP Tools](./mcp-tools.md) — connecting to Model Context Protocol servers
 - [Text Agent Combinators](./text-agents.md) — using `TextAgentTool` to call agent pipelines as tools
-- [cookbook 02 — agent with tools](../../examples/cookbook/src/02_agent_with_tools.rs)
-- [cookbook 09 — tool composition](../../examples/cookbook/src/09_tool_composition.rs)
+- [cookbook 02 — agent with tools](../../examples/cookbook/src/01_foundations.rs)
+- [cookbook 09 — tool composition](../../examples/cookbook/src/03_composition.rs)
 ```

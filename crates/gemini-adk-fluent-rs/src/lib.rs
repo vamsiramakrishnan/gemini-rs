@@ -40,6 +40,7 @@ pub mod builder;
 pub mod compose;
 pub mod conversation;
 pub mod flow_macros;
+pub mod handoff;
 pub mod live;
 pub mod live_builders;
 pub mod motifs;

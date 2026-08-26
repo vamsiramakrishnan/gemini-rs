@@ -311,7 +311,8 @@ The most evidenced bet: every commercial voice-agent tester is LLM-vs-LLM
 - 🚧 Single-binary telephony: **shipped** — `telephony::sip::SipAgent`
   (feature `sip`) answers raw SIP calls in-process (rsipstack signalling +
   built-in RTP/SDP/G.711), alongside the Twilio Media Streams connector.
-  Remaining: SIP registration, SRTP, RFC 4733 DTMF.
+  RFC 4733 DTMF shipped (negotiated in the SDP answer; digits land in the
+  shared `telephony:` state keys). Remaining: SIP registration, SRTP.
 - 💭 WASM edge governance: compiler + Sim in the browser (authoring/validation)
   and Workers/on-device.
 - 💭 On-device turn detection (smart-turn-v3 is BSD-2/8M params/12ms CPU;

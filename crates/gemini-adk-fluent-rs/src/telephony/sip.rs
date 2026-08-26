@@ -23,10 +23,13 @@
 //! }
 //! ```
 //!
-//! What is deliberately *not* here yet: SIP registration (the agent is a
-//! directly-dialed UAS), SRTP, and RFC 4733 DTMF events. Media is symmetric
-//! RTP: the agent sends to the offer's address but re-latches onto the
-//! source of the first arriving packet, which keeps NATted softphones
+//! RFC 4733 telephone events (DTMF) are negotiated in the SDP answer when
+//! the offer proposes them; keypresses land in session state under the
+//! shared [`super::bridge`] keys, where flow guards read them —
+//! identical to the Twilio path. What is deliberately *not* here yet: SIP
+//! registration (the agent is a directly-dialed UAS) and SRTP. Media is
+//! symmetric RTP: the agent sends to the offer's address but re-latches onto
+//! the source of the first arriving packet, which keeps NATted softphones
 //! working.
 
 use std::net::{IpAddr, SocketAddr};
@@ -46,7 +49,9 @@ use rsipstack::transport::TransportLayer;
 use rsipstack::EndpointBuilder;
 
 use gemini_adk_rs::live::LiveHandle;
+use gemini_adk_rs::State;
 
+use super::bridge::{self, DtmfDeduper, FillerConfig};
 use super::g711;
 use super::rtp::{self, RtpSender, PT_PCMA, SAMPLES_PER_PACKET};
 use super::sdp::{self, AudioOffer};
@@ -208,6 +213,7 @@ impl SipAgent {
                         from,
                         local_ip: self.local_ip,
                         dialog_layer: self.dialog_layer.clone(),
+                        filler: None,
                     });
                 }
                 Method::Ack | Method::Bye | Method::Cancel | Method::Info | Method::Update => {
@@ -257,11 +263,26 @@ pub struct IncomingCall {
     pub from: String,
     local_ip: IpAddr,
     dialog_layer: Arc<DialogLayer>,
+    filler: Option<FillerConfig>,
 }
 
 impl IncomingCall {
+    /// Play a latency-masking filler clip when the model stays silent too
+    /// long after the caller stops speaking — see
+    /// [`bridge::spawn_latency_filler`]. The clip must be mono PCM16 at
+    /// 8 kHz (the call's playback rate).
+    pub fn filler(mut self, config: FillerConfig) -> Self {
+        self.filler = Some(config);
+        self
+    }
+
     /// Answer the call onto a connected session: bind an RTP socket, send the
     /// SDP answer in the 200 OK, and start the media loop.
+    ///
+    /// When the offer proposes RFC 4733 telephone events, the answer accepts
+    /// them and keypresses are written to session state via
+    /// [`bridge::record_dtmf`]. The caller's `From` identity lands under
+    /// [`bridge::KEY_CALLER`].
     pub async fn answer(self, handle: &LiveHandle) -> Result<SipCall, SipError> {
         let payload_type = self.offer.g711_payload_type().ok_or_else(|| {
             let _ = self.dialog.reject(None, None);
@@ -275,11 +296,18 @@ impl IncomingCall {
             .parse()
             .map_err(|_| SipError::NoAudioOffer)?;
 
-        let answer =
-            sdp::audio_answer(seed() as u64, &media_ip.to_string(), rtp_port, payload_type);
+        let telephone_event_pt = self.offer.telephone_event_pt;
+        let answer = sdp::audio_answer(
+            seed() as u64,
+            &media_ip.to_string(),
+            rtp_port,
+            payload_type,
+            telephone_event_pt,
+        );
         self.dialog
             .accept(None, Some(answer.into_bytes()))
             .map_err(SipError::Sip)?;
+        let _ = handle.state().set(bridge::KEY_CALLER, self.from.clone());
 
         let cancel = CancellationToken::new();
         let media = rtp_media(
@@ -287,6 +315,8 @@ impl IncomingCall {
             Arc::new(rtp_socket),
             remote,
             payload_type,
+            telephone_event_pt,
+            self.filler,
             cancel.clone(),
         );
 
@@ -351,12 +381,16 @@ struct MediaTasks {
     pump: VoicePump,
     inbound: JoinHandle<()>,
     outbound: JoinHandle<()>,
+    filler: Option<JoinHandle<()>>,
 }
 
 impl MediaTasks {
     async fn stop(self) {
         self.inbound.abort();
         self.outbound.abort();
+        if let Some(filler) = self.filler {
+            filler.abort();
+        }
         self.pump.abort();
         self.pump.join().await;
     }
@@ -371,6 +405,8 @@ fn rtp_media(
     socket: Arc<UdpSocket>,
     remote: SocketAddr,
     payload_type: u8,
+    telephone_event_pt: Option<u8>,
+    filler: Option<FillerConfig>,
     cancel: CancellationToken,
 ) -> MediaTasks {
     let (mic_tx, mic_rx) = mpsc::channel::<Vec<i16>>(64);
@@ -379,14 +415,18 @@ fn rtp_media(
         handle,
         mic_rx,
         super::TWILIO_HZ,
-        speaker_tx,
+        speaker_tx.clone(),
         super::TWILIO_HZ,
     );
     let (peer_tx, peer_rx) = watch::channel(remote);
 
+    let filler = filler.map(|config| bridge::spawn_latency_filler(handle, speaker_tx, config));
+
     let inbound = tokio::spawn(inbound_loop(
         socket.clone(),
         payload_type,
+        telephone_event_pt,
+        handle.state().clone(),
         mic_tx,
         peer_tx,
         cancel.clone(),
@@ -403,18 +443,22 @@ fn rtp_media(
         pump: voice_pump,
         inbound,
         outbound,
+        filler,
     }
 }
 
 async fn inbound_loop(
     socket: Arc<UdpSocket>,
     payload_type: u8,
+    telephone_event_pt: Option<u8>,
+    state: State,
     mic_tx: mpsc::Sender<Vec<i16>>,
     peer_tx: watch::Sender<SocketAddr>,
     cancel: CancellationToken,
 ) {
     let mut buf = [0u8; 2048];
     let mut latched = false;
+    let mut dtmf = DtmfDeduper::default();
     loop {
         let (len, source) = tokio::select! {
             _ = cancel.cancelled() => break,
@@ -426,8 +470,19 @@ async fn inbound_loop(
         let Some(packet) = rtp::parse(&buf[..len]) else {
             continue; // stray non-RTP traffic on the media port
         };
+        if telephone_event_pt == Some(packet.payload_type) {
+            // RFC 4733 keypress: emit once per end-marked event.
+            if let Some(event) = rtp::parse_telephone_event(&packet.payload) {
+                if dtmf.accept(event.end, packet.timestamp) {
+                    if let Some(digit) = event.digit() {
+                        bridge::record_dtmf(&state, digit);
+                    }
+                }
+            }
+            continue;
+        }
         if packet.payload_type != payload_type {
-            continue; // e.g. telephone-event we did not negotiate
+            continue; // a payload type we did not negotiate
         }
         if !latched {
             let _ = peer_tx.send(source);

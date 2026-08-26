@@ -108,7 +108,7 @@ while let Some(incoming) = agent.next_call().await {
 }
 ```
 
-Deliberately deferred: SIP registration, SRTP, RFC 4733 DTMF. The [telephony chapter](https://vamsiramakrishnan.github.io/gemini-rs/user-guide/telephony.html) has the decision table.
+Both paths land DTMF keypresses in session state where flow guards read them — Twilio as protocol events, SIP as RFC 4733 telephone events negotiated in the SDP answer. Deliberately deferred: SIP registration and SRTP. The [telephony chapter](https://vamsiramakrishnan.github.io/gemini-rs/user-guide/telephony.html) has the decision table.
 
 ## Choose your altitude
 

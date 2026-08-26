@@ -25,6 +25,7 @@ pub mod persistence;
 pub mod phase;
 pub(crate) mod processor;
 pub mod reactor;
+pub mod redaction;
 pub mod replay;
 pub mod session_signals;
 pub mod soft_turn;
