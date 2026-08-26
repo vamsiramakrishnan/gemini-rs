@@ -10,9 +10,9 @@
     runtime, one fluent API, in three layered crates.
   </p>
   <div class="hero-cta">
-    <a class="primary" href="./setup-and-running.html">Get started</a>
-    <a class="secondary" href="./cookbooks.html">Browse the cookbook</a>
-    <a class="secondary" href="https://github.com/vamsiramakrishnan/gemini-rs">GitHub</a>
+
+[Get started](./setup-and-running.md) [Browse the cookbook](./cookbooks.md) [GitHub](https://github.com/vamsiramakrishnan/gemini-rs)
+
   </div>
 </div>
 

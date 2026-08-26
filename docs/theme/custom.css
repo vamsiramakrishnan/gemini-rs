@@ -298,11 +298,13 @@ hr {
   line-height: 1.6;
 }
 
-.hero-cta {
+.hero-cta,
+.hero-cta p {
   display: flex;
   gap: 0.75rem;
   justify-content: center;
   flex-wrap: wrap;
+  margin: 0;
 }
 
 .hero-cta a {
@@ -318,7 +320,7 @@ hr {
   border-color: var(--accent);
 }
 
-.hero-cta a.primary {
+.hero-cta a:first-child {
   border-color: var(--accent);
   color: var(--accent) !important;
 }
