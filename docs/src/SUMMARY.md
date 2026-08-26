@@ -17,6 +17,7 @@
 
 - [Voice & Live Sessions](./user-guide/live-sessions.md)
 - [Live Callbacks: Fast Lane vs Control Lane](./user-guide/live-callbacks.md)
+- [Voice I/O: pump() and talk()](./voice.md)
 - [Telephony: Answering Phone Calls](./user-guide/telephony.md)
 - [Phase System](./user-guide/phases.md)
 - [Phase Transitions Deep Dive](./user-guide/phase-transitions-deep-dive.md)
@@ -36,11 +37,16 @@
 # Composition & Patterns
 
 - [Governed Flows (conversation/tool DAGs)](./user-guide/flow.md)
-- [Flows as JSON & the Flow Studio](./user-guide/flow-json.md)
+- [Flows as JSON (SessionSpec)](./user-guide/flow-json.md)
+- [The Flow Studio](./flow-studio.md)
 - [Agent Orchestration](./user-guide/orchestration.md)
 - [Text Agent Combinators](./user-guide/text-agents.md)
 - [S·C·T·P·M·A Operator Algebra](./user-guide/composition.md)
 - [Middleware & Processors](./user-guide/middleware.md)
+
+# Memory
+
+- [Durable Memory (gemini-memory-rs)](./memory.md)
 
 # Examples
 

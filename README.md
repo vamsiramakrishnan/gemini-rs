@@ -1,1214 +1,150 @@
 # gemini-rs
 
-> Full Rust SDK for the Gemini Multimodal Live API -- wire protocol, agent runtime, and fluent DX in three layered crates.
+### The model improvises. The conversation must not.
 
 [![CI](https://github.com/vamsiramakrishnan/gemini-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/vamsiramakrishnan/gemini-rs/actions/workflows/ci.yml)
 [![Docs](https://github.com/vamsiramakrishnan/gemini-rs/actions/workflows/docs.yml/badge.svg)](https://github.com/vamsiramakrishnan/gemini-rs/actions/workflows/docs.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![crates.io](https://img.shields.io/crates/v/gemini-genai-rs.svg)](https://crates.io/crates/gemini-genai-rs)
-[![Rust](https://img.shields.io/badge/rust-1.93%2B-orange.svg)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/rust-1.93%2B-orange.svg)](rust-toolchain.toml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
----
+**v0.8 · pre-1.0 · MIT** · [book](https://vamsiramakrishnan.github.io/gemini-rs/) · [API reference](https://vamsiramakrishnan.github.io/gemini-rs/api/gemini_genai_rs/index.html)
 
-## Why gemini-rs?
+A live voice model will happily book the table before checking availability, charge the card before verifying identity, and skip the disclosure it was told to read. Not because the prompt was wrong — because a prompt is advice, and advice is not enforcement.
 
-Google's Gemini Multimodal Live API enables full-duplex, real-time voice and
-text conversations with tool calling, streaming audio, and mid-session
-instruction updates. Building on it raw means wrestling with WebSocket frame
-parsing, binary/text codec differences between Google AI and Vertex AI,
-authentication token management, voice activity detection, barge-in handling,
-and turn lifecycle -- before you write a single line of agent logic.
+The usual fix is a longer prompt. The longer prompt is also advice.
 
-**gemini-rs** eliminates that friction. It gives you a layered Rust SDK where
-each crate adds exactly the abstraction you need:
+gemini-rs is a full Rust SDK for the Gemini Multimodal Live API that treats the conversation as a contract. You declare the flow — steps, completion guards, tool gates, ordering constraints — and the runtime enforces it while the model speaks: a tool the flow has not admitted does not execute, whatever the model intends. The same contract is a JSON document you can validate, simulate, test, and code-generate offline, and a canvas you can edit by hand.
 
-- **Wire-level access** for custom transports, proxies, or non-standard
-  deployments (`gemini-genai-rs`).
-- **Agent runtime** with typed state, phase machines, tool dispatch, text agent
-  combinators, and a three-lane processor architecture (`gemini-adk-rs`).
-- **Fluent builder API** where a production voice agent is 20 lines of
-  declarative Rust, not 200 lines of boilerplate (`gemini-adk-fluent-rs`).
-- **Governed agents** — a declarative control DAG (`Flow`), deterministic +
-  async fact resolution (`Extract`), and agent orchestration (`Resolver`),
-  composing over one shared `State` spine (`gemini-adk-rs`, surfaced at L2).
-
-Every layer is independently usable. Pick the altitude that fits your problem.
-
-### Raw WebSocket vs. Fluent API
-
-<table>
-<tr><th>Raw WebSocket (L0 only)</th><th>Fluent API (L2)</th></tr>
-<tr>
-<td>
-
-```rust
-// Connect, subscribe, send, match events,
-// handle tool calls, manage turns, track
-// state, parse audio frames ...
-let session = quick_connect(
-    "KEY", "gemini-2.0-flash-live-001"
-).await?;
-session.send_text("Hello").await?;
-let mut events = session.subscribe();
-while let Ok(event) = events.recv().await {
-    match event {
-        SessionEvent::Audio(data) => {
-            /* decode, buffer, play */
-        }
-        SessionEvent::TextDelta(t) => {
-            print!("{t}");
-        }
-        SessionEvent::ToolCall(calls) => {
-            // dispatch, build responses,
-            // send back ...
-        }
-        SessionEvent::TurnComplete => break,
-        _ => {}
-    }
-}
-```
-
-</td>
-<td>
-
-```rust
-let handle = Live::builder()
-    .instruction("You are a helpful assistant.")
-    .greeting("Say hello to the user.")
-    .on_audio(|data| speaker.send(data))
-    .on_text(|t| print!("{t}"))
-    .on_tool_call(|calls, state| async move {
-        // auto-dispatched with .tools()
-        None
-    })
-    .connect_google_ai("KEY")
-    .await?;
-
-handle.send_text("Hello").await?;
-```
-
-</td>
-</tr>
-</table>
-
----
-
-## Architecture
-
-<p align="center"><img src="docs/assets/diagrams/architecture-stack.svg" alt="Three-crate layered architecture: L2 fluent DX over L1 runtime over L0 wire protocol" width="760"></p>
-
-Each layer depends only on the one below it. Application code imports from the
-highest layer it needs. The L2 `prelude` is a curated **kernel** (the ~40 types a
-typical app touches across all three layers); anything beyond it lives in a
-focused submodule — `gemini_adk_fluent_rs::{live, text, tools, state, flow,
-agents, llm, conversation, wire}` — so a glob import stays small. See the
-[migration guide](docs/src/user-guide/migration.md) for the full kernel/submodule map.
-
-> **Where does `Flow` live?** `Flow`, `Extract`, and the `Resolver`
-> orchestration primitives are **L1 runtime** types (`gemini-adk-rs`) — *not* a
-> layer above the fluent API. L2 simply surfaces them ergonomically
-> (`Live::govern(flow)`, `.extract_record(..)`, `.on_enter(..)`). They are
-> cross-cutting capabilities *within* the three-layer stack, composing over the
-> shared `State` spine — so you can use them from L1 directly or via the L2
-> builder.
-
----
-
-## Governed Agents
-
-Three **runtime primitives** (L1, surfaced fluently at L2) make an agent
-*governed*. They are three lenses over one shared spine — session `State` — and
-compose **multiplicatively**: every result lands in `State` under one convention
-(`{name}:result` + `state_meta:` provenance), so each lens consumes the others'
-output reactively.
-
-| Lens | What it does | Surfaced as |
-|------|--------------|-------------|
-| **Flow** | a governed conversation/tool DAG — gates tool calls, projects per-step steering (`posture`/`ground`), enforces order (`once` / `never…until` / `require`) | `Live::govern(flow)` · `.observe(flow)` |
-| **Extract** | fills `State` with typed facts — CPU `Recognizer`s (no model: `integer`/`money`/`fuzzy`/`yes_no`/`datetime`/…) and async `Resolver` field sources (fetch/MCP/LLM/agent) with a TTL cache | `.extract_record(Order::extract())` |
-| **Orchestration** | invoke a sub-agent / fetch / LLM in a `Mode` (`Call`/`Dispatch`/`Background`); result + provenance → `State` | `Resolver` · `.on_enter(step, agent, mode)` |
-
-```rust
-use gemini_adk_fluent_rs::prelude::*;
-
-// A booking flow: extraction fills slots, a step orchestrates availability on
-// entry, grounding pins the model to known facts, and the commit is gated.
-let flow = Flow::new()
-    .step("collect").done(Guard::captured(["party_size", "slot"]))
-    .step("check").after("collect")
-        .ground("Party of {party_size} at {slot}; availability: {check:result}.")
-        .done(Guard::resolved("check"))
-    .step("book").after("check").allow(["book"]).done(Guard::called_ok("book"))
-    .never("book").until(Guard::resolved("check")).once("book")
-    .build()?;
-
-let handle = Live::builder()
-    .govern(flow)                                            // enforce the DAG
-    .extract_record(Booking::extract())                      // #[derive(Extract)]
-    .on_enter("check", availability_agent, AgentMode::Call)  // result -> check:result
-    .connect_from_env().await?;
-```
-
-Deterministic where it can be (recognizers, guards — no model in the control
-loop), model-driven where it must be. See the **Governed Flows**, **Extraction
-Pipeline**, and **Agent Orchestration** chapters in
-[the book](https://vamsiramakrishnan.github.io/gemini-rs/), and cookbook
-examples `37`–`40`.
-
----
-
-## Core Concepts & How They Interplay
-
-A gemini-rs voice session is built from six core concepts that work together.
-This section shows what each one does and how they connect.
-
-<p align="center"><img src="docs/assets/diagrams/core-concepts.svg" alt="How the six core concepts (phases, extractors, tools, watchers, telemetry) converge on shared State" width="840"></p>
-
-### 1. State -- The Shared Spine
-
-Everything reads from and writes to `State`. It is the single source of truth
-for a session -- a concurrent, typed key-value store with prefix-scoped
-namespaces.
-
-<p align="center"><img src="docs/assets/diagrams/state-hierarchy.svg" alt="State prefix namespaces: app, session, derived, turn, bg" width="760"></p>
-
-**Why it matters:** Phase transitions check state. Extractors write to state.
-Watchers fire when state changes. Computed variables derive from state.
-Telemetry auto-populates state. Everything converges here.
-
-### 2. Phases -- Conversation Structure
-
-Phases define the *shape* of a conversation: what the model should do, what
-tools are available, and when to move on.
-
-<p align="center"><img src="docs/assets/diagrams/phase-flow.svg" alt="Conversation phases with instructions, tools, and transition predicates" width="860"></p>
-
-Each phase declares:
-- **Instruction**: what the model should do (static or state-driven dynamic)
-- **Tools**: which tools are available in this phase
-- **Transitions**: state predicates that trigger moves to the next phase
-- **Guards**: predicates that must be true before entering a phase
-- **Needs**: state keys still required (drives navigation context)
-- **Lifecycle hooks**: `on_enter` / `on_exit` for side effects
-
-Phases don't micromanage the model. They set guardrails -- the LLM naturally
-asks follow-up questions until the transition predicate becomes true.
-
-### 3. Extractors -- Structured Data from Conversation
-
-Extractors run out-of-band LLM calls to pull structured data from the
-conversation transcript and write it into State.
-
-<p align="center"><img src="docs/assets/diagrams/extraction-pipeline.svg" alt="Extraction pipeline: transcript through an out-of-band LLM call into State" width="820"></p>
-
-**Extraction triggers** control *when* extractors fire:
-
-| Trigger | When it fires | Use case |
-|---------|--------------|----------|
-| `EveryTurn` | After every TurnComplete | Default, high-frequency extraction |
-| `Interval(n)` | Every N turns | Reduce LLM costs for slow-changing data |
-| `AfterToolCall` | After tool dispatch completes | Extract from tool results |
-| `OnPhaseChange` | When phase transitions fire | Re-extract on context shift |
-
-### 4. Watchers & Temporal Patterns -- Reactive State
-
-Watchers observe state changes and fire callbacks. Temporal patterns detect
-conditions that persist over time or turns.
-
-<p align="center"><img src="docs/assets/diagrams/watchers-temporal.svg" alt="Watchers and temporal patterns reacting to state change" width="820"></p>
-
-### 5. Tools -- Model Actions
-
-Tools give the model the ability to take actions. gemini-rs supports typed
-tools (auto-schema from Rust structs), simple tools (raw JSON), built-in
-tools (Google Search, code execution), and agent-as-tool (text agent pipelines
-callable by the live model).
-
-<p align="center"><img src="docs/assets/diagrams/tool-dispatcher.svg" alt="ToolDispatcher routing calls to simple, typed, and agent tools" width="760"></p>
-
-**Background tool execution** eliminates dead air in voice sessions. Mark
-tools as background and the model receives a "processing" acknowledgment
-immediately, continuing the conversation while the tool runs:
+## Five lines to try it
 
 ```rust
 Live::builder()
-    .tools(dispatcher)
-    .tool_background("search_kb")  // runs async, no dead air
+    .instruction("You are a helpful concierge.")
+    .greeting("Greet the caller.")
+    .connect_from_env().await?     // GEMINI_API_KEY, or Vertex env vars
+    .talk().await?;                // mic in, speakers out, barge-in handled
 ```
 
-### 6. Telemetry -- Observability Pipeline
+`cargo add gemini-adk-fluent-rs --features voice-io`, export `GEMINI_API_KEY`, done. `talk()` (feature `voice-io`; Linux needs `libasound2-dev`) runs the duplex audio loop on the default devices; an interruption flushes the speaker buffer instead of playing stale speech. `connect_from_env()` resolves Google AI vs Vertex AI from the environment — both platforms, one code path, unsupported wire fields stripped automatically.
 
-Telemetry flows through two complementary systems, both running on the
-telemetry lane (off the hot path):
+## One call, walked through
 
-<p align="center"><img src="docs/assets/diagrams/telemetry-pipeline.svg" alt="Telemetry pipeline: SessionSignals to State and SessionTelemetry atomic counters" width="820"></p>
+`examples/voice-spec-demo` places a real phone-style call with no human in the room: Gemini TTS plays the caller, Gemini Live answers as the agent, and one JSON document governs the agent. The document is the restaurant cookbook from the Flow Studio gallery, edited by hand — because the document the Studio edits is just JSON.
 
-**SessionSignals** writes to State -- so phases, watchers, and extractors can
-react to session-level metrics (e.g., transition after N turns, alert when
-tokens exceed budget).
-
-**SessionTelemetry** tracks lock-free atomic counters (~1ns per operation) for
-performance metrics: audio throughput, response latency (min/avg/max via CAS),
-turn duration, token usage, and interruption counts.
-
-**UsageMetadata** from the Gemini API is automatically tracked at all layers:
-- L0 emits `SessionEvent::Usage(UsageMetadata)` with full token breakdowns
-- L1 records in both SessionSignals (state keys) and SessionTelemetry (atomics)
-- L2 exposes `.on_usage(|metadata| ...)` callback for real-time observation
-
-### How They Work Together
-
-Here's the flow for a single model turn in a phased conversation:
-
-<p align="center"><img src="docs/assets/diagrams/turn-flow.svg" alt="The nine steps of processing a single model turn" width="760"></p>
-
----
-
-## Quick Start
-
-### Zero-Ceremony (Recommended)
-
-`connect_from_env()` resolves platform and credentials automatically — no
-manual token wiring needed:
-
-```rust
-use gemini_adk_fluent_rs::prelude::*;
-
-// Set GEMINI_API_KEY  (Google AI)
-// or GOOGLE_GENAI_USE_VERTEXAI=true + GOOGLE_CLOUD_PROJECT  (Vertex AI)
-let handle = Live::builder()
-    .model(GeminiModel::Gemini2_0FlashLive)
-    .instruction("You are a friendly assistant.")
-    .on_text(|t| print!("{t}"))
-    .connect_from_env()
-    .await?;
-
-handle.send_text("What is the speed of light?").await?;
+```text
+$ cargo run -p example-voice-spec-demo
+spec `trattoria-voice` valid: true
+  embedded test `party books a table`: passed (6 events)
+  embedded test `no booking before availability`: passed (3 events)
+connected: models/gemini-2.5-flash-native-audio-preview-12-2025
+  [flow] done: [] · active: [gather] · admitted tools: [capture_party]
+[caller] Hi! I'd like a table for two tomorrow at seven in the evening.
+  [flow] done: [check, gather] · active: [book] · admitted tools: [book_table]
+[caller] Seven thirty works perfectly. Please book it.
+  [flow] done: [book, check, farewell, gather] · active: []
+wrote voice-spec-demo.wav — 27.3s of call audio
 ```
 
-Resolution order: `GOOGLE_GENAI_USE_VERTEXAI=true` → Vertex AI with
-`GOOGLE_CLOUD_PROJECT` / `GOOGLE_CLOUD_LOCATION` and a token from
-`GOOGLE_ACCESS_TOKEN` (falls back to `gcloud auth print-access-token`).
-Otherwise → Google AI via `GEMINI_API_KEY` (or `GOOGLE_GENAI_API_KEY` /
-`GOOGLE_API_KEY`).
+Read the trace, not the adjectives. Before the call, the document's embedded tests replay through the real flow monitor — offline, no API key. During the call, `book_table` is not admitted until an availability check has actually run; the constraint `never book_table until availability_checked` is enforced by the runtime, not requested of the model. The full log is checked in at [`examples/voice-spec-demo/run-receipt.txt`](examples/voice-spec-demo/run-receipt.txt); the document is [`spec.json`](examples/voice-spec-demo/spec.json) beside it.
 
-### Google AI (API Key)
-
-```rust
-use gemini_adk_fluent_rs::prelude::*;
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let handle = Live::builder()
-        .model(GeminiModel::Gemini2_0FlashLive)
-        .instruction("You are a friendly assistant.")
-        .on_text(|t| print!("{t}"))
-        .on_turn_complete(|| async { println!("\n---") })
-        .connect_google_ai(std::env::var("GEMINI_API_KEY")?)
-        .await?;
-
-    handle.send_text("What is the speed of light?").await?;
-    tokio::signal::ctrl_c().await?;
-    handle.disconnect().await?;
-    Ok(())
-}
-```
-
-### Vertex AI
-
-```rust
-let handle = Live::builder()
-    .model(GeminiModel::Gemini2_0FlashLive)
-    .voice(Voice::Kore)
-    .instruction("You are a customer support agent.")
-    .on_audio(|data| playback_tx.send(data.clone()).ok())
-    .on_text(|t| print!("{t}"))
-    .connect_vertex("my-project", "us-central1", access_token)
-    .await?;
-```
-
-### Wire Level Only (L0)
-
-```rust
-use gemini_genai_rs::prelude::*;
-
-let session = gemini_genai_rs::quick_connect(
-    "API_KEY", "gemini-2.0-flash-live-001"
-).await?;
-session.send_text("What is the speed of light?").await?;
-
-let mut events = session.subscribe();
-while let Ok(event) = events.recv().await {
-    if let SessionEvent::TextDelta(ref text) = event {
-        print!("{text}");
-    }
-    if let SessionEvent::TurnComplete = event { break; }
-}
-```
-
----
-
-## Crate Overview
-
-| Crate | Layer | Description |
-|-------|-------|-------------|
-| [`gemini-genai-rs`](crates/gemini-genai-rs) | L0 -- Wire | Protocol types, WebSocket transport, auth providers, VAD, jitter buffer, REST APIs (feature-gated). Full Rust equivalent of Google's `@google/genai`. |
-| [`gemini-adk-rs`](crates/gemini-adk-rs) | L1 -- Runtime | Agent runtime with state management, phase machines, tool dispatch, text agent combinators, extractors, watchers, telemetry. Full Rust equivalent of Google's `@google/adk`. |
-| [`gemini-adk-fluent-rs`](crates/gemini-adk-fluent-rs) | L2 -- Fluent | `Live::builder()` API, `AgentBuilder`, S.C.T.P.M.A operator algebra, composition patterns, test utilities. |
-
----
-
-## Features
-
-### Voice / Live Sessions
-
-Build full-duplex voice sessions with callbacks for every event type. Audio,
-text, transcription, interruptions, and turn lifecycle are all handled.
-
-```rust
-let handle = Live::builder()
-    .model(GeminiModel::GeminiLive2_5FlashNativeAudio)
-    .voice(Voice::Puck)
-    .instruction("You are a weather assistant.")
-    .greeting("Greet the user and ask how you can help.")
-    .transcription(true, true)          // input + output transcription
-    .thinking(1024)                     // enable thinking with token budget
-    .include_thoughts()                 // receive thought summaries
-    .affective_dialog(true)             // emotionally expressive responses
-    .context_compression(4000, 2000)    // auto-compress context window
-    .on_audio(|data| speaker.write(data))
-    .on_thought(|text| println!("[Thought] {text}"))
-    .on_input_transcript(|text, _final| println!("[User] {text}"))
-    .on_output_transcript(|text, _final| println!("[Agent] {text}"))
-    .on_interrupted(|| async { speaker.flush().await })
-    .on_turn_complete(|| async { println!("--- turn complete ---") })
-    .on_usage(|usage| {
-        if let Some(total) = usage.total_token_count {
-            println!("Tokens used: {total}");
-        }
-    })
-    .connect_vertex(project, location, token)
-    .await?;
-```
-
-**Available voices:** `Aoede`, `Charon`, `Fenrir`, `Kore`, `Puck` (default), or `Voice::Custom("name")`.
-
-### Thinking (Gemini 2.5+)
-
-The `gemini-2.5-flash-native-audio-preview-12-2025` model supports thinking
-capabilities with dynamic thinking enabled by default. Control the thinking
-budget and receive thought summaries in your session:
-
-```rust
-let handle = Live::builder()
-    .model(GeminiModel::Custom(
-        "models/gemini-2.5-flash-native-audio-preview-12-2025".into(),
-    ))
-    .thinking(1024)           // set thinking token budget (0 = disable)
-    .include_thoughts()       // receive thought summaries via on_thought
-    .on_thought(|text| println!("[Thought] {text}"))
-    .on_text(|t| print!("{t}"))
-    .connect_google_ai(api_key)
-    .await?;
-```
-
-**How it works in the three-lane architecture:**
-
-- `thinkingConfig` (`thinkingBudget`, `includeThoughts`) is sent in the setup
-  message's `generationConfig`
-- When `includeThoughts` is true, thought parts arrive as `Part::Thought` in
-  `model_turn` content — emitted as `SessionEvent::Thought(String)`
-- Thought events are routed to the **fast lane** and delivered via the
-  `on_thought` sync callback (< 1ms, no allocations)
-
-**Platform support:** Google AI only. On Vertex AI, `thinkingConfig` is
-automatically stripped from the setup message — no code changes needed.
-
-### Tool Calling
-
-Declare function tools with JSON Schema parameters. The SDK auto-dispatches
-tool calls when you provide a `ToolDispatcher`, or you can handle them manually
-in `on_tool_call`.
-
-```rust
-let handle = Live::builder()
-    .instruction("You can check the weather and do math.")
-    .on_tool_call(|calls, state| async move {
-        let responses: Vec<FunctionResponse> = calls.iter().map(|call| {
-            let result = match call.name.as_str() {
-                "get_weather" => json!({"temp": 22, "condition": "sunny"}),
-                _ => json!({"error": "unknown tool"}),
-            };
-            FunctionResponse {
-                name: call.name.clone(),
-                response: result,
-                id: call.id.clone(),
-                scheduling: None,
-            }
-        }).collect();
-        Some(responses)
-    })
-    .connect_google_ai(api_key)
-    .await?;
-```
-
-Or use built-in tools directly:
-
-```rust
-Live::builder()
-    .google_search()        // Google Search grounding
-    .code_execution()       // Sandbox code execution
-    .url_context()          // URL content retrieval
-```
-
-### State Management
-
-A concurrent, type-safe `State` container with prefix-scoped namespaces,
-atomic read-modify-write, delta tracking, and transparent derived fallbacks.
-
-```rust
-use gemini_adk_rs::State;
-use gemini_adk_rs::state::StateKey;
-
-// Typed keys eliminate typo bugs
-const TURN_COUNT: StateKey<u32> = StateKey::new("session:turn_count");
-const SENTIMENT: StateKey<String> = StateKey::new("derived:sentiment");
-
-let state = State::new();
-
-// Prefix-scoped accessors
-state.app().set("flag", true);              // writes to "app:flag"
-state.user().set("name", "Alice");          // writes to "user:name"
-state.session().set("turn_count", 0u32);    // writes to "session:turn_count"
-state.turn().set("transcript", "hello");    // writes to "turn:transcript"
-
-// Atomic read-modify-write
-state.modify("session:turn_count", 0u32, |n| n + 1);
-
-// Transparent derived fallback: get("risk") auto-checks "derived:risk"
-state.set("derived:risk", 0.85);
-let risk: Option<f64> = state.get("risk");  // returns Some(0.85)
-
-// Delta tracking for transactional state
-let tracked = state.with_delta_tracking();
-tracked.set("temp:scratch", 42);
-tracked.commit();   // merge into main store
-// or: tracked.rollback();
-```
-
-**Prefix namespaces:**
-
-| Prefix | Purpose | Lifetime |
-|--------|---------|----------|
-| `session:` | Auto-tracked signals (turn count, tokens, timing) | Session |
-| `derived:` | Read-only computed variables | Session |
-| `turn:` | Cleared each turn | Turn |
-| `app:` | Application state | Session |
-| `bg:` | Background task state | Session |
-| `user:` | User-scoped state | Session |
-| `temp:` | Scratch space | Explicit |
-
-### Phase System
-
-Declarative conversation phase management with guard-based transitions,
-per-phase tool filtering, instruction composition, and async lifecycle callbacks.
-
-```rust
-let handle = Live::builder()
-    .phase("greeting")
-        .instruction("Welcome the user warmly.")
-        .prompt_on_enter(true)
-        .transition_with("identify", |s| {
-            s.get::<String>("caller_name").is_some()
-        }, "when caller provides their name")
-        .done()
-    .phase("identify")
-        .instruction("Confirm the caller's identity.")
-        .needs(&["caller_name", "caller_org"])
-        .tools(vec!["lookup_contact".into()])
-        .transition_with("handle", |s| {
-            s.get::<bool>("verified").unwrap_or(false)
-        }, "when identity is verified")
-        .done()
-    .phase("handle")
-        .dynamic_instruction(|s| {
-            let topic: String = s.get("topic").unwrap_or_default();
-            format!("Help the caller with: {topic}")
-        })
-        .tools(vec!["search".into(), "calc".into()])
-        .transition_with("farewell", |s| {
-            s.get::<bool>("resolved").unwrap_or(false)
-        }, "when the request is resolved")
-        .done()
-    .phase("farewell")
-        .instruction("Say goodbye and provide a reference number.")
-        .terminal()
-        .done()
-    .initial_phase("greeting")
-    // Phase defaults inherited by all phases
-    .phase_defaults(|p| {
-        p.with_state(&["caller_name", "caller_org"])
-         .navigation()  // inject phase navigation context
-    })
-    // Recommended: set persona once, steer via context injection
-    .steering_mode(SteeringMode::ContextInjection)
-    .connect_vertex(project, location, token)
-    .await?;
-```
-
-#### Steering Modes
-
-Control how the SDK delivers phase instructions to the model. This is the most
-impactful configuration choice for multi-phase apps:
-
-| Mode | System Instruction | Phase Instructions | Best For |
-|------|--------------------|--------------------|----------|
-| `ContextInjection` | Set once at connect | Delivered as model-role context turns | Multi-phase apps with stable persona (**recommended**) |
-| `InstructionUpdate` | Replaced on every transition | Baked into system instruction | Agents with radically different personas per phase |
-| `Hybrid` | Replaced on transition | Modifiers as context turns | Persona shifts + per-turn steering |
-
-```rust
-// Recommended: base persona at connect, phase context injected per turn
-Live::builder()
-    .instruction("You are a helpful assistant.")
-    .steering_mode(SteeringMode::ContextInjection)
-```
-
-#### Context Delivery Timing
-
-Control when model-role context turns hit the wire:
-
-| Mode | Behavior | Best For |
-|------|----------|----------|
-| `Immediate` (default) | Send as single batched frame during TurnComplete | Low-latency, text-only apps |
-| `Deferred` | Queue until next user send (audio/text/video) | Voice apps — eliminates mid-silence frames |
-
-```rust
-// Voice app: flush context alongside user audio, not during silence
-Live::builder()
-    .steering_mode(SteeringMode::ContextInjection)
-    .context_delivery(ContextDelivery::Deferred)
-```
-
-With `Deferred`, the `DeferredWriter` wraps the session writer and drains pending context before each `send_audio`/`send_text`/`send_video`. Context that requires a prompt (e.g. `prompt_on_enter`) is always sent immediately.
-
-See the [Steering Modes guide](docs/user-guide/steering-modes.md) for the full
-decision matrix, anti-patterns, and implementation details.
-
-#### Phase Navigation Context
-
-The `.navigation()` modifier injects a structured description of the current
-phase graph into the model's instruction, giving it awareness of where it is,
-what it still needs, and where it can go:
-
-```
-[Navigation]
-Current phase: identify -- Confirm the caller's identity.
-Previous: greeting (turn 2)
-Still needed: caller_org
-Possible next:
-  -> handle: when identity is verified
-```
-
-This is auto-generated from `.needs()`, `.transition_with()` descriptions, and
-phase history. The model can use this to guide the conversation naturally.
-
-### Extraction Pipeline
-
-Run out-of-band LLM calls to extract structured data from the conversation
-transcript. Schema-guided via `schemars::JsonSchema`.
-
-```rust
-use schemars::JsonSchema;
-
-#[derive(Deserialize, Serialize, JsonSchema)]
-struct CallerInfo {
-    caller_name: Option<String>,
-    caller_org: Option<String>,
-    request_type: Option<String>,
-}
-
-let handle = Live::builder()
-    .instruction("You are a receptionist.")
-    // Extract every 2 turns instead of every turn (reduces LLM costs)
-    .extract_turns_triggered::<CallerInfo>(
-        flash_llm,
-        "Extract caller name, organization, and request type",
-        5,  // transcript window size
-        ExtractionTrigger::Interval(2),
-    )
-    .on_extracted(|name, value| async move {
-        println!("Extracted {name}: {value}");
-    })
-    .connect_vertex(project, location, token)
-    .await?;
-
-// Read latest extraction at any time
-let info: Option<CallerInfo> = handle.extracted("CallerInfo");
-```
-
-Extractors automatically enable transcription and warm up the OOB LLM
-connection at session start for fast first-extraction latency.
-
-#### Deterministic extraction (no model)
-
-Not every field needs an LLM. Declare an `Extract` record of typed fields filled
-by CPU `Recognizer`s — they run on the control lane with no model, network, or
-accelerator and promote straight into `State`:
-
-```rust
-use gemini_adk_rs::Extract;   // the #[derive(Extract)] macro
-
-#[derive(Extract)]
-#[extract(name = "order", window = 3)]
-struct Order {
-    #[recognize(integer_near = ["want", "get"])]
-    quantity: Option<i64>,
-    #[recognize(one_of = ["pizza", "salad", "soda"])]
-    item: Option<String>,
-    #[recognize(datetime)]           // -> { "time": "18:00", "day": "tomorrow" }
-    #[extract(state = "when")]
-    pickup: Option<serde_json::Value>,
-    #[recognize(yes_no)]
-    confirmed: Option<bool>,
-}
-
-Live::builder()
-    .extract_record(Order::extract())   // drives Flow done(captured([..]))
-    .govern(order_flow)
-    .connect_from_env().await?;
-```
-
-Recognizers: `integer`/`integer_near`, `money`, `regex`, `one_of`, `fuzzy`
-(ASR-robust), `yes_no`, `datetime`. Async field sources
-(`field_resolve(name, args, ttl, fetch)`) bind args from `State` and cache by
-`(field, args)`; `on_complete(agent, mode)` dispatches a downstream agent when a
-record lands fields.
-
-### Agent Orchestration
-
-Invoke a sub-agent, a system fetch, or a one-shot LLM in a `Mode`; the result
-(and its provenance) lands in `State` under `{name}:result`, so a `Flow` step
-completes on it via `Guard::resolved`:
-
-```rust
-use gemini_adk_rs::Resolver;
-
-Resolver::agent("availability", availability_agent).resolve(&state).await?;
-Resolver::fetch("availability", |s| async move { /* tool/HTTP/MCP */ Ok(json!({"open": true})) })
-    .dispatch(state.clone());                       // fire-and-forget
-Resolver::llm("summary", flash_llm, "Summarize the {topic} issue").resolve(&state).await?;
-```
-
-A governed `Flow` drives this in-session: `.on_enter("check", agent, AgentMode::Call)`
-runs an agent the moment a step activates.
-
-### Governed Flows
-
-A `Flow` is one declarative DAG governing both conversation stages and tool-call
-order. The runtime enforces it live — gating tools, steering per active step,
-surfacing what still has to happen:
+The contract, in the fluent phrasing:
 
 ```rust
 let flow = Flow::new()
-    .step("verify").posture("Verify the caller's identity.")
-        .allow(["lookup_account"]).done(Guard::is_true("identity_verified"))
-    .step("disclose").after("verify").done(Guard::is_true("disclosure_given"))
-    .step("take_payment").after("disclose").allow(["charge_card"])
-        .done(Guard::called_ok("charge_card"))
-    .never("charge_card").until(Guard::is_true("ptp_confirmed")).once("charge_card")
+    .step("gather").allow(["capture_party"])
+        .done(Guard::captured(["party_size", "requested_time"]))
+    .step("check").after("gather").allow(["check_availability"])
+        .done(Guard::is_true("availability_checked"))
+        .ground("Party of {party_size}.")
+    .step("book").after("check").allow(["book_table"])
+        .done(Guard::called_ok("book_table"))
+    .step("farewell").after("book").terminal()
+    .once("book_table")
+    .never("book_table").until(Guard::is_true("availability_checked"))
     .build()?;
 
-Live::builder().tools(dispatcher).govern(flow).connect_from_env().await?;
+Live::builder().govern(flow).connect_from_env().await?.talk().await?;
 ```
 
-Guards are a closed, serializable predicate set (`is_true`/`captured`/
-`called_ok`/`resolved`/…), so a flow can be authored as data; `flow.to_mermaid()`
-renders the DAG. Use `.observe(flow)` for audit-only (records deviations, blocks
-nothing).
+Guards are a closed, serializable vocabulary — `is_true`, `captured`, `called_ok`, `resolved`, composed with any/all — which is why the same flow round-trips between Rust, JSON, and the canvas without loss, and why a stuck step can explain itself: the runtime prints the truth value of every atom it is waiting on.
 
-### State Watchers & Temporal Patterns
+## The document is the program
 
-React to state changes and time-based conditions declaratively:
+Everything a session is — flow, tools (mock, HTTP, MCP), extraction schemas, phases, watchers, computed state, memory slots, runtime tuning, and its own test suite — serializes into one `SessionSpec` document. `validate()` compiles it with did-you-mean diagnostics on state keys. `simulate` replays the embedded tests. `to_rust()` prints the equivalent fluent program; generated cookbook apps compile under `-D warnings`. Nothing here is Studio magic: the Studio is one client of the document.
+
+<p align="center"><img src="docs/assets/studio/flow-studio.gif" alt="Flow Studio click-through: load a cookbook from the gallery, drag a node, validate, run the embedded tests, scrub a simulated session on the canvas, read the generated Rust" width="900"></p>
+
+The Flow Studio (`cargo run -p gemini-adk-web-rs` → `/flows`) is the same document on a canvas. Conditional edges render dashed with their guard as the label; the badge is the compiler's verdict; the Preview scrubber is the offline simulator driving the canvas; the Code tab is `to_rust()`.
+
+<p align="center"><img src="docs/assets/studio/canvas.png" alt="The clinic-intake DAG on the Studio canvas: a dashed conditional emergency edge labeled is_true(is_emergency) into a terminal close step, a green valid badge, and compile diagnostics naming the four steps and four tools" width="900"></p>
+
+<p align="center"><img src="docs/assets/studio/preview.png" alt="The offline simulator scrubbing event 3 of 6 of an embedded test: identify and triage latched done, schedule active, the three conformance tests reported passed in the diagnostics console" width="900"></p>
+
+Six industry cookbooks ship in the gallery — healthcare intake, debt collection, telecom support, call screening, returns desk, table booking — each with embedded conformance tests. A CI test walks the gallery and requires every cookbook to compile and pass its own tests. The tour lives in [the Flow Studio chapter](https://vamsiramakrishnan.github.io/gemini-rs/flow-studio.html).
+
+## The expensive callback is the one that blocks
+
+Live audio does not wait. Every session event is routed through three lanes with different latency contracts: a **fast lane** (sync, sub-millisecond — audio chunks, text deltas, transcripts, VAD), a **control lane** (async — tool calls, turn boundaries, extraction, phase transitions), and a **telemetry lane** (lock-free counters, off the hot path). The fast-lane contract is enforced by convention and documented per callback; a blocked audio callback costs the conversation, so hooks that need to block get a `_concurrent` variant that detaches instead.
+
+The same discipline shapes the audio path. `voice::pump()` is the device-independent duplex core: feed microphone frames at any sample rate on one channel, receive playback at any rate on another, and an interruption arrives as an explicit `Playback::Flush` — stale audio is dropped, never played. `talk()` is `pump()` on cpal devices. Telephony is `pump()` on a phone line.
+
+## A phone line is just another pump
+
+Two runnable ends, one audio core:
+
+**Twilio Media Streams** — the SDK speaks the protocol and bridges G.711 μ-law to the session at 8 kHz; barge-in becomes Twilio's `clear`, DTMF lands in session state where flow guards read it ([`examples/telephony`](examples/telephony)).
+
+**No carrier at all** (feature `sip`) — an in-process SIP agent over [rsipstack](https://github.com/restsend/rsipstack): SDP negotiation, symmetric RTP, G.711 inside the SDK. Any softphone or PBX extension dials it directly:
 
 ```rust
-Live::builder()
-    // Fire when app:score crosses above 0.9
-    .watch("app:score")
-        .crossed_above(0.9)
-        .then(|_old, _new, state| async move {
-            state.set("high_score_alert", true);
-        })
-    // Fire when a boolean becomes true
-    .watch("app:escalated")
-        .became_true()
-        .blocking()   // block turn processing until complete
-        .then(|_old, _new, _state| async move {
-            notify_supervisor().await;
-        })
-    // Fire when condition holds for 30 seconds continuously
-    .when_sustained("user_confused",
-        |s| s.get::<bool>("confused").unwrap_or(false),
-        Duration::from_secs(30),
-        |_state, writer| async move { /* offer help */ },
-    )
-    // Fire after 3 consecutive turns matching condition
-    .when_turns("stuck_in_loop",
-        |s| s.get::<bool>("repeating").unwrap_or(false),
-        3,
-        |_state, writer| async move { /* break loop */ },
-    )
+let mut agent = SipAgent::bind("0.0.0.0:5060".parse()?).await?;
+while let Some(incoming) = agent.next_call().await {
+    let session = Live::builder()
+        .instruction("Answer the phone politely.")
+        .connect_from_env().await?;
+    let call = incoming.answer(&session).await?;   // SDP answer + RTP starts
+    tokio::spawn(async move { call.ended().await; });
+}
 ```
 
-### Computed (Derived) State
+Deliberately deferred: SIP registration, SRTP, RFC 4733 DTMF. The [telephony chapter](https://vamsiramakrishnan.github.io/gemini-rs/user-guide/telephony.html) has the decision table.
 
-Register reactive computed variables that update when their dependencies change:
+## Choose your altitude
 
-```rust
-Live::builder()
-    .computed("risk_level", &["app:sentiment_score"], |state| {
-        let score: f64 = state.get("app:sentiment_score")?;
-        if score < 0.3 { Some(json!("high")) }
-        else { Some(json!("low")) }
-    })
-    // Read transparently: state.get("risk_level") auto-checks "derived:risk_level"
-```
+Three crates, each depending only on the one below, each usable alone:
 
-### Text Agent Combinators
+| Crate | Layer | The contract |
+|---|---|---|
+| [`gemini-adk-fluent-rs`](crates/gemini-adk-fluent-rs) | L2 · authoring | Two equivalent phrasings — fluent chain and JSON document. Never invents runtime semantics. |
+| [`gemini-adk-rs`](crates/gemini-adk-rs) | L1 · runtime | State, flows, tools, extraction, phases, watchers. Gives meaning and enforcement; never hides a decision. |
+| [`gemini-genai-rs`](crates/gemini-genai-rs) | L0 · wire | A duplex authenticated frame stream, both platforms. Never interprets the conversation. |
 
-Build complex request/response LLM pipelines that can be dispatched from
-Live session hooks. These use standard `generate()` calls (not WebSocket
-sessions), enabling background processing during a voice conversation.
+Each layer's promise is named in code — `primitives` modules with compile-time drift tests, so a renamed or removed primitive breaks the contract at build time, not in a reader's mental model. [`gemini-memory-rs`](crates/gemini-memory-rs) sits beside the stack: durable memory as human-readable Markdown, prepared asynchronously, consumed synchronously, projected into governed state where guards read it.
 
-| Combinator | Purpose |
-|-----------|---------|
-| `LlmTextAgent` | Core agent -- generate, tool dispatch, loop |
-| `FnTextAgent` | Zero-cost state transform (no LLM call) |
-| `SequentialTextAgent` | Run children in order, state flows forward |
-| `ParallelTextAgent` | Run children concurrently via `tokio::spawn` |
-| `LoopTextAgent` | Repeat until max iterations or predicate |
-| `FallbackTextAgent` | Try each child, first success wins |
-| `RouteTextAgent` | State-driven deterministic branching |
-| `RaceTextAgent` | Run concurrently, first to finish wins |
-| `TimeoutTextAgent` | Wrap an agent with a time limit |
-| `MapOverTextAgent` | Iterate an agent over a list in state |
-| `TapTextAgent` | Read-only observation (no mutation) |
-| `DispatchTextAgent` | Fire-and-forget background tasks |
-| `JoinTextAgent` | Wait for dispatched tasks |
+Beyond flows, the L1/L2 surface covers the rest of a production session: typed tools with schemas derived from Rust types, per-tool policies (`confirm`/`timeout`/`cached`), background tool execution, MCP servers, out-of-band LLM extraction plus deterministic CPU recognizers (`#[derive(Extract)]` — no model in the control loop), phases with three steering modes, state watchers and temporal patterns, session persistence and repair, and text-agent combinators (`>>` `|` `/` `*`) with an eight-namespace composition algebra. Every one has a [book chapter](https://vamsiramakrishnan.github.io/gemini-rs/).
 
-Register text agents as tools the live model can call. The agent shares
-the session's `State`, so mutations are visible to watchers and phase
-transitions:
+## What the tests hold
 
-```rust
-Live::builder()
-    .agent_tool("verify_identity", "Verify caller identity", verifier_agent)
-    .agent_tool("calc_payment", "Calculate payment plans", calc_pipeline)
-```
-
-### S.C.T.P.M.A Composition
-
-Six operator namespaces for composing different aspects of agent configuration:
-
-| Namespace | Operator | Purpose | Example |
-|-----------|----------|---------|---------|
-| `S::` | `>>` | State transforms | `S::set("key", val) >> S::rename("a", "b")` |
-| `C::` | `+` | Context engineering | `C::last_n(5) + C::system_only()` |
-| `T::` | `\|` | Tool composition | `T::function(search) \| T::google_search()` |
-| `P::` | `+` | Prompt composition | `P::role("assistant") + P::task("summarize")` |
-| `M::` | `\|` | Middleware composition | `M::log() \| M::rate_limit(10)` |
-| `A::` | `+` | Artifact schemas | `A::produces(schema) + A::consumes(schema)` |
-
-**Prompt composition example:**
-
-```rust
-use gemini_adk_fluent_rs::prelude::*;
-
-let prompt = P::role("a customer support agent for Acme Corp")
-    + P::task("help customers with billing inquiries")
-    + P::constraint("never reveal internal pricing formulas")
-    + P::guidelines(vec![
-        "Be empathetic and professional",
-        "Confirm resolution before closing",
-    ]);
-
-let instruction = prompt.render();
-```
-
-### Callback Modes
-
-Control-lane callbacks support two execution modes:
-
-| Mode | Method suffix | Behavior |
-|------|--------------|----------|
-| **Blocking** | `.on_turn_complete()` | Awaited inline -- event loop waits |
-| **Concurrent** | `.on_turn_complete_concurrent()` | Spawned as detached task -- fire and forget |
-
-Use concurrent mode for logging, analytics, webhook dispatch, or background
-agent triggering where you don't need ordering guarantees.
-
-### REST APIs (Feature-Gated)
-
-The L0 crate also provides feature-gated access to Gemini REST APIs beyond
-the Live WebSocket connection:
-
-```toml
-[dependencies]
-gemini-genai-rs = { version = "0.8", features = ["generate", "embed", "files"] }
-# Or enable everything:
-# gemini-genai-rs = { version = "0.8", features = ["all-apis"] }
-```
-
-| Feature | API |
-|---------|-----|
-| `generate` | Content generation (`generateContent`) |
-| `embed` | Text embeddings |
-| `files` | File upload and management |
-| `models` | Model listing and info |
-| `tokens` | Token counting |
-| `caches` | Context caching |
-| `tunings` | Fine-tuning jobs |
-| `batches` | Batch prediction |
-| `chats` | Multi-turn chat sessions |
-
-### MCP Tools
-
-Register Model Context Protocol servers (stdio or HTTP) as tools callable by
-the live model. The SDK handles the MCP handshake, tool schema translation, and
-call routing automatically.
-
-```rust
-Live::builder()
-    .mcp_stdio("filesystem", "npx", &["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
-    .mcp_http("kb", "http://localhost:8080/mcp")
-```
-
-### Session Persistence
-
-Survive process restarts by persisting session state to a storage backend.
-Resume a session transparently — the model context, phase, and state are
-restored from the snapshot.
-
-Built-in backends: `FsPersistence` (filesystem), `MemoryPersistence`
-(in-process, useful for tests). Implement the `SessionPersistence` trait for
-custom backends (Redis, SQLite via sqlx, DynamoDB, etc.).
-
-```rust
-Live::builder()
-    .persistence(Arc::new(FsPersistence::new("/var/sessions")))
-    .session_id("user-123-session-456")
-```
-
-### Operator Quick Reference
-
-| Operator | Namespace(s) | Meaning |
-|----------|-------------|---------|
-| `>>` | `S::` (State), text agents | Sequential / pipeline — left runs first, output feeds right |
-| `\|` | `T::` (Tools), `M::` (Middleware), text agents | Parallel fan-out (agents) or compose into a set (tools / middleware) |
-| `/` | text agents | Fallback — try left, use right if left fails |
-| `*` | text agents | Loop — `agent * 3` (fixed count) or `agent * until(pred)` (conditional) |
-| `+` | `C::` (Context), `P::` (Prompt), `A::` (Artifacts) | Additive composition — layers are merged in order |
-
----
-
-## Three-Lane Processor Architecture
-
-All Live session events are routed through a zero-copy dispatcher into three
-independent lanes, each optimized for its latency profile:
-
-<p align="center"><img src="docs/assets/diagrams/three-lane-processor.svg" alt="Three-lane processor: fast, control, and telemetry lanes" width="820"></p>
-
-**Design constraints:**
-- Fast lane callbacks must be sync and complete in < 1ms (no allocations, no locks, no async)
-- Control lane owns the `TranscriptBuffer` exclusively (no `Arc<Mutex<>>`)
-- Telemetry lane runs on its own broadcast receiver (never blocks the router)
-- Extractors run concurrently via `futures::future::join_all`
-
----
-
-## Examples
-
-The `examples/cookbook/` directory ships **40 runnable cookbook examples** on a
-Crawl → Walk → Run → Governed path; `37`–`40` cover the governed-agent
-capabilities (`Flow`, `Extract`, and the booking/screening capstones) and run
-with no credentials. Plus standalone Axum demos and the multi-app Web UI below.
-
-### Getting Started
+- 2,500+ workspace tests, none requiring an API key — including G.711 codec conformance against known wire values, RTP wire layouts, SDP offer/answer round-trips, a raw-UDP SIP signalling integration test, guard truth-trace suites, and codegen goldens.
+- Every gallery cookbook compiles through the real flow compiler and passes its own embedded tests, in CI.
+- Generated apps compile as standalone crates under `RUSTFLAGS="-D warnings"`.
+- Layer contracts are drift-tested; docs build with `RUSTDOCFLAGS="-D warnings"`.
 
 ```bash
-# 1. Configure credentials
-cp .env.example .env
-# Edit .env: set GEMINI_API_KEY (Google AI) or GOOGLE_CLOUD_PROJECT + GOOGLE_CLOUD_LOCATION (Vertex AI)
-
-# 2. Run a standalone example
-cargo run -p text-chat       # http://127.0.0.1:3001
-cargo run -p voice-chat      # http://127.0.0.1:3002
-cargo run -p tool-calling    # http://127.0.0.1:3003
-cargo run -p transcription   # http://127.0.0.1:3004
-
-# 3. Run the multi-app Web UI (all apps + devtools panel)
-cargo run -p gemini-adk-web-rs         # http://127.0.0.1:25125
+cargo test --workspace          # ~2,500 tests, no credentials
+cargo run -p example-cookbook --bin 37-governed-flow    # governed flow, no credentials
+cargo run -p gemini-adk-web-rs  # Web UI + Flow Studio → :25125
 ```
 
-### Standalone Examples
+[`examples/`](examples/INDEX.md) holds 40 progressive cookbook binaries (builders → combinators → multi-agent → governed capstones), the telephony and SIP agents, the TTS-driven call above, and focused per-layer demos. [`apps/gemini-adk-web-rs`](apps/gemini-adk-web-rs) bundles 13 showcase apps with a shared DevTools panel.
 
-These run independently with their own Axum server and minimal UI.
+## Documentation
 
-| Example | Port | Layer | What You Learn |
-|---------|------|-------|----------------|
-| [`text-chat`](examples/text-chat) | 3001 | L0 | Wire protocol basics — connect, send text, receive streaming deltas |
-| [`voice-chat`](examples/voice-chat) | 3002 | L0 | Bidirectional audio, voice selection, VAD events, transcription |
-| [`tool-calling`](examples/tool-calling) | 3003 | L1 | `TypedTool` with auto-generated JSON Schema, `ToolDispatcher` routing |
-| [`transcription`](examples/transcription) | 3004 | L0 | Every Gemini Live config option: VAD, activity handling, affective dialog, context compression, session resumption |
-| [`agents`](examples/agents) | CLI | L1/L2 | Text agent combinators (`>>`, `\|`, `/`), `TypedTool`, copy-on-write builders |
+The [book](https://vamsiramakrishnan.github.io/gemini-rs/) is the reference — 30+ chapters from setup to the layer contract, deployed from [`docs/`](docs) on every push to `main`, with the merged [rustdoc API reference](https://vamsiramakrishnan.github.io/gemini-rs/api/gemini_genai_rs/index.html) beside it. [CLAUDE.md](CLAUDE.md) is the condensed map of the codebase. [ROADMAP.md](ROADMAP.md) says what is deliberately not built yet.
 
-### ADK Web UI (`gemini-adk-web-rs`)
-
-The Web UI bundles all apps below into a single Axum server with a shared
-devtools panel showing real-time state, timeline, transcript, and telemetry.
-
-#### Crawl (Beginner)
-
-| App | What It Demonstrates | Key SDK Features |
-|-----|---------------------|-----------------|
-| **text-chat** | Minimal text-only session — no microphone needed | `Live::builder().text_only()`, text streaming |
-| **voice-chat** | Native audio chat with real-time transcription | `Modality::Audio`, voice selection, input/output transcription |
-| **tool-calling** | Three demo tools: weather, time, calculator | `FunctionDeclaration`, `on_tool_call`, `NonBlocking` behavior, `WhenIdle` scheduling |
-
-#### Walk (Intermediate)
-
-| App | What It Demonstrates | Key SDK Features |
-|-----|---------------------|-----------------|
-| **all-config** | Configuration playground — every Gemini Live option in one app | Dynamic tool creation, modality switching, Google Search, code execution, context compression |
-| **guardrails** | Real-time policy monitoring with corrective injection | `RegexExtractor`, `.watch()` state reactions, `.instruction_amendment()`, PII/off-topic/sentiment detection |
-| **playbook** | 6-phase customer support flow with state extraction | `.phase()` chains, `.transition_with()` guards, `.greeting()`, `.with_context()`, `RegexExtractor` |
-
-#### Run (Advanced)
-
-| App | What It Demonstrates | Key SDK Features |
-|-----|---------------------|-----------------|
-| **support-assistant** | Multi-agent handoff between billing and technical support | Dual state machines (10 phases), `.computed()` derived state, cross-agent transitions, telemetry |
-| **call-screening** | Incoming call screening with sentiment analysis and smart routing | Phase machine, tool calling (`check_contact_list`, `check_calendar`, `take_message`, `transfer_call`, `block_caller`), `NonBlocking` tools |
-| **clinic** | HIPAA-aware telehealth scheduling with clinical triage | 8 tools (`verify_patient`, `check_availability`, `book_appointment`, etc.), patient intake flow, department routing |
-| **restaurant** | Restaurant reservation and ordering system | 6 tools (`check_availability`, `make_reservation`, `get_menu`, etc.), dietary handling, occasion tracking |
-| **debt-collection** | FDCPA-compliant debt collection with compliance gates | `StateKey<T>`, identity verification, payment negotiation, cease-and-desist handling, compliance watchers |
-
-### Platform Support
-
-All examples work with both **Google AI** (API key) and **Vertex AI** (project/location).
-The SDK auto-strips unsupported features on Vertex AI — no code changes needed:
-
-| Feature | Google AI | Vertex AI |
-|---------|-----------|-----------|
-| Async tool calling (`NonBlocking`, `WhenIdle`/`Silent`) | Supported | Stripped automatically |
-| Thinking (`thinkingConfig`) | Supported | Stripped automatically |
-
----
-
-## Common Errors & Solutions
-
-### Vertex AI sends binary WebSocket frames
-
-**Symptom:** `serde_json::from_str` fails on messages from Vertex AI.
-
-**Cause:** Vertex AI sends Binary WebSocket frames, not Text frames (unlike
-Google AI).
-
-**Solution:** Already handled by `TungsteniteTransport::recv()`. If you build a
-custom transport, handle both `Message::Text` and `Message::Binary`.
-
-### Native audio model only supports AUDIO output modality
-
-**Symptom:** Error when requesting `Modality::Text` with
-`GeminiLive2_5FlashNativeAudio`.
-
-**Solution:** Use `Modality::Audio` only, or switch to `Gemini2_0FlashLive`
-which supports text output:
-
-```rust
-// Correct for native audio model:
-config.response_modalities(vec![Modality::Audio])
-
-// For text output, use the non-native model:
-.model(GeminiModel::Gemini2_0FlashLive)
-```
-
-### Vertex AI endpoint URL
-
-**Symptom:** Connection fails to `global-aiplatform.googleapis.com`.
-
-**Solution:** Use `aiplatform.googleapis.com` (no `global-` prefix). The SDK
-handles this automatically via the `Platform` enum.
-
-### Tool declarations cannot be updated mid-session
-
-**Symptom:** Attempting to add or remove tools after `connect()`.
-
-**Cause:** The Gemini Live API does not support updating tool definitions after
-session setup.
-
-**Solution:** Declare all tools upfront. Use per-phase `tools_enabled` to
-control which tools the model can call at any given point in the conversation.
-
-### Extraction returns stale data
-
-**Symptom:** `handle.extracted::<T>(name)` returns the previous turn's data.
-
-**Cause:** Extractors run asynchronously on the control lane after each turn
-completes.
-
-**Solution:** Use the `on_extracted` callback for real-time notifications, or
-poll `handle.extracted()` after the turn-complete event.
-
-### State key not found despite being set
-
-**Symptom:** `state.get("risk")` returns `None` even though you called
-`state.set("derived:risk", 0.85)`.
-
-**Solution:** The derived fallback works correctly: `get("risk")` checks
-`derived:risk` automatically. However, `get("app:risk")` does NOT trigger the
-fallback -- prefixed keys are looked up exactly as specified.
-
-### Session disconnects after inactivity
-
-**Symptom:** Server sends `GoAway` and closes the connection.
-
-**Solution:** Handle gracefully with `.on_go_away(|ttl| async move { ... })`.
-Enable session resumption with `.session_resume(true)` for transparent reconnect
-support.
-
-### Context window fills up in long conversations
-
-**Symptom:** Model responses degrade in quality after many turns.
-
-**Solution:** Enable context window compression:
-
-```rust
-Live::builder()
-    .context_compression(4000, 2000)  // trigger at 4k tokens, compress to 2k
-```
-
----
-
-## Development
-
-### Prerequisites
-
-| Requirement | Version | Purpose |
-|------------|---------|---------|
-| **Rust** | 1.93+ | Language toolchain ([install](https://rustup.rs/)) |
-| **cargo** | (bundled) | Build system and package manager |
-| **pkg-config** | any | Locates system libraries |
-| **OpenSSL** | 1.1+ | TLS for WebSocket connections |
-| **ALSA dev** (Linux) | any | Audio I/O for voice examples |
-
-**Quick setup (Ubuntu/Debian):**
-
-```bash
-# Install Rust
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-source $HOME/.cargo/env
-
-# Install system dependencies
-sudo apt-get update
-sudo apt-get install -y pkg-config libssl-dev libasound2-dev build-essential
-```
-
-**Quick setup (macOS):**
-
-```bash
-# Install Rust
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
-# System deps (OpenSSL via Homebrew)
-brew install openssl pkg-config
-```
-
-**Environment variables:**
-
-```bash
-# Google AI (API key auth)
-export GEMINI_API_KEY="your-api-key"
-
-# Vertex AI (service account auth)
-export GOOGLE_CLOUD_PROJECT="your-project-id"
-export GOOGLE_CLOUD_LOCATION="us-central1"
-```
-
-### Build
-
-```bash
-cargo build --workspace
-```
-
-### Test
-
-```bash
-cargo test --workspace
-```
-
-### Lint
-
-```bash
-cargo clippy --workspace --all-targets -- -D warnings
-cargo fmt --all -- --check
-```
-
-### Run the Web UI
-
-```bash
-cd apps/gemini-adk-web-rs
-GEMINI_API_KEY="your-key" cargo run
-# Open http://localhost:25125
-```
-
-### Generate documentation
-
-```bash
-cargo doc --workspace --no-deps --open
-```
-
-### Feature flags (gemini-genai-rs)
-
-```bash
-# Default: live + vad + tracing
-cargo build -p gemini-genai-rs
-
-# With REST APIs
-cargo build -p gemini-genai-rs --features generate,embed,files
-
-# Everything
-cargo build -p gemini-genai-rs --features all-apis,metrics,opus
-```
-
----
-
-## Project Structure
-
-```
-gemini-rs/
-  crates/
-    gemini-genai-rs/              L0: Wire protocol, transport, types
-    gemini-adk-rs/                L1: Agent runtime, state, phases, tools
-    gemini-adk-fluent-rs/         L2: Fluent builder API, operators
-  examples/
-    text-chat/             Minimal text-only session (L0)
-    voice-chat/            Bidirectional audio chat (L0)
-    tool-calling/          TypedTool + ToolDispatcher (L1)
-    transcription/         Every Gemini Live config option (L0)
-    agents/                Text agent combinators (L1/L2)
-    INDEX.md               Full example reference with per-app docs
-  apps/
-    gemini-adk-web-rs/               Multi-app Web UI with devtools (L2)
-      src/apps/            13 showcase apps (see examples/INDEX.md)
-  tools/
-    gemini-adk-transpiler-rs/        Python ADK to Rust transpiler
-  Cargo.toml               Workspace root
-```
-
----
+Building locally: Rust 1.93+, `pkg-config libssl-dev` (plus `libasound2-dev` for `voice-io`); `cargo build --workspace`; `mdbook build docs` for the book. Releases go through `just release <version>` — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-Licensed under the MIT License. See [LICENSE](LICENSE) for
-details.
+MIT — see [LICENSE](LICENSE).

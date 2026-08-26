@@ -1,421 +1,394 @@
 /* =============================================================================
-   gemini-rs mdBook custom theme
+   gemini-rs mdBook theme — the instrument-panel language.
+   No gradients, no glow, no decorative colour. Square corners, one-pixel
+   rules, semantic accent only. Monospace carries byte-shaped evidence.
    Applied on top of mdBook's built-in 'ayu' (dark) / 'light' themes.
    ============================================================================= */
 
-/* ── Google Fonts ─────────────────────────────────────────────────────────── */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
-/* ── Brand tokens ─────────────────────────────────────────────────────────── */
 :root {
-  --brand:          #4f46e5;
-  --brand-light:    #818cf8;
-  --brand-glow:     rgba(79, 70, 229, 0.15);
-  --radius:         8px;
-  --radius-lg:      12px;
+  --accent: #2563eb;          /* bounded / addressed / controlled */
+  --rule:   rgba(128, 128, 128, 0.28);
 }
 
 /* ── Base typography ──────────────────────────────────────────────────────── */
 body {
   font-family: 'Inter', system-ui, -apple-system, sans-serif !important;
   font-size: 16px;
-  line-height: 1.75;
+  line-height: 1.7;
   -webkit-font-smoothing: antialiased;
 }
 
 .content main {
-  max-width: 860px;
+  max-width: 800px;
 }
 
-/* ── Headings ─────────────────────────────────────────────────────────────── */
+/* ── Headings: hierarchy by weight and rule, not colour ───────────────────── */
 h1, h2, h3, h4, h5 {
   font-family: 'Inter', system-ui, sans-serif;
   font-weight: 700;
-  line-height: 1.3;
-  letter-spacing: -0.02em;
+  line-height: 1.25;
+  letter-spacing: -0.015em;
 }
 
 h1 {
-  font-size: 2rem;
-  font-weight: 800;
+  font-size: 1.9rem;
   margin-top: 0;
   padding-bottom: 0.5rem;
-  border-bottom: 2px solid var(--brand);
-  background: linear-gradient(135deg, var(--brand) 0%, var(--brand-light) 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  border-bottom: 1px solid var(--rule);
 }
 
 h2 {
-  font-size: 1.5rem;
-  margin-top: 2.5rem;
-  padding-bottom: 0.35rem;
-  border-bottom: 1px solid var(--quote-border);
+  font-size: 1.35rem;
+  margin-top: 2.75rem;
+  padding-bottom: 0.3rem;
+  border-bottom: 1px solid var(--rule);
 }
 
 h3 {
-  font-size: 1.2rem;
+  font-size: 1.1rem;
   margin-top: 2rem;
-  color: var(--brand-light);
 }
 
 h4 {
-  font-size: 1rem;
+  font-size: 0.85rem;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin-top: 1.5rem;
-  opacity: 0.85;
+  letter-spacing: 0.07em;
+  margin-top: 1.75rem;
+  opacity: 0.8;
 }
 
-/* ── Links ────────────────────────────────────────────────────────────────── */
+/* ── Links: accent, underline on hover, nothing else ──────────────────────── */
 a {
-  color: var(--brand-light) !important;
+  color: var(--accent) !important;
   text-decoration: none;
   border-bottom: 1px solid transparent;
-  transition: border-color 0.15s, color 0.15s;
 }
 
 a:hover {
-  border-bottom-color: var(--brand-light);
+  border-bottom-color: var(--accent);
 }
 
-/* ── Code: inline ─────────────────────────────────────────────────────────── */
+/* ── Code: JetBrains Mono, hairline borders, square corners ───────────────── */
 code {
   font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace !important;
   font-size: 0.85em;
-  padding: 0.15em 0.4em;
-  border-radius: 4px;
-  font-feature-settings: "liga" 1, "calt" 1;
+  padding: 0.1em 0.35em;
+  border-radius: 0;
+  font-feature-settings: "liga" 0;
 }
 
-/* ── Code: blocks ─────────────────────────────────────────────────────────── */
 pre {
-  border-radius: var(--radius-lg) !important;
-  border: 1px solid rgba(255,255,255,0.08) !important;
-  box-shadow: 0 4px 24px rgba(0,0,0,0.25) !important;
-  position: relative;
-  overflow: hidden;
-}
-
-pre::before {
-  content: '';
-  position: absolute;
-  top: 0; left: 0; right: 0;
-  height: 3px;
-  background: linear-gradient(90deg, var(--brand) 0%, var(--brand-light) 100%);
-  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  border-radius: 0 !important;
+  border: 1px solid var(--rule) !important;
+  box-shadow: none !important;
 }
 
 pre code {
   font-family: 'JetBrains Mono', 'Fira Code', monospace !important;
-  font-size: 0.875rem !important;
-  line-height: 1.65 !important;
+  font-size: 0.85rem !important;
+  line-height: 1.6 !important;
   padding: 0 !important;
-  border-radius: 0 !important;
 }
 
-/* ── Tables ───────────────────────────────────────────────────────────────── */
+/* ── Tables: rules organize, they do not decorate ─────────────────────────── */
 table {
   border-collapse: collapse;
   width: 100%;
   margin: 1.5rem 0;
-  border-radius: var(--radius);
-  overflow: hidden;
-  box-shadow: 0 1px 8px rgba(0,0,0,0.15);
+  border-radius: 0;
+  box-shadow: none;
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
 }
 
 thead tr {
-  background: var(--brand) !important;
+  background: transparent !important;
 }
 
 thead th {
-  color: #ffffff !important;
   font-weight: 600;
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: 0.75rem 1rem !important;
+  letter-spacing: 0.06em;
+  padding: 0.6rem 0.9rem !important;
   border: none !important;
+  border-bottom: 1px solid var(--rule) !important;
+  text-align: left;
 }
 
-tbody tr:nth-child(even) {
-  background: rgba(79, 70, 229, 0.05);
-}
-
+tbody tr:nth-child(even),
 tbody tr:hover {
-  background: rgba(79, 70, 229, 0.1);
-  transition: background 0.15s;
+  background: transparent;
 }
 
 td, th {
-  padding: 0.6rem 1rem !important;
-  border-bottom: 1px solid var(--quote-border) !important;
-  border-top: none !important;
-  border-left: none !important;
-  border-right: none !important;
+  padding: 0.55rem 0.9rem !important;
+  border: none !important;
+  border-bottom: 1px solid var(--rule) !important;
   vertical-align: top;
 }
 
-/* ── Blockquote → styled callout ─────────────────────────────────────────── */
+tbody tr:last-child td {
+  border-bottom: none !important;
+}
+
+/* ── Blockquote: a rule and an inset, no icon, no wash ────────────────────── */
 blockquote {
-  border-left: 4px solid var(--brand) !important;
-  background: var(--brand-glow) !important;
+  border-left: 2px solid var(--accent) !important;
+  background: transparent !important;
   margin: 1.5rem 0 !important;
-  padding: 1rem 1.25rem !important;
-  border-radius: 0 var(--radius) var(--radius) 0 !important;
+  padding: 0.25rem 1.25rem !important;
+  border-radius: 0 !important;
   font-style: normal !important;
 }
 
 blockquote p {
-  margin: 0;
-}
-
-blockquote p:first-child::before {
-  content: '💡 ';
+  margin: 0.5rem 0;
 }
 
 /* ── Sidebar ──────────────────────────────────────────────────────────────── */
 #sidebar {
   background: var(--bg) !important;
-  border-right: 1px solid var(--quote-border) !important;
+  border-right: 1px solid var(--rule) !important;
 }
 
 #sidebar .sidebar-scrollbox {
-  padding: 1.5rem 0.75rem;
+  padding: 1.25rem 0.75rem;
 }
 
 .sidebar .chapter li a {
-  border-radius: var(--radius) !important;
-  padding: 0.3rem 0.75rem !important;
-  margin: 0.1rem 0 !important;
+  border-radius: 0 !important;
+  padding: 0.28rem 0.75rem !important;
+  margin: 0 !important;
   display: block;
-  transition: background 0.15s, color 0.15s;
   font-size: 0.9rem;
 }
 
 .sidebar .chapter li a:hover {
-  background: var(--brand-glow) !important;
+  background: transparent !important;
   border-bottom: none !important;
+  color: var(--accent) !important;
 }
 
 .sidebar .chapter li a.active {
-  background: var(--brand) !important;
-  color: #ffffff !important;
+  background: transparent !important;
+  border-left: 2px solid var(--accent) !important;
+  padding-left: calc(0.75rem - 2px) !important;
+  color: var(--accent) !important;
   font-weight: 600;
 }
 
 /* ── Nav bar ──────────────────────────────────────────────────────────────── */
 #menu-bar {
-  backdrop-filter: blur(12px) !important;
-  border-bottom: 1px solid var(--quote-border) !important;
+  border-bottom: 1px solid var(--rule) !important;
 }
 
 /* ── Search ───────────────────────────────────────────────────────────────── */
 #searchbar {
-  border-radius: var(--radius) !important;
-  border: 1px solid var(--brand) !important;
-  box-shadow: 0 0 0 3px var(--brand-glow) !important;
+  border-radius: 0 !important;
+  border: 1px solid var(--rule) !important;
+  box-shadow: none !important;
   font-family: 'Inter', sans-serif !important;
 }
 
-/* ── Page nav buttons ────────────────────────────────────────────────────────*/
+#searchbar:focus {
+  border-color: var(--accent) !important;
+}
+
+/* ── Page nav buttons ─────────────────────────────────────────────────────── */
 .nav-chapters {
-  border-radius: var(--radius) !important;
-  transition: background 0.15s, transform 0.15s !important;
+  border-radius: 0 !important;
+  transition: none !important;
 }
 
 .nav-chapters:hover {
-  background: var(--brand-glow) !important;
-  transform: scale(1.05);
+  background: transparent !important;
+  color: var(--accent) !important;
+  transform: none;
 }
 
 /* ── hr divider ───────────────────────────────────────────────────────────── */
 hr {
   border: none !important;
   height: 1px;
-  background: linear-gradient(90deg, transparent, var(--brand), transparent) !important;
+  background: var(--rule) !important;
   margin: 2.5rem 0 !important;
-  opacity: 0.5;
 }
 
 /* ── Scrollbar (Webkit) ───────────────────────────────────────────────────── */
-::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--brand); border-radius: 99px; }
-::-webkit-scrollbar-thumb:hover { background: var(--brand-light); }
+::-webkit-scrollbar-thumb { background: var(--rule); border-radius: 0; }
 
-/* ── "Note" / "Warning" admonish-style callouts via raw HTML in .md files ── */
+/* ── Callouts: colour is semantic, backgrounds stay quiet ─────────────────── */
 /* Usage in .md: <div class="callout note">...</div>                          */
 .callout {
   margin: 1.5rem 0;
-  padding: 1rem 1.25rem;
-  border-radius: 0 var(--radius) var(--radius) 0;
-  border-left: 4px solid;
+  padding: 0.85rem 1.25rem;
+  border-radius: 0;
+  border-left: 2px solid;
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+  border-right: 1px solid var(--rule);
   font-size: 0.95rem;
 }
 
-.callout.note {
-  border-color: var(--brand);
-  background: var(--brand-glow);
-}
-
-.callout.warning {
-  border-color: #f59e0b;
-  background: rgba(245, 158, 11, 0.1);
-}
-
-.callout.danger {
-  border-color: #ef4444;
-  background: rgba(239, 68, 68, 0.1);
-}
-
-.callout.tip {
-  border-color: #10b981;
-  background: rgba(16, 185, 129, 0.1);
-}
+.callout.note    { border-left-color: var(--accent); }  /* bounded / controlled */
+.callout.warning { border-left-color: #b45309; }        /* decision point */
+.callout.danger  { border-left-color: #b91c1c; }        /* loss / unsupported */
+.callout.tip     { border-left-color: #15803d; }        /* verified outcome */
 
 .callout-title {
-  font-weight: 700;
-  font-size: 0.85rem;
+  font-weight: 600;
+  font-size: 0.8rem;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  margin-bottom: 0.5rem;
+  letter-spacing: 0.07em;
+  margin-bottom: 0.4rem;
 }
 
-/* ── Hero (homepage) ──────────────────────────────────────────────────────── */
+/* ── Images: diagrams and screenshots sit on a hairline, not a shadow ─────── */
+.content main img {
+  border: 1px solid var(--rule);
+}
+
+.content main img.hero-mark,
+.content main .hero img {
+  border: none;
+}
+
+/* ── Homepage components: hero, stat strip, card grid ─────────────────────────
+   Structure from the brand-refresh pass, restated in the instrument-panel
+   language: no gradients, no radius, hairlines and the one accent. */
 .hero {
-  margin: -1rem -1rem 2.5rem -1rem;
-  padding: 3.5rem 2rem 3rem;
-  border-radius: var(--radius-lg);
-  background:
-    radial-gradient(circle at 15% 20%, var(--brand-glow), transparent 55%),
-    radial-gradient(circle at 85% 0%, rgba(52, 211, 153, 0.12), transparent 50%);
+  margin: 0 0 2rem 0;
+  padding: 2.5rem 1rem 2rem;
   text-align: center;
+  border-bottom: 1px solid var(--rule);
 }
+
 .hero-mark {
-  width: 56px;
-  height: 56px;
-  margin: 0 auto 1.25rem;
+  width: 48px;
+  height: 48px;
+  margin: 0 auto 1rem;
   display: block;
-  border-radius: 14px;
-  box-shadow: 0 8px 24px var(--brand-glow);
 }
+
 .hero-eyebrow {
-  display: inline-block;
+  font-family: 'JetBrains Mono', monospace;
   font-size: 0.75rem;
-  font-weight: 700;
-  letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--brand);
-  background: var(--brand-glow);
-  padding: 0.3rem 0.85rem;
-  border-radius: 999px;
-  margin-bottom: 1rem;
+  letter-spacing: 0.1em;
+  opacity: 0.7;
+  margin-bottom: 0.75rem;
 }
+
 .hero h1 {
-  border-bottom: none !important;
-  font-size: 2.6rem !important;
-  margin: 0 0 1rem !important;
-  padding: 0 !important;
+  border-bottom: none;
+  padding-bottom: 0;
+  margin-bottom: 0.75rem;
 }
+
 .hero-sub {
-  max-width: 640px;
-  margin: 0 auto 1.75rem;
-  font-size: 1.15rem;
+  max-width: 40rem;
+  margin: 0 auto 1.5rem;
+  font-size: 1.05rem;
   line-height: 1.6;
-  opacity: 0.85;
 }
-.hero-cta {
+
+.hero-cta,
+.hero-cta p {
   display: flex;
   gap: 0.75rem;
   justify-content: center;
   flex-wrap: wrap;
-}
-.hero-cta a {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.65rem 1.4rem;
-  border-radius: 999px;
-  font-weight: 600;
-  font-size: 0.95rem;
-  text-decoration: none !important;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
-}
-.hero-cta a.primary {
-  background: linear-gradient(135deg, var(--brand), var(--brand-light));
-  color: #fff !important;
-  box-shadow: 0 6px 20px var(--brand-glow);
-}
-.hero-cta a.secondary {
-  border: 1px solid var(--brand);
-  color: var(--brand) !important;
-  background: transparent;
-}
-.ayu .hero-cta a.secondary,
-.coal .hero-cta a.secondary,
-.navy .hero-cta a.secondary {
-  color: #a5b4fc !important;
-  border-color: #a5b4fc;
-}
-.hero-cta a:hover {
-  transform: translateY(-2px);
+  margin: 0;
 }
 
-/* ── Stat / feature strip ─────────────────────────────────────────────────── */
+.hero-cta a {
+  display: inline-block;
+  padding: 0.45rem 1.1rem;
+  border: 1px solid var(--rule);
+  border-radius: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.hero-cta a:hover {
+  border-color: var(--accent);
+}
+
+.hero-cta a:first-child {
+  border-color: var(--accent);
+  color: var(--accent) !important;
+}
+
+/* Measured numbers, presented as such. */
 .stat-row {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 1rem;
-  margin: 2rem 0;
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin: 0 0 2.5rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.stat-row .stat {
+  padding: 0.9rem 1.75rem;
   text-align: center;
 }
+
+.stat-row .stat + .stat {
+  border-left: 1px solid var(--rule);
+}
+
 .stat-row .stat b {
   display: block;
-  font-size: 1.6rem;
-  font-weight: 800;
-  background: linear-gradient(135deg, var(--brand), var(--brand-light));
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  font-size: 1.4rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
+
 .stat-row .stat span {
-  font-size: 0.8rem;
-  opacity: 0.7;
+  display: block;
+  font-size: 0.75rem;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
+  opacity: 0.7;
+  margin-top: 0.15rem;
 }
 
 .card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-  gap: 1rem;
-  margin: 1.5rem 0 2rem;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0;
+  border: 1px solid var(--rule);
+  margin: 1.5rem 0;
 }
+
 .card-grid .card {
-  border: 1px solid var(--brand-glow);
-  border-radius: var(--radius-lg);
-  padding: 1.1rem 1.3rem;
-  background: var(--sidebar-bg, rgba(127,127,127,0.04));
+  padding: 1.1rem 1.25rem;
+  border: 0 solid var(--rule);
+  border-right-width: 1px;
+  border-bottom-width: 1px;
+  margin: -0.5px;
 }
+
 .card-grid .card h4 {
-  margin: 0 0 0.4rem !important;
-  font-size: 1rem;
+  margin: 0 0 0.4rem 0;
 }
+
 .card-grid .card p {
   margin: 0;
-  font-size: 0.88rem;
-  opacity: 0.8;
+  font-size: 0.9rem;
   line-height: 1.55;
 }
 
-/* ── Mobile tweaks ────────────────────────────────────────────────────────── */
+/* ── Mobile ───────────────────────────────────────────────────────────────── */
 @media (max-width: 768px) {
-  h1 { font-size: 1.6rem; }
-  h2 { font-size: 1.3rem; }
-  pre { border-radius: var(--radius) !important; }
+  h1 { font-size: 1.5rem; }
+  h2 { font-size: 1.25rem; }
   table { font-size: 0.85rem; }
   .hero { padding: 2.5rem 1.25rem 2rem; margin: -1rem -1rem 2rem -1rem; }
   .hero h1 { font-size: 1.9rem !important; }
