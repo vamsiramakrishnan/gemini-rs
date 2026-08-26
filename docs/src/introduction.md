@@ -1,13 +1,36 @@
+<div class="hero">
+  <img class="hero-mark" src="./assets/brand/logo-mark.svg" alt="gemini-rs">
+  <div class="hero-eyebrow">v0.8 · Rust SDK</div>
+
 # gemini-rs
 
-**The model improvises. The conversation must not.**
+  <p class="hero-sub">
+    <strong>The model improvises. The conversation must not.</strong><br>
+    Full-duplex Gemini Live agents in Rust — one wire protocol, one governed
+    runtime, one fluent API, in three layered crates.
+  </p>
+  <div class="hero-cta">
+    <a class="primary" href="./setup-and-running.html">Get started</a>
+    <a class="secondary" href="./cookbooks.html">Browse the cookbook</a>
+    <a class="secondary" href="https://github.com/vamsiramakrishnan/gemini-rs">GitHub</a>
+  </div>
+</div>
 
-gemini-rs is a full Rust SDK for the Gemini Multimodal Live API — wire
-protocol, agent runtime, and fluent DX in three layered crates. It treats a
-conversation as a contract: you declare the flow — steps, completion guards,
-tool gates, ordering constraints — and the runtime enforces it while the
-model speaks. The same contract is a JSON document that validates, simulates,
-tests, and code-generates offline, and a canvas you can edit by hand.
+<div class="stat-row">
+  <div class="stat"><b>3</b><span>layered crates</span></div>
+  <div class="stat"><b>40</b><span>cookbook recipes</span></div>
+  <div class="stat"><b>2,500+</b><span>tests, no API key</span></div>
+  <div class="stat"><b>6</b><span>Studio cookbooks</span></div>
+</div>
+
+gemini-rs treats a conversation as a contract: you declare the flow — steps,
+completion guards, tool gates, ordering constraints — and the runtime
+enforces it while the model speaks. The same contract is a JSON document that
+validates, simulates, tests, and code-generates offline, and a canvas you can
+edit by hand. Drop to `gemini-genai-rs` for byte-level control of the
+Multimodal Live protocol, or reach for `gemini-adk-fluent-rs` and have a
+governed voice agent talking in five lines — the same `State` spine underpins
+every layer, so you never hit a ceiling.
 
 <p align="center"><img src="./assets/diagrams/architecture-stack.svg" alt="Three-crate layered architecture: L2 fluent DX over L1 runtime over L0 wire protocol" width="720"></p>
 
@@ -76,18 +99,40 @@ over exactly that document:
 See [Flows as JSON](./user-guide/flow-json.md) for the format and
 [the Studio tour](./flow-studio.md) for the editor.
 
-## Guide structure
+## Find your way around
 
-- **Getting Started** — setup, authentication, architecture, the layer
-  contract, migration, best practices
-- **Voice & Live Sessions** — live sessions and callbacks, voice I/O,
-  telephony (Twilio + SIP), phases, steering, state, watchers, persistence,
-  record & replay
-- **Tools & Extraction** — tool system, per-tool policies, MCP, extraction
-- **Composition & Patterns** — governed flows, flows as JSON, the Flow Studio,
-  orchestration, text agents, the operator algebra, middleware
-- **Memory** — the durable memory engine and its declarative binding
-- **Examples** — 40 progressive cookbook examples plus the interactive Web UI
+<div class="card-grid">
+  <div class="card">
+    <h4>Getting started</h4>
+    <p>Setup, authentication, the three-layer architecture and its contract,
+    migrating from raw WebSockets, best practices.</p>
+  </div>
+  <div class="card">
+    <h4>Voice &amp; Live sessions</h4>
+    <p>Live sessions and callbacks, voice I/O, telephony (Twilio + SIP),
+    phases, steering, state, watchers, persistence, record &amp; replay.</p>
+  </div>
+  <div class="card">
+    <h4>Tools &amp; extraction</h4>
+    <p>The tool system, per-tool policies, MCP interop, and deterministic +
+    LLM-backed extraction pipelines.</p>
+  </div>
+  <div class="card">
+    <h4>Composition &amp; patterns</h4>
+    <p>Governed flows, flows as JSON, the Flow Studio, orchestration,
+    text-agent combinators, the S·C·T·P·M·A algebra, middleware.</p>
+  </div>
+  <div class="card">
+    <h4>Memory</h4>
+    <p>The durable memory engine — async-prepare, sync-consume — and its
+    declarative binding into governed state.</p>
+  </div>
+  <div class="card">
+    <h4>Examples &amp; Web UI</h4>
+    <p>40 progressive cookbook recipes plus the interactive
+    <code>gemini-adk-web-rs</code> demo suite and DevTools.</p>
+  </div>
+</div>
 
 ## API reference
 
