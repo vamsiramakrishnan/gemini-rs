@@ -63,31 +63,41 @@ cargo run -p gemini-memory-rs --example memory_pipeline
 
 ## Wiring into a Live session
 
+Memory has exactly two touchpoints on a live conversation, and both are
+mechanisms the runtime already owns: the **extraction pipeline** (a
+`MemoryTurnExtractor` runs at each turn boundary and promotes its fields into
+governed `State`) and the **tool dispatcher** (which serves `recall_context`
+and `manage_memory`). There is deliberately no third mechanism — an earlier
+revision carried its own channel and control loop, and every duplicated
+mechanism is a second place for turn bookkeeping to drift. The whole
+installation is one extension trait:
+
 ```rust,ignore
-use gemini_memory_rs::runtime::{channel, run_memory_control_loop, tools};
+use gemini_memory_rs::runtime::{LiveMemoryExt, MemorySlot};
 
 let session = Arc::new(engine.begin_session(SessionId::new("ses_01")));
-let (sender, receiver) = channel(256);
-tokio::spawn(run_memory_control_loop(receiver, session.clone(), state.clone()));
 
 Live::builder()
-    .on_input_transcript({
-        let sender = sender.clone();
-        move |text, is_final| { sender.input_transcript(turn, text, is_final); }
-    })
-    .on_vad_start({
-        let sender = sender.clone();
-        move || { sender.user_activity_started(turn); }
-    })
-    .with_tools(
-        tools::recall_context_tool(session.clone())
-            | tools::manage_memory_tool(session.clone()),
+    .with_memory_slots(
+        session,
+        [
+            MemorySlot::new("dietary_identity", "user:diet"),
+            MemorySlot::new("venue_preference", "user:venue"),
+        ],
     )
+    // Satisfied from memory for a returning user, so they are not
+    // asked again for something they already told us.
+    .phase("plan_dinner")
+        .needs(&["user:diet", "user:venue"])
+        .done()
 ```
 
-Every method on the sender is a bounded `try_send` and nothing else. Fast-lane
-callbacks have a sub-millisecond budget; a dropped speculative event costs a
-little retrieval quality, a blocked audio callback costs the conversation.
+`with_memory(session)` is the slotless form. A slot filled from memory
+satisfies `phase.needs(..)` and `Flow` guards exactly as one filled by the
+user would — which is the point: the application asks for what it needs and
+does not care whether the answer arrived this minute or last month.
+`memory_tools(session)` exposes the two tools as a composite for manual
+`with_tools` wiring.
 
 ## Declarative binding: `spec.memory`
 
@@ -144,7 +154,7 @@ user-asked one. The Flow Studio provisions an in-process engine per run.
 | `retrieval` | Retrieval plans, fusion, budgeted context assembly |
 | `ingestion` | Observation extraction, candidate ledger, session overlay |
 | `reconcile` | Consolidation, conflict resolution, promotion, commit |
-| `runtime` | Live wiring: state keys, control loop, tool surface, spec binding |
+| `runtime` | Live wiring: `LiveMemoryExt`, turn extractor, tool surface, spec binding |
 | `evals` | Fixture-driven quality harness |
 
 ## Extending it

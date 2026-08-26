@@ -26,7 +26,7 @@ Live::builder()
     .talk().await?;                // mic in, speakers out, barge-in handled
 ```
 
-`cargo add gemini-adk-fluent-rs`, export `GEMINI_API_KEY`, done. `talk()` (feature `voice-io`) runs the duplex audio loop on the default devices; an interruption flushes the speaker buffer instead of playing stale speech. `connect_from_env()` resolves Google AI vs Vertex AI from the environment — both platforms, one code path, unsupported wire fields stripped automatically.
+`cargo add gemini-adk-fluent-rs --features voice-io`, export `GEMINI_API_KEY`, done. `talk()` (feature `voice-io`; Linux needs `libasound2-dev`) runs the duplex audio loop on the default devices; an interruption flushes the speaker buffer instead of playing stale speech. `connect_from_env()` resolves Google AI vs Vertex AI from the environment — both platforms, one code path, unsupported wire fields stripped automatically.
 
 ## One call, walked through
 
