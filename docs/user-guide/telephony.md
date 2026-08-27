@@ -168,16 +168,29 @@ same parts:
 3. **Hardening**: attach the latency filler and the handoff recorder from
    the same module — see [Hardening a Voice Deployment](./hardening.md).
 
-`TwilioCall::attach` (~100 lines) is the reference: it owns no socket,
-speaks its platform's dialect at the edges, and delegates everything else
-to the shared components. A new connector should look like it.
+This is not a hypothetical: [`examples/audiohook`](https://github.com/vamsiramakrishnan/gemini-rs/tree/main/examples/audiohook)
+is a third connector built exactly this way, speaking the open
+[AudioHook protocol](https://developer.genesys.cloud/devapps/audiohook/) a
+Genesys-style contact-center platform dials out to — JSON text frames for
+the session lifecycle, binary μ-law frames for audio, both directions. The
+wire dialect (envelope sequencing, media negotiation, position tracking,
+the platform's connection probe) lives in one pure state machine with its
+own offline test suite; the glue between it and a governed session is one
+`select!` loop. Barge-in becomes an AudioHook `barge_in` event, DTMF lands
+in the same `telephony:*` keys, and the latency filler attaches with one
+line — no SDK changes anywhere.
+
+`TwilioCall::attach` (~100 lines) and the AudioHook example's
+`ServerSession` are the references: each owns no socket, speaks its
+platform's dialect at the edges, and delegates everything else to the
+shared components. A new connector should look like them.
 
 ## Choosing a path
 
-| | Twilio Media Streams | Raw SIP (`sip` feature) |
-|---|---|---|
-| Who terminates PSTN | Twilio (also Vonage/Telnyx equivalents) | your SIP trunk / PBX |
-| Transport | WebSocket you host | UDP SIP + RTP in-process |
-| Barge-in | `clear` message to carrier | drop own RTP buffer |
-| DTMF | ✓ (`telephony:dtmf*` state) | ✓ (RFC 4733, same state keys) |
-| Extra dependency | none (any WS server) | `rsipstack` |
+| | Twilio Media Streams | Raw SIP (`sip` feature) | AudioHook (example) |
+|---|---|---|---|
+| Who terminates PSTN | Twilio (also Vonage/Telnyx equivalents) | your SIP trunk / PBX | the contact-center platform |
+| Transport | WebSocket you host | UDP SIP + RTP in-process | WebSocket you host |
+| Barge-in | `clear` message to carrier | drop own RTP buffer | `barge_in` event to platform |
+| DTMF | ✓ (`telephony:dtmf*` state) | ✓ (RFC 4733, same state keys) | ✓ (`dtmf` message, same state keys) |
+| Extra dependency | none (any WS server) | `rsipstack` | none (any WS server) |

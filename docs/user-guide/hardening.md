@@ -131,6 +131,8 @@ vocabulary ([`telephony::bridge`](../api/gemini_adk_fluent_rs/telephony/bridge/i
 `telephony:dtmf`, `telephony:dtmf_history`, `telephony:caller`,
 `telephony:call_sid`, `telephony:stream_sid`. A flow guard like
 `Guard::eq("telephony:dtmf", "1")` behaves identically whether the digits
-arrived as Twilio protocol events or RFC 4733 telephone events on a SIP
-leg — and will behave identically on the next transport. See
-[Telephony](./telephony.md) for the connector-side picture.
+arrived as Twilio protocol events, RFC 4733 telephone events on a SIP
+leg, or AudioHook `dtmf` messages from a contact-center platform
+(`examples/audiohook`, the third connector) — and will behave identically
+on the next transport. See [Telephony](./telephony.md) for the
+connector-side picture.

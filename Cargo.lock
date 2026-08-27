@@ -1056,6 +1056,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-audiohook"
+version = "0.1.0"
+dependencies = [
+ "axum 0.7.9",
+ "dotenvy",
+ "gemini-adk-fluent-rs",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "example-cookbook"
 version = "0.1.0"
 dependencies = [

@@ -727,6 +727,7 @@ examples/
   agents/            Agent composition examples
   sip-agent/         Directly-dialed SIP agent (rsipstack + in-process RTP)
   telephony/         Phone-call agent (Twilio Media Streams + TwiML webhook)
+  audiohook/         Contact-center bot server (open AudioHook WebSocket protocol)
   voice-chat/        Voice chat example
   tool-calling/      Tool calling example
   transcription/     Transcription example

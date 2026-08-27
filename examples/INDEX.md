@@ -69,6 +69,7 @@ cargo run -p example-tool-calling    # http://127.0.0.1:3003
 cargo run -p example-transcription   # http://127.0.0.1:3004
 cargo run -p example-telephony       # 0.0.0.0:8080 — Twilio voice webhook + Media Streams
 cargo run -p example-sip-agent       # 0.0.0.0:5060/udp — raw SIP agent, dial from any softphone
+cargo run -p example-audiohook       # 0.0.0.0:8080 — AudioHook bot server for contact-center platforms
 ```
 
 ### Multi-app Web UI
@@ -133,6 +134,14 @@ A directly-dialed SIP agent — no carrier service in the path. Terminates SIP s
 - **Layer:** L2 (`gemini_adk_fluent_rs::telephony::sip`, feature `sip`)
 - **Run:** `cargo run -p example-sip-agent`, then call `sip:gemini@<host>` from Linphone/Zoiper or route a PBX extension to it
 - **Features:** rsipstack UAS dialog, SDP offer/answer, symmetric RTP with 20 ms pacing, μ-law/A-law negotiation
+
+### audiohook (L2 Fluent)
+
+The third telephony connector, built with no SDK changes: a bot server speaking the open [AudioHook protocol](https://developer.genesys.cloud/devapps/audiohook/) a Genesys-style contact-center platform dials out to. The wire dialect is a pure, offline-tested state machine (`src/protocol.rs`); the glue onto a governed session is one `select!` loop.
+
+- **Layer:** L2 (`voice::pump`, `telephony::{g711, bridge}`)
+- **Run:** `cargo run -p example-audiohook`, then point the platform's AudioHook integration at `wss://<host>/audiohook`
+- **Features:** `open`/`opened` media negotiation (PCMU 8 kHz, connection-probe aware), binary μ-law audio both directions, `barge_in` event on interruption, DTMF into the shared `telephony:*` state keys, optional latency filler via `FILLER_CLIP`
 
 ### agents (L1/L2 Runtime + Fluent)
 

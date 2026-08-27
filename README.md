@@ -91,7 +91,7 @@ The same discipline shapes the audio path. `voice::pump()` is the device-indepen
 
 ## A phone line is just another pump
 
-Two runnable ends, one audio core:
+Three runnable ends, one audio core:
 
 **Twilio Media Streams** — the SDK speaks the protocol and bridges G.711 μ-law to the session at 8 kHz; barge-in becomes Twilio's `clear`, DTMF lands in session state where flow guards read it ([`examples/telephony`](examples/telephony)).
 
@@ -108,7 +108,9 @@ while let Some(incoming) = agent.next_call().await {
 }
 ```
 
-Both paths land DTMF keypresses in session state where flow guards read them — Twilio as protocol events, SIP as RFC 4733 telephone events negotiated in the SDP answer. Deliberately deferred: SIP registration and SRTP. The [telephony chapter](https://vamsiramakrishnan.github.io/gemini-rs/user-guide/telephony.html) has the decision table.
+**A contact-center platform's virtual-agent slot** — [`examples/audiohook`](examples/audiohook) is the proof that a new transport needs no SDK changes: a bot server speaking the open [AudioHook protocol](https://developer.genesys.cloud/devapps/audiohook/) (the WebSocket dialect a Genesys-style platform dials out to), with the wire protocol as a pure, offline-tested state machine and the session glue as one `select!` loop over the same `pump`.
+
+All three paths land DTMF keypresses in session state where flow guards read them — Twilio as protocol events, SIP as RFC 4733 telephone events negotiated in the SDP answer, AudioHook as `dtmf` messages. Deliberately deferred: SIP registration and SRTP. The [telephony chapter](https://vamsiramakrishnan.github.io/gemini-rs/user-guide/telephony.html) has the decision table.
 
 ## Choose your altitude
 
