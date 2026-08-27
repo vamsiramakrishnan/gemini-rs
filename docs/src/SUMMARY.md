@@ -19,6 +19,7 @@
 - [Live Callbacks: Fast Lane vs Control Lane](./user-guide/live-callbacks.md)
 - [Voice I/O: pump() and talk()](./voice.md)
 - [Telephony: Answering Phone Calls](./user-guide/telephony.md)
+- [Hardening a Voice Deployment](./user-guide/hardening.md)
 - [Phase System](./user-guide/phases.md)
 - [Phase Transitions Deep Dive](./user-guide/phase-transitions-deep-dive.md)
 - [Steering Modes](./user-guide/steering-modes.md)

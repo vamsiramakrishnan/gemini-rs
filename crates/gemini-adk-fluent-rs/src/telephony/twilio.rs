@@ -38,14 +38,9 @@ use crate::voice::{pump, Playback, VoicePump};
 /// The sample rate of every Twilio Media Stream, both directions.
 pub const TWILIO_HZ: u32 = 8_000;
 
-/// State key holding the most recent DTMF digit pressed by the caller.
-pub const KEY_DTMF: &str = "telephony:dtmf";
-/// State key holding every DTMF digit pressed so far, concatenated in order.
-pub const KEY_DTMF_HISTORY: &str = "telephony:dtmf_history";
-/// State key holding the Twilio call SID once the stream has started.
-pub const KEY_CALL_SID: &str = "telephony:call_sid";
-/// State key holding the Twilio stream SID once the stream has started.
-pub const KEY_STREAM_SID: &str = "telephony:stream_sid";
+// The state-key vocabulary is shared across every connector — see
+// [`super::bridge`]. Re-exported here so existing imports keep working.
+pub use super::bridge::{KEY_CALL_SID, KEY_DTMF, KEY_DTMF_HISTORY, KEY_STREAM_SID};
 
 // ── Inbound protocol (Twilio → us) ───────────────────────────────────────────
 
@@ -322,13 +317,7 @@ impl TwilioCall {
                         let _ = state.set(KEY_STREAM_SID, meta.stream_sid.clone());
                         let _ = sid_tx.send(Some(meta.stream_sid));
                     }
-                    Ok(Inbound::Dtmf(digit)) => {
-                        let _ = state.set(KEY_DTMF, digit.to_string());
-                        let _ = state.modify(KEY_DTMF_HISTORY, String::new(), |mut history| {
-                            history.push(digit);
-                            history
-                        });
-                    }
+                    Ok(Inbound::Dtmf(digit)) => super::bridge::record_dtmf(&state, digit),
                     Ok(Inbound::Stopped) => break,
                     Ok(Inbound::Connected | Inbound::Mark(_) | Inbound::Ignored) => {}
                     Err(err) => tracing::warn!("dropping unparseable Twilio frame: {err}"),

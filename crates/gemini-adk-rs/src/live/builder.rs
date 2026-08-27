@@ -62,6 +62,7 @@ pub struct LiveSessionBuilder {
     telemetry_interval: Option<std::time::Duration>,
     middleware: Vec<Arc<dyn crate::middleware::Middleware>>,
     flow: Option<crate::flow::FlowMonitor>,
+    redactor: Option<Arc<super::redaction::TranscriptRedactor>>,
 }
 
 impl LiveSessionBuilder {
@@ -90,7 +91,19 @@ impl LiveSessionBuilder {
             telemetry_interval: None,
             middleware: Vec::new(),
             flow: None,
+            redactor: None,
         }
+    }
+
+    /// Install transcript redaction — see
+    /// [`redaction::TranscriptRedactor`](super::redaction::TranscriptRedactor).
+    ///
+    /// Applied at the event router, before callbacks, the transcript buffer,
+    /// extraction, or persistence see the text. An inactive redactor (no
+    /// rules enabled) is dropped rather than installed.
+    pub fn redaction(mut self, redactor: super::redaction::TranscriptRedactor) -> Self {
+        self.redactor = redactor.is_active().then(|| Arc::new(redactor));
+        self
     }
 
     /// Add a middleware layer.
@@ -382,6 +395,7 @@ impl LiveSessionBuilder {
             telemetry_interval: self.telemetry_interval,
             middleware: self.middleware,
             flow: self.flow,
+            redactor: self.redactor,
         })
     }
 }
@@ -421,6 +435,7 @@ pub(crate) struct SessionPlan {
     telemetry_interval: Option<std::time::Duration>,
     middleware: Vec<Arc<dyn crate::middleware::Middleware>>,
     flow: Option<crate::flow::FlowMonitor>,
+    redactor: Option<Arc<super::redaction::TranscriptRedactor>>,
 }
 
 /// Fully wired runtime for a connected Live session, ready for lane spawning.
@@ -515,6 +530,7 @@ pub(crate) fn build_runtime(plan: SessionPlan, session: SessionHandle) -> Sessio
             Arc::new(chain)
         },
         flow: flow_monitor.clone(),
+        redactor: plan.redactor,
     };
 
     // Create shared PendingContext for deferred delivery.

@@ -100,6 +100,50 @@ pub fn parse(datagram: &[u8]) -> Option<RtpPacket> {
     })
 }
 
+// ── Telephone events (RFC 4733 DTMF) ────────────────────────────────────────
+
+/// One parsed telephone-event (RFC 4733) payload — a DTMF keypress carried
+/// as RTP instead of audio tones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TelephoneEvent {
+    /// Event code: 0–9 are the digits, 10 is `*`, 11 is `#`, 12–15 are A–D.
+    pub event: u8,
+    /// End bit — set on the final packet(s) of the keypress. End packets are
+    /// conventionally retransmitted three times; deduplicate on
+    /// [`RtpPacket::timestamp`], which stays constant for one keypress.
+    pub end: bool,
+    /// Cumulative duration of the event so far, in timestamp units.
+    pub duration: u16,
+}
+
+impl TelephoneEvent {
+    /// The event as the character a keypad prints, `None` for codes > 15.
+    pub fn digit(&self) -> Option<char> {
+        Some(match self.event {
+            0..=9 => (b'0' + self.event) as char,
+            10 => '*',
+            11 => '#',
+            12..=15 => (b'A' + self.event - 12) as char,
+            _ => return None,
+        })
+    }
+}
+
+/// Parse an RFC 4733 telephone-event payload (the 4-byte named-event form).
+///
+/// The caller decides *whether* a packet is a telephone event from the
+/// payload type negotiated in SDP — this parses the payload of one that is.
+pub fn parse_telephone_event(payload: &[u8]) -> Option<TelephoneEvent> {
+    if payload.len() < 4 {
+        return None;
+    }
+    Some(TelephoneEvent {
+        event: payload[0],
+        end: payload[1] & 0x80 != 0,
+        duration: u16::from_be_bytes([payload[2], payload[3]]),
+    })
+}
+
 /// Sender-side RTP state: sequence, timestamp, and SSRC advance per packet.
 #[derive(Debug)]
 pub struct RtpSender {
@@ -206,6 +250,36 @@ mod tests {
         assert_eq!(parse(&[]), None);
         assert_eq!(parse(&[0x80; 5]), None); // too short
         assert_eq!(parse(&[0x00; 20]), None); // version 0 (e.g. STUN)
+    }
+
+    #[test]
+    fn telephone_events_parse_digits_and_end_bits() {
+        // '5' pressed, not yet released, 160 timestamp units in.
+        let event = parse_telephone_event(&[5, 0x0A, 0x00, 0xA0]).unwrap();
+        assert_eq!(event.digit(), Some('5'));
+        assert!(!event.end);
+        assert_eq!(event.duration, 160);
+
+        // '#' released (end bit set).
+        let end = parse_telephone_event(&[11, 0x8A, 0x03, 0x20]).unwrap();
+        assert_eq!(end.digit(), Some('#'));
+        assert!(end.end);
+
+        assert_eq!(
+            parse_telephone_event(&[12, 0x80, 0, 60]).unwrap().digit(),
+            Some('A')
+        );
+        assert_eq!(
+            parse_telephone_event(&[10, 0x80, 0, 60]).unwrap().digit(),
+            Some('*')
+        );
+        // Flash-hook (16) and other extended events carry no keypad digit.
+        assert_eq!(
+            parse_telephone_event(&[16, 0x80, 0, 60]).unwrap().digit(),
+            None
+        );
+        // Truncated payload.
+        assert_eq!(parse_telephone_event(&[5, 0x80]), None);
     }
 
     #[test]

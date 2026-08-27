@@ -420,7 +420,7 @@ let batch = map_over(item_processor, 4);
 
 - [Text Agent Combinators](./text-agents.md) — the full combinator reference (`SequentialTextAgent`, `ParallelTextAgent`, etc.)
 - [Tools](./tools.md) — defining tools to equip your agents with
-- [cookbook 07 — state transforms](../../examples/cookbook/src/07_state_transforms.rs)
-- [cookbook 08 — prompt composition](../../examples/cookbook/src/08_prompt_composition.rs)
-- [cookbook 09 — tool composition](../../examples/cookbook/src/09_tool_composition.rs)
+- [cookbook 07 — state transforms](../../examples/cookbook/src/03_composition.rs)
+- [cookbook 08 — prompt composition](../../examples/cookbook/src/03_composition.rs)
+- [cookbook 09 — tool composition](../../examples/cookbook/src/03_composition.rs)
 - [cookbook 21 — full algebra](../../examples/cookbook/src/21_full_algebra.rs)

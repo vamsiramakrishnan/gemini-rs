@@ -339,4 +339,4 @@ set by a watcher -- all within a single turn cycle.
 
 - [State Management](./state.md) — the `State` type and `derived:` prefix that watchers observe
 - [Phase System](./phases.md) — phase transition guards that react to the same state watchers write
-- [cookbook 10 — guards](../../examples/cookbook/src/10_guards.rs)
+- [cookbook 10 — guards](../../examples/cookbook/src/03_composition.rs)

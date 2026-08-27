@@ -584,6 +584,7 @@ let artifacts = A::json_output("report", "Analysis report")
 | `FsPersistence` / `MemoryPersistence` | Built-in persistence backends |
 | `ControlPlaneConfig` | Consolidated control plane settings for the processor |
 | `Delivery` / `DeliveryConfig` | Per-event-class fast-lane backpressure policy: `Lossless` (default; awaits) vs `LossyDropNewest` (drops on full). L2: `.delivery(..)`, `.lossy_audio()`, `.lossy_transcript()` |
+| `redaction::TranscriptRedactor` | Transcript scrubbing (Luhn-checked card numbers, digit runs, custom patterns) applied at the event router before callbacks/transcript buffer/extraction/persistence. L2: `.redaction(..)`; streaming deltas are documented as not redacted |
 | `ExtractionTrigger` | When to run extractors: EveryTurn, Interval, AfterToolCall, OnPhaseChange, OnGenerationComplete |
 | `Flow` / `Step` / `Guard` / `FlowMonitor` | Governed conversation/tool DAG: one declarative spec enforced live (`Live::govern(flow)`) — gates tool calls, projects active-step postures, drives repair. Closed serializable vocabulary; see `docs/user-guide/flow.md` |
 
@@ -598,6 +599,9 @@ let artifacts = A::json_output("report", "Analysis report")
 | `Composable` / `Pipeline` / `FanOut` / `Loop` / `Fallback` | Operator algebra nodes |
 | `S` / `C` / `T` / `P` / `M` / `A` | Composition namespace modules |
 | `let_clone!` | Macro to reduce Arc/clone boilerplate in closures |
+| `telephony::bridge` | Vendor-neutral connector components: shared `telephony:*` state keys, `record_dtmf`, `DtmfDeduper` (RFC 4733 end-packet dedup), `FillerConfig`/`spawn_latency_filler` (latency-masking clip when the model stays silent after VadEnd) |
+| `handoff::{HandoffRecorder, HandoffPacket}` | Warm-handoff context packet: recorded (redacted) transcript tail + selected state keys + flow standing (done/active/missing) + optional LLM summary; delivery is the connector's job |
+| `voice::{MicProcessor, NoiseGate, pump_processed}` | Mic-chain seam for denoisers/VAD gates applied per frame before resampling; `NoiseGate` is the reference impl |
 
 ## Three-Lane Processor Architecture
 
@@ -723,6 +727,7 @@ examples/
   agents/            Agent composition examples
   sip-agent/         Directly-dialed SIP agent (rsipstack + in-process RTP)
   telephony/         Phone-call agent (Twilio Media Streams + TwiML webhook)
+  audiohook/         Contact-center bot server (open AudioHook WebSocket protocol)
   voice-chat/        Voice chat example
   tool-calling/      Tool calling example
   transcription/     Transcription example

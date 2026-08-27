@@ -374,9 +374,9 @@ let approved = supervised(
 
 - [S.C.T.P.M.A Operator Algebra](./composition.md) — operator syntax (`>>`, `|`, `*`, `/`) for building pipelines with `AgentBuilder`
 - [Tools](./tools.md) — equipping text agents with tools via `ToolDispatcher`
-- [cookbook 04 — sequential pipeline](../../examples/cookbook/src/04_sequential_pipeline.rs)
-- [cookbook 05 — parallel fan-out](../../examples/cookbook/src/05_parallel_fanout.rs)
-- [cookbook 06 — loop agent](../../examples/cookbook/src/06_loop_agent.rs)
+- [cookbook 04 — sequential pipeline](../../examples/cookbook/src/02_combinators.rs)
+- [cookbook 05 — parallel fan-out](../../examples/cookbook/src/02_combinators.rs)
+- [cookbook 06 — loop agent](../../examples/cookbook/src/02_combinators.rs)
 - [cookbook 11 — route branching](../../examples/cookbook/src/11_route_branching.rs)
 - [cookbook 12 — fallback chain](../../examples/cookbook/src/12_fallback_chain.rs)
 - [cookbook 13 — review loop](../../examples/cookbook/src/13_review_loop.rs)

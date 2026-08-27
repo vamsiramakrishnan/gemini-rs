@@ -474,6 +474,24 @@ impl Live {
         self
     }
 
+    /// Install transcript redaction: sensitive strings (card numbers,
+    /// one-time codes, custom patterns) are removed at the event router,
+    /// before callbacks, the transcript buffer, extraction, or persistence
+    /// see the text.
+    ///
+    /// ```ignore
+    /// use gemini_adk_rs::live::redaction::TranscriptRedactor;
+    /// Live::builder()
+    ///     .redaction(TranscriptRedactor::new().card_numbers().long_digits(6))
+    /// ```
+    pub fn redaction(
+        mut self,
+        redactor: gemini_adk_rs::live::redaction::TranscriptRedactor,
+    ) -> Self {
+        self.redactor = Some(redactor);
+        self
+    }
+
     /// Enable the conversation repair protocol.
     ///
     /// Tracks unfulfilled `needs` per phase. After `nudge_after` stalled turns,

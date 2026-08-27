@@ -197,6 +197,9 @@ impl Live {
         builder = builder.steering_mode(self.steering_mode);
         builder = builder.context_delivery(self.context_delivery);
         builder = builder.delivery(self.delivery);
+        if let Some(redactor) = self.redactor {
+            builder = builder.redaction(redactor);
+        }
         if let Some(config) = self.repair_config {
             builder = builder.repair(config);
         }
