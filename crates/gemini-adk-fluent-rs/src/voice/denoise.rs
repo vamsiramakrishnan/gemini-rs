@@ -51,6 +51,8 @@ pub struct Denoiser {
     /// The first processed block is warm-up noise; it is replaced by
     /// silence so the session never hears it.
     warmed_up: bool,
+    /// Speech probability from the network's VAD head, per 10 ms block.
+    last_vad: f32,
 }
 
 impl Denoiser {
@@ -62,7 +64,33 @@ impl Denoiser {
             mic_hz,
             pending: Vec::with_capacity(FRAME * 2),
             warmed_up: false,
+            last_vad: 0.0,
         }
+    }
+
+    /// Speech probability in `[0, 1]` from RNNoise's VAD head — the same
+    /// recurrent features that drive the suppression gains, read out as a
+    /// per-block classifier. Updated every 10 ms block the denoiser
+    /// processes (the maximum across the blocks consumed by the most recent
+    /// [`process`](MicProcessor::process) call); `0.0` before the first
+    /// full block.
+    ///
+    /// This is a *learned* VAD: it responds to the statistical fingerprint
+    /// of speech (pitch movement, formants, syllabic modulation), not to
+    /// level. Measured on the module-docs benchmark it separates cleanly —
+    /// speech medians 0.76–0.96 against noise medians ≈ 0.00 for pink and
+    /// street-traffic scenes (horns, engines) even at 0 dB SNR. Use it as
+    /// the decision path for turn-taking (poll after each pumped frame, add
+    /// hysteresis: on above ≈ 0.6, off below ≈ 0.3 with a ~300 ms hangover)
+    /// where an energy-threshold VAD would false-trigger on loud non-speech.
+    ///
+    /// Two measured caveats: babble and competing talkers score as speech
+    /// (they are speech — see the module docs on level gating), and *loud
+    /// sustained broadband white noise from stream start* can hold the head
+    /// high until its noise estimate converges, so pair the probability
+    /// with hysteresis rather than acting on a single block.
+    pub fn vad_probability(&self) -> f32 {
+        self.last_vad
     }
 }
 
@@ -81,16 +109,22 @@ impl MicProcessor for Denoiser {
         let mut out48: Vec<i16> = Vec::with_capacity(self.pending.len());
         let mut input = [0.0f32; FRAME];
         let mut output = [0.0f32; FRAME];
+        let mut call_vad: Option<f32> = None;
         while self.pending.len() >= FRAME {
             input.copy_from_slice(&self.pending[..FRAME]);
             self.pending.drain(..FRAME);
-            self.state.process_frame(&mut output, &input);
+            let vad = self.state.process_frame(&mut output, &input);
+            call_vad = Some(call_vad.map_or(vad, |v: f32| v.max(vad)));
             if self.warmed_up {
                 out48.extend(output.iter().map(|&s| s.clamp(-32768.0, 32767.0) as i16));
             } else {
                 out48.extend(std::iter::repeat_n(0i16, FRAME));
                 self.warmed_up = true;
             }
+        }
+
+        if let Some(vad) = call_vad {
+            self.last_vad = vad;
         }
 
         // Back to the mic rate. The frame the pump forwards may be shorter
@@ -161,6 +195,45 @@ mod tests {
         }
         // Output may trail input by up to one 10 ms block (80 samples @ 8 kHz).
         assert!(fed - got <= 80, "fed {fed}, got {got}");
+    }
+
+    /// Pink noise via Voss-McCartney — ambience-shaped, the realistic
+    /// speech-free bed (the VAD head is known to run high on *loud white*
+    /// noise from a cold start; see the getter docs).
+    fn pink_frame(len: usize, rows: &mut [f64; 16], n: &mut usize, seed: &mut u64) -> Vec<i16> {
+        (0..len)
+            .map(|_| {
+                *n += 1;
+                let row = (n.trailing_zeros() as usize).min(15);
+                *seed ^= *seed << 13;
+                *seed ^= *seed >> 7;
+                *seed ^= *seed << 17;
+                rows[row] = (seed.wrapping_mul(0x2545F4914F6CDD1D) >> 11) as f64
+                    / (1u64 << 52) as f64
+                    * 2.0
+                    - 1.0;
+                (rows.iter().sum::<f64>() / 16.0 * 8000.0) as i16
+            })
+            .collect()
+    }
+
+    #[test]
+    fn vad_probability_stays_low_on_ambience_noise() {
+        let mut denoiser = Denoiser::new(16_000);
+        assert_eq!(denoiser.vad_probability(), 0.0, "no blocks processed yet");
+        let (mut rows, mut n, mut seed) = ([0.0; 16], 0usize, 0xFEED | 1);
+        for _ in 0..50 {
+            let mut frame = pink_frame(320, &mut rows, &mut n, &mut seed);
+            denoiser.process(&mut frame);
+            let p = denoiser.vad_probability();
+            assert!((0.0..=1.0).contains(&p), "probability out of range: {p}");
+        }
+        // Sustained speech-free ambience must not read as speech.
+        assert!(
+            denoiser.vad_probability() < 0.5,
+            "pink noise scored {} on the VAD head",
+            denoiser.vad_probability()
+        );
     }
 
     #[test]

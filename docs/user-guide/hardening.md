@@ -178,6 +178,39 @@ inference crate is published only as a git dependency, which a crates.io
 release cannot carry, so it slots in as an application-side
 `impl MicProcessor` rather than an SDK feature.
 
+### A learned VAD, already paid for
+
+Suppression and detection are the same estimation problem — "which
+time-frequency cells are speech" is both the gain mask and a voice
+activity decision — and RNNoise computes both from one recurrent
+network. `Denoiser::vad_probability()` exposes that second output: the
+per-10 ms speech probability from the network's VAD head, free with the
+denoising you are already running. It responds to the statistical
+fingerprint of speech (pitch movement, formants, syllabic modulation),
+not to level, which makes it a different instrument from both the energy
+VAD and Google's WebRTC VAD (a GMM over spectral features). Measured on
+the same benchmark, with the same 60 ms-onset / 300 ms-hangover decision
+layer on every detector (*false activations / utterances detected of 3 /
+% of noise-only time claimed as speech*):
+
+| condition | energy VAD | WebRTC VAD (most conservative) | RNNoise head (0.5 threshold) |
+|---|---|---|---|
+| street traffic 10 dB | 1 / 3 / **95 %** | 4 / 3 / 53 % | **0 / 3 / 0 %** |
+| street traffic 0 dB | 1 / 3 / **95 %** | 3 / 3 / 82 % | 1 / 3 / 4 % |
+| pink 0 dB | 0 / **0** / 0 % (all missed) | 10 / 3 / 34 % | **0 / 3 / 0 %** |
+| white 0 dB | 1 / 3 / 99 % | 1 / 3 / 100 % | 1 / 3 / 29 % |
+| babble (any SNR) | open ~99 % | open ~100 % | open ~100 % |
+
+Horns, engines, and ambience fool a level detector and a GMM alike; the
+learned head shrugs them off — and the babble row is the honest boundary
+shared by all three: background *speech* reads as speech on any
+speaker-blind detector (see the two-talker discussion above). Two
+caveats from the same runs: loud broadband white noise from a cold start
+can hold the head high until its noise estimate converges, and the
+probability is per-block noisy — always wrap it in hysteresis (on above
+≈ 0.6, off below ≈ 0.3, ~300 ms hangover) rather than acting on one
+block.
+
 ## One state vocabulary across transports
 
 All of this composes because connectors share one session-state
