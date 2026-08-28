@@ -124,6 +124,60 @@ recorded call set, scored on both transcription accuracy *and* added
 latency — a stage that cleans the audio but spends 200 ms per frame
 defeats the point.
 
+### A speech enhancer in the box
+
+The `denoise` feature ships a first-party stage: `voice::Denoiser`, an
+RNNoise-based suppressor (pure Rust via
+[`nnnoiseless`](https://crates.io/crates/nnnoiseless), no system
+dependencies). It exists because the energy VAD has two measurable noise
+pathologies. On TTS speech mixed over synthesized noise — three utterances
+with labeled noise-only gaps, scored as *false activations / utterances
+detected (of 3) / % of noise-only time the VAD claimed speech* — the raw
+detector, given continuous **white** noise at any SNR from 20 dB down,
+fires one false activation at call start and then latches open for ~99 %
+of the call; given **pink** noise at ≤10 dB it instead adapts its floor
+upward and *misses* two or three of the three utterances. With
+`Denoiser` ahead of it, every one of those cells reads `0/3/0 %` — no
+false activations, no stuck-open time, all speech detected, down to
+0 dB — at ~0.008× realtime on one CPU core, buffering 10 ms.
+
+```rust,ignore
+use gemini_adk_fluent_rs::voice::{pump_processed, Denoiser, NoiseGate};
+
+let running = pump_processed(
+    &handle,
+    mic_rx, 8_000,
+    vec![
+        Box::new(Denoiser::new(8_000)),          // noise first…
+        Box::new(NoiseGate::new(1_600.0, 3)),    // …then level, on clean audio
+    ],
+    spk_tx, 8_000,
+);
+```
+
+The order matters, because the same measurements draw a sharp boundary: a
+speech *enhancer* preserves speech, so babble noise and a second talker in
+the room pass through it untouched — in a two-talker scene (a far talker
+degraded by distance level drop, spectral tilt, and room reflections),
+every enhancer tested left the far talker's activations exactly where the
+raw VAD had them, at every level down to −18 dB. What rejected the far
+talker was the *gate*, with its threshold calibrated between the two
+talkers' levels: at that setting it produced zero far-talker activations
+and zero stuck-open time while keeping every near-talker utterance. Level
+is the mono-microphone cue for "the person closer to the phone"; run the
+gate after the denoiser so it reads levels off clean audio, and derive
+its threshold from the caller's own first utterance rather than a
+constant. The residual hard case — two people at equal level on one
+speakerphone — is not solvable by level or enhancement; that is
+target-speaker extraction or server-side semantics.
+
+Heavier option: DeepFilterNet — itself a Rust project, tract CPU
+inference at ~0.12× realtime — matches these results on the same
+benchmark and preserves more speech quality at very low SNR. Its
+inference crate is published only as a git dependency, which a crates.io
+release cannot carry, so it slots in as an application-side
+`impl MicProcessor` rather than an SDK feature.
+
 ## One state vocabulary across transports
 
 All of this composes because connectors share one session-state

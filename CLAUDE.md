@@ -602,6 +602,7 @@ let artifacts = A::json_output("report", "Analysis report")
 | `telephony::bridge` | Vendor-neutral connector components: shared `telephony:*` state keys, `record_dtmf`, `DtmfDeduper` (RFC 4733 end-packet dedup), `FillerConfig`/`spawn_latency_filler` (latency-masking clip when the model stays silent after VadEnd) |
 | `handoff::{HandoffRecorder, HandoffPacket}` | Warm-handoff context packet: recorded (redacted) transcript tail + selected state keys + flow standing (done/active/missing) + optional LLM summary; delivery is the connector's job |
 | `voice::{MicProcessor, NoiseGate, pump_processed}` | Mic-chain seam for denoisers/VAD gates applied per frame before resampling; `NoiseGate` is the reference impl |
+| `voice::Denoiser` | RNNoise speech enhancement as a mic-chain stage (feature `denoise`, pure Rust): clears the energy VAD's stuck-open (white) and missed-speech (pink) noise pathologies down to 0 dB SNR at ~0.008× realtime; does NOT reject competing speech — chain a calibrated `NoiseGate` after it for near-talker preference |
 
 ## Three-Lane Processor Architecture
 

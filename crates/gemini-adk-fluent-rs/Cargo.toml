@@ -30,6 +30,7 @@ reqwest = { version = "0.12", default-features = false, features = [
 ], optional = true }
 # Optional: native microphone/speaker duplex for `voice::Talk` (`voice-io`).
 cpal = { version = "0.15", optional = true }
+nnnoiseless = { version = "0.5", default-features = false, optional = true }
 # Optional: in-process SIP signalling for `telephony::sip` (`sip`).
 rsipstack = { version = "0.6", optional = true }
 tokio-util = { version = "0.7", optional = true }
@@ -55,6 +56,9 @@ http-tools = ["dep:reqwest"]
 # Native microphone/speaker duplex (`voice::Talk::talk`). Needs system audio
 # headers (Linux: libasound2-dev).
 voice-io = ["dep:cpal", "dep:thiserror", "tokio/signal"]
+# RNNoise speech enhancement as a mic-chain stage (`voice::Denoiser`).
+# Pure Rust, no system dependencies.
+denoise = ["dep:nnnoiseless"]
 # In-process SIP agent (`telephony::sip::SipAgent`) — answer raw SIP calls
 # (rsipstack signalling + built-in RTP/SDP/G.711 media).
 sip = ["dep:rsipstack", "dep:tokio-util", "tokio/net", "tokio/rt-multi-thread"]

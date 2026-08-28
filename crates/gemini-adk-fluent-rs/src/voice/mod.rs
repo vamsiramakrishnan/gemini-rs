@@ -31,6 +31,12 @@ mod devices;
 #[cfg(feature = "voice-io")]
 pub use devices::{Talk, VoiceIoError};
 
+#[cfg(feature = "denoise")]
+mod denoise;
+
+#[cfg(feature = "denoise")]
+pub use denoise::Denoiser;
+
 use gemini_adk_rs::live::{LiveEvent, LiveHandle};
 use gemini_genai_rs::prelude::{bytes_to_i16, i16_to_bytes};
 use tokio::sync::mpsc;
