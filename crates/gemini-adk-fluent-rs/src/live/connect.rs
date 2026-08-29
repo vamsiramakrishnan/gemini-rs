@@ -102,7 +102,7 @@ impl Live {
                         silence_duration_ms: None,
                     });
         }
-        let input_audio = self.input_audio.clone();
+        let input_audio = std::mem::take(&mut self.input_audio);
 
         // Resolve a `.record_wire(path)` request into a FileWireRecorder now
         // that we are actually connecting.
@@ -276,24 +276,14 @@ impl Live {
 
         let handle = builder.connect().await?;
 
-        // Input-audio hardening: build the mic-chain processors and hand
-        // them (plus VAD tuning and authority) to the connected handle.
+        // Input-audio hardening: materialize the configured stages (in
+        // order) and hand them plus VAD tuning and authority to the handle.
         if input_audio.is_configured() {
-            let mut processors: Vec<Box<dyn gemini_adk_rs::live::InputAudioProcessor>> = Vec::new();
-            #[cfg(feature = "denoise")]
-            if input_audio.denoise {
-                processors.push(Box::new(crate::voice::Denoiser::new(16_000)));
-            }
-            if let Some((threshold_rms, hold_frames)) = input_audio.noise_gate {
-                processors.push(Box::new(crate::voice::NoiseGate::new(
-                    threshold_rms,
-                    hold_frames,
-                )));
-            }
+            let (processors, vad, client_authority) = input_audio.build_processors();
             handle.configure_input_audio(
                 processors,
-                input_audio.vad,
-                if input_audio.client_authority {
+                vad,
+                if client_authority {
                     gemini_adk_rs::live::ActivityAuthority::Client
                 } else {
                     gemini_adk_rs::live::ActivityAuthority::Server

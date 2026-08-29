@@ -257,6 +257,47 @@ the highest threshold that still detects every utterance — false-accept
 robustness ages better than onset speed, because noise levels vary
 day-to-day and the onset cost of one extra confirm frame is only 30 ms.
 
+### The whole chain as configuration
+
+Everything above is builder — and spec — surface, so hosted sessions
+(the web bridge, the API server, anything driving
+`LiveHandle::send_audio`) get the same hardened path as native pumps.
+Stages run in the order configured; the open `mic_processor` slot takes
+any `InputAudioProcessor` (an application-side DeepFilterNet stage, AGC,
+a custom filter):
+
+```rust,ignore
+Live::builder()
+    .mic_denoise()                                   // feature `denoise`
+    .mic_noise_gate(700.0, 3)
+    .mic_processor(MyCustomStage::new())             // open slot
+    .input_vad(VadConfig::noisy_street())
+    .client_interruption_authority()                 // ~2× faster barge-in
+```
+
+Or as the `runtime.audio` section of a `SessionSpec` — editable in Flow
+Studio's runtime panel, validated with warnings for the measured
+foot-guns (client authority or a gate without the denoiser):
+
+```json
+"runtime": {
+  "audio": {
+    "denoise": true,
+    "noise_gate": { "threshold_rms": 700.0 },
+    "client_vad": { "preset": "noisy_street" },
+    "authority": "client"
+  }
+}
+```
+
+Under `authority: client` the session is configured with the server's
+automatic activity detection disabled, and the input VAD's speech edges
+send `activityStart`/`activityEnd` — the client owns interruptions.
+Leave it at `server` (the default) unless barge-in latency matters more
+than the occasional tuning review: measured, client authority with the
+full chain barged in at 146–1095 ms with zero false interruptions,
+against the server's 560–1480 ms, also with zero.
+
 ## One state vocabulary across transports
 
 All of this composes because connectors share one session-state

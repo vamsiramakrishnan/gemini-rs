@@ -350,7 +350,7 @@ impl Live {
     /// pump. See the hardening chapter for the measured benchmark.
     #[cfg(feature = "denoise")]
     pub fn mic_denoise(mut self) -> Self {
-        self.input_audio.denoise = true;
+        self.input_audio.stages.push(InputStage::Denoise);
         self
     }
 
@@ -360,7 +360,24 @@ impl Live {
     /// hangover. Calibrate the threshold between the caller's level and the
     /// background (measured sweet spot 400–700 behind the denoiser).
     pub fn mic_noise_gate(mut self, threshold_rms: f64, hold_frames: u32) -> Self {
-        self.input_audio.noise_gate = Some((threshold_rms, hold_frames));
+        self.input_audio.stages.push(InputStage::NoiseGate {
+            threshold_rms,
+            hold_frames,
+        });
+        self
+    }
+
+    /// Chain any [`InputAudioProcessor`](gemini_adk_rs::live::InputAudioProcessor)
+    /// over outgoing mic audio inside `send_audio` — the open slot for
+    /// application-side stages (a DeepFilterNet enhancer, AGC, a custom
+    /// filter). Stages run in the order configured.
+    pub fn mic_processor(
+        mut self,
+        processor: impl gemini_adk_rs::live::InputAudioProcessor + 'static,
+    ) -> Self {
+        self.input_audio
+            .stages
+            .push(InputStage::Custom(Box::new(processor)));
         self
     }
 
@@ -568,23 +585,114 @@ impl Live {
 
 /// Input-audio hardening configuration accumulated by the builder and
 /// applied to the [`LiveHandle`](gemini_adk_rs::live::LiveHandle) right
-/// after connect (see `Live::mic_denoise`, `Live::mic_noise_gate`,
-/// `Live::input_vad`, `Live::client_interruption_authority`).
-#[derive(Debug, Clone, Default)]
+/// after connect. Stages run over each outgoing frame **in the order they
+/// were configured** — chain the denoiser before the gate so the gate
+/// calibrates on clean levels (see `Live::mic_denoise`,
+/// `Live::mic_noise_gate`, `Live::mic_processor`, `Live::input_vad`,
+/// `Live::client_interruption_authority`).
+#[derive(Default)]
 pub struct InputAudioConfig {
-    /// Run the RNNoise denoiser stage (feature `denoise`).
-    pub denoise: bool,
-    /// Noise gate after the denoiser: (threshold RMS, hold frames).
-    pub noise_gate: Option<(f64, u32)>,
+    /// Ordered mic-chain stages.
+    pub stages: Vec<InputStage>,
     /// Replacement input-VAD configuration.
     pub vad: Option<gemini_genai_rs::vad::VadConfig>,
     /// Client VAD sends activity marks; server auto-detection is disabled.
     pub client_authority: bool,
 }
 
+/// One stage of the input mic chain — the named stages the SDK ships plus
+/// an open [`Custom`](Self::Custom) slot for any
+/// [`InputAudioProcessor`](gemini_adk_rs::live::InputAudioProcessor).
+pub enum InputStage {
+    /// RNNoise speech enhancement (feature `denoise`).
+    #[cfg(feature = "denoise")]
+    Denoise,
+    /// Level gate: silences frames whose RMS falls below the threshold.
+    NoiseGate {
+        /// RMS threshold in sample units.
+        threshold_rms: f64,
+        /// Quiet frames the gate stays open after the last loud one.
+        hold_frames: u32,
+    },
+    /// Any caller-supplied processor (denoisers, AGC, custom filters).
+    Custom(Box<dyn gemini_adk_rs::live::InputAudioProcessor>),
+}
+
 impl InputAudioConfig {
     /// Whether any part of the input path is configured.
     pub fn is_configured(&self) -> bool {
-        self.denoise || self.noise_gate.is_some() || self.vad.is_some() || self.client_authority
+        !self.stages.is_empty() || self.vad.is_some() || self.client_authority
+    }
+
+    /// Materialize the configured stages into runnable processors.
+    pub(crate) fn build_processors(
+        self,
+    ) -> (
+        Vec<Box<dyn gemini_adk_rs::live::InputAudioProcessor>>,
+        Option<gemini_genai_rs::vad::VadConfig>,
+        bool,
+    ) {
+        let processors = self
+            .stages
+            .into_iter()
+            .map(
+                |stage| -> Box<dyn gemini_adk_rs::live::InputAudioProcessor> {
+                    match stage {
+                        #[cfg(feature = "denoise")]
+                        InputStage::Denoise => Box::new(crate::voice::Denoiser::new(16_000)),
+                        InputStage::NoiseGate {
+                            threshold_rms,
+                            hold_frames,
+                        } => Box::new(crate::voice::NoiseGate::new(threshold_rms, hold_frames)),
+                        InputStage::Custom(processor) => processor,
+                    }
+                },
+            )
+            .collect();
+        (processors, self.vad, self.client_authority)
+    }
+}
+
+#[cfg(test)]
+mod input_audio_tests {
+    use super::*;
+
+    struct Doubler;
+    impl gemini_adk_rs::live::InputAudioProcessor for Doubler {
+        fn process_frame(&mut self, frame: &mut Vec<i16>) {
+            for s in frame.iter_mut() {
+                *s = s.saturating_mul(2);
+            }
+        }
+    }
+
+    #[test]
+    fn stages_run_in_configured_order() {
+        let live = crate::live::Live::builder()
+            .mic_processor(Doubler)
+            .mic_noise_gate(400.0, 3)
+            .input_vad(gemini_genai_rs::vad::VadConfig::noisy_street())
+            .client_interruption_authority();
+        assert!(live.input_audio.is_configured());
+        assert_eq!(live.input_audio.stages.len(), 2);
+        assert!(matches!(live.input_audio.stages[0], InputStage::Custom(_)));
+        assert!(matches!(
+            live.input_audio.stages[1],
+            InputStage::NoiseGate { .. }
+        ));
+        let (mut processors, vad, client) = live.input_audio.build_processors();
+        assert_eq!(processors.len(), 2);
+        assert_eq!(vad.unwrap().start_threshold_db, 21.0);
+        assert!(client);
+        // The custom stage actually runs: 100 doubles to 200, then the gate
+        // (RMS 200 < 400) silences the frame — order is observable.
+        let mut frame = vec![100i16; 480];
+        for p in processors.iter_mut() {
+            p.process_frame(&mut frame);
+        }
+        assert!(
+            frame.iter().all(|&s| s == 0),
+            "gate should silence the doubled but still-quiet frame"
+        );
     }
 }
