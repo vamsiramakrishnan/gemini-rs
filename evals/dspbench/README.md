@@ -75,6 +75,36 @@ The very first run earned its keep (`golden/report.json`):
 - The known noise story reproduced: `hpf+denoise` takes white/babble
   scenes from 8/9 missed onsets to 0/9 at zero false activations.
 
+## Real recordings: the DEMAND × LibriSpeech sweep
+
+The synthetic layer ranks variants; `scripts/real_noise_eval.py` +
+`examples/real_eval.rs` confirm them on real audio: real LibriSpeech
+utterances mixed into real DEMAND environment recordings (14 environments —
+transport, street, nature, domestic, office, public) at 10/5/0 dB, scored
+by the same Rust scorer (energy VAD, declared-latency compensation).
+
+Headline from the first full sweep (168 utterance detections per variant):
+
+- **raw misses 116 of 168** — the energy VAD is effectively deaf on real
+  noisy mixtures at these SNRs, at zero false activations (it simply never
+  fires);
+- **hpf+denoise misses 4** — all in competing-speech scenes (meeting
+  babble, cafeteria @ 0 dB) — with residual false activations of at most
+  one event per 24 s track in 10 of 42 conditions (nature/traffic
+  transients);
+- noise floor in speech gaps drops 16–56 dB everywhere except
+  meeting babble (2 dB — competing speech reads as speech to RNNoise);
+- the denoiser's processing-distortion floor caps speech-active segmental
+  SNR at ≈5.5 dB: on scenes that are already clean (bus/metro @ 10 dB,
+  where raw sits at 8–10 dB segSNR), the chain *costs* fidelity. Run raw
+  on clean close-talk inputs.
+
+Scoring note: real speech re-triggers the VAD across prosodic pauses
+within one utterance. `score_vad` counts those as `reactivations`, not
+false activations — only an onset outside every truth window is false.
+This distinction is invisible on single-burst synthetic scenes and
+mandatory on real speech.
+
 ## What this bench does not cover
 
 Synthetic proxies, not recorded speech: the babble/traffic beds are shaped

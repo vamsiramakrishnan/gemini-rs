@@ -6,7 +6,8 @@
         "missed_onsets": 8,
         "total_onsets": 9,
         "onset_latency_ms_p50": 30.0,
-        "activations": 1
+        "activations": 1,
+        "reactivations": 0
       },
       "seg_snr_db": 1.3156039,
       "lsd_db": 12.7070675,
@@ -21,7 +22,8 @@
         "missed_onsets": 0,
         "total_onsets": 9,
         "onset_latency_ms_p50": 30.0,
-        "activations": 10
+        "activations": 10,
+        "reactivations": 0
       },
       "seg_snr_db": 0.8374993,
       "lsd_db": 15.412169,
@@ -36,7 +38,8 @@
         "missed_onsets": 8,
         "total_onsets": 9,
         "onset_latency_ms_p50": 30.0,
-        "activations": 1
+        "activations": 1,
+        "reactivations": 0
       },
       "seg_snr_db": 7.773114,
       "lsd_db": 12.67496,
@@ -53,7 +56,8 @@
         "missed_onsets": 4,
         "total_onsets": 9,
         "onset_latency_ms_p50": 30.0,
-        "activations": 5
+        "activations": 5,
+        "reactivations": 0
       },
       "seg_snr_db": 1.906767,
       "lsd_db": 12.942363,
@@ -68,7 +72,8 @@
         "missed_onsets": 3,
         "total_onsets": 9,
         "onset_latency_ms_p50": 35.0,
-        "activations": 6
+        "activations": 6,
+        "reactivations": 0
       },
       "seg_snr_db": 0.43591875,
       "lsd_db": 15.665188,
@@ -83,7 +88,8 @@
         "missed_onsets": 3,
         "total_onsets": 9,
         "onset_latency_ms_p50": 40.0,
-        "activations": 6
+        "activations": 6,
+        "reactivations": 0
       },
       "seg_snr_db": 35.0,
       "lsd_db": 12.814282,
@@ -100,7 +106,8 @@
         "missed_onsets": 5,
         "total_onsets": 8,
         "onset_latency_ms_p50": 5.0,
-        "activations": 6
+        "activations": 6,
+        "reactivations": 0
       },
       "seg_snr_db": -6.5291014,
       "lsd_db": 32.661804,
@@ -115,7 +122,8 @@
         "missed_onsets": 5,
         "total_onsets": 8,
         "onset_latency_ms_p50": 30.0,
-        "activations": 5
+        "activations": 5,
+        "reactivations": 0
       },
       "seg_snr_db": 1.9257764,
       "lsd_db": 12.906859,
@@ -130,7 +138,8 @@
         "missed_onsets": 1,
         "total_onsets": 8,
         "onset_latency_ms_p50": 20.0,
-        "activations": 7
+        "activations": 7,
+        "reactivations": 0
       },
       "seg_snr_db": 1.9908159,
       "lsd_db": 22.103819,
@@ -145,7 +154,8 @@
         "missed_onsets": 3,
         "total_onsets": 8,
         "onset_latency_ms_p50": 20.0,
-        "activations": 6
+        "activations": 6,
+        "reactivations": 0
       },
       "seg_snr_db": 0.44372872,
       "lsd_db": 15.592785,
@@ -160,7 +170,8 @@
         "missed_onsets": 1,
         "total_onsets": 8,
         "onset_latency_ms_p50": 30.0,
-        "activations": 7
+        "activations": 7,
+        "reactivations": 0
       },
       "seg_snr_db": 28.699074,
       "lsd_db": 12.858655,
@@ -177,7 +188,8 @@
         "missed_onsets": 0,
         "total_onsets": 0,
         "onset_latency_ms_p50": 0.0,
-        "activations": 8
+        "activations": 8,
+        "reactivations": 0
       },
       "seg_snr_db": null,
       "lsd_db": null,
@@ -192,7 +204,8 @@
         "missed_onsets": 0,
         "total_onsets": 0,
         "onset_latency_ms_p50": 0.0,
-        "activations": 1
+        "activations": 1,
+        "reactivations": 0
       },
       "seg_snr_db": null,
       "lsd_db": null,
@@ -207,7 +220,8 @@
         "missed_onsets": 0,
         "total_onsets": 0,
         "onset_latency_ms_p50": 0.0,
-        "activations": 1
+        "activations": 1,
+        "reactivations": 0
       },
       "seg_snr_db": null,
       "lsd_db": null,
@@ -222,7 +236,8 @@
         "missed_onsets": 0,
         "total_onsets": 0,
         "onset_latency_ms_p50": 0.0,
-        "activations": 3
+        "activations": 3,
+        "reactivations": 0
       },
       "seg_snr_db": null,
       "lsd_db": null,
@@ -237,7 +252,8 @@
         "missed_onsets": 0,
         "total_onsets": 0,
         "onset_latency_ms_p50": 0.0,
-        "activations": 1
+        "activations": 1,
+        "reactivations": 0
       },
       "seg_snr_db": null,
       "lsd_db": null,
@@ -254,7 +270,8 @@
         "missed_onsets": 5,
         "total_onsets": 9,
         "onset_latency_ms_p50": 110.0,
-        "activations": 4
+        "activations": 4,
+        "reactivations": 0
       },
       "seg_snr_db": 1.5998971,
       "lsd_db": 39.206802,
@@ -269,7 +286,8 @@
         "missed_onsets": 4,
         "total_onsets": 9,
         "onset_latency_ms_p50": 30.0,
-        "activations": 5
+        "activations": 5,
+        "reactivations": 0
       },
       "seg_snr_db": 0.21389672,
       "lsd_db": 31.80444,
@@ -284,7 +302,8 @@
         "missed_onsets": 8,
         "total_onsets": 9,
         "onset_latency_ms_p50": 30.0,
-        "activations": 1
+        "activations": 1,
+        "reactivations": 0
       },
       "seg_snr_db": 12.78365,
       "lsd_db": 39.213295,
@@ -301,7 +320,8 @@
         "missed_onsets": 2,
         "total_onsets": 9,
         "onset_latency_ms_p50": 40.0,
-        "activations": 8
+        "activations": 8,
+        "reactivations": 0
       },
       "seg_snr_db": 1.8105962,
       "lsd_db": 12.718963,
@@ -316,7 +336,8 @@
         "missed_onsets": 2,
         "total_onsets": 9,
         "onset_latency_ms_p50": 30.0,
-        "activations": 8
+        "activations": 8,
+        "reactivations": 0
       },
       "seg_snr_db": 0.3698324,
       "lsd_db": 15.576257,
@@ -331,7 +352,8 @@
         "missed_onsets": 3,
         "total_onsets": 9,
         "onset_latency_ms_p50": 40.0,
-        "activations": 7
+        "activations": 7,
+        "reactivations": 0
       },
       "seg_snr_db": 32.775135,
       "lsd_db": 12.626246,
@@ -348,7 +370,8 @@
         "missed_onsets": 8,
         "total_onsets": 9,
         "onset_latency_ms_p50": 30.0,
-        "activations": 1
+        "activations": 1,
+        "reactivations": 0
       },
       "seg_snr_db": 0.7821274,
       "lsd_db": 72.627,
@@ -363,7 +386,8 @@
         "missed_onsets": 0,
         "total_onsets": 9,
         "onset_latency_ms_p50": 30.0,
-        "activations": 9
+        "activations": 9,
+        "reactivations": 0
       },
       "seg_snr_db": 1.0300794,
       "lsd_db": 55.200478,
@@ -378,7 +402,8 @@
         "missed_onsets": 8,
         "total_onsets": 9,
         "onset_latency_ms_p50": 30.0,
-        "activations": 1
+        "activations": 1,
+        "reactivations": 0
       },
       "seg_snr_db": 7.6915393,
       "lsd_db": 72.62793,

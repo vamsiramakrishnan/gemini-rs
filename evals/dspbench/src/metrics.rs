@@ -23,6 +23,11 @@ pub struct DecisionScore {
     pub onset_latency_ms_p50: f32,
     /// Total activations observed.
     pub activations: usize,
+    /// Additional activations inside an already-matched truth interval —
+    /// the VAD re-firing across a prosodic pause within one utterance.
+    /// Harmless for barge-in (speech is genuinely present), tracked
+    /// separately so real speech does not inflate the false count.
+    pub reactivations: usize,
 }
 
 /// Score a processed track with the shipped energy VAD against ground-truth
@@ -77,18 +82,23 @@ pub fn score_vad(
     let mut matched = vec![false; shifted_truth.len()];
     let mut latencies_ms: Vec<f32> = Vec::new();
     let mut false_count = 0usize;
+    let mut reactivations = 0usize;
 
     for &onset in &activations {
         let mut found = None;
+        let mut inside_matched = false;
         for (i, &(start, end)) in shifted_truth.iter().enumerate() {
-            if matched[i] {
+            let window_start = start as i64 - tol_samples;
+            let inside = onset as i64 >= window_start && onset as i64 <= end as i64;
+            if !inside {
                 continue;
             }
-            let window_start = start as i64 - tol_samples;
-            if onset as i64 >= window_start && onset as i64 <= end as i64 {
-                found = Some(i);
-                break;
+            if matched[i] {
+                inside_matched = true;
+                continue;
             }
+            found = Some(i);
+            break;
         }
         match found {
             Some(i) => {
@@ -96,6 +106,10 @@ pub fn score_vad(
                 let latency_samples = onset as i64 - shifted_truth[i].0 as i64;
                 latencies_ms.push(latency_samples as f32 * 1000.0 / sample_rate as f32);
             }
+            // Real speech re-triggers the VAD across prosodic pauses within
+            // one utterance; that is not a false activation — speech is
+            // present. Only an onset outside every truth window is false.
+            None if inside_matched => reactivations += 1,
             None => false_count += 1,
         }
     }
@@ -116,6 +130,7 @@ pub fn score_vad(
         total_onsets: truth.len(),
         onset_latency_ms_p50,
         activations: activations.len(),
+        reactivations,
     }
 }
 
@@ -399,6 +414,26 @@ mod tests {
             score.false_activations_per_min > 0.0,
             "echo-only self-barge-in must register as false activations"
         );
+    }
+
+    #[test]
+    fn score_vad_reactivation_inside_utterance_is_not_false() {
+        // Two bursts inside ONE truth interval — a real utterance with a
+        // prosodic pause. The second SpeechStart must count as a
+        // re-activation, not a false activation.
+        let (sig, bursts) = make_bursts(SR, 0.3, 440.0, 1000, 8000, 2);
+        let utterance = vec![(bursts[0].0, bursts[1].1)];
+        let score = score_vad(&sig, SR, &utterance, VadConfig::noisy_street(), 0, 120);
+
+        assert_eq!(score.total_onsets, 1);
+        assert_eq!(score.missed_onsets, 0);
+        assert_eq!(
+            score.false_activations_per_min, 0.0,
+            "re-firing across a pause within one utterance is not false"
+        );
+        if score.activations > 1 {
+            assert_eq!(score.reactivations, score.activations - 1);
+        }
     }
 
     #[test]
