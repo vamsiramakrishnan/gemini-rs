@@ -30,6 +30,8 @@ mod devices;
 
 #[cfg(feature = "voice-io")]
 pub use devices::{Talk, VoiceIoError};
+pub mod dsp;
+pub use dsp::{AudioBus, ChainMetrics, ChainSnapshot, DspChain, DspStage, IntStage, StageSnapshot};
 
 #[cfg(feature = "denoise")]
 mod denoise;

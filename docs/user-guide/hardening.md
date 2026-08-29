@@ -298,6 +298,51 @@ than the occasional tuning review: measured, client authority with the
 full chain barged in at 146–1095 ms with zero false interruptions,
 against the server's 560–1480 ms, also with zero.
 
+## The DSP chain: engineer the signal, not just the decision
+
+The mic chain's original stages passed integer PCM hand to hand — every
+hop re-quantized and every boundary was a silent clip point. The `voice::dsp`
+module (heavier stages behind feature `dsp`) rebuilds it the way a DSP
+engineer would:
+
+- **One float bus.** Samples convert to `f32` once on entry and back once
+  at the exit, where clipping is *counted* (`ChainSnapshot::exit_clipped`),
+  never silent. `IntStage` wraps the proven integer stages (RNNoise,
+  the noise gate) as the chain's one deliberate int boundary.
+- **A declared latency budget.** Every stage reports its group delay;
+  `DspChain::total_latency_samples()` sums the causal budget the
+  turn-commit timestamps cite.
+- **Uniform metering.** The chain, not the stages, meters peak/RMS at
+  every stage output — read live via `ChainMetrics::snapshot()`.
+
+The stage library, in canonical order — each stage assumes what the
+previous one guarantees:
+
+| Stage | Job | Why this position |
+|---|---|---|
+| `HighPass` (RBJ biquad, 100 Hz) | DC / rumble removal | de-biases the energy VAD's adaptive noise floor |
+| `Aec` (PBFDAF NLMS) | subtract the bot's own playback echo | needs the *linear* signal — before the nonlinear denoiser breaks the echo-path model |
+| `Denoiser` (RNNoise) | noise suppression | after AEC, before gain |
+| `Agc` (AGC2-style) | level toward −18 dBFS | after denoise so it never amplifies noise; adaptation gateable by RNNoise's `vad_probability()` |
+| `NoiseGate` | near-talker preference | on the leveled signal |
+| `Limiter` (5 ms lookahead) | ceiling 0.98 | last — nothing after it can clip |
+
+The echo canceller matters most for open-speaker deployments under client
+interruption authority: without it, the bot's own voice re-enters the mic
+and barges in on itself. Feed the far end from the playback path
+(`AecFarEnd::push_pcm16` in your `on_audio` handler), set `delay_ms` to
+your playback pipeline's latency, and watch `erle_db()` — the echo-return
+loss the filter is actually achieving, the number an engineer trusts over
+any subjective impression. Adaptation freezes on double-talk so the user
+talking over the bot never destroys the learned echo path.
+
+For spectral work there is one shared STFT engine (`Stft` — sqrt-Hann
+WOLA, COLA-exact, identity reconstructs at −60 dB): implement
+`SpectralStage` and pay one FFT per 10 ms hop no matter how many spectral
+stages run. `SincResampler` (rubato, 128-tap windowed sinc) replaces
+linear interpolation where alias rejection matters — a 12 kHz tone folded
+into the speech band by a linear resampler is crushed below −34 dB.
+
 ## Turn commitment: holds and sustains, not raw edges
 
 Raw VAD edges are the wrong turn signals, and the error is measurable.
