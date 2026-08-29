@@ -1,0 +1,56 @@
+# DSP-chain effectiveness scenes. Everything seeded — same file, same samples.
+# speech.level_dbfs is near-end speech RMS; noise.snr_db is speech-to-noise;
+# echo simulates bot playback re-entering the mic (far ⊛ RIR at gain/delay).
+
+[[scene]]
+name = "clean_speech"
+duration_s = 20.0
+seed = 11
+speech = { level_dbfs = -22.0, on_ms = 1400, off_ms = 900 }
+
+[[scene]]
+name = "white_10db"
+duration_s = 20.0
+seed = 12
+speech = { level_dbfs = -22.0, on_ms = 1400, off_ms = 900 }
+noise = { kind = "white", snr_db = 10.0 }
+
+[[scene]]
+name = "traffic_5db"
+duration_s = 20.0
+seed = 13
+speech = { level_dbfs = -22.0, on_ms = 1400, off_ms = 900 }
+noise = { kind = "traffic", snr_db = 5.0 }
+
+[[scene]]
+name = "babble_10db"
+duration_s = 20.0
+seed = 14
+speech = { level_dbfs = -22.0, on_ms = 1400, off_ms = 900 }
+noise = { kind = "babble", snr_db = 10.0 }
+
+[[scene]]
+name = "quiet_talker_pink"
+duration_s = 20.0
+seed = 15
+speech = { level_dbfs = -34.0, on_ms = 1400, off_ms = 900 }
+noise = { kind = "pink", snr_db = 12.0 }
+
+# Bot audio on open speakers, user silent: every VAD activation here is a
+# false self-barge-in. THE AEC system metric.
+[[scene]]
+name = "echo_only_speakerphone"
+duration_s = 20.0
+seed = 16
+speech = { level_dbfs = -100.0, on_ms = 0, off_ms = 1000 }
+echo = { gain_db = -12.0, delay_ms = 40, taps = 48 }
+far = { level_dbfs = -18.0, on_ms = 1600, off_ms = 600 }
+
+# Double-talk: user speaks over bot playback — near end must survive.
+[[scene]]
+name = "double_talk"
+duration_s = 20.0
+seed = 17
+speech = { level_dbfs = -22.0, on_ms = 1200, off_ms = 1200 }
+echo = { gain_db = -14.0, delay_ms = 40, taps = 48 }
+far = { level_dbfs = -18.0, on_ms = 1600, off_ms = 600 }

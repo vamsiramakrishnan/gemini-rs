@@ -93,6 +93,7 @@ pub struct IntStage<P: InputAudioProcessor> {
     inner: P,
     name: &'static str,
     scratch: Vec<i16>,
+    latency: usize,
 }
 
 impl<P: InputAudioProcessor> IntStage<P> {
@@ -102,13 +103,26 @@ impl<P: InputAudioProcessor> IntStage<P> {
             inner,
             name,
             scratch: Vec::new(),
+            latency: 0,
         }
+    }
+
+    /// Declare the wrapped processor's internal buffering (it cannot
+    /// declare it itself — the integer trait has no latency contract).
+    /// E.g. the RNNoise denoiser buffers one 10 ms block: 160 samples.
+    pub fn with_latency(mut self, samples: usize) -> Self {
+        self.latency = samples;
+        self
     }
 }
 
 impl<P: InputAudioProcessor> DspStage for IntStage<P> {
     fn name(&self) -> &'static str {
         self.name
+    }
+
+    fn latency_samples(&self) -> usize {
+        self.latency
     }
 
     fn process(&mut self, bus: &mut AudioBus) {
