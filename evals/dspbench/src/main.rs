@@ -78,8 +78,6 @@ struct Scene {
     /// Far-end signal fed to the AEC reference input (bot playback).
     far: Option<Vec<f32>>,
     echo_delay_ms: u32,
-    /// True when near end is silent: every activation is a self-barge-in.
-    echo_only: bool,
 }
 
 fn build_scene(def: &SceneDef) -> Scene {
@@ -103,8 +101,8 @@ fn build_scene(def: &SceneDef) -> Scene {
     let mut mic = clean.clone();
 
     if let Some(noise) = &def.noise {
-        let noise_rms = signal::rms(&clean_nonsilent(&clean, &truth))
-            * 10f32.powf(-noise.snr_db / 20.0);
+        let noise_rms =
+            signal::rms(&clean_nonsilent(&clean, &truth)) * 10f32.powf(-noise.snr_db / 20.0);
         let mut nz = match noise.kind.as_str() {
             "white" => signal::white(&mut rng, n, noise_rms),
             "pink" => signal::pink(&mut rng, n, noise_rms),
@@ -150,7 +148,6 @@ fn build_scene(def: &SceneDef) -> Scene {
         truth,
         far: far_signal,
         echo_delay_ms,
-        echo_only: def.speech.on_ms == 0,
     }
 }
 
@@ -202,6 +199,9 @@ impl Variant {
 }
 
 struct BuiltChain {
+    /// Canonical order: the high-pass runs BEFORE the echo canceller
+    /// (the AEC models a linear path; feed it the conditioned signal).
+    pre: Option<HighPass>,
     aec: Option<(Aec, AecFarEnd)>,
     rest: DspChain,
 }
@@ -218,26 +218,25 @@ fn build_chain(variant: Variant, echo_delay_ms: u32) -> BuiltChain {
     } else {
         None
     };
+    let pre = if variant == Variant::Raw {
+        None
+    } else {
+        Some(HighPass::speech(SR))
+    };
     let mut rest = DspChain::new(SR);
     match variant {
-        Variant::Raw => {}
-        Variant::Hpf | Variant::HpfAec => {
-            rest = rest.stage(HighPass::speech(SR));
-        }
+        Variant::Raw | Variant::Hpf | Variant::HpfAec => {}
         Variant::HpfDenoise => {
-            rest = rest
-                .stage(HighPass::speech(SR))
-                .stage(IntStage::named(Denoiser::new(SR), "denoise").with_latency(160));
+            rest = rest.stage(IntStage::named(Denoiser::new(SR), "denoise").with_latency(160));
         }
         Variant::Full => {
             rest = rest
-                .stage(HighPass::speech(SR))
                 .stage(IntStage::named(Denoiser::new(SR), "denoise").with_latency(160))
                 .stage(Agc::speech_default(SR))
                 .stage(Limiter::speech_default(SR));
         }
     }
-    BuiltChain { aec, rest }
+    BuiltChain { pre, aec, rest }
 }
 
 /// Run the scene's mic track through the chain, 20 ms frames, feeding the
@@ -257,6 +256,13 @@ fn run_chain(scene: &Scene, chain: &mut BuiltChain) -> (Vec<f32>, usize) {
         }
         float_buf.clear();
         float_buf.extend_from_slice(block);
+        if let Some(pre) = &mut chain.pre {
+            let mut bus = gemini_adk_fluent_rs::voice::dsp::AudioBus {
+                samples: &mut float_buf,
+                sample_rate: SR,
+            };
+            pre.process(&mut bus);
+        }
         if let Some((aec, _)) = &mut chain.aec {
             let mut bus = gemini_adk_fluent_rs::voice::dsp::AudioBus {
                 samples: &mut float_buf,

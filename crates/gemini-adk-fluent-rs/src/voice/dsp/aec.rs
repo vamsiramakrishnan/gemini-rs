@@ -147,9 +147,14 @@ pub struct AecConfig {
     /// enters the filter, in milliseconds — models playback pipeline
     /// latency between "handed to the speaker" and "captured by the mic".
     pub delay_ms: u32,
-    /// NLMS step size. `0.5` is a conservative middle of the classic NLMS
-    /// stability range (`0 < μ < 2`) once the update is power-normalized
-    /// by `Px`, which it is here.
+    /// NLMS step size. The theoretical bound for a power-normalized
+    /// update is `0 < mu < 2`; the practical bound on narrowband bursty
+    /// far ends (speech through a speaker) measured far below it:
+    /// 0.25+ diverges within seconds, 0.1 reaches a bad marginal
+    /// equilibrium (gradient-noise misadjustment above the echo level),
+    /// 0.05 holds through every measured stress with ERLE +8..11 dB on
+    /// the worst-case harmonic proxy and 12+ dB on broadband far ends.
+    /// Default 0.05 — raise it only with `evals/dspbench` watching.
     pub mu: f32,
 }
 
@@ -158,7 +163,7 @@ impl Default for AecConfig {
         Self {
             tail_ms: 128,
             delay_ms: 40,
-            mu: 0.5,
+            mu: 0.05,
         }
     }
 }
@@ -415,21 +420,27 @@ impl Aec {
         .expect("aec: error forward fft (fixed sizes)");
 
         // 6. Px EWMA of the far-end power spectrum (NLMS normalizer).
-        for px in &mut self.px {
-            *px *= EWMA_RETAIN;
-        }
-        for p in 0..self.partitions {
-            let idx = (self.head + self.partitions - p) % self.partitions;
-            let xp = &self.x_hist[idx];
-            for (px, x) in self.px.iter_mut().zip(xp.iter()) {
-                *px += (1.0 - EWMA_RETAIN) * x.norm_sqr();
+        // Held frozen while the far end is silent: decaying it through
+        // inter-burst gaps would make the next burst onset see a fraction
+        // of the true power and overshoot the NLMS stability bound —
+        // measured as divergence on speech-like (bursty) far ends.
+        let far_active = mean_power(&self.far_block) > FAR_ACTIVE_THRESHOLD;
+        if far_active {
+            for px in &mut self.px {
+                *px *= EWMA_RETAIN;
+            }
+            for p in 0..self.partitions {
+                let idx = (self.head + self.partitions - p) % self.partitions;
+                let xp = &self.x_hist[idx];
+                for (px, x) in self.px.iter_mut().zip(xp.iter()) {
+                    *px += (1.0 - EWMA_RETAIN) * x.norm_sqr();
+                }
             }
         }
 
         // 7. Far-end-activity + Geigel double-talk gating.
         let far_peak = self.far_block.iter().fold(0.0f32, |m, &s| m.max(s.abs()));
         let mic_peak = self.mic_block.iter().fold(0.0f32, |m, &s| m.max(s.abs()));
-        let far_active = mean_power(&self.far_block) > FAR_ACTIVE_THRESHOLD;
 
         if self.far_peak_hist.len() == self.partitions {
             self.far_peak_hist.pop_front();
@@ -449,6 +460,28 @@ impl Aec {
         // 8. NLMS update, gated by double-talk/far-end-activity.
         if adapting {
             let mu = self.mu;
+            // Leaky NLMS: damp weight components the far end never
+            // excites. Narrowband input leaves most bins unexcited; energy
+            // accumulating there from error noise is what turned marginal
+            // stability into a bad equilibrium (output above mic) on
+            // sustained harmonic far ends. ~0.1% decay per 10 ms block is
+            // invisible to converged echo paths (they are re-excited every
+            // block) and, together with the unexcited-bin gate below, fatal
+            // to the parasitic modes. (0.1%/block measured too strong: it
+            // capped converged broadband ERLE at ~9 dB.)
+            const LEAK: f32 = 0.9999;
+            for wp in &mut self.w {
+                for w in wp.iter_mut() {
+                    *w *= LEAK;
+                }
+            }
+            // Spectral regularization: floor every bin's normalizer at 1%
+            // of the mean bin power. In bins where a narrowband far end
+            // has no energy, Px is microscopic and the update would divide
+            // by EPS alone — the weights there random-walk on error noise
+            // until feedback diverges (measured on harmonic far ends).
+            let px_mean = self.px.iter().sum::<f32>() / self.px.len().max(1) as f32;
+            let px_floor = px_mean * 0.01;
             for p in 0..self.partitions {
                 let idx = (self.head + self.partitions - p) % self.partitions;
                 let xp = &self.x_hist[idx];
@@ -459,7 +492,18 @@ impl Aec {
                     .zip(self.px.iter())
                     .zip(self.e_freq.iter());
                 for (((w, x), px), e) in updates {
-                    let denom = *px + EPS;
+                    // Bins the far end doesn't excite get NO update at all
+                    // (their weights only leak toward zero): with narrowband
+                    // input, updating unexcited bins lets error noise
+                    // accumulate parasitic weight energy that ends up
+                    // louder than the echo it was meant to cancel.
+                    if *px < px_floor {
+                        continue;
+                    }
+                    // Floor the normalizer with this bin's instantaneous
+                    // power: whatever the EWMA lags, the effective step
+                    // stays <= mu, inside the NLMS stability bound.
+                    let denom = px.max(x.norm_sqr()) + EPS;
                     let grad = x.conj() * *e;
                     let mut updated = *w + grad * (mu / denom);
                     if !updated.re.is_finite() || !updated.im.is_finite() {
@@ -494,12 +538,18 @@ impl Aec {
             .expect("aec: constraint forward fft (fixed sizes)");
         }
 
-        // 10. ERLE bookkeeping (only while the far-end has something to
-        // cancel) and handoff of the block's output.
-        if far_active {
+        // 10. ERLE bookkeeping — only on blocks where cancellation is
+        // measurable: far end active AND no double-talk (during double
+        // talk the error carries near-end speech by design; feeding those
+        // blocks poisons the meter for many seconds afterwards).
+        if adapting {
+            // Slow meter (~2 s memory): the fast Px constant would let
+            // burst onsets and AM valleys drag the reading far below the
+            // converged cancellation the waveforms show.
+            const ERLE_RETAIN: f32 = 0.995;
             if self.erle_ever_active {
-                self.erle_mic_pow = self.erle_mic_pow * EWMA_RETAIN + mic_pow * (1.0 - EWMA_RETAIN);
-                self.erle_err_pow = self.erle_err_pow * EWMA_RETAIN + err_pow * (1.0 - EWMA_RETAIN);
+                self.erle_mic_pow = self.erle_mic_pow * ERLE_RETAIN + mic_pow * (1.0 - ERLE_RETAIN);
+                self.erle_err_pow = self.erle_err_pow * ERLE_RETAIN + err_pow * (1.0 - ERLE_RETAIN);
             } else {
                 self.erle_mic_pow = mic_pow;
                 self.erle_err_pow = err_pow;
@@ -545,6 +595,80 @@ impl DspStage for Aec {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn stays_stable_on_narrowband_bursty_far_end() {
+        // The discriminating input the white-noise tests miss: a harmonic,
+        // bursty far end (speech through a speaker). Three separate
+        // instabilities were measured here before their fixes: burst-onset
+        // step overshoot (decaying Px), empty-bin amplification (Px ~ 0 in
+        // bins the tone never touches), and a step size above the
+        // practical narrowband bound.
+        let sr = 16_000u32;
+        let n = 20 * sr as usize;
+        let mut far = vec![0.0f32; n];
+        let (on, off) = (sr as usize * 16 / 10, sr as usize * 6 / 10);
+        let mut i = 0usize;
+        let mut f0 = 120.0f32;
+        while i < n {
+            let end = (i + on).min(n);
+            for (k, slot) in far[i..end].iter_mut().enumerate() {
+                let t = k as f32 / sr as f32;
+                let am = 0.6 + 0.4 * (2.0 * std::f32::consts::PI * 4.0 * t).sin();
+                let mut v = 0.0;
+                for h in 1..=4 {
+                    v += (2.0 * std::f32::consts::PI * f0 * h as f32 * t).sin() / h as f32;
+                }
+                *slot = 0.12 * am * v;
+            }
+            f0 = if f0 > 190.0 { 120.0 } else { f0 + 23.0 };
+            i = end + off;
+        }
+        // Echo path: sparse decaying taps, 40 ms bulk delay.
+        let taps: [f32; 6] = [0.12, -0.05, 0.03, -0.015, 0.008, -0.004];
+        let delay = 40 * sr as usize / 1000;
+        let mut mic = vec![0.0f32; n];
+        for j in 0..n {
+            for (ti, &tap) in taps.iter().enumerate() {
+                let src = j as isize - delay as isize - (ti as isize * 37);
+                if src >= 0 {
+                    mic[j] += tap * far[src as usize];
+                }
+            }
+        }
+
+        let (mut aec, far_end) = Aec::new(
+            AecConfig {
+                delay_ms: 40,
+                ..AecConfig::default()
+            },
+            sr,
+        );
+        let mut out = Vec::with_capacity(n);
+        for (idx, block) in mic.chunks(320).enumerate() {
+            let a = idx * 320;
+            far_end.push_f32(&far[a..(a + block.len()).min(n)]);
+            let mut buf = block.to_vec();
+            let mut bus = AudioBus {
+                samples: &mut buf,
+                sample_rate: sr,
+            };
+            aec.process(&mut bus);
+            out.extend_from_slice(&buf);
+        }
+
+        assert!(out.iter().all(|s| s.is_finite()), "output diverged");
+        let tail = &out[n - 2 * sr as usize..];
+        let mic_tail = &mic[n - 2 * sr as usize..];
+        let rms = |x: &[f32]| (x.iter().map(|s| s * s).sum::<f32>() / x.len() as f32).sqrt();
+        assert!(
+            rms(tail) < 0.5 * rms(mic_tail),
+            "no cancellation: out {} vs mic {}",
+            rms(tail),
+            rms(mic_tail)
+        );
+        assert!(aec.erle_db() > 6.0, "erle {} dB", aec.erle_db());
+    }
+
     use super::*;
 
     /// Fixed-seed xorshift32 — deterministic, no `rand` dependency.
@@ -624,7 +748,9 @@ mod tests {
     fn converges_on_synthetic_echo() {
         let h = rir_taps();
         let mut far_rng = Xorshift32::new(0x1234_5678);
-        let total = 8 * SR as usize;
+        // mu = 0.1 (the measured-safe default) converges ~5x slower than
+        // the old 0.5 — same ERLE floors, longer runway.
+        let total = 24 * SR as usize;
         let far: Vec<f32> = (0..total).map(|_| 0.3 * far_rng.next_signed()).collect();
         let clean = convolve_causal(&far, &h);
         let mut noise_rng = Xorshift32::new(0x9e37_79b9);
@@ -637,7 +763,7 @@ mod tests {
             AecConfig {
                 tail_ms: 128,
                 delay_ms: 0,
-                mu: 0.5,
+                mu: 0.05,
             },
             SR,
         );
@@ -647,8 +773,8 @@ mod tests {
             let range = start..start + BLOCK;
             let out = step(&mut aec, &far_end, &mic[range.clone()], &far[range]);
             output.extend(out);
-            if start + BLOCK == 4 * SR as usize {
-                assert!(aec.erle_db() > 12.0, "erle at 4s = {}", aec.erle_db());
+            if start + BLOCK == 16 * SR as usize {
+                assert!(aec.erle_db() > 12.0, "erle at 16s = {}", aec.erle_db());
             }
         }
 
@@ -697,8 +823,8 @@ mod tests {
     fn double_talk_freezes_adaptation() {
         let h = rir_taps();
         let mut far_rng = Xorshift32::new(0x7777_8888);
-        // 4 s to converge + 0.5 s double-talk burst + 2.5 s to verify recovery.
-        let total = 7 * SR as usize;
+        // 14 s to converge (mu = 0.1) + 0.5 s double-talk burst + recovery.
+        let total = 20 * SR as usize;
         let far: Vec<f32> = (0..total).map(|_| 0.3 * far_rng.next_signed()).collect();
         let clean = convolve_causal(&far, &h);
         let mut noise_rng = Xorshift32::new(0xaaaa_bbbb);
@@ -707,7 +833,7 @@ mod tests {
             .map(|&c| c + 1e-4 * noise_rng.next_signed())
             .collect();
 
-        let burst_start = 4 * SR as usize;
+        let burst_start = 14 * SR as usize;
         let burst_len = SR as usize / 2;
         for (i, sample) in mic[burst_start..burst_start + burst_len]
             .iter_mut()
@@ -721,7 +847,7 @@ mod tests {
             AecConfig {
                 tail_ms: 128,
                 delay_ms: 0,
-                mu: 0.5,
+                mu: 0.05,
             },
             SR,
         );
@@ -760,7 +886,9 @@ mod tests {
         let h = rir_taps();
         let delay_samples = 640; // 40 ms @ 16 kHz
         let mut far_rng = Xorshift32::new(0x2222_3333);
-        let total = 8 * SR as usize;
+        // mu = 0.1 (the measured-safe default) converges ~5x slower than
+        // the old 0.5 — same ERLE floors, longer runway.
+        let total = 24 * SR as usize;
         let far: Vec<f32> = (0..total).map(|_| 0.3 * far_rng.next_signed()).collect();
 
         let mut far_delayed = vec![0.0f32; total];
@@ -776,7 +904,7 @@ mod tests {
             AecConfig {
                 tail_ms: 128,
                 delay_ms: 40,
-                mu: 0.5,
+                mu: 0.05,
             },
             SR,
         );

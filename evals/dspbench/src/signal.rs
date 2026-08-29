@@ -1,8 +1,10 @@
-//! Deterministic scene-signal generators (contract; implementation pending).
+//! Deterministic scene-signal generators.
 //!
 //! Everything is seeded: the same scene definition always produces the same
 //! samples, so metric deltas between chain variants are attributable to the
 //! chain, never to the material.
+
+#![allow(clippy::needless_range_loop)] // sample-index loops read naturally in DSP code
 
 use std::f32::consts::PI;
 
@@ -135,9 +137,7 @@ pub fn synth_rir(rng: &mut Rng, taps: usize, gain_db: f32) -> Vec<f32> {
     // Alternating-ish signs: roughly every other tap, with randomization
     for i in 1..taps {
         let magnitude = decay_rate.powi(i as i32);
-        let sign = if rng.next_f32() < 0.4 {
-            -1.0
-        } else if (i % 2) == 1 {
+        let sign = if rng.next_f32() < 0.4 || (i % 2) == 1 {
             -1.0
         } else {
             1.0
@@ -174,10 +174,10 @@ pub fn synth_rir(rng: &mut Rng, taps: usize, gain_db: f32) -> Vec<f32> {
 /// (start, end) — free labels, because we composed the scene.
 ///
 /// Each burst features:
-/// - Fundamental wandering between 110-220 Hz (controlled by RNG)
-/// - 3-5 harmonics with decreasing amplitude
-/// - Amplitude modulation at 3-6 Hz (syllabic rhythm)
-/// - 20 ms raised-cosine onset/offset ramps for smooth edges
+///   - Fundamental wandering between 110-220 Hz (controlled by RNG)
+///   - 3-5 harmonics with decreasing amplitude
+///   - Amplitude modulation at 3-6 Hz (syllabic rhythm)
+///   - 20 ms raised-cosine onset/offset ramps for smooth edges
 ///
 /// The entire voiced portion is scaled so its RMS = 10^(level_dbfs/20).
 pub fn speech_proxy(
@@ -212,7 +212,9 @@ pub fn speech_proxy(
             for i in 0..on_samples {
                 // Amplitude modulation at syllabic rate
                 am_phase = (am_phase + am_rate / sr_f) % 1.0;
-                let am = 0.5 + 0.5 * (2.0 * PI * am_phase).sin();
+                // Depth 0.4 with floor 0.2: real syllabic energy dips, but
+                // never to digital zero (which fragments VAD truth matching).
+                let am = 0.6 + 0.4 * (2.0 * PI * am_phase).sin();
 
                 // Harmonic stack
                 let mut harmonic_out = 0.0;
@@ -323,6 +325,7 @@ pub fn babble(rng: &mut Rng, len: usize, rms_target: f32) -> Vec<f32> {
 /// - Pink noise low-passed to ~300 Hz (rumble)
 /// - Intermittent "horn" events: 0.2-0.5 s bursts around 400/600 Hz,
 ///   a few per 10 seconds
+///
 /// Normalized to the requested RMS.
 pub fn traffic(rng: &mut Rng, len: usize, rms_target: f32, sample_rate: u32) -> Vec<f32> {
     let sr_f = sample_rate as f32;

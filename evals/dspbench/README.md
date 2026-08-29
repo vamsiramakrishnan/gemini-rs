@@ -52,6 +52,29 @@ The table prints to stderr; the full report lands in `dspbench-report.json`.
 regenerate it when a chain change is *intended* to move the numbers, and
 let the diff be the review.
 
+## First golden: what the bench already caught
+
+The very first run earned its keep (`golden/report.json`):
+
+- **Three AEC instabilities**, none visible to white-noise unit tests:
+  burst-onset step overshoot (the Px normalizer decayed through far-end
+  silence), empty-bin weight random-walk on narrowband far ends, and a
+  practical step-size bound far below theory (mu 0.25+ diverges, 0.1 sits
+  at a bad equilibrium, **0.05 holds**: ERLE +8..11 dB on the harmonic
+  worst case). All three fixed in `voice::dsp::aec` with a regression
+  test on the discriminating input.
+- **`hpf+aec` is the echo-scene chain**: self-barge-ins at the raw floor
+  with 11 dB ERLE; zero false activations under double-talk with the
+  near-end surviving at 20 ms onset latency.
+- **A real composition flaw in `full`**: behind an AEC, the AGC's
+  energy-based speech gate mistakes residual echo for quiet speech and
+  amplifies it (+30 dB max gain), tripling self-barge-ins. Until the
+  chain wires RNNoise's `vad_probability()` into
+  `Agc::set_speech_probability`, do not put the AGC after an AEC in
+  echo-prone deployments.
+- The known noise story reproduced: `hpf+denoise` takes white/babble
+  scenes from 8/9 missed onsets to 0/9 at zero false activations.
+
 ## What this bench does not cover
 
 Synthetic proxies, not recorded speech: the babble/traffic beds are shaped
