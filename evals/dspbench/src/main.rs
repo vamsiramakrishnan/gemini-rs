@@ -302,6 +302,30 @@ struct RunReport {
     latency_ms: f32,
 }
 
+/// Minimal RIFF/PCM16 mono writer at the bench rate.
+fn write_wav(path: &str, samples: &[f32]) {
+    let mut bytes = Vec::with_capacity(44 + samples.len() * 2);
+    let data_len = (samples.len() * 2) as u32;
+    bytes.extend_from_slice(b"RIFF");
+    bytes.extend_from_slice(&(36 + data_len).to_le_bytes());
+    bytes.extend_from_slice(b"WAVEfmt ");
+    bytes.extend_from_slice(&16u32.to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes()); // PCM
+    bytes.extend_from_slice(&1u16.to_le_bytes()); // mono
+    bytes.extend_from_slice(&SR.to_le_bytes());
+    bytes.extend_from_slice(&(SR * 2).to_le_bytes());
+    bytes.extend_from_slice(&2u16.to_le_bytes());
+    bytes.extend_from_slice(&16u16.to_le_bytes());
+    bytes.extend_from_slice(b"data");
+    bytes.extend_from_slice(&data_len.to_le_bytes());
+    for &s in samples {
+        bytes.extend_from_slice(
+            &((s * 32768.0).round().clamp(-32768.0, 32767.0) as i16).to_le_bytes(),
+        );
+    }
+    std::fs::write(path, bytes).expect("write wav");
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let manifest_path = args
@@ -320,6 +344,16 @@ fn main() {
         .and_then(|i| args.get(i + 1))
         .cloned()
         .unwrap_or_else(|| "dspbench-report.json".into());
+    // --dump-dir <dir>: write each scene's mic track and every variant's
+    // processed output as 16 kHz PCM16 WAVs — the ears are a metric too.
+    let dump_dir = args
+        .iter()
+        .position(|a| a == "--dump-dir")
+        .and_then(|i| args.get(i + 1))
+        .cloned();
+    if let Some(dir) = &dump_dir {
+        std::fs::create_dir_all(dir).expect("create dump dir");
+    }
 
     let manifest: Manifest =
         toml::from_str(&std::fs::read_to_string(&manifest_path).expect("scenes.toml")).unwrap();
@@ -328,6 +362,9 @@ fn main() {
 
     for def in &manifest.scene {
         let scene = build_scene(def);
+        if let Some(dir) = &dump_dir {
+            write_wav(&format!("{dir}/{}-0-mic.wav", scene.name), &scene.mic);
+        }
         let mut per_variant = BTreeMap::new();
         for variant in Variant::all() {
             // AEC without a far end is a passthrough; skip to keep tables sharp.
@@ -336,6 +373,16 @@ fn main() {
             }
             let mut chain = build_chain(variant, scene.echo_delay_ms);
             let (processed, latency) = run_chain(&scene, &mut chain);
+            if let Some(dir) = &dump_dir {
+                write_wav(
+                    &format!(
+                        "{dir}/{}-{}.wav",
+                        scene.name,
+                        variant.name().replace('+', "_")
+                    ),
+                    &processed,
+                );
+            }
 
             let decision = metrics::score_vad(
                 &processed,
