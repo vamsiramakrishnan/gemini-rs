@@ -332,7 +332,10 @@ impl<S: SpectralStage> DspStage for Stft<S> {
 }
 
 #[cfg(test)]
-#[allow(clippy::needless_range_loop, reason = "sample-index loops read naturally in DSP tests")]
+#[allow(
+    clippy::needless_range_loop,
+    reason = "sample-index loops read naturally in DSP tests"
+)]
 mod tests {
     use super::*;
 
