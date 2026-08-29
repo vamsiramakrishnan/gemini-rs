@@ -311,7 +311,10 @@ mod tests {
     fn answer_with_ipv6_address() {
         // Answer should handle IPv6 addresses
         let answer = audio_answer(7, "2001:db8::1", 4000, PT_PCMU, None);
-        assert!(answer.contains("c=IN IP4 2001:db8::1\r\n"), "IPv6 in output");
+        assert!(
+            answer.contains("c=IN IP4 2001:db8::1\r\n"),
+            "IPv6 in output"
+        );
         // Round-trip should work
         let parsed = parse_audio_offer(&answer).expect("should parse answer with IPv6");
         assert_eq!(parsed.host, "2001:db8::1");
@@ -321,7 +324,10 @@ mod tests {
     fn answer_session_id_is_version() {
         // session_id becomes both session ID and version in o= line
         let answer = audio_answer(12345, "192.0.2.1", 4000, PT_PCMU, None);
-        assert!(answer.contains("o=- 12345 12345 IN IP4"), "session_id used for both fields");
+        assert!(
+            answer.contains("o=- 12345 12345 IN IP4"),
+            "session_id used for both fields"
+        );
     }
 
     #[test]
@@ -330,7 +336,11 @@ mod tests {
         let sdp = "v=0\r\nc=IN IP4 192.0.2.1\r\nm=audio 4000 RTP/AVP 101\r\n\
                    a=rtpmap:101 TELEPHONE-EVENT/8000\r\n";
         let offer = parse_audio_offer(sdp).expect("should parse");
-        assert_eq!(offer.telephone_event_pt, Some(101), "case-insensitive match");
+        assert_eq!(
+            offer.telephone_event_pt,
+            Some(101),
+            "case-insensitive match"
+        );
     }
 
     #[test]

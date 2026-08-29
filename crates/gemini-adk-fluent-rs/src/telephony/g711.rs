@@ -264,9 +264,11 @@ mod tests {
             let pos_rt = ulaw_to_linear(linear_to_ulaw(abs_val));
             let neg_rt = ulaw_to_linear(linear_to_ulaw(-abs_val));
             assert_eq!(
-                pos_rt as i32 + neg_rt as i32, 0,
+                pos_rt as i32 + neg_rt as i32,
+                0,
                 "μ-law should preserve sign symmetry: {} + {} != 0",
-                pos_rt, neg_rt
+                pos_rt,
+                neg_rt
             );
         }
     }
@@ -278,9 +280,11 @@ mod tests {
             let pos_rt = alaw_to_linear(linear_to_alaw(abs_val));
             let neg_rt = alaw_to_linear(linear_to_alaw(-abs_val));
             assert_eq!(
-                pos_rt as i32 + neg_rt as i32, 0,
+                pos_rt as i32 + neg_rt as i32,
+                0,
                 "A-law should preserve sign symmetry: {} + {} != 0",
-                pos_rt, neg_rt
+                pos_rt,
+                neg_rt
             );
         }
     }

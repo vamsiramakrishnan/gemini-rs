@@ -172,12 +172,12 @@ pub mod prelude {
     pub use crate::compose::{Ctx, A, C, E, G, M, P, S, T};
     pub use crate::live::Live;
     // Dynamic instructions (ADK instruction-provider pattern) + tool media.
+    pub use crate::operators::*;
+    pub use crate::patterns::*;
     pub use gemini_adk_rs::instruction::InstructionProvider;
     #[cfg(feature = "templates")]
     pub use gemini_adk_rs::instruction::TemplateInstruction;
     pub use gemini_adk_rs::tool::media as tool_media;
-    pub use crate::operators::*;
-    pub use crate::patterns::*;
     // Build-time validation DX (contract checking, data-flow inference, harness).
     pub use crate::testing::{
         check_contracts, check_live, diagnose, infer_data_flow, AgentHarness, ContractViolation,
