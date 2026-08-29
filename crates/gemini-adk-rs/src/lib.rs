@@ -40,6 +40,7 @@ pub mod router;
 pub mod run_config;
 pub mod runner;
 pub mod session;
+pub mod skills;
 pub mod state;
 pub mod telemetry;
 pub mod text;

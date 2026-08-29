@@ -194,6 +194,39 @@ pub enum LlmError {
     Other(String),
 }
 
+/// Capability declaration for a model — what callers may rely on without
+/// probing. See [`BaseLlm::capabilities`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ModelCapabilities {
+    /// Accepts a thinking budget / emits thought summaries.
+    pub thinking: bool,
+    /// Serves bidiGenerateContent (Live) sessions.
+    pub live_bidi: bool,
+    /// Produces native audio output.
+    pub audio_output: bool,
+    /// Accepts inline image/media parts in requests (vision).
+    pub vision_input: bool,
+    /// Honors cached-content references.
+    pub context_caching: bool,
+}
+
+impl ModelCapabilities {
+    /// Conservative inference from a model id string. Known family
+    /// substrings light up capabilities; unknown ids report text-only.
+    pub fn infer_from_id(id: &str) -> Self {
+        let id = id.to_ascii_lowercase();
+        let gemini = id.contains("gemini");
+        let live = id.contains("live") || id.contains("native-audio");
+        Self {
+            thinking: gemini && (id.contains("2.5") || id.contains("thinking")),
+            live_bidi: live,
+            audio_output: live || id.contains("tts"),
+            vision_input: gemini,
+            context_caching: gemini,
+        }
+    }
+}
+
 /// Trait for LLM providers — decouples agents from specific models.
 ///
 /// Implementations must be `Send + Sync` for use across async tasks.
@@ -201,6 +234,15 @@ pub enum LlmError {
 pub trait BaseLlm: Send + Sync {
     /// The model identifier (e.g., "gemini-2.5-flash").
     fn model_id(&self) -> &str;
+
+    /// What this model supports — the ADK model-capability-declaration
+    /// pattern: the model states its capabilities instead of every caller
+    /// re-inferring them from the id string. The default derives a
+    /// conservative estimate from [`model_id`](Self::model_id); back-ends
+    /// with authoritative knowledge should override.
+    fn capabilities(&self) -> ModelCapabilities {
+        ModelCapabilities::infer_from_id(self.model_id())
+    }
 
     /// Generate content from the LLM.
     async fn generate(&self, request: LlmRequest) -> Result<LlmResponse, LlmError>;
