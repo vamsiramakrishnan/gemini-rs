@@ -298,4 +298,146 @@ mod tests {
         // 1000 + 2×160 (sent) + 800 (skipped) = 2120.
         assert_eq!(resumed.timestamp, 2120);
     }
+
+    #[test]
+    fn rtp_packet_with_no_payload() {
+        // Valid RTP packet with zero-length payload
+        let packet = RtpPacket {
+            payload_type: PT_PCMU,
+            marker: false,
+            sequence: 100,
+            timestamp: 1000,
+            ssrc: 42,
+            payload: Vec::new(),
+        };
+        let built = build(&packet);
+        let parsed = parse(&built).expect("should parse empty payload");
+        assert_eq!(parsed.payload, Vec::<u8>::new());
+    }
+
+    #[test]
+    fn rtp_sequence_wrapping() {
+        // Sequence numbers should wrap at u16::MAX
+        let mut sender = RtpSender::new(PT_PCMU, 1, u16::MAX - 1, 0);
+        let p1 = parse(&sender.packetize(&[0u8; 160], 160)).unwrap();
+        let p2 = parse(&sender.packetize(&[0u8; 160], 160)).unwrap();
+        assert_eq!(p1.sequence, u16::MAX - 1);
+        assert_eq!(p2.sequence, u16::MAX);
+        let p3 = parse(&sender.packetize(&[0u8; 160], 160)).unwrap();
+        assert_eq!(p3.sequence, 0, "sequence should wrap to 0");
+    }
+
+    #[test]
+    fn rtp_timestamp_wrapping() {
+        // Timestamps should wrap at u32::MAX
+        let mut sender = RtpSender::new(PT_PCMU, 1, 0, u32::MAX - 100);
+        let p1 = parse(&sender.packetize(&[0u8; 160], 160)).unwrap();
+        assert_eq!(p1.timestamp, u32::MAX - 100);
+        let p2 = parse(&sender.packetize(&[0u8; 160], 160)).unwrap();
+        let expected = (u32::MAX as u64 - 100 + 160) as u32;
+        assert_eq!(p2.timestamp, expected, "timestamp should wrap correctly");
+    }
+
+    #[test]
+    fn rtp_csrc_count_limits() {
+        // Max CSRC count is 15 (4-bit field)
+        let mut bytes = vec![0x8F, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; // V=2, CC=15, no P/X
+        for _ in 0..15 {
+            bytes.extend_from_slice(&[0, 0, 0, 0]); // 15 CSRCs
+        }
+        bytes.extend_from_slice(&[1, 2]); // payload
+        let packet = parse(&bytes).expect("should parse max CSRCs");
+        assert_eq!(packet.payload, vec![1, 2]);
+    }
+
+    #[test]
+    fn rtp_extension_header_handling() {
+        // RTP extension with multiple 4-byte words
+        let mut bytes = vec![0x90, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; // no CSRC, has ext
+        bytes.extend_from_slice(&[0xAB, 0xCD, 0x00, 0x04]); // ext: profile, 4 words
+        for _ in 0..4 {
+            bytes.extend_from_slice(&[0xFF, 0xEE, 0xDD, 0xCC]);
+        }
+        bytes.extend_from_slice(&[0x12, 0x34]); // payload
+        let packet = parse(&bytes).expect("should parse extension");
+        assert_eq!(packet.payload, vec![0x12, 0x34]);
+    }
+
+    #[test]
+    fn rtp_padding_edge_cases() {
+        // Padding: payload [1, 2, 3] followed by 3-byte padding (includes count)
+        let mut bytes = vec![0xA0, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; // P=1, X=0, CC=0
+        bytes.extend_from_slice(&[1, 2]); // payload
+        bytes.extend_from_slice(&[0, 0, 3]); // 3 bytes padding (0, 0, and count byte 3)
+        let packet = parse(&bytes).expect("should parse when pad equals end");
+        assert_eq!(packet.payload, vec![1, 2]); // last 3 bytes removed as padding
+    }
+
+    #[test]
+    fn rtp_parse_rejects_invalid_padding() {
+        // Padding count of 0 is invalid
+        let mut bytes = vec![0xA0, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; // P=1
+        bytes.extend_from_slice(&[1, 2]);
+        bytes.push(0); // invalid: padding count must be >= 1
+        assert_eq!(parse(&bytes), None, "should reject zero padding count");
+
+        // Padding extends beyond datagram
+        let mut bytes = vec![0xA0, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; // P=1
+        bytes.extend_from_slice(&[1, 2]);
+        bytes.push(10); // padding count = 10, but only 3 bytes follow the header
+        assert_eq!(parse(&bytes), None, "should reject oversized padding");
+    }
+
+    #[test]
+    fn telephone_event_all_digits() {
+        // Test all standard DTMF codes (0-15)
+        for event_code in 0u8..=15 {
+            let payload = [event_code, 0x00, 0x00, 0xA0];
+            let event = parse_telephone_event(&payload).unwrap();
+            assert_eq!(event.event, event_code);
+            assert!(!event.end);
+            // Verify digit() returns appropriate char for 0-11, None for 12-15
+            match event_code {
+                0..=9 => {
+                    assert!(event.digit().is_some());
+                }
+                10..=11 => {
+                    assert!(event.digit().is_some());
+                }
+                12..=15 => {
+                    assert!(event.digit().is_some());
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    #[test]
+    fn telephone_event_duration_limits() {
+        // Duration is u16, test edge values
+        let payload = [5, 0x80, 0xFF, 0xFF]; // max duration
+        let event = parse_telephone_event(&payload).unwrap();
+        assert_eq!(event.duration, u16::MAX);
+
+        let payload = [5, 0x80, 0x00, 0x01]; // min non-zero duration
+        let event = parse_telephone_event(&payload).unwrap();
+        assert_eq!(event.duration, 1);
+    }
+
+    #[test]
+    fn payload_type_only_uses_7_bits() {
+        // Payload type is 7 bits; marker is bit 7
+        let packet = RtpPacket {
+            payload_type: 0x7F, // max 7-bit value
+            marker: true,
+            sequence: 0,
+            timestamp: 0,
+            ssrc: 0,
+            payload: vec![1, 2],
+        };
+        let built = build(&packet);
+        let parsed = parse(&built).unwrap();
+        assert_eq!(parsed.payload_type, 0x7F);
+        assert!(parsed.marker);
+    }
 }

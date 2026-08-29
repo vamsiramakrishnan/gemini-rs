@@ -26,6 +26,7 @@
 
 mod callbacks;
 mod config;
+pub use config::{InputAudioConfig, InputStage};
 mod connect;
 mod contract;
 mod extraction;
@@ -60,19 +61,20 @@ use gemini_genai_rs::prelude::*;
 // soft-turn, runtime contract, …) is re-exported here. (Explicit, rather than a
 // glob, to avoid shadowing the L1/L2 private `callbacks`/`contract` modules.)
 pub use gemini_adk_rs::live::{
-    BackendInputVad, BackendVadSnapshot, BackgroundAgentDispatcher, BackgroundToolTracker,
-    CallbackMode, ComputedContract, ComputedVar, ConsecutiveFailureDetector, ContextBuilder,
-    ControlContract, DefaultResultFormatter, DeferredWriter, EffectMode, EffectPolicy,
-    ExtractionTrigger, ExtractorContract, FieldPromotion, FsPersistence, LiveEffect,
-    LiveEffectExecutor, LiveEvent, LiveEventStream, LiveHandle, LiveReactor, LiveSessionBuilder,
-    LlmExtractor, MemoryPersistence, MergePolicy, NeedsFulfillment, PatternDetector,
-    PendingContext, PhaseContract, PhaseInstruction, PhaseMachine, PhasePreparation,
-    PhaseTransition, PredicateFn, PreparationContract, PromotionContract, RateDetector, Reaction,
-    ReactorEvent, ReactorRule, RepairAction, ResultFormatter, RuntimeContract, SessionSignals,
-    SessionSnapshot, SessionTelemetry, SessionType, SoftTurnDetector, SustainedDetector,
-    ToolCallSummary, ToolContract, TranscriptBuffer, TranscriptTurn, TranscriptWindow, Transition,
-    TransitionContract, TransitionEvaluation, TransitionResult, TransitionTrigger,
-    TurnCountDetector, VoiceRuntimeState, WatchPredicate, Watcher, WatcherContract,
+    ActivityAuthority, BackendInputVad, BackendVadSnapshot, BackgroundAgentDispatcher,
+    BackgroundToolTracker, CallbackMode, ComputedContract, ComputedVar, ConsecutiveFailureDetector,
+    ContextBuilder, ControlContract, DefaultResultFormatter, DeferredWriter, EffectMode,
+    EffectPolicy, ExtractionTrigger, ExtractorContract, FieldPromotion, FsPersistence,
+    InputAudioProcessor, LiveEffect, LiveEffectExecutor, LiveEvent, LiveEventStream, LiveHandle,
+    LiveReactor, LiveSessionBuilder, LlmExtractor, MemoryPersistence, MergePolicy,
+    NeedsFulfillment, PatternDetector, PendingContext, PhaseContract, PhaseInstruction,
+    PhaseMachine, PhasePreparation, PhaseTransition, PredicateFn, PreparationContract,
+    PromotionContract, RateDetector, Reaction, ReactorEvent, ReactorRule, RepairAction,
+    ResultFormatter, RuntimeContract, SessionSignals, SessionSnapshot, SessionTelemetry,
+    SessionType, SoftTurnDetector, SustainedDetector, ToolCallSummary, ToolContract,
+    TranscriptBuffer, TranscriptTurn, TranscriptWindow, Transition, TransitionContract,
+    TransitionEvaluation, TransitionResult, TransitionTrigger, TurnCommitConfig, TurnCommitPolicy,
+    TurnCountDetector, TurnSignal, VoiceRuntimeState, WatchPredicate, Watcher, WatcherContract,
 };
 // Offline record/replay harness (Milestone 7 determinism spine).
 pub use gemini_adk_rs::live::replay::{
@@ -180,6 +182,9 @@ pub struct Live {
     pub(crate) flow_precompiled: bool,
     /// Caller-supplied session `State`, so tools and flow guards can share one.
     pub(crate) state: Option<State>,
+    /// Input audio hardening: mic-chain stages, client input-VAD tuning, and
+    /// interruption authority. Applied to the handle right after connect.
+    pub(crate) input_audio: crate::live::config::InputAudioConfig,
     // Per-step on_enter actions: run an agent in a mode when a step activates.
     pub(crate) flow_actions: Vec<(
         String,
@@ -268,6 +273,7 @@ impl Live {
             state: None,
             flow_actions: Vec::new(),
             record_wire_path: None,
+            input_audio: crate::live::config::InputAudioConfig::default(),
         }
     }
 

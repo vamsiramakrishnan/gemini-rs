@@ -88,6 +88,22 @@ impl Live {
             self.config = self.config.voice_realtime_defaults();
         }
 
+        // Client interruption authority: the server must stop deciding, so
+        // its automatic activity detection is disabled in the setup message
+        // (the input VAD's activity marks take over in `send_audio`).
+        if self.input_audio.client_authority {
+            self.config =
+                self.config
+                    .server_vad(gemini_genai_rs::prelude::AutomaticActivityDetection {
+                        disabled: Some(true),
+                        start_of_speech_sensitivity: None,
+                        end_of_speech_sensitivity: None,
+                        prefix_padding_ms: None,
+                        silence_duration_ms: None,
+                    });
+        }
+        let input_audio = std::mem::take(&mut self.input_audio);
+
         // Resolve a `.record_wire(path)` request into a FileWireRecorder now
         // that we are actually connecting.
         if let Some(path) = self.record_wire_path.take() {
@@ -258,7 +274,26 @@ impl Live {
             });
         }
 
-        builder.connect().await
+        let handle = builder.connect().await?;
+
+        // Input-audio hardening: materialize the configured stages (in
+        // order) and hand them plus VAD tuning and authority to the handle.
+        if input_audio.is_configured() {
+            let (processors, vad, client_authority, turn_commit) = input_audio.build_processors();
+            handle.configure_input_audio(
+                processors,
+                vad,
+                if client_authority {
+                    gemini_adk_rs::live::ActivityAuthority::Client
+                } else {
+                    gemini_adk_rs::live::ActivityAuthority::Server
+                },
+            );
+            if let Some(config) = turn_commit {
+                handle.set_turn_commit(config);
+            }
+        }
+        Ok(handle)
     }
 }
 

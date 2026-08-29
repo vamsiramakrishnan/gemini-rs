@@ -22,6 +22,9 @@ members = [
     "tools/gemini-adk-transpiler-rs",
     "tools/gemini-adk-cli-rs",
 ]
+exclude = [
+    "evals/turnbench/predictor",
+]
 
 [workspace.package]
 version = "0.8.0"

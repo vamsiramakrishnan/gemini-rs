@@ -14,6 +14,9 @@ use crate::tool::ToolDispatcher;
 /// Maximum number of tool-dispatch round-trips before giving up.
 const MAX_TOOL_ROUNDS: usize = 10;
 
+/// A dynamic model source: state in, the model to use for this run out.
+type LlmProviderFn = Arc<dyn Fn(&State) -> Arc<dyn BaseLlm> + Send + Sync>;
+
 /// Core text agent — calls `BaseLlm::generate()`, dispatches tools, loops
 /// until the model produces a final text response.
 ///
@@ -32,6 +35,13 @@ pub struct LlmTextAgent {
     name: String,
     llm: Arc<dyn BaseLlm>,
     instruction: Option<String>,
+    /// Dynamic instruction source, resolved against state on every run;
+    /// wins over the static `instruction` when both are set.
+    instruction_provider: Option<Arc<dyn crate::instruction::InstructionProvider>>,
+    /// Dynamic model source, resolved against state on every run;
+    /// wins over the constructor's model when set. Risk-based escalation,
+    /// cost routing, per-tenant model selection without rebuilding the agent.
+    llm_provider: Option<LlmProviderFn>,
     dispatcher: Option<Arc<ToolDispatcher>>,
     temperature: Option<f32>,
     max_output_tokens: Option<u32>,
@@ -45,6 +55,8 @@ impl LlmTextAgent {
             name: name.into(),
             llm,
             instruction: None,
+            instruction_provider: None,
+            llm_provider: None,
             dispatcher: None,
             temperature: None,
             max_output_tokens: None,
@@ -55,6 +67,31 @@ impl LlmTextAgent {
     /// Set the system instruction.
     pub fn instruction(mut self, inst: impl Into<String>) -> Self {
         self.instruction = Some(inst.into());
+        self
+    }
+
+    /// Set a dynamic instruction source — an
+    /// [`InstructionProvider`](crate::instruction::InstructionProvider)
+    /// (any `Fn(&State) -> String` closure, or a `TemplateInstruction`
+    /// under the `templates` feature) resolved against session state at
+    /// the start of every run. Wins over [`instruction`](Self::instruction).
+    pub fn instruction_provider(
+        mut self,
+        provider: impl crate::instruction::InstructionProvider + 'static,
+    ) -> Self {
+        self.instruction_provider = Some(Arc::new(provider));
+        self
+    }
+
+    /// Set a dynamic model source, resolved against session state at the
+    /// start of every run — risk-based escalation to a stronger model, cost
+    /// routing to a cheaper one, per-tenant model selection — without
+    /// rebuilding the agent. Wins over the constructor's model when set.
+    pub fn llm_provider<F>(mut self, provider: F) -> Self
+    where
+        F: Fn(&State) -> Arc<dyn BaseLlm> + Send + Sync + 'static,
+    {
+        self.llm_provider = Some(Arc::new(provider));
         self
     }
 
@@ -92,9 +129,9 @@ impl LlmTextAgent {
     }
 
     /// Build an LlmRequest, taking ownership of contents to avoid cloning.
-    fn build_request(&self, contents: Vec<Content>) -> LlmRequest {
+    fn build_request(&self, contents: Vec<Content>, instruction: &Option<String>) -> LlmRequest {
         let mut req = LlmRequest::from_contents(contents);
-        req.system_instruction = self.instruction.clone();
+        req.system_instruction = instruction.clone();
         req.temperature = self.temperature;
         req.max_output_tokens = self.max_output_tokens;
 
@@ -162,6 +199,21 @@ impl TextAgent for LlmTextAgent {
 
         let mut contents = vec![Content::user(&input)];
 
+        // Resolve the instruction for this run: provider (against live
+        // state) wins over the static string.
+        let instruction = match &self.instruction_provider {
+            Some(provider) => Some(provider.provide(state)),
+            None => self.instruction.clone(),
+        };
+
+        // Resolve the LLM for this run: provider (against live state) wins
+        // over the constructor's LLM.
+        let llm = self
+            .llm_provider
+            .as_ref()
+            .map(|p| p(state))
+            .unwrap_or_else(|| self.llm.clone());
+
         // Lifecycle event — makes `on_event` (e.g. M::tap) observe agent start.
         let _ = self
             .middleware
@@ -172,17 +224,21 @@ impl TextAgent for LlmTextAgent {
 
         // Enforce the tightest middleware timeout (M::timeout) over the whole run.
         let result = match self.middleware.timeout() {
-            Some(limit) => match tokio::time::timeout(limit, self.run_inner(&mut contents)).await {
-                Ok(r) => r,
-                Err(_) => {
-                    let _ = self.middleware.run_on_event(&AgentEvent::Timeout).await;
-                    Err(AgentError::Other(format!(
-                        "agent '{}' timed out after {:?}",
-                        self.name, limit
-                    )))
+            Some(limit) => {
+                match tokio::time::timeout(limit, self.run_inner(&mut contents, &instruction, &llm))
+                    .await
+                {
+                    Ok(r) => r,
+                    Err(_) => {
+                        let _ = self.middleware.run_on_event(&AgentEvent::Timeout).await;
+                        Err(AgentError::Other(format!(
+                            "agent '{}' timed out after {:?}",
+                            self.name, limit
+                        )))
+                    }
                 }
-            },
-            None => self.run_inner(&mut contents).await,
+            }
+            None => self.run_inner(&mut contents, &instruction, &llm).await,
         };
 
         if let Err(ref e) = result {
@@ -203,9 +259,14 @@ impl TextAgent for LlmTextAgent {
 
 impl LlmTextAgent {
     /// Inner execution loop — separated so `on_error` fires exactly once.
-    async fn run_inner(&self, contents: &mut Vec<Content>) -> Result<String, AgentError> {
+    async fn run_inner(
+        &self,
+        contents: &mut Vec<Content>,
+        instruction: &Option<String>,
+        llm: &Arc<dyn BaseLlm>,
+    ) -> Result<String, AgentError> {
         for _round in 0..MAX_TOOL_ROUNDS {
-            let mut request = self.build_request(contents.clone());
+            let mut request = self.build_request(contents.clone(), instruction);
 
             // transform_request hook — may rewrite the request (e.g. context
             // policies trimming conversation history) before it is sent.
@@ -215,8 +276,7 @@ impl LlmTextAgent {
             let response = match self.middleware.run_before_model(&request).await? {
                 Some(cached) => cached,
                 None => {
-                    let llm_response = self
-                        .llm
+                    let llm_response = llm
                         .generate(request.clone())
                         .await
                         .map_err(|e| AgentError::Other(format!("LLM error: {e}")))?;
@@ -243,14 +303,27 @@ impl LlmTextAgent {
             // Move model response into conversation (no clone needed).
             contents.push(response.content);
 
-            // Dispatch tools (middleware hooks inside).
+            // Dispatch tools (middleware hooks inside). Media a tool
+            // attached under `_media` is lifted out of the JSON and
+            // delivered as inline_data parts in the same turn, so the
+            // model *sees* images rather than base64 noise.
             let tool_responses = self.dispatch_tools(&calls).await;
-            let response_parts: Vec<Part> = tool_responses
+            let mut media_parts: Vec<Part> = Vec::new();
+            let mut response_parts: Vec<Part> = tool_responses
                 .into_iter()
-                .map(|fr| Part::FunctionResponse {
-                    function_response: fr,
+                .map(|mut fr| {
+                    for attachment in crate::tool::media::extract(&mut fr.response) {
+                        media_parts.push(Part::inline_data(
+                            attachment.mime_type,
+                            attachment.data_base64,
+                        ));
+                    }
+                    Part::FunctionResponse {
+                        function_response: fr,
+                    }
                 })
                 .collect();
+            response_parts.append(&mut media_parts);
 
             contents.push(Content {
                 role: Some(Role::User),
@@ -284,6 +357,108 @@ mod tests {
             finish_reason: Some("STOP".into()),
             usage: None,
         }
+    }
+
+    /// LLM that returns a function call on the first request, text on the
+    /// second, capturing every request it sees.
+    struct CapturingLlm {
+        requests: std::sync::Mutex<Vec<LlmRequest>>,
+    }
+    #[async_trait]
+    impl BaseLlm for CapturingLlm {
+        fn model_id(&self) -> &str {
+            "capturing"
+        }
+        async fn generate(&self, req: LlmRequest) -> Result<LlmResponse, LlmError> {
+            let mut requests = self.requests.lock().unwrap();
+            requests.push(req);
+            if requests.len() == 1 {
+                Ok(LlmResponse {
+                    content: Content {
+                        role: Some(Role::Model),
+                        parts: vec![Part::FunctionCall {
+                            function_call: gemini_genai_rs::prelude::FunctionCall {
+                                name: "snap".into(),
+                                args: serde_json::json!({}),
+                                id: None,
+                            },
+                        }],
+                    },
+                    finish_reason: None,
+                    usage: None,
+                })
+            } else {
+                Ok(text_response("described"))
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn tool_media_reaches_the_model_as_inline_data() {
+        use crate::tool::{media, SimpleTool, ToolDispatcher};
+        let llm = Arc::new(CapturingLlm {
+            requests: std::sync::Mutex::new(Vec::new()),
+        });
+        let mut dispatcher = ToolDispatcher::new();
+        dispatcher.register(SimpleTool::new(
+            "snap",
+            "Take a snapshot",
+            None,
+            |_args| async move {
+                let mut result = serde_json::json!({"took": true});
+                media::attach(&mut result, "image/png", b"fakepng");
+                Ok(result)
+            },
+        ));
+        let agent = LlmTextAgent::new("vision", llm.clone()).tools(Arc::new(dispatcher));
+        let state = State::new();
+        let _ = state.set("input", "what do you see?");
+        assert_eq!(agent.run(&state).await.unwrap(), "described");
+
+        let requests = llm.requests.lock().unwrap();
+        assert_eq!(requests.len(), 2);
+        // The second request's tool-response turn carries the image part and
+        // the function response JSON no longer contains the base64 blob.
+        let turn = requests[1].contents.last().unwrap();
+        let has_inline = turn
+            .parts
+            .iter()
+            .any(|p| matches!(p, Part::InlineData { .. }));
+        assert!(has_inline, "expected an inline_data part, got {turn:?}");
+        let fr_clean = turn.parts.iter().all(|p| match p {
+            Part::FunctionResponse { function_response } => {
+                function_response.response.get(media::MEDIA_KEY).is_none()
+            }
+            _ => true,
+        });
+        assert!(
+            fr_clean,
+            "media key should be stripped from the response JSON"
+        );
+    }
+
+    #[tokio::test]
+    async fn instruction_provider_resolves_against_state_each_run() {
+        let llm = Arc::new(CapturingLlm {
+            requests: std::sync::Mutex::new(Vec::new()),
+        });
+        let agent = LlmTextAgent::new("persona", llm.clone()).instruction_provider(|s: &State| {
+            format!(
+                "You are {}.",
+                s.get::<String>("persona").unwrap_or_default()
+            )
+        });
+        let state = State::new();
+        let _ = state.set("input", "hi");
+        let _ = state.set("persona", "a pirate");
+        // CapturingLlm returns a function call first; with no dispatcher the
+        // loop sends an empty tool-response turn and the second reply ends
+        // the run — both requests must carry the resolved instruction.
+        let _ = agent.run(&state).await.unwrap();
+        let requests = llm.requests.lock().unwrap();
+        assert!(requests
+            .iter()
+            .all(|r| r.system_instruction.as_deref() == Some("You are a pirate.")));
     }
 
     struct SlowLlm;
@@ -356,5 +531,56 @@ mod tests {
             flag.load(Ordering::SeqCst),
             "on_event(AgentStarted) should fire"
         );
+    }
+
+    #[tokio::test]
+    async fn llm_provider_switches_model_per_run() {
+        // Two mock LLMs with distinguishable responses.
+        struct MockLlmA;
+        #[async_trait]
+        impl BaseLlm for MockLlmA {
+            fn model_id(&self) -> &str {
+                "mock-a"
+            }
+            async fn generate(&self, _req: LlmRequest) -> Result<LlmResponse, LlmError> {
+                Ok(text_response("from-a"))
+            }
+        }
+
+        struct MockLlmB;
+        #[async_trait]
+        impl BaseLlm for MockLlmB {
+            fn model_id(&self) -> &str {
+                "mock-b"
+            }
+            async fn generate(&self, _req: LlmRequest) -> Result<LlmResponse, LlmError> {
+                Ok(text_response("from-b"))
+            }
+        }
+
+        let llm_a = Arc::new(MockLlmA);
+        let llm_b = Arc::new(MockLlmB);
+
+        // Agent with provider that switches based on escalate flag.
+        let agent = LlmTextAgent::new("switcher", llm_a.clone()).llm_provider(move |state| {
+            if state.get::<bool>("escalate").unwrap_or(false) {
+                llm_b.clone()
+            } else {
+                llm_a.clone()
+            }
+        });
+
+        // Run 1: without escalate flag -> should use model A
+        let state = State::new();
+        let _ = state.set("input", "hi");
+        let result = agent.run(&state).await.unwrap();
+        assert_eq!(result, "from-a", "without escalate, should use model A");
+
+        // Run 2: with escalate flag -> should use model B
+        let state2 = State::new();
+        let _ = state2.set("input", "hi");
+        let _ = state2.set("escalate", true);
+        let result2 = agent.run(&state2).await.unwrap();
+        assert_eq!(result2, "from-b", "with escalate, should use model B");
     }
 }

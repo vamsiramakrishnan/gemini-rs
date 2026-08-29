@@ -13,6 +13,8 @@ pub use typed::*;
 use std::sync::Arc;
 use std::time::Duration;
 
+pub mod media;
+
 use async_trait::async_trait;
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;

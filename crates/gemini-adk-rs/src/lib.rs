@@ -40,6 +40,7 @@ pub mod router;
 pub mod run_config;
 pub mod runner;
 pub mod session;
+pub mod skills;
 pub mod state;
 pub mod telemetry;
 pub mod text;
@@ -49,6 +50,7 @@ pub mod tool;
 pub mod tools;
 pub mod toolset;
 pub mod utils;
+pub mod workflow;
 
 #[cfg(test)]
 pub(crate) mod test_helpers;

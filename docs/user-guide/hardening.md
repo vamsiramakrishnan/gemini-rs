@@ -124,6 +124,226 @@ recorded call set, scored on both transcription accuracy *and* added
 latency — a stage that cleans the audio but spends 200 ms per frame
 defeats the point.
 
+### A speech enhancer in the box
+
+The `denoise` feature ships a first-party stage: `voice::Denoiser`, an
+RNNoise-based suppressor (pure Rust via
+[`nnnoiseless`](https://crates.io/crates/nnnoiseless), no system
+dependencies). It exists because the energy VAD has two measurable noise
+pathologies. On TTS speech mixed over synthesized noise — three utterances
+with labeled noise-only gaps, scored as *false activations / utterances
+detected (of 3) / % of noise-only time the VAD claimed speech* — the raw
+detector, given continuous **white** noise at any SNR from 20 dB down,
+fires one false activation at call start and then latches open for ~99 %
+of the call; given **pink** noise at ≤10 dB it instead adapts its floor
+upward and *misses* two or three of the three utterances. With
+`Denoiser` ahead of it, every one of those cells reads `0/3/0 %` — no
+false activations, no stuck-open time, all speech detected, down to
+0 dB — at ~0.008× realtime on one CPU core, buffering 10 ms.
+
+```rust,ignore
+use gemini_adk_fluent_rs::voice::{pump_processed, Denoiser, NoiseGate};
+
+let running = pump_processed(
+    &handle,
+    mic_rx, 8_000,
+    vec![
+        Box::new(Denoiser::new(8_000)),          // noise first…
+        Box::new(NoiseGate::new(1_600.0, 3)),    // …then level, on clean audio
+    ],
+    spk_tx, 8_000,
+);
+```
+
+The order matters, because the same measurements draw a sharp boundary: a
+speech *enhancer* preserves speech, so babble noise and a second talker in
+the room pass through it untouched — in a two-talker scene (a far talker
+degraded by distance level drop, spectral tilt, and room reflections),
+every enhancer tested left the far talker's activations exactly where the
+raw VAD had them, at every level down to −18 dB. What rejected the far
+talker was the *gate*, with its threshold calibrated between the two
+talkers' levels: at that setting it produced zero far-talker activations
+and zero stuck-open time while keeping every near-talker utterance. Level
+is the mono-microphone cue for "the person closer to the phone"; run the
+gate after the denoiser so it reads levels off clean audio, and derive
+its threshold from the caller's own first utterance rather than a
+constant. The residual hard case — two people at equal level on one
+speakerphone — is not solvable by level or enhancement; that is
+target-speaker extraction or server-side semantics.
+
+Heavier option: DeepFilterNet — itself a Rust project, tract CPU
+inference at ~0.12× realtime — matches these results on the same
+benchmark and preserves more speech quality at very low SNR. Its
+inference crate is published only as a git dependency, which a crates.io
+release cannot carry, so it slots in as an application-side
+`impl MicProcessor` rather than an SDK feature.
+
+### A learned VAD, already paid for
+
+Suppression and detection are the same estimation problem — "which
+time-frequency cells are speech" is both the gain mask and a voice
+activity decision — and RNNoise computes both from one recurrent
+network. `Denoiser::vad_probability()` exposes that second output: the
+per-10 ms speech probability from the network's VAD head, free with the
+denoising you are already running. It responds to the statistical
+fingerprint of speech (pitch movement, formants, syllabic modulation),
+not to level, which makes it a different instrument from both the energy
+VAD and Google's WebRTC VAD (a GMM over spectral features). Measured on
+the same benchmark, with the same 60 ms-onset / 300 ms-hangover decision
+layer on every detector (*false activations / utterances detected of 3 /
+% of noise-only time claimed as speech*):
+
+| condition | energy VAD | WebRTC VAD (most conservative) | RNNoise head (0.5 threshold) |
+|---|---|---|---|
+| street traffic 10 dB | 1 / 3 / **95 %** | 4 / 3 / 53 % | **0 / 3 / 0 %** |
+| street traffic 0 dB | 1 / 3 / **95 %** | 3 / 3 / 82 % | 1 / 3 / 4 % |
+| pink 0 dB | 0 / **0** / 0 % (all missed) | 10 / 3 / 34 % | **0 / 3 / 0 %** |
+| white 0 dB | 1 / 3 / 99 % | 1 / 3 / 100 % | 1 / 3 / 29 % |
+| babble (any SNR) | open ~99 % | open ~100 % | open ~100 % |
+
+Horns, engines, and ambience fool a level detector and a GMM alike; the
+learned head shrugs them off — and the babble row is the honest boundary
+shared by all three: background *speech* reads as speech on any
+speaker-blind detector (see the two-talker discussion above). Two
+caveats from the same runs: loud broadband white noise from a cold start
+can hold the head high until its noise estimate converges, and the
+probability is per-block noisy — always wrap it in hysteresis (on above
+≈ 0.6, off below ≈ 0.3, ~300 ms hangover) rather than acting on one
+block.
+
+### Tuning the decision path
+
+The client VAD has three knobs that matter, and they trade against each
+other:
+
+| knob | raising it buys | raising it costs |
+|---|---|---|
+| `start_threshold_db` | fewer false activations from noise residue | quiet speech missed |
+| `min_speech_frames` | clicks and horn onsets rejected | +30 ms onset latency per frame |
+| `hangover_frames` | no mid-word speech-end flapping | +30 ms per frame before `SpeechEnd` |
+
+Tuned as a closed loop over labeled scenes (synthesized noise beds under
+TTS utterances with known spans, swept clean → 0 dB, each setting scored
+as `40·missed + 12·false + 1.5·stuck-open% + 0.05·onset-ms`), one
+configuration dominates — and it only exists *behind the denoiser*:
+**`VadConfig::noisy_street()`** (start 21 dB, stop 16 dB, 1-frame
+confirm, 300 ms hangover). Cleaning the signal first is what lets the
+threshold go **up** 6 dB (horn residue rejected) while the confirmation
+delay goes **down** to one frame (~150–310 ms measured onset). The same
+sweep run on the raw noisy stream finds no good setting at any threshold
+— the adaptive floor latches regardless — which is why the preset's
+documentation insists on the denoiser.
+
+```rust,ignore
+let vad = VoiceActivityDetector::new(VadConfig::noisy_street());
+// …fed with frames that already passed through voice::Denoiser.
+```
+
+Validated end-to-end against a live Gemini session (26 s of continuous
+0 dB street traffic streamed while the model spoke): the server's own
+VAD fired zero false interruptions and barged in on every utterance at
+~0.6–1.4 s regardless of the client chain — so leave interruption
+authority to the server — while the client VAD needed the
+denoiser + preset to stay useful (raw, it latched open within 600 ms
+and never recovered; denoised + preset, zero false activations). The
+client's decisions are what drive local playback ducking, latency
+fillers, and soft-turn logic; the ~10 ms the denoiser adds is noise
+against the server's barge-in path.
+
+To re-tune for a specific deployment, replace the synthesized bed with a
+30-second recording of the real site's noise (captured through the real
+device path, so its AGC is in the loop), re-run the sweep, and prefer
+the highest threshold that still detects every utterance — false-accept
+robustness ages better than onset speed, because noise levels vary
+day-to-day and the onset cost of one extra confirm frame is only 30 ms.
+
+### The whole chain as configuration
+
+Everything above is builder — and spec — surface, so hosted sessions
+(the web bridge, the API server, anything driving
+`LiveHandle::send_audio`) get the same hardened path as native pumps.
+Stages run in the order configured; the open `mic_processor` slot takes
+any `InputAudioProcessor` (an application-side DeepFilterNet stage, AGC,
+a custom filter):
+
+```rust,ignore
+Live::builder()
+    .mic_denoise()                                   // feature `denoise`
+    .mic_noise_gate(700.0, 3)
+    .mic_processor(MyCustomStage::new())             // open slot
+    .input_vad(VadConfig::noisy_street())
+    .client_interruption_authority()                 // ~2× faster barge-in
+```
+
+Or as the `runtime.audio` section of a `SessionSpec` — editable in Flow
+Studio's runtime panel, validated with warnings for the measured
+foot-guns (client authority or a gate without the denoiser):
+
+```json
+"runtime": {
+  "audio": {
+    "denoise": true,
+    "noise_gate": { "threshold_rms": 700.0 },
+    "client_vad": { "preset": "noisy_street" },
+    "authority": "client"
+  }
+}
+```
+
+Under `authority: client` the session is configured with the server's
+automatic activity detection disabled, and the input VAD's speech edges
+send `activityStart`/`activityEnd` — the client owns interruptions.
+Leave it at `server` (the default) unless barge-in latency matters more
+than the occasional tuning review: measured, client authority with the
+full chain barged in at 146–1095 ms with zero false interruptions,
+against the server's 560–1480 ms, also with zero.
+
+## Turn commitment: holds and sustains, not raw edges
+
+Raw VAD edges are the wrong turn signals, and the error is measurable.
+Scored against [TurnBench](https://github.com/SesameAILabs/turnbench) —
+Sesame's benchmark of triple-annotated, two-channel human conversations
+(dev split: 38 dialogues, ~6.6 h) — forwarding every speech offset as an
+end-of-turn commits during mid-turn pauses at a 0.206 false-positive
+rate, and treating every onset over the other side's speech as a
+barge-in fires on backchannels ("mm-hm") at 0.702. Both mistakes have
+the same shape: an edge is evidence, not a decision.
+
+[`TurnCommitConfig`](../api/gemini_adk_rs/live/struct.TurnCommitConfig.html)
+is the decision layer, with two rules:
+
+- **End-hold** — an end-of-turn commits only after silence outlasts
+  `eot_hold`; speech resuming inside the hold bridges the pause and
+  nothing is sent. Measured frontier (hold → recall / fp): 400 ms →
+  0.900/0.214 · 600 ms → 0.855/0.135 · **800 ms → 0.798/0.087** (the
+  benchmark's 0.1-fp qualifying point) · 1600 ms → 0.508/0.011.
+- **Interruption sustain** — speech starting while the model holds the
+  floor commits as a barge-in only after sustaining `min_interruption`;
+  shorter overlap is a backchannel and never reaches the wire. Frontier
+  (sustain → recall / fp): 600 ms → 0.939/0.319 · 1000 ms → 0.931/0.126
+  · **1400 ms → 0.899/0.062** — half the false-positive rate of the
+  leaderboard's learned VAP model at its own operating point.
+
+```rust
+Live::builder()
+    .mic_denoise()
+    .input_vad(VadConfig::noisy_street())
+    .client_interruption_authority()
+    .turn_commit(TurnCommitConfig::conversational())  // 800 ms / 1400 ms
+```
+
+Presets carry their provenance: `immediate()` (raw edge forwarding —
+what you get with no policy), `responsive()` (400/600, the default when
+a spec sets only one knob), `conversational()` (800/1400, the
+qualifying point). In a spec, the knobs live beside the rest of the
+audio section — `runtime.audio.eot_hold_ms` and
+`runtime.audio.min_interruption_ms` — and validation warns past the
+measured cliffs. The latency is not hidden: every held commit arrives
+exactly `hold` (or `sustain`) later than the edge, which is the price
+the benchmark says the precision costs. The full harness, tables and
+methodology live in `evals/turnbench/`; re-run it before moving an
+operating point.
+
 ## One state vocabulary across transports
 
 All of this composes because connectors share one session-state

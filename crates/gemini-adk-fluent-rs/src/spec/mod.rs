@@ -504,6 +504,125 @@ pub struct VadSpec {
     pub silence_duration_ms: Option<u32>,
 }
 
+/// Input-audio hardening: the measured mic chain (denoiser, noise gate),
+/// client input-VAD tuning, and interruption authority. Lowers to
+/// `Live::mic_denoise` / `mic_noise_gate` / `input_vad` /
+/// `client_interruption_authority`; see the hardening chapter for the
+/// benchmark behind each default.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct AudioSpec {
+    /// Run the RNNoise speech enhancer over incoming user audio (requires
+    /// the `denoise` feature; skipped with a validation warning otherwise).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub denoise: Option<bool>,
+    /// Noise gate after the denoiser — silences frames below a level
+    /// threshold (near-talker preference; rejects denoiser residue).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub noise_gate: Option<NoiseGateSpec>,
+    /// Client input-VAD tuning (the detector driving speech edges in
+    /// `send_audio`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_vad: Option<ClientVadSpec>,
+    /// Who decides when user speech interrupts the model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authority: Option<AuthoritySpec>,
+    /// Milliseconds to hold the turn-end marker during mid-turn pauses, suppressing
+    /// false end-of-turn commits. Measured on TurnBench dev: 800 ms = 0.1-fp
+    /// qualifying point (recall 0.798), 1600 ms = recall 0.508 (frontier).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub eot_hold_ms: Option<u32>,
+    /// Milliseconds to suppress barge-in detection on backchannels and false
+    /// interruptions. Measured on TurnBench dev: 1400 ms suppresses backchannel
+    /// false positives (0.702 → 0.062), 2000 ms = maximum interruption match window.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_interruption_ms: Option<u32>,
+}
+
+/// Noise-gate stage parameters.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct NoiseGateSpec {
+    /// RMS threshold in sample units (i16 full scale 32767; measured sweet
+    /// spot 400–700 behind the denoiser).
+    #[serde(default = "default_gate_threshold")]
+    pub threshold_rms: f64,
+    /// Quiet frames the gate stays open after the last loud one.
+    #[serde(default = "default_gate_hold")]
+    pub hold_frames: u32,
+}
+
+fn default_gate_threshold() -> f64 {
+    700.0
+}
+fn default_gate_hold() -> u32 {
+    3
+}
+
+/// Client input-VAD tuning: start from a preset, override individual knobs.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ClientVadSpec {
+    /// Base preset the overrides apply to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preset: Option<ClientVadPreset>,
+    /// Energy above the noise floor (dB) to open.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_threshold_db: Option<f64>,
+    /// Energy above the noise floor (dB) to close.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stop_threshold_db: Option<f64>,
+    /// Consecutive frames (30 ms each) to confirm onset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_speech_frames: Option<u32>,
+    /// Frames of hangover before speech-end.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hangover_frames: Option<u32>,
+}
+
+/// Named client-VAD starting points.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ClientVadPreset {
+    /// The library defaults (quiet environments).
+    Default,
+    /// The closed-loop-tuned noisy-environment profile — use behind
+    /// `denoise: true` (see `VadConfig::noisy_street`).
+    NoisyStreet,
+}
+
+impl ClientVadSpec {
+    /// Lower to a wire `VadConfig`: preset base plus overrides.
+    pub fn to_config(&self) -> gemini_genai_rs::vad::VadConfig {
+        let mut config = match self.preset {
+            Some(ClientVadPreset::NoisyStreet) => gemini_genai_rs::vad::VadConfig::noisy_street(),
+            _ => gemini_genai_rs::vad::VadConfig::default(),
+        };
+        if let Some(v) = self.start_threshold_db {
+            config.start_threshold_db = v;
+        }
+        if let Some(v) = self.stop_threshold_db {
+            config.stop_threshold_db = v;
+        }
+        if let Some(v) = self.min_speech_frames {
+            config.min_speech_frames = v;
+        }
+        if let Some(v) = self.hangover_frames {
+            config.hangover_frames = v;
+        }
+        config
+    }
+}
+
+/// Interruption authority (measured trade: client is ~2× faster to barge
+/// in; server posted zero false interruptions in every benchmark run).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthoritySpec {
+    /// The Live API's automatic activity detection decides (default).
+    Server,
+    /// This client's input VAD decides: automatic detection is disabled and
+    /// speech edges send activityStart/activityEnd.
+    Client,
+}
+
 /// Input/output transcription toggles.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TranscriptionSpec {
@@ -587,6 +706,9 @@ pub struct RuntimeSpec {
     /// Voice-activity-detection tuning.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vad: Option<VadSpec>,
+    /// Input-audio hardening: mic chain, client VAD, interruption authority.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio: Option<AudioSpec>,
     /// Fire a soft turn when the model stays silent this long after VAD end.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub soft_turn_timeout_ms: Option<u64>,
@@ -917,6 +1039,16 @@ impl SessionSpec {
         let mut errors = Vec::new();
         let mut warnings = Vec::new();
 
+        // Fragment namespace validation: must be non-empty to create valid step ids.
+        for use_frag in &self.use_fragments {
+            if use_frag.namespace.is_empty() {
+                errors.push(
+                    "use_fragments directive has empty namespace — step ids would be malformed"
+                        .into(),
+                );
+            }
+        }
+
         let flow = match self.effective_flow() {
             Ok(flow) => flow,
             Err(errs) => {
@@ -937,6 +1069,19 @@ impl SessionSpec {
         if let Some(initial) = &self.initial_phase {
             if !self.phases.iter().any(|p| &p.name == initial) {
                 errors.push(format!("initial_phase '{initial}' is not a declared phase"));
+            }
+        }
+        // Check for duplicate phase names
+        {
+            let phase_names: std::collections::BTreeSet<&str> =
+                self.phases.iter().map(|p| p.name.as_str()).collect();
+            if phase_names.len() != self.phases.len() {
+                let mut seen = std::collections::BTreeSet::new();
+                for p in &self.phases {
+                    if !seen.insert(p.name.as_str()) {
+                        errors.push(format!("phase '{}' is declared more than once", p.name));
+                    }
+                }
             }
         }
         for pattern in &self.patterns {
@@ -1109,6 +1254,56 @@ impl SessionSpec {
                      thoughts will arrive"
                         .into(),
                 );
+            }
+            if let Some(audio) = &runtime.audio {
+                if audio.denoise == Some(true) && !cfg!(feature = "denoise") {
+                    warnings.push(
+                        "runtime.audio.denoise requires building with the `denoise` feature — \
+                         the stage will be skipped"
+                            .into(),
+                    );
+                }
+                if audio.authority == Some(AuthoritySpec::Client) && audio.denoise != Some(true) {
+                    warnings.push(
+                        "runtime.audio.authority=client without denoise — in noise the raw \
+                         energy VAD latches open and will drive interruptions falsely \
+                         (measured); enable denoise or expect spurious barge-ins"
+                            .into(),
+                    );
+                }
+                if audio.noise_gate.is_some() && audio.denoise != Some(true) {
+                    warnings.push(
+                        "runtime.audio.noise_gate without denoise — the gate calibrates on \
+                         noisy levels; chain it behind denoise so it gates clean audio"
+                            .into(),
+                    );
+                }
+                if audio.authority == Some(AuthoritySpec::Client) && runtime.vad.is_some() {
+                    warnings.push(
+                        "runtime.audio.authority=client disables the server's automatic \
+                         activity detection — runtime.vad sensitivities will have no effect"
+                            .into(),
+                    );
+                }
+                if let Some(eot_ms) = audio.eot_hold_ms {
+                    if eot_ms > 1600 {
+                        warnings.push(
+                            "runtime.audio.eot_hold_ms exceeds the measured frontier (1600 ms): \
+                             recall fell to 0.508 at 1600ms on TurnBench dev — values beyond this \
+                             may cause missed turn-end detection"
+                                .into(),
+                        );
+                    }
+                }
+                if let Some(min_int_ms) = audio.min_interruption_ms {
+                    if min_int_ms > 2000 {
+                        warnings.push(
+                            "runtime.audio.min_interruption_ms exceeds the interruption match \
+                             window (2000 ms) — commits may land too late to count"
+                                .into(),
+                        );
+                    }
+                }
             }
             if runtime.session_id.is_some() && runtime.persistence.is_none() {
                 warnings.push(
@@ -1490,6 +1685,23 @@ async fn run_effects(
     }
 }
 
+/// Lower the turn-commit tuning knobs onto the Live builder. A knob left
+/// unset keeps the default from
+/// [`TurnCommitConfig::responsive()`](gemini_adk_rs::live::TurnCommitConfig::responsive).
+fn apply_turn_commit(
+    mut live: Live,
+    eot_hold_ms: Option<u32>,
+    min_interruption_ms: Option<u32>,
+) -> Live {
+    if let Some(ms) = eot_hold_ms {
+        live = live.turn_commit_eot_hold_ms(u64::from(ms));
+    }
+    if let Some(ms) = min_interruption_ms {
+        live = live.turn_commit_min_interruption_ms(u64::from(ms));
+    }
+    live
+}
+
 /// Lower the `runtime` section onto the builder.
 fn apply_runtime(mut live: Live, runtime: &RuntimeSpec) -> Live {
     if let Some(t) = runtime.temperature {
@@ -1515,6 +1727,24 @@ fn apply_runtime(mut live: Live, runtime: &RuntimeSpec) -> Live {
             prefix_padding_ms: vad.prefix_padding_ms,
             silence_duration_ms: vad.silence_duration_ms,
         });
+    }
+    if let Some(audio) = &runtime.audio {
+        #[cfg(feature = "denoise")]
+        if audio.denoise == Some(true) {
+            live = live.mic_denoise();
+        }
+        if let Some(gate) = &audio.noise_gate {
+            live = live.mic_noise_gate(gate.threshold_rms, gate.hold_frames);
+        }
+        if let Some(vad) = &audio.client_vad {
+            live = live.input_vad(vad.to_config());
+        }
+        if audio.authority == Some(AuthoritySpec::Client) {
+            live = live.client_interruption_authority();
+        }
+        // Turn-commit tuning knobs integration seam: if either field is set,
+        // the Live builder's turn_commit(...) method will wire them through.
+        live = apply_turn_commit(live, audio.eot_hold_ms, audio.min_interruption_ms);
     }
     if let Some(ms) = runtime.soft_turn_timeout_ms {
         live = live.soft_turn_timeout(std::time::Duration::from_millis(ms));
@@ -1870,6 +2100,142 @@ fn levenshtein(a: &str, b: &str) -> usize {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn audio_spec_lowers_and_validates() {
+        let spec: SessionSpec = serde_json::from_str(
+            r#"{
+                "name": "noisy",
+                "instruction": "hi",
+                "runtime": {
+                    "audio": {
+                        "denoise": true,
+                        "noise_gate": { "threshold_rms": 700.0 },
+                        "client_vad": { "preset": "noisy_street", "hangover_frames": 12 },
+                        "authority": "client"
+                    }
+                }
+            }"#,
+        )
+        .unwrap();
+        let audio = spec.runtime.as_ref().unwrap().audio.as_ref().unwrap();
+        assert_eq!(audio.noise_gate.as_ref().unwrap().hold_frames, 3); // serde default
+        let config = audio.client_vad.as_ref().unwrap().to_config();
+        assert_eq!(config.start_threshold_db, 21.0); // preset
+        assert_eq!(config.hangover_frames, 12); // override wins
+        assert_eq!(audio.authority, Some(AuthoritySpec::Client));
+        // Round-trips through JSON unchanged.
+        let json = serde_json::to_value(&spec).unwrap();
+        let back: SessionSpec = serde_json::from_value(json).unwrap();
+        assert_eq!(
+            back.runtime
+                .unwrap()
+                .audio
+                .unwrap()
+                .client_vad
+                .unwrap()
+                .hangover_frames,
+            Some(12)
+        );
+    }
+
+    #[test]
+    fn audio_spec_warns_on_risky_combinations() {
+        let spec: SessionSpec = serde_json::from_str(
+            r#"{
+                "name": "risky",
+                "instruction": "hi",
+                "runtime": { "audio": { "authority": "client", "noise_gate": {} } }
+            }"#,
+        )
+        .unwrap();
+        let validation = spec.validate();
+        assert!(
+            validation
+                .warnings
+                .iter()
+                .any(|w| w.contains("authority=client without denoise")),
+            "expected client-authority warning, got {:?}",
+            validation.warnings
+        );
+        assert!(
+            validation
+                .warnings
+                .iter()
+                .any(|w| w.contains("noise_gate without denoise")),
+            "expected gate warning, got {:?}",
+            validation.warnings
+        );
+    }
+
+    #[test]
+    fn turn_commit_tuning_knobs_serialize_and_round_trip() {
+        let spec: SessionSpec = serde_json::from_str(
+            r#"{
+                "name": "tune",
+                "instruction": "hi",
+                "runtime": {
+                    "audio": {
+                        "eot_hold_ms": 800,
+                        "min_interruption_ms": 1400
+                    }
+                }
+            }"#,
+        )
+        .unwrap();
+        let audio = spec.runtime.as_ref().unwrap().audio.as_ref().unwrap();
+        assert_eq!(audio.eot_hold_ms, Some(800));
+        assert_eq!(audio.min_interruption_ms, Some(1400));
+        // Round-trips through JSON unchanged.
+        let json = serde_json::to_value(&spec).unwrap();
+        let back: SessionSpec = serde_json::from_value(json).unwrap();
+        let audio_back = back.runtime.unwrap().audio.unwrap();
+        assert_eq!(audio_back.eot_hold_ms, Some(800));
+        assert_eq!(audio_back.min_interruption_ms, Some(1400));
+    }
+
+    #[test]
+    fn turn_commit_tuning_knobs_validate_thresholds() {
+        // Warn on eot_hold_ms > 1600
+        let spec: SessionSpec = serde_json::from_str(
+            r#"{
+                "name": "frontier",
+                "instruction": "hi",
+                "runtime": { "audio": { "eot_hold_ms": 1700 } }
+            }"#,
+        )
+        .unwrap();
+        let validation = spec.validate();
+        assert!(
+            validation
+                .warnings
+                .iter()
+                .any(|w| w.contains("eot_hold_ms") && w.contains("1600") && w.contains("frontier")),
+            "expected eot_hold_ms frontier warning, got {:?}",
+            validation.warnings
+        );
+
+        // Warn on min_interruption_ms > 2000
+        let spec2: SessionSpec = serde_json::from_str(
+            r#"{
+                "name": "window",
+                "instruction": "hi",
+                "runtime": { "audio": { "min_interruption_ms": 2100 } }
+            }"#,
+        )
+        .unwrap();
+        let validation2 = spec2.validate();
+        assert!(
+            validation2
+                .warnings
+                .iter()
+                .any(|w| w.contains("min_interruption_ms")
+                    && w.contains("2000")
+                    && w.contains("window")),
+            "expected min_interruption_ms window warning, got {:?}",
+            validation2.warnings
+        );
+    }
     use super::*;
 
     fn collections_spec() -> SessionSpec {
@@ -1992,6 +2358,132 @@ mod tests {
         }))
         .expect("parses");
         assert!(spec.validate().valid);
+    }
+
+    #[test]
+    fn empty_fragment_namespace_is_rejected() {
+        let spec = SessionSpec::from_value(json!({
+            "instruction": "x",
+            "fragments": {
+                "verify": {"steps": [
+                    {"id": "ask", "terminal": true}
+                ]}
+            },
+            "use_fragments": [{"fragment": "verify", "namespace": ""}],
+            "flow": {"steps": [
+                {"id": "start", "terminal": true}
+            ]}
+        }))
+        .expect("parses");
+        let v = spec.validate();
+        // Empty namespace should be a validation error
+        assert!(
+            !v.valid,
+            "empty namespace should fail validation, got errors: {:?}",
+            v.errors
+        );
+        assert!(
+            v.errors.iter().any(|e| e.contains("namespace")),
+            "should mention namespace issue: {:?}",
+            v.errors
+        );
+    }
+
+    #[test]
+    fn duplicate_computed_keys_are_rejected() {
+        let spec = SessionSpec::from_value(json!({
+            "instruction": "x",
+            "flow": {"steps": [{"id": "only", "terminal": true}]},
+            "computed": [
+                {"key": "risk", "from": {"key": "score"}},
+                {"key": "risk", "from": {"key": "other_score"}}
+            ]
+        }))
+        .expect("parses");
+        let v = spec.validate();
+        assert!(!v.valid, "duplicate computed keys should fail validation");
+        assert!(
+            v.errors.iter().any(|e| e.contains("duplicate")),
+            "should mention duplicate computed key: {:?}",
+            v.errors
+        );
+    }
+
+    #[test]
+    fn duplicate_phase_names_are_rejected() {
+        let spec = SessionSpec::from_value(json!({
+            "instruction": "x",
+            "phases": [
+                {"name": "greet", "instruction": "Welcome."},
+                {"name": "greet", "instruction": "Hi again."}
+            ],
+            "initial_phase": "greet"
+        }))
+        .expect("parses");
+        let v = spec.validate();
+        assert!(!v.valid, "duplicate phase names should fail validation");
+        assert!(
+            v.errors.iter().any(|e| e.contains("phase")),
+            "should mention duplicate phase: {:?}",
+            v.errors
+        );
+    }
+
+    #[test]
+    fn tool_background_false_round_trips() {
+        // Test that explicitly setting background: false round-trips correctly
+        let spec = SessionSpec::from_value(json!({
+            "instruction": "x",
+            "tools": [
+                {"name": "search", "background": false},
+                {"name": "log", "background": true}
+            ],
+            "flow": {"steps": [{"id": "only", "terminal": true}]}
+        }))
+        .expect("parses");
+
+        // After serialization
+        let serialized = serde_json::to_value(&spec).unwrap();
+        let tools = serialized["tools"].as_array().unwrap();
+
+        // background: false is skipped in serialization (optimization), but
+        // when deserialized, missing field defaults to false ✓
+        assert!(
+            tools[0].get("background").is_none(),
+            "background: false is optimized away"
+        );
+
+        // background: true is serialized
+        assert_eq!(tools[1].get("background"), Some(&json!(true)));
+
+        // Round-trip test
+        let back: SessionSpec = serde_json::from_value(serialized).unwrap();
+        assert!(!back.tools[0].background);
+        assert!(back.tools[1].background);
+    }
+
+    #[test]
+    fn promotion_spec_with_no_to_field_uses_field_name() {
+        // Test that promotion without explicit "to" uses the field name as target
+        let spec = SessionSpec::from_value(json!({
+            "instruction": "x",
+            "tools": [{"name": "extract", "set_state": {"test": true}}],
+            "extract": [{
+                "name": "data",
+                "instruction": "Extract.",
+                "schema": {"type": "object"},
+                "promote": [
+                    {"field": "amount"},
+                    {"field": "date", "to": "extracted_date"}
+                ]
+            }],
+            "flow": {"steps": [{"id": "only", "terminal": true}]}
+        }))
+        .expect("parses");
+
+        let promote = &spec.extract[0].promote;
+        assert_eq!(promote[0].target(), "amount");
+        assert_eq!(promote[1].target(), "extracted_date");
     }
 
     #[test]

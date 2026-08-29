@@ -573,6 +573,12 @@ let artifacts = A::json_output("report", "Analysis report")
 | `TemporalPattern` / `TemporalRegistry` | Time/turn-based pattern detection |
 | `SessionSignals` / `SessionTelemetry` | Auto-collected session metrics |
 | `BaseLlm` / `GeminiLlm` | LLM abstraction for text agents |
+| `InstructionProvider` / `TemplateInstruction` | Dynamic instructions: any `Fn(&State) -> String`, or Jinja2-syntax templates over state (feature `templates`, minijinja) — resolved per run via `.instruction_provider(..)` on `LlmTextAgent`/`AgentBuilder` |
+| `tool::media` | Tool media returns (ADK pattern): `media::attach(&mut result, mime, bytes)` in any tool; the text-agent loop lifts `_media` out of the JSON and delivers it to the model as `inline_data` parts |
+| `Workflow` / `WorkflowBuilder` / `WorkflowController` | Graph *execution* runtime (ADK 2.0 pattern; complements the governance `Flow`): named agent/function/approval nodes, `after` edges with `when` guards and any/all joins, concurrent ready-set execution over shared `State` (outputs land in `workflow:<id>`), HITL approve/reject via the controller, cycles and dangling deps rejected at `build()` |
+| `skills::{SkillInfo, SkillRegistryBackend, LocalSkillRegistry}` | Skill registry: versioned publish/resolve/list of capabilities (a local `AgentConfig` or a remote A2A endpoint), numeric-aware latest-version resolution, `load_dir` hydration from agent config files |
+| `ModelCapabilities` | Model capability declarations on `BaseLlm::capabilities()` — thinking/live-bidi/audio/vision/caching stated by the model, conservatively inferred from `model_id` by default |
+| `LlmTextAgent::llm_provider` | Dynamic model switching: a model source resolved against state per run (risk escalation, cost routing, per-tenant selection) — `AgentBuilder::llm_provider` at L2 |
 | `TextAgentTool` | Wraps a TextAgent as a callable tool |
 | `BackgroundAgentDispatcher` | Fire-and-forget agent dispatch |
 | `SoftTurnDetector` | Proactive silence awareness for `proactiveAudio` sessions |
@@ -586,6 +592,7 @@ let artifacts = A::json_output("report", "Analysis report")
 | `Delivery` / `DeliveryConfig` | Per-event-class fast-lane backpressure policy: `Lossless` (default; awaits) vs `LossyDropNewest` (drops on full). L2: `.delivery(..)`, `.lossy_audio()`, `.lossy_transcript()` |
 | `redaction::TranscriptRedactor` | Transcript scrubbing (Luhn-checked card numbers, digit runs, custom patterns) applied at the event router before callbacks/transcript buffer/extraction/persistence. L2: `.redaction(..)`; streaming deltas are documented as not redacted |
 | `ExtractionTrigger` | When to run extractors: EveryTurn, Interval, AfterToolCall, OnPhaseChange, OnGenerationComplete |
+| `TurnCommitConfig` / `TurnCommitPolicy` / `TurnSignal` | Turn-commit policy between VAD edges and activity marks: end-hold suppresses mid-turn-pause EOT commits, interruption-sustain suppresses backchannel barge-ins (TurnBench-measured presets `responsive` 400/600 ms, `conversational` 800/1400 ms). L2: `.turn_commit(..)`; spec: `runtime.audio.eot_hold_ms`/`min_interruption_ms`; eval harness in `evals/turnbench/` |
 | `Flow` / `Step` / `Guard` / `FlowMonitor` | Governed conversation/tool DAG: one declarative spec enforced live (`Live::govern(flow)`) — gates tool calls, projects active-step postures, drives repair. Closed serializable vocabulary; see `docs/user-guide/flow.md` |
 
 ### L2 (gemini-adk-fluent-rs) -- Fluent DX
@@ -602,6 +609,7 @@ let artifacts = A::json_output("report", "Analysis report")
 | `telephony::bridge` | Vendor-neutral connector components: shared `telephony:*` state keys, `record_dtmf`, `DtmfDeduper` (RFC 4733 end-packet dedup), `FillerConfig`/`spawn_latency_filler` (latency-masking clip when the model stays silent after VadEnd) |
 | `handoff::{HandoffRecorder, HandoffPacket}` | Warm-handoff context packet: recorded (redacted) transcript tail + selected state keys + flow standing (done/active/missing) + optional LLM summary; delivery is the connector's job |
 | `voice::{MicProcessor, NoiseGate, pump_processed}` | Mic-chain seam for denoisers/VAD gates applied per frame before resampling; `NoiseGate` is the reference impl |
+| `voice::Denoiser` | RNNoise speech enhancement as a mic-chain stage (feature `denoise`, pure Rust): clears the energy VAD's stuck-open (white) and missed-speech (pink) noise pathologies down to 0 dB SNR at ~0.008× realtime; does NOT reject competing speech — chain a calibrated `NoiseGate` after it for near-talker preference. `vad_probability()` exposes the network's per-10 ms VAD head — a learned speech classifier that beats WebRTC VAD on every measured noise condition (street traffic 10 dB: 0 false/0% open vs 4 false/53%); wrap it in hysteresis, and note babble still reads as speech |
 
 ## Three-Lane Processor Architecture
 

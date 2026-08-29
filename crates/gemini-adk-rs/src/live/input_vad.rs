@@ -2,6 +2,29 @@
 
 use std::time::Instant;
 
+/// A per-frame processor applied to outgoing microphone audio inside
+/// [`LiveHandle::send_audio`](super::LiveHandle::send_audio) — the L1 seam
+/// the L2 `voice` chain (denoiser, noise gate) plugs into so hosted
+/// surfaces (web bridge, API server) get the same hardened path as native
+/// pumps. Runs on the send path: keep it fast and allocation-light.
+pub trait InputAudioProcessor: Send {
+    /// Process one PCM16 frame in place (the frame may change length).
+    fn process_frame(&mut self, frame: &mut Vec<i16>);
+}
+
+/// Who decides when user speech interrupts the model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ActivityAuthority {
+    /// The Live API's automatic activity detection decides (default).
+    #[default]
+    Server,
+    /// This client's input VAD decides: `send_audio` emits
+    /// `activityStart`/`activityEnd` marks on speech edges. Only meaningful
+    /// when the session was configured with automatic activity detection
+    /// disabled — otherwise the server ignores the marks.
+    Client,
+}
+
 use gemini_genai_rs::prelude::{VadConfig, VadEvent, VoiceActivityDetector};
 use gemini_genai_rs::vad::VadState;
 use serde::Serialize;
@@ -73,6 +96,11 @@ impl BackendInputVad {
             }
         }
         events
+    }
+
+    /// The detector's configured input sample rate in Hz.
+    pub fn sample_rate(&self) -> u32 {
+        self.config.sample_rate
     }
 
     /// Return a diagnostics snapshot suitable for UI/devtools display.

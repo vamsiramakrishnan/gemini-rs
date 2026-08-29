@@ -33,6 +33,7 @@ pub mod steering;
 pub mod telemetry;
 pub mod temporal;
 pub mod transcript;
+pub mod turn_commit;
 pub mod watcher;
 
 pub use background_agent_dispatch::BackgroundAgentDispatcher;
@@ -52,7 +53,7 @@ pub use effect_executor::LiveEffectExecutor;
 pub use events::{LiveEvent, LiveEventStream};
 pub use extractor::{ExtractionTrigger, FieldPromotion, LlmExtractor, MergePolicy, TurnExtractor};
 pub use handle::LiveHandle;
-pub use input_vad::{BackendInputVad, BackendVadSnapshot};
+pub use input_vad::{ActivityAuthority, BackendInputVad, BackendVadSnapshot, InputAudioProcessor};
 pub use needs::{NeedsFulfillment, RepairAction, RepairConfig};
 pub use persistence::{FsPersistence, MemoryPersistence, SessionPersistence, SessionSnapshot};
 pub use phase::{
@@ -75,4 +76,5 @@ pub use temporal::{
     TemporalRegistry, TurnCountDetector,
 };
 pub use transcript::{ToolCallSummary, TranscriptBuffer, TranscriptTurn, TranscriptWindow};
+pub use turn_commit::{TurnCommitConfig, TurnCommitPolicy, TurnSignal};
 pub use watcher::{PredicateFn, WatchPredicate, Watcher, WatcherRegistry};

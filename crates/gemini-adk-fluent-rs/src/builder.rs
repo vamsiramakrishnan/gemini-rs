@@ -16,12 +16,16 @@ use crate::compose::guards::GComposite;
 use crate::compose::middleware::MiddlewareComposite;
 use crate::compose::tools::ToolComposite;
 
+type LlmProviderFn = Arc<dyn Fn(&gemini_adk_rs::State) -> Arc<dyn BaseLlm> + Send + Sync>;
+
 /// Inner state of an AgentBuilder — shared via Arc for copy-on-write.
 #[derive(Clone)]
 struct AgentBuilderInner {
     name: String,
     model: Option<GeminiModel>,
     instruction: Option<String>,
+    instruction_provider: Option<Arc<dyn gemini_adk_rs::instruction::InstructionProvider>>,
+    llm_provider: Option<LlmProviderFn>,
     voice: Option<Voice>,
     temperature: Option<f32>,
     top_p: Option<f32>,
@@ -158,6 +162,8 @@ impl AgentBuilder {
                 name: name.into(),
                 model: None,
                 instruction: None,
+                instruction_provider: None,
+                llm_provider: None,
                 voice: None,
                 temperature: None,
                 top_p: None,
@@ -323,6 +329,32 @@ impl AgentBuilder {
     pub fn instruction(self, inst: impl Into<String>) -> Self {
         let mut inner = self.mutate();
         inner.instruction = Some(inst.into());
+        Self::with(inner)
+    }
+
+    /// Set a dynamic instruction source — any `Fn(&State) -> String`
+    /// closure or a `TemplateInstruction` (feature `templates`), resolved
+    /// against live session state at the start of every run. Wins over
+    /// [`instruction`](Self::instruction) when both are set.
+    pub fn instruction_provider(
+        self,
+        provider: impl gemini_adk_rs::instruction::InstructionProvider + 'static,
+    ) -> Self {
+        let mut inner = self.mutate();
+        inner.instruction_provider = Some(Arc::new(provider));
+        Self::with(inner)
+    }
+
+    /// Set a dynamic model source, resolved against session state at the
+    /// start of every run — risk-based escalation to a stronger model, cost
+    /// routing to a cheaper one, per-tenant model selection — without
+    /// rebuilding the agent. Wins over the constructor's model when set.
+    pub fn llm_provider(
+        self,
+        provider: impl Fn(&gemini_adk_rs::State) -> Arc<dyn BaseLlm> + Send + Sync + 'static,
+    ) -> Self {
+        let mut inner = self.mutate();
+        inner.llm_provider = Some(Arc::new(provider));
         Self::with(inner)
     }
 
@@ -643,6 +675,13 @@ impl AgentBuilder {
 
         if let Some(inst) = &self.inner.instruction {
             agent = agent.instruction(inst);
+        }
+        if let Some(provider) = &self.inner.instruction_provider {
+            agent = agent.instruction_provider(provider.clone());
+        }
+        if let Some(provider) = &self.inner.llm_provider {
+            let provider_clone = provider.clone();
+            agent = agent.llm_provider(move |state| provider_clone(state));
         }
         if let Some(t) = self.inner.temperature {
             agent = agent.temperature(t);

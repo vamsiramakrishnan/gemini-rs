@@ -343,6 +343,106 @@ impl Live {
 
     // -- VAD & Activity --
 
+    /// Run the RNNoise speech enhancer over outgoing mic audio inside
+    /// `send_audio` *(feature `denoise`)* — the same stage as
+    /// [`voice::Denoiser`](crate::voice::Denoiser), applied server-side to
+    /// hosted surfaces (web bridge, API server) that do not run a local
+    /// pump. See the hardening chapter for the measured benchmark.
+    #[cfg(feature = "denoise")]
+    pub fn mic_denoise(mut self) -> Self {
+        self.input_audio.stages.push(InputStage::Denoise);
+        self
+    }
+
+    /// Chain a [`NoiseGate`](crate::voice::NoiseGate) over outgoing mic
+    /// audio inside `send_audio`, after any denoiser — frames whose RMS
+    /// falls below `threshold_rms` are silenced, with `hold_frames` of
+    /// hangover. Calibrate the threshold between the caller's level and the
+    /// background (measured sweet spot 400–700 behind the denoiser).
+    pub fn mic_noise_gate(mut self, threshold_rms: f64, hold_frames: u32) -> Self {
+        self.input_audio.stages.push(InputStage::NoiseGate {
+            threshold_rms,
+            hold_frames,
+        });
+        self
+    }
+
+    /// Chain any [`InputAudioProcessor`](gemini_adk_rs::live::InputAudioProcessor)
+    /// over outgoing mic audio inside `send_audio` — the open slot for
+    /// application-side stages (a DeepFilterNet enhancer, AGC, a custom
+    /// filter). Stages run in the order configured.
+    pub fn mic_processor(
+        mut self,
+        processor: impl gemini_adk_rs::live::InputAudioProcessor + 'static,
+    ) -> Self {
+        self.input_audio
+            .stages
+            .push(InputStage::Custom(Box::new(processor)));
+        self
+    }
+
+    /// Replace the input VAD's configuration (the detector that runs inside
+    /// `send_audio` for client-side speech edges). Use
+    /// [`VadConfig::noisy_street()`](gemini_genai_rs::vad::VadConfig::noisy_street)
+    /// behind [`mic_denoise`](Self::mic_denoise) for noisy environments.
+    pub fn input_vad(mut self, config: gemini_genai_rs::vad::VadConfig) -> Self {
+        self.input_audio.vad = Some(config);
+        self
+    }
+
+    /// Give this client's input VAD interruption authority: the session is
+    /// configured with the server's automatic activity detection disabled,
+    /// and `send_audio` emits `activityStart`/`activityEnd` on the input
+    /// VAD's speech edges. Measured ~2× faster barge-in than server
+    /// authority; pair with [`mic_denoise`](Self::mic_denoise) (and
+    /// [`mic_noise_gate`](Self::mic_noise_gate)) or noise will drive the
+    /// marks.
+    pub fn client_interruption_authority(mut self) -> Self {
+        self.input_audio.client_authority = true;
+        self
+    }
+
+    /// Install a turn-commit policy between the input VAD's speech edges and
+    /// the activity marks sent under
+    /// [`client_interruption_authority`](Self::client_interruption_authority).
+    ///
+    /// Raw edges make two measured mistakes as turn signals (TurnBench dev
+    /// set, 38 real dyadic conversations): committing end-of-turn during
+    /// mid-turn pauses (fp 0.206 raw -> 0.087 with an 800 ms hold), and
+    /// treating backchannels ("mm-hm") over model speech as barge-ins
+    /// (fp 0.702 raw -> 0.062 with a 1400 ms sustain). See
+    /// [`TurnCommitConfig`](gemini_adk_rs::live::TurnCommitConfig) for the
+    /// presets carrying those operating points.
+    pub fn turn_commit(mut self, config: gemini_adk_rs::live::TurnCommitConfig) -> Self {
+        self.input_audio.turn_commit = Some(config);
+        self
+    }
+
+    /// [`turn_commit`](Self::turn_commit) with millisecond knobs.
+    pub fn turn_commit_ms(self, eot_hold_ms: u64, min_interruption_ms: u64) -> Self {
+        self.turn_commit(gemini_adk_rs::live::TurnCommitConfig {
+            eot_hold: std::time::Duration::from_millis(eot_hold_ms),
+            min_interruption: std::time::Duration::from_millis(min_interruption_ms),
+        })
+    }
+
+    /// Set only the end-of-turn hold, keeping (or defaulting) the sustain —
+    /// one of the two granular forms Flow Studio codegen emits.
+    pub fn turn_commit_eot_hold_ms(mut self, eot_hold_ms: u64) -> Self {
+        let mut config = self.input_audio.turn_commit.unwrap_or_default();
+        config.eot_hold = std::time::Duration::from_millis(eot_hold_ms);
+        self.input_audio.turn_commit = Some(config);
+        self
+    }
+
+    /// Set only the interruption sustain, keeping (or defaulting) the hold.
+    pub fn turn_commit_min_interruption_ms(mut self, min_interruption_ms: u64) -> Self {
+        let mut config = self.input_audio.turn_commit.unwrap_or_default();
+        config.min_interruption = std::time::Duration::from_millis(min_interruption_ms);
+        self.input_audio.turn_commit = Some(config);
+        self
+    }
+
     /// Configure server-side VAD.
     pub fn vad(mut self, detection: AutomaticActivityDetection) -> Self {
         self.config = self.config.server_vad(detection);
@@ -521,5 +621,147 @@ impl Live {
     pub fn tool_advisory(mut self, enabled: bool) -> Self {
         self.tool_advisory = enabled;
         self
+    }
+}
+
+/// Input-audio hardening configuration accumulated by the builder and
+/// applied to the [`LiveHandle`](gemini_adk_rs::live::LiveHandle) right
+/// after connect. Stages run over each outgoing frame **in the order they
+/// were configured** — chain the denoiser before the gate so the gate
+/// calibrates on clean levels (see `Live::mic_denoise`,
+/// `Live::mic_noise_gate`, `Live::mic_processor`, `Live::input_vad`,
+/// `Live::client_interruption_authority`).
+#[derive(Default)]
+pub struct InputAudioConfig {
+    /// Ordered mic-chain stages.
+    pub stages: Vec<InputStage>,
+    /// Replacement input-VAD configuration.
+    pub vad: Option<gemini_genai_rs::vad::VadConfig>,
+    /// Client VAD sends activity marks; server auto-detection is disabled.
+    pub client_authority: bool,
+    /// Turn-commit policy between VAD edges and activity marks.
+    pub turn_commit: Option<gemini_adk_rs::live::TurnCommitConfig>,
+}
+
+/// One stage of the input mic chain — the named stages the SDK ships plus
+/// an open [`Custom`](Self::Custom) slot for any
+/// [`InputAudioProcessor`](gemini_adk_rs::live::InputAudioProcessor).
+pub enum InputStage {
+    /// RNNoise speech enhancement (feature `denoise`).
+    #[cfg(feature = "denoise")]
+    Denoise,
+    /// Level gate: silences frames whose RMS falls below the threshold.
+    NoiseGate {
+        /// RMS threshold in sample units.
+        threshold_rms: f64,
+        /// Quiet frames the gate stays open after the last loud one.
+        hold_frames: u32,
+    },
+    /// Any caller-supplied processor (denoisers, AGC, custom filters).
+    Custom(Box<dyn gemini_adk_rs::live::InputAudioProcessor>),
+}
+
+/// Everything [`InputAudioConfig::build_processors`] hands the handle:
+/// materialized mic-chain stages, optional VAD replacement, client
+/// activity authority, and the optional turn-commit policy.
+pub(crate) type BuiltInputAudio = (
+    Vec<Box<dyn gemini_adk_rs::live::InputAudioProcessor>>,
+    Option<gemini_genai_rs::vad::VadConfig>,
+    bool,
+    Option<gemini_adk_rs::live::TurnCommitConfig>,
+);
+
+impl InputAudioConfig {
+    /// Whether any part of the input path is configured.
+    pub fn is_configured(&self) -> bool {
+        !self.stages.is_empty()
+            || self.vad.is_some()
+            || self.client_authority
+            || self.turn_commit.is_some()
+    }
+
+    /// Materialize the configured stages into runnable processors.
+    pub(crate) fn build_processors(self) -> BuiltInputAudio {
+        let processors = self
+            .stages
+            .into_iter()
+            .map(
+                |stage| -> Box<dyn gemini_adk_rs::live::InputAudioProcessor> {
+                    match stage {
+                        #[cfg(feature = "denoise")]
+                        InputStage::Denoise => Box::new(crate::voice::Denoiser::new(16_000)),
+                        InputStage::NoiseGate {
+                            threshold_rms,
+                            hold_frames,
+                        } => Box::new(crate::voice::NoiseGate::new(threshold_rms, hold_frames)),
+                        InputStage::Custom(processor) => processor,
+                    }
+                },
+            )
+            .collect();
+        (
+            processors,
+            self.vad,
+            self.client_authority,
+            self.turn_commit,
+        )
+    }
+}
+
+#[cfg(test)]
+mod input_audio_tests {
+    use super::*;
+
+    #[test]
+    fn turn_commit_flows_through_build() {
+        let config = InputAudioConfig {
+            turn_commit: Some(gemini_adk_rs::live::TurnCommitConfig::conversational()),
+            ..Default::default()
+        };
+        assert!(config.is_configured());
+        let (_, _, _, turn_commit) = config.build_processors();
+        assert_eq!(
+            turn_commit,
+            Some(gemini_adk_rs::live::TurnCommitConfig::conversational())
+        );
+    }
+
+    struct Doubler;
+    impl gemini_adk_rs::live::InputAudioProcessor for Doubler {
+        fn process_frame(&mut self, frame: &mut Vec<i16>) {
+            for s in frame.iter_mut() {
+                *s = s.saturating_mul(2);
+            }
+        }
+    }
+
+    #[test]
+    fn stages_run_in_configured_order() {
+        let live = crate::live::Live::builder()
+            .mic_processor(Doubler)
+            .mic_noise_gate(400.0, 3)
+            .input_vad(gemini_genai_rs::vad::VadConfig::noisy_street())
+            .client_interruption_authority();
+        assert!(live.input_audio.is_configured());
+        assert_eq!(live.input_audio.stages.len(), 2);
+        assert!(matches!(live.input_audio.stages[0], InputStage::Custom(_)));
+        assert!(matches!(
+            live.input_audio.stages[1],
+            InputStage::NoiseGate { .. }
+        ));
+        let (mut processors, vad, client, _) = live.input_audio.build_processors();
+        assert_eq!(processors.len(), 2);
+        assert_eq!(vad.unwrap().start_threshold_db, 21.0);
+        assert!(client);
+        // The custom stage actually runs: 100 doubles to 200, then the gate
+        // (RMS 200 < 400) silences the frame — order is observable.
+        let mut frame = vec![100i16; 480];
+        for p in processors.iter_mut() {
+            p.process_frame(&mut frame);
+        }
+        assert!(
+            frame.iter().all(|&s| s == 0),
+            "gate should silence the doubled but still-quiet frame"
+        );
     }
 }

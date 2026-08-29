@@ -230,4 +230,127 @@ mod tests {
         assert_eq!(parsed.telephone_event_pt, Some(101));
         assert_eq!(parsed.g711_payload_type(), Some(PT_PCMU));
     }
+
+    #[test]
+    fn parses_ipv6_address_in_connection_line() {
+        // IPv6 addresses in c= line should be handled correctly
+        let sdp = "v=0\r\nc=IN IP6 2001:db8::1\r\nm=audio 4000 RTP/AVP 0\r\n";
+        let offer = parse_audio_offer(sdp).expect("should parse IPv6");
+        assert_eq!(offer.host, "2001:db8::1");
+    }
+
+    #[test]
+    fn multiple_media_sections_uses_first_audio() {
+        // Multiple media sections; should use first audio section only
+        let sdp = "v=0\r\nc=IN IP4 192.0.2.1\r\nm=video 5000 RTP/AVP 96\r\n\
+                   m=audio 4000 RTP/AVP 0\r\n";
+        let offer = parse_audio_offer(sdp).expect("should find first audio after video");
+        assert_eq!(offer.port, 4000);
+    }
+
+    #[test]
+    fn connection_line_after_audio_section_starts_ignored() {
+        // Connection lines after non-audio section are ignored
+        let sdp = "v=0\r\nc=IN IP4 192.0.2.1\r\nm=video 5000 RTP/AVP 96\r\nc=IN IP4 192.0.2.99\r\n\
+                   m=audio 4000 RTP/AVP 0\r\n";
+        let offer = parse_audio_offer(sdp).expect("should parse correctly");
+        // Should use session-level connection (not the one after video)
+        assert_eq!(offer.host, "192.0.2.1");
+    }
+
+    #[test]
+    fn session_level_connection_used_when_media_level_missing() {
+        // Session-level connection should be used if media-level is missing
+        let sdp = "v=0\r\nc=IN IP4 192.0.2.1\r\nm=audio 4000 RTP/AVP 0\r\n";
+        let offer = parse_audio_offer(sdp).expect("should use session-level connection");
+        assert_eq!(offer.host, "192.0.2.1");
+    }
+
+    #[test]
+    fn payload_type_with_whitespace() {
+        // Payload types separated by whitespace should parse correctly
+        let sdp = "v=0\r\nc=IN IP4 192.0.2.1\r\nm=audio 4000 RTP/AVP  0  8  101  \r\n";
+        let offer = parse_audio_offer(sdp).expect("should handle extra whitespace");
+        assert_eq!(offer.payload_types, vec![0, 8, 101]);
+    }
+
+    #[test]
+    fn port_number_edge_cases() {
+        // Port number 1 (minimum valid)
+        let sdp = "v=0\r\nc=IN IP4 192.0.2.1\r\nm=audio 1 RTP/AVP 0\r\n";
+        let offer = parse_audio_offer(sdp).expect("should accept port 1");
+        assert_eq!(offer.port, 1);
+
+        // Port number 65535 (maximum u16)
+        let sdp = "v=0\r\nc=IN IP4 192.0.2.1\r\nm=audio 65535 RTP/AVP 0\r\n";
+        let offer = parse_audio_offer(sdp).expect("should accept max port");
+        assert_eq!(offer.port, 65535);
+    }
+
+    #[test]
+    fn invalid_port_number_rejected() {
+        // Non-numeric port
+        let sdp = "v=0\r\nc=IN IP4 192.0.2.1\r\nm=audio abc RTP/AVP 0\r\n";
+        assert_eq!(parse_audio_offer(sdp), None);
+
+        // Port too large for u16
+        let sdp = "v=0\r\nc=IN IP4 192.0.2.1\r\nm=audio 70000 RTP/AVP 0\r\n";
+        assert_eq!(parse_audio_offer(sdp), None);
+    }
+
+    #[test]
+    fn rtpmap_with_extra_fields() {
+        // rtpmap line with extra whitespace/fields should still parse
+        let sdp = "v=0\r\nc=IN IP4 192.0.2.1\r\nm=audio 4000 RTP/AVP 101\r\n\
+                   a=rtpmap:101 telephone-event/8000  extra stuff\r\n";
+        let offer = parse_audio_offer(sdp).expect("should parse despite extra fields");
+        assert_eq!(offer.telephone_event_pt, Some(101));
+    }
+
+    #[test]
+    fn answer_with_ipv6_address() {
+        // Answer should handle IPv6 addresses
+        let answer = audio_answer(7, "2001:db8::1", 4000, PT_PCMU, None);
+        assert!(
+            answer.contains("c=IN IP4 2001:db8::1\r\n"),
+            "IPv6 in output"
+        );
+        // Round-trip should work
+        let parsed = parse_audio_offer(&answer).expect("should parse answer with IPv6");
+        assert_eq!(parsed.host, "2001:db8::1");
+    }
+
+    #[test]
+    fn answer_session_id_is_version() {
+        // session_id becomes both session ID and version in o= line
+        let answer = audio_answer(12345, "192.0.2.1", 4000, PT_PCMU, None);
+        assert!(
+            answer.contains("o=- 12345 12345 IN IP4"),
+            "session_id used for both fields"
+        );
+    }
+
+    #[test]
+    fn case_insensitive_telephone_event_match() {
+        // Telephone event matching should be case-insensitive
+        let sdp = "v=0\r\nc=IN IP4 192.0.2.1\r\nm=audio 4000 RTP/AVP 101\r\n\
+                   a=rtpmap:101 TELEPHONE-EVENT/8000\r\n";
+        let offer = parse_audio_offer(sdp).expect("should parse");
+        assert_eq!(
+            offer.telephone_event_pt,
+            Some(101),
+            "case-insensitive match"
+        );
+    }
+
+    #[test]
+    fn empty_sdp_rejected() {
+        assert_eq!(parse_audio_offer(""), None);
+    }
+
+    #[test]
+    fn sdp_without_media_section_rejected() {
+        let sdp = "v=0\r\nc=IN IP4 192.0.2.1\r\ns=no media\r\n";
+        assert_eq!(parse_audio_offer(sdp), None);
+    }
 }

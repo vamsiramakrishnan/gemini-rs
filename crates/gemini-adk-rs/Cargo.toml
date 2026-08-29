@@ -26,6 +26,7 @@ dashmap = "6"
 futures = "0.3"
 parking_lot = "0.12"
 regex = "1"
+minijinja = { version = "2", optional = true }
 once_cell = "1"
 strsim = "0.11"
 uuid = { version = "1", features = ["v4"] }
@@ -53,6 +54,8 @@ gcs-artifacts = ["http"]
 tracing-support = ["dep:tracing", "gemini-genai-rs/tracing-support"]
 # Passthroughs so applications don't need a direct gemini-genai-rs dependency.
 vad-wavekat = ["gemini-genai-rs/vad-wavekat"]
+# Jinja2-syntax instruction templates (TemplateInstruction).
+templates = ["dep:minijinja"]
 tls-rustls = ["gemini-genai-rs/tls-rustls"]
 metrics = ["dep:metrics"]
 database-sessions = ["dep:sqlx", "sqlx/runtime-tokio-rustls", "sqlx/sqlite"]
