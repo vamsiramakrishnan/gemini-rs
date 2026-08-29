@@ -14,6 +14,9 @@ use crate::tool::ToolDispatcher;
 /// Maximum number of tool-dispatch round-trips before giving up.
 const MAX_TOOL_ROUNDS: usize = 10;
 
+/// A dynamic model source: state in, the model to use for this run out.
+type LlmProviderFn = Arc<dyn Fn(&State) -> Arc<dyn BaseLlm> + Send + Sync>;
+
 /// Core text agent — calls `BaseLlm::generate()`, dispatches tools, loops
 /// until the model produces a final text response.
 ///
@@ -35,6 +38,10 @@ pub struct LlmTextAgent {
     /// Dynamic instruction source, resolved against state on every run;
     /// wins over the static `instruction` when both are set.
     instruction_provider: Option<Arc<dyn crate::instruction::InstructionProvider>>,
+    /// Dynamic model source, resolved against state on every run;
+    /// wins over the constructor's model when set. Risk-based escalation,
+    /// cost routing, per-tenant model selection without rebuilding the agent.
+    llm_provider: Option<LlmProviderFn>,
     dispatcher: Option<Arc<ToolDispatcher>>,
     temperature: Option<f32>,
     max_output_tokens: Option<u32>,
@@ -49,6 +56,7 @@ impl LlmTextAgent {
             llm,
             instruction: None,
             instruction_provider: None,
+            llm_provider: None,
             dispatcher: None,
             temperature: None,
             max_output_tokens: None,
@@ -72,6 +80,18 @@ impl LlmTextAgent {
         provider: impl crate::instruction::InstructionProvider + 'static,
     ) -> Self {
         self.instruction_provider = Some(Arc::new(provider));
+        self
+    }
+
+    /// Set a dynamic model source, resolved against session state at the
+    /// start of every run — risk-based escalation to a stronger model, cost
+    /// routing to a cheaper one, per-tenant model selection — without
+    /// rebuilding the agent. Wins over the constructor's model when set.
+    pub fn llm_provider<F>(mut self, provider: F) -> Self
+    where
+        F: Fn(&State) -> Arc<dyn BaseLlm> + Send + Sync + 'static,
+    {
+        self.llm_provider = Some(Arc::new(provider));
         self
     }
 
@@ -186,6 +206,14 @@ impl TextAgent for LlmTextAgent {
             None => self.instruction.clone(),
         };
 
+        // Resolve the LLM for this run: provider (against live state) wins
+        // over the constructor's LLM.
+        let llm = self
+            .llm_provider
+            .as_ref()
+            .map(|p| p(state))
+            .unwrap_or_else(|| self.llm.clone());
+
         // Lifecycle event — makes `on_event` (e.g. M::tap) observe agent start.
         let _ = self
             .middleware
@@ -197,7 +225,8 @@ impl TextAgent for LlmTextAgent {
         // Enforce the tightest middleware timeout (M::timeout) over the whole run.
         let result = match self.middleware.timeout() {
             Some(limit) => {
-                match tokio::time::timeout(limit, self.run_inner(&mut contents, &instruction)).await
+                match tokio::time::timeout(limit, self.run_inner(&mut contents, &instruction, &llm))
+                    .await
                 {
                     Ok(r) => r,
                     Err(_) => {
@@ -209,7 +238,7 @@ impl TextAgent for LlmTextAgent {
                     }
                 }
             }
-            None => self.run_inner(&mut contents, &instruction).await,
+            None => self.run_inner(&mut contents, &instruction, &llm).await,
         };
 
         if let Err(ref e) = result {
@@ -234,6 +263,7 @@ impl LlmTextAgent {
         &self,
         contents: &mut Vec<Content>,
         instruction: &Option<String>,
+        llm: &Arc<dyn BaseLlm>,
     ) -> Result<String, AgentError> {
         for _round in 0..MAX_TOOL_ROUNDS {
             let mut request = self.build_request(contents.clone(), instruction);
@@ -246,8 +276,7 @@ impl LlmTextAgent {
             let response = match self.middleware.run_before_model(&request).await? {
                 Some(cached) => cached,
                 None => {
-                    let llm_response = self
-                        .llm
+                    let llm_response = llm
                         .generate(request.clone())
                         .await
                         .map_err(|e| AgentError::Other(format!("LLM error: {e}")))?;
@@ -502,5 +531,56 @@ mod tests {
             flag.load(Ordering::SeqCst),
             "on_event(AgentStarted) should fire"
         );
+    }
+
+    #[tokio::test]
+    async fn llm_provider_switches_model_per_run() {
+        // Two mock LLMs with distinguishable responses.
+        struct MockLlmA;
+        #[async_trait]
+        impl BaseLlm for MockLlmA {
+            fn model_id(&self) -> &str {
+                "mock-a"
+            }
+            async fn generate(&self, _req: LlmRequest) -> Result<LlmResponse, LlmError> {
+                Ok(text_response("from-a"))
+            }
+        }
+
+        struct MockLlmB;
+        #[async_trait]
+        impl BaseLlm for MockLlmB {
+            fn model_id(&self) -> &str {
+                "mock-b"
+            }
+            async fn generate(&self, _req: LlmRequest) -> Result<LlmResponse, LlmError> {
+                Ok(text_response("from-b"))
+            }
+        }
+
+        let llm_a = Arc::new(MockLlmA);
+        let llm_b = Arc::new(MockLlmB);
+
+        // Agent with provider that switches based on escalate flag.
+        let agent = LlmTextAgent::new("switcher", llm_a.clone()).llm_provider(move |state| {
+            if state.get::<bool>("escalate").unwrap_or(false) {
+                llm_b.clone()
+            } else {
+                llm_a.clone()
+            }
+        });
+
+        // Run 1: without escalate flag -> should use model A
+        let state = State::new();
+        let _ = state.set("input", "hi");
+        let result = agent.run(&state).await.unwrap();
+        assert_eq!(result, "from-a", "without escalate, should use model A");
+
+        // Run 2: with escalate flag -> should use model B
+        let state2 = State::new();
+        let _ = state2.set("input", "hi");
+        let _ = state2.set("escalate", true);
+        let result2 = agent.run(&state2).await.unwrap();
+        assert_eq!(result2, "from-b", "with escalate, should use model B");
     }
 }

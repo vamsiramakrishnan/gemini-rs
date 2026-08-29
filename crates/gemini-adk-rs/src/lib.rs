@@ -50,6 +50,7 @@ pub mod tool;
 pub mod tools;
 pub mod toolset;
 pub mod utils;
+pub mod workflow;
 
 #[cfg(test)]
 pub(crate) mod test_helpers;

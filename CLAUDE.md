@@ -575,6 +575,10 @@ let artifacts = A::json_output("report", "Analysis report")
 | `BaseLlm` / `GeminiLlm` | LLM abstraction for text agents |
 | `InstructionProvider` / `TemplateInstruction` | Dynamic instructions: any `Fn(&State) -> String`, or Jinja2-syntax templates over state (feature `templates`, minijinja) — resolved per run via `.instruction_provider(..)` on `LlmTextAgent`/`AgentBuilder` |
 | `tool::media` | Tool media returns (ADK pattern): `media::attach(&mut result, mime, bytes)` in any tool; the text-agent loop lifts `_media` out of the JSON and delivers it to the model as `inline_data` parts |
+| `Workflow` / `WorkflowBuilder` / `WorkflowController` | Graph *execution* runtime (ADK 2.0 pattern; complements the governance `Flow`): named agent/function/approval nodes, `after` edges with `when` guards and any/all joins, concurrent ready-set execution over shared `State` (outputs land in `workflow:<id>`), HITL approve/reject via the controller, cycles and dangling deps rejected at `build()` |
+| `skills::{SkillInfo, SkillRegistryBackend, LocalSkillRegistry}` | Skill registry: versioned publish/resolve/list of capabilities (a local `AgentConfig` or a remote A2A endpoint), numeric-aware latest-version resolution, `load_dir` hydration from agent config files |
+| `ModelCapabilities` | Model capability declarations on `BaseLlm::capabilities()` — thinking/live-bidi/audio/vision/caching stated by the model, conservatively inferred from `model_id` by default |
+| `LlmTextAgent::llm_provider` | Dynamic model switching: a model source resolved against state per run (risk escalation, cost routing, per-tenant selection) — `AgentBuilder::llm_provider` at L2 |
 | `TextAgentTool` | Wraps a TextAgent as a callable tool |
 | `BackgroundAgentDispatcher` | Fire-and-forget agent dispatch |
 | `SoftTurnDetector` | Proactive silence awareness for `proactiveAudio` sessions |
