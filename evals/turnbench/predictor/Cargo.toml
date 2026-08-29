@@ -1,0 +1,13 @@
+[package]
+name = "turnbench-predictor"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+gemini-genai-rs = { path = "../../../crates/gemini-genai-rs", features = ["vad"] }
+gemini-adk-fluent-rs = { path = "../../../crates/gemini-adk-fluent-rs", features = ["denoise"] }
+serde_json = "1"
+
+[profile.release]
+debug = false

@@ -33,6 +33,7 @@ pub mod steering;
 pub mod telemetry;
 pub mod temporal;
 pub mod transcript;
+pub mod turn_commit;
 pub mod watcher;
 
 pub use background_agent_dispatch::BackgroundAgentDispatcher;
@@ -75,4 +76,5 @@ pub use temporal::{
     TemporalRegistry, TurnCountDetector,
 };
 pub use transcript::{ToolCallSummary, TranscriptBuffer, TranscriptTurn, TranscriptWindow};
+pub use turn_commit::{TurnCommitConfig, TurnCommitPolicy, TurnSignal};
 pub use watcher::{PredicateFn, WatchPredicate, Watcher, WatcherRegistry};

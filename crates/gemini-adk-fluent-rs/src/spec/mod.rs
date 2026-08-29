@@ -526,6 +526,16 @@ pub struct AudioSpec {
     /// Who decides when user speech interrupts the model.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub authority: Option<AuthoritySpec>,
+    /// Milliseconds to hold the turn-end marker during mid-turn pauses, suppressing
+    /// false end-of-turn commits. Measured on TurnBench dev: 800 ms = 0.1-fp
+    /// qualifying point (recall 0.798), 1600 ms = recall 0.508 (frontier).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub eot_hold_ms: Option<u32>,
+    /// Milliseconds to suppress barge-in detection on backchannels and false
+    /// interruptions. Measured on TurnBench dev: 1400 ms suppresses backchannel
+    /// false positives (0.702 → 0.062), 2000 ms = maximum interruption match window.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_interruption_ms: Option<u32>,
 }
 
 /// Noise-gate stage parameters.
@@ -1275,6 +1285,25 @@ impl SessionSpec {
                             .into(),
                     );
                 }
+                if let Some(eot_ms) = audio.eot_hold_ms {
+                    if eot_ms > 1600 {
+                        warnings.push(
+                            "runtime.audio.eot_hold_ms exceeds the measured frontier (1600 ms): \
+                             recall fell to 0.508 at 1600ms on TurnBench dev — values beyond this \
+                             may cause missed turn-end detection"
+                                .into(),
+                        );
+                    }
+                }
+                if let Some(min_int_ms) = audio.min_interruption_ms {
+                    if min_int_ms > 2000 {
+                        warnings.push(
+                            "runtime.audio.min_interruption_ms exceeds the interruption match \
+                             window (2000 ms) — commits may land too late to count"
+                                .into(),
+                        );
+                    }
+                }
             }
             if runtime.session_id.is_some() && runtime.persistence.is_none() {
                 warnings.push(
@@ -1656,6 +1685,23 @@ async fn run_effects(
     }
 }
 
+/// Lower the turn-commit tuning knobs onto the Live builder. A knob left
+/// unset keeps the default from
+/// [`TurnCommitConfig::responsive()`](gemini_adk_rs::live::TurnCommitConfig::responsive).
+fn apply_turn_commit(
+    mut live: Live,
+    eot_hold_ms: Option<u32>,
+    min_interruption_ms: Option<u32>,
+) -> Live {
+    if let Some(ms) = eot_hold_ms {
+        live = live.turn_commit_eot_hold_ms(u64::from(ms));
+    }
+    if let Some(ms) = min_interruption_ms {
+        live = live.turn_commit_min_interruption_ms(u64::from(ms));
+    }
+    live
+}
+
 /// Lower the `runtime` section onto the builder.
 fn apply_runtime(mut live: Live, runtime: &RuntimeSpec) -> Live {
     if let Some(t) = runtime.temperature {
@@ -1696,6 +1742,9 @@ fn apply_runtime(mut live: Live, runtime: &RuntimeSpec) -> Live {
         if audio.authority == Some(AuthoritySpec::Client) {
             live = live.client_interruption_authority();
         }
+        // Turn-commit tuning knobs integration seam: if either field is set,
+        // the Live builder's turn_commit(...) method will wire them through.
+        live = apply_turn_commit(live, audio.eot_hold_ms, audio.min_interruption_ms);
     }
     if let Some(ms) = runtime.soft_turn_timeout_ms {
         live = live.soft_turn_timeout(std::time::Duration::from_millis(ms));
@@ -2116,6 +2165,75 @@ mod tests {
                 .any(|w| w.contains("noise_gate without denoise")),
             "expected gate warning, got {:?}",
             validation.warnings
+        );
+    }
+
+    #[test]
+    fn turn_commit_tuning_knobs_serialize_and_round_trip() {
+        let spec: SessionSpec = serde_json::from_str(
+            r#"{
+                "name": "tune",
+                "instruction": "hi",
+                "runtime": {
+                    "audio": {
+                        "eot_hold_ms": 800,
+                        "min_interruption_ms": 1400
+                    }
+                }
+            }"#,
+        )
+        .unwrap();
+        let audio = spec.runtime.as_ref().unwrap().audio.as_ref().unwrap();
+        assert_eq!(audio.eot_hold_ms, Some(800));
+        assert_eq!(audio.min_interruption_ms, Some(1400));
+        // Round-trips through JSON unchanged.
+        let json = serde_json::to_value(&spec).unwrap();
+        let back: SessionSpec = serde_json::from_value(json).unwrap();
+        let audio_back = back.runtime.unwrap().audio.unwrap();
+        assert_eq!(audio_back.eot_hold_ms, Some(800));
+        assert_eq!(audio_back.min_interruption_ms, Some(1400));
+    }
+
+    #[test]
+    fn turn_commit_tuning_knobs_validate_thresholds() {
+        // Warn on eot_hold_ms > 1600
+        let spec: SessionSpec = serde_json::from_str(
+            r#"{
+                "name": "frontier",
+                "instruction": "hi",
+                "runtime": { "audio": { "eot_hold_ms": 1700 } }
+            }"#,
+        )
+        .unwrap();
+        let validation = spec.validate();
+        assert!(
+            validation
+                .warnings
+                .iter()
+                .any(|w| w.contains("eot_hold_ms") && w.contains("1600") && w.contains("frontier")),
+            "expected eot_hold_ms frontier warning, got {:?}",
+            validation.warnings
+        );
+
+        // Warn on min_interruption_ms > 2000
+        let spec2: SessionSpec = serde_json::from_str(
+            r#"{
+                "name": "window",
+                "instruction": "hi",
+                "runtime": { "audio": { "min_interruption_ms": 2100 } }
+            }"#,
+        )
+        .unwrap();
+        let validation2 = spec2.validate();
+        assert!(
+            validation2
+                .warnings
+                .iter()
+                .any(|w| w.contains("min_interruption_ms")
+                    && w.contains("2000")
+                    && w.contains("window")),
+            "expected min_interruption_ms window warning, got {:?}",
+            validation2.warnings
         );
     }
     use super::*;

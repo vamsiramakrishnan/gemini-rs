@@ -22,6 +22,7 @@ use super::input_vad::{
 use super::processor::ControlEvent;
 use super::reactor::{LiveReactor, ReactorEvent, VoiceRuntimeState};
 use super::telemetry::SessionTelemetry;
+use super::turn_commit::TurnSignal;
 
 /// Handle for interacting with a running Live session.
 ///
@@ -57,6 +58,12 @@ pub struct LiveHandle {
     input_processors: Arc<Mutex<Vec<Box<dyn InputAudioProcessor>>>>,
     /// Whether this client's VAD sends activityStart/activityEnd marks.
     client_activity_authority: Arc<std::sync::atomic::AtomicBool>,
+    /// Turn-commit policy between VAD edges and activity marks (None = raw
+    /// edge forwarding). See [`set_turn_commit`](Self::set_turn_commit).
+    turn_commit: Arc<Mutex<Option<super::turn_commit::TurnCommitPolicy>>>,
+    /// Monotonic audio clock in milliseconds, advanced by each chunk's
+    /// duration — the policy's time base (deterministic, not wall time).
+    audio_clock_ms: Arc<std::sync::atomic::AtomicU64>,
     /// Governed-flow monitor shared with the control lane (None when the
     /// session is not governed by a flow).
     flow: Option<SharedFlowMonitor>,
@@ -115,6 +122,8 @@ impl LiveHandle {
             input_vad: Arc::new(Mutex::new(BackendInputVad::default())),
             input_processors: Arc::new(Mutex::new(Vec::new())),
             client_activity_authority: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            turn_commit: Arc::new(Mutex::new(None)),
+            audio_clock_ms: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             flow,
             background_tracker,
             ctrl_tx: None,
@@ -152,31 +161,87 @@ impl LiveHandle {
                 frame.iter().flat_map(|s| s.to_le_bytes()).collect()
             }
         };
-        let vad_events = {
+        let (vad_events, sample_rate) = {
             let mut input_vad = self.input_vad.lock();
-            input_vad.process_pcm_bytes(&data)
+            (input_vad.process_pcm_bytes(&data), input_vad.sample_rate())
         };
         let client_authority = self
             .client_activity_authority
             .load(std::sync::atomic::Ordering::Relaxed);
 
+        // Advance the audio clock by this chunk's duration and run the
+        // turn-commit policy (if configured) over the observed edges. The
+        // policy decides which activity marks reach the wire; raw-edge
+        // callbacks below stay untouched so watchers and transcript
+        // bookkeeping see VAD truth either way.
+        let commit_signals = {
+            let samples = (data.len() / 2) as u64;
+            let chunk_ms = samples * 1000 / u64::from(sample_rate.max(1));
+            let now_ms = chunk_ms
+                + self
+                    .audio_clock_ms
+                    .fetch_add(chunk_ms, std::sync::atomic::Ordering::Relaxed);
+            let mut policy = self.turn_commit.lock();
+            policy.as_mut().map(|p| {
+                let model_speaking = self
+                    .state
+                    .session()
+                    .get::<bool>("is_model_speaking")
+                    .unwrap_or(false);
+                p.advance(now_ms, &vad_events, model_speaking)
+            })
+        };
+
         if vad_events.contains(&VadEvent::SpeechStart) {
-            if client_authority {
+            if client_authority && commit_signals.is_none() {
                 self.writer.signal_activity_start().await?;
             }
             self.user_speech_started().await?;
+        }
+        if let Some(signals) = &commit_signals {
+            // Start-type commits go out before the audio, like raw marks.
+            for signal in signals {
+                if client_authority
+                    && matches!(
+                        signal,
+                        TurnSignal::ActivityStart | TurnSignal::InterruptionStart
+                    )
+                {
+                    self.writer.signal_activity_start().await?;
+                }
+            }
         }
 
         self.writer.send_audio(data).await?;
 
         if vad_events.contains(&VadEvent::SpeechEnd) {
-            if client_authority {
+            if client_authority && commit_signals.is_none() {
                 self.writer.signal_activity_end().await?;
             }
             self.user_speech_ended().await?;
         }
+        if let Some(signals) = &commit_signals {
+            for signal in signals {
+                if client_authority && matches!(signal, TurnSignal::ActivityEnd) {
+                    self.writer.signal_activity_end().await?;
+                }
+            }
+        }
 
         Ok(())
+    }
+
+    /// Install a turn-commit policy between the input VAD's speech edges and
+    /// the activity marks sent under client activity authority.
+    ///
+    /// Raw edges make two measured mistakes as turn signals (TurnBench dev
+    /// set): committing end-of-turn during mid-turn pauses, and treating
+    /// backchannels ("mm-hm") over model speech as barge-ins. The policy's
+    /// end-hold and interruption-sustain rules suppress both — see
+    /// [`TurnCommitConfig`] for the measured operating points. Without a
+    /// policy, edges forward to the wire unchanged.
+    pub fn set_turn_commit(&self, config: super::turn_commit::TurnCommitConfig) {
+        *self.turn_commit.lock() = Some(super::turn_commit::TurnCommitPolicy::new(config));
     }
 
     /// Configure the input audio path: mic-chain processors applied inside

@@ -279,7 +279,7 @@ impl Live {
         // Input-audio hardening: materialize the configured stages (in
         // order) and hand them plus VAD tuning and authority to the handle.
         if input_audio.is_configured() {
-            let (processors, vad, client_authority) = input_audio.build_processors();
+            let (processors, vad, client_authority, turn_commit) = input_audio.build_processors();
             handle.configure_input_audio(
                 processors,
                 vad,
@@ -289,6 +289,9 @@ impl Live {
                     gemini_adk_rs::live::ActivityAuthority::Server
                 },
             );
+            if let Some(config) = turn_commit {
+                handle.set_turn_commit(config);
+            }
         }
         Ok(handle)
     }

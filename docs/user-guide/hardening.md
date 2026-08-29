@@ -298,6 +298,52 @@ than the occasional tuning review: measured, client authority with the
 full chain barged in at 146–1095 ms with zero false interruptions,
 against the server's 560–1480 ms, also with zero.
 
+## Turn commitment: holds and sustains, not raw edges
+
+Raw VAD edges are the wrong turn signals, and the error is measurable.
+Scored against [TurnBench](https://github.com/SesameAILabs/turnbench) —
+Sesame's benchmark of triple-annotated, two-channel human conversations
+(dev split: 38 dialogues, ~6.6 h) — forwarding every speech offset as an
+end-of-turn commits during mid-turn pauses at a 0.206 false-positive
+rate, and treating every onset over the other side's speech as a
+barge-in fires on backchannels ("mm-hm") at 0.702. Both mistakes have
+the same shape: an edge is evidence, not a decision.
+
+[`TurnCommitConfig`](../api/gemini_adk_rs/live/struct.TurnCommitConfig.html)
+is the decision layer, with two rules:
+
+- **End-hold** — an end-of-turn commits only after silence outlasts
+  `eot_hold`; speech resuming inside the hold bridges the pause and
+  nothing is sent. Measured frontier (hold → recall / fp): 400 ms →
+  0.900/0.214 · 600 ms → 0.855/0.135 · **800 ms → 0.798/0.087** (the
+  benchmark's 0.1-fp qualifying point) · 1600 ms → 0.508/0.011.
+- **Interruption sustain** — speech starting while the model holds the
+  floor commits as a barge-in only after sustaining `min_interruption`;
+  shorter overlap is a backchannel and never reaches the wire. Frontier
+  (sustain → recall / fp): 600 ms → 0.939/0.319 · 1000 ms → 0.931/0.126
+  · **1400 ms → 0.899/0.062** — half the false-positive rate of the
+  leaderboard's learned VAP model at its own operating point.
+
+```rust
+Live::builder()
+    .mic_denoise()
+    .input_vad(VadConfig::noisy_street())
+    .client_interruption_authority()
+    .turn_commit(TurnCommitConfig::conversational())  // 800 ms / 1400 ms
+```
+
+Presets carry their provenance: `immediate()` (raw edge forwarding —
+what you get with no policy), `responsive()` (400/600, the default when
+a spec sets only one knob), `conversational()` (800/1400, the
+qualifying point). In a spec, the knobs live beside the rest of the
+audio section — `runtime.audio.eot_hold_ms` and
+`runtime.audio.min_interruption_ms` — and validation warns past the
+measured cliffs. The latency is not hidden: every held commit arrives
+exactly `hold` (or `sustain`) later than the edge, which is the price
+the benchmark says the precision costs. The full harness, tables and
+methodology live in `evals/turnbench/`; re-run it before moving an
+operating point.
+
 ## One state vocabulary across transports
 
 All of this composes because connectors share one session-state

@@ -1389,6 +1389,25 @@
     form.append(field('Interruption authority', authSel,
       'client: ~2× faster barge-in (measured ~400 ms vs ~800 ms) via activity marks; requires denoise (+ gate) or noise falsely interrupts. server: zero false interruptions in every benchmark run.'));
 
+    // Turn-commit tuning.
+    const tcRow = document.createElement('div');
+    tcRow.className = 'fs-row';
+    const eotHold = textInput(audio().eot_hold_ms != null ? String(audio().eot_hold_ms) : '', (v) => {
+      const n = parseInt(v, 10);
+      if (Number.isNaN(n)) { audioSet('eot_hold_ms', undefined); return; }
+      audioSet('eot_hold_ms', n);
+    }, { mono: true, placeholder: 'eot_hold_ms (off)' });
+    const minInt = textInput(audio().min_interruption_ms != null ? String(audio().min_interruption_ms) : '', (v) => {
+      const n = parseInt(v, 10);
+      if (Number.isNaN(n)) { audioSet('min_interruption_ms', undefined); return; }
+      audioSet('min_interruption_ms', n);
+    }, { mono: true, placeholder: 'min_interruption_ms (off)' });
+    eotHold.style.flex = '1';
+    minInt.style.flex = '1';
+    tcRow.append(eotHold, minInt);
+    form.append(field('Turn-commit tuning', tcRow,
+      'eot_hold_ms: suppress false end-of-turn commits during mid-turn pauses (800 ms = TurnBench 0.1-fp qualifying point, 1600 ms = frontier). min_interruption_ms: suppress false barge-ins on backchannels (1400 ms: fp 0.702 → 0.062, 2000 ms = max window).'));
+
     // Repair thresholds.
     const repairRow = document.createElement('div');
     repairRow.className = 'fs-row';

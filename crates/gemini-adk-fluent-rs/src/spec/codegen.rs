@@ -782,6 +782,16 @@ fn gen_runtime(runtime: &RuntimeSpec) -> String {
         if audio.authority == Some(super::AuthoritySpec::Client) {
             out.push_str("        .client_interruption_authority()\n");
         }
+        if let Some(eot_ms) = audio.eot_hold_ms {
+            let _ = writeln!(out, "        .turn_commit_eot_hold_ms({})", eot_ms);
+        }
+        if let Some(min_int_ms) = audio.min_interruption_ms {
+            let _ = writeln!(
+                out,
+                "        .turn_commit_min_interruption_ms({})",
+                min_int_ms
+            );
+        }
     }
     if let Some(ms) = runtime.soft_turn_timeout_ms {
         let _ = writeln!(
@@ -998,6 +1008,30 @@ mod tests {
         assert!(code.contains(".voice(Voice::Kore)"));
         assert!(code.contains("session.talk().await?"));
         assert!(audio.to_cargo_toml().contains("voice-io"));
+    }
+
+    #[test]
+    fn turn_commit_tuning_knobs_generate_builder_calls() {
+        let spec = SessionSpec::from_value(json!({
+            "name": "tuned",
+            "instruction": "Talk to me.",
+            "runtime": {
+                "audio": {
+                    "eot_hold_ms": 800,
+                    "min_interruption_ms": 1400
+                }
+            }
+        }))
+        .expect("parses");
+        let code = spec.to_rust();
+        assert!(
+            code.contains(".turn_commit_eot_hold_ms(800)"),
+            "missing eot_hold_ms in codegen:\n{code}"
+        );
+        assert!(
+            code.contains(".turn_commit_min_interruption_ms(1400)"),
+            "missing min_interruption_ms in codegen:\n{code}"
+        );
     }
 
     #[test]

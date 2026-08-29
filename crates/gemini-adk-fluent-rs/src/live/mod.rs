@@ -73,8 +73,8 @@ pub use gemini_adk_rs::live::{
     ResultFormatter, RuntimeContract, SessionSignals, SessionSnapshot, SessionTelemetry,
     SessionType, SoftTurnDetector, SustainedDetector, ToolCallSummary, ToolContract,
     TranscriptBuffer, TranscriptTurn, TranscriptWindow, Transition, TransitionContract,
-    TransitionEvaluation, TransitionResult, TransitionTrigger, TurnCountDetector,
-    VoiceRuntimeState, WatchPredicate, Watcher, WatcherContract,
+    TransitionEvaluation, TransitionResult, TransitionTrigger, TurnCommitConfig, TurnCommitPolicy,
+    TurnCountDetector, TurnSignal, VoiceRuntimeState, WatchPredicate, Watcher, WatcherContract,
 };
 // Offline record/replay harness (Milestone 7 determinism spine).
 pub use gemini_adk_rs::live::replay::{

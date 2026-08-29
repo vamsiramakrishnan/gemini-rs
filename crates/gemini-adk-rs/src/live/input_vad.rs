@@ -98,6 +98,11 @@ impl BackendInputVad {
         events
     }
 
+    /// The detector's configured input sample rate in Hz.
+    pub fn sample_rate(&self) -> u32 {
+        self.config.sample_rate
+    }
+
     /// Return a diagnostics snapshot suitable for UI/devtools display.
     pub fn snapshot(&self) -> BackendVadSnapshot {
         BackendVadSnapshot {

@@ -402,6 +402,47 @@ impl Live {
         self
     }
 
+    /// Install a turn-commit policy between the input VAD's speech edges and
+    /// the activity marks sent under
+    /// [`client_interruption_authority`](Self::client_interruption_authority).
+    ///
+    /// Raw edges make two measured mistakes as turn signals (TurnBench dev
+    /// set, 38 real dyadic conversations): committing end-of-turn during
+    /// mid-turn pauses (fp 0.206 raw -> 0.087 with an 800 ms hold), and
+    /// treating backchannels ("mm-hm") over model speech as barge-ins
+    /// (fp 0.702 raw -> 0.062 with a 1400 ms sustain). See
+    /// [`TurnCommitConfig`](gemini_adk_rs::live::TurnCommitConfig) for the
+    /// presets carrying those operating points.
+    pub fn turn_commit(mut self, config: gemini_adk_rs::live::TurnCommitConfig) -> Self {
+        self.input_audio.turn_commit = Some(config);
+        self
+    }
+
+    /// [`turn_commit`](Self::turn_commit) with millisecond knobs.
+    pub fn turn_commit_ms(self, eot_hold_ms: u64, min_interruption_ms: u64) -> Self {
+        self.turn_commit(gemini_adk_rs::live::TurnCommitConfig {
+            eot_hold: std::time::Duration::from_millis(eot_hold_ms),
+            min_interruption: std::time::Duration::from_millis(min_interruption_ms),
+        })
+    }
+
+    /// Set only the end-of-turn hold, keeping (or defaulting) the sustain —
+    /// one of the two granular forms Flow Studio codegen emits.
+    pub fn turn_commit_eot_hold_ms(mut self, eot_hold_ms: u64) -> Self {
+        let mut config = self.input_audio.turn_commit.unwrap_or_default();
+        config.eot_hold = std::time::Duration::from_millis(eot_hold_ms);
+        self.input_audio.turn_commit = Some(config);
+        self
+    }
+
+    /// Set only the interruption sustain, keeping (or defaulting) the hold.
+    pub fn turn_commit_min_interruption_ms(mut self, min_interruption_ms: u64) -> Self {
+        let mut config = self.input_audio.turn_commit.unwrap_or_default();
+        config.min_interruption = std::time::Duration::from_millis(min_interruption_ms);
+        self.input_audio.turn_commit = Some(config);
+        self
+    }
+
     /// Configure server-side VAD.
     pub fn vad(mut self, detection: AutomaticActivityDetection) -> Self {
         self.config = self.config.server_vad(detection);
@@ -598,6 +639,8 @@ pub struct InputAudioConfig {
     pub vad: Option<gemini_genai_rs::vad::VadConfig>,
     /// Client VAD sends activity marks; server auto-detection is disabled.
     pub client_authority: bool,
+    /// Turn-commit policy between VAD edges and activity marks.
+    pub turn_commit: Option<gemini_adk_rs::live::TurnCommitConfig>,
 }
 
 /// One stage of the input mic chain — the named stages the SDK ships plus
@@ -618,20 +661,27 @@ pub enum InputStage {
     Custom(Box<dyn gemini_adk_rs::live::InputAudioProcessor>),
 }
 
+/// Everything [`InputAudioConfig::build_processors`] hands the handle:
+/// materialized mic-chain stages, optional VAD replacement, client
+/// activity authority, and the optional turn-commit policy.
+pub(crate) type BuiltInputAudio = (
+    Vec<Box<dyn gemini_adk_rs::live::InputAudioProcessor>>,
+    Option<gemini_genai_rs::vad::VadConfig>,
+    bool,
+    Option<gemini_adk_rs::live::TurnCommitConfig>,
+);
+
 impl InputAudioConfig {
     /// Whether any part of the input path is configured.
     pub fn is_configured(&self) -> bool {
-        !self.stages.is_empty() || self.vad.is_some() || self.client_authority
+        !self.stages.is_empty()
+            || self.vad.is_some()
+            || self.client_authority
+            || self.turn_commit.is_some()
     }
 
     /// Materialize the configured stages into runnable processors.
-    pub(crate) fn build_processors(
-        self,
-    ) -> (
-        Vec<Box<dyn gemini_adk_rs::live::InputAudioProcessor>>,
-        Option<gemini_genai_rs::vad::VadConfig>,
-        bool,
-    ) {
+    pub(crate) fn build_processors(self) -> BuiltInputAudio {
         let processors = self
             .stages
             .into_iter()
@@ -649,13 +699,32 @@ impl InputAudioConfig {
                 },
             )
             .collect();
-        (processors, self.vad, self.client_authority)
+        (
+            processors,
+            self.vad,
+            self.client_authority,
+            self.turn_commit,
+        )
     }
 }
 
 #[cfg(test)]
 mod input_audio_tests {
     use super::*;
+
+    #[test]
+    fn turn_commit_flows_through_build() {
+        let config = InputAudioConfig {
+            turn_commit: Some(gemini_adk_rs::live::TurnCommitConfig::conversational()),
+            ..Default::default()
+        };
+        assert!(config.is_configured());
+        let (_, _, _, turn_commit) = config.build_processors();
+        assert_eq!(
+            turn_commit,
+            Some(gemini_adk_rs::live::TurnCommitConfig::conversational())
+        );
+    }
 
     struct Doubler;
     impl gemini_adk_rs::live::InputAudioProcessor for Doubler {
@@ -680,7 +749,7 @@ mod input_audio_tests {
             live.input_audio.stages[1],
             InputStage::NoiseGate { .. }
         ));
-        let (mut processors, vad, client) = live.input_audio.build_processors();
+        let (mut processors, vad, client, _) = live.input_audio.build_processors();
         assert_eq!(processors.len(), 2);
         assert_eq!(vad.unwrap().start_threshold_db, 21.0);
         assert!(client);

@@ -592,6 +592,7 @@ let artifacts = A::json_output("report", "Analysis report")
 | `Delivery` / `DeliveryConfig` | Per-event-class fast-lane backpressure policy: `Lossless` (default; awaits) vs `LossyDropNewest` (drops on full). L2: `.delivery(..)`, `.lossy_audio()`, `.lossy_transcript()` |
 | `redaction::TranscriptRedactor` | Transcript scrubbing (Luhn-checked card numbers, digit runs, custom patterns) applied at the event router before callbacks/transcript buffer/extraction/persistence. L2: `.redaction(..)`; streaming deltas are documented as not redacted |
 | `ExtractionTrigger` | When to run extractors: EveryTurn, Interval, AfterToolCall, OnPhaseChange, OnGenerationComplete |
+| `TurnCommitConfig` / `TurnCommitPolicy` / `TurnSignal` | Turn-commit policy between VAD edges and activity marks: end-hold suppresses mid-turn-pause EOT commits, interruption-sustain suppresses backchannel barge-ins (TurnBench-measured presets `responsive` 400/600 ms, `conversational` 800/1400 ms). L2: `.turn_commit(..)`; spec: `runtime.audio.eot_hold_ms`/`min_interruption_ms`; eval harness in `evals/turnbench/` |
 | `Flow` / `Step` / `Guard` / `FlowMonitor` | Governed conversation/tool DAG: one declarative spec enforced live (`Live::govern(flow)`) — gates tool calls, projects active-step postures, drives repair. Closed serializable vocabulary; see `docs/user-guide/flow.md` |
 
 ### L2 (gemini-adk-fluent-rs) -- Fluent DX
