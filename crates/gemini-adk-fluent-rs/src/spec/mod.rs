@@ -2340,8 +2340,8 @@ mod tests {
 
         // Round-trip test
         let back: SessionSpec = serde_json::from_value(serialized).unwrap();
-        assert_eq!(back.tools[0].background, false);
-        assert_eq!(back.tools[1].background, true);
+        assert!(!back.tools[0].background);
+        assert!(back.tools[1].background);
     }
 
     #[test]

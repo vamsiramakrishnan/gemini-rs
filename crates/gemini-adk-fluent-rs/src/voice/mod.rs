@@ -416,7 +416,7 @@ mod tests {
         let result = resample(&extreme, 16_000, 24_000);
         for &sample in &result {
             assert!(
-                sample >= i16::MIN && sample <= i16::MAX,
+                (i16::MIN..=i16::MAX).contains(&sample),
                 "resampled sample in valid i16 range"
             );
         }

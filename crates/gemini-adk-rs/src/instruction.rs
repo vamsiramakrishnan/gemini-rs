@@ -102,9 +102,7 @@ impl TemplateInstruction {
         for key in state.keys() {
             if let Some(value) = state.get_raw(&key) {
                 let bare_identifier = !key.is_empty()
-                    && key
-                        .chars()
-                        .all(|c| c.is_ascii_alphanumeric() || c == '_')
+                    && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
                     && !key.starts_with(|c: char| c.is_ascii_digit());
                 if bare_identifier {
                     top.insert(key.clone(), value.clone());
@@ -113,7 +111,7 @@ impl TemplateInstruction {
             }
         }
         top.insert("state".into(), serde_json::Value::Object(all));
-        minijinja::Value::from_serialize(&serde_json::Value::Object(top))
+        minijinja::Value::from_serialize(serde_json::Value::Object(top))
     }
 }
 

@@ -39,10 +39,13 @@ pub fn attach(result: &mut serde_json::Value, mime_type: &str, data: &[u8]) {
     let entry = serde_json::json!({"mime_type": mime_type, "data": encoded});
     match result {
         serde_json::Value::Object(map) => {
-            map.entry(MEDIA_KEY)
+            if let Some(list) = map
+                .entry(MEDIA_KEY)
                 .or_insert_with(|| serde_json::Value::Array(Vec::new()))
                 .as_array_mut()
-                .map(|list| list.push(entry));
+            {
+                list.push(entry)
+            }
         }
         other => {
             // Non-object results are wrapped so the attachment has a home.

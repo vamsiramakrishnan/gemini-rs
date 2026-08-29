@@ -395,7 +395,7 @@ mod tests {
             let payload = [event_code, 0x00, 0x00, 0xA0];
             let event = parse_telephone_event(&payload).unwrap();
             assert_eq!(event.event, event_code);
-            assert_eq!(event.end, false);
+            assert!(!event.end);
             // Verify digit() returns appropriate char for 0-11, None for 12-15
             match event_code {
                 0..=9 => {
@@ -438,6 +438,6 @@ mod tests {
         let built = build(&packet);
         let parsed = parse(&built).unwrap();
         assert_eq!(parsed.payload_type, 0x7F);
-        assert_eq!(parsed.marker, true);
+        assert!(parsed.marker);
     }
 }

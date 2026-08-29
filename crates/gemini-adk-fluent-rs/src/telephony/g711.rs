@@ -226,7 +226,7 @@ mod tests {
         for segment in 0u8..=7 {
             for mantissa in 0u8..=15 {
                 // Reconstruct the encoded byte: !(sign | segment<<4 | mantissa)
-                let encoded = !(0 | (segment << 4) | mantissa);
+                let encoded = !((segment << 4) | mantissa);
                 let decoded = ulaw_to_linear(encoded);
                 // Re-encode to verify round-trip consistency
                 let re_encoded = linear_to_ulaw(decoded);

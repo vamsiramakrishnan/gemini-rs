@@ -196,18 +196,19 @@ impl TextAgent for LlmTextAgent {
 
         // Enforce the tightest middleware timeout (M::timeout) over the whole run.
         let result = match self.middleware.timeout() {
-            Some(limit) => match tokio::time::timeout(limit, self.run_inner(&mut contents, &instruction))
-                .await
-            {
-                Ok(r) => r,
-                Err(_) => {
-                    let _ = self.middleware.run_on_event(&AgentEvent::Timeout).await;
-                    Err(AgentError::Other(format!(
-                        "agent '{}' timed out after {:?}",
-                        self.name, limit
-                    )))
+            Some(limit) => {
+                match tokio::time::timeout(limit, self.run_inner(&mut contents, &instruction)).await
+                {
+                    Ok(r) => r,
+                    Err(_) => {
+                        let _ = self.middleware.run_on_event(&AgentEvent::Timeout).await;
+                        Err(AgentError::Other(format!(
+                            "agent '{}' timed out after {:?}",
+                            self.name, limit
+                        )))
+                    }
                 }
-            },
+            }
             None => self.run_inner(&mut contents, &instruction).await,
         };
 
@@ -401,7 +402,10 @@ mod tests {
             }
             _ => true,
         });
-        assert!(fr_clean, "media key should be stripped from the response JSON");
+        assert!(
+            fr_clean,
+            "media key should be stripped from the response JSON"
+        );
     }
 
     #[tokio::test]
