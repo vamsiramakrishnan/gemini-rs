@@ -238,7 +238,8 @@ impl LiveHandle {
     /// set): committing end-of-turn during mid-turn pauses, and treating
     /// backchannels ("mm-hm") over model speech as barge-ins. The policy's
     /// end-hold and interruption-sustain rules suppress both — see
-    /// [`TurnCommitConfig`] for the measured operating points. Without a
+    /// [`TurnCommitConfig`](super::turn_commit::TurnCommitConfig) for the
+    /// measured operating points. Without a
     /// policy, edges forward to the wire unchanged.
     pub fn set_turn_commit(&self, config: super::turn_commit::TurnCommitConfig) {
         *self.turn_commit.lock() = Some(super::turn_commit::TurnCommitPolicy::new(config));
