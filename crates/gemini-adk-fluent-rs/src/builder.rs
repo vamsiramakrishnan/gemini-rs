@@ -22,6 +22,7 @@ struct AgentBuilderInner {
     name: String,
     model: Option<GeminiModel>,
     instruction: Option<String>,
+    instruction_provider: Option<Arc<dyn gemini_adk_rs::instruction::InstructionProvider>>,
     voice: Option<Voice>,
     temperature: Option<f32>,
     top_p: Option<f32>,
@@ -158,6 +159,7 @@ impl AgentBuilder {
                 name: name.into(),
                 model: None,
                 instruction: None,
+                instruction_provider: None,
                 voice: None,
                 temperature: None,
                 top_p: None,
@@ -323,6 +325,19 @@ impl AgentBuilder {
     pub fn instruction(self, inst: impl Into<String>) -> Self {
         let mut inner = self.mutate();
         inner.instruction = Some(inst.into());
+        Self::with(inner)
+    }
+
+    /// Set a dynamic instruction source — any `Fn(&State) -> String`
+    /// closure or a `TemplateInstruction` (feature `templates`), resolved
+    /// against live session state at the start of every run. Wins over
+    /// [`instruction`](Self::instruction) when both are set.
+    pub fn instruction_provider(
+        self,
+        provider: impl gemini_adk_rs::instruction::InstructionProvider + 'static,
+    ) -> Self {
+        let mut inner = self.mutate();
+        inner.instruction_provider = Some(Arc::new(provider));
         Self::with(inner)
     }
 
@@ -643,6 +658,9 @@ impl AgentBuilder {
 
         if let Some(inst) = &self.inner.instruction {
             agent = agent.instruction(inst);
+        }
+        if let Some(provider) = &self.inner.instruction_provider {
+            agent = agent.instruction_provider(provider.clone());
         }
         if let Some(t) = self.inner.temperature {
             agent = agent.temperature(t);

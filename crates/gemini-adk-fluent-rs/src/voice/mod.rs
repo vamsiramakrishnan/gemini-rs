@@ -348,4 +348,110 @@ mod tests {
         gate.process(&mut frame);
         assert_eq!(frame, loud, "the gate reopens on speech");
     }
+
+    #[test]
+    fn resample_single_sample_upsampling() {
+        // Single sample upsampled should not panic and should produce clamped output
+        let result = resample(&[100i16], 8_000, 24_000);
+        assert!(
+            !result.is_empty(),
+            "upsampling single sample should produce output"
+        );
+        assert_eq!(
+            result[0], 100,
+            "single sample upsampled should preserve value"
+        );
+    }
+
+    #[test]
+    fn resample_single_sample_downsampling() {
+        // Downsampling single sample to lower rate should work
+        let result = resample(&[100i16], 24_000, 8_000);
+        // A single 24kHz sample downsampled to 8kHz may produce 0-1 samples depending on ratio
+        // floor(1 / (24000/8000)) = floor(1 / 3) = 0, but let's verify the function handles it
+        assert!(
+            result.len() <= 1,
+            "downsampling single sample should produce at most 1 sample"
+        );
+    }
+
+    #[test]
+    fn resample_extreme_upsampling_ratio() {
+        // 1 sample at 100 Hz to 48000 Hz (480x ratio)
+        let result = resample(&[1000i16], 100, 48_000);
+        assert!(
+            !result.is_empty(),
+            "extreme upsampling should produce output"
+        );
+        // With 1 sample input at low rate upsampled to high rate, we should get many samples
+        assert!(
+            result.len() >= 400,
+            "extreme upsampling should produce proportional output"
+        );
+    }
+
+    #[test]
+    fn resample_maintains_edge_indices_without_panic() {
+        // Verify that resampling with various edge lengths doesn't panic on index access
+        for len in &[1, 2, 3, 159, 160, 161, 479, 480, 481] {
+            let input = vec![100i16; *len];
+            let down = resample(&input, 48_000, 16_000);
+            let up = resample(&input, 16_000, 48_000);
+            assert!(
+                !down.is_empty() || *len <= 4,
+                "downsampling should produce some output or be very short"
+            );
+            // Up should always produce non-empty unless input is empty
+            assert!(
+                !up.is_empty(),
+                "upsampling non-empty input should produce output"
+            );
+        }
+    }
+
+    #[test]
+    fn resample_boundary_value_clamping() {
+        // Extreme values should not overflow or produce NaN
+        let extreme = vec![i16::MIN, 0, i16::MAX];
+        let result = resample(&extreme, 16_000, 24_000);
+        for &sample in &result {
+            assert!(
+                sample >= i16::MIN && sample <= i16::MAX,
+                "resampled sample in valid i16 range"
+            );
+        }
+    }
+
+    #[test]
+    fn noise_gate_accumulates_open_duration() {
+        // Test that open_for counter works correctly over multiple frames
+        let mut gate = NoiseGate::new(1_000.0, 3);
+        let loud = vec![8_000i16; 160];
+        let quiet = vec![100i16; 160];
+
+        // Loud frame: open_for = 4 (hang_frames + 1), then -= 1 → 3
+        let mut frame = loud.clone();
+        gate.process(&mut frame);
+        assert_eq!(frame, loud);
+
+        // Quiet frame 1: open_for = 3, -= 1 → 2, gate open
+        let mut frame = quiet.clone();
+        gate.process(&mut frame);
+        assert_eq!(frame, quiet);
+
+        // Quiet frame 2: open_for = 2, -= 1 → 1, gate open
+        let mut frame = quiet.clone();
+        gate.process(&mut frame);
+        assert_eq!(frame, quiet);
+
+        // Quiet frame 3: open_for = 1, -= 1 → 0, gate open
+        let mut frame = quiet.clone();
+        gate.process(&mut frame);
+        assert_eq!(frame, quiet);
+
+        // Quiet frame 4: open_for = 0, gate closed
+        let mut frame = quiet.clone();
+        gate.process(&mut frame);
+        assert_eq!(frame, vec![0i16; 160]);
+    }
 }

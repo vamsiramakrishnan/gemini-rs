@@ -573,6 +573,8 @@ let artifacts = A::json_output("report", "Analysis report")
 | `TemporalPattern` / `TemporalRegistry` | Time/turn-based pattern detection |
 | `SessionSignals` / `SessionTelemetry` | Auto-collected session metrics |
 | `BaseLlm` / `GeminiLlm` | LLM abstraction for text agents |
+| `InstructionProvider` / `TemplateInstruction` | Dynamic instructions: any `Fn(&State) -> String`, or Jinja2-syntax templates over state (feature `templates`, minijinja) — resolved per run via `.instruction_provider(..)` on `LlmTextAgent`/`AgentBuilder` |
+| `tool::media` | Tool media returns (ADK pattern): `media::attach(&mut result, mime, bytes)` in any tool; the text-agent loop lifts `_media` out of the JSON and delivers it to the model as `inline_data` parts |
 | `TextAgentTool` | Wraps a TextAgent as a callable tool |
 | `BackgroundAgentDispatcher` | Fire-and-forget agent dispatch |
 | `SoftTurnDetector` | Proactive silence awareness for `proactiveAudio` sessions |

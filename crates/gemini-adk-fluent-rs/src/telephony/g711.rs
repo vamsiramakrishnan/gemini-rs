@@ -185,4 +185,139 @@ mod tests {
         assert_eq!(decode_ulaw(&encode_ulaw(&samples)).len(), samples.len());
         assert_eq!(decode_alaw(&encode_alaw(&samples)).len(), samples.len());
     }
+
+    #[test]
+    fn ulaw_segment_boundaries() {
+        // Test round-trip accuracy at segment transitions (where step size changes)
+        // Segment boundaries in μ-law are at magnitudes where probe changes (256, 512, 1024, ...)
+        for &boundary in &[256i16, 512, 1024, 2048, 4096, 8192, 16384] {
+            for offset in &[-1i32, 0, 1] {
+                let s = (boundary as i32 + offset) as i16;
+                let rt = ulaw_to_linear(linear_to_ulaw(s));
+                let tolerance = (s.unsigned_abs() as i32 / 16).max(16);
+                assert!(
+                    ((rt as i32) - (s as i32)).abs() <= tolerance,
+                    "sample {s} at boundary round-tripped to {rt}, error exceeds tolerance"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn alaw_segment_boundaries() {
+        // Test round-trip accuracy at segment transitions in A-law
+        // A-law segment 0 spans magnitude 0-255, then transitions to segment 1
+        for &boundary in &[256i16, 512, 1024, 2048, 4096, 8192, 16384] {
+            for offset in &[-1i32, 0, 1] {
+                let s = (boundary as i32 + offset) as i16;
+                let rt = alaw_to_linear(linear_to_alaw(s));
+                let tolerance = (s.unsigned_abs() as i32 / 16).max(24);
+                assert!(
+                    ((rt as i32) - (s as i32)).abs() <= tolerance,
+                    "alaw sample {s} at boundary round-tripped to {rt}, error exceeds tolerance"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn ulaw_all_mantissas_per_segment() {
+        // Verify each mantissa value (0-15) in each segment (0-7) codes/decodes correctly
+        for segment in 0u8..=7 {
+            for mantissa in 0u8..=15 {
+                // Reconstruct the encoded byte: !(sign | segment<<4 | mantissa)
+                let encoded = !(0 | (segment << 4) | mantissa);
+                let decoded = ulaw_to_linear(encoded);
+                // Re-encode to verify round-trip consistency
+                let re_encoded = linear_to_ulaw(decoded);
+                assert_eq!(
+                    re_encoded, encoded,
+                    "mantissa {mantissa} in segment {segment}: round-trip mismatch"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn alaw_all_mantissas_per_segment() {
+        // Verify A-law mantissas (0-15) in each segment (0-7) code/decode correctly
+        for segment in 0u8..=7 {
+            for mantissa in 0u8..=15 {
+                // Reconstruct the encoded byte per A-law spec
+                let compressed = (segment << 4) | mantissa;
+                let encoded = (0x80 | compressed) ^ 0x55; // with sign bit + XOR
+                let decoded = alaw_to_linear(encoded);
+                // Re-encode to verify consistency
+                let re_encoded = linear_to_alaw(decoded);
+                assert_eq!(
+                    re_encoded, encoded,
+                    "alaw mantissa {mantissa} in segment {segment}: round-trip mismatch"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn ulaw_negative_values_symmetric() {
+        // Negative and positive values should have symmetric round-trip errors
+        for &abs_val in &[100i16, 256, 1000, 8000, 20000] {
+            let pos_rt = ulaw_to_linear(linear_to_ulaw(abs_val));
+            let neg_rt = ulaw_to_linear(linear_to_ulaw(-abs_val));
+            assert_eq!(
+                pos_rt as i32 + neg_rt as i32, 0,
+                "μ-law should preserve sign symmetry: {} + {} != 0",
+                pos_rt, neg_rt
+            );
+        }
+    }
+
+    #[test]
+    fn alaw_negative_values_symmetric() {
+        // A-law should also preserve sign symmetry
+        for &abs_val in &[100i16, 256, 1000, 8000, 20000] {
+            let pos_rt = alaw_to_linear(linear_to_alaw(abs_val));
+            let neg_rt = alaw_to_linear(linear_to_alaw(-abs_val));
+            assert_eq!(
+                pos_rt as i32 + neg_rt as i32, 0,
+                "A-law should preserve sign symmetry: {} + {} != 0",
+                pos_rt, neg_rt
+            );
+        }
+    }
+
+    #[test]
+    fn ulaw_clipping_at_extremes() {
+        // Values beyond CLIP (32635) should clip to the same rounded value
+        let large_pos = ulaw_to_linear(linear_to_ulaw(32_767));
+        let large_pos2 = ulaw_to_linear(linear_to_ulaw(32_700));
+        assert_eq!(
+            large_pos, large_pos2,
+            "μ-law should clip large positive values to same result"
+        );
+
+        let large_neg = ulaw_to_linear(linear_to_ulaw(-32_768));
+        let large_neg2 = ulaw_to_linear(linear_to_ulaw(-32_700));
+        assert_eq!(
+            large_neg, large_neg2,
+            "μ-law should clip large negative values to same result"
+        );
+    }
+
+    #[test]
+    fn alaw_clipping_at_extremes() {
+        // A-law should also clip consistently
+        let large_pos = alaw_to_linear(linear_to_alaw(32_767));
+        let large_pos2 = alaw_to_linear(linear_to_alaw(32_700));
+        assert_eq!(
+            large_pos, large_pos2,
+            "A-law should clip large positive values to same result"
+        );
+
+        let large_neg = alaw_to_linear(linear_to_alaw(-32_768));
+        let large_neg2 = alaw_to_linear(linear_to_alaw(-32_700));
+        assert_eq!(
+            large_neg, large_neg2,
+            "A-law should clip large negative values to same result"
+        );
+    }
 }
