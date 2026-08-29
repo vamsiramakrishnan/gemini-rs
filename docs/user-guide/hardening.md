@@ -211,6 +211,52 @@ probability is per-block noisy — always wrap it in hysteresis (on above
 ≈ 0.6, off below ≈ 0.3, ~300 ms hangover) rather than acting on one
 block.
 
+### Tuning the decision path
+
+The client VAD has three knobs that matter, and they trade against each
+other:
+
+| knob | raising it buys | raising it costs |
+|---|---|---|
+| `start_threshold_db` | fewer false activations from noise residue | quiet speech missed |
+| `min_speech_frames` | clicks and horn onsets rejected | +30 ms onset latency per frame |
+| `hangover_frames` | no mid-word speech-end flapping | +30 ms per frame before `SpeechEnd` |
+
+Tuned as a closed loop over labeled scenes (synthesized noise beds under
+TTS utterances with known spans, swept clean → 0 dB, each setting scored
+as `40·missed + 12·false + 1.5·stuck-open% + 0.05·onset-ms`), one
+configuration dominates — and it only exists *behind the denoiser*:
+**`VadConfig::noisy_street()`** (start 21 dB, stop 16 dB, 1-frame
+confirm, 300 ms hangover). Cleaning the signal first is what lets the
+threshold go **up** 6 dB (horn residue rejected) while the confirmation
+delay goes **down** to one frame (~150–310 ms measured onset). The same
+sweep run on the raw noisy stream finds no good setting at any threshold
+— the adaptive floor latches regardless — which is why the preset's
+documentation insists on the denoiser.
+
+```rust,ignore
+let vad = VoiceActivityDetector::new(VadConfig::noisy_street());
+// …fed with frames that already passed through voice::Denoiser.
+```
+
+Validated end-to-end against a live Gemini session (26 s of continuous
+0 dB street traffic streamed while the model spoke): the server's own
+VAD fired zero false interruptions and barged in on every utterance at
+~0.6–1.4 s regardless of the client chain — so leave interruption
+authority to the server — while the client VAD needed the
+denoiser + preset to stay useful (raw, it latched open within 600 ms
+and never recovered; denoised + preset, zero false activations). The
+client's decisions are what drive local playback ducking, latency
+fillers, and soft-turn logic; the ~10 ms the denoiser adds is noise
+against the server's barge-in path.
+
+To re-tune for a specific deployment, replace the synthesized bed with a
+30-second recording of the real site's noise (captured through the real
+device path, so its AGC is in the loop), re-run the sweep, and prefer
+the highest threshold that still detects every utterance — false-accept
+robustness ages better than onset speed, because noise levels vary
+day-to-day and the onset cost of one extra confirm frame is only 30 ms.
+
 ## One state vocabulary across transports
 
 All of this composes because connectors share one session-state

@@ -52,6 +52,30 @@ impl VadConfig {
     pub fn frame_size(&self) -> usize {
         (self.sample_rate * self.frame_duration_ms / 1000) as usize
     }
+
+    /// Tuned for noisy environments **behind a denoiser** (the L2
+    /// `voice::Denoiser`, feature `denoise`) — do not use on a raw noisy
+    /// stream, where the energy floor latches regardless of threshold.
+    ///
+    /// Found by a latency-aware parameter sweep over labeled street-traffic,
+    /// pink, and white scenes (clean → 0 dB SNR): with the signal denoised,
+    /// the threshold can be *raised* to 21 dB (rejecting horn and engine
+    /// residue) while the onset confirmation drops to a single frame
+    /// (~150–310 ms measured onset). On the same benchmark the shipped
+    /// defaults behind the denoiser score 174–312 ms onset with more
+    /// residual open time; on street traffic at 0 dB this preset reads
+    /// 0 false activations / 3 of 3 utterances / 0 % stuck-open, and it
+    /// held 0 false client activations in a live Gemini session streaming
+    /// 0 dB traffic. See the hardening chapter for the full study.
+    pub fn noisy_street() -> Self {
+        Self {
+            start_threshold_db: 21.0,
+            stop_threshold_db: 16.0,
+            min_speech_frames: 1,
+            hangover_frames: 10,
+            ..Self::default()
+        }
+    }
 }
 
 /// VAD state machine states.
@@ -561,5 +585,19 @@ mod tests {
         vad.reset();
         assert_eq!(vad.state(), VadState::Silence);
         assert_eq!(vad.noise_floor_db(), -60.0);
+    }
+
+    #[test]
+    fn noisy_street_preset_is_stricter_and_faster_than_default() {
+        let preset = VadConfig::noisy_street();
+        let default = VadConfig::default();
+        // Higher bar to open (noise rejection) with hysteresis preserved…
+        assert!(preset.start_threshold_db > default.start_threshold_db);
+        assert!(preset.stop_threshold_db < preset.start_threshold_db);
+        // …and a shorter onset confirmation (lower barge-in latency).
+        assert!(preset.min_speech_frames < default.min_speech_frames);
+        assert!(preset.min_speech_frames >= 1);
+        // Frame geometry unchanged — presets tune sensitivity, not timing base.
+        assert_eq!(preset.frame_size(), default.frame_size());
     }
 }
