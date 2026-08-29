@@ -1029,6 +1029,16 @@ impl SessionSpec {
         let mut errors = Vec::new();
         let mut warnings = Vec::new();
 
+        // Fragment namespace validation: must be non-empty to create valid step ids.
+        for use_frag in &self.use_fragments {
+            if use_frag.namespace.is_empty() {
+                errors.push(
+                    "use_fragments directive has empty namespace — step ids would be malformed"
+                        .into(),
+                );
+            }
+        }
+
         let flow = match self.effective_flow() {
             Ok(flow) => flow,
             Err(errs) => {
@@ -1049,6 +1059,19 @@ impl SessionSpec {
         if let Some(initial) = &self.initial_phase {
             if !self.phases.iter().any(|p| &p.name == initial) {
                 errors.push(format!("initial_phase '{initial}' is not a declared phase"));
+            }
+        }
+        // Check for duplicate phase names
+        {
+            let phase_names: std::collections::BTreeSet<&str> =
+                self.phases.iter().map(|p| p.name.as_str()).collect();
+            if phase_names.len() != self.phases.len() {
+                let mut seen = std::collections::BTreeSet::new();
+                for p in &self.phases {
+                    if !seen.insert(p.name.as_str()) {
+                        errors.push(format!("phase '{}' is declared more than once", p.name));
+                    }
+                }
             }
         }
         for pattern in &self.patterns {
@@ -2217,6 +2240,132 @@ mod tests {
         }))
         .expect("parses");
         assert!(spec.validate().valid);
+    }
+
+    #[test]
+    fn empty_fragment_namespace_is_rejected() {
+        let spec = SessionSpec::from_value(json!({
+            "instruction": "x",
+            "fragments": {
+                "verify": {"steps": [
+                    {"id": "ask", "terminal": true}
+                ]}
+            },
+            "use_fragments": [{"fragment": "verify", "namespace": ""}],
+            "flow": {"steps": [
+                {"id": "start", "terminal": true}
+            ]}
+        }))
+        .expect("parses");
+        let v = spec.validate();
+        // Empty namespace should be a validation error
+        assert!(
+            !v.valid,
+            "empty namespace should fail validation, got errors: {:?}",
+            v.errors
+        );
+        assert!(
+            v.errors.iter().any(|e| e.contains("namespace")),
+            "should mention namespace issue: {:?}",
+            v.errors
+        );
+    }
+
+    #[test]
+    fn duplicate_computed_keys_are_rejected() {
+        let spec = SessionSpec::from_value(json!({
+            "instruction": "x",
+            "flow": {"steps": [{"id": "only", "terminal": true}]},
+            "computed": [
+                {"key": "risk", "from": {"key": "score"}},
+                {"key": "risk", "from": {"key": "other_score"}}
+            ]
+        }))
+        .expect("parses");
+        let v = spec.validate();
+        assert!(!v.valid, "duplicate computed keys should fail validation");
+        assert!(
+            v.errors.iter().any(|e| e.contains("duplicate")),
+            "should mention duplicate computed key: {:?}",
+            v.errors
+        );
+    }
+
+    #[test]
+    fn duplicate_phase_names_are_rejected() {
+        let spec = SessionSpec::from_value(json!({
+            "instruction": "x",
+            "phases": [
+                {"name": "greet", "instruction": "Welcome."},
+                {"name": "greet", "instruction": "Hi again."}
+            ],
+            "initial_phase": "greet"
+        }))
+        .expect("parses");
+        let v = spec.validate();
+        assert!(!v.valid, "duplicate phase names should fail validation");
+        assert!(
+            v.errors.iter().any(|e| e.contains("phase")),
+            "should mention duplicate phase: {:?}",
+            v.errors
+        );
+    }
+
+    #[test]
+    fn tool_background_false_round_trips() {
+        // Test that explicitly setting background: false round-trips correctly
+        let spec = SessionSpec::from_value(json!({
+            "instruction": "x",
+            "tools": [
+                {"name": "search", "background": false},
+                {"name": "log", "background": true}
+            ],
+            "flow": {"steps": [{"id": "only", "terminal": true}]}
+        }))
+        .expect("parses");
+
+        // After serialization
+        let serialized = serde_json::to_value(&spec).unwrap();
+        let tools = serialized["tools"].as_array().unwrap();
+
+        // background: false is skipped in serialization (optimization), but
+        // when deserialized, missing field defaults to false ✓
+        assert!(
+            tools[0].get("background").is_none(),
+            "background: false is optimized away"
+        );
+
+        // background: true is serialized
+        assert_eq!(tools[1].get("background"), Some(&json!(true)));
+
+        // Round-trip test
+        let back: SessionSpec = serde_json::from_value(serialized).unwrap();
+        assert_eq!(back.tools[0].background, false);
+        assert_eq!(back.tools[1].background, true);
+    }
+
+    #[test]
+    fn promotion_spec_with_no_to_field_uses_field_name() {
+        // Test that promotion without explicit "to" uses the field name as target
+        let spec = SessionSpec::from_value(json!({
+            "instruction": "x",
+            "tools": [{"name": "extract", "set_state": {"test": true}}],
+            "extract": [{
+                "name": "data",
+                "instruction": "Extract.",
+                "schema": {"type": "object"},
+                "promote": [
+                    {"field": "amount"},
+                    {"field": "date", "to": "extracted_date"}
+                ]
+            }],
+            "flow": {"steps": [{"id": "only", "terminal": true}]}
+        }))
+        .expect("parses");
+
+        let promote = &spec.extract[0].promote;
+        assert_eq!(promote[0].target(), "amount");
+        assert_eq!(promote[1].target(), "extracted_date");
     }
 
     #[test]

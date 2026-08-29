@@ -682,6 +682,10 @@ fn const_name(key: &str) -> String {
             out.push('_');
         }
     }
+    if out.is_empty() {
+        // Empty key produces empty string after char filtering; use "_" for valid Rust
+        return "_".to_string();
+    }
     if out.chars().next().is_some_and(|c| c.is_ascii_digit()) {
         out.insert(0, '_');
     }
@@ -1059,5 +1063,34 @@ mod tests {
             assert!(code.contains(fragment), "missing fragment: {fragment}\n---\n{code}");
         }
         assert!(spec.to_cargo_toml().contains("gemini-memory-rs"));
+    }
+
+    #[test]
+    fn empty_state_key_name_generates_valid_const_name() {
+        // Test that empty state key names are handled gracefully in codegen
+        let key = "";
+        let name = super::const_name(key);
+        // const_name should never return an empty string, should be at least "_"
+        // to produce valid Rust code
+        assert!(
+            !name.is_empty(),
+            "const_name produced empty string for empty key"
+        );
+        assert!(
+            name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'),
+            "const_name produced invalid Rust identifier: {}",
+            name
+        );
+    }
+
+    #[test]
+    fn state_key_name_starting_with_digit_is_escaped() {
+        let name = super::const_name("123abc");
+        assert!(
+            name.starts_with('_'),
+            "const_name should prepend _ to digit-starting keys, got {}",
+            name
+        );
+        assert_eq!(name, "_123ABC");
     }
 }

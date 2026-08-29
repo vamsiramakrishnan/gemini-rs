@@ -239,8 +239,14 @@ impl VoiceActivityDetector {
                 }
 
                 if is_speech_like {
-                    self.state = VadState::PendingSpeech;
                     self.state_frames = 1;
+                    // Check if this single frame meets the minimum requirement
+                    if self.state_frames >= self.config.min_speech_frames {
+                        self.state = VadState::Speech;
+                        self.state_frames = 0;
+                        return Some(VadEvent::SpeechStart);
+                    }
+                    self.state = VadState::PendingSpeech;
                 }
                 None
             }
@@ -599,5 +605,73 @@ mod tests {
         assert!(preset.min_speech_frames >= 1);
         // Frame geometry unchanged — presets tune sensitivity, not timing base.
         assert_eq!(preset.frame_size(), default.frame_size());
+    }
+
+    #[test]
+    fn pending_speech_emits_on_first_frame_when_min_speech_frames_one() {
+        let mut vad = VoiceActivityDetector::new_energy(VadConfig {
+            sample_rate: 16000,
+            frame_duration_ms: 20,
+            start_threshold_db: 15.0,
+            stop_threshold_db: 10.0,
+            min_speech_frames: 1,
+            hangover_frames: 3,
+            speech_zcr_range: (0.01, 0.9),
+            initial_noise_floor_db: -60.0,
+            pre_speech_frames: 2,
+        });
+
+        let frame = speech_frame(320, 10000);
+
+        // With min_speech_frames=1, should emit SpeechStart on frame 1
+        let e = vad.process_frame(&frame);
+        assert_eq!(
+            e,
+            Some(VadEvent::SpeechStart),
+            "Expected SpeechStart on first speech frame when min_speech_frames=1"
+        );
+        assert_eq!(vad.state(), VadState::Speech);
+    }
+
+    #[test]
+    fn hangover_exits_after_min_frames_when_hangover_frames_one() {
+        let mut vad = VoiceActivityDetector::new_energy(VadConfig {
+            sample_rate: 16000,
+            frame_duration_ms: 20,
+            start_threshold_db: 15.0,
+            stop_threshold_db: 10.0,
+            min_speech_frames: 2,
+            hangover_frames: 1,
+            speech_zcr_range: (0.01, 0.9),
+            initial_noise_floor_db: -60.0,
+            pre_speech_frames: 2,
+        });
+
+        let speech = speech_frame(320, 10000);
+        let silence = silence_frame(320);
+
+        // Trigger speech (need 2 frames with min_speech_frames=2)
+        vad.process_frame(&speech);
+        assert_eq!(vad.state(), VadState::PendingSpeech);
+        vad.process_frame(&speech);
+        assert_eq!(vad.state(), VadState::Speech);
+
+        // Drop energy -> hangover (frame 1 in hangover)
+        let e1 = vad.process_frame(&silence);
+        assert!(
+            e1.is_none(),
+            "Should not emit SpeechEnd when entering hangover"
+        );
+        assert_eq!(vad.state(), VadState::Hangover);
+
+        // With hangover_frames=1, should exit hangover on frame 1 (the entry)
+        // But current implementation exits on frame 2
+        let e2 = vad.process_frame(&silence);
+        assert_eq!(
+            e2,
+            Some(VadEvent::SpeechEnd),
+            "Expected SpeechEnd after 1 hangover frame when hangover_frames=1"
+        );
+        assert_eq!(vad.state(), VadState::Silence);
     }
 }

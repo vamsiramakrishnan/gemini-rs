@@ -139,7 +139,11 @@ impl AudioJitterBuffer {
             self.queue.drain(..to_drop.min(self.queue.len()));
         }
 
+        // Add samples, respecting max depth constraint
         self.queue.extend(samples.iter());
+        while self.queue.len() > self.config.max_depth_samples {
+            self.queue.pop_front();
+        }
 
         // State transitions
         if (self.state == BufferState::Filling || self.state == BufferState::Underrun)
@@ -304,5 +308,31 @@ mod tests {
         let mut buf = make_buffer();
         buf.push(&vec![0i16; 1600]); // 100ms at 16kHz
         assert!((buf.depth_ms() - 100.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn large_sample_exceeds_max_depth() {
+        let mut buf = AudioJitterBuffer::new(JitterConfig {
+            sample_rate: 16000,
+            min_depth_samples: 100,
+            max_depth_samples: 500,
+            ..Default::default()
+        });
+
+        // Push initial data to fill part of buffer
+        buf.push(&vec![1i16; 200]);
+        assert_eq!(buf.depth(), 200);
+
+        // Push a very large sample that exceeds remaining capacity
+        // With current implementation, this can cause buffer to exceed max_depth
+        buf.push(&vec![2i16; 600]);
+
+        // Buffer should not exceed max_depth_samples
+        assert!(
+            buf.depth() <= 500,
+            "Buffer depth {} exceeded max {} after large push",
+            buf.depth(),
+            500
+        );
     }
 }
