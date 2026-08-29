@@ -52,7 +52,7 @@ pub use effect_executor::LiveEffectExecutor;
 pub use events::{LiveEvent, LiveEventStream};
 pub use extractor::{ExtractionTrigger, FieldPromotion, LlmExtractor, MergePolicy, TurnExtractor};
 pub use handle::LiveHandle;
-pub use input_vad::{BackendInputVad, BackendVadSnapshot};
+pub use input_vad::{ActivityAuthority, BackendInputVad, BackendVadSnapshot, InputAudioProcessor};
 pub use needs::{NeedsFulfillment, RepairAction, RepairConfig};
 pub use persistence::{FsPersistence, MemoryPersistence, SessionPersistence, SessionSnapshot};
 pub use phase::{

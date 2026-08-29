@@ -504,6 +504,115 @@ pub struct VadSpec {
     pub silence_duration_ms: Option<u32>,
 }
 
+/// Input-audio hardening: the measured mic chain (denoiser, noise gate),
+/// client input-VAD tuning, and interruption authority. Lowers to
+/// `Live::mic_denoise` / `mic_noise_gate` / `input_vad` /
+/// `client_interruption_authority`; see the hardening chapter for the
+/// benchmark behind each default.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct AudioSpec {
+    /// Run the RNNoise speech enhancer over incoming user audio (requires
+    /// the `denoise` feature; skipped with a validation warning otherwise).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub denoise: Option<bool>,
+    /// Noise gate after the denoiser — silences frames below a level
+    /// threshold (near-talker preference; rejects denoiser residue).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub noise_gate: Option<NoiseGateSpec>,
+    /// Client input-VAD tuning (the detector driving speech edges in
+    /// `send_audio`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_vad: Option<ClientVadSpec>,
+    /// Who decides when user speech interrupts the model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authority: Option<AuthoritySpec>,
+}
+
+/// Noise-gate stage parameters.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct NoiseGateSpec {
+    /// RMS threshold in sample units (i16 full scale 32767; measured sweet
+    /// spot 400–700 behind the denoiser).
+    #[serde(default = "default_gate_threshold")]
+    pub threshold_rms: f64,
+    /// Quiet frames the gate stays open after the last loud one.
+    #[serde(default = "default_gate_hold")]
+    pub hold_frames: u32,
+}
+
+fn default_gate_threshold() -> f64 {
+    700.0
+}
+fn default_gate_hold() -> u32 {
+    3
+}
+
+/// Client input-VAD tuning: start from a preset, override individual knobs.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ClientVadSpec {
+    /// Base preset the overrides apply to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preset: Option<ClientVadPreset>,
+    /// Energy above the noise floor (dB) to open.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_threshold_db: Option<f64>,
+    /// Energy above the noise floor (dB) to close.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stop_threshold_db: Option<f64>,
+    /// Consecutive frames (30 ms each) to confirm onset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_speech_frames: Option<u32>,
+    /// Frames of hangover before speech-end.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hangover_frames: Option<u32>,
+}
+
+/// Named client-VAD starting points.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ClientVadPreset {
+    /// The library defaults (quiet environments).
+    Default,
+    /// The closed-loop-tuned noisy-environment profile — use behind
+    /// `denoise: true` (see `VadConfig::noisy_street`).
+    NoisyStreet,
+}
+
+impl ClientVadSpec {
+    /// Lower to a wire `VadConfig`: preset base plus overrides.
+    pub fn to_config(&self) -> gemini_genai_rs::vad::VadConfig {
+        let mut config = match self.preset {
+            Some(ClientVadPreset::NoisyStreet) => gemini_genai_rs::vad::VadConfig::noisy_street(),
+            _ => gemini_genai_rs::vad::VadConfig::default(),
+        };
+        if let Some(v) = self.start_threshold_db {
+            config.start_threshold_db = v;
+        }
+        if let Some(v) = self.stop_threshold_db {
+            config.stop_threshold_db = v;
+        }
+        if let Some(v) = self.min_speech_frames {
+            config.min_speech_frames = v;
+        }
+        if let Some(v) = self.hangover_frames {
+            config.hangover_frames = v;
+        }
+        config
+    }
+}
+
+/// Interruption authority (measured trade: client is ~2× faster to barge
+/// in; server posted zero false interruptions in every benchmark run).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthoritySpec {
+    /// The Live API's automatic activity detection decides (default).
+    Server,
+    /// This client's input VAD decides: automatic detection is disabled and
+    /// speech edges send activityStart/activityEnd.
+    Client,
+}
+
 /// Input/output transcription toggles.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TranscriptionSpec {
@@ -587,6 +696,9 @@ pub struct RuntimeSpec {
     /// Voice-activity-detection tuning.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vad: Option<VadSpec>,
+    /// Input-audio hardening: mic chain, client VAD, interruption authority.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio: Option<AudioSpec>,
     /// Fire a soft turn when the model stays silent this long after VAD end.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub soft_turn_timeout_ms: Option<u64>,
@@ -1110,6 +1222,37 @@ impl SessionSpec {
                         .into(),
                 );
             }
+            if let Some(audio) = &runtime.audio {
+                if audio.denoise == Some(true) && !cfg!(feature = "denoise") {
+                    warnings.push(
+                        "runtime.audio.denoise requires building with the `denoise` feature — \
+                         the stage will be skipped"
+                            .into(),
+                    );
+                }
+                if audio.authority == Some(AuthoritySpec::Client) && audio.denoise != Some(true) {
+                    warnings.push(
+                        "runtime.audio.authority=client without denoise — in noise the raw \
+                         energy VAD latches open and will drive interruptions falsely \
+                         (measured); enable denoise or expect spurious barge-ins"
+                            .into(),
+                    );
+                }
+                if audio.noise_gate.is_some() && audio.denoise != Some(true) {
+                    warnings.push(
+                        "runtime.audio.noise_gate without denoise — the gate calibrates on \
+                         noisy levels; chain it behind denoise so it gates clean audio"
+                            .into(),
+                    );
+                }
+                if audio.authority == Some(AuthoritySpec::Client) && runtime.vad.is_some() {
+                    warnings.push(
+                        "runtime.audio.authority=client disables the server's automatic \
+                         activity detection — runtime.vad sensitivities will have no effect"
+                            .into(),
+                    );
+                }
+            }
             if runtime.session_id.is_some() && runtime.persistence.is_none() {
                 warnings.push(
                     "runtime.session_id is set without runtime.persistence — nothing will be \
@@ -1516,6 +1659,21 @@ fn apply_runtime(mut live: Live, runtime: &RuntimeSpec) -> Live {
             silence_duration_ms: vad.silence_duration_ms,
         });
     }
+    if let Some(audio) = &runtime.audio {
+        #[cfg(feature = "denoise")]
+        if audio.denoise == Some(true) {
+            live = live.mic_denoise();
+        }
+        if let Some(gate) = &audio.noise_gate {
+            live = live.mic_noise_gate(gate.threshold_rms, gate.hold_frames);
+        }
+        if let Some(vad) = &audio.client_vad {
+            live = live.input_vad(vad.to_config());
+        }
+        if audio.authority == Some(AuthoritySpec::Client) {
+            live = live.client_interruption_authority();
+        }
+    }
     if let Some(ms) = runtime.soft_turn_timeout_ms {
         live = live.soft_turn_timeout(std::time::Duration::from_millis(ms));
     }
@@ -1870,6 +2028,73 @@ fn levenshtein(a: &str, b: &str) -> usize {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn audio_spec_lowers_and_validates() {
+        let spec: SessionSpec = serde_json::from_str(
+            r#"{
+                "name": "noisy",
+                "instruction": "hi",
+                "runtime": {
+                    "audio": {
+                        "denoise": true,
+                        "noise_gate": { "threshold_rms": 700.0 },
+                        "client_vad": { "preset": "noisy_street", "hangover_frames": 12 },
+                        "authority": "client"
+                    }
+                }
+            }"#,
+        )
+        .unwrap();
+        let audio = spec.runtime.as_ref().unwrap().audio.as_ref().unwrap();
+        assert_eq!(audio.noise_gate.as_ref().unwrap().hold_frames, 3); // serde default
+        let config = audio.client_vad.as_ref().unwrap().to_config();
+        assert_eq!(config.start_threshold_db, 21.0); // preset
+        assert_eq!(config.hangover_frames, 12); // override wins
+        assert_eq!(audio.authority, Some(AuthoritySpec::Client));
+        // Round-trips through JSON unchanged.
+        let json = serde_json::to_value(&spec).unwrap();
+        let back: SessionSpec = serde_json::from_value(json).unwrap();
+        assert_eq!(
+            back.runtime
+                .unwrap()
+                .audio
+                .unwrap()
+                .client_vad
+                .unwrap()
+                .hangover_frames,
+            Some(12)
+        );
+    }
+
+    #[test]
+    fn audio_spec_warns_on_risky_combinations() {
+        let spec: SessionSpec = serde_json::from_str(
+            r#"{
+                "name": "risky",
+                "instruction": "hi",
+                "runtime": { "audio": { "authority": "client", "noise_gate": {} } }
+            }"#,
+        )
+        .unwrap();
+        let validation = spec.validate();
+        assert!(
+            validation
+                .warnings
+                .iter()
+                .any(|w| w.contains("authority=client without denoise")),
+            "expected client-authority warning, got {:?}",
+            validation.warnings
+        );
+        assert!(
+            validation
+                .warnings
+                .iter()
+                .any(|w| w.contains("noise_gate without denoise")),
+            "expected gate warning, got {:?}",
+            validation.warnings
+        );
+    }
     use super::*;
 
     fn collections_spec() -> SessionSpec {

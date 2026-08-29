@@ -1312,6 +1312,83 @@
     );
     form.append(field('VAD silence before end-of-speech (ms)', silence));
 
+    // Audio hardening: the measured mic chain + client VAD + authority.
+    const audioTitle = document.createElement('div');
+    audioTitle.className = 'fs-section-title';
+    audioTitle.textContent = 'Audio hardening';
+    form.append(audioTitle);
+    const audio = () => (r.audio || {});
+    const audioSet = (key, value) => {
+      const a = { ...(rt().audio || {}) };
+      if (value === undefined || value === null || value === '' || (typeof value === 'number' && Number.isNaN(value))) delete a[key];
+      else a[key] = value;
+      setOrClear('audio', Object.keys(a).length ? a : undefined);
+    };
+
+    const denoiseCb = document.createElement('input');
+    denoiseCb.type = 'checkbox';
+    denoiseCb.checked = audio().denoise === true;
+    denoiseCb.addEventListener('change', () => audioSet('denoise', denoiseCb.checked ? true : undefined));
+    form.append(field('Denoise mic audio (RNNoise)', denoiseCb,
+      'Speech enhancer over incoming user audio. Measured: takes the energy VAD from latched-open in street noise to 0 false activations at 0 dB SNR. +10 ms latency.'));
+
+    const gateRow = document.createElement('div');
+    gateRow.className = 'fs-row';
+    const gateThr = textInput(audio().noise_gate ? String(audio().noise_gate.threshold_rms) : '', (v) => {
+      const n = parseFloat(v);
+      if (Number.isNaN(n)) { audioSet('noise_gate', undefined); return; }
+      audioSet('noise_gate', { threshold_rms: n, hold_frames: audio().noise_gate?.hold_frames ?? 3 });
+    }, { mono: true, placeholder: 'gate RMS (400–700; off)' });
+    const gateHold = textInput(audio().noise_gate ? String(audio().noise_gate.hold_frames) : '', (v) => {
+      const n = parseInt(v, 10);
+      if (Number.isNaN(n) || !audio().noise_gate) return;
+      audioSet('noise_gate', { threshold_rms: audio().noise_gate.threshold_rms, hold_frames: n });
+    }, { mono: true, placeholder: 'hold frames (3)' });
+    gateThr.style.flex = '1';
+    gateHold.style.flex = '1';
+    gateRow.append(gateThr, gateHold);
+    form.append(field('Noise gate (after denoiser)', gateRow,
+      'Silences frames below the RMS threshold — near-talker preference and horn-residue rejection. Chain behind denoise.'));
+
+    const presetSel = document.createElement('select');
+    presetSel.innerHTML = '<option value="">client VAD: default</option>'
+      + '<option value="noisy_street">client VAD: noisy street (tuned)</option>';
+    presetSel.value = audio().client_vad?.preset || '';
+    presetSel.addEventListener('change', () => {
+      const cv = { ...(audio().client_vad || {}) };
+      if (presetSel.value) cv.preset = presetSel.value; else delete cv.preset;
+      audioSet('client_vad', Object.keys(cv).length ? cv : undefined);
+    });
+    form.append(field('Client VAD preset', presetSel,
+      'noisy_street: 21 dB start / 1-frame confirm — the closed-loop-tuned profile for denoised streams (0 false activations at 0 dB traffic).'));
+    const cvRow = document.createElement('div');
+    cvRow.className = 'fs-row';
+    const cvNum = (key, placeholder, parse = parseFloat) => {
+      const input = textInput(audio().client_vad?.[key] != null ? String(audio().client_vad[key]) : '', (v) => {
+        const n = parse(v);
+        const cv = { ...(audio().client_vad || {}) };
+        if (Number.isNaN(n)) delete cv[key]; else cv[key] = n;
+        audioSet('client_vad', Object.keys(cv).length ? cv : undefined);
+      }, { mono: true, placeholder });
+      input.style.flex = '1';
+      return input;
+    };
+    cvRow.append(
+      cvNum('start_threshold_db', 'start dB'),
+      cvNum('min_speech_frames', 'confirm frames', (v) => parseInt(v, 10)),
+      cvNum('hangover_frames', 'hangover frames', (v) => parseInt(v, 10)),
+    );
+    form.append(field('Client VAD overrides', cvRow,
+      'Each confirm/hangover frame is 30 ms. Overrides apply on top of the preset.'));
+
+    const authSel = document.createElement('select');
+    authSel.innerHTML = '<option value="">interruptions: server decides (default)</option>'
+      + '<option value="client">interruptions: this client\u2019s VAD decides</option>';
+    authSel.value = audio().authority || '';
+    authSel.addEventListener('change', () => audioSet('authority', authSel.value || undefined));
+    form.append(field('Interruption authority', authSel,
+      'client: ~2× faster barge-in (measured ~400 ms vs ~800 ms) via activity marks; requires denoise (+ gate) or noise falsely interrupts. server: zero false interruptions in every benchmark run.'));
+
     // Repair thresholds.
     const repairRow = document.createElement('div');
     repairRow.className = 'fs-row';

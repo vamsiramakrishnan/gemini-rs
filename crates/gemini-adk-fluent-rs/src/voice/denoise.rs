@@ -94,6 +94,12 @@ impl Denoiser {
     }
 }
 
+impl gemini_adk_rs::live::InputAudioProcessor for Denoiser {
+    fn process_frame(&mut self, frame: &mut Vec<i16>) {
+        MicProcessor::process(self, frame);
+    }
+}
+
 impl MicProcessor for Denoiser {
     fn process(&mut self, frame: &mut Vec<i16>) {
         if frame.is_empty() {

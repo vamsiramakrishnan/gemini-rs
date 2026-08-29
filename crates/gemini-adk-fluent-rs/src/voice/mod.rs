@@ -188,6 +188,12 @@ impl NoiseGate {
     }
 }
 
+impl gemini_adk_rs::live::InputAudioProcessor for NoiseGate {
+    fn process_frame(&mut self, frame: &mut Vec<i16>) {
+        MicProcessor::process(self, frame);
+    }
+}
+
 impl MicProcessor for NoiseGate {
     fn process(&mut self, frame: &mut Vec<i16>) {
         if frame.is_empty() {

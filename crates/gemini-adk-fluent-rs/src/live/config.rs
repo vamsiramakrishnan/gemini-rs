@@ -343,6 +343,48 @@ impl Live {
 
     // -- VAD & Activity --
 
+    /// Run the RNNoise speech enhancer over outgoing mic audio inside
+    /// `send_audio` *(feature `denoise`)* — the same stage as
+    /// [`voice::Denoiser`](crate::voice::Denoiser), applied server-side to
+    /// hosted surfaces (web bridge, API server) that do not run a local
+    /// pump. See the hardening chapter for the measured benchmark.
+    #[cfg(feature = "denoise")]
+    pub fn mic_denoise(mut self) -> Self {
+        self.input_audio.denoise = true;
+        self
+    }
+
+    /// Chain a [`NoiseGate`](crate::voice::NoiseGate) over outgoing mic
+    /// audio inside `send_audio`, after any denoiser — frames whose RMS
+    /// falls below `threshold_rms` are silenced, with `hold_frames` of
+    /// hangover. Calibrate the threshold between the caller's level and the
+    /// background (measured sweet spot 400–700 behind the denoiser).
+    pub fn mic_noise_gate(mut self, threshold_rms: f64, hold_frames: u32) -> Self {
+        self.input_audio.noise_gate = Some((threshold_rms, hold_frames));
+        self
+    }
+
+    /// Replace the input VAD's configuration (the detector that runs inside
+    /// `send_audio` for client-side speech edges). Use
+    /// [`VadConfig::noisy_street()`](gemini_genai_rs::vad::VadConfig::noisy_street)
+    /// behind [`mic_denoise`](Self::mic_denoise) for noisy environments.
+    pub fn input_vad(mut self, config: gemini_genai_rs::vad::VadConfig) -> Self {
+        self.input_audio.vad = Some(config);
+        self
+    }
+
+    /// Give this client's input VAD interruption authority: the session is
+    /// configured with the server's automatic activity detection disabled,
+    /// and `send_audio` emits `activityStart`/`activityEnd` on the input
+    /// VAD's speech edges. Measured ~2× faster barge-in than server
+    /// authority; pair with [`mic_denoise`](Self::mic_denoise) (and
+    /// [`mic_noise_gate`](Self::mic_noise_gate)) or noise will drive the
+    /// marks.
+    pub fn client_interruption_authority(mut self) -> Self {
+        self.input_audio.client_authority = true;
+        self
+    }
+
     /// Configure server-side VAD.
     pub fn vad(mut self, detection: AutomaticActivityDetection) -> Self {
         self.config = self.config.server_vad(detection);
@@ -521,5 +563,28 @@ impl Live {
     pub fn tool_advisory(mut self, enabled: bool) -> Self {
         self.tool_advisory = enabled;
         self
+    }
+}
+
+/// Input-audio hardening configuration accumulated by the builder and
+/// applied to the [`LiveHandle`](gemini_adk_rs::live::LiveHandle) right
+/// after connect (see `Live::mic_denoise`, `Live::mic_noise_gate`,
+/// `Live::input_vad`, `Live::client_interruption_authority`).
+#[derive(Debug, Clone, Default)]
+pub struct InputAudioConfig {
+    /// Run the RNNoise denoiser stage (feature `denoise`).
+    pub denoise: bool,
+    /// Noise gate after the denoiser: (threshold RMS, hold frames).
+    pub noise_gate: Option<(f64, u32)>,
+    /// Replacement input-VAD configuration.
+    pub vad: Option<gemini_genai_rs::vad::VadConfig>,
+    /// Client VAD sends activity marks; server auto-detection is disabled.
+    pub client_authority: bool,
+}
+
+impl InputAudioConfig {
+    /// Whether any part of the input path is configured.
+    pub fn is_configured(&self) -> bool {
+        self.denoise || self.noise_gate.is_some() || self.vad.is_some() || self.client_authority
     }
 }

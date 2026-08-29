@@ -737,6 +737,48 @@ fn gen_runtime(runtime: &RuntimeSpec) -> String {
         );
         out.push_str("            disabled: None,\n        })\n");
     }
+    if let Some(audio) = &runtime.audio {
+        if audio.denoise == Some(true) {
+            out.push_str("        .mic_denoise() // feature `denoise`\n");
+        }
+        if let Some(gate) = &audio.noise_gate {
+            let _ = writeln!(
+                out,
+                "        .mic_noise_gate({:?}, {})",
+                gate.threshold_rms, gate.hold_frames
+            );
+        }
+        if let Some(vad) = &audio.client_vad {
+            let base = match vad.preset {
+                Some(super::ClientVadPreset::NoisyStreet) => "VadConfig::noisy_street()",
+                _ => "VadConfig::default()",
+            };
+            let mut overrides = String::new();
+            if let Some(v) = vad.start_threshold_db {
+                let _ = write!(overrides, " start_threshold_db: {v:?},");
+            }
+            if let Some(v) = vad.stop_threshold_db {
+                let _ = write!(overrides, " stop_threshold_db: {v:?},");
+            }
+            if let Some(v) = vad.min_speech_frames {
+                let _ = write!(overrides, " min_speech_frames: {v},");
+            }
+            if let Some(v) = vad.hangover_frames {
+                let _ = write!(overrides, " hangover_frames: {v},");
+            }
+            if overrides.is_empty() {
+                let _ = writeln!(out, "        .input_vad({base})");
+            } else {
+                let _ = writeln!(
+                    out,
+                    "        .input_vad(VadConfig {{{overrides} ..{base} }})"
+                );
+            }
+        }
+        if audio.authority == Some(super::AuthoritySpec::Client) {
+            out.push_str("        .client_interruption_authority()\n");
+        }
+    }
     if let Some(ms) = runtime.soft_turn_timeout_ms {
         let _ = writeln!(
             out,

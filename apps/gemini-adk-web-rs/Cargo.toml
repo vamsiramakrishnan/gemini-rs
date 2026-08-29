@@ -8,7 +8,7 @@ publish = false
 [dependencies]
 gemini-genai-rs       = { workspace = true }
 gemini-adk-rs        = { workspace = true, features = ["gemini-llm"] }
-gemini-adk-fluent-rs = { workspace = true, features = ["gemini-llm"] }
+gemini-adk-fluent-rs = { workspace = true, features = ["gemini-llm", "denoise"] }
 gemini-memory-rs = { workspace = true }
 gemini-adk-server-rs = { workspace = true }
 tokio = { version = "1.0", features = ["full"] }

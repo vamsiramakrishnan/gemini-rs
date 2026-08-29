@@ -180,6 +180,9 @@ pub struct Live {
     pub(crate) flow_precompiled: bool,
     /// Caller-supplied session `State`, so tools and flow guards can share one.
     pub(crate) state: Option<State>,
+    /// Input audio hardening: mic-chain stages, client input-VAD tuning, and
+    /// interruption authority. Applied to the handle right after connect.
+    pub(crate) input_audio: crate::live::config::InputAudioConfig,
     // Per-step on_enter actions: run an agent in a mode when a step activates.
     pub(crate) flow_actions: Vec<(
         String,
@@ -268,6 +271,7 @@ impl Live {
             state: None,
             flow_actions: Vec::new(),
             record_wire_path: None,
+            input_audio: crate::live::config::InputAudioConfig::default(),
         }
     }
 
