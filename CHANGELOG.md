@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-30
+
+### Features
+
+- feat(dsp): engineer-grade mic chain + decision-level effectiveness bench (AEC, WOLA STFT, AGC, limiter, sinc resampler) (#30)
+- feat: audio hardening stack + Flow Studio mechanisms, bug-bash fixes, ADK parity features (#29)
+- feat(voice): production hardening — redaction, DTMF over SIP, latency filler, warm handoff, mic chain, third connector (#28)
+- feat(flow): Flow Studio + SessionSpec — author whole governed sessions as JSON, with a drag-and-drop editor (#25)
+- feat(memory): split the extraction models; Flash Lite for transcripts (#24)
+- feat(memory): contextual memory engine for Gemini Live sessions (#21)
+### Bug Fixes
+
+- fix: typed turns reach extractors; TypedTool declarations the API accepts; Live e2e coverage (#22)
+### Documentation
+
+- docs: straitjacket-register overhaul — README, Flow Studio visuals, new chapters, TTS-driven governed-call demo (#26)
+- docs(site): world-class GH Pages brand refresh (phase 1) (#27)
+
 _Nothing yet._
 
 ## [0.8.0] - 2026-06-12
