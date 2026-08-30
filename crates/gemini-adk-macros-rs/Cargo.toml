@@ -21,8 +21,13 @@ proc-macro2 = "1"
 # Integration tests exercise the generated code, which references the consumer's
 # crate graph (gemini-adk-rs, serde, schemars, ...). These are dev-only and do
 # NOT create a build cycle: the proc-macro crate itself depends on none of them.
+#
+# gemini-adk-rs is declared path-only (no version) ON PURPOSE: cargo strips
+# versionless path dev-dependencies from the published package, which breaks
+# the serde/serde_derive-style publish cycle — this crate must reach crates.io
+# BEFORE gemini-adk-rs, whose matching version therefore cannot exist yet.
 [dev-dependencies]
-gemini-adk-rs = { workspace = true }
+gemini-adk-rs = { path = "../gemini-adk-rs" }
 async-trait = "0.1"
 schemars = "0.8"
 serde = { version = "1", features = ["derive"] }
