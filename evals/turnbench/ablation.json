@@ -1,0 +1,98 @@
+[
+ {
+  "name": "energy-raw",
+  "env": {
+   "VAD": "energy",
+   "CHAIN": "raw",
+   "EOT_HOLD_MS": "800"
+  }
+ },
+ {
+  "name": "energy-hpf",
+  "env": {
+   "VAD": "energy",
+   "CHAIN": "hpf",
+   "EOT_HOLD_MS": "800"
+  }
+ },
+ {
+  "name": "energy-denoise",
+  "env": {
+   "VAD": "energy",
+   "CHAIN": "denoise",
+   "EOT_HOLD_MS": "800"
+  }
+ },
+ {
+  "name": "energy-hpf-denoise",
+  "env": {
+   "VAD": "energy",
+   "CHAIN": "hpf,denoise",
+   "EOT_HOLD_MS": "800"
+  }
+ },
+ {
+  "name": "earshot-raw",
+  "env": {
+   "VAD": "earshot",
+   "CHAIN": "raw",
+   "EOT_HOLD_MS": "800"
+  }
+ },
+ {
+  "name": "earshot-hpf",
+  "env": {
+   "VAD": "earshot",
+   "CHAIN": "hpf",
+   "EOT_HOLD_MS": "800"
+  }
+ },
+ {
+  "name": "earshot-denoise",
+  "env": {
+   "VAD": "earshot",
+   "CHAIN": "denoise",
+   "EOT_HOLD_MS": "800"
+  }
+ },
+ {
+  "name": "earshot-hpf-denoise",
+  "env": {
+   "VAD": "earshot",
+   "CHAIN": "hpf,denoise",
+   "EOT_HOLD_MS": "800"
+  }
+ },
+ {
+  "name": "fusion-raw",
+  "env": {
+   "VAD": "fusion",
+   "CHAIN": "raw",
+   "EOT_HOLD_MS": "800"
+  }
+ },
+ {
+  "name": "fusion-hpf",
+  "env": {
+   "VAD": "fusion",
+   "CHAIN": "hpf",
+   "EOT_HOLD_MS": "800"
+  }
+ },
+ {
+  "name": "fusion-denoise",
+  "env": {
+   "VAD": "fusion",
+   "CHAIN": "denoise",
+   "EOT_HOLD_MS": "800"
+  }
+ },
+ {
+  "name": "fusion-hpf-denoise",
+  "env": {
+   "VAD": "fusion",
+   "CHAIN": "hpf,denoise",
+   "EOT_HOLD_MS": "800"
+  }
+ }
+]

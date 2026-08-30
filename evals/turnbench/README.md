@@ -51,7 +51,47 @@ python evals/turnbench/driver.py --dataset mundo-ai/turn-benchmark-dev --out pre
 python evals/turnbench/driver.py --dataset mundo-ai/turn-benchmark-dev --raw-out segments.json --out preds.json
 ```
 
-Env knobs forwarded to the predictor: `CHAIN=raw|denoise` (default denoise), `VAD=default|noisy_street` (default noisy_street), `EOT_HOLD_MS` (default 400).
+Env knobs forwarded to the predictor: `CHAIN` (comma list from `{hpf, denoise}`; `raw` = none; default denoise), `VAD=energy|earshot|fusion` (default energy at `noisy_street`; `default` selects `VadConfig::default()`), `EOT_HOLD_MS` (default 400), and for earshot `EARSHOT_THRESHOLD` / `EARSHOT_START_MS` / `EARSHOT_END_MS`.
+
+### Pluggable VAD backends and the ablation matrix
+
+The predictor's decision stage is a `VadBackend` trait — a causal
+frame-in/edge-out interface. Three backends ship:
+
+- `energy` — the L0 `VoiceActivityDetector` (30 ms frames), the SDK's client VAD;
+- `earshot` — [pykeio/earshot](https://github.com/pykeio/earshot)'s neural
+  VAD (16 ms frames) behind causal run-length hysteresis
+  (48 ms attack / 240 ms release by default);
+- `fusion` — earshot AND energy for onset (both must agree), either-silent
+  for offset, at the energy VAD's 30 ms cadence.
+
+Adding a backend = implementing the trait and one match arm. The chain is
+ablatable the same way (`CHAIN` stages compose in order).
+
+To run a whole ablation matrix in ONE pass over the dataset (each
+conversation decoded once, every config scored on it; shards downloaded
+one at a time and deleted, so the split never sits on disk):
+
+```bash
+python evals/turnbench/driver.py --dataset mundo-ai/turn-benchmark-dev \
+    --configs evals/turnbench/ablation.json --out-dir results/ --score
+```
+
+`ablation.json` is a list of `{"name": ..., "env": {...}}`; the committed
+one is the 12-config matrix `{energy, earshot, fusion} × {raw, hpf,
+denoise, hpf+denoise}` at the conversational operating point. Per config
+you get `preds-<name>.json`, `raw-<name>.json` (segments for sweeps), and
+a consolidated `scores.json`.
+
+Nothing is ever computed twice:
+
+- `--resume` skips configs whose `preds-<name>.json` already exists — add
+  a 13th config to the matrix and only that one costs a dataset pass;
+- `--score-only` recomputes `scores.json` from saved predictions with no
+  audio pass at all;
+- operating-point changes (EOT hold, INT sustain) need no re-run either:
+  sweep them offline from the saved `raw-<name>.json` segments with
+  `sweep.py`.
 
 ### 4. Operating-Point Sweep
 

@@ -1,0 +1,416 @@
+{
+  "babble_10db": {
+    "hpf": {
+      "decision": {
+        "false_activations_per_min": 0.0,
+        "missed_onsets": 8,
+        "total_onsets": 9,
+        "onset_latency_ms_p50": 30.0,
+        "activations": 1,
+        "reactivations": 0
+      },
+      "seg_snr_db": 1.3156039,
+      "lsd_db": 12.7070675,
+      "level_mean_dbfs": -26.56203,
+      "level_std_db": 5.2827067,
+      "erle_db": null,
+      "latency_ms": 0.0
+    },
+    "hpf+denoise": {
+      "decision": {
+        "false_activations_per_min": 3.0,
+        "missed_onsets": 0,
+        "total_onsets": 9,
+        "onset_latency_ms_p50": 30.0,
+        "activations": 10,
+        "reactivations": 0
+      },
+      "seg_snr_db": 0.8374993,
+      "lsd_db": 15.412169,
+      "level_mean_dbfs": -33.81245,
+      "level_std_db": 15.129898,
+      "erle_db": null,
+      "latency_ms": 10.0
+    },
+    "raw": {
+      "decision": {
+        "false_activations_per_min": 0.0,
+        "missed_onsets": 8,
+        "total_onsets": 9,
+        "onset_latency_ms_p50": 30.0,
+        "activations": 1,
+        "reactivations": 0
+      },
+      "seg_snr_db": 7.773114,
+      "lsd_db": 12.67496,
+      "level_mean_dbfs": -26.208847,
+      "level_std_db": 5.303006,
+      "erle_db": null,
+      "latency_ms": 0.0
+    }
+  },
+  "clean_speech": {
+    "hpf": {
+      "decision": {
+        "false_activations_per_min": 0.0,
+        "missed_onsets": 4,
+        "total_onsets": 9,
+        "onset_latency_ms_p50": 30.0,
+        "activations": 5,
+        "reactivations": 0
+      },
+      "seg_snr_db": 1.906767,
+      "lsd_db": 12.942363,
+      "level_mean_dbfs": -23.6746,
+      "level_std_db": 3.0725505,
+      "erle_db": null,
+      "latency_ms": 0.0
+    },
+    "hpf+denoise": {
+      "decision": {
+        "false_activations_per_min": 0.0,
+        "missed_onsets": 3,
+        "total_onsets": 9,
+        "onset_latency_ms_p50": 35.0,
+        "activations": 6,
+        "reactivations": 0
+      },
+      "seg_snr_db": 0.43591875,
+      "lsd_db": 15.665188,
+      "level_mean_dbfs": -25.075623,
+      "level_std_db": 6.183422,
+      "erle_db": null,
+      "latency_ms": 10.0
+    },
+    "raw": {
+      "decision": {
+        "false_activations_per_min": 0.0,
+        "missed_onsets": 3,
+        "total_onsets": 9,
+        "onset_latency_ms_p50": 40.0,
+        "activations": 6,
+        "reactivations": 0
+      },
+      "seg_snr_db": 35.0,
+      "lsd_db": 12.814282,
+      "level_mean_dbfs": -23.043806,
+      "level_std_db": 3.1835275,
+      "erle_db": null,
+      "latency_ms": 0.0
+    }
+  },
+  "double_talk": {
+    "full": {
+      "decision": {
+        "false_activations_per_min": 9.0,
+        "missed_onsets": 5,
+        "total_onsets": 8,
+        "onset_latency_ms_p50": 35.0,
+        "activations": 6,
+        "reactivations": 0
+      },
+      "seg_snr_db": -6.4296474,
+      "lsd_db": 35.838806,
+      "level_mean_dbfs": -26.566175,
+      "level_std_db": 14.270712,
+      "erle_db": 0.20116472,
+      "latency_ms": 25.0
+    },
+    "hpf": {
+      "decision": {
+        "false_activations_per_min": 6.0,
+        "missed_onsets": 5,
+        "total_onsets": 8,
+        "onset_latency_ms_p50": 30.0,
+        "activations": 5,
+        "reactivations": 0
+      },
+      "seg_snr_db": 1.9257764,
+      "lsd_db": 12.906859,
+      "level_mean_dbfs": -36.076675,
+      "level_std_db": 14.232632,
+      "erle_db": null,
+      "latency_ms": 0.0
+    },
+    "hpf+aec": {
+      "decision": {
+        "false_activations_per_min": 0.0,
+        "missed_onsets": 1,
+        "total_onsets": 8,
+        "onset_latency_ms_p50": 20.0,
+        "activations": 7,
+        "reactivations": 0
+      },
+      "seg_snr_db": 1.9908159,
+      "lsd_db": 22.103819,
+      "level_mean_dbfs": -34.412624,
+      "level_std_db": 12.213117,
+      "erle_db": 0.20116472,
+      "latency_ms": 10.0
+    },
+    "hpf+denoise": {
+      "decision": {
+        "false_activations_per_min": 3.0,
+        "missed_onsets": 3,
+        "total_onsets": 8,
+        "onset_latency_ms_p50": 20.0,
+        "activations": 6,
+        "reactivations": 0
+      },
+      "seg_snr_db": 0.44372872,
+      "lsd_db": 15.592785,
+      "level_mean_dbfs": -36.25187,
+      "level_std_db": 14.760827,
+      "erle_db": null,
+      "latency_ms": 10.0
+    },
+    "raw": {
+      "decision": {
+        "false_activations_per_min": 0.0,
+        "missed_onsets": 1,
+        "total_onsets": 8,
+        "onset_latency_ms_p50": 30.0,
+        "activations": 7,
+        "reactivations": 0
+      },
+      "seg_snr_db": 28.699074,
+      "lsd_db": 12.858655,
+      "level_mean_dbfs": -35.365395,
+      "level_std_db": 14.130342,
+      "erle_db": null,
+      "latency_ms": 0.0
+    }
+  },
+  "echo_only_speakerphone": {
+    "full": {
+      "decision": {
+        "false_activations_per_min": 24.0,
+        "missed_onsets": 0,
+        "total_onsets": 0,
+        "onset_latency_ms_p50": 0.0,
+        "activations": 8,
+        "reactivations": 0
+      },
+      "seg_snr_db": null,
+      "lsd_db": null,
+      "level_mean_dbfs": -35.801464,
+      "level_std_db": 10.891833,
+      "erle_db": 11.113169,
+      "latency_ms": 25.0
+    },
+    "hpf": {
+      "decision": {
+        "false_activations_per_min": 3.0,
+        "missed_onsets": 0,
+        "total_onsets": 0,
+        "onset_latency_ms_p50": 0.0,
+        "activations": 1,
+        "reactivations": 0
+      },
+      "seg_snr_db": null,
+      "lsd_db": null,
+      "level_mean_dbfs": -48.17395,
+      "level_std_db": 4.155113,
+      "erle_db": null,
+      "latency_ms": 0.0
+    },
+    "hpf+aec": {
+      "decision": {
+        "false_activations_per_min": 3.0,
+        "missed_onsets": 0,
+        "total_onsets": 0,
+        "onset_latency_ms_p50": 0.0,
+        "activations": 1,
+        "reactivations": 0
+      },
+      "seg_snr_db": null,
+      "lsd_db": null,
+      "level_mean_dbfs": -58.294903,
+      "level_std_db": 3.6945271,
+      "erle_db": 11.113169,
+      "latency_ms": 10.0
+    },
+    "hpf+denoise": {
+      "decision": {
+        "false_activations_per_min": 9.0,
+        "missed_onsets": 0,
+        "total_onsets": 0,
+        "onset_latency_ms_p50": 0.0,
+        "activations": 3,
+        "reactivations": 0
+      },
+      "seg_snr_db": null,
+      "lsd_db": null,
+      "level_mean_dbfs": -48.32518,
+      "level_std_db": 4.3277607,
+      "erle_db": null,
+      "latency_ms": 10.0
+    },
+    "raw": {
+      "decision": {
+        "false_activations_per_min": 3.0,
+        "missed_onsets": 0,
+        "total_onsets": 0,
+        "onset_latency_ms_p50": 0.0,
+        "activations": 1,
+        "reactivations": 0
+      },
+      "seg_snr_db": null,
+      "lsd_db": null,
+      "level_mean_dbfs": -47.64082,
+      "level_std_db": 4.0563364,
+      "erle_db": null,
+      "latency_ms": 0.0
+    }
+  },
+  "quiet_talker_pink": {
+    "hpf": {
+      "decision": {
+        "false_activations_per_min": 0.0,
+        "missed_onsets": 5,
+        "total_onsets": 9,
+        "onset_latency_ms_p50": 110.0,
+        "activations": 4,
+        "reactivations": 0
+      },
+      "seg_snr_db": 1.5998971,
+      "lsd_db": 39.206802,
+      "level_mean_dbfs": -47.00586,
+      "level_std_db": 14.743548,
+      "erle_db": null,
+      "latency_ms": 0.0
+    },
+    "hpf+denoise": {
+      "decision": {
+        "false_activations_per_min": 0.0,
+        "missed_onsets": 4,
+        "total_onsets": 9,
+        "onset_latency_ms_p50": 30.0,
+        "activations": 5,
+        "reactivations": 0
+      },
+      "seg_snr_db": 0.21389672,
+      "lsd_db": 31.80444,
+      "level_mean_dbfs": -37.287983,
+      "level_std_db": 6.2506166,
+      "erle_db": null,
+      "latency_ms": 10.0
+    },
+    "raw": {
+      "decision": {
+        "false_activations_per_min": 0.0,
+        "missed_onsets": 8,
+        "total_onsets": 9,
+        "onset_latency_ms_p50": 30.0,
+        "activations": 1,
+        "reactivations": 0
+      },
+      "seg_snr_db": 12.78365,
+      "lsd_db": 39.213295,
+      "level_mean_dbfs": -39.274136,
+      "level_std_db": 6.601199,
+      "erle_db": null,
+      "latency_ms": 0.0
+    }
+  },
+  "traffic_5db": {
+    "hpf": {
+      "decision": {
+        "false_activations_per_min": 3.0,
+        "missed_onsets": 2,
+        "total_onsets": 9,
+        "onset_latency_ms_p50": 40.0,
+        "activations": 8,
+        "reactivations": 0
+      },
+      "seg_snr_db": 1.8105962,
+      "lsd_db": 12.718963,
+      "level_mean_dbfs": -23.098679,
+      "level_std_db": 5.633831,
+      "erle_db": null,
+      "latency_ms": 0.0
+    },
+    "hpf+denoise": {
+      "decision": {
+        "false_activations_per_min": 3.0,
+        "missed_onsets": 2,
+        "total_onsets": 9,
+        "onset_latency_ms_p50": 30.0,
+        "activations": 8,
+        "reactivations": 0
+      },
+      "seg_snr_db": 0.3698324,
+      "lsd_db": 15.576257,
+      "level_mean_dbfs": -24.20927,
+      "level_std_db": 7.0214443,
+      "erle_db": null,
+      "latency_ms": 10.0
+    },
+    "raw": {
+      "decision": {
+        "false_activations_per_min": 3.0,
+        "missed_onsets": 3,
+        "total_onsets": 9,
+        "onset_latency_ms_p50": 40.0,
+        "activations": 7,
+        "reactivations": 0
+      },
+      "seg_snr_db": 32.775135,
+      "lsd_db": 12.626246,
+      "level_mean_dbfs": -22.305468,
+      "level_std_db": 4.0090127,
+      "erle_db": null,
+      "latency_ms": 0.0
+    }
+  },
+  "white_10db": {
+    "hpf": {
+      "decision": {
+        "false_activations_per_min": 0.0,
+        "missed_onsets": 8,
+        "total_onsets": 9,
+        "onset_latency_ms_p50": 30.0,
+        "activations": 1,
+        "reactivations": 0
+      },
+      "seg_snr_db": 0.7821274,
+      "lsd_db": 72.627,
+      "level_mean_dbfs": -26.130257,
+      "level_std_db": 4.9541707,
+      "erle_db": null,
+      "latency_ms": 0.0
+    },
+    "hpf+denoise": {
+      "decision": {
+        "false_activations_per_min": 0.0,
+        "missed_onsets": 0,
+        "total_onsets": 9,
+        "onset_latency_ms_p50": 30.0,
+        "activations": 9,
+        "reactivations": 0
+      },
+      "seg_snr_db": 1.0300794,
+      "lsd_db": 55.200478,
+      "level_mean_dbfs": -32.96052,
+      "level_std_db": 16.582375,
+      "erle_db": null,
+      "latency_ms": 10.0
+    },
+    "raw": {
+      "decision": {
+        "false_activations_per_min": 0.0,
+        "missed_onsets": 8,
+        "total_onsets": 9,
+        "onset_latency_ms_p50": 30.0,
+        "activations": 1,
+        "reactivations": 0
+      },
+      "seg_snr_db": 7.6915393,
+      "lsd_db": 72.62793,
+      "level_mean_dbfs": -25.869871,
+      "level_std_db": 5.1036243,
+      "erle_db": null,
+      "latency_ms": 0.0
+    }
+  }
+}
