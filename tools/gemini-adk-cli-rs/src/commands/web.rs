@@ -17,10 +17,17 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
-// ── Static assets (embedded from gemini-adk-web-rs at compile time) ────────────────────
+// ── Static assets (embedded at compile time) ───────────────────────────────────────────
+//
+// The embed folder MUST live inside this crate: `cargo publish` ships only the
+// crate directory, so a `../../apps/...` path compiles in the workspace but is
+// absent from the package tarball, and the derive silently produces no impl
+// (v1.0.0's publish verify failed exactly this way). `assets/web/` is a
+// committed copy of `apps/gemini-adk-web-rs/static/`, kept identical by the
+// `vendored_web_assets_match_source` drift test.
 
 #[derive(Embed)]
-#[folder = "../../apps/gemini-adk-web-rs/static"]
+#[folder = "assets/web"]
 struct Assets;
 
 // ── App state ────────────────────────────────────────────────────────────────

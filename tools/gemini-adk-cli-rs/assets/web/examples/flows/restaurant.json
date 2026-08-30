@@ -1,0 +1,169 @@
+{
+  "name": "restaurant-booking",
+  "description": "Table booking with durable memory: gather party details, check availability, book — remembering diet and seating across visits.",
+  "instruction": "You are the booking assistant for Trattoria Rustica. Help the caller book a table. Use the tools for availability and booking — never invent availability. Use what you remember about the caller, and never ask again for something you already know.",
+  "greeting": "Welcome the caller to Trattoria Rustica and ask when they would like to dine and for how many people.",
+  "modality": "text",
+  "state": {
+    "party_size": {
+      "type": "number",
+      "description": "How many guests the caller is booking for."
+    },
+    "requested_time": {
+      "type": "string",
+      "description": "The requested date and time, as recorded."
+    },
+    "availability_checked": {
+      "type": "boolean",
+      "default": false,
+      "description": "A real availability lookup has run for the requested time."
+    },
+    "user:diet": {
+      "type": "string",
+      "description": "Remembered dietary identity, projected from memory."
+    },
+    "user:seating": {
+      "type": "string",
+      "description": "Remembered seating preference, projected from memory."
+    }
+  },
+  "computed": [
+    {
+      "key": "large_party",
+      "from": { "gte": [{ "key": "party_size" }, { "const": 6 }] },
+      "description": "Six or more guests — the set-menu policy applies."
+    }
+  ],
+  "memory": {
+    "slots": [
+      { "predicate": "dietary_identity", "to": "user:diet" },
+      { "predicate": "seating_preference", "to": "user:seating" }
+    ]
+  },
+  "watch": [
+    {
+      "key": "large_party",
+      "condition": "became_true",
+      "effects": [
+        { "context": "The party is six or more: mention the set-menu policy before booking." },
+        { "remember": "Books for large parties ({state.party_size} guests)" }
+      ]
+    }
+  ],
+  "patterns": [
+    {
+      "name": "undecided",
+      "when": { "not": { "is_true": "availability_checked" } },
+      "turns": 4,
+      "effects": [
+        { "prompt": "The caller has not settled on a time after several turns. Briefly offer tonight's two most popular slots to help them decide." }
+      ]
+    }
+  ],
+  "runtime": {
+    "temperature": 0.6,
+    "steering": "context_injection",
+    "repair": { "nudge_after": 2, "escalate_after": 4 }
+  },
+  "tools": [
+    {
+      "name": "capture_party",
+      "description": "Record the party size and requested date/time.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "party_size": { "type": "integer" },
+          "datetime": { "type": "string", "description": "Requested date and time" }
+        },
+        "required": ["party_size", "datetime"]
+      },
+      "response": { "recorded": true },
+      "set_state": { "party_size": 2, "requested_time": "recorded" }
+    },
+    {
+      "name": "check_availability",
+      "description": "Check table availability for the requested time.",
+      "response": { "available": true, "options": ["19:00", "19:30", "21:00"] },
+      "set_state": { "availability_checked": true }
+    },
+    {
+      "name": "book_table",
+      "description": "Book the table for the confirmed time.",
+      "response": { "booked": true, "reference": "TR-2044" }
+    }
+  ],
+  "tests": [
+    {
+      "name": "party books a table",
+      "script": [
+        { "expect": { "active": ["gather"], "blocked": ["book_table"] } },
+        { "tool": "capture_party" },
+        { "tool": "check_availability" },
+        { "expect": { "done": ["gather", "check"], "allowed": ["book_table"] } },
+        { "tool": "book_table" },
+        { "expect": { "done": ["book", "farewell"], "complete": true } }
+      ]
+    },
+    {
+      "name": "no booking before availability",
+      "script": [
+        { "tool": "capture_party" },
+        { "tool": "book_table" },
+        { "expect": { "blocked": ["book_table"], "complete": false } }
+      ]
+    },
+    {
+      "name": "memory recall stays ambient",
+      "script": [
+        { "expect": { "allowed": ["recall_context"] } },
+        { "tool": "capture_party" },
+        { "expect": { "allowed": ["recall_context"] } }
+      ]
+    },
+    {
+      "name": "large parties compute their flag",
+      "script": [
+        { "tool": "capture_party" },
+        { "expect": { "state": { "derived:large_party": false } } },
+        { "set": { "party_size": 7 } },
+        { "expect": { "state": { "derived:large_party": true } } }
+      ]
+    }
+  ],
+  "flow": {
+    "steps": [
+      {
+        "id": "gather",
+        "posture": "Find out the party size and the requested date and time, then record them.",
+        "allow": ["capture_party"],
+        "done": { "captured": ["party_size", "requested_time"] }
+      },
+      {
+        "id": "check",
+        "after": ["gather"],
+        "posture": "Check availability for the requested time and offer the options.",
+        "allow": ["check_availability"],
+        "done": { "is_true": "availability_checked" },
+        "ground": "Party of {party_size}. Diet: {user:diet?known:not on file}."
+      },
+      {
+        "id": "book",
+        "after": ["check"],
+        "posture": "Book the table for the option the caller picks, then read back the reference.",
+        "allow": ["book_table"],
+        "done": { "called_ok": "book_table" }
+      },
+      {
+        "id": "farewell",
+        "after": ["book"],
+        "terminal": true
+      }
+    ],
+    "constraints": [
+      { "once": "book_table" },
+      { "never_until": { "tool": "book_table", "until": { "is_true": "availability_checked" } } },
+      { "require": ["farewell"] }
+    ],
+    "ambient": ["recall_context", "manage_memory"]
+  }
+}
