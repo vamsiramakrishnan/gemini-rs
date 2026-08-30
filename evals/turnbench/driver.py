@@ -107,12 +107,12 @@ def run_predictor(paths: list[str], env_overlay: dict | None) -> dict:
     return json.loads(raw)
 
 
-def to_prediction(conv: Conversation, events: dict) -> ConversationPrediction:
+def to_prediction(cid: str, duration_s: float, events: dict) -> ConversationPrediction:
     # Clamp into the scored duration (strictly increasing is preserved).
-    limit = conv.duration_s - 1e-3
-    clamp = lambda ts: [min(t, limit) for t in ts if t <= conv.duration_s]
+    limit = duration_s - 1e-3
+    clamp = lambda ts: [min(t, limit) for t in ts if t <= duration_s]
     return ConversationPrediction(
-        conversation_id=conv.conversation_id,
+        conversation_id=cid,
         speaker_1=SpeakerEvents(
             eot=clamp(events["speaker_1"]["eot"]),
             interruption=clamp(events["speaker_1"]["interruption"]),
@@ -219,33 +219,62 @@ def main() -> None:
         missing = ", ".join(str(c["name"]) for c in configs)
         sys.exit(f"--score-only but no saved predictions for: {missing}")
 
-    predictions: dict[str, list] = {c["name"]: [] for c in configs}
+    # Per-conversation checkpointing: every conversation's raw events are
+    # appended to raw-<name>.jsonl the moment they are computed, so a crash
+    # (disk-full, OOM, container reclaim) loses at most one conversation,
+    # and a restart resumes exactly where it stopped instead of paying for
+    # the whole dataset pass again.
     raw_all: dict[str, dict] = {c["name"]: {} for c in configs}
+    ckpt_paths: dict[str, Path] = {}
+    if args.configs:
+        out_dir = Path(args.out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        for cfg in configs:
+            path = out_dir / f"raw-{cfg['name']}.jsonl"
+            ckpt_paths[cfg["name"]] = path
+            if path.exists():
+                for line in path.read_text().splitlines():
+                    if line.strip():
+                        row = json.loads(line)
+                        raw_all[cfg["name"]][row["conversation_id"]] = row
+        loaded = {n: len(v) for n, v in raw_all.items() if v}
+        if loaded:
+            print(f"checkpoints loaded: {loaded}", file=sys.stderr)
+
     for conv in stream_conversations(args.dataset) if configs else ():
+        todo = [c for c in configs if conv.conversation_id not in raw_all[c["name"]]]
+        if not todo:
+            continue
         with tempfile.TemporaryDirectory() as tmp:
             paths = []
             for speaker in (1, 2):
-                samples, rate = conv.audio(speaker)
                 path = Path(tmp) / f"sp{speaker}.wav"
+                samples, rate = conv.audio(speaker)
                 path.write_bytes(to_pcm16_16k(samples, rate))
                 paths.append(str(path))
-            for cfg in configs:
+            for cfg in todo:
                 events = run_predictor(paths, cfg["env"])
-                predictions[cfg["name"]].append(to_prediction(conv, events))
-                raw_all[cfg["name"]][conv.conversation_id] = {
+                row = {
+                    "conversation_id": conv.conversation_id,
                     "duration_s": conv.duration_s,
                     **events,
                 }
-        print(f"  {conv.conversation_id}: done ({conv.duration_s:.0f}s x {len(configs)} configs)", file=sys.stderr)
+                raw_all[cfg["name"]][conv.conversation_id] = row
+                if cfg["name"] in ckpt_paths:
+                    with ckpt_paths[cfg["name"]].open("a") as f:
+                        f.write(json.dumps(row) + "\n")
+        print(f"  {conv.conversation_id}: done ({conv.duration_s:.0f}s x {len(todo)} configs)", file=sys.stderr)
 
     # Write every config's outputs before any scoring, so a scorer failure
     # never discards a completed dataset pass.
     submissions = dict(done)
     for cfg in configs:
         name = cfg["name"]
-        submission = Submission(
-            schema_version=SCHEMA_VERSION, predictions=predictions[name]
-        )
+        predictions = [
+            to_prediction(cid, row["duration_s"], row)
+            for cid, row in raw_all[name].items()
+        ]
+        submission = Submission(schema_version=SCHEMA_VERSION, predictions=predictions)
         submissions[name] = submission
         if name is None:
             out_path, raw_path = Path(args.out), args.raw_out and Path(args.raw_out)
@@ -257,7 +286,7 @@ def main() -> None:
         out_path.write_text(submission.model_dump_json(indent=1))
         if raw_path:
             raw_path.write_text(json.dumps(raw_all[name]))
-        print(f"wrote {out_path} ({len(predictions[name])} conversations)")
+        print(f"wrote {out_path} ({len(predictions)} conversations)")
 
     if args.score:
         scores_out = {}
