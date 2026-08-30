@@ -220,6 +220,7 @@ jobs:
               echo "| Crate | Version | Install |"
               echo "|-------|---------|---------|"
               echo "| \`gemini-genai-rs\` | $VERSION | \`cargo add gemini-genai-rs@${VERSION}\` |"
+              echo "| \`gemini-adk-macros-rs\` | $VERSION | \`cargo add gemini-adk-macros-rs@${VERSION}\` |"
               echo "| \`gemini-adk-rs\` | $VERSION | \`cargo add gemini-adk-rs@${VERSION}\` |"
               echo "| \`gemini-adk-fluent-rs\` | $VERSION | \`cargo add gemini-adk-fluent-rs@${VERSION}\` |"
               echo "| \`gemini-memory-rs\` | $VERSION | \`cargo add gemini-memory-rs@${VERSION}\` |"

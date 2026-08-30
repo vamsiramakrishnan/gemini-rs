@@ -672,10 +672,12 @@ just release-status
 ### Published crates (dependency order)
 
 1. `gemini-genai-rs` (L0)
-2. `gemini-adk-rs` (L1)
-3. `gemini-adk-fluent-rs` (L2)
-4. `gemini-adk-server-rs`
-5. `gemini-adk-cli-rs`
+2. `gemini-adk-macros-rs` (proc-macros; dependency of L1 — publishes before it)
+3. `gemini-adk-rs` (L1)
+4. `gemini-adk-fluent-rs` (L2)
+5. `gemini-memory-rs`
+6. `gemini-adk-server-rs`
+7. `gemini-adk-cli-rs`
 
 ### Version management
 
