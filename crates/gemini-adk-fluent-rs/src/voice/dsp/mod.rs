@@ -345,6 +345,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "dsp")]
     #[test]
     fn rate_change_does_not_persist_across_frames() {
         // A mid-chain resampler rewrites the bus rate for LATER stages in
