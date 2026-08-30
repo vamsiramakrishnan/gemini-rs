@@ -83,6 +83,16 @@ denoise, hpf+denoise}` at the conversational operating point. Per config
 you get `preds-<name>.json`, `raw-<name>.json` (segments for sweeps), and
 a consolidated `scores.json`.
 
+Nothing is ever computed twice:
+
+- `--resume` skips configs whose `preds-<name>.json` already exists — add
+  a 13th config to the matrix and only that one costs a dataset pass;
+- `--score-only` recomputes `scores.json` from saved predictions with no
+  audio pass at all;
+- operating-point changes (EOT hold, INT sustain) need no re-run either:
+  sweep them offline from the saved `raw-<name>.json` segments with
+  `sweep.py`.
+
 ### 4. Operating-Point Sweep
 
 The sweep derives EOT and INT events from the same speech segments at different hold/sustain thresholds:

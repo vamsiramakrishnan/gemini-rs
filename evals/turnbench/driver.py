@@ -192,16 +192,36 @@ def main() -> None:
     parser.add_argument("--raw-out", help="also write raw predictor output (segments) per conversation")
     parser.add_argument("--configs", help="JSON file: [{name, env}] — ablation matrix in one dataset pass")
     parser.add_argument("--out-dir", default="results", help="output directory for --configs mode")
+    parser.add_argument("--resume", action="store_true",
+                        help="skip configs whose preds-<name>.json already exists in --out-dir; "
+                        "only new configs cost a dataset pass, finished ones are never re-run")
+    parser.add_argument("--score-only", action="store_true",
+                        help="no audio pass at all: load existing preds-*.json from --out-dir and (re)score them")
     args = parser.parse_args()
+    if args.score_only:
+        args.score = True
 
     if args.configs:
         configs = json.loads(Path(args.configs).read_text())
     else:
         configs = [{"name": None, "env": {}}]
 
+    done: dict[str, "Submission"] = {}
+    if args.resume or args.score_only:
+        for cfg in list(configs):
+            name = cfg["name"]
+            path = Path(args.out_dir) / f"preds-{name}.json" if name else Path(args.out)
+            if path.exists():
+                done[name] = Submission.model_validate_json(path.read_text())
+                configs.remove(cfg)
+                print(f"kept existing {path} ({len(done[name].predictions)} conversations)")
+    if args.score_only and configs:
+        missing = ", ".join(str(c["name"]) for c in configs)
+        sys.exit(f"--score-only but no saved predictions for: {missing}")
+
     predictions: dict[str, list] = {c["name"]: [] for c in configs}
     raw_all: dict[str, dict] = {c["name"]: {} for c in configs}
-    for conv in stream_conversations(args.dataset):
+    for conv in stream_conversations(args.dataset) if configs else ():
         with tempfile.TemporaryDirectory() as tmp:
             paths = []
             for speaker in (1, 2):
@@ -220,7 +240,7 @@ def main() -> None:
 
     # Write every config's outputs before any scoring, so a scorer failure
     # never discards a completed dataset pass.
-    submissions = {}
+    submissions = dict(done)
     for cfg in configs:
         name = cfg["name"]
         submission = Submission(
@@ -242,8 +262,7 @@ def main() -> None:
     if args.score:
         scores_out = {}
         dataset = resolve_dataset(args.dataset, skip_audio=True)
-        for cfg in configs:
-            name = cfg["name"]
+        for name in submissions:
             try:
                 scores = score_submission(submissions[name], dataset)
             except Exception as e:  # keep scoring the rest
