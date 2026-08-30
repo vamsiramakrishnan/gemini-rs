@@ -396,17 +396,6 @@ impl Guard {
     }
 }
 
-impl schemars::JsonSchema for Guard {
-    fn schema_name() -> String {
-        "Guard".to_string()
-    }
-    fn json_schema(generator: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
-        // A Guard serializes exactly as its Pred (custom guards refuse to
-        // serialize), so the schema is Pred's.
-        Pred::json_schema(generator)
-    }
-}
-
 /// Unwrap a list of guards known to be all `Spec` into their predicates.
 ///
 /// The caller (`Guard::all`/`Guard::any`) only invokes this after verifying every
