@@ -27,7 +27,7 @@ exclude = [
 ]
 
 [workspace.package]
-version = "0.9.0"
+version = "1.0.0"
 edition = "2021"
 rust-version = "1.93"
 license = "MIT"
@@ -36,12 +36,12 @@ repository = "https://github.com/vamsiramakrishnan/gemini-rs"
 # Internal workspace crates — version mirrors [workspace.package].version above.
 # Update ONLY [workspace.package].version when releasing; release.sh handles the rest.
 [workspace.dependencies]
-gemini-genai-rs      = { path = "crates/gemini-genai-rs",      version = "0.9.0" }
-gemini-adk-macros-rs = { path = "crates/gemini-adk-macros-rs", version = "0.9.0" }
-gemini-adk-rs        = { path = "crates/gemini-adk-rs",        version = "0.9.0" }
-gemini-adk-fluent-rs = { path = "crates/gemini-adk-fluent-rs", version = "0.9.0" }
-gemini-memory-rs     = { path = "crates/gemini-memory-rs",     version = "0.9.0" }
-gemini-adk-server-rs = { path = "apps/gemini-adk-server-rs",   version = "0.9.0" }
+gemini-genai-rs      = { path = "crates/gemini-genai-rs",      version = "1.0.0" }
+gemini-adk-macros-rs = { path = "crates/gemini-adk-macros-rs", version = "1.0.0" }
+gemini-adk-rs        = { path = "crates/gemini-adk-rs",        version = "1.0.0" }
+gemini-adk-fluent-rs = { path = "crates/gemini-adk-fluent-rs", version = "1.0.0" }
+gemini-memory-rs     = { path = "crates/gemini-memory-rs",     version = "1.0.0" }
+gemini-adk-server-rs = { path = "apps/gemini-adk-server-rs",   version = "1.0.0" }
 
 [workspace.lints.clippy]
 # All style/correctness lints are ON workspace-wide. The handful of deliberate
