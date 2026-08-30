@@ -370,26 +370,35 @@ impl DspStage for Limiter {
         let ceiling = self.ceiling;
 
         for s in bus.samples.iter_mut() {
-            // Store the current sample in the delay line.
+            // True lookahead: emit the sample that entered the delay line
+            // `lookahead_samples` ago, scaled by a gain that has already
+            // seen every sample between it and "now" — the gain reaches
+            // full attenuation BEFORE a peak arrives at the output. This
+            // is the delay `latency_samples()` declares.
+            let delayed = self.delay_line[self.delay_pos];
             self.delay_line[self.delay_pos] = *s;
             self.delay_pos = (self.delay_pos + 1) % self.lookahead_samples;
 
-            // Look ahead and compute the gain needed to keep the peak at ceiling.
-            let peak = self.lookahead_peak();
+            // Gain needed to keep the window's peak at the ceiling. The
+            // window still contains the emitted sample's own magnitude
+            // until this very iteration, so it too is bounded.
+            let peak = self.lookahead_peak().max(delayed.abs());
             let target_gain = if peak > ceiling {
                 ceiling / peak.max(1e-6)
             } else {
                 1.0
             };
 
-            // Attack is instant; release is exponential.
+            // Attack is instant; release recovers exponentially toward the
+            // target with the configured time constant (dividing by the
+            // per-sample decay grows the gain by ~1/tau per sample).
             self.current_gain = if target_gain < self.current_gain {
                 target_gain
             } else {
-                self.current_gain.max(target_gain * release_decay)
+                (self.current_gain / release_decay).min(target_gain)
             };
 
-            *s *= self.current_gain;
+            *s = delayed * self.current_gain;
         }
     }
 
@@ -610,6 +619,62 @@ mod tests {
             limiter.latency_samples(),
             expected_samples,
             "Latency does not match lookahead"
+        );
+    }
+
+    #[test]
+    fn limiter_actually_delays_by_declared_latency() {
+        // The declared latency must be REAL: an impulse fed at t=0 comes
+        // out at t=lookahead, not at t=0 (a "lookahead" limiter that emits
+        // the current sample undelayed cannot attack before the peak).
+        let mut limiter = Limiter::speech_default(16_000);
+        let lookahead = limiter.latency_samples();
+        let mut samples = vec![0.0f32; lookahead * 3];
+        samples[0] = 0.5;
+        let mut bus = AudioBus {
+            samples: &mut samples,
+            sample_rate: 16_000,
+        };
+        limiter.process(&mut bus);
+        let peak_at = bus
+            .samples
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.abs().total_cmp(&b.1.abs()))
+            .map(|(i, _)| i)
+            .unwrap();
+        assert_eq!(
+            peak_at, lookahead,
+            "impulse must emerge exactly one lookahead later"
+        );
+    }
+
+    #[test]
+    fn limiter_release_is_gradual_not_instant() {
+        // After a limiting event ends, the gain must recover on the
+        // configured time constant, not snap back within one sample.
+        let mut limiter = Limiter::new(0.98, 5.0, 50.0, 16_000);
+        // 30 ms of hard overdrive, then quiet signal at 0.5.
+        let mut samples: Vec<f32> = Vec::new();
+        samples.extend(std::iter::repeat_n(1.96f32, 480)); // needs gain 0.5
+        samples.extend(std::iter::repeat_n(0.5f32, 1600));
+        let mut bus = AudioBus {
+            samples: &mut samples,
+            sample_rate: 16_000,
+        };
+        limiter.process(&mut bus);
+        // Shortly after the overdrive leaves the window the quiet samples
+        // are still attenuated near 0.5x...
+        let early = bus.samples[480 + 160]; // 10 ms into the quiet region
+        assert!(
+            early < 0.5 * 0.75,
+            "gain released almost instantly: quiet sample {early}"
+        );
+        // ...but several release constants later it is back near unity.
+        let late = *bus.samples.last().unwrap();
+        assert!(
+            late > 0.5 * 0.9,
+            "gain failed to recover: quiet sample {late}"
         );
     }
 }

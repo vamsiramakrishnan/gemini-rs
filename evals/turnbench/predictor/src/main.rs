@@ -223,7 +223,21 @@ impl VadBackend for FusionVad {
 struct Chain {
     hpf: Option<HighPass>,
     denoiser: Option<Denoiser>,
+    /// Denoiser output FIFO. RNNoise emits in its own 160-sample (10 ms)
+    /// block multiples, so for frame sizes that don't divide its block
+    /// (earshot's 256) a call can return more or fewer samples than one
+    /// frame. The FIFO is primed once with one block of leading silence —
+    /// at least the denoiser's maximum holdback — so it can never
+    /// underrun afterwards: a constant causal delay, every sample
+    /// preserved in order. Truncating (the old behavior) dropped real
+    /// samples whenever a call returned more than one frame.
+    dn_fifo: Vec<i16>,
 }
+
+/// The denoiser's internal block at 16 kHz: it never holds back more than
+/// one block minus one sample, so priming the FIFO with this many zeros
+/// guarantees it always covers a full frame.
+const DENOISE_BLOCK: usize = 160;
 
 impl Chain {
     fn from_env() -> Self {
@@ -241,6 +255,7 @@ impl Chain {
         Self {
             hpf: hpf.then(|| HighPass::speech(SR as u32)),
             denoiser: denoise.then(|| Denoiser::new(SR as u32)),
+            dn_fifo: vec![0i16; DENOISE_BLOCK],
         }
     }
 
@@ -259,9 +274,13 @@ impl Chain {
         }
         if let Some(d) = self.denoiser.as_mut() {
             d.process(buf);
-            // The denoiser may return fewer samples than a full frame while
-            // its block buffer fills; pad with silence to keep the frame
-            // cadence (a fixed, causal alignment cost).
+            self.dn_fifo.append(buf);
+            // Re-frame from the FIFO at the caller's cadence. The one-time
+            // priming silence means the FIFO always holds a full frame:
+            // fifo = prime + emitted - consumed = prime + target - holdback,
+            // and holdback < DENOISE_BLOCK <= prime.
+            debug_assert!(self.dn_fifo.len() >= target, "denoiser FIFO underrun");
+            buf.extend(self.dn_fifo.drain(..target.min(self.dn_fifo.len())));
             buf.resize(target, 0);
         }
     }
@@ -313,6 +332,57 @@ impl Channel {
             None => {}
         }
         edge
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The denoised stream must stay time-aligned regardless of the
+    /// caller's frame size: 256-sample (earshot) framing and 480-sample
+    /// (energy) framing must produce nearly the same stream. (Bit
+    /// equality is not attainable — the denoiser's internal per-call
+    /// resampler has a tiny call-boundary interpolation artifact — but
+    /// the old truncate-to-frame behavior DROPPED 64 real samples per
+    /// long call under 256-framing, so the two streams drifted apart in
+    /// time and diverged completely.)
+    #[test]
+    fn denoiser_reframing_is_frame_size_invariant() {
+        let n = SR; // 1 s
+        let input: Vec<i16> = (0..n)
+            .map(|i| {
+                let t = i as f32 / SR as f32;
+                ((t * 220.0 * std::f32::consts::TAU).sin() * 8000.0) as i16
+            })
+            .collect();
+
+        let run = |frame_len: usize| -> Vec<f64> {
+            std::env::set_var("CHAIN", "denoise");
+            let mut chain = Chain::from_env();
+            let mut out = Vec::with_capacity(n);
+            for block in input.chunks(frame_len) {
+                let mut buf = block.to_vec();
+                chain.process(&mut buf);
+                assert_eq!(buf.len(), block.len(), "cadence must be preserved");
+                out.extend(buf.iter().map(|&s| f64::from(s)));
+            }
+            out
+        };
+
+        let a = run(256);
+        let b = run(480);
+        let common = a.len().min(b.len());
+        let (mut err, mut energy) = (0.0f64, 0.0f64);
+        for i in 0..common {
+            err += (a[i] - b[i]).powi(2);
+            energy += b[i].powi(2);
+        }
+        let rel = (err / energy.max(1.0)).sqrt();
+        assert!(
+            rel < 0.05,
+            "streams diverged (relative RMS diff {rel:.3}) — framing dropped or shifted samples"
+        );
     }
 }
 

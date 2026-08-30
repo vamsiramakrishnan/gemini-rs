@@ -627,11 +627,11 @@ mod tests {
         let taps: [f32; 6] = [0.12, -0.05, 0.03, -0.015, 0.008, -0.004];
         let delay = 40 * sr as usize / 1000;
         let mut mic = vec![0.0f32; n];
-        for j in 0..n {
+        for (j, m) in mic.iter_mut().enumerate() {
             for (ti, &tap) in taps.iter().enumerate() {
                 let src = j as isize - delay as isize - (ti as isize * 37);
                 if src >= 0 {
-                    mic[j] += tap * far[src as usize];
+                    *m += tap * far[src as usize];
                 }
             }
         }

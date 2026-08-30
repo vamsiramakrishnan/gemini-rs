@@ -277,13 +277,17 @@ impl InputAudioProcessor for DspChain {
             .extend(frame.iter().map(|&s| f32::from(s) / 32768.0));
 
         let metrics = self.metrics.as_ref().expect("ensured").inner.clone();
+        // Rate changes (a resampler mid-chain) propagate stage-to-stage
+        // WITHIN this frame only; the chain's own input rate is fixed, so
+        // the next frame's fresh PCM is labeled correctly again.
+        let mut rate = self.sample_rate;
         for (stage, meter) in self.stages.iter_mut().zip(&metrics.meters) {
             let mut bus = AudioBus {
                 samples: &mut self.bus,
-                sample_rate: self.sample_rate,
+                sample_rate: rate,
             };
             stage.process(&mut bus);
-            self.sample_rate = bus.sample_rate;
+            rate = bus.sample_rate;
 
             // Uniform metering at the stage output.
             let mut peak = 0.0f32;
@@ -339,6 +343,22 @@ mod tests {
                 *s *= self.0;
             }
         }
+    }
+
+    #[test]
+    fn rate_change_does_not_persist_across_frames() {
+        // A mid-chain resampler rewrites the bus rate for LATER stages in
+        // the SAME frame only. The next frame's fresh input PCM arrives at
+        // the chain's input rate again — persisting the output rate fed
+        // 16 kHz-labeled audio to a resampler built for 48 kHz (debug
+        // panic; silent rate corruption in release).
+        let mut chain = DspChain::new(48_000).stage(
+            crate::voice::dsp::resample::SincResampler::new(48_000, 16_000),
+        );
+        let mut frame = vec![1000i16; 960]; // 20 ms at 48 kHz
+        chain.process_frame(&mut frame);
+        let mut frame2 = vec![1000i16; 960];
+        chain.process_frame(&mut frame2); // panicked before the fix
     }
 
     #[test]

@@ -32,6 +32,10 @@ pub struct SincResampler {
     out_scratch: Vec<Vec<f32>>,
     output_fifo: VecDeque<f32>,
     latency_out: usize,
+    /// Cumulative input samples accepted (for exact long-term rate).
+    in_total: u64,
+    /// Cumulative output samples emitted.
+    out_total: u64,
 }
 
 impl SincResampler {
@@ -62,6 +66,8 @@ impl SincResampler {
             out_scratch,
             output_fifo: VecDeque::with_capacity(chunk * 4),
             latency_out,
+            in_total: 0,
+            out_total: 0,
         }
     }
 }
@@ -92,13 +98,22 @@ impl DspStage for SincResampler {
                 .extend(self.out_scratch[0][..out_len].iter().copied());
         }
 
-        // Emit the rate-converted share of what came in this call.
-        let want = (in_len as u64 * u64::from(self.to_hz) / u64::from(self.from_hz)) as usize;
+        // Emit the rate-converted share of the CUMULATIVE input, not of
+        // this call alone: per-call truncation would permanently drop the
+        // fractional remainder (one sample per call at 48k -> 16k never
+        // emits anything), drifting the long-term rate and stranding audio
+        // in the FIFO. A startup deficit (FIFO shorter than the share)
+        // carries forward and is recovered as the resampler fills.
+        self.in_total += in_len as u64;
+        let due = self.in_total * u64::from(self.to_hz) / u64::from(self.from_hz);
+        let want = due.saturating_sub(self.out_total) as usize;
         bus.samples.clear();
-        for _ in 0..want.min(self.output_fifo.len()) {
+        let take = want.min(self.output_fifo.len());
+        for _ in 0..take {
             bus.samples
                 .push(self.output_fifo.pop_front().unwrap_or(0.0));
         }
+        self.out_total += take as u64;
         bus.sample_rate = self.to_hz;
     }
 
@@ -165,6 +180,32 @@ mod tests {
         let tail = &out[skip..];
         let rms = (tail.iter().map(|s| s * s).sum::<f32>() / tail.len() as f32).sqrt();
         assert!(rms < 0.01, "alias energy leaked: rms {rms}");
+    }
+
+    #[test]
+    fn tiny_blocks_still_emit_the_full_rate_share() {
+        // One sample per call at 48k -> 16k: per-call truncation computes
+        // floor(1/3) = 0 forever and strands every output sample in the
+        // FIFO. The cumulative accounting must emit ~1/3 of the input.
+        let mut stage = SincResampler::new(48_000, 16_000);
+        let mut emitted = 0usize;
+        let mut buf = Vec::with_capacity(1);
+        for _ in 0..48_000 {
+            buf.clear();
+            buf.push(0.25f32);
+            let mut bus = AudioBus {
+                samples: &mut buf,
+                sample_rate: 48_000,
+            };
+            stage.process(&mut bus);
+            emitted += buf.len();
+        }
+        let expected = 16_000usize;
+        assert!(
+            (emitted as i64 - expected as i64).unsigned_abs() as usize
+                <= stage.latency_samples() + 320,
+            "emitted {emitted} of ~{expected}"
+        );
     }
 
     #[test]
