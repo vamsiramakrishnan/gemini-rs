@@ -396,17 +396,6 @@ impl Guard {
     }
 }
 
-impl schemars::JsonSchema for Guard {
-    fn schema_name() -> String {
-        "Guard".to_string()
-    }
-    fn json_schema(generator: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
-        // A Guard serializes exactly as its Pred (custom guards refuse to
-        // serialize), so the schema is Pred's.
-        Pred::json_schema(generator)
-    }
-}
-
 /// Unwrap a list of guards known to be all `Spec` into their predicates.
 ///
 /// The caller (`Guard::all`/`Guard::any`) only invokes this after verifying every
@@ -435,6 +424,21 @@ impl Serialize for Guard {
 impl<'de> Deserialize<'de> for Guard {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         Ok(Guard::Spec(Pred::deserialize(d)?))
+    }
+}
+
+// A serializable guard is exactly a `Pred` atom on the wire (the `Custom`
+// variant is code-only and rejected by `Serialize`), so its JSON Schema is
+// `Pred`'s. Inline the `Pred` subschema wherever a `Guard` appears.
+impl schemars::JsonSchema for Guard {
+    fn is_referenceable() -> bool {
+        false
+    }
+    fn schema_name() -> String {
+        "Guard".to_string()
+    }
+    fn json_schema(generator: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+        generator.subschema_for::<Pred>()
     }
 }
 
@@ -1707,7 +1711,8 @@ enum Denial {
 }
 
 /// A single problem found while compiling a [`Flow`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", content = "detail", rename_all = "snake_case")]
 pub enum FlowError {
     /// A referential-integrity or acyclicity error from [`Flow::validate`].
     Invalid(String),
@@ -1765,7 +1770,7 @@ impl std::fmt::Display for FlowError {
 }
 
 /// All problems found while compiling a [`Flow`]; non-empty on failure.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct FlowErrors(pub Vec<FlowError>);
 
 impl std::fmt::Display for FlowErrors {

@@ -24,6 +24,9 @@ members = [
 ]
 exclude = [
     "evals/turnbench/predictor",
+    # The Python binding crate links libpython and is built by maturin, not
+    # `cargo build --workspace`; keep it out of the workspace graph/CI gates.
+    "crates/gemini-adk-py",
 ]
 
 [workspace.package]

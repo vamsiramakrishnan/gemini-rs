@@ -40,6 +40,7 @@
 - [Governed Flows (conversation/tool DAGs)](./user-guide/flow.md)
 - [Flows as JSON (SessionSpec)](./user-guide/flow-json.md)
 - [The Flow Studio](./flow-studio.md)
+- [Conversation CI](./user-guide/conversation-ci.md)
 - [Agent Orchestration](./user-guide/orchestration.md)
 - [Text Agent Combinators](./user-guide/text-agents.md)
 - [S·C·T·P·M·A Operator Algebra](./user-guide/composition.md)

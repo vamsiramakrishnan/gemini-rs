@@ -1,0 +1,15 @@
+{
+  "name": "happy_path",
+  "steps": [
+    { "expect_active": ["collect"] },
+    { "set": { "key": "party_size", "value": 4 } },
+    { "set": { "key": "slot", "value": "tomorrow 7pm" } },
+    "turn",
+    { "expect_active": ["confirm"] },
+    { "set": { "key": "user_confirmed", "value": true } },
+    "turn",
+    { "expect_allowed": "book" },
+    { "tool_ok": "book" },
+    "expect_complete"
+  ]
+}

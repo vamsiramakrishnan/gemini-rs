@@ -1,0 +1,24 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "gemini-adk"
+version = "0.8.0"
+description = "Python access to the gemini-rs governed-conversation data plane: author, compile, validate, and deterministically simulate voice-agent conversation specs."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+keywords = ["voice", "agent", "conversation", "governance", "gemini", "llm"]
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: 3",
+    "Intended Audience :: Developers",
+]
+
+[tool.maturin]
+# The compiled module is `gemini_adk` (see [lib].name in Cargo.toml); the pure
+# Python wrapper package lives under python/.
+python-source = "python"
+module-name = "gemini_adk._gemini_adk"
+features = ["pyo3/extension-module"]

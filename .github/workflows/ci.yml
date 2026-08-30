@@ -107,3 +107,17 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: EmbarkStudios/cargo-deny-action@v2
+
+  # Conversation CI: compile every governed conversation spec in `conversations/`
+  # and run its model-free scenario tests deterministically. Dogfoods the
+  # `adk flow ci` gate on this repo's own corpus.
+  conversation-ci:
+    name: Conversation CI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.93.1"
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo run -p gemini-adk-cli-rs -- flow ci conversations

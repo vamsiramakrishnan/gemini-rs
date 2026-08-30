@@ -58,6 +58,94 @@ use gemini_adk_rs::state::State;
 type SlotFetch =
     Arc<dyn Fn(Value) -> Pin<Box<dyn Future<Output = Result<Value, String>> + Send>> + Send + Sync>;
 
+/// A registry of named async resolvers, bound to a [`ConversationSpec`]'s
+/// declared resolver slots at load time via
+/// [`Conversation::from_spec_with_resolvers`].
+///
+/// This is what makes a JSON spec a complete deployable unit: the spec carries
+/// the *declarations* (slot, resolver name, args, ttl) and the registry supplies
+/// the *implementations*.
+///
+/// ```ignore
+/// let registry = ResolverRegistry::new()
+///     .with("availability", |args| async move {
+///         Ok(serde_json::json!({ "open": true }))
+///     });
+/// let convo = Conversation::from_spec_with_resolvers(spec, &registry)?;
+/// ```
+#[derive(Clone, Default)]
+pub struct ResolverRegistry {
+    fetchers: BTreeMap<String, SlotFetch>,
+}
+
+impl ResolverRegistry {
+    /// An empty registry.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Register an async resolver under `name` (builder style).
+    pub fn with<F, Fut>(mut self, name: impl Into<String>, fetch: F) -> Self
+    where
+        F: Fn(Value) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<Value, String>> + Send + 'static,
+    {
+        self.add(name, fetch);
+        self
+    }
+
+    /// Register an async resolver under `name`.
+    pub fn add<F, Fut>(&mut self, name: impl Into<String>, fetch: F)
+    where
+        F: Fn(Value) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<Value, String>> + Send + 'static,
+    {
+        let fetch = Arc::new(fetch);
+        self.fetchers.insert(
+            name.into(),
+            Arc::new(move |v| {
+                let fetch = fetch.clone();
+                Box::pin(async move { fetch(v).await })
+            }),
+        );
+    }
+
+    /// Whether a resolver named `name` is registered.
+    pub fn contains(&self, name: &str) -> bool {
+        self.fetchers.contains_key(name)
+    }
+
+    /// A registry that stubs every resolver declared anywhere in `spec` (stages
+    /// and overlays) with a no-op returning JSON `null`.
+    ///
+    /// For **structural validation and deterministic simulation**, the resolver
+    /// *implementations* are irrelevant — a resolver is an external fetch, so in
+    /// a model-free test its output is supplied via a scenario `set` step (like
+    /// a tool result via `tool_ok`), and the stub is never actually invoked when
+    /// the slot is pre-set. Real implementations bind at deploy time via
+    /// [`Conversation::from_spec_with_resolvers`].
+    pub fn stubbing(spec: &ConversationSpec) -> Self {
+        let mut reg = Self::new();
+        let stages = spec
+            .stages
+            .iter()
+            .chain(spec.overlays.iter().flat_map(|o| o.stages.iter()));
+        for stage in stages {
+            for r in &stage.resolve {
+                let name = r.resolver_name().to_string();
+                if !reg.contains(&name) {
+                    reg.add(name, |_args| async { Ok(serde_json::Value::Null) });
+                }
+            }
+        }
+        reg
+    }
+
+    fn get(&self, name: &str) -> Option<SlotFetch> {
+        self.fetchers.get(name).cloned()
+    }
+}
+
 /// A resolver binding attached to a stage by [`Conversation::resolve_slot`]. The
 /// closure lives only in the builder (it is not serializable); the serializable
 /// [`ConversationSpec`] is unaffected.
@@ -70,8 +158,37 @@ struct StageResolver {
     fetch: SlotFetch,
 }
 
+/// A serializable declaration that a slot is filled by a *named* async resolver.
+///
+/// The resolver's implementation (the async fetch) is bound at load time from a
+/// [`ResolverRegistry`] — so a `ConversationSpec` carrying these is a complete,
+/// JSON-deployable unit once paired with a registry. This is the data half of
+/// [`Conversation::resolve_slot`]; the closure half lives only in the builder.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ResolveSpec {
+    /// The slot (state key) the resolver fills. Added to the stage's `collect`.
+    pub slot: String,
+    /// The registered resolver name to bind (defaults to `slot` if omitted).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolver: Option<String>,
+    /// State keys passed to the resolver as a JSON object argument.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<String>,
+    /// Optional memoization TTL in seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ttl_secs: Option<u64>,
+}
+
+impl ResolveSpec {
+    /// The resolver name to look up in the registry (the explicit `resolver`, or
+    /// the slot name as a default).
+    fn resolver_name(&self) -> &str {
+        self.resolver.as_deref().unwrap_or(&self.slot)
+    }
+}
+
 /// A transition: advance to `to` when `when` holds.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TransitionSpec {
     /// Target stage id.
     pub to: String,
@@ -80,7 +197,7 @@ pub struct TransitionSpec {
 }
 
 /// A confirm-before-act tool, gated by `when`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CommitSpec {
     /// The committing tool (e.g. `book`, `charge_card`).
     pub tool: String,
@@ -89,7 +206,7 @@ pub struct CommitSpec {
 }
 
 /// One authored conversation stage.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct StageSpec {
     /// Unique stage id.
     pub id: String,
@@ -127,6 +244,10 @@ pub struct StageSpec {
     /// Repair policy for this stage (reprompt/escalate on stalling).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repair: Option<RepairPolicy>,
+    /// Named-resolver slot declarations. Bound to implementations at load via a
+    /// [`ResolverRegistry`]; the data lives in the spec so it round-trips JSON.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub resolve: Vec<ResolveSpec>,
 }
 
 /// The state key set when a stage's repair policy escalates.
@@ -140,7 +261,9 @@ fn reprompt_flag(stage: &str) -> String {
 }
 
 /// How the main flow continues after a digression (overlay) completes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum Resume {
     /// Resume the main flow exactly where it was suspended (history state).
@@ -164,7 +287,7 @@ fn default_escalate_after() -> u32 {
 /// active `reprompt_after` turns without completing, and `repair:{stage}:escalate`
 /// after `escalate_after`. When `escalate_to` is set, escalation also *completes*
 /// the stage and routes to that stage — a deterministic "give up and hand off".
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepairPolicy {
     /// Turns the stage may be active before a reprompt signal is raised.
     #[serde(default = "default_reprompt_after")]
@@ -206,7 +329,7 @@ impl RepairPolicy {
 
 /// A digression (overlay): a named sub-flow that suspends the main flow when its
 /// `trigger` holds, runs to completion, then resumes per `resume`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OverlaySpec {
     /// Overlay name.
     pub name: String,
@@ -225,7 +348,7 @@ pub struct OverlaySpec {
 
 /// The serializable authoring spec — the single source of truth from which the
 /// typed builder, YAML, and (later) codegen all derive.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ConversationSpec {
     /// Conversation name.
     pub name: String,
@@ -270,6 +393,45 @@ impl std::fmt::Display for ConversationError {
 }
 
 impl std::error::Error for ConversationError {}
+
+/// The JSON Schema for a [`ConversationSpec`], as a pretty-printed string.
+///
+/// This is the machine-readable authoring contract: a web form, an IDE, or an
+/// LLM/skill drafting a spec targets this schema. Generated from the same
+/// `#[derive(JsonSchema)]` types the runtime compiles, so it cannot drift.
+pub fn conversation_spec_schema() -> String {
+    let schema = schemars::schema_for!(ConversationSpec);
+    serde_json::to_string_pretty(&schema).expect("schema serialization is infallible")
+}
+
+impl serde::Serialize for ConversationError {
+    /// A machine-readable diagnostic so authoring tools (web/CLI/skills) can
+    /// render structured errors. Shape:
+    /// `{ "kind": "compile", "errors": [ { "kind": "unreachable_step", ... } ] }`.
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut m = s.serialize_map(None)?;
+        m.serialize_entry("message", &self.to_string())?;
+        match self {
+            ConversationError::Empty => {
+                m.serialize_entry("kind", "empty")?;
+            }
+            ConversationError::Spec(msg) => {
+                m.serialize_entry("kind", "spec")?;
+                m.serialize_entry("detail", msg)?;
+            }
+            ConversationError::Flow(errs) => {
+                m.serialize_entry("kind", "flow")?;
+                m.serialize_entry("errors", errs)?;
+            }
+            ConversationError::Compile(e) => {
+                m.serialize_entry("kind", "compile")?;
+                m.serialize_entry("errors", &e.0)?;
+            }
+        }
+        m.end()
+    }
+}
 
 /// A compiled digression: its trigger, lowered flow, extractors, and resume policy.
 #[derive(Clone)]
@@ -570,14 +732,23 @@ impl Conversation {
     {
         let name = name.into();
         let stage = self.current().id.clone();
+        let args: Vec<String> = args.into_iter().map(Into::into).collect();
         if !self.current().collect.contains(&name) {
             self.current().collect.push(name.clone());
         }
+        // Record the serializable declaration too, so `into_spec()` carries the
+        // resolver and the spec can later be re-bound from a `ResolverRegistry`.
+        self.current().resolve.push(ResolveSpec {
+            slot: name.clone(),
+            resolver: None,
+            args: args.clone(),
+            ttl_secs: ttl.map(|d| d.as_secs()),
+        });
         let fetch = Arc::new(fetch);
         self.resolvers.push(StageResolver {
             stage,
             name,
-            args: args.into_iter().map(Into::into).collect(),
+            args,
             ttl,
             fetch: Arc::new(move |v| {
                 let fetch = fetch.clone();
@@ -630,10 +801,61 @@ impl Conversation {
         self.spec
     }
 
-    /// Compile from a [`ConversationSpec`] (e.g. parsed from YAML). Resolver-slot
-    /// bindings are builder-only, so a spec loaded this way has none.
+    /// Compile from a [`ConversationSpec`] (e.g. parsed from JSON/YAML).
+    ///
+    /// If the spec declares any named-resolver slots (`stage.resolve`), this
+    /// errors — those slots would be collected but never filled. Use
+    /// [`Conversation::from_spec_with_resolvers`] to bind them.
     pub fn from_spec(spec: ConversationSpec) -> Result<CompiledConversation, ConversationError> {
-        compile_spec(spec, Vec::new())
+        Self::from_spec_with_resolvers(spec, &ResolverRegistry::new())
+    }
+
+    /// Compile a [`ConversationSpec`] with its declared resolvers **stubbed**
+    /// (each returns JSON `null`) — for structural validation, model-free
+    /// simulation, and CI, where resolver outputs are supplied by scenario
+    /// `set` steps rather than live fetches.
+    ///
+    /// Use this (not [`from_spec`](Self::from_spec)) when compiling a spec from
+    /// untrusted JSON for testing/authoring; use
+    /// [`from_spec_with_resolvers`](Self::from_spec_with_resolvers) at deploy
+    /// time to bind real implementations.
+    pub fn from_spec_stubbing_resolvers(
+        spec: ConversationSpec,
+    ) -> Result<CompiledConversation, ConversationError> {
+        let registry = ResolverRegistry::stubbing(&spec);
+        Self::from_spec_with_resolvers(spec, &registry)
+    }
+
+    /// Compile a [`ConversationSpec`] and bind its declared named-resolver slots
+    /// from `registry`. This makes a JSON spec + a resolver registry a complete
+    /// deployable unit.
+    ///
+    /// Errors if the spec references a resolver name absent from `registry`.
+    pub fn from_spec_with_resolvers(
+        spec: ConversationSpec,
+        registry: &ResolverRegistry,
+    ) -> Result<CompiledConversation, ConversationError> {
+        let mut resolvers = Vec::new();
+        for stage in &spec.stages {
+            for r in &stage.resolve {
+                let fetch = registry.get(r.resolver_name()).ok_or_else(|| {
+                    ConversationError::Spec(format!(
+                        "stage '{}' slot '{}' needs resolver '{}', which is not in the registry",
+                        stage.id,
+                        r.slot,
+                        r.resolver_name()
+                    ))
+                })?;
+                resolvers.push(StageResolver {
+                    stage: stage.id.clone(),
+                    name: r.slot.clone(),
+                    args: r.args.clone(),
+                    ttl: r.ttl_secs.map(Duration::from_secs),
+                    fetch,
+                });
+            }
+        }
+        compile_spec(spec, resolvers)
     }
 
     /// Lower and validate into a [`CompiledConversation`].
@@ -1197,6 +1419,117 @@ mod tests {
         let back: ConversationSpec = serde_json::from_str(&json).expect("deserialize spec");
         let recompiled = Conversation::from_spec(back).expect("recompile from spec");
         assert_eq!(recompiled.flow().flow().steps.len(), 4);
+    }
+
+    #[tokio::test]
+    async fn named_resolver_spec_round_trips_and_binds_from_registry() {
+        // A spec declaring a named-resolver slot (data only, no closure).
+        let json = r#"
+        {
+          "name": "booking",
+          "stages": [
+            { "id": "check",
+              "resolve": [{ "slot": "availability", "resolver": "avail", "args": ["party_size"] }],
+              "next": [{ "to": "done", "when": { "captured": ["availability"] } }] },
+            { "id": "done", "terminal": true }
+          ],
+          "require": ["done"]
+        }
+        "#;
+        let spec: ConversationSpec = serde_json::from_str(json).expect("parse");
+        // Round-trips losslessly.
+        let reser = serde_json::to_string(&spec).unwrap();
+        let back: ConversationSpec = serde_json::from_str(&reser).unwrap();
+        assert_eq!(back.stages[0].resolve[0].resolver_name(), "avail");
+
+        // Without a registry, an unbound resolver is a loud error (not a silently
+        // unfillable slot).
+        let err = Conversation::from_spec(back.clone()).expect_err("unbound resolver errors");
+        assert!(matches!(err, ConversationError::Spec(m) if m.contains("avail")));
+
+        // With a registry, it compiles and the resolver extractor is wired.
+        let registry = ResolverRegistry::new().with("avail", |_args| async move {
+            Ok(serde_json::json!({ "open": true }))
+        });
+        let convo =
+            Conversation::from_spec_with_resolvers(back, &registry).expect("binds and compiles");
+        // The resolver lowered to an extractor that fills the `availability` slot.
+        assert!(
+            convo.extractors().iter().any(|e| e
+                .field_state_keys()
+                .iter()
+                .any(|(_, k)| k == "availability")),
+            "a resolver extractor filling 'availability' was compiled in"
+        );
+    }
+
+    #[tokio::test]
+    async fn resolver_spec_is_validatable_and_simulatable_without_a_registry() {
+        // The exact shape the CLI/Python/CI data-plane sees: a resolver slot
+        // with no implementation available.
+        let json = r#"{ "name": "r", "stages": [
+            { "id": "check",
+              "resolve": [{ "slot": "avail", "resolver": "lookup", "args": ["x"] }],
+              "next": [{ "to": "done", "when": { "captured": ["avail"] } }] },
+            { "id": "done", "terminal": true } ], "require": ["done"] }"#;
+        let spec: ConversationSpec = serde_json::from_str(json).unwrap();
+
+        // Strict path (no registry) errors — as it should at deploy time.
+        assert!(Conversation::from_spec(spec.clone()).is_err());
+
+        // Stubbing path compiles for structural validation + simulation.
+        let convo = Conversation::from_spec_stubbing_resolvers(spec)
+            .expect("stubbed resolvers compile for testing");
+
+        // A scenario supplies the resolver's output via `set` (the stub fetch is
+        // never invoked when the slot is pre-set), and the flow completes.
+        use crate::simulation::Sim;
+        let mut sim = Sim::new(&convo, gemini_adk_rs::flow::Enforcement::Enforce);
+        sim.set("avail", serde_json::json!({ "open": true }));
+        sim.turn();
+        assert!(sim.is_complete(), "resolver slot supplied by set completes");
+    }
+
+    #[test]
+    fn conversation_spec_schema_is_valid_json_with_expected_shape() {
+        let schema_str = conversation_spec_schema();
+        let schema: serde_json::Value =
+            serde_json::from_str(&schema_str).expect("schema is valid JSON");
+        // The root describes ConversationSpec; its `stages` property must exist
+        // (proves the transitive JsonSchema derives wired through StageSpec).
+        assert_eq!(schema["title"], "ConversationSpec");
+        assert!(
+            schema["properties"]["stages"].is_object(),
+            "schema exposes the stages property: {schema}"
+        );
+        // The closed atom set (Pred, via Guard) must appear in $defs.
+        assert!(
+            schema["definitions"]["Pred"].is_object() || schema["$defs"]["Pred"].is_object(),
+            "Pred atom schema is present"
+        );
+    }
+
+    #[test]
+    fn conversation_error_serializes_machine_readable() {
+        // An unguarded commit is rejected at compile with a Compile error.
+        let err = Conversation::new("x")
+            .stage("s")
+            .commit("pay", Guard::always())
+            .done(Guard::called_ok("pay"))
+            .next("done", Guard::called_ok("pay"))
+            .stage("done")
+            .terminal()
+            .compile()
+            .expect_err("unguarded commit must fail");
+        let json = serde_json::to_value(&err).expect("error serializes");
+        assert_eq!(json["kind"], "compile");
+        assert!(json["message"].is_string());
+        // The structured per-error list carries the tagged FlowError diagnostics.
+        let errors = json["errors"].as_array().expect("errors array");
+        assert!(
+            errors.iter().any(|e| e["kind"] == "unguarded_commit_tool"),
+            "structured FlowError kinds present: {json}"
+        );
     }
 
     #[test]

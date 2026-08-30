@@ -51,6 +51,9 @@ pub enum MemoryError {
     /// A storage backend error.
     #[error("Storage error: {0}")]
     Storage(String),
+    /// The backend does not support this operation.
+    #[error("Unsupported operation: {0}")]
+    Unsupported(String),
 }
 
 /// Trait for session-scoped memory persistence.

@@ -203,12 +203,27 @@ enum FlowAction {
         /// Path to a ConversationSpec JSON file.
         spec: String,
     },
+    /// Print the JSON Schema for a ConversationSpec (the authoring contract).
+    Schema,
+    /// Compile a spec and report errors as JSON (exits non-zero on failure).
+    Validate {
+        /// Path to a ConversationSpec JSON file.
+        spec: String,
+    },
     /// Run a model-free Scenario (JSON) against a conversation spec.
     Simulate {
         /// Path to a ConversationSpec JSON file.
         spec: String,
         /// Path to a Scenario JSON file.
         scenario: String,
+    },
+    /// Conversation CI: compile every spec in a directory and run its scenarios.
+    Ci {
+        /// Directory holding `*.spec.json` + `*.scenario.json` files (recursive).
+        dir: String,
+        /// Emit a machine-readable JSON report instead of the human summary.
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -320,9 +335,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Command::Flow { action } => match action {
             FlowAction::Inspect { spec } => commands::flow::inspect(&spec)?,
             FlowAction::Graph { spec } => commands::flow::graph(&spec)?,
+            FlowAction::Schema => commands::flow::schema()?,
+            FlowAction::Validate { spec } => commands::flow::validate(&spec)?,
             FlowAction::Simulate { spec, scenario } => {
                 commands::flow::simulate(&spec, &scenario).await?
             }
+            FlowAction::Ci { dir, json } => commands::flow::ci(&dir, json).await?,
         },
 
         Command::Deploy {

@@ -144,7 +144,7 @@ pub use text::{
     SequentialTextAgent, TapTextAgent, TaskRegistry, TextAgent, TimeoutTextAgent,
 };
 pub use text_agent_tool::TextAgentTool;
-pub use text_runner::InMemoryRunner;
+pub use text_runner::{InMemoryRunner, RunEvent};
 pub use tool::{SimpleTool, ToolDispatcher, ToolFunction, TypedTool};
 pub use tools::long_running::LongRunningFunctionTool;
 pub use tools::mcp::{McpConnectionParams, McpTool, McpToolset};

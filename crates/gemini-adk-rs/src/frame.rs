@@ -32,7 +32,7 @@ use crate::extract::{Extract, Recognizer};
 
 /// A serializable validator applied to a recognized slot value; a value failing
 /// it is rejected (the slot stays unfilled until a valid value is recognized).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SlotValidator {
     /// Numeric range with optional inclusive bounds (accepts numbers, or numeric
@@ -86,7 +86,7 @@ impl SlotValidator {
 /// data, not a compiled `Regex`), so a [`FrameSpec`] — and the conversation spec
 /// that embeds it — round-trips through JSON/YAML. Lower to a runtime recognizer
 /// with [`SlotRecognizer::to_recognizer`].
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SlotRecognizer {
     /// First integer in the text.
@@ -124,7 +124,9 @@ impl SlotRecognizer {
 }
 
 /// When a slot's value should be confirmed back to the user before it is trusted.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ConfirmPolicy {
     /// Never explicitly confirm.
@@ -149,7 +151,7 @@ impl ConfirmPolicy {
 }
 
 /// Metadata for a single slot within a [`FrameSpec`].
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SlotSpec {
     /// The slot (field) name.
     pub name: String,
@@ -199,7 +201,7 @@ impl SlotSpec {
 /// The slot definition of a frame — the source of truth for what a stage that
 /// `collect`s this frame must gather, plus the metadata that drives confirmation
 /// and repair.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct FrameSpec {
     /// Frame name (defaults to the struct name in snake_case).
     pub name: String,

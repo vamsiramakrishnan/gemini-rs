@@ -1,0 +1,40 @@
+name: "Conversation CI"
+description: >-
+  Deterministically compile every governed conversation spec in a directory and
+  run its model-free scenario tests — voice-agent governance tests with no live
+  model. Fails the build on any compile error or scenario regression.
+branding:
+  icon: check-circle
+  color: purple
+
+inputs:
+  dir:
+    description: "Directory holding *.spec.json + *.scenario.json files (searched recursively)."
+    required: false
+    default: "conversations"
+  version:
+    description: "Version of gemini-adk-cli-rs to install from crates.io (default: latest)."
+    required: false
+    default: ""
+  json:
+    description: "Emit a machine-readable JSON report instead of the human summary."
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Install adk CLI
+      shell: bash
+      run: |
+        if [ -n "${{ inputs.version }}" ]; then
+          cargo install gemini-adk-cli-rs --version "${{ inputs.version }}" --locked
+        else
+          cargo install gemini-adk-cli-rs --locked
+        fi
+    - name: Run Conversation CI
+      shell: bash
+      run: |
+        FLAGS=""
+        [ "${{ inputs.json }}" = "true" ] && FLAGS="--json"
+        adk flow ci "${{ inputs.dir }}" $FLAGS

@@ -20,7 +20,7 @@
 use serde::{Deserialize, Serialize};
 
 /// A reusable, cross-cutting policy aspect.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum Policy {
     /// Hand off (terminate the conversation) when any of these intents is
