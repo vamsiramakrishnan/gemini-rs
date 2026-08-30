@@ -6,8 +6,9 @@ publish = false
 
 [dependencies]
 gemini-genai-rs = { path = "../../../crates/gemini-genai-rs", features = ["vad"] }
-gemini-adk-fluent-rs = { path = "../../../crates/gemini-adk-fluent-rs", features = ["denoise"] }
+gemini-adk-fluent-rs = { path = "../../../crates/gemini-adk-fluent-rs", features = ["denoise", "dsp"] }
 serde_json = "1"
+earshot = "1"
 
 [profile.release]
 debug = false

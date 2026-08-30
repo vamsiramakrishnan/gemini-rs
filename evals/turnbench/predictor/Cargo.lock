@@ -219,6 +219,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 
 [[package]]
+name = "earshot"
+version = "1.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "afea66474c4036a7e5fa4b072a3b0a09cd0b01f00134da3115d76b7cc5899f03"
+
+[[package]]
 name = "easyfft"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -376,6 +382,8 @@ dependencies = [
  "gemini-genai-rs",
  "nnnoiseless",
  "parking_lot",
+ "realfft",
+ "rubato",
  "schemars",
  "serde",
  "serde_json",
@@ -1072,6 +1080,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "rubato"
+version = "0.16.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5258099699851cfd0082aeb645feb9c084d9a5e1f1b8d5372086b989fc5e56a1"
+dependencies = [
+ "num-complex",
+ "num-integer",
+ "num-traits",
+ "realfft",
+]
+
+[[package]]
 name = "rustfft"
 version = "6.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1598,6 +1618,7 @@ dependencies = [
 name = "turnbench-predictor"
 version = "0.1.0"
 dependencies = [
+ "earshot",
  "gemini-adk-fluent-rs",
  "gemini-genai-rs",
  "serde_json",
