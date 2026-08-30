@@ -41,6 +41,11 @@ jobs:
         run: cargo publish -p gemini-genai-rs --dry-run
       # SemVer ratchet: the declared version bump must cover the actual API
       # delta vs the latest published release (0.x minor may break; patch may not).
+      # The action builds rustdoc with ALL features; `voice-io` (cpal) needs
+      # ALSA headers the runner image does not ship — v0.9.0's first release
+      # run died on the missing `alsa.pc`, not on any semver delta.
+      - name: Install ALSA headers (all-features rustdoc needs cpal)
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - name: SemVer check vs published baseline
         uses: obi1kenobi/cargo-semver-checks-action@v2
         with:
