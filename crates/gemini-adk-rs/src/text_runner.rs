@@ -234,14 +234,25 @@ impl InMemoryRunner {
                             }
                         };
                         for event in &prior {
+                            // An event written before 1.0.1 carries no format
+                            // marker: nothing in it was escaped, it has no
+                            // removal channel, and every entry is a literal
+                            // state key. Decoding one would rename the keys the
+                            // application chose.
+                            let encoded = event.actions.is_format_marked();
                             for (key, value) in &event.actions.state_delta {
-                                if key == EventActions::REMOVED_KEYS
-                                    && EventActions::is_removal_payload(value)
+                                if encoded
+                                    && (key == EventActions::REMOVED_KEYS
+                                        || key == EventActions::FORMAT)
                                 {
                                     continue;
                                 }
-                                let key = EventActions::decode_key(key);
-                                let _ = state.set(key.into_owned(), value.clone());
+                                let key = if encoded {
+                                    EventActions::decode_key(key).into_owned()
+                                } else {
+                                    key.clone()
+                                };
+                                let _ = state.set(key, value.clone());
                             }
                             // Removals ride in their own reserved entry and are
                             // applied after the sets: a stored `null` is a value
@@ -327,11 +338,16 @@ impl InMemoryRunner {
                             );
                         }
 
+                        let mut actions = EventActions {
+                            state_delta: delta,
+                            ..Default::default()
+                        };
+                        // Marks the delta as escaped and its removal entry as a
+                        // deletion list, so replay never has to guess which era
+                        // an event came from.
+                        actions.mark_format();
                         let result_event = Event::new(self.root_agent.name(), Some(result.clone()))
-                            .with_actions(EventActions {
-                                state_delta: delta,
-                                ..Default::default()
-                            });
+                            .with_actions(actions);
 
                         // 4. Persist the result event.
                         if let Err(e) = self
@@ -617,6 +633,54 @@ mod tests {
         assert_eq!(
             peeked, "Some([\"keep\"])/Some(\"kept\")",
             "the value at the reserved key was dropped, or read as a deletion"
+        );
+    }
+
+    /// Events persisted by 1.0.0 outlive the upgrade — this repo ships SQLite,
+    /// Postgres and Vertex AI session services. Such an event carries no format
+    /// marker, so every key in it must replay literally: no `:literal` suffix
+    /// stripped, and no string array mistaken for a deletion list.
+    #[tokio::test]
+    async fn a_pre_upgrade_event_replays_literally() {
+        let agent = Arc::new(FnTextAgent::new("worker", |state| {
+            Ok(format!(
+                "{:?}/{:?}/{:?}",
+                state.get::<String>("adk:removed:literal"),
+                state.get::<Vec<String>>(EventActions::REMOVED_KEYS),
+                state.get::<String>("survivor"),
+            ))
+        }));
+        let runner = InMemoryRunner::new(agent, "test-app");
+        let sessions = runner.session_service_ref();
+        let session = sessions.create_session("test-app", "user-1").await.unwrap();
+
+        // Hand-built in the pre-1.0.1 shape: no marker, nothing escaped, and a
+        // string array sitting at the name the removal channel later took.
+        let mut delta = std::collections::HashMap::new();
+        delta.insert(
+            "adk:removed:literal".to_string(),
+            serde_json::json!("laddered"),
+        );
+        delta.insert(
+            EventActions::REMOVED_KEYS.to_string(),
+            serde_json::json!(["survivor"]),
+        );
+        delta.insert("survivor".to_string(), serde_json::json!("still here"));
+        let legacy = Event::new("worker", Some("legacy".into()))
+            .with_actions(EventActions::state_delta(delta));
+        assert!(
+            !legacy.actions.is_format_marked(),
+            "the fixture must look like a pre-upgrade event"
+        );
+        sessions.append_event(&session.id, legacy).await.unwrap();
+
+        let peeked = runner
+            .run("peek", "user-1", Some(&session.id))
+            .await
+            .unwrap();
+        assert_eq!(
+            peeked, "Some(\"laddered\")/Some([\"survivor\"])/Some(\"still here\")",
+            "a pre-upgrade event was decoded under the new rules"
         );
     }
 

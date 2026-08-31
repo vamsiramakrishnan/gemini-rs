@@ -76,8 +76,9 @@ pub struct EventActions {
     /// Deletions travel in here too, under the reserved [`Self::REMOVED_KEYS`]
     /// entry — see that constant for why they are not spelled as `null`. State
     /// keys are written through [`Self::encode_key`] and read back through
-    /// [`Self::decode_key`], so a state key that collides with the reserved
-    /// name is carried rather than lost.
+    /// [`Self::decode_key`], so a state key that collides with a reserved name
+    /// is carried rather than lost, and [`Self::FORMAT`] marks a delta that
+    /// went through that encoding so a pre-1.0.1 one is read literally.
     #[serde(default)]
     pub state_delta: HashMap<String, serde_json::Value>,
 }
@@ -94,11 +95,31 @@ impl EventActions {
     /// code that already names every field.
     ///
     /// `State` accepts arbitrary keys, so this name is not reserved *from*
-    /// applications — it is escaped around them by [`Self::encode_key`].
+    /// applications — it is escaped around them by [`Self::encode_key`]. It is
+    /// only read as a removal list on an event that carries [`Self::FORMAT`].
     pub const REMOVED_KEYS: &'static str = "adk:removed";
 
+    /// Reserved `state_delta` entry marking an event whose keys went through
+    /// [`Self::encode_key`] and whose removals live at [`Self::REMOVED_KEYS`].
+    ///
+    /// Events written before 1.0.1 have no such marker and no escaping: every
+    /// entry in them is a literal state key, including one that happens to be
+    /// named `adk:removed` or to end in `:literal`. Without this discriminator
+    /// there is nothing in the delta itself to tell the two eras apart, and
+    /// decoding a legacy event would shift those keys or read a stored array
+    /// as a deletion list. Replay therefore decodes only marked events.
+    ///
+    /// The residue this cannot cover is a pre-1.0.1 event that stored a number
+    /// under a state key named exactly `adk:format`. Closing that too would
+    /// take a field outside `state_delta`, which `EventActions` cannot grow
+    /// without breaking source compatibility.
+    pub const FORMAT: &'static str = "adk:format";
+
+    /// Value written at [`Self::FORMAT`] by this version.
+    pub const FORMAT_VERSION: u64 = 1;
+
     /// Suffix appended by [`Self::encode_key`] to step a colliding state key
-    /// out of the reserved channel's way.
+    /// out of a reserved entry's way.
     const LITERAL: &'static str = ":literal";
 
     /// Create actions that transfer to another agent.
@@ -134,21 +155,46 @@ impl EventActions {
             Self::REMOVED_KEYS.to_string(),
             serde_json::Value::Array(keys),
         );
-        Self {
+        let mut actions = Self {
             state_delta: delta,
             ..Default::default()
-        }
+        };
+        actions.mark_format();
+        actions
+    }
+
+    /// Stamp [`Self::FORMAT`] on this delta, declaring its keys encoded and
+    /// its [`Self::REMOVED_KEYS`] entry a removal list.
+    pub fn mark_format(&mut self) {
+        self.state_delta.insert(
+            Self::FORMAT.to_string(),
+            serde_json::Value::from(Self::FORMAT_VERSION),
+        );
+    }
+
+    /// True when this delta carries a [`Self::FORMAT`] marker this build
+    /// understands — i.e. it was written by 1.0.1 or later.
+    ///
+    /// An unmarked delta is a legacy one: every entry in it is a literal state
+    /// key and it has no removal channel. A marker from a *newer* format than
+    /// this build knows also reads as unmarked, so a forward-dated event is
+    /// replayed literally rather than decoded under the wrong rules.
+    pub fn is_format_marked(&self) -> bool {
+        self.state_delta
+            .get(Self::FORMAT)
+            .and_then(serde_json::Value::as_u64)
+            .is_some_and(|v| v == Self::FORMAT_VERSION)
     }
 
     /// The state keys this event deletes, drawn from [`Self::REMOVED_KEYS`].
     ///
-    /// Empty unless that entry holds an array of strings — a value of any
-    /// other shape is an ordinary state value written there before the
-    /// reserved entry existed, and [`Self::decode_key`] hands it back.
+    /// Always empty on a delta without [`Self::FORMAT`]: a legacy event that
+    /// happens to hold an array of strings at that key stored it as a value,
+    /// and replaying it as a deletion list would delete every key it names.
     pub fn removed_keys(&self) -> impl Iterator<Item = &str> {
-        self.state_delta
-            .get(Self::REMOVED_KEYS)
-            .filter(|v| Self::is_removal_payload(v))
+        self.is_format_marked()
+            .then(|| self.state_delta.get(Self::REMOVED_KEYS))
+            .flatten()
             .and_then(serde_json::Value::as_array)
             .map(Vec::as_slice)
             .unwrap_or_default()
@@ -156,22 +202,14 @@ impl EventActions {
             .filter_map(serde_json::Value::as_str)
     }
 
-    /// True when a value at [`Self::REMOVED_KEYS`] is a removal list rather
-    /// than an ordinary state value that happens to live at that key.
-    pub(crate) fn is_removal_payload(value: &serde_json::Value) -> bool {
-        value
-            .as_array()
-            .is_some_and(|items| items.iter().all(serde_json::Value::is_string))
-    }
-
     /// Map a state key to the `state_delta` key that carries it.
     ///
-    /// Ordinary keys pass through. A key that would land on the reserved
-    /// removal entry — `adk:removed`, or an already-escaped `adk:removed`
+    /// Ordinary keys pass through. A key that would land on a reserved entry —
+    /// `adk:removed` or `adk:format`, or an already-escaped form of either
     /// followed by any number of `:literal` suffixes — gains one more
-    /// `:literal`. That ladder is injective and never produces the bare
-    /// reserved name, so the channel stays free without any state key being
-    /// dropped or overwritten.
+    /// `:literal`. That ladder is injective and never produces a bare reserved
+    /// name, so both channels stay free without any state key being dropped or
+    /// overwritten.
     pub fn encode_key(key: &str) -> std::borrow::Cow<'_, str> {
         if Self::is_escape_ladder(key) {
             std::borrow::Cow::Owned(format!("{key}{}", Self::LITERAL))
@@ -183,9 +221,9 @@ impl EventActions {
     /// Inverse of [`Self::encode_key`]: recover the state key a `state_delta`
     /// entry carries.
     ///
-    /// The bare reserved name decodes to itself, which only happens for events
-    /// written before the reserved entry existed; those stored a real value
-    /// there and it is restored under its own name.
+    /// Apply this only to a delta where [`Self::is_format_marked`] holds. On a
+    /// legacy delta every key is already literal, and stripping a `:literal`
+    /// suffix there would rename a state key the application chose.
     pub fn decode_key(key: &str) -> std::borrow::Cow<'_, str> {
         match key.strip_suffix(Self::LITERAL) {
             Some(stripped) if Self::is_escape_ladder(stripped) => {
@@ -195,9 +233,12 @@ impl EventActions {
         }
     }
 
-    /// `adk:removed` followed by zero or more `:literal` suffixes.
+    /// A reserved name followed by zero or more `:literal` suffixes.
     fn is_escape_ladder(key: &str) -> bool {
-        let Some(mut rest) = key.strip_prefix(Self::REMOVED_KEYS) else {
+        let Some(mut rest) = [Self::REMOVED_KEYS, Self::FORMAT]
+            .iter()
+            .find_map(|reserved| key.strip_prefix(reserved))
+        else {
             return false;
         };
         while let Some(next) = rest.strip_prefix(Self::LITERAL) {
@@ -274,43 +315,69 @@ mod tests {
     #[test]
     fn key_escaping_is_injective_and_frees_the_reserved_name() {
         // Ordinary keys are untouched, including near-misses.
-        for key in ["turn_count", "adk:removedish", "adk:removed:literalish"] {
+        for key in [
+            "turn_count",
+            "adk:removedish",
+            "adk:removed:literalish",
+            "adk:formatting",
+        ] {
             assert_eq!(EventActions::encode_key(key), key);
             assert_eq!(EventActions::decode_key(key), key);
         }
 
-        // The reserved name and every already-escaped form step one rung up,
-        // so nothing an application stores can land on the bare channel.
-        let mut key = EventActions::REMOVED_KEYS.to_string();
-        for _ in 0..4 {
-            let encoded = EventActions::encode_key(&key).into_owned();
-            assert_ne!(encoded, EventActions::REMOVED_KEYS);
-            assert_ne!(encoded, key);
-            assert_eq!(EventActions::decode_key(&encoded), key);
-            key = encoded;
+        // Both reserved names, and every already-escaped form of either, step
+        // one rung up — so nothing an application stores lands on a channel.
+        for reserved in [EventActions::REMOVED_KEYS, EventActions::FORMAT] {
+            let mut key = reserved.to_string();
+            for _ in 0..4 {
+                let encoded = EventActions::encode_key(&key).into_owned();
+                assert_ne!(encoded, EventActions::REMOVED_KEYS);
+                assert_ne!(encoded, EventActions::FORMAT);
+                assert_ne!(encoded, key);
+                assert_eq!(EventActions::decode_key(&encoded), key);
+                key = encoded;
+            }
         }
     }
 
-    /// An event written before the reserved entry existed could hold a real
-    /// state value at that key. Only an array of strings reads as a removal
-    /// list; anything else is handed back as the value it is.
+    /// A pre-1.0.1 event can hold a real state value at the reserved key —
+    /// including a string array, which is exactly the shape a removal list
+    /// has. Without the format marker it is a value, never a deletion list.
     #[test]
-    fn a_non_removal_value_at_the_reserved_key_is_not_read_as_removals() {
-        let mut delta = HashMap::new();
-        delta.insert(
-            EventActions::REMOVED_KEYS.to_string(),
-            serde_json::json!({"legacy": true}),
-        );
-        let actions = EventActions::state_delta(delta);
-        assert_eq!(actions.removed_keys().count(), 0);
-
-        let mut delta = HashMap::new();
-        delta.insert(
-            EventActions::REMOVED_KEYS.to_string(),
+    fn a_legacy_string_array_at_the_reserved_key_is_not_read_as_removals() {
+        for payload in [
             serde_json::json!(["a", "b"]),
-        );
-        let actions = EventActions::state_delta(delta);
+            serde_json::json!([]),
+            serde_json::json!({"legacy": true}),
+        ] {
+            let mut delta = HashMap::new();
+            delta.insert(EventActions::REMOVED_KEYS.to_string(), payload.clone());
+            let actions = EventActions::state_delta(delta);
+            assert!(!actions.is_format_marked());
+            assert_eq!(
+                actions.removed_keys().count(),
+                0,
+                "unmarked delta must have no removal channel, got {payload}"
+            );
+        }
+
+        // The same array on a marked delta *is* the removal list.
+        let actions = EventActions::state_removed(["a".to_string(), "b".to_string()]);
+        assert!(actions.is_format_marked());
         assert_eq!(actions.removed_keys().collect::<Vec<_>>(), ["a", "b"]);
+    }
+
+    /// A marker this build does not recognise must not be decoded under this
+    /// build's rules — a forward-dated event replays literally instead.
+    #[test]
+    fn an_unrecognised_format_version_reads_as_unmarked() {
+        let mut actions = EventActions::state_removed(["a".to_string()]);
+        actions.state_delta.insert(
+            EventActions::FORMAT.to_string(),
+            serde_json::json!(EventActions::FORMAT_VERSION + 1),
+        );
+        assert!(!actions.is_format_marked());
+        assert_eq!(actions.removed_keys().count(), 0);
     }
 
     /// `EventActions` is exhaustively constructible by downstream code, so its
