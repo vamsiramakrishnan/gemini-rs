@@ -72,17 +72,28 @@ pub struct EventActions {
     #[serde(default)]
     pub transfer_to_agent: Option<String>,
     /// State mutations (key → new value).
+    ///
+    /// Deletions travel in here too, under the reserved [`Self::REMOVED_KEYS`]
+    /// entry — see that constant for why they are not spelled as `null`.
     #[serde(default)]
     pub state_delta: HashMap<String, serde_json::Value>,
-    /// Keys the agent removed. Deletion is carried here rather than as a
-    /// `null` in `state_delta`, because `null` is a perfectly ordinary value
-    /// an agent may store deliberately — conflating the two made replay lose
-    /// it, so persistence was not round-trip lossless for valid `State`.
-    #[serde(default)]
-    pub state_removed: Vec<String>,
 }
 
 impl EventActions {
+    /// Reserved `state_delta` entry carrying the keys an event deleted, as a
+    /// JSON array of strings.
+    ///
+    /// Deletion needs its own channel because `null` is a perfectly ordinary
+    /// value an agent may store deliberately: using it as the tombstone made
+    /// replay drop a real `null`, so persistence was not round-trip lossless
+    /// for valid `State`. It rides inside `state_delta` rather than as a
+    /// sibling field so that `EventActions` stays constructible by downstream
+    /// code that already names every field.
+    ///
+    /// Runtime state keys must not use this name; the text runner skips it
+    /// when diffing so a state key cannot forge a deletion.
+    pub const REMOVED_KEYS: &'static str = "adk:removed";
+
     /// Create actions that transfer to another agent.
     pub fn transfer(agent_name: impl Into<String>) -> Self {
         Self {
@@ -109,10 +120,28 @@ impl EventActions {
 
     /// Create actions that remove keys from state.
     pub fn state_removed(keys: impl IntoIterator<Item = String>) -> Self {
+        let keys: Vec<serde_json::Value> =
+            keys.into_iter().map(serde_json::Value::String).collect();
+        let mut delta = HashMap::new();
+        delta.insert(
+            Self::REMOVED_KEYS.to_string(),
+            serde_json::Value::Array(keys),
+        );
         Self {
-            state_removed: keys.into_iter().collect(),
+            state_delta: delta,
             ..Default::default()
         }
+    }
+
+    /// The state keys this event deletes, drawn from [`Self::REMOVED_KEYS`].
+    pub fn removed_keys(&self) -> impl Iterator<Item = &str> {
+        self.state_delta
+            .get(Self::REMOVED_KEYS)
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(serde_json::Value::as_str)
     }
 }
 
@@ -158,6 +187,41 @@ mod tests {
             actions.state_delta.get("topic"),
             Some(&serde_json::json!("Rust"))
         );
+    }
+
+    #[test]
+    fn event_actions_state_removed_round_trips_through_the_reserved_entry() {
+        let actions = EventActions::state_removed(["a".to_string(), "b".to_string()]);
+        assert_eq!(actions.removed_keys().collect::<Vec<_>>(), ["a", "b"]);
+
+        // Removals must survive the wire, not just the in-process struct.
+        let json = serde_json::to_string(&actions).unwrap();
+        let parsed: EventActions = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.removed_keys().collect::<Vec<_>>(), ["a", "b"]);
+    }
+
+    #[test]
+    fn actions_without_the_reserved_entry_remove_nothing() {
+        let mut delta = HashMap::new();
+        // A deliberately stored `null` is a value, not a tombstone.
+        delta.insert("maybe".to_string(), serde_json::Value::Null);
+        let actions = EventActions::state_delta(delta);
+        assert_eq!(actions.removed_keys().count(), 0);
+    }
+
+    /// `EventActions` is exhaustively constructible by downstream code, so its
+    /// field set is part of the public API and cannot grow in a patch release.
+    /// This literal names every field: if one is added, this test stops
+    /// compiling here rather than in someone else's crate after publish.
+    #[test]
+    fn event_actions_stays_exhaustively_constructible() {
+        let actions = EventActions {
+            escalate: false,
+            skip_summarization: false,
+            transfer_to_agent: None,
+            state_delta: HashMap::new(),
+        };
+        assert!(!actions.escalate);
     }
 
     #[test]

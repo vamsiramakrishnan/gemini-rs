@@ -235,13 +235,16 @@ impl InMemoryRunner {
                         };
                         for event in &prior {
                             for (key, value) in &event.actions.state_delta {
+                                if key == EventActions::REMOVED_KEYS {
+                                    continue;
+                                }
                                 let _ = state.set(key.clone(), value.clone());
                             }
-                            // Removals are their own list, applied after the
-                            // sets: a stored `null` is a value like any other
-                            // and must survive replay, so deletion cannot be
-                            // spelled as one.
-                            for key in &event.actions.state_removed {
+                            // Removals ride in their own reserved entry and are
+                            // applied after the sets: a stored `null` is a value
+                            // like any other and must survive replay, so deletion
+                            // cannot be spelled as one.
+                            for key in event.actions.removed_keys() {
                                 let _ = state.remove(key);
                             }
                         }
@@ -290,7 +293,11 @@ impl InMemoryRunner {
                         let after = state.to_hashmap();
                         let mut delta = std::collections::HashMap::new();
                         for (key, value) in &after {
-                            if key == "input" {
+                            // `input` is re-seeded per run; the reserved removal
+                            // entry is the runner's own channel, so a state key
+                            // by that name must never reach the delta and forge
+                            // a deletion.
+                            if key == "input" || key == EventActions::REMOVED_KEYS {
                                 continue;
                             }
                             if baseline.get(key) != Some(value) {
@@ -298,19 +305,28 @@ impl InMemoryRunner {
                             }
                         }
                         // Keys the agent removed: absent from `after` but present
-                        // in the baseline. Recorded as removals, not as `null`
-                        // values, so replay deletes them without making a
-                        // deliberately-stored `null` indistinguishable from one.
-                        let removed: Vec<String> = baseline
+                        // in the baseline. Recorded under the reserved entry, not
+                        // as `null` values, so replay deletes them without making
+                        // a deliberately-stored `null` indistinguishable from one.
+                        let removed: Vec<serde_json::Value> = baseline
                             .keys()
-                            .filter(|key| *key != "input" && !after.contains_key(*key))
-                            .cloned()
+                            .filter(|key| {
+                                *key != "input"
+                                    && *key != EventActions::REMOVED_KEYS
+                                    && !after.contains_key(*key)
+                            })
+                            .map(|key| serde_json::Value::String(key.clone()))
                             .collect();
+                        if !removed.is_empty() {
+                            delta.insert(
+                                EventActions::REMOVED_KEYS.to_string(),
+                                serde_json::Value::Array(removed),
+                            );
+                        }
 
                         let result_event = Event::new(self.root_agent.name(), Some(result.clone()))
                             .with_actions(EventActions {
                                 state_delta: delta,
-                                state_removed: removed,
                                 ..Default::default()
                             });
 
@@ -539,12 +555,9 @@ mod tests {
             .find(|e| e.author == "worker")
             .expect("clear run's agent event");
         assert!(
-            clear_event
-                .actions
-                .state_removed
-                .contains(&"flag".to_string()),
-            "removal persisted in state_removed, got {:?}",
-            clear_event.actions.state_removed
+            clear_event.actions.removed_keys().any(|k| k == "flag"),
+            "removal persisted under the reserved entry, got {:?}",
+            clear_event.actions.state_delta
         );
         assert!(
             !clear_event.actions.state_delta.contains_key("flag"),
