@@ -50,7 +50,6 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
-use gemini_adk_fluent_rs::compose::M;
 use gemini_adk_fluent_rs::live::Live;
 use gemini_adk_rs::live::LiveHandle;
 use gemini_adk_rs::State;
@@ -200,7 +199,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let flush = flush.clone();
                 async move {
                     if let Some(line) = flush.get() {
-                        line.flush();
+                        line.flush().await;
                     }
                 }
             })
@@ -229,13 +228,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .with_tools(collector::tools(state.clone(), journal.clone()))
             .govern(collector::flow())
             .transcription(true, true)
-            // Records what the model *asked* for. The gate decides separately
-            // whether it runs, and the difference between the two lists is the
-            // only place a refusal is visible.
-            .middleware(M::before_tool(move |call| {
-                asked.asked(&call.name, call.args.clone());
-                Ok(())
-            }))
+            // Records what the model *asked* for, before the flow gate rules on
+            // it. This has to be `on_tool_call`: the Live tool handler runs
+            // `FlowMonitor::admits_tool` and `continue`s on a denial, so a
+            // refused call never reaches `M::before_tool` at all — and the
+            // difference between asked and ran, which is the only place a
+            // refusal is visible, would always be empty. Returning `None`
+            // leaves dispatch, and the gate, exactly as they were.
+            .on_tool_call(move |calls, _state| {
+                let asked = asked.clone();
+                async move {
+                    for call in &calls {
+                        asked.asked(&call.name, call.args.clone());
+                    }
+                    None
+                }
+            })
             .on_audio(move |pcm| {
                 if let Some(line) = audio.get() {
                     line.feed(pcm);
@@ -251,7 +259,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let flush = flush.clone();
                 async move {
                     if let Some(line) = flush.get() {
-                        line.flush();
+                        line.flush().await;
                     }
                 }
             })

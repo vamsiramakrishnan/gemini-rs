@@ -24,8 +24,13 @@
 //! # Barge-in
 //!
 //! When a session is interrupted, everything still queued for the far side is
-//! speech that was never finished. Playing it on is the one unforgivable sin of
-//! a voice UI, so [`Line::flush`] drops the buffer at the next tick.
+//! speech that was never finished, and playing it on is the one unforgivable
+//! sin of a voice UI. So [`Line::flush`] does not set a flag for the pump to
+//! notice later: it puts a marker *in the queue*. A flag is read at the next
+//! tick, and audio from the replacement generation can arrive inside that
+//! window — the pump would then clear the new utterance along with the old one,
+//! swallowing its opening. The marker is ordered against the audio around it,
+//! so exactly the frames queued before the interruption are dropped.
 //!
 //! # Deliberately full duplex
 //!
@@ -69,11 +74,18 @@ const BUFFER_CAP: usize = SESSION_INPUT_HZ as usize * BUFFER_CAP_SECS;
 /// the far side's audio, so it is counted too.
 const HANDOFF_CHUNKS: usize = 256;
 
+/// What travels down a line: speech, or the boundary that ends it.
+enum Chunk {
+    /// A chunk of the speaker's 24 kHz output.
+    Audio(Vec<u8>),
+    /// Everything queued before this point was interrupted and must be dropped.
+    Flush,
+}
+
 /// One direction of the call.
 #[derive(Clone)]
 pub struct Line {
-    tx: mpsc::Sender<Vec<u8>>,
-    flush: Arc<AtomicBool>,
+    tx: mpsc::Sender<Chunk>,
     dropped: Arc<AtomicUsize>,
 }
 
@@ -84,15 +96,19 @@ impl Line {
     /// allocates only the copy the channel needs, and drops rather than waits
     /// if the pump has fallen behind.
     pub fn feed(&self, pcm24: &[u8]) {
-        if self.tx.try_send(pcm24.to_vec()).is_err() {
+        if self.tx.try_send(Chunk::Audio(pcm24.to_vec())).is_err() {
             self.dropped.fetch_add(1, Ordering::Relaxed);
         }
     }
 
     /// Drop everything queued: the speaker was interrupted and the rest of that
     /// utterance is never going to be said.
-    pub fn flush(&self) {
-        self.flush.store(true, Ordering::Relaxed);
+    ///
+    /// Awaits rather than trying, because this runs on the control lane where
+    /// blocking is allowed, and a barge-in dropped because the queue was
+    /// momentarily full is the failure this exists to prevent.
+    pub async fn flush(&self) {
+        let _ = self.tx.send(Chunk::Flush).await;
     }
 
     /// Chunks lost because the pump could not keep up.
@@ -133,13 +149,11 @@ pub fn spawn(
     tape: Arc<Tape>,
     stop: Arc<AtomicBool>,
 ) -> (Line, tokio::task::JoinHandle<()>) {
-    let (tx, mut rx) = mpsc::channel::<Vec<u8>>(HANDOFF_CHUNKS);
-    let flush = Arc::new(AtomicBool::new(false));
+    let (tx, mut rx) = mpsc::channel::<Chunk>(HANDOFF_CHUNKS);
     let dropped = Arc::new(AtomicUsize::new(0));
 
     let line = Line {
         tx,
-        flush: flush.clone(),
         dropped: dropped.clone(),
     };
 
@@ -160,7 +174,7 @@ pub fn spawn(
                 biased;
 
                 chunk = rx.recv(), if open => match chunk {
-                    Some(chunk) => {
+                    Some(Chunk::Audio(chunk)) => {
                         let Some(pcm24) = bytes_to_i16(&chunk) else { continue };
                         buf.extend(resample(pcm24, SESSION_OUTPUT_HZ, SESSION_INPUT_HZ));
                         if buf.len() > BUFFER_CAP {
@@ -169,15 +183,15 @@ pub fn spawn(
                             dropped.fetch_add(1, Ordering::Relaxed);
                         }
                     }
+                    // Ordered against the audio around it: everything queued
+                    // before the interruption goes, everything after stays.
+                    Some(Chunk::Flush) => buf.clear(),
                     None => open = false,
                 },
 
                 _ = ticker.tick() => {
                     if stop.load(Ordering::Relaxed) {
                         return;
-                    }
-                    if flush.swap(false, Ordering::Relaxed) {
-                        buf.clear();
                     }
                     for slot in frame.iter_mut() {
                         *slot = buf.pop_front().unwrap_or(0);
