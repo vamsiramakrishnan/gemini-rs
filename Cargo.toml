@@ -10,6 +10,7 @@ members = [
     "apps/gemini-adk-web-rs",
     "apps/gemini-adk-api-rs",
     "examples/agents",
+    "examples/quickstart",
     "examples/text-chat",
     "examples/voice-chat",
     "examples/tool-calling",

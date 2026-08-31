@@ -64,7 +64,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
 # ── Published crates in dependency order ──────────────────────────────────
-PUBLISH_CRATES=("gemini-genai-rs" "gemini-adk-rs" "gemini-adk-fluent-rs" "gemini-memory-rs" "gemini-adk-server-rs" "gemini-adk-cli-rs")
+PUBLISH_CRATES=("gemini-genai-rs" "gemini-adk-macros-rs" "gemini-adk-rs" "gemini-adk-fluent-rs" "gemini-memory-rs" "gemini-adk-server-rs" "gemini-adk-cli-rs")
 
 # ── Read current workspace version ────────────────────────────────────────
 CURRENT=$(grep -m1 '^version = "' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')

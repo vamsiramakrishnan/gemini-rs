@@ -201,8 +201,8 @@ pub mod prelude {
     // ── State (prefix scopes + `SlotEvidence` in `crate::state`) ──
     pub use gemini_adk_rs::state::{State, StateKey};
 
-    // ── LLM (core; params/request/response/registry in `crate::text`) ──
-    pub use gemini_adk_rs::llm::{BaseLlm, GeminiLlm};
+    // ── LLM (core; request/response/registry in `crate::text`) ──
+    pub use gemini_adk_rs::llm::{BaseLlm, GeminiLlm, GeminiLlmParams};
 
     // ── Tools ──
     pub use gemini_adk_rs::tool::{SimpleTool, ToolDispatcher, ToolFunction, TypedTool};

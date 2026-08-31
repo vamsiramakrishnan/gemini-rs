@@ -1,0 +1,27 @@
+[package]
+name = "example-quickstart"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+# The two programs the README's Quickstart prints, compiled in CI exactly as
+# printed there — `tests/readme_snippets.rs` fails the build if the README
+# and these files ever drift apart.
+
+[dependencies]
+gemini-adk-fluent-rs = { path = "../../crates/gemini-adk-fluent-rs", features = [
+    "gemini-llm",
+    "voice-io",
+] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+[[bin]]
+name = "hello-text"
+path = "src/bin/hello_text.rs"
+
+[[bin]]
+name = "hello-voice"
+path = "src/bin/hello_voice.rs"
+
+[lints]
+workspace = true

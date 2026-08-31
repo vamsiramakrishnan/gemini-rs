@@ -836,7 +836,11 @@ impl Conversation {
         registry: &ResolverRegistry,
     ) -> Result<CompiledConversation, ConversationError> {
         let mut resolvers = Vec::new();
-        for stage in &spec.stages {
+        let stages = spec
+            .stages
+            .iter()
+            .chain(spec.overlays.iter().flat_map(|o| o.stages.iter()));
+        for stage in stages {
             for r in &stage.resolve {
                 let fetch = registry.get(r.resolver_name()).ok_or_else(|| {
                     ConversationError::Spec(format!(
@@ -1248,13 +1252,42 @@ fn compile_spec(
         }
     }
 
+    // A declared resolver slot behaves like a collected slot: the stage's
+    // implicit `captured` completion must wait for the resolution. The builder
+    // path (`resolve_slot`) adds it eagerly; specs parsed from JSON get the
+    // same normalization here, before lowering.
+    for stage in spec
+        .stages
+        .iter_mut()
+        .chain(spec.overlays.iter_mut().flat_map(|o| o.stages.iter_mut()))
+    {
+        for slot in stage
+            .resolve
+            .iter()
+            .map(|r| r.slot.clone())
+            .collect::<Vec<_>>()
+        {
+            if !stage.collect.contains(&slot) {
+                stage.collect.push(slot);
+            }
+        }
+    }
+
     // Main flow.
     let flow = lower_flow(&spec.stages, &spec.require)?;
 
-    // Resolver bindings must reference known main stages.
+    // Resolver bindings must reference a known stage — main or overlay. For a
+    // stage id that appears in both, the main flow wins (ids are expected to be
+    // globally unique across a spec).
     let ids: BTreeSet<&str> = spec.stages.iter().map(|s| s.id.as_str()).collect();
+    let mut overlay_of: BTreeMap<&str, usize> = BTreeMap::new();
+    for (i, ov) in spec.overlays.iter().enumerate() {
+        for s in &ov.stages {
+            overlay_of.entry(s.id.as_str()).or_insert(i);
+        }
+    }
     for r in &resolvers {
-        if !ids.contains(r.stage.as_str()) {
+        if !ids.contains(r.stage.as_str()) && !overlay_of.contains_key(r.stage.as_str()) {
             return Err(ConversationError::Spec(format!(
                 "resolver for slot '{}' references unknown stage '{}'",
                 r.name, r.stage
@@ -1262,13 +1295,9 @@ fn compile_spec(
         }
     }
 
-    // Main extractors: frame recognizers + resolver-slot bindings.
-    let mut extractors = frame_extractors(&spec.stages);
-    let mut by_stage: BTreeMap<&str, Vec<&StageResolver>> = BTreeMap::new();
-    for r in &resolvers {
-        by_stage.entry(r.stage.as_str()).or_default().push(r);
-    }
-    for (stage, binds) in by_stage {
+    // Group resolver bindings per stage, routed to the main flow or the owning
+    // overlay so overlay-declared resolvers actually fill their slots.
+    let build_resolver_extractor = |stage: &str, binds: &[&StageResolver]| {
         let mut builder = Extract::record(format!("{}__{}_resolve", spec.name, stage));
         for r in binds {
             let fetch = r.fetch.clone();
@@ -1277,7 +1306,23 @@ fn compile_spec(
                 async move { fetch(args).await }
             });
         }
-        extractors.push(builder.build());
+        builder.build()
+    };
+    let mut by_stage: BTreeMap<&str, Vec<&StageResolver>> = BTreeMap::new();
+    for r in &resolvers {
+        by_stage.entry(r.stage.as_str()).or_default().push(r);
+    }
+    let mut overlay_extractors: BTreeMap<usize, Vec<Extract>> = BTreeMap::new();
+
+    // Main extractors: frame recognizers + resolver-slot bindings.
+    let mut extractors = frame_extractors(&spec.stages);
+    for (stage, binds) in &by_stage {
+        let extractor = build_resolver_extractor(stage, binds);
+        if ids.contains(stage) {
+            extractors.push(extractor);
+        } else if let Some(&i) = overlay_of.get(stage) {
+            overlay_extractors.entry(i).or_default().push(extractor);
+        }
     }
 
     // Overlays: each lowers to its own validated flow + extractors. An overlay
@@ -1295,11 +1340,15 @@ fn compile_spec(
             ov.require.clone()
         };
         let ov_flow = lower_flow(&ov.stages, &require)?;
+        let mut ov_extractors = frame_extractors(&ov.stages);
+        if let Some(bound) = overlay_extractors.remove(&overlays.len()) {
+            ov_extractors.extend(bound);
+        }
         overlays.push(CompiledOverlay {
             name: ov.name.clone(),
             trigger: ov.trigger.clone(),
             flow: ov_flow,
-            extractors: frame_extractors(&ov.stages),
+            extractors: ov_extractors,
             resume: ov.resume,
         });
     }
@@ -1488,6 +1537,57 @@ mod tests {
         sim.set("avail", serde_json::json!({ "open": true }));
         sim.turn();
         assert!(sim.is_complete(), "resolver slot supplied by set completes");
+    }
+
+    #[tokio::test]
+    async fn overlay_resolver_binds_validates_and_fills_the_overlay() {
+        // A resolver declared on an OVERLAY stage must be validated against the
+        // registry and lowered into that overlay's extractors — not silently
+        // ignored (which left the slot permanently unfilled at runtime).
+        let json = r#"{ "name": "ov", "stages": [
+            { "id": "main", "terminal": true } ],
+          "require": ["main"],
+          "overlays": [ { "name": "lookup", "trigger": { "is_true": "intent:lookup" },
+            "stages": [
+              { "id": "fetch", "resolve": [{ "slot": "balance", "resolver": "bal" }] },
+              { "id": "ov_done", "terminal": true, "after": ["fetch"] } ] } ] }"#;
+        let spec: ConversationSpec = serde_json::from_str(json).unwrap();
+
+        // Unbound overlay resolver is a loud error, same as a main-stage one.
+        let err = Conversation::from_spec(spec.clone()).expect_err("unbound overlay resolver");
+        assert!(matches!(err, ConversationError::Spec(m) if m.contains("bal")));
+
+        // Bound, it compiles and the extractor lands on the overlay.
+        let registry =
+            ResolverRegistry::new().with("bal", |_args| async move { Ok(serde_json::json!(42)) });
+        let convo = Conversation::from_spec_with_resolvers(spec, &registry).expect("compiles");
+        assert!(
+            convo.overlays()[0]
+                .extractors
+                .iter()
+                .any(|e| e.field_state_keys().iter().any(|(_, k)| k == "balance")),
+            "the overlay carries the resolver extractor for 'balance'"
+        );
+    }
+
+    #[tokio::test]
+    async fn resolver_slot_counts_toward_stage_completion_from_json() {
+        // A resolver-only stage from JSON must gain the slot in `collect` (the
+        // builder path adds it eagerly), so its implicit captured completion
+        // exists and lowering succeeds instead of failing with "no completion".
+        let json = r#"{ "name": "r2", "stages": [
+            { "id": "check", "resolve": [{ "slot": "avail", "resolver": "lookup" }] },
+            { "id": "done", "terminal": true, "after": ["check"] } ],
+          "require": ["done"] }"#;
+        let spec: ConversationSpec = serde_json::from_str(json).unwrap();
+        let convo =
+            Conversation::from_spec_stubbing_resolvers(spec).expect("resolver-only stage compiles");
+        assert!(
+            convo.spec().stages[0]
+                .collect
+                .contains(&"avail".to_string()),
+            "declared resolver slot normalized into collect"
+        );
     }
 
     #[test]
