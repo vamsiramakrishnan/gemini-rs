@@ -109,14 +109,21 @@ impl EventActions {
     /// decoding a legacy event would shift those keys or read a stored array
     /// as a deletion list. Replay therefore decodes only marked events.
     ///
-    /// The residue this cannot cover is a pre-1.0.1 event that stored a number
-    /// under a state key named exactly `adk:format`. Closing that too would
-    /// take a field outside `state_delta`, which `EventActions` cannot grow
-    /// without breaking source compatibility.
+    /// A residue is structural: the marker shares the arbitrary key/value space
+    /// of the deltas it discriminates, so a legacy event that stored exactly
+    /// [`Self::FORMAT_VERSION`] at exactly this key would still be misread.
+    /// Closing that completely takes a field outside `state_delta`, which
+    /// `EventActions` cannot grow without breaking source compatibility — so
+    /// the marker value is chosen to make the collision unreachable in
+    /// practice rather than merely unlikely.
     pub const FORMAT: &'static str = "adk:format";
 
     /// Value written at [`Self::FORMAT`] by this version.
-    pub const FORMAT_VERSION: u64 = 1;
+    ///
+    /// A sentinel string rather than a version number: a plain `1` is a value
+    /// an application could conceivably have stored under its own key, whereas
+    /// this one only appears if someone wrote this crate's marker by hand.
+    pub const FORMAT_VERSION: &'static str = "gemini-adk/state-delta/1";
 
     /// Suffix appended by [`Self::encode_key`] to step a colliding state key
     /// out of a reserved entry's way.
@@ -182,7 +189,7 @@ impl EventActions {
     pub fn is_format_marked(&self) -> bool {
         self.state_delta
             .get(Self::FORMAT)
-            .and_then(serde_json::Value::as_u64)
+            .and_then(serde_json::Value::as_str)
             .is_some_and(|v| v == Self::FORMAT_VERSION)
     }
 
@@ -367,6 +374,32 @@ mod tests {
         assert_eq!(actions.removed_keys().collect::<Vec<_>>(), ["a", "b"]);
     }
 
+    /// The marker value is a sentinel string, not a bare number: a legacy
+    /// delta holding `1` — or any other ordinary value — at the marker key
+    /// must not be mistaken for a marked one.
+    #[test]
+    fn an_ordinary_value_at_the_marker_key_does_not_mark_a_delta() {
+        for value in [
+            serde_json::json!(1),
+            serde_json::json!("1"),
+            serde_json::json!(true),
+            serde_json::json!(null),
+        ] {
+            let mut delta = HashMap::new();
+            delta.insert(EventActions::FORMAT.to_string(), value.clone());
+            delta.insert(
+                EventActions::REMOVED_KEYS.to_string(),
+                serde_json::json!(["victim"]),
+            );
+            let actions = EventActions::state_delta(delta);
+            assert!(
+                !actions.is_format_marked(),
+                "{value} at the marker key must not mark the delta"
+            );
+            assert_eq!(actions.removed_keys().count(), 0);
+        }
+    }
+
     /// A marker this build does not recognise must not be decoded under this
     /// build's rules — a forward-dated event replays literally instead.
     #[test]
@@ -374,7 +407,7 @@ mod tests {
         let mut actions = EventActions::state_removed(["a".to_string()]);
         actions.state_delta.insert(
             EventActions::FORMAT.to_string(),
-            serde_json::json!(EventActions::FORMAT_VERSION + 1),
+            serde_json::json!("gemini-adk/state-delta/2"),
         );
         assert!(!actions.is_format_marked());
         assert_eq!(actions.removed_keys().count(), 0);
