@@ -221,6 +221,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let flush = to_caller.clone();
         let turns = collector_turns.clone();
         let asked = journal.clone();
+        let answered = journal.clone();
         with_model(Live::builder())
             .voice(Voice::Puck)
             .instruction(collector::instruction())
@@ -242,6 +243,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         asked.asked(&call.name, call.args.clone());
                     }
                     None
+                }
+            })
+            // Every response the model receives, including the flow gate's own
+            // `{"error": …}` for a call it denied. That is the only place a
+            // refusal is directly observable — a call that simply never ran
+            // could equally have been cancelled by barge-in or have failed
+            // argument deserialization, and neither is a governance failure.
+            .before_tool_response({
+                let answered = answered.clone();
+                move |responses, _state| {
+                    let answered = answered.clone();
+                    async move {
+                        for r in &responses {
+                            answered.answered(&r.name, r.response.clone());
+                        }
+                        responses
+                    }
                 }
             })
             .on_audio(move |pcm| {
