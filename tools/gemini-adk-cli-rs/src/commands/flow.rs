@@ -179,7 +179,26 @@ pub async fn ci(dir: &str, json: bool) -> Result<(), Box<dyn std::error::Error>>
         let mut scen_reports = Vec::new();
         for scen_path in paired_scenarios(spec_path)? {
             scen_total += 1;
-            let scenario: Scenario = serde_json::from_str(&fs::read_to_string(&scen_path)?)?;
+            // A malformed scenario is a failed scenario, not an abort: the
+            // command's contract is compile-and-run-ALL with a full report.
+            let scenario: Scenario = match fs::read_to_string(&scen_path)
+                .map_err(|e| e.to_string())
+                .and_then(|raw| serde_json::from_str(&raw).map_err(|e| e.to_string()))
+            {
+                Ok(s) => s,
+                Err(msg) => {
+                    let msg = format!("unreadable or invalid scenario JSON: {msg}");
+                    scen_reports.push(serde_json::json!({
+                        "scenario": scen_path.display().to_string(),
+                        "ok": false, "error": msg,
+                    }));
+                    if !json {
+                        println!("      {} ... FAIL", scen_path.display());
+                        println!("          {msg}");
+                    }
+                    continue;
+                }
+            };
             let name = scenario.name.clone();
             match scenario.run(&convo, FlowMode::Enforce).await {
                 Ok(()) => {

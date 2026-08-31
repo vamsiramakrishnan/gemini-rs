@@ -235,7 +235,15 @@ impl InMemoryRunner {
                         };
                         for event in &prior {
                             for (key, value) in &event.actions.state_delta {
-                                let _ = state.set(key.clone(), value.clone());
+                                // `null` is the deletion tombstone (written by the
+                                // diff below when an agent removes a key), so a
+                                // removal survives replay instead of the earlier
+                                // value resurrecting on the next invocation.
+                                if value.is_null() {
+                                    let _ = state.remove(key);
+                                } else {
+                                    let _ = state.set(key.clone(), value.clone());
+                                }
                             }
                         }
                         let _ = state.set("input", &prompt);
@@ -288,6 +296,14 @@ impl InMemoryRunner {
                             }
                             if baseline.get(key) != Some(value) {
                                 delta.insert(key.clone(), value.clone());
+                            }
+                        }
+                        // Keys the agent removed: absent from `after` but present
+                        // in the baseline. Persist a `null` tombstone so replay
+                        // deletes them instead of resurrecting the old value.
+                        for key in baseline.keys() {
+                            if key != "input" && !after.contains_key(key) {
+                                delta.insert(key.clone(), serde_json::Value::Null);
                             }
                         }
 
@@ -483,6 +499,54 @@ mod tests {
         assert_eq!(
             final_event.actions.state_delta.get("turn_count"),
             Some(&serde_json::json!(1))
+        );
+    }
+
+    #[tokio::test]
+    async fn removed_keys_tombstone_and_stay_removed_across_replay() {
+        // set → clear → peek on ONE session: the clear run must emit a `null`
+        // tombstone delta, and the peek run's replay must honor it instead of
+        // resurrecting the value from the earlier delta.
+        let agent = Arc::new(FnTextAgent::new("worker", |state| {
+            let input: String = state.get("input").unwrap_or_default();
+            match input.as_str() {
+                "set" => {
+                    let _ = state.set("flag", true);
+                }
+                "clear" => {
+                    let _ = state.remove("flag");
+                }
+                _ => {}
+            }
+            Ok(format!("saw: {:?}", state.get::<bool>("flag")))
+        }));
+        let runner = InMemoryRunner::new(agent, "test-app");
+
+        runner.run("set", "user-1", None).await.unwrap();
+        let sessions = runner
+            .session_service_ref()
+            .list_sessions("test-app", "user-1")
+            .await
+            .unwrap();
+        let sid = sessions[0].id.clone();
+
+        runner.run("clear", "user-1", Some(&sid)).await.unwrap();
+        let events = runner.session_service_ref().get_events(&sid).await.unwrap();
+        let clear_event = events
+            .iter()
+            .rev()
+            .find(|e| e.author == "worker")
+            .expect("clear run's agent event");
+        assert_eq!(
+            clear_event.actions.state_delta.get("flag"),
+            Some(&serde_json::Value::Null),
+            "removal persisted as a null tombstone"
+        );
+
+        let peeked = runner.run("peek", "user-1", Some(&sid)).await.unwrap();
+        assert_eq!(
+            peeked, "saw: None",
+            "removed key did not resurrect on replay"
         );
     }
 
