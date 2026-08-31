@@ -62,12 +62,12 @@ jobs:
             docs/src README.md
           fail: true
 
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - name: Check rustdoc (no warnings)
         env:
           RUSTDOCFLAGS: "-D warnings"
         run: cargo doc --no-deps --workspace
 
-      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       # ── Upload artifact (main branch only) ──────────────────────────────────
       - name: Build rustdoc API reference
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
