@@ -235,10 +235,13 @@ impl InMemoryRunner {
                         };
                         for event in &prior {
                             for (key, value) in &event.actions.state_delta {
-                                if key == EventActions::REMOVED_KEYS {
+                                if key == EventActions::REMOVED_KEYS
+                                    && EventActions::is_removal_payload(value)
+                                {
                                     continue;
                                 }
-                                let _ = state.set(key.clone(), value.clone());
+                                let key = EventActions::decode_key(key);
+                                let _ = state.set(key.into_owned(), value.clone());
                             }
                             // Removals ride in their own reserved entry and are
                             // applied after the sets: a stored `null` is a value
@@ -293,28 +296,28 @@ impl InMemoryRunner {
                         let after = state.to_hashmap();
                         let mut delta = std::collections::HashMap::new();
                         for (key, value) in &after {
-                            // `input` is re-seeded per run; the reserved removal
-                            // entry is the runner's own channel, so a state key
-                            // by that name must never reach the delta and forge
-                            // a deletion.
-                            if key == "input" || key == EventActions::REMOVED_KEYS {
+                            if key == "input" {
                                 continue;
                             }
                             if baseline.get(key) != Some(value) {
-                                delta.insert(key.clone(), value.clone());
+                                // Escaped, so a state key that collides with the
+                                // reserved removal entry is carried rather than
+                                // dropped — and cannot forge a deletion either.
+                                delta.insert(
+                                    EventActions::encode_key(key).into_owned(),
+                                    value.clone(),
+                                );
                             }
                         }
                         // Keys the agent removed: absent from `after` but present
                         // in the baseline. Recorded under the reserved entry, not
                         // as `null` values, so replay deletes them without making
                         // a deliberately-stored `null` indistinguishable from one.
+                        // These are values in a JSON array, not map keys, so they
+                        // need no escaping.
                         let removed: Vec<serde_json::Value> = baseline
                             .keys()
-                            .filter(|key| {
-                                *key != "input"
-                                    && *key != EventActions::REMOVED_KEYS
-                                    && !after.contains_key(*key)
-                            })
+                            .filter(|key| *key != "input" && !after.contains_key(*key))
                             .map(|key| serde_json::Value::String(key.clone()))
                             .collect();
                         if !removed.is_empty() {
@@ -568,6 +571,52 @@ mod tests {
         assert_eq!(
             peeked, "saw: None",
             "removed key did not resurrect on replay"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_state_value_stored_at_the_reserved_key_survives_replay() {
+        // `State` accepts arbitrary keys, so an application can legitimately
+        // write to the name the removal channel uses. Escaping carries it
+        // instead of dropping it — and it must not read back as a deletion.
+        let agent = Arc::new(FnTextAgent::new("worker", |state| {
+            let input: String = state.get("input").unwrap_or_default();
+            if input == "store" {
+                let _ = state.set("keep", "kept");
+                let _ = state.set(EventActions::REMOVED_KEYS, vec!["keep"]);
+            }
+            Ok(format!(
+                "{:?}/{:?}",
+                state.get::<Vec<String>>(EventActions::REMOVED_KEYS),
+                state.get::<String>("keep")
+            ))
+        }));
+        let runner = InMemoryRunner::new(agent, "test-app");
+
+        runner.run("store", "user-1", None).await.unwrap();
+        let sessions = runner
+            .session_service_ref()
+            .list_sessions("test-app", "user-1")
+            .await
+            .unwrap();
+        let sid = sessions[0].id.clone();
+
+        let events = runner.session_service_ref().get_events(&sid).await.unwrap();
+        let stored = events
+            .iter()
+            .rev()
+            .find(|e| e.author == "worker")
+            .expect("store run\'s agent event");
+        assert_eq!(
+            stored.actions.removed_keys().count(),
+            0,
+            "a state value must not be mistaken for a removal list"
+        );
+
+        let peeked = runner.run("peek", "user-1", Some(&sid)).await.unwrap();
+        assert_eq!(
+            peeked, "Some([\"keep\"])/Some(\"kept\")",
+            "the value at the reserved key was dropped, or read as a deletion"
         );
     }
 
