@@ -1,6 +1,6 @@
 <div class="hero">
   <img class="hero-mark" src="./assets/brand/logo-mark.svg" alt="gemini-rs">
-  <div class="hero-eyebrow">v0.8 · Rust SDK</div>
+  <div class="hero-eyebrow">v1.0 · Rust SDK</div>
 
 # gemini-rs
 

@@ -35,7 +35,9 @@ GEMINI_MODEL=models/gemini-2.5-flash-native-audio-preview-12-2025
 # Vertex AI  → stripped to: projects/{project}/locations/{loc}/publishers/google/models/gemini-2.5-flash-native-audio-preview-12-2025
 ```
 
-Omit `GEMINI_MODEL` to use the SDK default (`models/gemini-genai-2.5-flash-native-audio`).
+Omit `GEMINI_MODEL` to use the SDK default — connect resolves one the target
+platform actually serves (`models/gemini-2.5-flash-native-audio-latest` on
+Google AI, `models/gemini-live-2.5-flash-native-audio` on Vertex AI).
 
 #### Two-model architecture
 
@@ -63,6 +65,8 @@ let llm: Arc<dyn BaseLlm> = Arc::new(GeminiLlm::new(GeminiLlmParams {
 ### Standalone examples
 
 ```bash
+cargo run -p example-quickstart --bin hello-text    # the README quickstart: first token
+cargo run -p example-quickstart --bin hello-voice   # the README quickstart: first sound
 cargo run -p example-text-chat       # http://127.0.0.1:3001
 cargo run -p example-voice-chat      # http://127.0.0.1:3002
 cargo run -p example-tool-calling    # http://127.0.0.1:3003

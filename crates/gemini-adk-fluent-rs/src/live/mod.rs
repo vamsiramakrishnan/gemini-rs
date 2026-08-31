@@ -193,6 +193,12 @@ pub struct Live {
     )>,
     // Wire-log path: a FileWireRecorder is created here at connect time.
     pub(crate) record_wire_path: Option<std::path::PathBuf>,
+    /// True once the application chose a model via `.model(..)` or
+    /// `.connect(config)`. When false, connect resolves a per-platform
+    /// default that the target platform actually serves (the wire-level
+    /// `GeminiModel::default()` is not accepted everywhere), honoring the
+    /// `GEMINI_MODEL` environment variable first.
+    pub(crate) model_explicit: bool,
 }
 
 impl Live {
@@ -273,6 +279,7 @@ impl Live {
             state: None,
             flow_actions: Vec::new(),
             record_wire_path: None,
+            model_explicit: false,
             input_audio: crate::live::config::InputAudioConfig::default(),
         }
     }

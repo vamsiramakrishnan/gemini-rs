@@ -4,7 +4,7 @@ Command-line interface for ADK agent development. Mirrors the upstream `adk` CLI
 
 ## Prerequisites
 
-- **Rust toolchain** (stable, 1.75+)
+- **Rust toolchain** (stable, 1.93+)
 - **Google API key or GCP credentials** for agent execution
 - **Docker** (for `deploy cloud_run` and `deploy gke`)
 - **gcloud CLI** (for `deploy cloud_run` and `deploy agent_engine`)
@@ -13,10 +13,13 @@ Command-line interface for ADK agent development. Mirrors the upstream `adk` CLI
 ## Installation
 
 ```bash
-# From workspace root
+# From crates.io
+cargo install gemini-adk-cli-rs
+
+# Or from a workspace checkout
 cargo install --path tools/gemini-adk-cli-rs
 
-# Or run directly
+# Or run directly from the workspace
 cargo run -p gemini-adk-cli-rs -- <command>
 ```
 

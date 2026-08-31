@@ -22,7 +22,9 @@ use crate::utils::variant::{get_google_llm_variant, GoogleLlmVariant};
 /// Parameters for constructing a [`GeminiLlm`].
 #[derive(Default)]
 pub struct GeminiLlmParams {
-    /// Model name (defaults to "gemini-2.5-flash").
+    /// Model name. Defaults to the `GEMINI_MODEL` env var if set, else
+    /// `gemini-flash-latest` on Google AI (a rolling alias the catalog
+    /// keeps serving) or `gemini-2.5-flash` on Vertex AI.
     pub model: Option<String>,
     /// API key for Gemini API (non-Vertex).
     pub api_key: Option<String>,
@@ -72,12 +74,6 @@ impl GeminiLlm {
     /// from parameters first, then falls back to environment variables.
     /// The gemini-live `Client` is created once here and reused for all calls.
     pub fn new(mut params: GeminiLlmParams) -> Self {
-        // Resolve model (default to "gemini-2.5-flash")
-        let model = params
-            .model
-            .clone()
-            .unwrap_or_else(|| "gemini-2.5-flash".to_string());
-
         // Resolve variant from params or env
         let variant = if let Some(true) = params.vertexai {
             GoogleLlmVariant::VertexAi
@@ -87,10 +83,30 @@ impl GeminiLlm {
             get_google_llm_variant()
         };
 
+        // Resolve model: params, then the GEMINI_MODEL env var, then a
+        // per-variant default. Google AI retires dated names but serves the
+        // rolling `gemini-flash-latest` alias; Vertex AI keeps versioned GA
+        // names and does not carry the alias.
+        let model = params
+            .model
+            .clone()
+            .or_else(|| {
+                std::env::var("GEMINI_MODEL")
+                    .ok()
+                    .filter(|m| !m.trim().is_empty())
+            })
+            .unwrap_or_else(|| match variant {
+                GoogleLlmVariant::GeminiApi => "gemini-flash-latest".to_string(),
+                GoogleLlmVariant::VertexAi => "gemini-2.5-flash".to_string(),
+            });
+
         // Resolve API key from params or env
         if params.api_key.is_none() && variant == GoogleLlmVariant::GeminiApi {
+            // Same acceptance chain as the Live connect path, so one exported
+            // variable works for both halves of the stack.
             params.api_key = std::env::var("GOOGLE_GENAI_API_KEY")
                 .or_else(|_| std::env::var("GEMINI_API_KEY"))
+                .or_else(|_| std::env::var("GOOGLE_API_KEY"))
                 .ok();
         }
 
@@ -286,8 +302,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_model_is_gemini_2_5_flash() {
-        let llm = GeminiLlm::new(GeminiLlmParams::default());
+    fn default_model_is_the_rolling_flash_alias() {
+        let llm = GeminiLlm::new(GeminiLlmParams {
+            vertexai: Some(false),
+            ..Default::default()
+        });
+        let expected = std::env::var("GEMINI_MODEL")
+            .ok()
+            .filter(|m| !m.trim().is_empty())
+            .unwrap_or_else(|| "gemini-flash-latest".to_string());
+        assert_eq!(llm.model_id(), expected);
+    }
+
+    #[test]
+    fn default_model_on_vertex_is_versioned() {
+        if std::env::var("GEMINI_MODEL").is_ok_and(|m| !m.trim().is_empty()) {
+            return; // env override wins by design; nothing to assert here
+        }
+        let llm = GeminiLlm::new(GeminiLlmParams {
+            vertexai: Some(true),
+            ..Default::default()
+        });
         assert_eq!(llm.model_id(), "gemini-2.5-flash");
     }
 

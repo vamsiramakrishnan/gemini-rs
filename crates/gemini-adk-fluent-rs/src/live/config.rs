@@ -16,8 +16,13 @@ impl Live {
     // -- Model & Voice --
 
     /// Set the Gemini model.
+    ///
+    /// Without this, connect resolves a default the target platform actually
+    /// serves (overridable via the `GEMINI_MODEL` environment variable) —
+    /// see the `connect_from_env` docs on [`Live`].
     pub fn model(mut self, model: GeminiModel) -> Self {
         self.config = self.config.model(model);
+        self.model_explicit = true;
         self
     }
 

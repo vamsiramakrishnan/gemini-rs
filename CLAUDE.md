@@ -32,7 +32,7 @@ The L2 `prelude` is a **kernel**, not an everything-glob: builders, the
 `S·C·T·P·M·A·E·G` algebra, operators/patterns, `Live`, `State`/`StateKey`,
 core errors, core flow (`Flow`/`Guard`/`FlowMonitor`/`FlowMode`/`Verdict`/
 `ToolPolicy`), core tools (`SimpleTool`/`TypedTool`/`ToolFunction`/
-`ToolDispatcher`/`#[tool]`/`Extract`/`Frame`), `BaseLlm`/`GeminiLlm`, callback
+`ToolDispatcher`/`#[tool]`/`Extract`/`Frame`), `BaseLlm`/`GeminiLlm`/`GeminiLlmParams`, callback
 contexts, the common Live session types, the text-agent combinators, build-time
 validation (`check_contracts`/`ContractViolation`/`diagnose`), and the L0 wire
 prelude. Everything else lives in a focused submodule — import what you need:
@@ -59,8 +59,10 @@ The L1 `Agent` *trait* is re-exported (in `prelude` and `agents`) as
 ### Fluent Agent Builder (Text Agents)
 
 ```rust
+// Requires the `gemini-llm` feature on gemini-adk-fluent-rs for real generation.
+// Model may be omitted: GeminiLlm defaults to GEMINI_MODEL or `gemini-flash-latest`.
 let agent = AgentBuilder::new("analyst")
-    .model(GeminiModel::Gemini2_0Flash)
+    .model(GeminiModel::Custom("gemini-flash-latest".into()))
     .instruction("Analyze the given topic")
     .temperature(0.3)
     .google_search()
@@ -76,7 +78,8 @@ Copy-on-write immutable builders -- every setter returns a new builder, original
 
 ```rust
 let handle = Live::builder()
-    .model(GeminiModel::Gemini2_0FlashLive)
+    // No .model(..) → connect resolves a platform-appropriate default
+    // (GEMINI_MODEL env var overrides; .model(Custom("models/…")) pins one).
     .voice(Voice::Kore)
     .instruction("You are a weather assistant")
     .greeting("Greet the user and ask how you can help.")
@@ -177,13 +180,14 @@ let tool = SimpleTool::new(
 **TypedTool** (auto-generated JSON Schema from `schemars::JsonSchema`):
 
 ```rust
+// Needs serde, serde_json, and schemars = "0.8" (schemars 1.x is a different trait).
 #[derive(Deserialize, JsonSchema)]
 struct WeatherArgs {
     /// The city to get weather for
     city: String,
 }
 
-let tool = TypedTool::new::<WeatherArgs>(
+let tool = TypedTool::<WeatherArgs>::new(
     "get_weather", "Get weather for a city",
     |args: WeatherArgs| async move {
         Ok(json!({"temp": 22, "city": args.city}))
@@ -710,8 +714,9 @@ just release-status
 ## Common Mistakes
 
 - **Wrong audio model**: Native audio model (`Gemini2_0FlashLive`) only supports `Modality::Audio` output, NOT `Modality::Text`. Use `.text_only()` for text-only mode with `Gemini2_0FlashLive`.
-- **Live model names differ by platform**: the native-audio Live model is `gemini-2.5-flash-native-audio-preview-12-2025` on **Google AI (AI Studio)** but `gemini-2.5-flash-native-audio` on **Vertex AI**. There is no single constant that works on both, so pass `GeminiModel::Custom("models/…")` chosen per platform rather than a named variant.
-- **Stale `GeminiModel` variants**: neither named Live variant works on Google AI — `Gemini2_0FlashLive` (`gemini-2.0-flash-live-001`) and `GeminiLive2_5FlashNativeAudio` (`gemini-live-2.5-flash-native-audio`) both draw *"not found for API version v1beta, or is not supported for bidiGenerateContent"*. Confirm what a key can reach: `curl "https://generativelanguage.googleapis.com/v1beta/models?key=$GEMINI_API_KEY" | jq -r '.models[] | select(.supportedGenerationMethods[]? == "bidiGenerateContent") | .name'`. (Verified against Google AI only; the Vertex catalog was not exercised.)
+- **Live model names differ by platform**, and Google AI retires dated names. When no `.model(..)` is set, connect resolves a platform-appropriate default: `GEMINI_MODEL` from the environment, else `models/gemini-2.5-flash-native-audio-latest` (a rolling alias, verified 2026-08) on Google AI, else the wire default `gemini-live-2.5-flash-native-audio` (Vertex AI's GA name per Google Cloud docs). Set `.model(GeminiModel::Custom("models/…"))` only when you need a specific model.
+- **Stale `GeminiModel` variants**: neither named Live variant works on Google AI — `Gemini2_0FlashLive` (`gemini-2.0-flash-live-001`) is gone from the catalog and `GeminiLive2_5FlashNativeAudio` (`gemini-live-2.5-flash-native-audio`) is Vertex-only. Confirm what a key can reach: `curl "https://generativelanguage.googleapis.com/v1beta/models?key=$GEMINI_API_KEY" | jq -r '.models[] | select(.supportedGenerationMethods[]? == "bidiGenerateContent") | .name'`. The same catalog drift hits text models: `gemini-2.5-flash` 404s on Google AI `generateContent`; `GeminiLlm` therefore defaults to the `gemini-flash-latest` alias there (`gemini-2.5-flash` still on Vertex).
+- **Feature flags gate real work**: `gemini-adk-fluent-rs` ships `default = []` — text generation needs `gemini-llm` (without it `GeminiLlm` compiles but errors at runtime), `talk()` needs `voice-io`. Typed tools need `schemars = "0.8"`, not 1.x.
 - **Vertex AI binary frames**: Vertex AI sends Binary WebSocket frames (not Text) -- handled automatically by `TungsteniteTransport`.
 - **Vertex AI endpoint**: Use `wss://aiplatform.googleapis.com/...` (NOT `global-aiplatform.googleapis.com`).
 - **API versions**: Google AI = `v1beta`, Vertex AI = `v1beta1` -- handled by `Platform` enum.

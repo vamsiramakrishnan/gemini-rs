@@ -1136,6 +1136,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-quickstart"
+version = "1.0.0"
+dependencies = [
+ "gemini-adk-fluent-rs",
+ "tokio",
+]
+
+[[package]]
 name = "example-sip-agent"
 version = "0.1.0"
 dependencies = [

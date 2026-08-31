@@ -4,29 +4,110 @@
 
 [![CI](https://github.com/vamsiramakrishnan/gemini-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/vamsiramakrishnan/gemini-rs/actions/workflows/ci.yml)
 [![Docs](https://github.com/vamsiramakrishnan/gemini-rs/actions/workflows/docs.yml/badge.svg)](https://github.com/vamsiramakrishnan/gemini-rs/actions/workflows/docs.yml)
-[![crates.io](https://img.shields.io/crates/v/gemini-genai-rs.svg)](https://crates.io/crates/gemini-genai-rs)
+[![crates.io](https://img.shields.io/crates/v/gemini-adk-fluent-rs.svg)](https://crates.io/crates/gemini-adk-fluent-rs)
 [![Rust](https://img.shields.io/badge/rust-1.93%2B-orange.svg)](rust-toolchain.toml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**v0.8 · pre-1.0 · MIT** · [book](https://vamsiramakrishnan.github.io/gemini-rs/) · [API reference](https://vamsiramakrishnan.github.io/gemini-rs/api/gemini_genai_rs/index.html)
+**v1.0 · MIT** · [book](https://vamsiramakrishnan.github.io/gemini-rs/) · [API reference](https://vamsiramakrishnan.github.io/gemini-rs/api/gemini_genai_rs/index.html)
 
-A live voice model will happily book the table before checking availability, charge the card before verifying identity, and skip the disclosure it was told to read. Not because the prompt was wrong — because a prompt is advice, and advice is not enforcement.
+gemini-rs is a full Rust SDK for the Gemini Multimodal Live API. A live voice model will happily book the table before checking availability — not because the prompt was wrong, but because a prompt is advice, and advice is not enforcement. Here you declare the conversation as a contract — steps, completion guards, tool gates, ordering constraints — and the runtime enforces it while the model speaks: a tool the flow has not admitted does not execute, whatever the model intends. The same contract is a JSON document you can validate, simulate, test, and code-generate offline, and a canvas you can edit by hand.
 
-The usual fix is a longer prompt. The longer prompt is also advice.
+## Quickstart
 
-gemini-rs is a full Rust SDK for the Gemini Multimodal Live API that treats the conversation as a contract. You declare the flow — steps, completion guards, tool gates, ordering constraints — and the runtime enforces it while the model speaks: a tool the flow has not admitted does not execute, whatever the model intends. The same contract is a JSON document you can validate, simulate, test, and code-generate offline, and a canvas you can edit by hand.
+Rust 1.93+. On Linux, voice needs the audio and TLS headers:
+`sudo apt-get install pkg-config libssl-dev libasound2-dev` (macOS needs nothing extra).
 
-## Five lines to try it
+Every snippet below is a complete file, compiled in CI exactly as printed
+([`examples/quickstart`](examples/quickstart) — a drift test fails if the README
+and the compiled programs ever disagree).
 
-```rust
-Live::builder()
-    .instruction("You are a helpful concierge.")
-    .greeting("Greet the caller.")
-    .connect_from_env().await?     // GEMINI_API_KEY, or Vertex env vars
-    .talk().await?;                // mic in, speakers out, barge-in handled
+**1. Add the dependencies** — one crate, two feature flags, and tokio:
+
+<!-- quickstart:Cargo.toml -->
+```toml
+[dependencies]
+gemini-adk-fluent-rs = { version = "1.0", features = ["gemini-llm", "voice-io"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
-`cargo add gemini-adk-fluent-rs --features voice-io`, export `GEMINI_API_KEY`, done. `talk()` (feature `voice-io`; Linux needs `libasound2-dev`) runs the duplex audio loop on the default devices; an interruption flushes the speaker buffer instead of playing stale speech. `connect_from_env()` resolves Google AI vs Vertex AI from the environment — both platforms, one code path, unsupported wire fields stripped automatically.
+`gemini-llm` powers text agents (off by default — without it, `GeminiLlm` compiles
+but refuses to generate). `voice-io` powers `talk()`. Writing typed tools later
+adds `serde`, `serde_json`, and `schemars = "0.8"` (the 0.8 pin matters — schemars 1.x
+is a different trait).
+
+**2. Set one environment variable:**
+
+| Platform | Environment |
+|---|---|
+| **Google AI** (fastest) | `export GEMINI_API_KEY=…` — [get a key](https://aistudio.google.com/apikey) |
+| **Vertex AI** | `export GOOGLE_GENAI_USE_VERTEXAI=true GOOGLE_CLOUD_PROJECT=my-project GOOGLE_CLOUD_LOCATION=us-central1`, then `gcloud auth application-default login` |
+
+One variable serves the whole stack — Live sessions and text agents accept the
+same `GEMINI_API_KEY` / `GOOGLE_GENAI_API_KEY` / `GOOGLE_API_KEY` chain.
+
+**3a. First sound** — the whole voice app is `src/main.rs`:
+
+<!-- quickstart:src/bin/hello_voice.rs -->
+```rust
+use gemini_adk_fluent_rs::prelude::*;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    Live::builder()
+        .instruction("You are a helpful concierge.")
+        .greeting("Greet the caller and ask how you can help.")
+        .connect_from_env() // GEMINI_API_KEY, or the Vertex AI env vars
+        .await?
+        .talk() // microphone in, speakers out, barge-in handled
+        .await?;
+    Ok(())
+}
+```
+
+`cargo run` and speak. You don't pick a model: connect resolves a default the
+target platform actually serves (Google AI's catalog and Vertex AI's disagree),
+and `GEMINI_MODEL=…` or `.model(…)` overrides it. An interruption flushes the
+speaker buffer instead of playing stale speech.
+
+**3b. First token** — the text agent, no microphone or audio deps needed:
+
+<!-- quickstart:src/bin/hello_text.rs -->
+```rust
+use gemini_adk_fluent_rs::prelude::*;
+use std::sync::Arc;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Reads GEMINI_API_KEY (Google AI) or the Vertex AI env vars.
+    let llm = Arc::new(GeminiLlm::new(GeminiLlmParams::default()));
+
+    let agent = AgentBuilder::new("assistant")
+        .instruction("You are a concise assistant.")
+        .build(llm);
+
+    let state = State::new();
+    state.set("input", "In one sentence: what is the Gemini Live API?")?;
+    println!("{}", agent.run(&state).await?);
+    Ok(())
+}
+```
+
+**From a clone instead:** `git clone` this repo, then
+`cargo run -p example-quickstart --bin hello-text` (or `--bin hello-voice`) —
+same programs, workspace paths.
+
+## Pick your path
+
+| I want to… | Do this | Read this |
+|---|---|---|
+| Talk to a voice agent right now | Quickstart 3a above | [Voice & Live Sessions](https://vamsiramakrishnan.github.io/gemini-rs/user-guide/live-sessions.html) |
+| Build a text agent / pipeline | Quickstart 3b, then combinators (`>>` `\|` `/` `*`) | [Text Agents](https://vamsiramakrishnan.github.io/gemini-rs/user-guide/text-agents.html) |
+| Give the model tools | `TypedTool` / `T::simple` + `ToolDispatcher` | [Tool System](https://vamsiramakrishnan.github.io/gemini-rs/user-guide/tools.html) |
+| Make the conversation follow rules | `Flow` + `Live::govern` — the governed-flow demo runs offline, no key: `cargo run -p example-cookbook --bin 37-governed-flow` | [Governed Flows](https://vamsiramakrishnan.github.io/gemini-rs/user-guide/flow.html) |
+| Edit flows on a canvas | `cargo run -p gemini-adk-web-rs` → `http://localhost:25125/flows` | [Flow Studio](https://vamsiramakrishnan.github.io/gemini-rs/flow-studio.html) |
+| Put an agent on a phone line | Twilio / SIP / AudioHook examples | [Telephony](https://vamsiramakrishnan.github.io/gemini-rs/user-guide/telephony.html) |
+| Learn by example | 40 progressive cookbook binaries | [`examples/INDEX.md`](examples/INDEX.md) |
+| Scaffold a project | `cargo install gemini-adk-cli-rs` → `adk create my-agent` | [`tools/gemini-adk-cli-rs`](tools/gemini-adk-cli-rs) |
 
 ## One call, walked through
 
@@ -129,6 +210,7 @@ Beyond flows, the L1/L2 surface covers the rest of a production session: typed t
 ## What the tests hold
 
 - 2,500+ workspace tests, none requiring an API key — including G.711 codec conformance against known wire values, RTP wire layouts, SDP offer/answer round-trips, a raw-UDP SIP signalling integration test, guard truth-trace suites, and codegen goldens.
+- The Quickstart programs above are compiled in CI verbatim — a drift test pins the README's fences to [`examples/quickstart`](examples/quickstart).
 - Every gallery cookbook compiles through the real flow compiler and passes its own embedded tests, in CI.
 - Generated apps compile as standalone crates under `RUSTFLAGS="-D warnings"`.
 - Layer contracts are drift-tested; docs build with `RUSTDOCFLAGS="-D warnings"`.
@@ -140,6 +222,19 @@ cargo run -p gemini-adk-web-rs  # Web UI + Flow Studio → :25125
 ```
 
 [`examples/`](examples/INDEX.md) holds 40 progressive cookbook binaries (builders → combinators → multi-agent → governed capstones), the telephony and SIP agents, the TTS-driven call above, and focused per-layer demos. [`apps/gemini-adk-web-rs`](apps/gemini-adk-web-rs) bundles 13 showcase apps with a shared DevTools panel.
+
+## When it doesn't work
+
+| Symptom | Cause and fix |
+|---|---|
+| Connect fails: *"model not found for API version v1beta"* or setup closes without `setupComplete` | The model isn't in your platform's Live catalog — Google AI and Vertex AI serve **different model names**. Leave `.model()` unset to get a platform-appropriate default, or list what your key can reach: `curl "https://generativelanguage.googleapis.com/v1beta/models?key=$GEMINI_API_KEY"` and look for `bidiGenerateContent` under `supportedGenerationMethods`. |
+| Text agent errors: *"GeminiLlm requires the 'gemini-llm' feature flag"* | Add `features = ["gemini-llm"]` to `gemini-adk-fluent-rs` — it's off by default. |
+| No `talk()` method on the handle | Add `features = ["voice-io"]`; on Linux install `libasound2-dev` first. |
+| `JsonSchema` trait bound errors on your tool structs, or "multiple versions of crate schemars" | Pin `schemars = "0.8"` — plain `cargo add schemars` installs 1.x, a different trait. |
+| Live connects but the text agent authenticates with an empty key | You exported only `GOOGLE_API_KEY` with an older SDK — use `GEMINI_API_KEY`; since 1.0.1 all three names work everywhere. |
+| `.on_thought()` never fires | Thinking is Google AI only; `thinkingConfig` is auto-stripped on Vertex AI. |
+
+More in the book's [Troubleshooting & FAQ](https://vamsiramakrishnan.github.io/gemini-rs/user-guide/troubleshooting.html).
 
 ## Documentation
 
