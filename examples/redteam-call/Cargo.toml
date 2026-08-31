@@ -1,0 +1,23 @@
+[package]
+name = "example-redteam-call"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+# Two Live sessions, cross-connected: a governed debt-collection agent and an
+# adversarial caller that tries to break it. No audio hardware — the two
+# sessions are each other's microphone and speaker — so this deliberately does
+# NOT enable `voice-io`, and builds on a headless box with no ALSA headers.
+
+[dependencies]
+gemini-adk-fluent-rs = { path = "../../crates/gemini-adk-fluent-rs" }
+gemini-adk-rs = { path = "../../crates/gemini-adk-rs" }
+gemini-genai-rs = { path = "../../crates/gemini-genai-rs" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "signal"] }
+serde_json = "1"
+schemars = "0.8"
+serde = { version = "1", features = ["derive"] }
+parking_lot = "0.12"
+
+[lints]
+workspace = true

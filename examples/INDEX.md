@@ -74,6 +74,7 @@ cargo run -p example-transcription   # http://127.0.0.1:3004
 cargo run -p example-telephony       # 0.0.0.0:8080 — Twilio voice webhook + Media Streams
 cargo run -p example-sip-agent       # 0.0.0.0:5060/udp — raw SIP agent, dial from any softphone
 cargo run -p example-audiohook       # 0.0.0.0:8080 — AudioHook bot server for contact-center platforms
+cargo run -p example-redteam-call    # no server — two Live sessions call each other, adversarially
 ```
 
 ### Multi-app Web UI
@@ -146,6 +147,17 @@ The third telephony connector, built with no SDK changes: a bot server speaking 
 - **Layer:** L2 (`voice::pump`, `telephony::{g711, bridge}`)
 - **Run:** `cargo run -p example-audiohook`, then point the platform's AudioHook integration at `wss://<host>/audiohook`
 - **Features:** `open`/`opened` media negotiation (PCMU 8 kHz, connection-probe aware), binary μ-law audio both directions, `barge_in` event on interruption, DTMF into the shared `telephony:*` state keys, optional latency filler via `FILLER_CLIP`
+
+### redteam-call (L2 Fluent)
+
+Two Live sessions cross-connected so one's speech is the other's microphone: a governed debt-collection agent, and a caller whose whole job is to break it. The collector is a tool-gating `Flow` with typed tools and a hardened instruction; the caller is one paragraph of prose and nothing else. Server VAD on both ends segments the turns — nothing in the program decides who speaks when.
+
+Writes a transcript, a stereo recording (collector left, caller right, so crosstalk is audible) and a scoreboard that keeps *facts* from the flow gate apart from *flags* matched over ASR text.
+
+- **Layer:** L2 (`Live`, `flow`, `voice::resample`)
+- **Run:** `GEMINI_API_KEY=… cargo run -p example-redteam-call -- --seconds 300 --turns 40`
+- **Features:** 24→16 kHz resampling, realtime-paced jitter buffer, open-line silence so VAD can close a turn, barge-in flush, full duplex on purpose
+- **Costs money:** two concurrent native-audio sessions for the wall-clock duration of the call
 
 ### agents (L1/L2 Runtime + Fluent)
 

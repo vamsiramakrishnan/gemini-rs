@@ -1144,6 +1144,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-redteam-call"
+version = "1.0.0"
+dependencies = [
+ "gemini-adk-fluent-rs",
+ "gemini-adk-rs",
+ "gemini-genai-rs",
+ "parking_lot",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "example-sip-agent"
 version = "0.1.0"
 dependencies = [
