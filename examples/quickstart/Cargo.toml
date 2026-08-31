@@ -7,13 +7,21 @@ publish = false
 # The two programs the README's Quickstart prints, compiled in CI exactly as
 # printed there — `tests/readme_snippets.rs` fails the build if the README
 # and these files ever drift apart.
+#
+# `voice-io` (cpal → alsa-sys) is deliberately NOT a default: the text program
+# is advertised as needing no audio dependencies, and a default feature would
+# make that false — `cargo run --bin hello-text`, and every plain workspace
+# build, would demand ALSA headers on Linux. `hello-voice` opts in instead.
 
 [dependencies]
 gemini-adk-fluent-rs = { path = "../../crates/gemini-adk-fluent-rs", features = [
     "gemini-llm",
-    "voice-io",
 ] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+[features]
+# Enables the microphone/speaker duplex used by `hello-voice`.
+voice = ["gemini-adk-fluent-rs/voice-io"]
 
 [[bin]]
 name = "hello-text"
@@ -22,6 +30,7 @@ path = "src/bin/hello_text.rs"
 [[bin]]
 name = "hello-voice"
 path = "src/bin/hello_voice.rs"
+required-features = ["voice"]
 
 [lints]
 workspace = true

@@ -14,24 +14,35 @@ gemini-rs is a full Rust SDK for the Gemini Multimodal Live API. A live voice mo
 
 ## Quickstart
 
-Rust 1.93+. On Linux, voice needs the audio and TLS headers:
-`sudo apt-get install pkg-config libssl-dev libasound2-dev` (macOS needs nothing extra).
+Rust 1.93+, plus `pkg-config libssl-dev` on Linux. The **voice** program additionally
+needs `libasound2-dev` there; the text program does not. macOS needs nothing extra.
 
 Every snippet below is a complete file, compiled in CI exactly as printed
 ([`examples/quickstart`](examples/quickstart) — a drift test fails if the README
 and the compiled programs ever disagree).
 
-**1. Add the dependencies** — one crate, two feature flags, and tokio:
+**1. Add the dependencies** — one crate, one feature flag, and tokio:
 
 <!-- quickstart:Cargo.toml -->
 ```toml
 [dependencies]
-gemini-adk-fluent-rs = { version = "1.0", features = ["gemini-llm", "voice-io"] }
+gemini-adk-fluent-rs = { version = "1.0", features = ["gemini-llm"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
-`gemini-llm` powers text agents (off by default — without it, `GeminiLlm` compiles
-but refuses to generate). `voice-io` powers `talk()`. Writing typed tools later
+`gemini-llm` powers text agents — it is off by default, and without it `GeminiLlm`
+compiles but refuses to generate. That is everything the text program below needs;
+it pulls in no audio stack, so it builds on a headless server as-is.
+
+For the **voice** program, add `voice-io` as well:
+
+<!-- quickstart:Cargo.toml:voice -->
+```toml
+gemini-adk-fluent-rs = { version = "1.0", features = ["gemini-llm", "voice-io"] }
+```
+
+That one is what needs the audio headers above (`libasound2-dev` on Linux), because
+it builds `cpal` to reach your microphone and speakers. Writing typed tools later
 adds `serde`, `serde_json`, and `schemars = "0.8"` (the 0.8 pin matters — schemars 1.x
 is a different trait).
 
@@ -69,7 +80,8 @@ target platform actually serves (Google AI's catalog and Vertex AI's disagree),
 and `GEMINI_MODEL=…` or `.model(…)` overrides it. An interruption flushes the
 speaker buffer instead of playing stale speech.
 
-**3b. First token** — the text agent, no microphone or audio deps needed:
+**3b. First token** — the text agent; no microphone, and no audio dependency
+in the manifest above, so this one builds anywhere:
 
 <!-- quickstart:src/bin/hello_text.rs -->
 ```rust
@@ -93,8 +105,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 **From a clone instead:** `git clone` this repo, then
-`cargo run -p example-quickstart --bin hello-text` (or `--bin hello-voice`) —
-same programs, workspace paths.
+`cargo run -p example-quickstart --bin hello-text`, or
+`cargo run -p example-quickstart --features voice --bin hello-voice` —
+same programs, workspace paths. (`voice` is opt-in there for the same reason:
+the text path stays audio-free.)
 
 ## Pick your path
 

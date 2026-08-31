@@ -74,6 +74,12 @@ pub struct EventActions {
     /// State mutations (key → new value).
     #[serde(default)]
     pub state_delta: HashMap<String, serde_json::Value>,
+    /// Keys the agent removed. Deletion is carried here rather than as a
+    /// `null` in `state_delta`, because `null` is a perfectly ordinary value
+    /// an agent may store deliberately — conflating the two made replay lose
+    /// it, so persistence was not round-trip lossless for valid `State`.
+    #[serde(default)]
+    pub state_removed: Vec<String>,
 }
 
 impl EventActions {
@@ -97,6 +103,14 @@ impl EventActions {
     pub fn state_delta(delta: HashMap<String, serde_json::Value>) -> Self {
         Self {
             state_delta: delta,
+            ..Default::default()
+        }
+    }
+
+    /// Create actions that remove keys from state.
+    pub fn state_removed(keys: impl IntoIterator<Item = String>) -> Self {
+        Self {
+            state_removed: keys.into_iter().collect(),
             ..Default::default()
         }
     }
