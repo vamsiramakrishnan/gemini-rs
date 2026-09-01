@@ -8,8 +8,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use once_cell::sync::Lazy;
 use regex::Regex;
+use std::sync::LazyLock;
 
 #[cfg(feature = "gemini-llm")]
 use crate::llm::TokenUsage;
@@ -59,7 +59,7 @@ pub struct GeminiLlm {
     client: gemini_genai_rs::prelude::Client,
 }
 
-static SUPPORTED_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
+static SUPPORTED_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     vec![
         Regex::new(r"^gemini-.*$").unwrap(),
         Regex::new(r"^projects/.*/endpoints/.*$").unwrap(),

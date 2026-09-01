@@ -56,7 +56,7 @@ pub(in crate::live) async fn run_extractors(
         })
         .collect();
 
-    let results = futures::future::join_all(extraction_futures).await;
+    let results = futures_util::future::join_all(extraction_futures).await;
     for result in results {
         match result {
             Ok((extractor, value)) => {
@@ -272,7 +272,7 @@ pub(in crate::live) async fn run_extractors_with_window(
         })
         .collect();
 
-    let results = futures::future::join_all(extraction_futures).await;
+    let results = futures_util::future::join_all(extraction_futures).await;
     for result in results {
         match result {
             Ok((extractor, value)) => {

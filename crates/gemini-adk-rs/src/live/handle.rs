@@ -491,7 +491,7 @@ impl LiveHandle {
         self.event_tx.subscribe()
     }
 
-    /// Subscribe to semantic events as a [`futures::Stream`].
+    /// Subscribe to semantic events as a [`futures_util::Stream`].
     ///
     /// Stream-flavored sibling of [`events`](Self::events): each call creates
     /// an independent subscriber starting from the current point in the event
@@ -503,7 +503,7 @@ impl LiveHandle {
     /// # Example
     ///
     /// ```rust,ignore
-    /// use futures::StreamExt;
+    /// use futures_util::StreamExt;
     ///
     /// let mut stream = handle.stream();
     /// while let Some(ev) = stream.next().await {

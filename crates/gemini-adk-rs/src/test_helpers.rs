@@ -5,7 +5,7 @@ use gemini_genai_rs::prelude::FunctionResponse;
 use gemini_genai_rs::session::{SessionError, SessionWriter};
 
 /// Mock writer that accepts all commands without error.
-pub struct MockWriter;
+pub(crate) struct MockWriter;
 
 #[async_trait]
 impl SessionWriter for MockWriter {

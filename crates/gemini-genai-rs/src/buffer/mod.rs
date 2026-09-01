@@ -3,12 +3,21 @@
 //! - [`SpscRing`]: Single-producer single-consumer ring buffer for zero-copy audio streaming.
 //! - [`AudioJitterBuffer`]: Adaptive jitter buffer for smooth playback of network audio.
 
+// The SPSC ring is the one place in the workspace that needs `unsafe`: a
+// wait-free producer/consumer handoff on the audio hot path. Every other crate
+// forbids it outright; here each block carries its own SAFETY argument.
+#![allow(
+    unsafe_code,
+    reason = "lock-free SPSC ring; each unsafe block documents its invariant"
+)]
+
 pub mod convert;
 pub mod jitter;
 
 pub use convert::{bytes_to_i16, i16_to_bytes, into_shared};
 pub use jitter::{AudioJitterBuffer, JitterConfig};
 
+use std::cell::UnsafeCell;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Cache-line padding to prevent false sharing between producer and consumer.
@@ -33,7 +42,11 @@ struct CachePad<T>(T);
 /// This buffer is safe for concurrent use by exactly one producer and one consumer.
 /// Multiple producers or multiple consumers will cause data races.
 pub struct SpscRing<T: Copy + Default> {
-    buf: Box<[T]>,
+    // `UnsafeCell` is what makes the producer's interior write through `&self`
+    // legal. A plain `Box<[T]>` cast to `*mut T` is an aliasing violation
+    // (the shared reference asserts the slice is immutable) and a formal data
+    // race against the consumer's read, even for `T: Copy`.
+    buf: Box<[UnsafeCell<T>]>,
     cap_mask: usize,
     head: CachePad<AtomicUsize>,
     tail: CachePad<AtomicUsize>,
@@ -50,7 +63,7 @@ impl<T: Copy + Default> SpscRing<T> {
     pub fn new(capacity: usize) -> Self {
         assert!(capacity > 0, "ring buffer capacity must be > 0");
         let cap = capacity.next_power_of_two();
-        let buf = vec![T::default(); cap].into_boxed_slice();
+        let buf: Box<[UnsafeCell<T>]> = (0..cap).map(|_| UnsafeCell::new(T::default())).collect();
         Self {
             buf,
             cap_mask: cap - 1,
@@ -103,19 +116,26 @@ impl<T: Copy + Default> SpscRing<T> {
 
         if end <= self.capacity() {
             // Contiguous write
-            // SAFETY: we are the sole producer and have verified space is available
+            // SAFETY: slots [start, start+to_write) are owned by the producer
+            // until `head` is published below; the consumer never reads them
+            // before that Release store. `UnsafeCell<T>` is `repr(transparent)`
+            // over `T`, so the slots are contiguous `T`s from `buf[start].get()`.
             unsafe {
-                let dst = self.buf.as_ptr() as *mut T;
-                std::ptr::copy_nonoverlapping(data.as_ptr(), dst.add(start), to_write);
+                std::ptr::copy_nonoverlapping(data.as_ptr(), self.buf[start].get(), to_write);
             }
         } else {
             // Wrapped write: two segments
             let first_len = self.capacity() - start;
             let second_len = to_write - first_len;
+            // SAFETY: same producer-owned-until-published argument as above,
+            // applied to the tail segment and then the head of the ring.
             unsafe {
-                let dst = self.buf.as_ptr() as *mut T;
-                std::ptr::copy_nonoverlapping(data.as_ptr(), dst.add(start), first_len);
-                std::ptr::copy_nonoverlapping(data.as_ptr().add(first_len), dst, second_len);
+                std::ptr::copy_nonoverlapping(data.as_ptr(), self.buf[start].get(), first_len);
+                std::ptr::copy_nonoverlapping(
+                    data.as_ptr().add(first_len),
+                    self.buf[0].get(),
+                    second_len,
+                );
             }
         }
 
@@ -145,13 +165,26 @@ impl<T: Copy + Default> SpscRing<T> {
         let start = tail & self.cap_mask;
         let end = start + to_read;
 
+        // SAFETY: slots [tail, tail+to_read) were published by the producer's
+        // Release store on `head` (paired with the Acquire load above) and the
+        // producer will not overwrite them until `tail` advances below. Reading
+        // through the raw pointer rather than `&self.buf[..]` avoids creating a
+        // shared reference to memory the producer may be writing elsewhere in.
         if end <= self.capacity() {
-            out[..to_read].copy_from_slice(&self.buf[start..start + to_read]);
+            unsafe {
+                std::ptr::copy_nonoverlapping(self.buf[start].get(), out.as_mut_ptr(), to_read);
+            }
         } else {
             let first_len = self.capacity() - start;
             let second_len = to_read - first_len;
-            out[..first_len].copy_from_slice(&self.buf[start..]);
-            out[first_len..to_read].copy_from_slice(&self.buf[..second_len]);
+            unsafe {
+                std::ptr::copy_nonoverlapping(self.buf[start].get(), out.as_mut_ptr(), first_len);
+                std::ptr::copy_nonoverlapping(
+                    self.buf[0].get(),
+                    out.as_mut_ptr().add(first_len),
+                    second_len,
+                );
+            }
         }
 
         self.tail

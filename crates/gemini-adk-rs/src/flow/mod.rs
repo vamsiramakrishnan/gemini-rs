@@ -437,7 +437,7 @@ impl schemars::JsonSchema for Guard {
     fn schema_name() -> String {
         "Guard".to_string()
     }
-    fn json_schema(generator: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+    fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
         generator.subschema_for::<Pred>()
     }
 }
@@ -530,7 +530,7 @@ impl schemars::JsonSchema for Edge {
     fn schema_name() -> String {
         "Edge".to_string()
     }
-    fn json_schema(generator: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+    fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
         #[derive(schemars::JsonSchema)]
         #[serde(untagged)]
         #[allow(dead_code)]

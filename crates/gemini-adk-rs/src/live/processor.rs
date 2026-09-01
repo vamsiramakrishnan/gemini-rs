@@ -173,7 +173,7 @@ impl DroppedFrames {
     /// Currently only consumed by tests; the per-class atomics are read
     /// directly elsewhere. Kept test-gated until a handle accessor surfaces it.
     #[cfg(test)]
-    pub fn total(&self) -> u64 {
+    pub(crate) fn total(&self) -> u64 {
         self.audio.load(Ordering::Relaxed)
             + self.text.load(Ordering::Relaxed)
             + self.transcript.load(Ordering::Relaxed)

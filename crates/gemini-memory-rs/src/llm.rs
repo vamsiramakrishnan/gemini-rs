@@ -397,7 +397,7 @@ fn parse_json<T: serde::de::DeserializeOwned>(raw: &str) -> Result<T, MemoryErro
 /// like a constraint in the code and behaves like free-form generation on the
 /// wire.
 fn schema_for<T: JsonSchema>() -> serde_json::Value {
-    let settings = schemars::gen::SchemaSettings::draft07().with(|s| {
+    let settings = schemars::r#gen::SchemaSettings::draft07().with(|s| {
         s.inline_subschemas = true;
         s.meta_schema = None;
     });

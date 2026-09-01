@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use futures::stream::{self, BoxStream, StreamExt};
+use futures_util::stream::{self, BoxStream, StreamExt};
 
 use crate::artifacts::{ArtifactService, InMemoryArtifactService};
 use crate::error::AgentError;

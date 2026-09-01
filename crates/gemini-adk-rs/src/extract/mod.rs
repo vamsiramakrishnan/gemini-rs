@@ -28,9 +28,9 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use dashmap::DashMap;
-use once_cell::sync::Lazy;
 use regex::Regex;
 use serde_json::Value;
+use std::sync::LazyLock;
 
 use crate::live::extractor::{ExtractionTrigger, FieldPromotion, OnComplete, TurnExtractor};
 use crate::live::transcript::TranscriptTurn;
@@ -39,16 +39,16 @@ use crate::orchestration::Mode as AgentMode;
 use crate::state::State;
 use crate::text::TextAgent;
 
-static MONEY_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"\$?\s?(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d{1,2}))?").unwrap());
-static INT_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"-?\d+").unwrap());
-static DATE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\b\d{4}-\d{2}-\d{2}\b").unwrap());
+static MONEY_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\$?\s?(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d{1,2}))?").unwrap());
+static INT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"-?\d+").unwrap());
+static DATE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b\d{4}-\d{2}-\d{2}\b").unwrap());
 // 12-hour clock with an am/pm marker: "3pm", "3:30 pm".
-static TIME12_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?i)\b(\d{1,2})(?::(\d{2}))?\s*([ap]m)\b").unwrap());
+static TIME12_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\b(\d{1,2})(?::(\d{2}))?\s*([ap]m)\b").unwrap());
 // 24-hour clock: "15:00", "09:30".
-static TIME24_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"\b([01]?\d|2[0-3]):([0-5]\d)\b").unwrap());
+static TIME24_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\b([01]?\d|2[0-3]):([0-5]\d)\b").unwrap());
 
 /// Normalize a clock time found in `text` to a 24-hour `"HH:MM"` string.
 fn parse_time(text: &str) -> Option<String> {
@@ -649,7 +649,7 @@ impl TurnExtractor for RecordExtractor {
                 }),
                 Source::Recognize(_) => None,
             });
-        for resolved in futures::future::join_all(resolves)
+        for resolved in futures_util::future::join_all(resolves)
             .await
             .into_iter()
             .flatten()

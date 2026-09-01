@@ -11,8 +11,8 @@ documentation = "https://docs.rs/gemini-adk-fluent-rs"
 readme = "README.md"
 
 [dependencies]
-gemini-genai-rs = { workspace = true }
-gemini-adk-rs  = { workspace = true }
+gemini-genai-rs = { workspace = true, default-features = false, features = ["live"] }
+gemini-adk-rs  = { workspace = true, default-features = false }
 base64 = "0.22"
 bytes = "1"
 # Targeted features only; tests get `full` via dev-dependencies.
@@ -52,7 +52,9 @@ parking_lot = "0.12"
 
 [features]
 templates = ["gemini-adk-rs/templates"]
-default = []
+# One TLS backend on by default (see gemini-adk-rs); swap with
+# `--no-default-features --features tls-rustls`.
+default = ["tls-native"]
 gemini-llm = ["gemini-adk-rs/gemini-llm"]
 # HTTP tool bindings in `spec` (SessionSpec `tools[].http`).
 http-tools = ["dep:reqwest"]
@@ -69,6 +71,7 @@ sip = ["dep:rsipstack", "dep:tokio-util", "tokio/net", "tokio/rt-multi-thread"]
 tracing-support = ["gemini-adk-rs/tracing-support"]
 # Passthroughs so applications don't need lower-layer dependencies.
 vad-wavekat = ["gemini-adk-rs/vad-wavekat"]
+tls-native = ["gemini-adk-rs/tls-native", "gemini-genai-rs/tls-native"]
 tls-rustls = ["gemini-adk-rs/tls-rustls", "gemini-genai-rs/tls-rustls"]
 otel = ["gemini-adk-rs/otel", "gemini-genai-rs/otel"]
 otel-otlp = ["gemini-adk-rs/otel-otlp", "gemini-genai-rs/otel-otlp"]

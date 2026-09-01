@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 //! Procedural macros for `gemini-adk-rs`.
 //!
 //! This crate provides the [`macro@tool`] attribute macro, which turns a plain

@@ -84,10 +84,8 @@ bytemuck = { version = "1", features = ["derive"] }
 # Concurrency
 parking_lot = "0.12"
 dashmap = "6"
-arc-swap = "1"
 
 # URL parsing
-url = "2"
 
 # HTTP client (optional, for REST APIs). TLS comes from `tls-native`/`tls-rustls`.
 reqwest = { version = "0.12", default-features = false, features = ["json"], optional = true }

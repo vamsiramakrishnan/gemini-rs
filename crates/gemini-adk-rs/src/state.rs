@@ -91,7 +91,7 @@ mod systemtime_epoch_millis {
 
     use serde::{Deserialize, Deserializer, Serializer};
 
-    pub fn serialize<S: Serializer>(t: &SystemTime, ser: S) -> Result<S::Ok, S::Error> {
+    pub(super) fn serialize<S: Serializer>(t: &SystemTime, ser: S) -> Result<S::Ok, S::Error> {
         let millis = t
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
@@ -99,7 +99,7 @@ mod systemtime_epoch_millis {
         ser.serialize_u64(millis)
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(de: D) -> Result<SystemTime, D::Error> {
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(de: D) -> Result<SystemTime, D::Error> {
         let millis = u64::deserialize(de)?;
         Ok(UNIX_EPOCH + Duration::from_millis(millis))
     }
@@ -601,6 +601,12 @@ impl State {
     }
 
     /// Check if a key exists (in delta or inner).
+    ///
+    /// Applies the same transparent `derived:` fallback as [`Self::get`],
+    /// [`Self::get_raw`] and [`Self::with`]: an unprefixed key also matches the
+    /// computed variable `derived:{key}`. Flow predicates (`is_set`, `captured`)
+    /// evaluate through this method, so without the fallback a computed value
+    /// would read as permanently unknown while `get` returned it fine.
     pub fn contains(&self, key: &str) -> bool {
         if self.track_delta {
             match self.delta.get(key).map(|r| r.value().clone()) {
@@ -609,7 +615,21 @@ impl State {
                 None => {}
             }
         }
-        self.inner.contains_key(key)
+        if self.inner.contains_key(key) {
+            return true;
+        }
+        if !key.contains(':') {
+            let derived_key = format!("derived:{key}");
+            if self.track_delta {
+                match self.delta.get(&derived_key).map(|r| r.value().clone()) {
+                    Some(DeltaOp::Put(_)) => return true,
+                    Some(DeltaOp::Delete) => return false,
+                    None => {}
+                }
+            }
+            return self.inner.contains_key(&derived_key);
+        }
+        false
     }
 
     /// Remove a key.
@@ -2142,5 +2162,55 @@ mod proptests {
             tx.rollback();
             prop_assert_eq!(&before, &snapshot(&tx));
         }
+    }
+}
+
+#[cfg(test)]
+mod derived_contains_fallback {
+    //! `contains` must agree with `get` about the transparent `derived:`
+    //! fallback. Flow predicates (`is_set`, `captured`) evaluate through
+    //! `contains`, so a computed variable that `get` returns but `contains`
+    //! denies reads as permanently unknown to the flow.
+    use super::State;
+
+    #[test]
+    fn contains_sees_a_derived_value_through_the_unprefixed_key() {
+        let state = State::new();
+        state.set("derived:risk", 0.85).unwrap();
+        assert_eq!(
+            state.get::<f64>("risk"),
+            Some(0.85),
+            "precondition: get falls back"
+        );
+        assert!(
+            state.contains("risk"),
+            "contains must fall back the same way get does"
+        );
+    }
+
+    #[test]
+    fn contains_fallback_respects_delta_tracking_and_tombstones() {
+        let state = State::new();
+        state.set("derived:score", 1u32).unwrap();
+        let tracked = state.with_delta_tracking();
+        assert!(
+            tracked.contains("score"),
+            "inner derived value visible through tracked view"
+        );
+        tracked.remove("derived:score");
+        assert!(
+            !tracked.contains("score"),
+            "a tombstone on the derived key shadows inner"
+        );
+    }
+
+    #[test]
+    fn contains_does_not_fall_back_for_prefixed_keys() {
+        let state = State::new();
+        state.set("derived:flag", true).unwrap();
+        assert!(
+            !state.contains("session:flag"),
+            "only unprefixed keys get the fallback"
+        );
     }
 }
