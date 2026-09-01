@@ -139,7 +139,7 @@ pub fn build_session_config(model: Option<&str>) -> Result<SessionConfig, String
     };
 
     let effective_model = model
-        .map(|s| s.to_string())
+        .map(std::string::ToString::to_string)
         .or_else(|| std::env::var("GEMINI_LIVE_MODEL").ok())
         .or_else(|| std::env::var("GEMINI_MODEL").ok());
 

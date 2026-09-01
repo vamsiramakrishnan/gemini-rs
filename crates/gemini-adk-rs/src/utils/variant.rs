@@ -41,6 +41,10 @@ fn classify(value: Option<&str>) -> GoogleLlmVariant {
 }
 
 #[cfg(test)]
+#[allow(
+    unsafe_code,
+    reason = "tests exercise env-driven platform detection and must mutate the process environment"
+)]
 mod tests {
     use super::*;
 
@@ -88,11 +92,11 @@ mod tests {
     #[test]
     fn the_variable_is_the_one_that_is_read() {
         let restore = std::env::var("GOOGLE_GENAI_USE_VERTEXAI").ok();
-        std::env::set_var("GOOGLE_GENAI_USE_VERTEXAI", "true");
+        unsafe { std::env::set_var("GOOGLE_GENAI_USE_VERTEXAI", "true") };
         let observed = get_google_llm_variant();
         match restore {
-            Some(value) => std::env::set_var("GOOGLE_GENAI_USE_VERTEXAI", value),
-            None => std::env::remove_var("GOOGLE_GENAI_USE_VERTEXAI"),
+            Some(value) => unsafe { std::env::set_var("GOOGLE_GENAI_USE_VERTEXAI", value) },
+            None => unsafe { std::env::remove_var("GOOGLE_GENAI_USE_VERTEXAI") },
         }
         assert_eq!(observed, GoogleLlmVariant::VertexAi);
     }

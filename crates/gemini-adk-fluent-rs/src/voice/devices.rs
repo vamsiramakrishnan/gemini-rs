@@ -10,7 +10,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use gemini_adk_rs::live::LiveHandle;
 use tokio::sync::mpsc;
 
-use super::{downmix, pump, Playback};
+use super::{Playback, downmix, pump};
 
 /// Errors from the device layer.
 #[derive(Debug, thiserror::Error)]
@@ -173,7 +173,7 @@ fn build_input_stream(
         other => {
             return Err(VoiceIoError::Backend(format!(
                 "unsupported input sample format {other:?}"
-            )))
+            )));
         }
     };
     Ok(stream)
@@ -220,7 +220,7 @@ fn build_output_stream(
         other => {
             return Err(VoiceIoError::Backend(format!(
                 "unsupported output sample format {other:?}"
-            )))
+            )));
         }
     };
     Ok(stream)

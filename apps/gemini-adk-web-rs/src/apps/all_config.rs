@@ -73,7 +73,7 @@ fn parse_config(raw: Option<&str>, voice_override: Option<&str>) -> AllConfigOpt
 
     // The voice from the Start message takes precedence over JSON config.
     if voice_override.is_some() {
-        config.voice = voice_override.map(|s| s.to_string());
+        config.voice = voice_override.map(std::string::ToString::to_string);
     }
 
     config
@@ -191,27 +191,27 @@ impl DemoApp for AllConfig {
         }
 
         // Custom tools.
-        if let Some(ref tool_defs) = opts.tools {
-            if !tool_defs.is_empty() {
-                let declarations: Vec<FunctionDeclaration> = tool_defs
-                    .iter()
-                    .map(|td| FunctionDeclaration {
-                        name: td.name.clone(),
-                        description: td.description.clone(),
-                        parameters: Some(json!({
-                            "type": "object",
-                            "properties": {
-                                "input": {
-                                    "type": "string",
-                                    "description": "Input for the tool"
-                                }
+        if let Some(ref tool_defs) = opts.tools
+            && !tool_defs.is_empty()
+        {
+            let declarations: Vec<FunctionDeclaration> = tool_defs
+                .iter()
+                .map(|td| FunctionDeclaration {
+                    name: td.name.clone(),
+                    description: td.description.clone(),
+                    parameters: Some(json!({
+                        "type": "object",
+                        "properties": {
+                            "input": {
+                                "type": "string",
+                                "description": "Input for the tool"
                             }
-                        })),
-                        behavior: Some(FunctionCallingBehavior::NonBlocking),
-                    })
-                    .collect();
-                live = live.add_tool(Tool::functions(declarations));
-            }
+                        }
+                    })),
+                    behavior: Some(FunctionCallingBehavior::NonBlocking),
+                })
+                .collect();
+            live = live.add_tool(Tool::functions(declarations));
         }
 
         // Context window compression.

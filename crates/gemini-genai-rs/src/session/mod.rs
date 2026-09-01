@@ -11,7 +11,7 @@ pub mod traits;
 
 // Re-export all public types at the `session::` level for backward compatibility.
 pub use errors::{AuthError, SessionError, SetupError, WebSocketError};
-pub use events::{recv_event, ResumeInfo, SessionCommand, SessionEvent, Turn};
+pub use events::{ResumeInfo, SessionCommand, SessionEvent, Turn, recv_event};
 pub use handle::SessionHandle;
 pub use state::{SessionPhase, SessionState};
 pub use traits::{SessionReader, SessionWriter};

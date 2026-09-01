@@ -1,6 +1,6 @@
 //! Pluggable session store trait + in-memory default implementation.
 
-use crate::types::{now_iso8601, SessionData};
+use crate::types::{SessionData, now_iso8601};
 use std::collections::HashMap;
 
 /// Trait for session storage backends.

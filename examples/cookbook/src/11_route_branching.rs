@@ -103,7 +103,7 @@ async fn main() {
     let _ = state.set("account_id", "ACC-12345");
 
     let result = router.run(&state).await.unwrap();
-    println!("Router selected: {}\n", result);
+    println!("Router selected: {result}\n");
 
     // ── Scenario 2: Technical support ────────────────────────────────────
 
@@ -113,7 +113,7 @@ async fn main() {
     let _ = state.set("issue_description", "Wi-Fi keeps disconnecting");
 
     let result = router.run(&state).await.unwrap();
-    println!("Router selected: {}\n", result);
+    println!("Router selected: {result}\n");
 
     // ── Scenario 3: Sales intent (no department set) ─────────────────────
 
@@ -123,7 +123,7 @@ async fn main() {
     let _ = state.set("product_interest", "Enterprise Pro");
 
     let result = router.run(&state).await.unwrap();
-    println!("Router selected: {}\n", result);
+    println!("Router selected: {result}\n");
 
     // ── Scenario 4: No matching route → default ──────────────────────────
 
@@ -131,7 +131,7 @@ async fn main() {
     let state = State::new();
 
     let result = router.run(&state).await.unwrap();
-    println!("Router selected: {}\n", result);
+    println!("Router selected: {result}\n");
 
     // ── Demonstrate S:: state predicates ─────────────────────────────────
     // S::is_true, S::eq, S::one_of provide ergonomic predicate construction.

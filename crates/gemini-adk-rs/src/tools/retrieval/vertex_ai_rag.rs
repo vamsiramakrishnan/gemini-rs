@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::base::{BaseRetrievalTool, RetrievalResult};
 use crate::error::ToolError;
@@ -372,9 +372,10 @@ mod tests {
         let cfg = test_config();
         assert_eq!(cfg.project, "my-proj");
         assert_eq!(cfg.location, "us-central1");
-        assert!(cfg
-            .retrieve_contexts_url()
-            .contains("us-central1-aiplatform.googleapis.com"));
+        assert!(
+            cfg.retrieve_contexts_url()
+                .contains("us-central1-aiplatform.googleapis.com")
+        );
         assert!(cfg.retrieve_contexts_url().ends_with(":retrieveContexts"));
     }
 
@@ -401,9 +402,11 @@ mod tests {
         assert_eq!(body["query"]["text"], "q");
         // No top_k → no ragRetrievalConfig.
         assert!(body["query"].get("ragRetrievalConfig").is_none());
-        assert!(body["vertexRagStore"]
-            .get("vectorDistanceThreshold")
-            .is_none());
+        assert!(
+            body["vertexRagStore"]
+                .get("vectorDistanceThreshold")
+                .is_none()
+        );
     }
 
     #[test]

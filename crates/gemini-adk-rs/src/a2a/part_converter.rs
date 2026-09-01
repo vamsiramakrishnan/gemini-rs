@@ -52,10 +52,10 @@ pub fn to_a2a_part(part: &Part, long_running_tool_ids: &[String]) -> Option<A2aP
                 ADK_TYPE_KEY.to_string(),
                 serde_json::json!(DATA_TYPE_FUNCTION_CALL),
             );
-            if let Some(id) = &function_call.id {
-                if long_running_tool_ids.contains(id) {
-                    metadata.insert(ADK_IS_LONG_RUNNING_KEY.to_string(), serde_json::json!(true));
-                }
+            if let Some(id) = &function_call.id
+                && long_running_tool_ids.contains(id)
+            {
+                metadata.insert(ADK_IS_LONG_RUNNING_KEY.to_string(), serde_json::json!(true));
             }
             Some(A2aPart::Data {
                 data: serde_json::json!({

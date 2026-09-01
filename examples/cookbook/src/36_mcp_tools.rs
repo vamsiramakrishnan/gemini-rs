@@ -165,7 +165,7 @@ fn main() {
         .with_filter(vec!["search".to_string(), "summarize".to_string()]);
 
     match toolset_filtered.filter() {
-        Some(names) => println!("  McpToolset (filtered):   {:?}", names),
+        Some(names) => println!("  McpToolset (filtered):   {names:?}"),
         None => println!("  McpToolset (filtered):   no filter"),
     }
     println!();
@@ -255,7 +255,9 @@ fn main() {
 
     println!("  Optional features:");
     println!("    mcp-http   \u{2192} enables SSE/StreamableHTTP transport via reqwest");
-    println!("               \u{2192} add to Cargo.toml: gemini-adk-rs = {{ features = [\"mcp-http\"] }}\n");
+    println!(
+        "               \u{2192} add to Cargo.toml: gemini-adk-rs = {{ features = [\"mcp-http\"] }}\n"
+    );
 
     println!("  McpConnectionParams::Sse {{...}} always compiles, but calling");
     println!("  list_tools() / call_tool() on an Sse manager without the feature");

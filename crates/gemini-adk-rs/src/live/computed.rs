@@ -187,8 +187,7 @@ impl ComputedRegistry {
                 .map(|i| self.vars[i].key.as_str())
                 .collect();
             Err(format!(
-                "Cycle detected among computed variables: {:?}",
-                cycle_vars
+                "Cycle detected among computed variables: {cycle_vars:?}"
             ))
         }
     }
@@ -276,7 +275,7 @@ impl ComputedRegistry {
                 .filter(|&i| in_degree[i] > 0)
                 .map(|i| self.vars[i].key.as_str())
                 .collect();
-            panic!("Cycle detected among computed variables: {:?}", cycle_vars);
+            panic!("Cycle detected among computed variables: {cycle_vars:?}");
         }
 
         // Reorder vars according to topological sort.
@@ -518,11 +517,7 @@ mod tests {
             dependencies: vec!["app:flag".into()],
             compute: Arc::new(|state| {
                 let flag: bool = state.get("app:flag")?;
-                if flag {
-                    Some(json!("yes"))
-                } else {
-                    None
-                }
+                if flag { Some(json!("yes")) } else { None }
             }),
         });
 

@@ -1,3 +1,4 @@
+#![warn(unreachable_pub)]
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 //! # gemini-adk-fluent-rs
@@ -115,7 +116,7 @@ pub mod agents {
     pub use gemini_adk_rs::agent::Agent as AgentTrait;
     pub use gemini_adk_rs::agent_session::*;
     pub use gemini_adk_rs::orchestration::{
-        self, call as call_agent, provenance, Mode as AgentMode, Resolver,
+        self, Mode as AgentMode, Resolver, call as call_agent, provenance,
     };
 }
 
@@ -170,7 +171,7 @@ pub mod prelude {
 
     // ── Builders, composition algebra, operators, patterns (headline DX) ──
     pub use crate::builder::*;
-    pub use crate::compose::{Ctx, A, C, E, G, M, P, S, T};
+    pub use crate::compose::{A, C, Ctx, E, G, M, P, S, T};
     pub use crate::live::Live;
     // Dynamic instructions (ADK instruction-provider pattern) + tool media.
     pub use crate::operators::*;
@@ -181,8 +182,8 @@ pub mod prelude {
     pub use gemini_adk_rs::tool::media as tool_media;
     // Build-time validation DX (contract checking, data-flow inference, harness).
     pub use crate::testing::{
-        check_contracts, check_live, diagnose, infer_data_flow, AgentHarness, ContractViolation,
-        DataFlowEdge, LiveViolation,
+        AgentHarness, ContractViolation, DataFlowEdge, LiveViolation, check_contracts, check_live,
+        diagnose, infer_data_flow,
     };
 
     // The L1 `gemini_adk_rs::agent::Agent` *trait* collides with the L2 `Agent`

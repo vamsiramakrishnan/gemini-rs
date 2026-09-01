@@ -8,8 +8,8 @@
 use chrono::{DateTime, Duration, Utc};
 
 use crate::core::{
-    meets_promotion_criteria, CanonicalMemory, Explicitness, MemoryStatus, PromotionConfig,
-    PromotionEvidence,
+    CanonicalMemory, Explicitness, MemoryStatus, PromotionConfig, PromotionEvidence,
+    meets_promotion_criteria,
 };
 
 /// What a promotion sweep decided about one staged record.

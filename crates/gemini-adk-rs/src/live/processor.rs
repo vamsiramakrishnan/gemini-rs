@@ -6,8 +6,8 @@
 //! **Telemetry lane**: SessionSignals + SessionTelemetry (debounced state writes,
 //!   runs on its own broadcast receiver — zero work on the router hot path)
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -493,24 +493,24 @@ pub(crate) fn spawn_event_processor(
     });
 
     // Optional timer task for sustained temporal patterns
-    if let Some(ref temporal_ref) = timer_temporal {
-        if temporal_ref.needs_timer() {
-            let t = temporal_ref.clone();
-            let cancel = timer_cancel.clone();
-            tokio::spawn(async move {
-                let mut interval = tokio::time::interval(Duration::from_millis(500));
-                loop {
-                    tokio::select! {
-                        _ = cancel.cancelled() => break,
-                        _ = interval.tick() => {
-                            for action in t.check_all(&timer_state, None, &timer_writer) {
-                                tokio::spawn(action);
-                            }
+    if let Some(ref temporal_ref) = timer_temporal
+        && temporal_ref.needs_timer()
+    {
+        let t = temporal_ref.clone();
+        let cancel = timer_cancel.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_millis(500));
+            loop {
+                tokio::select! {
+                    _ = cancel.cancelled() => break,
+                    _ = interval.tick() => {
+                        for action in t.check_all(&timer_state, None, &timer_writer) {
+                            tokio::spawn(action);
                         }
                     }
                 }
-            });
-        }
+            }
+        });
     }
 
     // Handed to `LiveHandle` so `send_text` can record a typed turn on the
@@ -564,7 +564,7 @@ pub(crate) fn spawn_telemetry_lane(
                                 SessionEvent::VoiceActivityStart => {
                                     telemetry.mark_turn_start();
                                 }
-                                SessionEvent::Usage(ref usage) => {
+                                SessionEvent::Usage(usage) => {
                                     telemetry.record_usage(
                                         usage.total_token_count,
                                         usage.prompt_token_count,

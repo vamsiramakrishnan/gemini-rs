@@ -294,7 +294,7 @@ pub fn read_genai_source(source_dir: &Path) -> Result<GenaiSchema, String> {
 
     let ts_files: Vec<_> = WalkDir::new(source_dir)
         .into_iter()
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .filter(|e| {
             let p = e.path();
             p.extension().is_some_and(|ext| ext == "ts")
@@ -315,7 +315,9 @@ pub fn read_genai_source(source_dir: &Path) -> Result<GenaiSchema, String> {
         let interfaces = ts::extract_interfaces(&content);
         for iface in &interfaces {
             let has_wire = wire_types.contains_key(iface.name.as_str());
-            let wire_type = wire_types.get(iface.name.as_str()).map(|s| s.to_string());
+            let wire_type = wire_types
+                .get(iface.name.as_str())
+                .map(std::string::ToString::to_string);
             let (fields, _callbacks) = ts::parse_fields(&iface.body);
 
             types.push(GenaiTypeDef {
@@ -332,7 +334,9 @@ pub fn read_genai_source(source_dir: &Path) -> Result<GenaiSchema, String> {
         let extracted_enums = ts::extract_enums(&content);
         for (name, jsdoc, variants) in &extracted_enums {
             let has_wire = enums_map.contains_key(name.as_str());
-            let wire_type = enums_map.get(name.as_str()).map(|s| s.to_string());
+            let wire_type = enums_map
+                .get(name.as_str())
+                .map(std::string::ToString::to_string);
 
             enums.push(GenaiEnumDef {
                 name: name.clone(),
@@ -355,7 +359,9 @@ pub fn read_genai_source(source_dir: &Path) -> Result<GenaiSchema, String> {
 
         let extracted_helpers = ts::extract_helper_functions(&content);
         for (name, signature) in &extracted_helpers {
-            let wire_equiv = helpers.get(name.as_str()).map(|s| s.to_string());
+            let wire_equiv = helpers
+                .get(name.as_str())
+                .map(std::string::ToString::to_string);
             helper_defs.push(GenaiHelperDef {
                 name: name.clone(),
                 ts_signature: signature.clone(),
@@ -424,13 +430,13 @@ fn map_genai_alias_to_rust(ts_def: &str, wire_types: &HashMap<&str, &str>) -> St
     let trimmed = ts_def.trim();
 
     if trimmed.contains('|') {
-        let parts: Vec<&str> = trimmed.split('|').map(|s| s.trim()).collect();
+        let parts: Vec<&str> = trimmed.split('|').map(str::trim).collect();
 
         for part in &parts {
             let cleaned = part.trim_end_matches("[]");
             if let Some(wire) = wire_types.get(cleaned) {
                 if part.ends_with("[]") {
-                    return format!("Vec<{}>", wire);
+                    return format!("Vec<{wire}>");
                 }
                 return wire.to_string();
             }

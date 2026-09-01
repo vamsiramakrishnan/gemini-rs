@@ -131,10 +131,10 @@ fn evaluate_simple_expr(expr: &str) -> f64 {
             current.push(ch);
         }
     }
-    if !current.is_empty() {
-        if let Ok(n) = current.trim().parse::<f64>() {
-            nums.push(n);
-        }
+    if !current.is_empty()
+        && let Ok(n) = current.trim().parse::<f64>()
+    {
+        nums.push(n);
     }
 
     if nums.is_empty() {

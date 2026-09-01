@@ -70,7 +70,7 @@ pub fn review_loop(author: AgentBuilder, reviewer: AgentBuilder, max_rounds: usi
         until: Some(LoopPredicate::new(|state| {
             state
                 .get("approved")
-                .and_then(|v| v.as_bool())
+                .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false)
         })),
     })
@@ -270,7 +270,7 @@ pub fn supervised(worker: AgentBuilder, supervisor: AgentBuilder, max_rounds: us
         until: Some(LoopPredicate::new(|state| {
             state
                 .get("approved")
-                .and_then(|v| v.as_bool())
+                .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false)
         })),
     })
@@ -304,7 +304,10 @@ pub fn supervised_keyed(
         max: max_revisions,
         middleware: Vec::new(),
         until: Some(LoopPredicate::new(move |state| {
-            state.get(&key).and_then(|v| v.as_bool()).unwrap_or(false)
+            state
+                .get(&key)
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
         })),
     })
 }

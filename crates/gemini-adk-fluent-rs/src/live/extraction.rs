@@ -3,8 +3,8 @@
 use std::future::Future;
 use std::sync::Arc;
 
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 use gemini_adk_rs::live::extractor::{ExtractionTrigger, LlmExtractor, TurnExtractor};
 use gemini_adk_rs::llm::BaseLlm;

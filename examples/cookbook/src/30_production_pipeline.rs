@@ -88,12 +88,23 @@ async fn main() {
             "status": "pending"
         }))
         >> S::compute("debt_to_income", |s| {
-            let income = s.get("income").and_then(|v| v.as_f64()).unwrap_or(1.0);
-            let loan = s.get("loan_amount").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let income = s
+                .get("income")
+                .and_then(serde_json::Value::as_f64)
+                .unwrap_or(1.0);
+            let loan = s
+                .get("loan_amount")
+                .and_then(serde_json::Value::as_f64)
+                .unwrap_or(0.0);
             json!((loan / income * 100.0).round() / 100.0)
         })
         >> S::branch(
-            |s| s.get("loan_amount").and_then(|v| v.as_f64()).unwrap_or(0.0) > 100_000.0,
+            |s| {
+                s.get("loan_amount")
+                    .and_then(serde_json::Value::as_f64)
+                    .unwrap_or(0.0)
+                    > 100_000.0
+            },
             S::set("requires_manual_review", json!(true)),
             S::set("requires_manual_review", json!(false)),
         );
@@ -291,7 +302,7 @@ async fn main() {
     let bad_violations = output_guards.check_all(bad_output);
     println!("  Bad output: {} violations", bad_violations.len());
     for v in &bad_violations {
-        println!("    - {}", v);
+        println!("    - {v}");
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -335,7 +346,7 @@ async fn main() {
     let scores = eval_criteria.score_all(sample, "approved");
     println!("\nSample scores:");
     for (name, score) in &scores {
-        println!("  {}: {:.2}", name, score);
+        println!("  {name}: {score:.2}");
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -373,13 +384,13 @@ async fn main() {
         for v in items {
             match v {
                 ContractViolation::UnproducedKey { consumer, key } => {
-                    println!("    {} reads '{}' (unproduced)", consumer, key);
+                    println!("    {consumer} reads '{key}' (unproduced)");
                 }
                 ContractViolation::DuplicateWrite { agents, key } => {
-                    println!("    '{}' written by {:?}", key, agents);
+                    println!("    '{key}' written by {agents:?}");
                 }
                 ContractViolation::OrphanedOutput { producer, key } => {
-                    println!("    {} writes '{}' (orphaned)", producer, key);
+                    println!("    {producer} writes '{key}' (orphaned)");
                 }
             }
         }
@@ -452,11 +463,11 @@ async fn main() {
             if guard_violations.is_empty() {
                 println!("Output passed all {} guard checks.", output_guards.len());
             } else {
-                println!("Guard violations: {:?}", guard_violations);
+                println!("Guard violations: {guard_violations:?}");
             }
         }
         Err(e) => {
-            println!("Pipeline error: {}", e);
+            println!("Pipeline error: {e}");
         }
     }
 
@@ -483,9 +494,9 @@ async fn main() {
                 serde_json::Value::String(s) if s.len() > 60 => {
                     format!("\"{}...\"", &s[..57])
                 }
-                other => format!("{}", other),
+                other => format!("{other}"),
             };
-            println!("  {}: {}", key, display);
+            println!("  {key}: {display}");
         }
     }
 

@@ -24,7 +24,7 @@ use gemini_memory_rs::core::{
 };
 use gemini_memory_rs::engine::MemoryEngine;
 #[cfg(feature = "gemini-llm")]
-use gemini_memory_rs::llm::{extraction_llm, GeminiObservationExtractor, GeminiPlanExtractor};
+use gemini_memory_rs::llm::{GeminiObservationExtractor, GeminiPlanExtractor, extraction_llm};
 use gemini_memory_rs::okf::{FsStore, OkfRepository};
 
 /// The extraction model these tests drive.

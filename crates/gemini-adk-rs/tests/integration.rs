@@ -4,8 +4,8 @@
 //! public API only.  They use mock SessionWriters so no real WebSocket or
 //! Gemini Live connection is required.
 
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -15,6 +15,7 @@ use tokio::sync::broadcast;
 use gemini_genai_rs::prelude::{Content, FunctionCall, FunctionResponse};
 use gemini_genai_rs::session::{SessionError, SessionEvent, SessionWriter};
 
+use gemini_adk_rs::LlmAgent;
 use gemini_adk_rs::agent::Agent;
 use gemini_adk_rs::agent_session::AgentSession;
 use gemini_adk_rs::agent_tool::AgentTool;
@@ -23,7 +24,6 @@ use gemini_adk_rs::error::AgentError;
 use gemini_adk_rs::middleware::{Middleware, MiddlewareChain};
 use gemini_adk_rs::runner::Runner;
 use gemini_adk_rs::tool::{SimpleTool, ToolFunction};
-use gemini_adk_rs::LlmAgent;
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -305,8 +305,7 @@ async fn middleware_chain_called_in_order() {
     let log = order_log.lock().clone();
     assert!(
         log.len() >= 2,
-        "both counting middleware should have been called, got {:?}",
-        log
+        "both counting middleware should have been called, got {log:?}"
     );
     let first_idx = log.iter().position(|s| s == "first").unwrap();
     let second_idx = log.iter().position(|s| s == "second").unwrap();
@@ -368,9 +367,7 @@ async fn events_emitted_in_order() {
 
     assert!(
         turn_idx < completed_idx,
-        "TurnComplete (idx={}) should come before AgentCompleted (idx={})",
-        turn_idx,
-        completed_idx
+        "TurnComplete (idx={turn_idx}) should come before AgentCompleted (idx={completed_idx})"
     );
 
     // AgentCompleted should be the last event.
@@ -402,8 +399,7 @@ impl Agent for StateReadingAgent {
 
         // Emit the text back as output.
         ctx.emit(AgentEvent::Session(SessionEvent::TextDelta(format!(
-            "got: {}",
-            request
+            "got: {request}"
         ))));
         Ok(())
     }

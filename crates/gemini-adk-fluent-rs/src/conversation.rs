@@ -1118,13 +1118,13 @@ fn lower_flow(stages: &[StageSpec], require: &[String]) -> Result<CompiledFlow, 
                 )));
             }
         }
-        if let Some(target) = s.repair.as_ref().and_then(|r| r.escalate_to.as_ref()) {
-            if !ids.contains(target.as_str()) {
-                return Err(ConversationError::Spec(format!(
-                    "stage '{}' escalates to unknown stage '{}'",
-                    s.id, target
-                )));
-            }
+        if let Some(target) = s.repair.as_ref().and_then(|r| r.escalate_to.as_ref())
+            && !ids.contains(target.as_str())
+        {
+            return Err(ConversationError::Spec(format!(
+                "stage '{}' escalates to unknown stage '{}'",
+                s.id, target
+            )));
         }
     }
     for r in require {
@@ -1167,10 +1167,10 @@ fn lower_flow(stages: &[StageSpec], require: &[String]) -> Result<CompiledFlow, 
             fb = fb.after(d);
         }
 
-        if let Some(inc) = incoming.get(s.id.as_str()) {
-            if let Some(gate) = any_of(inc.iter().map(|(_, w)| w.clone()).collect()) {
-                fb = fb.gate(gate);
-            }
+        if let Some(inc) = incoming.get(s.id.as_str())
+            && let Some(gate) = any_of(inc.iter().map(|(_, w)| w.clone()).collect())
+        {
+            fb = fb.gate(gate);
         }
 
         if let Some(say) = &s.say {
@@ -1181,10 +1181,10 @@ fn lower_flow(stages: &[StageSpec], require: &[String]) -> Result<CompiledFlow, 
         }
 
         let mut allow: Vec<String> = s.allow.clone();
-        if let Some(c) = &s.commit {
-            if !allow.contains(&c.tool) {
-                allow.push(c.tool.clone());
-            }
+        if let Some(c) = &s.commit
+            && !allow.contains(&c.tool)
+        {
+            allow.push(c.tool.clone());
         }
         if !allow.is_empty() {
             fb = fb.allow(allow);
@@ -1229,26 +1229,26 @@ fn compile_spec(
     // Apply cross-cutting policies. SafetyHandoff lowers to a `safety` digression
     // (terminate on intent); Redact/Commit are carried for the runtime.
     for policy in spec.policies.clone() {
-        if let crate::policy::Policy::SafetyHandoff { intents } = policy {
-            if let Some(trigger) = any_of(
+        if let crate::policy::Policy::SafetyHandoff { intents } = policy
+            && let Some(trigger) = any_of(
                 intents
                     .iter()
                     .map(|i| Guard::is_true(format!("intent:{i}")))
                     .collect(),
-            ) {
-                spec.overlays.push(OverlaySpec {
-                    name: "safety".into(),
-                    trigger,
-                    stages: vec![StageSpec {
-                        id: "safety_handoff".into(),
-                        say: Some("Safety concern detected — hand off to a human now.".into()),
-                        terminal: true,
-                        ..Default::default()
-                    }],
-                    require: Vec::new(),
-                    resume: Resume::Terminate,
-                });
-            }
+            )
+        {
+            spec.overlays.push(OverlaySpec {
+                name: "safety".into(),
+                trigger,
+                stages: vec![StageSpec {
+                    id: "safety_handoff".into(),
+                    say: Some("Safety concern detected — hand off to a human now.".into()),
+                    terminal: true,
+                    ..Default::default()
+                }],
+                require: Vec::new(),
+                resume: Resume::Terminate,
+            });
         }
     }
 

@@ -13,10 +13,10 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use gemini_adk_rs::live::replay::{collect_events_until_idle, replay_session};
 use gemini_adk_rs::live::LiveSessionBuilder;
+use gemini_adk_rs::live::replay::{collect_events_until_idle, replay_session};
 use gemini_adk_rs::state::{State, StateMutation};
-use gemini_genai_rs::prelude::{read_wire_log, SessionConfig, WireDirection};
+use gemini_genai_rs::prelude::{SessionConfig, WireDirection, read_wire_log};
 
 pub async fn replay(
     wire_log_path: &str,

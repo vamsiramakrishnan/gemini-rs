@@ -282,7 +282,7 @@ impl WorkflowBuilder {
     /// Set dependencies for the most recently added node. Node runs after all deps are terminal.
     pub fn after(mut self, deps: &[&str]) -> Self {
         if let Some(node) = self.nodes.last_mut() {
-            node.dependencies = deps.iter().map(|d| d.to_string()).collect();
+            node.dependencies = deps.iter().map(std::string::ToString::to_string).collect();
         }
         self
     }
@@ -363,10 +363,7 @@ impl WorkflowBuilder {
                 if !visited.contains(dep) {
                     self.dfs(dep, visited, rec_stack)?;
                 } else if rec_stack.contains(dep) {
-                    return Err(WorkflowError::CycleDetected(format!(
-                        "{} -> {}",
-                        node_id, dep
-                    )));
+                    return Err(WorkflowError::CycleDetected(format!("{node_id} -> {dep}")));
                 }
             }
         }
@@ -499,7 +496,7 @@ impl Workflow {
                             join_set.spawn(async move {
                                 let value = match controller.wait_for_decision(&node_id).await {
                                     Ok(()) => Ok(Value::Bool(true)),
-                                    Err(reason) => Err(format!("Rejected: {}", reason)),
+                                    Err(reason) => Err(format!("Rejected: {reason}")),
                                 };
                                 (node_id, value)
                             });
@@ -527,7 +524,7 @@ impl Workflow {
                         Ok(value) => {
                             outputs.insert(node_id.clone(), value.clone());
                             // Also write to state under workflow:<id>.
-                            let _ = state.set(format!("workflow:{}", node_id), value);
+                            let _ = state.set(format!("workflow:{node_id}"), value);
                             finished.insert(node_id);
                         }
                         Err(e) => {
@@ -573,7 +570,7 @@ impl TextAgent for EchoAgent {
 
     async fn run(&self, state: &State) -> Result<String, AgentError> {
         let input: String = state.get("input").unwrap_or_else(|| "empty".to_string());
-        Ok(format!("Echo: {}", input))
+        Ok(format!("Echo: {input}"))
     }
 }
 
@@ -596,14 +593,14 @@ mod tests {
             })
             .function("b", |state| async move {
                 let a_val: Option<String> = state.get("a_val");
-                let b_val = format!("value_b_from_{:?}", a_val);
+                let b_val = format!("value_b_from_{a_val:?}");
                 state.set("b_val", b_val).map_err(|e| e.to_string())?;
                 Ok(json!({"b": "done"}))
             })
             .after(&["a"])
             .function("c", |state| async move {
                 let a_val: Option<String> = state.get("a_val");
-                let c_val = format!("value_c_from_{:?}", a_val);
+                let c_val = format!("value_c_from_{a_val:?}");
                 state.set("c_val", c_val).map_err(|e| e.to_string())?;
                 Ok(json!({"c": "done"}))
             })
@@ -611,7 +608,7 @@ mod tests {
             .function("d", |state| async move {
                 let b_val: Option<String> = state.get("b_val");
                 let c_val: Option<String> = state.get("c_val");
-                let d_val = format!("value_d_from_b_{:?}_c_{:?}", b_val, c_val);
+                let d_val = format!("value_d_from_b_{b_val:?}_c_{c_val:?}");
                 state.set("d_val", d_val).map_err(|e| e.to_string())?;
                 Ok(json!({"d": "done"}))
             })
@@ -750,7 +747,7 @@ mod tests {
             WorkflowError::Rejected { node_id, .. } => {
                 assert_eq!(node_id, "review");
             }
-            e => panic!("Expected Rejected, got {:?}", e),
+            e => panic!("Expected Rejected, got {e:?}"),
         }
     }
 
@@ -765,7 +762,7 @@ mod tests {
         // Must error immediately instead of hanging on an unreachable gate.
         match wf.run(&state).await.unwrap_err() {
             WorkflowError::ApprovalWithoutController(id) => assert_eq!(id, "gate"),
-            e => panic!("Expected ApprovalWithoutController, got {:?}", e),
+            e => panic!("Expected ApprovalWithoutController, got {e:?}"),
         }
     }
 

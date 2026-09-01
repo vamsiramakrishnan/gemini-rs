@@ -18,7 +18,7 @@ use std::sync::Arc;
 use gemini_adk_fluent_rs::compose::tools::ToolComposite;
 use gemini_adk_fluent_rs::live::Live;
 
-use super::tools::{manage_memory_tool, recall_context_tool, MEMORY_TOOLS};
+use super::tools::{MEMORY_TOOLS, manage_memory_tool, recall_context_tool};
 use super::turn_extractor::{MemorySlot, MemoryTurnExtractor};
 use crate::engine::MemorySession;
 

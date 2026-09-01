@@ -294,7 +294,7 @@ impl C {
     /// // Produces: "[Context: name=John, account_balance=$5230, risk=0.72]"
     /// ```
     pub fn from_state(keys: &[&str]) -> ContextPolicy {
-        let owned_keys: Vec<String> = keys.iter().map(|k| k.to_string()).collect();
+        let owned_keys: Vec<String> = keys.iter().map(std::string::ToString::to_string).collect();
         ContextPolicy::new("from_state", move |history| {
             // Note: This policy captures keys but cannot access State at filter time.
             // The actual state injection happens at the Live session level via
@@ -303,7 +303,7 @@ impl C {
             let mut result = Vec::new();
             if !owned_keys.is_empty() {
                 let key_list = owned_keys.join(", ");
-                result.push(Content::user(format!("[Context keys: {}]", key_list)));
+                result.push(Content::user(format!("[Context keys: {key_list}]")));
             }
             result.extend(history.iter().cloned());
             result
@@ -373,7 +373,10 @@ impl C {
     /// Redact patterns from context messages.
     pub fn redact(patterns: &[&str]) -> ContextPolicy {
         use gemini_genai_rs::prelude::Part;
-        let patterns: Vec<String> = patterns.iter().map(|p| p.to_string()).collect();
+        let patterns: Vec<String> = patterns
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect();
         ContextPolicy::new("redact", move |history| {
             history
                 .iter()
@@ -414,7 +417,7 @@ impl C {
     pub fn summarize(prompt: &str) -> ContextPolicy {
         let prompt = prompt.to_string();
         ContextPolicy::new("summarize", move |history| {
-            let mut result = vec![Content::user(format!("[Summarize context: {}]", prompt))];
+            let mut result = vec![Content::user(format!("[Summarize context: {prompt}]"))];
             result.extend(history.iter().cloned());
             result
         })
@@ -433,8 +436,7 @@ impl C {
         let key = query_key.to_string();
         ContextPolicy::new("relevant", move |history| {
             let mut result = vec![Content::user(format!(
-                "[Filter context relevant to state key: {}]",
-                key
+                "[Filter context relevant to state key: {key}]"
             ))];
             result.extend(history.iter().cloned());
             result
@@ -451,7 +453,7 @@ impl C {
     /// C::extract(&["customer_name", "order_id", "complaint"])
     /// ```
     pub fn extract(keys: &[&str]) -> ContextPolicy {
-        let owned_keys: Vec<String> = keys.iter().map(|k| k.to_string()).collect();
+        let owned_keys: Vec<String> = keys.iter().map(std::string::ToString::to_string).collect();
         ContextPolicy::new("extract", move |history| {
             let mut result = vec![Content::user(format!(
                 "[Extract from context: {}]",
@@ -474,7 +476,7 @@ impl C {
     pub fn distill(instruction: &str) -> ContextPolicy {
         let instruction = instruction.to_string();
         ContextPolicy::new("distill", move |history| {
-            let mut result = vec![Content::user(format!("[Distill context: {}]", instruction))];
+            let mut result = vec![Content::user(format!("[Distill context: {instruction}]"))];
             result.extend(history.iter().cloned());
             result
         })
@@ -496,10 +498,10 @@ impl C {
         ContextPolicy::new("priority", move |history| {
             let weight_str = owned_weights
                 .iter()
-                .map(|(k, v)| format!("{}={}", k, v))
+                .map(|(k, v)| format!("{k}={v}"))
                 .collect::<Vec<_>>()
                 .join(", ");
-            let mut result = vec![Content::user(format!("[Priority weights: {}]", weight_str))];
+            let mut result = vec![Content::user(format!("[Priority weights: {weight_str}]"))];
             result.extend(history.iter().cloned());
             result
         })
@@ -558,7 +560,10 @@ impl C {
     /// C::project(&["name", "status", "priority"])
     /// ```
     pub fn project(fields: &[&str]) -> ContextPolicy {
-        let owned_fields: Vec<String> = fields.iter().map(|f| f.to_string()).collect();
+        let owned_fields: Vec<String> = fields
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect();
         ContextPolicy::new("project", move |history| {
             let mut result = vec![Content::user(format!(
                 "[Project fields: {}]",
@@ -589,7 +594,7 @@ impl C {
     /// C::from_agents(&["researcher", "analyst"])
     /// ```
     pub fn from_agents(names: &[&str]) -> ContextPolicy {
-        let owned_names: Vec<String> = names.iter().map(|n| n.to_string()).collect();
+        let owned_names: Vec<String> = names.iter().map(std::string::ToString::to_string).collect();
         ContextPolicy::new("from_agents", move |history| {
             history
                 .iter()
@@ -597,7 +602,7 @@ impl C {
                     c.parts.iter().any(|p| match p {
                         gemini_genai_rs::prelude::Part::Text { text } => owned_names
                             .iter()
-                            .any(|name| text.contains(&format!("[Agent: {}]", name))),
+                            .any(|name| text.contains(&format!("[Agent: {name}]"))),
                         _ => false,
                     })
                 })
@@ -616,7 +621,7 @@ impl C {
     /// C::exclude_agents(&["logger", "debugger"])
     /// ```
     pub fn exclude_agents(names: &[&str]) -> ContextPolicy {
-        let owned_names: Vec<String> = names.iter().map(|n| n.to_string()).collect();
+        let owned_names: Vec<String> = names.iter().map(std::string::ToString::to_string).collect();
         ContextPolicy::new("exclude_agents", move |history| {
             history
                 .iter()
@@ -624,7 +629,7 @@ impl C {
                     !c.parts.iter().any(|p| match p {
                         gemini_genai_rs::prelude::Part::Text { text } => owned_names
                             .iter()
-                            .any(|name| text.contains(&format!("[Agent: {}]", name))),
+                            .any(|name| text.contains(&format!("[Agent: {name}]"))),
                         _ => false,
                     })
                 })
@@ -645,10 +650,7 @@ impl C {
     pub fn notes(key: &str) -> ContextPolicy {
         let key = key.to_string();
         ContextPolicy::new("notes", move |history| {
-            let mut result = vec![Content::user(format!(
-                "[Scratchpad from state key: {}]",
-                key
-            ))];
+            let mut result = vec![Content::user(format!("[Scratchpad from state key: {key}]"))];
             result.extend(history.iter().cloned());
             result
         })

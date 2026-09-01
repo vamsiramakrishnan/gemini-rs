@@ -509,7 +509,7 @@ impl DemoApp for CallScreening {
                                 "check_contact_list" => {
                                     if r.response
                                         .get("found")
-                                        .and_then(|v| v.as_bool())
+                                        .and_then(serde_json::Value::as_bool)
                                         .unwrap_or(false)
                                     {
                                         state.set("is_known_contact", true);

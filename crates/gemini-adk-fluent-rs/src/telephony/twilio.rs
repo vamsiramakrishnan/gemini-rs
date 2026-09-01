@@ -33,7 +33,7 @@ use tokio::task::JoinHandle;
 use gemini_adk_rs::live::LiveHandle;
 
 use super::g711;
-use crate::voice::{pump, Playback, VoicePump};
+use crate::voice::{Playback, VoicePump, pump};
 
 /// The sample rate of every Twilio Media Stream, both directions.
 pub const TWILIO_HZ: u32 = 8_000;

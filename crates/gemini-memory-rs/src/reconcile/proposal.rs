@@ -8,11 +8,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::core::{
-    normalize_token, CanonicalMemory, CanonicalPredicate, DiscardReason, EntityRef,
-    EvidenceCounters, Explicitness, FactFingerprint, MemoryId, MemoryKind, MemorySource,
-    MemoryStatus, MemoryValue, MutationIntent, PrivacyMetadata, ProposedPersistence,
-    RetrievalMetadata, SensitivityClass, SessionId, TemporalMetadata, TemporalScope, TurnId,
-    UserId,
+    CanonicalMemory, CanonicalPredicate, DiscardReason, EntityRef, EvidenceCounters, Explicitness,
+    FactFingerprint, MemoryId, MemoryKind, MemorySource, MemoryStatus, MemoryValue, MutationIntent,
+    PrivacyMetadata, ProposedPersistence, RetrievalMetadata, SensitivityClass, SessionId,
+    TemporalMetadata, TemporalScope, TurnId, UserId, normalize_token,
 };
 
 /// A memory consolidation is asking to be allowed to write.

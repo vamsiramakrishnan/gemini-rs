@@ -15,8 +15,8 @@ pub use builder::ConnectBuilder;
 pub use codec::{Codec, CodecError, JsonCodec};
 pub use connection::{connect, connect_with};
 pub use recording::{
-    parse_wire_log, read_wire_log, FileWireRecorder, MemoryWireRecorder, RecordingCodec,
-    WireDirection, WireEntry, WireLogError, WireRecorder, WireRecorderHandle,
+    FileWireRecorder, MemoryWireRecorder, RecordingCodec, WireDirection, WireEntry, WireLogError,
+    WireRecorder, WireRecorderHandle, parse_wire_log, read_wire_log,
 };
 pub use replay::{OutboundFrames, ReplayControl, ReplayTransport, ReplayTransportError};
 pub use ws::{MockTransport, MockTransportError, Transport, TungsteniteTransport};

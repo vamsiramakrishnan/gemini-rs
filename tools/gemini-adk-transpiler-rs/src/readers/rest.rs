@@ -24,7 +24,7 @@ pub fn read_rest_modules(source_dir: &Path) -> Result<Vec<RestModuleDef>, String
     // Scan all .ts files for classes extending BaseModule
     let entries: Vec<_> = std::fs::read_dir(source_dir)
         .map_err(|e| format!("Failed to read source dir: {e}"))?
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .filter(|e| e.path().extension().is_some_and(|ext| ext == "ts"))
         .collect();
 
@@ -144,7 +144,7 @@ fn build_method_def(
     let key = (module_name, ts_name);
     let rust_name = method_names
         .get(&key)
-        .map(|s| s.to_string())
+        .map(std::string::ToString::to_string)
         .unwrap_or_else(|| format!("{}_{}", ts_name, singular(module_name)));
 
     let (http_method, returns_void, is_special) =
@@ -394,17 +394,15 @@ export class Files extends BaseModule {
     fn extracts_public_methods() {
         let methods = extract_methods(SAMPLE_FILES_TS, "files").unwrap();
         let names: Vec<&str> = methods.iter().map(|m| m.ts_name.as_str()).collect();
-        assert!(names.contains(&"list"), "Should contain list: {:?}", names);
-        assert!(names.contains(&"get"), "Should contain get: {:?}", names);
+        assert!(names.contains(&"list"), "Should contain list: {names:?}");
+        assert!(names.contains(&"get"), "Should contain get: {names:?}");
         assert!(
             names.contains(&"delete"),
-            "Should contain delete: {:?}",
-            names
+            "Should contain delete: {names:?}"
         );
         assert!(
             names.contains(&"upload"),
-            "Should contain upload: {:?}",
-            names
+            "Should contain upload: {names:?}"
         );
         // Should NOT contain private methods
         assert!(

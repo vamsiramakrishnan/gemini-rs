@@ -88,7 +88,10 @@ fn main() {
         "process_refund",
         "Process a refund for the customer",
         |args| async move {
-            let amount = args.get("amount").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let amount = args
+                .get("amount")
+                .and_then(serde_json::Value::as_f64)
+                .unwrap_or(0.0);
             Ok(json!({
                 "refund_id": "REF-12345",
                 "amount": amount,

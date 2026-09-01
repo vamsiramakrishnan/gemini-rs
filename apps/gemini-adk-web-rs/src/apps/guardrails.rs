@@ -37,28 +37,28 @@ fn check_violations(text: &str) -> Vec<DetectedViolation> {
     let mut violations = Vec::new();
 
     // PII: SSN pattern (XXX-XX-XXXX or XXX.XX.XXXX or XXXXXXXXX).
-    if SSN_RE.is_match(text) {
-        if let Some(m) = SSN_RE.find(text) {
-            let digits_only: String = m.as_str().chars().filter(|c| c.is_ascii_digit()).collect();
-            if digits_only.len() == 9 {
-                violations.push(DetectedViolation {
-                    rule_name: "pii_ssn",
-                    severity: "critical",
-                    detail: format!("Possible SSN detected: {}***", &m.as_str()[..3]),
-                });
-            }
+    if SSN_RE.is_match(text)
+        && let Some(m) = SSN_RE.find(text)
+    {
+        let digits_only: String = m.as_str().chars().filter(char::is_ascii_digit).collect();
+        if digits_only.len() == 9 {
+            violations.push(DetectedViolation {
+                rule_name: "pii_ssn",
+                severity: "critical",
+                detail: format!("Possible SSN detected: {}***", &m.as_str()[..3]),
+            });
         }
     }
 
     // PII: Credit card pattern (XXXX-XXXX-XXXX-XXXX or XXXX XXXX XXXX XXXX).
-    if CC_RE.is_match(text) {
-        if let Some(m) = CC_RE.find(text) {
-            violations.push(DetectedViolation {
-                rule_name: "pii_credit_card",
-                severity: "critical",
-                detail: format!("Possible credit card detected: {}****", &m.as_str()[..4]),
-            });
-        }
+    if CC_RE.is_match(text)
+        && let Some(m) = CC_RE.find(text)
+    {
+        violations.push(DetectedViolation {
+            rule_name: "pii_credit_card",
+            severity: "critical",
+            detail: format!("Possible credit card detected: {}****", &m.as_str()[..4]),
+        });
     }
 
     // Off-topic detection: keywords outside normal support context.
@@ -350,9 +350,11 @@ mod tests {
     #[test]
     fn detect_negative_sentiment() {
         let violations = check_violations("This is absolutely terrible service!");
-        assert!(violations
-            .iter()
-            .any(|v| v.rule_name == "negative_sentiment"));
+        assert!(
+            violations
+                .iter()
+                .any(|v| v.rule_name == "negative_sentiment")
+        );
     }
 
     #[test]

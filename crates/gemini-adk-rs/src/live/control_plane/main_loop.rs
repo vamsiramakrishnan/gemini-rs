@@ -166,15 +166,15 @@ pub(in crate::live) async fn run_control_lane(
                 // `Fn(&str, bool)` closures -- call them directly. Fire BEFORE
                 // `handle_turn_complete` so finalization precedes `on_turn_complete`,
                 // mirroring the partial -> final ASR ordering.
-                if !accumulated_output.is_empty() {
-                    if let Some(cb) = &callbacks.on_output_transcript {
-                        cb(&accumulated_output, true);
-                    }
+                if !accumulated_output.is_empty()
+                    && let Some(cb) = &callbacks.on_output_transcript
+                {
+                    cb(&accumulated_output, true);
                 }
-                if !accumulated_input.is_empty() {
-                    if let Some(cb) = &callbacks.on_input_transcript {
-                        cb(&accumulated_input, true);
-                    }
+                if !accumulated_input.is_empty()
+                    && let Some(cb) = &callbacks.on_input_transcript
+                {
+                    cb(&accumulated_input, true);
                 }
                 accumulated_input.clear();
                 accumulated_output.clear();

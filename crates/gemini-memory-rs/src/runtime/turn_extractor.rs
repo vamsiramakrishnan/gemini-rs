@@ -22,7 +22,7 @@
 //! into slots.
 
 use async_trait::async_trait;
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 use std::sync::Arc;
 
 use gemini_adk_rs::live::extractor::{ExtractionTrigger, FieldPromotion, TurnExtractor};
@@ -299,24 +299,30 @@ impl TurnExtractor for MemoryTurnExtractor {
         payload.insert("turn".into(), json!(turn.turn_number));
         payload.insert(
             "created".into(),
-            json!(outcomes
-                .iter()
-                .filter(|o| matches!(o, LedgerOutcome::Created(_)))
-                .count()),
+            json!(
+                outcomes
+                    .iter()
+                    .filter(|o| matches!(o, LedgerOutcome::Created(_)))
+                    .count()
+            ),
         );
         payload.insert(
             "reinforced".into(),
-            json!(outcomes
-                .iter()
-                .filter(|o| matches!(o, LedgerOutcome::Reinforced { .. }))
-                .count()),
+            json!(
+                outcomes
+                    .iter()
+                    .filter(|o| matches!(o, LedgerOutcome::Reinforced { .. }))
+                    .count()
+            ),
         );
         payload.insert(
             "rejected".into(),
-            json!(outcomes
-                .iter()
-                .filter(|o| matches!(o, LedgerOutcome::Rejected(_)))
-                .count()),
+            json!(
+                outcomes
+                    .iter()
+                    .filter(|o| matches!(o, LedgerOutcome::Rejected(_)))
+                    .count()
+            ),
         );
         payload.insert(
             "session_facts".into(),
@@ -324,10 +330,12 @@ impl TurnExtractor for MemoryTurnExtractor {
         );
         payload.insert(
             "scheduled".into(),
-            json!(scheduled
-                .iter()
-                .map(|w| format!("{w:?}"))
-                .collect::<Vec<_>>()),
+            json!(
+                scheduled
+                    .iter()
+                    .map(|w| format!("{w:?}"))
+                    .collect::<Vec<_>>()
+            ),
         );
         Ok(Value::Object(payload))
     }
@@ -574,10 +582,12 @@ mod tests {
             .await
             .unwrap();
         let prepared = session.prepared_snapshot();
-        assert!(prepared
-            .facts
-            .iter()
-            .any(|f| f.statement.to_lowercase().contains("pescatarian")));
+        assert!(
+            prepared
+                .facts
+                .iter()
+                .any(|f| f.statement.to_lowercase().contains("pescatarian"))
+        );
     }
 
     #[tokio::test]

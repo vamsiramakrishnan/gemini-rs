@@ -17,7 +17,7 @@ use gemini_adk_rs::error::AgentError;
 use gemini_adk_rs::llm::{BaseLlm, LlmRequest, LlmResponse};
 use gemini_adk_rs::middleware::Middleware;
 
-use crate::compose::judge::{render_contents, LlmJudge};
+use crate::compose::judge::{LlmJudge, render_contents};
 
 /// A guard that validates agent output.
 #[derive(Clone)]
@@ -212,9 +212,9 @@ impl G {
         GGuard::new("length", move |output| {
             let len = output.len();
             if len < min {
-                Err(format!("Output too short: {} < {}", len, min))
+                Err(format!("Output too short: {len} < {min}"))
             } else if len > max {
-                Err(format!("Output too long: {} > {}", len, max))
+                Err(format!("Output too long: {len} > {max}"))
             } else {
                 Ok(())
             }
@@ -227,7 +227,7 @@ impl G {
         GGuard::new("regex", move |output| {
             // Simple substring check — full regex requires the `regex` crate.
             if output.contains(&pattern) {
-                Err(format!("Output matches forbidden pattern: {}", pattern))
+                Err(format!("Output matches forbidden pattern: {pattern}"))
             } else {
                 Ok(())
             }
@@ -241,8 +241,7 @@ impl G {
             let estimated_tokens = output.len() / 4;
             if estimated_tokens > max_tokens {
                 Err(format!(
-                    "Output exceeds token budget: ~{} > {}",
-                    estimated_tokens, max_tokens
+                    "Output exceeds token budget: ~{estimated_tokens} > {max_tokens}"
                 ))
             } else {
                 Ok(())
@@ -255,7 +254,7 @@ impl G {
         GGuard::new("json", |output| {
             serde_json::from_str::<serde_json::Value>(output)
                 .map(|_| ())
-                .map_err(|e| format!("Invalid JSON: {}", e))
+                .map_err(|e| format!("Invalid JSON: {e}"))
         })
     }
 
@@ -287,7 +286,7 @@ impl G {
             let lower = output.to_lowercase();
             for topic in &deny {
                 if lower.contains(topic.as_str()) {
-                    return Err(format!("Output mentions denied topic: {}", topic));
+                    return Err(format!("Output mentions denied topic: {topic}"));
                 }
             }
             Ok(())

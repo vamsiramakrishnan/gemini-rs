@@ -432,8 +432,7 @@ fn gen_flow(flow: &Flow) -> String {
     for tool in &flow.confirm_tools {
         let _ = writeln!(
             out,
-            "        // confirm-gated: {} (see Per-Tool Policies)",
-            tool
+            "        // confirm-gated: {tool} (see Per-Tool Policies)"
         );
     }
     out.push_str("        .build()\n        .expect(\"validated in the Flow Studio\");\n");
@@ -783,13 +782,12 @@ fn gen_runtime(runtime: &RuntimeSpec) -> String {
             out.push_str("        .client_interruption_authority()\n");
         }
         if let Some(eot_ms) = audio.eot_hold_ms {
-            let _ = writeln!(out, "        .turn_commit_eot_hold_ms({})", eot_ms);
+            let _ = writeln!(out, "        .turn_commit_eot_hold_ms({eot_ms})");
         }
         if let Some(min_int_ms) = audio.min_interruption_ms {
             let _ = writeln!(
                 out,
-                "        .turn_commit_min_interruption_ms({})",
-                min_int_ms
+                "        .turn_commit_min_interruption_ms({min_int_ms})"
             );
         }
     }
@@ -995,7 +993,10 @@ mod tests {
             ".connect_from_env()",
             "session.send_text(line.trim()).await?",
         ] {
-            assert!(code.contains(fragment), "missing fragment: {fragment}\n---\n{code}");
+            assert!(
+                code.contains(fragment),
+                "missing fragment: {fragment}\n---\n{code}"
+            );
         }
     }
 
@@ -1094,7 +1095,10 @@ mod tests {
             "send_client_content(vec![Content::model(\"Offer to help.\")], true)",
             "// remember (durable): \"guest got stuck\"",
         ] {
-            assert!(code.contains(fragment), "missing fragment: {fragment}\n---\n{code}");
+            assert!(
+                code.contains(fragment),
+                "missing fragment: {fragment}\n---\n{code}"
+            );
         }
         assert!(spec.to_cargo_toml().contains("gemini-memory-rs"));
     }

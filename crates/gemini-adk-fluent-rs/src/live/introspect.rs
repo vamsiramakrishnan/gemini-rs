@@ -14,9 +14,9 @@
 //! Anything validating tool names must either run after connect resolution or
 //! treat the deferred count as an admission of incompleteness.
 
+use gemini_adk_rs::State;
 use gemini_adk_rs::flow::{Enforcement, Flow};
 use gemini_adk_rs::live::Phase;
-use gemini_adk_rs::State;
 use gemini_genai_rs::prelude::Tool;
 
 use super::Live;
@@ -188,9 +188,10 @@ mod tests {
             .instruction("Verify the caller")
             .build(std::sync::Arc::new(InertLlm));
         let live = Live::builder().agent_tool_arc("verify_identity", "Verify caller", verifier);
-        assert!(live
-            .declared_tool_names()
-            .contains(&"verify_identity".to_string()));
+        assert!(
+            live.declared_tool_names()
+                .contains(&"verify_identity".to_string())
+        );
     }
 
     #[test]

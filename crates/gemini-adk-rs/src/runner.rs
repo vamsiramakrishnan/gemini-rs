@@ -382,7 +382,7 @@ mod tests {
 
         match result {
             Err(AgentError::UnknownAgent(name)) => assert_eq!(name, "nonexistent"),
-            other => panic!("expected UnknownAgent, got: {:?}", other),
+            other => panic!("expected UnknownAgent, got: {other:?}"),
         }
     }
 
@@ -396,7 +396,7 @@ mod tests {
 
         match result {
             Err(AgentError::Other(msg)) => assert_eq!(msg, "boom"),
-            other => panic!("expected Other error, got: {:?}", other),
+            other => panic!("expected Other error, got: {other:?}"),
         }
     }
 

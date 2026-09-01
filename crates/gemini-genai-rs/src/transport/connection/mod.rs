@@ -10,9 +10,9 @@ use tokio::sync::{broadcast, mpsc, watch};
 
 use crate::protocol::types::*;
 use crate::session::{SessionHandle, SessionPhase, SessionState};
+use crate::transport::TransportConfig;
 use crate::transport::codec::{Codec, JsonCodec};
 use crate::transport::ws::{Transport, TungsteniteTransport};
-use crate::transport::TransportConfig;
 
 /// Connect to the Gemini Multimodal Live API and return a session handle.
 ///
@@ -99,7 +99,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::message_handler::{handle_server_msg, MessageAction};
+    use super::message_handler::{MessageAction, handle_server_msg};
     use super::reconnect::reconnect_delay;
     use super::*;
 

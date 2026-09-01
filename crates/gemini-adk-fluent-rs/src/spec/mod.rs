@@ -24,15 +24,15 @@ mod codegen;
 mod simulate;
 
 pub use simulate::{
-    run_tests, trace_test, SimEvent, SimSnapshot, SpecTest, TestExpectation, TestReport,
-    TestStepResult,
+    SimEvent, SimSnapshot, SpecTest, TestExpectation, TestReport, TestStepResult, run_tests,
+    trace_test,
 };
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use gemini_adk_rs::expr::Expr;
 use gemini_adk_rs::flow::{Constraint, Flow, Guard, Pred, Step};
@@ -1024,10 +1024,10 @@ impl SessionSpec {
     /// Seed declared `state` defaults for keys not yet set.
     pub(crate) fn seed_state_defaults(&self, state: &State) {
         for (key, field) in &self.state {
-            if let Some(default) = &field.default {
-                if state.get_raw(key).is_none() {
-                    let _ = state.set(key, default.clone());
-                }
+            if let Some(default) = &field.default
+                && state.get_raw(key).is_none()
+            {
+                let _ = state.set(key, default.clone());
             }
         }
     }
@@ -1066,10 +1066,10 @@ impl SessionSpec {
         if !self.phases.is_empty() && self.initial_phase.is_none() {
             errors.push("phases are declared but initial_phase is not set".into());
         }
-        if let Some(initial) = &self.initial_phase {
-            if !self.phases.iter().any(|p| &p.name == initial) {
-                errors.push(format!("initial_phase '{initial}' is not a declared phase"));
-            }
+        if let Some(initial) = &self.initial_phase
+            && !self.phases.iter().any(|p| &p.name == initial)
+        {
+            errors.push(format!("initial_phase '{initial}' is not a declared phase"));
         }
         // Check for duplicate phase names
         {
@@ -1201,12 +1201,12 @@ impl SessionSpec {
         // Declared state dictionary: defaults must match their declared type;
         // once a dictionary exists, undeclared keys are worth flagging.
         for (key, field) in &self.state {
-            if let (Some(kind), Some(default)) = (field.kind, &field.default) {
-                if !kind.matches(default) {
-                    warnings.push(format!(
-                        "state key '{key}' declares type {kind:?} but its default is {default}"
-                    ));
-                }
+            if let (Some(kind), Some(default)) = (field.kind, &field.default)
+                && !kind.matches(default)
+            {
+                warnings.push(format!(
+                    "state key '{key}' declares type {kind:?} but its default is {default}"
+                ));
             }
         }
         if !self.state.is_empty() {
@@ -1285,24 +1285,24 @@ impl SessionSpec {
                             .into(),
                     );
                 }
-                if let Some(eot_ms) = audio.eot_hold_ms {
-                    if eot_ms > 1600 {
-                        warnings.push(
-                            "runtime.audio.eot_hold_ms exceeds the measured frontier (1600 ms): \
+                if let Some(eot_ms) = audio.eot_hold_ms
+                    && eot_ms > 1600
+                {
+                    warnings.push(
+                        "runtime.audio.eot_hold_ms exceeds the measured frontier (1600 ms): \
                              recall fell to 0.508 at 1600ms on TurnBench dev — values beyond this \
                              may cause missed turn-end detection"
-                                .into(),
-                        );
-                    }
+                            .into(),
+                    );
                 }
-                if let Some(min_int_ms) = audio.min_interruption_ms {
-                    if min_int_ms > 2000 {
-                        warnings.push(
-                            "runtime.audio.min_interruption_ms exceeds the interruption match \
+                if let Some(min_int_ms) = audio.min_interruption_ms
+                    && min_int_ms > 2000
+                {
+                    warnings.push(
+                        "runtime.audio.min_interruption_ms exceeds the interruption match \
                              window (2000 ms) — commits may land too late to count"
-                                .into(),
-                        );
-                    }
+                            .into(),
+                    );
                 }
             }
             if runtime.session_id.is_some() && runtime.persistence.is_none() {
@@ -1332,7 +1332,11 @@ impl SessionSpec {
                 if self.memory.is_some() {
                     // The memory binding installs its tools at connect; the
                     // flow may reference or gate them.
-                    names.extend(MEMORY_TOOL_NAMES.iter().map(|s| s.to_string()));
+                    names.extend(
+                        MEMORY_TOOL_NAMES
+                            .iter()
+                            .map(std::string::ToString::to_string),
+                    );
                 }
                 let refs: Vec<&str> = names.iter().map(String::as_str).collect();
                 flow.clone().compile_with_tools(&refs)
@@ -1348,7 +1352,7 @@ impl SessionSpec {
                         .collect::<Vec<_>>(),
                 ),
                 Err(errs) => {
-                    errors.extend(errs.0.iter().map(|e| e.to_string()));
+                    errors.extend(errs.0.iter().map(std::string::ToString::to_string));
                     (false, Vec::new())
                 }
             }
@@ -2545,11 +2549,13 @@ mod tests {
             "computed": [{"key": "a", "from": {"key": "a"}}]
         }))
         .expect("parses");
-        assert!(self_read
-            .validate()
-            .errors
-            .iter()
-            .any(|e| e.contains("reads its own key")));
+        assert!(
+            self_read
+                .validate()
+                .errors
+                .iter()
+                .any(|e| e.contains("reads its own key"))
+        );
     }
 
     #[test]
@@ -2577,10 +2583,11 @@ mod tests {
         dangling.computed[0].from =
             serde_json::from_value(json!({"gt": [{"key": "scoer"}, {"const": 0.5}]})).unwrap();
         let v = dangling.validate();
-        assert!(v
-            .warnings
-            .iter()
-            .any(|w| w.contains("computed 'high_risk' reads state key 'scoer'")));
+        assert!(
+            v.warnings
+                .iter()
+                .any(|w| w.contains("computed 'high_risk' reads state key 'scoer'"))
+        );
     }
 
     #[test]
@@ -2614,11 +2621,12 @@ mod tests {
 
         let mut bad = spec.clone();
         bad.memory.as_mut().unwrap().slots[0].to = "derived:diet".into();
-        assert!(bad
-            .validate()
-            .errors
-            .iter()
-            .any(|e| e.contains("read-only key")));
+        assert!(
+            bad.validate()
+                .errors
+                .iter()
+                .any(|e| e.contains("read-only key"))
+        );
     }
 
     #[test]
@@ -2646,9 +2654,10 @@ mod tests {
             memory: Some(Arc::new(NullBinding)),
             ..Default::default()
         };
-        assert!(spec
-            .apply(Live::builder(), &State::new(), &resources)
-            .is_ok());
+        assert!(
+            spec.apply(Live::builder(), &State::new(), &resources)
+                .is_ok()
+        );
     }
 
     #[test]
@@ -2713,17 +2722,20 @@ mod tests {
         .expect("parses");
         let v = spec.validate();
         assert!(v.valid, "errors: {:?}", v.errors);
-        assert!(spec
-            .apply(Live::builder(), &State::new(), &SpecResources::default())
-            .is_ok());
+        assert!(
+            spec.apply(Live::builder(), &State::new(), &SpecResources::default())
+                .is_ok()
+        );
 
         let mut incoherent = spec.clone();
         incoherent.runtime.as_mut().unwrap().thinking_budget = None;
-        assert!(incoherent
-            .validate()
-            .warnings
-            .iter()
-            .any(|w| w.contains("include_thoughts")));
+        assert!(
+            incoherent
+                .validate()
+                .warnings
+                .iter()
+                .any(|w| w.contains("include_thoughts"))
+        );
     }
 
     #[test]
@@ -2741,9 +2753,10 @@ mod tests {
         }))
         .expect("parses");
         assert!(spec.validate().valid);
-        assert!(spec
-            .apply(Live::builder(), &State::new(), &SpecResources::default())
-            .is_ok());
+        assert!(
+            spec.apply(Live::builder(), &State::new(), &SpecResources::default())
+                .is_ok()
+        );
     }
 
     #[test]
@@ -2760,8 +2773,10 @@ mod tests {
         // Without the extraction entries it applies clean.
         let mut no_extract = spec.clone();
         no_extract.extract.clear();
-        assert!(no_extract
-            .apply(Live::builder(), &state, &SpecResources::default())
-            .is_ok());
+        assert!(
+            no_extract
+                .apply(Live::builder(), &state, &SpecResources::default())
+                .is_ok()
+        );
     }
 }

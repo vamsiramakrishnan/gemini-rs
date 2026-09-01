@@ -23,11 +23,11 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
+use gemini_adk_rs::State;
 use gemini_adk_rs::live::{
     InstructionModifier, Phase, PhaseInstruction, PhasePreparation, TranscriptWindow, Transition,
     WatchPredicate, Watcher,
 };
-use gemini_adk_rs::State;
 use gemini_genai_rs::prelude::Content;
 use gemini_genai_rs::session::SessionWriter;
 
@@ -54,7 +54,7 @@ impl PhaseDefaults {
     /// Append state keys to every phase's instruction at runtime.
     pub fn with_state(mut self, keys: &[&str]) -> Self {
         self.modifiers.push(InstructionModifier::StateAppend(
-            keys.iter().map(|s| s.to_string()).collect(),
+            keys.iter().map(std::string::ToString::to_string).collect(),
         ));
         self
     }
@@ -190,7 +190,7 @@ impl PhaseBuilder {
     ///     .done()
     /// ```
     pub fn needs(mut self, keys: &[&str]) -> Self {
-        self.needs = keys.iter().map(|k| k.to_string()).collect();
+        self.needs = keys.iter().map(std::string::ToString::to_string).collect();
         self
     }
 
@@ -208,7 +208,7 @@ impl PhaseBuilder {
     ///     .done()
     /// ```
     pub fn requires(mut self, keys: &[&str]) -> Self {
-        self.requires = keys.iter().map(|k| k.to_string()).collect();
+        self.requires = keys.iter().map(std::string::ToString::to_string).collect();
         self
     }
 
@@ -226,7 +226,10 @@ impl PhaseBuilder {
     {
         self.preparations.push(PhasePreparation {
             name: name.into(),
-            produces: produces.iter().map(|k| k.to_string()).collect(),
+            produces: produces
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect(),
             run: Arc::new(move |s, w| Box::pin(f(s, w))),
         });
         self
@@ -238,7 +241,10 @@ impl PhaseBuilder {
     /// with [`transition_after_presented`](Self::transition_after_presented) to
     /// avoid accepting stale acknowledgements from earlier phases.
     pub fn presents(mut self, concepts: &[&str]) -> Self {
-        self.presents = concepts.iter().map(|c| c.to_string()).collect();
+        self.presents = concepts
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect();
         self
     }
 
@@ -247,7 +253,7 @@ impl PhaseBuilder {
     /// This is useful for removing stale acknowledgements or intents that were
     /// extracted before the current phase's concept was presented.
     pub fn clear_on_enter(mut self, keys: &[&str]) -> Self {
-        self.clear_on_enter = keys.iter().map(|k| k.to_string()).collect();
+        self.clear_on_enter = keys.iter().map(std::string::ToString::to_string).collect();
         self
     }
 
@@ -363,7 +369,7 @@ impl PhaseBuilder {
     /// Renders as `[Context: key1=val1, key2=val2, ...]`.
     pub fn with_state(mut self, keys: &[&str]) -> Self {
         self.modifiers.push(InstructionModifier::StateAppend(
-            keys.iter().map(|s| s.to_string()).collect(),
+            keys.iter().map(std::string::ToString::to_string).collect(),
         ));
         self
     }

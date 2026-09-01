@@ -247,9 +247,9 @@ impl M {
     /// Shortcut for a before-agent hook.
     pub fn before_agent(
         f: impl Fn(&gemini_adk_rs::context::InvocationContext) -> Result<(), String>
-            + Send
-            + Sync
-            + 'static,
+        + Send
+        + Sync
+        + 'static,
     ) -> MiddlewareComposite {
         MiddlewareComposite::new(Arc::new(BeforeAgentMiddleware {
             handler: Arc::new(f),
@@ -259,9 +259,9 @@ impl M {
     /// Shortcut for an after-agent hook.
     pub fn after_agent(
         f: impl Fn(&gemini_adk_rs::context::InvocationContext) -> Result<(), String>
-            + Send
-            + Sync
-            + 'static,
+        + Send
+        + Sync
+        + 'static,
     ) -> MiddlewareComposite {
         MiddlewareComposite::new(Arc::new(AfterAgentMiddleware {
             handler: Arc::new(f),
@@ -280,12 +280,12 @@ impl M {
     /// Shortcut for an after-model hook.
     pub fn after_model(
         f: impl Fn(
-                &gemini_adk_rs::llm::LlmRequest,
-                &gemini_adk_rs::llm::LlmResponse,
-            ) -> Result<(), String>
-            + Send
-            + Sync
-            + 'static,
+            &gemini_adk_rs::llm::LlmRequest,
+            &gemini_adk_rs::llm::LlmResponse,
+        ) -> Result<(), String>
+        + Send
+        + Sync
+        + 'static,
     ) -> MiddlewareComposite {
         MiddlewareComposite::new(Arc::new(AfterModelMiddleware {
             handler: Arc::new(f),
@@ -727,7 +727,7 @@ impl Middleware for CacheMiddleware {
     ) -> Result<Option<gemini_adk_rs::llm::LlmResponse>, AgentError> {
         use std::hash::{Hash, Hasher};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        format!("{:?}", request).hash(&mut hasher);
+        format!("{request:?}").hash(&mut hasher);
         let key = hasher.finish();
         let cache = self.cache.lock();
         Ok(cache.get(&key).cloned())
@@ -740,7 +740,7 @@ impl Middleware for CacheMiddleware {
     ) -> Result<Option<gemini_adk_rs::llm::LlmResponse>, AgentError> {
         use std::hash::{Hash, Hasher};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        format!("{:?}", request).hash(&mut hasher);
+        format!("{request:?}").hash(&mut hasher);
         let key = hasher.finish();
         self.cache.lock().insert(key, response.clone());
         Ok(None) // don't replace the response
@@ -767,7 +767,7 @@ impl Middleware for DedupMiddleware {
     ) -> Result<Option<gemini_adk_rs::llm::LlmResponse>, AgentError> {
         use std::hash::{Hash, Hasher};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        format!("{:?}", request).hash(&mut hasher);
+        format!("{request:?}").hash(&mut hasher);
         let hash = hasher.finish();
         let mut last = self.last_request_hash.lock();
         if *last == Some(hash) {

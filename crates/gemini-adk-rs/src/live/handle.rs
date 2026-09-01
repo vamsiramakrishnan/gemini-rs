@@ -414,13 +414,12 @@ impl LiveHandle {
         // disconnect (or a clone's disconnect) simply finds them gone.
         for lane in [&self.fast_task, &self.ctrl_task] {
             let task = lane.lock().take();
-            if let Some(mut task) = task {
-                if tokio::time::timeout(Self::LANE_SHUTDOWN_GRACE, &mut task)
+            if let Some(mut task) = task
+                && tokio::time::timeout(Self::LANE_SHUTDOWN_GRACE, &mut task)
                     .await
                     .is_err()
-                {
-                    task.abort();
-                }
+            {
+                task.abort();
             }
         }
 

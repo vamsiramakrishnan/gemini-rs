@@ -2,10 +2,10 @@
 
 use crate::protocol::types::SessionConfig;
 use crate::session::{SessionError, SessionHandle};
+use crate::transport::TransportConfig;
 use crate::transport::codec::{Codec, JsonCodec};
 use crate::transport::connection::connect_with;
 use crate::transport::ws::{Transport, TungsteniteTransport};
-use crate::transport::TransportConfig;
 
 /// Builder for advanced connection configuration.
 ///

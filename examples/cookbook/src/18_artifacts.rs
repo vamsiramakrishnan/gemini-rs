@@ -233,8 +233,8 @@ fn main() {
     println!("  Batch pipeline: {} operations", ops.len());
     for op in &ops {
         match op.name() {
-            Some(name) => println!("    {:?} -> {name}", op),
-            None => println!("    {:?}", op),
+            Some(name) => println!("    {op:?} -> {name}"),
+            None => println!("    {op:?}"),
         }
     }
 

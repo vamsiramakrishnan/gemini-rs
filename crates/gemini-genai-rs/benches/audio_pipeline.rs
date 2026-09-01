@@ -2,7 +2,7 @@
 //!
 //! Run with: `cargo bench -p gemini-live`
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 
 use gemini_genai_rs::buffer::{AudioJitterBuffer, JitterConfig, SpscRing};
 use gemini_genai_rs::protocol::types::{GeminiModel, SessionConfig, Voice};
@@ -31,7 +31,7 @@ fn bench_spsc_write_read(c: &mut Criterion) {
                     let written = ring.write(black_box(&data));
                     let read = ring.read(black_box(&mut out));
                     black_box((written, read));
-                })
+                });
             },
         );
     }
@@ -50,7 +50,7 @@ fn bench_spsc_write_only(c: &mut Criterion) {
             ring.read(&mut drain);
             let written = ring.write(black_box(&data));
             black_box(written);
-        })
+        });
     });
 }
 
@@ -65,7 +65,7 @@ fn bench_spsc_contention(c: &mut Criterion) {
             ring.write(black_box(&chunk));
             ring.read(black_box(&mut out));
             black_box(&out);
-        })
+        });
     });
 }
 
@@ -101,7 +101,7 @@ fn bench_jitter_push(c: &mut Criterion) {
                     let mut drain = vec![0i16; 16000];
                     buf.pull(&mut drain);
                 }
-            })
+            });
         });
     }
 
@@ -125,7 +125,7 @@ fn bench_jitter_push_pull_cycle(c: &mut Criterion) {
                 let real = buf.pull(black_box(&mut pull_buf));
                 black_box(real);
             }
-        })
+        });
     });
 }
 
@@ -138,7 +138,7 @@ fn bench_jitter_flush(c: &mut Criterion) {
             // Simulate barge-in flush
             buf.flush();
             black_box(buf.depth());
-        })
+        });
     });
 }
 
@@ -167,7 +167,7 @@ fn bench_codec_encode_audio(c: &mut Criterion) {
             b.iter(|| {
                 let result = codec.encode_command(black_box(cmd), &config).unwrap();
                 black_box(result);
-            })
+            });
         });
     }
 
@@ -185,7 +185,7 @@ fn bench_codec_encode_text(c: &mut Criterion) {
         b.iter(|| {
             let result = codec.encode_command(black_box(&cmd), &config).unwrap();
             black_box(result);
-        })
+        });
     });
 }
 
@@ -200,7 +200,7 @@ fn bench_codec_encode_setup(c: &mut Criterion) {
         b.iter(|| {
             let result = codec.encode_setup(black_box(&config)).unwrap();
             black_box(result);
-        })
+        });
     });
 }
 
@@ -212,7 +212,7 @@ fn bench_codec_decode_text(c: &mut Criterion) {
         b.iter(|| {
             let result = codec.decode_message(black_box(msg)).unwrap();
             black_box(result);
-        })
+        });
     });
 }
 
@@ -230,8 +230,7 @@ fn bench_codec_decode_audio(c: &mut Criterion) {
         encoded
     };
     let msg = format!(
-        r#"{{"serverContent":{{"modelTurn":{{"parts":[{{"inlineData":{{"mimeType":"audio/pcm","data":"{}"}}}}]}}}}}}"#,
-        base64_audio
+        r#"{{"serverContent":{{"modelTurn":{{"parts":[{{"inlineData":{{"mimeType":"audio/pcm","data":"{base64_audio}"}}}}]}}}}}}"#
     );
     let msg_bytes = msg.into_bytes();
 
@@ -239,7 +238,7 @@ fn bench_codec_decode_audio(c: &mut Criterion) {
         b.iter(|| {
             let result = codec.decode_message(black_box(&msg_bytes)).unwrap();
             black_box(result);
-        })
+        });
     });
 }
 
@@ -251,7 +250,7 @@ fn bench_codec_decode_tool_call(c: &mut Criterion) {
         b.iter(|| {
             let result = codec.decode_message(black_box(msg)).unwrap();
             black_box(result);
-        })
+        });
     });
 }
 
@@ -263,7 +262,7 @@ fn bench_codec_decode_setup_complete(c: &mut Criterion) {
         b.iter(|| {
             let result = codec.decode_message(black_box(msg)).unwrap();
             black_box(result);
-        })
+        });
     });
 }
 

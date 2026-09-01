@@ -5,8 +5,8 @@
 //! transcription**, because reading a text-modality response would exercise a
 //! path no deployment uses.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;

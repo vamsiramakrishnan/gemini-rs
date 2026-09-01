@@ -34,7 +34,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde::Deserialize;
 
-use super::{now_secs, Artifact, ArtifactError, ArtifactMetadata, ArtifactService};
+use super::{Artifact, ArtifactError, ArtifactMetadata, ArtifactService, now_secs};
 
 const STORAGE_BASE: &str = "https://storage.googleapis.com/storage/v1";
 const UPLOAD_BASE: &str = "https://storage.googleapis.com/upload/storage/v1";

@@ -558,10 +558,10 @@ mod tests {
         let mut stream = runner.run_stream("Hi", "user-1", None).await;
         let mut last = None;
         while let Some(item) = stream.next().await {
-            if let RunEvent::Event(e) = item {
-                if e.author == "echo" {
-                    last = e.content.clone();
-                }
+            if let RunEvent::Event(e) = item
+                && e.author == "echo"
+            {
+                last = e.content.clone();
             }
         }
         assert_eq!(last.as_deref(), Some("Echo: Hi"));

@@ -122,12 +122,12 @@ use std::collections::HashMap;
 
 use common::corpus::{self, PROBES};
 use common::paraphrase;
-use common::rank::{as_hits, fuse, lexical, rank_of, CANDIDATES};
+use common::rank::{CANDIDATES, as_hits, fuse, lexical, rank_of};
 use common::views::structural_view;
-use common::{file_backed_engine, ScratchDir};
+use common::{ScratchDir, file_backed_engine};
 
 use gemini_memory_rs::bm25::{IndexedMemory, MemoryIndex, SearchHit};
-use gemini_memory_rs::core::{stable_hash, CanonicalMemory, MemoryId, MemoryKind, MemoryStatus};
+use gemini_memory_rs::core::{CanonicalMemory, MemoryId, MemoryKind, MemoryStatus, stable_hash};
 
 const EMBEDDING_MODEL: &str = "gemini-embedding-2";
 const WIDTH: usize = 768;

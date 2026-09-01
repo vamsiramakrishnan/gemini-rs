@@ -132,7 +132,7 @@ impl SessionSignals {
 
             SessionEvent::GoAway(time_left) => {
                 let _ = self.state.session().set("go_away_received", true);
-                if let Some(ref tl) = time_left {
+                if let Some(tl) = time_left {
                     let _ = self.state.session().set("go_away_time_left", tl.clone());
                     if let Ok(secs) = tl.trim_end_matches('s').parse::<u64>() {
                         let deadline = Instant::now() + std::time::Duration::from_secs(secs);

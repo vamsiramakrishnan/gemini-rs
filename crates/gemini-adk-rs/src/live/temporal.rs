@@ -10,8 +10,8 @@
 //! returns `true`).
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use gemini_genai_rs::session::{SessionEvent, SessionWriter};
@@ -94,10 +94,10 @@ impl TemporalPattern {
 
         // Enforce cooldown.
         let mut last = self.last_triggered.lock();
-        if let (Some(cooldown), Some(prev)) = (self.cooldown, *last) {
-            if now.duration_since(prev) < cooldown {
-                return None;
-            }
+        if let (Some(cooldown), Some(prev)) = (self.cooldown, *last)
+            && now.duration_since(prev) < cooldown
+        {
+            return None;
         }
 
         *last = Some(now);
@@ -257,10 +257,10 @@ impl PatternDetector for RateDetector {
         let mut ts = self.timestamps.lock();
 
         // Record matching event.
-        if let Some(evt) = event {
-            if (self.filter)(evt) {
-                ts.push_back(now);
-            }
+        if let Some(evt) = event
+            && (self.filter)(evt)
+        {
+            ts.push_back(now);
         }
 
         // Expire old timestamps.
@@ -715,9 +715,11 @@ mod tests {
         assert_eq!(counter.load(Ordering::SeqCst), 1);
 
         // Immediate re-check: cooldown blocks.
-        assert!(pattern
-            .try_fire(&state, None, &writer, t0 + Duration::from_millis(2))
-            .is_none());
+        assert!(
+            pattern
+                .try_fire(&state, None, &writer, t0 + Duration::from_millis(2))
+                .is_none()
+        );
 
         // After cooldown: fires again.
         let fut = pattern.try_fire(&state, None, &writer, t0 + Duration::from_secs(11));

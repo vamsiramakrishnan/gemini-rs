@@ -47,9 +47,9 @@ impl RegexExtractor {
         name: impl Into<String>,
         window_size: usize,
         extract_fn: impl Fn(&str, &HashMap<String, Value>) -> HashMap<String, Value>
-            + Send
-            + Sync
-            + 'static,
+        + Send
+        + Sync
+        + 'static,
     ) -> Self {
         Self {
             name: name.into(),

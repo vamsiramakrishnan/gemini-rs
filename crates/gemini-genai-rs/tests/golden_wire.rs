@@ -26,7 +26,7 @@ use gemini_genai_rs::protocol::types::*;
 use gemini_genai_rs::session::SessionCommand;
 use gemini_genai_rs::transport::codec::{Codec, JsonCodec};
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::PathBuf;
 
 fn fixture_path(name: &str) -> PathBuf {

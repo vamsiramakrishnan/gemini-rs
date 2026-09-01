@@ -11,12 +11,12 @@ use crate::session::{
     ResumeInfo, SessionCommand, SessionError, SessionEvent, SessionPhase, SessionState, SetupError,
     WebSocketError,
 };
+use crate::transport::TransportConfig;
 use crate::transport::codec::Codec;
 use crate::transport::ws::Transport;
-use crate::transport::TransportConfig;
 
-use super::message_handler::{handle_server_msg, MessageAction};
-use super::reconnect::{reconnect_delay, DisconnectReason};
+use super::message_handler::{MessageAction, handle_server_msg};
+use super::reconnect::{DisconnectReason, reconnect_delay};
 
 /// The main connection loop — manages connect, setup, send/recv, and reconnection.
 ///
@@ -97,7 +97,7 @@ pub(super) async fn generic_connection_loop<T: Transport, C: Codec>(
                 match setup_result {
                     Ok(Ok(())) => {
                         attempt = 0; // Reset backoff on successful setup
-                                     // Run main session loop
+                        // Run main session loop
                         let reason = generic_run_session(
                             &config,
                             &mut transport,
@@ -185,15 +185,15 @@ async fn wait_for_setup<T: Transport, C: Codec>(
         match transport.recv().await {
             Ok(Some(data)) => match codec.decode_message(&data) {
                 Ok(ServerMessage::SetupComplete(sc)) => {
-                    if let Some(ref resumption) = sc.setup_complete.session_resumption {
-                        if let Some(ref handle) = resumption.handle {
-                            *state.resume_handle.lock() = Some(handle.clone());
-                            let _ = event_tx.send(SessionEvent::SessionResumeUpdate(ResumeInfo {
-                                handle: handle.clone(),
-                                resumable: true,
-                                last_consumed_index: None,
-                            }));
-                        }
+                    if let Some(ref resumption) = sc.setup_complete.session_resumption
+                        && let Some(ref handle) = resumption.handle
+                    {
+                        *state.resume_handle.lock() = Some(handle.clone());
+                        let _ = event_tx.send(SessionEvent::SessionResumeUpdate(ResumeInfo {
+                            handle: handle.clone(),
+                            resumable: true,
+                            last_consumed_index: None,
+                        }));
                     }
                     let _ = state.transition_to(SessionPhase::Active);
                     let _ = event_tx.send(SessionEvent::Connected);

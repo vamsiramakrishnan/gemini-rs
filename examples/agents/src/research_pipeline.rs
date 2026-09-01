@@ -99,7 +99,7 @@ fn main() {
     let pre_write = S::pick(&["findings"]) >> S::rename(&[("findings", "research_data")]);
     let mut state = serde_json::json!({"findings": "quantum data", "noise": "ignore"});
     pre_write.apply(&mut state);
-    println!("\nState transform: {:?}", state);
+    println!("\nState transform: {state:?}");
 
     // P — Prompt composition
     let system_prompt = P::role("senior technical writer")
@@ -163,7 +163,7 @@ fn main() {
                     println!("  UNPRODUCED: '{consumer}' reads '{key}' — nobody writes it");
                 }
                 ContractViolation::DuplicateWrite { agents, key } => {
-                    println!("  DUPLICATE: '{key}' written by {:?}", agents);
+                    println!("  DUPLICATE: '{key}' written by {agents:?}");
                 }
                 ContractViolation::OrphanedOutput { producer, key } => {
                     println!("  ORPHANED: '{producer}' writes '{key}' — nobody reads it");

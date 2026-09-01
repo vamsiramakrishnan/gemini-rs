@@ -285,7 +285,7 @@ impl ContextBuilder {
             let missing: Vec<&str> = needs
                 .iter()
                 .filter(|key| !state.contains(key))
-                .map(|s| s.as_str())
+                .map(std::string::String::as_str)
                 .collect();
             if !missing.is_empty() {
                 lines.push(format!("[Gathering] {}", missing.join(", ")));

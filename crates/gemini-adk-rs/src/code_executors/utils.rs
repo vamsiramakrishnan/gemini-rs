@@ -45,7 +45,7 @@ pub fn build_code_execution_result_part(stdout: &str, stderr: &str) -> Part {
     let output = if stderr.is_empty() {
         stdout.to_string()
     } else {
-        format!("{}\n{}", stdout, stderr)
+        format!("{stdout}\n{stderr}")
     };
     Part::CodeExecutionResult {
         code_execution_result: GenaiCodeExecResult {

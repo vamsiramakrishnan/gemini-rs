@@ -67,11 +67,11 @@ impl FsPersistence {
     }
 
     fn path(&self, session_id: &str) -> PathBuf {
-        self.dir.join(format!("{}.json", session_id))
+        self.dir.join(format!("{session_id}.json"))
     }
 
     fn tmp_path(&self, session_id: &str) -> PathBuf {
-        self.dir.join(format!("{}.json.tmp", session_id))
+        self.dir.join(format!("{session_id}.json.tmp"))
     }
 }
 

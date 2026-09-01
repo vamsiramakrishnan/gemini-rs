@@ -253,13 +253,13 @@ fn main() {
     for v in &violations {
         match v {
             ContractViolation::UnproducedKey { consumer, key } => {
-                println!("  UNPRODUCED: '{}' reads '{}'", consumer, key);
+                println!("  UNPRODUCED: '{consumer}' reads '{key}'");
             }
             ContractViolation::DuplicateWrite { agents, key } => {
-                println!("  DUPLICATE: '{}' written by {:?}", key, agents);
+                println!("  DUPLICATE: '{key}' written by {agents:?}");
             }
             ContractViolation::OrphanedOutput { producer, key } => {
-                println!("  ORPHANED: '{}' writes '{}'", producer, key);
+                println!("  ORPHANED: '{producer}' writes '{key}'");
             }
         }
     }

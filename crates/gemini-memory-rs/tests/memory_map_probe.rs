@@ -115,9 +115,9 @@ use std::collections::{BTreeMap, HashMap};
 
 use common::corpus::{self, PROBES};
 use common::paraphrase;
-use common::{file_backed_engine, have_api_key, skip, ScratchDir};
+use common::{ScratchDir, file_backed_engine, have_api_key, skip};
 
-use gemini_memory_rs::core::{stable_hash, CanonicalMemory, MemoryStatus, UserId};
+use gemini_memory_rs::core::{CanonicalMemory, MemoryStatus, UserId, stable_hash};
 
 /// Cheapest model that writes a small structured object, and the one
 /// `serving_latency_probe` found has the lower TTFT — which is what a

@@ -21,7 +21,7 @@ use super::handle::LiveHandle;
 use super::needs::{NeedsFulfillment, RepairConfig};
 use super::persistence::SessionPersistence;
 use super::phase::PhaseMachine;
-use super::processor::{spawn_event_processor, spawn_telemetry_lane, ControlPlaneConfig};
+use super::processor::{ControlPlaneConfig, spawn_event_processor, spawn_telemetry_lane};
 use super::session_signals::SessionSignals;
 use super::soft_turn::SoftTurnDetector;
 use super::steering::{ContextDelivery, SteeringMode};
@@ -495,10 +495,10 @@ pub(crate) fn build_runtime(plan: SessionPlan, session: SessionHandle) -> Sessio
     // Store initial phase's `needs` metadata for ContextBuilder.
     if let Some(ref pm) = plan.phase_machine {
         let _ = state.session().set("phase", pm.current());
-        if let Some(phase) = pm.current_phase() {
-            if !phase.needs.is_empty() {
-                let _ = state.set("session:phase_needs", phase.needs.clone());
-            }
+        if let Some(phase) = pm.current_phase()
+            && !phase.needs.is_empty()
+        {
+            let _ = state.set("session:phase_needs", phase.needs.clone());
         }
     }
 
@@ -674,20 +674,20 @@ pub(crate) async fn spawn_lanes(rt: SessionRuntime) -> Result<LiveHandle, AgentE
                     let tc = obj
                         .get("turn_count")
                         .or_else(|| obj.get("response_count"))
-                        .and_then(|v| v.as_u64())
+                        .and_then(serde_json::Value::as_u64)
                         .unwrap_or(0);
                     if tc > prev_turns {
                         let latency = obj
                             .get("last_response_latency_ms")
-                            .and_then(|v| v.as_u64())
+                            .and_then(serde_json::Value::as_u64)
                             .unwrap_or(0) as u32;
                         let prompt = obj
                             .get("prompt_token_count")
-                            .and_then(|v| v.as_u64())
+                            .and_then(serde_json::Value::as_u64)
                             .unwrap_or(0) as u32;
                         let response = obj
                             .get("response_token_count")
-                            .and_then(|v| v.as_u64())
+                            .and_then(serde_json::Value::as_u64)
                             .unwrap_or(0) as u32;
                         let _ = telem_tx.send(LiveEvent::TurnMetrics {
                             turn: tc as u32,

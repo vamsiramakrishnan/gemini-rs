@@ -184,9 +184,11 @@ mod audio_format_tests {
             "realtime input must declare the rate; a bare audio/pcm is accepted \
              by the socket and then transcribed as silence"
         );
-        assert!(AudioFormat::Pcm16
-            .mime_type()
-            .contains(&LIVE_INPUT_SAMPLE_RATE.to_string()));
+        assert!(
+            AudioFormat::Pcm16
+                .mime_type()
+                .contains(&LIVE_INPUT_SAMPLE_RATE.to_string())
+        );
     }
 }
 

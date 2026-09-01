@@ -884,14 +884,12 @@ impl SessionConfig {
             ApiEndpoint::GoogleAI { api_key } => format!(
                 "wss://generativelanguage.googleapis.com/ws/\
                  google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent\
-                 ?key={}",
-                api_key
+                 ?key={api_key}"
             ),
             ApiEndpoint::GoogleAIToken { access_token } => format!(
                 "wss://generativelanguage.googleapis.com/ws/\
                  google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent\
-                 ?access_token={}",
-                access_token
+                 ?access_token={access_token}"
             ),
             ApiEndpoint::VertexAI(v) => {
                 let host = v.api_host.as_deref().unwrap_or("");
@@ -972,6 +970,10 @@ impl SessionConfig {
 }
 
 #[cfg(test)]
+#[allow(
+    unsafe_code,
+    reason = "tests exercise from_env() and must mutate the process environment; each test restores what it touched"
+)]
 mod tests {
     use super::*;
 
@@ -989,36 +991,36 @@ mod tests {
             "GOOGLE_API_KEY",
         ];
         for v in vars {
-            std::env::remove_var(v);
+            unsafe { std::env::remove_var(v) };
         }
 
         // Google AI via GEMINI_API_KEY (default platform).
-        std::env::set_var("GEMINI_API_KEY", "k-123");
+        unsafe { std::env::set_var("GEMINI_API_KEY", "k-123") };
         assert!(matches!(
             ApiEndpoint::from_env(),
             Ok(ApiEndpoint::GoogleAI { ref api_key }) if api_key == "k-123"
         ));
 
         // Empty values are treated as unset → fall through to next candidate.
-        std::env::set_var("GEMINI_API_KEY", "   ");
-        std::env::set_var("GOOGLE_API_KEY", "k-fallback");
+        unsafe { std::env::set_var("GEMINI_API_KEY", "   ") };
+        unsafe { std::env::set_var("GOOGLE_API_KEY", "k-fallback") };
         assert!(matches!(
             ApiEndpoint::from_env(),
             Ok(ApiEndpoint::GoogleAI { ref api_key }) if api_key == "k-fallback"
         ));
 
         // No key anywhere → actionable error.
-        std::env::remove_var("GEMINI_API_KEY");
-        std::env::remove_var("GOOGLE_API_KEY");
+        unsafe { std::env::remove_var("GEMINI_API_KEY") };
+        unsafe { std::env::remove_var("GOOGLE_API_KEY") };
         assert!(matches!(
             ApiEndpoint::from_env(),
             Err(EndpointEnvError::Missing(_))
         ));
 
         // Vertex AI with explicit token + default location.
-        std::env::set_var("GOOGLE_GENAI_USE_VERTEXAI", "TRUE");
-        std::env::set_var("GOOGLE_CLOUD_PROJECT", "proj-1");
-        std::env::set_var("GOOGLE_ACCESS_TOKEN", "tok-abc");
+        unsafe { std::env::set_var("GOOGLE_GENAI_USE_VERTEXAI", "TRUE") };
+        unsafe { std::env::set_var("GOOGLE_CLOUD_PROJECT", "proj-1") };
+        unsafe { std::env::set_var("GOOGLE_ACCESS_TOKEN", "tok-abc") };
         match ApiEndpoint::from_env() {
             Ok(ApiEndpoint::VertexAI(cfg)) => {
                 assert_eq!(cfg.project, "proj-1");
@@ -1030,14 +1032,14 @@ mod tests {
 
         // Vertex selected but token missing → distinguishable error so higher
         // layers can fall back to gcloud.
-        std::env::remove_var("GOOGLE_ACCESS_TOKEN");
+        unsafe { std::env::remove_var("GOOGLE_ACCESS_TOKEN") };
         assert!(matches!(
             ApiEndpoint::from_env(),
             Err(EndpointEnvError::Missing("GOOGLE_ACCESS_TOKEN"))
         ));
 
         for v in vars {
-            std::env::remove_var(v);
+            unsafe { std::env::remove_var(v) };
         }
     }
 

@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::Mutex;
@@ -160,7 +160,7 @@ impl McpSessionManager {
             _ => {
                 return Err(McpError::ConnectionFailed(
                     "stdio transport requested for non-stdio params".to_string(),
-                ))
+                ));
             }
         };
 
@@ -261,7 +261,7 @@ impl McpSessionManager {
             _ => {
                 return Err(McpError::ConnectionFailed(
                     "HTTP transport requested for non-SSE params".to_string(),
-                ))
+                ));
             }
         };
 
@@ -392,7 +392,10 @@ fn value_id_as_u64(v: &Value) -> Option<u64> {
 /// Extract the `result` from a JSON-RPC response, mapping `error` to [`McpError`].
 fn extract_result(msg: &Value, id: u64) -> Result<Value, McpError> {
     if let Some(err) = msg.get("error") {
-        let code = err.get("code").and_then(|c| c.as_i64()).unwrap_or(0);
+        let code = err
+            .get("code")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(0);
         let message = err
             .get("message")
             .and_then(|m| m.as_str())
@@ -445,7 +448,7 @@ fn parse_tools_list(result: &Value) -> Result<Vec<McpToolInfo>, McpError> {
 fn check_tool_result(result: &Value, name: &str) -> Result<Value, McpError> {
     if result
         .get("isError")
-        .and_then(|e| e.as_bool())
+        .and_then(serde_json::Value::as_bool)
         .unwrap_or(false)
     {
         return Err(McpError::ToolCallFailed(format!(

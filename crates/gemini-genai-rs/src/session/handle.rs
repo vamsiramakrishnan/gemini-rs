@@ -408,7 +408,7 @@ mod tests {
 
         match event_rx.try_recv() {
             Ok(SessionEvent::PhaseChanged(SessionPhase::Connecting)) => {}
-            other => panic!("expected PhaseChanged(Connecting), got {:?}", other),
+            other => panic!("expected PhaseChanged(Connecting), got {other:?}"),
         }
     }
 

@@ -537,12 +537,11 @@ impl RecordExtractor {
         }
         let args_value = Value::Object(obj);
         let cache_key = format!("{field}|{args_value}");
-        if let Some(ttl) = ttl {
-            if let Some(entry) = self.cache.get(&cache_key) {
-                if entry.1.elapsed() < ttl {
-                    return Some(entry.0.clone());
-                }
-            }
+        if let Some(ttl) = ttl
+            && let Some(entry) = self.cache.get(&cache_key)
+            && entry.1.elapsed() < ttl
+        {
+            return Some(entry.0.clone());
         }
         match fetch(args_value).await {
             Ok(value) => {
@@ -592,13 +591,13 @@ impl TurnExtractor for RecordExtractor {
             .join(" ");
         let mut obj = serde_json::Map::new();
         for field in &self.spec.fields {
-            if let Source::Recognize(rec) = &field.source {
-                if let Some((value, _confidence)) = rec.recognize(&text) {
-                    if field.validate.as_ref().is_some_and(|v| !v(&value)) {
-                        continue; // recognized but rejected by the slot validator
-                    }
-                    obj.insert(field.name.clone(), value);
+            if let Source::Recognize(rec) = &field.source
+                && let Some((value, _confidence)) = rec.recognize(&text)
+            {
+                if field.validate.as_ref().is_some_and(|v| !v(&value)) {
+                    continue; // recognized but rejected by the slot validator
                 }
+                obj.insert(field.name.clone(), value);
             }
         }
         Ok(Value::Object(obj))
@@ -620,20 +619,20 @@ impl TurnExtractor for RecordExtractor {
         // values recognized in this same turn (before promotion runs).
         let mut fresh = serde_json::Map::new();
         for field in &self.spec.fields {
-            if let Source::Recognize(rec) = &field.source {
-                if let Some((value, confidence)) = rec.recognize(&text) {
-                    if field.validate.as_ref().is_some_and(|v| !v(&value)) {
-                        continue; // recognized but rejected by the slot validator
-                    }
-                    // Record provenance + confidence under the `state_meta:` convention
-                    // so `State::evidence()` can surface how a slot was filled.
-                    let _ = state.set(
-                        format!("state_meta:{}", field.state_key),
-                        serde_json::json!({ "source": "extraction", "confidence": confidence }),
-                    );
-                    fresh.insert(field.state_key.clone(), value.clone());
-                    obj.insert(field.name.clone(), value);
+            if let Source::Recognize(rec) = &field.source
+                && let Some((value, confidence)) = rec.recognize(&text)
+            {
+                if field.validate.as_ref().is_some_and(|v| !v(&value)) {
+                    continue; // recognized but rejected by the slot validator
                 }
+                // Record provenance + confidence under the `state_meta:` convention
+                // so `State::evidence()` can surface how a slot was filled.
+                let _ = state.set(
+                    format!("state_meta:{}", field.state_key),
+                    serde_json::json!({ "source": "extraction", "confidence": confidence }),
+                );
+                fresh.insert(field.state_key.clone(), value.clone());
+                obj.insert(field.name.clone(), value);
             }
         }
         // Async resolvers, bound from this turn's recognitions + State.

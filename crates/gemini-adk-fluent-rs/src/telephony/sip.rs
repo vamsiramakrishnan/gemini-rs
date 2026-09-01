@@ -41,21 +41,21 @@ use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
+use rsipstack::EndpointBuilder;
 use rsipstack::dialog::dialog::DialogState;
 use rsipstack::dialog::dialog_layer::DialogLayer;
 use rsipstack::dialog::invite_dialog::InviteDialog;
-use rsipstack::transport::udp::UdpConnection;
 use rsipstack::transport::TransportLayer;
-use rsipstack::EndpointBuilder;
+use rsipstack::transport::udp::UdpConnection;
 
-use gemini_adk_rs::live::LiveHandle;
 use gemini_adk_rs::State;
+use gemini_adk_rs::live::LiveHandle;
 
 use super::bridge::{self, DtmfDeduper, FillerConfig};
 use super::g711;
-use super::rtp::{self, RtpSender, PT_PCMA, SAMPLES_PER_PACKET};
+use super::rtp::{self, PT_PCMA, RtpSender, SAMPLES_PER_PACKET};
 use super::sdp::{self, AudioOffer};
-use crate::voice::{pump, Playback, VoicePump};
+use crate::voice::{Playback, VoicePump, pump};
 
 /// Errors from the SIP agent.
 #[derive(Debug)]
@@ -199,7 +199,7 @@ impl SipAgent {
                     let from = tx
                         .original
                         .from_header()
-                        .map(|h| h.to_string())
+                        .map(std::string::ToString::to_string)
                         .unwrap_or_default();
                     let _ = dialog.ringing(None, None);
                     // Responses (180/200/603) are queued events on the INVITE
@@ -472,12 +472,11 @@ async fn inbound_loop(
         };
         if telephone_event_pt == Some(packet.payload_type) {
             // RFC 4733 keypress: emit once per end-marked event.
-            if let Some(event) = rtp::parse_telephone_event(&packet.payload) {
-                if dtmf.accept(event.end, packet.timestamp) {
-                    if let Some(digit) = event.digit() {
-                        bridge::record_dtmf(&state, digit);
-                    }
-                }
+            if let Some(event) = rtp::parse_telephone_event(&packet.payload)
+                && dtmf.accept(event.end, packet.timestamp)
+                && let Some(digit) = event.digit()
+            {
+                bridge::record_dtmf(&state, digit);
             }
             continue;
         }

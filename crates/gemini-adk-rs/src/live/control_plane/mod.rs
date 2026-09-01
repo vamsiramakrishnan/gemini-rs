@@ -15,7 +15,7 @@ pub(super) use main_loop::run_control_lane;
 /// - [`Blocking`](super::callbacks::CallbackMode::Blocking): awaits the callback inline.
 /// - [`Concurrent`](super::callbacks::CallbackMode::Concurrent): spawns as a detached tokio task.
 macro_rules! dispatch_callback {
-    ($mode:expr, $cb:expr) => {
+    ($mode:expr_2021, $cb:expr_2021) => {
         match $mode {
             $crate::live::callbacks::CallbackMode::Blocking => {
                 $cb.await;

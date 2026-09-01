@@ -187,7 +187,7 @@ fn run_read(source: &Path, output: &Path) {
                     agent
                         .extends
                         .as_ref()
-                        .map(|e| format!(" extends {}", e))
+                        .map(|e| format!(" extends {e}"))
                         .unwrap_or_default()
                 );
             }
@@ -200,7 +200,7 @@ fn run_read(source: &Path, output: &Path) {
                     tool.fields.len(),
                     tool.extends
                         .as_ref()
-                        .map(|e| format!(" extends {}", e))
+                        .map(|e| format!(" extends {e}"))
                         .unwrap_or_default()
                 );
             }
@@ -223,14 +223,14 @@ fn run_read(source: &Path, output: &Path) {
                         type_def
                             .extends
                             .as_ref()
-                            .map(|e| format!(" extends {}", e))
+                            .map(|e| format!(" extends {e}"))
                             .unwrap_or_default()
                     );
                 }
             }
         }
         Err(e) => {
-            eprintln!("Error: {}", e);
+            eprintln!("Error: {e}");
             std::process::exit(1);
         }
     }
@@ -279,10 +279,7 @@ fn run_read_genai(source: &Path, output: &Path) {
             println!("=== js-genai Schema Summary ===");
             println!("Source: {}", schema.source.source_dir);
             println!();
-            println!(
-                "Types: {} total, {} with wire equivalent",
-                total_types, with_wire
-            );
+            println!("Types: {total_types} total, {with_wire} with wire equivalent");
             println!();
 
             println!("Wire Mappings:");
@@ -319,13 +316,13 @@ fn run_read_genai(source: &Path, output: &Path) {
                 let mapping = h
                     .wire_equivalent
                     .as_ref()
-                    .map(|w| format!(" -> {}", w))
+                    .map(|w| format!(" -> {w}"))
                     .unwrap_or_default();
                 println!("  - {}{}", h.name, mapping);
             }
         }
         Err(e) => {
-            eprintln!("Error: {}", e);
+            eprintln!("Error: {e}");
             std::process::exit(1);
         }
     }
@@ -343,7 +340,7 @@ fn run_diff(old_path: &Path, new_path: &Path) {
         .unwrap_or_else(|e| panic!("Failed to parse {}: {}", new_path.display(), e));
 
     let result = diff::diff_schemas(&old_schema, &new_schema);
-    print!("{}", result);
+    print!("{result}");
 
     if result.is_empty() {
         std::process::exit(0);
@@ -404,7 +401,7 @@ fn run_transpile(source: &Path, output: &Path, genai_source: Option<&Path>) {
                 Some(lookup)
             }
             Err(e) => {
-                eprintln!("Warning: failed to read js-genai source: {}", e);
+                eprintln!("Warning: failed to read js-genai source: {e}");
                 None
             }
         }
@@ -415,7 +412,7 @@ fn run_transpile(source: &Path, output: &Path, genai_source: Option<&Path>) {
     let schema = match readers::read_source_dir(source) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("Error reading source: {}", e);
+            eprintln!("Error reading source: {e}");
             std::process::exit(1);
         }
     };
@@ -462,7 +459,7 @@ fn run_transpile_genai(source: &Path, output_dir: &Path) {
     let schema = match readers::read_genai_source(source) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("Error reading source: {}", e);
+            eprintln!("Error reading source: {e}");
             std::process::exit(1);
         }
     };
@@ -484,7 +481,7 @@ fn run_transpile_genai(source: &Path, output_dir: &Path) {
     let output = codegen::generate_genai_modules(&schema);
 
     if let Err(e) = codegen::genai::write_genai_modules(&output, output_dir) {
-        eprintln!("Error writing output: {}", e);
+        eprintln!("Error writing output: {e}");
         std::process::exit(1);
     }
 
@@ -495,8 +492,8 @@ fn run_transpile_genai(source: &Path, output_dir: &Path) {
     for (name, code) in &output.modules {
         println!("  - {}.rs ({} bytes)", name, code.len());
     }
-    println!("Types with existing wire equiv (skipped): {}", with_wire);
-    println!("Types generated: {}", without_wire);
+    println!("Types with existing wire equiv (skipped): {with_wire}");
+    println!("Types generated: {without_wire}");
 }
 
 fn run_transpile_rest(source: &Path, output_dir: &Path, modules_filter: Option<&str>) {
@@ -505,13 +502,13 @@ fn run_transpile_rest(source: &Path, output_dir: &Path, modules_filter: Option<&
     let mut rest_modules = match readers::read_rest_modules(source) {
         Ok(m) => m,
         Err(e) => {
-            eprintln!("Error reading REST modules: {}", e);
+            eprintln!("Error reading REST modules: {e}");
             std::process::exit(1);
         }
     };
 
     if let Some(filter) = modules_filter {
-        let allowed: Vec<&str> = filter.split(',').map(|s| s.trim()).collect();
+        let allowed: Vec<&str> = filter.split(',').map(str::trim).collect();
         rest_modules.retain(|m| allowed.contains(&m.name.as_str()));
     }
 
@@ -523,7 +520,7 @@ fn run_transpile_rest(source: &Path, output_dir: &Path, modules_filter: Option<&
     let output = codegen::generate_rest_modules(&rest_modules);
 
     if let Err(e) = codegen::rest::write_rest_modules(&output, output_dir) {
-        eprintln!("Error writing output: {}", e);
+        eprintln!("Error writing output: {e}");
         std::process::exit(1);
     }
 
@@ -619,7 +616,7 @@ fn run_read_fluent(source: &Path, output: &Path) {
             }
         }
         Err(e) => {
-            eprintln!("Error: {}", e);
+            eprintln!("Error: {e}");
             std::process::exit(1);
         }
     }

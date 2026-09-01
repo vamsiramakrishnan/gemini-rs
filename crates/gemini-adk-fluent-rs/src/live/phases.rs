@@ -7,11 +7,11 @@ use std::time::Duration;
 
 use serde_json::Value;
 
+use gemini_adk_rs::State;
 use gemini_adk_rs::live::{
     ComputedVar, Phase, RateDetector, SustainedDetector, TemporalPattern, TurnCountDetector,
     Watcher,
 };
-use gemini_adk_rs::State;
 use gemini_genai_rs::prelude::*;
 use gemini_genai_rs::session::SessionWriter;
 
@@ -84,7 +84,7 @@ impl Live {
     ) -> Self {
         self.computed.register(ComputedVar {
             key: key.into(),
-            dependencies: deps.iter().map(|s| s.to_string()).collect(),
+            dependencies: deps.iter().map(std::string::ToString::to_string).collect(),
             compute: Arc::new(f),
         });
         self

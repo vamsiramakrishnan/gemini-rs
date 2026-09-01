@@ -175,12 +175,12 @@ use std::time::Instant;
 use common::corpus::{self, PROBES};
 use common::paraphrase::{self, Mode, Tier};
 use common::views::{curated, predicate, structural, structural_view};
-use common::{file_backed_engine, have_api_key, skip, ScratchDir};
+use common::{ScratchDir, file_backed_engine, have_api_key, skip};
 
 use gemini_memory_rs::bm25::{
     IndexedMemory, MemoryIndex, MemoryOrigin, Query, SearchExplanation, SearchHit,
 };
-use gemini_memory_rs::core::{stable_hash, CanonicalMemory, MemoryId, MemoryStatus};
+use gemini_memory_rs::core::{CanonicalMemory, MemoryId, MemoryStatus, stable_hash};
 use gemini_memory_rs::retrieval::{deterministic::topical_terms, reciprocal_rank_fusion};
 
 /// The embedding model, and the width its vectors are truncated to.
@@ -936,7 +936,7 @@ async fn what_a_semantic_layer_would_buy() {
     // better enrichment prompt ever turns this line around, the module docs
     // above are stale and this is where you find out.
     let lex = overall.tallies[LEXICAL].first;
-    let gen = overall.tallies[RRF_GEN].first;
+    let r#gen = overall.tallies[RRF_GEN].first;
     report.push_str(&format!(
         "\nfusing BM25 with the LLM-written view answers {gen}/{asked} against BM25's own \
          {lex}.\n\

@@ -367,7 +367,7 @@ mod tests {
             on_audio: Some(Box::new(|_| {})),
             ..Default::default()
         };
-        let debug = format!("{:?}", cb);
+        let debug = format!("{cb:?}");
         assert!(debug.contains("on_audio: true"));
         assert!(debug.contains("on_text: false"));
     }

@@ -88,11 +88,10 @@ impl PendingContext {
 
     /// Drain only context turns, leaving any pending prompt armed.
     pub fn drain_context(&self) -> Vec<Content> {
-        let contents = {
+        {
             let mut buf = self.buffer.lock();
             std::mem::take(&mut *buf)
-        };
-        contents
+        }
     }
 
     /// Take and clear the pending prompt flag without touching queued context.

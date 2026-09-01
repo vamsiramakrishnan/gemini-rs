@@ -31,6 +31,11 @@ pub struct TelemetryConfig {
     pub otel_metrics: bool,
     /// OTel service name for resource identification.
     pub otel_service_name: String,
+    /// OTLP collector endpoint (e.g. `http://localhost:4317`). `None` lets the
+    /// exporter fall back to the standard `OTEL_EXPORTER_OTLP_ENDPOINT` env var
+    /// and its default. Passed to the exporter builder directly; nothing here
+    /// mutates the process environment.
+    pub otel_endpoint: Option<String>,
     /// Google Cloud project ID for GCP-native OTel export.
     /// If None, auto-detects from ADC or environment.
     pub otel_gcp_project: Option<String>,
@@ -46,7 +51,8 @@ impl Default for TelemetryConfig {
             metrics_addr: None,
             otel_traces: false,
             otel_metrics: false,
-            otel_service_name: "gemini-live".to_string(),
+            otel_service_name: "gemini-genai-rs".to_string(),
+            otel_endpoint: None,
             otel_gcp_project: None,
         }
     }
@@ -84,9 +90,12 @@ impl TelemetryConfig {
         // --- OTel OTLP providers (must be created before tracing subscriber) ---
         #[cfg(feature = "otel-otlp")]
         let otel_tracer = if self.otel_traces {
-            let exporter = opentelemetry_otlp::SpanExporter::builder()
-                .with_tonic()
-                .build()?;
+            use opentelemetry_otlp::WithExportConfig as _;
+            let mut builder = opentelemetry_otlp::SpanExporter::builder().with_tonic();
+            if let Some(endpoint) = &self.otel_endpoint {
+                builder = builder.with_endpoint(endpoint.clone());
+            }
+            let exporter = builder.build()?;
             let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
                 .with_batch_exporter(exporter)
                 .with_resource(self.otel_resource())
@@ -103,9 +112,12 @@ impl TelemetryConfig {
 
         #[cfg(feature = "otel-otlp")]
         if self.otel_metrics {
-            let exporter = opentelemetry_otlp::MetricExporter::builder()
-                .with_tonic()
-                .build()?;
+            use opentelemetry_otlp::WithExportConfig as _;
+            let mut builder = opentelemetry_otlp::MetricExporter::builder().with_tonic();
+            if let Some(endpoint) = &self.otel_endpoint {
+                builder = builder.with_endpoint(endpoint.clone());
+            }
+            let exporter = builder.build()?;
             let provider = opentelemetry_sdk::metrics::SdkMeterProvider::builder()
                 .with_periodic_exporter(exporter)
                 .with_resource(self.otel_resource())
@@ -226,8 +238,8 @@ impl TelemetryConfig {
         #[cfg(feature = "otel-base")] otel_tracer: Option<opentelemetry_sdk::trace::Tracer>,
         #[cfg(not(feature = "otel-base"))] _otel_tracer: Option<()>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        use tracing_subscriber::prelude::*;
         use tracing_subscriber::EnvFilter;
+        use tracing_subscriber::prelude::*;
 
         let filter =
             EnvFilter::try_new(&self.log_filter).unwrap_or_else(|_| EnvFilter::new("info"));
@@ -293,7 +305,7 @@ mod tests {
         assert!(config.metrics_addr.is_none());
         assert!(!config.otel_traces);
         assert!(!config.otel_metrics);
-        assert_eq!(config.otel_service_name, "gemini-live");
+        assert_eq!(config.otel_service_name, "gemini-genai-rs");
         assert!(config.otel_gcp_project.is_none());
     }
 
@@ -308,6 +320,7 @@ mod tests {
             otel_traces: true,
             otel_metrics: true,
             otel_service_name: "my-service".to_string(),
+            otel_endpoint: None,
             otel_gcp_project: Some("my-project".to_string()),
         };
         assert!(!config.logging_enabled);

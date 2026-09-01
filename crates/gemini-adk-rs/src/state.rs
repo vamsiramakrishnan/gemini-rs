@@ -5,8 +5,8 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::marker::PhantomData;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::SystemTime;
 
 use dashmap::DashMap;
@@ -401,7 +401,7 @@ impl State {
         if !key.contains(':') {
             let mut derived_key = String::with_capacity(8 + key.len());
             use std::fmt::Write;
-            let _ = write!(derived_key, "derived:{}", key);
+            let _ = write!(derived_key, "derived:{key}");
             if self.track_delta {
                 match self.delta.get(&derived_key).map(|r| r.value().clone()) {
                     Some(DeltaOp::Put(v)) => return Some(f(&v)),
@@ -435,7 +435,7 @@ impl State {
         if !key.contains(':') {
             use std::fmt::Write;
             let mut derived_key = String::with_capacity(8 + key.len());
-            let _ = write!(derived_key, "derived:{}", key);
+            let _ = write!(derived_key, "derived:{key}");
             if self.track_delta {
                 match self.delta.get(&derived_key).map(|r| r.value().clone()) {
                     Some(DeltaOp::Put(v)) => return Some(v),
@@ -1103,7 +1103,10 @@ impl<'a> PrefixedState<'a> {
         self.state
             .keys()
             .into_iter()
-            .filter_map(|k| k.strip_prefix(self.prefix).map(|s| s.to_string()))
+            .filter_map(|k| {
+                k.strip_prefix(self.prefix)
+                    .map(std::string::ToString::to_string)
+            })
             .collect()
     }
 }
@@ -1150,7 +1153,10 @@ impl<'a> ReadOnlyPrefixedState<'a> {
         self.state
             .keys()
             .into_iter()
-            .filter_map(|k| k.strip_prefix(self.prefix).map(|s| s.to_string()))
+            .filter_map(|k| {
+                k.strip_prefix(self.prefix)
+                    .map(std::string::ToString::to_string)
+            })
             .collect()
     }
 }
@@ -1193,10 +1199,11 @@ mod tests {
         assert!(keys.contains(&"from_clone".to_string()));
         assert!(keys.contains(&"from_delta".to_string()));
         // Commit re-records the delta write into the committed store.
-        assert!(sink
-            .entries()
-            .iter()
-            .any(|m| m.origin == StateMutationOrigin::Commit));
+        assert!(
+            sink.entries()
+                .iter()
+                .any(|m| m.origin == StateMutationOrigin::Commit)
+        );
     }
 
     #[test]
@@ -1766,7 +1773,7 @@ mod tests {
         let snap = state.snapshot_values(&["a", "b", "c"]);
 
         let _ = state.set("a", 10); // changed
-                                    // b unchanged
+        // b unchanged
         let _ = state.set("c", 3); // new
 
         let diffs = state.diff_values(&snap, &["a", "b", "c"]);
@@ -1943,7 +1950,7 @@ mod tests {
     #[test]
     fn with_returns_none_for_missing() {
         let state = State::new();
-        let val = state.with("missing", |v| v.clone());
+        let val = state.with("missing", std::clone::Clone::clone);
         assert_eq!(val, None);
     }
 

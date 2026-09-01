@@ -91,10 +91,10 @@ impl Sim {
                 .await
             {
                 for (name, key) in &bound.fields {
-                    if let Some(v) = obj.get(name) {
-                        if !v.is_null() {
-                            let _ = self.state.set(key.clone(), v.clone());
-                        }
+                    if let Some(v) = obj.get(name)
+                        && !v.is_null()
+                    {
+                        let _ = self.state.set(key.clone(), v.clone());
                     }
                 }
             }

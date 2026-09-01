@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::core::{stable_hash, CanonicalPredicate, MemoryKind, PlanId, TurnId};
+use crate::core::{CanonicalPredicate, MemoryKind, PlanId, TurnId, stable_hash};
 
 /// Caps enforced on every plan, whoever produced it (§12.2).
 ///
@@ -234,7 +234,7 @@ impl RetrievalPlan {
     /// A cache key covering everything that changes the result.
     pub fn cache_key(&self) -> String {
         let mut parts = self.lexical_queries.clone();
-        parts.extend(self.entities.iter().flat_map(|e| e.forms()));
+        parts.extend(self.entities.iter().flat_map(RetrievalEntity::forms));
         parts.extend(self.scopes.iter().map(|s| s.scope_label().to_string()));
         parts.sort();
         stable_hash(&parts.join("|"))
@@ -242,7 +242,10 @@ impl RetrievalPlan {
 
     /// Every entity surface form the index should boost on.
     pub fn entity_forms(&self) -> Vec<String> {
-        self.entities.iter().flat_map(|e| e.forms()).collect()
+        self.entities
+            .iter()
+            .flat_map(RetrievalEntity::forms)
+            .collect()
     }
 }
 

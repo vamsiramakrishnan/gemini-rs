@@ -75,7 +75,7 @@ impl TextAgent for DispatchTextAgent {
                 agent
                     .run(&state)
                     .await
-                    .map_err(|e| format!("Task '{}' failed: {}", task_name_owned, e))
+                    .map_err(|e| format!("Task '{task_name_owned}' failed: {e}"))
             });
 
             registry.insert(task_name.clone(), handle);
@@ -153,7 +153,7 @@ impl TextAgent for JoinTextAgent {
             let result = if let Some(timeout) = self.timeout {
                 match tokio::time::timeout(timeout, handle).await {
                     Ok(Ok(Ok(text))) => {
-                        let _ = state.set(format!("_result_{}", task_name), &text);
+                        let _ = state.set(format!("_result_{task_name}"), &text);
                         Ok(text)
                     }
                     Ok(Ok(Err(e))) => Err(AgentError::Other(e)),
@@ -163,7 +163,7 @@ impl TextAgent for JoinTextAgent {
             } else {
                 match handle.await {
                     Ok(Ok(text)) => {
-                        let _ = state.set(format!("_result_{}", task_name), &text);
+                        let _ = state.set(format!("_result_{task_name}"), &text);
                         Ok(text)
                     }
                     Ok(Err(e)) => Err(AgentError::Other(e)),

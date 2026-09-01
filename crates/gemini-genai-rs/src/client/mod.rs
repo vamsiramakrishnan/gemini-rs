@@ -15,7 +15,7 @@ use crate::session::SessionHandle;
 use crate::transport::auth::{
     AuthProvider, GoogleAIAuth, GoogleAITokenAuth, RestAuth, ServiceEndpoint, VertexAIAuth,
 };
-use crate::transport::{connect, TransportConfig};
+use crate::transport::{TransportConfig, connect};
 
 /// Unified Gemini API client.
 ///

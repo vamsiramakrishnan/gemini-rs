@@ -10,8 +10,8 @@ use chrono::{DateTime, Utc};
 
 use super::proposal::{ProposedMemory, ResolutionKind, ResolvedMutation};
 use crate::core::{
-    aggregate_confidence, normalize_token, CanonicalMemory, DiscardReason, EvidenceCounters,
-    Explicitness, MemoryId, MemoryStatus, ProposedPersistence, SensitivityClass, UserId,
+    CanonicalMemory, DiscardReason, EvidenceCounters, Explicitness, MemoryId, MemoryStatus,
+    ProposedPersistence, SensitivityClass, UserId, aggregate_confidence, normalize_token,
 };
 
 /// Resolves proposals against existing memory.

@@ -6,8 +6,8 @@ use std::time::Duration;
 
 use bytes::Bytes;
 
-use gemini_adk_rs::live::CallbackMode;
 use gemini_adk_rs::State;
+use gemini_adk_rs::live::CallbackMode;
 use gemini_genai_rs::prelude::*;
 
 use super::Live;

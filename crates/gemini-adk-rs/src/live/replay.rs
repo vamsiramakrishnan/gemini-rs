@@ -45,11 +45,11 @@ use std::time::Duration;
 use gemini_genai_rs::prelude::{SessionConfig, SessionPhase, WireEntry};
 use gemini_genai_rs::session::SessionHandle;
 use gemini_genai_rs::transport::replay::{ReplayControl, ReplayTransport};
-use gemini_genai_rs::transport::{connect_with, JsonCodec, TransportConfig};
+use gemini_genai_rs::transport::{JsonCodec, TransportConfig, connect_with};
 
 use crate::error::AgentError;
 
-use super::builder::{build_runtime, spawn_lanes, LiveSessionBuilder};
+use super::builder::{LiveSessionBuilder, build_runtime, spawn_lanes};
 use super::events::LiveEvent;
 use super::handle::LiveHandle;
 
@@ -222,16 +222,20 @@ mod tests {
                 .any(|e| matches!(e, LiveEvent::TextDelta(t) if t == "Hi")),
             "expected replayed TextDelta, got {collected:?}"
         );
-        assert!(collected
-            .iter()
-            .any(|e| matches!(e, LiveEvent::TurnComplete)));
+        assert!(
+            collected
+                .iter()
+                .any(|e| matches!(e, LiveEvent::TurnComplete))
+        );
 
         // The replayed session re-encoded and "sent" the setup message.
         let outbound = replay.outbound_frames();
         assert!(!outbound.is_empty());
-        assert!(String::from_utf8(outbound[0].clone())
-            .unwrap()
-            .contains("\"setup\""));
+        assert!(
+            String::from_utf8(outbound[0].clone())
+                .unwrap()
+                .contains("\"setup\"")
+        );
 
         replay.disconnect().await.unwrap();
     }

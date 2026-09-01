@@ -22,17 +22,17 @@ pub enum TrajectoryMatch {
 /// separated list (`search, lookup`).
 fn parse_tool_seq(s: &str) -> Vec<String> {
     let t = s.trim();
-    if t.starts_with('[') {
-        if let Ok(v) = serde_json::from_str::<Vec<serde_json::Value>>(t) {
-            return v
-                .iter()
-                .filter_map(|x| {
-                    x.as_str()
-                        .map(str::to_string)
-                        .or_else(|| x.get("name").and_then(|n| n.as_str()).map(str::to_string))
-                })
-                .collect();
-        }
+    if t.starts_with('[')
+        && let Ok(v) = serde_json::from_str::<Vec<serde_json::Value>>(t)
+    {
+        return v
+            .iter()
+            .filter_map(|x| {
+                x.as_str()
+                    .map(str::to_string)
+                    .or_else(|| x.get("name").and_then(|n| n.as_str()).map(str::to_string))
+            })
+            .collect();
     }
     t.split([',', '\n'])
         .map(|p| p.trim().to_string())
@@ -51,11 +51,7 @@ fn trajectory_score(actual: &[String], expected: &[String], mode: TrajectoryMatc
         }
         TrajectoryMatch::AnyOrder => expected.iter().all(|e| actual.contains(e)),
     };
-    if matched {
-        1.0
-    } else {
-        0.0
-    }
+    if matched { 1.0 } else { 0.0 }
 }
 
 /// An evaluation criterion applied to agent output.
@@ -112,11 +108,7 @@ impl ECriterion {
             ECriterionKind::Sync(f) => f(output, expected),
             ECriterionKind::Judge(judge) => {
                 let verdict = judge.judge(output, Some(expected)).await;
-                if verdict.flagged {
-                    0.0
-                } else {
-                    1.0
-                }
+                if verdict.flagged { 0.0 } else { 1.0 }
             }
         }
     }
@@ -217,7 +209,7 @@ impl EvalSuite {
 
     /// Set criteria names for this suite.
     pub fn criteria(mut self, names: &[&str]) -> Self {
-        self.criteria_names = names.iter().map(|s| s.to_string()).collect();
+        self.criteria_names = names.iter().map(std::string::ToString::to_string).collect();
         self
     }
 
@@ -258,11 +250,7 @@ impl E {
     /// Substring containment criterion — scores 1.0 if output contains expected.
     pub fn contains_match() -> ECriterion {
         ECriterion::new("contains_match", |output, expected| {
-            if output.contains(expected) {
-                1.0
-            } else {
-                0.0
-            }
+            if output.contains(expected) { 1.0 } else { 0.0 }
         })
     }
 
@@ -365,7 +353,7 @@ impl E {
         let content = std::fs::read_to_string(path).unwrap_or_default();
         let lines: Vec<&str> = content
             .lines()
-            .map(|l| l.trim())
+            .map(str::trim)
             .filter(|l| !l.is_empty() && !l.starts_with('#'))
             .collect();
 
@@ -396,11 +384,7 @@ impl E {
             // indicating neutral — real implementation requires an LLM judge
             // parameterized with the persona description.
             let _ = description;
-            if output.is_empty() {
-                0.0
-            } else {
-                0.5
-            }
+            if output.is_empty() { 0.0 } else { 0.5 }
         })
     }
 }
@@ -524,11 +508,7 @@ mod tests {
         let c = E::custom(
             "length",
             |output, _expected| {
-                if output.len() > 10 {
-                    1.0
-                } else {
-                    0.0
-                }
+                if output.len() > 10 { 1.0 } else { 0.0 }
             },
         );
         assert_eq!(c.score("short", ""), 0.0);

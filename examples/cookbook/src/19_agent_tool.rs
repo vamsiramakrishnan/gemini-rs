@@ -224,7 +224,10 @@ async fn main() {
                 .get("query")
                 .and_then(|q| q.as_str())
                 .unwrap_or("no query");
-            let limit = args.get("limit").and_then(|l| l.as_u64()).unwrap_or(5);
+            let limit = args
+                .get("limit")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(5);
             Ok(format!("Found {limit} results for: {query}"))
         }),
         State::new(),

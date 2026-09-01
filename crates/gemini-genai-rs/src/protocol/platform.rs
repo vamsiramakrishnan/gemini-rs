@@ -144,6 +144,6 @@ mod tests {
     fn platform_is_clone_and_debug() {
         let p = Platform::GoogleAI;
         let _p2 = p.clone();
-        let _s = format!("{:?}", p);
+        let _s = format!("{p:?}");
     }
 }

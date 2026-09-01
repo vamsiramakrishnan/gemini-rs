@@ -92,23 +92,25 @@ fn analyze(events: &[Value], contract: Option<&RuntimeContract>) -> ReplayReport
                 let from = event.get("from").and_then(Value::as_str).unwrap_or("?");
                 let to = event.get("to").and_then(Value::as_str).unwrap_or("?");
                 report.phases.push(format!("{from} -> {to}"));
-                if let Some(phases) = &contract_phases {
-                    if to != "?" && !phases.contains(to) {
-                        report
-                            .errors
-                            .push(format!("event #{idx} transitions to unknown phase `{to}`"));
-                    }
+                if let Some(phases) = &contract_phases
+                    && to != "?"
+                    && !phases.contains(to)
+                {
+                    report
+                        .errors
+                        .push(format!("event #{idx} transitions to unknown phase `{to}`"));
                 }
             }
             "toolCallEvent" => {
                 let name = event.get("name").and_then(Value::as_str).unwrap_or("?");
                 report.tools.push(name.to_string());
-                if let Some(tools) = &contract_tools {
-                    if name != "?" && !tools.contains(name) {
-                        report
-                            .errors
-                            .push(format!("event #{idx} calls unknown tool `{name}`"));
-                    }
+                if let Some(tools) = &contract_tools
+                    && name != "?"
+                    && !tools.contains(name)
+                {
+                    report
+                        .errors
+                        .push(format!("event #{idx} calls unknown tool `{name}`"));
                 }
             }
             "statePromotionEvent" => {
@@ -118,12 +120,14 @@ fn analyze(events: &[Value], contract: Option<&RuntimeContract>) -> ReplayReport
                     .and_then(Value::as_str)
                     .unwrap_or("?");
                 report.promotions.push(key.to_string());
-                if let Some(promotions) = &contract_promotions {
-                    if !promotions.is_empty() && key != "?" && !promotions.contains(key) {
-                        report.errors.push(format!(
-                            "event #{idx} promotes undeclared state key `{key}`"
-                        ));
-                    }
+                if let Some(promotions) = &contract_promotions
+                    && !promotions.is_empty()
+                    && key != "?"
+                    && !promotions.contains(key)
+                {
+                    report.errors.push(format!(
+                        "event #{idx} promotes undeclared state key `{key}`"
+                    ));
                 }
             }
             _ => {}

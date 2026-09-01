@@ -231,13 +231,10 @@ fn main() {
     for v in &violations {
         match v {
             ContractViolation::OrphanedOutput { producer, key } => {
-                println!(
-                    "  ORPHANED: {} writes '{}' (OK -- consumed externally)",
-                    producer, key
-                );
+                println!("  ORPHANED: {producer} writes '{key}' (OK -- consumed externally)");
             }
             _ => {
-                println!("  {:?}", v);
+                println!("  {v:?}");
             }
         }
     }

@@ -271,7 +271,7 @@ mod tests {
 
         match input_rx.try_recv() {
             Ok(InputEvent::Audio(received)) => assert_eq!(received, data),
-            other => panic!("expected Audio, got {:?}", other),
+            other => panic!("expected Audio, got {other:?}"),
         }
     }
 
@@ -303,7 +303,7 @@ mod tests {
 
         match input_rx.try_recv() {
             Ok(InputEvent::Text(t)) => assert_eq!(t, "hello"),
-            other => panic!("expected Text, got {:?}", other),
+            other => panic!("expected Text, got {other:?}"),
         }
     }
 

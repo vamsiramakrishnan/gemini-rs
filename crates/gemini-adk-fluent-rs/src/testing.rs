@@ -176,7 +176,7 @@ pub fn diagnose(agent: &AgentBuilder) -> String {
     lines.push(format!("Agent: {}", agent.name()));
 
     if let Some(model) = agent.get_model() {
-        lines.push(format!("  Model: {:?}", model));
+        lines.push(format!("  Model: {model:?}"));
     }
     if let Some(inst) = agent.get_instruction() {
         let truncated = if inst.len() > 80 {
@@ -184,10 +184,10 @@ pub fn diagnose(agent: &AgentBuilder) -> String {
         } else {
             inst.to_string()
         };
-        lines.push(format!("  Instruction: {}", truncated));
+        lines.push(format!("  Instruction: {truncated}"));
     }
     if let Some(t) = agent.get_temperature() {
-        lines.push(format!("  Temperature: {}", t));
+        lines.push(format!("  Temperature: {t}"));
     }
     if agent.tool_count() > 0 {
         lines.push(format!("  Tools: {}", agent.tool_count()));
@@ -633,9 +633,11 @@ mod tests {
             .instruction("Never entered")
             .done()
             .initial_phase("greet");
-        assert!(check_live(&live)
-            .iter()
-            .any(|v| matches!(v, LiveViolation::UnreachablePhase { name } if name == "orphan")));
+        assert!(
+            check_live(&live)
+                .iter()
+                .any(|v| matches!(v, LiveViolation::UnreachablePhase { name } if name == "orphan"))
+        );
     }
 
     #[test]

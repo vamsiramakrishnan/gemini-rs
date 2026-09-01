@@ -32,7 +32,7 @@ exclude = [
 
 [workspace.package]
 version = "1.0.0"
-edition = "2021"
+edition = "2024"
 rust-version = "1.93"
 license = "MIT"
 repository = "https://github.com/vamsiramakrishnan/gemini-rs"
@@ -54,30 +54,25 @@ gemini-adk-server-rs = { path = "apps/gemini-adk-server-rs",   version = "1.0.0"
 # Every crate but the L0 audio ring is unsafe-free and says so with
 # `#![forbid(unsafe_code)]`; this keeps any new `unsafe` visible in review.
 unsafe_code = "warn"
-unreachable_pub = "warn"
-# `missing_debug_implementations` is the next lint to turn on: 224 public
-# types lack `Debug` today, most of them holding `dyn Fn` fields that need a
-# hand-written impl. That is its own change, not a side effect of this one.
+# `unreachable_pub` lives in each library crate's lib.rs rather than here:
+# it is the right lint for a library and pure noise for a binary.
+#
+# Next lints to turn on, each its own change (measured backlog in brackets):
+# missing_debug_implementations [224 types, mostly `dyn Fn` fields needing a
+# hand-written impl], clippy::must_use_candidate [1119],
+# clippy::doc_markdown [714], clippy::missing_errors_doc [163],
+# clippy::needless_pass_by_value [15, all public signatures].
 
 [workspace.lints.clippy]
-# Correctness-adjacent lints that the API guidelines expect a published SDK
-# to hold. Deliberate exceptions carry `#[allow(lint, reason = "…")]` at the
-# site so the reason travels with the code.
+# Lints every crate holds today. Deliberate exceptions carry
+# `#[allow(lint, reason = "…")]` at the site so the reason travels with
+# the code.
 dbg_macro = "warn"
 todo = "warn"
 unimplemented = "warn"
-print_stdout = "warn"
-print_stderr = "warn"
-large_futures = "warn"
-manual_let_else = "warn"
-needless_pass_by_value = "warn"
 redundant_closure_for_method_calls = "warn"
 semicolon_if_nothing_returned = "warn"
 uninlined_format_args = "warn"
 unnecessary_wraps = "warn"
 unused_async = "warn"
 unused_self = "warn"
-missing_errors_doc = "warn"
-missing_panics_doc = "warn"
-must_use_candidate = "warn"
-doc_markdown = "warn"

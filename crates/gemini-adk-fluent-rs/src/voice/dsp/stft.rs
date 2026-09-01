@@ -31,8 +31,8 @@
 
 use std::collections::VecDeque;
 
-use realfft::num_complex::Complex;
 use realfft::RealFftPlanner;
+use realfft::num_complex::Complex;
 
 use super::{AudioBus, DspStage};
 

@@ -8,15 +8,15 @@
 //!   # then open http://127.0.0.1:3001
 
 use axum::{
+    Router,
     extract::{
-        ws::{Message, WebSocket, WebSocketUpgrade},
         State,
+        ws::{Message, WebSocket, WebSocketUpgrade},
     },
     response::IntoResponse,
     routing::get,
-    Router,
 };
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use futures::{sink::SinkExt, stream::StreamExt};
 use gemini_genai_rs::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -117,8 +117,7 @@ async fn main() {
 
     let app = Router::new()
         .fallback_service(
-            ServeDir::new(static_dir)
-                .fallback(ServeFile::new(format!("{}/index.html", static_dir))),
+            ServeDir::new(static_dir).fallback(ServeFile::new(format!("{static_dir}/index.html"))),
         )
         .route("/ws", get(ws_handler))
         .layer(CorsLayer::permissive())
@@ -126,7 +125,7 @@ async fn main() {
 
     let addr = "127.0.0.1:3001";
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    println!("Text Chat example running at http://{}", addr);
+    println!("Text Chat example running at http://{addr}");
 
     axum::serve(listener, app).await.unwrap();
 }
@@ -144,154 +143,149 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
 
     let send_task = tokio::spawn(async move {
         while let Some(msg) = ws_rx.recv().await {
-            if let Ok(json) = serde_json::to_string(&msg) {
-                if sender.send(Message::Text(json)).await.is_err() {
-                    break;
-                }
+            if let Ok(json) = serde_json::to_string(&msg)
+                && sender.send(Message::Text(json)).await.is_err()
+            {
+                break;
             }
         }
     });
 
     while let Some(Ok(msg)) = receiver.next().await {
-        if let Message::Text(text) = msg {
-            if let Ok(client_msg) = serde_json::from_str::<ClientMessage>(&text) {
-                match client_msg {
-                    ClientMessage::Start {
-                        system_instruction, ..
-                    } => {
-                        info!("Starting text-only session");
+        if let Message::Text(text) = msg
+            && let Ok(client_msg) = serde_json::from_str::<ClientMessage>(&text)
+        {
+            match client_msg {
+                ClientMessage::Start {
+                    system_instruction, ..
+                } => {
+                    info!("Starting text-only session");
 
-                        let base_config = match &state.auth {
-                            AuthConfig::GoogleAI { api_key } => SessionConfig::new(api_key),
-                            AuthConfig::VertexAI { project, location } => {
-                                let token = String::from_utf8(
-                                    std::process::Command::new("gcloud")
-                                        .args(["auth", "print-access-token"])
-                                        .output()
-                                        .expect("gcloud CLI required for Vertex AI")
-                                        .stdout,
+                    let base_config = match &state.auth {
+                        AuthConfig::GoogleAI { api_key } => SessionConfig::new(api_key),
+                        AuthConfig::VertexAI { project, location } => {
+                            let token = String::from_utf8(
+                                std::process::Command::new("gcloud")
+                                    .args(["auth", "print-access-token"])
+                                    .output()
+                                    .expect("gcloud CLI required for Vertex AI")
+                                    .stdout,
+                            )
+                            .unwrap()
+                            .trim()
+                            .to_string();
+                            SessionConfig::from_vertex(project, location, token)
+                        }
+                    };
+
+                    // Text-only: use gemini-2.0-flash-live-001 with TEXT modality
+                    let mut config = base_config
+                        .model(GeminiModel::Gemini2_0FlashLive)
+                        .text_only();
+
+                    if let Some(sys) = system_instruction {
+                        config = config.system_instruction(sys);
+                    }
+
+                    match connect(config, TransportConfig::default()).await {
+                        Ok(session) => {
+                            session_handle = Some(session.clone());
+                            let mut events = session.subscribe();
+                            let tx = ws_tx.clone();
+
+                            if let Some(t) = session_event_task.take() {
+                                t.abort();
+                            }
+
+                            session_event_task = Some(tokio::spawn(async move {
+                                match tokio::time::timeout(
+                                    std::time::Duration::from_secs(15),
+                                    session.wait_for_phase(SessionPhase::Active),
                                 )
-                                .unwrap()
-                                .trim()
-                                .to_string();
-                                SessionConfig::from_vertex(project, location, token)
-                            }
-                        };
-
-                        // Text-only: use gemini-2.0-flash-live-001 with TEXT modality
-                        let mut config = base_config
-                            .model(GeminiModel::Gemini2_0FlashLive)
-                            .text_only();
-
-                        if let Some(sys) = system_instruction {
-                            config = config.system_instruction(sys);
-                        }
-
-                        match connect(config, TransportConfig::default()).await {
-                            Ok(session) => {
-                                session_handle = Some(session.clone());
-                                let mut events = session.subscribe();
-                                let tx = ws_tx.clone();
-
-                                if let Some(t) = session_event_task.take() {
-                                    t.abort();
+                                .await
+                                {
+                                    Ok(_) => {
+                                        info!("Session active");
+                                        let _ = tx.send(ServerMessage::Connected).await;
+                                    }
+                                    Err(_) => {
+                                        error!("Timed out waiting for active session");
+                                        let _ = tx
+                                            .send(ServerMessage::Error {
+                                                message: "Connection timeout".into(),
+                                            })
+                                            .await;
+                                        return;
+                                    }
                                 }
 
-                                session_event_task = Some(tokio::spawn(async move {
-                                    match tokio::time::timeout(
-                                        std::time::Duration::from_secs(15),
-                                        session.wait_for_phase(SessionPhase::Active),
-                                    )
-                                    .await
-                                    {
-                                        Ok(_) => {
-                                            info!("Session active");
-                                            let _ = tx.send(ServerMessage::Connected).await;
+                                while let Some(event) = recv_event(&mut events).await {
+                                    match event {
+                                        SessionEvent::TextDelta(t) => {
+                                            let _ =
+                                                tx.send(ServerMessage::TextDelta { text: t }).await;
                                         }
-                                        Err(_) => {
-                                            error!("Timed out waiting for active session");
+                                        SessionEvent::TextComplete(t) => {
                                             let _ = tx
-                                                .send(ServerMessage::Error {
-                                                    message: "Connection timeout".into(),
-                                                })
+                                                .send(ServerMessage::TextComplete { text: t })
                                                 .await;
-                                            return;
                                         }
-                                    }
-
-                                    while let Some(event) = recv_event(&mut events).await {
-                                        match event {
-                                            SessionEvent::TextDelta(t) => {
-                                                let _ = tx
-                                                    .send(ServerMessage::TextDelta { text: t })
-                                                    .await;
-                                            }
-                                            SessionEvent::TextComplete(t) => {
-                                                let _ = tx
-                                                    .send(ServerMessage::TextComplete { text: t })
-                                                    .await;
-                                            }
-                                            SessionEvent::AudioData(data) => {
-                                                let base64_data = BASE64.encode(&data);
-                                                let _ = tx
-                                                    .send(ServerMessage::Audio {
-                                                        data: base64_data,
-                                                    })
-                                                    .await;
-                                            }
-                                            SessionEvent::TurnComplete => {
-                                                let _ = tx.send(ServerMessage::TurnComplete).await;
-                                            }
-                                            SessionEvent::Interrupted => {
-                                                let _ = tx.send(ServerMessage::Interrupted).await;
-                                            }
-                                            SessionEvent::Error(e) => {
-                                                error!("Session error: {}", e);
-                                                let _ = tx
-                                                    .send(ServerMessage::Error { message: e })
-                                                    .await;
-                                            }
-                                            _ => {}
+                                        SessionEvent::AudioData(data) => {
+                                            let base64_data = BASE64.encode(&data);
+                                            let _ = tx
+                                                .send(ServerMessage::Audio { data: base64_data })
+                                                .await;
                                         }
+                                        SessionEvent::TurnComplete => {
+                                            let _ = tx.send(ServerMessage::TurnComplete).await;
+                                        }
+                                        SessionEvent::Interrupted => {
+                                            let _ = tx.send(ServerMessage::Interrupted).await;
+                                        }
+                                        SessionEvent::Error(e) => {
+                                            error!("Session error: {}", e);
+                                            let _ =
+                                                tx.send(ServerMessage::Error { message: e }).await;
+                                        }
+                                        _ => {}
                                     }
-                                }));
-                            }
-                            Err(e) => {
-                                error!("Failed to connect: {}", e);
-                                let _ = ws_tx
-                                    .send(ServerMessage::Error {
-                                        message: format!("Failed to connect: {}", e),
-                                    })
-                                    .await;
-                            }
-                        }
-                    }
-                    ClientMessage::Text { text } => {
-                        if let Some(session) = &session_handle {
-                            if let Err(e) = session.send_text(text).await {
-                                error!("Failed to send text: {}", e);
-                            }
-                        }
-                    }
-                    ClientMessage::Audio { data } => {
-                        if let Some(session) = &session_handle {
-                            if let Ok(bytes) = BASE64.decode(data) {
-                                if let Err(e) = session.send_audio(bytes).await {
-                                    error!("Failed to send audio: {}", e);
                                 }
-                            }
+                            }));
+                        }
+                        Err(e) => {
+                            error!("Failed to connect: {}", e);
+                            let _ = ws_tx
+                                .send(ServerMessage::Error {
+                                    message: format!("Failed to connect: {e}"),
+                                })
+                                .await;
                         }
                     }
-                    ClientMessage::Stop => {
-                        info!("Stopping session");
-                        if let Some(session) = &session_handle {
-                            let _ = session.disconnect().await;
-                        }
-                        if let Some(t) = session_event_task.take() {
-                            t.abort();
-                        }
-                        session_handle = None;
+                }
+                ClientMessage::Text { text } => {
+                    if let Some(session) = &session_handle
+                        && let Err(e) = session.send_text(text).await
+                    {
+                        error!("Failed to send text: {}", e);
                     }
+                }
+                ClientMessage::Audio { data } => {
+                    if let Some(session) = &session_handle
+                        && let Ok(bytes) = BASE64.decode(data)
+                        && let Err(e) = session.send_audio(bytes).await
+                    {
+                        error!("Failed to send audio: {}", e);
+                    }
+                }
+                ClientMessage::Stop => {
+                    info!("Stopping session");
+                    if let Some(session) = &session_handle {
+                        let _ = session.disconnect().await;
+                    }
+                    if let Some(t) = session_event_task.take() {
+                        t.abort();
+                    }
+                    session_handle = None;
                 }
             }
         }

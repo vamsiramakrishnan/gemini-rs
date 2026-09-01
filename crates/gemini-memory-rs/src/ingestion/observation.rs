@@ -14,9 +14,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::core::{
-    normalize_token, CanonicalPredicate, EntityRef, Explicitness, MemoryError, MemoryKind,
-    MemoryObservation, MemoryValue, MutationIntent, ObservationId, ProposedPersistence,
-    SensitivityClass, SessionId, SpeakerAttribution, TemporalScope, TranscriptEvidence, TurnId,
+    CanonicalPredicate, EntityRef, Explicitness, MemoryError, MemoryKind, MemoryObservation,
+    MemoryValue, MutationIntent, ObservationId, ProposedPersistence, SensitivityClass, SessionId,
+    SpeakerAttribution, TemporalScope, TranscriptEvidence, TurnId, normalize_token,
 };
 
 /// The system instruction for the observation extractor.
@@ -695,9 +695,11 @@ mod tests {
     #[tokio::test]
     async fn a_first_person_phrase_inside_a_question_is_not_a_statement() {
         // "what i am asking is whether…" contains "i am" but asserts nothing.
-        assert!(extract("what i am asking is whether it is open")
-            .await
-            .is_empty());
+        assert!(
+            extract("what i am asking is whether it is open")
+                .await
+                .is_empty()
+        );
     }
 
     #[tokio::test]

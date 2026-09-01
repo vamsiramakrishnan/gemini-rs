@@ -27,12 +27,12 @@
 //! | Access | [`AuthProvider`], [`GoogleAIAuth`], [`VertexAIAuth`], [`Transport`], [`TungsteniteTransport`], [`Codec`], [`JsonCodec`] |
 //! | Truth | [`UsageMetadata`], [`SessionError`] |
 
+pub use crate::protocol::Platform;
 pub use crate::protocol::types::{
     ApiEndpoint, Content, FunctionCall, FunctionCallingBehavior, FunctionDeclaration,
     FunctionResponse, FunctionResponseScheduling, GeminiModel, Modality, Part, Role, SessionConfig,
     Tool, UsageMetadata, Voice,
 };
-pub use crate::protocol::Platform;
 
 pub use crate::session::{
     ResumeInfo, SessionError, SessionEvent, SessionHandle, SessionPhase, SessionReader,
@@ -43,7 +43,7 @@ pub use crate::transport::auth::{AuthProvider, GoogleAIAuth, VertexAIAuth};
 pub use crate::transport::ws::{Transport, TungsteniteTransport};
 pub use crate::transport::{Codec, ConnectBuilder, JsonCodec};
 
-pub use crate::buffer::{bytes_to_i16, i16_to_bytes, AudioJitterBuffer, SpscRing};
+pub use crate::buffer::{AudioJitterBuffer, SpscRing, bytes_to_i16, i16_to_bytes};
 pub use crate::turn::{BargeInDetector, TurnDetector};
 
 #[cfg(test)]

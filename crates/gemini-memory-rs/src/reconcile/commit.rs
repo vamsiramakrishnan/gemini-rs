@@ -12,7 +12,7 @@ use super::consolidate::ConsolidationOutput;
 use super::proposal::{MemorySelector, ResolutionKind, ResolvedMutation};
 use super::resolver::Resolver;
 use crate::core::{
-    stable_hash, CommitReceipt, MemoryError, MemoryEvent, MemoryStatus, SessionEventWriter, UserId,
+    CommitReceipt, MemoryError, MemoryEvent, MemoryStatus, SessionEventWriter, UserId, stable_hash,
 };
 use crate::okf::{MemoryRepository, MemoryTransaction, ReconciliationSelector};
 
@@ -207,18 +207,18 @@ impl MemoryCommitter {
         };
         let _ = events.append(None, event).await;
 
-        if resolved.kind == ResolutionKind::Supersede || resolved.kind == ResolutionKind::Refine {
-            if let (Some(new), Some(old)) = (resolved.writes.first(), resolved.writes.get(1)) {
-                let _ = events
-                    .append(
-                        None,
-                        MemoryEvent::MemorySuperseded {
-                            old: old.id.clone(),
-                            new: new.id.clone(),
-                        },
-                    )
-                    .await;
-            }
+        if (resolved.kind == ResolutionKind::Supersede || resolved.kind == ResolutionKind::Refine)
+            && let (Some(new), Some(old)) = (resolved.writes.first(), resolved.writes.get(1))
+        {
+            let _ = events
+                .append(
+                    None,
+                    MemoryEvent::MemorySuperseded {
+                        old: old.id.clone(),
+                        new: new.id.clone(),
+                    },
+                )
+                .await;
         }
     }
 }

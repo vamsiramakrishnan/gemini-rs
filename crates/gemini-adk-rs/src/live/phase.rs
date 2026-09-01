@@ -13,8 +13,8 @@ use std::time::{Duration, Instant};
 
 use gemini_genai_rs::session::SessionWriter;
 
-use super::transcript::TranscriptWindow;
 use super::BoxFuture;
+use super::transcript::TranscriptWindow;
 use crate::state::State;
 
 // ── Core types ──────────────────────────────────────────────────────────────
@@ -100,10 +100,10 @@ impl InstructionModifier {
                     if let Some(val) = state.get::<serde_json::Value>(key) {
                         match val {
                             serde_json::Value::String(s) => {
-                                pairs.push(format!("{display_key}={s}"))
+                                pairs.push(format!("{display_key}={s}"));
                             }
                             serde_json::Value::Number(n) => {
-                                pairs.push(format!("{display_key}={n}"))
+                                pairs.push(format!("{display_key}={n}"));
                             }
                             serde_json::Value::Bool(b) => pairs.push(format!("{display_key}={b}")),
                             other => pairs.push(format!("{display_key}={other}")),
@@ -412,7 +412,7 @@ impl PhaseMachine {
                 .needs
                 .iter()
                 .filter(|key| !state.contains(key))
-                .map(|s| s.as_str())
+                .map(std::string::String::as_str)
                 .collect();
             if !missing.is_empty() {
                 lines.push(format!("Still needed: {}", missing.join(", ")));
@@ -423,7 +423,7 @@ impl PhaseMachine {
                 .requires
                 .iter()
                 .filter(|key| !state.contains(key))
-                .map(|s| s.as_str())
+                .map(std::string::String::as_str)
                 .collect();
             if !missing_required.is_empty() {
                 lines.push(format!(
@@ -490,10 +490,10 @@ impl PhaseMachine {
                 // Check target phase guard — if the target phase has a guard
                 // that returns false, skip this transition and try the next one.
                 if let Some(target_phase) = self.phases.get(&transition.target) {
-                    if let Some(ref phase_guard) = target_phase.guard {
-                        if !phase_guard(state) {
-                            continue;
-                        }
+                    if let Some(ref phase_guard) = target_phase.guard
+                        && !phase_guard(state)
+                    {
+                        continue;
                     }
                     let missing = target_phase.missing_requirements(state);
                     if missing.is_empty() {
@@ -564,11 +564,11 @@ impl PhaseMachine {
         let duration_in_phase = self.phase_entered_at.elapsed();
 
         // Run on_exit for the current phase (if it exists and has callback).
-        if let Some(phase) = self.phases.get(&from) {
-            if let Some(ref on_exit) = phase.on_exit {
-                let fut = on_exit(state.clone(), Arc::clone(writer));
-                fut.await;
-            }
+        if let Some(phase) = self.phases.get(&from)
+            && let Some(ref on_exit) = phase.on_exit
+        {
+            let fut = on_exit(state.clone(), Arc::clone(writer));
+            fut.await;
         }
 
         // Update current phase.
@@ -952,7 +952,7 @@ mod tests {
 
         let instr = PhaseInstruction::Dynamic(Arc::new(|s: &State| {
             let name: String = s.get("user_name").unwrap_or_default();
-            format!("Greet the user named {}.", name)
+            format!("Greet the user named {name}.")
         }));
 
         assert_eq!(instr.resolve(&state), "Greet the user named Alice.");
@@ -1078,7 +1078,7 @@ mod tests {
             name: "dynamic".to_string(),
             instruction: PhaseInstruction::Dynamic(Arc::new(|s: &State| {
                 let topic: String = s.get("topic").unwrap_or_default();
-                format!("Discuss {}.", topic)
+                format!("Discuss {topic}.")
             })),
             tools_enabled: None,
             guard: None,

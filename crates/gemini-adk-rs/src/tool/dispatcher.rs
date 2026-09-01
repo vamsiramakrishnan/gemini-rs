@@ -10,7 +10,7 @@ use gemini_genai_rs::prelude::{FunctionCall, FunctionDeclaration, FunctionRespon
 
 use crate::error::ToolError;
 
-use super::{ActiveStreamingTool, ToolClass, ToolFunction, ToolKind, DEFAULT_TOOL_TIMEOUT};
+use super::{ActiveStreamingTool, DEFAULT_TOOL_TIMEOUT, ToolClass, ToolFunction, ToolKind};
 
 /// Routes function calls to the right tool implementation.
 pub struct ToolDispatcher {
@@ -180,7 +180,7 @@ impl ToolDispatcher {
             Some(_) => {
                 return Err(ToolError::Other(format!(
                     "{name} is not a regular function tool"
-                )))
+                )));
             }
             None => return Err(ToolError::NotFound(name.to_string())),
         };
@@ -208,7 +208,7 @@ impl ToolDispatcher {
             Some(_) => {
                 return Err(ToolError::Other(format!(
                     "{name} is not a regular function tool"
-                )))
+                )));
             }
             None => return Err(ToolError::NotFound(name.to_string())),
         };
@@ -328,7 +328,7 @@ impl gemini_genai_rs::prelude::ToolProvider for ToolDispatcher {
 mod confirmation_tests {
     use super::*;
     use crate::confirmation::StaticConfirmation;
-    use crate::tool::{policy::ToolPolicy, PolicyTool, SimpleTool};
+    use crate::tool::{PolicyTool, SimpleTool, policy::ToolPolicy};
     use serde_json::json;
     use std::sync::atomic::{AtomicUsize, Ordering};
 

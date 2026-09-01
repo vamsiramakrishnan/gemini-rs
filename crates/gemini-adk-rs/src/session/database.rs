@@ -20,14 +20,14 @@ use async_trait::async_trait;
 use tokio::sync::Mutex;
 
 #[cfg(feature = "database-sessions")]
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
-#[cfg(feature = "database-sessions")]
 use sqlx::SqlitePool;
+#[cfg(feature = "database-sessions")]
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 
 #[cfg(feature = "postgres-sessions")]
-use sqlx::postgres::PgPoolOptions;
-#[cfg(feature = "postgres-sessions")]
 use sqlx::PgPool;
+#[cfg(feature = "postgres-sessions")]
+use sqlx::postgres::PgPoolOptions;
 
 #[cfg(feature = "database-sessions")]
 use super::{Session, SessionError, SessionId, SessionService};

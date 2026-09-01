@@ -84,10 +84,7 @@ fn main() {
             println!("  These keys are read by an agent but never written by any agent.");
             for v in &unproduced {
                 if let ContractViolation::UnproducedKey { consumer, key } = v {
-                    println!(
-                        "    - '{}' reads '{}', but no agent writes it",
-                        consumer, key
-                    );
+                    println!("    - '{consumer}' reads '{key}', but no agent writes it");
                 }
             }
             println!();
@@ -98,7 +95,7 @@ fn main() {
             println!("  Multiple agents write the same key, creating a race condition risk.");
             for v in &duplicates {
                 if let ContractViolation::DuplicateWrite { agents, key } = v {
-                    println!("    - '{}' written by: {:?}", key, agents);
+                    println!("    - '{key}' written by: {agents:?}");
                 }
             }
             println!();
@@ -109,7 +106,7 @@ fn main() {
             println!("  These keys are written by an agent but never read by any agent.");
             for v in &orphans {
                 if let ContractViolation::OrphanedOutput { producer, key } = v {
-                    println!("    - '{}' writes '{}', but nobody reads it", producer, key);
+                    println!("    - '{producer}' writes '{key}', but nobody reads it");
                 }
             }
             println!();
@@ -130,7 +127,7 @@ fn main() {
     }
 
     for (producer, edges) in &by_producer {
-        println!("  {} -->", producer);
+        println!("  {producer} -->");
         for edge in edges {
             println!("    --[{}]--> {}", edge.key, edge.consumer);
         }
@@ -141,7 +138,7 @@ fn main() {
 
     for agent in &all_agents {
         let diag = diagnose(agent);
-        println!("{}\n", diag);
+        println!("{diag}\n");
     }
 
     // ── 5. AgentHarness for state setup ──
@@ -287,10 +284,10 @@ fn main() {
             match step {
                 Composable::Agent(a) => println!("    Step {}: Agent({})", i, a.name()),
                 Composable::FanOut(f) => {
-                    println!("    Step {}: FanOut({} branches)", i, f.branches.len())
+                    println!("    Step {}: FanOut({} branches)", i, f.branches.len());
                 }
                 Composable::Pipeline(p) => {
-                    println!("    Step {}: Pipeline({} steps)", i, p.steps.len())
+                    println!("    Step {}: Pipeline({} steps)", i, p.steps.len());
                 }
                 Composable::Loop(l) => println!("    Step {}: Loop(max={})", i, l.max),
                 Composable::Fallback(f) => println!(

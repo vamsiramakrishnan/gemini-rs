@@ -4,7 +4,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tracing::info;
 
@@ -353,7 +353,10 @@ fn execute_tool(name: &str, args: &Value) -> Value {
                 .get("date")
                 .and_then(|v| v.as_str())
                 .unwrap_or("2026-03-15");
-            let party_size = args.get("party_size").and_then(|v| v.as_u64()).unwrap_or(2) as u32;
+            let party_size = args
+                .get("party_size")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(2) as u32;
             let is_large = party_size >= 9;
 
             json!({
@@ -397,7 +400,10 @@ fn execute_tool(name: &str, args: &Value) -> Value {
                 .get("time")
                 .and_then(|v| v.as_str())
                 .unwrap_or("7:00 PM");
-            let party_size = args.get("party_size").and_then(|v| v.as_u64()).unwrap_or(2);
+            let party_size = args
+                .get("party_size")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(2);
             let phone = args
                 .get("phone")
                 .and_then(|v| v.as_str())
@@ -798,8 +804,7 @@ impl DemoApp for Restaurant {
                                 .unwrap_or_else(|| "none".to_string());
                             if res_id != "none" {
                                 format!(
-                                    "Everything is set. Reservation ID is {}. I'll thank the guest and wrap up.",
-                                    res_id
+                                    "Everything is set. Reservation ID is {res_id}. I'll thank the guest and wrap up."
                                 )
                             } else {
                                 "I'll thank the guest for calling and wish them a wonderful day.".into()
@@ -941,10 +946,12 @@ mod tests {
             }),
         );
         assert_eq!(result["status"], "cancelled");
-        assert!(result["confirmation_message"]
-            .as_str()
-            .unwrap()
-            .contains("cancelled"));
+        assert!(
+            result["confirmation_message"]
+                .as_str()
+                .unwrap()
+                .contains("cancelled")
+        );
     }
 
     #[test]
@@ -993,10 +1000,12 @@ mod tests {
             }),
         );
         assert_eq!(result["status"], "added");
-        assert!(result["confirmation_message"]
-            .as_str()
-            .unwrap()
-            .contains("Birthday"));
+        assert!(
+            result["confirmation_message"]
+                .as_str()
+                .unwrap()
+                .contains("Birthday")
+        );
     }
 
     #[test]

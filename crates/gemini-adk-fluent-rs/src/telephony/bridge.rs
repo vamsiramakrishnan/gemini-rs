@@ -17,8 +17,8 @@ use std::time::Duration;
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
 
-use gemini_adk_rs::live::{LiveEvent, LiveHandle};
 use gemini_adk_rs::State;
+use gemini_adk_rs::live::{LiveEvent, LiveHandle};
 
 use crate::voice::Playback;
 

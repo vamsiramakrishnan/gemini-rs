@@ -64,10 +64,10 @@ pub(in crate::live) async fn handle_tool_calls(
     event_tx: &tokio::sync::broadcast::Sender<LiveEvent>,
 ) {
     // 0. Phase-scoped tool filtering: reject calls not in phase's allowed list
-    let (allowed_calls, rejected_responses) = if let Some(ref pm) = phase_machine {
+    let (allowed_calls, rejected_responses) = if let Some(pm) = phase_machine {
         let active_tools = {
             let pm_guard = pm.lock().await;
-            pm_guard.active_tools().map(|t| t.to_vec())
+            pm_guard.active_tools().map(<[std::string::String]>::to_vec)
         };
         if let Some(active_tools) = active_tools {
             let mut allowed = Vec::new();
@@ -124,7 +124,7 @@ pub(in crate::live) async fn handle_tool_calls(
                 Option<Arc<dyn crate::live::background_tool::ResultFormatter>>,
             )> = Vec::new();
 
-            if let Some(ref disp) = dispatcher {
+            if let Some(disp) = dispatcher {
                 for call in &allowed_calls {
                     // Flow governance gate: deny inadmissible tools (out-of-order,
                     // once-violated, gated) in Enforce mode; record in Observe.
@@ -158,7 +158,7 @@ pub(in crate::live) async fn handle_tool_calls(
                             // Send immediate ack
                             let fmt: &dyn crate::live::background_tool::ResultFormatter = formatter
                                 .as_ref()
-                                .map(|f| f.as_ref())
+                                .map(std::convert::AsRef::as_ref)
                                 .unwrap_or(&crate::live::background_tool::DefaultResultFormatter);
                             let ack = fmt.format_running(call);
                             results.push(FunctionResponse {
@@ -286,11 +286,11 @@ pub(in crate::live) async fn handle_tool_calls(
     }
 
     // 5. Send tool responses (standard + ack) back to Gemini
-    if !responses.is_empty() {
-        if let Err(_e) = writer.send_tool_response(responses).await {
-            #[cfg(feature = "tracing-support")]
-            tracing::error!("Failed to send tool response: {_e}");
-        }
+    if !responses.is_empty()
+        && let Err(_e) = writer.send_tool_response(responses).await
+    {
+        #[cfg(feature = "tracing-support")]
+        tracing::error!("Failed to send tool response: {_e}");
     }
 
     // 6. Spawn background tool tasks
@@ -354,7 +354,7 @@ pub(in crate::live) async fn handle_tool_calls(
 
             let fmt: &dyn crate::live::background_tool::ResultFormatter = formatter
                 .as_ref()
-                .map(|f| f.as_ref())
+                .map(std::convert::AsRef::as_ref)
                 .unwrap_or(&crate::live::background_tool::DefaultResultFormatter);
             let formatted = fmt.format_result(&call, result);
 
@@ -375,7 +375,7 @@ pub(in crate::live) async fn handle_tool_calls(
         });
 
         // Register in tracker for cancellation
-        if let Some(ref t) = background_tracker {
+        if let Some(t) = background_tracker {
             t.spawn(call_id, handle, cancel);
         }
     }

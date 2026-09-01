@@ -4,8 +4,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::client::http::HttpError;
 use crate::client::Client;
+use crate::client::http::HttpError;
 use crate::protocol::types::Content;
 use crate::transport::auth::ServiceEndpoint;
 

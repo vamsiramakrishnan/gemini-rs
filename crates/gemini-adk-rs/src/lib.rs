@@ -1,4 +1,6 @@
-#![forbid(unsafe_code)]
+#![warn(unreachable_pub)]
+#![cfg_attr(not(test), forbid(unsafe_code))]
+#![cfg_attr(test, deny(unsafe_code))]
 #![warn(missing_docs)]
 //! # gemini-adk-rs
 //!
@@ -57,7 +59,7 @@ pub mod workflow;
 pub(crate) mod test_helpers;
 
 // Ergonomic re-exports — existing
-pub use a2a::{to_a2a_message, to_a2a_parts, to_adk_event, to_genai_parts, A2aMessage, A2aPart};
+pub use a2a::{A2aMessage, A2aPart, to_a2a_message, to_a2a_parts, to_adk_event, to_genai_parts};
 pub use agent::Agent;
 pub use agent_tool::AgentTool;
 pub use agents::{LoopAgent, ParallelAgent, SequentialAgent};
@@ -83,9 +85,9 @@ pub use error::{AgentError, AgentResult, ToolError};
 pub use events::{Event, EventActions, EventType, StructuredEvent};
 pub use extract::{Extract, Recognizer, RecordExtractor};
 pub use flow::{
-    render_ground, run as run_on_enter, CompiledFlow, Enforcement as FlowMode, Flow, FlowError,
-    FlowErrors, FlowExplanation, FlowMonitor, Guard, SharedFlowMonitor, StepAction, ToolPolicy,
-    Verdict, Violation,
+    CompiledFlow, Enforcement as FlowMode, Flow, FlowError, FlowErrors, FlowExplanation,
+    FlowMonitor, Guard, SharedFlowMonitor, StepAction, ToolPolicy, Verdict, Violation,
+    render_ground, run as run_on_enter,
 };
 pub use frame::{ConfirmPolicy, Frame, FrameSpec, SlotRecognizer, SlotSpec, SlotValidator};
 /// Re-exports the `#[tool]`/`#[derive(..)]` macros route their generated code
@@ -100,10 +102,6 @@ pub mod __macros {
     pub use serde_json;
 }
 
-/// The `#[tool]` attribute macro — turns an `async fn` into a registrable Gemini tool.
-///
-/// See the [`gemini_adk_macros_rs::tool`] documentation for details.
-pub use gemini_adk_macros_rs::tool;
 /// The `#[derive(Extract)]` macro — builds an [`extract::Extract`] record from a
 /// struct's `#[recognize(..)]` fields. Shares the name `Extract` with the
 /// struct (macro vs type namespace), so both can be imported together.
@@ -115,6 +113,10 @@ pub use gemini_adk_macros_rs::Extract;
 /// `#[slot(..)]` fields. Shares the name `Frame` with the trait (macro vs type
 /// namespace), so both can be imported together.
 pub use gemini_adk_macros_rs::Frame;
+/// The `#[tool]` attribute macro — turns an `async fn` into a registrable Gemini tool.
+///
+/// See the [`gemini_adk_macros_rs::tool`] documentation for details.
+pub use gemini_adk_macros_rs::tool;
 pub use instruction::inject_session_state;
 pub use live::{
     CallbackMode, EventCallbacks, LiveHandle, LiveSessionBuilder, LlmExtractor, ToolCallSummary,
@@ -124,7 +126,7 @@ pub use llm::{BaseLlm, GeminiLlm, GeminiLlmParams, LlmRegistry, LlmRequest, LlmR
 pub use llm_agent::{LlmAgent, LlmAgentBuilder};
 pub use memory::{InMemoryMemoryService, MemoryEntry, MemoryService};
 pub use middleware::{Middleware, MiddlewareChain};
-pub use orchestration::{call as call_agent, provenance, Mode as AgentMode, Resolver};
+pub use orchestration::{Mode as AgentMode, Resolver, call as call_agent, provenance};
 pub use plugin::{Plugin, PluginManager, PluginResult};
 pub use processors::{
     ContentFilter, InstructionInserter, RequestProcessor, RequestProcessorChain, ResponseProcessor,
@@ -135,7 +137,7 @@ pub use run_config::{RunConfig, StreamingMode};
 pub use runner::Runner;
 #[cfg(feature = "database-sessions")]
 pub use session::DatabaseSessionService;
-pub use session::{db_schema, InMemorySessionService, Session, SessionId, SessionService};
+pub use session::{InMemorySessionService, Session, SessionId, SessionService, db_schema};
 pub use state::PrefixedState;
 pub use state::{FileJournalSink, JournalSink, MemoryJournalSink};
 pub use state::{SlotEvidence, State, StateMutation, StateMutationOrigin};
@@ -147,12 +149,12 @@ pub use text::{
 pub use text_agent_tool::TextAgentTool;
 pub use text_runner::{InMemoryRunner, RunEvent};
 pub use tool::{SimpleTool, ToolDispatcher, ToolFunction, TypedTool};
+pub use tools::GoogleSearchTool;
 pub use tools::long_running::LongRunningFunctionTool;
 pub use tools::mcp::{McpConnectionParams, McpTool, McpToolset};
-pub use tools::GoogleSearchTool;
 pub use toolset::{StaticToolset, Toolset};
-pub use utils::model_name::{extract_model_name, is_gemini2_or_above, is_gemini_model};
-pub use utils::variant::{get_google_llm_variant, GoogleLlmVariant};
+pub use utils::model_name::{extract_model_name, is_gemini_model, is_gemini2_or_above};
+pub use utils::variant::{GoogleLlmVariant, get_google_llm_variant};
 
 // New re-exports — A2A
 pub use a2a::{AgentCard, AgentSkill, RemoteA2aAgent, RemoteA2aAgentConfig};
@@ -206,7 +208,7 @@ pub use tools::{
 
 // New re-exports — Agent Config
 pub use agent_config::{
-    discover_agent_configs, AgentConfig, AgentConfigError, ToolConfig as AgentToolConfig,
+    AgentConfig, AgentConfigError, ToolConfig as AgentToolConfig, discover_agent_configs,
 };
 
 // Wire re-export

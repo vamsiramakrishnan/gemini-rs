@@ -93,7 +93,7 @@ fn main() {
         * until(|state| {
             state
                 .get("approved")
-                .and_then(|v| v.as_bool())
+                .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false)
         });
     println!("5. Conditional loop (* until): write >> review, until approved=true");
@@ -114,11 +114,13 @@ fn main() {
         >> analyst.clone()                                                // sequential
         >> (((writer.clone() / fallback_writer.clone())                   // fallback writer
             >> reviewer.clone())                                         // then review
-            * until(|s| s.get("approved").and_then(|v| v.as_bool()).unwrap_or(false)))  // loop
+            * until(|s| s.get("approved").and_then(serde_json::Value::as_bool).unwrap_or(false)))  // loop
         >> (editor.clone() * 3); // polish loop
 
     println!("\n6. Full pipeline combining all operators:");
-    println!("   (researcher | fast_researcher) >> analyst >> (writer/fallback >> reviewer)*until >> editor*3");
+    println!(
+        "   (researcher | fast_researcher) >> analyst >> (writer/fallback >> reviewer)*until >> editor*3"
+    );
     if let Composable::Pipeline(p) = &full_pipeline {
         println!("   Top-level pipeline with {} steps", p.steps.len());
     }
@@ -237,7 +239,7 @@ fn main() {
     let scores = eval.score_all("The answer is 42", "42");
     println!("   Evaluation scores:");
     for (name, score) in &scores {
-        println!("     {}: {:.2}", name, score);
+        println!("     {name}: {score:.2}");
     }
 
     // Build an eval suite
@@ -331,19 +333,13 @@ fn main() {
     for v in &violations {
         match v {
             ContractViolation::UnproducedKey { consumer, key } => {
-                println!(
-                    "     UNPRODUCED: '{}' reads '{}' -- nobody writes it",
-                    consumer, key
-                );
+                println!("     UNPRODUCED: '{consumer}' reads '{key}' -- nobody writes it");
             }
             ContractViolation::DuplicateWrite { agents, key } => {
-                println!("     DUPLICATE: '{}' written by {:?}", key, agents);
+                println!("     DUPLICATE: '{key}' written by {agents:?}");
             }
             ContractViolation::OrphanedOutput { producer, key } => {
-                println!(
-                    "     ORPHANED: '{}' writes '{}' -- nobody reads it",
-                    producer, key
-                );
+                println!("     ORPHANED: '{producer}' writes '{key}' -- nobody reads it");
             }
         }
     }

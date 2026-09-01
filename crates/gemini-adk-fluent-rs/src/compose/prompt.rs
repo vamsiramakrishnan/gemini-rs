@@ -138,14 +138,10 @@ impl PromptComposite {
             .sections
             .iter()
             .filter(|s| s.kind != PromptSectionKind::Compressed)
-            .map(|s| s.render())
+            .map(PromptSection::render)
             .collect::<Vec<_>>()
             .join("\n\n");
-        if compress {
-            compress_text(&body)
-        } else {
-            body
-        }
+        if compress { compress_text(&body) } else { body }
     }
 }
 
@@ -159,7 +155,7 @@ pub fn compress_text(s: &str) -> String {
         if collapsed.is_empty() {
             continue;
         }
-        if out.last().map(|l| l.as_str()) == Some(collapsed.as_str()) {
+        if out.last().map(std::string::String::as_str) == Some(collapsed.as_str()) {
             continue;
         }
         out.push(collapsed);
@@ -259,15 +255,15 @@ impl PromptComposite {
     pub fn apply(self, transform: PromptTransform) -> Self {
         match transform {
             PromptTransform::Reorder(order) => {
-                let refs: Vec<&str> = order.iter().map(|s| s.as_str()).collect();
+                let refs: Vec<&str> = order.iter().map(std::string::String::as_str).collect();
                 self.reorder_by_name(&refs)
             }
             PromptTransform::Only(names) => {
-                let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+                let refs: Vec<&str> = names.iter().map(std::string::String::as_str).collect();
                 self.only_by_name(&refs)
             }
             PromptTransform::Without(names) => {
-                let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+                let refs: Vec<&str> = names.iter().map(std::string::String::as_str).collect();
                 self.without_by_name(&refs)
             }
         }
@@ -411,7 +407,7 @@ impl P {
     pub fn section(name: &str, text: &str) -> PromptSection {
         PromptSection {
             kind: PromptSectionKind::Text,
-            content: format!("## {}\n{}", name, text),
+            content: format!("## {name}\n{text}"),
             name: Some(name.to_string()),
             adapter: None,
         }
@@ -437,7 +433,7 @@ impl P {
     ///     .reorder_by_name(&["format", "role", "task"]);
     /// ```
     pub fn reorder(order: &[&str]) -> PromptTransform {
-        let order: Vec<String> = order.iter().map(|s| s.to_string()).collect();
+        let order: Vec<String> = order.iter().map(std::string::ToString::to_string).collect();
         PromptTransform::Reorder(order)
     }
 
@@ -448,7 +444,7 @@ impl P {
     ///     .only_by_name(&["role", "task"]);
     /// ```
     pub fn only(names: &[&str]) -> PromptTransform {
-        let names: Vec<String> = names.iter().map(|s| s.to_string()).collect();
+        let names: Vec<String> = names.iter().map(std::string::ToString::to_string).collect();
         PromptTransform::Only(names)
     }
 
@@ -459,7 +455,7 @@ impl P {
     ///     .without_by_name(&["format"]);
     /// ```
     pub fn without(names: &[&str]) -> PromptTransform {
-        let names: Vec<String> = names.iter().map(|s| s.to_string()).collect();
+        let names: Vec<String> = names.iter().map(std::string::ToString::to_string).collect();
         PromptTransform::Without(names)
     }
 
@@ -547,7 +543,7 @@ impl P {
     /// ```
     pub fn with_state(keys: &[&str]) -> gemini_adk_rs::live::InstructionModifier {
         gemini_adk_rs::live::InstructionModifier::StateAppend(
-            keys.iter().map(|k| k.to_string()).collect(),
+            keys.iter().map(std::string::ToString::to_string).collect(),
         )
     }
 
@@ -694,10 +690,12 @@ mod tests {
         let prompt = P::role("analyst") + P::task("analyze") + P::format("JSON");
         let filtered = prompt.without_by_name(&["format"]);
         assert_eq!(filtered.sections.len(), 2);
-        assert!(filtered
-            .sections
-            .iter()
-            .all(|s| s.name.as_deref() != Some("format")));
+        assert!(
+            filtered
+                .sections
+                .iter()
+                .all(|s| s.name.as_deref() != Some("format"))
+        );
     }
 
     #[test]

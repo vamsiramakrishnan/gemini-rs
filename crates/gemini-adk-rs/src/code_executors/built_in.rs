@@ -20,8 +20,7 @@ impl BuiltInCodeExecutor {
     ) -> Result<(), CodeExecutorError> {
         if !is_gemini2_or_above(model) {
             return Err(CodeExecutorError::UnsupportedModel(format!(
-                "Built-in code execution requires Gemini 2.0+, got: {}",
-                model
+                "Built-in code execution requires Gemini 2.0+, got: {model}"
             )));
         }
         request

@@ -11,4 +11,4 @@ pub mod schema;
 
 pub use explain::{BoostKind, ScoreComponent, SearchExplanation};
 pub use index::{MemoryIndex, Query, SearchHit};
-pub use schema::{tokenize, Field, IndexedMemory, MemoryOrigin};
+pub use schema::{Field, IndexedMemory, MemoryOrigin, tokenize};

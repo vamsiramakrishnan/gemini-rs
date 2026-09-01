@@ -127,14 +127,9 @@ impl TelemetrySetup {
                 otel_traces: self.otlp_endpoint.is_some() || self.cloud_trace,
                 otel_metrics: false,
                 otel_service_name: self.service_name,
+                otel_endpoint: self.otlp_endpoint.clone(),
                 otel_gcp_project: None,
             };
-
-            // Set OTLP endpoint env var if provided (the OTLP exporter reads it).
-            #[cfg(feature = "otel-otlp")]
-            if let Some(ref endpoint) = self.otlp_endpoint {
-                std::env::set_var("OTEL_EXPORTER_OTLP_ENDPOINT", endpoint);
-            }
 
             let _guard = config.init()?;
             // Note: The guard is intentionally leaked here so the providers stay alive

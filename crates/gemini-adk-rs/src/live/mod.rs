@@ -66,7 +66,7 @@ pub use reactor::{
     EffectMode, EffectPolicy, LiveEffect, LiveReactor, Reaction, ReactorEvent, ReactorRule,
     VoiceRuntimeState,
 };
-pub use replay::{attach_session, collect_events_until_idle, replay_session, ReplaySession};
+pub use replay::{ReplaySession, attach_session, collect_events_until_idle, replay_session};
 pub use session_signals::{SessionSignals, SessionType};
 pub use soft_turn::SoftTurnDetector;
 pub use steering::{ContextDelivery, SteeringMode};

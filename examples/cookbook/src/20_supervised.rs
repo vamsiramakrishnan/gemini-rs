@@ -137,17 +137,17 @@ async fn main() {
     }
 
     // Test the predicate
-    if let Composable::Loop(l) = &managed {
-        if let Some(pred) = &l.until {
-            println!(
-                "  approved=false -> continue: {}",
-                !pred.check(&serde_json::json!({"approved": false}))
-            );
-            println!(
-                "  approved=true  -> stop:     {}",
-                pred.check(&serde_json::json!({"approved": true}))
-            );
-        }
+    if let Composable::Loop(l) = &managed
+        && let Some(pred) = &l.until
+    {
+        println!(
+            "  approved=false -> continue: {}",
+            !pred.check(&serde_json::json!({"approved": false}))
+        );
+        println!(
+            "  approved=true  -> stop:     {}",
+            pred.check(&serde_json::json!({"approved": true}))
+        );
     }
 
     // ── Part 3: supervised_keyed() with Custom Key ───────────────────────

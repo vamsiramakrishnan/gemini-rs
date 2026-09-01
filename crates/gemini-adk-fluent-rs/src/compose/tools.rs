@@ -234,7 +234,7 @@ impl T {
     /// identical arguments return the cached value without re-invoking the tool.
     /// Errors are not cached. Built-in/placeholder entries are left unchanged.
     pub fn cached(tool: ToolComposite) -> ToolComposite {
-        tool.map_function_policy(|p| p.with_cache())
+        tool.map_function_policy(gemini_adk_rs::tool::ToolPolicy::with_cache)
     }
 
     /// Combine multiple tool functions into a single composite.

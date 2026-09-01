@@ -39,7 +39,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use gemini_adk_rs::live::replay::{collect_events_until_idle, replay_session};
 use gemini_adk_rs::live::{LiveEvent, LiveSessionBuilder};
@@ -329,11 +329,15 @@ async fn closed_loop_record_then_replay_through_real_processor() {
         "tool response differs between record and replay"
     );
     // User-originated text is recorded but, by design, not regenerated.
-    assert!(recorded_outbound
-        .iter()
-        .any(|e| String::from_utf8_lossy(&e.payload).contains("What's the weather")));
-    assert!(!replayed
-        .outbound
-        .iter()
-        .any(|f| String::from_utf8_lossy(f).contains("What's the weather")));
+    assert!(
+        recorded_outbound
+            .iter()
+            .any(|e| String::from_utf8_lossy(&e.payload).contains("What's the weather"))
+    );
+    assert!(
+        !replayed
+            .outbound
+            .iter()
+            .any(|f| String::from_utf8_lossy(f).contains("What's the weather"))
+    );
 }

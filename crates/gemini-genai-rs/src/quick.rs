@@ -39,7 +39,7 @@
 
 use crate::protocol::types::{GeminiModel, SessionConfig};
 use crate::session::{SessionError, SessionHandle};
-use crate::transport::{connect, TransportConfig};
+use crate::transport::{TransportConfig, connect};
 
 /// Connect to Gemini Live with minimal configuration.
 ///

@@ -418,7 +418,7 @@ fn python_type_to_rust(py_type: &str) -> String {
 
     // Handle union types (A | B)
     if trimmed.contains('|') {
-        let parts: Vec<&str> = trimmed.split('|').map(|s| s.trim()).collect();
+        let parts: Vec<&str> = trimmed.split('|').map(str::trim).collect();
         if parts.contains(&"None") {
             let non_none: Vec<&str> = parts.into_iter().filter(|&p| p != "None").collect();
             if non_none.len() == 1 {

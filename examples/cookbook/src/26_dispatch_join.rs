@@ -106,7 +106,7 @@ async fn main() {
     // Dispatch fires all tasks in background
     println!("Dispatching background tasks...");
     let dispatch_result = dispatcher.run(&state).await.unwrap();
-    println!("  Dispatch returned immediately: '{}'", dispatch_result);
+    println!("  Dispatch returned immediately: '{dispatch_result}'");
     println!(
         "  Dispatch status: {:?}",
         state.get::<serde_json::Value>("_dispatch_status")

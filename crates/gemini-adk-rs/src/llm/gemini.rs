@@ -17,7 +17,7 @@ use crate::llm::{
     BaseLlm, EnvTokenProvider, GcloudTokenProvider, LlmError, LlmRequest, LlmResponse,
     TokenProvider,
 };
-use crate::utils::variant::{get_google_llm_variant, GoogleLlmVariant};
+use crate::utils::variant::{GoogleLlmVariant, get_google_llm_variant};
 
 /// Parameters for constructing a [`GeminiLlm`].
 #[derive(Default)]
@@ -254,7 +254,7 @@ impl BaseLlm for GeminiLlm {
                 .candidates
                 .first()
                 .and_then(|c| c.finish_reason)
-                .map(|r| format!("{:?}", r));
+                .map(|r| format!("{r:?}"));
 
             let usage = response.usage_metadata.map(|u| TokenUsage {
                 prompt_tokens: u.prompt_token_count.unwrap_or(0),

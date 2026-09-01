@@ -24,7 +24,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 
-use crate::orchestration::{call, Mode as AgentMode};
+use crate::orchestration::{Mode as AgentMode, call};
 use crate::state::State;
 use crate::text::TextAgent;
 
@@ -745,11 +745,7 @@ impl Flow {
         if self.has_cycle() {
             errs.push("flow dependency graph has a cycle (must be a DAG)".into());
         }
-        if errs.is_empty() {
-            Ok(())
-        } else {
-            Err(errs)
-        }
+        if errs.is_empty() { Ok(()) } else { Err(errs) }
     }
 
     /// Every tool name referenced anywhere in the flow (allow/deny/once/
@@ -821,10 +817,11 @@ impl Flow {
             }
         }
         for c in &self.constraints {
-            if let Constraint::Before(a, b) = c {
-                if ids.contains(a.as_str()) && ids.contains(b.as_str()) {
-                    succ.entry(a.as_str()).or_default().push(b.as_str());
-                }
+            if let Constraint::Before(a, b) = c
+                && ids.contains(a.as_str())
+                && ids.contains(b.as_str())
+            {
+                succ.entry(a.as_str()).or_default().push(b.as_str());
             }
         }
         let roots: Vec<&str> = self
@@ -836,10 +833,10 @@ impl Flow {
         let mut seen = BTreeSet::new();
         let mut stack = roots;
         while let Some(id) = stack.pop() {
-            if seen.insert(id.to_string()) {
-                if let Some(next) = succ.get(id) {
-                    stack.extend(next.iter().copied());
-                }
+            if seen.insert(id.to_string())
+                && let Some(next) = succ.get(id)
+            {
+                stack.extend(next.iter().copied());
             }
         }
         seen
@@ -982,7 +979,12 @@ impl Flow {
                 match color.get(d).copied() {
                     Some(1) => {
                         let start = path.iter().position(|p| p == d).unwrap_or(0);
-                        return Some(path[start..].iter().map(|s| s.to_string()).collect());
+                        return Some(
+                            path[start..]
+                                .iter()
+                                .map(std::string::ToString::to_string)
+                                .collect(),
+                        );
                     }
                     Some(2) => {}
                     _ => {
@@ -1541,10 +1543,10 @@ impl FlowMonitor {
         if self.marking.done.contains(step_id) {
             return Verdict::Done;
         }
-        if let Some(step) = self.flow.step(step_id) {
-            if self.eligible(step, state) {
-                return Verdict::Active;
-            }
+        if let Some(step) = self.flow.step(step_id)
+            && self.eligible(step, state)
+        {
+            return Verdict::Active;
         }
         // Skipped: a successor is done but this step never completed.
         let bypassed = self.flow.steps.iter().any(|s| {
@@ -1574,18 +1576,20 @@ impl FlowMonitor {
     fn admissibility(&self, tool: &str, state: &State) -> Result<(), Denial> {
         // 1. once(tool)
         for c in &self.flow.constraints {
-            if let Constraint::Once(t) = c {
-                if t == tool && self.marking.tool_ok.contains_key(tool) {
-                    return Err(Denial::OnceExhausted);
-                }
+            if let Constraint::Once(t) = c
+                && t == tool
+                && self.marking.tool_ok.contains_key(tool)
+            {
+                return Err(Denial::OnceExhausted);
             }
         }
         // 2. never(tool).until(guard)
         for c in &self.flow.constraints {
-            if let Constraint::NeverUntil { tool: t, until } = c {
-                if t == tool && !until.eval(&self.ctx(state)) {
-                    return Err(Denial::NotYet(until.describe()));
-                }
+            if let Constraint::NeverUntil { tool: t, until } = c
+                && t == tool
+                && !until.eval(&self.ctx(state))
+            {
+                return Err(Denial::NotYet(until.describe()));
             }
         }
         // 3. active allow/deny (whitelist while any active step restricts).
@@ -1678,13 +1682,13 @@ impl FlowMonitor {
     /// already gated via [`admits_tool`](Self::admits_tool); this records the
     /// call and, in Observe mode, logs a deviation if it was inadmissible.
     pub fn observe_tool(&mut self, tool: &str, ok: bool, state: &State) {
-        if self.mode == Enforcement::Observe {
-            if let Err(reason) = self.admits_tool(tool, state) {
-                self.violations.push(Violation {
-                    subject: tool.to_string(),
-                    reason,
-                });
-            }
+        if self.mode == Enforcement::Observe
+            && let Err(reason) = self.admits_tool(tool, state)
+        {
+            self.violations.push(Violation {
+                subject: tool.to_string(),
+                reason,
+            });
         }
         if ok {
             self.on_tool_ok(tool, state);
@@ -2420,10 +2424,11 @@ mod tests {
         let err = flow
             .compile()
             .expect_err("unguarded commit must fail to compile");
-        assert!(err
-            .0
-            .iter()
-            .any(|e| matches!(e, FlowError::UnguardedCommitTool(t) if t == "pay")));
+        assert!(
+            err.0
+                .iter()
+                .any(|e| matches!(e, FlowError::UnguardedCommitTool(t) if t == "pay"))
+        );
     }
 
     #[test]
@@ -2441,10 +2446,11 @@ mod tests {
         let err = debt_flow()
             .compile_with_tools(&["lookup_account"])
             .expect_err("dangling tool must fail to compile");
-        assert!(err
-            .0
-            .iter()
-            .any(|e| matches!(e, FlowError::UnknownTool(t) if t == "charge_card")));
+        assert!(
+            err.0
+                .iter()
+                .any(|e| matches!(e, FlowError::UnknownTool(t) if t == "charge_card"))
+        );
         // Plain compile() stays registry-agnostic.
         assert!(debt_flow().compile().is_ok());
     }

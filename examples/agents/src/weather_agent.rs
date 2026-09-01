@@ -76,10 +76,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .expect("GOOGLE_CLOUD_PROJECT required for Vertex AI");
         let location =
             std::env::var("GOOGLE_CLOUD_LOCATION").unwrap_or_else(|_| "us-central1".to_string());
-        println!(
-            "Using Vertex AI (project: {}, location: {})",
-            project, location
-        );
+        println!("Using Vertex AI (project: {project}, location: {location})");
         let token = String::from_utf8(
             std::process::Command::new("gcloud")
                 .args(["auth", "print-access-token"])
@@ -132,7 +129,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Send a question
     let question = "What's the weather like in San Francisco and Tokyo?";
-    println!("User: {}\n", question);
+    println!("User: {question}\n");
     session.send_text(question).await?;
 
     // Process events until turn complete
@@ -155,7 +152,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!();
             }
             Some(SessionEvent::TextDelta(text)) => {
-                print!("{}", text);
+                print!("{text}");
                 full_response.push_str(&text);
             }
             Some(SessionEvent::TurnComplete) => {
@@ -163,7 +160,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 break;
             }
             Some(SessionEvent::Error(e)) => {
-                eprintln!("\nError: {}", e);
+                eprintln!("\nError: {e}");
                 break;
             }
             None => {

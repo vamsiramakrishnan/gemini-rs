@@ -40,9 +40,9 @@
 use chrono::{Duration, Utc};
 
 use gemini_memory_rs::core::{
-    normalize_token, CanonicalMemory, CanonicalPredicate, EntityRef, EvidenceCounters,
-    Explicitness, MemoryId, MemoryKind, MemorySource, MemoryStatus, MemoryValue, PrivacyMetadata,
-    RetrievalMetadata, SessionId, TemporalMetadata, TemporalScope, TurnId, UserId,
+    CanonicalMemory, CanonicalPredicate, EntityRef, EvidenceCounters, Explicitness, MemoryId,
+    MemoryKind, MemorySource, MemoryStatus, MemoryValue, PrivacyMetadata, RetrievalMetadata,
+    SessionId, TemporalMetadata, TemporalScope, TurnId, UserId, normalize_token,
 };
 use gemini_memory_rs::engine::MemoryEngine;
 use gemini_memory_rs::okf::MemoryTransaction;

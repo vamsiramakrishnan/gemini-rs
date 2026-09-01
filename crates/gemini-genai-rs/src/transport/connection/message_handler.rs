@@ -68,17 +68,17 @@ pub(super) fn handle_server_msg(
             }
 
             // Handle input transcription
-            if let Some(transcription) = content.input_transcription {
-                if let Some(text) = transcription.text {
-                    let _ = event_tx.send(SessionEvent::InputTranscription(text));
-                }
+            if let Some(transcription) = content.input_transcription
+                && let Some(text) = transcription.text
+            {
+                let _ = event_tx.send(SessionEvent::InputTranscription(text));
             }
 
             // Handle output transcription
-            if let Some(transcription) = content.output_transcription {
-                if let Some(text) = transcription.text {
-                    let _ = event_tx.send(SessionEvent::OutputTranscription(text));
-                }
+            if let Some(transcription) = content.output_transcription
+                && let Some(text) = transcription.text
+            {
+                let _ = event_tx.send(SessionEvent::OutputTranscription(text));
             }
 
             // Handle usage metadata (present on most server content messages)
@@ -93,10 +93,10 @@ pub(super) fn handle_server_msg(
 
             // Handle turn complete
             if content.turn_complete.unwrap_or(false) {
-                if let Some(turn) = state.complete_turn() {
-                    if !turn.text.is_empty() {
-                        let _ = event_tx.send(SessionEvent::TextComplete(turn.text));
-                    }
+                if let Some(turn) = state.complete_turn()
+                    && !turn.text.is_empty()
+                {
+                    let _ = event_tx.send(SessionEvent::TextComplete(turn.text));
                 }
                 let _ = event_tx.send(SessionEvent::TurnComplete);
                 let _ = state.transition_to(SessionPhase::Active);

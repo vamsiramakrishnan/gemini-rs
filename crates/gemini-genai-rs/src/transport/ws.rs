@@ -62,8 +62,8 @@ pub trait Transport: Send + 'static {
 // ---------------------------------------------------------------------------
 
 use futures_util::{SinkExt, StreamExt};
-use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
 type WsStream =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;

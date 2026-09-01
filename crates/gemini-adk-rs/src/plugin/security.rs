@@ -62,7 +62,7 @@ impl Plugin for SecurityPlugin {
             PolicyOutcome::Confirm(msg) => {
                 #[cfg(feature = "tracing-support")]
                 tracing::warn!(tool = %call.name, reason = %msg, "[plugin:security] Tool call requires confirmation");
-                PluginResult::Deny(format!("Confirmation required: {}", msg))
+                PluginResult::Deny(format!("Confirmation required: {msg}"))
             }
             PolicyOutcome::Deny(reason) => {
                 #[cfg(feature = "tracing-support")]
@@ -88,7 +88,7 @@ impl DenyListPolicy {
 impl PolicyEngine for DenyListPolicy {
     fn evaluate(&self, tool_name: &str, _args: &serde_json::Value) -> PolicyOutcome {
         if self.blocked_tools.iter().any(|t| t == tool_name) {
-            PolicyOutcome::Deny(format!("Tool '{}' is blocked by policy", tool_name))
+            PolicyOutcome::Deny(format!("Tool '{tool_name}' is blocked by policy"))
         } else {
             PolicyOutcome::Allow
         }

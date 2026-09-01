@@ -519,7 +519,7 @@ mod tests {
         let result = codec.decode_message(bad_bytes);
         match result {
             Err(CodecError::InvalidUtf8) => {} // expected
-            other => panic!("Expected CodecError::InvalidUtf8, got {:?}", other),
+            other => panic!("Expected CodecError::InvalidUtf8, got {other:?}"),
         }
     }
 }

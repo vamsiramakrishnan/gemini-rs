@@ -10,7 +10,7 @@ use crate::live::callbacks::EventCallbacks;
 use crate::live::events::LiveEvent;
 use crate::live::extractor::{MergePolicy, TurnExtractor};
 use crate::live::transcript::TranscriptBuffer;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::dispatch_callback;
 
@@ -187,7 +187,11 @@ fn promote_extraction_fields(
 /// Fire an extractor's `on_complete` agent after its results land in state.
 async fn fire_on_complete(extractor: &dyn TurnExtractor, value: &Value, state: &State) {
     // Only fire when the extractor actually produced fields this turn.
-    if value.as_object().map(|o| o.is_empty()).unwrap_or(true) {
+    if value
+        .as_object()
+        .map(serde_json::Map::is_empty)
+        .unwrap_or(true)
+    {
         return;
     }
     let Some(oc) = extractor.on_complete() else {
@@ -394,7 +398,7 @@ mod tests {
             name: "DebtorState",
             value: json!({ "debt_acknowledged": true }),
             promotions: vec![
-                FieldPromotion::true_only("debt_acknowledged").after_presented("debt_details")
+                FieldPromotion::true_only("debt_acknowledged").after_presented("debt_details"),
             ],
         });
 

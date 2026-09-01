@@ -28,7 +28,7 @@ use base64::Engine as _;
 use gemini_adk_fluent_rs::live::LiveEvent;
 use gemini_adk_fluent_rs::prelude::*;
 use gemini_adk_fluent_rs::spec::{SessionSpec, SpecResources};
-use gemini_adk_fluent_rs::voice::{pump, Playback};
+use gemini_adk_fluent_rs::voice::{Playback, pump};
 use tokio::sync::mpsc;
 use tokio::time::{sleep, timeout};
 

@@ -42,6 +42,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use gemini_adk_rs::State;
 pub use gemini_adk_rs::live::extractor::TurnExtractor;
 pub use gemini_adk_rs::live::needs::RepairConfig;
 pub use gemini_adk_rs::live::persistence::SessionPersistence;
@@ -52,7 +53,6 @@ pub use gemini_adk_rs::live::{
 };
 use gemini_adk_rs::llm::BaseLlm;
 use gemini_adk_rs::tool::ToolDispatcher;
-use gemini_adk_rs::State;
 use gemini_genai_rs::prelude::*;
 
 // Carve (gap #9): `gemini_adk_fluent_rs::live` is the curated home for the full
@@ -78,7 +78,7 @@ pub use gemini_adk_rs::live::{
 };
 // Offline record/replay harness (Milestone 7 determinism spine).
 pub use gemini_adk_rs::live::replay::{
-    attach_session, collect_events_until_idle, replay_session, ReplaySession,
+    ReplaySession, attach_session, collect_events_until_idle, replay_session,
 };
 
 /// A deferred agent tool registration (resolved at connect time when State is available).

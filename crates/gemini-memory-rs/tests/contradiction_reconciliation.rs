@@ -61,11 +61,11 @@ mod common;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use common::{have_api_key, model_backed_engine, skip, ScratchDir};
+use common::{ScratchDir, have_api_key, model_backed_engine, skip};
 
 use gemini_memory_rs::core::{CanonicalMemory, MemoryId, MemoryStatus, SessionId, TurnId};
 use gemini_memory_rs::retrieval::{
-    embedding_text, PrecomputedSemanticIndex, SemanticFallback, StaticEmbedder,
+    PrecomputedSemanticIndex, SemanticFallback, StaticEmbedder, embedding_text,
 };
 
 /// The fact, and the correction that contradicts it.

@@ -93,17 +93,17 @@ fn extract_state(
     // Detect customer name: "my name is ___" / "I'm ___" / "this is ___"
     if !existing.contains_key("customer_name") {
         for pat in &*NAME_PATTERNS {
-            if let Some(caps) = pat.captures(text) {
-                if let Some(name) = caps.get(1) {
-                    let name_str = name.as_str();
-                    // Skip common false positives.
-                    let skip = [
-                        "a", "the", "not", "so", "very", "really", "just", "here", "having",
-                    ];
-                    if !skip.contains(&name_str.to_lowercase().as_str()) {
-                        extracted.insert("customer_name".into(), json!(name_str));
-                        break;
-                    }
+            if let Some(caps) = pat.captures(text)
+                && let Some(name) = caps.get(1)
+            {
+                let name_str = name.as_str();
+                // Skip common false positives.
+                let skip = [
+                    "a", "the", "not", "so", "very", "really", "just", "here", "having",
+                ];
+                if !skip.contains(&name_str.to_lowercase().as_str()) {
+                    extracted.insert("customer_name".into(), json!(name_str));
+                    break;
                 }
             }
         }
@@ -115,10 +115,10 @@ fn extract_state(
             if let Some(num) = caps.get(1) {
                 extracted.insert("order_number".into(), json!(num.as_str()));
             }
-        } else if let Some(caps) = ORDER_WORD_RE.captures(text) {
-            if let Some(num) = caps.get(1) {
-                extracted.insert("order_number".into(), json!(num.as_str()));
-            }
+        } else if let Some(caps) = ORDER_WORD_RE.captures(text)
+            && let Some(num) = caps.get(1)
+        {
+            extracted.insert("order_number".into(), json!(num.as_str()));
         }
     }
 
@@ -316,10 +316,7 @@ fn playbook_context(s: &State) -> String {
         .get("customer_name")
         .and_then(|v| v.as_str())
         .unwrap_or("the customer");
-    format!(
-        "Customer name: {}. Current state: {}",
-        customer_name, extracted
-    )
+    format!("Customer name: {customer_name}. Current state: {extracted}")
 }
 
 // ---------------------------------------------------------------------------
@@ -409,7 +406,7 @@ impl DemoApp for Playbook {
                     .greeting("Begin the conversation. Welcome the customer warmly.")
                     .extractor(extractor)
                     // Phase machine: 6 phases with transition guards based on extracted state.
-                    .phase_defaults(|d| d.navigation())
+                    .phase_defaults(gemini_adk_fluent_rs::live_builders::PhaseDefaults::navigation)
                     .phase("greet")
                     .instruction(PHASES[0].instruction)
                     .transition_with(

@@ -310,13 +310,13 @@ fn check(
             ));
         }
     }
-    if let Some(complete) = expect.complete {
-        if monitor.is_complete() != complete {
-            failures.push(format!(
-                "expected complete = {complete}; got {}",
-                monitor.is_complete()
-            ));
-        }
+    if let Some(complete) = expect.complete
+        && monitor.is_complete() != complete
+    {
+        failures.push(format!(
+            "expected complete = {complete}; got {}",
+            monitor.is_complete()
+        ));
     }
 }
 
@@ -394,10 +394,12 @@ mod tests {
         // start + 5 script events.
         assert_eq!(snapshots.len(), 6);
         assert_eq!(snapshots[0].event, "start");
-        assert!(snapshots[0]
-            .explanation
-            .active
-            .contains(&"verify".to_string()));
+        assert!(
+            snapshots[0]
+                .explanation
+                .active
+                .contains(&"verify".to_string())
+        );
         // After verify_identity (event 2), verify is done and pay is active.
         assert!(snapshots[2].done.contains(&"verify".to_string()));
         assert!(snapshots[2].explanation.active.contains(&"pay".to_string()));

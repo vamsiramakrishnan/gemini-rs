@@ -274,7 +274,7 @@ fn main() {
         println!("\n  Duplicate writes (expected -- routing selects one):");
         for v in &duplicates {
             if let ContractViolation::DuplicateWrite { agents, key } = v {
-                println!("    '{}' written by: {:?}", key, agents);
+                println!("    '{key}' written by: {agents:?}");
             }
         }
     }
@@ -315,7 +315,7 @@ fn main() {
             &case.prompt[..case.prompt.len().min(40)],
             scores
                 .iter()
-                .map(|(n, s)| format!("{}={:.1}", n, s))
+                .map(|(n, s)| format!("{n}={s:.1}"))
                 .collect::<Vec<_>>()
         );
     }

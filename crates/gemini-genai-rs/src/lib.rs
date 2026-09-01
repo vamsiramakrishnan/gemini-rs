@@ -1,3 +1,4 @@
+#![warn(unreachable_pub)]
 #![warn(missing_docs)]
 //! # gemini-live
 //!
@@ -51,33 +52,33 @@ pub use quick::{quick_connect, quick_connect_vertex};
 /// Convenient re-exports for wire-level usage.
 pub mod prelude {
     // Protocol types
+    pub use crate::protocol::Platform;
     pub use crate::protocol::messages::*;
     pub use crate::protocol::types::*;
-    pub use crate::protocol::Platform;
 
     // Transport
     pub use crate::transport::auth::{
         AuthProvider, GoogleAIAuth, GoogleAITokenAuth, ServiceEndpoint, VertexAIAuth,
     };
     pub use crate::transport::recording::{
-        read_wire_log, FileWireRecorder, MemoryWireRecorder, RecordingCodec, WireDirection,
-        WireEntry, WireLogError, WireRecorder, WireRecorderHandle,
+        FileWireRecorder, MemoryWireRecorder, RecordingCodec, WireDirection, WireEntry,
+        WireLogError, WireRecorder, WireRecorderHandle, read_wire_log,
     };
     pub use crate::transport::replay::{ReplayControl, ReplayTransport};
     pub use crate::transport::ws::{MockTransport, Transport, TungsteniteTransport};
     pub use crate::transport::{
-        connect, connect_with, Codec, CodecError, ConnectBuilder, JsonCodec, TransportConfig,
+        Codec, CodecError, ConnectBuilder, JsonCodec, TransportConfig, connect, connect_with,
     };
 
     // Session
     pub use crate::session::{
-        recv_event, AuthError, ResumeInfo, SessionCommand, SessionError, SessionEvent,
-        SessionHandle, SessionPhase, SessionReader, SessionWriter, SetupError, WebSocketError,
+        AuthError, ResumeInfo, SessionCommand, SessionError, SessionEvent, SessionHandle,
+        SessionPhase, SessionReader, SessionWriter, SetupError, WebSocketError, recv_event,
     };
 
     // Buffers
-    pub use crate::buffer::{bytes_to_i16, i16_to_bytes, into_shared};
     pub use crate::buffer::{AudioJitterBuffer, JitterConfig, SpscRing};
+    pub use crate::buffer::{bytes_to_i16, i16_to_bytes, into_shared};
 
     // VAD
     #[cfg(feature = "vad")]
@@ -99,9 +100,9 @@ pub mod prelude {
     };
 
     // Client
+    pub use crate::client::Client;
     #[cfg(feature = "http")]
     pub use crate::client::http::{HttpClient, HttpConfig, HttpError};
-    pub use crate::client::Client;
 
     // Generate API
     #[cfg(feature = "generate")]

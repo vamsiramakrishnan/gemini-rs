@@ -15,8 +15,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use gemini_adk_rs::live::replay::{collect_events_until_idle, replay_session};
 use gemini_adk_rs::live::LiveSessionBuilder;
+use gemini_adk_rs::live::replay::{collect_events_until_idle, replay_session};
 use gemini_genai_rs::prelude::{GeminiModel, SessionConfig, WireDirection, WireEntry};
 
 /// The minimum viable server script: complete the handshake and finish a turn.

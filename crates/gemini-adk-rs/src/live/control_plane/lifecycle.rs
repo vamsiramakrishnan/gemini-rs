@@ -82,7 +82,7 @@ pub(in crate::live) async fn handle_turn_complete(
     .await;
 
     // 5. Recompute derived state
-    if let Some(ref computed) = computed {
+    if let Some(computed) = computed {
         computed.recompute(state);
     }
 
@@ -112,7 +112,7 @@ pub(in crate::live) async fn handle_turn_complete(
     } = evaluate_phase_transition(phase_machine, state, writer, &transcript_window).await;
 
     // 7c. Emit PhaseTransition LiveEvent (if a transition fired)
-    if let (Some(ref from), Some(ref to)) = (&transition_from, &transition_to) {
+    if let (Some(from), Some(to)) = (&transition_from, &transition_to) {
         let _ = event_tx.send(LiveEvent::PhaseTransition {
             from: from.clone(),
             to: to.clone(),
@@ -179,7 +179,7 @@ pub(in crate::live) async fn handle_turn_complete(
     govern_flow(&control_plane.flow, state, &mut context_buffer).await;
 
     // 8. Fire watchers from net state mutations since the cursor.
-    if let (Some(ref watchers), Some(cursor)) = (watchers, pre_watcher_cursor) {
+    if let (Some(watchers), Some(cursor)) = (watchers, pre_watcher_cursor) {
         let mutations = state.mutations_since(cursor);
         if !mutations.is_empty() {
             let (blocking, concurrent) = watchers.evaluate_mutations(&mutations, state, writer);
@@ -193,7 +193,7 @@ pub(in crate::live) async fn handle_turn_complete(
     }
 
     // 9. Check temporal patterns
-    if let Some(ref temporal) = temporal {
+    if let Some(temporal) = temporal {
         let event = SessionEvent::TurnComplete;
         for action in temporal.check_all(state, Some(&event), writer) {
             tokio::spawn(action);
@@ -216,36 +216,32 @@ pub(in crate::live) async fn handle_turn_complete(
     // `recall_context` filter from 2% to 69%; in a no-phase session it was
     // never delivered, so the filters it exists to enable were being written
     // blind.
-    if transition_result.is_none() {
-        if let Some(ref amendment_fn) = callbacks.instruction_amendment {
-            if let Some(amendment_text) = amendment_fn(state) {
-                let base = if let Some(ref pm) = phase_machine {
-                    let pm_guard = pm.lock().await;
-                    pm_guard
-                        .current_phase()
-                        .map(|p| p.instruction.resolve_with_modifiers(state, &p.modifiers))
-                } else {
-                    None
-                };
-                // Falling back to the session instruction, not to sending the
-                // amendment alone: under `SteeringMode::InstructionUpdate` the
-                // resolved instruction *replaces* the system instruction, so an
-                // amendment on its own would delete the caller's prompt.
-                if let Some(base_instruction) =
-                    base.or_else(|| control_plane.base_instruction.clone())
-                {
-                    resolved_instruction =
-                        Some(format!("{}\n\n{}", base_instruction, amendment_text));
-                }
-            }
+    if transition_result.is_none()
+        && let Some(ref amendment_fn) = callbacks.instruction_amendment
+        && let Some(amendment_text) = amendment_fn(state)
+    {
+        let base = if let Some(pm) = phase_machine {
+            let pm_guard = pm.lock().await;
+            pm_guard
+                .current_phase()
+                .map(|p| p.instruction.resolve_with_modifiers(state, &p.modifiers))
+        } else {
+            None
+        };
+        // Falling back to the session instruction, not to sending the
+        // amendment alone: under `SteeringMode::InstructionUpdate` the
+        // resolved instruction *replaces* the system instruction, so an
+        // amendment on its own would delete the caller's prompt.
+        if let Some(base_instruction) = base.or_else(|| control_plane.base_instruction.clone()) {
+            resolved_instruction = Some(format!("{base_instruction}\n\n{amendment_text}"));
         }
     }
 
     // 11. Instruction template (full replacement -- escape hatch, overrides everything)
-    if let Some(ref template) = callbacks.instruction_template {
-        if let Some(new_instruction) = template(state) {
-            resolved_instruction = Some(new_instruction);
-        }
+    if let Some(ref template) = callbacks.instruction_template
+        && let Some(new_instruction) = template(state)
+    {
+        resolved_instruction = Some(new_instruction);
     }
 
     // 12–14. Compose the final instruction and deliver it plus any context turns
@@ -309,7 +305,7 @@ async fn build_snapshot(
     shared: &SharedState,
     turn_count: u32,
 ) -> crate::live::persistence::SessionSnapshot {
-    let phase_name = if let Some(ref pm) = phase_machine {
+    let phase_name = if let Some(pm) = phase_machine {
         pm.lock().await.current().to_string()
     } else {
         String::new()
@@ -388,22 +384,20 @@ async fn project_tool_advisory(
     state: &State,
     context_buffer: &mut Vec<gemini_genai_rs::prelude::Content>,
 ) {
-    if enabled {
-        if let Some(ref pm) = phase_machine {
-            let machine = pm.lock().await;
-            if let Some(tools) = machine.active_tools() {
-                let prev_tools: Option<Vec<String>> = state.session().get("active_tools");
-                let tools_vec: Vec<String> = tools.iter().map(|s| s.to_string()).collect();
-                let changed = prev_tools.as_ref() != Some(&tools_vec);
-                if changed {
-                    let _ = state.session().set("active_tools", tools_vec.clone());
-                    let tool_names = tools_vec.join(", ");
-                    context_buffer.push(gemini_genai_rs::prelude::Content::model(format!(
-                        "In this phase, I have access to these tools: {}. \
-                         I should only use these tools.",
-                        tool_names
-                    )));
-                }
+    if enabled && let Some(pm) = phase_machine {
+        let machine = pm.lock().await;
+        if let Some(tools) = machine.active_tools() {
+            let prev_tools: Option<Vec<String>> = state.session().get("active_tools");
+            let tools_vec: Vec<String> =
+                tools.iter().map(std::string::ToString::to_string).collect();
+            let changed = prev_tools.as_ref() != Some(&tools_vec);
+            if changed {
+                let _ = state.session().set("active_tools", tools_vec.clone());
+                let tool_names = tools_vec.join(", ");
+                context_buffer.push(gemini_genai_rs::prelude::Content::model(format!(
+                    "In this phase, I have access to these tools: {tool_names}. \
+                         I should only use these tools."
+                )));
             }
         }
     }
@@ -423,16 +417,15 @@ async fn project_steering_context(
     if matches!(
         steering_mode,
         SteeringMode::ContextInjection | SteeringMode::Hybrid
-    ) {
-        if let Some(ref pm) = phase_machine {
-            let machine = pm.lock().await;
-            if let Some(phase) = machine.current_phase() {
-                let steering_parts = steering::build_steering_context(state, &phase.modifiers);
-                if !steering_parts.is_empty() {
-                    context_buffer.push(gemini_genai_rs::prelude::Content::model(
-                        steering_parts.join("\n"),
-                    ));
-                }
+    ) && let Some(pm) = phase_machine
+    {
+        let machine = pm.lock().await;
+        if let Some(phase) = machine.current_phase() {
+            let steering_parts = steering::build_steering_context(state, &phase.modifiers);
+            if !steering_parts.is_empty() {
+                context_buffer.push(gemini_genai_rs::prelude::Content::model(
+                    steering_parts.join("\n"),
+                ));
             }
         }
     }
@@ -453,34 +446,34 @@ async fn evaluate_repair(
     context_buffer: &mut Vec<gemini_genai_rs::prelude::Content>,
 ) -> bool {
     let mut should_prompt = false;
-    if let Some(ref mut needs_tracker) = needs_fulfillment {
-        if let Some(ref pm) = phase_machine {
-            let machine = pm.lock().await;
-            let phase_name = machine.current().to_string();
-            if let Some(phase) = machine.current_phase() {
-                if !phase.needs.is_empty() {
-                    let needs = phase.needs.clone();
-                    drop(machine); // release lock before async work
-                    match needs_tracker.evaluate(&phase_name, &needs, state) {
-                        RepairAction::Nudge {
-                            unfulfilled,
-                            attempt,
-                        } => {
-                            context_buffer.push(gemini_genai_rs::prelude::Content::model(format!(
-                                "I still need to collect: {}. Let me ask about these.",
-                                unfulfilled.join(", ")
-                            )));
-                            if attempt == 1 {
-                                should_prompt = true;
-                            }
-                        }
-                        RepairAction::Escalate { unfulfilled } => {
-                            let _ = state.set("repair:escalation", true);
-                            let _ = state.set("repair:unfulfilled", unfulfilled);
-                        }
-                        RepairAction::None => {}
+    if let Some(needs_tracker) = needs_fulfillment
+        && let Some(pm) = phase_machine
+    {
+        let machine = pm.lock().await;
+        let phase_name = machine.current().to_string();
+        if let Some(phase) = machine.current_phase()
+            && !phase.needs.is_empty()
+        {
+            let needs = phase.needs.clone();
+            drop(machine); // release lock before async work
+            match needs_tracker.evaluate(&phase_name, &needs, state) {
+                RepairAction::Nudge {
+                    unfulfilled,
+                    attempt,
+                } => {
+                    context_buffer.push(gemini_genai_rs::prelude::Content::model(format!(
+                        "I still need to collect: {}. Let me ask about these.",
+                        unfulfilled.join(", ")
+                    )));
+                    if attempt == 1 {
+                        should_prompt = true;
                     }
                 }
+                RepairAction::Escalate { unfulfilled } => {
+                    let _ = state.set("repair:escalation", true);
+                    let _ = state.set("repair:unfulfilled", unfulfilled);
+                }
+                RepairAction::None => {}
             }
         }
     }
@@ -574,16 +567,16 @@ async fn evaluate_phase_transition(
     let mut transition_from: Option<String> = None;
     let mut transition_to: Option<String> = None;
 
-    if let Some(ref pm) = phase_machine {
+    if let Some(pm) = phase_machine {
         let mut machine = pm.lock().await;
 
         // 7a. Evaluate transitions and run target preparations when a guarded
         // transition is blocked only by missing required state.
         let mut evaluation = machine.evaluate_for_transition(state);
-        if let Some(TransitionEvaluation::Blocked { target, .. }) = &evaluation {
-            if machine.prepare_target(target, state, writer).await {
-                evaluation = machine.evaluate_for_transition(state);
-            }
+        if let Some(TransitionEvaluation::Blocked { target, .. }) = &evaluation
+            && machine.prepare_target(target, state, writer).await
+        {
+            evaluation = machine.evaluate_for_transition(state);
         }
 
         if let Some(TransitionEvaluation::Ready {
@@ -737,7 +730,7 @@ async fn deliver_instruction_and_context(
     }
 
     // Add on_enter_context content to the batch (if a phase transition produced it).
-    if let Some(ref tr) = transition_result {
+    if let Some(tr) = transition_result {
         if let Some(ref contents) = tr.context {
             context_buffer.extend(contents.iter().cloned());
         }
@@ -834,10 +827,10 @@ mod harness {
 
     use async_trait::async_trait;
     use parking_lot::Mutex;
-    use serde_json::{json, Value};
+    use serde_json::{Value, json};
     use std::collections::HashMap;
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use tokio::sync::broadcast;
 
     /// One observable wire write.

@@ -21,8 +21,8 @@ mod response;
 pub use config::GenerateContentConfig;
 pub use response::{BlockReason, Candidate, GenerateContentResponse, PromptFeedback};
 
-use crate::client::http::HttpError;
 use crate::client::Client;
+use crate::client::http::HttpError;
 use crate::protocol::types::GeminiModel;
 use crate::transport::auth::ServiceEndpoint;
 

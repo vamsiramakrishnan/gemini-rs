@@ -541,9 +541,10 @@ mod tests {
             cfg.api_base(),
             "https://us-central1-aiplatform.googleapis.com/v1beta1"
         );
-        assert!(cfg
-            .extensions_parent()
-            .ends_with("/projects/test-project/locations/us-central1"));
+        assert!(
+            cfg.extensions_parent()
+                .ends_with("/projects/test-project/locations/us-central1")
+        );
     }
 
     #[test]

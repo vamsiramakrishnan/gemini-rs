@@ -51,9 +51,9 @@ mod common;
 use std::sync::Arc;
 use std::time::Instant;
 
-use common::live::{connect, Observed};
+use common::live::{Observed, connect};
 use common::voice::{say, speak};
-use common::{corpus, file_backed_engine, have_api_key, model_backed_engine, skip, ScratchDir};
+use common::{ScratchDir, corpus, file_backed_engine, have_api_key, model_backed_engine, skip};
 
 use gemini_adk_fluent_rs::prelude::Live;
 use gemini_memory_rs::core::SessionId;

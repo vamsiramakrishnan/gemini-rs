@@ -81,7 +81,9 @@ pub(crate) fn build_rest_path(endpoint: ServiceEndpoint, model: Option<&GeminiMo
         ServiceEndpoint::BatchJobs => "batchJobs".to_string(),
         ServiceEndpoint::ListModels => "models".to_string(),
         endpoint => {
-            let raw = model.map(|m| m.to_string()).unwrap_or_default();
+            let raw = model
+                .map(std::string::ToString::to_string)
+                .unwrap_or_default();
             let model_str = if raw.starts_with("models/") {
                 raw
             } else {

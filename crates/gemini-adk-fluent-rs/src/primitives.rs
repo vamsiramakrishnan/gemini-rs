@@ -46,7 +46,7 @@
 pub use crate::builder::AgentBuilder;
 pub use crate::live::Live;
 
-pub use crate::operators::{until, FanOut, Pipeline};
+pub use crate::operators::{FanOut, Pipeline, until};
 
 pub use crate::compose::artifacts::A;
 pub use crate::compose::context::C;
@@ -57,10 +57,10 @@ pub use crate::compose::prompt::P;
 pub use crate::compose::state::S;
 pub use crate::compose::tools::T;
 
-pub use crate::spec::{run_tests, SessionSpec, SpecResources, SpecTest};
+pub use crate::spec::{SessionSpec, SpecResources, SpecTest, run_tests};
 
 pub use crate::telephony::TwilioCall;
-pub use crate::testing::{check_contracts, ContractViolation};
+pub use crate::testing::{ContractViolation, check_contracts};
 
 #[cfg(test)]
 mod contract {

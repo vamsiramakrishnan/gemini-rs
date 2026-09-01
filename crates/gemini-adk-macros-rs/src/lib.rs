@@ -26,8 +26,8 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::{
-    parse_macro_input, Data, DeriveInput, Expr, ExprLit, Fields, FnArg, ItemFn, Lit, LitInt,
-    LitStr, Meta, Pat, PatType, ReturnType, Type, TypePath,
+    Data, DeriveInput, Expr, ExprLit, Fields, FnArg, ItemFn, Lit, LitInt, LitStr, Meta, Pat,
+    PatType, ReturnType, Type, TypePath, parse_macro_input,
 };
 
 /// Turn an `async fn` into a registrable Gemini tool.
@@ -451,14 +451,14 @@ fn expand_frame(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                 return Err(syn::Error::new_spanned(
                     ident,
                     "#[derive(Frame)] requires a struct with named fields",
-                ))
+                ));
             }
         },
         _ => {
             return Err(syn::Error::new_spanned(
                 ident,
                 "#[derive(Frame)] can only be applied to structs",
-            ))
+            ));
         }
     };
 

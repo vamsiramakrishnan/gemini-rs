@@ -63,13 +63,13 @@ impl LlmJudge {
         p.push_str("RULE — a violation is when the following is TRUE:\n");
         p.push_str(&self.rubric);
         p.push_str("\n\n");
-        if self.use_context {
-            if let Some(ctx) = context {
-                p.push_str(self.context_label);
-                p.push_str(":\n");
-                p.push_str(ctx);
-                p.push_str("\n\n");
-            }
+        if self.use_context
+            && let Some(ctx) = context
+        {
+            p.push_str(self.context_label);
+            p.push_str(":\n");
+            p.push_str(ctx);
+            p.push_str("\n\n");
         }
         p.push_str("RESPONSE:\n");
         p.push_str(output);
@@ -148,13 +148,13 @@ pub fn render_contents(contents: &[Content]) -> String {
             _ => "system",
         };
         for part in &content.parts {
-            if let Part::Text { text } = part {
-                if !text.is_empty() {
-                    out.push_str(role);
-                    out.push_str(": ");
-                    out.push_str(text);
-                    out.push('\n');
-                }
+            if let Part::Text { text } = part
+                && !text.is_empty()
+            {
+                out.push_str(role);
+                out.push_str(": ");
+                out.push_str(text);
+                out.push('\n');
             }
         }
     }

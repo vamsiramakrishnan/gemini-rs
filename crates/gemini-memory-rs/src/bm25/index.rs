@@ -17,7 +17,7 @@ use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 
 use super::explain::{BoostKind, ScoreComponent, SearchExplanation};
-use super::schema::{tokenize, Field, IndexedMemory, MemoryOrigin};
+use super::schema::{Field, IndexedMemory, MemoryOrigin, tokenize};
 use crate::core::{MemoryId, MemoryKind};
 
 /// BM25 term-frequency saturation.
@@ -540,9 +540,11 @@ mod tests {
     #[test]
     fn a_query_with_no_matching_terms_returns_nothing() {
         let index = corpus();
-        assert!(index
-            .search(&Query::new("quantum chromodynamics"), Utc::now())
-            .is_empty());
+        assert!(
+            index
+                .search(&Query::new("quantum chromodynamics"), Utc::now())
+                .is_empty()
+        );
         assert!(index.search(&Query::new(""), Utc::now()).is_empty());
     }
 
@@ -552,11 +554,13 @@ mod tests {
         let hits = index.search(&Query::new("").with_entities(["Rhea"]), Utc::now());
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].id.as_str(), "mem_quiet");
-        assert!(hits[0]
-            .explanation
-            .boosts
-            .iter()
-            .any(|(kind, _)| *kind == BoostKind::ExactEntity));
+        assert!(
+            hits[0]
+                .explanation
+                .boosts
+                .iter()
+                .any(|(kind, _)| *kind == BoostKind::ExactEntity)
+        );
     }
 
     #[test]
@@ -624,9 +628,11 @@ mod tests {
         expired.expires_at = Some(Utc::now() - chrono::Duration::hours(1));
 
         let index = MemoryIndex::build([superseded, expired]);
-        assert!(index
-            .search(&Query::new("vegetarian"), Utc::now())
-            .is_empty());
+        assert!(
+            index
+                .search(&Query::new("vegetarian"), Utc::now())
+                .is_empty()
+        );
         assert!(index.search(&Query::new("sleep"), Utc::now()).is_empty());
     }
 
@@ -636,9 +642,11 @@ mod tests {
         assert_eq!(index.len(), 3);
         assert!(index.remove(&MemoryId::new("mem_quiet")));
         assert_eq!(index.len(), 2);
-        assert!(index
-            .search(&Query::new("quiet restaurant"), Utc::now())
-            .is_empty());
+        assert!(
+            index
+                .search(&Query::new("quiet restaurant"), Utc::now())
+                .is_empty()
+        );
         // Removing again is a no-op rather than a corruption.
         assert!(!index.remove(&MemoryId::new("mem_quiet")));
     }
@@ -694,9 +702,10 @@ mod tests {
             &Query::new("user").with_kinds(vec![MemoryKind::RelationshipPreference]),
             Utc::now(),
         );
-        assert!(hits
-            .iter()
-            .all(|h| h.kind == MemoryKind::RelationshipPreference));
+        assert!(
+            hits.iter()
+                .all(|h| h.kind == MemoryKind::RelationshipPreference)
+        );
     }
 
     #[test]

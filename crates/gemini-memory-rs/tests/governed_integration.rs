@@ -20,7 +20,7 @@ use gemini_adk_rs::state::State;
 use gemini_memory_rs::core::{SessionId, UserId};
 use gemini_memory_rs::engine::{MemoryEngine, MemorySession};
 use gemini_memory_rs::runtime::{
-    MemorySlot, MemoryTurnExtractor, MANAGE_TOOL, MEMORY_TOOLS, RECALL_TOOL,
+    MANAGE_TOOL, MEMORY_TOOLS, MemorySlot, MemoryTurnExtractor, RECALL_TOOL,
 };
 
 /// The slot every case here gates on.
