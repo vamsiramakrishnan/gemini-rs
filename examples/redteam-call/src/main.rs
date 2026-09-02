@@ -51,9 +51,9 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use gemini_adk_fluent_rs::live::Live;
-use gemini_adk_rs::live::LiveHandle;
 use gemini_adk_rs::State;
-use gemini_genai_rs::prelude::{GeminiModel, Voice};
+use gemini_adk_rs::live::LiveHandle;
+use gemini_genai_rs::prelude::Voice;
 use tokio::sync::mpsc;
 
 use bridge::{Line, Tape};
@@ -101,7 +101,7 @@ fn parse_args() -> Result<Args, String> {
         let mut value = || argv.next().ok_or(format!("{flag} needs a value"));
         match flag.as_str() {
             "--seconds" => {
-                args.seconds = value()?.parse().map_err(|e| format!("--seconds: {e}"))?
+                args.seconds = value()?.parse().map_err(|e| format!("--seconds: {e}"))?;
             }
             "--turns" => args.turns = value()?.parse().map_err(|e| format!("--turns: {e}"))?,
             "--out" => args.out = PathBuf::from(value()?),
@@ -120,27 +120,6 @@ fn parse_args() -> Result<Args, String> {
         }
     }
     Ok(args)
-}
-
-/// Pin a Live model only if the environment asks for one.
-///
-/// Left unset otherwise, so `connect_from_env` resolves a model appropriate to
-/// the platform it just detected. Hard-coding a name here would break on Vertex
-/// and rot the first time Google retires a dated preview.
-fn model_override() -> Option<GeminiModel> {
-    std::env::var("GEMINI_LIVE_MODEL")
-        .ok()
-        .map(|m| m.trim().to_string())
-        .filter(|m| !m.is_empty())
-        .map(GeminiModel::Custom)
-}
-
-/// Apply the model override, if there is one.
-fn with_model(builder: Live) -> Live {
-    match model_override() {
-        Some(model) => builder.model(model),
-        None => builder,
-    }
 }
 
 #[tokio::main]
@@ -180,10 +159,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let (audio, say) = (to_collector.clone(), say_tx.clone());
         let spoke = caller_spoke.clone();
         let flush = to_collector.clone();
-        with_model(Live::builder())
+        Live::builder()
             .voice(Voice::Kore)
             .instruction(caller::instruction())
-            .transcription(true, true)
+            .transcription()
             .on_audio(move |pcm| {
                 if let Some(line) = audio.get() {
                     line.feed(pcm);
@@ -222,13 +201,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let turns = collector_turns.clone();
         let asked = journal.clone();
         let answered = journal.clone();
-        with_model(Live::builder())
+        Live::builder()
             .voice(Voice::Puck)
             .instruction(collector::instruction())
-            .with_state(state.clone())
-            .with_tools(collector::tools(state.clone(), journal.clone()))
+            .state(state.clone())
+            .tools(collector::tools(state.clone(), journal.clone()))
             .govern(collector::flow())
-            .transcription(true, true)
+            .transcription()
             // Records what the model *asked* for, before the flow gate rules on
             // it. This has to be `on_tool_call`: the Live tool handler runs
             // `FlowMonitor::admits_tool` and `continue`s on a denial, so a
