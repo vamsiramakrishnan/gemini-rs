@@ -607,7 +607,7 @@ mod tests {
                 state.get::<String>("keep")
             ))
         }));
-        let runner = InMemoryRunner::new(agent, "test-app");
+        let runner = TextRunner::new(agent, "test-app");
 
         runner.run("store", "user-1", None).await.unwrap();
         let sessions = runner
@@ -650,7 +650,7 @@ mod tests {
                 state.get::<String>("survivor"),
             ))
         }));
-        let runner = InMemoryRunner::new(agent, "test-app");
+        let runner = TextRunner::new(agent, "test-app");
         let sessions = runner.session_service_ref();
         let session = sessions.create_session("test-app", "user-1").await.unwrap();
 
@@ -696,7 +696,7 @@ mod tests {
             }
             Ok(format!("present: {}", state.contains("maybe")))
         }));
-        let runner = InMemoryRunner::new(agent, "test-app");
+        let runner = TextRunner::new(agent, "test-app");
 
         runner.run("store", "user-1", None).await.unwrap();
         let sessions = runner

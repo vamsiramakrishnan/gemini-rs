@@ -48,12 +48,7 @@ fn readme_quickstart_manifest_names_the_required_dependencies() {
     let manifest = fenced_block(&readme, "Cargo.toml");
     // `gemini-llm` is a default feature, so the base manifest need not name it;
     // `voice-io` is opt-in and lives in the voice-only block, checked below.
-    for needle in [
-        "gemini-adk-fluent-rs",
-        "tokio",
-        "macros",
-        "rt-multi-thread",
-    ] {
+    for needle in ["gemini-adk-fluent-rs", "tokio", "macros", "rt-multi-thread"] {
         assert!(
             manifest.contains(needle),
             "README Cargo.toml block no longer names `{needle}` — \
