@@ -14,12 +14,10 @@ path = "src/research_pipeline.rs"
 
 [dependencies]
 gemini-adk-fluent-rs = { workspace = true }
-gemini-adk-rs        = { workspace = true, default-features = true }
-gemini-genai-rs       = { workspace = true, default-features = true }
+# `#[tool]` expands to `::gemini_adk_rs::…` paths, so the L1 crate must be a
+# direct dependency of any crate that uses the macro.
+gemini-adk-rs = { workspace = true }
 tokio = { version = "1", features = ["full"] }
-async-trait = "0.1"
-schemars = "0.8"
-serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 dotenvy = "0.15"
 

@@ -71,10 +71,13 @@ use syn::{
 ///
 /// # Path hygiene
 ///
-/// Generated code references `serde`, `schemars`, `serde_json`, `async_trait`,
-/// and `gemini_adk_rs` via absolute (`::`-rooted) paths in *your* crate graph.
-/// Consumers of `gemini-adk-rs` already have all of these as dependencies, so no
-/// extra setup is required.
+/// Generated code reaches `serde`, `schemars`, `serde_json`, and `async_trait`
+/// through `::gemini_adk_rs::__macros` (the derives are pointed there with
+/// `#[serde(crate = ..)]` / `#[schemars(crate = ..)]`), so none of them need
+/// to be in your `Cargo.toml`. The expansion is rooted at `::gemini_adk_rs`,
+/// which therefore must be a *direct* dependency of the crate using the macro —
+/// a re-export through another crate (such as `gemini-adk-fluent-rs`) is not
+/// enough.
 ///
 /// # Follow-ups (not yet supported)
 ///
@@ -200,6 +203,7 @@ fn expand(description: LitStr, func: ItemFn) -> syn::Result<proc_macro2::TokenSt
         // Hidden args struct: drives both deserialization and schema generation.
         #[derive(#serde::Deserialize, #schemars::JsonSchema)]
         #[serde(crate = "gemini_adk_rs::__macros::serde")]
+        #[schemars(crate = "gemini_adk_rs::__macros::schemars")]
         #[allow(non_camel_case_types, non_snake_case)]
         struct #args_struct {
             #(#struct_fields),*

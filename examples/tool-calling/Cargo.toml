@@ -5,14 +5,15 @@ edition.workspace = true
 publish = false
 
 [dependencies]
-gemini-genai-rs = { workspace = true, default-features = true }
-gemini-adk-rs = { workspace = true, default-features = true }
+gemini-adk-fluent-rs = { workspace = true }
+# `#[tool]` expands to `::gemini_adk_rs::…` paths, so the L1 crate must be a
+# direct dependency of any crate that uses the macro.
+gemini-adk-rs = { workspace = true }
 tokio = { version = "1", features = ["full"] }
 axum = { version = "0.7", features = ["ws"] }
 tower-http = { version = "0.5", features = ["fs", "cors"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-schemars = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 futures = "0.3"
