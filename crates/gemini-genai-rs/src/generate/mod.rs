@@ -5,14 +5,16 @@
 //!
 //! # Usage
 //!
-//! ```ignore
-//! use gemini_genai_rs::prelude::*;
+//! ```no_run
+//! use gemini_genai_rs::{Client, prelude::ModelId};
 //!
-//! let client = Client::from_api_key("your-key")
-//!     .model(ModelId::new("gemini-2.5-flash".into()));
+//! # async fn run() -> Result<(), Box<dyn std::error::Error>> {
+//! let client = Client::from_api_key("your-key").model(ModelId::FLASH_LATEST);
 //!
 //! let response = client.generate_content("What is Rust?").await?;
 //! println!("{}", response.text().unwrap_or_default());
+//! # Ok(())
+//! # }
 //! ```
 
 mod config;
@@ -44,10 +46,7 @@ impl Client {
     ) -> Result<GenerateContentResponse, GenerateError> {
         let model = model.unwrap_or(self.default_model());
         let url = self.rest_url_for(ServiceEndpoint::GenerateContent, model);
-        let headers = self
-            .auth_headers()
-            .await
-            .map_err(|e| GenerateError::Auth(e.to_string()))?;
+        let headers = self.auth_headers().await?;
 
         let body = config.to_request_body();
         let json = self
@@ -74,7 +73,7 @@ pub enum GenerateError {
 
     /// Authentication error.
     #[error("Auth error: {0}")]
-    Auth(String),
+    Auth(#[from] crate::session::AuthError),
 
     /// Content was blocked by safety filters.
     #[error("Content blocked: {reason:?}")]

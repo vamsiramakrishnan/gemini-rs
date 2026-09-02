@@ -1,4 +1,4 @@
-//! ConnectBuilder — ergonomic builder for advanced transport/codec configuration.
+//! ConnectBuilder — the one connect path with options.
 
 use crate::protocol::types::SessionConfig;
 use crate::session::{SessionError, SessionHandle};
@@ -7,10 +7,9 @@ use crate::transport::codec::{Codec, JsonCodec};
 use crate::transport::connection::connect_with;
 use crate::transport::ws::{Transport, TungsteniteTransport};
 
-/// Builder for advanced connection configuration.
-///
-/// Allows customizing the transport and codec used for the connection.
-/// Defaults to TungsteniteTransport + JsonCodec.
+/// Connects a [`SessionConfig`] with options: transport tuning, a custom
+/// transport or codec, a wire recorder. [`connect`](crate::transport::connect)
+/// is the same thing with none of them.
 ///
 /// # Example
 /// ```rust,no_run
@@ -20,7 +19,7 @@ use crate::transport::ws::{Transport, TungsteniteTransport};
 /// let config = SessionConfig::new("key");
 /// let handle = ConnectBuilder::new(config)
 ///     .transport_config(TransportConfig { connect_timeout_secs: 30, ..Default::default() })
-///     .build()
+///     .connect()
 ///     .await
 ///     .unwrap();
 /// # }
@@ -48,6 +47,13 @@ impl<T: Transport, C: Codec> ConnectBuilder<T, C> {
     /// Set the transport configuration.
     pub fn transport_config(mut self, tc: TransportConfig) -> Self {
         self.transport_config = tc;
+        self
+    }
+
+    /// Adjust the session config in place — for a builder handed out by
+    /// something else (e.g. [`Client::live`](crate::client::Client::live)).
+    pub fn configure(mut self, f: impl FnOnce(SessionConfig) -> SessionConfig) -> Self {
+        self.config = f(self.config);
         self
     }
 
@@ -83,8 +89,8 @@ impl<T: Transport, C: Codec> ConnectBuilder<T, C> {
         }
     }
 
-    /// Build the connection and return a SessionHandle.
-    pub async fn build(self) -> Result<SessionHandle, SessionError> {
+    /// Open the connection and return a [`SessionHandle`].
+    pub async fn connect(self) -> Result<SessionHandle, SessionError> {
         connect_with(
             self.config,
             self.transport_config,
@@ -139,7 +145,7 @@ mod tests {
             .model(ModelId::from_static("models/gemini-2.0-flash-live-001"));
         let handle = ConnectBuilder::new(config)
             .transport(mock)
-            .build()
+            .connect()
             .await
             .unwrap();
 

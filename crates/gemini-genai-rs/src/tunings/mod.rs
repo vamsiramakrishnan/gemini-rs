@@ -118,17 +118,14 @@ pub enum TuningsError {
     Parse(#[from] serde_json::Error),
     #[error("Auth error: {0}")]
     /// Authentication/authorization failure.
-    Auth(String),
+    Auth(#[from] crate::session::AuthError),
 }
 
 impl Client {
     /// List tuning jobs.
     pub async fn list_tuning_jobs(&self) -> Result<ListTuningJobsResponse, TuningsError> {
         let url = self.rest_url(ServiceEndpoint::TuningJobs);
-        let headers = self
-            .auth_headers()
-            .await
-            .map_err(|e| TuningsError::Auth(e.to_string()))?;
+        let headers = self.auth_headers().await?;
         let json = self.http_client().get_json(&url, headers).await?;
         if json.is_null() {
             return Ok(ListTuningJobsResponse {
@@ -143,10 +140,7 @@ impl Client {
     pub async fn get_tuning_job(&self, name: &str) -> Result<TuningJob, TuningsError> {
         let base_url = self.rest_url(ServiceEndpoint::TuningJobs);
         let url = format!("{base_url}/{name}");
-        let headers = self
-            .auth_headers()
-            .await
-            .map_err(|e| TuningsError::Auth(e.to_string()))?;
+        let headers = self.auth_headers().await?;
         let json = self.http_client().get_json(&url, headers).await?;
         Ok(serde_json::from_value(json)?)
     }
@@ -157,10 +151,7 @@ impl Client {
         config: CreateTuningJobConfig,
     ) -> Result<TuningJob, TuningsError> {
         let url = self.rest_url(ServiceEndpoint::TuningJobs);
-        let headers = self
-            .auth_headers()
-            .await
-            .map_err(|e| TuningsError::Auth(e.to_string()))?;
+        let headers = self.auth_headers().await?;
 
         let mut body = serde_json::json!({
             "baseModel": config.base_model,
@@ -179,10 +170,7 @@ impl Client {
     pub async fn cancel_tuning_job(&self, name: &str) -> Result<(), TuningsError> {
         let base_url = self.rest_url(ServiceEndpoint::TuningJobs);
         let url = format!("{base_url}/{name}:cancel");
-        let headers = self
-            .auth_headers()
-            .await
-            .map_err(|e| TuningsError::Auth(e.to_string()))?;
+        let headers = self.auth_headers().await?;
         self.http_client()
             .post_json(&url, headers, &serde_json::json!({}))
             .await?;

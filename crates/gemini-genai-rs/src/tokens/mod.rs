@@ -31,7 +31,7 @@ pub enum TokensError {
     Parse(#[from] serde_json::Error),
     #[error("Auth error: {0}")]
     /// Authentication/authorization failure.
-    Auth(String),
+    Auth(#[from] crate::session::AuthError),
 }
 
 impl Client {
@@ -51,10 +51,7 @@ impl Client {
     ) -> Result<CountTokensResponse, TokensError> {
         let model = model.unwrap_or(self.default_model());
         let url = self.rest_url_for(ServiceEndpoint::CountTokens, model);
-        let headers = self
-            .auth_headers()
-            .await
-            .map_err(|e| TokensError::Auth(e.to_string()))?;
+        let headers = self.auth_headers().await?;
 
         let body = serde_json::json!({ "contents": contents });
         let json = self.http_client().post_json(&url, headers, &body).await?;

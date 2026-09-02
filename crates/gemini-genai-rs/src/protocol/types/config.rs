@@ -317,7 +317,7 @@ pub struct GenerationConfig {
 /// let with_token = ApiEndpoint::google_ai_token("ya29.ACCESS_TOKEN");
 /// let vertex = ApiEndpoint::vertex("my-project", "us-central1", "ACCESS_TOKEN");
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum ApiEndpoint {
     /// Google AI Studio -- API-key authentication.
     GoogleAI {
@@ -327,10 +327,90 @@ pub enum ApiEndpoint {
     /// Google AI with OAuth2 access token (e.g. from gcloud).
     GoogleAIToken {
         /// The OAuth2 access token.
-        access_token: String,
+        access_token: AccessToken,
     },
     /// Vertex AI — project + location + OAuth2 bearer token.
     VertexAI(VertexConfig),
+}
+
+impl std::fmt::Debug for ApiEndpoint {
+    /// Credentials never appear in `Debug` output: a config logged at
+    /// `debug!` level must not leak the key that authenticates it.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::GoogleAI { .. } => f
+                .debug_struct("GoogleAI")
+                .field("api_key", &"<redacted>")
+                .finish(),
+            Self::GoogleAIToken { access_token } => f
+                .debug_struct("GoogleAIToken")
+                .field("access_token", access_token)
+                .finish(),
+            Self::VertexAI(v) => f.debug_tuple("VertexAI").field(v).finish(),
+        }
+    }
+}
+
+/// An OAuth2 access token source.
+///
+/// Tokens from `gcloud auth print-access-token` and service-account exchanges
+/// live for about an hour. A session that reconnects after that with the
+/// string it was built with is refused; [`AccessToken::Dynamic`] is consulted
+/// on every connection attempt instead, so a refreshing source keeps
+/// reconnects authenticated. `Debug` output never shows the token.
+///
+/// ```
+/// # use gemini_genai_rs::protocol::types::AccessToken;
+/// let fixed: AccessToken = "ya29.TOKEN".into();
+/// let fresh = AccessToken::from_fn(|| std::env::var("GOOGLE_ACCESS_TOKEN").unwrap_or_default());
+/// assert_eq!(fixed.get(), "ya29.TOKEN");
+/// assert_eq!(format!("{fresh:?}"), "AccessToken(<redacted>)");
+/// ```
+#[derive(Clone)]
+pub enum AccessToken {
+    /// A fixed token string.
+    Static(String),
+    /// A source consulted on every connection attempt.
+    Dynamic(std::sync::Arc<dyn Fn() -> String + Send + Sync>),
+}
+
+impl AccessToken {
+    /// A token source that is called on every connection attempt.
+    pub fn from_fn(f: impl Fn() -> String + Send + Sync + 'static) -> Self {
+        Self::Dynamic(std::sync::Arc::new(f))
+    }
+
+    /// The current token.
+    pub fn get(&self) -> String {
+        match self {
+            Self::Static(t) => t.clone(),
+            Self::Dynamic(f) => f(),
+        }
+    }
+}
+
+impl std::fmt::Debug for AccessToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("AccessToken(<redacted>)")
+    }
+}
+
+impl From<String> for AccessToken {
+    fn from(t: String) -> Self {
+        Self::Static(t)
+    }
+}
+
+impl From<&str> for AccessToken {
+    fn from(t: &str) -> Self {
+        Self::Static(t.to_string())
+    }
+}
+
+impl From<&String> for AccessToken {
+    fn from(t: &String) -> Self {
+        Self::Static(t.clone())
+    }
 }
 
 /// Configuration for connecting through Vertex AI.
@@ -340,9 +420,9 @@ pub struct VertexConfig {
     pub project: String,
     /// Regional location (e.g. `"us-central1"`).
     pub location: String,
-    /// OAuth2 access token obtained from `gcloud auth print-access-token`
-    /// or a service-account token exchange.
-    pub access_token: String,
+    /// OAuth2 bearer token source — a fixed string, or a closure consulted
+    /// on every connection attempt (see [`AccessToken`]).
+    pub access_token: AccessToken,
     /// Optional API host override. Defaults to
     /// `{location}-aiplatform.googleapis.com`.
     pub api_host: Option<String>,
@@ -360,17 +440,20 @@ impl ApiEndpoint {
     ///
     /// Use this when authenticating with `gcloud auth print-access-token`
     /// or any other OAuth2 flow instead of an API key.
-    pub fn google_ai_token(access_token: impl Into<String>) -> Self {
+    pub fn google_ai_token(access_token: impl Into<AccessToken>) -> Self {
         Self::GoogleAIToken {
             access_token: access_token.into(),
         }
     }
 
     /// Shorthand for Vertex AI endpoint.
+    ///
+    /// `access_token` is a fixed string or an [`AccessToken`]; for a token
+    /// that refreshes across reconnects see [`ApiEndpoint::vertex_refreshing`].
     pub fn vertex(
         project: impl Into<String>,
         location: impl Into<String>,
-        access_token: impl Into<String>,
+        access_token: impl Into<AccessToken>,
     ) -> Self {
         Self::VertexAI(VertexConfig {
             project: project.into(),
@@ -380,12 +463,30 @@ impl ApiEndpoint {
         })
     }
 
+    /// Vertex AI endpoint whose bearer token is fetched on every connection
+    /// attempt, so a reconnect after the token's ~1 h lifetime carries a
+    /// live credential.
+    ///
+    /// ```
+    /// # use gemini_genai_rs::protocol::types::ApiEndpoint;
+    /// let endpoint = ApiEndpoint::vertex_refreshing("my-project", "us-central1", || {
+    ///     std::env::var("GOOGLE_ACCESS_TOKEN").unwrap_or_default()
+    /// });
+    /// ```
+    pub fn vertex_refreshing(
+        project: impl Into<String>,
+        location: impl Into<String>,
+        token: impl Fn() -> String + Send + Sync + 'static,
+    ) -> Self {
+        Self::vertex(project, location, AccessToken::from_fn(token))
+    }
+
     /// Vertex AI endpoint with a custom API host (for private endpoints,
     /// VPC-SC, or testing).
     pub fn vertex_with_host(
         project: impl Into<String>,
         location: impl Into<String>,
-        access_token: impl Into<String>,
+        access_token: impl Into<AccessToken>,
         api_host: impl Into<String>,
     ) -> Self {
         Self::VertexAI(VertexConfig {
@@ -483,14 +584,10 @@ pub struct SessionConfig {
     pub context_window_compression: Option<ContextWindowCompressionConfig>,
     /// Proactivity configuration.
     pub proactivity: Option<ProactivityConfig>,
-    /// Audio format for input (default: PCM16).
+    /// Encoding of the audio sent with `send_audio` (default: PCM16 at
+    /// [`LIVE_INPUT_SAMPLE_RATE`](super::enums::LIVE_INPUT_SAMPLE_RATE)).
+    /// The output format is not configurable: the API returns 24 kHz PCM16.
     pub input_audio_format: AudioFormat,
-    /// Audio format for output (default: PCM16).
-    pub output_audio_format: AudioFormat,
-    /// Input audio sample rate in Hz (default: 16000).
-    pub input_sample_rate: u32,
-    /// Output audio sample rate in Hz (default: 24000).
-    pub output_sample_rate: u32,
     /// Optional send pacing for outbound audio (token-bucket backpressure).
     ///
     /// `None` (default) sends audio as fast as the command queue accepts it.
@@ -498,9 +595,8 @@ pub struct SessionConfig {
     /// paces the *producer*: a caller pushing audio faster than
     /// `refill_rate_bps` waits, instead of overflowing the send queue.
     pub audio_pacing: Option<crate::transport::BackpressureConfig>,
-    /// Optional wire recorder. When set, [`connect`](crate::transport::connect),
-    /// [`connect_with`](crate::transport::connect_with), and
-    /// [`ConnectBuilder`](crate::transport::ConnectBuilder) wrap the codec in a
+    /// Optional wire recorder. When set, [`connect`](crate::transport::connect)
+    /// and [`ConnectBuilder`](crate::transport::ConnectBuilder) wrap the codec in a
     /// [`RecordingCodec`](crate::transport::RecordingCodec) so every wire byte
     /// (both directions) is delivered to the recorder. See
     /// [`SessionConfig::record_wire`].
@@ -526,7 +622,7 @@ impl SessionConfig {
     /// # use gemini_genai_rs::protocol::types::SessionConfig;
     /// let config = SessionConfig::from_access_token("ya29.ACCESS_TOKEN");
     /// ```
-    pub fn from_access_token(access_token: impl Into<String>) -> Self {
+    pub fn from_access_token(access_token: impl Into<AccessToken>) -> Self {
         Self::from_endpoint(ApiEndpoint::google_ai_token(access_token))
     }
 
@@ -547,7 +643,7 @@ impl SessionConfig {
     pub fn from_vertex(
         project: impl Into<String>,
         location: impl Into<String>,
-        access_token: impl Into<String>,
+        access_token: impl Into<AccessToken>,
     ) -> Self {
         Self::from_endpoint(ApiEndpoint::vertex(project, location, access_token))
     }
@@ -571,9 +667,6 @@ impl SessionConfig {
             context_window_compression: None,
             proactivity: None,
             input_audio_format: AudioFormat::Pcm16,
-            output_audio_format: AudioFormat::Pcm16,
-            input_sample_rate: 16000,
-            output_sample_rate: 24000,
             audio_pacing: None,
             wire_recorder: None,
         }
@@ -595,8 +688,7 @@ impl SessionConfig {
 
     /// Record every wire byte (both directions) to the given recorder.
     ///
-    /// All connect paths ([`connect`](crate::transport::connect),
-    /// [`connect_with`](crate::transport::connect_with),
+    /// Both connect paths ([`connect`](crate::transport::connect) and
     /// [`ConnectBuilder`](crate::transport::ConnectBuilder)) honor this by
     /// wrapping the codec in a [`RecordingCodec`](crate::transport::RecordingCodec).
     /// Use [`FileWireRecorder`](crate::transport::FileWireRecorder) for a
@@ -612,17 +704,11 @@ impl SessionConfig {
 
     /// Set the output voice.
     pub fn voice(mut self, voice: Voice) -> Self {
-        let voice_name = match &voice {
-            Voice::Aoede => "Aoede".to_string(),
-            Voice::Charon => "Charon".to_string(),
-            Voice::Fenrir => "Fenrir".to_string(),
-            Voice::Kore => "Kore".to_string(),
-            Voice::Puck => "Puck".to_string(),
-            Voice::Custom(name) => name.clone(),
-        };
         self.generation_config.speech_config = Some(SpeechConfig {
             voice_config: Some(VoiceConfig {
-                prebuilt_voice_config: Some(PrebuiltVoiceConfig { voice_name }),
+                prebuilt_voice_config: Some(PrebuiltVoiceConfig {
+                    voice_name: voice.to_string(),
+                }),
             }),
         });
         self
@@ -680,15 +766,17 @@ impl SessionConfig {
         self
     }
 
-    /// Enable input audio transcription.
-    pub fn enable_input_transcription(mut self) -> Self {
-        self.input_audio_transcription = Some(InputAudioTranscription {});
+    /// Whether the server transcribes the user's audio
+    /// (`SessionEvent::InputTranscription`).
+    pub fn input_transcription(mut self, enabled: bool) -> Self {
+        self.input_audio_transcription = enabled.then_some(InputAudioTranscription {});
         self
     }
 
-    /// Enable output audio transcription.
-    pub fn enable_output_transcription(mut self) -> Self {
-        self.output_audio_transcription = Some(OutputAudioTranscription {});
+    /// Whether the server transcribes the model's audio
+    /// (`SessionEvent::OutputTranscription`).
+    pub fn output_transcription(mut self, enabled: bool) -> Self {
+        self.output_audio_transcription = enabled.then_some(OutputAudioTranscription {});
         self
     }
 
@@ -782,9 +870,20 @@ impl SessionConfig {
         self
     }
 
-    /// Enable session resumption.
-    pub fn session_resumption(mut self, handle: Option<String>) -> Self {
-        self.session_resumption = Some(SessionResumptionConfig { handle });
+    /// Enable session resumption: the server issues resumption handles
+    /// (`SessionEvent::SessionResumeUpdate`) that a later session can pass to
+    /// [`resume_from`](Self::resume_from).
+    pub fn session_resumption(mut self) -> Self {
+        self.session_resumption = Some(SessionResumptionConfig { handle: None });
+        self
+    }
+
+    /// Resume an earlier session from a handle the server issued for it.
+    /// Implies [`session_resumption`](Self::session_resumption).
+    pub fn resume_from(mut self, handle: impl Into<String>) -> Self {
+        self.session_resumption = Some(SessionResumptionConfig {
+            handle: Some(handle.into()),
+        });
         self
     }
 
@@ -838,8 +937,9 @@ impl SessionConfig {
         self
     }
 
-    /// Include the model's thought process in responses.
-    pub fn include_thoughts(mut self) -> Self {
+    /// Whether thought summaries are delivered (`SessionEvent::Thought`).
+    /// Google AI only; see [`supports_thinking`](Self::supports_thinking).
+    pub fn include_thoughts(mut self, enabled: bool) -> Self {
         let mut tc = self
             .generation_config
             .thinking_config
@@ -847,7 +947,7 @@ impl SessionConfig {
                 thinking_budget: None,
                 include_thoughts: None,
             });
-        tc.include_thoughts = Some(true);
+        tc.include_thoughts = Some(enabled);
         self.generation_config.thinking_config = Some(tc);
         self
     }
@@ -870,17 +970,9 @@ impl SessionConfig {
         self
     }
 
-    /// Set input audio format and sample rate.
-    pub fn input_audio(mut self, format: AudioFormat, sample_rate: u32) -> Self {
+    /// Set the encoding of the audio sent with `send_audio`.
+    pub fn input_audio_format(mut self, format: AudioFormat) -> Self {
         self.input_audio_format = format;
-        self.input_sample_rate = sample_rate;
-        self
-    }
-
-    /// Set output audio format and sample rate.
-    pub fn output_audio(mut self, format: AudioFormat, sample_rate: u32) -> Self {
-        self.output_audio_format = format;
-        self.output_sample_rate = sample_rate;
         self
     }
 
@@ -900,7 +992,8 @@ impl SessionConfig {
             ApiEndpoint::GoogleAIToken { access_token } => format!(
                 "wss://generativelanguage.googleapis.com/ws/\
                  google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent\
-                 ?access_token={access_token}"
+                 ?access_token={}",
+                access_token.get()
             ),
             ApiEndpoint::VertexAI(v) => {
                 let host = v.api_host.as_deref().unwrap_or("");
@@ -941,15 +1034,16 @@ impl SessionConfig {
         }
     }
 
-    /// Returns the bearer token when using Vertex AI, `None` for Google AI.
+    /// The current bearer token when using Vertex AI, `None` for Google AI.
     ///
-    /// Used by the transport layer to set the `Authorization` HTTP header
-    /// during the WebSocket upgrade handshake. Google AI endpoints pass the
-    /// token as a query parameter instead.
-    pub fn bearer_token(&self) -> Option<&str> {
+    /// The transport calls this on every connection attempt to set the
+    /// `Authorization` header for the WebSocket upgrade, so a refreshing
+    /// [`AccessToken`] is honoured on reconnect. Google AI endpoints pass the
+    /// credential as a query parameter instead.
+    pub fn bearer_token(&self) -> Option<String> {
         match &self.endpoint {
             ApiEndpoint::GoogleAI { .. } | ApiEndpoint::GoogleAIToken { .. } => None,
-            ApiEndpoint::VertexAI(v) => Some(&v.access_token),
+            ApiEndpoint::VertexAI(v) => Some(v.access_token.get()),
         }
     }
 
@@ -965,6 +1059,13 @@ impl SessionConfig {
     /// fields are automatically stripped from the wire messages when targeting
     /// Vertex AI so callers can set them unconditionally.
     pub fn supports_async_tools(&self) -> bool {
+        !self.is_vertex()
+    }
+
+    /// Returns `true` if the platform accepts `thinkingConfig` in the setup
+    /// message. Vertex AI does not: the whole config is stripped there, so
+    /// `thinking(..)` and `include_thoughts(..)` are silent no-ops on Vertex.
+    pub fn supports_thinking(&self) -> bool {
         !self.is_vertex()
     }
 
@@ -1033,7 +1134,7 @@ mod tests {
             Ok(ApiEndpoint::VertexAI(cfg)) => {
                 assert_eq!(cfg.project, "proj-1");
                 assert_eq!(cfg.location, "us-central1");
-                assert_eq!(cfg.access_token, "tok-abc");
+                assert_eq!(cfg.access_token.get(), "tok-abc");
             }
             other => panic!("expected Vertex endpoint, got {other:?}"),
         }
@@ -1095,7 +1196,7 @@ mod tests {
         let config = SessionConfig::from_vertex("my-project", "us-central1", "token123")
             .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO);
         assert!(config.is_vertex());
-        assert!(config.bearer_token() == Some("token123"));
+        assert_eq!(config.bearer_token().as_deref(), Some("token123"));
     }
 
     #[test]
@@ -1292,7 +1393,9 @@ mod tests {
 
     #[test]
     fn thinking_config_with_include_thoughts() {
-        let config = SessionConfig::new("key").thinking(2048).include_thoughts();
+        let config = SessionConfig::new("key")
+            .thinking(2048)
+            .include_thoughts(true);
         let json = config.to_setup_json();
         assert!(json.contains("\"thinkingBudget\""));
         assert!(json.contains("2048"));

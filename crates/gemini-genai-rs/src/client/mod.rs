@@ -10,12 +10,10 @@ pub mod http;
 use std::sync::Arc;
 
 use crate::protocol::types::{ApiEndpoint, ModelId, SessionConfig};
-use crate::session::SessionError;
-use crate::session::SessionHandle;
+use crate::transport::ConnectBuilder;
 use crate::transport::auth::{
     AuthProvider, GoogleAIAuth, GoogleAITokenAuth, RestAuth, ServiceEndpoint, VertexAIAuth,
 };
-use crate::transport::{TransportConfig, connect};
 
 /// Unified Gemini API client.
 ///
@@ -25,15 +23,20 @@ use crate::transport::{TransportConfig, connect};
 ///
 /// # Construction
 ///
-/// ```ignore
+/// ```no_run
+/// use gemini_genai_rs::Client;
+///
+/// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
 /// // From API key (Google AI)
 /// let client = Client::from_api_key("your-api-key");
 ///
 /// // From Vertex AI credentials
 /// let client = Client::from_vertex("project-id", "us-central1", "access-token");
 ///
-/// // Live WebSocket session
-/// let session = client.live("gemini-2.5-flash").connect().await?;
+/// // Live WebSocket session on the platform's default Live model
+/// let session = client.live(None).connect().await?;
+/// # Ok(())
+/// # }
 /// ```
 pub struct Client {
     endpoint: ApiEndpoint,
@@ -94,12 +97,13 @@ impl Client {
 
     /// Create a client with Vertex AI authentication and dynamic token refresh.
     ///
-    /// The `refresher` closure is called on every REST API request to obtain
-    /// a fresh Bearer token. It should handle caching internally to avoid
-    /// unnecessary overhead (see `GcloudTokenProvider` in gemini-adk-rs for an example).
+    /// The `refresher` closure is called on every REST API request and on
+    /// every Live connection attempt (including reconnects) to obtain a
+    /// fresh Bearer token. It should cache internally (see
+    /// `GcloudTokenProvider` in gemini-adk-rs for an example).
     ///
-    /// This is the recommended constructor for long-running HTTP clients
-    /// (e.g., extraction LLMs) where tokens may expire during the session.
+    /// This is the right constructor for anything that outlives a token's
+    /// ~1 h lifetime.
     pub fn from_vertex_refreshable(
         project: impl Into<String>,
         location: impl Into<String>,
@@ -107,11 +111,16 @@ impl Client {
     ) -> Self {
         let proj: String = project.into();
         let loc: String = location.into();
-        // Get initial token for the ApiEndpoint (used if .live() is called)
-        let initial_token = refresher();
-        let endpoint = ApiEndpoint::vertex(proj.clone(), loc.clone(), initial_token);
+        // One source feeds both sides: REST requests and every Live
+        // (re)connection attempt see a fresh token.
+        let refresher = Arc::new(refresher);
+        let live_refresher = refresher.clone();
+        let endpoint =
+            ApiEndpoint::vertex_refreshing(proj.clone(), loc.clone(), move || live_refresher());
         let auth: Arc<dyn RestAuth> =
-            Arc::new(VertexAIAuth::with_token_refresher(proj, loc, refresher));
+            Arc::new(VertexAIAuth::with_token_refresher(proj, loc, move || {
+                refresher()
+            }));
         Self {
             endpoint,
             model: ModelId::FLASH_LATEST,
@@ -159,16 +168,15 @@ impl Client {
         self.auth.auth_headers().await
     }
 
-    /// Start a Live WebSocket session builder.
+    /// A Live session on this client's credentials.
     ///
-    /// Returns a [`LiveSessionBuilder`] that can be customized before connecting.
-    pub fn live(&self, model: ModelId) -> LiveSessionBuilder {
-        LiveSessionBuilder {
-            endpoint: self.endpoint.clone(),
-            model,
-            transport_config: TransportConfig::default(),
-            config_fn: None,
-        }
+    /// `None` connects to the platform's default Live model (the REST default
+    /// model is a text model and would not do). Tune the session with
+    /// [`ConnectBuilder::configure`], then `.connect().await`.
+    pub fn live(&self, model: Option<ModelId>) -> ConnectBuilder {
+        let mut config = SessionConfig::from_endpoint(self.endpoint.clone());
+        config.model = model;
+        ConnectBuilder::new(config)
     }
 
     /// Get a reference to the HTTP client for making REST API calls.
@@ -187,45 +195,8 @@ impl Client {
         body: &impl serde::Serialize,
     ) -> Result<serde_json::Value, http::HttpError> {
         let url = self.rest_url(endpoint);
-        let headers = self
-            .auth
-            .auth_headers()
-            .await
-            .map_err(|e| http::HttpError::Auth(e.to_string()))?;
+        let headers = self.auth.auth_headers().await?;
         self.http.post_json(&url, headers, body).await
-    }
-}
-
-/// Builder for Live WebSocket sessions initiated from a [`Client`].
-pub struct LiveSessionBuilder {
-    endpoint: ApiEndpoint,
-    model: ModelId,
-    transport_config: TransportConfig,
-    config_fn: Option<Box<dyn FnOnce(SessionConfig) -> SessionConfig>>,
-}
-
-impl LiveSessionBuilder {
-    /// Set transport configuration (timeouts, reconnection, etc.).
-    pub fn transport_config(mut self, config: TransportConfig) -> Self {
-        self.transport_config = config;
-        self
-    }
-
-    /// Apply a customization function to the session config before connecting.
-    pub fn configure(mut self, f: impl FnOnce(SessionConfig) -> SessionConfig + 'static) -> Self {
-        self.config_fn = Some(Box::new(f));
-        self
-    }
-
-    /// Connect and return a [`SessionHandle`].
-    pub async fn connect(self) -> Result<SessionHandle, SessionError> {
-        let mut config = SessionConfig::from_endpoint(self.endpoint).model(self.model);
-
-        if let Some(f) = self.config_fn {
-            config = f(config);
-        }
-
-        connect(config, self.transport_config).await
     }
 }
 
@@ -278,7 +249,9 @@ mod tests {
     #[test]
     fn live_session_builder_created() {
         let client = Client::from_api_key("key");
-        let _builder = client.live(ModelId::from_static("models/gemini-2.0-flash-live-001"));
+        let _builder = client.live(Some(ModelId::from_static(
+            "models/gemini-2.0-flash-live-001",
+        )));
     }
 
     #[tokio::test]
@@ -290,11 +263,19 @@ mod tests {
             cc.fetch_add(1, Ordering::SeqCst);
             "refreshed-token".to_string()
         });
-        // Initial token fetch happens at construction
-        assert!(call_count.load(Ordering::SeqCst) >= 1);
-        // auth_headers should call the refresher again
+        // Nothing is fetched eagerly: a token minted at construction would be
+        // the stale one by the time a reconnect needs it.
+        assert_eq!(call_count.load(Ordering::SeqCst), 0);
+        // Every REST request consults the source …
         let headers = client.auth_headers().await.unwrap();
         assert_eq!(headers[0].1, "Bearer refreshed-token");
-        assert!(call_count.load(Ordering::SeqCst) >= 2);
+        assert_eq!(call_count.load(Ordering::SeqCst), 1);
+        // … and so does every Live connection attempt, through the same source.
+        let live_config = SessionConfig::from_endpoint(client.endpoint.clone());
+        assert_eq!(
+            live_config.bearer_token().as_deref(),
+            Some("refreshed-token")
+        );
+        assert_eq!(call_count.load(Ordering::SeqCst), 2);
     }
 }

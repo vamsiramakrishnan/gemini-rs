@@ -1,19 +1,8 @@
 #![warn(unreachable_pub)]
 #![warn(missing_docs)]
-//! # gemini-live
-//!
-//! Full Rust equivalent of Google's `@google/genai` SDK.
-//! Wire protocol, transport, types, auth, plus REST API modules (feature-gated).
-//!
-//! ## Layers
-//!
-//! - **Protocol**: Wire-format types mapping 1:1 to the API (`protocol/`)
-//! - **Transport**: WebSocket connection with reconnection and flow control (`transport/`)
-//! - **Session**: Session handle with command/event channels and phase FSM (`session/`)
-//! - **Buffer**: Lock-free SPSC ring buffer and adaptive jitter buffer (`buffer/`)
-//! - **VAD**: Voice activity detection with adaptive noise floor (`vad/`)
-//! - **Flow**: Barge-in detection and turn detection (`flow/`)
-//! - **Telemetry**: OTel spans, structured logging, Prometheus metrics (`telemetry/`)
+// The README is the crate doc, so its code blocks are doctests: the
+// quickstart cannot drift from the API without failing `cargo test`.
+#![doc = include_str!("../README.md")]
 
 #[cfg(feature = "batches")]
 pub mod batches;
@@ -33,7 +22,6 @@ pub mod generate;
 pub mod models;
 pub mod primitives;
 pub mod protocol;
-pub mod quick;
 pub mod session;
 pub mod telemetry;
 #[cfg(feature = "tokens")]
@@ -47,7 +35,7 @@ pub mod vad;
 
 // Top-level re-exports for convenience.
 pub use client::Client;
-pub use quick::{quick_connect, quick_connect_vertex};
+pub use transport::{ConnectBuilder, connect};
 
 /// Convenient re-exports for wire-level usage.
 pub mod prelude {
@@ -58,7 +46,7 @@ pub mod prelude {
     #[allow(deprecated)]
     pub use crate::protocol::types::GeminiModel;
     pub use crate::protocol::types::{
-        ActivityHandling, ApiEndpoint, AudioFormat, AutomaticActivityDetection, Blob,
+        AccessToken, ActivityHandling, ApiEndpoint, AudioFormat, AutomaticActivityDetection, Blob,
         CodeExecutionResult, Content, ContextWindowCompressionConfig, EndpointEnvError,
         ExecutableCode, FunctionCall, FunctionCallingBehavior, FunctionCallingConfig,
         FunctionCallingMode, FunctionDeclaration, FunctionResponse, FunctionResponseScheduling,
@@ -83,7 +71,7 @@ pub mod prelude {
         MockTransport, Transport, TungsteniteError, TungsteniteTransport,
     };
     pub use crate::transport::{
-        Codec, CodecError, ConnectBuilder, JsonCodec, TransportConfig, connect, connect_with,
+        Codec, CodecError, ConnectBuilder, JsonCodec, TransportConfig, connect,
     };
 
     // Session
@@ -165,7 +153,4 @@ pub mod prelude {
     // Chat API
     #[cfg(feature = "chats")]
     pub use crate::chats::ChatSession;
-
-    // Quick-start
-    pub use crate::quick::{quick_connect, quick_connect_vertex};
 }

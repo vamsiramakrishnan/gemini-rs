@@ -1,95 +1,114 @@
 # gemini-genai-rs
 
-Raw wire protocol and transport for the Gemini Multimodal Live API. This is the L0 (foundation) crate in the gemini-rs workspace — it handles WebSocket connections, authentication, wire-format types, and audio buffering with no agent abstractions.
+The wire layer for Google's Gemini Live API in Rust: a WebSocket session
+with typed events, the setup/realtime message vocabulary, Google AI and
+Vertex AI authentication, and the audio primitives a realtime client needs.
+It is the L0 crate of the gemini-rs workspace, with no agent abstractions.
+Applications usually want the L2 crate, `gemini-adk-fluent-rs`; this crate
+is for anyone who needs the protocol itself.
 
-## Features
+## Quick start
 
-- **Protocol types** mapping 1:1 to the Gemini Live API wire format
-- **WebSocket transport** with Vertex AI and Google AI authentication
-- **Lock-free audio buffers** (SPSC ring buffer, adaptive jitter buffer)
-- **Voice activity detection** with adaptive noise floor
-- **Feature-gated REST APIs** (generate, embed, files, models, tokens, caches, tunings, batches)
-- **Pluggable architecture** via `Transport`, `Codec`, and `AuthProvider` traits
-
-## Quick Start
-
-```rust,ignore
+```rust,no_run
 use gemini_genai_rs::prelude::*;
 
-let config = TransportConfig::google_ai("YOUR_API_KEY", GeminiModel::Gemini2_0Flash);
-let (handle, events) = connect(config).await?;
+#[tokio::main]
+async fn main() -> Result<(), SessionError> {
+    // Unset model → the platform's current native-audio Live model
+    // (`GEMINI_MODEL` overrides). Output transcription makes the answer readable.
+    let config = SessionConfig::new(std::env::var("GEMINI_API_KEY").unwrap())
+        .output_transcription(true);
+    let session = connect(config).await?;
 
-handle.send_text("Hello!").await?;
-while let Some(event) = events.recv().await {
-    // Handle server events
+    let mut events = session.subscribe();
+    session.send_text("What is the speed of light?").await?;
+    while let Some(event) = recv_event(&mut events).await {
+        match event {
+            SessionEvent::OutputTranscription(text) => print!("{text}"),
+            SessionEvent::TurnComplete => break,
+            SessionEvent::Error(e) => eprintln!("{e}"),
+            _ => {}
+        }
+    }
+    session.disconnect().await
 }
 ```
 
-## Feature Flags
+Vertex AI is the same session with a different endpoint. Tokens live about
+an hour, so give a long-lived session a refreshing source:
 
-The crate is split into opt-in feature flags so you only compile what you need.
-The default build includes Live WebSocket support, VAD, and tracing.
+```rust,no_run
+use gemini_genai_rs::prelude::*;
+
+# fn fetch_token() -> String { String::new() }
+let config = SessionConfig::from_endpoint(ApiEndpoint::vertex_refreshing(
+    "my-project",
+    "us-central1",
+    fetch_token,
+));
+```
+
+Timeouts, reconnection policy, a custom transport or codec, and wire
+recording go through `ConnectBuilder`; `connect(config)` is the same path
+with none of the options.
+
+## What is in the box
+
+- **Protocol types** mapping one-to-one to the Live API wire format, with
+  builders for the parts you write (`Content::user(..)`, `Part::text(..)`,
+  `Tool::function(..)`).
+- **A session** (`SessionHandle`): `send_audio`/`send_text`/`send_video`/
+  tool responses in, a broadcast of `SessionEvent` out, reconnection with
+  backoff and session-resumption handles, GoAway as a typed event.
+- **Authentication** for Google AI (API key or OAuth token) and Vertex AI
+  (bearer token, static or refreshing), and platform differences handled on
+  the wire (Vertex strips async-tool and thinking fields it does not accept).
+- **Audio primitives**: a lock-free SPSC ring, an adaptive jitter buffer,
+  client-side voice activity detection, barge-in and turn detection.
+- **REST surfaces** behind feature flags: `generateContent`, embeddings,
+  token counting, files, caches, tunings, batches, chats.
+
+## Feature flags
+
+The default build is the Live protocol plus a TLS backend. Everything
+heavier is opt-in.
 
 | Feature | Enables | Default |
 |---------|---------|---------|
-| `live` | WebSocket Live API session types and transport | yes |
-| `vad` | Voice activity detection (shared base) | yes |
-| `vad-wavekat` | VAD powered by the `wavekat-vad` model (implies `vad`) | yes |
-| `tracing-support` | `tracing` + `tracing-subscriber` integration | yes |
-| `http` | HTTP client (`reqwest`) — required by all REST API features | no |
-| `generate` | `generateContent` REST endpoint (implies `http`) | no |
-| `tokens` | Token counting REST endpoint (implies `http`) | no |
-| `models` | Model listing and metadata REST endpoint (implies `http`) | no |
-| `files` | File upload and management REST endpoint (implies `http`) | no |
-| `embed` | Text embeddings REST endpoint (implies `http`) | no |
-| `caches` | Context caching REST endpoint (implies `http`) | no |
-| `tunings` | Fine-tuning jobs REST endpoint (implies `http`) | no |
-| `batches` | Batch prediction REST endpoint (implies `http`) | no |
-| `chats` | Multi-turn chat sessions (implies `generate`) | no |
-| `all-apis` | All REST API features above | no |
-| `opus` | Opus audio codec via `audiopus` | no |
+| `live` | Live WebSocket session types and transport | yes |
+| `tls-native` | TLS via the platform's native library (enable exactly one TLS backend) | yes |
+| `tls-rustls` | TLS via rustls with native root certificates | no |
+| `vad` | Energy-based client-side voice activity detection | no |
+| `vad-wavekat` | VAD backed by the `wavekat-vad` model (implies `vad`) | no |
+| `http` | HTTP client (`reqwest`), required by every REST feature | no |
+| `generate`, `embed`, `tokens`, `models`, `files`, `caches`, `tunings`, `batches` | The corresponding REST endpoint (each implies `http`) | no |
+| `chats` | Multi-turn chat sessions over `generate` | no |
+| `all-apis` | Every REST feature above | no |
+| `tracing-subscriber` | The `fmt`/`EnvFilter` subscriber behind `TelemetryConfig::init` | no |
 | `metrics` | Prometheus metrics exporter | no |
-| `otel-base` | Shared OpenTelemetry deps (traces + metrics) | no |
-| `otel-otlp` | Generic OTLP exporter over gRPC/tonic (implies `otel-base`) | no |
-| `otel-gcp` | Google Cloud Trace + Cloud Monitoring exporters (implies `otel-base`) | no |
-| `otel` | Alias for `otel-otlp` | no |
+| `otel-otlp` / `otel-gcp` | OpenTelemetry export over OTLP, or to Google Cloud Trace and Monitoring | no |
 
-**Example — add REST generation and token counting:**
+The `tracing` facade itself is always compiled; spans are no-ops until a
+subscriber is installed.
 
 ```toml
 [dependencies]
-gemini-genai-rs = { version = "0.8", features = ["generate", "tokens"] }
+gemini-genai-rs = { version = "2", features = ["generate", "tokens"] }
 ```
 
-**Enable everything:**
+## Voice activity detection
 
-```toml
-gemini-genai-rs = { version = "0.8", features = ["all-apis", "metrics", "opus"] }
-```
-
-## Voice Activity Detection (VAD)
-
-The `vad` / `vad-wavekat` features provide a client-side voice activity
-detector that can be used alongside or instead of the server-side VAD built
-into Gemini Live. It applies an adaptive noise-floor model to incoming PCM
-frames and emits start/end events:
-
-- `vad-wavekat` (default): uses the `wavekat-vad` ML model for more accurate
-  speech boundary detection.
-- `vad` alone: lightweight energy-based detector with no ML dependency.
-
-The detector is exposed as `VoiceActivityDetector` / `VadConfig` and is used
-internally by the three-lane processor to power soft-turn detection
-(`SoftTurnDetector`) in L1.
+`VoiceActivityDetector` (feature `vad`) runs client-side, alongside or
+instead of the server's detection: an adaptive noise floor over incoming
+PCM frames that emits speech start and end events. `vad-wavekat` swaps in
+the `wavekat-vad` model for tighter speech boundaries. The L1 runtime uses
+it for soft-turn detection and client-authority interruption.
 
 ## Documentation
 
-[API Reference (docs.rs)](https://docs.rs/gemini-genai-rs)
-
-## See Also
-
-- [Cookbook examples](../../examples/cookbook) — runnable snippets covering
-  quick-connect, REST generate, file upload, and more.
+[API reference on docs.rs](https://docs.rs/gemini-genai-rs) · the
+[gemini-rs book](https://vamsiramakrishnan.github.io/gemini-rs/) for the
+full stack.
 
 ## License
 

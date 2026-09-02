@@ -59,6 +59,18 @@ impl ModelId {
         Self(Cow::Owned(id.into()))
     }
 
+    /// A model id with the `models/` resource prefix added when the name is
+    /// bare (contains no `/`). Qualified names — `models/…`, `projects/…` —
+    /// pass through untouched.
+    pub fn qualified(id: impl Into<String>) -> Self {
+        let id = id.into();
+        if id.contains('/') {
+            Self::new(id)
+        } else {
+            Self::new(format!("models/{id}"))
+        }
+    }
+
     /// The identifier as given.
     pub fn as_str(&self) -> &str {
         &self.0
@@ -72,12 +84,16 @@ impl ModelId {
 
     /// The Live model to use when none was set: the platform's current
     /// native-audio Flash model, overridden by `GEMINI_MODEL` if that is set.
+    ///
+    /// A bare name in `GEMINI_MODEL` (no `/`) gets the `models/` prefix the
+    /// wire expects; a qualified one passes through untouched.
     pub fn live_default(vertex: bool) -> Self {
         if let Some(m) = std::env::var("GEMINI_MODEL")
             .ok()
-            .filter(|m| !m.trim().is_empty())
+            .map(|m| m.trim().to_string())
+            .filter(|m| !m.is_empty())
         {
-            return Self::new(m);
+            return Self::qualified(m);
         }
         if vertex {
             Self::LIVE_2_5_FLASH_NATIVE_AUDIO
@@ -165,6 +181,20 @@ pub enum Voice {
     /// Custom voice name for forward compatibility.
     #[serde(untagged)]
     Custom(String),
+}
+
+impl std::fmt::Display for Voice {
+    /// The name as the API's `prebuiltVoiceConfig.voiceName` wants it.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Aoede => "Aoede",
+            Self::Charon => "Charon",
+            Self::Fenrir => "Fenrir",
+            Self::Kore => "Kore",
+            Self::Puck => "Puck",
+            Self::Custom(name) => name,
+        })
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -346,6 +376,16 @@ mod tests {
                 ModelId::FLASH_2_5_NATIVE_AUDIO_LATEST
             );
         }
+    }
+
+    #[test]
+    fn qualified_prefixes_bare_names_only() {
+        assert_eq!(ModelId::qualified("gemini-x"), "models/gemini-x");
+        assert_eq!(ModelId::qualified("models/gemini-x"), "models/gemini-x");
+        assert_eq!(
+            ModelId::qualified("projects/p/models/gemini-x"),
+            "projects/p/models/gemini-x"
+        );
     }
 
     #[test]

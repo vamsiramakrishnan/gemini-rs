@@ -160,7 +160,7 @@ fn bench_codec_encode_audio(c: &mut Criterion) {
         ("100ms_16kHz_16bit", 3200), // 100ms
     ] {
         let audio_data = vec![0u8; size];
-        let cmd = SessionCommand::SendAudio(audio_data);
+        let cmd = SessionCommand::SendAudio(audio_data.into());
 
         group.throughput(Throughput::Bytes(size as u64));
         group.bench_with_input(BenchmarkId::new("audio", label), &cmd, |b, cmd| {

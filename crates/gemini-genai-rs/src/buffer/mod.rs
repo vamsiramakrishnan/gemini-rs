@@ -15,7 +15,7 @@ pub mod convert;
 pub mod jitter;
 
 pub use convert::{bytes_to_i16, i16_to_bytes, into_shared};
-pub use jitter::{AudioJitterBuffer, JitterConfig};
+pub use jitter::{AudioJitterBuffer, BufferState, JitterConfig};
 
 use std::cell::UnsafeCell;
 use std::sync::atomic::{AtomicUsize, Ordering};

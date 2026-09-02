@@ -124,7 +124,10 @@ mod tests {
         let msg = ServerMessage::parse(json).unwrap();
         match msg {
             ServerMessage::GoAway(ga) => {
-                assert_eq!(ga.go_away.time_left, Some("30s".to_string()));
+                assert_eq!(
+                    ga.go_away.time_left,
+                    Some(std::time::Duration::from_secs(30))
+                );
             }
             _ => panic!("Expected GoAway"),
         }

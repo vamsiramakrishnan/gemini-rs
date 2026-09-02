@@ -248,7 +248,7 @@ mod tests {
         let codec = JsonCodec;
         let config = test_config();
         let audio_data = vec![1u8, 2, 3, 4];
-        let cmd = SessionCommand::SendAudio(audio_data);
+        let cmd = SessionCommand::SendAudio(audio_data.into());
         let bytes = codec.encode_command(&cmd, &config).unwrap();
         let json = String::from_utf8(bytes).unwrap();
         assert!(
@@ -417,7 +417,7 @@ mod tests {
     fn json_codec_encode_send_video() {
         let codec = JsonCodec;
         let config = test_config();
-        let cmd = SessionCommand::SendVideo(vec![0xFF, 0xD8, 0xFF]); // JPEG magic bytes
+        let cmd = SessionCommand::SendVideo(vec![0xFF, 0xD8, 0xFF].into()); // JPEG magic bytes
         let bytes = codec.encode_command(&cmd, &config).unwrap();
         let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(

@@ -77,17 +77,14 @@ pub enum ModelsError {
     Parse(#[from] serde_json::Error),
     #[error("Auth error: {0}")]
     /// Authentication/authorization failure.
-    Auth(String),
+    Auth(#[from] crate::session::AuthError),
 }
 
 impl Client {
     /// List available models.
     pub async fn list_models(&self) -> Result<ListModelsResponse, ModelsError> {
         let url = self.rest_url_for(ServiceEndpoint::ListModels, self.default_model());
-        let headers = self
-            .auth_headers()
-            .await
-            .map_err(|e| ModelsError::Auth(e.to_string()))?;
+        let headers = self.auth_headers().await?;
 
         let json = self.http_client().get_json(&url, headers).await?;
         Ok(serde_json::from_value(json)?)
@@ -96,10 +93,7 @@ impl Client {
     /// Get metadata for a specific model.
     pub async fn get_model(&self, model: &ModelId) -> Result<ModelInfo, ModelsError> {
         let url = self.rest_url_for(ServiceEndpoint::GetModel, model);
-        let headers = self
-            .auth_headers()
-            .await
-            .map_err(|e| ModelsError::Auth(e.to_string()))?;
+        let headers = self.auth_headers().await?;
 
         let json = self.http_client().get_json(&url, headers).await?;
         Ok(serde_json::from_value(json)?)

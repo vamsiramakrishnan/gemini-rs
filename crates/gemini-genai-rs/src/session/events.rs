@@ -5,9 +5,11 @@
 //! [`Turn`] — tracking for a single model response turn.
 //! [`recv_event`] — broadcast lag-tolerant event receiver.
 
+use super::errors::SessionError;
 use super::state::SessionPhase;
 use crate::protocol::{Content, FunctionCall, FunctionResponse, UsageMetadata};
-use std::time::Instant;
+use bytes::Bytes;
+use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
 
 // ---------------------------------------------------------------------------
@@ -51,12 +53,16 @@ pub enum SessionEvent {
     Interrupted,
     /// Session phase changed.
     PhaseChanged(SessionPhase),
-    /// Server sent GoAway signal with optional time remaining.
-    GoAway(Option<String>),
+    /// Server sent GoAway: it will close the connection after `time_left`
+    /// (when it said how long). The transport reconnects on its own; this
+    /// is the moment to drain buffered audio and expect a resumption handle.
+    GoAway(Option<Duration>),
     /// Session disconnected (with optional reason).
     Disconnected(Option<String>),
-    /// Non-fatal error.
-    Error(String),
+    /// Non-fatal error. The session loop keeps running (reconnecting where
+    /// the transport allows); match on the [`SessionError`] variants to tell
+    /// a refused setup from a dropped socket.
+    Error(SessionError),
     /// Session resumption update with handle, resumability, and consumed index.
     SessionResumeUpdate(ResumeInfo),
     /// Server-side voice activity detected (user started speaking).
@@ -89,7 +95,10 @@ pub struct ResumeInfo {
 #[derive(Debug, Clone)]
 pub enum SessionCommand {
     /// Send audio data (raw PCM16 bytes, will be base64-encoded).
-    SendAudio(Vec<u8>),
+    ///
+    /// [`Bytes`] both ways: the same handle type as [`SessionEvent::AudioData`],
+    /// so audio can be forwarded without a copy.
+    SendAudio(Bytes),
     /// Send a text message.
     SendText(String),
     /// Send tool responses.
@@ -106,7 +115,7 @@ pub enum SessionCommand {
         turn_complete: bool,
     },
     /// Send video/image data (raw JPEG bytes, will be base64-encoded).
-    SendVideo(Vec<u8>),
+    SendVideo(Bytes),
     /// Update system instruction mid-session (sends client_content with role=system).
     UpdateInstruction(String),
     /// Gracefully disconnect.
@@ -175,11 +184,14 @@ impl Default for Turn {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```no_run
+/// # use gemini_genai_rs::session::{SessionHandle, recv_event};
+/// # async fn run(handle: SessionHandle) {
 /// let mut events = handle.subscribe();
 /// while let Some(event) = recv_event(&mut events).await {
 ///     // handle event
 /// }
+/// # }
 /// ```
 pub async fn recv_event(rx: &mut broadcast::Receiver<SessionEvent>) -> Option<SessionEvent> {
     loop {

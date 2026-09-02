@@ -186,7 +186,7 @@ impl Transport for TungsteniteTransport {
                 Some(Ok(Message::Ping(_) | Message::Pong(_))) => continue,
                 // Frame is a low-level variant; skip.
                 Some(Ok(Message::Frame(_))) => continue,
-                Some(Err(e)) => return Err(TungsteniteError::WebSocket(e)),
+                Some(Err(e)) => return Err(e.into()),
                 None => return Ok(None),
             }
         }

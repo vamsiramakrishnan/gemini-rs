@@ -72,7 +72,7 @@ impl SessionConfig {
                 .collect()
         };
 
-        let generation_config = if self.supports_async_tools() {
+        let generation_config = if self.supports_thinking() {
             self.generation_config.clone()
         } else {
             let mut gc = self.generation_config.clone();

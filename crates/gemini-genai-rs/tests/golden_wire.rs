@@ -65,8 +65,8 @@ fn rich_config(mut config: SessionConfig) -> SessionConfig {
         .model(ModelId::from_static("models/gemini-2.0-flash-live-001"))
         .voice(Voice::Kore)
         .thinking(1024)
-        .include_thoughts()
-        .session_resumption(Some("resume-handle-123".into()));
+        .include_thoughts(true)
+        .resume_from("resume-handle-123");
     config.system_instruction = Some(Content {
         role: Some(Role::System),
         parts: vec![Part::text("You are a weather assistant")],
@@ -150,7 +150,7 @@ fn setup_vertex_ai_golden() {
 fn realtime_audio_input_golden() {
     let config = SessionConfig::new("test-api-key");
     let bytes = JsonCodec
-        .encode_command(&SessionCommand::SendAudio(vec![1, 2, 3, 4]), &config)
+        .encode_command(&SessionCommand::SendAudio(vec![1, 2, 3, 4].into()), &config)
         .unwrap();
     let actual: Value = serde_json::from_slice(&bytes).unwrap();
     assert_golden("client_realtime_audio.json", &actual);
@@ -335,7 +335,10 @@ fn parse_go_away() {
     let msg = ServerMessage::parse(&load_fixture("server_go_away.json")).unwrap();
     match msg {
         ServerMessage::GoAway(m) => {
-            assert_eq!(m.go_away.time_left.as_deref(), Some("30s"));
+            assert_eq!(
+                m.go_away.time_left,
+                Some(std::time::Duration::from_secs(30))
+            );
         }
         other => panic!("expected GoAway, got {other:?}"),
     }

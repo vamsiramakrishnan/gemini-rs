@@ -38,9 +38,12 @@ async fn connect_and_receive_text() {
             .to_vec(),
     );
 
-    let handle = connect_with(test_config(), no_reconnect_config(), transport, JsonCodec)
+    let handle = ConnectBuilder::new(test_config())
+        .transport_config(no_reconnect_config())
+        .transport(transport)
+        .connect()
         .await
-        .expect("connect_with should succeed");
+        .expect("connect should succeed");
 
     let mut events = handle.subscribe();
 
@@ -90,9 +93,12 @@ async fn connect_and_send_text() {
     // Script: setupComplete only (no server content response needed).
     transport.script_recv(br#"{"setupComplete":{}}"#.to_vec());
 
-    let handle = connect_with(test_config(), no_reconnect_config(), transport, JsonCodec)
+    let handle = ConnectBuilder::new(test_config())
+        .transport_config(no_reconnect_config())
+        .transport(transport)
+        .connect()
         .await
-        .expect("connect_with should succeed");
+        .expect("connect should succeed");
 
     // Wait for active.
     tokio::time::timeout(
@@ -124,9 +130,12 @@ async fn tool_call_event() {
             .to_vec(),
     );
 
-    let handle = connect_with(test_config(), no_reconnect_config(), transport, JsonCodec)
+    let handle = ConnectBuilder::new(test_config())
+        .transport_config(no_reconnect_config())
+        .transport(transport)
+        .connect()
         .await
-        .expect("connect_with should succeed");
+        .expect("connect should succeed");
 
     let mut events = handle.subscribe();
 
@@ -172,9 +181,12 @@ async fn phase_changes_on_connect() {
     // Script: setupComplete only.
     transport.script_recv(br#"{"setupComplete":{}}"#.to_vec());
 
-    let handle = connect_with(test_config(), no_reconnect_config(), transport, JsonCodec)
+    let handle = ConnectBuilder::new(test_config())
+        .transport_config(no_reconnect_config())
+        .transport(transport)
+        .connect()
         .await
-        .expect("connect_with should succeed");
+        .expect("connect should succeed");
 
     let mut events = handle.subscribe();
 
@@ -209,7 +221,7 @@ async fn phase_changes_on_connect() {
         }
     }
 
-    // We subscribed after connect_with returned, so we may or may not catch
+    // We subscribed after connect returned, so we may or may not catch
     // the early PhaseChanged events (they fire before we subscribe). But the
     // Connected event is emitted at setup completion, which races with our
     // subscribe. The key assertion is that the phase is Active.

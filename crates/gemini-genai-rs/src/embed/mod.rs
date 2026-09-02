@@ -99,7 +99,7 @@ pub enum EmbedError {
     Parse(#[from] serde_json::Error),
     #[error("Auth error: {0}")]
     /// Authentication/authorization failure.
-    Auth(String),
+    Auth(#[from] crate::session::AuthError),
 }
 
 impl Client {
@@ -120,10 +120,7 @@ impl Client {
     ) -> Result<EmbedContentResponse, EmbedError> {
         let model = model.unwrap_or(self.default_model());
         let url = self.rest_url_for(ServiceEndpoint::EmbedContent, model);
-        let headers = self
-            .auth_headers()
-            .await
-            .map_err(|e| EmbedError::Auth(e.to_string()))?;
+        let headers = self.auth_headers().await?;
 
         let mut body = serde_json::json!({
             "content": config.content,

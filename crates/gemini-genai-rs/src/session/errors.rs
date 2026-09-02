@@ -39,6 +39,10 @@ pub enum SessionError {
     #[error("Setup failed: {0}")]
     SetupFailed(#[source] SetupError),
 
+    /// A client message could not be encoded, or a server message decoded.
+    #[error("Codec error: {0}")]
+    Codec(#[source] crate::transport::CodecError),
+
     /// Server requested graceful disconnect.
     #[error("Server sent GoAway (time left: {time_left:?})")]
     GoAway {

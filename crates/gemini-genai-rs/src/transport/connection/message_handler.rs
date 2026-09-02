@@ -12,7 +12,7 @@ use crate::session::{ResumeInfo, SessionEvent, SessionPhase, SessionState};
 /// Action to take after processing a server message.
 pub(super) enum MessageAction {
     Continue,
-    GoAway(Option<String>),
+    GoAway(Option<std::time::Duration>),
 }
 
 /// Process a decoded [`ServerMessage`] and emit appropriate session events.

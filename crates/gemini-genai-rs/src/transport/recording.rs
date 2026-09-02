@@ -15,7 +15,7 @@
 //! # Installation
 //!
 //! The lowest-friction knob is [`crate::protocol::types::SessionConfig::record_wire`]:
-//! `connect`/`connect_with`/`ConnectBuilder` all honor it by wrapping whatever
+//! `connect` and `ConnectBuilder` both honor it by wrapping whatever
 //! codec is in use. [`crate::transport::ConnectBuilder::record_wire`] is the
 //! builder-level equivalent.
 //!
@@ -206,7 +206,7 @@ impl<C: Codec> Codec for RecordingCodec<C> {
     }
 }
 
-/// Forwarding impl so [`connect_with`](crate::transport::connect_with) can
+/// Forwarding impl so the connection loop can
 /// install a recorder dynamically without changing its generic signature.
 impl Codec for Box<dyn Codec> {
     fn encode_setup(&self, config: &SessionConfig) -> Result<Vec<u8>, CodecError> {

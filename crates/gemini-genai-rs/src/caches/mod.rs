@@ -104,17 +104,14 @@ pub enum CachesError {
     Parse(#[from] serde_json::Error),
     #[error("Auth error: {0}")]
     /// Authentication/authorization failure.
-    Auth(String),
+    Auth(#[from] crate::session::AuthError),
 }
 
 impl Client {
     /// List cached contents.
     pub async fn list_cached_contents(&self) -> Result<ListCachedContentsResponse, CachesError> {
         let url = self.rest_url(ServiceEndpoint::CachedContents);
-        let headers = self
-            .auth_headers()
-            .await
-            .map_err(|e| CachesError::Auth(e.to_string()))?;
+        let headers = self.auth_headers().await?;
         let json = self.http_client().get_json(&url, headers).await?;
         if json.is_null() {
             return Ok(ListCachedContentsResponse {
@@ -131,10 +128,7 @@ impl Client {
         config: CreateCachedContentConfig,
     ) -> Result<CachedContent, CachesError> {
         let url = self.rest_url(ServiceEndpoint::CachedContents);
-        let headers = self
-            .auth_headers()
-            .await
-            .map_err(|e| CachesError::Auth(e.to_string()))?;
+        let headers = self.auth_headers().await?;
 
         let mut body = serde_json::json!({
             "model": config.model,
@@ -159,10 +153,7 @@ impl Client {
     pub async fn get_cached_content(&self, name: &str) -> Result<CachedContent, CachesError> {
         let base_url = self.rest_url(ServiceEndpoint::CachedContents);
         let url = format!("{base_url}/{name}");
-        let headers = self
-            .auth_headers()
-            .await
-            .map_err(|e| CachesError::Auth(e.to_string()))?;
+        let headers = self.auth_headers().await?;
         let json = self.http_client().get_json(&url, headers).await?;
         Ok(serde_json::from_value(json)?)
     }
@@ -175,10 +166,7 @@ impl Client {
     ) -> Result<CachedContent, CachesError> {
         let base_url = self.rest_url(ServiceEndpoint::CachedContents);
         let url = format!("{base_url}/{name}");
-        let headers = self
-            .auth_headers()
-            .await
-            .map_err(|e| CachesError::Auth(e.to_string()))?;
+        let headers = self.auth_headers().await?;
         let json = self
             .http_client()
             .patch_json(&url, headers, &updates)
@@ -190,10 +178,7 @@ impl Client {
     pub async fn delete_cached_content(&self, name: &str) -> Result<(), CachesError> {
         let base_url = self.rest_url(ServiceEndpoint::CachedContents);
         let url = format!("{base_url}/{name}");
-        let headers = self
-            .auth_headers()
-            .await
-            .map_err(|e| CachesError::Auth(e.to_string()))?;
+        let headers = self.auth_headers().await?;
         self.http_client().delete(&url, headers).await?;
         Ok(())
     }
