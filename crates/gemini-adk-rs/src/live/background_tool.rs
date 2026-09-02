@@ -432,10 +432,12 @@ mod tests {
 
         assert_eq!(result["status"], "error");
         assert_eq!(result["tool"], "search");
-        assert!(result["error"]
-            .as_str()
-            .unwrap()
-            .contains("connection timeout"));
+        assert!(
+            result["error"]
+                .as_str()
+                .unwrap()
+                .contains("connection timeout")
+        );
     }
 
     #[test]
@@ -460,7 +462,7 @@ mod tests {
     #[test]
     fn tool_execution_mode_debug_standard() {
         let mode = ToolExecutionMode::Standard;
-        assert_eq!(format!("{:?}", mode), "Standard");
+        assert_eq!(format!("{mode:?}"), "Standard");
     }
 
     #[test]
@@ -470,7 +472,7 @@ mod tests {
             scheduling: None,
         };
         assert_eq!(
-            format!("{:?}", mode),
+            format!("{mode:?}"),
             "Background(formatter=false, scheduling=None)"
         );
     }
@@ -482,7 +484,7 @@ mod tests {
             scheduling: None,
         };
         assert_eq!(
-            format!("{:?}", mode),
+            format!("{mode:?}"),
             "Background(formatter=true, scheduling=None)"
         );
     }

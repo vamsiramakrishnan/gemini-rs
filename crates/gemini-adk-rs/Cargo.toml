@@ -11,7 +11,9 @@ documentation = "https://docs.rs/gemini-adk-rs"
 readme = "README.md"
 
 [dependencies]
-gemini-genai-rs = { workspace = true, features = ["vad"] }
+# `default-features = false` so this crate — not L0's defaults — decides the
+# TLS backend. Without it `tls-rustls` silently kept native-tls in the tree.
+gemini-genai-rs = { workspace = true, default-features = false, features = ["live", "vad"] }
 gemini-adk-macros-rs = { workspace = true }
 bytes = "1"
 # Targeted features only; tests get `full` via dev-dependencies.
@@ -23,20 +25,19 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 dashmap = "6"
-futures = "0.3"
+futures-util = "0.3"
 parking_lot = "0.12"
 regex = "1"
 minijinja = { version = "2", optional = true }
-once_cell = "1"
 strsim = "0.11"
 uuid = { version = "1", features = ["v4"] }
-tracing = { version = "0.1", optional = true }
+tracing = "0.1"
 metrics = { version = "0.24", optional = true }
 # Persistence backends (optional, feature-gated)
 sqlx = { version = "0.8", default-features = false, optional = true }
 # REST-backed services: Vertex AI sessions/RAG memory + retrieval, MCP-over-HTTP.
 # Optional: only compiled when an `http`-pulling feature is enabled.
-reqwest = { version = "0.12", features = ["json", "multipart"], optional = true }
+reqwest = { version = "0.12", default-features = false, features = ["json", "multipart"], optional = true }
 base64 = "0.22"
 
 [dev-dependencies]
@@ -45,18 +46,26 @@ tokio-test = "0.4"
 proptest = "1"
 
 [features]
-default = []
+# One TLS backend is on by default so a plain `cargo add` can dial `wss://`,
+# and `gemini-llm` so `GeminiLlm` generates instead of erroring at runtime.
+# Pick the other TLS backend with `--no-default-features --features
+# tls-rustls,gemini-llm`; the two are mutually exclusive by construction (each
+# selects its own reqwest and tungstenite backend and nothing else selects one).
+default = ["tls-native", "gemini-llm"]
 gemini-llm = ["gemini-genai-rs/http", "gemini-genai-rs/generate"]
 # Pulls the optional reqwest HTTP client; enabled transitively by the
 # REST-backed feature areas below.
 http = ["dep:reqwest"]
 gcs-artifacts = ["http"]
-tracing-support = ["dep:tracing", "gemini-genai-rs/tracing-support"]
+# No-op since 2.0, kept so existing manifests keep resolving; tracing is
+# always compiled (the facade is already unconditional in L0 and L2).
+tracing-support = []
 # Passthroughs so applications don't need a direct gemini-genai-rs dependency.
 vad-wavekat = ["gemini-genai-rs/vad-wavekat"]
 # Jinja2-syntax instruction templates (TemplateInstruction).
 templates = ["dep:minijinja"]
-tls-rustls = ["gemini-genai-rs/tls-rustls"]
+tls-native = ["gemini-genai-rs/tls-native", "reqwest?/native-tls"]
+tls-rustls = ["gemini-genai-rs/tls-rustls", "reqwest?/rustls-tls"]
 metrics = ["dep:metrics"]
 database-sessions = ["dep:sqlx", "sqlx/runtime-tokio-rustls", "sqlx/sqlite"]
 postgres-sessions = ["database-sessions", "sqlx/postgres"]
@@ -67,9 +76,9 @@ vertex-ai-code-executor = ["http"]
 vertex-ai-rag = ["http"]
 # MCP-over-HTTP/SSE transport (stdio transport needs no extra deps)
 mcp-http = ["http"]
-otel = ["gemini-genai-rs/otel", "tracing-support"]
-otel-otlp = ["gemini-genai-rs/otel-otlp", "tracing-support"]
-otel-gcp = ["gemini-genai-rs/otel-gcp", "tracing-support"]
+otel = ["gemini-genai-rs/otel"]
+otel-otlp = ["gemini-genai-rs/otel-otlp"]
+otel-gcp = ["gemini-genai-rs/otel-gcp"]
 
 [lints]
 workspace = true

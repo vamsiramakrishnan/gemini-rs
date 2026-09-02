@@ -70,9 +70,9 @@ mod common;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use common::corpus::{self, payload_statements, says_any, PROBES};
+use common::corpus::{self, PROBES, payload_statements, says_any};
 use common::paraphrase::{self, Mode, Tier};
-use common::{file_backed_engine, ScratchDir};
+use common::{ScratchDir, file_backed_engine};
 
 use async_trait::async_trait;
 use chrono::Utc;

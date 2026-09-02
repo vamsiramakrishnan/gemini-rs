@@ -87,7 +87,7 @@ Live::builder()
 ```
 
 `with_memory(session)` is the slotless form; `memory_tools(session)` exposes
-the two tools as a composite for manual `with_tools` wiring.
+the two tools as a composite for manual `Live::tools` wiring.
 
 ## Layout
 

@@ -51,7 +51,6 @@ use gemini_adk_rs::live::persistence::FsPersistence;
 use std::sync::Arc;
 
 Live::builder()
-    .model(GeminiModel::Gemini2_0FlashLive)
     .instruction("You are a helpful assistant")
     .persistence(Arc::new(FsPersistence::new("/var/lib/myapp/sessions")))
     .session_id("user-42-session-7")
@@ -123,7 +122,7 @@ close the connection soon:
 ```rust,ignore
 // Session 1: enable resumption and capture the handle.
 let handle = Live::builder()
-    .session_resume(true)
+    .session_resume()
     .on_go_away(|time_left| async move {
         println!("Server closing in {time_left:?} — capture the resume handle now");
     })
@@ -155,7 +154,7 @@ or any other store:
 
 ```rust,ignore
 use async_trait::async_trait;
-use gemini_adk_rs::live::persistence::{SessionPersistence, SessionSnapshot};
+use gemini_adk_rs::live::persistence::{PersistenceError, SessionPersistence, SessionSnapshot};
 
 struct RedisSessionPersistence { client: redis::Client }
 
@@ -165,30 +164,37 @@ impl SessionPersistence for RedisSessionPersistence {
         &self,
         session_id: &str,
         snapshot: &SessionSnapshot,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let json = serde_json::to_string(snapshot)?;
-        let mut conn = self.client.get_async_connection().await?;
-        redis::cmd("SET").arg(session_id).arg(json).query_async(&mut conn).await?;
+    ) -> Result<(), PersistenceError> {
+        let json = serde_json::to_string(snapshot)?; // serde_json::Error → PersistenceError::Serde
+        let mut conn = self.client.get_async_connection().await.map_err(backend)?;
+        redis::cmd("SET").arg(session_id).arg(json).query_async(&mut conn).await.map_err(backend)?;
         Ok(())
     }
 
     async fn load(
         &self,
         session_id: &str,
-    ) -> Result<Option<SessionSnapshot>, Box<dyn std::error::Error + Send + Sync>> {
-        let mut conn = self.client.get_async_connection().await?;
-        let json: Option<String> = redis::cmd("GET").arg(session_id).query_async(&mut conn).await?;
+    ) -> Result<Option<SessionSnapshot>, PersistenceError> {
+        let mut conn = self.client.get_async_connection().await.map_err(backend)?;
+        let json: Option<String> =
+            redis::cmd("GET").arg(session_id).query_async(&mut conn).await.map_err(backend)?;
         Ok(json.map(|s| serde_json::from_str(&s)).transpose()?)
     }
 
     async fn delete(
         &self,
         session_id: &str,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let mut conn = self.client.get_async_connection().await?;
-        redis::cmd("DEL").arg(session_id).query_async(&mut conn).await?;
+    ) -> Result<(), PersistenceError> {
+        let mut conn = self.client.get_async_connection().await.map_err(backend)?;
+        redis::cmd("DEL").arg(session_id).query_async(&mut conn).await.map_err(backend)?;
         Ok(())
     }
+}
+
+/// Store-specific failures map to `PersistenceError::Backend`; I/O and serde
+/// errors convert with `?` (`PersistenceError::Io` / `PersistenceError::Serde`).
+fn backend(e: redis::RedisError) -> PersistenceError {
+    PersistenceError::Backend(e.to_string())
 }
 ```
 

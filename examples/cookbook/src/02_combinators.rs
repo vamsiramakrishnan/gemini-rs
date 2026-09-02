@@ -140,7 +140,7 @@ fn loops() {
     let converging = iterator
         * until(|s| {
             s.get("converged")
-                .and_then(|v| v.as_bool())
+                .and_then(gemini_adk_fluent_rs::gemini_adk_rs::__macros::serde_json::value::Value::as_bool)
                 .unwrap_or(false)
         });
     println!("\nConditional loop: iterator * until(converged == true)");

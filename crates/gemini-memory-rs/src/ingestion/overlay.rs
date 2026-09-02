@@ -11,9 +11,9 @@ use chrono::{DateTime, Utc};
 use super::ledger::{SessionCandidate, SessionCandidateStatus};
 use crate::bm25::{IndexedMemory, MemoryIndex};
 use crate::core::{
-    stable_hash, CanonicalMemory, EvidenceCounters, MemoryId, MemorySource, MemoryStatus,
-    MutationIntent, PrivacyMetadata, RetrievalMetadata, SensitivityClass, SessionId,
-    TemporalMetadata, UserId,
+    CanonicalMemory, EvidenceCounters, MemoryId, MemorySource, MemoryStatus, MutationIntent,
+    PrivacyMetadata, RetrievalMetadata, SensitivityClass, SessionId, TemporalMetadata, UserId,
+    stable_hash,
 };
 
 /// The searchable projection of the session ledger.
@@ -258,14 +258,18 @@ mod tests {
         .await;
 
         assert_eq!(overlay.len(), 1);
-        assert!(overlay
-            .index()
-            .search(&Query::new("vegetarian"), Utc::now())
-            .is_empty());
-        assert!(!overlay
-            .index()
-            .search(&Query::new("pescatarian"), Utc::now())
-            .is_empty());
+        assert!(
+            overlay
+                .index()
+                .search(&Query::new("vegetarian"), Utc::now())
+                .is_empty()
+        );
+        assert!(
+            !overlay
+                .index()
+                .search(&Query::new("pescatarian"), Utc::now())
+                .is_empty()
+        );
     }
 
     #[tokio::test]
@@ -319,9 +323,11 @@ mod tests {
             Utc::now(),
         );
         assert_eq!(provisional.status, MemoryStatus::Staged);
-        assert!(provisional
-            .retrieval
-            .tags
-            .contains(&"pescatarian".to_string()));
+        assert!(
+            provisional
+                .retrieval
+                .tags
+                .contains(&"pescatarian".to_string())
+        );
     }
 }

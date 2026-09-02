@@ -29,9 +29,9 @@ or decides when to speak.
 
 | Concern | Primitives |
 |---|---|
-| Connect | `SessionConfig`, `ConnectBuilder`, `ApiEndpoint`, `Platform`, `ResumeInfo` |
+| Connect | `SessionConfig`, `connect`, `ConnectBuilder`, `ApiEndpoint`, `AccessToken`, `ResumeInfo` |
 | Speak / listen | `SessionHandle`, `SessionWriter`, `SessionReader`, `SessionEvent`, `SessionPhase` |
-| Say things | `Content`, `Part`, `Role`, `GeminiModel`, `Voice`, `Modality` |
+| Say things | `Content`, `Part`, `Role`, `ModelId`, `Voice`, `Modality` |
 | Tools on the wire | `Tool`, `FunctionDeclaration`, `FunctionCall`, `FunctionResponse`, `FunctionCallingBehavior`, `FunctionResponseScheduling` |
 | Real time | `SpscRing`, `AudioJitterBuffer`, `bytes_to_i16`, `i16_to_bytes`, `BargeInDetector`, `TurnDetector` |
 | Access | `AuthProvider`, `GoogleAIAuth`, `VertexAIAuth`, `Transport`, `TungsteniteTransport`, `Codec`, `JsonCodec` |
@@ -78,7 +78,7 @@ equivalent.
 | Voice session | `Live` (builder → connect → `LiveHandle`) |
 | Text agents | `AgentBuilder`, `Pipeline` `>>`, `FanOut` `\|`, `*` loops, `until`, `/` fallback |
 | The algebra | `S`, `C`, `T`, `P`, `M`, `A`, `E`, `G` |
-| Session as data | `SessionSpec`, `SpecResources`, `SpecTest`, `run_tests` |
+| Session as data | `SessionSpec` (`.run_tests()`), `SpecResources`, `SpecTest` |
 | Proof before connect | `check_contracts`, `ContractViolation` |
 | Voice I/O | `voice::pump`, `voice::Playback`, `voice::Talk` *(feature `voice-io`)* |
 | Telephony | `telephony::TwilioCall`, `telephony::sip::SipAgent` *(feature `sip`)*, `telephony::{g711, rtp, sdp}` — a phone call on the same pump |

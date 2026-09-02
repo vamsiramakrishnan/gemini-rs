@@ -13,10 +13,11 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use gemini_adk_rs::live::replay::{collect_events_until_idle, replay_session};
 use gemini_adk_rs::live::LiveSessionBuilder;
+use gemini_adk_rs::live::replay::{collect_events_until_idle, replay_session};
 use gemini_adk_rs::state::{State, StateMutation};
-use gemini_genai_rs::prelude::{read_wire_log, SessionConfig, WireDirection};
+use gemini_genai_rs::prelude::SessionConfig;
+use gemini_genai_rs::transport::{WireDirection, read_wire_log};
 
 pub async fn replay(
     wire_log_path: &str,
@@ -52,7 +53,7 @@ pub async fn replay(
     // goes to the replay transport. No network, no credentials.
     let state = State::new();
     let config = SessionConfig::new("offline-replay");
-    let builder = LiveSessionBuilder::new(config.clone()).with_state(state.clone());
+    let builder = LiveSessionBuilder::new(config.clone()).state(state.clone());
 
     let session = replay_session(config, builder, &entries).await?;
     let mut live_events = session.handle().events();

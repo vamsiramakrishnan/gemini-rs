@@ -14,13 +14,13 @@ pub fn to_a2a_message(event: &Event) -> Option<A2aMessage> {
     let mut parts = Vec::new();
 
     // Add text content as a text part
-    if let Some(content) = &event.content {
-        if !content.is_empty() {
-            parts.push(A2aPart::Text {
-                text: content.clone(),
-                metadata: None,
-            });
-        }
+    if let Some(content) = &event.content
+        && !content.is_empty()
+    {
+        parts.push(A2aPart::Text {
+            text: content.clone(),
+            metadata: None,
+        });
     }
 
     if parts.is_empty() {

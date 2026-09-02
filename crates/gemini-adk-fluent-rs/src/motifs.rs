@@ -11,6 +11,8 @@
 //! `compile()` exactly like a hand-written one would).
 //!
 //! ```ignore
+//! // `ignore`: `Booking` is an application `#[derive(Frame)]` type; the tests
+//! // in this module build the same conversation against a concrete frame.
 //! let convo = Conversation::new("booking")
 //!     .add_stage(Motif::collect_frame::<Booking>("collect"))
 //!         .next("confirm", Guard::captured(["party_size"]))

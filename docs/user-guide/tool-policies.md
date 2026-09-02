@@ -36,7 +36,7 @@ returns `ToolError::Timeout(duration)` and the inner future is dropped.
 use std::time::Duration;
 
 Live::builder()
-    .with_tools(
+    .tools(
         T::timeout(
             T::simple("search_kb", "Search the knowledge base", |args| async move {
                 // potentially slow call
@@ -65,7 +65,7 @@ Canonical JSON sorts object keys lexicographically, so `{"b":2,"a":1}` and
 ```rust,ignore
 // Weather results cached for the lifetime of the session
 Live::builder()
-    .with_tools(
+    .tools(
         T::cached(T::simple("get_weather", "Get weather for a city", |args| async move {
             Ok(call_weather_api(&args["city"]).await?)
         }))
@@ -88,7 +88,7 @@ and surfaced at runtime via `PolicyTool::requires_confirmation()`.
 
 ```rust,ignore
 Live::builder()
-    .with_tools(
+    .tools(
         T::confirm(
             T::simple("send_email", "Send an email to the customer", |args| async move {
                 Ok(do_send_email(args).await?)
@@ -113,7 +113,7 @@ Wire one onto a dispatcher directly, or via `Live::confirmation_provider`:
 use std::sync::Arc;
 
 let handle = Live::builder()
-    .with_tools(T::confirm(send_email_tool, "Send this email?"))
+    .tools(T::confirm(send_email_tool, "Send this email?"))
     // Any async closure `Fn(ConfirmationRequest) -> impl Future<Output = ToolConfirmation>`
     // works, or implement the `ConfirmationProvider` trait.
     .confirmation_provider(Arc::new(|req: ConfirmationRequest| async move {
@@ -177,7 +177,7 @@ the platform difference. Use `config.supports_async_tools()` to check at runtime
 
 ```rust,ignore
 Live::builder()
-    .tools(dispatcher)
+    .dispatcher(dispatcher)
     .tool_background("search_kb")                    // WhenIdle scheduling by default
     .tool_background_with_scheduling(
         "log_event",
@@ -259,7 +259,7 @@ Policies and execution modes compose freely:
 
 ```rust,ignore
 Live::builder()
-    .with_tools(
+    .tools(
         // 10-second timeout + in-session cache
         T::cached(T::timeout(
             T::simple("get_stock_price", "Get a stock price", |args| async move {

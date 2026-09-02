@@ -1,13 +1,13 @@
-use once_cell::sync::Lazy;
 use regex::Regex;
+use std::sync::LazyLock;
 
-static MODEL_PATH_RE: Lazy<Regex> = Lazy::new(|| {
+static MODEL_PATH_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^projects/[^/]+/locations/[^/]+/publishers/[^/]+/models/(.+)$").unwrap()
 });
 
 /// Regex to extract the major version digit from a gemini model name.
 /// Matches "gemini-" followed by one or more digits (the major version).
-static GEMINI_VERSION_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^gemini-(\d+)").unwrap());
+static GEMINI_VERSION_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^gemini-(\d+)").unwrap());
 
 /// Extract simple model name from a fully-qualified resource path.
 ///

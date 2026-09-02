@@ -26,8 +26,8 @@ mod common;
 
 use std::time::{Duration, Instant};
 
-use common::corpus::{self, payload_statements, says, says_any, PROBES};
-use common::{file_backed_engine, ScratchDir};
+use common::corpus::{self, PROBES, payload_statements, says, says_any};
+use common::{ScratchDir, file_backed_engine};
 
 use gemini_memory_rs::core::{SessionId, TurnId};
 use gemini_memory_rs::engine::{MemoryEngine, MemorySession};

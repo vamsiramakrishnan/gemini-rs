@@ -70,9 +70,9 @@
 
 mod common;
 
-use common::corpus::{self, payload_statements, says_any, PROBES};
-use common::paraphrase::{self, overlap, Mode, Tier};
-use common::{file_backed_engine, ScratchDir};
+use common::corpus::{self, PROBES, payload_statements, says_any};
+use common::paraphrase::{self, Mode, Tier, overlap};
+use common::{ScratchDir, file_backed_engine};
 
 use gemini_memory_rs::core::{SessionId, TurnId};
 

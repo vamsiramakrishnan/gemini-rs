@@ -5,15 +5,15 @@
 //! transcription**, because reading a text-modality response would exercise a
 //! path no deployment uses.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 use tokio::sync::Notify;
 
 use gemini_adk_fluent_rs::live::Live;
-use gemini_genai_rs::prelude::GeminiModel;
+use gemini_genai_rs::prelude::ModelId;
 
 /// How long to wait for the model to finish a turn.
 ///
@@ -32,7 +32,7 @@ const TRANSCRIPT_GRACE: Duration = Duration::from_millis(750);
 /// The Live model these tests drive.
 ///
 /// **The name differs by platform**, which is why this is resolved at runtime
-/// rather than pinned to a [`GeminiModel`] variant:
+/// rather than pinned to a [`ModelId`] variant:
 ///
 /// | Platform | Native-audio Live model |
 /// |---|---|
@@ -53,8 +53,8 @@ const TRANSCRIPT_GRACE: Duration = Duration::from_millis(750);
 /// curl "https://generativelanguage.googleapis.com/v1beta/models?key=$GEMINI_API_KEY" \
 ///   | jq -r '.models[] | select(.supportedGenerationMethods[]? == "bidiGenerateContent") | .name'
 /// ```
-pub fn live_model() -> GeminiModel {
-    GeminiModel::Custom(
+pub fn live_model() -> ModelId {
+    ModelId::new(
         std::env::var("GEMINI_LIVE_MODEL")
             .unwrap_or_else(|_| "models/gemini-2.5-flash-native-audio-preview-12-2025".to_string()),
     )
@@ -300,7 +300,7 @@ pub async fn connect(
         }))
         // Input transcription feeds ingestion; output transcription is what the
         // assertions read, since the model answers in audio.
-        .transcription(true, true)
+        .transcription()
         .on_output_transcript(move |text, is_final| {
             if is_final && !text.trim().is_empty() {
                 spoken.spoken.lock().push(text.to_string());

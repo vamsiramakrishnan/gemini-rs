@@ -9,15 +9,15 @@
 //! lagged messages (the primary OTLP export path is unaffected).
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use tokio::sync::broadcast;
+use tracing::Subscriber;
 use tracing::field::{Field, Visit};
 use tracing::span::{Attributes, Id};
-use tracing::Subscriber;
-use tracing_subscriber::layer::Context;
 use tracing_subscriber::Layer;
+use tracing_subscriber::layer::Context;
 
 use crate::app::ServerMessage;
 
@@ -94,7 +94,7 @@ impl Visit for AttrVisitor {
     fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
         self.map.insert(
             field.name().to_string(),
-            serde_json::Value::String(format!("{:?}", value)),
+            serde_json::Value::String(format!("{value:?}")),
         );
     }
 }
@@ -142,7 +142,7 @@ impl<S: Subscriber> Layer<S> for WebSocketSpanLayer {
             let msg = ServerMessage::SpanEvent {
                 name: record.name,
                 span_id: format!("{:016x}", record.span_id),
-                parent_id: record.parent_id.map(|id| format!("{:016x}", id)),
+                parent_id: record.parent_id.map(|id| format!("{id:016x}")),
                 duration_us,
                 attributes: record.attributes,
                 status: "ok".to_string(),

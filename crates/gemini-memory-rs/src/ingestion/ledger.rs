@@ -12,10 +12,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 
 use crate::core::{
-    admit_observation, aggregate_confidence, AdmissionVerdict, DiscardReason, Explicitness,
-    FactFingerprint, IngestionConfig, MemoryError, MemoryKind, MemoryObservation, MemoryValue,
-    MutationIntent, ObservationId, ProposedPersistence, SensitivityClass, SessionId, TemporalScope,
-    TurnId,
+    AdmissionVerdict, DiscardReason, Explicitness, FactFingerprint, IngestionConfig, MemoryError,
+    MemoryKind, MemoryObservation, MemoryValue, MutationIntent, ObservationId, ProposedPersistence,
+    SensitivityClass, SessionId, TemporalScope, TurnId, admit_observation, aggregate_confidence,
 };
 
 /// Where a candidate stands within the session.
@@ -412,11 +411,11 @@ impl InMemorySessionLedger {
                 if fingerprint == winner {
                     continue;
                 }
-                if let Some(candidate) = state.candidates.get_mut(&fingerprint) {
-                    if candidate.status != SessionCandidateStatus::Suppressed {
-                        candidate.status = SessionCandidateStatus::Suppressed;
-                        report.suppressed += 1;
-                    }
+                if let Some(candidate) = state.candidates.get_mut(&fingerprint)
+                    && candidate.status != SessionCandidateStatus::Suppressed
+                {
+                    candidate.status = SessionCandidateStatus::Suppressed;
+                    report.suppressed += 1;
                 }
             }
         }

@@ -243,11 +243,13 @@ mod tests {
             store.list("users/").await.unwrap(),
             vec!["users/usr_1/preferences.md"]
         );
-        assert!(store
-            .read("users/usr_1/missing.md")
-            .await
-            .unwrap()
-            .is_none());
+        assert!(
+            store
+                .read("users/usr_1/missing.md")
+                .await
+                .unwrap()
+                .is_none()
+        );
 
         store.remove("users/usr_1/preferences.md").await.unwrap();
         assert!(store.list("users/").await.unwrap().is_empty());

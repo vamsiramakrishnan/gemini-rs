@@ -110,7 +110,7 @@ impl Yaml {
     /// Read a sequence of strings, tolerating a missing or null value.
     pub fn as_string_list(&self) -> Vec<String> {
         match self {
-            Self::Seq(items) => items.iter().filter_map(|i| i.as_string()).collect(),
+            Self::Seq(items) => items.iter().filter_map(Yaml::as_string).collect(),
             Self::Null => Vec::new(),
             other => other.as_string().into_iter().collect(),
         }

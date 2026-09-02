@@ -54,10 +54,10 @@ pub fn discover_agents(dir: &Path) -> Vec<(PathBuf, AgentManifest)> {
 
     // Check root
     let root_manifest = dir.join("agent.toml");
-    if root_manifest.is_file() {
-        if let Ok(m) = load_manifest(&root_manifest) {
-            agents.push((dir.to_path_buf(), m));
-        }
+    if root_manifest.is_file()
+        && let Ok(m) = load_manifest(&root_manifest)
+    {
+        agents.push((dir.to_path_buf(), m));
     }
 
     // Check immediate subdirectories
@@ -66,10 +66,10 @@ pub fn discover_agents(dir: &Path) -> Vec<(PathBuf, AgentManifest)> {
             let path = entry.path();
             if path.is_dir() {
                 let sub_manifest = path.join("agent.toml");
-                if sub_manifest.is_file() {
-                    if let Ok(m) = load_manifest(&sub_manifest) {
-                        agents.push((path, m));
-                    }
+                if sub_manifest.is_file()
+                    && let Ok(m) = load_manifest(&sub_manifest)
+                {
+                    agents.push((path, m));
                 }
             }
         }

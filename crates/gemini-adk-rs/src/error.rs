@@ -48,6 +48,44 @@ pub enum AgentError {
     Other(String),
 }
 
+/// A build-time configuration error: one or more problems found while
+/// validating user-supplied configuration (a [`Flow`](crate::flow::Flow), a
+/// [`PhaseMachine`](crate::live::PhaseMachine), a
+/// [`ComputedRegistry`](crate::live::ComputedRegistry), …).
+///
+/// Every issue is reported, not just the first; `Display` joins them with
+/// `"; "`. Converts into [`AgentError::Config`] via `?`.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", issues.join("; "))]
+pub struct ConfigError {
+    /// Every problem found, in discovery order. Never empty.
+    pub issues: Vec<String>,
+}
+
+impl ConfigError {
+    /// A single-issue error.
+    pub fn new(issue: impl Into<String>) -> Self {
+        Self {
+            issues: vec![issue.into()],
+        }
+    }
+
+    /// Collect a list of issues into an error, or `Ok(())` when there are none.
+    pub fn from_issues(issues: Vec<String>) -> Result<(), Self> {
+        if issues.is_empty() {
+            Ok(())
+        } else {
+            Err(Self { issues })
+        }
+    }
+}
+
+impl From<ConfigError> for AgentError {
+    fn from(err: ConfigError) -> Self {
+        AgentError::Config(err.to_string())
+    }
+}
+
 /// Errors that can occur during tool execution.
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum ToolError {
@@ -123,6 +161,17 @@ mod tests {
         let msg = agent_err.to_string();
         assert!(msg.contains("Tool error"), "got: {msg}");
         assert!(msg.contains("my_tool"), "got: {msg}");
+    }
+
+    #[test]
+    fn config_error_joins_issues_and_converts() {
+        let err = ConfigError {
+            issues: vec!["a".into(), "b".into()],
+        };
+        assert_eq!(err.to_string(), "a; b");
+        assert!(ConfigError::from_issues(vec![]).is_ok());
+        let agent_err: AgentError = ConfigError::new("bad").into();
+        assert_eq!(agent_err.to_string(), "Configuration error: bad");
     }
 
     #[test]

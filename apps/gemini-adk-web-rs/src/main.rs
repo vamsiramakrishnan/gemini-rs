@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
 use axum::{
+    Router,
     extract::{Path, State, WebSocketUpgrade},
     middleware::{self, Next},
     response::{Html, IntoResponse, Json, Response},
     routing::{get, post},
-    Router,
 };
 use tokio::sync::broadcast;
 use tower_http::services::ServeDir;
@@ -33,7 +33,7 @@ async fn main() {
     dotenvy::dotenv().ok();
 
     // Initialize telemetry with WebSocketSpanLayer wired in
-    let (_telemetry_guard, span_tx) = init_telemetry().await;
+    let (_telemetry_guard, span_tx) = init_telemetry();
 
     let mut registry = AppRegistry::new();
     apps::register_all(&mut registry);
@@ -78,12 +78,12 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
-async fn init_telemetry() -> (
+fn init_telemetry() -> (
     gemini_genai_rs::telemetry::TelemetryGuard,
     broadcast::Sender<ServerMessage>,
 ) {
-    use tracing_subscriber::prelude::*;
     use tracing_subscriber::EnvFilter;
+    use tracing_subscriber::prelude::*;
 
     // Create the WebSocketSpanLayer (bridges tracing spans → browser)
     let (ws_layer, span_tx) = span_layer::WebSocketSpanLayer::new(256);

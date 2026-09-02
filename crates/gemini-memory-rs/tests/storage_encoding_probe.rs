@@ -108,14 +108,14 @@ use std::sync::Arc;
 
 use common::corpus::{self, PROBES};
 use common::paraphrase;
-use common::rank::{fuse, lexical, rank_of, CANDIDATES};
+use common::rank::{CANDIDATES, fuse, lexical, rank_of};
 use common::views::structural_view;
-use common::{file_backed_engine, ScratchDir};
+use common::{ScratchDir, file_backed_engine};
 
 use gemini_memory_rs::bm25::{
     IndexedMemory, MemoryIndex, MemoryOrigin, SearchExplanation, SearchHit,
 };
-use gemini_memory_rs::core::{stable_hash, CanonicalMemory, MemoryId, MemoryKind, MemoryStatus};
+use gemini_memory_rs::core::{CanonicalMemory, MemoryId, MemoryKind, MemoryStatus, stable_hash};
 use gemini_memory_rs::okf::MemoryStore;
 use gemini_memory_rs::retrieval::semantic::{OkfVectorStore, VectorStore};
 use gemini_memory_rs::retrieval::{PrecomputedSemanticIndex, StaticEmbedder};

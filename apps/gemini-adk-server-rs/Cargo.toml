@@ -9,7 +9,7 @@ keywords = ["gemini", "agents", "adk", "server", "axum"]
 categories = ["api-bindings", "asynchronous", "web-programming::http-server"]
 
 [dependencies]
-gemini-adk-rs = { workspace = true, features = ["gemini-llm"] }
+gemini-adk-rs = { workspace = true, default-features = true, features = ["gemini-llm"] }
 gemini-adk-fluent-rs = { workspace = true, features = ["http-tools", "denoise"] }
 axum = { version = "0.7", features = ["macros", "ws"] }
 tower-http = { version = "0.5", features = ["cors"] }
@@ -22,7 +22,7 @@ futures = "0.3"
 uuid = { version = "1", features = ["v4"] }
 parking_lot = "0.12"
 async-trait = "0.1"
-thiserror = "1"
+thiserror = "2"
 
 [dev-dependencies]
 tower = { version = "0.4", features = ["util"] }

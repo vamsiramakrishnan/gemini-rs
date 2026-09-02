@@ -237,7 +237,9 @@ mod tests {
             service_account: Some(ServiceAccountCredential {
                 service_account_key_file: Some("/path/to/key.json".into()),
                 service_account_key: None,
-                scopes: Some(vec!["https://www.googleapis.com/auth/cloud-platform".into()]),
+                scopes: Some(vec![
+                    "https://www.googleapis.com/auth/cloud-platform".into(),
+                ]),
                 use_default_credential: Some(true),
                 project_id: Some("my-project".into()),
                 universe_domain: Some("googleapis.com".into()),

@@ -4,8 +4,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::client::http::HttpError;
 use crate::client::Client;
+use crate::client::http::HttpError;
 use crate::transport::auth::ServiceEndpoint;
 
 /// State of a file in the Files API.
@@ -92,20 +92,20 @@ pub enum FilesError {
     Parse(#[from] serde_json::Error),
     #[error("Auth error: {0}")]
     /// Authentication/authorization failure.
-    Auth(String),
+    Auth(#[from] crate::session::AuthError),
     #[error("IO error: {0}")]
     /// Local file I/O failure.
     Io(#[from] std::io::Error),
+    #[error("Base64 decode error: {0}")]
+    /// Downloaded bytes were not valid base64.
+    Decode(String),
 }
 
 impl Client {
     /// List files.
     pub async fn list_files(&self) -> Result<ListFilesResponse, FilesError> {
         let url = self.rest_url(ServiceEndpoint::Files);
-        let headers = self
-            .auth_headers()
-            .await
-            .map_err(|e| FilesError::Auth(e.to_string()))?;
+        let headers = self.auth_headers().await?;
         let json = self.http_client().get_json(&url, headers).await?;
         // Handle empty response (no files)
         if json.is_null() {
@@ -121,10 +121,7 @@ impl Client {
     pub async fn get_file(&self, name: &str) -> Result<File, FilesError> {
         let base_url = self.rest_url(ServiceEndpoint::Files);
         let url = format!("{base_url}/{name}");
-        let headers = self
-            .auth_headers()
-            .await
-            .map_err(|e| FilesError::Auth(e.to_string()))?;
+        let headers = self.auth_headers().await?;
         let json = self.http_client().get_json(&url, headers).await?;
         Ok(serde_json::from_value(json)?)
     }
@@ -133,10 +130,7 @@ impl Client {
     pub async fn delete_file(&self, name: &str) -> Result<(), FilesError> {
         let base_url = self.rest_url(ServiceEndpoint::Files);
         let url = format!("{base_url}/{name}");
-        let headers = self
-            .auth_headers()
-            .await
-            .map_err(|e| FilesError::Auth(e.to_string()))?;
+        let headers = self.auth_headers().await?;
         self.http_client().delete(&url, headers).await?;
         Ok(())
     }
@@ -148,10 +142,7 @@ impl Client {
         config: UploadFileConfig,
     ) -> Result<File, FilesError> {
         let url = self.rest_url(ServiceEndpoint::Files);
-        let headers = self
-            .auth_headers()
-            .await
-            .map_err(|e| FilesError::Auth(e.to_string()))?;
+        let headers = self.auth_headers().await?;
 
         let mut body = serde_json::json!({
             "file": {
@@ -176,16 +167,13 @@ impl Client {
     pub async fn download_file(&self, name: &str) -> Result<Vec<u8>, FilesError> {
         let base_url = self.rest_url(ServiceEndpoint::Files);
         let url = format!("{base_url}/{name}:download");
-        let headers = self
-            .auth_headers()
-            .await
-            .map_err(|e| FilesError::Auth(e.to_string()))?;
+        let headers = self.auth_headers().await?;
         let json = self.http_client().get_json(&url, headers).await?;
 
         // The response contains base64-encoded data
         if let Some(data) = json.get("data").and_then(|v| v.as_str()) {
             let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, data)
-                .map_err(|e| FilesError::Auth(format!("Base64 decode error: {e}")))?;
+                .map_err(|e| FilesError::Decode(e.to_string()))?;
             Ok(bytes)
         } else {
             // Return raw JSON as bytes if no data field
@@ -196,10 +184,7 @@ impl Client {
     /// Register external files by URI (Vertex AI only).
     pub async fn register_files(&self, sources: Vec<FileSource>) -> Result<Vec<File>, FilesError> {
         let url = self.rest_url(ServiceEndpoint::Files);
-        let headers = self
-            .auth_headers()
-            .await
-            .map_err(|e| FilesError::Auth(e.to_string()))?;
+        let headers = self.auth_headers().await?;
 
         let mut files = Vec::new();
         for source in sources {

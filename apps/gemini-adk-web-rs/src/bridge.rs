@@ -183,20 +183,20 @@ impl SessionBridge {
                     let turn_count = obj
                         .get("turn_count")
                         .or_else(|| obj.get("response_count"))
-                        .and_then(|v| v.as_u64())
+                        .and_then(serde_json::Value::as_u64)
                         .unwrap_or(0);
                     if turn_count > prev_turn_count {
                         let latency_ms = obj
                             .get("last_response_latency_ms")
-                            .and_then(|v| v.as_u64())
+                            .and_then(serde_json::Value::as_u64)
                             .unwrap_or(0) as u32;
                         let prompt_tokens = obj
                             .get("prompt_token_count")
-                            .and_then(|v| v.as_u64())
+                            .and_then(serde_json::Value::as_u64)
                             .unwrap_or(0) as u32;
                         let response_tokens = obj
                             .get("response_token_count")
-                            .and_then(|v| v.as_u64())
+                            .and_then(serde_json::Value::as_u64)
                             .unwrap_or(0) as u32;
                         let _ = tx.send(ServerMessage::TurnMetrics {
                             turn: turn_count as u32,
@@ -403,10 +403,10 @@ impl SessionBridge {
                 match events.recv().await {
                     Ok(event) => {
                         let phase_changed = matches!(event, LiveEvent::PhaseTransition { .. });
-                        if let Some(msg) = map_event(event) {
-                            if tx.send(msg).is_err() {
-                                break;
-                            }
+                        if let Some(msg) = map_event(event)
+                            && tx.send(msg).is_err()
+                        {
+                            break;
                         }
                         if phase_changed {
                             send_phase_snapshot(&tx, &event_handle);

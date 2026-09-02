@@ -144,7 +144,7 @@ pub(in crate::live) async fn run_control_lane(
                 // Truncate current model turn on interruption (no mutex)
                 transcript_buffer.truncate_current_model_turn();
                 if let Some(cb) = &callbacks.on_interrupted {
-                    cb().await;
+                    dispatch_callback!(callbacks.on_interrupted_mode, cb());
                 }
                 // Resume audio forwarding after interrupt callback completes
                 shared.interrupted.store(false, Ordering::Release);
@@ -166,15 +166,15 @@ pub(in crate::live) async fn run_control_lane(
                 // `Fn(&str, bool)` closures -- call them directly. Fire BEFORE
                 // `handle_turn_complete` so finalization precedes `on_turn_complete`,
                 // mirroring the partial -> final ASR ordering.
-                if !accumulated_output.is_empty() {
-                    if let Some(cb) = &callbacks.on_output_transcript {
-                        cb(&accumulated_output, true);
-                    }
+                if !accumulated_output.is_empty()
+                    && let Some(cb) = &callbacks.on_output_transcript
+                {
+                    cb(&accumulated_output, true);
                 }
-                if !accumulated_input.is_empty() {
-                    if let Some(cb) = &callbacks.on_input_transcript {
-                        cb(&accumulated_input, true);
-                    }
+                if !accumulated_input.is_empty()
+                    && let Some(cb) = &callbacks.on_input_transcript
+                {
+                    cb(&accumulated_input, true);
                 }
                 accumulated_input.clear();
                 accumulated_output.clear();
@@ -197,11 +197,7 @@ pub(in crate::live) async fn run_control_lane(
                 let _ = event_tx.send(LiveEvent::TurnComplete);
             }
             ControlEvent::GoAway(time_left) => {
-                let duration = time_left
-                    .as_deref()
-                    .and_then(|s| s.trim_end_matches('s').parse::<u64>().ok())
-                    .map(Duration::from_secs)
-                    .unwrap_or(Duration::from_secs(60));
+                let duration = time_left.unwrap_or(Duration::from_secs(60));
                 if let Some(cb) = &callbacks.on_go_away {
                     dispatch_callback!(callbacks.on_go_away_mode, cb(duration));
                 }
@@ -222,6 +218,9 @@ pub(in crate::live) async fn run_control_lane(
                 // Teardown first, and always awaited: these flush durable state
                 // (memory reconciliation, for one), so the application's own
                 // handler should observe a settled world rather than race it.
+                for hook in &callbacks.on_teardown_concurrent {
+                    tokio::spawn(hook());
+                }
                 for hook in &callbacks.on_teardown {
                     hook().await;
                 }

@@ -15,9 +15,8 @@ One builder call taps both directions of the WebSocket:
 use gemini_adk_fluent_rs::prelude::*;
 
 let handle = Live::builder()
-    .model(GeminiModel::Gemini2_0FlashLive)
     .instruction("You are a weather assistant")
-    .tools(dispatcher)
+    .dispatcher(dispatcher)
     .record_wire("/var/log/sessions/user-123.wire.jsonl")
     .connect_from_env()
     .await?;
@@ -40,7 +39,9 @@ session.
 At lower layers the same knob is `SessionConfig::record_wire(recorder)` or
 `ConnectBuilder::record_wire(recorder)`; custom backends implement the
 `WireRecorder` trait (one sync `record(&self, entry: WireEntry)` method).
-`MemoryWireRecorder` collects entries in memory for tests.
+`MemoryWireRecorder` collects entries in memory for tests. These live under
+`gemini_genai_rs::transport` (alongside `FileWireRecorder`, `WireDirection`,
+`read_wire_log`, `ReplayTransport`, `ReplayControl`), not in the prelude.
 
 ### Mutation journal — `JournalSink`
 
@@ -57,7 +58,7 @@ let state = State::new();
 state.set_journal_sink(Arc::new(FileJournalSink::create(
     "/var/log/sessions/user-123.journal.jsonl",
 )?));
-// hand `state` to the session: Live::builder()…  /  LiveSessionBuilder::with_state(state)
+// hand `state` to the session: Live::builder().state(state)  /  LiveSessionBuilder::state(state)
 ```
 
 The sink is shared with all clones and delta views of the `State` and is
@@ -119,14 +120,15 @@ with the original dispatcher attached:
 ```rust
 use gemini_adk_fluent_rs::live::{collect_events_until_idle, replay_session};
 use gemini_adk_rs::live::LiveSessionBuilder;
-use gemini_genai_rs::prelude::{read_wire_log, SessionConfig};
+use gemini_genai_rs::prelude::SessionConfig;
+use gemini_genai_rs::transport::read_wire_log;
 
 let entries = read_wire_log("user-123.wire.jsonl")?;
 let state = State::new();
 let config = SessionConfig::new("offline"); // no network, no credentials used
 let builder = LiveSessionBuilder::new(config.clone())
     .dispatcher(weather_dispatcher(state.clone()))
-    .with_state(state.clone());
+    .state(state.clone());
 
 let replay = replay_session(config, builder, &entries).await?;
 let mut events = replay.handle().events();

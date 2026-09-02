@@ -1,8 +1,15 @@
+#![warn(unreachable_pub)]
+#![cfg_attr(not(test), forbid(unsafe_code))]
+#![cfg_attr(test, deny(unsafe_code))]
 #![warn(missing_docs)]
 //! # gemini-adk-rs
 //!
 //! Full Rust equivalent of Google's `@google/adk` framework.
 //! Agents, tools, sessions, events, middleware, and runtime.
+
+// The proc macros expand to `::gemini_adk_rs::…`; this makes that path valid
+// inside the crate itself (its own tests and doctests included).
+extern crate self as gemini_adk_rs;
 
 pub mod a2a;
 pub mod agent;
@@ -12,7 +19,6 @@ pub mod agent_tool;
 pub mod agents;
 pub mod artifacts;
 pub mod auth;
-pub mod callback;
 pub mod code_executors;
 pub mod confirmation;
 pub mod context;
@@ -55,8 +61,36 @@ pub mod workflow;
 #[cfg(test)]
 pub(crate) mod test_helpers;
 
+// ── Shared closure shapes ─────────────────────────────────────────────────
+// Named once here so every module (phases, workflows, watchers, temporal
+// patterns, callbacks, resolvers) spells the same shape the same way.
+
+/// A boxed, sendable, `'static` future — the return type of every async
+/// callback and hook in the runtime.
+pub type BoxFuture<T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send + 'static>>;
+
+/// A synchronous predicate over shared [`State`]: `true` admits (a phase
+/// transition, a workflow node, a guard).
+pub type StatePredicate = std::sync::Arc<dyn Fn(&State) -> bool + Send + Sync>;
+
+/// An async source of a JSON value — the seam for a tool call, an HTTP fetch,
+/// an MCP request, or a workflow function node. `In` is what the source is
+/// bound from: the whole [`State`] by default, or a pre-bound args
+/// [`Value`](serde_json::Value) for extraction-kit field resolvers.
+///
+/// The `Err(String)` payload is a human-readable reason; it lands in
+/// `{name}:error` state keys and in extraction diagnostics.
+pub type AsyncSourceFn<In = State> = std::sync::Arc<
+    dyn Fn(
+            In,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<serde_json::Value, String>> + Send>,
+        > + Send
+        + Sync,
+>;
+
 // Ergonomic re-exports — existing
-pub use a2a::{to_a2a_message, to_a2a_parts, to_adk_event, to_genai_parts, A2aMessage, A2aPart};
+pub use a2a::{A2aMessage, A2aPart, to_a2a_message, to_a2a_parts, to_adk_event, to_genai_parts};
 pub use agent::Agent;
 pub use agent_tool::AgentTool;
 pub use agents::{LoopAgent, ParallelAgent, SequentialAgent};
@@ -67,7 +101,6 @@ pub use auth::{
     AuthConfig, AuthHandler, AuthScheme, CredentialExchanger, CredentialExchangerRegistry,
     OAuthGrantType,
 };
-pub use callback::{AfterToolCallback, BeforeToolCallback, BeforeToolResult, ToolCallResult};
 pub use code_executors::{
     BuiltInCodeExecutor, CodeExecutionInput, CodeExecutionResult, CodeExecutor, CodeFile,
 };
@@ -78,13 +111,12 @@ pub use context::{AgentEvent, CallbackContext, InvocationContext, ToolContext};
 pub use credentials::{
     AuthCredential, CredentialError, CredentialService, InMemoryCredentialService,
 };
-pub use error::{AgentError, AgentResult, ToolError};
+pub use error::{AgentError, AgentResult, ConfigError, ToolError};
 pub use events::{Event, EventActions, EventType, StructuredEvent};
 pub use extract::{Extract, Recognizer, RecordExtractor};
 pub use flow::{
-    render_ground, run as run_on_enter, CompiledFlow, Enforcement as FlowMode, Flow, FlowError,
-    FlowErrors, FlowExplanation, FlowMonitor, Guard, SharedFlowMonitor, StepAction, ToolPolicy,
-    Verdict, Violation,
+    CompiledFlow, Enforcement, Flow, FlowError, FlowErrors, FlowExplanation, FlowMonitor, Guard,
+    SharedFlowMonitor, StepAction, ToolSurface, Verdict, Violation, on_enter,
 };
 pub use frame::{ConfirmPolicy, Frame, FrameSpec, SlotRecognizer, SlotSpec, SlotValidator};
 /// Re-exports the `#[tool]`/`#[derive(..)]` macros route their generated code
@@ -99,10 +131,6 @@ pub mod __macros {
     pub use serde_json;
 }
 
-/// The `#[tool]` attribute macro — turns an `async fn` into a registrable Gemini tool.
-///
-/// See the [`gemini_adk_macros_rs::tool`] documentation for details.
-pub use gemini_adk_macros_rs::tool;
 /// The `#[derive(Extract)]` macro — builds an [`extract::Extract`] record from a
 /// struct's `#[recognize(..)]` fields. Shares the name `Extract` with the
 /// struct (macro vs type namespace), so both can be imported together.
@@ -114,16 +142,20 @@ pub use gemini_adk_macros_rs::Extract;
 /// `#[slot(..)]` fields. Shares the name `Frame` with the trait (macro vs type
 /// namespace), so both can be imported together.
 pub use gemini_adk_macros_rs::Frame;
+/// The `#[tool]` attribute macro — turns an `async fn` into a registrable Gemini tool.
+///
+/// See the [`gemini_adk_macros_rs::tool`] documentation for details.
+pub use gemini_adk_macros_rs::tool;
 pub use instruction::inject_session_state;
 pub use live::{
-    CallbackMode, EventCallbacks, LiveHandle, LiveSessionBuilder, LlmExtractor, ToolCallSummary,
-    TranscriptBuffer, TranscriptTurn, TurnExtractor,
+    EventCallbacks, ExecutionMode, LiveHandle, LiveSessionBuilder, LlmExtractor, PersistenceError,
+    SessionHook, ToolCallSummary, TranscriptBuffer, TranscriptTurn, TurnExtractor,
 };
 pub use llm::{BaseLlm, GeminiLlm, GeminiLlmParams, LlmRegistry, LlmRequest, LlmResponse};
 pub use llm_agent::{LlmAgent, LlmAgentBuilder};
 pub use memory::{InMemoryMemoryService, MemoryEntry, MemoryService};
 pub use middleware::{Middleware, MiddlewareChain};
-pub use orchestration::{call as call_agent, provenance, Mode as AgentMode, Resolver};
+pub use orchestration::{AgentMode, Resolver, call_agent, provenance};
 pub use plugin::{Plugin, PluginManager, PluginResult};
 pub use processors::{
     ContentFilter, InstructionInserter, RequestProcessor, RequestProcessorChain, ResponseProcessor,
@@ -134,9 +166,9 @@ pub use run_config::{RunConfig, StreamingMode};
 pub use runner::Runner;
 #[cfg(feature = "database-sessions")]
 pub use session::DatabaseSessionService;
-pub use session::{db_schema, InMemorySessionService, Session, SessionId, SessionService};
-pub use state::PrefixedState;
+pub use session::{InMemorySessionService, Session, SessionId, SessionService, db_schema};
 pub use state::{FileJournalSink, JournalSink, MemoryJournalSink};
+pub use state::{PrefixedState, ReadOnlyPrefixedState, StateError};
 pub use state::{SlotEvidence, State, StateMutation, StateMutationOrigin};
 pub use text::{
     DispatchTextAgent, FallbackTextAgent, FnTextAgent, JoinTextAgent, LlmTextAgent, LoopTextAgent,
@@ -144,14 +176,14 @@ pub use text::{
     SequentialTextAgent, TapTextAgent, TaskRegistry, TextAgent, TimeoutTextAgent,
 };
 pub use text_agent_tool::TextAgentTool;
-pub use text_runner::{InMemoryRunner, RunEvent};
-pub use tool::{SimpleTool, ToolDispatcher, ToolFunction, TypedTool};
+pub use text_runner::{RunEvent, TextRunner};
+pub use tool::{SimpleTool, ToolDispatcher, ToolFunction, ToolPolicy, TypedTool};
+pub use tools::GoogleSearchTool;
 pub use tools::long_running::LongRunningFunctionTool;
 pub use tools::mcp::{McpConnectionParams, McpTool, McpToolset};
-pub use tools::GoogleSearchTool;
 pub use toolset::{StaticToolset, Toolset};
-pub use utils::model_name::{extract_model_name, is_gemini2_or_above, is_gemini_model};
-pub use utils::variant::{get_google_llm_variant, GoogleLlmVariant};
+pub use utils::model_name::{extract_model_name, is_gemini_model, is_gemini2_or_above};
+pub use utils::variant::{GoogleLlmVariant, get_google_llm_variant};
 
 // New re-exports — A2A
 pub use a2a::{AgentCard, AgentSkill, RemoteA2aAgent, RemoteA2aAgentConfig};
@@ -205,7 +237,7 @@ pub use tools::{
 
 // New re-exports — Agent Config
 pub use agent_config::{
-    discover_agent_configs, AgentConfig, AgentConfigError, ToolConfig as AgentToolConfig,
+    AgentConfig, AgentConfigError, ToolConfig as AgentToolConfig, discover_agent_configs,
 };
 
 // Wire re-export

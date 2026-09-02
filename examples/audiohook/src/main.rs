@@ -28,18 +28,18 @@
 
 mod protocol;
 
+use axum::Router;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use axum::routing::get;
-use axum::Router;
 use serde_json::json;
 use tracing::{error, info, warn};
 
 use gemini_adk_fluent_rs::prelude::*;
 use gemini_adk_fluent_rs::telephony::{bridge, g711};
-use gemini_adk_fluent_rs::voice::{pump, Playback};
+use gemini_adk_fluent_rs::voice::{Playback, pump};
 
-use protocol::{Effect, OpenInfo, ServerSession, AUDIOHOOK_HZ};
+use protocol::{AUDIOHOOK_HZ, Effect, OpenInfo, ServerSession};
 
 #[tokio::main]
 async fn main() {
@@ -58,7 +58,9 @@ async fn main() {
         .route("/audiohook", get(audiohook));
 
     let addr = std::env::var("BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".into());
-    info!("listening on {addr} — point the platform's AudioHook integration at wss://<host>/audiohook");
+    info!(
+        "listening on {addr} — point the platform's AudioHook integration at wss://<host>/audiohook"
+    );
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .expect("bind BIND_ADDR");
@@ -95,7 +97,7 @@ async fn run_connection(mut socket: WebSocket) -> Result<(), Box<dyn std::error:
                 }
                 match opened {
                     Some(info) if info.probe => {
-                        info!("connection probe answered — waiting for close")
+                        info!("connection probe answered — waiting for close");
                     }
                     Some(info) => break info,
                     None => {}
@@ -167,11 +169,10 @@ async fn run_connection(mut socket: WebSocket) -> Result<(), Box<dyn std::error:
                     }
                 }
                 Some(Ok(Message::Binary(payload))) => {
-                    if let Some(pcm) = driver.handle_binary(&payload) {
-                        if mic_tx.send(pcm).await.is_err() {
+                    if let Some(pcm) = driver.handle_binary(&payload)
+                        && mic_tx.send(pcm).await.is_err() {
                             break; // session gone
                         }
-                    }
                 }
                 Some(Ok(Message::Close(_))) | None => break,
                 Some(Ok(_)) => {}
@@ -263,8 +264,8 @@ fn filler_config() -> Option<bridge::FillerConfig> {
 
 /// Live model from `GEMINI_LIVE_MODEL`, defaulting to the Google AI
 /// native-audio preview (see CLAUDE.md: Live model names differ by platform).
-fn live_model() -> GeminiModel {
-    GeminiModel::Custom(
+fn live_model() -> ModelId {
+    ModelId::new(
         std::env::var("GEMINI_LIVE_MODEL")
             .unwrap_or_else(|_| "models/gemini-2.5-flash-native-audio-preview-12-2025".into()),
     )

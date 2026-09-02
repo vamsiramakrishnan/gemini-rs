@@ -34,7 +34,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde::Deserialize;
 
-use super::{now_secs, Artifact, ArtifactError, ArtifactMetadata, ArtifactService};
+use super::{Artifact, ArtifactError, ArtifactMetadata, ArtifactService, now_secs};
 
 const STORAGE_BASE: &str = "https://storage.googleapis.com/storage/v1";
 const UPLOAD_BASE: &str = "https://storage.googleapis.com/upload/storage/v1";
@@ -398,7 +398,7 @@ fn urlencode(s: &str) -> String {
     for b in s.bytes() {
         match b {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char)
+                out.push(b as char);
             }
             _ => out.push_str(&format!("%{b:02X}")),
         }
@@ -510,13 +510,13 @@ impl ArtifactService for GcsArtifactService {
             }
         }
         for name in self.list_object_names(&user_prefix).await? {
-            if let Some(rest) = name.strip_prefix(&user_prefix) {
-                if let Some(idx) = rest.rfind('/') {
-                    // Re-attach the `user:` prefix so callers can round-trip the
-                    // returned name back into load/load_version. The stored blob
-                    // path keeps the literal `user:` filename segment.
-                    filenames.insert(rest[..idx].to_string());
-                }
+            if let Some(rest) = name.strip_prefix(&user_prefix)
+                && let Some(idx) = rest.rfind('/')
+            {
+                // Re-attach the `user:` prefix so callers can round-trip the
+                // returned name back into load/load_version. The stored blob
+                // path keeps the literal `user:` filename segment.
+                filenames.insert(rest[..idx].to_string());
             }
         }
 

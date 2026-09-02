@@ -156,7 +156,7 @@ fn main() {
     let toolset_all = McpToolset::new(manager_arc.clone());
     println!(
         "  McpToolset (no filter):  {} tools pre-loaded",
-        toolset_all.get_tools().len()
+        toolset_all.tools().len()
     );
     println!("  (Tools are loaded lazily on first list_tools() call)\n");
 
@@ -165,7 +165,7 @@ fn main() {
         .with_filter(vec!["search".to_string(), "summarize".to_string()]);
 
     match toolset_filtered.filter() {
-        Some(names) => println!("  McpToolset (filtered):   {:?}", names),
+        Some(names) => println!("  McpToolset (filtered):   {names:?}"),
         None => println!("  McpToolset (filtered):   no filter"),
     }
     println!();
@@ -217,15 +217,15 @@ fn main() {
     //
     //   // Option A: T::mcp() fluent shorthand
     //   let handle = Live::builder()
-    //       .model(GeminiModel::Gemini2_0FlashLive)
-    //       .with_tools(T::mcp("node ./my-mcp-server.js") | T::google_search())
+    //       .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
+    //       .tools(T::mcp("node ./my-mcp-server.js") | T::google_search())
     //       .connect_from_env()
     //       .await?;
     //
     //   // Option B: McpToolset for finer-grained control
     //   let toolset = McpToolset::new(manager).with_filter(vec!["search".to_string()]);
     //   let handle = Live::builder()
-    //       .model(GeminiModel::Gemini2_0FlashLive)
+    //       .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
     //       // ... register toolset manually ...
     //       .connect_from_env()
     //       .await?;
@@ -238,8 +238,8 @@ fn main() {
     println!("  // }}));");
     println!("  //");
     println!("  // let handle = Live::builder()");
-    println!("  //     .model(GeminiModel::Gemini2_0FlashLive)");
-    println!("  //     .with_tools(T::mcp(\"node ./my-mcp-server.js\"))");
+    println!("  //     .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)");
+    println!("  //     .tools(T::mcp(\"node ./my-mcp-server.js\"))");
     println!("  //     .connect_from_env()");
     println!("  //     .await?;");
     println!();
@@ -255,7 +255,9 @@ fn main() {
 
     println!("  Optional features:");
     println!("    mcp-http   \u{2192} enables SSE/StreamableHTTP transport via reqwest");
-    println!("               \u{2192} add to Cargo.toml: gemini-adk-rs = {{ features = [\"mcp-http\"] }}\n");
+    println!(
+        "               \u{2192} add to Cargo.toml: gemini-adk-rs = {{ features = [\"mcp-http\"] }}\n"
+    );
 
     println!("  McpConnectionParams::Sse {{...}} always compiles, but calling");
     println!("  list_tools() / call_tool() on an Sse manager without the feature");

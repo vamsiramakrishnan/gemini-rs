@@ -432,7 +432,7 @@ mod tests {
         // Check the last 20% (last 1600 samples).
         let tail = &bus.samples[6_400..];
         let tail_rms = rms(tail);
-        assert!(tail_rms < 0.005, "DC residue too high: RMS = {}", tail_rms);
+        assert!(tail_rms < 0.005, "DC residue too high: RMS = {tail_rms}");
     }
 
     #[test]
@@ -457,11 +457,7 @@ mod tests {
         // After settling, RMS should be within 1 dB.
         let output_rms = rms(&bus.samples[2_000..]);
         let ratio_db = 20.0 * (output_rms / input_rms).log10();
-        assert!(
-            ratio_db > -1.0,
-            "1 kHz attenuation too high: {} dB",
-            ratio_db
-        );
+        assert!(ratio_db > -1.0, "1 kHz attenuation too high: {ratio_db} dB");
 
         // Test 50 Hz (attenuated).
         let mut hpf = HighPass::speech(16_000);
@@ -479,7 +475,7 @@ mod tests {
 
         let output_rms = rms(&bus.samples[2_000..]);
         let ratio_db = 20.0 * (output_rms / input_rms).log10();
-        assert!(ratio_db < -10.0, "50 Hz not attenuated: {} dB", ratio_db);
+        assert!(ratio_db < -10.0, "50 Hz not attenuated: {ratio_db} dB");
     }
 
     #[test]
@@ -511,8 +507,7 @@ mod tests {
         let gain_applied = output_rms / input_rms;
         assert!(
             gain_applied >= 3.0,
-            "AGC did not raise level enough: gain = {}x",
-            gain_applied
+            "AGC did not raise level enough: gain = {gain_applied}x"
         );
         assert!(
             agc.current_gain_linear <= 10.0_f32.powf(30.0 / 20.0),
@@ -551,7 +546,7 @@ mod tests {
 
         let final_gain_db = 20.0 * agc.current_gain_linear.log10();
         let delta_db = (final_gain_db - initial_gain_db).abs();
-        assert!(delta_db < 1.0, "Gain drifted in silence: {} dB", delta_db);
+        assert!(delta_db < 1.0, "Gain drifted in silence: {delta_db} dB");
     }
 
     #[test]
@@ -606,8 +601,7 @@ mod tests {
         let ratio_db = 20.0 * (output_rms / input_rms).log10();
         assert!(
             ratio_db.abs() < 0.1,
-            "Quiet passage not at unity: {} dB",
-            ratio_db
+            "Quiet passage not at unity: {ratio_db} dB"
         );
     }
 

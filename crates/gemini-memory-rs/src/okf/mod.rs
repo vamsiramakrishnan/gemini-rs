@@ -12,10 +12,10 @@ pub mod store;
 pub mod yaml;
 
 pub use document::OkfDocument;
-pub use record::{from_document, to_document, OKF_VERSION};
+pub use record::{OKF_VERSION, from_document, to_document};
 pub use repository::{
-    category_path, ManifestEntry, MemoryManifest, MemoryRepository, MemoryTransaction, MemoryWrite,
-    OkfRepository, ReconciliationSelector, Tombstone, MANIFEST_SCHEMA_VERSION,
+    MANIFEST_SCHEMA_VERSION, ManifestEntry, MemoryManifest, MemoryRepository, MemoryTransaction,
+    MemoryWrite, OkfRepository, ReconciliationSelector, Tombstone, category_path,
 };
 pub use store::{FsStore, MemoryStore, OkfStore};
 pub use yaml::{Yaml, YamlError};

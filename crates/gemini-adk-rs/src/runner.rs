@@ -28,9 +28,9 @@ use crate::state::State;
 ///
 /// runner.run(|agent| async move {
 ///     let config = SessionConfig::new(&api_key)
-///         .model(GeminiModel::GeminiLive2_5FlashNativeAudio);
+///         .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO);
 ///     // Add agent's tools to config
-///     let session = connect(config, TransportConfig::default()).await?;
+///     let session = connect(config).await?;
 ///     Ok(AgentSession::new(session))
 /// }).await?;
 /// ```
@@ -73,19 +73,19 @@ impl Runner {
     }
 
     /// Add middleware to the runner (applied to all agent invocations).
-    pub fn with_middleware(mut self, mw: impl crate::middleware::Middleware + 'static) -> Self {
+    pub fn middleware(mut self, mw: impl crate::middleware::Middleware + 'static) -> Self {
         self.middleware.add(Arc::new(mw));
         self
     }
 
     /// Add a plugin to the runner.
-    pub fn with_plugin(mut self, plugin: impl Plugin + 'static) -> Self {
+    pub fn plugin(mut self, plugin: impl Plugin + 'static) -> Self {
         self.plugins.add(Arc::new(plugin));
         self
     }
 
     /// Set initial state (available to all agents).
-    pub fn with_state(mut self, state: State) -> Self {
+    pub fn state(mut self, state: State) -> Self {
         self.state = state;
         self
     }
@@ -382,7 +382,7 @@ mod tests {
 
         match result {
             Err(AgentError::UnknownAgent(name)) => assert_eq!(name, "nonexistent"),
-            other => panic!("expected UnknownAgent, got: {:?}", other),
+            other => panic!("expected UnknownAgent, got: {other:?}"),
         }
     }
 
@@ -396,7 +396,7 @@ mod tests {
 
         match result {
             Err(AgentError::Other(msg)) => assert_eq!(msg, "boom"),
-            other => panic!("expected Other error, got: {:?}", other),
+            other => panic!("expected Other error, got: {other:?}"),
         }
     }
 
@@ -418,7 +418,7 @@ mod tests {
         let initial_state = State::new();
         let _ = initial_state.set("initial_key", "initial_value");
 
-        let runner = Runner::new(StateCheckAgent).with_state(initial_state);
+        let runner = Runner::new(StateCheckAgent).state(initial_state);
 
         let result = runner
             .run(|_agent| async { Ok(mock_agent_session()) })

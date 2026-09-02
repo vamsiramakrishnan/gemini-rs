@@ -1,4 +1,20 @@
 //! Model, session, and tool configuration methods for `Live`.
+//!
+//! # Boolean-setter rule
+//!
+//! Every L2 fluent builder follows one rule for on/off capabilities:
+//!
+//! - A capability that is **off by default** is enabled by a no-argument verb:
+//!   `.transcription()`, `.session_resume()`, `.affective_dialog()`,
+//!   `.proactive_audio()`, `.include_thoughts()`, `.prompt_on_enter()`.
+//! - A capability that is **on by default** is disabled by `no_<x>()`:
+//!   `.no_tool_advisory()`.
+//! - A `bool` parameter appears only where both values are routinely passed
+//!   from data — a `SessionSpec` mapping a field onto the builder — never as
+//!   the way an application spells "on".
+//!
+//! There is no `.x(true)` / `.x(false)` pair to remember: the method name says
+//! which way it flips, and the default is the absence of the call.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -7,7 +23,7 @@ use gemini_adk_rs::live::needs::RepairConfig;
 use gemini_adk_rs::live::persistence::SessionPersistence;
 use gemini_adk_rs::live::steering::{ContextDelivery, SteeringMode};
 use gemini_adk_rs::live::{Delivery, DeliveryConfig, ResultFormatter, ToolExecutionMode};
-use gemini_adk_rs::tool::ToolDispatcher;
+use gemini_adk_rs::tool::{ToolDispatcher, ToolFunction};
 use gemini_genai_rs::prelude::*;
 
 use super::{DeferredAgentTool, Live};
@@ -20,9 +36,8 @@ impl Live {
     /// Without this, connect resolves a default the target platform actually
     /// serves (overridable via the `GEMINI_MODEL` environment variable) —
     /// see the `connect_from_env` docs on [`Live`].
-    pub fn model(mut self, model: GeminiModel) -> Self {
+    pub fn model(mut self, model: ModelId) -> Self {
         self.config = self.config.model(model);
-        self.model_explicit = true;
         self
     }
 
@@ -41,7 +56,7 @@ impl Live {
     /// Switch to text-only mode (no audio output).
     ///
     /// Sets response modality to `Text` and disables speech config.
-    /// Use with `GeminiModel::Gemini2_0FlashLive` for text-only conversations.
+    /// Use with `ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO` for text-only conversations.
     pub fn text_only(mut self) -> Self {
         self.config = self.config.text_only();
         self
@@ -61,14 +76,17 @@ impl Live {
     /// When set, this text is sent immediately after the session connects,
     /// causing the model to respond first (e.g. with a greeting or introduction).
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// # async fn run() -> Result<(), AgentError> {
     /// let handle = Live::builder()
-    ///     .model(GeminiModel::Gemini2_0FlashLive)
     ///     .instruction("You are a friendly assistant")
     ///     .greeting("Greet the user warmly and introduce yourself.")
-    ///     .connect_vertex(project, location, token)
+    ///     .connect_from_env()
     ///     .await?;
     /// // Model will speak first without any user input
+    /// # let _ = handle; Ok(())
+    /// # }
     /// ```
     pub fn greeting(mut self, prompt: impl Into<String>) -> Self {
         self.greeting = Some(prompt.into());
@@ -86,16 +104,19 @@ impl Live {
     /// Record every wire byte (both directions) to a JSONL log at `path`.
     ///
     /// The log is written by a
-    /// [`FileWireRecorder`] created at connect time (a connect error is returned if the file cannot
+    /// [`FileWireRecorder`](gemini_genai_rs::transport::FileWireRecorder) created at connect time (a connect error is returned if the file cannot
     /// be created). Replay it offline with `adk session replay <path>` or
     /// [`gemini_adk_rs::live::replay::replay_session`].
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// # async fn run() -> Result<(), AgentError> {
     /// let handle = Live::builder()
-    ///     .model(GeminiModel::Gemini2_0FlashLive)
     ///     .record_wire("/tmp/session.wire.jsonl")
     ///     .connect_from_env()
     ///     .await?;
+    /// # let _ = handle; Ok(())
+    /// # }
     /// ```
     pub fn record_wire(mut self, path: impl Into<std::path::PathBuf>) -> Self {
         self.record_wire_path = Some(path.into());
@@ -103,13 +124,13 @@ impl Live {
     }
 
     /// Record every wire byte to a custom
-    /// [`WireRecorder`] implementation.
+    /// [`WireRecorder`](gemini_genai_rs::transport::WireRecorder) implementation.
     ///
     /// Overrides (and is overridden by) the most recent of this and
     /// [`record_wire`](Self::record_wire).
     pub fn wire_recorder(
         mut self,
-        recorder: Arc<dyn gemini_genai_rs::prelude::WireRecorder>,
+        recorder: Arc<dyn gemini_genai_rs::transport::WireRecorder>,
     ) -> Self {
         self.record_wire_path = None;
         self.config = self.config.record_wire(recorder);
@@ -118,28 +139,30 @@ impl Live {
 
     // -- Tools --
 
-    /// Set the tool dispatcher (auto-dispatches tool calls).
-    pub fn tools(mut self, dispatcher: ToolDispatcher) -> Self {
-        self.dispatcher = Some(dispatcher);
-        self
-    }
-
-    /// Register tools from a `T` module composition.
+    /// Register tools: a `|`-composed [`ToolComposite`] from the `T`
+    /// namespace, or a single [`ToolFunction`] (a `SimpleTool`/`TypedTool`,
+    /// the value a `#[tool]` function returns, an `Arc<dyn ToolFunction>`).
     ///
-    /// ```ignore
-    /// use gemini_adk_fluent_rs::prelude::*;
+    /// Runtime tools go into the session's dispatcher (created on demand),
+    /// built-ins into the session config, agent tools share the session
+    /// `State`, and `T::mcp(..)` toolsets are connected at `connect`.
     ///
+    /// ```no_run
+    /// # use gemini_adk_fluent_rs::prelude::*;
     /// Live::builder()
-    ///     .with_tools(
+    ///     .tools(
     ///         T::simple("get_weather", "Get weather", |args| async move {
+    ///             let _ = args;
     ///             Ok(serde_json::json!({"temp": 22}))
     ///         })
     ///         | T::google_search()
-    ///     )
+    ///     );
     /// ```
-    pub fn with_tools(mut self, composite: crate::compose::tools::ToolComposite) -> Self {
+    ///
+    /// [`ToolComposite`]: crate::compose::tools::ToolComposite
+    pub fn tools(mut self, tools: impl Into<crate::compose::tools::ToolComposite>) -> Self {
         use crate::compose::tools::ToolResolution;
-        for entry in composite.entries {
+        for entry in tools.into().entries {
             match entry.classify() {
                 ToolResolution::Runtime(f) => {
                     self.dispatcher
@@ -163,12 +186,38 @@ impl Live {
                     });
                 }
                 ToolResolution::Deferred(deferred) => {
-                    // MCP / A2A / OpenAPI / Search need an async connection;
-                    // resolve them at connect time (see build_and_connect).
+                    // MCP toolsets need an async connection; resolve them at
+                    // connect time (see build_and_connect).
                     self.deferred_tools.push(deferred);
                 }
             }
         }
+        self
+    }
+
+    /// Register one tool — anything that implements [`ToolFunction`].
+    ///
+    /// ```no_run
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// #[tool("Get the weather for a city")]
+    /// async fn get_weather(city: String) -> Result<serde_json::Value, ToolError> {
+    ///     Ok(serde_json::json!({"city": city, "temp": 22}))
+    /// }
+    /// Live::builder().tool(get_weather());
+    /// ```
+    pub fn tool(self, f: impl ToolFunction + 'static) -> Self {
+        self.tools(crate::compose::tools::ToolComposite::from_function(
+            Arc::new(f),
+        ))
+    }
+
+    /// Use a [`ToolDispatcher`] you built yourself as the session's dispatcher
+    /// — the escape hatch for streaming tools, input-streaming tools, or a
+    /// dispatcher shared with other components. Replaces any dispatcher the
+    /// builder created for [`tools`](Self::tools) so far; tools registered
+    /// after this call are added to it.
+    pub fn dispatcher(mut self, dispatcher: ToolDispatcher) -> Self {
+        self.dispatcher = Some(dispatcher);
         self
     }
 
@@ -177,10 +226,13 @@ impl Live {
     /// The agent shares the session's `State`, so it can read live-extracted
     /// values and its mutations are visible to watchers and phase transitions.
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// # let verifier_agent = FnTextAgent::new("verifier", |_| Ok("verified".to_string()));
+    /// # let calc_pipeline = FnTextAgent::new("calc", |_| Ok("plan".to_string()));
     /// Live::builder()
     ///     .agent_tool("verify_identity", "Verify caller identity", verifier_agent)
-    ///     .agent_tool("calc_payment", "Calculate payment plans", calc_pipeline)
+    ///     .agent_tool("calc_payment", "Calculate payment plans", calc_pipeline);
     /// ```
     pub fn agent_tool(
         mut self,
@@ -287,14 +339,21 @@ impl Live {
 
     // -- Audio/Video Config --
 
-    /// Enable input and/or output transcription.
-    pub fn transcription(mut self, input: bool, output: bool) -> Self {
-        if input {
-            self.config = self.config.enable_input_transcription();
-        }
-        if output {
-            self.config = self.config.enable_output_transcription();
-        }
+    /// Enable transcription of both the user's speech and the model's audio
+    /// (delivered to `on_input_transcript` / `on_output_transcript`).
+    pub fn transcription(self) -> Self {
+        self.input_transcription().output_transcription()
+    }
+
+    /// Enable transcription of the user's speech only.
+    pub fn input_transcription(mut self) -> Self {
+        self.config = self.config.input_transcription(true);
+        self
+    }
+
+    /// Enable transcription of the model's audio output only.
+    pub fn output_transcription(mut self) -> Self {
+        self.config = self.config.output_transcription(true);
         self
     }
 
@@ -303,11 +362,12 @@ impl Live {
     /// Sets the thinking budget for the Live session. Use with
     /// `.include_thoughts()` and `.on_thought()` to receive thought summaries.
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # use gemini_adk_fluent_rs::prelude::*;
     /// Live::builder()
     ///     .thinking(1024)
     ///     .include_thoughts()
-    ///     .on_thought(|text| println!("[Thought] {text}"))
+    ///     .on_thought(|text| println!("[Thought] {text}"));
     /// ```
     ///
     /// **Platform support:** Google AI only. On Vertex AI, `thinkingConfig`
@@ -324,19 +384,21 @@ impl Live {
     ///
     /// **Platform support:** Google AI only. Stripped on Vertex AI.
     pub fn include_thoughts(mut self) -> Self {
-        self.config = self.config.include_thoughts();
+        self.config = self.config.include_thoughts(true);
         self
     }
 
     /// Enable affective dialog (emotionally expressive responses).
-    pub fn affective_dialog(mut self, enabled: bool) -> Self {
-        self.config = self.config.affective_dialog(enabled);
+    pub fn affective_dialog(mut self) -> Self {
+        self.config = self.config.affective_dialog(true);
         self
     }
 
-    /// Enable proactive audio.
-    pub fn proactive_audio(mut self, enabled: bool) -> Self {
-        self.config = self.config.proactive_audio(enabled);
+    /// Enable proactive audio: the model may decide not to respond to input
+    /// it judges not addressed to it. Pair with
+    /// [`soft_turn_timeout`](Self::soft_turn_timeout).
+    pub fn proactive_audio(mut self) -> Self {
+        self.config = self.config.proactive_audio(true);
         self
     }
 
@@ -468,11 +530,11 @@ impl Live {
 
     // -- Session Lifecycle --
 
-    /// Enable session resumption.
-    pub fn session_resume(mut self, enabled: bool) -> Self {
-        if enabled {
-            self.config = self.config.session_resumption(None);
-        }
+    /// Enable session resumption: the server issues resumption handles that
+    /// [`session_resume_from`](Self::session_resume_from) accepts on the next
+    /// connect.
+    pub fn session_resume(mut self) -> Self {
+        self.config = self.config.session_resumption();
         self
     }
 
@@ -485,7 +547,7 @@ impl Live {
     /// here on the next connect. Resumption stays enabled for the new session,
     /// so fresh handles keep arriving. No automatic reconnect is performed.
     pub fn session_resume_from(mut self, handle: impl Into<String>) -> Self {
-        self.config = self.config.session_resumption(Some(handle.into()));
+        self.config = self.config.resume_from(handle);
         self
     }
 
@@ -528,14 +590,15 @@ impl Live {
     ///   (`send_audio`/`send_text`/`send_video`).  Eliminates isolated
     ///   WebSocket frames during silence that can confuse the model.
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # use gemini_adk_fluent_rs::prelude::*;
     /// Live::builder()
     ///     .steering_mode(SteeringMode::ContextInjection)
     ///     .context_delivery(ContextDelivery::Deferred)
     ///     .phase("greeting")
     ///         .instruction("Welcome the guest")
     ///         .done()
-    ///     .initial_phase("greeting")
+    ///     .initial_phase("greeting");
     /// ```
     pub fn context_delivery(mut self, mode: ContextDelivery) -> Self {
         self.context_delivery = mode;
@@ -552,12 +615,13 @@ impl Live {
     /// newest frame on overflow instead of stalling the router (and thereby
     /// stalling control-lane routing too).
     ///
-    /// ```ignore
-    /// use gemini_adk_rs::live::{Delivery, DeliveryConfig};
+    /// ```no_run
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// use gemini_adk_fluent_rs::live::{Delivery, DeliveryConfig};
     /// Live::builder()
     ///     .delivery(DeliveryConfig::default()
     ///         .audio(Delivery::LossyDropNewest)
-    ///         .transcript(Delivery::LossyDropNewest))
+    ///         .transcript(Delivery::LossyDropNewest));
     /// ```
     pub fn delivery(mut self, delivery: DeliveryConfig) -> Self {
         self.delivery = delivery;
@@ -584,10 +648,11 @@ impl Live {
     /// before callbacks, the transcript buffer, extraction, or persistence
     /// see the text.
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # use gemini_adk_fluent_rs::prelude::*;
     /// use gemini_adk_rs::live::redaction::TranscriptRedactor;
     /// Live::builder()
-    ///     .redaction(TranscriptRedactor::new().card_numbers().long_digits(6))
+    ///     .redaction(TranscriptRedactor::new().card_numbers().long_digits(6));
     /// ```
     pub fn redaction(
         mut self,
@@ -619,12 +684,12 @@ impl Live {
         self
     }
 
-    /// Enable or disable tool availability advisory on phase transitions.
+    /// Disable the tool availability advisory on phase transitions.
     ///
-    /// When enabled (default), the SDK injects a model-role context turn
-    /// telling the model which tools are available in the new phase.
-    pub fn tool_advisory(mut self, enabled: bool) -> Self {
-        self.tool_advisory = enabled;
+    /// By default the SDK injects a model-role context turn telling the model
+    /// which tools are available in the new phase.
+    pub fn no_tool_advisory(mut self) -> Self {
+        self.tool_advisory = false;
         self
     }
 }

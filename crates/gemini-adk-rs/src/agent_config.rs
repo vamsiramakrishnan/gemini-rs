@@ -193,13 +193,12 @@ impl AgentConfig {
         if self.name.is_empty() {
             return Err(AgentConfigError::Invalid("Agent name is required".into()));
         }
-        if let Some(temp) = self.temperature {
-            if !(0.0..=2.0).contains(&temp) {
-                return Err(AgentConfigError::Invalid(format!(
-                    "Temperature must be 0.0-2.0, got {}",
-                    temp
-                )));
-            }
+        if let Some(temp) = self.temperature
+            && !(0.0..=2.0).contains(&temp)
+        {
+            return Err(AgentConfigError::Invalid(format!(
+                "Temperature must be 0.0-2.0, got {temp}"
+            )));
         }
         // Validate sub-agents recursively.
         for sub in &self.sub_agents {
@@ -255,10 +254,10 @@ pub fn discover_agent_configs(dir: &Path) -> Result<Vec<AgentConfig>, AgentConfi
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_dir() {
-                if let Ok(sub_configs) = discover_agent_configs(&path) {
-                    configs.extend(sub_configs);
-                }
+            if path.is_dir()
+                && let Ok(sub_configs) = discover_agent_configs(&path)
+            {
+                configs.extend(sub_configs);
             }
         }
     }

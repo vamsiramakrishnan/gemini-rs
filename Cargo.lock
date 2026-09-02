@@ -123,15 +123,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fb5dfbc6d8d2675589ccbe4d0fd61df2419075625f8c1a62325e718e2b0049f9"
 
 [[package]]
-name = "arc-swap"
-version = "1.9.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c049c0be4daef0b145cb3555416b3b8ef5b7888a38aea1a3a155801fe7b0810b"
-dependencies = [
- "rustversion",
-]
-
-[[package]]
 name = "array-init"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1096,13 +1087,8 @@ dependencies = [
 name = "example-agents"
 version = "0.1.0"
 dependencies = [
- "async-trait",
  "dotenvy",
  "gemini-adk-fluent-rs",
- "gemini-adk-rs",
- "gemini-genai-rs",
- "schemars 0.8.22",
- "serde",
  "serde_json",
  "tokio",
 ]
@@ -1174,7 +1160,7 @@ dependencies = [
  "base64 0.22.1",
  "dotenvy",
  "futures",
- "gemini-genai-rs",
+ "gemini-adk-fluent-rs",
  "serde",
  "serde_json",
  "tokio",
@@ -1191,9 +1177,7 @@ dependencies = [
  "base64 0.22.1",
  "dotenvy",
  "futures",
- "gemini-adk-rs",
- "gemini-genai-rs",
- "schemars 0.8.22",
+ "gemini-adk-fluent-rs",
  "serde",
  "serde_json",
  "tokio",
@@ -1210,7 +1194,7 @@ dependencies = [
  "base64 0.22.1",
  "dotenvy",
  "futures",
- "gemini-genai-rs",
+ "gemini-adk-fluent-rs",
  "serde",
  "serde_json",
  "tokio",
@@ -1227,7 +1211,7 @@ dependencies = [
  "base64 0.22.1",
  "dotenvy",
  "futures",
- "gemini-genai-rs",
+ "gemini-adk-fluent-rs",
  "serde",
  "serde_json",
  "tokio",
@@ -1521,6 +1505,7 @@ version = "1.0.0"
 dependencies = [
  "async-trait",
  "gemini-adk-rs",
+ "proc-macro-crate",
  "proc-macro2",
  "quote",
  "schemars 0.8.22",
@@ -1539,12 +1524,11 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "dashmap",
- "futures",
+ "futures-util",
  "gemini-adk-macros-rs",
  "gemini-genai-rs",
  "metrics",
  "minijinja",
- "once_cell",
  "parking_lot",
  "proptest",
  "regex",
@@ -1574,7 +1558,7 @@ dependencies = [
  "parking_lot",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.20",
  "tokio",
  "toml 0.8.23",
  "tower 0.4.13",
@@ -1625,7 +1609,6 @@ dependencies = [
 name = "gemini-genai-rs"
 version = "1.0.0"
 dependencies = [
- "arc-swap",
  "async-trait",
  "base64 0.22.1",
  "bytemuck",
@@ -1643,6 +1626,7 @@ dependencies = [
  "parking_lot",
  "proptest",
  "reqwest 0.12.28",
+ "rtrb",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
@@ -1652,7 +1636,6 @@ dependencies = [
  "tracing",
  "tracing-opentelemetry 0.32.1",
  "tracing-subscriber",
- "url",
  "uuid",
  "wavekat-vad",
 ]
@@ -4032,6 +4015,12 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
 ]
+
+[[package]]
+name = "rtrb"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9278fb35b3e730abe136e9b395b5b81b96d06b9f5478a50f0c8430a2237b22de"
 
 [[package]]
 name = "rubato"

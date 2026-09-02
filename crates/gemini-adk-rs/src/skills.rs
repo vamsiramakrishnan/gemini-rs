@@ -89,7 +89,7 @@ impl SkillInfo {
 
     /// Add discovery tags.
     pub fn with_tags(mut self, tags: &[&str]) -> Self {
-        self.tags = tags.iter().map(|t| t.to_string()).collect();
+        self.tags = tags.iter().map(std::string::ToString::to_string).collect();
         self
     }
 }
@@ -105,15 +105,15 @@ pub struct SkillFilter {
 
 impl SkillFilter {
     fn matches(&self, skill: &SkillInfo) -> bool {
-        if let Some(needle) = &self.name_contains {
-            if !skill.name.to_lowercase().contains(&needle.to_lowercase()) {
-                return false;
-            }
+        if let Some(needle) = &self.name_contains
+            && !skill.name.to_lowercase().contains(&needle.to_lowercase())
+        {
+            return false;
         }
-        if let Some(tag) = &self.tag {
-            if !skill.tags.iter().any(|t| t == tag) {
-                return false;
-            }
+        if let Some(tag) = &self.tag
+            && !skill.tags.iter().any(|t| t == tag)
+        {
+            return false;
         }
         true
     }

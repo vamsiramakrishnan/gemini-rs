@@ -15,10 +15,10 @@ pub mod promotion;
 pub mod proposal;
 pub mod resolver;
 
-pub use commit::{commit_promotions, MemoryCommitter, ReconciliationReport};
-pub use consolidate::{consolidate, ConsolidationOutput};
+pub use commit::{MemoryCommitter, ReconciliationReport, commit_promotions};
+pub use consolidate::{ConsolidationOutput, consolidate};
 pub use promotion::{
-    evaluate, sweep, PromotionOutcome, PromotionShortfall, STAGING_RETENTION_DAYS,
+    PromotionOutcome, PromotionShortfall, STAGING_RETENTION_DAYS, evaluate, sweep,
 };
 pub use proposal::{MemorySelector, ProposedMemory, ResolutionKind, ResolvedMutation};
-pub use resolver::{proposal_from, Resolver};
+pub use resolver::{Resolver, proposal_from};

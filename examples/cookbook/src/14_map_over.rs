@@ -131,14 +131,18 @@ async fn main() {
 
     println!("\n--- Part 3: map_over() Pattern Helper ---");
 
+    // `map_over` is a `Composable` node like any other: it compiles to a
+    // `MapOverTextAgent` over the list at "paragraphs" and composes with `>>`.
     let map_workflow = map_over(
         AgentBuilder::new("translator").instruction("Translate the given text to French"),
-        4, // concurrency limit
+        "paragraphs",
     );
 
-    println!("  Agent: {}", map_workflow.agent.name());
-    println!("  Concurrency: {}", map_workflow.concurrency);
-    println!("  Instruction: {:?}", map_workflow.agent.get_instruction());
+    if let Composable::MapOver(m) = &map_workflow {
+        println!("  Agent: {}", m.agent.name());
+        println!("  List key: {}", m.list_key);
+        println!("  Instruction: {:?}", m.agent.get_instruction());
+    }
 
     // ── Part 4: map_reduce() Pattern ─────────────────────────────────────
 
@@ -148,12 +152,18 @@ async fn main() {
         AgentBuilder::new("chunk_analyzer").instruction("Analyze this data chunk for anomalies"),
         AgentBuilder::new("anomaly_aggregator")
             .instruction("Combine anomaly reports into a summary"),
-        8, // concurrency limit for map phase
+        "chunks",
     );
 
-    println!("  Mapper: {}", mr_workflow.mapper.name());
-    println!("  Reducer: {}", mr_workflow.reducer.name());
-    println!("  Concurrency: {}", mr_workflow.concurrency);
+    // A map-reduce is a pipeline: map_over(mapper) >> reducer.
+    if let Composable::Pipeline(p) = &mr_workflow {
+        if let Some(Composable::MapOver(m)) = p.steps.first() {
+            println!("  Mapper: {} over {}", m.agent.name(), m.list_key);
+        }
+        if let Some(Composable::Agent(r)) = p.steps.get(1) {
+            println!("  Reducer: {}", r.name());
+        }
+    }
 
     // ── Part 5: Custom item and output keys ──────────────────────────────
 

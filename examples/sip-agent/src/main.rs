@@ -68,7 +68,7 @@ async fn build_session() -> Result<LiveHandle, Box<dyn std::error::Error>> {
          conversational — this is a voice call."
             .into()
     });
-    let model = GeminiModel::Custom(
+    let model = ModelId::new(
         std::env::var("GEMINI_LIVE_MODEL")
             .unwrap_or_else(|_| "models/gemini-2.5-flash-native-audio-preview-12-2025".into()),
     );

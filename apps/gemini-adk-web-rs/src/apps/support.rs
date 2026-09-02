@@ -116,13 +116,13 @@ fn extract_state(
             "a", "the", "not", "so", "very", "really", "just", "here", "having",
         ];
         for pat in &*NAME_PATTERNS {
-            if let Some(caps) = pat.captures(text) {
-                if let Some(name) = caps.get(1) {
-                    let name_str = name.as_str();
-                    if !skip.contains(&name_str.to_lowercase().as_str()) {
-                        extracted.insert("customer_name".into(), json!(name_str));
-                        break;
-                    }
+            if let Some(caps) = pat.captures(text)
+                && let Some(name) = caps.get(1)
+            {
+                let name_str = name.as_str();
+                if !skip.contains(&name_str.to_lowercase().as_str()) {
+                    extracted.insert("customer_name".into(), json!(name_str));
+                    break;
                 }
             }
         }
@@ -414,10 +414,7 @@ fn support_context(s: &State) -> String {
         .get("customer_name")
         .and_then(|v| v.as_str())
         .unwrap_or("the customer");
-    format!(
-        "Customer name: {}. Current state: {}",
-        customer_name, extracted
-    )
+    format!("Customer name: {customer_name}. Current state: {extracted}")
 }
 
 // ---------------------------------------------------------------------------
@@ -514,7 +511,7 @@ impl DemoApp for SupportAssistant {
                             .as_deref()
                             .unwrap_or(BILLING_PHASES[0].instruction),
                     )
-                    .transcription(true, true)
+                    .transcription()
                     .steering_mode(SteeringMode::ContextInjection)
                     .context_delivery(ContextDelivery::Deferred)
                     // Model greets the caller immediately on connect
@@ -530,7 +527,7 @@ impl DemoApp for SupportAssistant {
                         }
                     })
                     // --- Billing Phases ---
-                    .phase_defaults(|d| d.navigation())
+                    .phase_defaults(gemini_adk_fluent_rs::live_builders::PhaseDefaults::navigation)
                     .phase("billing:greet")
                         .instruction(BILLING_PHASES[0].instruction)
                         .transition_with("billing:identify", |s| {
@@ -546,7 +543,7 @@ impl DemoApp for SupportAssistant {
                         .transition_with("tech:greet", |s| {
                             s.get::<serde_json::Value>("support_state")
                                 .and_then(|v| v.get("issue_type").cloned())
-                                .and_then(|v| v.as_str().map(|s| s.to_string()))
+                                .and_then(|v| v.as_str().map(std::string::ToString::to_string))
                                 .map(|t| t == "technical")
                                 .unwrap_or(false)
                         }, "when issue type is technical — handoff to tech support")
@@ -635,14 +632,12 @@ impl DemoApp for SupportAssistant {
                                     if let Some(outcome) = new.as_object()
                                         .and_then(|obj| obj.get("final_outcome"))
                                         .and_then(|v| v.as_str())
-                                    {
-                                        if outcome == "escalated" {
+                                        && outcome == "escalated" {
                                             let _ = tx.send(ServerMessage::StateUpdate {
                                                 key: "escalation".into(),
                                                 value: json!({"priority": "high", "reason": "Customer issue escalated"}),
                                             });
                                         }
-                                    }
                                 }
                             }
                         })

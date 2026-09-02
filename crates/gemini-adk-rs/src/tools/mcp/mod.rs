@@ -204,7 +204,7 @@ mod tests {
             timeout: None,
         }));
         let toolset = McpToolset::new(manager);
-        assert!(toolset.get_tools().is_empty());
+        assert!(toolset.tools().is_empty());
     }
 
     #[test]

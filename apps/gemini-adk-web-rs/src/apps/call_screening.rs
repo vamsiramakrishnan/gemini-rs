@@ -471,7 +471,7 @@ impl DemoApp for CallScreening {
                 live.model(super::live_model())
                     .voice(voice)
                     .instruction(SYSTEM_INSTRUCTION)
-                    .transcription(true, true)
+                    .transcription()
                     .add_tool(call_screening_tools())
                     .steering_mode(SteeringMode::ContextInjection)
                     .context_delivery(ContextDelivery::Deferred)
@@ -509,7 +509,7 @@ impl DemoApp for CallScreening {
                                 "check_contact_list" => {
                                     if r.response
                                         .get("found")
-                                        .and_then(|v| v.as_bool())
+                                        .and_then(serde_json::Value::as_bool)
                                         .unwrap_or(false)
                                     {
                                         state.set("is_known_contact", true);
@@ -565,7 +565,7 @@ impl DemoApp for CallScreening {
                     .phase("greeting")
                     .instruction(GREETING_INSTRUCTION)
                     .tools(vec!["check_contact_list".into()])
-                    .prompt_on_enter(true)
+                    .prompt_on_enter()
                     .transition_with(
                         "identify_caller",
                         |s: &State| {

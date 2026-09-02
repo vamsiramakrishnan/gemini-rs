@@ -3,7 +3,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use super::TextAgent;
+use crate::context::AgentEvent;
 use crate::error::AgentError;
+use crate::middleware::MiddlewareChain;
 use crate::state::State;
 
 /// Runs text agents sequentially. Each agent sees state mutations from
@@ -11,6 +13,7 @@ use crate::state::State;
 pub struct SequentialTextAgent {
     name: String,
     children: Vec<Arc<dyn TextAgent>>,
+    middleware: MiddlewareChain,
 }
 
 impl SequentialTextAgent {
@@ -19,7 +22,16 @@ impl SequentialTextAgent {
         Self {
             name: name.into(),
             children,
+            middleware: MiddlewareChain::new(),
         }
+    }
+
+    /// Attach a middleware chain. `AgentEvent::AgentStarted` /
+    /// `AgentEvent::AgentCompleted` are emitted through it around every child,
+    /// so `on_event` observers see each stage of the pipeline.
+    pub fn with_middleware_chain(mut self, chain: MiddlewareChain) -> Self {
+        self.middleware = chain;
+        self
     }
 }
 
@@ -32,7 +44,19 @@ impl TextAgent for SequentialTextAgent {
     async fn run(&self, state: &State) -> Result<String, AgentError> {
         let mut last_output = String::new();
         for child in &self.children {
+            let _ = self
+                .middleware
+                .run_on_event(&AgentEvent::AgentStarted {
+                    name: child.name().to_string(),
+                })
+                .await;
             last_output = child.run(state).await?;
+            let _ = self
+                .middleware
+                .run_on_event(&AgentEvent::AgentCompleted {
+                    name: child.name().to_string(),
+                })
+                .await;
             // Feed output as input for the next agent.
             let _ = state.set("input", &last_output);
         }

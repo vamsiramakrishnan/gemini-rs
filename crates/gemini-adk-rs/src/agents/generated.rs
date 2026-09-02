@@ -897,9 +897,9 @@ pub struct LiveRequest {
     /// If set, send the blob to the model in realtime mode.
     pub blob: Option<gemini_genai_rs::prelude::Blob>,
     /// If set, signal the start of user activity to the model.
-    pub activity_start: Option<gemini_genai_rs::prelude::ActivityStart>,
+    pub activity_start: Option<gemini_genai_rs::protocol::messages::ActivityStart>,
     /// If set, signal the end of user activity to the model.
-    pub activity_end: Option<gemini_genai_rs::prelude::ActivityEnd>,
+    pub activity_end: Option<gemini_genai_rs::protocol::messages::ActivityEnd>,
     /// If set, close the queue.
     pub close: Option<bool>,
 }
@@ -947,11 +947,11 @@ pub struct LlmResponse {
     pub finish_reason: Option<serde_json::Value>,
     /// The session resumption update of the LlmResponse
     pub live_session_resumption_update:
-        Option<gemini_genai_rs::prelude::SessionResumptionUpdatePayload>,
+        Option<gemini_genai_rs::protocol::messages::SessionResumptionUpdatePayload>,
     /// Audio transcription of user input.
-    pub input_transcription: Option<gemini_genai_rs::prelude::TranscriptionPayload>,
+    pub input_transcription: Option<gemini_genai_rs::protocol::messages::TranscriptionPayload>,
     /// Audio transcription of model output.
-    pub output_transcription: Option<gemini_genai_rs::prelude::TranscriptionPayload>,
+    pub output_transcription: Option<gemini_genai_rs::protocol::messages::TranscriptionPayload>,
 }
 
 // ---- LoadArtifactRequest (module: artifacts) ----

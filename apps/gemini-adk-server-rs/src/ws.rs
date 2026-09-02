@@ -446,10 +446,10 @@ pub async fn handle_ws(
                     }
                 }
                 other => {
-                    if let Ok(json) = serde_json::to_string(&other) {
-                        if ws_tx.send(Message::Text(json)).await.is_err() {
-                            break;
-                        }
+                    if let Ok(json) = serde_json::to_string(&other)
+                        && ws_tx.send(Message::Text(json)).await.is_err()
+                    {
+                        break;
                     }
                 }
             }
@@ -461,10 +461,10 @@ pub async fn handle_ws(
         while let Some(Ok(msg)) = ws_rx.next().await {
             match msg {
                 Message::Text(text) => {
-                    if let Ok(client_msg) = serde_json::from_str::<ClientMessage>(&text) {
-                        if client_tx.send(client_msg).is_err() {
-                            break;
-                        }
+                    if let Ok(client_msg) = serde_json::from_str::<ClientMessage>(&text)
+                        && client_tx.send(client_msg).is_err()
+                    {
+                        break;
                     }
                 }
                 Message::Binary(data) => {

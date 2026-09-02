@@ -35,7 +35,7 @@ Register these with the synchronous closure variants on `Live::builder()`.
 | `.on_thought(f)` | `f: Fn(&str)` | Thought summary chunk. Requires `.include_thoughts()`. Google AI only. |
 | `.on_vad_start(f)` | `f: Fn()` | Server-side VAD detected voice activity start. |
 | `.on_vad_end(f)` | `f: Fn()` | Server-side VAD detected voice activity end. |
-| `.on_phase(f)` | `f: Fn(SessionPhase)` | Session lifecycle phase changed (connecting, active, disconnecting, etc.). Use for lightweight UI state updates. |
+| `.on_session_phase(f)` | `f: Fn(SessionPhase)` | Wire-level session lifecycle phase changed (connecting, active, disconnecting, etc.) — not the `PhaseMachine`. Use for lightweight UI state updates. |
 | `.on_usage(f)` | `f: Fn(&UsageMetadata)` | Token usage delivered after each generation. Fires on the telemetry lane (not the audio hot path), but shares the sync-only constraint. |
 
 ### Partial and Final Transcript Semantics
@@ -137,7 +137,7 @@ blocking callback in sequence; concurrent variants are spawned as detached tasks
 | `.on_go_away(f)` | `f: Fn(Duration) -> impl Future` | Server sent a GoAway signal with a time-to-disconnect hint. Save state and prepare for reconnect. |
 | `.on_resumed(f)` | `f: Fn() -> impl Future` | Fires after a session resumes from a persisted snapshot. Use to re-subscribe to external streams or reset UI state. Requires `.persistence(...)` on the builder. |
 | `.on_error(f)` | `f: Fn(String) -> impl Future` | Non-fatal error from the server or processor. The session continues. |
-| `.on_interrupted(f)` | `f: Fn() -> impl Future` | Model output was interrupted by barge-in. Flush your playback buffer here. **Forced blocking** — no `_concurrent` variant. |
+| `.on_interrupted(f)` | `f: Fn() -> impl Future` | Model output was interrupted by barge-in. Flush your playback buffer here — audio forwarding resumes only after it returns. `.on_interrupted_concurrent(f)` exists for bookkeeping only (audio resumes without waiting). |
 
 ### Tool Callbacks
 
@@ -191,7 +191,10 @@ Live::builder()
 ## Outbound Interceptors
 
 These are not event callbacks but pipeline hooks that transform data on its way
-out to Gemini. They are always blocking (no `_concurrent` variant).
+out to Gemini. `before_tool_response` is always blocking (its return value is
+the response); `on_turn_boundary` is blocking by default, with
+`on_turn_boundary_concurrent` for observation-only bodies (the next turn does
+not wait for context injected from a detached task).
 
 ### `before_tool_response`
 
@@ -305,10 +308,9 @@ let is_speaking = Arc::new(AtomicBool::new(false));
 let is_speaking2 = is_speaking.clone();
 
 let handle = Live::builder()
-    .model(GeminiModel::Gemini2_0FlashLive)
     .voice(Voice::Kore)
     .instruction("You are a customer service agent.")
-    .transcription(true, true)
+    .transcription()
     .greeting("Welcome! How can I help you today?")
 
     // Fast lane: audio forwarded via lock-free channel

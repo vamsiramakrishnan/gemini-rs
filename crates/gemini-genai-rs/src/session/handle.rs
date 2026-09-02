@@ -9,6 +9,7 @@ use super::state::{SessionPhase, SessionState};
 use super::traits::{SessionReader, SessionWriter};
 use crate::protocol::{Content, FunctionResponse};
 use async_trait::async_trait;
+use bytes::Bytes;
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio::task::JoinHandle;
@@ -20,11 +21,11 @@ use tokio::task::JoinHandle;
 #[derive(Clone)]
 pub struct SessionHandle {
     /// Channel for sending commands to the transport layer.
-    pub command_tx: mpsc::Sender<SessionCommand>,
+    command_tx: mpsc::Sender<SessionCommand>,
     /// Broadcast channel for session events.
     event_tx: broadcast::Sender<SessionEvent>,
     /// Shared session state.
-    pub state: Arc<SessionState>,
+    state: Arc<SessionState>,
     /// Phase watch receiver for async observation.
     phase_rx: watch::Receiver<SessionPhase>,
     /// Handle to the spawned connection loop task.
@@ -101,9 +102,16 @@ impl SessionHandle {
         self.event_tx.subscribe()
     }
 
-    /// Get the event sender (for internal use by transport).
+    /// The event broadcaster, for a runtime that injects its own events
+    /// into the session stream (the L1 agent session does). Application code
+    /// wants [`subscribe`](Self::subscribe).
     pub fn event_sender(&self) -> &broadcast::Sender<SessionEvent> {
         &self.event_tx
+    }
+
+    /// The most recent session-resumption handle the server issued, if any.
+    pub fn resume_handle(&self) -> Option<String> {
+        self.state.resume_handle.lock().clone()
     }
 
     /// Current session phase.
@@ -131,7 +139,8 @@ impl SessionHandle {
     /// When [`SessionConfig::audio_pacing`](crate::protocol::SessionConfig::audio_pacing) is configured, this paces the
     /// caller: pushing audio faster than the configured sustained rate waits
     /// here instead of overflowing the send queue.
-    pub async fn send_audio(&self, data: Vec<u8>) -> Result<(), SessionError> {
+    pub async fn send_audio(&self, data: impl Into<Bytes>) -> Result<(), SessionError> {
+        let data: Bytes = data.into();
         if let Some(pacer) = &self.audio_pacer {
             pacer.lock().await.consume(data.len()).await;
         }
@@ -154,8 +163,8 @@ impl SessionHandle {
     }
 
     /// Send a video/image frame (raw JPEG bytes).
-    pub async fn send_video(&self, jpeg_data: Vec<u8>) -> Result<(), SessionError> {
-        self.send_command(SessionCommand::SendVideo(jpeg_data))
+    pub async fn send_video(&self, jpeg_data: impl Into<Bytes>) -> Result<(), SessionError> {
+        self.send_command(SessionCommand::SendVideo(jpeg_data.into()))
             .await
     }
 
@@ -221,7 +230,7 @@ impl std::fmt::Debug for SessionHandle {
 
 #[async_trait]
 impl SessionWriter for SessionHandle {
-    async fn send_audio(&self, data: Vec<u8>) -> Result<(), SessionError> {
+    async fn send_audio(&self, data: Bytes) -> Result<(), SessionError> {
         SessionHandle::send_audio(self, data).await
     }
 
@@ -249,7 +258,7 @@ impl SessionWriter for SessionHandle {
         .await
     }
 
-    async fn send_video(&self, jpeg_data: Vec<u8>) -> Result<(), SessionError> {
+    async fn send_video(&self, jpeg_data: Bytes) -> Result<(), SessionError> {
         self.send_command(SessionCommand::SendVideo(jpeg_data))
             .await
     }
@@ -408,7 +417,7 @@ mod tests {
 
         match event_rx.try_recv() {
             Ok(SessionEvent::PhaseChanged(SessionPhase::Connecting)) => {}
-            other => panic!("expected PhaseChanged(Connecting), got {:?}", other),
+            other => panic!("expected PhaseChanged(Connecting), got {other:?}"),
         }
     }
 

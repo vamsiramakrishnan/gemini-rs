@@ -58,10 +58,12 @@ fn main() {
 
     // In a live session you'd simply: `Live::builder().govern(flow).connect_from_env()`
     println!("--- In a live session ---");
-    println!("    Live::builder()\n        .model(GeminiModel::Gemini2_0FlashLive)\n        .tools(dispatcher)\n        .govern(flow)            // enforce the DAG\n        .connect_from_env().await?;\n");
+    println!(
+        "    Live::builder()\n        .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)\n        .dispatcher(dispatcher)\n        .govern(flow)            // enforce the DAG\n        .connect_from_env().await?;\n"
+    );
 
     // Drive a monitor through a simulated conversation.
-    let mut mon = FlowMonitor::new(flow, FlowMode::Enforce);
+    let mut mon = FlowMonitor::new(flow, Enforcement::Enforce);
     let state = State::new();
 
     println!("--- Turn 0: only `verify` is active ---");
@@ -95,7 +97,7 @@ fn main() {
 
     // Observe mode: nothing blocked, deviations recorded for audit.
     println!("\n--- Observe mode (audit, no blocking) ---");
-    let mut audit = FlowMonitor::new(debt_collection_flow(), FlowMode::Observe);
+    let mut audit = FlowMonitor::new(debt_collection_flow(), Enforcement::Observe);
     let s2 = State::new();
     audit.observe_tool("charge_card", true, &s2); // out of order on turn 0
     println!("    recorded {} violation(s):", audit.violations().len());

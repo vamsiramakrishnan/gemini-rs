@@ -11,8 +11,8 @@ documentation = "https://docs.rs/gemini-adk-fluent-rs"
 readme = "README.md"
 
 [dependencies]
-gemini-genai-rs = { workspace = true }
-gemini-adk-rs  = { workspace = true }
+gemini-genai-rs = { workspace = true, default-features = false, features = ["live"] }
+gemini-adk-rs  = { workspace = true, default-features = false }
 base64 = "0.22"
 bytes = "1"
 # Targeted features only; tests get `full` via dev-dependencies.
@@ -52,7 +52,11 @@ parking_lot = "0.12"
 
 [features]
 templates = ["gemini-adk-rs/templates"]
-default = []
+# One TLS backend and text generation are on by default: `AgentBuilder::build`
+# runs on `GeminiLlm`, which is pure Rust, so a plain `cargo add` answers a
+# question. Swap the TLS backend with `--no-default-features --features
+# tls-rustls,gemini-llm`.
+default = ["tls-native", "gemini-llm"]
 gemini-llm = ["gemini-adk-rs/gemini-llm"]
 # HTTP tool bindings in `spec` (SessionSpec `tools[].http`).
 http-tools = ["dep:reqwest"]
@@ -66,9 +70,11 @@ dsp = ["dep:realfft", "dep:rubato"]
 # In-process SIP agent (`telephony::sip::SipAgent`) — answer raw SIP calls
 # (rsipstack signalling + built-in RTP/SDP/G.711 media).
 sip = ["dep:rsipstack", "dep:tokio-util", "tokio/net", "tokio/rt-multi-thread"]
+# No-op passthrough (tracing is always compiled); kept for manifest compatibility.
 tracing-support = ["gemini-adk-rs/tracing-support"]
 # Passthroughs so applications don't need lower-layer dependencies.
 vad-wavekat = ["gemini-adk-rs/vad-wavekat"]
+tls-native = ["gemini-adk-rs/tls-native", "gemini-genai-rs/tls-native"]
 tls-rustls = ["gemini-adk-rs/tls-rustls", "gemini-genai-rs/tls-rustls"]
 otel = ["gemini-adk-rs/otel", "gemini-genai-rs/otel"]
 otel-otlp = ["gemini-adk-rs/otel-otlp", "gemini-genai-rs/otel-otlp"]

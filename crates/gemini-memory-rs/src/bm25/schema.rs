@@ -10,8 +10,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::core::{
-    normalize_token, CanonicalMemory, CanonicalPredicate, MemoryId, MemoryKind, MemoryStatus,
-    TemporalScope,
+    CanonicalMemory, CanonicalPredicate, MemoryId, MemoryKind, MemoryStatus, TemporalScope,
+    normalize_token,
 };
 
 /// The indexed fields, in weight order.
@@ -251,10 +251,10 @@ fn singularize(token: &str) -> String {
         return format!("{stem}y");
     }
     for suffix in ["ches", "shes", "sses", "xes", "zes"] {
-        if let Some(stem) = token.strip_suffix("es") {
-            if token.ends_with(suffix) {
-                return stem.to_string();
-            }
+        if let Some(stem) = token.strip_suffix("es")
+            && token.ends_with(suffix)
+        {
+            return stem.to_string();
         }
     }
     if token.ends_with('s')

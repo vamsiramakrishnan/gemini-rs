@@ -72,7 +72,13 @@ fn main() {
 
     let safety_stack = M::validate(|call| {
         // Reject tool calls with empty arguments
-        if call.args.is_null() || call.args.as_object().map(|o| o.is_empty()).unwrap_or(true) {
+        if call.args.is_null()
+            || call
+                .args
+                .as_object()
+                .map(gemini_adk_fluent_rs::gemini_adk_rs::__macros::serde_json::map::Map::is_empty)
+                .unwrap_or(true)
+        {
             Err("Tool call has empty arguments".to_string())
         } else {
             Ok(())

@@ -46,9 +46,10 @@ fn readme_quickstart_programs_are_the_compiled_binaries() {
 fn readme_quickstart_manifest_names_the_required_dependencies() {
     let readme = readme();
     let manifest = fenced_block(&readme, "Cargo.toml");
+    // `gemini-llm` is a default feature, so the base manifest need not name it;
+    // `voice-io` is opt-in and lives in the voice-only block, checked below.
     for needle in [
         "gemini-adk-fluent-rs",
-        "gemini-llm",
         "tokio",
         "macros",
         "rt-multi-thread",
@@ -78,8 +79,8 @@ fn readme_text_path_manifest_pulls_in_no_audio_stack() {
 
     let voice = fenced_block(&readme, "Cargo.toml:voice");
     assert!(
-        voice.contains("voice-io") && voice.contains("gemini-llm"),
-        "the voice README block must add `voice-io` alongside `gemini-llm`"
+        voice.contains("voice-io"),
+        "the voice README block must add `voice-io`"
     );
 
     let manifest = std::fs::read_to_string(

@@ -11,6 +11,7 @@ use gemini_genai_rs::prelude::Content;
 
 use crate::state::StateMutation;
 
+use super::ExecutionMode;
 use super::events::LiveEvent;
 
 /// A normalized event that can drive ADK-level reactions.
@@ -89,7 +90,7 @@ impl VoiceRuntimeState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EffectPolicy {
     /// Whether this effect blocks later effects from running.
-    pub mode: EffectMode,
+    pub mode: ExecutionMode,
     /// Optional maximum time budget for the effect.
     pub timeout: Option<Duration>,
 }
@@ -97,19 +98,10 @@ pub struct EffectPolicy {
 impl Default for EffectPolicy {
     fn default() -> Self {
         Self {
-            mode: EffectMode::Blocking,
+            mode: ExecutionMode::Blocking,
             timeout: None,
         }
     }
-}
-
-/// Whether an effect must complete before the reactor continues.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EffectMode {
-    /// Await this effect before continuing.
-    Blocking,
-    /// Run this effect independently of later effects.
-    Concurrent,
 }
 
 /// A typed runtime effect emitted by a reaction.
@@ -160,7 +152,7 @@ impl Reaction {
             source,
             effect,
             policy: EffectPolicy {
-                mode: EffectMode::Concurrent,
+                mode: ExecutionMode::Concurrent,
                 ..EffectPolicy::default()
             },
         }
@@ -302,7 +294,7 @@ mod tests {
         });
         assert_eq!(reactions.len(), 1);
         assert_eq!(reactions[0].source, "prompt_on_playback_drained");
-        assert_eq!(reactions[0].policy.mode, EffectMode::Blocking);
+        assert_eq!(reactions[0].policy.mode, ExecutionMode::Blocking);
         assert!(matches!(reactions[0].effect, LiveEffect::PromptModel));
     }
 

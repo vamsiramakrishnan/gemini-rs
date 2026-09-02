@@ -17,13 +17,13 @@ pub struct LlmJudge {
     /// Describes the condition that constitutes a *violation* (a `true` verdict).
     rubric: String,
     /// Label used for the supplied context/reference block in the prompt.
-    context_label: &'static str,
+    context_label: String,
     /// Whether to include the context/reference block at all.
     use_context: bool,
 }
 
-/// The judge's verdict.
-pub struct Verdict {
+/// The judge's verdict (distinct from the flow's `JudgeVerdict` on tool calls).
+pub struct JudgeVerdict {
     /// Whether the judge flagged a violation of the rubric.
     pub flagged: bool,
     /// Short reason / explanation extracted from the judge reply.
@@ -36,16 +36,16 @@ impl LlmJudge {
         Self {
             llm,
             rubric: rubric.into(),
-            context_label: "CONTEXT",
+            context_label: "CONTEXT".to_string(),
             use_context: false,
         }
     }
 
     /// Include a context/reference block in the judge prompt, under `label`
     /// (e.g. "CONTEXT" for grounding, "REFERENCE ANSWER" for semantic match).
-    pub fn with_context(mut self, label: &'static str) -> Self {
+    pub fn with_context(mut self, label: impl Into<String>) -> Self {
         self.use_context = true;
-        self.context_label = label;
+        self.context_label = label.into();
         self
     }
 
@@ -63,13 +63,13 @@ impl LlmJudge {
         p.push_str("RULE — a violation is when the following is TRUE:\n");
         p.push_str(&self.rubric);
         p.push_str("\n\n");
-        if self.use_context {
-            if let Some(ctx) = context {
-                p.push_str(self.context_label);
-                p.push_str(":\n");
-                p.push_str(ctx);
-                p.push_str("\n\n");
-            }
+        if self.use_context
+            && let Some(ctx) = context
+        {
+            p.push_str(&self.context_label);
+            p.push_str(":\n");
+            p.push_str(ctx);
+            p.push_str("\n\n");
         }
         p.push_str("RESPONSE:\n");
         p.push_str(output);
@@ -85,11 +85,11 @@ impl LlmJudge {
     /// Fails open: if the judge LLM errors, the verdict is *not* flagged (so a
     /// transient judge outage never vetoes a turn) and the error is recorded in
     /// `reason`.
-    pub async fn judge(&self, output: &str, context: Option<&str>) -> Verdict {
+    pub async fn judge(&self, output: &str, context: Option<&str>) -> JudgeVerdict {
         let req = LlmRequest::from_contents(vec![Content::user(self.prompt(output, context))]);
         match self.llm.generate(req).await {
             Ok(resp) => parse_verdict(&resp.text()),
-            Err(e) => Verdict {
+            Err(e) => JudgeVerdict {
                 flagged: false,
                 reason: format!("judge unavailable: {e}"),
             },
@@ -100,7 +100,7 @@ impl LlmJudge {
 /// Parse a verdict from the judge model's reply. Tolerant of extra prose around
 /// the JSON: it scans for the `violation` field's boolean and the `reason`
 /// string, falling back to common labels (`invalid`, `unsafe`).
-pub fn parse_verdict(text: &str) -> Verdict {
+pub fn parse_verdict(text: &str) -> JudgeVerdict {
     let lower = text.to_ascii_lowercase();
     let flagged = match lower.find("violation") {
         Some(idx) => {
@@ -123,7 +123,7 @@ pub fn parse_verdict(text: &str) -> Verdict {
             "ok".to_string()
         }
     });
-    Verdict { flagged, reason }
+    JudgeVerdict { flagged, reason }
 }
 
 fn extract_reason(text: &str) -> Option<String> {
@@ -148,13 +148,13 @@ pub fn render_contents(contents: &[Content]) -> String {
             _ => "system",
         };
         for part in &content.parts {
-            if let Part::Text { text } = part {
-                if !text.is_empty() {
-                    out.push_str(role);
-                    out.push_str(": ");
-                    out.push_str(text);
-                    out.push('\n');
-                }
+            if let Part::Text { text } = part
+                && !text.is_empty()
+            {
+                out.push_str(role);
+                out.push_str(": ");
+                out.push_str(text);
+                out.push('\n');
             }
         }
     }
@@ -181,7 +181,7 @@ mod tests {
 
     #[test]
     fn falls_back_to_labels() {
-        assert!(parse_verdict("Verdict: INVALID").flagged);
+        assert!(parse_verdict("JudgeVerdict: INVALID").flagged);
         assert!(!parse_verdict("looks valid to me").flagged);
     }
 }

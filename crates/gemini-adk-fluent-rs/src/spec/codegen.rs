@@ -162,12 +162,12 @@ impl SessionSpec {
                 }
             }
         }
-        out.push_str("        .with_state(state.clone())\n");
+        out.push_str("        .state(state.clone())\n");
         if !self.tools.is_empty() {
-            out.push_str("        .tools(tools)\n");
+            out.push_str("        .dispatcher(tools)\n");
         }
         for params in &self.mcp {
-            let _ = writeln!(out, "        .with_tools(T::mcp({}))", rust_str(params));
+            let _ = writeln!(out, "        .tools(T::mcp({}))", rust_str(params));
         }
         if !flow.steps.is_empty() {
             out.push_str("        .govern(flow)\n");
@@ -432,8 +432,7 @@ fn gen_flow(flow: &Flow) -> String {
     for tool in &flow.confirm_tools {
         let _ = writeln!(
             out,
-            "        // confirm-gated: {} (see Per-Tool Policies)",
-            tool
+            "        // confirm-gated: {tool} (see Per-Tool Policies)"
         );
     }
     out.push_str("        .build()\n        .expect(\"validated in the Flow Studio\");\n");
@@ -533,8 +532,8 @@ fn gen_phase(phase: &super::PhaseSpec) -> String {
     if !phase.needs.is_empty() {
         let _ = writeln!(out, "            .needs(&{})", str_slice(&phase.needs));
     }
-    if let Some(prompt) = phase.prompt_on_enter {
-        let _ = writeln!(out, "            .prompt_on_enter({prompt})");
+    if phase.prompt_on_enter == Some(true) {
+        out.push_str("            .prompt_on_enter()\n");
     }
     for transition in &phase.transitions {
         let guard = gen_guard(&transition.when);
@@ -705,10 +704,15 @@ fn gen_runtime(runtime: &RuntimeSpec) -> String {
         out.push_str("        .include_thoughts()\n");
     }
     if let Some(t) = runtime.transcription {
-        let _ = writeln!(out, "        .transcription({}, {})", t.input, t.output);
+        match (t.input, t.output) {
+            (true, true) => out.push_str("        .transcription()\n"),
+            (true, false) => out.push_str("        .input_transcription()\n"),
+            (false, true) => out.push_str("        .output_transcription()\n"),
+            (false, false) => {}
+        }
     }
-    if let Some(enabled) = runtime.proactive_audio {
-        let _ = writeln!(out, "        .proactive_audio({enabled})");
+    if runtime.proactive_audio == Some(true) {
+        out.push_str("        .proactive_audio()\n");
     }
     if let Some(vad) = &runtime.vad {
         out.push_str("        .vad(AutomaticActivityDetection {\n");
@@ -783,13 +787,12 @@ fn gen_runtime(runtime: &RuntimeSpec) -> String {
             out.push_str("        .client_interruption_authority()\n");
         }
         if let Some(eot_ms) = audio.eot_hold_ms {
-            let _ = writeln!(out, "        .turn_commit_eot_hold_ms({})", eot_ms);
+            let _ = writeln!(out, "        .turn_commit_eot_hold_ms({eot_ms})");
         }
         if let Some(min_int_ms) = audio.min_interruption_ms {
             let _ = writeln!(
                 out,
-                "        .turn_commit_min_interruption_ms({})",
-                min_int_ms
+                "        .turn_commit_min_interruption_ms({min_int_ms})"
             );
         }
     }
@@ -995,7 +998,10 @@ mod tests {
             ".connect_from_env()",
             "session.send_text(line.trim()).await?",
         ] {
-            assert!(code.contains(fragment), "missing fragment: {fragment}\n---\n{code}");
+            assert!(
+                code.contains(fragment),
+                "missing fragment: {fragment}\n---\n{code}"
+            );
         }
     }
 
@@ -1094,7 +1100,10 @@ mod tests {
             "send_client_content(vec![Content::model(\"Offer to help.\")], true)",
             "// remember (durable): \"guest got stuck\"",
         ] {
-            assert!(code.contains(fragment), "missing fragment: {fragment}\n---\n{code}");
+            assert!(
+                code.contains(fragment),
+                "missing fragment: {fragment}\n---\n{code}"
+            );
         }
         assert!(spec.to_cargo_toml().contains("gemini-memory-rs"));
     }
@@ -1112,8 +1121,7 @@ mod tests {
         );
         assert!(
             name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'),
-            "const_name produced invalid Rust identifier: {}",
-            name
+            "const_name produced invalid Rust identifier: {name}"
         );
     }
 
@@ -1122,8 +1130,7 @@ mod tests {
         let name = super::const_name("123abc");
         assert!(
             name.starts_with('_'),
-            "const_name should prepend _ to digit-starting keys, got {}",
-            name
+            "const_name should prepend _ to digit-starting keys, got {name}"
         );
         assert_eq!(name, "_123ABC");
     }

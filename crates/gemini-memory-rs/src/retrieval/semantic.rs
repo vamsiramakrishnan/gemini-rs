@@ -855,7 +855,7 @@ mod tests {
         let query = vector(43, 768);
         let hits = built.search_vector(&query, 5);
         assert_eq!(
-            hits.first().map(|id| id.as_str()),
+            hits.first().map(crate::core::ids::MemoryId::as_str),
             Some("mem_42"),
             "a record queried by its own vector must rank first"
         );
@@ -876,7 +876,7 @@ mod tests {
             "the packed scan must still return candidates"
         );
         assert_eq!(
-            exact_first.first().map(|id| id.as_str()),
+            exact_first.first().map(crate::core::ids::MemoryId::as_str),
             Some("mem_76"),
             "the reranked top hit must be the exact nearest neighbour"
         );
@@ -946,7 +946,7 @@ mod tests {
 
         assert_eq!(built.len(), 2, "one retired, one added");
         let ids = built.search_vector(&vector(999, 768), 10);
-        let ids: Vec<&str> = ids.iter().map(|i| i.as_str()).collect();
+        let ids: Vec<&str> = ids.iter().map(crate::core::ids::MemoryId::as_str).collect();
         assert!(ids.contains(&"mem_new"), "the new record was not embedded");
         assert!(
             ids.contains(&"mem_keep"),
@@ -1106,7 +1106,7 @@ mod tests {
         assert_eq!(built.len(), 2);
         let hits = built.search_vector(&vector(22, 768), 1);
         assert_eq!(
-            hits.first().map(|id| id.as_str()),
+            hits.first().map(crate::core::ids::MemoryId::as_str),
             Some("mem_second"),
             "an index built empty must rank properly once it has been filled"
         );
@@ -1274,7 +1274,10 @@ mod tests {
             .expect("a restored vector must not be re-embedded");
 
         let hits = second.search_vector(&vector(3, 768), 1);
-        assert_eq!(hits.first().map(|i| i.as_str()), Some("mem_one"));
+        assert_eq!(
+            hits.first().map(crate::core::ids::MemoryId::as_str),
+            Some("mem_one")
+        );
     }
 
     /// And the safety property that makes the cache trustworthy: a record whose
@@ -1314,7 +1317,7 @@ mod tests {
         assert_eq!(index.len(), 1, "the record must not be duplicated");
         let hits = index.search_vector(&vector(22, 768), 1);
         assert_eq!(
-            hits.first().map(|i| i.as_str()),
+            hits.first().map(crate::core::ids::MemoryId::as_str),
             Some("mem_one"),
             "the index still holds the vector for the superseded wording"
         );

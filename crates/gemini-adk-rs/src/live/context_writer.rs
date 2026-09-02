@@ -88,11 +88,10 @@ impl PendingContext {
 
     /// Drain only context turns, leaving any pending prompt armed.
     pub fn drain_context(&self) -> Vec<Content> {
-        let contents = {
+        {
             let mut buf = self.buffer.lock();
             std::mem::take(&mut *buf)
-        };
-        contents
+        }
     }
 
     /// Take and clear the pending prompt flag without touching queued context.
@@ -178,7 +177,7 @@ impl DeferredWriter {
 
 #[async_trait]
 impl SessionWriter for DeferredWriter {
-    async fn send_audio(&self, data: Vec<u8>) -> Result<(), SessionError> {
+    async fn send_audio(&self, data: bytes::Bytes) -> Result<(), SessionError> {
         self.flush_context().await?;
         self.inner.send_audio(data).await
     }
@@ -206,7 +205,7 @@ impl SessionWriter for DeferredWriter {
         self.inner.send_client_content(turns, turn_complete).await
     }
 
-    async fn send_video(&self, jpeg_data: Vec<u8>) -> Result<(), SessionError> {
+    async fn send_video(&self, jpeg_data: bytes::Bytes) -> Result<(), SessionError> {
         self.flush_context().await?;
         self.inner.send_video(jpeg_data).await
     }
@@ -257,7 +256,7 @@ mod tests {
 
     #[async_trait]
     impl SessionWriter for CountingWriter {
-        async fn send_audio(&self, _: Vec<u8>) -> Result<(), SessionError> {
+        async fn send_audio(&self, _: bytes::Bytes) -> Result<(), SessionError> {
             self.audio_count.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }
@@ -272,7 +271,7 @@ mod tests {
             self.client_content_count.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }
-        async fn send_video(&self, _: Vec<u8>) -> Result<(), SessionError> {
+        async fn send_video(&self, _: bytes::Bytes) -> Result<(), SessionError> {
             self.video_count.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }
@@ -352,7 +351,7 @@ mod tests {
         pending.push(Content::model("steering context"));
         pending.push(Content::model("phase instruction"));
 
-        writer.send_audio(vec![0u8; 100]).await.unwrap();
+        writer.send_audio(vec![0u8; 100].into()).await.unwrap();
 
         // Should have flushed: 1 client_content + 1 audio
         assert_eq!(inner.client_content_count.load(Ordering::SeqCst), 1);
@@ -382,7 +381,7 @@ mod tests {
 
         pending.push(Content::model("context"));
 
-        writer.send_video(vec![0xFFu8; 50]).await.unwrap();
+        writer.send_video(vec![0xFFu8; 50].into()).await.unwrap();
 
         assert_eq!(inner.client_content_count.load(Ordering::SeqCst), 1);
         assert_eq!(inner.video_count.load(Ordering::SeqCst), 1);
@@ -395,7 +394,7 @@ mod tests {
         let writer = DeferredWriter::new(inner.clone(), pending.clone());
 
         // No pending context — should just send audio, no client_content
-        writer.send_audio(vec![0u8; 100]).await.unwrap();
+        writer.send_audio(vec![0u8; 100].into()).await.unwrap();
 
         assert_eq!(inner.client_content_count.load(Ordering::SeqCst), 0);
         assert_eq!(inner.audio_count.load(Ordering::SeqCst), 1);
@@ -410,7 +409,7 @@ mod tests {
         pending.push(Content::model("repair nudge"));
         pending.set_prompt();
 
-        writer.send_audio(vec![0u8; 100]).await.unwrap();
+        writer.send_audio(vec![0u8; 100].into()).await.unwrap();
 
         // User audio only flushes context. Prompt remains armed until an
         // explicit idle/playback-drained flush.

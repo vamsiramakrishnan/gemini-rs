@@ -10,8 +10,8 @@
 //! returns `true`).
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use gemini_genai_rs::session::{SessionEvent, SessionWriter};
@@ -56,7 +56,7 @@ pub struct TemporalPattern {
     pub detector: Box<dyn PatternDetector>,
     /// The async action to execute when the pattern triggers.
     /// Receives a cloned `State` and the session writer.
-    pub action: super::phase::PhaseHook,
+    pub action: super::SessionHook,
     /// Optional minimum interval between successive firings.
     pub cooldown: Option<Duration>,
     /// Tracks when this pattern last fired (for cooldown enforcement).
@@ -68,7 +68,7 @@ impl TemporalPattern {
     pub fn new(
         name: impl Into<String>,
         detector: Box<dyn PatternDetector>,
-        action: super::phase::PhaseHook,
+        action: super::SessionHook,
         cooldown: Option<Duration>,
     ) -> Self {
         Self {
@@ -94,10 +94,10 @@ impl TemporalPattern {
 
         // Enforce cooldown.
         let mut last = self.last_triggered.lock();
-        if let (Some(cooldown), Some(prev)) = (self.cooldown, *last) {
-            if now.duration_since(prev) < cooldown {
-                return None;
-            }
+        if let (Some(cooldown), Some(prev)) = (self.cooldown, *last)
+            && now.duration_since(prev) < cooldown
+        {
+            return None;
         }
 
         *last = Some(now);
@@ -129,8 +129,8 @@ impl TemporalRegistry {
         }
     }
 
-    /// Add a pattern to the registry.
-    pub fn add(&mut self, pattern: TemporalPattern) {
+    /// Register a pattern.
+    pub fn register(&mut self, pattern: TemporalPattern) {
         self.patterns.push(pattern);
     }
 
@@ -257,10 +257,10 @@ impl PatternDetector for RateDetector {
         let mut ts = self.timestamps.lock();
 
         // Record matching event.
-        if let Some(evt) = event {
-            if (self.filter)(evt) {
-                ts.push_back(now);
-            }
+        if let Some(evt) = event
+            && (self.filter)(evt)
+        {
+            ts.push_back(now);
         }
 
         // Expire old timestamps.
@@ -385,7 +385,7 @@ mod tests {
     impl SessionWriter for MockWriter {
         async fn send_audio(
             &self,
-            _: Vec<u8>,
+            _: bytes::Bytes,
         ) -> Result<(), gemini_genai_rs::session::SessionError> {
             Ok(())
         }
@@ -407,7 +407,7 @@ mod tests {
         }
         async fn send_video(
             &self,
-            _: Vec<u8>,
+            _: bytes::Bytes,
         ) -> Result<(), gemini_genai_rs::session::SessionError> {
             Ok(())
         }
@@ -435,7 +435,7 @@ mod tests {
     }
 
     /// Helper: action that increments a shared counter.
-    fn counting_action(counter: Arc<AtomicU32>) -> crate::live::phase::PhaseHook {
+    fn counting_action(counter: Arc<AtomicU32>) -> crate::live::SessionHook {
         Arc::new(move |_state, _writer| {
             let c = counter.clone();
             Box::pin(async move {
@@ -715,9 +715,11 @@ mod tests {
         assert_eq!(counter.load(Ordering::SeqCst), 1);
 
         // Immediate re-check: cooldown blocks.
-        assert!(pattern
-            .try_fire(&state, None, &writer, t0 + Duration::from_millis(2))
-            .is_none());
+        assert!(
+            pattern
+                .try_fire(&state, None, &writer, t0 + Duration::from_millis(2))
+                .is_none()
+        );
 
         // After cooldown: fires again.
         let fut = pattern.try_fire(&state, None, &writer, t0 + Duration::from_secs(11));
@@ -738,7 +740,7 @@ mod tests {
         let mut registry = TemporalRegistry::new();
 
         // TurnCountDetector with required=1 — fires on first true check.
-        registry.add(TemporalPattern::new(
+        registry.register(TemporalPattern::new(
             "confusion",
             Box::new(TurnCountDetector::new(
                 Arc::new(|s: &State| s.get::<bool>("confused").unwrap_or(false)),
@@ -764,7 +766,7 @@ mod tests {
         let counter = Arc::new(AtomicU32::new(0));
         let mut registry = TemporalRegistry::new();
 
-        registry.add(TemporalPattern::new(
+        registry.register(TemporalPattern::new(
             "sustained",
             Box::new(SustainedDetector::new(
                 Arc::new(|_: &State| true),
@@ -784,14 +786,14 @@ mod tests {
         let counter = Arc::new(AtomicU32::new(0));
         let mut registry = TemporalRegistry::new();
 
-        registry.add(TemporalPattern::new(
+        registry.register(TemporalPattern::new(
             "turn-count",
             Box::new(TurnCountDetector::new(Arc::new(|_: &State| true), 3)),
             counting_action(counter.clone()),
             None,
         ));
 
-        registry.add(TemporalPattern::new(
+        registry.register(TemporalPattern::new(
             "rate",
             Box::new(RateDetector::new(
                 Arc::new(|_: &SessionEvent| true),

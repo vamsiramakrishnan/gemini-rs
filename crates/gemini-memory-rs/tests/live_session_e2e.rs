@@ -22,16 +22,16 @@
 
 mod common;
 
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use gemini_adk_fluent_rs::live::Live;
 use gemini_memory_rs::core::{SessionId, TurnId};
 use gemini_memory_rs::engine::{MemoryEngine, MemorySession};
 use gemini_memory_rs::runtime::{LiveMemoryExt, MemorySlot};
 
-use common::live::{connect, Observed};
-use common::{have_api_key, model_backed_engine, skip, ScratchDir};
+use common::live::{Observed, connect};
+use common::{ScratchDir, have_api_key, model_backed_engine, skip};
 
 fn slots() -> Vec<MemorySlot> {
     vec![

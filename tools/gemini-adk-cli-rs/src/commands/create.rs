@@ -82,7 +82,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {{
         .instruction("You are a helpful assistant. Be concise and informative.")
         .google_search()
         .temperature(0.7)
-        .build(llm);
+        .build(llm)?;
 
     // Interactive REPL.
     let state = State::new();

@@ -158,12 +158,12 @@ use std::time::{Duration, Instant};
 
 use common::corpus::{self, PROBES};
 use common::paraphrase::{self};
-use common::rank::{as_hits, fuse, lexical, rank_of, CANDIDATES};
+use common::rank::{CANDIDATES, as_hits, fuse, lexical, rank_of};
 use common::views::structural_view;
-use common::{file_backed_engine, ScratchDir};
+use common::{ScratchDir, file_backed_engine};
 
 use gemini_memory_rs::bm25::{IndexedMemory, MemoryIndex, SearchHit};
-use gemini_memory_rs::core::{stable_hash, CanonicalMemory, MemoryId, MemoryStatus};
+use gemini_memory_rs::core::{CanonicalMemory, MemoryId, MemoryStatus, stable_hash};
 
 // ─── what each configuration costs to run ───────────────────────────────────
 //
@@ -271,11 +271,7 @@ impl Rotation {
                 state ^= state << 13;
                 state ^= state >> 7;
                 state ^= state << 17;
-                if state & 1 == 0 {
-                    1.0
-                } else {
-                    -1.0
-                }
+                if state & 1 == 0 { 1.0 } else { -1.0 }
             })
             .collect();
         Self { signs, padded }

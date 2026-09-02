@@ -15,7 +15,7 @@
 //! # Installation
 //!
 //! The lowest-friction knob is [`crate::protocol::types::SessionConfig::record_wire`]:
-//! `connect`/`connect_with`/`ConnectBuilder` all honor it by wrapping whatever
+//! `connect` and `ConnectBuilder` both honor it by wrapping whatever
 //! codec is in use. [`crate::transport::ConnectBuilder::record_wire`] is the
 //! builder-level equivalent.
 //!
@@ -35,8 +35,8 @@
 //! [`crate::transport::replay::ReplayTransport`].
 
 use std::io::Write;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::protocol::messages::ServerMessage;
@@ -75,11 +75,11 @@ mod base64_bytes {
     use base64::Engine;
     use serde::{Deserialize, Deserializer, Serializer};
 
-    pub fn serialize<S: Serializer>(bytes: &[u8], ser: S) -> Result<S::Ok, S::Error> {
+    pub(super) fn serialize<S: Serializer>(bytes: &[u8], ser: S) -> Result<S::Ok, S::Error> {
         ser.serialize_str(&base64::engine::general_purpose::STANDARD.encode(bytes))
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(de: D) -> Result<Vec<u8>, D::Error> {
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(de: D) -> Result<Vec<u8>, D::Error> {
         let s = String::deserialize(de)?;
         base64::engine::general_purpose::STANDARD
             .decode(s.as_bytes())
@@ -206,7 +206,7 @@ impl<C: Codec> Codec for RecordingCodec<C> {
     }
 }
 
-/// Forwarding impl so [`connect_with`](crate::transport::connect_with) can
+/// Forwarding impl so the connection loop can
 /// install a recorder dynamically without changing its generic signature.
 impl Codec for Box<dyn Codec> {
     fn encode_setup(&self, config: &SessionConfig) -> Result<Vec<u8>, CodecError> {
@@ -388,11 +388,12 @@ pub fn parse_wire_log(data: &str) -> Result<Vec<WireEntry>, WireLogError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::types::GeminiModel;
+    use crate::protocol::types::ModelId;
     use crate::transport::codec::JsonCodec;
 
     fn test_config() -> SessionConfig {
-        SessionConfig::new("test-key").model(GeminiModel::Gemini2_0FlashLive)
+        SessionConfig::new("test-key")
+            .model(ModelId::from_static("models/gemini-2.0-flash-live-001"))
     }
 
     #[test]

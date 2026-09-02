@@ -8,13 +8,14 @@ use super::events::SessionEvent;
 use super::state::SessionPhase;
 use crate::protocol::{Content, FunctionResponse};
 use async_trait::async_trait;
+use bytes::Bytes;
 use tokio::sync::broadcast;
 
 /// Write-side of a session — send commands without owning the full handle.
 #[async_trait]
 pub trait SessionWriter: Send + Sync + 'static {
     /// Send raw PCM16 audio bytes.
-    async fn send_audio(&self, data: Vec<u8>) -> Result<(), SessionError>;
+    async fn send_audio(&self, data: Bytes) -> Result<(), SessionError>;
     /// Send a text message.
     async fn send_text(&self, text: String) -> Result<(), SessionError>;
     /// Send tool/function call responses back to the model.
@@ -29,7 +30,7 @@ pub trait SessionWriter: Send + Sync + 'static {
         turn_complete: bool,
     ) -> Result<(), SessionError>;
     /// Send a video/image frame (raw JPEG bytes).
-    async fn send_video(&self, jpeg_data: Vec<u8>) -> Result<(), SessionError>;
+    async fn send_video(&self, jpeg_data: Bytes) -> Result<(), SessionError>;
     /// Update the system instruction mid-session.
     async fn update_instruction(&self, instruction: String) -> Result<(), SessionError>;
     /// Signal that user speech activity has started.

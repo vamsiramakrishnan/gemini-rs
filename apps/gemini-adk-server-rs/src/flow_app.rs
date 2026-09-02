@@ -9,9 +9,9 @@
 //! `FlowAppSpec` JSON documents keep parsing (the spec is a strict superset).
 
 pub use gemini_adk_fluent_rs::spec::{
-    run_tests, EffectSpec, ExtractSpec, HttpBinding, PhaseSpec, PromotePolicy, PromoteSpec,
-    SessionSpec, SimEvent, SpecModality, SpecResources, SpecTest, SpecValidation, TestExpectation,
-    TestReport, ToolSpec, TransitionSpec, TriggerSpec, UseFragment, WatchCondition, WatchSpec,
+    EffectSpec, ExtractSpec, HttpBinding, PhaseSpec, PromotePolicy, PromoteSpec, SessionSpec,
+    SimEvent, SpecModality, SpecResources, SpecTest, SpecValidation, TestExpectation, TestReport,
+    ToolSpec, TransitionSpec, TriggerSpec, UseFragment, WatchCondition, WatchSpec,
 };
 
 /// The original name for the app document. Alias of [`SessionSpec`]; every

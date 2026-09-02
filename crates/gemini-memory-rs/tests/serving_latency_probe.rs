@@ -292,10 +292,16 @@ async fn generate_once(
                 ttft = Some(started.elapsed());
             }
             if let Some(usage) = json["usageMetadata"].as_object() {
-                if let Some(n) = usage.get("candidatesTokenCount").and_then(|v| v.as_u64()) {
+                if let Some(n) = usage
+                    .get("candidatesTokenCount")
+                    .and_then(serde_json::Value::as_u64)
+                {
                     output_tokens = n as usize;
                 }
-                if let Some(n) = usage.get("promptTokenCount").and_then(|v| v.as_u64()) {
+                if let Some(n) = usage
+                    .get("promptTokenCount")
+                    .and_then(serde_json::Value::as_u64)
+                {
                     input_tokens = n as usize;
                 }
             }

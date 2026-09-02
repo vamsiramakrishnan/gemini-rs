@@ -6,9 +6,10 @@ use gemini_genai_rs::prelude::SessionPhase;
 use gemini_genai_rs::session::{SessionError, SessionWriter};
 use tokio::sync::broadcast;
 
+use super::ExecutionMode;
 use super::context_writer::PendingContext;
 use super::events::LiveEvent;
-use super::reactor::{EffectMode, LiveEffect, Reaction};
+use super::reactor::{LiveEffect, Reaction};
 
 /// Executes [`LiveEffect`] values emitted by the Live reactor.
 #[derive(Clone)]
@@ -36,7 +37,7 @@ impl LiveEffectExecutor {
     pub async fn execute_reactions(&self, reactions: Vec<Reaction>) -> Result<(), SessionError> {
         for reaction in reactions {
             match reaction.policy.mode {
-                EffectMode::Blocking => {
+                ExecutionMode::Blocking => {
                     let executor = self.clone();
                     let fut = executor.execute(reaction.effect);
                     if let Some(timeout) = reaction.policy.timeout {
@@ -50,7 +51,7 @@ impl LiveEffectExecutor {
                         fut.await?;
                     }
                 }
-                EffectMode::Concurrent => {
+                ExecutionMode::Concurrent => {
                     let executor = self.clone();
                     let timeout = reaction.policy.timeout;
                     let source = reaction.source;
@@ -153,7 +154,7 @@ mod tests {
 
     #[async_trait]
     impl SessionWriter for MockWriter {
-        async fn send_audio(&self, _data: Vec<u8>) -> Result<(), SessionError> {
+        async fn send_audio(&self, _data: bytes::Bytes) -> Result<(), SessionError> {
             Ok(())
         }
 
@@ -180,7 +181,7 @@ mod tests {
             Ok(())
         }
 
-        async fn send_video(&self, _jpeg_data: Vec<u8>) -> Result<(), SessionError> {
+        async fn send_video(&self, _jpeg_data: bytes::Bytes) -> Result<(), SessionError> {
             Ok(())
         }
 
@@ -310,7 +311,7 @@ mod tests {
         struct FailWriter;
         #[async_trait]
         impl SessionWriter for FailWriter {
-            async fn send_audio(&self, _: Vec<u8>) -> Result<(), SessionError> {
+            async fn send_audio(&self, _: bytes::Bytes) -> Result<(), SessionError> {
                 Ok(())
             }
             async fn send_text(&self, _: String) -> Result<(), SessionError> {
@@ -329,7 +330,7 @@ mod tests {
             ) -> Result<(), SessionError> {
                 Err(SessionError::NotConnected)
             }
-            async fn send_video(&self, _: Vec<u8>) -> Result<(), SessionError> {
+            async fn send_video(&self, _: bytes::Bytes) -> Result<(), SessionError> {
                 Ok(())
             }
             async fn update_instruction(&self, _: String) -> Result<(), SessionError> {

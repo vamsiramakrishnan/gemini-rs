@@ -10,8 +10,8 @@ use chrono::{DateTime, Utc};
 
 use super::proposal::{ProposedMemory, ResolutionKind, ResolvedMutation};
 use crate::core::{
-    aggregate_confidence, normalize_token, CanonicalMemory, DiscardReason, EvidenceCounters,
-    Explicitness, MemoryId, MemoryStatus, ProposedPersistence, SensitivityClass, UserId,
+    CanonicalMemory, DiscardReason, EvidenceCounters, Explicitness, MemoryId, MemoryStatus,
+    ProposedPersistence, SensitivityClass, UserId, aggregate_confidence, normalize_token,
 };
 
 /// Resolves proposals against existing memory.
@@ -54,7 +54,7 @@ impl Resolver {
 
         // 1. The same fact, said again. Strengthen rather than duplicate.
         if let Some(same) = active.iter().find(|m| m.fingerprint() == fingerprint) {
-            return self.reinforce(same, &proposal, now);
+            return Self::reinforce(same, &proposal, now);
         }
 
         // 2. The same fact under a different predicate name.
@@ -65,7 +65,7 @@ impl Resolver {
         // and, without this, the corpus accumulates a duplicate per session.
         // Same subject and same value is the same fact, whatever it was called.
         if let Some(equivalent) = active.iter().find(|m| is_same_fact_renamed(&proposal, m)) {
-            return self.reinforce(equivalent, &proposal, now);
+            return Self::reinforce(equivalent, &proposal, now);
         }
 
         // 3. Nothing else claims this subject and predicate.
@@ -122,7 +122,6 @@ impl Resolver {
     }
 
     fn reinforce(
-        &self,
         existing: &CanonicalMemory,
         proposal: &ProposedMemory,
         now: DateTime<Utc>,

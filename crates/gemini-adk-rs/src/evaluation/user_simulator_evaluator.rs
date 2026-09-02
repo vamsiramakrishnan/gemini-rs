@@ -102,12 +102,12 @@ impl UserSimulatorEvaluator {
         }
 
         // Try to find JSON embedded in text
-        if let Some(start) = text.find('{') {
-            if let Some(end) = text[start..].rfind('}') {
-                let json_str = &text[start..=start + end];
-                if let Some(result) = try_parse_response(json_str) {
-                    return result;
-                }
+        if let Some(start) = text.find('{')
+            && let Some(end) = text[start..].rfind('}')
+        {
+            let json_str = &text[start..=start + end];
+            if let Some(result) = try_parse_response(json_str) {
+                return result;
             }
         }
 

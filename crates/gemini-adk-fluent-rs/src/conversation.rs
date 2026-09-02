@@ -8,7 +8,10 @@
 //! the low level, never a parallel runtime (see
 //! `docs/plans/2026-06-06-conversation-compiler-rfc.md`).
 //!
-//! ```ignore
+//! ```no_run
+//! # use gemini_adk_fluent_rs::prelude::*;
+//! # use gemini_adk_fluent_rs::conversation::Conversation;
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let convo = Conversation::new("booking")
 //!     .stage("collect")
 //!         .say("Help the user book a table.")
@@ -23,7 +26,9 @@
 //!     .stage("done").terminal()
 //!     .require(["done"])
 //!     .compile()?;
-//! let mut monitor = convo.monitor(FlowMode::Enforce);
+//! let mut monitor = convo.monitor(Enforcement::Enforce);
+//! # let _ = &mut monitor; Ok(())
+//! # }
 //! ```
 //!
 //! ### Lowering semantics (MVP)
@@ -66,12 +71,18 @@ type SlotFetch =
 /// the *declarations* (slot, resolver name, args, ttl) and the registry supplies
 /// the *implementations*.
 ///
-/// ```ignore
+/// ```no_run
+/// # use gemini_adk_fluent_rs::conversation::{Conversation, ConversationSpec, ResolverRegistry};
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// # let spec = ConversationSpec::default();
 /// let registry = ResolverRegistry::new()
 ///     .with("availability", |args| async move {
+///         let _ = args;
 ///         Ok(serde_json::json!({ "open": true }))
 ///     });
 /// let convo = Conversation::from_spec_with_resolvers(spec, &registry)?;
+/// # let _ = convo; Ok(())
+/// # }
 /// ```
 #[derive(Clone, Default)]
 pub struct ResolverRegistry {
@@ -536,7 +547,7 @@ pub struct Conversation {
     spec: ConversationSpec,
     resolvers: Vec<StageResolver>,
     /// When `Some(i)`, stage setters target `spec.overlays[i]` instead of the main
-    /// flow (between `.overlay(..)` and `.done_overlay()`).
+    /// flow (between `.overlay(..)` and `.end_overlay()`).
     current_overlay: Option<usize>,
 }
 
@@ -554,7 +565,7 @@ impl Conversation {
     }
 
     /// Begin authoring a new stage; subsequent setters apply to it. Routes to the
-    /// active overlay when between `.overlay(..)` and `.done_overlay()`.
+    /// active overlay when between `.overlay(..)` and `.end_overlay()`.
     pub fn stage(mut self, id: impl Into<String>) -> Self {
         let stage = StageSpec {
             id: id.into(),
@@ -568,7 +579,7 @@ impl Conversation {
     }
 
     /// Begin authoring a digression/overlay; subsequent `.stage(..)` calls (until
-    /// `.done_overlay()`) populate it. Set its activation guard with `.trigger(..)`
+    /// `.end_overlay()`) populate it. Set its activation guard with `.trigger(..)`
     /// (an overlay with no trigger never fires — fail-closed).
     pub fn overlay(mut self, name: impl Into<String>) -> Self {
         self.spec.overlays.push(OverlaySpec {
@@ -599,9 +610,10 @@ impl Conversation {
         self
     }
 
-    /// Finish the current overlay; subsequent `.stage(..)` calls target the main
-    /// flow again.
-    pub fn done_overlay(mut self) -> Self {
+    /// End overlay authoring; subsequent `.stage(..)` calls target the main
+    /// flow again. (Not a sub-builder exit — the `Conversation` is the same
+    /// value throughout — so it is named for what it does.)
+    pub fn end_overlay(mut self) -> Self {
         self.current_overlay = None;
         self
     }
@@ -685,8 +697,9 @@ impl Conversation {
         self
     }
 
-    /// Set an explicit completion guard for this stage.
-    pub fn done(mut self, guard: Guard) -> Self {
+    /// Set an explicit completion guard for this stage: the stage counts as
+    /// complete when `guard` holds (default: all `collect`ed slots captured).
+    pub fn complete_when(mut self, guard: Guard) -> Self {
         self.current().done = Some(guard);
         self
     }
@@ -874,13 +887,20 @@ impl crate::live::Live {
     /// its frames' slots each turn. The one-liner entrypoint for "run this
     /// conversation".
     ///
-    /// ```ignore
-    /// let convo = Conversation::new("booking")./* … */.compile()?;
+    /// ```no_run
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// # use gemini_adk_fluent_rs::conversation::Conversation;
+    /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
+    /// let convo = Conversation::new("booking")
+    ///     .stage("done").terminal()
+    ///     .require(["done"])
+    ///     .compile()?;
     /// let handle = Live::builder()
-    ///     .model(GeminiModel::Gemini2_0FlashLive)
     ///     .converse(&convo)
     ///     .connect_from_env()
     ///     .await?;
+    /// # let _ = handle; Ok(())
+    /// # }
     /// ```
     pub fn converse(self, convo: &CompiledConversation) -> Self {
         let mut live = self.govern_compiled(convo.flow().clone());
@@ -1118,13 +1138,13 @@ fn lower_flow(stages: &[StageSpec], require: &[String]) -> Result<CompiledFlow, 
                 )));
             }
         }
-        if let Some(target) = s.repair.as_ref().and_then(|r| r.escalate_to.as_ref()) {
-            if !ids.contains(target.as_str()) {
-                return Err(ConversationError::Spec(format!(
-                    "stage '{}' escalates to unknown stage '{}'",
-                    s.id, target
-                )));
-            }
+        if let Some(target) = s.repair.as_ref().and_then(|r| r.escalate_to.as_ref())
+            && !ids.contains(target.as_str())
+        {
+            return Err(ConversationError::Spec(format!(
+                "stage '{}' escalates to unknown stage '{}'",
+                s.id, target
+            )));
         }
     }
     for r in require {
@@ -1167,10 +1187,10 @@ fn lower_flow(stages: &[StageSpec], require: &[String]) -> Result<CompiledFlow, 
             fb = fb.after(d);
         }
 
-        if let Some(inc) = incoming.get(s.id.as_str()) {
-            if let Some(gate) = any_of(inc.iter().map(|(_, w)| w.clone()).collect()) {
-                fb = fb.gate(gate);
-            }
+        if let Some(inc) = incoming.get(s.id.as_str())
+            && let Some(gate) = any_of(inc.iter().map(|(_, w)| w.clone()).collect())
+        {
+            fb = fb.gate(gate);
         }
 
         if let Some(say) = &s.say {
@@ -1181,10 +1201,10 @@ fn lower_flow(stages: &[StageSpec], require: &[String]) -> Result<CompiledFlow, 
         }
 
         let mut allow: Vec<String> = s.allow.clone();
-        if let Some(c) = &s.commit {
-            if !allow.contains(&c.tool) {
-                allow.push(c.tool.clone());
-            }
+        if let Some(c) = &s.commit
+            && !allow.contains(&c.tool)
+        {
+            allow.push(c.tool.clone());
         }
         if !allow.is_empty() {
             fb = fb.allow(allow);
@@ -1210,7 +1230,7 @@ fn lower_flow(stages: &[StageSpec], require: &[String]) -> Result<CompiledFlow, 
         fb = fb.require(require.to_vec());
     }
 
-    let flow = fb.build().map_err(ConversationError::Flow)?;
+    let flow = fb.build().map_err(|e| ConversationError::Flow(e.issues))?;
     flow.compile().map_err(ConversationError::Compile)
 }
 
@@ -1229,26 +1249,26 @@ fn compile_spec(
     // Apply cross-cutting policies. SafetyHandoff lowers to a `safety` digression
     // (terminate on intent); Redact/Commit are carried for the runtime.
     for policy in spec.policies.clone() {
-        if let crate::policy::Policy::SafetyHandoff { intents } = policy {
-            if let Some(trigger) = any_of(
+        if let crate::policy::Policy::SafetyHandoff { intents } = policy
+            && let Some(trigger) = any_of(
                 intents
                     .iter()
                     .map(|i| Guard::is_true(format!("intent:{i}")))
                     .collect(),
-            ) {
-                spec.overlays.push(OverlaySpec {
-                    name: "safety".into(),
-                    trigger,
-                    stages: vec![StageSpec {
-                        id: "safety_handoff".into(),
-                        say: Some("Safety concern detected — hand off to a human now.".into()),
-                        terminal: true,
-                        ..Default::default()
-                    }],
-                    require: Vec::new(),
-                    resume: Resume::Terminate,
-                });
-            }
+            )
+        {
+            spec.overlays.push(OverlaySpec {
+                name: "safety".into(),
+                trigger,
+                stages: vec![StageSpec {
+                    id: "safety_handoff".into(),
+                    say: Some("Safety concern detected — hand off to a human now.".into()),
+                    terminal: true,
+                    ..Default::default()
+                }],
+                require: Vec::new(),
+                resume: Resume::Terminate,
+            });
         }
     }
 
@@ -1427,7 +1447,7 @@ mod tests {
     fn compiles_to_a_governed_flow() {
         let convo = booking();
         // The commit tool is in the tool universe and gated.
-        assert!(convo.flow().tool_policy().tools.contains("book"));
+        assert!(convo.flow().tool_surface().tools.contains("book"));
         assert_eq!(convo.flow().flow().steps.len(), 4);
     }
 
@@ -1615,7 +1635,7 @@ mod tests {
         let err = Conversation::new("x")
             .stage("s")
             .commit("pay", Guard::always())
-            .done(Guard::called_ok("pay"))
+            .complete_when(Guard::called_ok("pay"))
             .next("done", Guard::called_ok("pay"))
             .stage("done")
             .terminal()
@@ -1781,7 +1801,10 @@ mod tests {
             .stage("check")
             .resolve_slot("availability", ["party_size"], None, |args| async move {
                 // Echo an availability decision derived from the bound arg.
-                let n = args.get("party_size").and_then(|v| v.as_i64()).unwrap_or(0);
+                let n = args
+                    .get("party_size")
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap_or(0);
                 Ok(serde_json::json!(n <= 8))
             })
             .next("done", Guard::is_set("availability"))
@@ -1850,12 +1873,12 @@ mod tests {
             .trigger(Guard::is_true("intent:faq"))
             // A gated answer stage so the overlay does not complete in one turn.
             .stage("answer")
-            .done(Guard::is_true("faq_answered"))
+            .complete_when(Guard::is_true("faq_answered"))
             .next("faq_end", Guard::is_true("faq_answered"))
             .stage("faq_end")
             .terminal()
             .resume(Resume::Previous)
-            .done_overlay()
+            .end_overlay()
             .compile()
             .expect("compiles");
 
@@ -1897,7 +1920,7 @@ mod tests {
             .stage("confirm")
             .terminal()
             .resume(Resume::Terminate)
-            .done_overlay()
+            .end_overlay()
             .into_spec();
         let json = serde_json::to_string(&spec).unwrap();
         let back: ConversationSpec = serde_json::from_str(&json).unwrap();
@@ -1946,14 +1969,14 @@ mod tests {
         // escalate (route to `handoff`) after 3.
         let convo = Conversation::new("support")
             .stage("collect")
-            .done(Guard::is_true("info"))
+            .complete_when(Guard::is_true("info"))
             .next("done", Guard::is_true("info"))
             .repair(RepairPolicy::new(2, 3).escalate_to("handoff"))
             .stage("done")
             .terminal()
             // Non-terminal so it stays *active* (terminal stages latch instantly).
             .stage("handoff")
-            .done(Guard::is_true("handoff_complete"))
+            .complete_when(Guard::is_true("handoff_complete"))
             .compile()
             .expect("compiles");
 
@@ -1980,7 +2003,7 @@ mod tests {
 
         let convo = Conversation::new("s")
             .stage("collect")
-            .done(Guard::is_true("info"))
+            .complete_when(Guard::is_true("info"))
             .next("done", Guard::is_true("info"))
             .repair(RepairPolicy::new(1, 9))
             .stage("done")
@@ -2020,7 +2043,7 @@ mod tests {
         let err = Conversation::new("x")
             .stage("s")
             .commit("pay", Guard::always())
-            .done(Guard::called_ok("pay"))
+            .complete_when(Guard::called_ok("pay"))
             .next("done", Guard::called_ok("pay"))
             .stage("done")
             .terminal()

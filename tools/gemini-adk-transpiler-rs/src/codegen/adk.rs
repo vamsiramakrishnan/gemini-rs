@@ -21,7 +21,7 @@ const RUST_KEYWORDS: &[&str] = &[
 /// Escape a Rust keyword by prefixing with `r#`.
 fn escape_keyword(name: &str) -> String {
     if RUST_KEYWORDS.contains(&name) {
-        format!("r#{}", name)
+        format!("r#{name}")
     } else {
         name.to_string()
     }
@@ -68,7 +68,7 @@ fn to_camel_case_variant(name: &str) -> String {
                     Some(first) => {
                         let rest: String =
                             chars.map(|c| c.to_lowercase().next().unwrap()).collect();
-                        format!("{}{}", first, rest)
+                        format!("{first}{rest}")
                     }
                     None => String::new(),
                 }
@@ -230,7 +230,7 @@ fn generate_type_def(type_def: &TypeDef) -> String {
 
     if let Some(desc) = &type_def.description {
         for line in desc.lines() {
-            out.push_str(&format!("/// {}\n", line));
+            out.push_str(&format!("/// {line}\n"));
         }
     }
 
@@ -252,11 +252,11 @@ fn generate_type_def(type_def: &TypeDef) -> String {
 
         for field in &type_def.fields {
             if let Some(desc) = &field.description {
-                out.push_str(&format!("    /// {}\n", desc));
+                out.push_str(&format!("    /// {desc}\n"));
             }
             let snake = escape_keyword(&to_snake_case(&field.name));
             let rtype = field_rust_type(field);
-            out.push_str(&format!("    pub {}: {},\n", snake, rtype));
+            out.push_str(&format!("    pub {snake}: {rtype},\n"));
         }
 
         out.push_str("}\n\n");
@@ -273,18 +273,18 @@ fn generate_type_def(type_def: &TypeDef) -> String {
 /// - Agent trait impl (for composition agents)
 fn generate_agent(agent: &AgentDef) -> String {
     let struct_name = to_rust_struct_name(&agent.name);
-    let config_name = format!("{}Config", struct_name);
-    let builder_name = format!("{}Builder", struct_name);
+    let config_name = format!("{struct_name}Config");
+    let builder_name = format!("{struct_name}Builder");
 
     let mut out = String::new();
 
     // Section separator
-    out.push_str(&format!("// ---- {} ----\n\n", struct_name));
+    out.push_str(&format!("// ---- {struct_name} ----\n\n"));
 
     // Doc comment
     if let Some(desc) = &agent.description {
         for line in desc.lines() {
-            out.push_str(&format!("/// {}\n", line));
+            out.push_str(&format!("/// {line}\n"));
         }
     }
 
@@ -293,16 +293,16 @@ fn generate_agent(agent: &AgentDef) -> String {
 
     // --- Config struct ---
     out.push_str("#[derive(Debug, Clone)]\n");
-    out.push_str(&format!("pub struct {} {{\n", config_name));
+    out.push_str(&format!("pub struct {config_name} {{\n"));
     out.push_str("    pub name: String,\n");
 
     for field in &fields {
         if let Some(desc) = &field.description {
-            out.push_str(&format!("    /// {}\n", desc));
+            out.push_str(&format!("    /// {desc}\n"));
         }
         let snake = escape_keyword(&to_snake_case(&field.name));
         let rtype = field_rust_type(field);
-        out.push_str(&format!("    pub {}: {},\n", snake, rtype));
+        out.push_str(&format!("    pub {snake}: {rtype},\n"));
     }
 
     // Callbacks as comments
@@ -310,7 +310,7 @@ fn generate_agent(agent: &AgentDef) -> String {
         out.push_str(&format!("    // Callback: {}\n", cb.name));
         out.push_str(&format!("    // TS signature: {}\n", cb.ts_signature));
         if let Some(desc) = &cb.description {
-            out.push_str(&format!("    // {}\n", desc));
+            out.push_str(&format!("    // {desc}\n"));
         }
         out.push_str("    // TODO: Implement Rust callback type\n");
     }
@@ -318,7 +318,7 @@ fn generate_agent(agent: &AgentDef) -> String {
     out.push_str("}\n\n");
 
     // --- Default impl ---
-    out.push_str(&format!("impl Default for {} {{\n", config_name));
+    out.push_str(&format!("impl Default for {config_name} {{\n"));
     out.push_str("    fn default() -> Self {\n");
     out.push_str("        Self {\n");
     out.push_str("            name: String::new(),\n");
@@ -326,7 +326,7 @@ fn generate_agent(agent: &AgentDef) -> String {
     for field in &fields {
         let snake = escape_keyword(&to_snake_case(&field.name));
         let default = rust_default_for_type(&field.rust_type, field.optional);
-        out.push_str(&format!("            {}: {},\n", snake, default));
+        out.push_str(&format!("            {snake}: {default},\n"));
     }
 
     out.push_str("        }\n");
@@ -334,18 +334,18 @@ fn generate_agent(agent: &AgentDef) -> String {
     out.push_str("}\n\n");
 
     // --- Builder ---
-    out.push_str(&format!("pub struct {} {{\n", builder_name));
-    out.push_str(&format!("    config: {},\n", config_name));
+    out.push_str(&format!("pub struct {builder_name} {{\n"));
+    out.push_str(&format!("    config: {config_name},\n"));
     out.push_str("}\n\n");
 
-    out.push_str(&format!("impl {} {{\n", builder_name));
+    out.push_str(&format!("impl {builder_name} {{\n"));
 
     // Builder::new
     out.push_str("    pub fn new(name: impl Into<String>) -> Self {\n");
     out.push_str("        Self {\n");
-    out.push_str(&format!("            config: {} {{\n", config_name));
+    out.push_str(&format!("            config: {config_name} {{\n"));
     out.push_str("                name: name.into(),\n");
-    out.push_str(&format!("                ..{}::default()\n", config_name));
+    out.push_str(&format!("                ..{config_name}::default()\n"));
     out.push_str("            },\n");
     out.push_str("        }\n");
     out.push_str("    }\n\n");
@@ -359,48 +359,46 @@ fn generate_agent(agent: &AgentDef) -> String {
                 "    pub fn {}(mut self, value: {}) -> Self {{\n",
                 snake, field.rust_type
             ));
-            out.push_str(&format!("        self.config.{} = Some(value);\n", snake));
+            out.push_str(&format!("        self.config.{snake} = Some(value);\n"));
         } else {
             out.push_str(&format!(
                 "    pub fn {}(mut self, value: {}) -> Self {{\n",
                 snake, field.rust_type
             ));
-            out.push_str(&format!("        self.config.{} = value;\n", snake));
+            out.push_str(&format!("        self.config.{snake} = value;\n"));
         }
         out.push_str("        self\n");
         out.push_str("    }\n\n");
     }
 
     // Builder::build
-    out.push_str(&format!("    pub fn build(self) -> {} {{\n", struct_name));
+    out.push_str(&format!("    pub fn build(self) -> {struct_name} {{\n"));
     out.push_str(&format!(
-        "        {} {{ config: self.config }}\n",
-        struct_name
+        "        {struct_name} {{ config: self.config }}\n"
     ));
     out.push_str("    }\n");
     out.push_str("}\n\n");
 
     // --- Wrapper struct ---
-    out.push_str(&format!("pub struct {} {{\n", struct_name));
-    out.push_str(&format!("    config: {},\n", config_name));
+    out.push_str(&format!("pub struct {struct_name} {{\n"));
+    out.push_str(&format!("    config: {config_name},\n"));
     out.push_str("}\n\n");
 
     // --- Agent trait impl (for all agents, composition gets todo!, others get comment) ---
     if is_composition_agent(&agent.kind) {
         out.push_str("#[async_trait]\n");
-        out.push_str(&format!("impl Agent for {} {{\n", struct_name));
+        out.push_str(&format!("impl Agent for {struct_name} {{\n"));
         out.push_str("    fn name(&self) -> &str {\n");
         out.push_str("        &self.config.name\n");
         out.push_str("    }\n\n");
         out.push_str("    async fn run_live(&self, _ctx: &mut InvocationContext) -> Result<(), AgentError> {\n");
         out.push_str("        // Generated stub -- override with actual implementation\n");
-        out.push_str(&format!("        todo!(\"{}::run_live\")\n", struct_name));
+        out.push_str(&format!("        todo!(\"{struct_name}::run_live\")\n"));
         out.push_str("    }\n");
         out.push_str("}\n\n");
     } else {
         out.push_str(&format!(
-            "// Agent trait impl for {} should be provided by the runtime crate.\n\n",
-            struct_name
+            "// Agent trait impl for {struct_name} should be provided by the runtime crate.\n\n"
         ));
     }
 
@@ -413,24 +411,24 @@ fn generate_tool(tool: &ToolDef) -> String {
 
     let mut out = String::new();
 
-    out.push_str(&format!("// ---- {} ----\n\n", struct_name));
+    out.push_str(&format!("// ---- {struct_name} ----\n\n"));
 
     if let Some(desc) = &tool.description {
         for line in desc.lines() {
-            out.push_str(&format!("/// {}\n", line));
+            out.push_str(&format!("/// {line}\n"));
         }
     }
 
     out.push_str("#[derive(Debug, Clone, Default)]\n");
-    out.push_str(&format!("pub struct {} {{\n", struct_name));
+    out.push_str(&format!("pub struct {struct_name} {{\n"));
 
     for field in &tool.fields {
         if let Some(desc) = &field.description {
-            out.push_str(&format!("    /// {}\n", desc));
+            out.push_str(&format!("    /// {desc}\n"));
         }
         let snake = escape_keyword(&to_snake_case(&field.name));
         let rtype = field_rust_type(field);
-        out.push_str(&format!("    pub {}: {},\n", snake, rtype));
+        out.push_str(&format!("    pub {snake}: {rtype},\n"));
     }
 
     out.push_str("}\n\n");
@@ -466,7 +464,7 @@ fn resolve_runtime_type(rust_type: &str) -> String {
         .and_then(|s| s.strip_suffix('>'))
     {
         let resolved_inner = resolve_runtime_type(inner);
-        return format!("Vec<{}>", resolved_inner);
+        return format!("Vec<{resolved_inner}>");
     }
 
     // 2. Check genai lookup (set during combined transpile)
@@ -504,7 +502,7 @@ fn resolve_runtime_type(rust_type: &str) -> String {
     }
 
     // 4. Heuristic fallback — unknown PascalCase → serde_json::Value
-    if rust_type.chars().next().is_some_and(|c| c.is_uppercase())
+    if rust_type.chars().next().is_some_and(char::is_uppercase)
         && !rust_type.starts_with("String")
         && !rust_type.starts_with("Option<")
         && !rust_type.contains("::")
@@ -519,7 +517,7 @@ fn resolve_runtime_type(rust_type: &str) -> String {
 fn resolved_field_type(field: &FieldDef) -> String {
     let resolved = resolve_runtime_type(&field.rust_type);
     if field.optional {
-        format!("Option<{}>", resolved)
+        format!("Option<{resolved}>")
     } else {
         resolved
     }
@@ -695,7 +693,7 @@ fn generate_compilable_type_def(type_def: &TypeDef) -> String {
 
     if let Some(desc) = &type_def.description {
         for line in desc.lines() {
-            out.push_str(&format!("/// {}\n", line));
+            out.push_str(&format!("/// {line}\n"));
         }
     }
 
@@ -736,11 +734,11 @@ fn generate_compilable_type_def(type_def: &TypeDef) -> String {
 
         for field in &type_def.fields {
             if let Some(desc) = &field.description {
-                out.push_str(&format!("    /// {}\n", desc));
+                out.push_str(&format!("    /// {desc}\n"));
             }
             let snake = escape_keyword(&to_snake_case(&field.name));
             let rtype = resolved_field_type(field);
-            out.push_str(&format!("    pub {}: {},\n", snake, rtype));
+            out.push_str(&format!("    pub {snake}: {rtype},\n"));
         }
 
         out.push_str("}\n\n");
@@ -756,20 +754,20 @@ fn generate_compilable_agent(
     agents_by_name: &HashMap<&str, &AgentDef>,
 ) -> String {
     let struct_name = to_rust_struct_name(&agent.name);
-    let config_name = format!("{}Config", struct_name);
-    let builder_name = format!("{}Builder", struct_name);
+    let config_name = format!("{struct_name}Config");
+    let builder_name = format!("{struct_name}Builder");
 
     let (flattened_fields, flattened_callbacks) = flatten_fields(agent, agents_by_name);
 
     let mut out = String::new();
 
     // Section separator
-    out.push_str(&format!("// ---- {} ----\n\n", struct_name));
+    out.push_str(&format!("// ---- {struct_name} ----\n\n"));
 
     // Doc comment
     if let Some(desc) = &agent.description {
         for line in desc.lines() {
-            out.push_str(&format!("/// {}\n", line));
+            out.push_str(&format!("/// {line}\n"));
         }
     }
     if agent.extends.is_some() {
@@ -791,34 +789,33 @@ fn generate_compilable_agent(
     } else {
         out.push_str("// Cannot derive Clone: contains trait objects\n");
     }
-    out.push_str(&format!("pub struct {} {{\n", config_name));
+    out.push_str(&format!("pub struct {config_name} {{\n"));
     out.push_str("    pub name: String,\n");
 
     for field in &flattened_fields {
         if let Some(desc) = &field.description {
-            out.push_str(&format!("    /// {}\n", desc));
+            out.push_str(&format!("    /// {desc}\n"));
         }
         let snake = escape_keyword(&to_snake_case(&field.name));
         let rtype = resolved_field_type(field);
-        out.push_str(&format!("    pub {}: {},\n", snake, rtype));
+        out.push_str(&format!("    pub {snake}: {rtype},\n"));
     }
 
     // Callbacks as real types
     for cb in &flattened_callbacks {
         let snake = escape_keyword(&to_snake_case(&cb.name));
         if let Some(desc) = &cb.description {
-            out.push_str(&format!("    /// {}\n", desc));
+            out.push_str(&format!("    /// {desc}\n"));
         }
         out.push_str(&format!(
-            "    pub {}: Option<Box<dyn Fn(&InvocationContext) + Send + Sync>>,\n",
-            snake
+            "    pub {snake}: Option<Box<dyn Fn(&InvocationContext) + Send + Sync>>,\n"
         ));
     }
 
     out.push_str("}\n\n");
 
     // --- Config impl with new() ---
-    out.push_str(&format!("impl {} {{\n", config_name));
+    out.push_str(&format!("impl {config_name} {{\n"));
     out.push_str("    pub fn new(name: impl Into<String>) -> Self {\n");
     out.push_str("        Self {\n");
     out.push_str("            name: name.into(),\n");
@@ -827,12 +824,12 @@ fn generate_compilable_agent(
         let snake = escape_keyword(&to_snake_case(&field.name));
         let resolved = resolve_runtime_type(&field.rust_type);
         let default = runtime_default_for_type(&resolved, field.optional);
-        out.push_str(&format!("            {}: {},\n", snake, default));
+        out.push_str(&format!("            {snake}: {default},\n"));
     }
 
     for cb in &flattened_callbacks {
         let snake = escape_keyword(&to_snake_case(&cb.name));
-        out.push_str(&format!("            {}: None,\n", snake));
+        out.push_str(&format!("            {snake}: None,\n"));
     }
 
     out.push_str("        }\n");
@@ -840,19 +837,16 @@ fn generate_compilable_agent(
     out.push_str("}\n\n");
 
     // --- Builder ---
-    out.push_str(&format!("pub struct {} {{\n", builder_name));
-    out.push_str(&format!("    config: {},\n", config_name));
+    out.push_str(&format!("pub struct {builder_name} {{\n"));
+    out.push_str(&format!("    config: {config_name},\n"));
     out.push_str("}\n\n");
 
-    out.push_str(&format!("impl {} {{\n", builder_name));
+    out.push_str(&format!("impl {builder_name} {{\n"));
 
     // Builder::new
     out.push_str("    pub fn new(name: impl Into<String>) -> Self {\n");
     out.push_str("        Self {\n");
-    out.push_str(&format!(
-        "            config: {}::new(name),\n",
-        config_name
-    ));
+    out.push_str(&format!("            config: {config_name}::new(name),\n"));
     out.push_str("        }\n");
     out.push_str("    }\n\n");
 
@@ -862,33 +856,30 @@ fn generate_compilable_agent(
         let resolved = resolve_runtime_type(&field.rust_type);
         if field.optional {
             out.push_str(&format!(
-                "    pub fn {}(mut self, value: {}) -> Self {{\n",
-                snake, resolved
+                "    pub fn {snake}(mut self, value: {resolved}) -> Self {{\n"
             ));
-            out.push_str(&format!("        self.config.{} = Some(value);\n", snake));
+            out.push_str(&format!("        self.config.{snake} = Some(value);\n"));
         } else {
             out.push_str(&format!(
-                "    pub fn {}(mut self, value: {}) -> Self {{\n",
-                snake, resolved
+                "    pub fn {snake}(mut self, value: {resolved}) -> Self {{\n"
             ));
-            out.push_str(&format!("        self.config.{} = value;\n", snake));
+            out.push_str(&format!("        self.config.{snake} = value;\n"));
         }
         out.push_str("        self\n");
         out.push_str("    }\n\n");
     }
 
     // Builder::build
-    out.push_str(&format!("    pub fn build(self) -> {} {{\n", struct_name));
+    out.push_str(&format!("    pub fn build(self) -> {struct_name} {{\n"));
     out.push_str(&format!(
-        "        {} {{ config: self.config }}\n",
-        struct_name
+        "        {struct_name} {{ config: self.config }}\n"
     ));
     out.push_str("    }\n");
     out.push_str("}\n\n");
 
     // --- Wrapper struct ---
-    out.push_str(&format!("pub struct {} {{\n", struct_name));
-    out.push_str(&format!("    pub config: {},\n", config_name));
+    out.push_str(&format!("pub struct {struct_name} {{\n"));
+    out.push_str(&format!("    pub config: {config_name},\n"));
     out.push_str("}\n\n");
 
     // --- Agent trait impl ---
@@ -896,8 +887,7 @@ fn generate_compilable_agent(
         out.push_str(&generate_composition_agent_impl(agent, &struct_name));
     } else {
         out.push_str(&format!(
-            "// Agent trait impl for {} should be provided by the application.\n\n",
-            struct_name
+            "// Agent trait impl for {struct_name} should be provided by the application.\n\n"
         ));
     }
 
@@ -910,7 +900,7 @@ fn generate_composition_agent_impl(agent: &AgentDef, struct_name: &str) -> Strin
     let mut out = String::new();
 
     out.push_str("#[async_trait]\n");
-    out.push_str(&format!("impl Agent for {} {{\n", struct_name));
+    out.push_str(&format!("impl Agent for {struct_name} {{\n"));
 
     // name()
     out.push_str("    fn name(&self) -> &str {\n");
@@ -953,7 +943,7 @@ fn generate_composition_agent_impl(agent: &AgentDef, struct_name: &str) -> Strin
             out.push_str("        inner.run_live(ctx).await\n");
         }
         _ => {
-            out.push_str(&format!("        todo!(\"{}::run_live\")\n", struct_name));
+            out.push_str(&format!("        todo!(\"{struct_name}::run_live\")\n"));
         }
     }
 
@@ -969,11 +959,11 @@ fn generate_compilable_tool(tool: &ToolDef) -> String {
 
     let mut out = String::new();
 
-    out.push_str(&format!("// ---- {} ----\n\n", struct_name));
+    out.push_str(&format!("// ---- {struct_name} ----\n\n"));
 
     if let Some(desc) = &tool.description {
         for line in desc.lines() {
-            out.push_str(&format!("/// {}\n", line));
+            out.push_str(&format!("/// {line}\n"));
         }
     }
 
@@ -988,15 +978,15 @@ fn generate_compilable_tool(tool: &ToolDef) -> String {
     } else {
         out.push_str("// Cannot derive Clone: contains trait objects\n");
     }
-    out.push_str(&format!("pub struct {} {{\n", struct_name));
+    out.push_str(&format!("pub struct {struct_name} {{\n"));
 
     for field in &tool.fields {
         if let Some(desc) = &field.description {
-            out.push_str(&format!("    /// {}\n", desc));
+            out.push_str(&format!("    /// {desc}\n"));
         }
         let snake = escape_keyword(&to_snake_case(&field.name));
         let rtype = resolved_field_type(field);
-        out.push_str(&format!("    pub {}: {},\n", snake, rtype));
+        out.push_str(&format!("    pub {snake}: {rtype},\n"));
     }
 
     out.push_str("}\n\n");
@@ -1119,8 +1109,7 @@ mod tests {
         );
         assert!(
             code.contains("pub description: Option<String>,"),
-            "Should contain optional description field, got:\n{}",
-            code
+            "Should contain optional description field, got:\n{code}"
         );
         assert!(
             code.contains("pub sub_agents: Option<Vec<String>>,"),
@@ -1384,7 +1373,7 @@ mod tests {
             description: Some("Test agent.".to_string()),
             fields,
             callbacks,
-            extends: extends.map(|s| s.to_string()),
+            extends: extends.map(std::string::ToString::to_string),
         }
     }
 
@@ -1502,8 +1491,7 @@ mod tests {
         );
         assert!(
             code.contains("pub tools: Option<Vec<Arc<dyn ToolFunction>>>,"),
-            "Should resolve ToolRef to Arc<dyn ToolFunction>, got:\n{}",
-            code
+            "Should resolve ToolRef to Arc<dyn ToolFunction>, got:\n{code}"
         );
         // Inherited fields
         assert!(
@@ -1512,8 +1500,7 @@ mod tests {
         );
         assert!(
             code.contains("pub sub_agents: Option<Vec<Arc<dyn Agent>>>,"),
-            "Should resolve inherited Vec<AgentRef> to Vec<Arc<dyn Agent>>, got:\n{}",
-            code
+            "Should resolve inherited Vec<AgentRef> to Vec<Arc<dyn Agent>>, got:\n{code}"
         );
         // Inherited callback
         assert!(
@@ -1639,8 +1626,7 @@ mod tests {
             code.contains(
                 "pub before_model_callback: Option<Box<dyn Fn(&InvocationContext) + Send + Sync>>,"
             ),
-            "Should generate real callback type, got:\n{}",
-            code
+            "Should generate real callback type, got:\n{code}"
         );
         assert!(
             !code.contains("// TODO: Implement Rust callback type"),
@@ -1664,8 +1650,7 @@ mod tests {
 
         assert!(
             code.contains("pub agent: Arc<dyn Agent>,"),
-            "Should resolve AgentRef to Arc<dyn Agent>, got:\n{}",
-            code
+            "Should resolve AgentRef to Arc<dyn Agent>, got:\n{code}"
         );
     }
 

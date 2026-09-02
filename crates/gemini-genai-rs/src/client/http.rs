@@ -54,7 +54,7 @@ pub enum HttpError {
 
     /// Authentication error.
     #[error("Auth error: {0}")]
-    Auth(String),
+    Auth(#[from] crate::session::AuthError),
 
     /// JSON deserialization error.
     #[error("JSON parse error: {0}")]

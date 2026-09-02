@@ -33,7 +33,6 @@ use gemini_adk_fluent_rs::prelude::*;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let handle = Live::builder()
-        .model(GeminiModel::Gemini2_0FlashLive)
         .instruction("You are a helpful voice assistant.")
         .on_text(|t| print!("{t}"))
         .on_turn_complete(|| async { println!() })
@@ -57,7 +56,6 @@ resolution rules and troubleshooting guide.
 
 ```rust,ignore
 let handle = Live::builder()
-    .model(GeminiModel::Gemini2_0FlashLive)
     .instruction("You are a helpful voice assistant.")
     .on_text(|t| print!("{t}"))
     .on_turn_complete(|| async { println!() })
@@ -79,24 +77,24 @@ session. Here is the full chain with all major options:
 
 ```rust,ignore
 let handle = Live::builder()
-    // Model and voice
-    .model(GeminiModel::Gemini2_5FlashNativeAudio)
+    // Model (optional — omit it and connect picks the platform default) and voice
+    .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
     .voice(Voice::Kore)
     .temperature(0.7)
     .instruction("You are a restaurant order assistant.")
 
     // Tools (auto-dispatched when model calls them)
-    .tools(dispatcher)
+    .dispatcher(dispatcher)
 
     // Audio/transcription config
-    .transcription(true, true)   // input, output
-    .affective_dialog(true)      // emotionally expressive responses
+    .transcription()         // both directions (.input_transcription() / .output_transcription() for one)
+    .affective_dialog()      // emotionally expressive responses
 
     // Server-side VAD
     .vad(AutomaticActivityDetection::default())
 
     // Session lifecycle
-    .session_resume(true)
+    .session_resume()
     .context_compression(4000, 2000)  // trigger_tokens, target_tokens
 
     // Greeting (model speaks first)
@@ -235,9 +233,8 @@ dispatcher.register(SimpleTool::new(
 ));
 
 let handle = Live::builder()
-    .model(GeminiModel::Gemini2_0FlashLive)
     .instruction("You are a weather assistant. Use get_weather to answer questions.")
-    .tools(dispatcher)
+    .dispatcher(dispatcher)
     .on_text(|t| print!("{t}"))
     .connect_google_ai(api_key)
     .await?;
@@ -269,7 +266,6 @@ completes.
 
 ```rust,ignore
 let handle = Live::builder()
-    .model(GeminiModel::Gemini2_5FlashNativeAudio)
     .voice(Voice::Kore)
     .instruction("You are a receptionist at a dental clinic.")
     .greeting("Greet the caller and ask how you can help them today.")
@@ -289,8 +285,7 @@ the user said and what the model said:
 
 ```rust,ignore
 let handle = Live::builder()
-    .model(GeminiModel::Gemini2_0FlashLive)
-    .transcription(true, true)  // input, output
+    .transcription()  // both directions
     .on_input_transcript(|text, is_final| {
         if is_final {
             println!("User: {text}");  // final, suitable for storage
@@ -333,10 +328,11 @@ A session progresses through these phases:
 | `SetupSent` | Setup message sent, waiting for `setupComplete` |
 | `Active` | Session is live, audio/text flowing |
 
-The `GoAway` event signals the server will disconnect in ~60 seconds.
-Save state and prepare to reconnect. With `.session_resume(true)`, you
-receive a `SessionResumeHandle` that can be used to continue the
-conversation in a new session.
+The `GoAway` event signals the server will disconnect soon (the
+`on_go_away` callback receives the server's time-left hint as a `Duration`).
+Save state and prepare to reconnect. With `.session_resume()`, the server
+keeps issuing resumption handles; `handle.resume_handle()` returns the latest
+one, which can be used to continue the conversation in a new session.
 
 ### Interacting with a Running Session
 
@@ -418,7 +414,6 @@ The easiest way to switch platforms is `connect_from_env()` with
 
 ```rust,ignore
 let handle = Live::builder()
-    .model(GeminiModel::Gemini2_0FlashLive)
     .connect_google_ai("YOUR_API_KEY")
     .await?;
 ```
@@ -433,7 +428,6 @@ let handle = Live::builder()
 let token = std::env::var("GOOGLE_ACCESS_TOKEN")?;
 
 let handle = Live::builder()
-    .model(GeminiModel::Gemini2_0FlashLive)
     .connect_vertex("my-gcp-project", "us-central1", token)
     .await?;
 ```
@@ -453,12 +447,11 @@ use gemini_genai_rs::prelude::*;
 let config = SessionConfig::from_endpoint(
     ApiEndpoint::vertex("my-project", "us-central1", token)
 )
-    .model(GeminiModel::Gemini2_5FlashNativeAudio)
     .voice(Voice::Kore)
     .response_modalities(vec![Modality::Audio])
     .system_instruction("You are a helpful assistant.")
-    .enable_input_transcription()
-    .enable_output_transcription();
+    .input_transcription(true)
+    .output_transcription(true);
 
 let handle = Live::builder()
     .on_audio(|data| { /* play audio */ })

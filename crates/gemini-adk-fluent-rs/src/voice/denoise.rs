@@ -2,7 +2,7 @@
 //!
 //! [`Denoiser`] is an RNNoise-based noise suppressor
 //! ([`nnnoiseless`](https://crates.io/crates/nnnoiseless), pure Rust) packaged
-//! as a [`MicProcessor`](super::MicProcessor) — drop it into
+//! as an [`InputAudioProcessor`](super::InputAudioProcessor) — drop it into
 //! [`pump_processed`](super::pump_processed) and the session's VAD sees
 //! denoised audio.
 //!
@@ -33,10 +33,10 @@
 //! ~0.12× realtime) scores the same on these noise benchmarks and better on
 //! very low-SNR speech quality, but its inference crate is only published
 //! as a git dependency, which a crates.io release cannot carry — so it
-//! stays an application-side `impl MicProcessor` (the eval harness in the
+//! stays an application-side `impl InputAudioProcessor` (the eval harness in the
 //! repository history has a working one) rather than an SDK feature.
 
-use super::MicProcessor;
+use super::InputAudioProcessor;
 
 const DENOISE_HZ: u32 = 48_000;
 const FRAME: usize = nnnoiseless::DenoiseState::FRAME_SIZE; // 480 = 10 ms
@@ -72,7 +72,7 @@ impl Denoiser {
     /// recurrent features that drive the suppression gains, read out as a
     /// per-block classifier. Updated every 10 ms block the denoiser
     /// processes (the maximum across the blocks consumed by the most recent
-    /// [`process`](MicProcessor::process) call); `0.0` before the first
+    /// [`process_frame`](InputAudioProcessor::process_frame) call); `0.0` before the first
     /// full block.
     ///
     /// This is a *learned* VAD: it responds to the statistical fingerprint
@@ -94,14 +94,8 @@ impl Denoiser {
     }
 }
 
-impl gemini_adk_rs::live::InputAudioProcessor for Denoiser {
+impl InputAudioProcessor for Denoiser {
     fn process_frame(&mut self, frame: &mut Vec<i16>) {
-        MicProcessor::process(self, frame);
-    }
-}
-
-impl MicProcessor for Denoiser {
-    fn process(&mut self, frame: &mut Vec<i16>) {
         if frame.is_empty() {
             return;
         }
@@ -171,7 +165,7 @@ mod tests {
         for i in 0..50 {
             let mut frame = noise_frame(320, &mut seed);
             let level_in = rms(&frame);
-            denoiser.process(&mut frame);
+            denoiser.process_frame(&mut frame);
             if i >= 10 && !frame.is_empty() {
                 in_rms += level_in;
                 out_rms += rms(&frame);
@@ -196,7 +190,7 @@ mod tests {
         for _ in 0..40 {
             let mut frame = noise_frame(160, &mut seed); // 20 ms @ 8 kHz
             fed += frame.len();
-            denoiser.process(&mut frame);
+            denoiser.process_frame(&mut frame);
             got += frame.len();
         }
         // Output may trail input by up to one 10 ms block (80 samples @ 8 kHz).
@@ -230,7 +224,7 @@ mod tests {
         let (mut rows, mut n, mut seed) = ([0.0; 16], 0usize, 0xFEED | 1);
         for _ in 0..50 {
             let mut frame = pink_frame(320, &mut rows, &mut n, &mut seed);
-            denoiser.process(&mut frame);
+            denoiser.process_frame(&mut frame);
             let p = denoiser.vad_probability();
             assert!((0.0..=1.0).contains(&p), "probability out of range: {p}");
         }
@@ -246,7 +240,7 @@ mod tests {
     fn empty_frames_flow_through() {
         let mut denoiser = Denoiser::new(16_000);
         let mut frame = Vec::new();
-        denoiser.process(&mut frame);
+        denoiser.process_frame(&mut frame);
         assert!(frame.is_empty());
     }
 }

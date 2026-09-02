@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use dashmap::DashMap;
 
-use super::{now_secs, Artifact, ArtifactError, ArtifactMetadata, ArtifactService};
+use super::{Artifact, ArtifactError, ArtifactMetadata, ArtifactService, now_secs};
 
 /// In-memory artifact service backed by [`DashMap`] for lock-free concurrent access.
 ///

@@ -41,7 +41,7 @@
 use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::state::State;
 
@@ -151,10 +151,11 @@ impl Expr {
                 }
                 Some(Value::String(out))
             }
-            Expr::CountTrue(keys) => Some(json!(keys
-                .iter()
-                .filter(|k| state.get::<bool>(k).unwrap_or(false))
-                .count())),
+            Expr::CountTrue(keys) => Some(json!(
+                keys.iter()
+                    .filter(|k| state.get::<bool>(k).unwrap_or(false))
+                    .count()
+            )),
         }
     }
 

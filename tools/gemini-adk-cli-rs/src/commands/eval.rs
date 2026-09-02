@@ -106,7 +106,7 @@ pub async fn run(
             _ => builder,
         };
     }
-    let agent = builder.build(llm.clone());
+    let agent = builder.build(llm.clone())?;
 
     // ── Create judge LLM (same model, used for scoring) ─────────────
     let judge_params = GeminiLlmParams {

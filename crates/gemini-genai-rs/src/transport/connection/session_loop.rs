@@ -11,12 +11,12 @@ use crate::session::{
     ResumeInfo, SessionCommand, SessionError, SessionEvent, SessionPhase, SessionState, SetupError,
     WebSocketError,
 };
+use crate::transport::TransportConfig;
 use crate::transport::codec::Codec;
 use crate::transport::ws::Transport;
-use crate::transport::TransportConfig;
 
-use super::message_handler::{handle_server_msg, MessageAction};
-use super::reconnect::{reconnect_delay, DisconnectReason};
+use super::message_handler::{MessageAction, handle_server_msg};
+use super::reconnect::{DisconnectReason, reconnect_delay};
 
 /// The main connection loop — manages connect, setup, send/recv, and reconnection.
 ///
@@ -43,10 +43,15 @@ pub(super) async fn generic_connection_loop<T: Transport, C: Codec>(
             state.force_phase(SessionPhase::Connecting);
         }
 
-        // Build URL and headers from config
+        // Build URL and headers from config. Google AI carries the credential
+        // in the query string, so only the part before `?` is logged.
         let url = config.ws_url();
         let model_uri = config.model_uri();
-        tracing::info!(url = %url, model = %model_uri, "WebSocket connecting");
+        tracing::info!(
+            endpoint = %url.split('?').next().unwrap_or_default(),
+            model = %model_uri,
+            "WebSocket connecting"
+        );
         let mut headers = vec![];
         if let Some(token) = config.bearer_token() {
             headers.push(("Authorization".to_string(), format!("Bearer {token}")));
@@ -66,13 +71,14 @@ pub(super) async fn generic_connection_loop<T: Transport, C: Codec>(
                 let setup_bytes = match codec.encode_setup(&config) {
                     Ok(b) => b,
                     Err(e) => {
-                        let _ =
-                            event_tx.send(SessionEvent::Error(format!("Setup encode error: {e}")));
+                        let _ = event_tx.send(SessionEvent::Error(SessionError::Codec(e)));
                         break;
                     }
                 };
                 if let Err(e) = transport.send(setup_bytes).await {
-                    let _ = event_tx.send(SessionEvent::Error(format!("Setup send error: {e}")));
+                    let _ = event_tx.send(SessionEvent::Error(SessionError::WebSocket(
+                        WebSocketError::ProtocolError(format!("setup send failed: {e}")),
+                    )));
                     // Fall through to reconnect
                     attempt += 1;
                     if attempt > transport_config.max_reconnect_attempts {
@@ -97,7 +103,7 @@ pub(super) async fn generic_connection_loop<T: Transport, C: Codec>(
                 match setup_result {
                     Ok(Ok(())) => {
                         attempt = 0; // Reset backoff on successful setup
-                                     // Run main session loop
+                        // Run main session loop
                         let reason = generic_run_session(
                             &config,
                             &mut transport,
@@ -133,24 +139,32 @@ pub(super) async fn generic_connection_loop<T: Transport, C: Codec>(
                     }
                     Ok(Err(e)) => {
                         tracing::warn!(error = %e, "WebSocket setup failed");
-                        let _ = event_tx.send(SessionEvent::Error(format!("Setup failed: {e}")));
+                        let _ = event_tx.send(SessionEvent::Error(e));
                     }
                     Err(_) => {
                         tracing::warn!(
                             "WebSocket setup timeout ({}s)",
                             transport_config.setup_timeout_secs
                         );
-                        let _ = event_tx.send(SessionEvent::Error("Setup timeout".into()));
+                        let _ = event_tx.send(SessionEvent::Error(SessionError::Timeout {
+                            phase: SessionPhase::SetupSent,
+                            elapsed: Duration::from_secs(transport_config.setup_timeout_secs),
+                        }));
                     }
                 }
             }
             Ok(Err(e)) => {
                 tracing::warn!(error = %e, "WebSocket connection failed");
-                let _ = event_tx.send(SessionEvent::Error(format!("Connection failed: {e}")));
+                let _ = event_tx.send(SessionEvent::Error(SessionError::WebSocket(
+                    WebSocketError::ConnectionRefused(e.to_string()),
+                )));
             }
             Err(_) => {
                 tracing::warn!("WebSocket connect timeout");
-                let _ = event_tx.send(SessionEvent::Error("Connect timeout".into()));
+                let _ = event_tx.send(SessionEvent::Error(SessionError::Timeout {
+                    phase: SessionPhase::Connecting,
+                    elapsed: Duration::from_secs(transport_config.connect_timeout_secs),
+                }));
             }
         }
 
@@ -185,15 +199,15 @@ async fn wait_for_setup<T: Transport, C: Codec>(
         match transport.recv().await {
             Ok(Some(data)) => match codec.decode_message(&data) {
                 Ok(ServerMessage::SetupComplete(sc)) => {
-                    if let Some(ref resumption) = sc.setup_complete.session_resumption {
-                        if let Some(ref handle) = resumption.handle {
-                            *state.resume_handle.lock() = Some(handle.clone());
-                            let _ = event_tx.send(SessionEvent::SessionResumeUpdate(ResumeInfo {
-                                handle: handle.clone(),
-                                resumable: true,
-                                last_consumed_index: None,
-                            }));
-                        }
+                    if let Some(ref resumption) = sc.setup_complete.session_resumption
+                        && let Some(ref handle) = resumption.handle
+                    {
+                        *state.resume_handle.lock() = Some(handle.clone());
+                        let _ = event_tx.send(SessionEvent::SessionResumeUpdate(ResumeInfo {
+                            handle: handle.clone(),
+                            resumable: true,
+                            last_consumed_index: None,
+                        }));
                     }
                     let _ = state.transition_to(SessionPhase::Active);
                     let _ = event_tx.send(SessionEvent::Connected);
@@ -264,15 +278,24 @@ async fn generic_run_session<T: Transport, C: Codec>(
                     }
                     // The peer's stated reason when it gave one — a bare
                     // "transport closed" is the fact of the close with the
-                    // account of it thrown away.
+                    // account of it thrown away. 1005 is RFC 6455's "no
+                    // status code was present": the transport reports the
+                    // reason text, not the code.
                     Ok(None) => {
-                        return DisconnectReason::Error(
-                            transport
-                                .close_reason()
-                                .unwrap_or_else(|| "transport closed".into()),
-                        )
+                        return DisconnectReason::Error(SessionError::WebSocket(
+                            WebSocketError::Closed {
+                                code: 1005,
+                                reason: transport
+                                    .close_reason()
+                                    .unwrap_or_else(|| "transport closed".into()),
+                            },
+                        ));
                     }
-                    Err(e) => return DisconnectReason::Error(e.to_string()),
+                    Err(e) => {
+                        return DisconnectReason::Error(SessionError::WebSocket(
+                            WebSocketError::ProtocolError(e.to_string()),
+                        ));
+                    }
                 }
             }
             cmd = command_rx.recv() => {
@@ -285,11 +308,20 @@ async fn generic_run_session<T: Transport, C: Codec>(
                     Some(cmd) => {
                         match codec.encode_command(&cmd, config) {
                             Ok(bytes) if !bytes.is_empty() => {
-                                if transport.send(bytes).await.is_err() {
-                                    return DisconnectReason::Error("Failed to send".into());
+                                if let Err(e) = transport.send(bytes).await {
+                                    return DisconnectReason::Error(SessionError::WebSocket(
+                                        WebSocketError::ProtocolError(format!(
+                                            "send failed: {e}"
+                                        )),
+                                    ));
                                 }
                             }
-                            _ => {}
+                            Ok(_) => {}
+                            // An unencodable command is the caller's bug, not
+                            // the connection's: report it and keep the session.
+                            Err(e) => {
+                                let _ = event_tx.send(SessionEvent::Error(SessionError::Codec(e)));
+                            }
                         }
                     }
                     None => return DisconnectReason::CommandChannelClosed,

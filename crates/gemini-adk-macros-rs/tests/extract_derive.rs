@@ -4,11 +4,11 @@
 //! live in `tests/` (not `#[cfg(test)] mod`). They exercise the generated code
 //! against the real `gemini-adk-rs` crate graph.
 
+use gemini_adk_rs::Extract; // the derive macro (macro namespace)
 use gemini_adk_rs::extract::RecordExtractor;
 use gemini_adk_rs::live::TranscriptTurn;
 use gemini_adk_rs::live::TurnExtractor;
-use gemini_adk_rs::Extract; // the derive macro (macro namespace)
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 #[derive(Extract)]
 #[extract(name = "order", window = 2)]

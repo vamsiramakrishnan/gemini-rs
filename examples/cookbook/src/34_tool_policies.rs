@@ -22,8 +22,8 @@
 //! Runs without credentials — all logic is exercised locally.
 
 use std::sync::{
-    atomic::{AtomicU32, Ordering},
     Arc,
+    atomic::{AtomicU32, Ordering},
 };
 use std::time::Duration;
 
@@ -324,7 +324,11 @@ async fn main() {
     println!("  T::timeout(tool, duration)   \u{2192} ToolError::Timeout on elapse");
     println!("  T::confirm(tool, msg)        \u{2192} PolicyTool::requires_confirmation() == true");
     println!("  T::cached(T::timeout(...))   \u{2192} both policies active (policies nest)");
-    println!("  ToolPolicy::new()            \u{2192} low-level builder: .with_cache() / .with_timeout() / .with_confirm()");
-    println!("  PolicyTool::new(fn, policy)  \u{2192} direct decorator; T::* wrappers call this internally");
+    println!(
+        "  ToolPolicy::new()            \u{2192} low-level builder: .with_cache() / .with_timeout() / .with_confirm()"
+    );
+    println!(
+        "  PolicyTool::new(fn, policy)  \u{2192} direct decorator; T::* wrappers call this internally"
+    );
     println!("\n=== Done ===");
 }

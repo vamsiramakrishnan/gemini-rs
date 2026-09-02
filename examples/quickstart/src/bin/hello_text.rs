@@ -8,7 +8,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let agent = AgentBuilder::new("assistant")
         .instruction("You are a concise assistant.")
-        .build(llm);
+        .build(llm)?;
 
     let state = State::new();
     state.set("input", "In one sentence: what is the Gemini Live API?")?;

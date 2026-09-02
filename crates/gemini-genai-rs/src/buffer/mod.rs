@@ -1,272 +1,237 @@
 //! Lock-free audio buffers for the hot path.
 //!
-//! - [`SpscRing`]: Single-producer single-consumer ring buffer for zero-copy audio streaming.
-//! - [`AudioJitterBuffer`]: Adaptive jitter buffer for smooth playback of network audio.
+//! - [`SpscRing`]: wait-free single-producer single-consumer ring for audio
+//!   streaming, split into a [`SpscProducer`] and an [`SpscConsumer`].
+//! - [`AudioJitterBuffer`]: adaptive jitter buffer for smooth playback of
+//!   network audio.
 
 pub mod convert;
 pub mod jitter;
 
 pub use convert::{bytes_to_i16, i16_to_bytes, into_shared};
-pub use jitter::{AudioJitterBuffer, JitterConfig};
+pub use jitter::{AudioJitterBuffer, BufferState, JitterConfig};
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+/// Wait-free single-producer single-consumer ring buffer for audio samples.
+///
+/// [`SpscRing::channel`] hands back the two halves, the way `mpsc::channel` does. Each half is `Send` but not
+/// `Sync`, so the "exactly one producer, exactly one consumer" rule that a
+/// ring like this depends on is enforced by the type system instead of by a
+/// comment: the producer moves to the capture thread, the consumer to the
+/// playback thread, and neither can be shared.
+///
+/// Backed by [`rtrb`] (the ring used across the Rust audio ecosystem):
+/// no allocation after construction, no locks, no `unsafe` in this crate.
+///
+/// ```
+/// use gemini_genai_rs::buffer::SpscRing;
+///
+/// let (mut tx, mut rx) = SpscRing::<i16>::channel(1024);
+/// assert_eq!(tx.write(&[1, 2, 3]), 3);
+/// let mut out = [0i16; 8];
+/// assert_eq!(rx.read(&mut out), 3);
+/// assert_eq!(&out[..3], &[1, 2, 3]);
+/// ```
+#[derive(Debug)]
+pub struct SpscRing<T>(std::marker::PhantomData<T>);
 
-/// Cache-line padding to prevent false sharing between producer and consumer.
-///
-/// 128 bytes covers both x86_64 (64B) and Apple Silicon (128B) cache lines.
-#[repr(align(128))]
-struct CachePad<T>(T);
-
-/// Lock-free single-producer single-consumer ring buffer.
-///
-/// The hot path for audio data. No heap allocation after initialization.
-/// Uses atomic head/tail pointers with cache-line padding to prevent false sharing.
-///
-/// # Performance
-///
-/// - Wait-free on the fast path (atomic store/load only)
-/// - Power-of-two capacity for bitwise modulo (single-cycle AND vs multi-cycle DIV)
-/// - Bounded memory, no allocation after init
-///
-/// # Safety
-///
-/// This buffer is safe for concurrent use by exactly one producer and one consumer.
-/// Multiple producers or multiple consumers will cause data races.
-pub struct SpscRing<T: Copy + Default> {
-    buf: Box<[T]>,
-    cap_mask: usize,
-    head: CachePad<AtomicUsize>,
-    tail: CachePad<AtomicUsize>,
-}
-
-impl<T: Copy + Default> SpscRing<T> {
-    /// Create a new ring buffer with the given capacity.
-    ///
-    /// Capacity is rounded up to the next power of two for efficient modulo.
+impl<T: Copy> SpscRing<T> {
+    /// Create a ring holding exactly `capacity` samples and split it into its
+    /// producer and consumer halves.
     ///
     /// # Panics
     ///
     /// Panics if `capacity` is 0.
-    pub fn new(capacity: usize) -> Self {
-        assert!(capacity > 0, "ring buffer capacity must be > 0");
-        let cap = capacity.next_power_of_two();
-        let buf = vec![T::default(); cap].into_boxed_slice();
-        Self {
-            buf,
-            cap_mask: cap - 1,
-            head: CachePad(AtomicUsize::new(0)),
-            tail: CachePad(AtomicUsize::new(0)),
-        }
-    }
-
-    /// Returns the usable capacity of the buffer.
-    pub fn capacity(&self) -> usize {
-        self.cap_mask + 1
-    }
-
-    /// Returns the number of items currently available to read.
-    pub fn len(&self) -> usize {
-        let head = self.head.0.load(Ordering::Acquire);
-        let tail = self.tail.0.load(Ordering::Acquire);
-        head.wrapping_sub(tail)
-    }
-
-    /// Returns true if the buffer is empty.
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    /// Returns the number of free slots available for writing.
-    pub fn available(&self) -> usize {
-        self.capacity() - self.len()
-    }
-
-    /// Write samples into the ring buffer.
-    ///
-    /// Returns the number of samples actually written (may be less than
-    /// `data.len()` if the buffer is nearly full).
-    ///
-    /// This is the **producer** method — call from exactly one thread.
-    pub fn write(&self, data: &[T]) -> usize {
-        let head = self.head.0.load(Ordering::Relaxed);
-        let tail = self.tail.0.load(Ordering::Acquire);
-
-        let free = self.capacity() - head.wrapping_sub(tail);
-        let to_write = data.len().min(free);
-
-        if to_write == 0 {
-            return 0;
-        }
-
-        let start = head & self.cap_mask;
-        let end = start + to_write;
-
-        if end <= self.capacity() {
-            // Contiguous write
-            // SAFETY: we are the sole producer and have verified space is available
-            unsafe {
-                let dst = self.buf.as_ptr() as *mut T;
-                std::ptr::copy_nonoverlapping(data.as_ptr(), dst.add(start), to_write);
-            }
-        } else {
-            // Wrapped write: two segments
-            let first_len = self.capacity() - start;
-            let second_len = to_write - first_len;
-            unsafe {
-                let dst = self.buf.as_ptr() as *mut T;
-                std::ptr::copy_nonoverlapping(data.as_ptr(), dst.add(start), first_len);
-                std::ptr::copy_nonoverlapping(data.as_ptr().add(first_len), dst, second_len);
-            }
-        }
-
-        self.head
-            .0
-            .store(head.wrapping_add(to_write), Ordering::Release);
-        to_write
-    }
-
-    /// Read samples from the ring buffer into `out`.
-    ///
-    /// Returns the number of samples actually read (may be less than
-    /// `out.len()` if the buffer has fewer samples available).
-    ///
-    /// This is the **consumer** method — call from exactly one thread.
-    pub fn read(&self, out: &mut [T]) -> usize {
-        let tail = self.tail.0.load(Ordering::Relaxed);
-        let head = self.head.0.load(Ordering::Acquire);
-
-        let available = head.wrapping_sub(tail);
-        let to_read = out.len().min(available);
-
-        if to_read == 0 {
-            return 0;
-        }
-
-        let start = tail & self.cap_mask;
-        let end = start + to_read;
-
-        if end <= self.capacity() {
-            out[..to_read].copy_from_slice(&self.buf[start..start + to_read]);
-        } else {
-            let first_len = self.capacity() - start;
-            let second_len = to_read - first_len;
-            out[..first_len].copy_from_slice(&self.buf[start..]);
-            out[first_len..to_read].copy_from_slice(&self.buf[..second_len]);
-        }
-
-        self.tail
-            .0
-            .store(tail.wrapping_add(to_read), Ordering::Release);
-        to_read
-    }
-
-    /// Discard all buffered data without reading it.
-    pub fn clear(&self) {
-        let head = self.head.0.load(Ordering::Acquire);
-        self.tail.0.store(head, Ordering::Release);
+    pub fn channel(capacity: usize) -> (SpscProducer<T>, SpscConsumer<T>) {
+        assert!(capacity > 0, "ring capacity must be > 0");
+        let (producer, consumer) = rtrb::RingBuffer::new(capacity);
+        (SpscProducer(producer), SpscConsumer(consumer))
     }
 }
 
-// SAFETY: SpscRing is safe to share across threads. The atomic operations on head/tail
-// provide the necessary synchronization. The invariant that exactly one producer and
-// one consumer exist must be upheld by the caller.
-unsafe impl<T: Copy + Default + Send> Send for SpscRing<T> {}
-unsafe impl<T: Copy + Default + Send> Sync for SpscRing<T> {}
+/// The writing half of an [`SpscRing`].
+pub struct SpscProducer<T>(rtrb::Producer<T>);
+
+/// The reading half of an [`SpscRing`].
+pub struct SpscConsumer<T>(rtrb::Consumer<T>);
+
+impl<T: Copy> SpscProducer<T> {
+    /// Write as many samples as fit; returns how many were written.
+    ///
+    /// A short write means the consumer is behind — the caller decides
+    /// whether to retry, drop, or block.
+    pub fn write(&mut self, data: &[T]) -> usize {
+        let (written, _remaining) = self.0.push_partial_slice(data);
+        written.len()
+    }
+
+    /// Number of samples that can be written right now.
+    pub fn available(&self) -> usize {
+        self.0.slots()
+    }
+
+    /// Whether a write of even one sample would fail right now.
+    pub fn is_full(&self) -> bool {
+        self.0.is_full()
+    }
+
+    /// Total capacity in samples.
+    pub fn capacity(&self) -> usize {
+        self.0.buffer().capacity()
+    }
+
+    /// Whether the consumer half has been dropped: nothing written will ever
+    /// be read.
+    pub fn is_abandoned(&self) -> bool {
+        self.0.is_abandoned()
+    }
+}
+
+impl<T: Copy> SpscConsumer<T> {
+    /// Read up to `out.len()` samples; returns how many were read.
+    pub fn read(&mut self, out: &mut [T]) -> usize {
+        let (filled, _unfilled) = self.0.pop_partial_slice(out);
+        filled.len()
+    }
+
+    /// Number of samples waiting to be read.
+    pub fn len(&self) -> usize {
+        self.0.slots()
+    }
+
+    /// Whether nothing is waiting to be read.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Total capacity in samples.
+    pub fn capacity(&self) -> usize {
+        self.0.buffer().capacity()
+    }
+
+    /// Discard everything buffered without reading it — the barge-in flush.
+    pub fn clear(&mut self) {
+        let n = self.0.slots();
+        if let Ok(chunk) = self.0.read_chunk(n) {
+            chunk.commit_all();
+        }
+    }
+
+    /// Whether the producer half has been dropped: once drained, nothing more
+    /// will arrive.
+    pub fn is_abandoned(&self) -> bool {
+        self.0.is_abandoned()
+    }
+}
+
+impl<T> std::fmt::Debug for SpscProducer<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SpscProducer")
+            .field("free", &self.0.slots())
+            .field("capacity", &self.0.buffer().capacity())
+            .finish()
+    }
+}
+
+impl<T> std::fmt::Debug for SpscConsumer<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SpscConsumer")
+            .field("len", &self.0.slots())
+            .field("capacity", &self.0.buffer().capacity())
+            .finish()
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn create_ring() {
-        let ring = SpscRing::<i16>::new(100);
-        // Rounds up to 128
-        assert_eq!(ring.capacity(), 128);
-        assert!(ring.is_empty());
-        assert_eq!(ring.available(), 128);
+    fn capacity_is_exact() {
+        let (tx, rx) = SpscRing::<i16>::channel(100);
+        assert_eq!(tx.capacity(), 100);
+        assert_eq!(rx.capacity(), 100);
+        assert!(rx.is_empty());
+        assert_eq!(tx.available(), 100);
     }
 
     #[test]
     fn write_and_read() {
-        let ring = SpscRing::<i16>::new(16);
-        let data = [1i16, 2, 3, 4, 5];
-
-        let written = ring.write(&data);
-        assert_eq!(written, 5);
-        assert_eq!(ring.len(), 5);
-
+        let (mut tx, mut rx) = SpscRing::<i16>::channel(16);
+        assert_eq!(tx.write(&[1i16, 2, 3, 4, 5]), 5);
+        assert_eq!(rx.len(), 5);
         let mut out = [0i16; 5];
-        let read = ring.read(&mut out);
-        assert_eq!(read, 5);
+        assert_eq!(rx.read(&mut out), 5);
         assert_eq!(out, [1, 2, 3, 4, 5]);
-        assert!(ring.is_empty());
+        assert!(rx.is_empty());
     }
 
     #[test]
     fn wraparound() {
-        let ring = SpscRing::<i16>::new(8); // capacity = 8
-        let data = [1i16, 2, 3, 4, 5, 6];
-
-        ring.write(&data);
+        let (mut tx, mut rx) = SpscRing::<i16>::channel(8);
+        tx.write(&[1i16, 2, 3, 4, 5, 6]);
         let mut out = [0i16; 4];
-        ring.read(&mut out); // consume 4, tail = 4
+        rx.read(&mut out);
         assert_eq!(out, [1, 2, 3, 4]);
-
-        // Write more — will wrap around
-        let data2 = [7i16, 8, 9, 10, 11, 12];
-        let written = ring.write(&data2);
-        assert_eq!(written, 6);
-
+        assert_eq!(tx.write(&[7i16, 8, 9, 10, 11, 12]), 6);
         let mut out2 = [0i16; 8];
-        let read = ring.read(&mut out2);
-        assert_eq!(read, 8);
-        assert_eq!(&out2[..8], &[5, 6, 7, 8, 9, 10, 11, 12]);
+        assert_eq!(rx.read(&mut out2), 8);
+        assert_eq!(out2, [5, 6, 7, 8, 9, 10, 11, 12]);
     }
 
     #[test]
     fn overflow_returns_partial() {
-        let ring = SpscRing::<i16>::new(4); // capacity = 4
-        let data = [1i16, 2, 3, 4, 5, 6]; // too many
-        let written = ring.write(&data);
-        assert_eq!(written, 4);
+        let (mut tx, _rx) = SpscRing::<i16>::channel(4);
+        assert_eq!(tx.write(&[1i16, 2, 3, 4, 5, 6]), 4);
+        assert!(tx.is_full());
     }
 
     #[test]
     fn underflow_returns_partial() {
-        let ring = SpscRing::<i16>::new(16);
-        ring.write(&[1i16, 2, 3]);
-
+        let (mut tx, mut rx) = SpscRing::<i16>::channel(16);
+        tx.write(&[1i16, 2, 3]);
         let mut out = [0i16; 10];
-        let read = ring.read(&mut out);
-        assert_eq!(read, 3);
+        assert_eq!(rx.read(&mut out), 3);
         assert_eq!(&out[..3], &[1, 2, 3]);
     }
 
     #[test]
     fn clear_discards_data() {
-        let ring = SpscRing::<i16>::new(16);
-        ring.write(&[1i16, 2, 3, 4, 5]);
-        assert_eq!(ring.len(), 5);
+        let (mut tx, mut rx) = SpscRing::<i16>::channel(16);
+        tx.write(&[1i16, 2, 3, 4, 5]);
+        assert_eq!(rx.len(), 5);
+        rx.clear();
+        assert!(rx.is_empty());
+        assert_eq!(tx.available(), 16);
+    }
 
-        ring.clear();
-        assert!(ring.is_empty());
-        assert_eq!(ring.available(), 16);
+    #[test]
+    fn abandonment_is_visible_to_the_other_half() {
+        let (tx, rx) = SpscRing::<i16>::channel(4);
+        assert!(!tx.is_abandoned());
+        drop(rx);
+        assert!(tx.is_abandoned());
+    }
+
+    #[test]
+    fn halves_move_to_their_threads() {
+        // Each half is `Send` (it can move to the capture / playback thread);
+        // neither is `Sync`, which is what makes "one producer, one consumer"
+        // a compile-time fact rather than a comment — rtrb's own impls.
+        fn is_send<T: Send>() {}
+        is_send::<SpscProducer<i16>>();
+        is_send::<SpscConsumer<i16>>();
     }
 
     #[test]
     fn concurrent_write_read() {
-        use std::sync::Arc;
-
-        let ring = Arc::new(SpscRing::<i16>::new(1024));
-        let ring_w = ring.clone();
-        let ring_r = ring.clone();
+        let (mut tx, mut rx) = SpscRing::<i16>::channel(1024);
 
         let writer = std::thread::spawn(move || {
             let mut total = 0usize;
             for i in 0..1000 {
                 let chunk: Vec<i16> = (0..16).map(|j| (i * 16 + j) as i16).collect();
                 loop {
-                    let w = ring_w.write(&chunk[total % 16..]);
+                    let w = tx.write(&chunk[total % 16..]);
                     total += w;
                     if total >= (i as usize + 1) * 16 {
                         break;
@@ -280,7 +245,7 @@ mod tests {
             let mut total = 0usize;
             let mut buf = [0i16; 64];
             while total < 16000 {
-                let r = ring_r.read(&mut buf);
+                let r = rx.read(&mut buf);
                 total += r;
                 if r == 0 {
                     std::thread::yield_now();
@@ -290,13 +255,12 @@ mod tests {
         });
 
         writer.join().unwrap();
-        let total_read = reader.join().unwrap();
-        assert_eq!(total_read, 16000);
+        assert_eq!(reader.join().unwrap(), 16000);
     }
 
     #[test]
     #[should_panic(expected = "capacity must be > 0")]
     fn zero_capacity_panics() {
-        SpscRing::<i16>::new(0);
+        SpscRing::<i16>::channel(0);
     }
 }
