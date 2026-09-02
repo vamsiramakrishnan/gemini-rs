@@ -106,7 +106,7 @@ same programs, workspace paths.
 | Make the conversation follow rules | `Flow` + `Live::govern` — the governed-flow demo runs offline, no key: `cargo run -p example-cookbook --bin 37-governed-flow` | [Governed Flows](https://vamsiramakrishnan.github.io/gemini-rs/user-guide/flow.html) |
 | Edit flows on a canvas | `cargo run -p gemini-adk-web-rs` → `http://localhost:25125/flows` | [Flow Studio](https://vamsiramakrishnan.github.io/gemini-rs/flow-studio.html) |
 | Put an agent on a phone line | Twilio / SIP / AudioHook examples | [Telephony](https://vamsiramakrishnan.github.io/gemini-rs/user-guide/telephony.html) |
-| Learn by example | 40 progressive cookbook binaries | [`examples/INDEX.md`](examples/INDEX.md) |
+| Learn by example | 30 progressive cookbook binaries | [`examples/INDEX.md`](examples/INDEX.md) |
 | Scaffold a project | `cargo install gemini-adk-cli-rs` → `adk create my-agent` | [`tools/gemini-adk-cli-rs`](tools/gemini-adk-cli-rs) |
 
 ## One call, walked through
@@ -221,7 +221,7 @@ cargo run -p example-cookbook --bin 37-governed-flow    # governed flow, no cred
 cargo run -p gemini-adk-web-rs  # Web UI + Flow Studio → :25125
 ```
 
-[`examples/`](examples/INDEX.md) holds 40 progressive cookbook binaries (builders → combinators → multi-agent → governed capstones), the telephony and SIP agents, the TTS-driven call above, and focused per-layer demos. [`apps/gemini-adk-web-rs`](apps/gemini-adk-web-rs) bundles 13 showcase apps with a shared DevTools panel.
+[`examples/`](examples/INDEX.md) holds 30 progressive cookbook binaries (builders → combinators → multi-agent → governed capstones), the telephony and SIP agents, the TTS-driven call above, and focused per-layer demos. [`apps/gemini-adk-web-rs`](apps/gemini-adk-web-rs) bundles 13 showcase apps with a shared DevTools panel.
 
 ## When it doesn't work
 

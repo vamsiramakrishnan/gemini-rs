@@ -18,7 +18,7 @@
 
 <div class="stat-row">
   <div class="stat"><b>3</b><span>layered crates</span></div>
-  <div class="stat"><b>40</b><span>cookbook recipes</span></div>
+  <div class="stat"><b>30</b><span>cookbook recipes</span></div>
   <div class="stat"><b>2,500+</b><span>tests, no API key</span></div>
   <div class="stat"><b>6</b><span>Studio cookbooks</span></div>
 </div>
@@ -128,7 +128,7 @@ See [Flows as JSON](./user-guide/flow-json.md) for the format and
   </div>
   <div class="card">
     <h4>Examples &amp; Web UI</h4>
-    <p>40 progressive cookbook recipes plus the interactive
+    <p>30 progressive cookbook recipes plus the interactive
     <code>gemini-adk-web-rs</code> demo suite and DevTools.</p>
   </div>
 </div>
