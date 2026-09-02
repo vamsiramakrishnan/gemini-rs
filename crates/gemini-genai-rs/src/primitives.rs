@@ -19,18 +19,17 @@
 //!
 //! | Concern | Primitives |
 //! |---|---|
-//! | Connect | [`SessionConfig`], [`ConnectBuilder`], [`ApiEndpoint`], [`Platform`], [`ResumeInfo`] |
+//! | Connect | [`SessionConfig`], [`ConnectBuilder`], [`ApiEndpoint`], [`ResumeInfo`] |
 //! | Speak / listen | [`SessionHandle`], [`SessionWriter`], [`SessionReader`], [`SessionEvent`], [`SessionPhase`] |
-//! | Say things | [`Content`], [`Part`], [`Role`], [`GeminiModel`], [`Voice`], [`Modality`] |
+//! | Say things | [`Content`], [`Part`], [`Role`], [`ModelId`], [`Voice`], [`Modality`] |
 //! | Tools on the wire | [`Tool`], [`FunctionDeclaration`], [`FunctionCall`], [`FunctionResponse`], [`FunctionCallingBehavior`], [`FunctionResponseScheduling`] |
 //! | Real time | [`SpscRing`], [`AudioJitterBuffer`], [`bytes_to_i16`], [`i16_to_bytes`], [`BargeInDetector`], [`TurnDetector`] |
 //! | Access | [`AuthProvider`], [`GoogleAIAuth`], [`VertexAIAuth`], [`Transport`], [`TungsteniteTransport`], [`Codec`], [`JsonCodec`] |
 //! | Truth | [`UsageMetadata`], [`SessionError`] |
 
-pub use crate::protocol::Platform;
 pub use crate::protocol::types::{
     ApiEndpoint, Content, FunctionCall, FunctionCallingBehavior, FunctionDeclaration,
-    FunctionResponse, FunctionResponseScheduling, GeminiModel, Modality, Part, Role, SessionConfig,
+    FunctionResponse, FunctionResponseScheduling, Modality, ModelId, Part, Role, SessionConfig,
     Tool, UsageMetadata, Voice,
 };
 
@@ -58,7 +57,6 @@ mod contract {
         is_type::<SessionConfig>();
         is_type::<ConnectBuilder>();
         is_type::<ApiEndpoint>();
-        is_type::<Platform>();
         is_type::<ResumeInfo>();
         is_type::<SessionHandle>();
         is_type::<dyn SessionWriter>();
@@ -68,7 +66,7 @@ mod contract {
         is_type::<Content>();
         is_type::<Part>();
         is_type::<Role>();
-        is_type::<GeminiModel>();
+        is_type::<ModelId>();
         is_type::<Voice>();
         is_type::<Modality>();
         is_type::<Tool>();

@@ -9,7 +9,7 @@
 //! use gemini_genai_rs::prelude::*;
 //!
 //! let client = Client::from_api_key("your-key")
-//!     .model(GeminiModel::Custom("gemini-2.5-flash".into()));
+//!     .model(ModelId::new("gemini-2.5-flash".into()));
 //!
 //! let response = client.generate_content("What is Rust?").await?;
 //! println!("{}", response.text().unwrap_or_default());
@@ -23,7 +23,7 @@ pub use response::{BlockReason, Candidate, GenerateContentResponse, PromptFeedba
 
 use crate::client::Client;
 use crate::client::http::HttpError;
-use crate::protocol::types::GeminiModel;
+use crate::protocol::types::ModelId;
 use crate::transport::auth::ServiceEndpoint;
 
 impl Client {
@@ -40,7 +40,7 @@ impl Client {
     pub async fn generate_content_with(
         &self,
         config: GenerateContentConfig,
-        model: Option<&GeminiModel>,
+        model: Option<&ModelId>,
     ) -> Result<GenerateContentResponse, GenerateError> {
         let model = model.unwrap_or(self.default_model());
         let url = self.rest_url_for(ServiceEndpoint::GenerateContent, model);

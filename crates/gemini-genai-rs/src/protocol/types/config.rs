@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::content::{Content, Part};
-use super::enums::{AudioFormat, GeminiModel, Modality, Sensitivity, Voice};
+use super::enums::{AudioFormat, Modality, ModelId, Sensitivity, Voice};
 use super::tools::{Tool, ToolConfig};
 
 // ---------------------------------------------------------------------------
@@ -459,7 +459,10 @@ pub struct SessionConfig {
     /// API endpoint and credentials (Google AI key or Vertex AI project/token).
     pub endpoint: ApiEndpoint,
     /// Which Gemini model to use.
-    pub model: GeminiModel,
+    /// The Live model. `None` means "the platform's current default", resolved
+    /// at connect time by [`SessionConfig::resolved_model`]; set it only when a
+    /// specific model is required.
+    pub model: Option<ModelId>,
     /// Generation parameters (modalities, temperature, etc.).
     pub generation_config: GenerationConfig,
     /// System instruction content.
@@ -553,7 +556,7 @@ impl SessionConfig {
     pub fn from_endpoint(endpoint: ApiEndpoint) -> Self {
         Self {
             endpoint,
-            model: GeminiModel::default(),
+            model: None,
             generation_config: GenerationConfig {
                 response_modalities: Some(vec![Modality::Audio]),
                 ..Default::default()
@@ -577,9 +580,17 @@ impl SessionConfig {
     }
 
     /// Set the Gemini model.
-    pub fn model(mut self, model: GeminiModel) -> Self {
-        self.model = model;
+    pub fn model(mut self, model: impl Into<ModelId>) -> Self {
+        self.model = Some(model.into());
         self
+    }
+
+    /// The model this session will ask for: the configured one, else the
+    /// platform default (see [`ModelId::live_default`]).
+    pub fn resolved_model(&self) -> ModelId {
+        self.model
+            .clone()
+            .unwrap_or_else(|| ModelId::live_default(self.is_vertex()))
     }
 
     /// Record every wire byte (both directions) to the given recorder.
@@ -919,17 +930,14 @@ impl SessionConfig {
     pub fn model_uri(&self) -> String {
         match &self.endpoint {
             ApiEndpoint::GoogleAI { .. } | ApiEndpoint::GoogleAIToken { .. } => {
-                self.model.to_string()
+                self.resolved_model().to_string()
             }
-            ApiEndpoint::VertexAI(v) => {
-                // Strip the `models/` prefix from the Display representation
-                let model_name = self.model.to_string();
-                let bare = model_name.strip_prefix("models/").unwrap_or(&model_name);
-                format!(
-                    "projects/{}/locations/{}/publishers/google/models/{}",
-                    v.project, v.location, bare
-                )
-            }
+            ApiEndpoint::VertexAI(v) => format!(
+                "projects/{}/locations/{}/publishers/google/models/{}",
+                v.project,
+                v.location,
+                self.resolved_model().bare_name()
+            ),
         }
     }
 
@@ -1046,7 +1054,7 @@ mod tests {
     #[test]
     fn session_config_builder() {
         let config = SessionConfig::new("test-key")
-            .model(GeminiModel::Gemini2_0FlashLive)
+            .model(ModelId::from_static("models/gemini-2.0-flash-live-001"))
             .voice(Voice::Kore)
             .system_instruction("Be helpful.")
             .temperature(0.7);
@@ -1054,7 +1062,10 @@ mod tests {
         assert!(
             matches!(config.endpoint, ApiEndpoint::GoogleAI { ref api_key } if api_key == "test-key")
         );
-        assert_eq!(config.model, GeminiModel::Gemini2_0FlashLive);
+        assert_eq!(
+            config.model,
+            Some(ModelId::from_static("models/gemini-2.0-flash-live-001"))
+        );
         assert!(config.system_instruction.is_some());
         assert_eq!(config.generation_config.temperature, Some(0.7));
     }
@@ -1082,7 +1093,7 @@ mod tests {
     #[test]
     fn vertex_session_config() {
         let config = SessionConfig::from_vertex("my-project", "us-central1", "token123")
-            .model(GeminiModel::GeminiLive2_5FlashNativeAudio);
+            .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO);
         assert!(config.is_vertex());
         assert!(config.bearer_token() == Some("token123"));
     }
@@ -1125,7 +1136,7 @@ mod tests {
     #[test]
     fn vertex_model_uri() {
         let config = SessionConfig::from_vertex("my-proj", "us-central1", "tok")
-            .model(GeminiModel::Gemini2_0FlashLive);
+            .model(ModelId::from_static("models/gemini-2.0-flash-live-001"));
         assert_eq!(
             config.model_uri(),
             "projects/my-proj/locations/us-central1/publishers/google/models/gemini-2.0-flash-live-001"
@@ -1135,7 +1146,7 @@ mod tests {
     #[test]
     fn vertex_model_uri_custom_model() {
         let config = SessionConfig::from_vertex("proj", "asia-southeast1", "tok").model(
-            GeminiModel::Custom("gemini-live-2.5-flash-native-audio".to_string()),
+            ModelId::new("gemini-live-2.5-flash-native-audio".to_string()),
         );
         assert_eq!(
             config.model_uri(),
@@ -1152,7 +1163,8 @@ mod tests {
 
     #[test]
     fn google_ai_model_uri_unchanged() {
-        let config = SessionConfig::new("key").model(GeminiModel::Gemini2_0FlashLive);
+        let config = SessionConfig::new("key")
+            .model(ModelId::from_static("models/gemini-2.0-flash-live-001"));
         assert_eq!(config.model_uri(), "models/gemini-2.0-flash-live-001");
     }
 

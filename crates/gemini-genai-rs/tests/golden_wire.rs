@@ -62,7 +62,7 @@ fn load_fixture(name: &str) -> String {
 /// behavior + google_search), thinking, voice, transcription, resumption.
 fn rich_config(mut config: SessionConfig) -> SessionConfig {
     config = config
-        .model(GeminiModel::Gemini2_0FlashLive)
+        .model(ModelId::from_static("models/gemini-2.0-flash-live-001"))
         .voice(Voice::Kore)
         .thinking(1024)
         .include_thoughts()
@@ -371,15 +371,15 @@ fn parse_unknown_is_forward_compatible() {
 fn model_catalog_wire_names() {
     let cases = [
         (
-            GeminiModel::Gemini2_0FlashLive,
+            ModelId::from_static("models/gemini-2.0-flash-live-001"),
             "models/gemini-2.0-flash-live-001",
         ),
         (
-            GeminiModel::GeminiLive2_5FlashNativeAudio,
+            ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO,
             "models/gemini-live-2.5-flash-native-audio",
         ),
         (
-            GeminiModel::Custom("models/gemini-9.9-future".into()),
+            ModelId::new("models/gemini-9.9-future"),
             "models/gemini-9.9-future",
         ),
     ];
@@ -390,11 +390,8 @@ fn model_catalog_wire_names() {
     }
     // Custom is the forward-compatibility escape hatch: unknown strings must
     // round-trip through deserialization instead of failing.
-    let parsed: GeminiModel = serde_json::from_value(json!("models/not-yet-invented")).unwrap();
-    assert_eq!(
-        parsed,
-        GeminiModel::Custom("models/not-yet-invented".into())
-    );
+    let parsed: ModelId = serde_json::from_value(json!("models/not-yet-invented")).unwrap();
+    assert_eq!(parsed, ModelId::new("models/not-yet-invented"));
 }
 
 #[test]

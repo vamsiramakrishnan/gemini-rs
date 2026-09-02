@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::client::Client;
 use crate::client::http::HttpError;
-use crate::protocol::types::{Content, GeminiModel};
+use crate::protocol::types::{Content, ModelId};
 use crate::transport::auth::ServiceEndpoint;
 
 /// Response from countTokens.
@@ -47,7 +47,7 @@ impl Client {
     pub async fn count_tokens_for(
         &self,
         contents: Vec<Content>,
-        model: Option<&GeminiModel>,
+        model: Option<&ModelId>,
     ) -> Result<CountTokensResponse, TokensError> {
         let model = model.unwrap_or(self.default_model());
         let url = self.rest_url_for(ServiceEndpoint::CountTokens, model);

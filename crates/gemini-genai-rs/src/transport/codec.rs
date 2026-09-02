@@ -201,7 +201,7 @@ mod tests {
 
     fn test_config() -> SessionConfig {
         SessionConfig::new("test-key")
-            .model(GeminiModel::Gemini2_0FlashLive)
+            .model(ModelId::from_static("models/gemini-2.0-flash-live-001"))
             .voice(Voice::Puck)
     }
 
@@ -297,7 +297,7 @@ mod tests {
     fn json_codec_strips_scheduling_for_vertex() {
         let codec = JsonCodec;
         let config = SessionConfig::from_vertex("proj", "us-central1", "token")
-            .model(GeminiModel::Gemini2_0FlashLive);
+            .model(ModelId::from_static("models/gemini-2.0-flash-live-001"));
         let cmd = SessionCommand::SendToolResponse(vec![FunctionResponse {
             name: "search".to_string(),
             response: serde_json::json!({"ok": true}),

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::client::Client;
 use crate::client::http::HttpError;
-use crate::protocol::types::{Content, GeminiModel};
+use crate::protocol::types::{Content, ModelId};
 use crate::transport::auth::ServiceEndpoint;
 
 /// Configuration for embed requests.
@@ -116,7 +116,7 @@ impl Client {
     pub async fn embed_content_with(
         &self,
         config: EmbedContentConfig,
-        model: Option<&GeminiModel>,
+        model: Option<&ModelId>,
     ) -> Result<EmbedContentResponse, EmbedError> {
         let model = model.unwrap_or(self.default_model());
         let url = self.rest_url_for(ServiceEndpoint::EmbedContent, model);

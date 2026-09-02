@@ -131,7 +131,8 @@ mod tests {
                 .to_vec(),
         );
 
-        let config = SessionConfig::new("test-key").model(GeminiModel::Gemini2_0FlashLive);
+        let config = SessionConfig::new("test-key")
+            .model(ModelId::from_static("models/gemini-2.0-flash-live-001"));
 
         let handle = connect_with(config, no_reconnect_config(), transport, JsonCodec)
             .await
@@ -151,7 +152,8 @@ mod tests {
                 .to_vec(),
         );
 
-        let config = SessionConfig::new("test-key").model(GeminiModel::Gemini2_0FlashLive);
+        let config = SessionConfig::new("test-key")
+            .model(ModelId::from_static("models/gemini-2.0-flash-live-001"));
         let handle = connect_with(config, no_reconnect_config(), transport, JsonCodec)
             .await
             .unwrap();
@@ -200,7 +202,8 @@ mod tests {
                 .to_vec(),
         );
 
-        let config = SessionConfig::new("test-key").model(GeminiModel::Gemini2_0FlashLive);
+        let config = SessionConfig::new("test-key")
+            .model(ModelId::from_static("models/gemini-2.0-flash-live-001"));
         let handle = connect_with(config, no_reconnect_config(), transport, JsonCodec)
             .await
             .unwrap();
@@ -237,7 +240,8 @@ mod tests {
                 .to_vec(),
         );
 
-        let config = SessionConfig::new("test-key").model(GeminiModel::Gemini2_0FlashLive);
+        let config = SessionConfig::new("test-key")
+            .model(ModelId::from_static("models/gemini-2.0-flash-live-001"));
         let handle = connect_with(config, no_reconnect_config(), transport, JsonCodec)
             .await
             .unwrap();
@@ -306,7 +310,8 @@ mod tests {
         let mut transport = MockTransport::new();
         transport.script_recv(br#"{"setupComplete":{}}"#.to_vec());
 
-        let config = SessionConfig::new("test-key").model(GeminiModel::Gemini2_0FlashLive);
+        let config = SessionConfig::new("test-key")
+            .model(ModelId::from_static("models/gemini-2.0-flash-live-001"));
         let handle = connect_with(config, no_reconnect_config(), transport, JsonCodec)
             .await
             .unwrap();
@@ -327,7 +332,8 @@ mod tests {
         let mut transport = MockTransport::new();
         transport.script_recv(br#"{"setupComplete":{}}"#.to_vec());
 
-        let config = SessionConfig::new("test-key").model(GeminiModel::Gemini2_0FlashLive);
+        let config = SessionConfig::new("test-key")
+            .model(ModelId::from_static("models/gemini-2.0-flash-live-001"));
         let handle = connect_with(config, no_reconnect_config(), transport, JsonCodec)
             .await
             .unwrap();

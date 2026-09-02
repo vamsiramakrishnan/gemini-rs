@@ -7,7 +7,7 @@
 
 use crate::client::Client;
 use crate::generate::{GenerateContentConfig, GenerateContentResponse, GenerateError};
-use crate::protocol::types::{Content, GeminiModel};
+use crate::protocol::types::{Content, ModelId};
 
 /// A stateful chat session that tracks conversation history.
 ///
@@ -15,7 +15,7 @@ use crate::protocol::types::{Content, GeminiModel};
 /// to the history, so subsequent calls include full conversation context.
 pub struct ChatSession<'a> {
     client: &'a Client,
-    model: GeminiModel,
+    model: ModelId,
     history: Vec<Content>,
     system_instruction: Option<String>,
 }
@@ -42,10 +42,10 @@ impl<'a> ChatSession<'a> {
             .await?;
 
         // Append model response to history
-        if let Some(candidate) = response.candidates.first() {
-            if let Some(content) = &candidate.content {
-                self.history.push(content.clone());
-            }
+        if let Some(candidate) = response.candidates.first()
+            && let Some(content) = &candidate.content
+        {
+            self.history.push(content.clone());
         }
 
         Ok(response)
@@ -77,15 +77,15 @@ impl Client {
 /// Builder for configuring a [`ChatSession`].
 pub struct ChatSessionBuilder<'a> {
     client: &'a Client,
-    model: GeminiModel,
+    model: ModelId,
     history: Vec<Content>,
     system_instruction: Option<String>,
 }
 
 impl<'a> ChatSessionBuilder<'a> {
     /// Set the model for this chat.
-    pub fn model(mut self, model: GeminiModel) -> Self {
-        self.model = model;
+    pub fn model(mut self, model: impl Into<ModelId>) -> Self {
+        self.model = model.into();
         self
     }
 
@@ -121,7 +121,7 @@ mod tests {
         let client = Client::from_api_key("key");
         let chat = client
             .chat()
-            .model(GeminiModel::Gemini2_0FlashLive)
+            .model(ModelId::from_static("models/gemini-2.0-flash-live-001"))
             .system_instruction("You are helpful")
             .build();
         assert_eq!(chat.turn_count(), 0);

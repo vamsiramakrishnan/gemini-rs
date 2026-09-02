@@ -51,21 +51,37 @@ pub use quick::{quick_connect, quick_connect_vertex};
 
 /// Convenient re-exports for wire-level usage.
 pub mod prelude {
-    // Protocol types
-    pub use crate::protocol::Platform;
-    pub use crate::protocol::messages::*;
-    pub use crate::protocol::types::*;
+    // Protocol types — the API vocabulary an application names. The wire
+    // envelopes (`SetupMessage`, `RealtimeInputPayload`, `ServerMessageWrapper`,
+    // …) stay public at `protocol::messages` for anyone writing a codec, but
+    // they are not something a glob import should hand every caller.
+    #[allow(deprecated)]
+    pub use crate::protocol::types::GeminiModel;
+    pub use crate::protocol::types::{
+        ActivityHandling, ApiEndpoint, AudioFormat, AutomaticActivityDetection, Blob,
+        CodeExecutionResult, Content, ContextWindowCompressionConfig, EndpointEnvError,
+        ExecutableCode, FunctionCall, FunctionCallingBehavior, FunctionCallingConfig,
+        FunctionCallingMode, FunctionDeclaration, FunctionResponse, FunctionResponseScheduling,
+        GenerationConfig, GoogleSearch, GoogleSearchRetrieval, GroundingMetadata,
+        InputAudioTranscription, LIVE_INPUT_SAMPLE_RATE, MediaResolution, Modality,
+        ModalityTokenCount, ModelId, OutputAudioTranscription, Part, PrebuiltVoiceConfig,
+        ProactivityConfig, RealtimeInputConfig, Role, Sensitivity, SessionConfig,
+        SessionResumptionConfig, SlidingWindow, SpeechConfig, ThinkingConfig, Tool,
+        ToolCodeExecution, ToolConfig, ToolProvider, TurnCoverage, UrlContext, UrlContextMetadata,
+        UsageMetadata, VertexConfig, Voice, VoiceConfig,
+    };
+    // The decoded server message is the one envelope applications do match on.
+    pub use crate::protocol::messages::ServerMessage;
 
     // Transport
     pub use crate::transport::auth::{
         AuthProvider, GoogleAIAuth, GoogleAITokenAuth, ServiceEndpoint, VertexAIAuth,
     };
-    pub use crate::transport::recording::{
-        FileWireRecorder, MemoryWireRecorder, RecordingCodec, WireDirection, WireEntry,
-        WireLogError, WireRecorder, WireRecorderHandle, read_wire_log,
+    // Wire recording and replay are debugging/test tooling; they live at
+    // `transport::recording` and `transport::replay` rather than in the prelude.
+    pub use crate::transport::ws::{
+        MockTransport, Transport, TungsteniteError, TungsteniteTransport,
     };
-    pub use crate::transport::replay::{ReplayControl, ReplayTransport};
-    pub use crate::transport::ws::{MockTransport, Transport, TungsteniteTransport};
     pub use crate::transport::{
         Codec, CodecError, ConnectBuilder, JsonCodec, TransportConfig, connect, connect_with,
     };
@@ -90,8 +106,8 @@ pub mod prelude {
         TurnDetector,
     };
 
-    // Telemetry
-    pub use crate::telemetry::TelemetryConfig;
+    // `telemetry::TelemetryConfig` installs a process-global subscriber; that
+    // is an application's once-per-binary decision, not prelude material.
 
     // Safety types (shared across all APIs)
     pub use crate::protocol::types::{
@@ -99,16 +115,14 @@ pub mod prelude {
         HarmProbability, SafetyRating, SafetySetting,
     };
 
-    // Client
-    pub use crate::client::Client;
+    // `Client` (the REST client) is at the crate root; a name that generic does
+    // not belong in a glob.
     #[cfg(feature = "http")]
     pub use crate::client::http::{HttpClient, HttpConfig, HttpError};
 
     // Generate API
     #[cfg(feature = "generate")]
-    pub use crate::generate::{
-        Candidate, GenerateContentConfig, GenerateContentResponse, GenerateError,
-    };
+    pub use crate::generate::{GenerateContentConfig, GenerateContentResponse, GenerateError};
 
     // Tokens API
     #[cfg(feature = "tokens")]
@@ -116,19 +130,16 @@ pub mod prelude {
 
     // Models API
     #[cfg(feature = "models")]
-    pub use crate::models::{ListModelsResponse, ModelInfo, ModelsError};
+    pub use crate::models::{ListModelsResponse, ModelsError};
 
     // Embed API
     #[cfg(feature = "embed")]
     pub use crate::embed::{
-        ContentEmbedding, EmbedContentConfig, EmbedContentResponse, EmbedError, TaskType,
+        ContentEmbedding, EmbedContentConfig, EmbedContentResponse, EmbedError,
     };
 
-    // Files API
-    #[cfg(feature = "files")]
-    pub use crate::files::{
-        File, FileSource, FileState, FilesError, ListFilesResponse, UploadFileConfig,
-    };
+    // The Files API is at `crate::files`; `File` next to `std::fs::File` in a
+    // glob import is an ambiguity error waiting to happen.
 
     // Caches API
     #[cfg(feature = "caches")]

@@ -5,7 +5,7 @@
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 
 use gemini_genai_rs::buffer::{AudioJitterBuffer, JitterConfig, SpscRing};
-use gemini_genai_rs::protocol::types::{GeminiModel, SessionConfig, Voice};
+use gemini_genai_rs::protocol::types::{ModelId, SessionConfig, Voice};
 use gemini_genai_rs::session::SessionCommand;
 use gemini_genai_rs::transport::{Codec, JsonCodec};
 
@@ -150,7 +150,7 @@ fn bench_codec_encode_audio(c: &mut Criterion) {
     let mut group = c.benchmark_group("codec_encode");
     let codec = JsonCodec;
     let config = SessionConfig::new("test-key")
-        .model(GeminiModel::Gemini2_0FlashLive)
+        .model(ModelId::from_static("models/gemini-2.0-flash-live-001"))
         .voice(Voice::Puck);
 
     // Benchmark different audio chunk sizes
@@ -177,7 +177,7 @@ fn bench_codec_encode_audio(c: &mut Criterion) {
 fn bench_codec_encode_text(c: &mut Criterion) {
     let codec = JsonCodec;
     let config = SessionConfig::new("test-key")
-        .model(GeminiModel::Gemini2_0FlashLive)
+        .model(ModelId::from_static("models/gemini-2.0-flash-live-001"))
         .voice(Voice::Puck);
     let cmd = SessionCommand::SendText("Hello, how are you doing today?".to_string());
 
@@ -192,7 +192,7 @@ fn bench_codec_encode_text(c: &mut Criterion) {
 fn bench_codec_encode_setup(c: &mut Criterion) {
     let codec = JsonCodec;
     let config = SessionConfig::new("test-key")
-        .model(GeminiModel::Gemini2_0FlashLive)
+        .model(ModelId::from_static("models/gemini-2.0-flash-live-001"))
         .voice(Voice::Puck)
         .system_instruction("You are a helpful assistant.");
 

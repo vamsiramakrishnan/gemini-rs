@@ -9,7 +9,7 @@ pub mod http;
 
 use std::sync::Arc;
 
-use crate::protocol::types::{ApiEndpoint, GeminiModel, SessionConfig};
+use crate::protocol::types::{ApiEndpoint, ModelId, SessionConfig};
 use crate::session::SessionError;
 use crate::session::SessionHandle;
 use crate::transport::auth::{
@@ -37,7 +37,7 @@ use crate::transport::{TransportConfig, connect};
 /// ```
 pub struct Client {
     endpoint: ApiEndpoint,
-    model: GeminiModel,
+    model: ModelId,
     auth: Arc<dyn RestAuth>,
     #[cfg(feature = "http")]
     http: http::HttpClient,
@@ -51,7 +51,7 @@ impl Client {
         let auth: Arc<dyn RestAuth> = Arc::new(GoogleAIAuth::new(key));
         Self {
             endpoint,
-            model: GeminiModel::default(),
+            model: ModelId::FLASH_LATEST,
             auth,
             #[cfg(feature = "http")]
             http: http::HttpClient::new(http::HttpConfig::default()),
@@ -65,7 +65,7 @@ impl Client {
         let auth: Arc<dyn RestAuth> = Arc::new(GoogleAITokenAuth::new(token));
         Self {
             endpoint,
-            model: GeminiModel::default(),
+            model: ModelId::FLASH_LATEST,
             auth,
             #[cfg(feature = "http")]
             http: http::HttpClient::new(http::HttpConfig::default()),
@@ -85,7 +85,7 @@ impl Client {
         let auth: Arc<dyn RestAuth> = Arc::new(VertexAIAuth::new(proj, loc, tok));
         Self {
             endpoint,
-            model: GeminiModel::default(),
+            model: ModelId::FLASH_LATEST,
             auth,
             #[cfg(feature = "http")]
             http: http::HttpClient::new(http::HttpConfig::default()),
@@ -114,7 +114,7 @@ impl Client {
             Arc::new(VertexAIAuth::with_token_refresher(proj, loc, refresher));
         Self {
             endpoint,
-            model: GeminiModel::default(),
+            model: ModelId::FLASH_LATEST,
             auth,
             #[cfg(feature = "http")]
             http: http::HttpClient::new(http::HttpConfig::default()),
@@ -122,7 +122,7 @@ impl Client {
     }
 
     /// Set the default model for all API calls.
-    pub fn model(mut self, model: impl Into<GeminiModel>) -> Self {
+    pub fn model(mut self, model: impl Into<ModelId>) -> Self {
         self.model = model.into();
         self
     }
@@ -140,7 +140,7 @@ impl Client {
     }
 
     /// Get the default model.
-    pub fn default_model(&self) -> &GeminiModel {
+    pub fn default_model(&self) -> &ModelId {
         &self.model
     }
 
@@ -150,7 +150,7 @@ impl Client {
     }
 
     /// Build the REST URL for a given service endpoint with a specific model.
-    pub fn rest_url_for(&self, endpoint: ServiceEndpoint, model: &GeminiModel) -> String {
+    pub fn rest_url_for(&self, endpoint: ServiceEndpoint, model: &ModelId) -> String {
         self.auth.rest_url(endpoint, Some(model))
     }
 
@@ -162,7 +162,7 @@ impl Client {
     /// Start a Live WebSocket session builder.
     ///
     /// Returns a [`LiveSessionBuilder`] that can be customized before connecting.
-    pub fn live(&self, model: GeminiModel) -> LiveSessionBuilder {
+    pub fn live(&self, model: ModelId) -> LiveSessionBuilder {
         LiveSessionBuilder {
             endpoint: self.endpoint.clone(),
             model,
@@ -199,7 +199,7 @@ impl Client {
 /// Builder for Live WebSocket sessions initiated from a [`Client`].
 pub struct LiveSessionBuilder {
     endpoint: ApiEndpoint,
-    model: GeminiModel,
+    model: ModelId,
     transport_config: TransportConfig,
     config_fn: Option<Box<dyn FnOnce(SessionConfig) -> SessionConfig>>,
 }
@@ -236,31 +236,31 @@ mod tests {
     #[test]
     fn client_from_api_key() {
         let client = Client::from_api_key("test-key");
-        assert!(matches!(
-            client.default_model(),
-            GeminiModel::GeminiLive2_5FlashNativeAudio
-        ));
+        // The REST client's default is a text model: `generateContent` on a
+        // Live-only native-audio model 404s.
+        assert_eq!(client.default_model(), &ModelId::FLASH_LATEST);
     }
 
     #[test]
     fn client_from_vertex() {
         let client = Client::from_vertex("proj", "us-central1", "tok");
-        let url = client.auth().ws_url(&GeminiModel::default());
+        let url = client.auth().ws_url(&ModelId::FLASH_LATEST);
         assert!(url.contains("us-central1-aiplatform.googleapis.com"));
     }
 
     #[test]
     fn client_model_override() {
-        let client = Client::from_api_key("key").model(GeminiModel::Gemini2_0FlashLive);
-        assert!(matches!(
+        let client = Client::from_api_key("key").model("models/gemini-2.0-flash-live-001");
+        assert_eq!(
             client.default_model(),
-            GeminiModel::Gemini2_0FlashLive
-        ));
+            &ModelId::from_static("models/gemini-2.0-flash-live-001")
+        );
     }
 
     #[test]
     fn client_rest_url_generate() {
-        let client = Client::from_api_key("my-key").model(GeminiModel::Gemini2_0FlashLive);
+        let client = Client::from_api_key("my-key")
+            .model(ModelId::from_static("models/gemini-2.0-flash-live-001"));
         let url = client.rest_url(ServiceEndpoint::GenerateContent);
         assert!(url.contains(":generateContent"));
         assert!(url.contains("key=my-key"));
@@ -268,8 +268,8 @@ mod tests {
 
     #[test]
     fn client_rest_url_vertex() {
-        let client =
-            Client::from_vertex("proj", "us-east1", "tok").model(GeminiModel::Gemini2_0FlashLive);
+        let client = Client::from_vertex("proj", "us-east1", "tok")
+            .model(ModelId::from_static("models/gemini-2.0-flash-live-001"));
         let url = client.rest_url(ServiceEndpoint::GenerateContent);
         assert!(url.contains("us-east1-aiplatform.googleapis.com"));
         assert!(url.contains(":generateContent"));
@@ -278,7 +278,7 @@ mod tests {
     #[test]
     fn live_session_builder_created() {
         let client = Client::from_api_key("key");
-        let _builder = client.live(GeminiModel::Gemini2_0FlashLive);
+        let _builder = client.live(ModelId::from_static("models/gemini-2.0-flash-live-001"));
     }
 
     #[tokio::test]

@@ -388,11 +388,12 @@ pub fn parse_wire_log(data: &str) -> Result<Vec<WireEntry>, WireLogError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::types::GeminiModel;
+    use crate::protocol::types::ModelId;
     use crate::transport::codec::JsonCodec;
 
     fn test_config() -> SessionConfig {
-        SessionConfig::new("test-key").model(GeminiModel::Gemini2_0FlashLive)
+        SessionConfig::new("test-key")
+            .model(ModelId::from_static("models/gemini-2.0-flash-live-001"))
     }
 
     #[test]

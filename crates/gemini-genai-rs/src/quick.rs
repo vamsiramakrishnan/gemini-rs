@@ -37,7 +37,7 @@
 //! # }
 //! ```
 
-use crate::protocol::types::{GeminiModel, SessionConfig};
+use crate::protocol::types::{ModelId, SessionConfig};
 use crate::session::{SessionError, SessionHandle};
 use crate::transport::{TransportConfig, connect};
 
@@ -46,7 +46,7 @@ use crate::transport::{TransportConfig, connect};
 /// Uses sensible defaults: [`TransportConfig::default()`], audio output modality.
 /// For advanced configuration, use [`SessionConfig`] + [`connect()`] directly.
 pub async fn quick_connect(api_key: &str, model: &str) -> Result<SessionHandle, SessionError> {
-    let config = SessionConfig::new(api_key).model(GeminiModel::Custom(model.to_string()));
+    let config = SessionConfig::new(api_key).model(ModelId::new(model));
     connect(config, TransportConfig::default()).await
 }
 
@@ -55,13 +55,13 @@ pub async fn quick_connect(api_key: &str, model: &str) -> Result<SessionHandle, 
 /// Uses sensible defaults: [`TransportConfig::default()`], audio output modality.
 /// For advanced configuration, use [`SessionConfig::from_vertex()`] + [`connect()`] directly.
 pub async fn quick_connect_vertex(
-    access_token: &str,
     project: &str,
     location: &str,
+    access_token: &str,
     model: &str,
 ) -> Result<SessionHandle, SessionError> {
-    let config = SessionConfig::from_vertex(project, location, access_token)
-        .model(GeminiModel::Custom(model.to_string()));
+    let config =
+        SessionConfig::from_vertex(project, location, access_token).model(ModelId::new(model));
     connect(config, TransportConfig::default()).await
 }
 
@@ -79,13 +79,13 @@ mod tests {
     /// Instead we replicate its config construction and verify it works with a mock.
     #[tokio::test]
     async fn quick_connect_creates_valid_config() {
-        let config = SessionConfig::new("test-api-key")
-            .model(GeminiModel::Custom("gemini-2.0-flash-live-001".to_string()));
+        let config =
+            SessionConfig::new("test-api-key").model(ModelId::new("gemini-2.0-flash-live-001"));
 
         // Verify the config fields
         assert_eq!(
             config.model,
-            GeminiModel::Custom("gemini-2.0-flash-live-001".to_string())
+            Some(ModelId::new("gemini-2.0-flash-live-001"))
         );
 
         // Verify it connects successfully with a mock transport
@@ -109,12 +109,12 @@ mod tests {
     #[tokio::test]
     async fn quick_connect_vertex_creates_valid_config() {
         let config = SessionConfig::from_vertex("my-project", "us-central1", "ya29.TOKEN")
-            .model(GeminiModel::Custom("gemini-2.0-flash-live-001".to_string()));
+            .model(ModelId::new("gemini-2.0-flash-live-001"));
 
         // Verify model
         assert_eq!(
             config.model,
-            GeminiModel::Custom("gemini-2.0-flash-live-001".to_string())
+            Some(ModelId::new("gemini-2.0-flash-live-001"))
         );
 
         // Verify Vertex AI endpoint

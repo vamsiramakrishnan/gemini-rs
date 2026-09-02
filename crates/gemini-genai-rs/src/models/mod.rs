@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::client::Client;
 use crate::client::http::HttpError;
-use crate::protocol::types::GeminiModel;
+use crate::protocol::types::ModelId;
 use crate::transport::auth::ServiceEndpoint;
 
 /// Model metadata returned by the API.
@@ -94,7 +94,7 @@ impl Client {
     }
 
     /// Get metadata for a specific model.
-    pub async fn get_model(&self, model: &GeminiModel) -> Result<ModelInfo, ModelsError> {
+    pub async fn get_model(&self, model: &ModelId) -> Result<ModelInfo, ModelsError> {
         let url = self.rest_url_for(ServiceEndpoint::GetModel, model);
         let headers = self
             .auth_headers()

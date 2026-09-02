@@ -103,7 +103,8 @@ mod tests {
 
     #[test]
     fn builder_compiles_with_defaults() {
-        let config = SessionConfig::new("key").model(GeminiModel::Gemini2_0FlashLive);
+        let config = SessionConfig::new("key")
+            .model(ModelId::from_static("models/gemini-2.0-flash-live-001"));
         let _builder = ConnectBuilder::new(config);
     }
 
@@ -134,7 +135,8 @@ mod tests {
         let mut mock = MockTransport::new();
         mock.script_recv(br#"{"setupComplete":{}}"#.to_vec());
 
-        let config = SessionConfig::new("key").model(GeminiModel::Gemini2_0FlashLive);
+        let config = SessionConfig::new("key")
+            .model(ModelId::from_static("models/gemini-2.0-flash-live-001"));
         let handle = ConnectBuilder::new(config)
             .transport(mock)
             .build()

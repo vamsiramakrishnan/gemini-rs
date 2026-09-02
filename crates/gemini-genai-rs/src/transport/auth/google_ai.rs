@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 
-use crate::protocol::types::GeminiModel;
+use crate::protocol::types::ModelId;
 use crate::session::AuthError;
 
 use super::url_builders::{build_google_ai_rest_url, build_google_ai_rest_url_no_key};
@@ -30,7 +30,7 @@ impl GoogleAIAuth {
 
 #[async_trait]
 impl AuthProvider for GoogleAIAuth {
-    fn ws_url(&self, _model: &GeminiModel) -> String {
+    fn ws_url(&self, _model: &ModelId) -> String {
         format!(
             "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key={}",
             self.api_key
@@ -47,7 +47,7 @@ impl AuthProvider for GoogleAIAuth {
 }
 
 impl RestAuth for GoogleAIAuth {
-    fn rest_url(&self, endpoint: ServiceEndpoint, model: Option<&GeminiModel>) -> String {
+    fn rest_url(&self, endpoint: ServiceEndpoint, model: Option<&ModelId>) -> String {
         let base = "https://generativelanguage.googleapis.com/v1beta";
         build_google_ai_rest_url(base, endpoint, model, &self.api_key)
     }
@@ -75,7 +75,7 @@ impl GoogleAITokenAuth {
 
 #[async_trait]
 impl AuthProvider for GoogleAITokenAuth {
-    fn ws_url(&self, _model: &GeminiModel) -> String {
+    fn ws_url(&self, _model: &ModelId) -> String {
         format!(
             "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained?access_token={}",
             self.access_token
@@ -91,7 +91,7 @@ impl AuthProvider for GoogleAITokenAuth {
 }
 
 impl RestAuth for GoogleAITokenAuth {
-    fn rest_url(&self, endpoint: ServiceEndpoint, model: Option<&GeminiModel>) -> String {
+    fn rest_url(&self, endpoint: ServiceEndpoint, model: Option<&ModelId>) -> String {
         let base = "https://generativelanguage.googleapis.com/v1beta";
         // Token auth uses Bearer header, not query param — build URL without key
         build_google_ai_rest_url_no_key(base, endpoint, model)

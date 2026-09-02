@@ -20,7 +20,7 @@ fn no_reconnect_config() -> TransportConfig {
 
 /// Helper: create a SessionConfig suitable for mock tests.
 fn test_config() -> SessionConfig {
-    SessionConfig::new("test-key").model(GeminiModel::Gemini2_0FlashLive)
+    SessionConfig::new("test-key").model(ModelId::from_static("models/gemini-2.0-flash-live-001"))
 }
 
 // ---------------------------------------------------------------------------
