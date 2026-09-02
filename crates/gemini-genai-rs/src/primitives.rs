@@ -42,7 +42,9 @@ pub use crate::transport::auth::{AuthProvider, GoogleAIAuth, VertexAIAuth};
 pub use crate::transport::ws::{Transport, TungsteniteTransport};
 pub use crate::transport::{Codec, ConnectBuilder, JsonCodec};
 
-pub use crate::buffer::{AudioJitterBuffer, SpscRing, bytes_to_i16, i16_to_bytes};
+pub use crate::buffer::{
+    AudioJitterBuffer, SpscConsumer, SpscProducer, SpscRing, bytes_to_i16, i16_to_bytes,
+};
 pub use crate::turn::{BargeInDetector, TurnDetector};
 
 #[cfg(test)]
@@ -76,6 +78,8 @@ mod contract {
         is_type::<FunctionCallingBehavior>();
         is_type::<FunctionResponseScheduling>();
         is_type::<SpscRing<i16>>();
+        is_type::<SpscProducer<i16>>();
+        is_type::<SpscConsumer<i16>>();
         is_type::<AudioJitterBuffer>();
         is_type::<BargeInDetector>();
         is_type::<TurnDetector>();

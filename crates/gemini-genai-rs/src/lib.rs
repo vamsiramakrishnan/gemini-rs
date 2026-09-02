@@ -1,3 +1,5 @@
+#![cfg_attr(not(test), forbid(unsafe_code))]
+#![cfg_attr(test, deny(unsafe_code))]
 #![warn(unreachable_pub)]
 #![warn(missing_docs)]
 // The README is the crate doc, so its code blocks are doctests: the
@@ -81,7 +83,9 @@ pub mod prelude {
     };
 
     // Buffers
-    pub use crate::buffer::{AudioJitterBuffer, JitterConfig, SpscRing};
+    pub use crate::buffer::{
+        AudioJitterBuffer, BufferState, JitterConfig, SpscConsumer, SpscProducer, SpscRing,
+    };
     pub use crate::buffer::{bytes_to_i16, i16_to_bytes, into_shared};
 
     // VAD

@@ -1632,6 +1632,7 @@ dependencies = [
  "parking_lot",
  "proptest",
  "reqwest 0.12.28",
+ "rtrb",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
@@ -4020,6 +4021,12 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
 ]
+
+[[package]]
+name = "rtrb"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9278fb35b3e730abe136e9b395b5b81b96d06b9f5478a50f0c8430a2237b22de"
 
 [[package]]
 name = "rubato"

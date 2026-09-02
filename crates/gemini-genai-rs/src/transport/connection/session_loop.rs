@@ -43,10 +43,15 @@ pub(super) async fn generic_connection_loop<T: Transport, C: Codec>(
             state.force_phase(SessionPhase::Connecting);
         }
 
-        // Build URL and headers from config
+        // Build URL and headers from config. Google AI carries the credential
+        // in the query string, so only the part before `?` is logged.
         let url = config.ws_url();
         let model_uri = config.model_uri();
-        tracing::info!(url = %url, model = %model_uri, "WebSocket connecting");
+        tracing::info!(
+            endpoint = %url.split('?').next().unwrap_or_default(),
+            model = %model_uri,
+            "WebSocket connecting"
+        );
         let mut headers = vec![];
         if let Some(token) = config.bearer_token() {
             headers.push(("Authorization".to_string(), format!("Bearer {token}")));

@@ -51,8 +51,8 @@ gemini-memory-rs     = { path = "crates/gemini-memory-rs",     version = "1.0.0"
 gemini-adk-server-rs = { path = "apps/gemini-adk-server-rs",   version = "1.0.0" }
 
 [workspace.lints.rust]
-# Every crate but the L0 audio ring is unsafe-free and says so with
-# `#![forbid(unsafe_code)]`; this keeps any new `unsafe` visible in review.
+# Every crate is unsafe-free and says so with `#![forbid(unsafe_code)]` (the
+# audio ring is `rtrb`); this keeps any new `unsafe` visible in review.
 unsafe_code = "warn"
 # `unreachable_pub` lives in each library crate's lib.rs rather than here:
 # it is the right lint for a library and pure noise for a binary.

@@ -18,7 +18,7 @@ fn bench_spsc_write_read(c: &mut Criterion) {
 
     // Benchmark different chunk sizes
     for chunk_size in [256, 512, 1024, 2048] {
-        let ring = SpscRing::<i16>::new(4096);
+        let (mut tx, mut rx) = SpscRing::<i16>::channel(4096);
         let data: Vec<i16> = (0..chunk_size).map(|i| i as i16).collect();
         let mut out = vec![0i16; chunk_size];
 
@@ -28,8 +28,8 @@ fn bench_spsc_write_read(c: &mut Criterion) {
             &chunk_size,
             |b, _| {
                 b.iter(|| {
-                    let written = ring.write(black_box(&data));
-                    let read = ring.read(black_box(&mut out));
+                    let written = tx.write(black_box(&data));
+                    let read = rx.read(black_box(&mut out));
                     black_box((written, read));
                 });
             },
@@ -40,15 +40,15 @@ fn bench_spsc_write_read(c: &mut Criterion) {
 }
 
 fn bench_spsc_write_only(c: &mut Criterion) {
-    let ring = SpscRing::<i16>::new(8192);
+    let (mut tx, mut rx) = SpscRing::<i16>::channel(8192);
     let data: Vec<i16> = (0..1024).map(|i| i as i16).collect();
 
     c.bench_function("spsc_write_1024_samples", |b| {
         b.iter(|| {
             // Drain to make room each iteration
             let mut drain = vec![0i16; 1024];
-            ring.read(&mut drain);
-            let written = ring.write(black_box(&data));
+            rx.read(&mut drain);
+            let written = tx.write(black_box(&data));
             black_box(written);
         });
     });
@@ -56,14 +56,14 @@ fn bench_spsc_write_only(c: &mut Criterion) {
 
 fn bench_spsc_contention(c: &mut Criterion) {
     // Benchmark rapid alternating write/read to simulate real-time audio streaming
-    let ring = SpscRing::<i16>::new(4096);
+    let (mut tx, mut rx) = SpscRing::<i16>::channel(4096);
     let chunk: Vec<i16> = (0..160).map(|i| i as i16).collect(); // 10ms at 16kHz
     let mut out = vec![0i16; 160];
 
     c.bench_function("spsc_10ms_write_read_cycle", |b| {
         b.iter(|| {
-            ring.write(black_box(&chunk));
-            ring.read(black_box(&mut out));
+            tx.write(black_box(&chunk));
+            rx.read(black_box(&mut out));
             black_box(&out);
         });
     });
