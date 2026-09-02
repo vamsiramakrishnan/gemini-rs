@@ -7,6 +7,10 @@
 //! Full Rust equivalent of Google's `@google/adk` framework.
 //! Agents, tools, sessions, events, middleware, and runtime.
 
+// The proc macros expand to `::gemini_adk_rs::…`; this makes that path valid
+// inside the crate itself (its own tests and doctests included).
+extern crate self as gemini_adk_rs;
+
 pub mod a2a;
 pub mod agent;
 pub mod agent_config;
