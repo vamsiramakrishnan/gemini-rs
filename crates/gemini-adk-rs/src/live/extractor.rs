@@ -17,8 +17,7 @@ use super::transcript::TranscriptTurn;
 
 /// Controls WHEN an extractor runs.
 ///
-/// The default is `EveryTurn`, which preserves backward compatibility.
-/// Use `AfterToolCall` when tool calls are the primary state source,
+/// The default is `EveryTurn`. Use `AfterToolCall` when tool calls are the primary state source,
 /// `Interval(n)` to reduce extraction frequency, or `OnPhaseChange`
 /// to extract only when entering a new conversation phase.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -185,9 +184,10 @@ pub trait TurnExtractor: Send + Sync {
 
     /// Field promotion rules for this extractor.
     ///
-    /// When empty, the runtime preserves legacy behavior and auto-flattens
-    /// top-level non-null fields into state. When non-empty, only these rules
-    /// can promote raw extraction fields into authoritative state.
+    /// When empty, the runtime auto-flattens every top-level non-null field of
+    /// the extraction into state under the field's own name. When non-empty,
+    /// only these rules can promote raw extraction fields into authoritative
+    /// state.
     fn promotion_rules(&self) -> &[FieldPromotion] {
         &[]
     }
@@ -223,7 +223,7 @@ pub struct OnComplete {
     /// The agent to run; it reads its inputs from `State`.
     pub agent: Arc<dyn crate::text::TextAgent>,
     /// How to run it (`Call` awaits inline; `Dispatch`/`Background` detached).
-    pub mode: crate::orchestration::Mode,
+    pub mode: crate::orchestration::AgentMode,
 }
 
 /// LLM-backed turn extractor that sends transcript windows to an OOB LLM
@@ -240,7 +240,8 @@ pub struct LlmExtractor {
     min_words: usize,
     /// When this extractor should fire.
     trigger: ExtractionTrigger,
-    /// Field promotion rules. Empty means legacy auto-flattening.
+    /// Field promotion rules. Empty means every top-level non-null field is
+    /// auto-flattened into state under its own name.
     promotion_rules: Vec<FieldPromotion>,
 }
 

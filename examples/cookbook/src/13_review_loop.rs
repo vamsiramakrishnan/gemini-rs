@@ -115,17 +115,17 @@ async fn main() {
     }
 
     // Test the predicate
-    if let Composable::Loop(l) = &workflow {
-        if let Some(pred) = &l.until {
-            println!(
-                "  Predicate(approved=false): {}",
-                pred.check(&serde_json::json!({"approved": false}))
-            );
-            println!(
-                "  Predicate(approved=true):  {}",
-                pred.check(&serde_json::json!({"approved": true}))
-            );
-        }
+    if let Composable::Loop(l) = &workflow
+        && let Some(pred) = &l.until
+    {
+        println!(
+            "  Predicate(approved=false): {}",
+            pred.check(&serde_json::json!({"approved": false}))
+        );
+        println!(
+            "  Predicate(approved=true):  {}",
+            pred.check(&serde_json::json!({"approved": true}))
+        );
     }
 
     // ── Part 3: review_loop_keyed() with custom quality key ──────────────
@@ -141,17 +141,17 @@ async fn main() {
         5,
     );
 
-    if let Composable::Loop(l) = &keyed_workflow {
-        if let Some(pred) = &l.until {
-            println!(
-                "  quality='draft':      {}",
-                pred.check(&serde_json::json!({"quality": "draft"}))
-            );
-            println!(
-                "  quality='production': {}",
-                pred.check(&serde_json::json!({"quality": "production"}))
-            );
-        }
+    if let Composable::Loop(l) = &keyed_workflow
+        && let Some(pred) = &l.until
+    {
+        println!(
+            "  quality='draft':      {}",
+            pred.check(&serde_json::json!({"quality": "draft"}))
+        );
+        println!(
+            "  quality='production': {}",
+            pred.check(&serde_json::json!({"quality": "production"}))
+        );
     }
 
     // ── Part 4: Using the * operator with until() ────────────────────────
@@ -162,7 +162,7 @@ async fn main() {
     let converge = refiner
         * until(|v| {
             v.get("score")
-                .and_then(|s| s.as_f64())
+                .and_then(serde_json::Value::as_f64)
                 .map(|s| s >= 0.95)
                 .unwrap_or(false)
         });

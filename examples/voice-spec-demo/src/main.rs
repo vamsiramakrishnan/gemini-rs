@@ -28,7 +28,7 @@ use base64::Engine as _;
 use gemini_adk_fluent_rs::live::LiveEvent;
 use gemini_adk_fluent_rs::prelude::*;
 use gemini_adk_fluent_rs::spec::{SessionSpec, SpecResources};
-use gemini_adk_fluent_rs::voice::{pump, Playback};
+use gemini_adk_fluent_rs::voice::{Playback, pump};
 use tokio::sync::mpsc;
 use tokio::time::{sleep, timeout};
 
@@ -55,7 +55,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for w in &validation.warnings {
         println!("  warning: {w}");
     }
-    for report in gemini_adk_fluent_rs::spec::run_tests(&spec) {
+    for report in spec.run_tests() {
         println!(
             "  embedded test `{}`: {} ({} events)",
             report.name,
@@ -67,8 +67,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ── 2. The session, configured entirely from the document ───────────
     let state = State::new();
     let live = Live::builder()
-        .model(GeminiModel::Custom(LIVE_MODEL.into()))
-        .transcription(true, true);
+        .model(ModelId::new(LIVE_MODEL))
+        .transcription();
     let live = spec
         .apply(live, &state, &SpecResources::default())
         .map_err(|e| format!("spec.apply: {e}"))?;
@@ -197,7 +197,7 @@ async fn tts(
 /// the document currently admits.
 fn print_flow_state(handle: &LiveHandle) {
     let done: Vec<String> = handle.state().get("flow:done").unwrap_or_default();
-    if let Some(explanation) = handle.why_blocked() {
+    if let Some(explanation) = handle.explain() {
         println!(
             "  [flow] done: [{}] · active: [{}] · admitted tools: [{}]",
             done.join(", "),

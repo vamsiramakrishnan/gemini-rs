@@ -2,13 +2,14 @@
 
 use std::time::Duration;
 
+use crate::session::SessionError;
 use crate::transport::TransportConfig;
 
 /// Reason for session disconnect.
 pub(super) enum DisconnectReason {
     Graceful,
-    GoAway(Option<String>),
-    Error(String),
+    GoAway(Option<Duration>),
+    Error(SessionError),
     CommandChannelClosed,
 }
 

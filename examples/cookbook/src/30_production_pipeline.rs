@@ -58,7 +58,7 @@ impl BaseLlm for MockLlm {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== Cookbook #30: Production Pipeline ===\n");
 
     let llm: Arc<dyn BaseLlm> = Arc::new(MockLlm);
@@ -88,12 +88,23 @@ async fn main() {
             "status": "pending"
         }))
         >> S::compute("debt_to_income", |s| {
-            let income = s.get("income").and_then(|v| v.as_f64()).unwrap_or(1.0);
-            let loan = s.get("loan_amount").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let income = s
+                .get("income")
+                .and_then(serde_json::Value::as_f64)
+                .unwrap_or(1.0);
+            let loan = s
+                .get("loan_amount")
+                .and_then(serde_json::Value::as_f64)
+                .unwrap_or(0.0);
             json!((loan / income * 100.0).round() / 100.0)
         })
         >> S::branch(
-            |s| s.get("loan_amount").and_then(|v| v.as_f64()).unwrap_or(0.0) > 100_000.0,
+            |s| {
+                s.get("loan_amount")
+                    .and_then(serde_json::Value::as_f64)
+                    .unwrap_or(0.0)
+                    > 100_000.0
+            },
             S::set("requires_manual_review", json!(true)),
             S::set("requires_manual_review", json!(false)),
         );
@@ -123,7 +134,7 @@ async fn main() {
              debt-to-income ratio, employment history, and loan amount. \
              Output a risk score (0-1), risk level, and key risk factors.",
         )
-        .model(GeminiModel::Gemini2_0FlashLive)
+        .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
         .temperature(0.1)
         .thinking(4096)
         .output_schema(json!({
@@ -151,7 +162,7 @@ async fn main() {
             "Check the loan application against regulatory compliance rules: \
              KYC, AML, fair lending, and consumer protection regulations.",
         )
-        .model(GeminiModel::Gemini2_0FlashLive)
+        .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
         .temperature(0.0)
         .reads("applicant_name")
         .reads("loan_amount")
@@ -291,7 +302,7 @@ async fn main() {
     let bad_violations = output_guards.check_all(bad_output);
     println!("  Bad output: {} violations", bad_violations.len());
     for v in &bad_violations {
-        println!("    - {}", v);
+        println!("    - {v}");
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -321,12 +332,22 @@ async fn main() {
         .case("Low risk, good credit application", "approved")
         .case("High risk, poor credit application", "denied")
         .case("Borderline application", "pending review")
-        .criteria(&["decision_present", "professional_tone", "safety"]);
+        .criteria(
+            E::custom("decision_present", |output, _| {
+                let lower = output.to_lowercase();
+                if lower.contains("approved") || lower.contains("denied") {
+                    1.0
+                } else {
+                    0.0
+                }
+            }) | E::custom("professional_tone", |_, _| 1.0)
+                | E::custom("safety", |_, _| 1.0),
+        );
 
     println!(
         "Eval suite: {} cases, {} criteria",
         eval_suite.len(),
-        eval_suite.criteria_names.len()
+        eval_suite.criteria.len()
     );
 
     // Score a sample output
@@ -335,7 +356,7 @@ async fn main() {
     let scores = eval_criteria.score_all(sample, "approved");
     println!("\nSample scores:");
     for (name, score) in &scores {
-        println!("  {}: {:.2}", name, score);
+        println!("  {name}: {score:.2}");
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -373,13 +394,13 @@ async fn main() {
         for v in items {
             match v {
                 ContractViolation::UnproducedKey { consumer, key } => {
-                    println!("    {} reads '{}' (unproduced)", consumer, key);
+                    println!("    {consumer} reads '{key}' (unproduced)");
                 }
                 ContractViolation::DuplicateWrite { agents, key } => {
-                    println!("    '{}' written by {:?}", key, agents);
+                    println!("    '{key}' written by {agents:?}");
                 }
                 ContractViolation::OrphanedOutput { producer, key } => {
-                    println!("    {} writes '{}' (orphaned)", producer, key);
+                    println!("    {producer} writes '{key}' (orphaned)");
                 }
             }
         }
@@ -426,7 +447,7 @@ async fn main() {
     println!("\n=== STAGE 8: Runtime Execution ===\n");
 
     // Compile and run the pipeline
-    let compiled = full_pipeline.compile(llm.clone());
+    let compiled = full_pipeline.compile(llm.clone())?;
     println!("Pipeline compiled. Name: {}", compiled.name());
 
     // Set up state with the application data
@@ -452,11 +473,11 @@ async fn main() {
             if guard_violations.is_empty() {
                 println!("Output passed all {} guard checks.", output_guards.len());
             } else {
-                println!("Guard violations: {:?}", guard_violations);
+                println!("Guard violations: {guard_violations:?}");
             }
         }
         Err(e) => {
-            println!("Pipeline error: {}", e);
+            println!("Pipeline error: {e}");
         }
     }
 
@@ -483,9 +504,9 @@ async fn main() {
                 serde_json::Value::String(s) if s.len() > 60 => {
                     format!("\"{}...\"", &s[..57])
                 }
-                other => format!("{}", other),
+                other => format!("{other}"),
             };
-            println!("  {}: {}", key, display);
+            println!("  {key}: {display}");
         }
     }
 
@@ -531,4 +552,5 @@ async fn main() {
     println!("  8. Operator algebra (>>, |, /, * until) for composition");
     println!("  9. Patterns (fan_out_merge, fallback) for common workflows");
     println!(" 10. Runtime execution with compiled pipeline");
+    Ok(())
 }

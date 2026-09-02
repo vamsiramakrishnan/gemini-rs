@@ -62,7 +62,7 @@ the substrate the compiler targets; the compiler arc proper is:
 Authored as focused, green commits, in this order:
 
 1. ✅ **Hierarchical statecharts + digressions above the DAG** — `OverlaySpec`
-   (serializable) + `Conversation::overlay/trigger/resume/done_overlay`, each
+   (serializable) + `Conversation::overlay/trigger/resume/end_overlay`, each
    lowering to its own `CompiledFlow`; runtime `FlowStack`
    (`CompiledConversation::stack`) with push-on-trigger / resume-on-completion
    (`Resume::Previous`/`Restart`/`Terminate`); active-layer delegation for

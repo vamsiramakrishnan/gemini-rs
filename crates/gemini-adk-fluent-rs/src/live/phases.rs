@@ -7,11 +7,11 @@ use std::time::Duration;
 
 use serde_json::Value;
 
+use gemini_adk_rs::State;
 use gemini_adk_rs::live::{
     ComputedVar, Phase, RateDetector, SustainedDetector, TemporalPattern, TurnCountDetector,
     Watcher,
 };
-use gemini_adk_rs::State;
 use gemini_genai_rs::prelude::*;
 use gemini_genai_rs::session::SessionWriter;
 
@@ -27,15 +27,16 @@ impl Live {
     /// is not sent twice). Returns `None` to leave the instruction unchanged.
     ///
     /// # Example
-    /// ```ignore
-    /// .instruction_template(|state| {
+    /// ```no_run
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// Live::builder().instruction_template(|state| {
     ///     let phase: String = state.get("phase").unwrap_or_default();
     ///     match phase.as_str() {
     ///         "ordering" => Some("Focus on taking the order accurately.".into()),
     ///         "confirming" => Some("Summarize and confirm the order.".into()),
     ///         _ => None,
     ///     }
-    /// })
+    /// });
     /// ```
     pub fn instruction_template(
         mut self,
@@ -52,15 +53,16 @@ impl Live {
     /// to know or repeat the base instruction.
     ///
     /// # Example
-    /// ```ignore
-    /// .instruction_amendment(|state| {
+    /// ```no_run
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// Live::builder().instruction_amendment(|state| {
     ///     let risk: String = state.get("derived:risk").unwrap_or_default();
     ///     if risk == "high" {
     ///         Some("[IMPORTANT: Use empathetic language. Do not threaten.]".into())
     ///     } else {
     ///         None
     ///     }
-    /// })
+    /// });
     /// ```
     pub fn instruction_amendment(
         mut self,
@@ -76,17 +78,22 @@ impl Live {
     ///
     /// The compute function receives the full `State` and returns `Some(value)`
     /// to write to `derived:{key}`, or `None` to skip.
+    ///
+    /// A dependency cycle among computed variables is a configuration error;
+    /// it is reported by `connect` (as `AgentError::Config`), never a panic.
     pub fn computed(
         mut self,
         key: impl Into<String>,
         deps: &[&str],
         f: impl Fn(&State) -> Option<Value> + Send + Sync + 'static,
     ) -> Self {
-        self.computed.register(ComputedVar {
+        if let Err(err) = self.computed.register(ComputedVar {
             key: key.into(),
-            dependencies: deps.iter().map(|s| s.to_string()).collect(),
+            dependencies: deps.iter().map(std::string::ToString::to_string).collect(),
             compute: Arc::new(f),
-        });
+        }) {
+            self.config_errors.extend(err.issues);
+        }
         self
     }
 
@@ -96,15 +103,16 @@ impl Live {
     ///
     /// Phase-specific modifiers are applied *after* defaults, so they extend (not replace).
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # use gemini_adk_fluent_rs::prelude::*;
     /// Live::builder()
     ///     .phase_defaults(|p| {
-    ///         p.with_state(&["emotional_state", "risk_level"])
-    ///          .when(risk_is_elevated, "Show extra empathy.")
-    ///          .prompt_on_enter(true)
+    ///         p.show_state(&["emotional_state", "risk_level"])
+    ///          .when(|s| s.get::<String>("risk").unwrap_or_default() == "high", "Show extra empathy.")
+    ///          .prompt_on_enter()
     ///     })
     ///     .phase("greet").instruction("...").done()
-    ///     .phase("close").instruction("...").done()
+    ///     .phase("close").instruction("...").done();
     ///     // Both phases inherit the modifiers and prompt_on_enter.
     /// ```
     pub fn phase_defaults(mut self, f: impl FnOnce(PhaseDefaults) -> PhaseDefaults) -> Self {
@@ -143,7 +151,7 @@ impl Live {
 
     /// Internal method called by [`WatchBuilder::then`].
     pub(crate) fn add_watcher(&mut self, watcher: Watcher) {
-        self.watchers.add(watcher);
+        self.watchers.register(watcher);
     }
 
     // -- Temporal Patterns --
@@ -163,7 +171,7 @@ impl Live {
         Fut: Future<Output = ()> + Send + 'static,
     {
         let detector = SustainedDetector::new(Arc::new(condition), duration);
-        self.temporal.add(TemporalPattern::new(
+        self.temporal.register(TemporalPattern::new(
             name,
             Box::new(detector),
             Arc::new(move |s, w| Box::pin(action(s, w))),
@@ -188,7 +196,7 @@ impl Live {
         Fut: Future<Output = ()> + Send + 'static,
     {
         let detector = RateDetector::new(Arc::new(filter), count, window);
-        self.temporal.add(TemporalPattern::new(
+        self.temporal.register(TemporalPattern::new(
             name,
             Box::new(detector),
             Arc::new(move |s, w| Box::pin(action(s, w))),
@@ -212,7 +220,7 @@ impl Live {
         Fut: Future<Output = ()> + Send + 'static,
     {
         let detector = TurnCountDetector::new(Arc::new(condition), turn_count);
-        self.temporal.add(TemporalPattern::new(
+        self.temporal.register(TemporalPattern::new(
             name,
             Box::new(detector),
             Arc::new(move |s, w| Box::pin(action(s, w))),

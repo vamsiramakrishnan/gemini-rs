@@ -41,8 +41,14 @@ fn state_transforms() {
 
     let mut state = json!({"price": 100, "quantity": 5});
     S::compute("total", |s| {
-        let price = s.get("price").and_then(|v| v.as_f64()).unwrap_or(0.0);
-        let qty = s.get("quantity").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let price = s
+            .get("price")
+            .and_then(serde_json::Value::as_f64)
+            .unwrap_or(0.0);
+        let qty = s
+            .get("quantity")
+            .and_then(serde_json::Value::as_f64)
+            .unwrap_or(0.0);
         json!(price * qty)
     })
     .apply(&mut state);
@@ -58,7 +64,10 @@ fn state_transforms() {
     let chain = S::pick(&["findings", "score"])
         >> S::rename(&[("findings", "research")])
         >> S::compute("grade", |s| {
-            let score = s.get("score").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let score = s
+                .get("score")
+                .and_then(serde_json::Value::as_f64)
+                .unwrap_or(0.0);
             json!(if score >= 90.0 {
                 "A"
             } else if score >= 80.0 {

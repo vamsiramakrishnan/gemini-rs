@@ -139,12 +139,12 @@ pub fn build_session_config(model: Option<&str>) -> Result<SessionConfig, String
     };
 
     let effective_model = model
-        .map(|s| s.to_string())
+        .map(std::string::ToString::to_string)
         .or_else(|| std::env::var("GEMINI_LIVE_MODEL").ok())
         .or_else(|| std::env::var("GEMINI_MODEL").ok());
 
     if let Some(m) = effective_model {
-        config = config.model(GeminiModel::Custom(m));
+        config = config.model(ModelId::new(m));
     }
 
     Ok(config)
@@ -152,12 +152,12 @@ pub fn build_session_config(model: Option<&str>) -> Result<SessionConfig, String
 
 /// Resolve the Live session model from env vars, falling back to `Gemini2_0FlashLive`.
 ///
-/// Precedence: `GEMINI_LIVE_MODEL` env var > `GeminiModel::Gemini2_0FlashLive`.
-pub fn live_model() -> GeminiModel {
+/// Precedence: `GEMINI_LIVE_MODEL` env var > `ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO`.
+pub fn live_model() -> ModelId {
     std::env::var("GEMINI_LIVE_MODEL")
         .ok()
-        .map(GeminiModel::Custom)
-        .unwrap_or(GeminiModel::Gemini2_0FlashLive)
+        .map(ModelId::new)
+        .unwrap_or(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
 }
 
 /// Build a `GeminiLlm` for OOB extraction from environment variables.

@@ -10,8 +10,8 @@ use crate::events::Event;
 
 /// Plugin that logs agent and tool lifecycle events.
 ///
-/// When the `tracing-support` feature is enabled, uses `tracing` macros for
-/// structured logging. Without the feature, all hooks are silent no-ops.
+/// Uses `tracing` macros for structured logging; the events are no-ops
+/// until a subscriber is installed.
 pub struct LoggingPlugin;
 
 impl LoggingPlugin {
@@ -34,24 +34,18 @@ impl Plugin for LoggingPlugin {
     }
 
     async fn before_agent(&self, _ctx: &InvocationContext) -> PluginResult {
-        #[cfg(feature = "tracing-support")]
         tracing::info!("[plugin:logging] Agent starting");
         PluginResult::Continue
     }
 
     async fn after_agent(&self, _ctx: &InvocationContext) -> PluginResult {
-        #[cfg(feature = "tracing-support")]
         tracing::info!("[plugin:logging] Agent completed");
         PluginResult::Continue
     }
 
     async fn before_tool(&self, call: &FunctionCall, _ctx: &InvocationContext) -> PluginResult {
-        let _ = call;
-        #[cfg(feature = "tracing-support")]
-        {
-            tracing::info!(tool = %call.name, "[plugin:logging] Tool call starting");
-            tracing::debug!(tool = %call.name, args = %call.args, "[plugin:logging] Tool call args");
-        }
+        tracing::info!(tool = %call.name, "[plugin:logging] Tool call starting");
+        tracing::debug!(tool = %call.name, args = %call.args, "[plugin:logging] Tool call args");
         PluginResult::Continue
     }
 
@@ -61,15 +55,11 @@ impl Plugin for LoggingPlugin {
         _result: &serde_json::Value,
         _ctx: &InvocationContext,
     ) -> PluginResult {
-        let _ = call;
-        #[cfg(feature = "tracing-support")]
         tracing::info!(tool = %call.name, "[plugin:logging] Tool call completed");
         PluginResult::Continue
     }
 
     async fn on_event(&self, event: &Event, _ctx: &InvocationContext) -> PluginResult {
-        let _ = event;
-        #[cfg(feature = "tracing-support")]
         tracing::debug!(
             event_id = %event.id,
             author = %event.author,

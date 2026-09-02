@@ -234,10 +234,12 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result["status"], "found");
-        assert!(result["facts"][0]["statement"]
-            .as_str()
-            .unwrap()
-            .contains("pescatarian"));
+        assert!(
+            result["facts"][0]["statement"]
+                .as_str()
+                .unwrap()
+                .contains("pescatarian")
+        );
     }
 
     #[tokio::test]
@@ -319,11 +321,13 @@ mod tests {
         let tool = manage_memory_tool(session().await);
         let result = tool.call(json!({ "operation": "list" })).await.unwrap();
         assert_eq!(result["operation"], "list");
-        assert!(result["facts"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|f| f.as_str().unwrap_or_default().contains("pescatarian")));
+        assert!(
+            result["facts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|f| f.as_str().unwrap_or_default().contains("pescatarian"))
+        );
     }
 
     #[tokio::test]
@@ -336,10 +340,11 @@ mod tests {
     #[tokio::test]
     async fn an_operation_outside_the_schema_is_a_tool_error() {
         let tool = manage_memory_tool(session().await);
-        assert!(tool
-            .call(json!({ "operation": "obliterate" }))
-            .await
-            .is_err());
+        assert!(
+            tool.call(json!({ "operation": "obliterate" }))
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]
@@ -410,11 +415,15 @@ mod tests {
     fn recall_scopes_partition_durable_from_episodic() {
         assert!(RecallScope::All.kinds().is_empty());
         assert!(RecallScope::Recent.kinds().contains(&MemoryKind::Episodic));
-        assert!(RecallScope::Persistent
-            .kinds()
-            .contains(&MemoryKind::Preference));
-        assert!(!RecallScope::Persistent
-            .kinds()
-            .contains(&MemoryKind::Episodic));
+        assert!(
+            RecallScope::Persistent
+                .kinds()
+                .contains(&MemoryKind::Preference)
+        );
+        assert!(
+            !RecallScope::Persistent
+                .kinds()
+                .contains(&MemoryKind::Episodic)
+        );
     }
 }

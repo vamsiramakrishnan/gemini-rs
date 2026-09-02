@@ -157,11 +157,7 @@ fn luhn_valid(digits: &str) -> bool {
         };
         let d = if i % 2 == 1 {
             let doubled = d * 2;
-            if doubled > 9 {
-                doubled - 9
-            } else {
-                doubled
-            }
+            if doubled > 9 { doubled - 9 } else { doubled }
         } else {
             d
         };

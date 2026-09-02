@@ -9,7 +9,7 @@
 //! ADK_API_PORT=8080 cargo run -p gemini-adk-api-rs
 //! ```
 
-use gemini_adk_server_rs::{run_server, ServeConfig};
+use gemini_adk_server_rs::{ServeConfig, run_server};
 
 #[tokio::main]
 async fn main() {
@@ -33,7 +33,7 @@ async fn main() {
 }
 
 fn init_tracing() {
-    use tracing_subscriber::{fmt, EnvFilter};
+    use tracing_subscriber::{EnvFilter, fmt};
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     fmt().with_env_filter(filter).init();
 }

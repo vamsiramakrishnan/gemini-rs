@@ -27,7 +27,6 @@ use gemini_adk_fluent_rs::prelude::*;
 use gemini_adk_fluent_rs::telephony::TwilioCall;
 
 let session = Live::builder()
-    .model(GeminiModel::Custom("models/gemini-2.5-flash-native-audio-preview-12-2025".into()))
     .instruction("You are the front desk. This is a voice call — keep it short.")
     .greeting("Greet the caller and ask how you can help.")
     .connect_from_env()

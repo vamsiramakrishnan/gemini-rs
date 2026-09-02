@@ -85,10 +85,7 @@ impl SqliteSessionService {
                 "SqliteSessionService: the `database-sessions` feature is not                  enabled — ignoring db_path '{}' and using in-memory storage                  (sessions are lost on restart)",
                 config.db_path.to_string_lossy()
             );
-            #[cfg(feature = "tracing-support")]
             tracing::warn!(target: "gemini_adk_rs::session", "{msg}");
-            #[cfg(not(feature = "tracing-support"))]
-            eprintln!("warning: {msg}");
         });
         super::InMemorySessionService::new()
     }

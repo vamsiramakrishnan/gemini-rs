@@ -16,7 +16,7 @@
 //! offline (see the tests below) and the glue in `main.rs` small.
 
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use gemini_adk_fluent_rs::telephony::g711;
 

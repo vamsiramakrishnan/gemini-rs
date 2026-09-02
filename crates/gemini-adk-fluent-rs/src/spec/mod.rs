@@ -24,15 +24,14 @@ mod codegen;
 mod simulate;
 
 pub use simulate::{
-    run_tests, trace_test, SimEvent, SimSnapshot, SpecTest, TestExpectation, TestReport,
-    TestStepResult,
+    SimEvent, SimSnapshot, SpecTest, TestExpectation, TestReport, TestStepResult, trace_test,
 };
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use gemini_adk_rs::expr::Expr;
 use gemini_adk_rs::flow::{Constraint, Flow, Guard, Pred, Step};
@@ -822,7 +821,8 @@ pub struct SessionSpec {
     /// The governed flow DAG (optional — a spec may be phases-only).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flow: Option<Flow>,
-    /// Embedded conformance tests, replayed offline by [`run_tests`].
+    /// Embedded conformance tests, replayed offline by
+    /// [`SessionSpec::run_tests`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tests: Vec<SpecTest>,
 }
@@ -1024,10 +1024,10 @@ impl SessionSpec {
     /// Seed declared `state` defaults for keys not yet set.
     pub(crate) fn seed_state_defaults(&self, state: &State) {
         for (key, field) in &self.state {
-            if let Some(default) = &field.default {
-                if state.get_raw(key).is_none() {
-                    let _ = state.set(key, default.clone());
-                }
+            if let Some(default) = &field.default
+                && state.get_raw(key).is_none()
+            {
+                let _ = state.set(key, default.clone());
             }
         }
     }
@@ -1066,10 +1066,10 @@ impl SessionSpec {
         if !self.phases.is_empty() && self.initial_phase.is_none() {
             errors.push("phases are declared but initial_phase is not set".into());
         }
-        if let Some(initial) = &self.initial_phase {
-            if !self.phases.iter().any(|p| &p.name == initial) {
-                errors.push(format!("initial_phase '{initial}' is not a declared phase"));
-            }
+        if let Some(initial) = &self.initial_phase
+            && !self.phases.iter().any(|p| &p.name == initial)
+        {
+            errors.push(format!("initial_phase '{initial}' is not a declared phase"));
         }
         // Check for duplicate phase names
         {
@@ -1201,12 +1201,12 @@ impl SessionSpec {
         // Declared state dictionary: defaults must match their declared type;
         // once a dictionary exists, undeclared keys are worth flagging.
         for (key, field) in &self.state {
-            if let (Some(kind), Some(default)) = (field.kind, &field.default) {
-                if !kind.matches(default) {
-                    warnings.push(format!(
-                        "state key '{key}' declares type {kind:?} but its default is {default}"
-                    ));
-                }
+            if let (Some(kind), Some(default)) = (field.kind, &field.default)
+                && !kind.matches(default)
+            {
+                warnings.push(format!(
+                    "state key '{key}' declares type {kind:?} but its default is {default}"
+                ));
             }
         }
         if !self.state.is_empty() {
@@ -1285,24 +1285,24 @@ impl SessionSpec {
                             .into(),
                     );
                 }
-                if let Some(eot_ms) = audio.eot_hold_ms {
-                    if eot_ms > 1600 {
-                        warnings.push(
-                            "runtime.audio.eot_hold_ms exceeds the measured frontier (1600 ms): \
+                if let Some(eot_ms) = audio.eot_hold_ms
+                    && eot_ms > 1600
+                {
+                    warnings.push(
+                        "runtime.audio.eot_hold_ms exceeds the measured frontier (1600 ms): \
                              recall fell to 0.508 at 1600ms on TurnBench dev — values beyond this \
                              may cause missed turn-end detection"
-                                .into(),
-                        );
-                    }
+                            .into(),
+                    );
                 }
-                if let Some(min_int_ms) = audio.min_interruption_ms {
-                    if min_int_ms > 2000 {
-                        warnings.push(
-                            "runtime.audio.min_interruption_ms exceeds the interruption match \
+                if let Some(min_int_ms) = audio.min_interruption_ms
+                    && min_int_ms > 2000
+                {
+                    warnings.push(
+                        "runtime.audio.min_interruption_ms exceeds the interruption match \
                              window (2000 ms) — commits may land too late to count"
-                                .into(),
-                        );
-                    }
+                            .into(),
+                    );
                 }
             }
             if runtime.session_id.is_some() && runtime.persistence.is_none() {
@@ -1332,7 +1332,11 @@ impl SessionSpec {
                 if self.memory.is_some() {
                     // The memory binding installs its tools at connect; the
                     // flow may reference or gate them.
-                    names.extend(MEMORY_TOOL_NAMES.iter().map(|s| s.to_string()));
+                    names.extend(
+                        MEMORY_TOOL_NAMES
+                            .iter()
+                            .map(std::string::ToString::to_string),
+                    );
                 }
                 let refs: Vec<&str> = names.iter().map(String::as_str).collect();
                 flow.clone().compile_with_tools(&refs)
@@ -1341,14 +1345,14 @@ impl SessionSpec {
                 Ok(compiled) => (
                     true,
                     compiled
-                        .tool_policy()
+                        .tool_surface()
                         .tools
                         .iter()
                         .cloned()
                         .collect::<Vec<_>>(),
                 ),
                 Err(errs) => {
-                    errors.extend(errs.0.iter().map(|e| e.to_string()));
+                    errors.extend(errs.0.iter().map(std::string::ToString::to_string));
                     (false, Vec::new())
                 }
             }
@@ -1435,13 +1439,13 @@ impl SessionSpec {
     /// Run the embedded test suite offline (no model, no network) — scripted
     /// events replayed through the real [`FlowMonitor`](gemini_adk_rs::flow::FlowMonitor).
     pub fn run_tests(&self) -> Vec<TestReport> {
-        run_tests(self)
+        simulate::run_tests(self)
     }
 
     /// Configure a [`Live`] builder from this spec.
     ///
     /// `state` is the session state the declared tools bind to — pass the
-    /// same one via `.with_state` (this method does). Returns an error when
+    /// same one via `.state` (this method does). Returns an error when
     /// the spec fails validation or requires a resource `resources` lacks.
     /// Everything code-only (callbacks, custom guards, middleware) is added on
     /// the returned builder afterwards.
@@ -1471,7 +1475,7 @@ impl SessionSpec {
         self.seed_state_defaults(state);
 
         let mut live = live
-            .with_state(state.clone())
+            .state(state.clone())
             .instruction(if self.instruction.is_empty() {
                 "Follow the conversation flow you are given.".to_string()
             } else {
@@ -1488,10 +1492,10 @@ impl SessionSpec {
 
         // Tools: declared (mock/HTTP) via the dispatcher, MCP merged on top.
         if !self.tools.is_empty() {
-            live = live.tools(self.build_dispatcher(state));
+            live = live.dispatcher(self.build_dispatcher(state));
         }
         for params in &self.mcp {
-            live = live.with_tools(T::mcp(params.clone()));
+            live = live.tools(T::mcp(params.clone()));
         }
 
         // Governance.
@@ -1563,8 +1567,8 @@ impl SessionSpec {
                 let refs: Vec<&str> = p.needs.iter().map(String::as_str).collect();
                 builder = builder.needs(&refs);
             }
-            if let Some(prompt) = p.prompt_on_enter {
-                builder = builder.prompt_on_enter(prompt);
+            if p.prompt_on_enter == Some(true) {
+                builder = builder.prompt_on_enter();
             }
             if p.terminal {
                 builder = builder.terminal();
@@ -1714,10 +1718,15 @@ fn apply_runtime(mut live: Live, runtime: &RuntimeSpec) -> Live {
         live = live.include_thoughts();
     }
     if let Some(t) = runtime.transcription {
-        live = live.transcription(t.input, t.output);
+        if t.input {
+            live = live.input_transcription();
+        }
+        if t.output {
+            live = live.output_transcription();
+        }
     }
-    if let Some(enabled) = runtime.proactive_audio {
-        live = live.proactive_audio(enabled);
+    if runtime.proactive_audio == Some(true) {
+        live = live.proactive_audio();
     }
     if let Some(vad) = &runtime.vad {
         live = live.vad(AutomaticActivityDetection {
@@ -1903,6 +1912,10 @@ async fn execute_http(binding: &HttpBinding, args: &Value, state: &State) -> Res
 }
 
 #[cfg(not(feature = "http-tools"))]
+#[allow(
+    clippy::unused_async,
+    reason = "same signature as the http-tools implementation so the call site is feature-agnostic"
+)]
 async fn execute_http(
     _binding: &HttpBinding,
     _args: &Value,
@@ -2545,11 +2558,13 @@ mod tests {
             "computed": [{"key": "a", "from": {"key": "a"}}]
         }))
         .expect("parses");
-        assert!(self_read
-            .validate()
-            .errors
-            .iter()
-            .any(|e| e.contains("reads its own key")));
+        assert!(
+            self_read
+                .validate()
+                .errors
+                .iter()
+                .any(|e| e.contains("reads its own key"))
+        );
     }
 
     #[test]
@@ -2577,10 +2592,11 @@ mod tests {
         dangling.computed[0].from =
             serde_json::from_value(json!({"gt": [{"key": "scoer"}, {"const": 0.5}]})).unwrap();
         let v = dangling.validate();
-        assert!(v
-            .warnings
-            .iter()
-            .any(|w| w.contains("computed 'high_risk' reads state key 'scoer'")));
+        assert!(
+            v.warnings
+                .iter()
+                .any(|w| w.contains("computed 'high_risk' reads state key 'scoer'"))
+        );
     }
 
     #[test]
@@ -2614,11 +2630,12 @@ mod tests {
 
         let mut bad = spec.clone();
         bad.memory.as_mut().unwrap().slots[0].to = "derived:diet".into();
-        assert!(bad
-            .validate()
-            .errors
-            .iter()
-            .any(|e| e.contains("read-only key")));
+        assert!(
+            bad.validate()
+                .errors
+                .iter()
+                .any(|e| e.contains("read-only key"))
+        );
     }
 
     #[test]
@@ -2646,9 +2663,10 @@ mod tests {
             memory: Some(Arc::new(NullBinding)),
             ..Default::default()
         };
-        assert!(spec
-            .apply(Live::builder(), &State::new(), &resources)
-            .is_ok());
+        assert!(
+            spec.apply(Live::builder(), &State::new(), &resources)
+                .is_ok()
+        );
     }
 
     #[test]
@@ -2713,17 +2731,20 @@ mod tests {
         .expect("parses");
         let v = spec.validate();
         assert!(v.valid, "errors: {:?}", v.errors);
-        assert!(spec
-            .apply(Live::builder(), &State::new(), &SpecResources::default())
-            .is_ok());
+        assert!(
+            spec.apply(Live::builder(), &State::new(), &SpecResources::default())
+                .is_ok()
+        );
 
         let mut incoherent = spec.clone();
         incoherent.runtime.as_mut().unwrap().thinking_budget = None;
-        assert!(incoherent
-            .validate()
-            .warnings
-            .iter()
-            .any(|w| w.contains("include_thoughts")));
+        assert!(
+            incoherent
+                .validate()
+                .warnings
+                .iter()
+                .any(|w| w.contains("include_thoughts"))
+        );
     }
 
     #[test]
@@ -2741,9 +2762,10 @@ mod tests {
         }))
         .expect("parses");
         assert!(spec.validate().valid);
-        assert!(spec
-            .apply(Live::builder(), &State::new(), &SpecResources::default())
-            .is_ok());
+        assert!(
+            spec.apply(Live::builder(), &State::new(), &SpecResources::default())
+                .is_ok()
+        );
     }
 
     #[test]
@@ -2760,8 +2782,10 @@ mod tests {
         // Without the extraction entries it applies clean.
         let mut no_extract = spec.clone();
         no_extract.extract.clear();
-        assert!(no_extract
-            .apply(Live::builder(), &state, &SpecResources::default())
-            .is_ok());
+        assert!(
+            no_extract
+                .apply(Live::builder(), &state, &SpecResources::default())
+                .is_ok()
+        );
     }
 }

@@ -10,7 +10,7 @@ use crate::live::callbacks::EventCallbacks;
 use crate::live::events::LiveEvent;
 use crate::live::extractor::{MergePolicy, TurnExtractor};
 use crate::live::transcript::TranscriptBuffer;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::dispatch_callback;
 
@@ -47,7 +47,6 @@ pub(in crate::live) async fn run_extractors(
                 match ext.extract_with_state(&window, &state).await {
                     Ok(value) => Ok((ext, value)),
                     Err(e) => {
-                        #[cfg(feature = "tracing-support")]
                         tracing::warn!(extractor = ext.name(), "Extraction failed: {e}");
                         Err((ext.name().to_string(), e.to_string()))
                     }
@@ -56,7 +55,7 @@ pub(in crate::live) async fn run_extractors(
         })
         .collect();
 
-    let results = futures::future::join_all(extraction_futures).await;
+    let results = futures_util::future::join_all(extraction_futures).await;
     for result in results {
         match result {
             Ok((extractor, value)) => {
@@ -187,7 +186,11 @@ fn promote_extraction_fields(
 /// Fire an extractor's `on_complete` agent after its results land in state.
 async fn fire_on_complete(extractor: &dyn TurnExtractor, value: &Value, state: &State) {
     // Only fire when the extractor actually produced fields this turn.
-    if value.as_object().map(|o| o.is_empty()).unwrap_or(true) {
+    if value
+        .as_object()
+        .map(serde_json::Map::is_empty)
+        .unwrap_or(true)
+    {
         return;
     }
     let Some(oc) = extractor.on_complete() else {
@@ -195,13 +198,13 @@ async fn fire_on_complete(extractor: &dyn TurnExtractor, value: &Value, state: &
     };
     let name = extractor.name().to_string();
     match oc.mode {
-        crate::orchestration::Mode::Call => {
-            let _ = crate::orchestration::call(&name, oc.agent, state).await;
+        crate::orchestration::AgentMode::Call => {
+            let _ = crate::orchestration::call_agent(&name, oc.agent, state).await;
         }
-        crate::orchestration::Mode::Dispatch | crate::orchestration::Mode::Background => {
+        crate::orchestration::AgentMode::Dispatch | crate::orchestration::AgentMode::Background => {
             let state = state.clone();
             tokio::spawn(async move {
-                let _ = crate::orchestration::call(&name, oc.agent, &state).await;
+                let _ = crate::orchestration::call_agent(&name, oc.agent, &state).await;
             });
         }
     }
@@ -263,7 +266,6 @@ pub(in crate::live) async fn run_extractors_with_window(
                 match ext.extract_with_state(&window, &state).await {
                     Ok(value) => Ok((ext, value)),
                     Err(e) => {
-                        #[cfg(feature = "tracing-support")]
                         tracing::warn!(extractor = ext.name(), "Extraction failed: {e}");
                         Err((ext.name().to_string(), e.to_string()))
                     }
@@ -272,7 +274,7 @@ pub(in crate::live) async fn run_extractors_with_window(
         })
         .collect();
 
-    let results = futures::future::join_all(extraction_futures).await;
+    let results = futures_util::future::join_all(extraction_futures).await;
     for result in results {
         match result {
             Ok((extractor, value)) => {
@@ -394,7 +396,7 @@ mod tests {
             name: "DebtorState",
             value: json!({ "debt_acknowledged": true }),
             promotions: vec![
-                FieldPromotion::true_only("debt_acknowledged").after_presented("debt_details")
+                FieldPromotion::true_only("debt_acknowledged").after_presented("debt_details"),
             ],
         });
 

@@ -1,7 +1,7 @@
 //! Semantic events emitted by the L1 processor.
 //!
 //! Subscribe via `LiveHandle::events()` (broadcast receiver) or
-//! `LiveHandle::stream()` (a [`futures::Stream`]). Zero-cost when no
+//! `LiveHandle::stream()` (a [`futures_util::Stream`]). Zero-cost when no
 //! subscribers.
 
 use std::pin::Pin;
@@ -9,7 +9,7 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 
 use bytes::Bytes;
-use futures::Stream;
+use futures_util::Stream;
 use tokio::sync::broadcast;
 
 /// Semantic events emitted by the Live session processor.
@@ -145,7 +145,7 @@ pub enum LiveEvent {
     },
 }
 
-/// A [`futures::Stream`] of [`LiveEvent`]s from a Live session.
+/// A [`futures_util::Stream`] of [`LiveEvent`]s from a Live session.
 ///
 /// Created by [`LiveHandle::stream()`](super::handle::LiveHandle::stream).
 /// Wraps the underlying [`broadcast::Receiver`] with stream semantics:
@@ -159,7 +159,7 @@ pub enum LiveEvent {
 /// Composes with all `futures`/`tokio-stream` combinators:
 ///
 /// ```rust,ignore
-/// use futures::StreamExt;
+/// use futures_util::StreamExt;
 ///
 /// let mut stream = handle.stream();
 /// while let Some(ev) = stream.next().await {
@@ -177,7 +177,7 @@ pub struct LiveEventStream {
 impl LiveEventStream {
     /// Wrap a broadcast receiver of [`LiveEvent`]s as a stream.
     pub(crate) fn new(rx: broadcast::Receiver<LiveEvent>) -> Self {
-        let inner = futures::stream::unfold(rx, |mut rx| async move {
+        let inner = futures_util::stream::unfold(rx, |mut rx| async move {
             loop {
                 match rx.recv().await {
                     Ok(ev) => return Some((ev, rx)),
@@ -211,7 +211,7 @@ impl std::fmt::Debug for LiveEventStream {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use futures::StreamExt;
+    use futures_util::StreamExt;
 
     #[tokio::test]
     async fn stream_yields_events_in_order_and_ends_on_close() {

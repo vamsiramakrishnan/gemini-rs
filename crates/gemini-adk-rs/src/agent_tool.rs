@@ -163,12 +163,10 @@ impl ToolFunction for AgentTool {
                 Ok(output)
             }
             Ok(Err(e)) => Err(ToolError::ExecutionFailed(format!(
-                "Agent '{}' failed: {}",
-                agent_name, e
+                "Agent '{agent_name}' failed: {e}"
             ))),
             Err(e) => Err(ToolError::ExecutionFailed(format!(
-                "Agent '{}' task panicked: {}",
-                agent_name, e
+                "Agent '{agent_name}' task panicked: {e}"
             ))),
         }
     }
@@ -195,8 +193,7 @@ mod tests {
                 .get::<String>("request_text")
                 .unwrap_or_else(|| "no request".to_string());
             ctx.emit(AgentEvent::Session(SessionEvent::TextDelta(format!(
-                "Echo: {}",
-                request
+                "Echo: {request}"
             ))));
             ctx.emit(AgentEvent::Session(SessionEvent::TurnComplete));
             Ok(())
@@ -259,7 +256,7 @@ mod tests {
             ToolError::ExecutionFailed(msg) => {
                 assert!(msg.contains("intentional failure"));
             }
-            other => panic!("expected ExecutionFailed, got: {:?}", other),
+            other => panic!("expected ExecutionFailed, got: {other:?}"),
         }
     }
 

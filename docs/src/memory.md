@@ -97,7 +97,7 @@ satisfies `phase.needs(..)` and `Flow` guards exactly as one filled by the
 user would — which is the point: the application asks for what it needs and
 does not care whether the answer arrived this minute or last month.
 `memory_tools(session)` exposes the two tools as a composite for manual
-`with_tools` wiring.
+`Live::tools` wiring.
 
 ## Declarative binding: `spec.memory`
 

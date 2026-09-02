@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use super::domain::{stable_hash, FactFingerprint, MemoryObservation, MutationIntent};
+use super::domain::{FactFingerprint, MemoryObservation, MutationIntent, stable_hash};
 use super::error::MemoryError;
 use super::ids::{EventId, MemoryId, SessionId, TurnId, UserId};
 use super::policy::DiscardReason;

@@ -23,7 +23,7 @@ use crate::state::State;
 #[derive(Debug, Clone)]
 pub enum InputEvent {
     /// Raw PCM16 audio bytes.
-    Audio(Vec<u8>),
+    Audio(bytes::Bytes),
     /// Text content.
     Text(String),
     /// User started speaking.
@@ -77,7 +77,8 @@ impl AgentSession {
     }
 
     /// Send audio data. Fans out to input-streaming tools ONLY if listeners exist.
-    pub async fn send_audio(&self, data: Vec<u8>) -> Result<(), AgentError> {
+    pub async fn send_audio(&self, data: impl Into<bytes::Bytes>) -> Result<(), AgentError> {
+        let data: bytes::Bytes = data.into();
         // Fan-out ONLY if input-streaming tools are listening
         if self.input_broadcast.receiver_count() > 0 {
             let _ = self.input_broadcast.send(InputEvent::Audio(data.clone()));
@@ -122,9 +123,9 @@ impl AgentSession {
     }
 
     /// Send video/image data (raw JPEG bytes).
-    pub async fn send_video(&self, jpeg_data: Vec<u8>) -> Result<(), AgentError> {
+    pub async fn send_video(&self, jpeg_data: impl Into<bytes::Bytes>) -> Result<(), AgentError> {
         self.writer
-            .send_video(jpeg_data)
+            .send_video(jpeg_data.into())
             .await
             .map_err(AgentError::Session)
     }
@@ -199,7 +200,7 @@ pub struct NoOpSessionWriter;
 
 #[async_trait::async_trait]
 impl SessionWriter for NoOpSessionWriter {
-    async fn send_audio(&self, _data: Vec<u8>) -> Result<(), SessionError> {
+    async fn send_audio(&self, _data: bytes::Bytes) -> Result<(), SessionError> {
         Ok(())
     }
     async fn send_text(&self, _text: String) -> Result<(), SessionError> {
@@ -218,7 +219,7 @@ impl SessionWriter for NoOpSessionWriter {
     ) -> Result<(), SessionError> {
         Ok(())
     }
-    async fn send_video(&self, _jpeg_data: Vec<u8>) -> Result<(), SessionError> {
+    async fn send_video(&self, _jpeg_data: bytes::Bytes) -> Result<(), SessionError> {
         Ok(())
     }
     async fn update_instruction(&self, _instruction: String) -> Result<(), SessionError> {
@@ -267,11 +268,11 @@ mod tests {
         // send_audio will fail at SessionHandle level (no real WS), but
         // the broadcast should still fire
         let data = vec![1, 2, 3, 4];
-        let _ = session.send_audio(data.clone()).await;
+        let _ = session.send_audio(bytes::Bytes::from(data.clone())).await;
 
         match input_rx.try_recv() {
             Ok(InputEvent::Audio(received)) => assert_eq!(received, data),
-            other => panic!("expected Audio, got {:?}", other),
+            other => panic!("expected Audio, got {other:?}"),
         }
     }
 
@@ -303,7 +304,7 @@ mod tests {
 
         match input_rx.try_recv() {
             Ok(InputEvent::Text(t)) => assert_eq!(t, "hello"),
-            other => panic!("expected Text, got {:?}", other),
+            other => panic!("expected Text, got {other:?}"),
         }
     }
 

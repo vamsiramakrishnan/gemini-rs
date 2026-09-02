@@ -201,7 +201,7 @@ mod tests {
 
     fn test_config() -> SessionConfig {
         SessionConfig::new("test-key")
-            .model(GeminiModel::Gemini2_0FlashLive)
+            .model(ModelId::from_static("models/gemini-2.0-flash-live-001"))
             .voice(Voice::Puck)
     }
 
@@ -248,7 +248,7 @@ mod tests {
         let codec = JsonCodec;
         let config = test_config();
         let audio_data = vec![1u8, 2, 3, 4];
-        let cmd = SessionCommand::SendAudio(audio_data);
+        let cmd = SessionCommand::SendAudio(audio_data.into());
         let bytes = codec.encode_command(&cmd, &config).unwrap();
         let json = String::from_utf8(bytes).unwrap();
         assert!(
@@ -297,7 +297,7 @@ mod tests {
     fn json_codec_strips_scheduling_for_vertex() {
         let codec = JsonCodec;
         let config = SessionConfig::from_vertex("proj", "us-central1", "token")
-            .model(GeminiModel::Gemini2_0FlashLive);
+            .model(ModelId::from_static("models/gemini-2.0-flash-live-001"));
         let cmd = SessionCommand::SendToolResponse(vec![FunctionResponse {
             name: "search".to_string(),
             response: serde_json::json!({"ok": true}),
@@ -417,7 +417,7 @@ mod tests {
     fn json_codec_encode_send_video() {
         let codec = JsonCodec;
         let config = test_config();
-        let cmd = SessionCommand::SendVideo(vec![0xFF, 0xD8, 0xFF]); // JPEG magic bytes
+        let cmd = SessionCommand::SendVideo(vec![0xFF, 0xD8, 0xFF].into()); // JPEG magic bytes
         let bytes = codec.encode_command(&cmd, &config).unwrap();
         let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(
@@ -519,7 +519,7 @@ mod tests {
         let result = codec.decode_message(bad_bytes);
         match result {
             Err(CodecError::InvalidUtf8) => {} // expected
-            other => panic!("Expected CodecError::InvalidUtf8, got {:?}", other),
+            other => panic!("Expected CodecError::InvalidUtf8, got {other:?}"),
         }
     }
 }

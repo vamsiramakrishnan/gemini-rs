@@ -17,12 +17,12 @@
 //! Then in Twilio: Phone Numbers → your number → Voice → webhook
 //! `https://<public-host>/twiml` (HTTP POST).
 
+use axum::Router;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::http::header::HOST;
 use axum::http::HeaderMap;
+use axum::http::header::HOST;
 use axum::response::IntoResponse;
 use axum::routing::{any, get};
-use axum::Router;
 use tracing::{error, info, warn};
 
 use gemini_adk_fluent_rs::prelude::*;
@@ -131,8 +131,8 @@ async fn run_call(mut socket: WebSocket) -> Result<(), Box<dyn std::error::Error
 
 /// Live model from `GEMINI_LIVE_MODEL`, defaulting to the Google AI
 /// native-audio preview (see CLAUDE.md: Live model names differ by platform).
-fn live_model() -> GeminiModel {
-    GeminiModel::Custom(
+fn live_model() -> ModelId {
+    ModelId::new(
         std::env::var("GEMINI_LIVE_MODEL")
             .unwrap_or_else(|_| "models/gemini-2.5-flash-native-audio-preview-12-2025".into()),
     )

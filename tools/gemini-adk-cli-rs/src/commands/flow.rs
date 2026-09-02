@@ -27,7 +27,7 @@ pub fn inspect_summary(convo: &CompiledConversation) -> String {
         let kind = if s.terminal { "terminal" } else { "stage" };
         out.push_str(&format!("  - {} [{kind}]\n", s.id));
     }
-    let tools = &convo.flow().tool_policy().tools;
+    let tools = &convo.flow().tool_surface().tools;
     out.push_str(&format!(
         "tools ({}): {}\n",
         tools.len(),
@@ -115,7 +115,7 @@ pub async fn simulate(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let convo = load(spec_path)?;
     let scenario: Scenario = serde_json::from_str(&fs::read_to_string(scenario_path)?)?;
-    match scenario.run(&convo, FlowMode::Enforce).await {
+    match scenario.run(&convo, Enforcement::Enforce).await {
         Ok(()) => {
             println!("PASS: scenario '{}'", scenario.name);
             Ok(())
@@ -200,7 +200,7 @@ pub async fn ci(dir: &str, json: bool) -> Result<(), Box<dyn std::error::Error>>
                 }
             };
             let name = scenario.name.clone();
-            match scenario.run(&convo, FlowMode::Enforce).await {
+            match scenario.run(&convo, Enforcement::Enforce).await {
                 Ok(()) => {
                     scen_passed += 1;
                     scen_reports.push(serde_json::json!({

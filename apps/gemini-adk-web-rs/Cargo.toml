@@ -6,8 +6,8 @@ edition.workspace = true
 publish = false
 
 [dependencies]
-gemini-genai-rs       = { workspace = true }
-gemini-adk-rs        = { workspace = true, features = ["gemini-llm"] }
+gemini-genai-rs       = { workspace = true, default-features = true }
+gemini-adk-rs        = { workspace = true, default-features = true, features = ["gemini-llm"] }
 gemini-adk-fluent-rs = { workspace = true, features = ["gemini-llm", "denoise"] }
 gemini-memory-rs = { workspace = true }
 gemini-adk-server-rs = { workspace = true }

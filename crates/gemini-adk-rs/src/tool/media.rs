@@ -44,7 +44,7 @@ pub fn attach(result: &mut serde_json::Value, mime_type: &str, data: &[u8]) {
                 .or_insert_with(|| serde_json::Value::Array(Vec::new()))
                 .as_array_mut()
             {
-                list.push(entry)
+                list.push(entry);
             }
         }
         other => {

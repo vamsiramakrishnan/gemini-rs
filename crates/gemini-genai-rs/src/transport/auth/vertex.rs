@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::protocol::types::GeminiModel;
+use crate::protocol::types::ModelId;
 use crate::session::AuthError;
 
 use super::url_builders::build_vertex_rest_url;
@@ -75,7 +75,7 @@ impl VertexAIAuth {
 
 #[async_trait]
 impl AuthProvider for VertexAIAuth {
-    fn ws_url(&self, model: &GeminiModel) -> String {
+    fn ws_url(&self, model: &ModelId) -> String {
         let host = if self.location == "global" {
             "aiplatform.googleapis.com".to_string()
         } else {
@@ -106,7 +106,7 @@ impl AuthProvider for VertexAIAuth {
 }
 
 impl RestAuth for VertexAIAuth {
-    fn rest_url(&self, endpoint: ServiceEndpoint, model: Option<&GeminiModel>) -> String {
+    fn rest_url(&self, endpoint: ServiceEndpoint, model: Option<&ModelId>) -> String {
         let host = if self.location == "global" {
             "aiplatform.googleapis.com".to_string()
         } else {

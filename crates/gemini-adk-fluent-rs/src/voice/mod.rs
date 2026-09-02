@@ -16,8 +16,12 @@
 //! - `Talk::talk` *(feature `voice-io`)* — the whole loop on the system's
 //!   default microphone and speakers via `cpal`, with drain signaling wired
 //!   back into the session's voice reactor. Ctrl-C or session end stops it.
+//!   Without the feature there is no `talk()` method on the handle: the
+//!   `Talk` extension trait is only compiled when `voice-io` is enabled
+//!   (Linux also needs `libasound2-dev`).
 //!
 //! ```ignore
+//! // `voice-io` feature: the doctest cannot compile without it.
 //! let session = Live::builder()
 //!     .instruction("You are a helpful concierge.")
 //!     .greeting("Greet the caller.")
@@ -39,6 +43,10 @@ mod denoise;
 #[cfg(feature = "denoise")]
 pub use denoise::Denoiser;
 
+/// The mic-chain stage trait — one `process_frame` over a PCM16 frame in
+/// place. Defined by the L1 runtime (`Live::mic_processor` takes the same
+/// trait), re-exported here so a voice application has one name for it.
+pub use gemini_adk_rs::live::InputAudioProcessor;
 use gemini_adk_rs::live::{LiveEvent, LiveHandle};
 use gemini_genai_rs::prelude::{bytes_to_i16, i16_to_bytes};
 use tokio::sync::mpsc;
@@ -102,16 +110,23 @@ pub fn pump(
     pump_processed(handle, mic, mic_hz, Vec::new(), speaker, speaker_hz)
 }
 
-/// [`pump`], with a chain of [`MicProcessor`]s applied to each microphone
-/// frame before resampling — the insertion point for denoisers and
-/// client-side voice-activity gates. Processors run in order at the mic's
-/// native rate; an emptied frame (all-zero) still flows, so the session's
-/// own VAD sees continuous audio.
+/// [`pump`], with a chain of [`InputAudioProcessor`]s applied to each
+/// microphone frame before resampling — the insertion point for denoisers
+/// and client-side voice-activity gates. Processors run in order at the
+/// mic's native rate; an emptied frame (all-zero) still flows, so the
+/// session's own VAD sees continuous audio.
+///
+/// This is the seam third-party audio front-ends plug into — a
+/// DeepFilterNet-style denoiser, a Silero-style VAD gate, a proprietary
+/// vendor SDK — each as one `impl InputAudioProcessor` with no changes to
+/// the pump. Evaluate candidates with the same recorded call set on both
+/// transcription accuracy *and* added latency: a stage that cleans the audio
+/// but spends 200 ms per frame defeats the point.
 pub fn pump_processed(
     handle: &LiveHandle,
     mut mic: mpsc::Receiver<Vec<i16>>,
     mic_hz: u32,
-    mut processors: Vec<Box<dyn MicProcessor>>,
+    mut processors: Vec<Box<dyn InputAudioProcessor>>,
     speaker: mpsc::Sender<Playback>,
     speaker_hz: u32,
 ) -> VoicePump {
@@ -119,7 +134,7 @@ pub fn pump_processed(
     let uplink = tokio::spawn(async move {
         while let Some(mut frame) = mic.recv().await {
             for processor in &mut processors {
-                processor.process(&mut frame);
+                processor.process_frame(&mut frame);
             }
             let samples = resample(&frame, mic_hz, SESSION_INPUT_HZ);
             if uplink_handle
@@ -153,58 +168,39 @@ pub fn pump_processed(
     VoicePump { uplink, downlink }
 }
 
-/// A stage in the microphone chain: denoisers, gates, meters. Each frame is
-/// mono PCM16 at the microphone's native rate; mutate it in place.
-///
-/// This is the seam third-party audio front-ends plug into — a
-/// DeepFilterNet-style denoiser, a Silero-style VAD gate, a proprietary
-/// vendor SDK — each as one `impl` with no changes to the pump. Evaluate
-/// candidates with the same recorded call set on both transcription
-/// accuracy *and* added latency: a stage that cleans the audio but spends
-/// 200 ms per frame defeats the point.
-pub trait MicProcessor: Send + 'static {
-    /// Process one microphone frame in place.
-    fn process(&mut self, frame: &mut Vec<i16>);
-}
-
-/// A reference [`MicProcessor`]: an energy gate that silences frames whose
-/// RMS falls below a threshold, with a hangover so word tails are not
+/// A reference [`InputAudioProcessor`]: an energy gate that silences frames
+/// whose RMS falls below a threshold, with a hold so word tails are not
 /// chopped. A floor, not a denoiser — it removes constant low-level room
 /// noise between utterances and nothing more.
 pub struct NoiseGate {
     threshold_rms: f64,
-    hang_frames: u32,
+    hold_frames: u32,
     open_for: u32,
 }
 
 impl NoiseGate {
     /// `threshold_rms` in sample units (i16 full scale is 32767; telephone
-    /// speech typically sits well above 1000 RMS). `hang_frames` keeps the
-    /// gate open that many quiet frames after the last loud one.
-    pub fn new(threshold_rms: f64, hang_frames: u32) -> Self {
+    /// speech typically sits well above 1000 RMS). `hold_frames` keeps the
+    /// gate open that many quiet frames after the last loud one (the same
+    /// knob as `Live::mic_noise_gate`).
+    pub fn new(threshold_rms: f64, hold_frames: u32) -> Self {
         Self {
             threshold_rms,
-            hang_frames,
+            hold_frames,
             open_for: 0,
         }
     }
 }
 
-impl gemini_adk_rs::live::InputAudioProcessor for NoiseGate {
+impl InputAudioProcessor for NoiseGate {
     fn process_frame(&mut self, frame: &mut Vec<i16>) {
-        MicProcessor::process(self, frame);
-    }
-}
-
-impl MicProcessor for NoiseGate {
-    fn process(&mut self, frame: &mut Vec<i16>) {
         if frame.is_empty() {
             return;
         }
         let energy: f64 = frame.iter().map(|&s| f64::from(s) * f64::from(s)).sum();
         let rms = (energy / frame.len() as f64).sqrt();
         if rms >= self.threshold_rms {
-            self.open_for = self.hang_frames + 1;
+            self.open_for = self.hold_frames + 1;
         }
         if self.open_for > 0 {
             self.open_for -= 1;
@@ -335,19 +331,19 @@ mod tests {
         let quiet = vec![50i16; 160];
 
         let mut frame = loud.clone();
-        gate.process(&mut frame);
+        gate.process_frame(&mut frame);
         assert_eq!(frame, loud, "speech passes untouched");
 
         let mut frame = quiet.clone();
-        gate.process(&mut frame);
+        gate.process_frame(&mut frame);
         assert_eq!(frame, quiet, "hangover keeps the tail of an utterance");
 
         let mut frame = quiet.clone();
-        gate.process(&mut frame);
+        gate.process_frame(&mut frame);
         assert_eq!(frame, vec![0i16; 160], "sustained quiet is gated");
 
         let mut frame = loud.clone();
-        gate.process(&mut frame);
+        gate.process_frame(&mut frame);
         assert_eq!(frame, loud, "the gate reopens on speech");
     }
 
@@ -431,29 +427,29 @@ mod tests {
         let loud = vec![8_000i16; 160];
         let quiet = vec![100i16; 160];
 
-        // Loud frame: open_for = 4 (hang_frames + 1), then -= 1 → 3
+        // Loud frame: open_for = 4 (hold_frames + 1), then -= 1 → 3
         let mut frame = loud.clone();
-        gate.process(&mut frame);
+        gate.process_frame(&mut frame);
         assert_eq!(frame, loud);
 
         // Quiet frame 1: open_for = 3, -= 1 → 2, gate open
         let mut frame = quiet.clone();
-        gate.process(&mut frame);
+        gate.process_frame(&mut frame);
         assert_eq!(frame, quiet);
 
         // Quiet frame 2: open_for = 2, -= 1 → 1, gate open
         let mut frame = quiet.clone();
-        gate.process(&mut frame);
+        gate.process_frame(&mut frame);
         assert_eq!(frame, quiet);
 
         // Quiet frame 3: open_for = 1, -= 1 → 0, gate open
         let mut frame = quiet.clone();
-        gate.process(&mut frame);
+        gate.process_frame(&mut frame);
         assert_eq!(frame, quiet);
 
         // Quiet frame 4: open_for = 0, gate closed
         let mut frame = quiet.clone();
-        gate.process(&mut frame);
+        gate.process_frame(&mut frame);
         assert_eq!(frame, vec![0i16; 160]);
     }
 }

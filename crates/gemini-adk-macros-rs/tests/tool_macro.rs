@@ -7,7 +7,7 @@
 use gemini_adk_macros_rs::tool;
 use gemini_adk_rs::error::ToolError;
 use gemini_adk_rs::tool::{ToolDispatcher, ToolFunction};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// Get the current weather for a city.
 #[tool("Get the current weather for a city")]
@@ -90,7 +90,7 @@ async fn zero_param_tool_works() {
     // Empty object schema — no properties (or an empty properties map).
     let has_no_props = params
         .get("properties")
-        .map(|p| p.as_object().map(|o| o.is_empty()).unwrap_or(true))
+        .map(|p| p.as_object().map(serde_json::Map::is_empty).unwrap_or(true))
         .unwrap_or(true);
     assert!(has_no_props, "zero-param tool should have no properties");
 

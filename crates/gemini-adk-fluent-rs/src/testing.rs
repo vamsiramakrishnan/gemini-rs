@@ -176,7 +176,7 @@ pub fn diagnose(agent: &AgentBuilder) -> String {
     lines.push(format!("Agent: {}", agent.name()));
 
     if let Some(model) = agent.get_model() {
-        lines.push(format!("  Model: {:?}", model));
+        lines.push(format!("  Model: {model:?}"));
     }
     if let Some(inst) = agent.get_instruction() {
         let truncated = if inst.len() > 80 {
@@ -184,10 +184,10 @@ pub fn diagnose(agent: &AgentBuilder) -> String {
         } else {
             inst.to_string()
         };
-        lines.push(format!("  Instruction: {}", truncated));
+        lines.push(format!("  Instruction: {truncated}"));
     }
     if let Some(t) = agent.get_temperature() {
-        lines.push(format!("  Temperature: {}", t));
+        lines.push(format!("  Temperature: {t}"));
     }
     if agent.tool_count() > 0 {
         lines.push(format!("  Tools: {}", agent.tool_count()));
@@ -530,7 +530,7 @@ mod tests {
     fn a_clean_session_reports_nothing() {
         let live = Live::builder()
             .instruction("Be helpful.")
-            .with_tools(book_tool())
+            .tools(book_tool())
             .govern(
                 Flow::new()
                     .step("book")
@@ -548,7 +548,7 @@ mod tests {
 
     #[test]
     fn a_flow_tool_typo_is_caught_before_connecting() {
-        let live = Live::builder().with_tools(book_tool()).govern(
+        let live = Live::builder().tools(book_tool()).govern(
             Flow::new()
                 .step("book")
                 .allow(["book_tabel"])
@@ -577,7 +577,7 @@ mod tests {
         // includes builder-registered ambient tools — otherwise it reports a
         // failure that will not happen.
         let live = Live::builder()
-            .with_tools(book_tool())
+            .tools(book_tool())
             .ambient_tools(["book_table"])
             .govern(
                 Flow::new()
@@ -633,9 +633,11 @@ mod tests {
             .instruction("Never entered")
             .done()
             .initial_phase("greet");
-        assert!(check_live(&live)
-            .iter()
-            .any(|v| matches!(v, LiveViolation::UnreachablePhase { name } if name == "orphan")));
+        assert!(
+            check_live(&live)
+                .iter()
+                .any(|v| matches!(v, LiveViolation::UnreachablePhase { name } if name == "orphan"))
+        );
     }
 
     #[test]

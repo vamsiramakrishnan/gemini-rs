@@ -1,24 +1,23 @@
 //! Text Chat example — simple text-only chat with Gemini Live.
 //!
-//! Demonstrates the simplest possible Gemini Live integration:
-//! connect to the text model, send text/audio input, receive text responses.
+//! The smallest possible Live integration on the L2 fluent crate: one
+//! `Live::builder()` per browser tab, `.text_only()` for text responses,
+//! `.connect_from_env()` for auth, and three callbacks that forward the
+//! model's output to the browser over a WebSocket.
 //!
 //! Usage:
 //!   cargo run -p example-text-chat
 //!   # then open http://127.0.0.1:3001
 
 use axum::{
-    extract::{
-        ws::{Message, WebSocket, WebSocketUpgrade},
-        State,
-    },
+    Router,
+    extract::ws::{Message, WebSocket, WebSocketUpgrade},
     response::IntoResponse,
     routing::get,
-    Router,
 };
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use futures::{sink::SinkExt, stream::StreamExt};
-use gemini_genai_rs::prelude::*;
+use gemini_adk_fluent_rs::prelude::*;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tower_http::{
@@ -27,88 +26,49 @@ use tower_http::{
 };
 use tracing::{error, info};
 
-#[derive(Clone)]
-struct AppState {
-    auth: AuthConfig,
-}
-
-#[derive(Clone, Debug)]
-enum AuthConfig {
-    GoogleAI { api_key: String },
-    VertexAI { project: String, location: String },
-}
-
+/// Messages from the browser UI.
 #[derive(Deserialize, Debug)]
-#[serde(tag = "type")]
+#[serde(tag = "type", rename_all = "lowercase")]
 enum ClientMessage {
-    #[serde(rename = "start")]
     Start {
-        #[allow(dead_code)]
-        model: Option<String>,
-        #[allow(dead_code)]
-        voice: Option<String>,
+        #[serde(alias = "systemInstruction")]
         system_instruction: Option<String>,
     },
-    #[serde(rename = "text")]
-    Text { text: String },
-    #[serde(rename = "audio")]
-    Audio { data: String },
-    #[serde(rename = "stop")]
+    Text {
+        text: String,
+    },
+    Audio {
+        data: String,
+    },
     Stop,
 }
 
+/// Messages to the browser UI.
 #[derive(Serialize, Debug)]
-#[serde(tag = "type")]
+#[serde(tag = "type", rename_all = "camelCase")]
 enum ServerMessage {
-    #[serde(rename = "connected")]
     Connected,
-    #[serde(rename = "textDelta")]
     TextDelta { text: String },
-    #[serde(rename = "textComplete")]
     TextComplete { text: String },
-    #[serde(rename = "audio")]
-    Audio { data: String },
-    #[serde(rename = "turnComplete")]
     TurnComplete,
-    #[serde(rename = "interrupted")]
     Interrupted,
-    #[serde(rename = "error")]
     Error { message: String },
 }
+
+type WsSender = mpsc::UnboundedSender<ServerMessage>;
 
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("info".parse().unwrap()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
 
+    // Credentials come from the environment (or `.env`): GEMINI_API_KEY for
+    // Google AI, or GOOGLE_GENAI_USE_VERTEXAI=true + GOOGLE_CLOUD_PROJECT for
+    // Vertex AI. `connect_from_env()` reads them when a session starts.
     let _ = dotenvy::dotenv();
-
-    let use_vertex = std::env::var("GOOGLE_GENAI_USE_VERTEXAI")
-        .map(|v| v.to_uppercase() == "TRUE" || v == "1")
-        .unwrap_or(false);
-
-    let auth = if use_vertex {
-        let project = std::env::var("GOOGLE_CLOUD_PROJECT")
-            .expect("GOOGLE_CLOUD_PROJECT required for Vertex AI");
-        let location =
-            std::env::var("GOOGLE_CLOUD_LOCATION").unwrap_or_else(|_| "us-central1".to_string());
-        info!(
-            "Using Vertex AI (project: {}, location: {})",
-            project, location
-        );
-        AuthConfig::VertexAI { project, location }
-    } else {
-        let api_key =
-            std::env::var("GEMINI_API_KEY").expect("Set GEMINI_API_KEY or enable Vertex AI");
-        info!("Using Google AI Studio");
-        AuthConfig::GoogleAI { api_key }
-    };
-
-    let state = AppState { auth };
 
     let static_dir = concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -117,191 +77,129 @@ async fn main() {
 
     let app = Router::new()
         .fallback_service(
-            ServeDir::new(static_dir)
-                .fallback(ServeFile::new(format!("{}/index.html", static_dir))),
+            ServeDir::new(static_dir).fallback(ServeFile::new(format!("{static_dir}/index.html"))),
         )
         .route("/ws", get(ws_handler))
-        .layer(CorsLayer::permissive())
-        .with_state(state);
+        .layer(CorsLayer::permissive());
 
     let addr = "127.0.0.1:3001";
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    println!("Text Chat example running at http://{}", addr);
+    println!("Text Chat example running at http://{addr}");
 
     axum::serve(listener, app).await.unwrap();
 }
 
-async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
-    ws.on_upgrade(|socket| handle_socket(socket, state))
+async fn ws_handler(ws: WebSocketUpgrade) -> impl IntoResponse {
+    ws.on_upgrade(handle_socket)
 }
 
-async fn handle_socket(socket: WebSocket, state: AppState) {
+/// Open a text-only Live session whose output is forwarded to `tx`.
+async fn start_session(
+    tx: &WsSender,
+    system_instruction: Option<String>,
+) -> Result<LiveHandle, AgentError> {
+    let mut live = Live::builder()
+        // Google AI's catalog serves native-audio Live models; `.text_only()`
+        // asks that model for text responses instead of speech.
+        .text_only();
+    if let Some(instruction) = system_instruction {
+        live = live.instruction(instruction);
+    }
+
+    let (tx_delta, tx_complete, tx_turn, tx_interrupted, tx_error) =
+        (tx.clone(), tx.clone(), tx.clone(), tx.clone(), tx.clone());
+    live.on_text(move |t| {
+        let _ = tx_delta.send(ServerMessage::TextDelta { text: t.into() });
+    })
+    .on_text_complete(move |t| {
+        let _ = tx_complete.send(ServerMessage::TextComplete { text: t.into() });
+    })
+    .on_turn_complete(move || {
+        let _ = tx_turn.send(ServerMessage::TurnComplete);
+        async {}
+    })
+    .on_interrupted(move || {
+        let _ = tx_interrupted.send(ServerMessage::Interrupted);
+        async {}
+    })
+    .on_error(move |message| {
+        error!("Session error: {message}");
+        let _ = tx_error.send(ServerMessage::Error { message });
+        async {}
+    })
+    // No `.model(..)`: connect picks the platform's current Live model
+    // (override with GEMINI_LIVE_MODEL).
+    .connect_from_env()
+    .await
+}
+
+async fn handle_socket(socket: WebSocket) {
     let (mut sender, mut receiver) = socket.split();
-    let mut session_handle: Option<SessionHandle> = None;
-    let mut session_event_task: Option<tokio::task::JoinHandle<()>> = None;
+    let (ws_tx, mut ws_rx) = mpsc::unbounded_channel::<ServerMessage>();
 
-    let (ws_tx, mut ws_rx) = mpsc::channel::<ServerMessage>(100);
-
+    // Session callbacks push into `ws_tx`; this task writes to the browser.
     let send_task = tokio::spawn(async move {
         while let Some(msg) = ws_rx.recv().await {
-            if let Ok(json) = serde_json::to_string(&msg) {
-                if sender.send(Message::Text(json)).await.is_err() {
-                    break;
-                }
+            if let Ok(json) = serde_json::to_string(&msg)
+                && sender.send(Message::Text(json)).await.is_err()
+            {
+                break;
             }
         }
     });
 
-    while let Some(Ok(msg)) = receiver.next().await {
-        if let Message::Text(text) = msg {
-            if let Ok(client_msg) = serde_json::from_str::<ClientMessage>(&text) {
-                match client_msg {
-                    ClientMessage::Start {
-                        system_instruction, ..
-                    } => {
-                        info!("Starting text-only session");
+    let mut session: Option<LiveHandle> = None;
 
-                        let base_config = match &state.auth {
-                            AuthConfig::GoogleAI { api_key } => SessionConfig::new(api_key),
-                            AuthConfig::VertexAI { project, location } => {
-                                let token = String::from_utf8(
-                                    std::process::Command::new("gcloud")
-                                        .args(["auth", "print-access-token"])
-                                        .output()
-                                        .expect("gcloud CLI required for Vertex AI")
-                                        .stdout,
-                                )
-                                .unwrap()
-                                .trim()
-                                .to_string();
-                                SessionConfig::from_vertex(project, location, token)
-                            }
-                        };
-
-                        // Text-only: use gemini-2.0-flash-live-001 with TEXT modality
-                        let mut config = base_config
-                            .model(GeminiModel::Gemini2_0FlashLive)
-                            .text_only();
-
-                        if let Some(sys) = system_instruction {
-                            config = config.system_instruction(sys);
-                        }
-
-                        match connect(config, TransportConfig::default()).await {
-                            Ok(session) => {
-                                session_handle = Some(session.clone());
-                                let mut events = session.subscribe();
-                                let tx = ws_tx.clone();
-
-                                if let Some(t) = session_event_task.take() {
-                                    t.abort();
-                                }
-
-                                session_event_task = Some(tokio::spawn(async move {
-                                    match tokio::time::timeout(
-                                        std::time::Duration::from_secs(15),
-                                        session.wait_for_phase(SessionPhase::Active),
-                                    )
-                                    .await
-                                    {
-                                        Ok(_) => {
-                                            info!("Session active");
-                                            let _ = tx.send(ServerMessage::Connected).await;
-                                        }
-                                        Err(_) => {
-                                            error!("Timed out waiting for active session");
-                                            let _ = tx
-                                                .send(ServerMessage::Error {
-                                                    message: "Connection timeout".into(),
-                                                })
-                                                .await;
-                                            return;
-                                        }
-                                    }
-
-                                    while let Some(event) = recv_event(&mut events).await {
-                                        match event {
-                                            SessionEvent::TextDelta(t) => {
-                                                let _ = tx
-                                                    .send(ServerMessage::TextDelta { text: t })
-                                                    .await;
-                                            }
-                                            SessionEvent::TextComplete(t) => {
-                                                let _ = tx
-                                                    .send(ServerMessage::TextComplete { text: t })
-                                                    .await;
-                                            }
-                                            SessionEvent::AudioData(data) => {
-                                                let base64_data = BASE64.encode(&data);
-                                                let _ = tx
-                                                    .send(ServerMessage::Audio {
-                                                        data: base64_data,
-                                                    })
-                                                    .await;
-                                            }
-                                            SessionEvent::TurnComplete => {
-                                                let _ = tx.send(ServerMessage::TurnComplete).await;
-                                            }
-                                            SessionEvent::Interrupted => {
-                                                let _ = tx.send(ServerMessage::Interrupted).await;
-                                            }
-                                            SessionEvent::Error(e) => {
-                                                error!("Session error: {}", e);
-                                                let _ = tx
-                                                    .send(ServerMessage::Error { message: e })
-                                                    .await;
-                                            }
-                                            _ => {}
-                                        }
-                                    }
-                                }));
-                            }
-                            Err(e) => {
-                                error!("Failed to connect: {}", e);
-                                let _ = ws_tx
-                                    .send(ServerMessage::Error {
-                                        message: format!("Failed to connect: {}", e),
-                                    })
-                                    .await;
-                            }
-                        }
+    while let Some(Ok(Message::Text(text))) = receiver.next().await {
+        let Ok(client_msg) = serde_json::from_str::<ClientMessage>(&text) else {
+            continue;
+        };
+        match client_msg {
+            ClientMessage::Start { system_instruction } => {
+                info!("Starting text-only session");
+                if let Some(old) = session.take() {
+                    let _ = old.disconnect().await;
+                }
+                match start_session(&ws_tx, system_instruction).await {
+                    Ok(handle) => {
+                        info!("Session active");
+                        let _ = ws_tx.send(ServerMessage::Connected);
+                        session = Some(handle);
                     }
-                    ClientMessage::Text { text } => {
-                        if let Some(session) = &session_handle {
-                            if let Err(e) = session.send_text(text).await {
-                                error!("Failed to send text: {}", e);
-                            }
-                        }
+                    Err(e) => {
+                        error!("Failed to connect: {e}");
+                        let _ = ws_tx.send(ServerMessage::Error {
+                            message: format!("Failed to connect: {e}"),
+                        });
                     }
-                    ClientMessage::Audio { data } => {
-                        if let Some(session) = &session_handle {
-                            if let Ok(bytes) = BASE64.decode(data) {
-                                if let Err(e) = session.send_audio(bytes).await {
-                                    error!("Failed to send audio: {}", e);
-                                }
-                            }
-                        }
-                    }
-                    ClientMessage::Stop => {
-                        info!("Stopping session");
-                        if let Some(session) = &session_handle {
-                            let _ = session.disconnect().await;
-                        }
-                        if let Some(t) = session_event_task.take() {
-                            t.abort();
-                        }
-                        session_handle = None;
-                    }
+                }
+            }
+            ClientMessage::Text { text } => {
+                if let Some(handle) = &session
+                    && let Err(e) = handle.send_text(text).await
+                {
+                    error!("Failed to send text: {e}");
+                }
+            }
+            ClientMessage::Audio { data } => {
+                if let Some(handle) = &session
+                    && let Ok(pcm) = BASE64.decode(data)
+                    && let Err(e) = handle.send_audio(pcm).await
+                {
+                    error!("Failed to send audio: {e}");
+                }
+            }
+            ClientMessage::Stop => {
+                info!("Stopping session");
+                if let Some(handle) = session.take() {
+                    let _ = handle.disconnect().await;
                 }
             }
         }
     }
 
-    if let Some(session) = session_handle {
-        let _ = session.disconnect().await;
-    }
-    if let Some(t) = session_event_task {
-        t.abort();
+    if let Some(handle) = session {
+        let _ = handle.disconnect().await;
     }
     send_task.abort();
 }

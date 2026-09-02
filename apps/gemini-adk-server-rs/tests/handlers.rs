@@ -5,14 +5,14 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use axum::body::{to_bytes, Body};
-use axum::http::{header, Request, StatusCode};
+use axum::body::{Body, to_bytes};
+use axum::http::{Request, StatusCode, header};
 use gemini_adk_rs::gemini_genai_rs::prelude::{Content, Part, Role};
 use gemini_adk_rs::llm::LlmError;
 use gemini_adk_rs::{BaseLlm, LlmRequest, LlmResponse};
 use gemini_adk_server_rs::trace::{TraceRecord, TraceStore};
 use gemini_adk_server_rs::{
-    build_api_router, AgentEntry, EvalResultSummary, ServerAgentRegistry, ServerState,
+    AgentEntry, EvalResultSummary, ServerAgentRegistry, ServerState, build_api_router,
 };
 use tower::ServiceExt;
 

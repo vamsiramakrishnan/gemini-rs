@@ -2,10 +2,10 @@
 //!
 //! Run with: `cargo bench -p gemini-live`
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 
 use gemini_genai_rs::buffer::{AudioJitterBuffer, JitterConfig, SpscRing};
-use gemini_genai_rs::protocol::types::{GeminiModel, SessionConfig, Voice};
+use gemini_genai_rs::protocol::types::{ModelId, SessionConfig, Voice};
 use gemini_genai_rs::session::SessionCommand;
 use gemini_genai_rs::transport::{Codec, JsonCodec};
 
@@ -18,7 +18,7 @@ fn bench_spsc_write_read(c: &mut Criterion) {
 
     // Benchmark different chunk sizes
     for chunk_size in [256, 512, 1024, 2048] {
-        let ring = SpscRing::<i16>::new(4096);
+        let (mut tx, mut rx) = SpscRing::<i16>::channel(4096);
         let data: Vec<i16> = (0..chunk_size).map(|i| i as i16).collect();
         let mut out = vec![0i16; chunk_size];
 
@@ -28,10 +28,10 @@ fn bench_spsc_write_read(c: &mut Criterion) {
             &chunk_size,
             |b, _| {
                 b.iter(|| {
-                    let written = ring.write(black_box(&data));
-                    let read = ring.read(black_box(&mut out));
+                    let written = tx.write(black_box(&data));
+                    let read = rx.read(black_box(&mut out));
                     black_box((written, read));
-                })
+                });
             },
         );
     }
@@ -40,32 +40,32 @@ fn bench_spsc_write_read(c: &mut Criterion) {
 }
 
 fn bench_spsc_write_only(c: &mut Criterion) {
-    let ring = SpscRing::<i16>::new(8192);
+    let (mut tx, mut rx) = SpscRing::<i16>::channel(8192);
     let data: Vec<i16> = (0..1024).map(|i| i as i16).collect();
 
     c.bench_function("spsc_write_1024_samples", |b| {
         b.iter(|| {
             // Drain to make room each iteration
             let mut drain = vec![0i16; 1024];
-            ring.read(&mut drain);
-            let written = ring.write(black_box(&data));
+            rx.read(&mut drain);
+            let written = tx.write(black_box(&data));
             black_box(written);
-        })
+        });
     });
 }
 
 fn bench_spsc_contention(c: &mut Criterion) {
     // Benchmark rapid alternating write/read to simulate real-time audio streaming
-    let ring = SpscRing::<i16>::new(4096);
+    let (mut tx, mut rx) = SpscRing::<i16>::channel(4096);
     let chunk: Vec<i16> = (0..160).map(|i| i as i16).collect(); // 10ms at 16kHz
     let mut out = vec![0i16; 160];
 
     c.bench_function("spsc_10ms_write_read_cycle", |b| {
         b.iter(|| {
-            ring.write(black_box(&chunk));
-            ring.read(black_box(&mut out));
+            tx.write(black_box(&chunk));
+            rx.read(black_box(&mut out));
             black_box(&out);
-        })
+        });
     });
 }
 
@@ -101,7 +101,7 @@ fn bench_jitter_push(c: &mut Criterion) {
                     let mut drain = vec![0i16; 16000];
                     buf.pull(&mut drain);
                 }
-            })
+            });
         });
     }
 
@@ -125,7 +125,7 @@ fn bench_jitter_push_pull_cycle(c: &mut Criterion) {
                 let real = buf.pull(black_box(&mut pull_buf));
                 black_box(real);
             }
-        })
+        });
     });
 }
 
@@ -138,7 +138,7 @@ fn bench_jitter_flush(c: &mut Criterion) {
             // Simulate barge-in flush
             buf.flush();
             black_box(buf.depth());
-        })
+        });
     });
 }
 
@@ -150,7 +150,7 @@ fn bench_codec_encode_audio(c: &mut Criterion) {
     let mut group = c.benchmark_group("codec_encode");
     let codec = JsonCodec;
     let config = SessionConfig::new("test-key")
-        .model(GeminiModel::Gemini2_0FlashLive)
+        .model(ModelId::from_static("models/gemini-2.0-flash-live-001"))
         .voice(Voice::Puck);
 
     // Benchmark different audio chunk sizes
@@ -160,14 +160,14 @@ fn bench_codec_encode_audio(c: &mut Criterion) {
         ("100ms_16kHz_16bit", 3200), // 100ms
     ] {
         let audio_data = vec![0u8; size];
-        let cmd = SessionCommand::SendAudio(audio_data);
+        let cmd = SessionCommand::SendAudio(audio_data.into());
 
         group.throughput(Throughput::Bytes(size as u64));
         group.bench_with_input(BenchmarkId::new("audio", label), &cmd, |b, cmd| {
             b.iter(|| {
                 let result = codec.encode_command(black_box(cmd), &config).unwrap();
                 black_box(result);
-            })
+            });
         });
     }
 
@@ -177,7 +177,7 @@ fn bench_codec_encode_audio(c: &mut Criterion) {
 fn bench_codec_encode_text(c: &mut Criterion) {
     let codec = JsonCodec;
     let config = SessionConfig::new("test-key")
-        .model(GeminiModel::Gemini2_0FlashLive)
+        .model(ModelId::from_static("models/gemini-2.0-flash-live-001"))
         .voice(Voice::Puck);
     let cmd = SessionCommand::SendText("Hello, how are you doing today?".to_string());
 
@@ -185,14 +185,14 @@ fn bench_codec_encode_text(c: &mut Criterion) {
         b.iter(|| {
             let result = codec.encode_command(black_box(&cmd), &config).unwrap();
             black_box(result);
-        })
+        });
     });
 }
 
 fn bench_codec_encode_setup(c: &mut Criterion) {
     let codec = JsonCodec;
     let config = SessionConfig::new("test-key")
-        .model(GeminiModel::Gemini2_0FlashLive)
+        .model(ModelId::from_static("models/gemini-2.0-flash-live-001"))
         .voice(Voice::Puck)
         .system_instruction("You are a helpful assistant.");
 
@@ -200,7 +200,7 @@ fn bench_codec_encode_setup(c: &mut Criterion) {
         b.iter(|| {
             let result = codec.encode_setup(black_box(&config)).unwrap();
             black_box(result);
-        })
+        });
     });
 }
 
@@ -212,7 +212,7 @@ fn bench_codec_decode_text(c: &mut Criterion) {
         b.iter(|| {
             let result = codec.decode_message(black_box(msg)).unwrap();
             black_box(result);
-        })
+        });
     });
 }
 
@@ -230,8 +230,7 @@ fn bench_codec_decode_audio(c: &mut Criterion) {
         encoded
     };
     let msg = format!(
-        r#"{{"serverContent":{{"modelTurn":{{"parts":[{{"inlineData":{{"mimeType":"audio/pcm","data":"{}"}}}}]}}}}}}"#,
-        base64_audio
+        r#"{{"serverContent":{{"modelTurn":{{"parts":[{{"inlineData":{{"mimeType":"audio/pcm","data":"{base64_audio}"}}}}]}}}}}}"#
     );
     let msg_bytes = msg.into_bytes();
 
@@ -239,7 +238,7 @@ fn bench_codec_decode_audio(c: &mut Criterion) {
         b.iter(|| {
             let result = codec.decode_message(black_box(&msg_bytes)).unwrap();
             black_box(result);
-        })
+        });
     });
 }
 
@@ -251,7 +250,7 @@ fn bench_codec_decode_tool_call(c: &mut Criterion) {
         b.iter(|| {
             let result = codec.decode_message(black_box(msg)).unwrap();
             black_box(result);
-        })
+        });
     });
 }
 
@@ -263,7 +262,7 @@ fn bench_codec_decode_setup_complete(c: &mut Criterion) {
         b.iter(|| {
             let result = codec.decode_message(black_box(msg)).unwrap();
             black_box(result);
-        })
+        });
     });
 }
 

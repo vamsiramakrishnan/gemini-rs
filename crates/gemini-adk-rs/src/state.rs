@@ -5,8 +5,8 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::marker::PhantomData;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::SystemTime;
 
 use dashmap::DashMap;
@@ -91,7 +91,7 @@ mod systemtime_epoch_millis {
 
     use serde::{Deserialize, Deserializer, Serializer};
 
-    pub fn serialize<S: Serializer>(t: &SystemTime, ser: S) -> Result<S::Ok, S::Error> {
+    pub(super) fn serialize<S: Serializer>(t: &SystemTime, ser: S) -> Result<S::Ok, S::Error> {
         let millis = t
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
@@ -99,7 +99,7 @@ mod systemtime_epoch_millis {
         ser.serialize_u64(millis)
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(de: D) -> Result<SystemTime, D::Error> {
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(de: D) -> Result<SystemTime, D::Error> {
         let millis = u64::deserialize(de)?;
         Ok(UNIX_EPOCH + Duration::from_millis(millis))
     }
@@ -133,14 +133,10 @@ impl std::fmt::Debug for JournalSinkSlot {
 
 const JOURNAL_FLUSH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 
-/// Log a journal-sink internal error without panicking the write path.
-/// Emits a `tracing::warn!` when the `tracing-support` feature is enabled;
-/// otherwise the error is swallowed (journaling is infallible by contract).
+/// Log a journal-sink internal error without panicking the write path
+/// (journaling is infallible by contract, so the error is only reported).
 fn journal_log_error(context: &'static str, e: &dyn std::fmt::Display) {
-    #[cfg(feature = "tracing-support")]
     tracing::warn!(error = %e, "{context}");
-    #[cfg(not(feature = "tracing-support"))]
-    let _ = (context, e);
 }
 
 struct FileJournalInner {
@@ -151,9 +147,8 @@ struct FileJournalInner {
 /// Durable [`JournalSink`] writing one JSON object per line (JSONL).
 ///
 /// Writes are buffered behind a `parking_lot::Mutex` and flushed at least
-/// every second and on drop. I/O errors are logged (via `tracing::warn!` when
-/// the `tracing-support` feature is enabled) — journaling never panics a
-/// state write.
+/// every second and on drop. I/O errors are logged via `tracing::warn!` —
+/// journaling never panics a state write.
 ///
 /// ```jsonl
 /// {"sequence":1,"key":"app:last_city","old":null,"new":"London","origin":"set","timestamp_ms":1718000000000,"delta":false}
@@ -251,13 +246,22 @@ impl JournalSink for MemoryJournalSink {
     }
 }
 
-/// Error returned by fallible state writes.
+/// Error returned by fallible state reads and writes.
 #[derive(Debug, thiserror::Error)]
 pub enum StateError {
     /// The value could not be serialized to JSON.
     #[error("failed to serialize state value for key '{key}': {source}")]
     Serialize {
         /// The key that was being written.
+        key: String,
+        /// The underlying serde error.
+        source: serde_json::Error,
+    },
+    /// A value is present at the key but does not deserialize to the
+    /// requested type (see [`State::try_get`]).
+    #[error("state value at key '{key}' is not the requested type: {source}")]
+    WrongType {
+        /// The key that was being read.
         key: String,
         /// The underlying serde error.
         source: serde_json::Error,
@@ -372,9 +376,39 @@ impl State {
 
     /// Get a value by key, attempting to deserialize to the requested type.
     /// When delta tracking is enabled, checks delta first, then inner.
+    ///
+    /// This is the *lenient* read: a value that is present but of the wrong
+    /// type is reported as `None`, indistinguishable from an absent key. Use
+    /// [`try_get`](Self::try_get) when that distinction matters.
     pub fn get<T: serde::de::DeserializeOwned>(&self, key: &str) -> Option<T> {
         self.get_raw(key)
             .and_then(|v| serde_json::from_value(v).ok())
+    }
+
+    /// Get a value by key, distinguishing "absent" from "present but the wrong
+    /// type".
+    ///
+    /// Returns `Ok(None)` when no value is stored at `key` (after the same
+    /// delta → inner → `derived:` lookup as [`get`](Self::get)), `Ok(Some(v))`
+    /// when the stored value deserializes to `T`, and
+    /// [`StateError::WrongType`] when a value exists but does not. This is the
+    /// *strict* read; [`get`](Self::get) is the lenient form that folds the
+    /// error case into `None`.
+    pub fn try_get<T: serde::de::DeserializeOwned>(
+        &self,
+        key: &str,
+    ) -> Result<Option<T>, StateError> {
+        match self.get_raw(key) {
+            None => Ok(None),
+            Some(v) => {
+                serde_json::from_value(v)
+                    .map(Some)
+                    .map_err(|source| StateError::WrongType {
+                        key: key.to_string(),
+                        source,
+                    })
+            }
+        }
     }
 
     /// Borrow a value by key without cloning, applying `f` to the reference.
@@ -401,7 +435,7 @@ impl State {
         if !key.contains(':') {
             let mut derived_key = String::with_capacity(8 + key.len());
             use std::fmt::Write;
-            let _ = write!(derived_key, "derived:{}", key);
+            let _ = write!(derived_key, "derived:{key}");
             if self.track_delta {
                 match self.delta.get(&derived_key).map(|r| r.value().clone()) {
                     Some(DeltaOp::Put(v)) => return Some(f(&v)),
@@ -435,7 +469,7 @@ impl State {
         if !key.contains(':') {
             use std::fmt::Write;
             let mut derived_key = String::with_capacity(8 + key.len());
-            let _ = write!(derived_key, "derived:{}", key);
+            let _ = write!(derived_key, "derived:{key}");
             if self.track_delta {
                 match self.delta.get(&derived_key).map(|r| r.value().clone()) {
                     Some(DeltaOp::Put(v)) => return Some(v),
@@ -448,9 +482,19 @@ impl State {
         None
     }
 
-    /// Get a typed value using a `StateKey<T>`.
+    /// Get a typed value using a `StateKey<T>` (lenient — a wrong-typed value
+    /// reads as `None`; see [`get`](Self::get)).
     pub fn get_key<T: serde::de::DeserializeOwned>(&self, key: &StateKey<T>) -> Option<T> {
         self.get(key.key())
+    }
+
+    /// Get a typed value using a `StateKey<T>`, distinguishing "absent" from
+    /// "present but the wrong type" (see [`try_get`](Self::try_get)).
+    pub fn try_get_key<T: serde::de::DeserializeOwned>(
+        &self,
+        key: &StateKey<T>,
+    ) -> Result<Option<T>, StateError> {
+        self.try_get(key.key())
     }
 
     /// Set a typed value using a `StateKey<T>`.
@@ -601,6 +645,12 @@ impl State {
     }
 
     /// Check if a key exists (in delta or inner).
+    ///
+    /// Applies the same transparent `derived:` fallback as [`Self::get`],
+    /// [`Self::get_raw`] and [`Self::with`]: an unprefixed key also matches the
+    /// computed variable `derived:{key}`. Flow predicates (`is_set`, `captured`)
+    /// evaluate through this method, so without the fallback a computed value
+    /// would read as permanently unknown while `get` returned it fine.
     pub fn contains(&self, key: &str) -> bool {
         if self.track_delta {
             match self.delta.get(key).map(|r| r.value().clone()) {
@@ -609,7 +659,21 @@ impl State {
                 None => {}
             }
         }
-        self.inner.contains_key(key)
+        if self.inner.contains_key(key) {
+            return true;
+        }
+        if !key.contains(':') {
+            let derived_key = format!("derived:{key}");
+            if self.track_delta {
+                match self.delta.get(&derived_key).map(|r| r.value().clone()) {
+                    Some(DeltaOp::Put(_)) => return true,
+                    Some(DeltaOp::Delete) => return false,
+                    None => {}
+                }
+            }
+            return self.inner.contains_key(&derived_key);
+        }
+        false
     }
 
     /// Remove a key.
@@ -1083,7 +1147,10 @@ impl<'a> PrefixedState<'a> {
         self.state
             .keys()
             .into_iter()
-            .filter_map(|k| k.strip_prefix(self.prefix).map(|s| s.to_string()))
+            .filter_map(|k| {
+                k.strip_prefix(self.prefix)
+                    .map(std::string::ToString::to_string)
+            })
             .collect()
     }
 }
@@ -1130,7 +1197,10 @@ impl<'a> ReadOnlyPrefixedState<'a> {
         self.state
             .keys()
             .into_iter()
-            .filter_map(|k| k.strip_prefix(self.prefix).map(|s| s.to_string()))
+            .filter_map(|k| {
+                k.strip_prefix(self.prefix)
+                    .map(std::string::ToString::to_string)
+            })
             .collect()
     }
 }
@@ -1173,10 +1243,11 @@ mod tests {
         assert!(keys.contains(&"from_clone".to_string()));
         assert!(keys.contains(&"from_delta".to_string()));
         // Commit re-records the delta write into the committed store.
-        assert!(sink
-            .entries()
-            .iter()
-            .any(|m| m.origin == StateMutationOrigin::Commit));
+        assert!(
+            sink.entries()
+                .iter()
+                .any(|m| m.origin == StateMutationOrigin::Commit)
+        );
     }
 
     #[test]
@@ -1610,6 +1681,35 @@ mod tests {
         assert!(turn_keys.contains(&"b".to_string()));
     }
 
+    // ── try_get / try_get_key ─────────────────────────────────────────
+
+    #[test]
+    fn try_get_distinguishes_absent_from_wrong_type() {
+        let state = State::new();
+        assert!(matches!(state.try_get::<u32>("missing"), Ok(None)));
+
+        state.set("n", 5u32).unwrap();
+        assert_eq!(state.try_get::<u32>("n").unwrap(), Some(5));
+
+        state.set("s", "not a number").unwrap();
+        // Lenient read folds the type error into `None`…
+        assert_eq!(state.get::<u32>("s"), None);
+        // …the strict read reports it.
+        match state.try_get::<u32>("s") {
+            Err(StateError::WrongType { key, .. }) => assert_eq!(key, "s"),
+            other => panic!("expected WrongType, got {other:?}"),
+        }
+
+        // Same derived: fallback as `get`.
+        state.set("derived:risk", 0.5f64).unwrap();
+        assert_eq!(state.try_get::<f64>("risk").unwrap(), Some(0.5));
+
+        const N: StateKey<u32> = StateKey::new("n");
+        assert_eq!(state.try_get_key(&N).unwrap(), Some(5));
+        const S: StateKey<u32> = StateKey::new("s");
+        assert!(state.try_get_key(&S).is_err());
+    }
+
     // ── ReadOnlyPrefixedState (derived) tests ────────────────────────────
 
     #[test]
@@ -1746,7 +1846,7 @@ mod tests {
         let snap = state.snapshot_values(&["a", "b", "c"]);
 
         let _ = state.set("a", 10); // changed
-                                    // b unchanged
+        // b unchanged
         let _ = state.set("c", 3); // new
 
         let diffs = state.diff_values(&snap, &["a", "b", "c"]);
@@ -1923,7 +2023,7 @@ mod tests {
     #[test]
     fn with_returns_none_for_missing() {
         let state = State::new();
-        let val = state.with("missing", |v| v.clone());
+        let val = state.with("missing", std::clone::Clone::clone);
         assert_eq!(val, None);
     }
 
@@ -2142,5 +2242,55 @@ mod proptests {
             tx.rollback();
             prop_assert_eq!(&before, &snapshot(&tx));
         }
+    }
+}
+
+#[cfg(test)]
+mod derived_contains_fallback {
+    //! `contains` must agree with `get` about the transparent `derived:`
+    //! fallback. Flow predicates (`is_set`, `captured`) evaluate through
+    //! `contains`, so a computed variable that `get` returns but `contains`
+    //! denies reads as permanently unknown to the flow.
+    use super::State;
+
+    #[test]
+    fn contains_sees_a_derived_value_through_the_unprefixed_key() {
+        let state = State::new();
+        state.set("derived:risk", 0.85).unwrap();
+        assert_eq!(
+            state.get::<f64>("risk"),
+            Some(0.85),
+            "precondition: get falls back"
+        );
+        assert!(
+            state.contains("risk"),
+            "contains must fall back the same way get does"
+        );
+    }
+
+    #[test]
+    fn contains_fallback_respects_delta_tracking_and_tombstones() {
+        let state = State::new();
+        state.set("derived:score", 1u32).unwrap();
+        let tracked = state.with_delta_tracking();
+        assert!(
+            tracked.contains("score"),
+            "inner derived value visible through tracked view"
+        );
+        tracked.remove("derived:score");
+        assert!(
+            !tracked.contains("score"),
+            "a tombstone on the derived key shadows inner"
+        );
+    }
+
+    #[test]
+    fn contains_does_not_fall_back_for_prefixed_keys() {
+        let state = State::new();
+        state.set("derived:flag", true).unwrap();
+        assert!(
+            !state.contains("session:flag"),
+            "only unprefixed keys get the fallback"
+        );
     }
 }

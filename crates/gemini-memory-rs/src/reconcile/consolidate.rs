@@ -232,9 +232,11 @@ mod tests {
             output.proposals[0].evidence_summary,
             "Explicitly stated by the user."
         );
-        assert!(output.proposals[0]
-            .tags
-            .contains(&"pescatarian".to_string()));
+        assert!(
+            output.proposals[0]
+                .tags
+                .contains(&"pescatarian".to_string())
+        );
     }
 
     #[tokio::test]

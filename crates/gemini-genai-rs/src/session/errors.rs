@@ -11,7 +11,7 @@ use thiserror::Error;
 pub enum SessionError {
     /// WebSocket-level error (transient, may be retried).
     #[error("WebSocket error: {0}")]
-    WebSocket(WebSocketError),
+    WebSocket(#[source] WebSocketError),
 
     /// Timeout waiting for handshake or setup.
     #[error("Timeout in {phase} after {elapsed:?}")]
@@ -37,7 +37,11 @@ pub enum SessionError {
 
     /// Server rejected the setup configuration.
     #[error("Setup failed: {0}")]
-    SetupFailed(SetupError),
+    SetupFailed(#[source] SetupError),
+
+    /// A client message could not be encoded, or a server message decoded.
+    #[error("Codec error: {0}")]
+    Codec(#[source] crate::transport::CodecError),
 
     /// Server requested graceful disconnect.
     #[error("Server sent GoAway (time left: {time_left:?})")]
@@ -56,7 +60,7 @@ pub enum SessionError {
 
     /// Authentication error.
     #[error("Auth error: {0}")]
-    Auth(AuthError),
+    Auth(#[source] AuthError),
 }
 
 /// WebSocket-level errors with structured detail.
@@ -324,5 +328,28 @@ mod tests {
 
         let session_err = SessionError::WebSocket(WebSocketError::ProtocolError("test".into()));
         let _ = session_err.clone();
+    }
+}
+
+#[cfg(test)]
+mod source_chain {
+    //! The structured inner errors must be reachable through
+    //! `std::error::Error::source()`, otherwise the L2 → L1 → L0 chain
+    //! dead-ends at the top L0 variant and callers cannot walk to the cause.
+    use super::*;
+    use std::error::Error as _;
+
+    #[test]
+    fn websocket_setup_and_auth_variants_expose_their_source() {
+        let ws = SessionError::WebSocket(WebSocketError::ConnectionRefused("x".into()));
+        assert!(
+            ws.source().is_some(),
+            "WebSocket variant must expose its source"
+        );
+        let auth = SessionError::Auth(AuthError::TokenExpired);
+        assert!(
+            auth.source().is_some(),
+            "Auth variant must expose its source"
+        );
     }
 }

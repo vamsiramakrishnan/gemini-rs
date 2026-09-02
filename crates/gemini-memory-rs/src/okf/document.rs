@@ -292,9 +292,11 @@ Explicitly stated by the user.
     #[test]
     fn an_empty_category_file_parses_to_no_records() {
         assert!(OkfDocument::parse_many("", "cat.md").unwrap().is_empty());
-        assert!(OkfDocument::parse_many("\n\n", "cat.md")
-            .unwrap()
-            .is_empty());
+        assert!(
+            OkfDocument::parse_many("\n\n", "cat.md")
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

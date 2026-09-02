@@ -76,10 +76,10 @@ fn cache_path(text: &str, voice: &str) -> PathBuf {
 /// Returns `None` without an API key, so a caller can skip rather than fail.
 pub async fn speak(text: &str, voice: &str) -> Option<Vec<u8>> {
     let path = cache_path(text, voice);
-    if let Ok(cached) = std::fs::read(&path) {
-        if !cached.is_empty() {
-            return Some(cached);
-        }
+    if let Ok(cached) = std::fs::read(&path)
+        && !cached.is_empty()
+    {
+        return Some(cached);
     }
     let key = api_key()?;
 

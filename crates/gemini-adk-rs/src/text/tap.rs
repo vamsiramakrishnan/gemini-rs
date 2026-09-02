@@ -6,6 +6,10 @@ use crate::state::State;
 
 /// Read-only observation agent. Calls a function with the state but
 /// cannot mutate it. Returns empty string. No LLM call.
+///
+/// There is no `with_middleware_chain` here: a tap runs no inner agent and
+/// has no lifecycle of its own to observe — it *is* the observer. Attach
+/// middleware to the pipeline that contains it instead.
 pub struct TapTextAgent {
     name: String,
     func: Box<dyn Fn(&State) + Send + Sync>,

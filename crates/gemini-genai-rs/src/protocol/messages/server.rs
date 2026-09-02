@@ -132,9 +132,43 @@ pub struct GoAwayMessage {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GoAwayPayload {
-    /// Time remaining before forced disconnect (e.g. `"30s"`).
-    #[serde(default)]
-    pub time_left: Option<String>,
+    /// Time remaining before forced disconnect. The wire carries a protobuf
+    /// `Duration` string such as `"30s"` or `"2.5s"`; an unparsable value
+    /// decodes as `None` so the GoAway itself is never lost.
+    #[serde(default, deserialize_with = "proto_duration::deserialize_opt")]
+    pub time_left: Option<std::time::Duration>,
+}
+
+/// Protobuf JSON `Duration` (`"3.5s"`) decoding.
+mod proto_duration {
+    use serde::{Deserialize, Deserializer};
+    use std::time::Duration;
+
+    pub(super) fn parse(s: &str) -> Option<Duration> {
+        let secs: f64 = s.trim().strip_suffix('s')?.parse().ok()?;
+        (secs.is_finite() && secs >= 0.0).then(|| Duration::from_secs_f64(secs))
+    }
+
+    pub(super) fn deserialize_opt<'de, D: Deserializer<'de>>(
+        d: D,
+    ) -> Result<Option<Duration>, D::Error> {
+        Ok(Option::<String>::deserialize(d)?.as_deref().and_then(parse))
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn parses_proto_duration_strings() {
+            assert_eq!(parse("30s"), Some(Duration::from_secs(30)));
+            assert_eq!(parse("2.5s"), Some(Duration::from_millis(2500)));
+            assert_eq!(parse("0s"), Some(Duration::ZERO));
+            assert_eq!(parse("30"), None);
+            assert_eq!(parse("-1s"), None);
+            assert_eq!(parse("soon"), None);
+        }
+    }
 }
 
 /// Session resumption update from server (sent during active session).

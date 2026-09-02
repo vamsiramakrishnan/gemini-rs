@@ -46,26 +46,26 @@ impl fmt::Display for SchemaDiff {
         if !self.agents.is_empty() {
             writeln!(f, "--- Agents ---")?;
             for name in &self.agents.added {
-                writeln!(f, "  + ADDED: {}", name)?;
+                writeln!(f, "  + ADDED: {name}")?;
             }
             for name in &self.agents.removed {
-                writeln!(f, "  - REMOVED: {}", name)?;
+                writeln!(f, "  - REMOVED: {name}")?;
             }
             for change in &self.agents.changed {
                 writeln!(f, "  ~ CHANGED: {}", change.name)?;
                 for fc in &change.field_changes {
                     match fc {
                         FieldChange::Added(name, ty) => {
-                            writeln!(f, "      + field '{}': {}", name, ty)?;
+                            writeln!(f, "      + field '{name}': {ty}")?;
                         }
                         FieldChange::Removed(name, ty) => {
-                            writeln!(f, "      - field '{}': {}", name, ty)?;
+                            writeln!(f, "      - field '{name}': {ty}")?;
                         }
                         FieldChange::TypeChanged(name, old, new) => {
-                            writeln!(f, "      ~ field '{}': {} -> {}", name, old, new)?;
+                            writeln!(f, "      ~ field '{name}': {old} -> {new}")?;
                         }
                         FieldChange::OptionalityChanged(name, old, new) => {
-                            writeln!(f, "      ~ field '{}': optional {} -> {}", name, old, new)?;
+                            writeln!(f, "      ~ field '{name}': optional {old} -> {new}")?;
                         }
                     }
                 }
@@ -77,26 +77,26 @@ impl fmt::Display for SchemaDiff {
         if !self.tools.is_empty() {
             writeln!(f, "--- Tools ---")?;
             for name in &self.tools.added {
-                writeln!(f, "  + ADDED: {}", name)?;
+                writeln!(f, "  + ADDED: {name}")?;
             }
             for name in &self.tools.removed {
-                writeln!(f, "  - REMOVED: {}", name)?;
+                writeln!(f, "  - REMOVED: {name}")?;
             }
             for change in &self.tools.changed {
                 writeln!(f, "  ~ CHANGED: {}", change.name)?;
                 for fc in &change.field_changes {
                     match fc {
                         FieldChange::Added(name, ty) => {
-                            writeln!(f, "      + field '{}': {}", name, ty)?;
+                            writeln!(f, "      + field '{name}': {ty}")?;
                         }
                         FieldChange::Removed(name, ty) => {
-                            writeln!(f, "      - field '{}': {}", name, ty)?;
+                            writeln!(f, "      - field '{name}': {ty}")?;
                         }
                         FieldChange::TypeChanged(name, old, new) => {
-                            writeln!(f, "      ~ field '{}': {} -> {}", name, old, new)?;
+                            writeln!(f, "      ~ field '{name}': {old} -> {new}")?;
                         }
                         FieldChange::OptionalityChanged(name, old, new) => {
-                            writeln!(f, "      ~ field '{}': optional {} -> {}", name, old, new)?;
+                            writeln!(f, "      ~ field '{name}': optional {old} -> {new}")?;
                         }
                     }
                 }
@@ -108,26 +108,26 @@ impl fmt::Display for SchemaDiff {
         if !self.types.is_empty() {
             writeln!(f, "--- Types ---")?;
             for name in &self.types.added {
-                writeln!(f, "  + ADDED: {}", name)?;
+                writeln!(f, "  + ADDED: {name}")?;
             }
             for name in &self.types.removed {
-                writeln!(f, "  - REMOVED: {}", name)?;
+                writeln!(f, "  - REMOVED: {name}")?;
             }
             for change in &self.types.changed {
                 writeln!(f, "  ~ CHANGED: {}", change.name)?;
                 for fc in &change.field_changes {
                     match fc {
                         FieldChange::Added(name, ty) => {
-                            writeln!(f, "      + field '{}': {}", name, ty)?;
+                            writeln!(f, "      + field '{name}': {ty}")?;
                         }
                         FieldChange::Removed(name, ty) => {
-                            writeln!(f, "      - field '{}': {}", name, ty)?;
+                            writeln!(f, "      - field '{name}': {ty}")?;
                         }
                         FieldChange::TypeChanged(name, old, new) => {
-                            writeln!(f, "      ~ field '{}': {} -> {}", name, old, new)?;
+                            writeln!(f, "      ~ field '{name}': {old} -> {new}")?;
                         }
                         FieldChange::OptionalityChanged(name, old, new) => {
-                            writeln!(f, "      ~ field '{}': optional {} -> {}", name, old, new)?;
+                            writeln!(f, "      ~ field '{name}': optional {old} -> {new}")?;
                         }
                     }
                 }
@@ -432,7 +432,7 @@ mod tests {
             tools: EntityDiffs::default(),
             types: EntityDiffs::default(),
         };
-        let output = format!("{}", diff);
+        let output = format!("{diff}");
         assert!(output.contains("ADDED: NewAgent"));
     }
 }

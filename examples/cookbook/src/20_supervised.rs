@@ -137,17 +137,17 @@ async fn main() {
     }
 
     // Test the predicate
-    if let Composable::Loop(l) = &managed {
-        if let Some(pred) = &l.until {
-            println!(
-                "  approved=false -> continue: {}",
-                !pred.check(&serde_json::json!({"approved": false}))
-            );
-            println!(
-                "  approved=true  -> stop:     {}",
-                pred.check(&serde_json::json!({"approved": true}))
-            );
-        }
+    if let Composable::Loop(l) = &managed
+        && let Some(pred) = &l.until
+    {
+        println!(
+            "  approved=false -> continue: {}",
+            !pred.check(&serde_json::json!({"approved": false}))
+        );
+        println!(
+            "  approved=true  -> stop:     {}",
+            pred.check(&serde_json::json!({"approved": true}))
+        );
     }
 
     // ── Part 3: supervised_keyed() with Custom Key ───────────────────────
@@ -246,6 +246,9 @@ async fn main() {
         let indent = "  ".repeat(depth);
         match c {
             Composable::Agent(a) => println!("{indent}Agent({})", a.name()),
+            Composable::MapOver(m) => {
+                println!("{indent}MapOver({} over {})", m.agent.name(), m.list_key);
+            }
             Composable::Pipeline(p) => {
                 println!("{indent}Pipeline({} steps):", p.steps.len());
                 for step in &p.steps {

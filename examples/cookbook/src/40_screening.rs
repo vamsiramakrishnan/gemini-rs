@@ -66,7 +66,7 @@ async fn main() {
 
     // Scenario A — a legitimate caller is screened and routed.
     println!("--- Scenario A: legitimate caller ---");
-    let mut mon = FlowMonitor::new(screening_flow(), FlowMode::Enforce);
+    let mut mon = FlowMonitor::new(screening_flow(), Enforcement::Enforce);
     let state = State::new();
     classify("hi this is acme calling about an invoice", &state);
     mon.on_turn(&state);
@@ -105,7 +105,7 @@ async fn main() {
 
     // Scenario B — a spam caller is blocked deterministically.
     println!("\n--- Scenario B: spam caller ---");
-    let mut mon = FlowMonitor::new(screening_flow(), FlowMode::Enforce);
+    let mut mon = FlowMonitor::new(screening_flow(), Enforcement::Enforce);
     let state = State::new();
     classify("I'm calling about your car's extended warranty", &state);
     mon.on_turn(&state);

@@ -1,24 +1,13 @@
 //! Internal URL builder helpers shared by auth implementations.
 
 use super::ServiceEndpoint;
-use crate::protocol::types::GeminiModel;
+use crate::protocol::types::ModelId;
 
 /// Build a Google AI REST URL with API key as query parameter.
 pub(crate) fn build_google_ai_rest_url(
     base: &str,
     endpoint: ServiceEndpoint,
-    model: Option<&GeminiModel>,
-    api_key: &str,
-) -> String {
-    let path = build_rest_path(endpoint, model);
-    format!("{base}/{path}?key={api_key}")
-}
-
-/// Build a Google AI REST URL without an API key (for token-based auth).
-pub(crate) fn build_google_ai_rest_url_no_key(
-    base: &str,
-    endpoint: ServiceEndpoint,
-    model: Option<&GeminiModel>,
+    model: Option<&ModelId>,
 ) -> String {
     let path = build_rest_path(endpoint, model);
     format!("{base}/{path}")
@@ -30,7 +19,7 @@ pub(crate) fn build_vertex_rest_url(
     project: &str,
     location: &str,
     endpoint: ServiceEndpoint,
-    model: Option<&GeminiModel>,
+    model: Option<&ModelId>,
 ) -> String {
     let base = format!("https://{host}/v1beta1/projects/{project}/locations/{location}",);
     match endpoint {
@@ -70,7 +59,7 @@ pub(crate) fn build_vertex_rest_url(
 }
 
 /// Build the REST path segment for Google AI (mldev) endpoints.
-pub(crate) fn build_rest_path(endpoint: ServiceEndpoint, model: Option<&GeminiModel>) -> String {
+pub(crate) fn build_rest_path(endpoint: ServiceEndpoint, model: Option<&ModelId>) -> String {
     match endpoint {
         ServiceEndpoint::LiveWs => {
             panic!("Use ws_url() for LiveWs endpoints")
@@ -81,7 +70,9 @@ pub(crate) fn build_rest_path(endpoint: ServiceEndpoint, model: Option<&GeminiMo
         ServiceEndpoint::BatchJobs => "batchJobs".to_string(),
         ServiceEndpoint::ListModels => "models".to_string(),
         endpoint => {
-            let raw = model.map(|m| m.to_string()).unwrap_or_default();
+            let raw = model
+                .map(std::string::ToString::to_string)
+                .unwrap_or_default();
             let model_str = if raw.starts_with("models/") {
                 raw
             } else {

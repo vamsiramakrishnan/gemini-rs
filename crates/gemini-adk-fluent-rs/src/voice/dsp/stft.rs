@@ -31,8 +31,8 @@
 
 use std::collections::VecDeque;
 
-use realfft::num_complex::Complex;
 use realfft::RealFftPlanner;
+use realfft::num_complex::Complex;
 
 use super::{AudioBus, DspStage};
 
@@ -440,8 +440,8 @@ mod tests {
         let signal_rms = (signal_sq / signal_ref.len() as f64).sqrt();
 
         let snr_db = 20.0 * (signal_rms / error_rms).log10();
-        eprintln!("SNR: {:.1} dB", snr_db);
-        assert!(snr_db > 60.0, "SNR {:.1} dB is not > 60 dB", snr_db);
+        eprintln!("SNR: {snr_db:.1} dB");
+        assert!(snr_db > 60.0, "SNR {snr_db:.1} dB is not > 60 dB");
     }
 
     #[test]
@@ -491,11 +491,10 @@ mod tests {
             (noise_output_sq / (output_segment_end - output_segment_start) as f64).sqrt();
 
         let attenuation_db = 20.0 * (noise_input_rms / (noise_output_rms + 1e-10)).log10();
-        eprintln!("Noise attenuation: {:.1} dB", attenuation_db);
+        eprintln!("Noise attenuation: {attenuation_db:.1} dB");
         assert!(
             attenuation_db > 6.0,
-            "Attenuation {:.1} dB is not > 6 dB",
-            attenuation_db
+            "Attenuation {attenuation_db:.1} dB is not > 6 dB"
         );
 
         // Speech-like tone BURSTS over the same noise, after a noise-only

@@ -67,8 +67,8 @@ mod tests {
     use crate::agent_session::{AgentSession, NoOpSessionWriter};
     use crate::context::InvocationContext;
     use crate::error::AgentError;
-    use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicU32, Ordering};
     use tokio::sync::broadcast;
 
     /// Helper: create a test InvocationContext with a no-op session.
@@ -195,7 +195,7 @@ mod tests {
             Err(AgentError::TransferRequested(target)) => {
                 assert_eq!(target, "other_agent");
             }
-            other => panic!("expected TransferRequested, got {:?}", other),
+            other => panic!("expected TransferRequested, got {other:?}"),
         }
 
         // Agent ran twice: first time Ok, second time TransferRequested.

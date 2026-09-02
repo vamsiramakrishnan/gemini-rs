@@ -67,9 +67,9 @@ impl TrajectoryMatchType {
             }
             Self::AnyOrder => {
                 let expected_set: std::collections::HashSet<&str> =
-                    expected.iter().map(|s| s.as_str()).collect();
+                    expected.iter().map(std::string::String::as_str).collect();
                 let actual_set: std::collections::HashSet<&str> =
-                    actual.iter().map(|s| s.as_str()).collect();
+                    actual.iter().map(std::string::String::as_str).collect();
                 let found = expected_set.intersection(&actual_set).count();
                 let score = found as f64 / expected_set.len() as f64;
                 (
@@ -108,7 +108,7 @@ mod tests {
     use super::*;
 
     fn names(s: &[&str]) -> Vec<String> {
-        s.iter().map(|x| x.to_string()).collect()
+        s.iter().map(std::string::ToString::to_string).collect()
     }
 
     #[test]

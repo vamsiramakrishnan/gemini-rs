@@ -9,8 +9,8 @@ use crate::tool::ToolFunction;
 /// A collection of tools that can be enumerated.
 #[async_trait]
 pub trait Toolset: Send + Sync {
-    /// Get all tools in this toolset.
-    fn get_tools(&self) -> Vec<Arc<dyn ToolFunction>>;
+    /// All tools in this toolset.
+    fn tools(&self) -> Vec<Arc<dyn ToolFunction>>;
 
     /// Clean up resources when the toolset is no longer needed.
     async fn close(&self) {}
@@ -41,7 +41,7 @@ impl StaticToolset {
 
 #[async_trait]
 impl Toolset for StaticToolset {
-    fn get_tools(&self) -> Vec<Arc<dyn ToolFunction>> {
+    fn tools(&self) -> Vec<Arc<dyn ToolFunction>> {
         self.tools.clone()
     }
 }
@@ -77,7 +77,7 @@ mod tests {
             Arc::new(DummyTool { name: "a" }),
             Arc::new(DummyTool { name: "b" }),
         ]);
-        let tools = toolset.get_tools();
+        let tools = toolset.tools();
         assert_eq!(tools.len(), 2);
         assert_eq!(tools[0].name(), "a");
         assert_eq!(tools[1].name(), "b");
@@ -92,7 +92,7 @@ mod tests {
         ]);
 
         let filtered = toolset.filter_by_name(&["alpha", "gamma"]);
-        let tools = filtered.get_tools();
+        let tools = filtered.tools();
         assert_eq!(tools.len(), 2);
         assert_eq!(tools[0].name(), "alpha");
         assert_eq!(tools[1].name(), "gamma");
@@ -101,14 +101,14 @@ mod tests {
     #[test]
     fn empty_toolset() {
         let toolset = StaticToolset::new(vec![]);
-        assert!(toolset.get_tools().is_empty());
+        assert!(toolset.tools().is_empty());
     }
 
     #[test]
     fn filter_by_nonexistent_name() {
         let toolset = StaticToolset::new(vec![Arc::new(DummyTool { name: "a" })]);
         let filtered = toolset.filter_by_name(&["nonexistent"]);
-        assert!(filtered.get_tools().is_empty());
+        assert!(filtered.tools().is_empty());
     }
 
     #[test]

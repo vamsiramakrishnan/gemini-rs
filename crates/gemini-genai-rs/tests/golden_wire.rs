@@ -26,7 +26,7 @@ use gemini_genai_rs::protocol::types::*;
 use gemini_genai_rs::session::SessionCommand;
 use gemini_genai_rs::transport::codec::{Codec, JsonCodec};
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::PathBuf;
 
 fn fixture_path(name: &str) -> PathBuf {
@@ -62,11 +62,11 @@ fn load_fixture(name: &str) -> String {
 /// behavior + google_search), thinking, voice, transcription, resumption.
 fn rich_config(mut config: SessionConfig) -> SessionConfig {
     config = config
-        .model(GeminiModel::Gemini2_0FlashLive)
+        .model(ModelId::from_static("models/gemini-2.0-flash-live-001"))
         .voice(Voice::Kore)
         .thinking(1024)
-        .include_thoughts()
-        .session_resumption(Some("resume-handle-123".into()));
+        .include_thoughts(true)
+        .resume_from("resume-handle-123");
     config.system_instruction = Some(Content {
         role: Some(Role::System),
         parts: vec![Part::text("You are a weather assistant")],
@@ -150,7 +150,7 @@ fn setup_vertex_ai_golden() {
 fn realtime_audio_input_golden() {
     let config = SessionConfig::new("test-api-key");
     let bytes = JsonCodec
-        .encode_command(&SessionCommand::SendAudio(vec![1, 2, 3, 4]), &config)
+        .encode_command(&SessionCommand::SendAudio(vec![1, 2, 3, 4].into()), &config)
         .unwrap();
     let actual: Value = serde_json::from_slice(&bytes).unwrap();
     assert_golden("client_realtime_audio.json", &actual);
@@ -335,7 +335,10 @@ fn parse_go_away() {
     let msg = ServerMessage::parse(&load_fixture("server_go_away.json")).unwrap();
     match msg {
         ServerMessage::GoAway(m) => {
-            assert_eq!(m.go_away.time_left.as_deref(), Some("30s"));
+            assert_eq!(
+                m.go_away.time_left,
+                Some(std::time::Duration::from_secs(30))
+            );
         }
         other => panic!("expected GoAway, got {other:?}"),
     }
@@ -371,15 +374,15 @@ fn parse_unknown_is_forward_compatible() {
 fn model_catalog_wire_names() {
     let cases = [
         (
-            GeminiModel::Gemini2_0FlashLive,
+            ModelId::from_static("models/gemini-2.0-flash-live-001"),
             "models/gemini-2.0-flash-live-001",
         ),
         (
-            GeminiModel::GeminiLive2_5FlashNativeAudio,
+            ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO,
             "models/gemini-live-2.5-flash-native-audio",
         ),
         (
-            GeminiModel::Custom("models/gemini-9.9-future".into()),
+            ModelId::new("models/gemini-9.9-future"),
             "models/gemini-9.9-future",
         ),
     ];
@@ -390,11 +393,8 @@ fn model_catalog_wire_names() {
     }
     // Custom is the forward-compatibility escape hatch: unknown strings must
     // round-trip through deserialization instead of failing.
-    let parsed: GeminiModel = serde_json::from_value(json!("models/not-yet-invented")).unwrap();
-    assert_eq!(
-        parsed,
-        GeminiModel::Custom("models/not-yet-invented".into())
-    );
+    let parsed: ModelId = serde_json::from_value(json!("models/not-yet-invented")).unwrap();
+    assert_eq!(parsed, ModelId::new("models/not-yet-invented"));
 }
 
 #[test]

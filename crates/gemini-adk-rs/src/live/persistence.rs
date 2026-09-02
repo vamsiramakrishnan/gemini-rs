@@ -28,6 +28,24 @@ pub struct SessionSnapshot {
     pub saved_at: String,
 }
 
+/// Error returned by a [`SessionPersistence`] backend.
+#[derive(Debug, thiserror::Error)]
+pub enum PersistenceError {
+    /// Filesystem or network I/O failed.
+    #[error("persistence I/O error: {0}")]
+    Io(#[from] std::io::Error),
+    /// A snapshot could not be encoded or decoded.
+    #[error("persistence serialization error: {0}")]
+    Serde(#[from] serde_json::Error),
+    /// No snapshot is stored under the given session id (for backends that
+    /// distinguish this from an empty `load`).
+    #[error("no persisted session '{0}'")]
+    NotFound(String),
+    /// A backend-specific failure (Redis, Firestore, DynamoDB, …).
+    #[error("persistence backend error: {0}")]
+    Backend(String),
+}
+
 /// Trait for persisting session state across process restarts.
 ///
 /// Implementations might write to the filesystem, Redis, Firestore, etc.
@@ -38,19 +56,13 @@ pub trait SessionPersistence: Send + Sync {
         &self,
         session_id: &str,
         snapshot: &SessionSnapshot,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+    ) -> Result<(), PersistenceError>;
 
     /// Load a previously saved session snapshot.
-    async fn load(
-        &self,
-        session_id: &str,
-    ) -> Result<Option<SessionSnapshot>, Box<dyn std::error::Error + Send + Sync>>;
+    async fn load(&self, session_id: &str) -> Result<Option<SessionSnapshot>, PersistenceError>;
 
     /// Delete a saved session.
-    async fn delete(
-        &self,
-        session_id: &str,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+    async fn delete(&self, session_id: &str) -> Result<(), PersistenceError>;
 }
 
 /// File-system persistence (good for development and single-server deployments).
@@ -67,11 +79,11 @@ impl FsPersistence {
     }
 
     fn path(&self, session_id: &str) -> PathBuf {
-        self.dir.join(format!("{}.json", session_id))
+        self.dir.join(format!("{session_id}.json"))
     }
 
     fn tmp_path(&self, session_id: &str) -> PathBuf {
-        self.dir.join(format!("{}.json.tmp", session_id))
+        self.dir.join(format!("{session_id}.json.tmp"))
     }
 }
 
@@ -81,7 +93,7 @@ impl SessionPersistence for FsPersistence {
         &self,
         session_id: &str,
         snapshot: &SessionSnapshot,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<(), PersistenceError> {
         tokio::fs::create_dir_all(&self.dir).await?;
         let json = serde_json::to_string_pretty(snapshot)?;
         // Write to a sibling temp file, then atomically rename over the
@@ -95,10 +107,7 @@ impl SessionPersistence for FsPersistence {
         Ok(())
     }
 
-    async fn load(
-        &self,
-        session_id: &str,
-    ) -> Result<Option<SessionSnapshot>, Box<dyn std::error::Error + Send + Sync>> {
+    async fn load(&self, session_id: &str) -> Result<Option<SessionSnapshot>, PersistenceError> {
         let path = self.path(session_id);
         match tokio::fs::read_to_string(&path).await {
             Ok(json) => Ok(Some(serde_json::from_str(&json)?)),
@@ -107,10 +116,7 @@ impl SessionPersistence for FsPersistence {
         }
     }
 
-    async fn delete(
-        &self,
-        session_id: &str,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn delete(&self, session_id: &str) -> Result<(), PersistenceError> {
         let path = self.path(session_id);
         match tokio::fs::remove_file(&path).await {
             Ok(()) => Ok(()),
@@ -146,22 +152,16 @@ impl SessionPersistence for MemoryPersistence {
         &self,
         session_id: &str,
         snapshot: &SessionSnapshot,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<(), PersistenceError> {
         self.store.insert(session_id.to_string(), snapshot.clone());
         Ok(())
     }
 
-    async fn load(
-        &self,
-        session_id: &str,
-    ) -> Result<Option<SessionSnapshot>, Box<dyn std::error::Error + Send + Sync>> {
+    async fn load(&self, session_id: &str) -> Result<Option<SessionSnapshot>, PersistenceError> {
         Ok(self.store.get(session_id).map(|v| v.value().clone()))
     }
 
-    async fn delete(
-        &self,
-        session_id: &str,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn delete(&self, session_id: &str) -> Result<(), PersistenceError> {
         self.store.remove(session_id);
         Ok(())
     }

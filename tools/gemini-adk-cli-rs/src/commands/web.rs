@@ -1,16 +1,16 @@
 use crate::manifest::{self, AgentManifest};
 use async_trait::async_trait;
 use axum::{
-    extract::{ws::WebSocketUpgrade, Path, State as AxumState},
-    http::{header, StatusCode},
+    Router,
+    extract::{Path, State as AxumState, ws::WebSocketUpgrade},
+    http::{StatusCode, header},
     response::{Html, IntoResponse, Json},
     routing::get,
-    Router,
 };
 use gemini_adk_fluent_rs::prelude::*;
 use gemini_adk_server_rs::ws::{
-    handle_ws, AgentSource, AppCategory, AppError, AppInfo, AppRegistry, ClientMessage,
-    ServerMessage, WsSender,
+    AgentSource, AppCategory, AppError, AppInfo, AppRegistry, ClientMessage, ServerMessage,
+    WsSender, handle_ws,
 };
 use rust_embed::Embed;
 use std::path::PathBuf;
@@ -160,10 +160,10 @@ impl AgentSource for ManifestApp {
         let tx_thought = tx.clone();
 
         let mut builder = Live::builder()
-            .model(GeminiModel::Gemini2_0FlashLive)
+            .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
             .instruction(&manifest.instruction)
             .voice(voice)
-            .transcription(true, true)
+            .transcription()
             .on_audio(move |data| {
                 tx_audio
                     .send(ServerMessage::Audio {
@@ -253,10 +253,9 @@ impl AgentSource for ManifestApp {
                 ClientMessage::Audio { data } => {
                     if let Ok(decoded) =
                         base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &data)
+                        && let Err(e) = handle.send_audio(decoded).await
                     {
-                        if let Err(e) = handle.send_audio(decoded).await {
-                            tracing::warn!("send_audio error: {}", e);
-                        }
+                        tracing::warn!("send_audio error: {}", e);
                     }
                 }
                 ClientMessage::Stop => break,

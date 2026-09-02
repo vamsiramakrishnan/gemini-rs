@@ -18,8 +18,7 @@ pub use ledger::{
     SessionLedgerSnapshot,
 };
 pub use observation::{
-    observation_schema, BoundedObservationExtractor, MemoryObservationExtractor,
-    ObservationExtractionContext, RuleBasedObservationExtractor,
-    OBSERVATION_EXTRACTION_INSTRUCTION,
+    BoundedObservationExtractor, MemoryObservationExtractor, OBSERVATION_EXTRACTION_INSTRUCTION,
+    ObservationExtractionContext, RuleBasedObservationExtractor, observation_schema,
 };
-pub use overlay::{provisional_memory, provisional_memory_id, SessionMemoryOverlay};
+pub use overlay::{SessionMemoryOverlay, provisional_memory, provisional_memory_id};

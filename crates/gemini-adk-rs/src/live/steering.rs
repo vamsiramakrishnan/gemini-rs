@@ -104,7 +104,7 @@ pub fn build_steering_context(
                             .unwrap_or(key);
                         state
                             .get::<Value>(key)
-                            .map(|v| format!("{}={}", display_key, v))
+                            .map(|v| format!("{display_key}={v}"))
                     })
                     .collect();
                 if !pairs.is_empty() {

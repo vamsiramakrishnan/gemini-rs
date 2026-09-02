@@ -21,7 +21,7 @@ GOOGLE_CLOUD_LOCATION=us-central1
 GOOGLE_GENAI_USE_VERTEXAI=TRUE
 
 # Default model for Live sessions (override per-app via browser Start message)
-GEMINI_MODEL=gemini-genai-2.5-flash-native-audio
+GEMINI_LIVE_MODEL=models/gemini-2.5-flash-native-audio-latest
 ```
 
 Alternatively, for Google AI (non-Vertex) usage, set `GOOGLE_GENAI_API_KEY` or `GEMINI_API_KEY` instead.
@@ -192,7 +192,6 @@ Feature flags are used to keep the default build lean. Key flags:
 | `gemini-genai-rs` | `all-apis` | All REST API modules |
 | `gemini-adk-rs` | `gemini-llm` | Gemini LLM integration via HTTP |
 | `gemini-adk-rs` | `database-sessions` | Persistent session storage |
-| `gemini-adk-rs` | `tracing-support` | Structured logging via `tracing` |
 | `gemini-adk-fluent-rs` | `gemini-llm` | Passthrough to `gemini-adk-rs/gemini-llm` |
 
 ## Testing
@@ -261,7 +260,7 @@ Existing design docs cover the full architecture and can be referenced for conte
 A few things worth knowing before diving into the code:
 
 - **Vertex AI sends Binary WebSocket frames** (not Text). The transport layer in `crates/gemini-genai-rs/src/transport/ws.rs` handles this transparently.
-- **The native audio model only supports AUDIO output modality**, not TEXT. You cannot get text responses from `gemini-genai-2.5-flash-native-audio`.
+- **The native audio model only supports AUDIO output modality**, not TEXT. You cannot get text responses from the native-audio Live models.
 - **Tool definitions cannot be updated mid-session** in Live API. Only system instructions can be updated after the session is established. Phase-scoped tool filtering works by rejecting tool calls on the SDK side, not by changing the API configuration.
 - **State keys use prefixes** (`session:`, `derived:`, `turn:`, `app:`, `bg:`, `user:`, `temp:`) to control scope and lifecycle. See `crates/gemini-adk-rs/src/state.rs`.
 - **`SessionWriter` is behind `Arc<dyn SessionWriter>`** so that multiple components (phases, extractors, background tools) can share a session handle without ownership conflicts.

@@ -14,11 +14,11 @@ pub mod tools;
 pub mod turn_extractor;
 
 #[cfg(feature = "fluent")]
-pub use live::{memory_tools, LiveMemoryExt};
+pub use live::{LiveMemoryExt, memory_tools};
 #[cfg(feature = "fluent")]
 pub use spec_binding::SessionMemoryBinding;
 pub use tools::{
-    manage_memory_tool, recall_context_tool, ManageArgs, RecallArgs, RecallScope, MANAGE_TOOL,
-    MEMORY_TOOLS, RECALL_TOOL,
+    MANAGE_TOOL, MEMORY_TOOLS, ManageArgs, RECALL_TOOL, RecallArgs, RecallScope,
+    manage_memory_tool, recall_context_tool,
 };
-pub use turn_extractor::{MemorySlot, MemorySlotError, MemoryTurnExtractor, MEMORY_EXTRACTOR_NAME};
+pub use turn_extractor::{MEMORY_EXTRACTOR_NAME, MemorySlot, MemorySlotError, MemoryTurnExtractor};

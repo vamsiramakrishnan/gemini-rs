@@ -1,12 +1,12 @@
 //! REST endpoint handlers — single implementation used by all server surfaces.
 
-use crate::{agents::AgentEntry, types::*, ServerState};
+use crate::{ServerState, agents::AgentEntry, types::*};
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
     response::{
-        sse::{Event, KeepAlive, Sse},
         IntoResponse, Json, Response,
+        sse::{Event, KeepAlive, Sse},
     },
 };
 use std::sync::Arc;

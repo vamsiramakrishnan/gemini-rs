@@ -1,9 +1,9 @@
 //! Agent-level observability — OpenTelemetry tracing, structured logging, Prometheus metrics.
 //!
 //! Mirrors the wire crate's telemetry layer but for agent lifecycle operations.
-//! All components are feature-gated for zero overhead when disabled:
-//! - `tracing-support`: OTel spans and structured logging
-//! - `metrics`: Prometheus metric definitions
+//! Spans and structured logging go through the `tracing` facade and are
+//! always compiled (no-ops until a subscriber is installed). Prometheus
+//! metric definitions are gated behind the `metrics` feature.
 
 use async_trait::async_trait;
 
@@ -22,8 +22,8 @@ pub mod spans;
 pub use setup::TelemetrySetup;
 
 /// Auto-registered middleware that calls telemetry functions.
-/// Zero-overhead when `tracing-support` and `metrics` features are disabled
-/// (all telemetry functions compile to no-ops).
+/// Spans and log events are no-ops until a `tracing` subscriber is
+/// installed; metrics compile to no-ops without the `metrics` feature.
 ///
 /// Automatically prepended to every LlmAgent's middleware chain at build time,
 /// so all agents get observability by default.

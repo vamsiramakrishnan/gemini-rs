@@ -40,9 +40,13 @@ pub trait TextAgent: Send + Sync {
 
 ```rust,ignore
 use gemini_adk_rs::text::LlmTextAgent;
-use gemini_adk_rs::llm::GeminiLlm;
+use gemini_adk_rs::llm::{GeminiLlm, GeminiLlmParams};
 
-let llm = Arc::new(GeminiLlm::new(GeminiModel::Gemini2_0Flash));
+// `model: None` resolves GEMINI_TEXT_MODEL, then GEMINI_MODEL, then the platform's Flash alias.
+let llm = Arc::new(GeminiLlm::new(GeminiLlmParams {
+    model: Some("gemini-flash-latest".into()),
+    ..Default::default()
+}));
 
 let agent = LlmTextAgent::new("analyst", llm)
     .instruction("Analyze the given topic and produce a summary.")
@@ -307,7 +311,7 @@ let robust = AgentBuilder::new("primary").instruction("Try this first")
     / AgentBuilder::new("backup").instruction("Fall back to this");
 
 // Compile the tree into an executable TextAgent
-let agent = pipeline.compile(llm);
+let agent = pipeline.compile(llm)?;
 let result = agent.run(&state).await?;
 ```
 
@@ -334,7 +338,7 @@ let summarize = AgentBuilder::new("summarize")
 // extract -> validate -> summarize
 let pipeline = extract >> validate >> summarize;
 
-let agent = pipeline.compile(llm);
+let agent = pipeline.compile(llm)?;
 let state = State::new();
 state.set("input", document_text);
 

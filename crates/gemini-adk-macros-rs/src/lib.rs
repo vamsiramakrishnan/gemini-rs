@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 //! Procedural macros for `gemini-adk-rs`.
 //!
 //! This crate provides the [`macro@tool`] attribute macro, which turns a plain
@@ -23,11 +24,42 @@
 //! ```
 
 use proc_macro::TokenStream;
+use proc_macro2::Span;
 use quote::{format_ident, quote};
 use syn::{
-    parse_macro_input, Data, DeriveInput, Expr, ExprLit, Fields, FnArg, ItemFn, Lit, LitInt,
-    LitStr, Meta, Pat, PatType, ReturnType, Type, TypePath,
+    Data, DeriveInput, Expr, ExprLit, Fields, FnArg, ItemFn, Lit, LitInt, LitStr, Meta, Pat,
+    PatType, ReturnType, Type, TypePath, parse_macro_input,
 };
+
+/// Where the runtime crate (`gemini-adk-rs`) is reachable from the expansion
+/// site, as a path and as the string form the derive `crate = ".."` attributes
+/// want.
+///
+/// A direct dependency wins (under whatever name it was renamed to); a crate
+/// that depends only on `gemini-adk-fluent-rs` reaches it through that
+/// crate's `gemini_adk_rs` re-export. Inside `gemini-adk-rs` itself the crate
+/// declares `extern crate self as gemini_adk_rs`, so the plain name works
+/// there and in its own tests.
+fn runtime() -> (proc_macro2::TokenStream, String) {
+    use proc_macro_crate::{FoundCrate, crate_name};
+    match crate_name("gemini-adk-rs") {
+        Ok(FoundCrate::Name(name)) => {
+            let ident = format_ident!("{name}");
+            (quote! { ::#ident }, name)
+        }
+        Ok(FoundCrate::Itself) => (quote! { ::gemini_adk_rs }, "gemini_adk_rs".to_string()),
+        Err(_) => match crate_name("gemini-adk-fluent-rs") {
+            Ok(FoundCrate::Name(name)) => {
+                let ident = format_ident!("{name}");
+                (
+                    quote! { ::#ident::gemini_adk_rs },
+                    format!("{name}::gemini_adk_rs"),
+                )
+            }
+            _ => (quote! { ::gemini_adk_rs }, "gemini_adk_rs".to_string()),
+        },
+    }
+}
 
 /// Turn an `async fn` into a registrable Gemini tool.
 ///
@@ -70,10 +102,14 @@ use syn::{
 ///
 /// # Path hygiene
 ///
-/// Generated code references `serde`, `schemars`, `serde_json`, `async_trait`,
-/// and `gemini_adk_rs` via absolute (`::`-rooted) paths in *your* crate graph.
-/// Consumers of `gemini-adk-rs` already have all of these as dependencies, so no
-/// extra setup is required.
+/// Generated code reaches `serde`, `schemars`, `serde_json`, and `async_trait`
+/// through the runtime crate's `__macros` module (the derives are pointed
+/// there with `#[serde(crate = ..)]` / `#[schemars(crate = ..)]`), so none of
+/// them need to be in your `Cargo.toml`. The runtime crate itself is located
+/// at expansion time: `gemini-adk-rs` if it is a direct dependency (under
+/// whatever name), else through `gemini-adk-fluent-rs`'s re-export — so a
+/// crate that depends only on the fluent layer can use `#[tool]` from its
+/// prelude.
 ///
 /// # Follow-ups (not yet supported)
 ///
@@ -190,15 +226,19 @@ fn expand(description: LitStr, func: ItemFn) -> syn::Result<proc_macro2::TokenSt
 
     // Upstream crates are reached through `gemini_adk_rs::__macros` so the consumer
     // doesn't need them in scope under those exact names.
-    let serde = quote! { ::gemini_adk_rs::__macros::serde };
-    let schemars = quote! { ::gemini_adk_rs::__macros::schemars };
-    let async_trait = quote! { ::gemini_adk_rs::__macros::async_trait };
-    let serde_json = quote! { ::gemini_adk_rs::__macros::serde_json };
+    let (rt, rt_str) = runtime();
+    let serde = quote! { #rt::__macros::serde };
+    let schemars = quote! { #rt::__macros::schemars };
+    let async_trait = quote! { #rt::__macros::async_trait };
+    let serde_json = quote! { #rt::__macros::serde_json };
+    let serde_crate = LitStr::new(&format!("{rt_str}::__macros::serde"), Span::call_site());
+    let schemars_crate = LitStr::new(&format!("{rt_str}::__macros::schemars"), Span::call_site());
 
     let expanded = quote! {
         // Hidden args struct: drives both deserialization and schema generation.
         #[derive(#serde::Deserialize, #schemars::JsonSchema)]
-        #[serde(crate = "gemini_adk_rs::__macros::serde")]
+        #[serde(crate = #serde_crate)]
+        #[schemars(crate = #schemars_crate)]
         #[allow(non_camel_case_types, non_snake_case)]
         struct #args_struct {
             #(#struct_fields),*
@@ -213,7 +253,7 @@ fn expand(description: LitStr, func: ItemFn) -> syn::Result<proc_macro2::TokenSt
         #vis struct #tool_struct;
 
         #[#async_trait::async_trait]
-        impl ::gemini_adk_rs::tool::ToolFunction for #tool_struct {
+        impl #rt::tool::ToolFunction for #tool_struct {
             fn name(&self) -> &str {
                 #fn_name_str
             }
@@ -233,10 +273,10 @@ fn expand(description: LitStr, func: ItemFn) -> syn::Result<proc_macro2::TokenSt
             async fn call(
                 &self,
                 args: #serde_json::Value,
-            ) -> ::core::result::Result<#serde_json::Value, ::gemini_adk_rs::error::ToolError> {
+            ) -> ::core::result::Result<#serde_json::Value, #rt::error::ToolError> {
                 let #args_struct { #(#destructure),* } =
                     #serde_json::from_value(args).map_err(|e| {
-                        ::gemini_adk_rs::error::ToolError::InvalidArgs(
+                        #rt::error::ToolError::InvalidArgs(
                             ::std::format!("Failed to deserialize arguments: {e}"),
                         )
                     })?;
@@ -313,6 +353,7 @@ pub fn derive_extract(item: TokenStream) -> TokenStream {
 }
 
 fn expand_extract(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
+    let (rt, _) = runtime();
     let ident = &input.ident;
 
     let fields = match &input.data {
@@ -394,8 +435,8 @@ fn expand_extract(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     Ok(quote! {
         impl #ident {
             #[doc = #doc]
-            pub fn extract() -> ::gemini_adk_rs::extract::Extract {
-                ::gemini_adk_rs::extract::Extract::record(#name)
+            pub fn extract() -> #rt::extract::Extract {
+                #rt::extract::Extract::record(#name)
                     #(#field_calls)*
                     .window(#window)
                     .build()
@@ -441,6 +482,7 @@ pub fn derive_frame(item: TokenStream) -> TokenStream {
 }
 
 fn expand_frame(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
+    let (rt, _) = runtime();
     let ident = &input.ident;
 
     let fields = match &input.data {
@@ -450,14 +492,14 @@ fn expand_frame(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                 return Err(syn::Error::new_spanned(
                     ident,
                     "#[derive(Frame)] requires a struct with named fields",
-                ))
+                ));
             }
         },
         _ => {
             return Err(syn::Error::new_spanned(
                 ident,
                 "#[derive(Frame)] can only be applied to structs",
-            ))
+            ));
         }
     };
 
@@ -485,7 +527,7 @@ fn expand_frame(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         let mut state_key = fname.clone();
         let mut prompt: Option<String> = None;
         let mut reprompt: Option<String> = None;
-        let mut confirm = quote! { ::gemini_adk_rs::frame::ConfirmPolicy::Never };
+        let mut confirm = quote! { #rt::frame::ConfirmPolicy::Never };
         let mut pii = false;
         let mut min: Option<f64> = None;
         let mut max: Option<f64> = None;
@@ -517,11 +559,11 @@ fn expand_frame(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                 } else if meta.path.is_ident("confirm") {
                     let v: LitStr = meta.value()?.parse()?;
                     confirm = match v.value().as_str() {
-                        "never" => quote! { ::gemini_adk_rs::frame::ConfirmPolicy::Never },
+                        "never" => quote! { #rt::frame::ConfirmPolicy::Never },
                         "low_confidence" => {
-                            quote! { ::gemini_adk_rs::frame::ConfirmPolicy::LowConfidence }
+                            quote! { #rt::frame::ConfirmPolicy::LowConfidence }
                         }
-                        "always" => quote! { ::gemini_adk_rs::frame::ConfirmPolicy::Always },
+                        "always" => quote! { #rt::frame::ConfirmPolicy::Always },
                         other => {
                             return Err(meta.error(format!(
                                 "unknown confirm policy '{other}' (expected never/low_confidence/always)"
@@ -555,9 +597,9 @@ fn expand_frame(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                 Some(v) => quote! { Some(#v) },
                 None => quote! { None },
             };
-            quote! { Some(::gemini_adk_rs::frame::SlotValidator::Range { min: #min_tok, max: #max_tok }) }
+            quote! { Some(#rt::frame::SlotValidator::Range { min: #min_tok, max: #max_tok }) }
         } else if non_empty {
-            quote! { Some(::gemini_adk_rs::frame::SlotValidator::NonEmpty) }
+            quote! { Some(#rt::frame::SlotValidator::NonEmpty) }
         } else {
             quote! { None }
         };
@@ -571,7 +613,7 @@ fn expand_frame(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
             None => quote! { None },
         };
         slot_exprs.push(quote! {
-            ::gemini_adk_rs::frame::SlotSpec {
+            #rt::frame::SlotSpec {
                 name: #fname.to_string(),
                 state_key: #state_key.to_string(),
                 prompt: #prompt_tok,
@@ -586,10 +628,10 @@ fn expand_frame(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
 
     let doc = format!("The `FrameSpec` derived from `{ident}`'s `#[slot(..)]` fields.");
     Ok(quote! {
-        impl ::gemini_adk_rs::frame::Frame for #ident {
+        impl #rt::frame::Frame for #ident {
             #[doc = #doc]
-            fn frame() -> ::gemini_adk_rs::frame::FrameSpec {
-                ::gemini_adk_rs::frame::FrameSpec {
+            fn frame() -> #rt::frame::FrameSpec {
+                #rt::frame::FrameSpec {
                     name: #name.to_string(),
                     slots: ::std::vec![ #(#slot_exprs),* ],
                 }
@@ -608,7 +650,8 @@ fn expand_frame(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
 
 /// Build the `Recognizer::..` expression for a single `#[recognize(..)]` attr.
 fn recognizer_expr(attr: &syn::Attribute) -> syn::Result<proc_macro2::TokenStream> {
-    let r = quote! { ::gemini_adk_rs::extract::Recognizer };
+    let (rt, _) = runtime();
+    let r = quote! { #rt::extract::Recognizer };
     let meta: Meta = attr.parse_args()?;
     match meta {
         Meta::Path(p) => {
@@ -664,7 +707,8 @@ fn recognizer_expr(attr: &syn::Attribute) -> syn::Result<proc_macro2::TokenStrea
 /// Build a serializable `SlotRecognizer` expression for a `#[recognize(..)]` attr
 /// on a `#[derive(Frame)]` field (same vocabulary as the Extract derive).
 fn slot_recognizer_expr(attr: &syn::Attribute) -> syn::Result<proc_macro2::TokenStream> {
-    let r = quote! { ::gemini_adk_rs::frame::SlotRecognizer };
+    let (rt, _) = runtime();
+    let r = quote! { #rt::frame::SlotRecognizer };
     let meta: Meta = attr.parse_args()?;
     match meta {
         Meta::Path(p) => {

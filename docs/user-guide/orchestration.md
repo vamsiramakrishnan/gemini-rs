@@ -60,7 +60,7 @@ downstream agent `on_complete`:
 ```rust,ignore
 Live::builder()
     .govern(booking_flow)
-    .on_enter("check", availability_agent, AgentMode::Call)   // result → check:result
+    .on_step_enter("check", availability_agent, AgentMode::Call)   // result → check:result
     .extract_record(
         Extract::record("triage")
             .field("intent", Recognizer::one_of(["refund", "status"]))

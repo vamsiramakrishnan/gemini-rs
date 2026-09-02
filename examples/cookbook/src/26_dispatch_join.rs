@@ -41,7 +41,7 @@ impl BaseLlm for EchoLlm {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== Cookbook #26: DispatchTextAgent + JoinTextAgent ===\n");
 
     let llm: Arc<dyn BaseLlm> = Arc::new(EchoLlm);
@@ -50,19 +50,19 @@ async fn main() {
 
     let email_agent = AgentBuilder::new("send-email")
         .instruction("Compose and send a confirmation email to the customer")
-        .build(llm.clone());
+        .build(llm.clone())?;
 
     let log_agent = AgentBuilder::new("audit-log")
         .instruction("Write an audit log entry for the transaction")
-        .build(llm.clone());
+        .build(llm.clone())?;
 
     let analytics_agent = AgentBuilder::new("analytics")
         .instruction("Update analytics dashboard with the new transaction data")
-        .build(llm.clone());
+        .build(llm.clone())?;
 
     let notification_agent = AgentBuilder::new("push-notification")
         .instruction("Send a push notification to the customer's mobile app")
-        .build(llm.clone());
+        .build(llm.clone())?;
 
     println!("Defined 4 background agents:");
     println!("  - send-email");
@@ -106,7 +106,7 @@ async fn main() {
     // Dispatch fires all tasks in background
     println!("Dispatching background tasks...");
     let dispatch_result = dispatcher.run(&state).await.unwrap();
-    println!("  Dispatch returned immediately: '{}'", dispatch_result);
+    println!("  Dispatch returned immediately: '{dispatch_result}'");
     println!(
         "  Dispatch status: {:?}",
         state.get::<serde_json::Value>("_dispatch_status")
@@ -143,11 +143,11 @@ async fn main() {
 
     let fast_task = AgentBuilder::new("fast-task")
         .instruction("Quick validation check")
-        .build(llm.clone());
+        .build(llm.clone())?;
 
     let slow_task = AgentBuilder::new("slow-task")
         .instruction("Comprehensive background analysis")
-        .build(llm.clone());
+        .build(llm.clone())?;
 
     let dispatcher2 = DispatchTextAgent::new(
         "selective-dispatcher",
@@ -181,11 +181,11 @@ async fn main() {
     // Build a pipeline: main agent >> dispatch side effects >> continue >> join results
     let main_agent = AgentBuilder::new("main-processor")
         .instruction("Process the customer request and determine next steps")
-        .build(llm.clone());
+        .build(llm.clone())?;
 
     let summary_agent = AgentBuilder::new("summarizer")
         .instruction("Summarize all results from the pipeline")
-        .build(llm.clone());
+        .build(llm.clone())?;
 
     // Using SequentialTextAgent to compose dispatch/join with other agents
     let pipeline = SequentialTextAgent::new(
@@ -232,4 +232,5 @@ async fn main() {
     println!("  Budget of 5: balanced concurrency for production use");
 
     println!("\nDispatch/Join pipeline example completed successfully!");
+    Ok(())
 }

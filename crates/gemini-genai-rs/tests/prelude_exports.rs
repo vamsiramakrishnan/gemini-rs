@@ -32,12 +32,11 @@ fn error_types_are_accessible() {
 #[test]
 fn type_safety_additions() {
     let _r = Role::User;
-    let _p = Platform::GoogleAI;
 }
 
 #[test]
 fn existing_types_still_accessible() {
-    let _model = GeminiModel::Gemini2_0FlashLive;
+    let _model = ModelId::from_static("models/gemini-2.0-flash-live-001");
     let _voice = Voice::Puck;
     let _modality = Modality::Audio;
     let _content = Content::user("hello");
@@ -46,6 +45,7 @@ fn existing_types_still_accessible() {
 
 #[test]
 fn connect_builder_accessible() {
-    let config = SessionConfig::new("key").model(GeminiModel::Gemini2_0FlashLive);
+    let config =
+        SessionConfig::new("key").model(ModelId::from_static("models/gemini-2.0-flash-live-001"));
     let _builder = ConnectBuilder::new(config);
 }

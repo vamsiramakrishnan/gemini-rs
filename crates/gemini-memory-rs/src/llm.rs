@@ -20,16 +20,16 @@ use serde::Deserialize;
 use std::sync::Arc;
 
 use crate::core::{
-    stable_hash, CanonicalPredicate, EntityRef, Explicitness, MemoryError, MemoryKind,
-    MemoryObservation, MemoryValue, MutationIntent, ObservationId, PlanId, ProposedPersistence,
-    SensitivityClass, SpeakerAttribution, TemporalScope, TranscriptEvidence, TurnId,
+    CanonicalPredicate, EntityRef, Explicitness, MemoryError, MemoryKind, MemoryObservation,
+    MemoryValue, MutationIntent, ObservationId, PlanId, ProposedPersistence, SensitivityClass,
+    SpeakerAttribution, TemporalScope, TranscriptEvidence, TurnId, stable_hash,
 };
 use crate::ingestion::{
-    MemoryObservationExtractor, ObservationExtractionContext, OBSERVATION_EXTRACTION_INSTRUCTION,
+    MemoryObservationExtractor, OBSERVATION_EXTRACTION_INSTRUCTION, ObservationExtractionContext,
 };
 use crate::retrieval::{
-    RetrievalEntity, RetrievalExtractionContext, RetrievalIntent, RetrievalPlan,
-    RetrievalPlanExtractor, RETRIEVAL_PLAN_INSTRUCTION,
+    RETRIEVAL_PLAN_INSTRUCTION, RetrievalEntity, RetrievalExtractionContext, RetrievalIntent,
+    RetrievalPlan, RetrievalPlanExtractor,
 };
 
 /// Build a Gemini LLM for out-of-band extraction from the environment.
@@ -397,7 +397,7 @@ fn parse_json<T: serde::de::DeserializeOwned>(raw: &str) -> Result<T, MemoryErro
 /// like a constraint in the code and behaves like free-form generation on the
 /// wire.
 fn schema_for<T: JsonSchema>() -> serde_json::Value {
-    let settings = schemars::gen::SchemaSettings::draft07().with(|s| {
+    let settings = schemars::r#gen::SchemaSettings::draft07().with(|s| {
         s.inline_subschemas = true;
         s.meta_schema = None;
     });
@@ -526,11 +526,13 @@ mod tests {
         let extractor = GeminiObservationExtractor::new(Arc::new(Canned(
             "```json\n{\"observations\":[]}\n```".into(),
         )));
-        assert!(extractor
-            .extract(obs_context("nothing to see"))
-            .await
-            .unwrap()
-            .is_empty());
+        assert!(
+            extractor
+                .extract(obs_context("nothing to see"))
+                .await
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[tokio::test]
@@ -614,11 +616,13 @@ mod tests {
                 "sensitivity":"normal"}]}"#
                 .into(),
         )));
-        assert!(extractor
-            .extract(obs_context("hi"))
-            .await
-            .unwrap()
-            .is_empty());
+        assert!(
+            extractor
+                .extract(obs_context("hi"))
+                .await
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[tokio::test]
@@ -681,10 +685,12 @@ mod tests {
         let plan = schema_for::<WirePlan>();
         assert_eq!(plan["type"], "object");
         assert!(plan["properties"]["requires_memory"].is_object());
-        assert!(plan["required"]
-            .as_array()
-            .unwrap()
-            .contains(&serde_json::json!("requires_memory")));
+        assert!(
+            plan["required"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("requires_memory"))
+        );
 
         // The enum values the model may emit are exactly the domain's.
         let rendered = schema_for::<WireObservations>().to_string();

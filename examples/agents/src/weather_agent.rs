@@ -1,180 +1,126 @@
 //! Weather agent example — self-contained CLI demo.
 //!
-//! Connects to Gemini Live, asks about weather, dispatches the tool call,
-//! sends back the tool response, and prints the model's final answer.
+//! Connects to Gemini Live in text-only mode with two `#[tool]` functions,
+//! asks about the weather, lets the runtime dispatch the tool calls the
+//! model makes, and prints the model's final answer.
 //!
 //! Usage:
-//!   cargo run -p agents-example --bin weather-agent
+//!   cargo run -p example-agents --bin weather-agent
 
-use std::sync::Arc;
+use gemini_adk_fluent_rs::prelude::*;
+use serde_json::{Value, json};
+use tokio::sync::mpsc;
 
-use gemini_adk_rs::tool::{ToolDispatcher, TypedTool};
-use gemini_genai_rs::prelude::*;
-use schemars::JsonSchema;
-use serde::Deserialize;
-
-/// Type-safe arguments for the weather tool.
-#[derive(Deserialize, JsonSchema)]
-struct WeatherArgs {
-    /// City name to get weather for
-    city: String,
+#[tool("Get current weather for a city")]
+async fn get_weather(city: String) -> Result<Value, ToolError> {
+    Ok(json!({
+        "city": city,
+        "temperature_celsius": 22,
+        "condition": "Partly cloudy",
+        "humidity": 65
+    }))
 }
 
-/// Type-safe arguments for the forecast tool.
-#[derive(Deserialize, JsonSchema)]
-struct ForecastArgs {
-    /// City name to get the forecast for
-    city: String,
+#[tool("Get 3-day weather forecast for a city")]
+async fn get_forecast(city: String) -> Result<Value, ToolError> {
+    Ok(json!({
+        "city": city,
+        "forecast": [
+            {"day": "Today", "high": 22, "low": 15, "condition": "Partly cloudy"},
+            {"day": "Tomorrow", "high": 25, "low": 17, "condition": "Sunny"},
+            {"day": "Day after", "high": 20, "low": 14, "condition": "Rain"}
+        ]
+    }))
 }
 
-fn create_dispatcher() -> ToolDispatcher {
-    let mut dispatcher = ToolDispatcher::new().with_timeout(std::time::Duration::from_secs(10));
-
-    dispatcher.register_function(Arc::new(TypedTool::new(
-        "get_weather",
-        "Get current weather for a city",
-        |args: WeatherArgs| async move {
-            Ok(serde_json::json!({
-                "city": args.city,
-                "temperature_celsius": 22,
-                "condition": "Partly cloudy",
-                "humidity": 65
-            }))
-        },
-    )));
-
-    dispatcher.register_function(Arc::new(TypedTool::new(
-        "get_forecast",
-        "Get 3-day weather forecast for a city",
-        |args: ForecastArgs| async move {
-            Ok(serde_json::json!({
-                "city": args.city,
-                "forecast": [
-                    {"day": "Today", "high": 22, "low": 15, "condition": "Partly cloudy"},
-                    {"day": "Tomorrow", "high": 25, "low": 17, "condition": "Sunny"},
-                    {"day": "Day after", "high": 20, "low": 14, "condition": "Rain"}
-                ]
-            }))
-        },
-    )));
-
-    dispatcher
+/// What the session reports back to `main` from its callbacks.
+enum Event {
+    Text(String),
+    TurnComplete,
+    Error(String),
+    Disconnected(Option<String>),
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== Weather Agent CLI Demo ===\n");
 
+    // GEMINI_API_KEY (Google AI) or the Vertex AI env vars; see
+    // `Live::connect_from_env`.
     let _ = dotenvy::dotenv();
 
-    let use_vertex = std::env::var("GOOGLE_GENAI_USE_VERTEXAI")
-        .map(|v| v.to_uppercase() == "TRUE" || v == "1")
-        .unwrap_or(false);
+    let (tx, mut rx) = mpsc::unbounded_channel::<Event>();
+    let (tx_text, tx_turn, tx_error, tx_disconnected) =
+        (tx.clone(), tx.clone(), tx.clone(), tx.clone());
 
-    let base_config = if use_vertex {
-        let project = std::env::var("GOOGLE_CLOUD_PROJECT")
-            .expect("GOOGLE_CLOUD_PROJECT required for Vertex AI");
-        let location =
-            std::env::var("GOOGLE_CLOUD_LOCATION").unwrap_or_else(|_| "us-central1".to_string());
-        println!(
-            "Using Vertex AI (project: {}, location: {})",
-            project, location
-        );
-        let token = String::from_utf8(
-            std::process::Command::new("gcloud")
-                .args(["auth", "print-access-token"])
-                .output()
-                .expect("gcloud CLI required for Vertex AI")
-                .stdout,
-        )?
-        .trim()
-        .to_string();
-        SessionConfig::from_vertex(&project, &location, token)
-    } else {
-        let api_key =
-            std::env::var("GEMINI_API_KEY").expect("Set GEMINI_API_KEY or enable Vertex AI");
-        println!("Using Google AI Studio");
-        SessionConfig::new(api_key)
-    };
-
-    // Set up tools
-    let dispatcher = create_dispatcher();
-    let tool_declarations = dispatcher.to_tool_declarations();
-    println!("Registered {} tools", dispatcher.len());
-
-    // Configure session with text model and tools
-    let mut config = base_config
-        .model(GeminiModel::Gemini2_0FlashLive)
+    println!("Connecting to Gemini Live...");
+    let session = Live::builder()
         .text_only()
-        .system_instruction(
+        .instruction(
             "You are a weather assistant. Use the get_weather and get_forecast tools \
              to answer questions about weather. Always use tools rather than guessing.",
-        );
-
-    for tool in tool_declarations {
-        config = config.add_tool(tool);
-    }
-
-    // Connect
-    println!("Connecting to Gemini Live...");
-    let session = connect(config, TransportConfig::default()).await?;
-    let mut events = session.subscribe();
-
-    // Wait for active
-    tokio::time::timeout(
-        std::time::Duration::from_secs(15),
-        session.wait_for_phase(SessionPhase::Active),
-    )
-    .await
-    .map_err(|_| "Timed out waiting for session to become active")?;
-
+        )
+        .tool(get_weather())
+        .tool(get_forecast())
+        // Tool calls are dispatched by the runtime; these hooks only narrate.
+        .on_tool_call(|calls, _state| {
+            println!("[Tool calls received: {}]", calls.len());
+            for call in &calls {
+                println!("  Calling {}({})", call.name, call.args);
+            }
+            async { None }
+        })
+        .before_tool_response(|responses, _state| {
+            for response in &responses {
+                println!("  Result: {}", response.response);
+            }
+            println!();
+            async move { responses }
+        })
+        .on_text(move |text| {
+            let _ = tx_text.send(Event::Text(text.into()));
+        })
+        .on_turn_complete(move || {
+            let _ = tx_turn.send(Event::TurnComplete);
+            async {}
+        })
+        .on_error(move |message| {
+            let _ = tx_error.send(Event::Error(message));
+            async {}
+        })
+        .on_disconnected(move |reason| {
+            let _ = tx_disconnected.send(Event::Disconnected(reason));
+            async {}
+        })
+        // No `.model(..)`: connect picks the platform's current Live model
+        // (override with GEMINI_LIVE_MODEL).
+        .connect_from_env()
+        .await?;
     println!("Connected!\n");
 
-    // Send a question
     let question = "What's the weather like in San Francisco and Tokyo?";
-    println!("User: {}\n", question);
+    println!("User: {question}\n");
     session.send_text(question).await?;
 
-    // Process events until turn complete
-    let mut full_response = String::new();
-    loop {
-        match recv_event(&mut events).await {
-            Some(SessionEvent::ToolCall(calls)) => {
-                println!("[Tool calls received: {}]", calls.len());
-                let mut responses = Vec::new();
-                for call in &calls {
-                    println!("  Calling {}({})", call.name, call.args);
-                    let result = dispatcher
-                        .call_function(&call.name, call.args.clone())
-                        .await;
-                    let response = ToolDispatcher::build_response(call, result);
-                    println!("  Result: {}", response.response);
-                    responses.push(response);
-                }
-                session.send_tool_response(responses).await?;
-                println!();
-            }
-            Some(SessionEvent::TextDelta(text)) => {
-                print!("{}", text);
-                full_response.push_str(&text);
-            }
-            Some(SessionEvent::TurnComplete) => {
+    // Print the streamed answer until the turn completes.
+    while let Some(event) = rx.recv().await {
+        match event {
+            Event::Text(text) => print!("{text}"),
+            Event::TurnComplete => {
                 println!("\n\n[Turn complete]");
                 break;
             }
-            Some(SessionEvent::Error(e)) => {
-                eprintln!("\nError: {}", e);
+            Event::Error(e) => {
+                eprintln!("\nError: {e}");
                 break;
             }
-            None => {
-                eprintln!("\nSession closed unexpectedly");
+            Event::Disconnected(reason) => {
+                eprintln!("\nSession closed: {}", reason.unwrap_or_default());
                 break;
             }
-            _ => {}
         }
     }
 
-    // Clean up
     session.disconnect().await?;
     println!("\nDone.");
     Ok(())

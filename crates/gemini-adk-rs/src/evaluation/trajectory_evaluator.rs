@@ -76,9 +76,9 @@ impl TrajectoryEvaluator {
         } else {
             // Set-based: how many expected tools were called
             let expected_set: std::collections::HashSet<&str> =
-                expected.iter().map(|s| s.as_str()).collect();
+                expected.iter().map(std::string::String::as_str).collect();
             let actual_set: std::collections::HashSet<&str> =
-                actual.iter().map(|s| s.as_str()).collect();
+                actual.iter().map(std::string::String::as_str).collect();
 
             let intersection = expected_set.intersection(&actual_set).count();
             let union = expected_set.union(&actual_set).count();

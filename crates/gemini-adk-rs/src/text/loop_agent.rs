@@ -63,10 +63,10 @@ impl TextAgent for LoopTextAgent {
 
             last_output = self.body.run(state).await?;
 
-            if let Some(pred) = &self.until {
-                if pred(state) {
-                    break;
-                }
+            if let Some(pred) = &self.until
+                && pred(state)
+            {
+                break;
             }
         }
 

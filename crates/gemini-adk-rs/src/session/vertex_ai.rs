@@ -625,15 +625,21 @@ mod tests {
             config.base_url(),
             "https://us-central1-aiplatform.googleapis.com/v1beta1/projects/my-project/locations/us-central1"
         );
-        assert!(config
-            .sessions_url("engine-1")
-            .contains("reasoningEngines/engine-1/sessions"));
-        assert!(config
-            .session_url("engine-1", "sess-1")
-            .contains("sessions/sess-1"));
-        assert!(config
-            .events_url("engine-1", "sess-1")
-            .contains("sessions/sess-1/events"));
+        assert!(
+            config
+                .sessions_url("engine-1")
+                .contains("reasoningEngines/engine-1/sessions")
+        );
+        assert!(
+            config
+                .session_url("engine-1", "sess-1")
+                .contains("sessions/sess-1")
+        );
+        assert!(
+            config
+                .events_url("engine-1", "sess-1")
+                .contains("sessions/sess-1/events")
+        );
     }
 
     #[test]

@@ -27,7 +27,7 @@ pub struct FlowStudio;
 
 /// Snapshot the governed flow's status into a `FlowStatus` message.
 fn send_flow_status(tx: &WsSender, handle: &LiveHandle) {
-    let Some(explanation) = handle.why_blocked() else {
+    let Some(explanation) = handle.explain() else {
         return;
     };
     let state = handle.state();

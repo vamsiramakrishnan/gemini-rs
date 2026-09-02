@@ -14,7 +14,7 @@ mod tests {
     #[test]
     fn setup_message_serialization() {
         let config = SessionConfig::new("test-key")
-            .model(GeminiModel::Gemini2_0FlashLive)
+            .model(ModelId::from_static("models/gemini-2.0-flash-live-001"))
             .voice(Voice::Kore)
             .system_instruction("You are a helpful assistant.");
 
@@ -124,7 +124,10 @@ mod tests {
         let msg = ServerMessage::parse(json).unwrap();
         match msg {
             ServerMessage::GoAway(ga) => {
-                assert_eq!(ga.go_away.time_left, Some("30s".to_string()));
+                assert_eq!(
+                    ga.go_away.time_left,
+                    Some(std::time::Duration::from_secs(30))
+                );
             }
             _ => panic!("Expected GoAway"),
         }

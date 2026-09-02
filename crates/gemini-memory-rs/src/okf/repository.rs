@@ -147,25 +147,25 @@ impl ReconciliationSelector {
         if !self.kinds.is_empty() && !self.kinds.contains(&memory.kind) {
             return false;
         }
-        if let Some(fp) = &self.fingerprint {
-            if &memory.fingerprint() != fp {
-                return false;
-            }
+        if let Some(fp) = &self.fingerprint
+            && &memory.fingerprint() != fp
+        {
+            return false;
         }
-        if let Some(prefix) = &self.subject_predicate {
-            if memory.fingerprint().subject_predicate() != prefix {
-                return false;
-            }
+        if let Some(prefix) = &self.subject_predicate
+            && memory.fingerprint().subject_predicate() != prefix
+        {
+            return false;
         }
-        if let Some(subject) = &self.subject {
-            if memory.fingerprint().subject() != subject.as_str() {
-                return false;
-            }
+        if let Some(subject) = &self.subject
+            && memory.fingerprint().subject() != subject.as_str()
+        {
+            return false;
         }
-        if let Some(predicate) = &self.predicate {
-            if &memory.predicate != predicate {
-                return false;
-            }
+        if let Some(predicate) = &self.predicate
+            && &memory.predicate != predicate
+        {
+            return false;
         }
         true
     }
@@ -479,13 +479,13 @@ impl<S: OkfStore> MemoryRepository for OkfRepository<S> {
                 deleted: Vec::new(),
             });
         }
-        if let Some(expected) = transaction.expected_revision {
-            if expected != namespace.revision {
-                return Err(MemoryError::RevisionConflict {
-                    expected,
-                    actual: namespace.revision,
-                });
-            }
+        if let Some(expected) = transaction.expected_revision
+            && expected != namespace.revision
+        {
+            return Err(MemoryError::RevisionConflict {
+                expected,
+                actual: namespace.revision,
+            });
         }
         if transaction.is_empty() {
             namespace.applied.push(transaction.idempotency_key);

@@ -395,7 +395,7 @@ mod tests {
 
     #[tokio::test]
     async fn tool_media_reaches_the_model_as_inline_data() {
-        use crate::tool::{media, SimpleTool, ToolDispatcher};
+        use crate::tool::{SimpleTool, ToolDispatcher, media};
         let llm = Arc::new(CapturingLlm {
             requests: std::sync::Mutex::new(Vec::new()),
         });
@@ -456,9 +456,11 @@ mod tests {
         // the run — both requests must carry the resolved instruction.
         let _ = agent.run(&state).await.unwrap();
         let requests = llm.requests.lock().unwrap();
-        assert!(requests
-            .iter()
-            .all(|r| r.system_instruction.as_deref() == Some("You are a pirate.")));
+        assert!(
+            requests
+                .iter()
+                .all(|r| r.system_instruction.as_deref() == Some("You are a pirate."))
+        );
     }
 
     struct SlowLlm;

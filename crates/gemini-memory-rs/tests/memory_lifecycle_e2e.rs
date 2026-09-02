@@ -20,8 +20,8 @@ use gemini_memory_rs::engine::MemorySession;
 use gemini_memory_rs::runtime::MemoryTurnExtractor;
 
 use common::{
-    active, corpus_text, describe, diagnose, have_api_key, mentions, model_backed_engine, skip,
-    ScratchDir,
+    ScratchDir, active, corpus_text, describe, diagnose, have_api_key, mentions,
+    model_backed_engine, skip,
 };
 
 /// Drive a session the way the runtime does: begin turn, ingest, complete.
@@ -49,7 +49,7 @@ async fn ask(session: &MemorySession, turn: u64, question: &str) -> Vec<String> 
     snapshot
         .facts
         .iter()
-        .map(|f| f.presented_statement())
+        .map(gemini_memory_rs::retrieval::RetrievedMemory::presented_statement)
         .collect()
 }
 

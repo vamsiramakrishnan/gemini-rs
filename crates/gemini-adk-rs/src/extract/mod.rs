@@ -6,9 +6,9 @@
 //! existing extraction pipeline) and promotes recognized fields into governed
 //! `State`, where `Flow` guards (`done(captured([...]))`) and repair read them.
 //!
-//! This is the deterministic, transcript-sourced slice of the kit (see the
-//! extraction-kit RFC). LLM / fetch / MCP / agent *resolvers* and the
-//! `#[derive(Extract)]` macro layer on top of this same record model.
+//! This is the deterministic, transcript-sourced slice of the kit. LLM / fetch
+//! / MCP / agent *resolvers* and the `#[derive(Extract)]` macro layer on top of
+//! this same record model.
 //!
 //! ```
 //! use gemini_adk_rs::extract::{Extract, Recognizer};
@@ -22,33 +22,33 @@
 //! ```
 
 use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use dashmap::DashMap;
-use once_cell::sync::Lazy;
 use regex::Regex;
 use serde_json::Value;
+use std::sync::LazyLock;
 
+use crate::AsyncSourceFn;
 use crate::live::extractor::{ExtractionTrigger, FieldPromotion, OnComplete, TurnExtractor};
 use crate::live::transcript::TranscriptTurn;
 use crate::llm::LlmError;
-use crate::orchestration::Mode as AgentMode;
+use crate::orchestration::AgentMode;
 use crate::state::State;
 use crate::text::TextAgent;
 
-static MONEY_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"\$?\s?(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d{1,2}))?").unwrap());
-static INT_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"-?\d+").unwrap());
-static DATE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\b\d{4}-\d{2}-\d{2}\b").unwrap());
+static MONEY_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\$?\s?(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d{1,2}))?").unwrap());
+static INT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"-?\d+").unwrap());
+static DATE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b\d{4}-\d{2}-\d{2}\b").unwrap());
 // 12-hour clock with an am/pm marker: "3pm", "3:30 pm".
-static TIME12_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?i)\b(\d{1,2})(?::(\d{2}))?\s*([ap]m)\b").unwrap());
+static TIME12_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\b(\d{1,2})(?::(\d{2}))?\s*([ap]m)\b").unwrap());
 // 24-hour clock: "15:00", "09:30".
-static TIME24_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"\b([01]?\d|2[0-3]):([0-5]\d)\b").unwrap());
+static TIME24_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\b([01]?\d|2[0-3]):([0-5]\d)\b").unwrap());
 
 /// Normalize a clock time found in `text` to a 24-hour `"HH:MM"` string.
 fn parse_time(text: &str) -> Option<String> {
@@ -294,11 +294,6 @@ impl Recognizer {
     }
 }
 
-/// The async source of a field: inputs (state keys) → value. The seam for a
-/// tool call, an HTTP fetch, or an MCP request.
-type FieldFetchFn =
-    Arc<dyn Fn(Value) -> Pin<Box<dyn Future<Output = Result<Value, String>> + Send>> + Send + Sync>;
-
 /// How a field is filled.
 #[derive(Clone)]
 enum Source {
@@ -311,7 +306,8 @@ enum Source {
         /// Optional cache time-to-live keyed by `(field, canonical args)`.
         ttl: Option<Duration>,
         /// The async fetcher.
-        fetch: FieldFetchFn,
+        /// (An [`AsyncSourceFn`] bound from the args object, not the whole `State`.)
+        fetch: AsyncSourceFn<Value>,
     },
 }
 
@@ -524,7 +520,7 @@ impl RecordExtractor {
         field: &str,
         args: &[String],
         ttl: Option<Duration>,
-        fetch: &FieldFetchFn,
+        fetch: &AsyncSourceFn<Value>,
         fresh: &serde_json::Map<String, Value>,
         state: &State,
     ) -> Option<Value> {
@@ -537,12 +533,11 @@ impl RecordExtractor {
         }
         let args_value = Value::Object(obj);
         let cache_key = format!("{field}|{args_value}");
-        if let Some(ttl) = ttl {
-            if let Some(entry) = self.cache.get(&cache_key) {
-                if entry.1.elapsed() < ttl {
-                    return Some(entry.0.clone());
-                }
-            }
+        if let Some(ttl) = ttl
+            && let Some(entry) = self.cache.get(&cache_key)
+            && entry.1.elapsed() < ttl
+        {
+            return Some(entry.0.clone());
         }
         match fetch(args_value).await {
             Ok(value) => {
@@ -552,9 +547,8 @@ impl RecordExtractor {
                 }
                 Some(value)
             }
-            Err(_e) => {
-                #[cfg(feature = "tracing-support")]
-                tracing::warn!(field, "resolver failed: {_e}");
+            Err(e) => {
+                tracing::warn!(field, "resolver failed: {e}");
                 None
             }
         }
@@ -592,13 +586,13 @@ impl TurnExtractor for RecordExtractor {
             .join(" ");
         let mut obj = serde_json::Map::new();
         for field in &self.spec.fields {
-            if let Source::Recognize(rec) = &field.source {
-                if let Some((value, _confidence)) = rec.recognize(&text) {
-                    if field.validate.as_ref().is_some_and(|v| !v(&value)) {
-                        continue; // recognized but rejected by the slot validator
-                    }
-                    obj.insert(field.name.clone(), value);
+            if let Source::Recognize(rec) = &field.source
+                && let Some((value, _confidence)) = rec.recognize(&text)
+            {
+                if field.validate.as_ref().is_some_and(|v| !v(&value)) {
+                    continue; // recognized but rejected by the slot validator
                 }
+                obj.insert(field.name.clone(), value);
             }
         }
         Ok(Value::Object(obj))
@@ -620,20 +614,20 @@ impl TurnExtractor for RecordExtractor {
         // values recognized in this same turn (before promotion runs).
         let mut fresh = serde_json::Map::new();
         for field in &self.spec.fields {
-            if let Source::Recognize(rec) = &field.source {
-                if let Some((value, confidence)) = rec.recognize(&text) {
-                    if field.validate.as_ref().is_some_and(|v| !v(&value)) {
-                        continue; // recognized but rejected by the slot validator
-                    }
-                    // Record provenance + confidence under the `state_meta:` convention
-                    // so `State::evidence()` can surface how a slot was filled.
-                    let _ = state.set(
-                        format!("state_meta:{}", field.state_key),
-                        serde_json::json!({ "source": "extraction", "confidence": confidence }),
-                    );
-                    fresh.insert(field.state_key.clone(), value.clone());
-                    obj.insert(field.name.clone(), value);
+            if let Source::Recognize(rec) = &field.source
+                && let Some((value, confidence)) = rec.recognize(&text)
+            {
+                if field.validate.as_ref().is_some_and(|v| !v(&value)) {
+                    continue; // recognized but rejected by the slot validator
                 }
+                // Record provenance + confidence under the `state_meta:` convention
+                // so `State::evidence()` can surface how a slot was filled.
+                let _ = state.set(
+                    format!("state_meta:{}", field.state_key),
+                    serde_json::json!({ "source": "extraction", "confidence": confidence }),
+                );
+                fresh.insert(field.state_key.clone(), value.clone());
+                obj.insert(field.name.clone(), value);
             }
         }
         // Async resolvers, bound from this turn's recognitions + State.
@@ -649,7 +643,7 @@ impl TurnExtractor for RecordExtractor {
                 }),
                 Source::Recognize(_) => None,
             });
-        for resolved in futures::future::join_all(resolves)
+        for resolved in futures_util::future::join_all(resolves)
             .await
             .into_iter()
             .flatten()

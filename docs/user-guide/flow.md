@@ -55,8 +55,7 @@ fails fast rather than misbehaving live.
 
 ```rust,ignore
 let handle = Live::builder()
-    .model(GeminiModel::Gemini2_0FlashLive)
-    .tools(dispatcher)
+    .dispatcher(dispatcher)
     .govern(flow)              // enforce — block inadmissible tools, steer per active step
     .connect_from_env()
     .await?;
@@ -85,14 +84,13 @@ let compiled = flow.compile_with_tools(&["lookup_account", "charge_card"])?;
 
 // Govern many sessions; connect does NOT re-validate or re-compile.
 let handle = Live::builder()
-    .model(GeminiModel::Gemini2_0FlashLive)
-    .tools(dispatcher)
+    .dispatcher(dispatcher)
     .govern_compiled(compiled)     // or .observe_compiled(compiled)
     .connect_from_env()
     .await?;
 ```
 
-## Why is it blocked? (`handle.why_blocked()`)
+## Why is it blocked? (`handle.explain()`)
 
 A governed session's handle answers the common debugging question directly —
 which steps are active, which tools are admitted vs blocked (with reasons), and
@@ -100,7 +98,7 @@ what's still required — as a serializable `FlowExplanation` snapshot computed
 against the live session state:
 
 ```rust,ignore
-if let Some(ex) = handle.why_blocked() {        // None when not governed
+if let Some(ex) = handle.explain() {            // None when not governed
     println!("active: {:?}", ex.active);
     println!("blocked: {:?}", ex.blocked_tools); // tool -> reason
     println!("missing: {:?}", ex.missing_requirements);
@@ -117,11 +115,11 @@ orchestration in-session:
 
 ```rust,ignore
 let handle = Live::builder()
-    .tools(dispatcher)
+    .dispatcher(dispatcher)
     .govern(booking_flow)
     // when `check` activates, run the availability agent; its result lands in
     // `check:result`, which the step completes on via `done(resolved("check"))`.
-    .on_enter("check", availability_agent, AgentMode::Call)
+    .on_step_enter("check", availability_agent, AgentMode::Call)
     .connect_from_env()
     .await?;
 ```

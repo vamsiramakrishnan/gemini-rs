@@ -1,4 +1,29 @@
 //! Event callback registration methods for `Live`.
+//!
+//! # The lane rule
+//!
+//! Every callback runs on one of two lanes, and the lane decides what the
+//! body may do:
+//!
+//! - **Fast lane** (`on_audio`, `on_text`, `on_text_complete`,
+//!   `on_input_transcript`, `on_output_transcript`, `on_thought`,
+//!   `on_vad_start`, `on_vad_end`, `on_session_phase`, `on_usage`): a sync
+//!   `Fn` invoked inline on the event-dispatch path. It must return in well
+//!   under a millisecond — no allocation, no locks, no I/O. A channel
+//!   `try_send` is the right shape; anything heavier goes to the other lane
+//!   through that channel.
+//! - **Control lane** (everything returning a future): async, may block, runs
+//!   in the processor's control loop. By default each is **awaited inline**
+//!   ([`ExecutionMode::Blocking`]) so ordering and state are consistent. A
+//!   `_concurrent` twin — `on_turn_complete_concurrent`, `on_connected_concurrent`,
+//!   … — registers the same body as a **detached task**
+//!   ([`ExecutionMode::Concurrent`]) for fire-and-forget work (logging,
+//!   analytics, webhooks). Twins exist only where fire-and-forget is
+//!   meaningful; hooks whose return value feeds the session (`on_tool_call`,
+//!   `before_tool_response`) have none.
+//!
+//! Registering a callback twice keeps the last registration, except
+//! [`on_teardown`](Live::on_teardown), which accumulates.
 
 use std::future::Future;
 use std::sync::Arc;
@@ -6,8 +31,8 @@ use std::time::Duration;
 
 use bytes::Bytes;
 
-use gemini_adk_rs::live::CallbackMode;
 use gemini_adk_rs::State;
+use gemini_adk_rs::live::ExecutionMode;
 use gemini_genai_rs::prelude::*;
 
 use super::Live;
@@ -22,14 +47,17 @@ impl Live {
     /// shared `State`, and returns (potentially modified) responses.
     ///
     /// # Example
-    /// ```ignore
-    /// .before_tool_response(|responses, state| async move {
+    /// ```no_run
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// # #[derive(Default, serde::Serialize, serde::Deserialize)]
+    /// # struct OrderState { items: Vec<String> }
+    /// Live::builder().before_tool_response(|responses, state| async move {
     ///     let order: OrderState = state.get("OrderState").unwrap_or_default();
     ///     responses.into_iter().map(|mut r| {
     ///         r.response["current_order"] = serde_json::to_value(&order).unwrap();
     ///         r
     ///     }).collect()
-    /// })
+    /// });
     /// ```
     pub fn before_tool_response<F, Fut>(mut self, f: F) -> Self
     where
@@ -49,14 +77,15 @@ impl Live {
     /// condensed state summaries, or any outbound content interleaving.
     ///
     /// # Example
-    /// ```ignore
-    /// .on_turn_boundary(|state, writer| async move {
+    /// ```no_run
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// Live::builder().on_turn_boundary(|state, writer| async move {
     ///     let summary = state.get::<String>("summary").unwrap_or_default();
     ///     writer.send_client_content(
-    ///         vec![Content::user().text(format!("[Context: {summary}]"))],
+    ///         vec![Content::user(format!("[Context: {summary}]"))],
     ///         false,
     ///     ).await.ok();
-    /// })
+    /// });
     /// ```
     pub fn on_turn_boundary<F, Fut>(mut self, f: F) -> Self
     where
@@ -91,14 +120,33 @@ impl Live {
         self
     }
 
-    /// Called for input (user speech) transcription.
-    pub fn on_input_transcript(mut self, f: impl Fn(&str, bool) + Send + Sync + 'static) -> Self {
+    /// Called for input (user speech) transcription: `f(text, is_final)`.
+    ///
+    /// While the user speaks, `is_final` is `false` and `text` is the latest
+    /// partial recognition, which later calls may revise. At the turn boundary
+    /// one call arrives with `is_final == true` carrying the complete
+    /// transcript for the turn — the only value suitable for storage. Requires
+    /// [`transcription`](Self::transcription) or
+    /// [`input_transcription`](Self::input_transcription).
+    pub fn on_input_transcript(
+        mut self,
+        f: impl Fn(&str, /* is_final */ bool) + Send + Sync + 'static,
+    ) -> Self {
         self.callbacks.on_input_transcript = Some(Box::new(f));
         self
     }
 
-    /// Called for output (model speech) transcription.
-    pub fn on_output_transcript(mut self, f: impl Fn(&str, bool) + Send + Sync + 'static) -> Self {
+    /// Called for output (model speech) transcription: `f(text, is_final)`.
+    ///
+    /// Same partial/final contract as
+    /// [`on_input_transcript`](Self::on_input_transcript): `is_final` is
+    /// `false` for revisable partials and `true` once for the turn's complete
+    /// transcript. Requires [`transcription`](Self::transcription) or
+    /// [`output_transcription`](Self::output_transcription).
+    pub fn on_output_transcript(
+        mut self,
+        f: impl Fn(&str, /* is_final */ bool) + Send + Sync + 'static,
+    ) -> Self {
         self.callbacks.on_output_transcript = Some(Box::new(f));
         self
     }
@@ -134,18 +182,23 @@ impl Live {
         self
     }
 
-    /// Called on session phase transitions.
+    /// Called on wire-level session phase transitions (connecting → active →
+    /// disconnecting …). This is the transport lifecycle, not the
+    /// `PhaseMachine` (see `.phase(..)`).
     ///
     /// Receives the new [`SessionPhase`]. Fast lane callback (sync, must
     /// complete in < 1ms). Use for lightweight UI state updates or metrics.
-    pub fn on_phase(mut self, f: impl Fn(SessionPhase) + Send + Sync + 'static) -> Self {
-        self.callbacks.on_phase = Some(Box::new(f));
+    pub fn on_session_phase(mut self, f: impl Fn(SessionPhase) + Send + Sync + 'static) -> Self {
+        self.callbacks.on_session_phase = Some(Box::new(f));
         self
     }
 
     // -- Control Lane Callbacks (async, can block) --
 
     /// Called when model is interrupted by barge-in.
+    ///
+    /// Awaited before audio forwarding resumes, so a playback flush here is
+    /// guaranteed to land before the next chunk.
     pub fn on_interrupted<F, Fut>(mut self, f: F) -> Self
     where
         F: Fn() -> Fut + Send + Sync + 'static,
@@ -269,7 +322,7 @@ impl Live {
     /// Called after the session resumes following a GoAway disconnect.
     ///
     /// Use to re-subscribe to external streams, reset UI state, or log
-    /// resume events. Paired with `.session_resume(true)` on the builder.
+    /// resume events. Paired with `.session_resume()` on the builder.
     pub fn on_resumed<F, Fut>(mut self, f: F) -> Self
     where
         F: Fn() -> Fut + Send + Sync + 'static,
@@ -279,7 +332,13 @@ impl Live {
         self
     }
 
-    /// Called on non-fatal errors.
+    /// Called on non-fatal errors with the error's message.
+    ///
+    /// The argument is a `String`, not a typed error: the runtime funnels
+    /// server errors, codec failures, and processor faults into one
+    /// human-readable message here, and the session keeps running. Fatal
+    /// errors end the session and arrive through
+    /// [`on_disconnected`](Self::on_disconnected) instead.
     pub fn on_error<F, Fut>(mut self, f: F) -> Self
     where
         F: Fn(String) -> Fut + Send + Sync + 'static,
@@ -290,8 +349,56 @@ impl Live {
     }
 
     // -- Concurrent callback variants --
-    // These set CallbackMode::Concurrent so the callback is spawned as a
+    // These set ExecutionMode::Concurrent so the callback is spawned as a
     // detached tokio task instead of being awaited inline.
+
+    /// Called when model is interrupted by barge-in (spawned concurrently).
+    ///
+    /// Audio forwarding resumes without waiting for the body, so this is for
+    /// bookkeeping (metrics, a log line) — a playback flush must use the
+    /// blocking [`on_interrupted`](Self::on_interrupted).
+    pub fn on_interrupted_concurrent<F, Fut>(mut self, f: F) -> Self
+    where
+        F: Fn() -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        self.callbacks.on_interrupted = Some(Arc::new(move || Box::pin(f())));
+        self.callbacks.on_interrupted_mode = ExecutionMode::Concurrent;
+        self
+    }
+
+    /// Turn-boundary hook spawned concurrently — for observation only. The
+    /// next turn proceeds without waiting, so context injected from here is
+    /// not guaranteed to precede it; use [`on_turn_boundary`](Self::on_turn_boundary)
+    /// for that.
+    pub fn on_turn_boundary_concurrent<F, Fut>(mut self, f: F) -> Self
+    where
+        F: Fn(gemini_adk_rs::State, Arc<dyn gemini_genai_rs::session::SessionWriter>) -> Fut
+            + Send
+            + Sync
+            + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        self.callbacks.on_turn_boundary =
+            Some(Arc::new(move |state, writer| Box::pin(f(state, writer))));
+        self.callbacks.on_turn_boundary_mode = ExecutionMode::Concurrent;
+        self
+    }
+
+    /// An **additive** teardown hook spawned detached on disconnect rather
+    /// than awaited — the disconnect does not wait for it. For a final metric
+    /// or log line; anything that flushes durable state belongs in
+    /// [`on_teardown`](Self::on_teardown).
+    pub fn on_teardown_concurrent<F, Fut>(mut self, f: F) -> Self
+    where
+        F: Fn() -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        self.callbacks
+            .on_teardown_concurrent
+            .push(Arc::new(move || Box::pin(f())));
+        self
+    }
 
     /// Called when model turn completes (spawned concurrently).
     pub fn on_turn_complete_concurrent<F, Fut>(mut self, f: F) -> Self
@@ -300,7 +407,7 @@ impl Live {
         Fut: Future<Output = ()> + Send + 'static,
     {
         self.callbacks.on_turn_complete = Some(Arc::new(move || Box::pin(f())));
-        self.callbacks.on_turn_complete_mode = CallbackMode::Concurrent;
+        self.callbacks.on_turn_complete_mode = ExecutionMode::Concurrent;
         self
     }
 
@@ -311,7 +418,7 @@ impl Live {
         Fut: Future<Output = ()> + Send + 'static,
     {
         self.callbacks.on_generation_complete = Some(Arc::new(move || Box::pin(f())));
-        self.callbacks.on_generation_complete_mode = CallbackMode::Concurrent;
+        self.callbacks.on_generation_complete_mode = ExecutionMode::Concurrent;
         self
     }
 
@@ -322,7 +429,7 @@ impl Live {
         Fut: Future<Output = ()> + Send + 'static,
     {
         self.callbacks.on_connected = Some(Arc::new(move |w| Box::pin(f(w))));
-        self.callbacks.on_connected_mode = CallbackMode::Concurrent;
+        self.callbacks.on_connected_mode = ExecutionMode::Concurrent;
         self
     }
 
@@ -333,7 +440,7 @@ impl Live {
         Fut: Future<Output = ()> + Send + 'static,
     {
         self.callbacks.on_disconnected = Some(Arc::new(move |r| Box::pin(f(r))));
-        self.callbacks.on_disconnected_mode = CallbackMode::Concurrent;
+        self.callbacks.on_disconnected_mode = ExecutionMode::Concurrent;
         self
     }
 
@@ -344,7 +451,7 @@ impl Live {
         Fut: Future<Output = ()> + Send + 'static,
     {
         self.callbacks.on_resumed = Some(Arc::new(move || Box::pin(f())));
-        self.callbacks.on_resumed_mode = CallbackMode::Concurrent;
+        self.callbacks.on_resumed_mode = ExecutionMode::Concurrent;
         self
     }
 
@@ -355,7 +462,7 @@ impl Live {
         Fut: Future<Output = ()> + Send + 'static,
     {
         self.callbacks.on_error = Some(Arc::new(move |e| Box::pin(f(e))));
-        self.callbacks.on_error_mode = CallbackMode::Concurrent;
+        self.callbacks.on_error_mode = ExecutionMode::Concurrent;
         self
     }
 
@@ -366,7 +473,7 @@ impl Live {
         Fut: Future<Output = ()> + Send + 'static,
     {
         self.callbacks.on_go_away = Some(Arc::new(move |d| Box::pin(f(d))));
-        self.callbacks.on_go_away_mode = CallbackMode::Concurrent;
+        self.callbacks.on_go_away_mode = ExecutionMode::Concurrent;
         self
     }
 
@@ -377,7 +484,7 @@ impl Live {
         Fut: Future<Output = ()> + Send + 'static,
     {
         self.callbacks.on_tool_cancelled = Some(Arc::new(move |ids| Box::pin(f(ids))));
-        self.callbacks.on_tool_cancelled_mode = CallbackMode::Concurrent;
+        self.callbacks.on_tool_cancelled_mode = ExecutionMode::Concurrent;
         self
     }
 
@@ -388,7 +495,7 @@ impl Live {
         Fut: Future<Output = ()> + Send + 'static,
     {
         self.callbacks.on_extracted = Some(Arc::new(move |name, value| Box::pin(f(name, value))));
-        self.callbacks.on_extracted_mode = CallbackMode::Concurrent;
+        self.callbacks.on_extracted_mode = ExecutionMode::Concurrent;
         self
     }
 
@@ -400,7 +507,7 @@ impl Live {
     {
         self.callbacks.on_extraction_error =
             Some(Arc::new(move |name, error| Box::pin(f(name, error))));
-        self.callbacks.on_extraction_error_mode = CallbackMode::Concurrent;
+        self.callbacks.on_extraction_error_mode = ExecutionMode::Concurrent;
         self
     }
 }
@@ -414,8 +521,8 @@ mod tests {
     #[test]
     fn builder_accepts_new_callbacks() {
         let _live = Live::builder()
-            // on_phase: sync fast-lane
-            .on_phase(|_phase| {})
+            // on_session_phase: sync fast-lane
+            .on_session_phase(|_phase| {})
             // on_tool_cancelled: async control-lane
             .on_tool_cancelled(|_ids| async {})
             // on_generation_complete: async control-lane, no args
@@ -428,10 +535,21 @@ mod tests {
     /// Verify that the concurrent variants of the new setters also compile.
     #[test]
     fn builder_accepts_new_callbacks_concurrent() {
-        let _live = Live::builder()
+        let live = Live::builder()
             .on_tool_cancelled_concurrent(|_ids| async {})
             .on_generation_complete_concurrent(|| async {})
-            .on_resumed_concurrent(|| async {});
-        // Compiles = test passes
+            .on_resumed_concurrent(|| async {})
+            .on_interrupted_concurrent(|| async {})
+            .on_turn_boundary_concurrent(|_state, _writer| async {})
+            .on_teardown_concurrent(|| async {});
+        assert_eq!(
+            live.callbacks.on_interrupted_mode,
+            ExecutionMode::Concurrent
+        );
+        assert_eq!(
+            live.callbacks.on_turn_boundary_mode,
+            ExecutionMode::Concurrent
+        );
+        assert_eq!(live.callbacks.on_teardown_concurrent.len(), 1);
     }
 }

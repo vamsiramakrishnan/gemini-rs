@@ -188,7 +188,7 @@ Gemini provides server-side tools requiring no implementation:
 Live::builder().google_search().code_execution().url_context()
 
 // Or T:: composition with pipe operator
-Live::builder().with_tools(T::google_search() | T::code_execution() | T::url_context())
+Live::builder().tools(T::google_search() | T::code_execution() | T::url_context())
 ```
 
 ## Per-Tool Policies
@@ -198,7 +198,7 @@ wrappers. Policies compose with `|` like any other tool entry.
 
 ```rust,ignore
 Live::builder()
-    .with_tools(
+    .tools(
         // 10-second timeout on a slow tool
         T::timeout(
             T::simple("search_kb", "Search the knowledge base", |args| async move {
@@ -270,14 +270,14 @@ dispatcher.register(my_tool);                        // impl ToolFunction
 dispatcher.register_function(Arc::new(my_tool));     // Arc<dyn ToolFunction>
 dispatcher.register_streaming(Arc::new(stream_tool));
 
-Live::builder().tools(dispatcher).connect(config).await?;
+Live::builder().dispatcher(dispatcher).connect(config).await?;
 ```
 
 **T:: composition (fluent API)**
 
 ```rust,ignore
 Live::builder()
-    .with_tools(
+    .tools(
         T::function(Arc::new(weather_tool))
         | T::simple("calculate", "Evaluate expression", |args| async move {
             Ok(json!({"result": 42}))
@@ -290,7 +290,7 @@ Live::builder()
 
 ```rust,ignore
 let tools: Vec<Arc<dyn ToolFunction>> = vec![Arc::new(a), Arc::new(b), Arc::new(c)];
-Live::builder().with_tools(T::toolset(tools))
+Live::builder().tools(T::toolset(tools))
 ```
 
 ## Tool Call Handling
@@ -383,7 +383,7 @@ background execution eliminates dead air in voice sessions.
 
 ```rust,ignore
 Live::builder()
-    .tools(dispatcher)
+    .dispatcher(dispatcher)
     .tool_background("search_knowledge_base")
     .tool_background_with_formatter("analyze_doc", Arc::new(MyFormatter))
     .connect_vertex(project, location, token)

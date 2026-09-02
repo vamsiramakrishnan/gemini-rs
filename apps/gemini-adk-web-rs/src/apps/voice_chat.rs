@@ -47,7 +47,7 @@ impl DemoApp for VoiceChat {
                             .as_deref()
                             .unwrap_or("You are a helpful voice assistant. Keep your responses concise and conversational."),
                     )
-                    .transcription(true, true)
+                    .transcription()
             })
             .await
     }

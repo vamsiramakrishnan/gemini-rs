@@ -14,7 +14,7 @@
 
 use gemini_adk_fluent_rs::prelude::*;
 use gemini_adk_fluent_rs::tools::Recognizer;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// Declare the record as a struct — each field names a deterministic recognizer.
 /// The derive generates `Order::extract() -> Extract`.
@@ -78,7 +78,7 @@ fn main() {
         .build()
         .expect("valid flow");
 
-    let mut mon = FlowMonitor::new(flow, FlowMode::Enforce);
+    let mut mon = FlowMonitor::new(flow, Enforcement::Enforce);
     let state = State::new();
 
     println!("\n--- Flow before extraction ---");

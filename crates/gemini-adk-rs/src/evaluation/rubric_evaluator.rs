@@ -151,12 +151,12 @@ impl RubricEvaluator {
         }
 
         // Try to find JSON embedded in text
-        if let Some(start) = text.find('{') {
-            if let Some(end) = text[start..].rfind('}') {
-                let json_str = &text[start..=start + end];
-                if let Some((score, explanation)) = try_parse_json(json_str) {
-                    return (score, explanation);
-                }
+        if let Some(start) = text.find('{')
+            && let Some(end) = text[start..].rfind('}')
+        {
+            let json_str = &text[start..=start + end];
+            if let Some((score, explanation)) = try_parse_json(json_str) {
+                return (score, explanation);
             }
         }
 
@@ -178,7 +178,7 @@ fn try_parse_json(text: &str) -> Option<(f64, String)> {
     } else if let Some(scores) = v["scores"].as_array() {
         let sum: f64 = scores
             .iter()
-            .filter_map(|s| s.as_f64())
+            .filter_map(serde_json::Value::as_f64)
             .map(|s| s.clamp(0.0, 1.0))
             .sum();
         let count = scores.len().max(1) as f64;

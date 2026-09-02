@@ -47,7 +47,7 @@ pub async fn run(
         };
     }
 
-    let agent = builder.build(llm);
+    let agent = builder.build(llm)?;
     let state = State::new();
     let mut transcript: Vec<serde_json::Value> = Vec::new();
 

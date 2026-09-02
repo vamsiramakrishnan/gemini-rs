@@ -72,7 +72,7 @@ pub struct TypedTool<T: DeserializeOwned + JsonSchema + Send + Sync + 'static> {
 /// [`narrow_to_api_subset`], which draft-07 is broader than in two ways that
 /// matter.
 fn wire_schema_for<T: JsonSchema>() -> serde_json::Value {
-    let settings = schemars::gen::SchemaSettings::draft07().with(|s| {
+    let settings = schemars::r#gen::SchemaSettings::draft07().with(|s| {
         s.inline_subschemas = true;
         s.meta_schema = None;
     });

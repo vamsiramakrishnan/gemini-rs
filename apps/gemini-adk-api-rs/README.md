@@ -4,7 +4,7 @@ Standalone headless REST API server for ADK agents. Mirrors upstream `adk api_se
 
 ## Prerequisites
 
-- **Rust toolchain** (stable, 1.75+)
+- **Rust toolchain** (stable, 1.93+; edition 2024)
 - **Agent config file** — at least one `agent.json` or `root_agent.json` in the working directory (or subdirectories)
 - **Authentication** — one of:
   - `GOOGLE_API_KEY` environment variable (Google AI)

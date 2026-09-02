@@ -5,23 +5,29 @@
 //!
 //! # Callback Modes
 //!
-//! Control-lane callbacks support two execution modes via [`gemini_adk_rs::live::CallbackMode`]:
+//! Control-lane callbacks support two execution modes via [`gemini_adk_rs::live::ExecutionMode`]:
 //!
-//! - **Default methods** (e.g., `.on_turn_complete()`) → [`gemini_adk_rs::live::CallbackMode::Blocking`]
-//! - **`_concurrent` methods** (e.g., `.on_turn_complete_concurrent()`) → [`gemini_adk_rs::live::CallbackMode::Concurrent`]
+//! - **Default methods** (e.g., `.on_turn_complete()`) → [`gemini_adk_rs::live::ExecutionMode::Blocking`]
+//! - **`_concurrent` methods** (e.g., `.on_turn_complete_concurrent()`) → [`gemini_adk_rs::live::ExecutionMode::Concurrent`]
 //!
-//! Use concurrent mode for fire-and-forget work (logging, analytics, webhook dispatch).
+//! Use concurrent mode for fire-and-forget work (logging, analytics, webhook
+//! dispatch). The lane rule for every callback is written once, at the top of
+//! the callbacks module (see the `Live` callback setters).
 //!
 //! # Background Tool Execution
 //!
 //! Mark tools for background execution to eliminate dead air in voice sessions:
 //!
-//! ```rust,ignore
+//! ```no_run
+//! # use gemini_adk_fluent_rs::prelude::*;
+//! # async fn run(tools: gemini_adk_fluent_rs::compose::tools::ToolComposite) -> Result<(), AgentError> {
 //! Live::builder()
-//!     .tools(dispatcher)
+//!     .tools(tools)
 //!     .tool_background("search_kb")
-//!     .connect_vertex(project, location, token)
+//!     .connect_from_env()
 //!     .await?;
+//! # Ok(())
+//! # }
 //! ```
 
 mod callbacks;
@@ -42,9 +48,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use gemini_adk_rs::State;
 pub use gemini_adk_rs::live::extractor::TurnExtractor;
 pub use gemini_adk_rs::live::needs::RepairConfig;
-pub use gemini_adk_rs::live::persistence::SessionPersistence;
+pub use gemini_adk_rs::live::persistence::{PersistenceError, SessionPersistence};
 pub use gemini_adk_rs::live::steering::{ContextDelivery, SteeringMode};
 pub use gemini_adk_rs::live::{
     ComputedRegistry, EventCallbacks, InstructionModifier, Phase, TemporalRegistry,
@@ -52,33 +59,33 @@ pub use gemini_adk_rs::live::{
 };
 use gemini_adk_rs::llm::BaseLlm;
 use gemini_adk_rs::tool::ToolDispatcher;
-use gemini_adk_rs::State;
 use gemini_genai_rs::prelude::*;
 
-// Carve (gap #9): `gemini_adk_fluent_rs::live` is the curated home for the full
+// `gemini_adk_fluent_rs::live` is the curated home for the full
 // Live control plane. The kernel `prelude` keeps only `Live` + the headline types;
 // everything else (persistence, steering, repair, transcripts, extraction triggers,
 // soft-turn, runtime contract, …) is re-exported here. (Explicit, rather than a
 // glob, to avoid shadowing the L1/L2 private `callbacks`/`contract` modules.)
 pub use gemini_adk_rs::live::{
     ActivityAuthority, BackendInputVad, BackendVadSnapshot, BackgroundAgentDispatcher,
-    BackgroundToolTracker, CallbackMode, ComputedContract, ComputedVar, ConsecutiveFailureDetector,
-    ContextBuilder, ControlContract, DefaultResultFormatter, DeferredWriter, EffectMode,
-    EffectPolicy, ExtractionTrigger, ExtractorContract, FieldPromotion, FsPersistence,
-    InputAudioProcessor, LiveEffect, LiveEffectExecutor, LiveEvent, LiveEventStream, LiveHandle,
-    LiveReactor, LiveSessionBuilder, LlmExtractor, MemoryPersistence, MergePolicy,
-    NeedsFulfillment, PatternDetector, PendingContext, PhaseContract, PhaseInstruction,
-    PhaseMachine, PhasePreparation, PhaseTransition, PredicateFn, PreparationContract,
+    BackgroundToolTracker, ComputedContract, ComputedVar, ConsecutiveFailureDetector,
+    ContextBuilder, ControlContract, DefaultResultFormatter, DeferredWriter, Delivery,
+    DeliveryConfig, EffectPolicy, ExecutionMode, ExtractionTrigger, ExtractorContract,
+    FieldPromotion, FsPersistence, InputAudioProcessor, LiveEffect, LiveEffectExecutor, LiveEvent,
+    LiveEventStream, LiveHandle, LiveReactor, LiveSessionBuilder, LlmExtractor, MemoryPersistence,
+    MergePolicy, NeedsFulfillment, PatternDetector, PendingContext, PhaseContract,
+    PhaseInstruction, PhaseMachine, PhasePreparation, PredicateFn, PreparationContract,
     PromotionContract, RateDetector, Reaction, ReactorEvent, ReactorRule, RepairAction,
-    ResultFormatter, RuntimeContract, SessionSignals, SessionSnapshot, SessionTelemetry,
-    SessionType, SoftTurnDetector, SustainedDetector, ToolCallSummary, ToolContract,
-    TranscriptBuffer, TranscriptTurn, TranscriptWindow, Transition, TransitionContract,
-    TransitionEvaluation, TransitionResult, TransitionTrigger, TurnCommitConfig, TurnCommitPolicy,
-    TurnCountDetector, TurnSignal, VoiceRuntimeState, WatchPredicate, Watcher, WatcherContract,
+    ResultFormatter, RuntimeContract, SessionHook, SessionSignals, SessionSnapshot,
+    SessionTelemetry, SessionType, SoftTurnDetector, SustainedDetector, ToolCallSummary,
+    ToolContract, TranscriptBuffer, TranscriptTurn, TranscriptWindow, Transition,
+    TransitionContract, TransitionEvaluation, TransitionRecord, TransitionResult,
+    TransitionTrigger, TurnCommitConfig, TurnCommitPolicy, TurnCountDetector, TurnSignal,
+    VoiceRuntimeState, WatchPredicate, Watcher, WatcherContract,
 };
 // Offline record/replay harness (Milestone 7 determinism spine).
 pub use gemini_adk_rs::live::replay::{
-    attach_session, collect_events_until_idle, replay_session, ReplaySession,
+    ReplaySession, attach_session, collect_events_until_idle, replay_session,
 };
 
 /// A deferred agent tool registration (resolved at connect time when State is available).
@@ -99,23 +106,30 @@ pub(crate) struct DeferredAgentTool {
 /// execution via [`tool_background()`](Self::tool_background).
 ///
 /// # Example
-/// ```ignore
+/// ```no_run
+/// # use gemini_adk_fluent_rs::prelude::*;
+/// # async fn run(tools: gemini_adk_fluent_rs::compose::tools::ToolComposite) -> Result<(), AgentError> {
 /// let session = Live::builder()
-///     .model(GeminiModel::Gemini2_0FlashLive)
 ///     .voice(Voice::Kore)
 ///     .instruction("You are a weather assistant")
-///     .tools(dispatcher)
-///     .on_audio(|data| playback_tx.send(data.clone()).ok())
+///     .tools(tools)
+///     .on_audio(|data| { let _ = data; })
 ///     .on_text(|t| print!("{t}"))
-///     .on_interrupted(|| async { playback.flush().await; })
-///     .connect_vertex("project", "us-central1", token)
+///     .on_interrupted(|| async { /* flush playback */ })
+///     .connect_from_env()
 ///     .await?;
+/// # let _ = session; Ok(())
+/// # }
 /// ```
 ///
 /// # Extraction Pipeline
-/// ```ignore
+/// ```no_run
+/// # use gemini_adk_fluent_rs::prelude::*;
+/// # use std::sync::Arc;
+/// # #[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+/// # struct OrderState { items: Vec<String> }
+/// # async fn run(flash_llm: Arc<dyn BaseLlm>) -> Result<(), AgentError> {
 /// let handle = Live::builder()
-///     .model(GeminiModel::Gemini2_0FlashLive)
 ///     .instruction("You are a restaurant order assistant")
 ///     .extract_turns::<OrderState>(
 ///         flash_llm,
@@ -124,11 +138,13 @@ pub(crate) struct DeferredAgentTool {
 ///     .on_extracted(|name, value| async move {
 ///         println!("Extracted {name}: {value}");
 ///     })
-///     .connect_vertex(project, location, token)
+///     .connect_from_env()
 ///     .await?;
 ///
 /// // Read latest extraction from shared State at any time:
 /// let order: Option<OrderState> = handle.extracted("OrderState");
+/// # let _ = order; Ok(())
+/// # }
 /// ```
 pub struct Live {
     pub(crate) config: SessionConfig,
@@ -189,16 +205,14 @@ pub struct Live {
     pub(crate) flow_actions: Vec<(
         String,
         Arc<dyn gemini_adk_rs::text::TextAgent>,
-        gemini_adk_rs::orchestration::Mode,
+        gemini_adk_rs::orchestration::AgentMode,
     )>,
     // Wire-log path: a FileWireRecorder is created here at connect time.
     pub(crate) record_wire_path: Option<std::path::PathBuf>,
-    /// True once the application chose a model via `.model(..)` or
-    /// `.connect(config)`. When false, connect resolves a per-platform
-    /// default that the target platform actually serves (the wire-level
-    /// `GeminiModel::default()` is not accepted everywhere), honoring the
-    /// `GEMINI_MODEL` environment variable first.
-    pub(crate) model_explicit: bool,
+    /// Configuration problems found while building (e.g. a computed-variable
+    /// dependency cycle). Builder setters cannot fail, so they are collected
+    /// here and reported as one `AgentError::Config` at connect.
+    pub(crate) config_errors: Vec<String>,
 }
 
 impl Live {
@@ -208,28 +222,30 @@ impl Live {
     ///
     /// Minimal live session setup:
     ///
-    /// ```rust,ignore
-    /// use gemini_adk_fluent_rs::prelude::*;
-    ///
+    /// ```no_run
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// # async fn run() -> Result<(), AgentError> {
     /// let handle = Live::builder()
-    ///     .model(GeminiModel::Gemini2_0FlashLive)
     ///     .voice(Voice::Kore)
     ///     .instruction("You are a helpful assistant")
     ///     .greeting("Hello! How can I help?")
-    ///     .on_audio(|data| { /* send to speaker */ })
+    ///     .on_audio(|data| { let _ = data; /* send to speaker */ })
     ///     .on_text(|t| print!("{t}"))
     ///     .connect_google_ai("API_KEY")
     ///     .await?;
     ///
     /// handle.send_text("What is the weather?").await?;
     /// handle.disconnect().await?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// With phases and state-based transitions:
     ///
-    /// ```rust,ignore
+    /// ```no_run
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// # async fn run() -> Result<(), AgentError> {
     /// let handle = Live::builder()
-    ///     .model(GeminiModel::Gemini2_0FlashLive)
     ///     .phase("greeting")
     ///         .instruction("Welcome the user")
     ///         .transition("main", S::is_true("greeted"))
@@ -241,6 +257,8 @@ impl Live {
     ///     .initial_phase("greeting")
     ///     .connect_google_ai("API_KEY")
     ///     .await?;
+    /// # let _ = handle; Ok(())
+    /// # }
     /// ```
     pub fn builder() -> Self {
         Self {
@@ -279,7 +297,7 @@ impl Live {
             state: None,
             flow_actions: Vec::new(),
             record_wire_path: None,
-            model_explicit: false,
+            config_errors: Vec::new(),
             input_audio: crate::live::config::InputAudioConfig::default(),
         }
     }
@@ -311,14 +329,14 @@ impl Live {
     /// # use gemini_adk_rs::State;
     /// let state = State::new();
     /// Live::builder()
-    ///     .with_state(state.clone())   // the session runs on this
-    ///     .with_tools(my_tools(state)); // and so do the tools
+    ///     .state(state.clone())   // the session runs on this
+    ///     .tools(my_tools(state)); // and so do the tools
     /// # fn my_tools(_: State) -> gemini_adk_fluent_rs::compose::tools::ToolComposite { todo!() }
     /// ```
     ///
     /// `agent_tool` already shares state with the agents it wraps; this is the
     /// same guarantee for ordinary tools.
-    pub fn with_state(mut self, state: State) -> Self {
+    pub fn state(mut self, state: State) -> Self {
         self.state = Some(state);
         self
     }
@@ -393,14 +411,14 @@ impl Live {
     /// is how a governed flow drives in-session orchestration. Requires a flow
     /// (`govern`/`observe`).
     ///
-    /// [`AgentMode::Call`]: gemini_adk_rs::orchestration::Mode::Call
-    /// [`AgentMode::Dispatch`]: gemini_adk_rs::orchestration::Mode::Dispatch
-    /// [`AgentMode::Background`]: gemini_adk_rs::orchestration::Mode::Background
-    pub fn on_enter(
+    /// [`AgentMode::Call`]: gemini_adk_rs::orchestration::AgentMode::Call
+    /// [`AgentMode::Dispatch`]: gemini_adk_rs::orchestration::AgentMode::Dispatch
+    /// [`AgentMode::Background`]: gemini_adk_rs::orchestration::AgentMode::Background
+    pub fn on_step_enter(
         mut self,
         step: impl Into<String>,
         agent: Arc<dyn gemini_adk_rs::text::TextAgent>,
-        mode: gemini_adk_rs::orchestration::Mode,
+        mode: gemini_adk_rs::orchestration::AgentMode,
     ) -> Self {
         self.flow_actions.push((step.into(), agent, mode));
         self
@@ -424,8 +442,8 @@ impl Live {
         self
     }
 
-    /// Attach a [`MiddlewareComposite`](crate::compose::middleware::MiddlewareComposite)
-    /// — every layer runs around tool
+    /// Attach middleware — a [`MiddlewareComposite`](crate::compose::middleware::MiddlewareComposite)
+    /// or a single `Arc<dyn Middleware>` — every layer runs around tool
     /// dispatch in the control lane (`before_tool` can veto a call,
     /// `after_tool` and `on_tool_error` observe results).
     ///
@@ -435,9 +453,9 @@ impl Live {
     /// pipeline concepts and do not apply to a streaming Live session.
     pub fn middleware(
         mut self,
-        composite: crate::compose::middleware::MiddlewareComposite,
+        middleware: impl Into<crate::compose::middleware::MiddlewareComposite>,
     ) -> Self {
-        self.middleware_layers.extend(composite.layers);
+        self.middleware_layers.extend(middleware.into().layers);
         self
     }
 
@@ -460,14 +478,15 @@ mod tests {
     #[test]
     fn builder_chain_compiles() {
         let _live = Live::builder()
-            .model(GeminiModel::Gemini2_0FlashLive)
+            .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
             .voice(Voice::Kore)
             .instruction("Test")
             .temperature(0.7)
             .google_search()
-            .transcription(true, true)
-            .affective_dialog(true)
-            .session_resume(true)
+            .transcription()
+            .affective_dialog()
+            .session_resume()
+            .no_tool_advisory()
             .context_compression(4000, 2000)
             .on_audio(|_data| {})
             .on_text(|_t| {})
@@ -526,12 +545,12 @@ mod tests {
                 "fake"
             }
             async fn generate(&self, _req: LlmRequest) -> Result<LlmResponse, LlmError> {
-                unimplemented!()
+                Err(LlmError::RequestFailed("FakeLlm never generates".into()))
             }
         }
 
         let _live = Live::builder()
-            .model(GeminiModel::Gemini2_0FlashLive)
+            .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
             .instruction("Restaurant order assistant")
             .extract_turns::<OrderState>(
                 Arc::new(FakeLlm),
@@ -560,7 +579,7 @@ mod tests {
     #[test]
     fn builder_with_computed_state_compiles() {
         let _live = Live::builder()
-            .model(GeminiModel::Gemini2_0FlashLive)
+            .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
             .instruction("Test computed state")
             .computed("doubled", &["app:count"], |state| {
                 let count: i64 = state.get("app:count")?;
@@ -579,7 +598,7 @@ mod tests {
     #[test]
     fn builder_with_phases_compiles() {
         let _live = Live::builder()
-            .model(GeminiModel::Gemini2_0FlashLive)
+            .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
             .phase("greeting")
             .instruction("Welcome the user warmly")
             .transition("main", |s| s.get::<bool>("greeted").unwrap_or(false))
@@ -605,7 +624,7 @@ mod tests {
     #[test]
     fn builder_with_phase_guard_compiles() {
         let _live = Live::builder()
-            .model(GeminiModel::Gemini2_0FlashLive)
+            .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
             .phase("start")
             .instruction("Begin")
             .transition("secure", |_| true)
@@ -624,7 +643,7 @@ mod tests {
     #[test]
     fn builder_with_watchers_compiles() {
         let _live = Live::builder()
-            .model(GeminiModel::Gemini2_0FlashLive)
+            .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
             .watch("app:score")
             .crossed_above(0.9)
             .then(|_old, _new, state| async move {
@@ -646,7 +665,7 @@ mod tests {
     #[test]
     fn builder_with_temporal_patterns_compiles() {
         let _live = Live::builder()
-            .model(GeminiModel::Gemini2_0FlashLive)
+            .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
             .when_sustained(
                 "user_confused",
                 |s| s.get::<bool>("confused").unwrap_or(false),
@@ -678,7 +697,7 @@ mod tests {
     fn builder_full_l1_chain_compiles() {
         // Full chain combining all L1 features in a single builder
         let _live = Live::builder()
-            .model(GeminiModel::Gemini2_0FlashLive)
+            .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
             .voice(Voice::Kore)
             .instruction("Full featured agent")
             // Computed state
@@ -724,7 +743,7 @@ mod tests {
     #[test]
     fn builder_with_callback_modes_compiles() {
         let _live = Live::builder()
-            .model(GeminiModel::Gemini2_0FlashLive)
+            .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
             .on_turn_complete_concurrent(|| async {})
             .on_error_concurrent(|_e| async {})
             .on_extracted_concurrent(|_name, _val| async {})
@@ -739,7 +758,7 @@ mod tests {
         use gemini_adk_rs::live::DefaultResultFormatter;
 
         let _live = Live::builder()
-            .model(GeminiModel::Gemini2_0FlashLive)
+            .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
             .tool_background("search_kb")
             .tool_background_with_formatter("analyze_document", Arc::new(DefaultResultFormatter));
     }
@@ -749,7 +768,7 @@ mod tests {
         use gemini_adk_rs::live::DefaultResultFormatter;
 
         let _live = Live::builder()
-            .model(GeminiModel::Gemini2_0FlashLive)
+            .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
             .voice(Voice::Kore)
             .instruction("Full featured agent")
             .tool_background("slow_tool")

@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::LazyLock;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
@@ -354,22 +354,22 @@ fn is_disclosure_acknowledgment(text: &str) -> bool {
 fn extract_structured(text: &str, existing: &HashMap<String, Value>) -> HashMap<String, Value> {
     let mut extracted = HashMap::new();
 
-    if !existing.contains_key("dollar_amount") {
-        if let Some(m) = DOLLAR_RE.find(text) {
-            extracted.insert("dollar_amount".into(), json!(m.as_str()));
-        }
+    if !existing.contains_key("dollar_amount")
+        && let Some(m) = DOLLAR_RE.find(text)
+    {
+        extracted.insert("dollar_amount".into(), json!(m.as_str()));
     }
 
-    if !existing.contains_key("phone_number") {
-        if let Some(m) = PHONE_RE.find(text) {
-            extracted.insert("phone_number".into(), json!(m.as_str()));
-        }
+    if !existing.contains_key("phone_number")
+        && let Some(m) = PHONE_RE.find(text)
+    {
+        extracted.insert("phone_number".into(), json!(m.as_str()));
     }
 
-    if !existing.contains_key("date_mentioned") {
-        if let Some(m) = DATE_RE.find(text) {
-            extracted.insert("date_mentioned".into(), json!(m.as_str()));
-        }
+    if !existing.contains_key("date_mentioned")
+        && let Some(m) = DATE_RE.find(text)
+    {
+        extracted.insert("date_mentioned".into(), json!(m.as_str()));
     }
 
     if !existing.contains_key("disclosure_given") && is_disclosure_acknowledgment(text) {
@@ -530,8 +530,14 @@ fn execute_tool(name: &str, args: &Value) -> Value {
             json!({"verified": verified, "reason": reason})
         }
         "calculate_payment_plan" => {
-            let total = args.get("total").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            let months = args.get("months").and_then(|v| v.as_u64()).unwrap_or(1) as f64;
+            let total = args
+                .get("total")
+                .and_then(serde_json::Value::as_f64)
+                .unwrap_or(0.0);
+            let months = args
+                .get("months")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(1) as f64;
             let interest_rate = 0.05;
             let total_with_interest = total * (1.0 + interest_rate);
             let monthly = (total_with_interest / months * 100.0).round() / 100.0;
@@ -545,7 +551,10 @@ fn execute_tool(name: &str, args: &Value) -> Value {
             })
         }
         "process_payment" => {
-            let amount = args.get("amount").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let amount = args
+                .get("amount")
+                .and_then(serde_json::Value::as_f64)
+                .unwrap_or(0.0);
             let method = args
                 .get("method")
                 .and_then(|v| v.as_str())
@@ -586,22 +595,20 @@ fn redact_pii(value: &Value) -> Value {
         if let Some(ssn) = obj
             .get("ssn")
             .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
+            .map(std::string::ToString::to_string)
+            && ssn.len() >= 4
         {
-            if ssn.len() >= 4 {
-                let last4 = &ssn[ssn.len() - 4..];
-                obj.insert("ssn".into(), json!(format!("***-**-{last4}")));
-            }
+            let last4 = &ssn[ssn.len() - 4..];
+            obj.insert("ssn".into(), json!(format!("***-**-{last4}")));
         }
         if let Some(acct) = obj
             .get("account_id")
             .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
+            .map(std::string::ToString::to_string)
+            && acct.len() >= 4
         {
-            if acct.len() >= 4 {
-                let last4 = &acct[acct.len() - 4..];
-                obj.insert("account_id".into(), json!(format!("****{last4}")));
-            }
+            let last4 = &acct[acct.len() - 4..];
+            obj.insert("account_id".into(), json!(format!("****{last4}")));
         }
         obj.remove("address");
     }
@@ -613,7 +620,7 @@ fn promote_tool_response_state(name: &str, response: &Value, state: &State) {
         "verify_identity" => {
             if response
                 .get("verified")
-                .and_then(|v| v.as_bool())
+                .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false)
             {
                 state.set("identity_verified", true);
@@ -653,7 +660,7 @@ fn promote_tool_response_state(name: &str, response: &Value, state: &State) {
             }
         }
         "log_compliance_event" => {
-            if response.get("logged").and_then(|v| v.as_bool()) != Some(true) {
+            if response.get("logged").and_then(serde_json::Value::as_bool) != Some(true) {
                 return;
             }
             let event_type = response
@@ -803,7 +810,7 @@ impl DemoApp for DebtCollection {
                             .as_deref()
                             .unwrap_or(DISCLOSURE_INSTRUCTION),
                     )
-                    .transcription(true, true)
+                    .transcription()
                     .add_tool(debt_collection_tools())
                     .steering_mode(SteeringMode::ContextInjection)
                     .context_delivery(ContextDelivery::Deferred)
@@ -915,7 +922,7 @@ impl DemoApp for DebtCollection {
                         .instruction(DISCLOSURE_INSTRUCTION)
                         .tools(vec!["log_compliance_event".into()])
                         .needs(&["disclosure_given"])
-                        .prompt_on_enter(true)
+                        .prompt_on_enter()
                         .transition_with("verify_identity", S::is_true("disclosure_given"), "when disclosure has been given")
                         .transition_with("close", S::is_true("cease_desist_requested"), "when debtor requests cease and desist")
                         .done()
@@ -1276,10 +1283,12 @@ mod tests {
             &json!({"account_id": "78234561", "amount": 708.33, "method": "bank_transfer"}),
         );
         assert_eq!(result["status"], "processed");
-        assert!(result["confirmation_id"]
-            .as_str()
-            .unwrap()
-            .starts_with("PAY-"));
+        assert!(
+            result["confirmation_id"]
+                .as_str()
+                .unwrap()
+                .starts_with("PAY-")
+        );
     }
 
     #[test]

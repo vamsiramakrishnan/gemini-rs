@@ -17,8 +17,8 @@
 
 mod common;
 
-use common::corpus::{self, payload_statements, says, says_any, PROBES, UNANSWERABLE};
-use common::{file_backed_engine, ScratchDir};
+use common::corpus::{self, PROBES, UNANSWERABLE, payload_statements, says, says_any};
+use common::{ScratchDir, file_backed_engine};
 
 use gemini_memory_rs::core::{MemoryStatus, SessionId, TurnId};
 use gemini_memory_rs::engine::{MemoryEngine, MemorySession};

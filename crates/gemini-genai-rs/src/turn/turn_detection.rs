@@ -78,14 +78,13 @@ impl TurnDetector {
         }
 
         // Check if end-of-speech delay has elapsed
-        if let Some(ended_at) = self.speech_ended_at {
-            if !self.turn_ended_emitted
-                && ended_at.elapsed() >= Duration::from_millis(self.config.end_of_speech_delay_ms)
-            {
-                self.turn_ended_emitted = true;
-                self.speech_ended_at = None;
-                return Some(TurnDetectionEvent::TurnEnded);
-            }
+        if let Some(ended_at) = self.speech_ended_at
+            && !self.turn_ended_emitted
+            && ended_at.elapsed() >= Duration::from_millis(self.config.end_of_speech_delay_ms)
+        {
+            self.turn_ended_emitted = true;
+            self.speech_ended_at = None;
+            return Some(TurnDetectionEvent::TurnEnded);
         }
 
         None

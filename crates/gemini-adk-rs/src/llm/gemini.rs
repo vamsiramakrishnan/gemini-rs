@@ -8,8 +8,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use once_cell::sync::Lazy;
 use regex::Regex;
+use std::sync::LazyLock;
 
 #[cfg(feature = "gemini-llm")]
 use crate::llm::TokenUsage;
@@ -17,7 +17,7 @@ use crate::llm::{
     BaseLlm, EnvTokenProvider, GcloudTokenProvider, LlmError, LlmRequest, LlmResponse,
     TokenProvider,
 };
-use crate::utils::variant::{get_google_llm_variant, GoogleLlmVariant};
+use crate::utils::variant::{GoogleLlmVariant, get_google_llm_variant};
 
 /// Parameters for constructing a [`GeminiLlm`].
 #[derive(Default)]
@@ -56,10 +56,10 @@ pub struct GeminiLlm {
     token_provider: Arc<dyn TokenProvider>,
     /// Cached gemini-live Client, created once at construction time.
     #[cfg(feature = "gemini-llm")]
-    client: gemini_genai_rs::prelude::Client,
+    client: gemini_genai_rs::Client,
 }
 
-static SUPPORTED_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
+static SUPPORTED_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     vec![
         Regex::new(r"^gemini-.*$").unwrap(),
         Regex::new(r"^projects/.*/endpoints/.*$").unwrap(),
@@ -83,22 +83,31 @@ impl GeminiLlm {
             get_google_llm_variant()
         };
 
-        // Resolve model: params, then the GEMINI_MODEL env var, then a
-        // per-variant default. Google AI retires dated names but serves the
-        // rolling `gemini-flash-latest` alias; Vertex AI keeps versioned GA
-        // names and does not carry the alias.
+        // Resolve model: params, then GEMINI_TEXT_MODEL, then the shared
+        // GEMINI_MODEL, then a per-variant default. Google AI retires dated
+        // names but serves the rolling `gemini-flash-latest` alias; Vertex AI
+        // keeps versioned GA names and does not carry the alias.
         let model = params
             .model
             .clone()
             .or_else(|| {
-                std::env::var("GEMINI_MODEL")
-                    .ok()
+                ["GEMINI_TEXT_MODEL", "GEMINI_MODEL"]
+                    .iter()
+                    .find_map(|k| std::env::var(k).ok())
                     .filter(|m| !m.trim().is_empty())
             })
             .unwrap_or_else(|| match variant {
                 GoogleLlmVariant::GeminiApi => "gemini-flash-latest".to_string(),
                 GoogleLlmVariant::VertexAi => "gemini-2.5-flash".to_string(),
             });
+        if model.contains("native-audio") || model.contains("-live-") {
+            tracing::warn!(
+                model = %model,
+                "GeminiLlm resolved a Live (bidi) model name for generateContent; set \
+                 GEMINI_TEXT_MODEL (or GeminiLlmParams::model) to a text model — a shared \
+                 GEMINI_MODEL pointing at the Live model 404s here"
+            );
+        }
 
         // Resolve API key from params or env
         if params.api_key.is_none() && variant == GoogleLlmVariant::GeminiApi {
@@ -141,11 +150,11 @@ impl GeminiLlm {
         // errors from stale tokens during long-running sessions.
         #[cfg(feature = "gemini-llm")]
         let client = {
-            use gemini_genai_rs::prelude::*;
+            use gemini_genai_rs::{Client, prelude::ModelId};
             match variant {
                 GoogleLlmVariant::GeminiApi => {
                     let api_key = params.api_key.as_deref().unwrap_or("");
-                    Client::from_api_key(api_key).model(GeminiModel::Custom(model.clone()))
+                    Client::from_api_key(api_key).model(ModelId::new(model.clone()))
                 }
                 GoogleLlmVariant::VertexAi => {
                     let project = params.project.as_deref().unwrap_or("").to_string();
@@ -156,7 +165,7 @@ impl GeminiLlm {
                         .to_string();
                     let tp = token_provider.clone();
                     Client::from_vertex_refreshable(project, location, move || tp.token())
-                        .model(GeminiModel::Custom(model.clone()))
+                        .model(ModelId::new(model.clone()))
                 }
             }
         };
@@ -182,7 +191,7 @@ impl GeminiLlm {
     }
 
     /// Preprocess request: remove labels and displayName for non-Vertex (Gemini API).
-    fn preprocess_request(&self, _request: &mut LlmRequest) {
+    fn preprocess_request(_request: &mut LlmRequest) {
         // For Gemini API backend: remove labels and displayName from tools.
         // This is a no-op for now since LlmRequest doesn't have those fields yet.
         // In a full implementation, this would strip Vertex-only fields.
@@ -196,7 +205,7 @@ impl BaseLlm for GeminiLlm {
     }
 
     async fn generate(&self, mut request: LlmRequest) -> Result<LlmResponse, LlmError> {
-        self.preprocess_request(&mut request);
+        Self::preprocess_request(&mut request);
 
         // Feature-gate the actual HTTP call behind gemini-live's generate + http features.
         #[cfg(feature = "gemini-llm")]
@@ -254,7 +263,7 @@ impl BaseLlm for GeminiLlm {
                 .candidates
                 .first()
                 .and_then(|c| c.finish_reason)
-                .map(|r| format!("{:?}", r));
+                .map(|r| format!("{r:?}"));
 
             let usage = response.usage_metadata.map(|u| TokenUsage {
                 prompt_tokens: u.prompt_token_count.unwrap_or(0),

@@ -222,10 +222,10 @@ impl SpeculationGate {
         let urgent = has_strong_signal || hypothesis.finalised;
 
         if !urgent {
-            if let Some(last) = self.last_fired_at {
-                if now.duration_since(last) < self.debounce {
-                    return SpeculationDecision::Debounced;
-                }
+            if let Some(last) = self.last_fired_at
+                && now.duration_since(last) < self.debounce
+            {
+                return SpeculationDecision::Debounced;
             }
             if new_tokens < self.minimum_new_tokens {
                 return SpeculationDecision::InsufficientNewContent;

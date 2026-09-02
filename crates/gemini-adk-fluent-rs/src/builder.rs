@@ -5,14 +5,15 @@
 
 use std::sync::Arc;
 
+use gemini_adk_rs::error::ConfigError;
 use gemini_adk_rs::llm::BaseLlm;
 use gemini_adk_rs::middleware::Middleware;
 use gemini_adk_rs::text::{LlmTextAgent, TextAgent};
 use gemini_adk_rs::tool::{ToolDispatcher, ToolFunction, ToolKind};
-use gemini_genai_rs::prelude::{GeminiModel, Modality, Tool, Voice};
+use gemini_genai_rs::prelude::{Modality, ModelId, Tool, Voice};
 
-use crate::compose::context::ContextPolicyChain;
-use crate::compose::guards::GComposite;
+use crate::compose::context::ContextComposite;
+use crate::compose::guards::GuardComposite;
 use crate::compose::middleware::MiddlewareComposite;
 use crate::compose::tools::ToolComposite;
 
@@ -22,7 +23,7 @@ type LlmProviderFn = Arc<dyn Fn(&gemini_adk_rs::State) -> Arc<dyn BaseLlm> + Sen
 #[derive(Clone)]
 struct AgentBuilderInner {
     name: String,
-    model: Option<GeminiModel>,
+    model: Option<ModelId>,
     instruction: Option<String>,
     instruction_provider: Option<Arc<dyn gemini_adk_rs::instruction::InstructionProvider>>,
     llm_provider: Option<LlmProviderFn>,
@@ -47,6 +48,9 @@ struct AgentBuilderInner {
     transfer_to_agent: Option<String>,
     /// Middleware layers to install on the compiled `LlmTextAgent`.
     middleware_layers: Vec<Arc<dyn Middleware>>,
+    /// Configuration problems found by setters (which cannot fail), reported
+    /// as one [`ConfigError`] by [`AgentBuilder::build`].
+    config_errors: Vec<String>,
 }
 
 /// An entry in the builder's tool list — either a runtime ToolKind or a declaration.
@@ -66,9 +70,6 @@ pub trait ToolEntryTrait: Send + Sync + 'static {
     fn to_tool_kind(&self) -> ToolKind;
 }
 
-/// Alias for [`AgentBuilder`] — matches upstream Python `Agent("name")` naming.
-pub type Agent = AgentBuilder;
-
 /// Copy-on-write immutable builder for agent construction.
 ///
 /// Every setter returns a new `AgentBuilder`, leaving the original unchanged.
@@ -78,10 +79,10 @@ pub type Agent = AgentBuilder;
 ///
 /// ```rust
 /// use gemini_adk_fluent_rs::builder::AgentBuilder;
-/// use gemini_genai_rs::prelude::GeminiModel;
+/// use gemini_genai_rs::prelude::ModelId;
 ///
 /// let agent = AgentBuilder::new("analyst")
-///     .model(GeminiModel::Gemini2_0FlashLive)
+///     .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
 ///     .instruction("Analyze the given topic")
 ///     .temperature(0.3);
 ///
@@ -184,6 +185,7 @@ impl AgentBuilder {
                 output_key: None,
                 transfer_to_agent: None,
                 middleware_layers: Vec::new(),
+                config_errors: Vec::new(),
             }),
         }
     }
@@ -208,7 +210,7 @@ impl AgentBuilder {
     }
 
     /// Configured model, if any.
-    pub fn get_model(&self) -> Option<&GeminiModel> {
+    pub fn get_model(&self) -> Option<&ModelId> {
         self.inner.model.as_ref()
     }
 
@@ -319,7 +321,7 @@ impl AgentBuilder {
     // ── Fluent Setters (copy-on-write) ──
 
     /// Set the Gemini model.
-    pub fn model(self, model: GeminiModel) -> Self {
+    pub fn model(self, model: ModelId) -> Self {
         let mut inner = self.mutate();
         inner.model = Some(model);
         Self::with(inner)
@@ -517,30 +519,41 @@ impl AgentBuilder {
         self.description(desc)
     }
 
-    /// Register a single tool function.
+    /// Register one tool: anything that implements [`ToolFunction`] — a
+    /// `SimpleTool`/`TypedTool`, the value a `#[tool]` function returns, or an
+    /// `Arc<dyn ToolFunction>` you already hold.
     ///
-    /// ```ignore
-    /// Agent::new("assistant").tool(Arc::new(my_tool))
+    /// ```no_run
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// # use std::sync::Arc;
+    /// #[tool("Get the weather for a city")]
+    /// async fn get_weather(city: String) -> Result<serde_json::Value, ToolError> {
+    ///     Ok(serde_json::json!({"city": city, "temp": 22}))
+    /// }
+    /// let agent = AgentBuilder::new("assistant").tool(get_weather());
     /// ```
-    pub fn tool(self, f: Arc<dyn ToolFunction>) -> Self {
-        let mut inner = self.mutate();
-        inner
-            .tools
-            .push(ToolEntry::Runtime(Arc::new(ToolFunctionEntry(f))));
-        Self::with(inner)
+    pub fn tool(self, f: impl ToolFunction + 'static) -> Self {
+        self.tools(ToolComposite::from_function(Arc::new(f)))
     }
 
-    /// Register multiple tools from a [`ToolComposite`].
+    /// Register tools: a `|`-composed [`ToolComposite`] from the `T`
+    /// namespace, or a single [`ToolFunction`].
     ///
-    /// ```ignore
+    /// `T::mcp(..)` needs an async connection that this synchronous builder
+    /// cannot perform; it is rejected by [`build`](Self::build) with a
+    /// [`ConfigError`] — attach MCP toolsets to a `Live` session instead.
+    ///
+    /// ```no_run
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// # use serde_json::json;
     /// let tools = T::simple("greet", "Greet", |_| async { Ok(json!({})) })
     ///     | T::google_search();
-    /// Agent::new("assistant").tools(tools)
+    /// AgentBuilder::new("assistant").tools(tools);
     /// ```
-    pub fn tools(self, composite: ToolComposite) -> Self {
+    pub fn tools(self, tools: impl Into<ToolComposite>) -> Self {
         use crate::compose::tools::{DeferredTool, ToolResolution};
         let mut inner = self.mutate();
-        for entry in composite.entries {
+        for entry in tools.into().entries {
             match entry.classify() {
                 ToolResolution::Runtime(f) => {
                     inner
@@ -568,22 +581,17 @@ impl AgentBuilder {
                             tool,
                         )))));
                 }
-                ToolResolution::Deferred(deferred) => {
-                    // MCP / A2A / OpenAPI / Search require an async connection,
-                    // which the synchronous text-agent `build()` cannot perform.
-                    // These belong on a `Live` session; surface that rather than
-                    // dropping the tool silently.
-                    let kind = match deferred {
-                        DeferredTool::Mcp { .. } => "T::mcp",
-                        DeferredTool::A2a { .. } => "T::a2a",
-                        DeferredTool::OpenApi { .. } => "T::openapi",
-                        DeferredTool::Search { .. } => "T::search",
-                    };
-                    tracing::warn!(
-                        tool = kind,
-                        "ignoring async-resolved tool on a text AgentBuilder: {kind} \
-                         requires a Live session (async connect); attach it via Live::with_tools"
-                    );
+                ToolResolution::Deferred(DeferredTool::Mcp { params }) => {
+                    // An MCP toolset needs an async handshake, which the
+                    // synchronous text-agent `build()` cannot perform. It
+                    // belongs on a `Live` session (resolved at connect); make
+                    // `build` fail rather than drop the tool silently — the same
+                    // outcome `Live::connect` gives an unreachable MCP server.
+                    inner.config_errors.push(format!(
+                        "T::mcp({params:?}) cannot be attached to a text AgentBuilder: MCP \
+                         toolsets need an async connection, which only a Live session performs \
+                         (`Live::builder().tools(T::mcp(..))`)"
+                    ));
                 }
             }
         }
@@ -594,16 +602,16 @@ impl AgentBuilder {
     /// guard; if any rejects the output the agent run fails with an
     /// [`AgentError`](gemini_adk_rs::error::AgentError) listing the violations.
     ///
-    /// Accepts a single guard or a `|`-composed [`GComposite`]:
+    /// Accepts a single guard or a `|`-composed [`GuardComposite`]:
     ///
-    /// ```rust,ignore
-    /// use gemini_adk_fluent_rs::compose::guards::G;
-    /// Agent::new("writer").guard(G::pii() | G::length(1, 2000))
+    /// ```no_run
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// AgentBuilder::new("writer").guard(G::pii() | G::length(1, 2000));
     /// ```
     ///
     /// The guards are installed as an `after_model` middleware layer, so they
     /// accumulate with `.middleware(...)` and honor copy-on-write.
-    pub fn guard(self, guard: impl Into<GComposite>) -> Self {
+    pub fn guard(self, guard: impl Into<GuardComposite>) -> Self {
         let mut inner = self.mutate();
         inner.middleware_layers.push(guard.into().into_middleware());
         Self::with(inner)
@@ -612,15 +620,15 @@ impl AgentBuilder {
     /// Attach a context policy that rewrites conversation history before each
     /// model call (e.g. windowing, role filtering, tool-result exclusion).
     ///
-    /// Accepts a single policy or a `+`-composed [`ContextPolicyChain`]:
+    /// Accepts a single policy or a `+`-composed [`ContextComposite`]:
     ///
-    /// ```rust,ignore
-    /// use gemini_adk_fluent_rs::compose::context::C;
-    /// Agent::new("chat").context(C::window(10) + C::user_only())
+    /// ```no_run
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// AgentBuilder::new("chat").context(C::window(10) + C::user_only());
     /// ```
     ///
     /// The policy is installed as a `transform_request` middleware layer.
-    pub fn context(self, policy: impl Into<ContextPolicyChain>) -> Self {
+    pub fn context(self, policy: impl Into<ContextComposite>) -> Self {
         let mut inner = self.mutate();
         inner
             .middleware_layers
@@ -633,24 +641,23 @@ impl AgentBuilder {
         self.isolate()
     }
 
-    /// Attach a [`MiddlewareComposite`] — all layers are installed on the
-    /// compiled `LlmTextAgent` in the order they appear in the composite.
+    /// Attach middleware — a `|`-composed [`MiddlewareComposite`] from the
+    /// `M` namespace or a single `Arc<dyn Middleware>`. All layers are
+    /// installed on the compiled `LlmTextAgent` in the order given.
     ///
     /// Multiple calls to `.middleware()` accumulate: the new layers are
     /// appended after any previously registered layers, preserving the
     /// copy-on-write contract.
     ///
-    /// ```rust,ignore
-    /// use gemini_adk_fluent_rs::compose::middleware::M;
-    ///
+    /// ```no_run
+    /// # use gemini_adk_fluent_rs::prelude::*;
     /// let agent = AgentBuilder::new("analyst")
     ///     .instruction("Analyze topics")
-    ///     .middleware(M::log() | M::latency())
-    ///     .build(llm);
+    ///     .middleware(M::log() | M::latency());
     /// ```
-    pub fn middleware(self, composite: MiddlewareComposite) -> Self {
+    pub fn middleware(self, middleware: impl Into<MiddlewareComposite>) -> Self {
         let mut inner = self.mutate();
-        inner.middleware_layers.extend(composite.layers);
+        inner.middleware_layers.extend(middleware.into().layers);
         Self::with(inner)
     }
 
@@ -662,15 +669,32 @@ impl AgentBuilder {
     /// Builder configuration (instruction, temperature, tools) is transferred to
     /// the resulting agent.
     ///
-    /// ```rust,ignore
+    /// Fails with a [`ConfigError`] when the configuration cannot be realized
+    /// by a text agent — today, an MCP toolset (`T::mcp`) in
+    /// [`tools`](Self::tools), which needs the async connect only a `Live`
+    /// session performs.
+    ///
+    /// ```no_run
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// # use std::sync::Arc;
+    /// # async fn run() -> Result<(), AgentError> {
+    /// let llm = Arc::new(GeminiLlm::new(GeminiLlmParams::default()));
     /// let agent = AgentBuilder::new("analyst")
     ///     .instruction("Analyze the topic")
     ///     .temperature(0.3)
-    ///     .build(llm);
+    ///     .build(llm)?;
     ///
+    /// let state = State::new();
     /// let result = agent.run(&state).await?;
+    /// # let _ = result; Ok(())
+    /// # }
     /// ```
-    pub fn build(self, llm: Arc<dyn BaseLlm>) -> Arc<dyn TextAgent> {
+    pub fn build(self, llm: Arc<dyn BaseLlm>) -> Result<Arc<dyn TextAgent>, ConfigError> {
+        if !self.inner.config_errors.is_empty() {
+            return Err(ConfigError {
+                issues: self.inner.config_errors.clone(),
+            });
+        }
         let mut agent = LlmTextAgent::new(&self.inner.name, llm);
 
         if let Some(inst) = &self.inner.instruction {
@@ -719,7 +743,7 @@ impl AgentBuilder {
             agent = agent.add_middleware(mw.clone());
         }
 
-        Arc::new(agent)
+        Ok(Arc::new(agent))
     }
 }
 
@@ -791,11 +815,11 @@ mod tests {
         let b = AgentBuilder::new("agent")
             .instruction("Be helpful")
             .temperature(0.7)
-            .model(GeminiModel::Gemini2_0FlashLive);
+            .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO);
 
         assert_eq!(b.get_instruction(), Some("Be helpful"));
         assert_eq!(b.get_temperature(), Some(0.7));
-        assert_eq!(b.get_model(), Some(&GeminiModel::Gemini2_0FlashLive));
+        assert_eq!(b.get_model(), Some(&ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO));
     }
 
     #[test]
@@ -864,7 +888,7 @@ mod tests {
     #[test]
     fn debug_display() {
         let b = AgentBuilder::new("debug-test");
-        let debug = format!("{:?}", b);
+        let debug = format!("{b:?}");
         assert!(debug.contains("debug-test"));
     }
 
@@ -915,7 +939,7 @@ mod tests {
     #[test]
     fn full_fluent_chain() {
         let b = AgentBuilder::new("full-agent")
-            .model(GeminiModel::Gemini2_0FlashLive)
+            .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
             .instruction("Be helpful")
             .temperature(0.7)
             .top_p(0.95)
@@ -945,7 +969,8 @@ mod tests {
         let agent = AgentBuilder::new("test")
             .instruction("Be helpful")
             .temperature(0.5)
-            .build(llm);
+            .build(llm)
+            .unwrap();
 
         assert_eq!(agent.name(), "test");
         let state = gemini_adk_rs::State::new();
@@ -956,7 +981,7 @@ mod tests {
     #[tokio::test]
     async fn build_stores_output_in_state() {
         let llm: Arc<dyn BaseLlm> = Arc::new(MockLlm("state output".into()));
-        let agent = AgentBuilder::new("test").build(llm);
+        let agent = AgentBuilder::new("test").build(llm).unwrap();
         let state = gemini_adk_rs::State::new();
         agent.run(&state).await.unwrap();
         assert_eq!(state.get::<String>("output"), Some("state output".into()));
@@ -995,7 +1020,7 @@ mod tests {
             }
         }
 
-        let agent = AgentBuilder::new("echo").build(Arc::new(EchoLlm));
+        let agent = AgentBuilder::new("echo").build(Arc::new(EchoLlm)).unwrap();
         let state = gemini_adk_rs::State::new();
         let _ = state.set("input", "hello from state");
         let result = agent.run(&state).await.unwrap();
@@ -1084,13 +1109,14 @@ mod tests {
 
         let agent = AgentBuilder::new("mw-test")
             .middleware(mw)
-            .tool(Arc::new(SimpleTool::new(
+            .tool(SimpleTool::new(
                 "echo_tool",
                 "Echo tool",
                 None,
                 |_args| async move { Ok(serde_json::json!({"echo": true})) },
-            )))
-            .build(llm);
+            ))
+            .build(llm)
+            .unwrap();
 
         let state = gemini_adk_rs::State::new();
         let result = agent.run(&state).await.unwrap();
@@ -1152,7 +1178,8 @@ mod tests {
 
         let agent = AgentBuilder::new("error-test")
             .middleware(mw)
-            .build(Arc::new(FailLlm));
+            .build(Arc::new(FailLlm))
+            .unwrap();
 
         let state = gemini_adk_rs::State::new();
         let result = agent.run(&state).await;
@@ -1204,7 +1231,10 @@ mod tests {
             seen_len: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         });
 
-        let agent = AgentBuilder::new("guarded").guard(G::pii()).build(llm);
+        let agent = AgentBuilder::new("guarded")
+            .guard(G::pii())
+            .build(llm)
+            .unwrap();
 
         let state = gemini_adk_rs::State::new();
         let err = agent.run(&state).await.unwrap_err();
@@ -1225,7 +1255,8 @@ mod tests {
 
         let agent = AgentBuilder::new("guarded")
             .guard(G::pii() | G::length(1, 1000))
-            .build(llm);
+            .build(llm)
+            .unwrap();
 
         let state = gemini_adk_rs::State::new();
         let result = agent.run(&state).await.unwrap();
@@ -1246,7 +1277,8 @@ mod tests {
 
         let agent = AgentBuilder::new("ctx")
             .context(C::prepend(Content::user("system preamble")))
-            .build(llm);
+            .build(llm)
+            .unwrap();
 
         let state = gemini_adk_rs::State::new();
         let _ = state.set("input", "hello");
@@ -1272,7 +1304,8 @@ mod tests {
 
         let agent = AgentBuilder::new("ctx")
             .context(C::prepend(Content::user("a")) + C::prepend(Content::user("b")) + C::window(1))
-            .build(llm);
+            .build(llm)
+            .unwrap();
 
         let state = gemini_adk_rs::State::new();
         let _ = state.set("input", "hello");
@@ -1282,5 +1315,52 @@ mod tests {
             1,
             "window(1) should trim history to the last turn"
         );
+    }
+}
+
+#[cfg(test)]
+mod mcp_rejection_tests {
+    use super::*;
+    use gemini_adk_rs::llm::{LlmError, LlmRequest, LlmResponse};
+
+    struct NeverLlm;
+    #[async_trait::async_trait]
+    impl BaseLlm for NeverLlm {
+        fn model_id(&self) -> &str {
+            "never"
+        }
+        async fn generate(&self, _req: LlmRequest) -> Result<LlmResponse, LlmError> {
+            Err(LlmError::RequestFailed("never".into()))
+        }
+    }
+
+    /// `T::mcp` on a text agent is a build error naming the tool kind — the
+    /// same way `Live::connect` fails on it — never a silent drop.
+    #[test]
+    fn mcp_toolset_is_a_build_error() {
+        use crate::compose::tools::T;
+        let err = AgentBuilder::new("text")
+            .tools(T::mcp("node ./server.js"))
+            .build(Arc::new(NeverLlm))
+            .err()
+            .expect("build must fail");
+        assert!(err.to_string().contains("T::mcp"), "{err}");
+        assert!(err.to_string().contains("Live"), "{err}");
+    }
+
+    /// `tool(..)` takes any `ToolFunction`, including an `Arc<dyn ToolFunction>`.
+    #[test]
+    fn tool_accepts_values_and_arcs() {
+        use gemini_adk_rs::tool::SimpleTool;
+        let arc: Arc<dyn ToolFunction> = Arc::new(SimpleTool::new("a", "a", None, |_| async {
+            Ok(serde_json::json!({}))
+        }));
+        let b = AgentBuilder::new("t")
+            .tool(SimpleTool::new("b", "b", None, |_| async {
+                Ok(serde_json::json!({}))
+            }))
+            .tool(arc.clone())
+            .tools(arc);
+        assert_eq!(b.tool_count(), 3);
     }
 }

@@ -1,3 +1,5 @@
+#![warn(unreachable_pub)]
+#![forbid(unsafe_code)]
 #![warn(missing_docs)]
 //! # gemini-memory-rs
 //!

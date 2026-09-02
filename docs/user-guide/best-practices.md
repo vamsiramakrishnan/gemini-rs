@@ -84,7 +84,7 @@ let tool = SimpleTool::new("lookup", "Quick lookup", None, |args| async move {
 
 // Option 2: background execution — model gets an ack immediately
 Live::builder()
-    .tools(dispatcher)
+    .dispatcher(dispatcher)
     .tool_background("search_knowledge_base")  // zero dead-air
 ```
 
@@ -154,7 +154,7 @@ Voice sessions (Live API) do not support adding or removing tool definitions mid
 ```rust,ignore
 // Tools declared at build time -- cannot change after connect
 let handle = Live::builder()
-    .tools(dispatcher)  // fixed for the session's lifetime
+    .dispatcher(dispatcher)  // fixed for the session's lifetime
     .connect_vertex(project, location, token)
     .await?;
 
@@ -258,15 +258,15 @@ Vertex AI sends Binary frames, not Text frames. The `TungsteniteTransport` handl
 
 ### Native audio model only supports AUDIO output
 
-The `Gemini2_0FlashLive` model supports only `Modality::Audio` output, not `Modality::Text`. If you need text responses, use `.text_only()` on the builder, which sets `Modality::Text` explicitly:
+The native-audio Live models support only `Modality::Audio` output, not `Modality::Text`. If you need text responses, use `.text_only()` on the builder, which sets `Modality::Text` explicitly:
 
 ```rust,ignore
-// Voice output (default for live model)
-Live::builder().model(GeminiModel::Gemini2_0FlashLive)
+// Voice output (default for live models)
+Live::builder()
     // response_modalities defaults to [Audio]
 
 // Text-only output
-Live::builder().model(GeminiModel::Gemini2_0FlashLive).text_only()
+Live::builder().text_only()
     // response_modalities set to [Text]
 ```
 
@@ -290,11 +290,11 @@ The processor rejects tool calls not in the current phase's `tools_enabled` list
 
 ### Wrong Vertex AI endpoint
 
-The global Vertex AI endpoint is `wss://aiplatform.googleapis.com/...`, NOT `wss://global-aiplatform.googleapis.com/...`. This is handled automatically by the `Platform` enum, but matters if you are constructing URLs manually.
+The global Vertex AI endpoint is `wss://aiplatform.googleapis.com/...`, NOT `wss://global-aiplatform.googleapis.com/...`. This is handled automatically by `ApiEndpoint`, but matters if you are constructing URLs manually.
 
 ### API version mismatch
 
-Google AI uses `v1beta`, Vertex AI uses `v1beta1`. Again, the `Platform` enum handles this, but be aware when reading API docs.
+Google AI uses `v1beta`, Vertex AI uses `v1beta1`. Again, `ApiEndpoint` handles this, but be aware when reading API docs.
 
 ### State prefix confusion
 
@@ -379,7 +379,7 @@ Live::builder()
 .phase("main")
     .instruction("Handle customer requests")
     .modifiers(vec![
-        P::with_state(&["emotional_state"]),
+        P::show_state(&["emotional_state"]),
         P::context_fn(|s| format!("Customer: {}", s.get::<String>("name").unwrap_or_default())),
     ])
     .done()
@@ -392,17 +392,16 @@ Live::builder()
 `MockTransport` lets you test without real WebSocket connections. Inject scripted server responses:
 
 ```rust,ignore
-use gemini_genai_rs::transport::MockTransport;
+use gemini_genai_rs::prelude::*;
 
-let mock = MockTransport::new(vec![
-    // Scripted server messages
-    ServerMessage::SetupComplete { ... },
-    ServerMessage::ServerContent { ... },
-]);
+let mut mock = MockTransport::new();
+// Scripted server frames (raw JSON bytes, in the order the server would send them)
+mock.script_recv(br#"{"setupComplete":{}}"#.to_vec());
+mock.script_recv(br#"{"serverContent":{"turnComplete":true}}"#.to_vec());
 
-let (handle, _) = ConnectBuilder::new(config)
+let handle = ConnectBuilder::new(config)
     .transport(mock)
-    .build()
+    .connect()
     .await?;
 ```
 
@@ -453,7 +452,7 @@ async fn test_pipeline() {
     let llm: Arc<dyn BaseLlm> = Arc::new(MockLlm("mock output".into()));
     let agent = AgentBuilder::new("test")
         .instruction("Analyze this")
-        .build(llm);
+        .build(llm)?;
 
     let state = State::new();
     state.set("input", "test data");

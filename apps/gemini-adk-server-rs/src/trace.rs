@@ -4,7 +4,7 @@
 //! endpoint can return real execution traces instead of an empty placeholder.
 //! This is a self-contained recorder of what the *server* does (agent run timing
 //! and outcome); deep L1 spans still flow to OTLP / Cloud Trace when the agent
-//! runtime is built with the `tracing-support` + exporter features.
+//! runtime is built with an OTel exporter feature.
 //!
 //! Traces are capped at [`MAX_TRACES`] with FIFO eviction so the store cannot
 //! grow without bound in a long-lived server.

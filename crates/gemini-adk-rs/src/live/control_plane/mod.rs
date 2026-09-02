@@ -10,17 +10,17 @@ mod tool_handler;
 
 pub(super) use main_loop::run_control_lane;
 
-/// Dispatch an async callback respecting its [`CallbackMode`].
+/// Dispatch an async callback respecting its [`ExecutionMode`](super::ExecutionMode).
 ///
-/// - [`Blocking`](super::callbacks::CallbackMode::Blocking): awaits the callback inline.
-/// - [`Concurrent`](super::callbacks::CallbackMode::Concurrent): spawns as a detached tokio task.
+/// - [`Blocking`](super::ExecutionMode::Blocking): awaits the callback inline.
+/// - [`Concurrent`](super::ExecutionMode::Concurrent): spawns as a detached tokio task.
 macro_rules! dispatch_callback {
-    ($mode:expr, $cb:expr) => {
+    ($mode:expr_2021, $cb:expr_2021) => {
         match $mode {
-            $crate::live::callbacks::CallbackMode::Blocking => {
+            $crate::live::ExecutionMode::Blocking => {
                 $cb.await;
             }
-            $crate::live::callbacks::CallbackMode::Concurrent => {
+            $crate::live::ExecutionMode::Concurrent => {
                 let f = $cb;
                 tokio::spawn(async move {
                     f.await;

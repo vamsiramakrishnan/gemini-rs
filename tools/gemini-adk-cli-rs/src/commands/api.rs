@@ -1,4 +1,4 @@
-use gemini_adk_server_rs::{run_server, ServeConfig};
+use gemini_adk_server_rs::{ServeConfig, run_server};
 
 /// Configuration for the API server command.
 #[allow(dead_code)]

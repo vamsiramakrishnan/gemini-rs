@@ -278,7 +278,10 @@ mod tests {
     }
 
     fn snapshot(facts: Vec<RetrievedMemory>) -> PreparedMemorySnapshot {
-        let token_count = facts.iter().map(|f| f.token_cost()).sum::<usize>() as u16;
+        let token_count = facts
+            .iter()
+            .map(super::RetrievedMemory::token_cost)
+            .sum::<usize>() as u16;
         PreparedMemorySnapshot {
             facts: Arc::from(facts),
             token_count,

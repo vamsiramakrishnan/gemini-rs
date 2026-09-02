@@ -74,14 +74,14 @@ async fn skill_spec_and_scenario_are_valid() {
     let convo = Conversation::from_spec(spec).expect("spec compiles");
 
     // The compiled artifact matches what the skill documents.
-    assert!(convo.flow().tool_policy().tools.contains("book"));
+    assert!(convo.flow().tool_surface().tools.contains("book"));
     assert!(convo.overlays().iter().any(|o| o.name == "faq"));
     assert!(convo.overlays().iter().any(|o| o.name == "safety")); // from safety_handoff
     assert!(convo.redacted_fields().contains("card_number"));
 
     let scenario: Scenario = serde_json::from_str(SCENARIO_JSON).expect("scenario parses");
     scenario
-        .run(&convo, FlowMode::Enforce)
+        .run(&convo, Enforcement::Enforce)
         .await
         .expect("happy-path scenario passes");
 }

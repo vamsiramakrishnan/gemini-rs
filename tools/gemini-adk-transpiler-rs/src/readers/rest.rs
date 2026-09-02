@@ -24,7 +24,7 @@ pub fn read_rest_modules(source_dir: &Path) -> Result<Vec<RestModuleDef>, String
     // Scan all .ts files for classes extending BaseModule
     let entries: Vec<_> = std::fs::read_dir(source_dir)
         .map_err(|e| format!("Failed to read source dir: {e}"))?
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .filter(|e| e.path().extension().is_some_and(|ext| ext == "ts"))
         .collect();
 
@@ -98,11 +98,13 @@ fn extract_methods(content: &str, module_name: &str) -> Result<Vec<RestMethodDef
         if ts_name.starts_with('_') || is_private_method(&ts_name, content) {
             continue;
         }
-        if let Some(method) =
-            build_method_def(&ts_name, module_name, &method_names, &method_http, content)
-        {
-            methods.push(method);
-        }
+        methods.push(build_method_def(
+            &ts_name,
+            module_name,
+            &method_names,
+            &method_http,
+            content,
+        ));
     }
 
     // Extract all method names (regular async form)
@@ -114,11 +116,13 @@ fn extract_methods(content: &str, module_name: &str) -> Result<Vec<RestMethodDef
         if ts_name.starts_with('_') || is_private_method(&ts_name, content) {
             continue;
         }
-        if let Some(method) =
-            build_method_def(&ts_name, module_name, &method_names, &method_http, content)
-        {
-            methods.push(method);
-        }
+        methods.push(build_method_def(
+            &ts_name,
+            module_name,
+            &method_names,
+            &method_http,
+            content,
+        ));
     }
 
     Ok(methods)
@@ -140,11 +144,11 @@ fn build_method_def(
     method_names: &HashMap<(&str, &str), &str>,
     method_http: &HashMap<(&str, &str), (HttpMethod, bool, bool)>,
     content: &str,
-) -> Option<RestMethodDef> {
+) -> RestMethodDef {
     let key = (module_name, ts_name);
     let rust_name = method_names
         .get(&key)
-        .map(|s| s.to_string())
+        .map(std::string::ToString::to_string)
         .unwrap_or_else(|| format!("{}_{}", ts_name, singular(module_name)));
 
     let (http_method, returns_void, is_special) =
@@ -159,7 +163,7 @@ fn build_method_def(
     // Determine return type from mapping
     let return_type = infer_return_type(ts_name, module_name);
 
-    Some(RestMethodDef {
+    RestMethodDef {
         ts_name: ts_name.to_string(),
         rust_name,
         http_method,
@@ -167,7 +171,7 @@ fn build_method_def(
         description,
         is_special,
         returns_void,
-    })
+    }
 }
 
 /// Extract JSDoc comment preceding a method.
@@ -394,17 +398,15 @@ export class Files extends BaseModule {
     fn extracts_public_methods() {
         let methods = extract_methods(SAMPLE_FILES_TS, "files").unwrap();
         let names: Vec<&str> = methods.iter().map(|m| m.ts_name.as_str()).collect();
-        assert!(names.contains(&"list"), "Should contain list: {:?}", names);
-        assert!(names.contains(&"get"), "Should contain get: {:?}", names);
+        assert!(names.contains(&"list"), "Should contain list: {names:?}");
+        assert!(names.contains(&"get"), "Should contain get: {names:?}");
         assert!(
             names.contains(&"delete"),
-            "Should contain delete: {:?}",
-            names
+            "Should contain delete: {names:?}"
         );
         assert!(
             names.contains(&"upload"),
-            "Should contain upload: {:?}",
-            names
+            "Should contain upload: {names:?}"
         );
         // Should NOT contain private methods
         assert!(
