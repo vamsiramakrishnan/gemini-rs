@@ -41,7 +41,7 @@ Repo examples also read these from a `.env` at the workspace root
 (`cp .env.example .env`).
 
 You normally don't pick a model: connect resolves a default the target platform
-actually serves, and `GEMINI_MODEL=…` (or `.model(…)` in code) overrides it.
+actually serves, and `GEMINI_LIVE_MODEL=…` (or `.model(…)` in code) overrides it.
 
 ## Path A — build your own project
 

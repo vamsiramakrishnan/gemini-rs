@@ -66,7 +66,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 `cargo run` and speak. You don't pick a model: connect resolves a default the
 target platform actually serves (Google AI's catalog and Vertex AI's disagree),
-and `GEMINI_MODEL=…` or `.model(…)` overrides it. An interruption flushes the
+and `GEMINI_LIVE_MODEL=…` (or `.model(…)`) overrides it. An interruption flushes the
 speaker buffer instead of playing stale speech.
 
 **3b. First token** — the text agent, no microphone or audio deps needed:

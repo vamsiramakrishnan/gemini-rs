@@ -9,7 +9,7 @@ constructed. Everything below is mechanical.
 | Area | 1.x | 2.0 |
 |------|-----|-----|
 | Model type | `GeminiModel` enum (`Gemini2_0FlashLive`, `GeminiLive2_5FlashNativeAudio`, `Gemini2_0Flash`, `Custom(s)`) | `ModelId` string newtype: `ModelId::new("…")`, `"…".into()`, `ModelId::from_static("…")`; constants `ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO` (Vertex GA), `ModelId::FLASH_2_5_NATIVE_AUDIO_LATEST` (Google AI alias), `ModelId::FLASH_LATEST` (text). `GeminiModel::Custom(s)` → `ModelId::new(s)` |
-| Choosing a model | `.model(GeminiModel::…)` was effectively required | `SessionConfig.model` is `Option<ModelId>`; leave it unset and connect resolves `ModelId::live_default(vertex)` (honours `GEMINI_MODEL`, prefixes bare names with `models/`). `Live::builder().model(..)` and `AgentBuilder::model(..)` take a `ModelId` |
+| Choosing a model | `.model(GeminiModel::…)` was effectively required | `SessionConfig.model` is `Option<ModelId>`; leave it unset and connect resolves `ModelId::live_default(vertex)` (honours `GEMINI_LIVE_MODEL`, then `GEMINI_MODEL`; prefixes bare names with `models/`). Text agents read `GEMINI_TEXT_MODEL`, then `GEMINI_MODEL`. `Live::builder().model(..)` and `AgentBuilder::model(..)` take a `ModelId` |
 | Connecting | `connect(config, TransportConfig::default())` | `connect(config)` |
 | Connecting with options | `connect_with(config, tc, transport, codec)` / `ConnectBuilder::new(config).build()` | `ConnectBuilder::new(config).transport_config(tc).transport(t).codec(c).connect().await` (`connect_with` is crate-private) |
 | Shortcuts | `quick_connect(key, model)`, `quick_connect_vertex(..)` | `connect(SessionConfig::new(key)).await` |

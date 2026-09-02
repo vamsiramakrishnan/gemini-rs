@@ -19,7 +19,7 @@ All examples read from a shared `.env` at the workspace root via [`dotenvy`](htt
 | `GOOGLE_CLOUD_PROJECT` | with Vertex | GCP project ID (e.g. `my-project-123`). |
 | `GOOGLE_CLOUD_LOCATION` | with Vertex | Region for the Live endpoint. Defaults to `us-central1`. |
 | `GOOGLE_ACCESS_TOKEN` | optional | Explicit OAuth2 token. Falls back to `gcloud auth print-access-token`. |
-| `GEMINI_MODEL` | optional | Override the default model (see below). |
+| `GEMINI_LIVE_MODEL` | optional | Override the Live model (see below). `GEMINI_TEXT_MODEL` does the same for text agents; `GEMINI_MODEL` is the shared fallback for both. |
 
 > **Tip:** The ADK Web UI also accepts `GOOGLE_GENAI_API_KEY` as an alias for `GEMINI_API_KEY`.
 
@@ -29,13 +29,13 @@ Always use the full `models/` prefix — the SDK normalizes it per-platform:
 
 ```bash
 # Works on both Google AI and Vertex AI:
-GEMINI_MODEL=models/gemini-2.5-flash-native-audio-preview-12-2025
+GEMINI_LIVE_MODEL=models/gemini-2.5-flash-native-audio-latest
 
 # Google AI  → sent as-is in the setup message
 # Vertex AI  → stripped to: projects/{project}/locations/{loc}/publishers/google/models/gemini-2.5-flash-native-audio-preview-12-2025
 ```
 
-Omit `GEMINI_MODEL` to use the SDK default — connect resolves one the target
+Omit `GEMINI_LIVE_MODEL` to use the SDK default — connect resolves one the target
 platform actually serves (`models/gemini-2.5-flash-native-audio-latest` on
 Google AI, `models/gemini-live-2.5-flash-native-audio` on Vertex AI).
 
@@ -45,7 +45,7 @@ Examples use **two separate models** that share the same auth credentials:
 
 | Role | Model | Protocol | Configured via |
 |------|-------|----------|----------------|
-| **Live session** | `gemini-genai-2.5-flash-native-audio` | WebSocket | `GEMINI_MODEL` env var |
+| **Live session** | `models/gemini-2.5-flash-native-audio-latest` (Google AI) / `gemini-live-2.5-flash-native-audio` (Vertex) | WebSocket | `GEMINI_LIVE_MODEL` env var |
 | **Text LLM** | `gemini-3.1-flash-lite-preview` | REST | `GeminiLlmParams` in code |
 
 The text LLM powers extractors, agent-as-tool pipelines, and background analysis in advanced examples. It reads the **same auth env vars** — no extra configuration needed.

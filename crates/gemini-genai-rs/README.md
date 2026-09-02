@@ -15,7 +15,7 @@ use gemini_genai_rs::prelude::*;
 #[tokio::main]
 async fn main() -> Result<(), SessionError> {
     // Unset model → the platform's current native-audio Live model
-    // (`GEMINI_MODEL` overrides). Output transcription makes the answer readable.
+    // (`GEMINI_LIVE_MODEL` overrides). Output transcription makes the answer readable.
     let config = SessionConfig::new(std::env::var("GEMINI_API_KEY").unwrap())
         .output_transcription(true);
     let session = connect(config).await?;

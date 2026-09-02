@@ -42,7 +42,7 @@ pub trait TextAgent: Send + Sync {
 use gemini_adk_rs::text::LlmTextAgent;
 use gemini_adk_rs::llm::{GeminiLlm, GeminiLlmParams};
 
-// `model: None` resolves GEMINI_MODEL, then the platform's Flash alias.
+// `model: None` resolves GEMINI_TEXT_MODEL, then GEMINI_MODEL, then the platform's Flash alias.
 let llm = Arc::new(GeminiLlm::new(GeminiLlmParams {
     model: Some("gemini-flash-latest".into()),
     ..Default::default()

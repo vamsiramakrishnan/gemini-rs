@@ -29,7 +29,7 @@ use gemini_genai_rs::prelude::*;
 
 ```rust
 let agent = AgentBuilder::new("analyst")
-    .model(ModelId::FLASH_LATEST)   // optional: GeminiLlm defaults to GEMINI_MODEL or this alias
+    .model(ModelId::FLASH_LATEST)   // optional: GeminiLlm defaults to GEMINI_TEXT_MODEL or this alias
     .instruction("Analyze the given topic")
     .temperature(0.3)
     .google_search()

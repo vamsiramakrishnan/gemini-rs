@@ -60,7 +60,7 @@ The L1 `Agent` *trait* is re-exported (in `prelude` and `agents`) as
 
 ```rust
 // Requires the `gemini-llm` feature on gemini-adk-fluent-rs for real generation.
-// Model may be omitted: GeminiLlm defaults to GEMINI_MODEL or `gemini-flash-latest`.
+// Model may be omitted: GeminiLlm defaults to GEMINI_TEXT_MODEL (then GEMINI_MODEL) or `gemini-flash-latest`.
 let agent = AgentBuilder::new("analyst")
     .model(ModelId::FLASH_LATEST)      // or any name: ModelId::new("…") / "…".into()
     .instruction("Analyze the given topic")
@@ -79,7 +79,7 @@ Copy-on-write immutable builders -- every setter returns a new builder, original
 ```rust
 let handle = Live::builder()
     // No .model(..) → connect resolves a platform-appropriate default
-    // (GEMINI_MODEL env var overrides; .model(Custom("models/…")) pins one).
+    // (GEMINI_LIVE_MODEL env var overrides; .model(ModelId::new("models/…")) pins one).
     .voice(Voice::Kore)
     .instruction("You are a weather assistant")
     .greeting("Greet the user and ask how you can help.")
@@ -713,7 +713,7 @@ just release-status
 ## Common Mistakes
 
 - **Wrong audio model**: The native-audio Live models only support `Modality::Audio` output, NOT `Modality::Text`. Use `.text_only()` for text-only mode.
-- **Live model names differ by platform**, and Google AI retires dated names. When no `.model(..)` is set (`SessionConfig.model` is `Option<ModelId>`), connect resolves a platform-appropriate default via `ModelId::live_default(vertex)`: `GEMINI_MODEL` from the environment (bare names get the `models/` prefix), else `ModelId::FLASH_2_5_NATIVE_AUDIO_LATEST` (`models/gemini-2.5-flash-native-audio-latest`, a rolling alias, verified 2026-08) on Google AI, else `ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO` (`models/gemini-live-2.5-flash-native-audio`, Vertex AI's GA name per Google Cloud docs). Set `.model(ModelId::new("models/…"))` only when you need a specific model.
+- **Live model names differ by platform**, and Google AI retires dated names. When no `.model(..)` is set (`SessionConfig.model` is `Option<ModelId>`), connect resolves a platform-appropriate default via `ModelId::live_default(vertex)`: `GEMINI_LIVE_MODEL`, then `GEMINI_MODEL`, from the environment (bare names get the `models/` prefix), else `ModelId::FLASH_2_5_NATIVE_AUDIO_LATEST` (`models/gemini-2.5-flash-native-audio-latest`, a rolling alias, verified 2026-08) on Google AI, else `ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO` (`models/gemini-live-2.5-flash-native-audio`, Vertex AI's GA name per Google Cloud docs). Set `.model(ModelId::new("models/…"))` only when you need a specific model. `GEMINI_MODEL` is shared with the text LLM, so a native-audio name there 404s every `generateContent` call: use `GEMINI_LIVE_MODEL` / `GEMINI_TEXT_MODEL` to pin the two separately (`GeminiLlm` warns when it resolves a Live model name).
 - **Dated model names drift**: `gemini-2.0-flash-live-001` is gone from the Google AI catalog and `gemini-live-2.5-flash-native-audio` is Vertex-only — which is why `ModelId` is a string newtype with rolling-alias constants rather than an enum of dated names. Confirm what a key can reach: `curl "https://generativelanguage.googleapis.com/v1beta/models?key=$GEMINI_API_KEY" | jq -r '.models[] | select(.supportedGenerationMethods[]? == "bidiGenerateContent") | .name'`. The same catalog drift hits text models: `gemini-2.5-flash` 404s on Google AI `generateContent`; `GeminiLlm` therefore defaults to the `gemini-flash-latest` alias there (`gemini-2.5-flash` still on Vertex).
 - **Feature flags gate real work**: `gemini-adk-fluent-rs` ships `default = []` — text generation needs `gemini-llm` (without it `GeminiLlm` compiles but errors at runtime), `talk()` needs `voice-io`. Typed tools need `schemars = "0.8"`, not 1.x.
 - **Vertex AI binary frames**: Vertex AI sends Binary WebSocket frames (not Text) -- handled automatically by `TungsteniteTransport`.

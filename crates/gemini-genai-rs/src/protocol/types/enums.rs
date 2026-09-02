@@ -82,14 +82,19 @@ impl ModelId {
         self.0.strip_prefix("models/").unwrap_or(&self.0)
     }
 
-    /// The Live model to use when none was set: the platform's current
-    /// native-audio Flash model, overridden by `GEMINI_MODEL` if that is set.
+    /// The Live model to use when none was set: `GEMINI_LIVE_MODEL` if set,
+    /// else `GEMINI_MODEL`, else the platform's current native-audio Flash
+    /// model.
     ///
-    /// A bare name in `GEMINI_MODEL` (no `/`) gets the `models/` prefix the
-    /// wire expects; a qualified one passes through untouched.
+    /// `GEMINI_LIVE_MODEL` exists because `GEMINI_MODEL` is also the text
+    /// model override (`GeminiLlm` reads `GEMINI_TEXT_MODEL`, then
+    /// `GEMINI_MODEL`): a native-audio name in the shared variable would 404
+    /// every `generateContent` call. A bare name (no `/`) gets the `models/`
+    /// prefix the wire expects; a qualified one passes through untouched.
     pub fn live_default(vertex: bool) -> Self {
-        if let Some(m) = std::env::var("GEMINI_MODEL")
-            .ok()
+        if let Some(m) = ["GEMINI_LIVE_MODEL", "GEMINI_MODEL"]
+            .iter()
+            .find_map(|k| std::env::var(k).ok())
             .map(|m| m.trim().to_string())
             .filter(|m| !m.is_empty())
         {
@@ -366,7 +371,9 @@ mod tests {
     fn live_default_follows_the_platform_unless_overridden() {
         // GEMINI_MODEL is process-global; only assert the platform branch when
         // it is not set in this environment.
-        if std::env::var_os("GEMINI_MODEL").is_none() {
+        if std::env::var_os("GEMINI_MODEL").is_none()
+            && std::env::var_os("GEMINI_LIVE_MODEL").is_none()
+        {
             assert_eq!(
                 ModelId::live_default(true),
                 ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO

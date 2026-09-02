@@ -83,22 +83,31 @@ impl GeminiLlm {
             get_google_llm_variant()
         };
 
-        // Resolve model: params, then the GEMINI_MODEL env var, then a
-        // per-variant default. Google AI retires dated names but serves the
-        // rolling `gemini-flash-latest` alias; Vertex AI keeps versioned GA
-        // names and does not carry the alias.
+        // Resolve model: params, then GEMINI_TEXT_MODEL, then the shared
+        // GEMINI_MODEL, then a per-variant default. Google AI retires dated
+        // names but serves the rolling `gemini-flash-latest` alias; Vertex AI
+        // keeps versioned GA names and does not carry the alias.
         let model = params
             .model
             .clone()
             .or_else(|| {
-                std::env::var("GEMINI_MODEL")
-                    .ok()
+                ["GEMINI_TEXT_MODEL", "GEMINI_MODEL"]
+                    .iter()
+                    .find_map(|k| std::env::var(k).ok())
                     .filter(|m| !m.trim().is_empty())
             })
             .unwrap_or_else(|| match variant {
                 GoogleLlmVariant::GeminiApi => "gemini-flash-latest".to_string(),
                 GoogleLlmVariant::VertexAi => "gemini-2.5-flash".to_string(),
             });
+        if model.contains("native-audio") || model.contains("-live-") {
+            tracing::warn!(
+                model = %model,
+                "GeminiLlm resolved a Live (bidi) model name for generateContent; set \
+                 GEMINI_TEXT_MODEL (or GeminiLlmParams::model) to a text model — a shared \
+                 GEMINI_MODEL pointing at the Live model 404s here"
+            );
+        }
 
         // Resolve API key from params or env
         if params.api_key.is_none() && variant == GoogleLlmVariant::GeminiApi {
