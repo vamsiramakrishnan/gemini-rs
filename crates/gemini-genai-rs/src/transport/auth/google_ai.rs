@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use crate::protocol::types::ModelId;
 use crate::session::AuthError;
 
-use super::url_builders::{build_google_ai_rest_url, build_google_ai_rest_url_no_key};
+use super::url_builders::build_google_ai_rest_url;
 use super::{AuthProvider, RestAuth, ServiceEndpoint};
 
 // ---------------------------------------------------------------------------
@@ -37,8 +37,12 @@ impl AuthProvider for GoogleAIAuth {
         )
     }
 
+    /// REST requests carry the key in the `x-goog-api-key` header rather
+    /// than the query string, so it never lands in access logs, proxies, or
+    /// error messages that echo the URL. (The Live WebSocket upgrade still
+    /// passes it as `?key=`, which is what that endpoint accepts.)
     async fn auth_headers(&self) -> Result<Vec<(String, String)>, AuthError> {
-        Ok(vec![]) // API key is in the URL
+        Ok(vec![("x-goog-api-key".to_string(), self.api_key.clone())])
     }
 
     fn query_params(&self) -> Vec<(String, String)> {
@@ -49,7 +53,7 @@ impl AuthProvider for GoogleAIAuth {
 impl RestAuth for GoogleAIAuth {
     fn rest_url(&self, endpoint: ServiceEndpoint, model: Option<&ModelId>) -> String {
         let base = "https://generativelanguage.googleapis.com/v1beta";
-        build_google_ai_rest_url(base, endpoint, model, &self.api_key)
+        build_google_ai_rest_url(base, endpoint, model)
     }
 }
 
@@ -94,6 +98,6 @@ impl RestAuth for GoogleAITokenAuth {
     fn rest_url(&self, endpoint: ServiceEndpoint, model: Option<&ModelId>) -> String {
         let base = "https://generativelanguage.googleapis.com/v1beta";
         // Token auth uses Bearer header, not query param — build URL without key
-        build_google_ai_rest_url_no_key(base, endpoint, model)
+        build_google_ai_rest_url(base, endpoint, model)
     }
 }

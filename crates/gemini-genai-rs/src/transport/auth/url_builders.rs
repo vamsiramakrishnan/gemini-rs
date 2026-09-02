@@ -8,17 +8,6 @@ pub(crate) fn build_google_ai_rest_url(
     base: &str,
     endpoint: ServiceEndpoint,
     model: Option<&ModelId>,
-    api_key: &str,
-) -> String {
-    let path = build_rest_path(endpoint, model);
-    format!("{base}/{path}?key={api_key}")
-}
-
-/// Build a Google AI REST URL without an API key (for token-based auth).
-pub(crate) fn build_google_ai_rest_url_no_key(
-    base: &str,
-    endpoint: ServiceEndpoint,
-    model: Option<&ModelId>,
 ) -> String {
     let path = build_rest_path(endpoint, model);
     format!("{base}/{path}")

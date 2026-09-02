@@ -136,10 +136,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn google_ai_auth_headers_empty() {
+    async fn google_ai_rest_key_travels_in_a_header_not_the_url() {
         let auth = GoogleAIAuth::new("test-key");
         let headers = auth.auth_headers().await.unwrap();
-        assert!(headers.is_empty());
+        assert_eq!(
+            headers,
+            vec![("x-goog-api-key".to_string(), "test-key".to_string())]
+        );
+        let url = auth.rest_url(
+            ServiceEndpoint::GenerateContent,
+            Some(&ModelId::FLASH_LATEST),
+        );
+        assert!(!url.contains("test-key"), "{url}");
     }
 
     #[test]
@@ -215,21 +223,24 @@ mod tests {
         let url = auth.rest_url(ServiceEndpoint::GenerateContent, Some(&model));
         assert!(url.starts_with("https://generativelanguage.googleapis.com/v1beta/"));
         assert!(url.contains(":generateContent"));
-        assert!(url.contains("key=test-key"));
+        assert!(
+            !url.contains("test-key"),
+            "the key rides in a header: {url}"
+        );
     }
 
     #[test]
     fn google_ai_rest_url_list_models() {
         let auth = GoogleAIAuth::new("key123");
         let url = auth.rest_url(ServiceEndpoint::ListModels, None);
-        assert!(url.contains("/models?key=key123"));
+        assert!(url.ends_with("/models"), "{url}");
     }
 
     #[test]
     fn google_ai_rest_url_files() {
         let auth = GoogleAIAuth::new("key");
         let url = auth.rest_url(ServiceEndpoint::Files, None);
-        assert!(url.contains("/files?key=key"));
+        assert!(url.ends_with("/files"), "{url}");
     }
 
     #[test]

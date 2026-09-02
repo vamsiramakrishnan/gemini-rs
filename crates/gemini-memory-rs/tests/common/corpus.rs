@@ -457,17 +457,17 @@ const GIFTS: &[&str] = &[
 
 /// A tiny deterministic mixer, so generated records vary without `rand` and
 /// without a run-to-run difference that would make a failure unreproducible.
-fn mix(seed: usize, salt: usize) -> usize {
-    let mut x =
-        seed.wrapping_mul(6_364_136_223_846_793_005) ^ salt.wrapping_mul(1_442_695_040_888_963_407);
+fn mix(seed: usize, stream: usize) -> usize {
+    let mut x = seed.wrapping_mul(6_364_136_223_846_793_005)
+        ^ stream.wrapping_mul(1_442_695_040_888_963_407);
     x ^= x >> 33;
     x = x.wrapping_mul(0xff51_afd7_ed55_8ccd);
     x ^= x >> 29;
     x
 }
 
-fn pick<'a>(table: &[&'a str], seed: usize, salt: usize) -> &'a str {
-    table[mix(seed, salt) % table.len()]
+fn pick<'a>(table: &[&'a str], seed: usize, stream: usize) -> &'a str {
+    table[mix(seed, stream) % table.len()]
 }
 
 // ─── record construction ────────────────────────────────────────────────────

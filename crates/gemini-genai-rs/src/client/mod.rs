@@ -234,7 +234,7 @@ mod tests {
             .model(ModelId::from_static("models/gemini-2.0-flash-live-001"));
         let url = client.rest_url(ServiceEndpoint::GenerateContent);
         assert!(url.contains(":generateContent"));
-        assert!(url.contains("key=my-key"));
+        assert!(!url.contains("my-key"), "the key rides in a header: {url}");
     }
 
     #[test]
