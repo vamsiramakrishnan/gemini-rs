@@ -31,6 +31,12 @@ jobs:
           toolchain: "1.93.1"
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
+      # Before the first workspace build, not just before the semver check: any
+      # workspace member may enable `voice-io` (cpal → alsa-sys), and a missing
+      # `alsa.pc` fails the build itself, long before rustdoc. Installing late
+      # meant `cargo test --workspace` could sink the release before publish.
+      - name: Install ALSA headers (cpal needs them; all-features rustdoc too)
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - run: cargo fmt --all -- --check
       - run: cargo test --workspace
       - run: cargo clippy --workspace --all-targets -- -D warnings
@@ -44,11 +50,6 @@ jobs:
         run: cargo publish -p gemini-adk-macros-rs --dry-run
       # SemVer ratchet: the declared version bump must cover the actual API
       # delta vs the latest published release (0.x minor may break; patch may not).
-      # The action builds rustdoc with ALL features; `voice-io` (cpal) needs
-      # ALSA headers the runner image does not ship — v0.9.0's first release
-      # run died on the missing `alsa.pc`, not on any semver delta.
-      - name: Install ALSA headers (all-features rustdoc needs cpal)
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - name: SemVer check vs published baseline
         uses: obi1kenobi/cargo-semver-checks-action@v2
         with:

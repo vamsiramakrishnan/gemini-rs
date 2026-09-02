@@ -46,19 +46,48 @@ fn readme_quickstart_programs_are_the_compiled_binaries() {
 fn readme_quickstart_manifest_names_the_required_dependencies() {
     let readme = readme();
     let manifest = fenced_block(&readme, "Cargo.toml");
-    // `gemini-llm` is a default feature, so the manifest need not name it;
-    // `voice-io` is opt-in and the voice program will not compile without it.
-    for needle in [
-        "gemini-adk-fluent-rs",
-        "voice-io",
-        "tokio",
-        "macros",
-        "rt-multi-thread",
-    ] {
+    // `gemini-llm` is a default feature, so the base manifest need not name it;
+    // `voice-io` is opt-in and lives in the voice-only block, checked below.
+    for needle in ["gemini-adk-fluent-rs", "tokio", "macros", "rt-multi-thread"] {
         assert!(
             manifest.contains(needle),
             "README Cargo.toml block no longer names `{needle}` — \
              the quickstart will not compile without it"
         );
     }
+}
+
+/// The text path is advertised as needing no audio stack, and the crate backs
+/// that up by gating `voice-io` behind an opt-in `voice` feature. If the
+/// README's base manifest ever enables `voice-io` again, that promise silently
+/// becomes false on every headless Linux box — so pin it here.
+#[test]
+fn readme_text_path_manifest_pulls_in_no_audio_stack() {
+    let readme = readme();
+    let base = fenced_block(&readme, "Cargo.toml");
+    assert!(
+        !base.contains("voice-io"),
+        "the base README manifest must stay audio-free — `voice-io` belongs in \
+         the voice-only block, or the text quickstart needs ALSA headers it \
+         claims not to need"
+    );
+
+    let voice = fenced_block(&readme, "Cargo.toml:voice");
+    assert!(
+        voice.contains("voice-io"),
+        "the voice README block must add `voice-io`"
+    );
+
+    let manifest = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"),
+    )
+    .expect("quickstart manifest");
+    assert!(
+        manifest.contains("voice = [\"gemini-adk-fluent-rs/voice-io\"]"),
+        "`voice-io` must stay behind this crate's opt-in `voice` feature"
+    );
+    assert!(
+        !manifest.contains("\"voice-io\",\n]"),
+        "`voice-io` must not be a default feature of the quickstart crate"
+    );
 }
