@@ -47,7 +47,6 @@ pub(in crate::live) async fn run_extractors(
                 match ext.extract_with_state(&window, &state).await {
                     Ok(value) => Ok((ext, value)),
                     Err(e) => {
-                        #[cfg(feature = "tracing-support")]
                         tracing::warn!(extractor = ext.name(), "Extraction failed: {e}");
                         Err((ext.name().to_string(), e.to_string()))
                     }
@@ -267,7 +266,6 @@ pub(in crate::live) async fn run_extractors_with_window(
                 match ext.extract_with_state(&window, &state).await {
                     Ok(value) => Ok((ext, value)),
                     Err(e) => {
-                        #[cfg(feature = "tracing-support")]
                         tracing::warn!(extractor = ext.name(), "Extraction failed: {e}");
                         Err((ext.name().to_string(), e.to_string()))
                     }

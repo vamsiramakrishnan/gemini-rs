@@ -287,9 +287,7 @@ pub(in crate::live) async fn handle_turn_complete(
             .unwrap_or_else(|| "default".to_string());
         tokio::spawn(async move {
             if let Err(e) = p.save(&sid, &snapshot).await {
-                #[cfg(feature = "tracing-support")]
-                tracing::warn!("Session persistence failed: {}", e);
-                let _ = e;
+                tracing::warn!("Session persistence failed: {e}");
             }
         });
     }
@@ -365,9 +363,7 @@ pub(in crate::live) async fn final_drain(
             .clone()
             .unwrap_or_else(|| "default".to_string());
         if let Err(e) = persistence.save(&sid, &snapshot).await {
-            #[cfg(feature = "tracing-support")]
-            tracing::warn!("Final session persistence failed: {}", e);
-            let _ = e;
+            tracing::warn!("Final session persistence failed: {e}");
         }
     }
 }

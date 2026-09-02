@@ -192,7 +192,6 @@ Feature flags are used to keep the default build lean. Key flags:
 | `gemini-genai-rs` | `all-apis` | All REST API modules |
 | `gemini-adk-rs` | `gemini-llm` | Gemini LLM integration via HTTP |
 | `gemini-adk-rs` | `database-sessions` | Persistent session storage |
-| `gemini-adk-rs` | `tracing-support` | Structured logging via `tracing` |
 | `gemini-adk-fluent-rs` | `gemini-llm` | Passthrough to `gemini-adk-rs/gemini-llm` |
 
 ## Testing

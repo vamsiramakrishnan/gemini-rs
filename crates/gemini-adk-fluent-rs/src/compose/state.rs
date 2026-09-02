@@ -557,7 +557,7 @@ impl S {
     ///
     /// ```ignore
     /// let t = S::branch(
-    ///     |s| s.get("premium").and_then(|v| v.as_bool()).unwrap_or(false),
+    ///     |s| s.get("premium").and_then(serde_json::Value::as_bool).unwrap_or(false),
     ///     S::set("tier", json!("gold")),
     ///     S::set("tier", json!("basic")),
     /// );
@@ -622,7 +622,7 @@ mod tests {
     fn map_custom_transform() {
         let mut state = json!({"count": 5});
         S::map(|s| {
-            if let Some(n) = s.get("count").and_then(|v| v.as_i64()) {
+            if let Some(n) = s.get("count").and_then(serde_json::Value::as_i64) {
                 s["count"] = json!(n * 2);
             }
         })
@@ -777,7 +777,11 @@ mod tests {
     fn branch_takes_true_path() {
         let mut state = json!({"premium": true});
         S::branch(
-            |s| s.get("premium").and_then(|v| v.as_bool()).unwrap_or(false),
+            |s| {
+                s.get("premium")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false)
+            },
             S::set("tier", json!("gold")),
             S::set("tier", json!("basic")),
         )
@@ -789,7 +793,11 @@ mod tests {
     fn branch_takes_false_path() {
         let mut state = json!({"premium": false});
         S::branch(
-            |s| s.get("premium").and_then(|v| v.as_bool()).unwrap_or(false),
+            |s| {
+                s.get("premium")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false)
+            },
             S::set("tier", json!("gold")),
             S::set("tier", json!("basic")),
         )

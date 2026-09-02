@@ -424,7 +424,12 @@ mod tests {
     #[test]
     fn conditional_creates_fallback_with_guard() {
         let result = conditional(
-            |state| state.get("flag").and_then(|v| v.as_bool()).unwrap_or(false),
+            |state| {
+                state
+                    .get("flag")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false)
+            },
             agent("yes").instruction("true branch"),
             agent("no").instruction("false branch"),
         );

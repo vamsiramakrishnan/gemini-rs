@@ -362,7 +362,12 @@ async fn embed_one(
     let values = json["embedding"]["values"]
         .as_array()
         .unwrap_or_else(|| panic!("no embedding in {json}"));
-    normalize(values.iter().filter_map(|v| v.as_f64()).map(|v| v as f32))
+    normalize(
+        values
+            .iter()
+            .filter_map(serde_json::Value::as_f64)
+            .map(|v| v as f32),
+    )
 }
 
 /// The prompt that writes the `generated` view.

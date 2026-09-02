@@ -173,8 +173,7 @@ let processed = chain.process(request).await?;
 
 ## Built-in Middleware
 
-**LogMiddleware** -- structured logging via `tracing` (requires
-`tracing-support` feature):
+**LogMiddleware** -- structured logging via `tracing`:
 
 ```rust,ignore
 let log = LogMiddleware::new();

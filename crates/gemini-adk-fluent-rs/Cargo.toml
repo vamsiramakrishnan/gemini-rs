@@ -68,6 +68,7 @@ dsp = ["dep:realfft", "dep:rubato"]
 # In-process SIP agent (`telephony::sip::SipAgent`) — answer raw SIP calls
 # (rsipstack signalling + built-in RTP/SDP/G.711 media).
 sip = ["dep:rsipstack", "dep:tokio-util", "tokio/net", "tokio/rt-multi-thread"]
+# No-op passthrough (tracing is always compiled); kept for manifest compatibility.
 tracing-support = ["gemini-adk-rs/tracing-support"]
 # Passthroughs so applications don't need lower-layer dependencies.
 vad-wavekat = ["gemini-adk-rs/vad-wavekat"]

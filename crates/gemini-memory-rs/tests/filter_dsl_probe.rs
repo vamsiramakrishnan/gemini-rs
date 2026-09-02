@@ -157,20 +157,20 @@ struct Filter {
 
 impl Filter {
     fn matches(&self, memory: &CanonicalMemory) -> bool {
-        if let Some(about) = &self.about {
-            if !memory.retrieval.subject.eq_ignore_ascii_case(about) {
-                return false;
-            }
+        if let Some(about) = &self.about
+            && !memory.retrieval.subject.eq_ignore_ascii_case(about)
+        {
+            return false;
         }
-        if let Some(attribute) = &self.attribute {
-            if memory.predicate.as_str() != attribute {
-                return false;
-            }
+        if let Some(attribute) = &self.attribute
+            && memory.predicate.as_str() != attribute
+        {
+            return false;
         }
-        if let Some(kind) = &self.kind {
-            if memory.kind != *kind {
-                return false;
-            }
+        if let Some(kind) = &self.kind
+            && memory.kind != *kind
+        {
+            return false;
         }
         for entity in &self.mentions {
             if !memory
@@ -342,7 +342,7 @@ async fn what_a_model_written_filter_would_buy_and_what_it_risks() {
                     Shape::About => {}
                     Shape::AboutKind => filter.kind = Some(memory.kind),
                     Shape::AboutAttribute => {
-                        filter.attribute = Some(memory.predicate.as_str().to_string())
+                        filter.attribute = Some(memory.predicate.as_str().to_string());
                     }
                 }
                 filter

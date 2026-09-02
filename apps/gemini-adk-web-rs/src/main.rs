@@ -33,7 +33,7 @@ async fn main() {
     dotenvy::dotenv().ok();
 
     // Initialize telemetry with WebSocketSpanLayer wired in
-    let (_telemetry_guard, span_tx) = init_telemetry().await;
+    let (_telemetry_guard, span_tx) = init_telemetry();
 
     let mut registry = AppRegistry::new();
     apps::register_all(&mut registry);
@@ -78,7 +78,7 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
-async fn init_telemetry() -> (
+fn init_telemetry() -> (
     gemini_genai_rs::telemetry::TelemetryGuard,
     broadcast::Sender<ServerMessage>,
 ) {

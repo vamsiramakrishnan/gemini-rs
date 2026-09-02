@@ -438,9 +438,7 @@ pub(crate) fn spawn_event_processor(
                     }
                 }
                 Err(broadcast::error::RecvError::Lagged(n)) => {
-                    #[cfg(feature = "tracing-support")]
                     tracing::warn!(skipped = n, "Event processor lagged, skipped events");
-                    let _ = n;
                 }
                 Err(broadcast::error::RecvError::Closed) => break,
             }
@@ -582,9 +580,7 @@ pub(crate) fn spawn_telemetry_lane(
                             signals.on_event(&event);
                         }
                         Err(broadcast::error::RecvError::Lagged(n)) => {
-                            #[cfg(feature = "tracing-support")]
                             tracing::warn!(skipped = n, "Telemetry lane lagged");
-                            let _ = n;
                         }
                         Err(broadcast::error::RecvError::Closed) => break,
                     }
@@ -735,10 +731,7 @@ async fn route_event(
         // doesn't understand yet are surfaced (not silently dropped) so
         // applications on an older runtime can observe them.
         other => {
-            #[cfg(feature = "tracing-support")]
             tracing::debug!(?other, "unhandled SessionEvent variant (newer wire event?)");
-            #[cfg(not(feature = "tracing-support"))]
-            let _ = other;
         }
     }
 }

@@ -183,10 +183,9 @@ async fn post(
             .json(body)
             .send()
             .await
+            && response.status().is_success()
         {
-            if response.status().is_success() {
-                return response.json().await.ok();
-            }
+            return response.json().await.ok();
         }
         tokio::time::sleep(backoff).await;
         backoff *= 2;
@@ -246,7 +245,7 @@ async fn embed(client: &reqwest::Client, key: &str, text: &str) -> Option<Vec<f3
     let values = json["embedding"]["values"].as_array()?;
     let mut vector: Vec<f32> = values
         .iter()
-        .filter_map(|v| v.as_f64())
+        .filter_map(serde_json::Value::as_f64)
         .map(|v| v as f32)
         .collect();
     let norm = vector.iter().map(|v| v * v).sum::<f32>().sqrt();

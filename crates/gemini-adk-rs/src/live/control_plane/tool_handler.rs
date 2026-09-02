@@ -248,7 +248,6 @@ pub(in crate::live) async fn handle_tool_calls(
                     }
                 }
             } else if results.is_empty() {
-                #[cfg(feature = "tracing-support")]
                 tracing::warn!("Tool call received but no dispatcher or callback registered");
             }
             (results, bg_spawns)
@@ -287,10 +286,9 @@ pub(in crate::live) async fn handle_tool_calls(
 
     // 5. Send tool responses (standard + ack) back to Gemini
     if !responses.is_empty()
-        && let Err(_e) = writer.send_tool_response(responses).await
+        && let Err(e) = writer.send_tool_response(responses).await
     {
-        #[cfg(feature = "tracing-support")]
-        tracing::error!("Failed to send tool response: {_e}");
+        tracing::error!("Failed to send tool response: {e}");
     }
 
     // 6. Spawn background tool tasks

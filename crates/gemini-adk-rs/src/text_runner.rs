@@ -127,7 +127,7 @@ impl InMemoryRunner {
         user_id: &str,
         session_id: Option<&SessionId>,
     ) -> Result<String, AgentError> {
-        let mut stream = self.run_stream(prompt, user_id, session_id).await;
+        let mut stream = self.run_stream(prompt, user_id, session_id);
         let mut last_response: Option<String> = None;
         while let Some(item) = stream.next().await {
             match item {
@@ -162,7 +162,7 @@ impl InMemoryRunner {
     ///
     /// `run(prompt, user, session)` is equivalent to draining this stream and
     /// returning the last response event's content.
-    pub async fn run_stream<'a>(
+    pub fn run_stream<'a>(
         &'a self,
         prompt: &'a str,
         user_id: &'a str,
@@ -464,7 +464,7 @@ mod tests {
     #[tokio::test]
     async fn run_stream_yields_user_then_final_event() {
         let runner = InMemoryRunner::new(echo_agent(), "test-app");
-        let mut stream = runner.run_stream("Hello", "user-1", None).await;
+        let mut stream = runner.run_stream("Hello", "user-1", None);
 
         let mut events = Vec::new();
         while let Some(item) = stream.next().await {
@@ -485,7 +485,7 @@ mod tests {
     #[tokio::test]
     async fn run_stream_surfaces_state_delta_on_final_event() {
         let runner = InMemoryRunner::new(delta_agent(), "test-app");
-        let mut stream = runner.run_stream("go", "user-1", None).await;
+        let mut stream = runner.run_stream("go", "user-1", None);
 
         let mut events = Vec::new();
         while let Some(item) = stream.next().await {
@@ -555,7 +555,7 @@ mod tests {
         let runner = InMemoryRunner::new(echo_agent(), "test-app");
 
         // Draining the stream's final response equals what `run` returns.
-        let mut stream = runner.run_stream("Hi", "user-1", None).await;
+        let mut stream = runner.run_stream("Hi", "user-1", None);
         let mut last = None;
         while let Some(item) = stream.next().await {
             if let RunEvent::Event(e) = item
@@ -570,7 +570,7 @@ mod tests {
     #[tokio::test]
     async fn run_stream_persists_events_like_run() {
         let runner = InMemoryRunner::new(echo_agent(), "test-app");
-        let mut stream = runner.run_stream("Hello", "user-1", None).await;
+        let mut stream = runner.run_stream("Hello", "user-1", None);
         while stream.next().await.is_some() {}
         drop(stream);
 
@@ -594,7 +594,7 @@ mod tests {
     async fn run_stream_emits_error_for_missing_session() {
         let runner = InMemoryRunner::new(echo_agent(), "test-app");
         let fake_id = SessionId::new();
-        let mut stream = runner.run_stream("Hello", "user-1", Some(&fake_id)).await;
+        let mut stream = runner.run_stream("Hello", "user-1", Some(&fake_id));
 
         let mut saw_error = false;
         while let Some(item) = stream.next().await {

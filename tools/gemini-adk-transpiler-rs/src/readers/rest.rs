@@ -98,11 +98,13 @@ fn extract_methods(content: &str, module_name: &str) -> Result<Vec<RestMethodDef
         if ts_name.starts_with('_') || is_private_method(&ts_name, content) {
             continue;
         }
-        if let Some(method) =
-            build_method_def(&ts_name, module_name, &method_names, &method_http, content)
-        {
-            methods.push(method);
-        }
+        methods.push(build_method_def(
+            &ts_name,
+            module_name,
+            &method_names,
+            &method_http,
+            content,
+        ));
     }
 
     // Extract all method names (regular async form)
@@ -114,11 +116,13 @@ fn extract_methods(content: &str, module_name: &str) -> Result<Vec<RestMethodDef
         if ts_name.starts_with('_') || is_private_method(&ts_name, content) {
             continue;
         }
-        if let Some(method) =
-            build_method_def(&ts_name, module_name, &method_names, &method_http, content)
-        {
-            methods.push(method);
-        }
+        methods.push(build_method_def(
+            &ts_name,
+            module_name,
+            &method_names,
+            &method_http,
+            content,
+        ));
     }
 
     Ok(methods)
@@ -140,7 +144,7 @@ fn build_method_def(
     method_names: &HashMap<(&str, &str), &str>,
     method_http: &HashMap<(&str, &str), (HttpMethod, bool, bool)>,
     content: &str,
-) -> Option<RestMethodDef> {
+) -> RestMethodDef {
     let key = (module_name, ts_name);
     let rust_name = method_names
         .get(&key)
@@ -159,7 +163,7 @@ fn build_method_def(
     // Determine return type from mapping
     let return_type = infer_return_type(ts_name, module_name);
 
-    Some(RestMethodDef {
+    RestMethodDef {
         ts_name: ts_name.to_string(),
         rust_name,
         http_method,
@@ -167,7 +171,7 @@ fn build_method_def(
         description,
         is_special,
         returns_void,
-    })
+    }
 }
 
 /// Extract JSDoc comment preceding a method.

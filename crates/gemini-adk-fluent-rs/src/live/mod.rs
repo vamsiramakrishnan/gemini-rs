@@ -526,7 +526,7 @@ mod tests {
                 "fake"
             }
             async fn generate(&self, _req: LlmRequest) -> Result<LlmResponse, LlmError> {
-                unimplemented!()
+                Err(LlmError::RequestFailed("FakeLlm never generates".into()))
             }
         }
 

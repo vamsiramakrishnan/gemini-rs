@@ -31,7 +31,7 @@ regex = "1"
 minijinja = { version = "2", optional = true }
 strsim = "0.11"
 uuid = { version = "1", features = ["v4"] }
-tracing = { version = "0.1", optional = true }
+tracing = "0.1"
 metrics = { version = "0.24", optional = true }
 # Persistence backends (optional, feature-gated)
 sqlx = { version = "0.8", default-features = false, optional = true }
@@ -56,7 +56,9 @@ gemini-llm = ["gemini-genai-rs/http", "gemini-genai-rs/generate"]
 # REST-backed feature areas below.
 http = ["dep:reqwest"]
 gcs-artifacts = ["http"]
-tracing-support = ["dep:tracing", "gemini-genai-rs/tracing-support"]
+# No-op since 2.0, kept so existing manifests keep resolving; tracing is
+# always compiled (the facade is already unconditional in L0 and L2).
+tracing-support = []
 # Passthroughs so applications don't need a direct gemini-genai-rs dependency.
 vad-wavekat = ["gemini-genai-rs/vad-wavekat"]
 # Jinja2-syntax instruction templates (TemplateInstruction).
@@ -73,9 +75,9 @@ vertex-ai-code-executor = ["http"]
 vertex-ai-rag = ["http"]
 # MCP-over-HTTP/SSE transport (stdio transport needs no extra deps)
 mcp-http = ["http"]
-otel = ["gemini-genai-rs/otel", "tracing-support"]
-otel-otlp = ["gemini-genai-rs/otel-otlp", "tracing-support"]
-otel-gcp = ["gemini-genai-rs/otel-gcp", "tracing-support"]
+otel = ["gemini-genai-rs/otel"]
+otel-otlp = ["gemini-genai-rs/otel-otlp"]
+otel-gcp = ["gemini-genai-rs/otel-gcp"]
 
 [lints]
 workspace = true

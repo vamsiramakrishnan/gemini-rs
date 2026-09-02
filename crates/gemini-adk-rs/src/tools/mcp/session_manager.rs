@@ -84,7 +84,12 @@ impl McpSessionManager {
     pub async fn list_tools(&self) -> Result<Vec<McpToolInfo>, McpError> {
         match &self.params {
             McpConnectionParams::Stdio { .. } => self.stdio_list_tools().await,
+            #[cfg(feature = "mcp-http")]
             McpConnectionParams::Sse { .. } => self.http_list_tools().await,
+            #[cfg(not(feature = "mcp-http"))]
+            McpConnectionParams::Sse { .. } => Err(McpError::ConnectionFailed(
+                "mcp-http feature not enabled".to_string(),
+            )),
         }
     }
 
@@ -96,7 +101,12 @@ impl McpSessionManager {
     pub async fn call_tool(&self, name: &str, args: Value) -> Result<Value, McpError> {
         match &self.params {
             McpConnectionParams::Stdio { .. } => self.stdio_call_tool(name, args).await,
+            #[cfg(feature = "mcp-http")]
             McpConnectionParams::Sse { .. } => self.http_call_tool(name, args).await,
+            #[cfg(not(feature = "mcp-http"))]
+            McpConnectionParams::Sse { .. } => Err(McpError::ConnectionFailed(
+                "mcp-http feature not enabled".to_string(),
+            )),
         }
     }
 
@@ -292,20 +302,6 @@ impl McpSessionManager {
             .await
             .map_err(|e| McpError::Other(format!("invalid MCP HTTP response body: {e}")))?;
         extract_result(&body, id)
-    }
-
-    #[cfg(not(feature = "mcp-http"))]
-    async fn http_list_tools(&self) -> Result<Vec<McpToolInfo>, McpError> {
-        Err(McpError::ConnectionFailed(
-            "mcp-http feature not enabled".to_string(),
-        ))
-    }
-
-    #[cfg(not(feature = "mcp-http"))]
-    async fn http_call_tool(&self, _name: &str, _args: Value) -> Result<Value, McpError> {
-        Err(McpError::ConnectionFailed(
-            "mcp-http feature not enabled".to_string(),
-        ))
     }
 }
 

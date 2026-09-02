@@ -1781,7 +1781,10 @@ mod tests {
             .stage("check")
             .resolve_slot("availability", ["party_size"], None, |args| async move {
                 // Echo an availability decision derived from the bound arg.
-                let n = args.get("party_size").and_then(|v| v.as_i64()).unwrap_or(0);
+                let n = args
+                    .get("party_size")
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap_or(0);
                 Ok(serde_json::json!(n <= 8))
             })
             .next("done", Guard::is_set("availability"))

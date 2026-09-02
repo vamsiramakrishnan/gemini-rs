@@ -49,7 +49,7 @@ async fn ask(session: &MemorySession, turn: u64, question: &str) -> Vec<String> 
     snapshot
         .facts
         .iter()
-        .map(|f| f.presented_statement())
+        .map(gemini_memory_rs::retrieval::RetrievedMemory::presented_statement)
         .collect()
 }
 

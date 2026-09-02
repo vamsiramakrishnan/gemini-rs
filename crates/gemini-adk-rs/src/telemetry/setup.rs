@@ -6,11 +6,11 @@
 //!
 //! # Feature flags
 //!
-//! - `tracing-support`: Enables tracing-subscriber with env-filter and fmt layer.
+//! Console logging (tracing-subscriber with env-filter and fmt layer) is always
+//! available. Exporters are opt-in:
+//!
 //! - `otel-otlp`: Adds OTLP trace export via `opentelemetry-otlp`.
 //! - `otel-gcp`: Adds Google Cloud Trace export via `opentelemetry-gcloud-trace`.
-//!
-//! Without any of these features, [`TelemetrySetup::init`] is a no-op that returns `Ok(())`.
 
 /// Configuration for telemetry export.
 ///
@@ -22,7 +22,7 @@
 /// ```rust,no_run
 /// use gemini_adk_rs::telemetry::setup::TelemetrySetup;
 ///
-/// // Basic setup with console logging only (requires `tracing-support` feature)
+/// // Basic setup with console logging only
 /// TelemetrySetup::new("my-agent-service").init().unwrap();
 ///
 /// // With OTLP export (requires `otel-otlp` feature)
@@ -106,42 +106,33 @@ impl TelemetrySetup {
     ///
     /// | Features enabled | Behavior |
     /// |-----------------|----------|
-    /// | (none) | No-op, returns `Ok(())` |
-    /// | `tracing-support` | Console logging with env-filter |
-    /// | `tracing-support` + `otel-otlp` | Console + OTLP trace export |
-    /// | `tracing-support` + `otel-gcp` | Console + Cloud Trace export |
+    /// | (none) | Console logging with env-filter |
+    /// | `otel-otlp` | Console + OTLP trace export |
+    /// | `otel-gcp` | Console + Cloud Trace export |
     ///
     /// # Errors
     ///
     /// Returns an error if the tracing subscriber cannot be set (e.g., if one
     /// is already registered globally), or if OTel exporter initialization fails.
     pub fn init(self) -> Result<(), Box<dyn std::error::Error>> {
-        #[cfg(feature = "tracing-support")]
-        {
-            let config = gemini_genai_rs::telemetry::TelemetryConfig {
-                logging_enabled: true,
-                log_filter: std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()),
-                json_logs: false,
-                metrics_enabled: false,
-                metrics_addr: None,
-                otel_traces: self.otlp_endpoint.is_some() || self.cloud_trace,
-                otel_metrics: false,
-                otel_service_name: self.service_name,
-                otel_endpoint: self.otlp_endpoint.clone(),
-                otel_gcp_project: None,
-            };
+        let config = gemini_genai_rs::telemetry::TelemetryConfig {
+            logging_enabled: true,
+            log_filter: std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()),
+            json_logs: false,
+            metrics_enabled: false,
+            metrics_addr: None,
+            otel_traces: self.otlp_endpoint.is_some() || self.cloud_trace,
+            otel_metrics: false,
+            otel_service_name: self.service_name,
+            otel_endpoint: self.otlp_endpoint.clone(),
+            otel_gcp_project: None,
+        };
 
-            let _guard = config.init()?;
-            // Note: The guard is intentionally leaked here so the providers stay alive
-            // for the process lifetime. For finer control, use TelemetryConfig::init()
-            // directly and hold the guard.
-            std::mem::forget(_guard);
-        }
-
-        #[cfg(not(feature = "tracing-support"))]
-        {
-            let _ = self; // suppress unused warning
-        }
+        let guard = config.init()?;
+        // The guard is intentionally leaked so the providers stay alive for the
+        // process lifetime. For finer control, use TelemetryConfig::init()
+        // directly and hold the guard.
+        Box::leak(Box::new(guard));
 
         Ok(())
     }

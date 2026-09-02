@@ -1116,8 +1116,7 @@ mod tests {
         );
         assert!(
             name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'),
-            "const_name produced invalid Rust identifier: {}",
-            name
+            "const_name produced invalid Rust identifier: {name}"
         );
     }
 
@@ -1126,8 +1125,7 @@ mod tests {
         let name = super::const_name("123abc");
         assert!(
             name.starts_with('_'),
-            "const_name should prepend _ to digit-starting keys, got {}",
-            name
+            "const_name should prepend _ to digit-starting keys, got {name}"
         );
         assert_eq!(name, "_123ABC");
     }

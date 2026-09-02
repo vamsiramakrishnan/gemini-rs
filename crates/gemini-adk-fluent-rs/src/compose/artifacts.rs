@@ -549,7 +549,7 @@ mod tests {
     #[test]
     fn op_debug_format() {
         let op = A::publish("report", "application/json");
-        let debug = format!("{:?}", op);
+        let debug = format!("{op:?}");
         assert!(debug.contains("Publish"));
         assert!(debug.contains("report"));
     }

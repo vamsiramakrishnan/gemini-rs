@@ -739,7 +739,7 @@ mod tests {
 
     #[test]
     fn chain_extends_with_add() {
-        let chain = C::window(10) + C::user_only() + C::custom(|h| h.to_vec());
+        let chain = C::window(10) + C::user_only() + C::custom(<[Content]>::to_vec);
         assert_eq!(chain.policies.len(), 3);
     }
 

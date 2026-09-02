@@ -551,9 +551,8 @@ impl RecordExtractor {
                 }
                 Some(value)
             }
-            Err(_e) => {
-                #[cfg(feature = "tracing-support")]
-                tracing::warn!(field, "resolver failed: {_e}");
+            Err(e) => {
+                tracing::warn!(field, "resolver failed: {e}");
                 None
             }
         }

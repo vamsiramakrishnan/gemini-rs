@@ -330,7 +330,7 @@ async fn a_stale_semantic_index_cannot_serve_a_superseded_fact() {
         stale_ids.len(),
         still_returned
             .iter()
-            .map(|i| i.as_str())
+            .map(MemoryId::as_str)
             .collect::<Vec<_>>(),
         superseded.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
     );
@@ -423,7 +423,7 @@ async fn a_correction_reaches_the_semantic_index_and_the_old_fact_leaves_it() {
     // Query by the correction's own text: it can only be found if it was
     // embedded and added.
     let found = index.search_vector(&seeded_vector(&embedding_text(correction)), 5);
-    let found_ids: Vec<&str> = found.iter().map(|id| id.as_str()).collect();
+    let found_ids: Vec<&str> = found.iter().map(MemoryId::as_str).collect();
 
     let report = format!(
         "\ncontradiction, semantic resync\n  held before:   {held_before:?}\n  \

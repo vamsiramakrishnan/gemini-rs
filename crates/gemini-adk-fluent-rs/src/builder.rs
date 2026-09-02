@@ -864,7 +864,7 @@ mod tests {
     #[test]
     fn debug_display() {
         let b = AgentBuilder::new("debug-test");
-        let debug = format!("{:?}", b);
+        let debug = format!("{b:?}");
         assert!(debug.contains("debug-test"));
     }
 

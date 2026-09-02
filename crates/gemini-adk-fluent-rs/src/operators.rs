@@ -817,17 +817,20 @@ mod tests {
         assert!(pipeline.last_step().is_some());
         assert!(pipeline.nth_step(1).is_some());
         assert!(pipeline.nth_step(99).is_none());
-        assert_eq!(pipeline.pipeline_steps().map(|s| s.len()), Some(2));
+        assert_eq!(pipeline.pipeline_steps().map(<[Composable]>::len), Some(2));
 
         let fan_out = Composable::Agent(agent("a")) | Composable::Agent(agent("b"));
-        assert_eq!(fan_out.fan_out_branches().map(|b| b.len()), Some(2));
+        assert_eq!(fan_out.fan_out_branches().map(<[Composable]>::len), Some(2));
 
         let looped = agent("a") * until(|_| true);
         assert!(looped.loop_predicate().is_some());
         assert!(looped.loop_body().is_some());
 
         let fallback = agent("a") / agent("b");
-        assert_eq!(fallback.fallback_candidates().map(|c| c.len()), Some(2));
+        assert_eq!(
+            fallback.fallback_candidates().map(<[Composable]>::len),
+            Some(2)
+        );
     }
 
     #[test]
@@ -854,7 +857,11 @@ mod tests {
 
     #[test]
     fn loop_predicate_check() {
-        let pred = until(|v| v.get("done").and_then(|v| v.as_bool()).unwrap_or(false));
+        let pred = until(|v| {
+            v.get("done")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+        });
         assert!(!pred.check(&serde_json::json!({"done": false})));
         assert!(pred.check(&serde_json::json!({"done": true})));
     }
@@ -988,7 +995,7 @@ mod tests {
 
             // Build a FnTextAgent-driven loop instead to test predicate.
             // We'll test via the operators directly.
-            let pred = until(|v| v.get("n").and_then(|v| v.as_i64()).unwrap_or(0) >= 3);
+            let pred = until(|v| v.get("n").and_then(serde_json::Value::as_i64).unwrap_or(0) >= 3);
             let body = agent("incr").instruction("increment");
             let looped = body * pred;
 

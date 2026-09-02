@@ -544,7 +544,7 @@ impl Middleware for CircuitBreakerMiddleware {
 // ── Trace Middleware ──────────────────────────────────────────────────────
 
 /// Middleware that creates tracing spans for agent and tool lifecycle events.
-/// When `tracing-support` is enabled, these spans are picked up by
+/// With an OTel exporter feature enabled, these spans are picked up by
 /// `tracing-opentelemetry` and exported as OTel spans.
 struct TraceMiddleware;
 

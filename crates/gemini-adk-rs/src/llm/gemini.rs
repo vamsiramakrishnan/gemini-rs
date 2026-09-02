@@ -182,7 +182,7 @@ impl GeminiLlm {
     }
 
     /// Preprocess request: remove labels and displayName for non-Vertex (Gemini API).
-    fn preprocess_request(&self, _request: &mut LlmRequest) {
+    fn preprocess_request(_request: &mut LlmRequest) {
         // For Gemini API backend: remove labels and displayName from tools.
         // This is a no-op for now since LlmRequest doesn't have those fields yet.
         // In a full implementation, this would strip Vertex-only fields.
@@ -196,7 +196,7 @@ impl BaseLlm for GeminiLlm {
     }
 
     async fn generate(&self, mut request: LlmRequest) -> Result<LlmResponse, LlmError> {
-        self.preprocess_request(&mut request);
+        Self::preprocess_request(&mut request);
 
         // Feature-gate the actual HTTP call behind gemini-live's generate + http features.
         #[cfg(feature = "gemini-llm")]

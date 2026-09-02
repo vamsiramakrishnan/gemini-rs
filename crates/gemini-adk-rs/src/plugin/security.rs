@@ -55,17 +55,14 @@ impl Plugin for SecurityPlugin {
     async fn before_tool(&self, call: &FunctionCall, _ctx: &InvocationContext) -> PluginResult {
         match self.engine.evaluate(&call.name, &call.args) {
             PolicyOutcome::Allow => {
-                #[cfg(feature = "tracing-support")]
                 tracing::debug!(tool = %call.name, "[plugin:security] Tool call allowed");
                 PluginResult::Continue
             }
             PolicyOutcome::Confirm(msg) => {
-                #[cfg(feature = "tracing-support")]
                 tracing::warn!(tool = %call.name, reason = %msg, "[plugin:security] Tool call requires confirmation");
                 PluginResult::Deny(format!("Confirmation required: {msg}"))
             }
             PolicyOutcome::Deny(reason) => {
-                #[cfg(feature = "tracing-support")]
                 tracing::warn!(tool = %call.name, reason = %reason, "[plugin:security] Tool call denied");
                 PluginResult::Deny(reason)
             }

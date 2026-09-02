@@ -133,14 +133,10 @@ impl std::fmt::Debug for JournalSinkSlot {
 
 const JOURNAL_FLUSH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 
-/// Log a journal-sink internal error without panicking the write path.
-/// Emits a `tracing::warn!` when the `tracing-support` feature is enabled;
-/// otherwise the error is swallowed (journaling is infallible by contract).
+/// Log a journal-sink internal error without panicking the write path
+/// (journaling is infallible by contract, so the error is only reported).
 fn journal_log_error(context: &'static str, e: &dyn std::fmt::Display) {
-    #[cfg(feature = "tracing-support")]
     tracing::warn!(error = %e, "{context}");
-    #[cfg(not(feature = "tracing-support"))]
-    let _ = (context, e);
 }
 
 struct FileJournalInner {
@@ -151,9 +147,8 @@ struct FileJournalInner {
 /// Durable [`JournalSink`] writing one JSON object per line (JSONL).
 ///
 /// Writes are buffered behind a `parking_lot::Mutex` and flushed at least
-/// every second and on drop. I/O errors are logged (via `tracing::warn!` when
-/// the `tracing-support` feature is enabled) — journaling never panics a
-/// state write.
+/// every second and on drop. I/O errors are logged via `tracing::warn!` —
+/// journaling never panics a state write.
 ///
 /// ```jsonl
 /// {"sequence":1,"key":"app:last_city","old":null,"new":"London","origin":"set","timestamp_ms":1718000000000,"delta":false}
