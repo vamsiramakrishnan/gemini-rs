@@ -231,10 +231,20 @@ fn callbacks() {
 
     // Agent lifecycle hooks.
     let lifecycle = M::before_agent(|ctx| {
-        println!("  [before_agent] session={:?}", ctx.session_id);
+        let mode = if ctx.session_id.is_some() {
+            "session-aware"
+        } else {
+            "stateless"
+        };
+        println!("  [before_agent] {mode} run");
         Ok(())
     }) | M::after_agent(|ctx| {
-        println!("  [after_agent] session={:?}", ctx.session_id);
+        let mode = if ctx.session_id.is_some() {
+            "session-aware"
+        } else {
+            "stateless"
+        };
+        println!("  [after_agent] {mode} run");
         Ok(())
     });
     println!("Lifecycle hooks: {} layers", lifecycle.len());

@@ -106,7 +106,7 @@ fn main() {
     );
 
     // Multiple servers for a microservices architecture
-    let billing_server = A2aServer::new("billing-service")
+    let invoicing_server = A2aServer::new("billing-service")
         .host("0.0.0.0")
         .port(8081)
         .health_check("/healthz");
@@ -124,8 +124,8 @@ fn main() {
     );
     println!(
         "  {} -> :{}",
-        billing_server.agent_name(),
-        billing_server.get_port()
+        invoicing_server.agent_name(),
+        invoicing_server.get_port()
     );
     println!(
         "  {} -> :{}",

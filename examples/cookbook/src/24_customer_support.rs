@@ -29,7 +29,7 @@ fn main() {
         .writes("issue_category")
         .writes("urgency");
 
-    let billing_specialist = AgentBuilder::new("billing-specialist")
+    let invoice_specialist = AgentBuilder::new("billing-specialist")
         .instruction(
             "You are a billing specialist. Handle billing disputes, payment issues, \
              refund requests, and subscription changes. Always verify the account \
@@ -54,7 +54,7 @@ fn main() {
         .writes("resolution")
         .writes("diagnostic_log");
 
-    let account_specialist = AgentBuilder::new("account-specialist")
+    let profile_specialist = AgentBuilder::new("account-specialist")
         .instruction(
             "You are an account specialist. Handle account access issues, \
              profile updates, security concerns, and account closures. \
@@ -104,9 +104,9 @@ fn main() {
     println!("Defined {} agents:", 7);
     for agent in &[
         &intake,
-        &billing_specialist,
+        &invoice_specialist,
         &tech_specialist,
-        &account_specialist,
+        &profile_specialist,
         &general_agent,
         &escalation_agent,
         &closer,
@@ -141,16 +141,16 @@ fn main() {
     // Route based on category
     // In production, this would use RouteTextAgent with an LLM.
     // Here we show the pipeline structure declaratively.
-    let billing_pipeline = billing_specialist.clone() / escalation_agent.clone(); // Fall back to escalation
+    let billing_pipeline = invoice_specialist.clone() / escalation_agent.clone(); // Fall back to escalation
 
     let tech_pipeline = tech_specialist.clone() / escalation_agent.clone();
 
-    let account_pipeline = account_specialist.clone() / escalation_agent.clone();
+    let account_pipeline = profile_specialist.clone() / escalation_agent.clone();
 
     println!("Specialist pipelines with escalation fallback:");
-    println!("  billing  -> billing_specialist / escalation");
+    println!("  billing  -> invoice_specialist / escalation");
     println!("  tech     -> tech_specialist / escalation");
-    println!("  account  -> account_specialist / escalation");
+    println!("  account  -> profile_specialist / escalation");
     println!("  general  -> general_agent / escalation");
 
     // Full support pipeline
@@ -247,9 +247,9 @@ fn main() {
 
     let all_agents = [
         intake.clone(),
-        billing_specialist.clone(),
+        invoice_specialist.clone(),
         tech_specialist.clone(),
-        account_specialist.clone(),
+        profile_specialist.clone(),
         general_agent.clone(),
         escalation_agent.clone(),
         closer.clone(),
