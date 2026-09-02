@@ -1,4 +1,4 @@
-//! InMemoryRunner — runs TextAgents with session management and services.
+//! `TextRunner` — runs `TextAgent`s with session management and services.
 //!
 //! Provides a complete runtime for text-based agent execution with automatic
 //! session management, memory, artifacts, and plugin hooks.
@@ -16,7 +16,7 @@ use crate::session::{InMemorySessionService, SessionId, SessionService};
 use crate::state::State;
 use crate::text::TextAgent;
 
-/// An item yielded by [`InMemoryRunner::run_stream`].
+/// An item yielded by [`TextRunner::run_stream`].
 ///
 /// Mirrors ADK-Python's `Runner.run_async()` event stream. Most items are
 /// [`RunEvent::Event`] carrying a persisted [`Event`]; a terminal
@@ -46,7 +46,7 @@ impl RunEvent {
     }
 }
 
-/// Internal driver state for the [`InMemoryRunner::run_stream`] state machine.
+/// Internal driver state for the [`TextRunner::run_stream`] state machine.
 enum RunStep {
     /// Create/load the session, replay deltas, emit the user event.
     Start,
@@ -64,7 +64,7 @@ enum RunStep {
 ///
 /// Auto-wires in-memory service implementations by default; override with
 /// builder methods for custom persistence.
-pub struct InMemoryRunner {
+pub struct TextRunner {
     root_agent: Arc<dyn TextAgent>,
     session_service: Arc<dyn SessionService>,
     memory_service: Arc<dyn MemoryService>,
@@ -73,7 +73,7 @@ pub struct InMemoryRunner {
     app_name: String,
 }
 
-impl InMemoryRunner {
+impl TextRunner {
     /// Create a new runner with in-memory defaults for all services.
     pub fn new(agent: Arc<dyn TextAgent>, app_name: impl Into<String>) -> Self {
         Self {
@@ -368,14 +368,14 @@ mod tests {
 
     #[tokio::test]
     async fn run_ephemeral() {
-        let runner = InMemoryRunner::new(echo_agent(), "test-app");
+        let runner = TextRunner::new(echo_agent(), "test-app");
         let result = runner.run_ephemeral("Hello").await.unwrap();
         assert_eq!(result, "Echo: Hello");
     }
 
     #[tokio::test]
     async fn run_with_session_creates_and_persists() {
-        let runner = InMemoryRunner::new(echo_agent(), "test-app");
+        let runner = TextRunner::new(echo_agent(), "test-app");
 
         // First run — creates session
         let result = runner.run("Hello", "user-1", None).await.unwrap();
@@ -402,7 +402,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_resumes_existing_session() {
-        let runner = InMemoryRunner::new(echo_agent(), "test-app");
+        let runner = TextRunner::new(echo_agent(), "test-app");
 
         // Create a session via first run
         let result1 = runner.run("First", "user-1", None).await.unwrap();
@@ -434,7 +434,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_with_nonexistent_session_errors() {
-        let runner = InMemoryRunner::new(echo_agent(), "test-app");
+        let runner = TextRunner::new(echo_agent(), "test-app");
         let fake_id = SessionId::new();
         let result = runner.run("Hello", "user-1", Some(&fake_id)).await;
         assert!(result.is_err());
@@ -443,7 +443,7 @@ mod tests {
     #[tokio::test]
     async fn custom_session_service() {
         let custom_svc = Arc::new(InMemorySessionService::new());
-        let runner = InMemoryRunner::new(echo_agent(), "app").session_service(custom_svc.clone());
+        let runner = TextRunner::new(echo_agent(), "app").session_service(custom_svc.clone());
 
         runner.run("Hi", "u1", None).await.unwrap();
 
@@ -463,7 +463,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_stream_yields_user_then_final_event() {
-        let runner = InMemoryRunner::new(echo_agent(), "test-app");
+        let runner = TextRunner::new(echo_agent(), "test-app");
         let mut stream = runner.run_stream("Hello", "user-1", None);
 
         let mut events = Vec::new();
@@ -484,7 +484,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_stream_surfaces_state_delta_on_final_event() {
-        let runner = InMemoryRunner::new(delta_agent(), "test-app");
+        let runner = TextRunner::new(delta_agent(), "test-app");
         let mut stream = runner.run_stream("go", "user-1", None);
 
         let mut events = Vec::new();
@@ -520,7 +520,7 @@ mod tests {
             }
             Ok(format!("saw: {:?}", state.get::<bool>("flag")))
         }));
-        let runner = InMemoryRunner::new(agent, "test-app");
+        let runner = TextRunner::new(agent, "test-app");
 
         runner.run("set", "user-1", None).await.unwrap();
         let sessions = runner
@@ -552,7 +552,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_stream_drains_to_same_result_as_run() {
-        let runner = InMemoryRunner::new(echo_agent(), "test-app");
+        let runner = TextRunner::new(echo_agent(), "test-app");
 
         // Draining the stream's final response equals what `run` returns.
         let mut stream = runner.run_stream("Hi", "user-1", None);
@@ -569,7 +569,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_stream_persists_events_like_run() {
-        let runner = InMemoryRunner::new(echo_agent(), "test-app");
+        let runner = TextRunner::new(echo_agent(), "test-app");
         let mut stream = runner.run_stream("Hello", "user-1", None);
         while stream.next().await.is_some() {}
         drop(stream);
@@ -592,7 +592,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_stream_emits_error_for_missing_session() {
-        let runner = InMemoryRunner::new(echo_agent(), "test-app");
+        let runner = TextRunner::new(echo_agent(), "test-app");
         let fake_id = SessionId::new();
         let mut stream = runner.run_stream("Hello", "user-1", Some(&fake_id));
 

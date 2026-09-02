@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
+use crate::error::ConfigError;
 use crate::state::State;
 
 use super::contract::ComputedContract;
@@ -59,16 +60,32 @@ impl ComputedRegistry {
         }
     }
 
-    /// Register a computed variable. Re-sorts the internal list and rebuilds
-    /// the dependency index. **Panics** if the new variable introduces a cycle.
-    pub fn register(&mut self, var: ComputedVar) {
-        if let Some(pos) = self.vars.iter().position(|v| v.key == var.key) {
-            self.vars[pos] = var; // replace existing
-        } else {
-            self.vars.push(var);
+    /// Register a computed variable (replacing any existing variable with the
+    /// same key). Re-sorts the internal list and rebuilds the dependency index.
+    ///
+    /// Returns a [`ConfigError`] naming the variables on the cycle if the new
+    /// variable would introduce a dependency cycle (including a self-cycle);
+    /// the registry is left unchanged in that case.
+    pub fn register(&mut self, var: ComputedVar) -> Result<(), ConfigError> {
+        let previous = match self.vars.iter().position(|v| v.key == var.key) {
+            Some(pos) => Some((pos, std::mem::replace(&mut self.vars[pos], var))),
+            None => {
+                self.vars.push(var);
+                None
+            }
+        };
+        if let Err(err) = self.topo_sort() {
+            // Roll back so a rejected registration leaves no trace.
+            match previous {
+                Some((pos, old)) => self.vars[pos] = old,
+                None => {
+                    self.vars.pop();
+                }
+            }
+            return Err(err);
         }
-        self.topo_sort_or_panic();
         self.rebuild_dep_index();
+        Ok(())
     }
 
     /// Recompute all variables in dependency order. Returns the keys whose
@@ -137,8 +154,8 @@ impl ComputedRegistry {
     }
 
     /// Validate the dependency graph. Returns `Ok(())` if there are no cycles,
-    /// or `Err(message)` describing the problem.
-    pub fn validate(&self) -> Result<(), String> {
+    /// or a [`ConfigError`] naming the variables on the cycle.
+    pub fn validate(&self) -> Result<(), ConfigError> {
         // Build adjacency from the current vars and run Kahn's algorithm.
         let n = self.vars.len();
         if n == 0 {
@@ -186,9 +203,9 @@ impl ComputedRegistry {
                 .filter(|&i| in_degree[i] > 0)
                 .map(|i| self.vars[i].key.as_str())
                 .collect();
-            Err(format!(
+            Err(ConfigError::new(format!(
                 "Cycle detected among computed variables: {cycle_vars:?}"
-            ))
+            )))
         }
     }
 
@@ -216,22 +233,23 @@ impl ComputedRegistry {
     // ── Internal helpers ──────────────────────────────────────────────────
 
     /// Topologically sort `self.vars` in-place using Kahn's algorithm.
-    /// Panics if a cycle is detected (including self-cycles).
-    fn topo_sort_or_panic(&mut self) {
+    /// Fails (leaving `self.vars` in its previous order) if a cycle is
+    /// detected, including self-cycles.
+    fn topo_sort(&mut self) -> Result<(), ConfigError> {
         let n = self.vars.len();
 
         // Check for self-cycles (a var depending on itself).
         for var in &self.vars {
             if var.dependencies.contains(&var.key) {
-                panic!(
+                return Err(ConfigError::new(format!(
                     "Cycle detected among computed variables: {:?}",
                     vec![var.key.as_str()]
-                );
+                )));
             }
         }
 
         if n <= 1 {
-            return;
+            return Ok(());
         }
 
         // Map computed-var keys to their current index.
@@ -275,7 +293,9 @@ impl ComputedRegistry {
                 .filter(|&i| in_degree[i] > 0)
                 .map(|i| self.vars[i].key.as_str())
                 .collect();
-            panic!("Cycle detected among computed variables: {cycle_vars:?}");
+            return Err(ConfigError::new(format!(
+                "Cycle detected among computed variables: {cycle_vars:?}"
+            )));
         }
 
         // Reorder vars according to topological sort.
@@ -286,6 +306,7 @@ impl ComputedRegistry {
                 self.vars.push(var);
             }
         }
+        Ok(())
     }
 
     /// Rebuild the `dep_index` mapping from dependency keys to var indices.
@@ -309,14 +330,16 @@ mod tests {
     #[test]
     fn single_var_register_and_recompute() {
         let mut registry = ComputedRegistry::new();
-        registry.register(ComputedVar {
-            key: "doubled".into(),
-            dependencies: vec!["app:count".into()],
-            compute: Arc::new(|state| {
-                let count: i64 = state.get("app:count")?;
-                Some(json!(count * 2))
-            }),
-        });
+        registry
+            .register(ComputedVar {
+                key: "doubled".into(),
+                dependencies: vec!["app:count".into()],
+                compute: Arc::new(|state| {
+                    let count: i64 = state.get("app:count")?;
+                    Some(json!(count * 2))
+                }),
+            })
+            .unwrap();
 
         let state = State::new();
         let _ = state.set("app:count", 5);
@@ -333,24 +356,28 @@ mod tests {
         let mut registry = ComputedRegistry::new();
 
         // Register B first (depends on derived:base).
-        registry.register(ComputedVar {
-            key: "derived_from_base".into(),
-            dependencies: vec!["base".into()],
-            compute: Arc::new(|state| {
-                let base: i64 = state.get("derived:base")?;
-                Some(json!(base + 100))
-            }),
-        });
+        registry
+            .register(ComputedVar {
+                key: "derived_from_base".into(),
+                dependencies: vec!["base".into()],
+                compute: Arc::new(|state| {
+                    let base: i64 = state.get("derived:base")?;
+                    Some(json!(base + 100))
+                }),
+            })
+            .unwrap();
 
         // Register A (base, no internal deps).
-        registry.register(ComputedVar {
-            key: "base".into(),
-            dependencies: vec!["app:input".into()],
-            compute: Arc::new(|state| {
-                let input: i64 = state.get("app:input")?;
-                Some(json!(input * 2))
-            }),
-        });
+        registry
+            .register(ComputedVar {
+                key: "base".into(),
+                dependencies: vec!["app:input".into()],
+                compute: Arc::new(|state| {
+                    let input: i64 = state.get("app:input")?;
+                    Some(json!(input * 2))
+                }),
+            })
+            .unwrap();
 
         let state = State::new();
         let _ = state.set("app:input", 3);
@@ -363,22 +390,28 @@ mod tests {
         assert!(changed.contains(&"derived_from_base".to_string()));
     }
 
-    // ── 3. Cycle detection (panic) ─────────────────────────────────────
+    // ── 3. Cycle detection (error, never a panic) ──────────────────────
 
     #[test]
-    #[should_panic(expected = "Cycle detected")]
-    fn cycle_detection_panics() {
+    fn cycle_detection_is_an_error_and_rolls_back() {
         let mut registry = ComputedRegistry::new();
-        registry.register(ComputedVar {
-            key: "a".into(),
-            dependencies: vec!["b".into()],
-            compute: Arc::new(|_| Some(json!(1))),
-        });
-        registry.register(ComputedVar {
+        registry
+            .register(ComputedVar {
+                key: "a".into(),
+                dependencies: vec!["b".into()],
+                compute: Arc::new(|_| Some(json!(1))),
+            })
+            .unwrap();
+        let result = registry.register(ComputedVar {
             key: "b".into(),
             dependencies: vec!["a".into()],
             compute: Arc::new(|_| Some(json!(2))),
         });
+        let err = result.expect_err("cycle must be rejected");
+        assert!(err.to_string().contains("Cycle detected"), "{err}");
+        // The rejected registration leaves no trace.
+        assert_eq!(registry.len(), 1);
+        assert!(registry.validate().is_ok());
     }
 
     // ── 4. Recompute returns only keys that changed ────────────────────
@@ -386,18 +419,20 @@ mod tests {
     #[test]
     fn recompute_returns_only_changed_keys() {
         let mut registry = ComputedRegistry::new();
-        registry.register(ComputedVar {
-            key: "level".into(),
-            dependencies: vec!["app:score".into()],
-            compute: Arc::new(|state| {
-                let score: f64 = state.get("app:score")?;
-                if score > 0.5 {
-                    Some(json!("high"))
-                } else {
-                    Some(json!("low"))
-                }
-            }),
-        });
+        registry
+            .register(ComputedVar {
+                key: "level".into(),
+                dependencies: vec!["app:score".into()],
+                compute: Arc::new(|state| {
+                    let score: f64 = state.get("app:score")?;
+                    if score > 0.5 {
+                        Some(json!("high"))
+                    } else {
+                        Some(json!("low"))
+                    }
+                }),
+            })
+            .unwrap();
 
         let state = State::new();
         let _ = state.set("app:score", 0.8);
@@ -431,24 +466,28 @@ mod tests {
         let cc_b = call_count_b.clone();
 
         let mut registry = ComputedRegistry::new();
-        registry.register(ComputedVar {
-            key: "from_x".into(),
-            dependencies: vec!["app:x".into()],
-            compute: Arc::new(move |state| {
-                cc_a.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                let x: i64 = state.get("app:x")?;
-                Some(json!(x + 1))
-            }),
-        });
-        registry.register(ComputedVar {
-            key: "from_y".into(),
-            dependencies: vec!["app:y".into()],
-            compute: Arc::new(move |state| {
-                cc_b.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                let y: i64 = state.get("app:y")?;
-                Some(json!(y + 1))
-            }),
-        });
+        registry
+            .register(ComputedVar {
+                key: "from_x".into(),
+                dependencies: vec!["app:x".into()],
+                compute: Arc::new(move |state| {
+                    cc_a.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let x: i64 = state.get("app:x")?;
+                    Some(json!(x + 1))
+                }),
+            })
+            .unwrap();
+        registry
+            .register(ComputedVar {
+                key: "from_y".into(),
+                dependencies: vec!["app:y".into()],
+                compute: Arc::new(move |state| {
+                    cc_b.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let y: i64 = state.get("app:y")?;
+                    Some(json!(y + 1))
+                }),
+            })
+            .unwrap();
 
         let state = State::new();
         let _ = state.set("app:x", 10);
@@ -470,7 +509,7 @@ mod tests {
     #[test]
     fn validate_catches_cycles() {
         let mut registry = ComputedRegistry::new();
-        // Manually push vars without going through register (which would panic).
+        // Manually push vars without going through register (which would reject the cycle).
         registry.vars.push(ComputedVar {
             key: "x".into(),
             dependencies: vec!["y".into()],
@@ -484,7 +523,7 @@ mod tests {
 
         let result = registry.validate();
         assert!(result.is_err());
-        let msg = result.unwrap_err();
+        let msg = result.unwrap_err().to_string();
         assert!(msg.contains("Cycle detected"));
     }
 
@@ -493,16 +532,20 @@ mod tests {
     #[test]
     fn validate_succeeds_on_valid_graph() {
         let mut registry = ComputedRegistry::new();
-        registry.register(ComputedVar {
-            key: "a".into(),
-            dependencies: vec!["app:input".into()],
-            compute: Arc::new(|_| Some(json!(1))),
-        });
-        registry.register(ComputedVar {
-            key: "b".into(),
-            dependencies: vec!["a".into()],
-            compute: Arc::new(|_| Some(json!(2))),
-        });
+        registry
+            .register(ComputedVar {
+                key: "a".into(),
+                dependencies: vec!["app:input".into()],
+                compute: Arc::new(|_| Some(json!(1))),
+            })
+            .unwrap();
+        registry
+            .register(ComputedVar {
+                key: "b".into(),
+                dependencies: vec!["a".into()],
+                compute: Arc::new(|_| Some(json!(2))),
+            })
+            .unwrap();
 
         assert!(registry.validate().is_ok());
     }
@@ -512,14 +555,16 @@ mod tests {
     #[test]
     fn compute_returning_none_skips_write() {
         let mut registry = ComputedRegistry::new();
-        registry.register(ComputedVar {
-            key: "maybe".into(),
-            dependencies: vec!["app:flag".into()],
-            compute: Arc::new(|state| {
-                let flag: bool = state.get("app:flag")?;
-                if flag { Some(json!("yes")) } else { None }
-            }),
-        });
+        registry
+            .register(ComputedVar {
+                key: "maybe".into(),
+                dependencies: vec!["app:flag".into()],
+                compute: Arc::new(|state| {
+                    let flag: bool = state.get("app:flag")?;
+                    if flag { Some(json!("yes")) } else { None }
+                }),
+            })
+            .unwrap();
 
         let state = State::new();
         // app:flag not set → get returns None → compute returns None.
@@ -556,42 +601,50 @@ mod tests {
         //     C
         let mut registry = ComputedRegistry::new();
 
-        registry.register(ComputedVar {
-            key: "d".into(),
-            dependencies: vec!["app:root".into()],
-            compute: Arc::new(|state| {
-                let root: i64 = state.get("app:root")?;
-                Some(json!(root))
-            }),
-        });
+        registry
+            .register(ComputedVar {
+                key: "d".into(),
+                dependencies: vec!["app:root".into()],
+                compute: Arc::new(|state| {
+                    let root: i64 = state.get("app:root")?;
+                    Some(json!(root))
+                }),
+            })
+            .unwrap();
 
-        registry.register(ComputedVar {
-            key: "a".into(),
-            dependencies: vec!["d".into()],
-            compute: Arc::new(|state| {
-                let d: i64 = state.get("derived:d")?;
-                Some(json!(d + 10))
-            }),
-        });
+        registry
+            .register(ComputedVar {
+                key: "a".into(),
+                dependencies: vec!["d".into()],
+                compute: Arc::new(|state| {
+                    let d: i64 = state.get("derived:d")?;
+                    Some(json!(d + 10))
+                }),
+            })
+            .unwrap();
 
-        registry.register(ComputedVar {
-            key: "b".into(),
-            dependencies: vec!["d".into()],
-            compute: Arc::new(|state| {
-                let d: i64 = state.get("derived:d")?;
-                Some(json!(d + 20))
-            }),
-        });
+        registry
+            .register(ComputedVar {
+                key: "b".into(),
+                dependencies: vec!["d".into()],
+                compute: Arc::new(|state| {
+                    let d: i64 = state.get("derived:d")?;
+                    Some(json!(d + 20))
+                }),
+            })
+            .unwrap();
 
-        registry.register(ComputedVar {
-            key: "c".into(),
-            dependencies: vec!["a".into(), "b".into()],
-            compute: Arc::new(|state| {
-                let a: i64 = state.get("derived:a")?;
-                let b: i64 = state.get("derived:b")?;
-                Some(json!(a + b))
-            }),
-        });
+        registry
+            .register(ComputedVar {
+                key: "c".into(),
+                dependencies: vec!["a".into(), "b".into()],
+                compute: Arc::new(|state| {
+                    let a: i64 = state.get("derived:a")?;
+                    let b: i64 = state.get("derived:b")?;
+                    Some(json!(a + b))
+                }),
+            })
+            .unwrap();
 
         let state = State::new();
         let _ = state.set("app:root", 1);
@@ -622,11 +675,13 @@ mod tests {
         assert!(registry.is_empty());
         assert_eq!(registry.len(), 0);
 
-        registry.register(ComputedVar {
-            key: "x".into(),
-            dependencies: vec![],
-            compute: Arc::new(|_| Some(json!(1))),
-        });
+        registry
+            .register(ComputedVar {
+                key: "x".into(),
+                dependencies: vec![],
+                compute: Arc::new(|_| Some(json!(1))),
+            })
+            .unwrap();
         assert!(!registry.is_empty());
         assert_eq!(registry.len(), 1);
     }
@@ -637,23 +692,27 @@ mod tests {
     fn recompute_affected_diamond() {
         let mut registry = ComputedRegistry::new();
 
-        registry.register(ComputedVar {
-            key: "root_derived".into(),
-            dependencies: vec!["app:root".into()],
-            compute: Arc::new(|state| {
-                let r: i64 = state.get("app:root")?;
-                Some(json!(r * 10))
-            }),
-        });
+        registry
+            .register(ComputedVar {
+                key: "root_derived".into(),
+                dependencies: vec!["app:root".into()],
+                compute: Arc::new(|state| {
+                    let r: i64 = state.get("app:root")?;
+                    Some(json!(r * 10))
+                }),
+            })
+            .unwrap();
 
-        registry.register(ComputedVar {
-            key: "leaf".into(),
-            dependencies: vec!["root_derived".into()],
-            compute: Arc::new(|state| {
-                let rd: i64 = state.get("derived:root_derived")?;
-                Some(json!(rd + 5))
-            }),
-        });
+        registry
+            .register(ComputedVar {
+                key: "leaf".into(),
+                dependencies: vec!["root_derived".into()],
+                compute: Arc::new(|state| {
+                    let rd: i64 = state.get("derived:root_derived")?;
+                    Some(json!(rd + 5))
+                }),
+            })
+            .unwrap();
 
         let state = State::new();
         let _ = state.set("app:root", 2);
@@ -686,13 +745,16 @@ mod tests {
     // ── Additional: self-cycle ──────────────────────────────────────────
 
     #[test]
-    #[should_panic(expected = "Cycle detected")]
-    fn self_cycle_panics() {
+    fn self_cycle_is_an_error() {
         let mut registry = ComputedRegistry::new();
-        registry.register(ComputedVar {
-            key: "self_ref".into(),
-            dependencies: vec!["self_ref".into()],
-            compute: Arc::new(|_| Some(json!(1))),
-        });
+        let err = registry
+            .register(ComputedVar {
+                key: "self_ref".into(),
+                dependencies: vec!["self_ref".into()],
+                compute: Arc::new(|_| Some(json!(1))),
+            })
+            .expect_err("self-cycle must be rejected");
+        assert!(err.to_string().contains("Cycle detected"), "{err}");
+        assert!(registry.is_empty());
     }
 }

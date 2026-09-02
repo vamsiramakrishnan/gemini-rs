@@ -1,10 +1,35 @@
 //! Live session management — callback-driven full-duplex event handling.
 
-use std::future::Future;
-use std::pin::Pin;
+use std::sync::Arc;
 
-/// A boxed future type used across live session modules.
-pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
+use gemini_genai_rs::session::SessionWriter;
+
+pub use crate::BoxFuture;
+use crate::state::State;
+
+/// How an async hook or effect runs relative to the control lane.
+///
+/// Every control-lane callback in [`EventCallbacks`] has a companion `_mode`
+/// field (e.g. `on_turn_complete_mode`), and every reactor
+/// [`EffectPolicy`] carries one. At the L2 fluent API level, `_concurrent`
+/// suffixed setters (e.g. `on_turn_complete_concurrent()`) set the callback
+/// and select [`Concurrent`](Self::Concurrent) in one call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ExecutionMode {
+    /// Awaited inline — the control lane waits for completion before the next
+    /// event or effect. Guarantees ordering and state consistency.
+    #[default]
+    Blocking,
+    /// Spawned as a detached tokio task — the control lane continues
+    /// immediately. Use for fire-and-forget work: logging, analytics, webhook
+    /// dispatch, background agent triggering.
+    Concurrent,
+}
+
+/// An async session hook: receives a clone of the shared [`State`] and the
+/// session writer. The shape of phase `on_enter`/`on_exit`, phase
+/// preparations, and temporal-pattern actions.
+pub type SessionHook = Arc<dyn Fn(State, Arc<dyn SessionWriter>) -> BoxFuture<()> + Send + Sync>;
 
 pub mod background_agent_dispatch;
 pub mod background_tool;
@@ -41,7 +66,7 @@ pub use background_tool::{
     BackgroundToolTracker, DefaultResultFormatter, ResultFormatter, ToolExecutionMode,
 };
 pub use builder::LiveSessionBuilder;
-pub use callbacks::{CallbackMode, EventCallbacks};
+pub use callbacks::EventCallbacks;
 pub use computed::{ComputedRegistry, ComputedVar};
 pub use context_builder::ContextBuilder;
 pub use context_writer::{DeferredWriter, PendingContext};
@@ -55,16 +80,16 @@ pub use extractor::{ExtractionTrigger, FieldPromotion, LlmExtractor, MergePolicy
 pub use handle::LiveHandle;
 pub use input_vad::{ActivityAuthority, BackendInputVad, BackendVadSnapshot, InputAudioProcessor};
 pub use needs::{NeedsFulfillment, RepairAction, RepairConfig};
-pub use persistence::{FsPersistence, MemoryPersistence, SessionPersistence, SessionSnapshot};
+pub use persistence::{
+    FsPersistence, MemoryPersistence, PersistenceError, SessionPersistence, SessionSnapshot,
+};
 pub use phase::{
-    EnterContextFn, InstructionModifier, Phase, PhaseHook, PhaseInstruction, PhaseMachine,
-    PhasePreparation, PhaseTransition, StateGuard, Transition, TransitionEvaluation,
-    TransitionResult, TransitionTrigger,
+    EnterContextFn, InstructionModifier, Phase, PhaseInstruction, PhaseMachine, PhasePreparation,
+    Transition, TransitionEvaluation, TransitionRecord, TransitionResult, TransitionTrigger,
 };
 pub use processor::{Delivery, DeliveryConfig};
 pub use reactor::{
-    EffectMode, EffectPolicy, LiveEffect, LiveReactor, Reaction, ReactorEvent, ReactorRule,
-    VoiceRuntimeState,
+    EffectPolicy, LiveEffect, LiveReactor, Reaction, ReactorEvent, ReactorRule, VoiceRuntimeState,
 };
 pub use replay::{ReplaySession, attach_session, collect_events_until_idle, replay_session};
 pub use session_signals::{SessionSignals, SessionType};

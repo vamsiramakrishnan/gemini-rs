@@ -540,13 +540,6 @@ impl LiveHandle {
             .map(|mon| mon.lock().explain(&self.state))
     }
 
-    /// Why the governed flow is blocked right now — alias of
-    /// [`explain`](Self::explain), named for the common debugging question.
-    /// Returns `None` when the session is not governed by a flow.
-    pub fn why_blocked(&self) -> Option<FlowExplanation> {
-        self.explain()
-    }
-
     /// Replace a governed step's posture mid-session. Returns `true` when the
     /// session is governed and the step exists.
     ///

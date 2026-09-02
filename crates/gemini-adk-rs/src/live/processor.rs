@@ -333,7 +333,7 @@ pub(crate) struct ControlPlaneConfig {
     /// Optional governed-flow monitor: gates tool calls, projects active-step
     /// postures into steering, and drives repair from unmet requirements.
     /// Shared (`Arc<Mutex<..>>`) so the [`LiveHandle`](super::handle::LiveHandle)
-    /// can snapshot `explain`/`why_blocked` while the control lane advances it.
+    /// can snapshot `explain` while the control lane advances it.
     /// Lock briefly; never hold the guard across an `await`.
     pub flow: Option<crate::flow::SharedFlowMonitor>,
     /// Fast-lane delivery (backpressure) policy per event class. Defaults to
@@ -806,7 +806,7 @@ async fn run_fast_lane(
                 let _ = event_tx.send(LiveEvent::VadEnd);
             }
             FastEvent::Phase(phase) => {
-                if let Some(cb) = &callbacks.on_phase {
+                if let Some(cb) = &callbacks.on_session_phase {
                     cb(phase);
                 }
                 // Phase is L0-level wire event, not emitted as LiveEvent
@@ -1461,7 +1461,7 @@ mod tests {
 
     #[tokio::test]
     async fn callback_mode_blocking_awaits_inline() {
-        use crate::live::callbacks::CallbackMode;
+        use crate::live::ExecutionMode;
         use std::sync::atomic::AtomicU32;
 
         let order = Arc::new(AtomicU32::new(0));
@@ -1477,7 +1477,7 @@ mod tests {
                     o.store(1, Ordering::SeqCst);
                 })
             })),
-            on_turn_complete_mode: CallbackMode::Blocking,
+            on_turn_complete_mode: ExecutionMode::Blocking,
             ..Default::default()
         };
         let callbacks = Arc::new(callbacks);
@@ -1686,7 +1686,7 @@ mod tests {
 
     #[tokio::test]
     async fn callback_mode_concurrent_spawns_task() {
-        use crate::live::callbacks::CallbackMode;
+        use crate::live::ExecutionMode;
 
         let called = Arc::new(AtomicBool::new(false));
         let called_clone = called.clone();
@@ -1699,7 +1699,7 @@ mod tests {
                     c.store(true, Ordering::SeqCst);
                 })
             })),
-            on_turn_complete_mode: CallbackMode::Concurrent,
+            on_turn_complete_mode: ExecutionMode::Concurrent,
             ..Default::default()
         };
         let callbacks = Arc::new(callbacks);

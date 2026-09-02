@@ -50,7 +50,6 @@
 
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use serde_json::Value;
@@ -60,6 +59,7 @@ use tokio::task::JoinSet;
 use crate::error::AgentError;
 use crate::state::State;
 use crate::text::TextAgent;
+use crate::{AsyncSourceFn, StatePredicate};
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Error Type
@@ -197,16 +197,10 @@ impl WorkflowController {
 // Internal Node Types
 // ──────────────────────────────────────────────────────────────────────────────
 
-/// A boxed async function node body: a `State` in, a JSON value out.
-type FunctionFn =
-    Arc<dyn Fn(State) -> Pin<Box<dyn Future<Output = Result<Value, String>> + Send>> + Send + Sync>;
-/// A readiness guard evaluated against the shared state.
-type GuardFn = Arc<dyn Fn(&State) -> bool + Send + Sync>;
-
 /// The kind of a workflow node.
 enum NodeKind {
     Agent(Arc<dyn TextAgent>),
-    Function(FunctionFn),
+    Function(AsyncSourceFn),
     Approval,
 }
 
@@ -215,7 +209,7 @@ struct WorkflowNode {
     id: String,
     kind: NodeKind,
     dependencies: Vec<String>,
-    when: Option<GuardFn>,
+    when: Option<StatePredicate>,
     join_any: bool,
 }
 
@@ -255,7 +249,7 @@ impl WorkflowBuilder {
         F: Fn(State) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<Value, String>> + Send + 'static,
     {
-        let wrapped: FunctionFn = Arc::new(move |state| Box::pin(f(state)));
+        let wrapped: AsyncSourceFn = Arc::new(move |state| Box::pin(f(state)));
 
         self.nodes.push(WorkflowNode {
             id: id.to_string(),

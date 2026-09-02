@@ -90,7 +90,7 @@ let handle = Live::builder()
     .await?;
 ```
 
-## Why is it blocked? (`handle.why_blocked()`)
+## Why is it blocked? (`handle.explain()`)
 
 A governed session's handle answers the common debugging question directly —
 which steps are active, which tools are admitted vs blocked (with reasons), and
@@ -98,7 +98,7 @@ what's still required — as a serializable `FlowExplanation` snapshot computed
 against the live session state:
 
 ```rust,ignore
-if let Some(ex) = handle.why_blocked() {        // None when not governed
+if let Some(ex) = handle.explain() {            // None when not governed
     println!("active: {:?}", ex.active);
     println!("blocked: {:?}", ex.blocked_tools); // tool -> reason
     println!("missing: {:?}", ex.missing_requirements);

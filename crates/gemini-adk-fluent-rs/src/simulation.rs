@@ -9,7 +9,7 @@
 //!
 //! ```ignore
 //! let convo = Conversation::new("booking")./* … */.compile()?;
-//! let mut sim = Sim::new(&convo, FlowMode::Enforce);
+//! let mut sim = Sim::new(&convo, Enforcement::Enforce);
 //! sim.user("a table for 4 tomorrow at 7pm").await;
 //! assert!(sim.active().contains(&"check".to_string()));
 //! assert!(!sim.allowed("book"));            // not confirmed yet

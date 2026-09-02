@@ -19,6 +19,7 @@ constructed. Everything below is mechanical.
 | Error event | `SessionEvent::Error(String)` | `SessionEvent::Error(SessionError)` — print with `{e}` or match `Codec(..)`, `WebSocket(..)`, `Timeout { phase, .. }`, `SetupFailed(..)`; `SessionError` gained `Codec(CodecError)` |
 | GoAway | `SessionEvent::GoAway(Option<String>)`, `GoAwayPayload.time_left: Option<String>` | `SessionEvent::GoAway(Option<Duration>)`, `GoAwayPayload.time_left: Option<Duration>` |
 | Audio / video payloads | `SessionCommand::SendAudio(Vec<u8>)` / `SendVideo(Vec<u8>)`; `SessionWriter::send_audio(Vec<u8>)` | `Bytes` throughout: `SessionCommand::SendAudio(Bytes)`, `SessionWriter::send_audio(Bytes)`, `SessionHandle::send_audio(impl Into<Bytes>)`; L1 `LiveHandle`/`AgentSession::send_audio`/`send_video` take `impl Into<Bytes>` (a `Vec<u8>` still works), `InputEvent::Audio` carries `Bytes` |
+| SPSC ring | `SpscRing::new(cap)` returned one shared, `Sync` object with `write(&self)` / `read(&self)`; capacity rounded up to a power of two | `SpscRing::channel(cap)` returns `(SpscProducer, SpscConsumer)` — each `Send`, neither `Sync`, so one-producer/one-consumer is enforced by the type system (backed by `rtrb`); exact capacity; `is_abandoned()` on both halves. No `unsafe` remains in the workspace |
 | Transcription setters | `enable_input_transcription()`, `enable_output_transcription()` | `input_transcription(true)`, `output_transcription(true)` |
 | Thoughts | `include_thoughts()` | `include_thoughts(true)` (L2 `Live::builder().include_thoughts()` is unchanged) |
 | Resumption setters | `session_resumption(None)`, `session_resumption(Some(h))` | `session_resumption()`, `resume_from(h)` |
@@ -30,6 +31,22 @@ constructed. Everything below is mechanical.
 | Prelude additions | — | `AccessToken`, `ModelId`, `TungsteniteError`, `VadState`, `BufferState` |
 | Removed types | `Platform` enum, `ToolDeclaration` alias | Use `ApiEndpoint` (host/version) and `FunctionDeclaration` |
 | Error types | `TungsteniteError::WebSocket(tungstenite::Error)`; REST errors `Auth(String)` | `TungsteniteError::WebSocket` boxes its source (no `tungstenite::Error` in the public API); `GenerateError`, `TokensError`, … carry `Auth(AuthError)`; `FilesError` gained `Decode(String)` |
+| L1 flow names | `flow::ToolPolicy` (the set of tools a flow reasons about; collided with `tool::ToolPolicy`), `CompiledFlow::tool_policy()`; `flow::Mode` (deprecated) / root `FlowMode`; `flow::run(agent, mode)` / root `run_on_enter`; root `render_ground` | `flow::ToolSurface`, `CompiledFlow::tool_surface()`; one name `Enforcement` (root, `flow`, L2 prelude); `flow::on_enter(agent, mode)` (root `on_enter`); `render_ground` lives in `flow` only. Root and L2 prelude `ToolPolicy` now means `tool::ToolPolicy` (timeout/cache/confirm) |
+| Orchestration names | `orchestration::Mode`, `orchestration::call` (root/L2 aliases `AgentMode`, `call_agent`) | Defined as `orchestration::AgentMode`, `orchestration::call_agent` — same names everywhere |
+| "Why is it blocked?" | `LiveHandle::why_blocked()`, `FlowMonitor::why_blocked(&state)` (aliases) | `LiveHandle::explain()`, `FlowMonitor::explain(&state)` |
+| Blocking vs concurrent | `live::callbacks::CallbackMode` (callbacks) and `live::reactor::EffectMode` (effects) | One `live::ExecutionMode { Blocking, Concurrent }` used by both |
+| Closure aliases | `live::phase::StateGuard` / `workflow::GuardFn`; `live::phase::PhaseHook`; `live::BoxFuture`; private `orchestration::FetchFn` / `extract::FieldFetchFn` / `workflow::FunctionFn` | `gemini_adk_rs::StatePredicate`; `live::SessionHook` (also used by temporal patterns); `gemini_adk_rs::BoxFuture` (re-exported from `live`); `gemini_adk_rs::AsyncSourceFn<In = State>` (`AsyncSourceFn<Value>` for extraction-kit field resolvers) |
+| Phase history record | `live::phase::PhaseTransition` | `live::TransitionRecord` (`Transition` remains the declared edge) |
+| Wire session phase callback | `EventCallbacks::on_phase` / `PhaseCallback`; L2 `Live::on_phase(..)` | `on_session_phase` / `SessionPhaseCallback`; L2 `Live::on_session_phase(..)` (it is the transport phase, not the `PhaseMachine`) |
+| Registry verbs | `WatcherRegistry::add`, `TemporalRegistry::add` | `register` (matching `ComputedRegistry::register`) |
+| Toolset | `Toolset::get_tools()` | `Toolset::tools()` |
+| Builder verbs | `Runner::{with_middleware, with_plugin, with_state}`; `LiveSessionBuilder::with_state`; L2 `Live::with_state` | `Runner::{middleware, plugin, state}`; `LiveSessionBuilder::state`; L2 `Live::state` |
+| Text runner | `text_runner::InMemoryRunner` | `text_runner::TextRunner` |
+| Removed modules/types | `gemini_adk_rs::callback` (`BeforeToolCallback`, `AfterToolCallback`, `BeforeToolResult`, `ToolCallResult` — unreferenced); public `agents::generated` (transpiler shadow types) | Deleted / crate-private. Use `Middleware` hooks (`before_tool`/`after_tool`) instead of the callback aliases |
+| State reads | `State::get<T>` returns `None` for a present-but-mistyped value | `get`/`get_key` unchanged (lenient); new `State::try_get<T>` / `try_get_key` return `Result<Option<T>, StateError>` with `StateError::WrongType { key, source }`. `ReadOnlyPrefixedState` (the type of `state.derived()`) is exported from the crate root |
+| Configuration errors | `ComputedRegistry::register` panicked on a dependency cycle; `Flow::validate` → `Result<(), Vec<String>>`, `FlowBuilder::build` → `Result<Flow, Vec<String>>`, `PhaseMachine::validate` / `ComputedRegistry::validate` → `Result<(), String>` | `ComputedRegistry::register` → `Result<(), ConfigError>` (never panics; a rejected registration leaves the registry unchanged — L2 `Live::computed(..)` defers the error to `connect`); all three `validate`s and `FlowBuilder::build` return `error::ConfigError { issues: Vec<String> }` (`Display` joins with `"; "`; `From<ConfigError> for AgentError`) |
+| Session persistence errors | `SessionPersistence::{save, load, delete}` → `Result<_, Box<dyn Error + Send + Sync>>` | `Result<_, PersistenceError>` (`Io`, `Serde`, `NotFound`, `Backend(String)`) |
+| Combinator middleware | `with_middleware_chain` on `LoopTextAgent`, `FallbackTextAgent`, `RouteTextAgent` only | Also on `Sequential`, `Parallel`, `Race`, `Timeout`, `MapOver`, `Dispatch`, `Join` text agents (`AgentStarted`/`AgentCompleted`, `LoopIteration`, `Timeout` `on_event`s); `TapTextAgent` documents why it has none |
 
 Toolchain: the workspace is Rust edition 2024 with MSRV 1.93. `gemini-genai-rs`
 default features are `["live", "tls-native"]` (`tls-rustls` is the alternative;
@@ -76,14 +93,15 @@ submodule when the compiler says a name isn't found.
   algebra, operators (`>> | * /`) and patterns (`until`, `review_loop`,
   `fan_out_merge`, `supervised`), `Live`.
 - State: `State`, `StateKey`.
-- Flow (core): `Flow`, `Guard`, `FlowMonitor`, `FlowMode`, `Verdict`, `ToolPolicy`.
+- Flow (core): `Flow`, `Guard`, `FlowMonitor`, `Enforcement`, `Verdict`.
 - Tools (core): `SimpleTool`, `TypedTool`, `ToolFunction`, `ToolDispatcher`,
-  `#[tool]`, `Extract`, `Frame`.
+  `ToolPolicy` (the per-tool timeout/cache/confirm policy), `#[tool]`,
+  `Extract`, `Frame`.
 - LLM (core): `BaseLlm`, `GeminiLlm`.
-- Errors: `AgentError`, `AgentResult`, `ToolError`.
+- Errors: `AgentError`, `AgentResult`, `ConfigError`, `ToolError`.
 - Callback contexts: `CallbackContext`, `ToolContext`.
 - Common Live types: `LiveHandle`, `EventCallbacks`, `SteeringMode`,
-  `ContextDelivery`, `RepairConfig`, `SessionPersistence`, `FsPersistence`,
+  `ContextDelivery`, `RepairConfig`, `SessionPersistence`, `PersistenceError`, `FsPersistence`,
   `MemoryPersistence`, `TurnExtractor`, `ExtractionTrigger`, `LlmExtractor`,
   `SoftTurnDetector`, `TranscriptBuffer`, `TranscriptTurn`.
 - Text-agent combinators (`LlmTextAgent`, `SequentialTextAgent`, …).
@@ -95,11 +113,11 @@ submodule when the compiler says a name isn't found.
 
 | Symbol(s) | Home |
 |-----------|------|
-| Full Live control plane: `LiveEvent`, `RuntimeContract`, `FieldPromotion`, `DeferredWriter`, `PendingContext`, `NeedsFulfillment`, `RepairAction`, `SessionSnapshot`, `LiveSessionBuilder`, `CallbackMode`, `ToolExecutionMode`, the `*Contract` types, … | `gemini_adk_fluent_rs::live` |
+| Full Live control plane: `LiveEvent`, `RuntimeContract`, `FieldPromotion`, `DeferredWriter`, `PendingContext`, `NeedsFulfillment`, `RepairAction`, `SessionSnapshot`, `LiveSessionBuilder`, `ExecutionMode`, `ToolExecutionMode`, the `*Contract` types, … | `gemini_adk_fluent_rs::live` |
 | Text-agent runtime internals | `gemini_adk_fluent_rs::text` |
 | `Toolset`, `StaticToolset`, `ConfirmationProvider`, `Recognizer`, `RecordExtractor`, `FrameSpec`, `SlotSpec`, … | `gemini_adk_fluent_rs::tools` |
 | `SlotEvidence`, prefix-scope helpers | `gemini_adk_fluent_rs::state` |
-| `CompiledFlow`, `StepAction`, `Violation`, `FlowExplanation`, `run` (on-enter), … | `gemini_adk_fluent_rs::flow` |
+| `CompiledFlow`, `StepAction`, `Violation`, `FlowExplanation`, `ToolSurface`, `on_enter`, `render_ground`, … | `gemini_adk_fluent_rs::flow` |
 | `AgentTrait` (L1 `Agent` trait), `call_agent`, `AgentMode`, `provenance`, `Resolver`, `agent_session::*` | `gemini_adk_fluent_rs::agents` |
 | `LlmRequest`, `LlmResponse`, `GeminiLlmParams`, `LlmRegistry` | `gemini_adk_fluent_rs::llm` |
 | `Conversation`, `ConversationSpec`, `CompiledConversation`, `FlowStack`, … | `gemini_adk_fluent_rs::conversation` |

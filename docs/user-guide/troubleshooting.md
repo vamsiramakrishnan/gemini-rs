@@ -22,7 +22,7 @@ there, but advanced ones moved to focused submodules. Add the matching import:
 | `CompiledFlow`, `StepAction`, `Violation` | `use gemini_adk_fluent_rs::flow::*;` |
 | `Scenario`, `Sim`, `Motif` | `gemini_adk_fluent_rs::{simulation, motifs}` |
 
-### "method `get_tools` not found … trait `Toolset` is not in scope"
+### "method `tools` not found … trait `Toolset` is not in scope"
 
 A trait method needs the trait in scope. `use gemini_adk_fluent_rs::tools::Toolset;`.
 

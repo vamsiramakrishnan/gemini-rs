@@ -485,7 +485,7 @@ async fn evaluate_repair(
 /// flow is governing the session.
 ///
 /// The monitor is shared with the [`LiveHandle`](crate::live::LiveHandle)
-/// (`explain`/`why_blocked` snapshots), so the lock is held only for the
+/// (`explain` snapshots), so the lock is held only for the
 /// synchronous re-latch + projection; on-enter actions (which may await an
 /// inline agent) fire after the guard is dropped.
 async fn govern_flow(
@@ -1469,7 +1469,7 @@ mod harness {
     #[tokio::test]
     async fn shared_monitor_snapshot_observes_control_lane_progress() {
         // The handle path: a clone of the shared monitor (what `LiveHandle`
-        // holds) answers `why_blocked` against the marking the control lane
+        // holds) answers `explain` against the marking the control lane
         // advances — without the two ever fighting over ownership.
         let flow = Flow::new()
             .step("verify")
@@ -1489,7 +1489,7 @@ mod harness {
         h.control.flow = Some(shared.clone());
 
         // Before verification, the snapshot reports charge_card blocked.
-        let ex = shared.lock().why_blocked(&h.state);
+        let ex = shared.lock().explain(&h.state);
         assert!(ex.active.contains(&"verify".to_string()));
         assert!(ex.blocked_tools.contains_key("charge_card"));
 
@@ -1497,7 +1497,7 @@ mod harness {
         // sees the progress: `pay` is active and charge_card is admitted.
         let _ = h.state.set("identity_verified", true);
         h.run_turn().await;
-        let ex = shared.lock().why_blocked(&h.state);
+        let ex = shared.lock().explain(&h.state);
         assert!(ex.active.contains(&"pay".to_string()));
         assert!(ex.allowed_tools.contains(&"charge_card".to_string()));
     }

@@ -156,7 +156,7 @@ fn main() {
     let toolset_all = McpToolset::new(manager_arc.clone());
     println!(
         "  McpToolset (no filter):  {} tools pre-loaded",
-        toolset_all.get_tools().len()
+        toolset_all.tools().len()
     );
     println!("  (Tools are loaded lazily on first list_tools() call)\n");
 

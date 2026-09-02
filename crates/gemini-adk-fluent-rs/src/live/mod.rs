@@ -5,10 +5,10 @@
 //!
 //! # Callback Modes
 //!
-//! Control-lane callbacks support two execution modes via [`gemini_adk_rs::live::CallbackMode`]:
+//! Control-lane callbacks support two execution modes via [`gemini_adk_rs::live::ExecutionMode`]:
 //!
-//! - **Default methods** (e.g., `.on_turn_complete()`) → [`gemini_adk_rs::live::CallbackMode::Blocking`]
-//! - **`_concurrent` methods** (e.g., `.on_turn_complete_concurrent()`) → [`gemini_adk_rs::live::CallbackMode::Concurrent`]
+//! - **Default methods** (e.g., `.on_turn_complete()`) → [`gemini_adk_rs::live::ExecutionMode::Blocking`]
+//! - **`_concurrent` methods** (e.g., `.on_turn_complete_concurrent()`) → [`gemini_adk_rs::live::ExecutionMode::Concurrent`]
 //!
 //! Use concurrent mode for fire-and-forget work (logging, analytics, webhook dispatch).
 //!
@@ -45,7 +45,7 @@ use std::time::Duration;
 use gemini_adk_rs::State;
 pub use gemini_adk_rs::live::extractor::TurnExtractor;
 pub use gemini_adk_rs::live::needs::RepairConfig;
-pub use gemini_adk_rs::live::persistence::SessionPersistence;
+pub use gemini_adk_rs::live::persistence::{PersistenceError, SessionPersistence};
 pub use gemini_adk_rs::live::steering::{ContextDelivery, SteeringMode};
 pub use gemini_adk_rs::live::{
     ComputedRegistry, EventCallbacks, InstructionModifier, Phase, TemporalRegistry,
@@ -55,25 +55,25 @@ use gemini_adk_rs::llm::BaseLlm;
 use gemini_adk_rs::tool::ToolDispatcher;
 use gemini_genai_rs::prelude::*;
 
-// Carve (gap #9): `gemini_adk_fluent_rs::live` is the curated home for the full
+// `gemini_adk_fluent_rs::live` is the curated home for the full
 // Live control plane. The kernel `prelude` keeps only `Live` + the headline types;
 // everything else (persistence, steering, repair, transcripts, extraction triggers,
 // soft-turn, runtime contract, …) is re-exported here. (Explicit, rather than a
 // glob, to avoid shadowing the L1/L2 private `callbacks`/`contract` modules.)
 pub use gemini_adk_rs::live::{
     ActivityAuthority, BackendInputVad, BackendVadSnapshot, BackgroundAgentDispatcher,
-    BackgroundToolTracker, CallbackMode, ComputedContract, ComputedVar, ConsecutiveFailureDetector,
-    ContextBuilder, ControlContract, DefaultResultFormatter, DeferredWriter, EffectMode,
-    EffectPolicy, ExtractionTrigger, ExtractorContract, FieldPromotion, FsPersistence,
+    BackgroundToolTracker, ComputedContract, ComputedVar, ConsecutiveFailureDetector,
+    ContextBuilder, ControlContract, DefaultResultFormatter, DeferredWriter, EffectPolicy,
+    ExecutionMode, ExtractionTrigger, ExtractorContract, FieldPromotion, FsPersistence,
     InputAudioProcessor, LiveEffect, LiveEffectExecutor, LiveEvent, LiveEventStream, LiveHandle,
     LiveReactor, LiveSessionBuilder, LlmExtractor, MemoryPersistence, MergePolicy,
     NeedsFulfillment, PatternDetector, PendingContext, PhaseContract, PhaseInstruction,
-    PhaseMachine, PhasePreparation, PhaseTransition, PredicateFn, PreparationContract,
-    PromotionContract, RateDetector, Reaction, ReactorEvent, ReactorRule, RepairAction,
-    ResultFormatter, RuntimeContract, SessionSignals, SessionSnapshot, SessionTelemetry,
-    SessionType, SoftTurnDetector, SustainedDetector, ToolCallSummary, ToolContract,
-    TranscriptBuffer, TranscriptTurn, TranscriptWindow, Transition, TransitionContract,
-    TransitionEvaluation, TransitionResult, TransitionTrigger, TurnCommitConfig, TurnCommitPolicy,
+    PhaseMachine, PhasePreparation, PredicateFn, PreparationContract, PromotionContract,
+    RateDetector, Reaction, ReactorEvent, ReactorRule, RepairAction, ResultFormatter,
+    RuntimeContract, SessionHook, SessionSignals, SessionSnapshot, SessionTelemetry, SessionType,
+    SoftTurnDetector, SustainedDetector, ToolCallSummary, ToolContract, TranscriptBuffer,
+    TranscriptTurn, TranscriptWindow, Transition, TransitionContract, TransitionEvaluation,
+    TransitionRecord, TransitionResult, TransitionTrigger, TurnCommitConfig, TurnCommitPolicy,
     TurnCountDetector, TurnSignal, VoiceRuntimeState, WatchPredicate, Watcher, WatcherContract,
 };
 // Offline record/replay harness (Milestone 7 determinism spine).
@@ -189,10 +189,14 @@ pub struct Live {
     pub(crate) flow_actions: Vec<(
         String,
         Arc<dyn gemini_adk_rs::text::TextAgent>,
-        gemini_adk_rs::orchestration::Mode,
+        gemini_adk_rs::orchestration::AgentMode,
     )>,
     // Wire-log path: a FileWireRecorder is created here at connect time.
     pub(crate) record_wire_path: Option<std::path::PathBuf>,
+    /// Configuration problems found while building (e.g. a computed-variable
+    /// dependency cycle). Builder setters cannot fail, so they are collected
+    /// here and reported as one `AgentError::Config` at connect.
+    pub(crate) config_errors: Vec<String>,
 }
 
 impl Live {
@@ -273,6 +277,7 @@ impl Live {
             state: None,
             flow_actions: Vec::new(),
             record_wire_path: None,
+            config_errors: Vec::new(),
             input_audio: crate::live::config::InputAudioConfig::default(),
         }
     }
@@ -304,14 +309,14 @@ impl Live {
     /// # use gemini_adk_rs::State;
     /// let state = State::new();
     /// Live::builder()
-    ///     .with_state(state.clone())   // the session runs on this
+    ///     .state(state.clone())        // the session runs on this
     ///     .with_tools(my_tools(state)); // and so do the tools
     /// # fn my_tools(_: State) -> gemini_adk_fluent_rs::compose::tools::ToolComposite { todo!() }
     /// ```
     ///
     /// `agent_tool` already shares state with the agents it wraps; this is the
     /// same guarantee for ordinary tools.
-    pub fn with_state(mut self, state: State) -> Self {
+    pub fn state(mut self, state: State) -> Self {
         self.state = Some(state);
         self
     }
@@ -386,14 +391,14 @@ impl Live {
     /// is how a governed flow drives in-session orchestration. Requires a flow
     /// (`govern`/`observe`).
     ///
-    /// [`AgentMode::Call`]: gemini_adk_rs::orchestration::Mode::Call
-    /// [`AgentMode::Dispatch`]: gemini_adk_rs::orchestration::Mode::Dispatch
-    /// [`AgentMode::Background`]: gemini_adk_rs::orchestration::Mode::Background
+    /// [`AgentMode::Call`]: gemini_adk_rs::orchestration::AgentMode::Call
+    /// [`AgentMode::Dispatch`]: gemini_adk_rs::orchestration::AgentMode::Dispatch
+    /// [`AgentMode::Background`]: gemini_adk_rs::orchestration::AgentMode::Background
     pub fn on_enter(
         mut self,
         step: impl Into<String>,
         agent: Arc<dyn gemini_adk_rs::text::TextAgent>,
-        mode: gemini_adk_rs::orchestration::Mode,
+        mode: gemini_adk_rs::orchestration::AgentMode,
     ) -> Self {
         self.flow_actions.push((step.into(), agent, mode));
         self

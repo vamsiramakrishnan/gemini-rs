@@ -6,12 +6,12 @@
 //!
 //! # Callback Modes
 //!
-//! Each control-lane callback has an associated [`CallbackMode`]:
+//! Each control-lane callback has an associated [`ExecutionMode`]:
 //!
-//! - [`Blocking`](CallbackMode::Blocking) — awaited inline. The event loop
+//! - [`Blocking`](ExecutionMode::Blocking) — awaited inline. The event loop
 //!   waits for completion before processing the next event. Guarantees
 //!   ordering and state consistency.
-//! - [`Concurrent`](CallbackMode::Concurrent) — spawned as a detached tokio
+//! - [`Concurrent`](ExecutionMode::Concurrent) — spawned as a detached tokio
 //!   task. The event loop continues immediately. Use for fire-and-forget
 //!   work (logging, background agent dispatch, analytics).
 //!
@@ -29,31 +29,8 @@ use bytes::Bytes;
 use gemini_genai_rs::prelude::{FunctionCall, FunctionResponse, SessionPhase, UsageMetadata};
 use gemini_genai_rs::session::SessionWriter;
 
-use super::BoxFuture;
+use super::{BoxFuture, ExecutionMode};
 use crate::state::State;
-
-/// Controls how a control-lane callback is executed relative to the event loop.
-///
-/// Each control-lane callback in [`EventCallbacks`] has a companion `_mode` field
-/// (e.g., `on_turn_complete_mode`) that determines execution semantics.
-///
-/// At the L2 fluent API level, use `_concurrent` suffixed methods (e.g.,
-/// `on_turn_complete_concurrent()`) to set both the callback and its mode
-/// in a single call.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum CallbackMode {
-    /// Callback is awaited inline — the event loop waits for completion.
-    ///
-    /// Use when subsequent events depend on the callback's side effects,
-    /// or when ordering guarantees are required.
-    #[default]
-    Blocking,
-    /// Callback is spawned as a concurrent task — the event loop continues immediately.
-    ///
-    /// Use for fire-and-forget work: logging, analytics, webhook dispatch,
-    /// background agent triggering. The callback runs in a detached tokio task.
-    Concurrent,
-}
 
 // ── Named callback types ──────────────────────────────────────────────────
 // These aliases are the vocabulary of the callback registry: every field
@@ -67,8 +44,9 @@ pub type TextCallback = Box<dyn Fn(&str) + Send + Sync>;
 pub type TranscriptCallback = Box<dyn Fn(&str, bool) + Send + Sync>;
 /// Fast-lane sync callback with no payload (VAD start/end).
 pub type SignalCallback = Box<dyn Fn() + Send + Sync>;
-/// Fast-lane sync callback over a session phase change.
-pub type PhaseCallback = Box<dyn Fn(SessionPhase) + Send + Sync>;
+/// Fast-lane sync callback over a wire-level [`SessionPhase`] change
+/// (connecting → active → disconnecting …). Not the `PhaseMachine`.
+pub type SessionPhaseCallback = Box<dyn Fn(SessionPhase) + Send + Sync>;
 /// Fast-lane sync callback over usage metadata.
 pub type UsageCallback = Box<dyn Fn(&UsageMetadata) + Send + Sync>;
 
@@ -112,7 +90,7 @@ pub struct EventCallbacks {
     /// Called when server-side VAD detects voice activity end.
     pub on_vad_end: Option<SignalCallback>,
     /// Called on session phase transitions.
-    pub on_phase: Option<PhaseCallback>,
+    pub on_session_phase: Option<SessionPhaseCallback>,
     /// Called when server sends token usage metadata.
     pub on_usage: Option<UsageCallback>,
 
@@ -169,27 +147,27 @@ pub struct EventCallbacks {
 
     // -- Callback modes (control-lane only) --
     /// Execution mode for [`on_turn_complete`](Self::on_turn_complete).
-    pub on_turn_complete_mode: CallbackMode,
+    pub on_turn_complete_mode: ExecutionMode,
     /// Execution mode for [`on_generation_complete`](Self::on_generation_complete).
-    pub on_generation_complete_mode: CallbackMode,
+    pub on_generation_complete_mode: ExecutionMode,
     /// Execution mode for [`on_connected`](Self::on_connected).
-    pub on_connected_mode: CallbackMode,
+    pub on_connected_mode: ExecutionMode,
     /// Execution mode for [`on_disconnected`](Self::on_disconnected).
-    pub on_disconnected_mode: CallbackMode,
+    pub on_disconnected_mode: ExecutionMode,
     /// Execution mode for [`on_error`](Self::on_error).
-    pub on_error_mode: CallbackMode,
+    pub on_error_mode: ExecutionMode,
     /// Execution mode for [`on_go_away`](Self::on_go_away).
-    pub on_go_away_mode: CallbackMode,
+    pub on_go_away_mode: ExecutionMode,
     /// Execution mode for [`on_extracted`](Self::on_extracted).
-    pub on_extracted_mode: CallbackMode,
+    pub on_extracted_mode: ExecutionMode,
     /// Execution mode for [`on_extraction_error`](Self::on_extraction_error).
-    pub on_extraction_error_mode: CallbackMode,
+    pub on_extraction_error_mode: ExecutionMode,
     /// Execution mode for [`on_tool_cancelled`](Self::on_tool_cancelled).
-    pub on_tool_cancelled_mode: CallbackMode,
+    pub on_tool_cancelled_mode: ExecutionMode,
     /// Execution mode for [`on_transfer`](Self::on_transfer).
-    pub on_transfer_mode: CallbackMode,
+    pub on_transfer_mode: ExecutionMode,
     /// Execution mode for [`on_resumed`](Self::on_resumed).
-    pub on_resumed_mode: CallbackMode,
+    pub on_resumed_mode: ExecutionMode,
 
     // -- Outbound interceptors (transform data going to Gemini) --
     /// Intercept tool responses before sending to Gemini.
@@ -238,7 +216,7 @@ impl Default for EventCallbacks {
             on_thought: None,
             on_vad_start: None,
             on_vad_end: None,
-            on_phase: None,
+            on_session_phase: None,
             on_usage: None,
             on_interrupted: None,
             on_tool_call: None,
@@ -254,17 +232,17 @@ impl Default for EventCallbacks {
             on_transfer: None,
             on_extracted: None,
             on_extraction_error: None,
-            on_turn_complete_mode: CallbackMode::Blocking,
-            on_generation_complete_mode: CallbackMode::Blocking,
-            on_connected_mode: CallbackMode::Blocking,
-            on_disconnected_mode: CallbackMode::Blocking,
-            on_error_mode: CallbackMode::Blocking,
-            on_go_away_mode: CallbackMode::Blocking,
-            on_extracted_mode: CallbackMode::Blocking,
-            on_extraction_error_mode: CallbackMode::Blocking,
-            on_tool_cancelled_mode: CallbackMode::Blocking,
-            on_transfer_mode: CallbackMode::Blocking,
-            on_resumed_mode: CallbackMode::Blocking,
+            on_turn_complete_mode: ExecutionMode::Blocking,
+            on_generation_complete_mode: ExecutionMode::Blocking,
+            on_connected_mode: ExecutionMode::Blocking,
+            on_disconnected_mode: ExecutionMode::Blocking,
+            on_error_mode: ExecutionMode::Blocking,
+            on_go_away_mode: ExecutionMode::Blocking,
+            on_extracted_mode: ExecutionMode::Blocking,
+            on_extraction_error_mode: ExecutionMode::Blocking,
+            on_tool_cancelled_mode: ExecutionMode::Blocking,
+            on_transfer_mode: ExecutionMode::Blocking,
+            on_resumed_mode: ExecutionMode::Blocking,
             before_tool_response: None,
             on_turn_boundary: None,
             instruction_template: None,
@@ -284,7 +262,7 @@ impl std::fmt::Debug for EventCallbacks {
             .field("on_thought", &self.on_thought.is_some())
             .field("on_vad_start", &self.on_vad_start.is_some())
             .field("on_vad_end", &self.on_vad_end.is_some())
-            .field("on_phase", &self.on_phase.is_some())
+            .field("on_session_phase", &self.on_session_phase.is_some())
             .field("on_usage", &self.on_usage.is_some())
             .field("on_interrupted", &self.on_interrupted.is_some())
             .field("on_tool_call", &self.on_tool_call.is_some())
@@ -349,16 +327,16 @@ mod tests {
     #[test]
     fn callback_mode_defaults_to_blocking() {
         let cb = EventCallbacks::default();
-        assert_eq!(cb.on_turn_complete_mode, CallbackMode::Blocking);
-        assert_eq!(cb.on_connected_mode, CallbackMode::Blocking);
-        assert_eq!(cb.on_disconnected_mode, CallbackMode::Blocking);
-        assert_eq!(cb.on_error_mode, CallbackMode::Blocking);
-        assert_eq!(cb.on_go_away_mode, CallbackMode::Blocking);
-        assert_eq!(cb.on_extracted_mode, CallbackMode::Blocking);
-        assert_eq!(cb.on_extraction_error_mode, CallbackMode::Blocking);
-        assert_eq!(cb.on_tool_cancelled_mode, CallbackMode::Blocking);
-        assert_eq!(cb.on_transfer_mode, CallbackMode::Blocking);
-        assert_eq!(cb.on_resumed_mode, CallbackMode::Blocking);
+        assert_eq!(cb.on_turn_complete_mode, ExecutionMode::Blocking);
+        assert_eq!(cb.on_connected_mode, ExecutionMode::Blocking);
+        assert_eq!(cb.on_disconnected_mode, ExecutionMode::Blocking);
+        assert_eq!(cb.on_error_mode, ExecutionMode::Blocking);
+        assert_eq!(cb.on_go_away_mode, ExecutionMode::Blocking);
+        assert_eq!(cb.on_extracted_mode, ExecutionMode::Blocking);
+        assert_eq!(cb.on_extraction_error_mode, ExecutionMode::Blocking);
+        assert_eq!(cb.on_tool_cancelled_mode, ExecutionMode::Blocking);
+        assert_eq!(cb.on_transfer_mode, ExecutionMode::Blocking);
+        assert_eq!(cb.on_resumed_mode, ExecutionMode::Blocking);
     }
 
     #[test]

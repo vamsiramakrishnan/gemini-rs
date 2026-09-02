@@ -60,7 +60,7 @@ pub use gemini_adk_rs;
 pub use gemini_genai_rs;
 
 // ---------------------------------------------------------------------------
-// Curated submodule homes (gap #9 — prelude hard carve).
+// Curated submodule homes (the prelude is a kernel, not an everything-glob).
 //
 // The kernel `prelude` (below) re-exports only the ~30 types a typical app
 // touches. Everything else lives in these focused, discoverable modules so
@@ -115,9 +115,7 @@ pub mod agents {
     #[doc(inline)]
     pub use gemini_adk_rs::agent::Agent as AgentTrait;
     pub use gemini_adk_rs::agent_session::*;
-    pub use gemini_adk_rs::orchestration::{
-        self, Mode as AgentMode, Resolver, call as call_agent, provenance,
-    };
+    pub use gemini_adk_rs::orchestration::{self, AgentMode, Resolver, call_agent, provenance};
 }
 
 /// L0 wire-protocol types for raw WebSocket access.
@@ -150,8 +148,8 @@ macro_rules! let_clone {
 
 /// The kernel prelude — the ~40 types a typical application touches.
 ///
-/// Gap #9 carved this down from the previous everything-prelude. Anything not
-/// here now lives in a focused submodule and is one import away:
+/// Deliberately a kernel, not an everything-glob. Anything not here lives in
+/// a focused submodule and is one import away:
 ///
 /// | Need | Import |
 /// |------|--------|
@@ -193,12 +191,10 @@ pub mod prelude {
     pub use gemini_adk_rs::agent::Agent as AgentTrait;
 
     // ── Errors ──
-    pub use gemini_adk_rs::error::{AgentError, AgentResult, ToolError};
+    pub use gemini_adk_rs::error::{AgentError, AgentResult, ConfigError, ToolError};
 
     // ── Governed flow (core vocabulary; full set in `crate::flow`) ──
-    pub use gemini_adk_rs::flow::{
-        Enforcement as FlowMode, Flow, FlowMonitor, Guard, ToolPolicy, Verdict,
-    };
+    pub use gemini_adk_rs::flow::{Enforcement, Flow, FlowMonitor, Guard, Verdict};
 
     // ── State (prefix scopes + `SlotEvidence` in `crate::state`) ──
     pub use gemini_adk_rs::state::{State, StateKey};
@@ -207,7 +203,9 @@ pub mod prelude {
     pub use gemini_adk_rs::llm::{BaseLlm, GeminiLlm, GeminiLlmParams};
 
     // ── Tools ──
-    pub use gemini_adk_rs::tool::{SimpleTool, ToolDispatcher, ToolFunction, TypedTool};
+    pub use gemini_adk_rs::tool::{
+        SimpleTool, ToolDispatcher, ToolFunction, ToolPolicy, TypedTool,
+    };
     // The `#[tool]` attribute macro — turns an `async fn` into a registrable tool.
     pub use gemini_adk_rs::tool;
     // Brings in both the `Extract` struct and the `#[derive(Extract)]` macro.
@@ -221,8 +219,8 @@ pub mod prelude {
     // ── Common Live session types (full control plane in `crate::live`) ──
     pub use gemini_adk_rs::live::{
         ContextDelivery, EventCallbacks, ExtractionTrigger, FsPersistence, LiveHandle,
-        LlmExtractor, MemoryPersistence, RepairConfig, SessionPersistence, SoftTurnDetector,
-        SteeringMode, TranscriptBuffer, TranscriptTurn, TurnExtractor,
+        LlmExtractor, MemoryPersistence, PersistenceError, RepairConfig, SessionPersistence,
+        SoftTurnDetector, SteeringMode, TranscriptBuffer, TranscriptTurn, TurnExtractor,
     };
 
     // ── Text-agent combinators (runtime details in `crate::text`) ──

@@ -78,7 +78,7 @@ fn main() {
         .build()
         .expect("valid flow");
 
-    let mut mon = FlowMonitor::new(flow, FlowMode::Enforce);
+    let mut mon = FlowMonitor::new(flow, Enforcement::Enforce);
     let state = State::new();
 
     println!("\n--- Flow before extraction ---");

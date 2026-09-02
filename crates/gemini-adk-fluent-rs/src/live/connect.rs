@@ -92,6 +92,13 @@ impl Live {
     }
 
     async fn build_and_connect(mut self) -> Result<LiveHandle, gemini_adk_rs::error::AgentError> {
+        // Builder setters cannot fail; problems they found are reported here.
+        if !self.config_errors.is_empty() {
+            return Err(gemini_adk_rs::error::ConfigError {
+                issues: std::mem::take(&mut self.config_errors),
+            }
+            .into());
+        }
         if uses_audio_output(&self.config) {
             self.config = self.config.voice_realtime_defaults();
         }
@@ -134,7 +141,7 @@ impl Live {
         // machine read; otherwise agent tools get a fresh one as before.
         let shared_state = self.state.clone();
         if let Some(ref state) = shared_state {
-            builder = builder.with_state(state.clone());
+            builder = builder.state(state.clone());
         }
 
         // Resolve deferred agent tools: register TextAgentTools against it.
@@ -150,7 +157,7 @@ impl Live {
                     state.clone(),
                 ));
             }
-            builder = builder.with_state(state);
+            builder = builder.state(state);
         }
 
         // Resolve deferred async tools (MCP connections, etc.).
@@ -266,7 +273,7 @@ impl Live {
             }
             let mut monitor = gemini_adk_rs::flow::FlowMonitor::new(flow, self.flow_mode);
             for (step, agent, mode) in self.flow_actions {
-                monitor = monitor.on_enter(step, gemini_adk_rs::flow::run(agent, mode));
+                monitor = monitor.on_enter(step, gemini_adk_rs::flow::on_enter(agent, mode));
             }
             builder = builder.flow_monitor(monitor);
         }

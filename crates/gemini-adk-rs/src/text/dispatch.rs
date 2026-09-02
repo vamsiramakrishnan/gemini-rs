@@ -5,7 +5,9 @@ use std::time::Duration;
 use async_trait::async_trait;
 
 use super::TextAgent;
+use crate::context::AgentEvent;
 use crate::error::AgentError;
+use crate::middleware::MiddlewareChain;
 use crate::state::State;
 
 /// Background task handle: agent name → join handle yielding `Ok(json)`/`Err(msg)`.
@@ -33,6 +35,7 @@ pub struct DispatchTextAgent {
     children: Vec<(String, Arc<dyn TextAgent>)>,
     registry: TaskRegistry,
     budget: Arc<tokio::sync::Semaphore>,
+    middleware: MiddlewareChain,
 }
 
 impl DispatchTextAgent {
@@ -48,7 +51,17 @@ impl DispatchTextAgent {
             children,
             registry,
             budget,
+            middleware: MiddlewareChain::new(),
         }
+    }
+
+    /// Attach a middleware chain. `AgentEvent::AgentStarted` is emitted
+    /// through it as each child task is launched, and `AgentEvent::AgentCompleted`
+    /// from inside the detached task when the child finishes (the chain is
+    /// cloned into the task, so this fires even after `run` has returned).
+    pub fn with_middleware_chain(mut self, chain: MiddlewareChain) -> Self {
+        self.middleware = chain;
+        self
     }
 }
 
@@ -101,6 +114,7 @@ pub struct JoinTextAgent {
     registry: TaskRegistry,
     target_names: Option<Vec<String>>,
     timeout: Option<Duration>,
+    middleware: MiddlewareChain,
 }
 
 impl JoinTextAgent {
@@ -111,7 +125,16 @@ impl JoinTextAgent {
             registry,
             target_names: None,
             timeout: None,
+            middleware: MiddlewareChain::new(),
         }
+    }
+
+    /// Attach a middleware chain. `AgentEvent::AgentCompleted` is emitted
+    /// through it for each task as it is joined successfully, and
+    /// `AgentEvent::Timeout` when a task exceeds the join timeout.
+    pub fn with_middleware_chain(mut self, chain: MiddlewareChain) -> Self {
+        self.middleware = chain;
+        self
     }
 
     /// Only wait for specific named tasks.
@@ -158,7 +181,10 @@ impl TextAgent for JoinTextAgent {
                     }
                     Ok(Ok(Err(e))) => Err(AgentError::Other(e)),
                     Ok(Err(e)) => Err(AgentError::Other(format!("Join error: {e}"))),
-                    Err(_) => Err(AgentError::Timeout),
+                    Err(_) => {
+                        let _ = self.middleware.run_on_event(&AgentEvent::Timeout).await;
+                        Err(AgentError::Timeout)
+                    }
                 }
             } else {
                 match handle.await {

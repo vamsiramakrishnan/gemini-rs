@@ -197,7 +197,7 @@ async fn tts(
 /// the document currently admits.
 fn print_flow_state(handle: &LiveHandle) {
     let done: Vec<String> = handle.state().get("flow:done").unwrap_or_default();
-    if let Some(explanation) = handle.why_blocked() {
+    if let Some(explanation) = handle.explain() {
         println!(
             "  [flow] done: [{}] · active: [{}] · admitted tools: [{}]",
             done.join(", "),

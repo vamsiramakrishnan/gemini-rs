@@ -6,9 +6,9 @@
 //! existing extraction pipeline) and promotes recognized fields into governed
 //! `State`, where `Flow` guards (`done(captured([...]))`) and repair read them.
 //!
-//! This is the deterministic, transcript-sourced slice of the kit (see the
-//! extraction-kit RFC). LLM / fetch / MCP / agent *resolvers* and the
-//! `#[derive(Extract)]` macro layer on top of this same record model.
+//! This is the deterministic, transcript-sourced slice of the kit. LLM / fetch
+//! / MCP / agent *resolvers* and the `#[derive(Extract)]` macro layer on top of
+//! this same record model.
 //!
 //! ```
 //! use gemini_adk_rs::extract::{Extract, Recognizer};
@@ -22,7 +22,6 @@
 //! ```
 
 use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -32,10 +31,11 @@ use regex::Regex;
 use serde_json::Value;
 use std::sync::LazyLock;
 
+use crate::AsyncSourceFn;
 use crate::live::extractor::{ExtractionTrigger, FieldPromotion, OnComplete, TurnExtractor};
 use crate::live::transcript::TranscriptTurn;
 use crate::llm::LlmError;
-use crate::orchestration::Mode as AgentMode;
+use crate::orchestration::AgentMode;
 use crate::state::State;
 use crate::text::TextAgent;
 
@@ -294,11 +294,6 @@ impl Recognizer {
     }
 }
 
-/// The async source of a field: inputs (state keys) → value. The seam for a
-/// tool call, an HTTP fetch, or an MCP request.
-type FieldFetchFn =
-    Arc<dyn Fn(Value) -> Pin<Box<dyn Future<Output = Result<Value, String>> + Send>> + Send + Sync>;
-
 /// How a field is filled.
 #[derive(Clone)]
 enum Source {
@@ -311,7 +306,8 @@ enum Source {
         /// Optional cache time-to-live keyed by `(field, canonical args)`.
         ttl: Option<Duration>,
         /// The async fetcher.
-        fetch: FieldFetchFn,
+        /// (An [`AsyncSourceFn`] bound from the args object, not the whole `State`.)
+        fetch: AsyncSourceFn<Value>,
     },
 }
 
@@ -524,7 +520,7 @@ impl RecordExtractor {
         field: &str,
         args: &[String],
         ttl: Option<Duration>,
-        fetch: &FieldFetchFn,
+        fetch: &AsyncSourceFn<Value>,
         fresh: &serde_json::Map<String, Value>,
         state: &State,
     ) -> Option<Value> {

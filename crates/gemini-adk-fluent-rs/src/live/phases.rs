@@ -76,17 +76,22 @@ impl Live {
     ///
     /// The compute function receives the full `State` and returns `Some(value)`
     /// to write to `derived:{key}`, or `None` to skip.
+    ///
+    /// A dependency cycle among computed variables is a configuration error;
+    /// it is reported by `connect` (as `AgentError::Config`), never a panic.
     pub fn computed(
         mut self,
         key: impl Into<String>,
         deps: &[&str],
         f: impl Fn(&State) -> Option<Value> + Send + Sync + 'static,
     ) -> Self {
-        self.computed.register(ComputedVar {
+        if let Err(err) = self.computed.register(ComputedVar {
             key: key.into(),
             dependencies: deps.iter().map(std::string::ToString::to_string).collect(),
             compute: Arc::new(f),
-        });
+        }) {
+            self.config_errors.extend(err.issues);
+        }
         self
     }
 
@@ -143,7 +148,7 @@ impl Live {
 
     /// Internal method called by [`WatchBuilder::then`].
     pub(crate) fn add_watcher(&mut self, watcher: Watcher) {
-        self.watchers.add(watcher);
+        self.watchers.register(watcher);
     }
 
     // -- Temporal Patterns --
@@ -163,7 +168,7 @@ impl Live {
         Fut: Future<Output = ()> + Send + 'static,
     {
         let detector = SustainedDetector::new(Arc::new(condition), duration);
-        self.temporal.add(TemporalPattern::new(
+        self.temporal.register(TemporalPattern::new(
             name,
             Box::new(detector),
             Arc::new(move |s, w| Box::pin(action(s, w))),
@@ -188,7 +193,7 @@ impl Live {
         Fut: Future<Output = ()> + Send + 'static,
     {
         let detector = RateDetector::new(Arc::new(filter), count, window);
-        self.temporal.add(TemporalPattern::new(
+        self.temporal.register(TemporalPattern::new(
             name,
             Box::new(detector),
             Arc::new(move |s, w| Box::pin(action(s, w))),
@@ -212,7 +217,7 @@ impl Live {
         Fut: Future<Output = ()> + Send + 'static,
     {
         let detector = TurnCountDetector::new(Arc::new(condition), turn_count);
-        self.temporal.add(TemporalPattern::new(
+        self.temporal.register(TemporalPattern::new(
             name,
             Box::new(detector),
             Arc::new(move |s, w| Box::pin(action(s, w))),

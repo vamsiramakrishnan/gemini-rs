@@ -102,7 +102,7 @@ mod tests {
             .require([booking::done])
             .compile()
             .expect("compiles");
-        assert!(convo.flow().tool_policy().tools.contains(booking::book));
+        assert!(convo.flow().tool_surface().tools.contains(booking::book));
     }
 
     // Sections are optional and order-independent.

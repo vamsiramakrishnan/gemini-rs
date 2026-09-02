@@ -162,7 +162,7 @@ impl SessionSpec {
                 }
             }
         }
-        out.push_str("        .with_state(state.clone())\n");
+        out.push_str("        .state(state.clone())\n");
         if !self.tools.is_empty() {
             out.push_str("        .tools(tools)\n");
         }

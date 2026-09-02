@@ -246,13 +246,22 @@ impl JournalSink for MemoryJournalSink {
     }
 }
 
-/// Error returned by fallible state writes.
+/// Error returned by fallible state reads and writes.
 #[derive(Debug, thiserror::Error)]
 pub enum StateError {
     /// The value could not be serialized to JSON.
     #[error("failed to serialize state value for key '{key}': {source}")]
     Serialize {
         /// The key that was being written.
+        key: String,
+        /// The underlying serde error.
+        source: serde_json::Error,
+    },
+    /// A value is present at the key but does not deserialize to the
+    /// requested type (see [`State::try_get`]).
+    #[error("state value at key '{key}' is not the requested type: {source}")]
+    WrongType {
+        /// The key that was being read.
         key: String,
         /// The underlying serde error.
         source: serde_json::Error,
@@ -367,9 +376,39 @@ impl State {
 
     /// Get a value by key, attempting to deserialize to the requested type.
     /// When delta tracking is enabled, checks delta first, then inner.
+    ///
+    /// This is the *lenient* read: a value that is present but of the wrong
+    /// type is reported as `None`, indistinguishable from an absent key. Use
+    /// [`try_get`](Self::try_get) when that distinction matters.
     pub fn get<T: serde::de::DeserializeOwned>(&self, key: &str) -> Option<T> {
         self.get_raw(key)
             .and_then(|v| serde_json::from_value(v).ok())
+    }
+
+    /// Get a value by key, distinguishing "absent" from "present but the wrong
+    /// type".
+    ///
+    /// Returns `Ok(None)` when no value is stored at `key` (after the same
+    /// delta → inner → `derived:` lookup as [`get`](Self::get)), `Ok(Some(v))`
+    /// when the stored value deserializes to `T`, and
+    /// [`StateError::WrongType`] when a value exists but does not. This is the
+    /// *strict* read; [`get`](Self::get) is the lenient form that folds the
+    /// error case into `None`.
+    pub fn try_get<T: serde::de::DeserializeOwned>(
+        &self,
+        key: &str,
+    ) -> Result<Option<T>, StateError> {
+        match self.get_raw(key) {
+            None => Ok(None),
+            Some(v) => {
+                serde_json::from_value(v)
+                    .map(Some)
+                    .map_err(|source| StateError::WrongType {
+                        key: key.to_string(),
+                        source,
+                    })
+            }
+        }
     }
 
     /// Borrow a value by key without cloning, applying `f` to the reference.
@@ -443,9 +482,19 @@ impl State {
         None
     }
 
-    /// Get a typed value using a `StateKey<T>`.
+    /// Get a typed value using a `StateKey<T>` (lenient — a wrong-typed value
+    /// reads as `None`; see [`get`](Self::get)).
     pub fn get_key<T: serde::de::DeserializeOwned>(&self, key: &StateKey<T>) -> Option<T> {
         self.get(key.key())
+    }
+
+    /// Get a typed value using a `StateKey<T>`, distinguishing "absent" from
+    /// "present but the wrong type" (see [`try_get`](Self::try_get)).
+    pub fn try_get_key<T: serde::de::DeserializeOwned>(
+        &self,
+        key: &StateKey<T>,
+    ) -> Result<Option<T>, StateError> {
+        self.try_get(key.key())
     }
 
     /// Set a typed value using a `StateKey<T>`.
@@ -1630,6 +1679,35 @@ mod tests {
         assert_eq!(turn_keys.len(), 2);
         assert!(turn_keys.contains(&"a".to_string()));
         assert!(turn_keys.contains(&"b".to_string()));
+    }
+
+    // ── try_get / try_get_key ─────────────────────────────────────────
+
+    #[test]
+    fn try_get_distinguishes_absent_from_wrong_type() {
+        let state = State::new();
+        assert!(matches!(state.try_get::<u32>("missing"), Ok(None)));
+
+        state.set("n", 5u32).unwrap();
+        assert_eq!(state.try_get::<u32>("n").unwrap(), Some(5));
+
+        state.set("s", "not a number").unwrap();
+        // Lenient read folds the type error into `None`…
+        assert_eq!(state.get::<u32>("s"), None);
+        // …the strict read reports it.
+        match state.try_get::<u32>("s") {
+            Err(StateError::WrongType { key, .. }) => assert_eq!(key, "s"),
+            other => panic!("expected WrongType, got {other:?}"),
+        }
+
+        // Same derived: fallback as `get`.
+        state.set("derived:risk", 0.5f64).unwrap();
+        assert_eq!(state.try_get::<f64>("risk").unwrap(), Some(0.5));
+
+        const N: StateKey<u32> = StateKey::new("n");
+        assert_eq!(state.try_get_key(&N).unwrap(), Some(5));
+        const S: StateKey<u32> = StateKey::new("s");
+        assert!(state.try_get_key(&S).is_err());
     }
 
     // ── ReadOnlyPrefixedState (derived) tests ────────────────────────────

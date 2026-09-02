@@ -97,7 +97,8 @@ pub struct ExtractorContract {
     pub window_size: usize,
     /// Trigger mode.
     pub trigger: String,
-    /// Explicit promotion policy. Empty means legacy auto-flatten behavior.
+    /// Explicit promotion policy. Empty means every top-level non-null field
+    /// is auto-flattened into state under its own name.
     pub promotions: Vec<PromotionContract>,
 }
 

@@ -23,7 +23,7 @@
 //!     .stage("done").terminal()
 //!     .require(["done"])
 //!     .compile()?;
-//! let mut monitor = convo.monitor(FlowMode::Enforce);
+//! let mut monitor = convo.monitor(Enforcement::Enforce);
 //! ```
 //!
 //! ### Lowering semantics (MVP)
@@ -1210,7 +1210,7 @@ fn lower_flow(stages: &[StageSpec], require: &[String]) -> Result<CompiledFlow, 
         fb = fb.require(require.to_vec());
     }
 
-    let flow = fb.build().map_err(ConversationError::Flow)?;
+    let flow = fb.build().map_err(|e| ConversationError::Flow(e.issues))?;
     flow.compile().map_err(ConversationError::Compile)
 }
 
@@ -1427,7 +1427,7 @@ mod tests {
     fn compiles_to_a_governed_flow() {
         let convo = booking();
         // The commit tool is in the tool universe and gated.
-        assert!(convo.flow().tool_policy().tools.contains("book"));
+        assert!(convo.flow().tool_surface().tools.contains("book"));
         assert_eq!(convo.flow().flow().steps.len(), 4);
     }
 

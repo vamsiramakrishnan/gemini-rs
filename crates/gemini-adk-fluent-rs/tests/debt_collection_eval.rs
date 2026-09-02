@@ -120,7 +120,7 @@ async fn a_governed_collections_call_is_evaluated_end_to_end() {
             // it. Without this the flow stalls at `verify` and the model — told
             // only that its tool call failed — apologises for "a system error"
             // and then tells the caller the disclosure was recorded anyway.
-            .with_state(state.clone())
+            .state(state.clone())
             .with_tools(scenario::tools(state.clone(), journal.clone(), started))
             .govern(scenario::flow()),
         observed.clone(),
@@ -637,7 +637,7 @@ async fn run_adversarial(evaluation: &mut Evaluation, started: Instant) {
         let handle = match connect(
             Live::builder()
                 .instruction(scenario::instruction())
-                .with_state(state.clone())
+                .state(state.clone())
                 .with_tools(scenario::tools(state.clone(), journal.clone(), started))
                 .govern(scenario::flow()),
             observed.clone(),

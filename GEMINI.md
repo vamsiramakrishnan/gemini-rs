@@ -114,7 +114,8 @@ let state = State::new();
 
 // Basic get/set with automatic serde serialization
 state.set("name", "Alice");
-let name: Option<String> = state.get("name");
+let name: Option<String> = state.get("name");          // lenient: wrong type reads as None
+let name: Option<String> = state.try_get("name")?;     // strict: StateError::WrongType if mistyped
 
 // Atomic read-modify-write
 let count = state.modify("count", 0u32, |n| n + 1);

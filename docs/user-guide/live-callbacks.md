@@ -35,7 +35,7 @@ Register these with the synchronous closure variants on `Live::builder()`.
 | `.on_thought(f)` | `f: Fn(&str)` | Thought summary chunk. Requires `.include_thoughts()`. Google AI only. |
 | `.on_vad_start(f)` | `f: Fn()` | Server-side VAD detected voice activity start. |
 | `.on_vad_end(f)` | `f: Fn()` | Server-side VAD detected voice activity end. |
-| `.on_phase(f)` | `f: Fn(SessionPhase)` | Session lifecycle phase changed (connecting, active, disconnecting, etc.). Use for lightweight UI state updates. |
+| `.on_session_phase(f)` | `f: Fn(SessionPhase)` | Wire-level session lifecycle phase changed (connecting, active, disconnecting, etc.) — not the `PhaseMachine`. Use for lightweight UI state updates. |
 | `.on_usage(f)` | `f: Fn(&UsageMetadata)` | Token usage delivered after each generation. Fires on the telemetry lane (not the audio hot path), but shares the sync-only constraint. |
 
 ### Partial and Final Transcript Semantics

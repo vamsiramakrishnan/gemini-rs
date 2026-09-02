@@ -13,8 +13,10 @@ use std::time::{Duration, Instant};
 
 use gemini_genai_rs::session::SessionWriter;
 
-use super::BoxFuture;
+use super::SessionHook;
 use super::transcript::TranscriptWindow;
+use crate::StatePredicate;
+use crate::error::ConfigError;
 use crate::state::State;
 
 // ── Core types ──────────────────────────────────────────────────────────────
@@ -156,13 +158,9 @@ pub struct PhasePreparation {
     /// State keys this preparation is expected to produce.
     pub produces: Vec<String>,
     /// Async effect that can mutate state and/or write context.
-    pub run: PhaseHook,
+    pub run: SessionHook,
 }
 
-/// Sync guard over state: `true` admits the transition/phase.
-pub type StateGuard = Arc<dyn Fn(&State) -> bool + Send + Sync>;
-/// Async phase hook receiving shared state and a session writer.
-pub type PhaseHook = Arc<dyn Fn(State, Arc<dyn SessionWriter>) -> BoxFuture<()> + Send + Sync>;
 /// Context generator run on phase entry (`None` = inject nothing).
 pub type EnterContextFn = Arc<
     dyn Fn(&State, &TranscriptWindow) -> Option<Vec<gemini_genai_rs::prelude::Content>>
@@ -179,11 +177,11 @@ pub struct Phase {
     /// Tool filter — `None` means all tools are allowed.
     pub tools_enabled: Option<Vec<String>>,
     /// Optional guard: phase can only be entered when this returns `true`.
-    pub guard: Option<StateGuard>,
+    pub guard: Option<StatePredicate>,
     /// Async callback executed when entering this phase.
-    pub on_enter: Option<PhaseHook>,
+    pub on_enter: Option<SessionHook>,
     /// Async callback executed when leaving this phase.
-    pub on_exit: Option<PhaseHook>,
+    pub on_exit: Option<SessionHook>,
     /// Ordered list of outbound transitions evaluated by the machine.
     pub transitions: Vec<Transition>,
     /// If `true`, `evaluate()` always returns `None` — no transitions out.
@@ -273,8 +271,9 @@ impl Phase {
     }
 }
 
-/// Record of a single phase transition for history/debugging.
-pub struct PhaseTransition {
+/// Record of a single phase transition that already happened, kept in
+/// [`PhaseMachine::history`]. Distinct from [`Transition`], the declared edge.
+pub struct TransitionRecord {
     /// Phase we left.
     pub from: String,
     /// Phase we entered.
@@ -332,7 +331,7 @@ pub struct PhaseMachine {
     phases: HashMap<String, Phase>,
     current: String,
     initial: String,
-    history: VecDeque<PhaseTransition>,
+    history: VecDeque<TransitionRecord>,
     phase_entered_at: Instant,
 }
 
@@ -367,13 +366,13 @@ impl PhaseMachine {
     }
 
     /// The transition history (oldest first, capped at 100 entries).
-    pub fn history(&self) -> &VecDeque<PhaseTransition> {
+    pub fn history(&self) -> &VecDeque<TransitionRecord> {
         &self.history
     }
 
     /// Mutable access to the transition history (for testing).
     #[cfg(test)]
-    pub(crate) fn history_mut(&mut self) -> &mut VecDeque<PhaseTransition> {
+    pub(crate) fn history_mut(&mut self) -> &mut VecDeque<TransitionRecord> {
         &mut self.history
     }
 
@@ -593,7 +592,7 @@ impl PhaseMachine {
         if self.history.len() >= MAX_PHASE_HISTORY {
             self.history.pop_front();
         }
-        self.history.push_back(PhaseTransition {
+        self.history.push_back(TransitionRecord {
             from,
             to: target.to_string(),
             turn,
@@ -641,23 +640,23 @@ impl PhaseMachine {
     /// - At least one phase is registered.
     /// - The initial phase exists.
     /// - Every transition target references an existing phase.
-    pub fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), ConfigError> {
         if self.phases.is_empty() {
-            return Err("no phases registered".to_string());
+            return Err(ConfigError::new("no phases registered"));
         }
         if !self.phases.contains_key(&self.initial) {
-            return Err(format!(
+            return Err(ConfigError::new(format!(
                 "initial phase '{}' not found in registered phases",
                 self.initial
-            ));
+            )));
         }
         for phase in self.phases.values() {
             for transition in &phase.transitions {
                 if !self.phases.contains_key(&transition.target) {
-                    return Err(format!(
+                    return Err(ConfigError::new(format!(
                         "phase '{}' has transition to unknown target '{}'",
                         phase.name, transition.target
-                    ));
+                    )));
                 }
             }
         }
@@ -895,7 +894,10 @@ mod tests {
         machine.add_phase(simple_phase("greeting", "Hi"));
 
         let err = machine.validate().unwrap_err();
-        assert!(err.contains("initial phase 'nonexistent' not found"));
+        assert!(
+            err.to_string()
+                .contains("initial phase 'nonexistent' not found")
+        );
     }
 
     // ── 10. validate catches invalid transition target ──────────────────
@@ -913,7 +915,7 @@ mod tests {
         machine.add_phase(greeting);
 
         let err = machine.validate().unwrap_err();
-        assert!(err.contains("unknown target 'missing_phase'"));
+        assert!(err.to_string().contains("unknown target 'missing_phase'"));
     }
 
     // ── 11. validate succeeds on valid config ───────────────────────────
@@ -964,7 +966,7 @@ mod tests {
     fn validate_catches_no_phases() {
         let machine = PhaseMachine::new("greeting");
         let err = machine.validate().unwrap_err();
-        assert!(err.contains("no phases registered"));
+        assert!(err.to_string().contains("no phases registered"));
     }
 
     // ── transition to nonexistent target returns None ────────────────────
@@ -1317,7 +1319,7 @@ mod tests {
         machine.add_phase(purpose);
 
         // Simulate history: greeting -> identify at turn 2
-        machine.history_mut().push_back(PhaseTransition {
+        machine.history_mut().push_back(TransitionRecord {
             from: "greeting".to_string(),
             to: "identify".to_string(),
             turn: 2,

@@ -153,7 +153,7 @@ impl HandoffRecorder {
                 selected.insert(key.to_string(), value);
             }
         }
-        let flow = handle.why_blocked().map(|explanation| HandoffFlowStatus {
+        let flow = handle.explain().map(|explanation| HandoffFlowStatus {
             done: state.get::<Vec<String>>("flow:done").unwrap_or_default(),
             active: explanation.active,
             missing: explanation.missing_requirements,

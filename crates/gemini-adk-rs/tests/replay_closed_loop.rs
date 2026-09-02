@@ -119,7 +119,7 @@ async fn run_session(
 
     let builder = LiveSessionBuilder::new(config.clone())
         .dispatcher(weather_dispatcher(state.clone()))
-        .with_state(state.clone());
+        .state(state.clone());
 
     let replay = replay_session(config, builder, entries)
         .await

@@ -136,8 +136,8 @@ impl WatcherRegistry {
         }
     }
 
-    /// Add a watcher to the registry.
-    pub fn add(&mut self, watcher: Watcher) {
+    /// Register a watcher.
+    pub fn register(&mut self, watcher: Watcher) {
         self.observed_keys.insert(watcher.key.clone());
         self.watchers.push(watcher);
     }
@@ -299,7 +299,7 @@ mod tests {
     async fn changed_fires_on_any_diff() {
         let counter = Arc::new(AtomicU32::new(0));
         let mut registry = WatcherRegistry::new();
-        registry.add(counting_watcher(
+        registry.register(counting_watcher(
             "x",
             WatchPredicate::Changed,
             counter.clone(),
@@ -325,7 +325,7 @@ mod tests {
     async fn changed_to_fires_when_new_value_matches() {
         let counter = Arc::new(AtomicU32::new(0));
         let mut registry = WatcherRegistry::new();
-        registry.add(counting_watcher(
+        registry.register(counting_watcher(
             "status",
             WatchPredicate::ChangedTo(json!("active")),
             counter.clone(),
@@ -350,7 +350,7 @@ mod tests {
     async fn changed_to_does_not_fire_when_new_value_differs() {
         let counter = Arc::new(AtomicU32::new(0));
         let mut registry = WatcherRegistry::new();
-        registry.add(counting_watcher(
+        registry.register(counting_watcher(
             "status",
             WatchPredicate::ChangedTo(json!("active")),
             counter.clone(),
@@ -372,7 +372,7 @@ mod tests {
     async fn changed_from_fires_when_old_value_matches() {
         let counter = Arc::new(AtomicU32::new(0));
         let mut registry = WatcherRegistry::new();
-        registry.add(counting_watcher(
+        registry.register(counting_watcher(
             "mode",
             WatchPredicate::ChangedFrom(json!("draft")),
             counter.clone(),
@@ -405,7 +405,7 @@ mod tests {
     async fn crossed_above_fires_on_upward_crossing() {
         let counter = Arc::new(AtomicU32::new(0));
         let mut registry = WatcherRegistry::new();
-        registry.add(counting_watcher(
+        registry.register(counting_watcher(
             "temp",
             WatchPredicate::CrossedAbove(100.0),
             counter.clone(),
@@ -431,7 +431,7 @@ mod tests {
     async fn crossed_above_does_not_fire_when_both_above() {
         let counter = Arc::new(AtomicU32::new(0));
         let mut registry = WatcherRegistry::new();
-        registry.add(counting_watcher(
+        registry.register(counting_watcher(
             "temp",
             WatchPredicate::CrossedAbove(100.0),
             counter.clone(),
@@ -454,7 +454,7 @@ mod tests {
     async fn crossed_below_fires_on_downward_crossing() {
         let counter = Arc::new(AtomicU32::new(0));
         let mut registry = WatcherRegistry::new();
-        registry.add(counting_watcher(
+        registry.register(counting_watcher(
             "battery",
             WatchPredicate::CrossedBelow(20.0),
             counter.clone(),
@@ -480,7 +480,7 @@ mod tests {
     async fn became_true_fires_on_false_to_true() {
         let counter = Arc::new(AtomicU32::new(0));
         let mut registry = WatcherRegistry::new();
-        registry.add(counting_watcher(
+        registry.register(counting_watcher(
             "flag",
             WatchPredicate::BecameTrue,
             counter.clone(),
@@ -505,7 +505,7 @@ mod tests {
     async fn became_false_fires_on_true_to_false() {
         let counter = Arc::new(AtomicU32::new(0));
         let mut registry = WatcherRegistry::new();
-        registry.add(counting_watcher(
+        registry.register(counting_watcher(
             "flag",
             WatchPredicate::BecameFalse,
             counter.clone(),
@@ -530,7 +530,7 @@ mod tests {
     async fn custom_predicate_fires_when_fn_returns_true() {
         let counter = Arc::new(AtomicU32::new(0));
         let mut registry = WatcherRegistry::new();
-        registry.add(counting_watcher(
+        registry.register(counting_watcher(
             "score",
             WatchPredicate::Custom(Arc::new(|old, new| {
                 // Fire only when value doubled
@@ -571,7 +571,7 @@ mod tests {
         let mut registry = WatcherRegistry::new();
 
         // Blocking watcher
-        registry.add(counting_watcher(
+        registry.register(counting_watcher(
             "x",
             WatchPredicate::Changed,
             blocking_counter.clone(),
@@ -579,7 +579,7 @@ mod tests {
         ));
 
         // Concurrent watcher
-        registry.add(counting_watcher(
+        registry.register(counting_watcher(
             "x",
             WatchPredicate::Changed,
             concurrent_counter.clone(),
@@ -611,7 +611,7 @@ mod tests {
     fn evaluate_with_no_matching_diffs_returns_empty() {
         let counter = Arc::new(AtomicU32::new(0));
         let mut registry = WatcherRegistry::new();
-        registry.add(counting_watcher(
+        registry.register(counting_watcher(
             "x",
             WatchPredicate::Changed,
             counter.clone(),
@@ -631,7 +631,7 @@ mod tests {
     async fn evaluate_mutations_collapses_to_net_diff() {
         let counter = Arc::new(AtomicU32::new(0));
         let mut registry = WatcherRegistry::new();
-        registry.add(counting_watcher(
+        registry.register(counting_watcher(
             "x",
             WatchPredicate::ChangedTo(json!(3)),
             counter.clone(),
@@ -658,7 +658,7 @@ mod tests {
     fn evaluate_mutations_ignores_net_noop() {
         let counter = Arc::new(AtomicU32::new(0));
         let mut registry = WatcherRegistry::new();
-        registry.add(counting_watcher(
+        registry.register(counting_watcher(
             "x",
             WatchPredicate::Changed,
             counter,
@@ -686,19 +686,19 @@ mod tests {
 
         assert!(registry.observed_keys().is_empty());
 
-        registry.add(counting_watcher(
+        registry.register(counting_watcher(
             "alpha",
             WatchPredicate::Changed,
             counter.clone(),
             false,
         ));
-        registry.add(counting_watcher(
+        registry.register(counting_watcher(
             "beta",
             WatchPredicate::Changed,
             counter.clone(),
             false,
         ));
-        registry.add(counting_watcher(
+        registry.register(counting_watcher(
             "alpha",
             WatchPredicate::BecameTrue,
             counter.clone(),
@@ -720,7 +720,7 @@ mod tests {
         let mut registry = WatcherRegistry::new();
 
         // Watcher A: fires on any change
-        registry.add(counting_watcher(
+        registry.register(counting_watcher(
             "x",
             WatchPredicate::Changed,
             counter_a.clone(),
@@ -728,7 +728,7 @@ mod tests {
         ));
 
         // Watcher B: fires only when new == 42
-        registry.add(counting_watcher(
+        registry.register(counting_watcher(
             "x",
             WatchPredicate::ChangedTo(json!(42)),
             counter_b.clone(),
@@ -765,7 +765,7 @@ mod tests {
     #[tokio::test]
     async fn action_receives_old_new_and_state() {
         let mut registry = WatcherRegistry::new();
-        registry.add(recording_watcher("val", WatchPredicate::Changed, false));
+        registry.register(recording_watcher("val", WatchPredicate::Changed, false));
 
         let state = State::new();
         let diffs = vec![("val".to_string(), json!("before"), json!("after"))];
@@ -785,7 +785,7 @@ mod tests {
     fn crossed_above_with_non_numeric_values_does_not_fire() {
         let counter = Arc::new(AtomicU32::new(0));
         let mut registry = WatcherRegistry::new();
-        registry.add(counting_watcher(
+        registry.register(counting_watcher(
             "x",
             WatchPredicate::CrossedAbove(10.0),
             counter.clone(),
@@ -804,7 +804,7 @@ mod tests {
     fn became_true_does_not_fire_on_non_bool() {
         let counter = Arc::new(AtomicU32::new(0));
         let mut registry = WatcherRegistry::new();
-        registry.add(counting_watcher(
+        registry.register(counting_watcher(
             "x",
             WatchPredicate::BecameTrue,
             counter.clone(),
@@ -824,7 +824,7 @@ mod tests {
     fn empty_diffs_produce_no_futures() {
         let counter = Arc::new(AtomicU32::new(0));
         let mut registry = WatcherRegistry::new();
-        registry.add(counting_watcher(
+        registry.register(counting_watcher(
             "x",
             WatchPredicate::Changed,
             counter.clone(),

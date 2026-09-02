@@ -1345,7 +1345,7 @@ impl SessionSpec {
                 Ok(compiled) => (
                     true,
                     compiled
-                        .tool_policy()
+                        .tool_surface()
                         .tools
                         .iter()
                         .cloned()
@@ -1475,7 +1475,7 @@ impl SessionSpec {
         self.seed_state_defaults(state);
 
         let mut live = live
-            .with_state(state.clone())
+            .state(state.clone())
             .instruction(if self.instruction.is_empty() {
                 "Follow the conversation flow you are given.".to_string()
             } else {
@@ -1907,6 +1907,10 @@ async fn execute_http(binding: &HttpBinding, args: &Value, state: &State) -> Res
 }
 
 #[cfg(not(feature = "http-tools"))]
+#[allow(
+    clippy::unused_async,
+    reason = "same signature as the http-tools implementation so the call site is feature-agnostic"
+)]
 async fn execute_http(
     _binding: &HttpBinding,
     _args: &Value,

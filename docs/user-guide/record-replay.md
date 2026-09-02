@@ -58,7 +58,7 @@ let state = State::new();
 state.set_journal_sink(Arc::new(FileJournalSink::create(
     "/var/log/sessions/user-123.journal.jsonl",
 )?));
-// hand `state` to the session: Live::builder()…  /  LiveSessionBuilder::with_state(state)
+// hand `state` to the session: Live::builder().state(state)  /  LiveSessionBuilder::state(state)
 ```
 
 The sink is shared with all clones and delta views of the `State` and is
@@ -128,7 +128,7 @@ let state = State::new();
 let config = SessionConfig::new("offline"); // no network, no credentials used
 let builder = LiveSessionBuilder::new(config.clone())
     .dispatcher(weather_dispatcher(state.clone()))
-    .with_state(state.clone());
+    .state(state.clone());
 
 let replay = replay_session(config, builder, &entries).await?;
 let mut events = replay.handle().events();

@@ -30,8 +30,8 @@ use gemini_genai_rs::prelude::*;
 
 The L2 `prelude` is a **kernel**, not an everything-glob: builders, the
 `S·C·T·P·M·A·E·G` algebra, operators/patterns, `Live`, `State`/`StateKey`,
-core errors, core flow (`Flow`/`Guard`/`FlowMonitor`/`FlowMode`/`Verdict`/
-`ToolPolicy`), core tools (`SimpleTool`/`TypedTool`/`ToolFunction`/
+core errors, core flow (`Flow`/`Guard`/`FlowMonitor`/`Enforcement`/`Verdict`),
+core tools (`SimpleTool`/`TypedTool`/`ToolFunction`/`ToolPolicy`/
 `ToolDispatcher`/`#[tool]`/`Extract`/`Frame`), `BaseLlm`/`GeminiLlm`/`GeminiLlmParams`, callback
 contexts, the common Live session types, the text-agent combinators, build-time
 validation (`check_contracts`/`ContractViolation`/`diagnose`), and the L0 wire
@@ -118,7 +118,7 @@ These callbacks are invoked synchronously on the event-dispatch hot path. They *
 | `on_thought` | `&str` | Thought summary chunk (Google AI only; requires `.include_thoughts()`) |
 | `on_vad_start` | `()` | Voice activity detected — user started speaking |
 | `on_vad_end` | `()` | Voice activity ended — user stopped speaking |
-| `on_phase` | `SessionPhase` | Session lifecycle phase changed (connecting, connected, disconnecting, etc.) |
+| `on_session_phase` | `SessionPhase` | Wire-level session lifecycle phase changed (connecting, connected, disconnecting, etc.) — not the `PhaseMachine` |
 | `on_usage` | `&UsageMetadata` | Token usage update delivered at the end of each generation |
 
 ##### Partial/final transcript semantics (`is_final`)
@@ -215,7 +215,8 @@ let state = State::new();
 
 // Basic get/set with automatic serde serialization
 state.set("name", "Alice");
-let name: Option<String> = state.get("name");
+let name: Option<String> = state.get("name");          // lenient: wrong type reads as None
+let name: Option<String> = state.try_get("name")?;     // strict: StateError::WrongType if mistyped
 
 // Atomic read-modify-write
 let count = state.modify("count", 0u32, |n| n + 1);
@@ -459,7 +460,7 @@ Live::builder()
     .session_id("user-123-session-456")
 ```
 
-Built-in backends: `FsPersistence` (filesystem), `MemoryPersistence` (in-memory/tests). Implement `SessionPersistence` trait for custom backends (Redis, DynamoDB, etc.).
+Built-in backends: `FsPersistence` (filesystem), `MemoryPersistence` (in-memory/tests). Implement the `SessionPersistence` trait (errors are the typed `PersistenceError`: `Io`/`Serde`/`NotFound`/`Backend`) for custom backends (Redis, DynamoDB, etc.).
 
 **Generation Complete Extraction** — Run extractors on generation complete (pre-truncation):
 
@@ -571,7 +572,7 @@ let artifacts = A::json_output("report", "Analysis report")
 | `Transition` / `TransitionResult` | Phase transition guards and results |
 | `TurnExtractor` / `LlmExtractor` | OOB extraction pipeline |
 | `TranscriptBuffer` / `TranscriptTurn` / `TranscriptWindow` | Conversation transcript tracking |
-| `ComputedRegistry` / `ComputedVar` | Derived state variables |
+| `ComputedRegistry` / `ComputedVar` | Derived state variables (`register` rejects dependency cycles with a `ConfigError`) |
 | `Watcher` / `WatcherRegistry` | State change watchers |
 | `TemporalPattern` / `TemporalRegistry` | Time/turn-based pattern detection |
 | `SessionSignals` / `SessionTelemetry` | Auto-collected session metrics |
@@ -589,7 +590,7 @@ let artifacts = A::json_output("report", "Analysis report")
 | `ContextDelivery` | When context hits wire: Immediate (during TurnComplete) or Deferred (with next user send) |
 | `PendingContext` / `DeferredWriter` | Deferred context buffer + SessionWriter wrapper |
 | `NeedsFulfillment` / `RepairConfig` / `RepairAction` | Conversation repair protocol |
-| `SessionPersistence` / `SessionSnapshot` | Session persistence trait and snapshot type |
+| `SessionPersistence` / `SessionSnapshot` / `PersistenceError` | Session persistence trait, snapshot type, and its typed error |
 | `FsPersistence` / `MemoryPersistence` | Built-in persistence backends |
 | `ControlPlaneConfig` | Consolidated control plane settings for the processor |
 | `Delivery` / `DeliveryConfig` | Per-event-class fast-lane backpressure policy: `Lossless` (default; awaits) vs `LossyDropNewest` (drops on full). L2: `.delivery(..)`, `.lossy_audio()`, `.lossy_transcript()` |

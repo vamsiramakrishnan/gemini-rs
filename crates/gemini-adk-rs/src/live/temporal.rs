@@ -56,7 +56,7 @@ pub struct TemporalPattern {
     pub detector: Box<dyn PatternDetector>,
     /// The async action to execute when the pattern triggers.
     /// Receives a cloned `State` and the session writer.
-    pub action: super::phase::PhaseHook,
+    pub action: super::SessionHook,
     /// Optional minimum interval between successive firings.
     pub cooldown: Option<Duration>,
     /// Tracks when this pattern last fired (for cooldown enforcement).
@@ -68,7 +68,7 @@ impl TemporalPattern {
     pub fn new(
         name: impl Into<String>,
         detector: Box<dyn PatternDetector>,
-        action: super::phase::PhaseHook,
+        action: super::SessionHook,
         cooldown: Option<Duration>,
     ) -> Self {
         Self {
@@ -129,8 +129,8 @@ impl TemporalRegistry {
         }
     }
 
-    /// Add a pattern to the registry.
-    pub fn add(&mut self, pattern: TemporalPattern) {
+    /// Register a pattern.
+    pub fn register(&mut self, pattern: TemporalPattern) {
         self.patterns.push(pattern);
     }
 
@@ -435,7 +435,7 @@ mod tests {
     }
 
     /// Helper: action that increments a shared counter.
-    fn counting_action(counter: Arc<AtomicU32>) -> crate::live::phase::PhaseHook {
+    fn counting_action(counter: Arc<AtomicU32>) -> crate::live::SessionHook {
         Arc::new(move |_state, _writer| {
             let c = counter.clone();
             Box::pin(async move {
@@ -740,7 +740,7 @@ mod tests {
         let mut registry = TemporalRegistry::new();
 
         // TurnCountDetector with required=1 — fires on first true check.
-        registry.add(TemporalPattern::new(
+        registry.register(TemporalPattern::new(
             "confusion",
             Box::new(TurnCountDetector::new(
                 Arc::new(|s: &State| s.get::<bool>("confused").unwrap_or(false)),
@@ -766,7 +766,7 @@ mod tests {
         let counter = Arc::new(AtomicU32::new(0));
         let mut registry = TemporalRegistry::new();
 
-        registry.add(TemporalPattern::new(
+        registry.register(TemporalPattern::new(
             "sustained",
             Box::new(SustainedDetector::new(
                 Arc::new(|_: &State| true),
@@ -786,14 +786,14 @@ mod tests {
         let counter = Arc::new(AtomicU32::new(0));
         let mut registry = TemporalRegistry::new();
 
-        registry.add(TemporalPattern::new(
+        registry.register(TemporalPattern::new(
             "turn-count",
             Box::new(TurnCountDetector::new(Arc::new(|_: &State| true), 3)),
             counting_action(counter.clone()),
             None,
         ));
 
-        registry.add(TemporalPattern::new(
+        registry.register(TemporalPattern::new(
             "rate",
             Box::new(RateDetector::new(
                 Arc::new(|_: &SessionEvent| true),

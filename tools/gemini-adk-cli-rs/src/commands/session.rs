@@ -53,7 +53,7 @@ pub async fn replay(
     // goes to the replay transport. No network, no credentials.
     let state = State::new();
     let config = SessionConfig::new("offline-replay");
-    let builder = LiveSessionBuilder::new(config.clone()).with_state(state.clone());
+    let builder = LiveSessionBuilder::new(config.clone()).state(state.clone());
 
     let session = replay_session(config, builder, &entries).await?;
     let mut live_events = session.handle().events();

@@ -198,13 +198,13 @@ async fn fire_on_complete(extractor: &dyn TurnExtractor, value: &Value, state: &
     };
     let name = extractor.name().to_string();
     match oc.mode {
-        crate::orchestration::Mode::Call => {
-            let _ = crate::orchestration::call(&name, oc.agent, state).await;
+        crate::orchestration::AgentMode::Call => {
+            let _ = crate::orchestration::call_agent(&name, oc.agent, state).await;
         }
-        crate::orchestration::Mode::Dispatch | crate::orchestration::Mode::Background => {
+        crate::orchestration::AgentMode::Dispatch | crate::orchestration::AgentMode::Background => {
             let state = state.clone();
             tokio::spawn(async move {
-                let _ = crate::orchestration::call(&name, oc.agent, &state).await;
+                let _ = crate::orchestration::call_agent(&name, oc.agent, &state).await;
             });
         }
     }

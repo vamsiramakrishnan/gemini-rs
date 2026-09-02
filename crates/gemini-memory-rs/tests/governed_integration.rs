@@ -190,7 +190,7 @@ async fn a_flow_guard_admits_a_tool_only_once_memory_fills_the_slot() {
 }
 
 /// The completed step must show up in the monitor's own account of itself, so
-/// `why_blocked` tells an operator the truth about what memory unlocked.
+/// `explain` tells an operator the truth about what memory unlocked.
 #[tokio::test]
 async fn the_flow_explains_what_memory_unlocked() {
     let engine = engine();

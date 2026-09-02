@@ -121,7 +121,7 @@ impl Live {
         self.persistence.is_some()
     }
 
-    /// The caller-supplied session `State`, if [`with_state`](Live::with_state)
+    /// The caller-supplied session `State`, if [`state`](Live::state)
     /// was called.
     pub fn shared_state(&self) -> Option<&State> {
         self.state.as_ref()
@@ -227,7 +227,7 @@ mod tests {
         // condition was in fact satisfied.
         let state = gemini_adk_rs::State::new();
         let _ = state.set("identity_verified", true);
-        let live = Live::builder().with_state(state.clone());
+        let live = Live::builder().state(state.clone());
         assert_eq!(
             live.shared_state()
                 .and_then(|s| s.get::<bool>("identity_verified")),

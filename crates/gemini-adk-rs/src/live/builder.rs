@@ -127,7 +127,7 @@ impl LiveSessionBuilder {
     /// If not set, a new State is created at connect time. Use this when
     /// the State needs to be shared with tools or other components before
     /// the session connects.
-    pub fn with_state(mut self, state: State) -> Self {
+    pub fn state(mut self, state: State) -> Self {
         self.state = Some(state);
         self
     }
@@ -328,10 +328,10 @@ impl LiveSessionBuilder {
     pub(crate) fn into_plan(self) -> Result<SessionPlan, AgentError> {
         // Build-time validations
         if let Some(ref pm) = self.phase_machine {
-            pm.validate().map_err(AgentError::Config)?;
+            pm.validate()?;
         }
         if let Some(ref computed) = self.computed {
-            computed.validate().map_err(AgentError::Config)?;
+            computed.validate()?;
         }
 
         // Apply NON_BLOCKING behavior to tool declarations for background tools
@@ -480,7 +480,7 @@ pub(crate) struct SessionRuntime {
 /// telemetry handle — but does not spawn any lanes.
 pub(crate) fn build_runtime(plan: SessionPlan, session: SessionHandle) -> SessionRuntime {
     // Share the governed-flow monitor between the control lane (which
-    // advances it) and the LiveHandle (which snapshots explain/why_blocked).
+    // advances it) and the LiveHandle (which snapshots explain).
     let flow_monitor = plan.flow.map(crate::flow::FlowMonitor::into_shared);
     let mut callbacks = plan.callbacks;
     let on_usage_cb = callbacks.on_usage.take();

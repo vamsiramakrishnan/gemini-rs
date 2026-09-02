@@ -6,9 +6,10 @@ use gemini_genai_rs::prelude::SessionPhase;
 use gemini_genai_rs::session::{SessionError, SessionWriter};
 use tokio::sync::broadcast;
 
+use super::ExecutionMode;
 use super::context_writer::PendingContext;
 use super::events::LiveEvent;
-use super::reactor::{EffectMode, LiveEffect, Reaction};
+use super::reactor::{LiveEffect, Reaction};
 
 /// Executes [`LiveEffect`] values emitted by the Live reactor.
 #[derive(Clone)]
@@ -36,7 +37,7 @@ impl LiveEffectExecutor {
     pub async fn execute_reactions(&self, reactions: Vec<Reaction>) -> Result<(), SessionError> {
         for reaction in reactions {
             match reaction.policy.mode {
-                EffectMode::Blocking => {
+                ExecutionMode::Blocking => {
                     let executor = self.clone();
                     let fut = executor.execute(reaction.effect);
                     if let Some(timeout) = reaction.policy.timeout {
@@ -50,7 +51,7 @@ impl LiveEffectExecutor {
                         fut.await?;
                     }
                 }
-                EffectMode::Concurrent => {
+                ExecutionMode::Concurrent => {
                     let executor = self.clone();
                     let timeout = reaction.policy.timeout;
                     let source = reaction.source;
