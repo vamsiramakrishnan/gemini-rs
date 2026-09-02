@@ -42,11 +42,11 @@
 //! artefact of the harness, and the stereo recording is where you hear it.
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
-use gemini_adk_fluent_rs::voice::{resample, SESSION_INPUT_HZ, SESSION_OUTPUT_HZ};
+use gemini_adk_fluent_rs::voice::{SESSION_INPUT_HZ, SESSION_OUTPUT_HZ, resample};
 use gemini_adk_rs::live::LiveHandle;
 use gemini_genai_rs::prelude::{bytes_to_i16, i16_to_bytes};
 use parking_lot::Mutex;
