@@ -122,7 +122,7 @@ close the connection soon:
 ```rust,ignore
 // Session 1: enable resumption and capture the handle.
 let handle = Live::builder()
-    .session_resume(true)
+    .session_resume()
     .on_go_away(|time_left| async move {
         println!("Server closing in {time_left:?} — capture the resume handle now");
     })

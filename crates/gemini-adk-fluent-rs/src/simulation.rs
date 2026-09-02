@@ -7,8 +7,19 @@
 //! `State` + guards, so motifs, repair, policies, and digressions become testable
 //! in CI — "a flow SDK with simulation is infra; without it, a demo framework".
 //!
-//! ```ignore
-//! let convo = Conversation::new("booking")./* … */.compile()?;
+//! ```no_run
+//! # use gemini_adk_fluent_rs::prelude::*;
+//! # use gemini_adk_fluent_rs::conversation::Conversation;
+//! # use gemini_adk_fluent_rs::simulation::Sim;
+//! # async fn run() -> Result<(), Box<dyn std::error::Error>> {
+//! let convo = Conversation::new("booking")
+//!     .stage("check").collect(["party_size", "slot"])
+//!         .next("confirm", Guard::captured(["party_size", "slot"]))
+//!     .stage("confirm").commit("book", Guard::is_true("user_confirmed"))
+//!         .next("done", Guard::called_ok("book"))
+//!     .stage("done").terminal()
+//!     .require(["done"])
+//!     .compile()?;
 //! let mut sim = Sim::new(&convo, Enforcement::Enforce);
 //! sim.user("a table for 4 tomorrow at 7pm").await;
 //! assert!(sim.active().contains(&"check".to_string()));
@@ -16,6 +27,8 @@
 //! sim.set("user_confirmed", true);
 //! sim.tool_ok("book");
 //! assert!(sim.is_complete());
+//! # Ok(())
+//! # }
 //! ```
 
 use std::collections::BTreeMap;

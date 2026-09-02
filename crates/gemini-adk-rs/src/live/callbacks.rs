@@ -18,9 +18,13 @@
 //! Fast-lane callbacks (audio, text, VAD) are always sync and inline.
 //! Interceptors (`before_tool_response`, `on_turn_boundary`) are always blocking.
 //!
-//! Some control-lane callbacks are forced-blocking (no concurrent variant):
-//! `on_interrupted` (must clear state before audio resumes),
-//! `on_tool_call` (return value is the tool response).
+//! `on_interrupted`, `on_turn_boundary`, and the `on_teardown` hooks default to
+//! blocking for a reason — audio forwarding resumes only after `on_interrupted`
+//! returns, the next turn proceeds only after `on_turn_boundary`, and disconnect
+//! completes only after teardown — but each can be made concurrent when the
+//! body is pure bookkeeping (see the `_mode` fields and `on_teardown_concurrent`).
+//! `on_tool_call` and `before_tool_response` are always blocking: their return
+//! value is the tool response.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -131,6 +135,11 @@ pub struct EventCallbacks {
     /// application's own handler observes a settled world. A hook that panics or
     /// hangs delays disconnect — keep them bounded.
     pub on_teardown: Vec<AsyncCallback>,
+    /// Teardown hooks that are spawned detached on disconnect rather than
+    /// awaited — for bookkeeping that must not delay the disconnect (metrics,
+    /// a final log line). Anything that flushes durable state belongs in
+    /// [`on_teardown`](Self::on_teardown).
+    pub on_teardown_concurrent: Vec<AsyncCallback>,
     /// Called after session resumes from GoAway.
     pub on_resumed: Option<AsyncCallback>,
     /// Called on non-fatal errors.
@@ -146,6 +155,14 @@ pub struct EventCallbacks {
     pub on_extraction_error: Option<AsyncCallbackWith2<String, String>>,
 
     // -- Callback modes (control-lane only) --
+    /// Execution mode for [`on_interrupted`](Self::on_interrupted). Blocking
+    /// by default: audio forwarding resumes only after the callback returns,
+    /// which is what a playback flush needs. Concurrent is for bookkeeping only.
+    pub on_interrupted_mode: ExecutionMode,
+    /// Execution mode for [`on_turn_boundary`](Self::on_turn_boundary).
+    /// Blocking by default so injected context lands before the next turn;
+    /// concurrent is for observation only.
+    pub on_turn_boundary_mode: ExecutionMode,
     /// Execution mode for [`on_turn_complete`](Self::on_turn_complete).
     pub on_turn_complete_mode: ExecutionMode,
     /// Execution mode for [`on_generation_complete`](Self::on_generation_complete).
@@ -227,11 +244,14 @@ impl Default for EventCallbacks {
             on_connected: None,
             on_disconnected: None,
             on_teardown: Vec::new(),
+            on_teardown_concurrent: Vec::new(),
             on_resumed: None,
             on_error: None,
             on_transfer: None,
             on_extracted: None,
             on_extraction_error: None,
+            on_interrupted_mode: ExecutionMode::Blocking,
+            on_turn_boundary_mode: ExecutionMode::Blocking,
             on_turn_complete_mode: ExecutionMode::Blocking,
             on_generation_complete_mode: ExecutionMode::Blocking,
             on_connected_mode: ExecutionMode::Blocking,
@@ -276,6 +296,10 @@ impl std::fmt::Debug for EventCallbacks {
             .field("on_transfer", &self.on_transfer.is_some())
             .field("on_extracted", &self.on_extracted.is_some())
             .field("on_extraction_error", &self.on_extraction_error.is_some())
+            .field("on_teardown", &self.on_teardown.len())
+            .field("on_teardown_concurrent", &self.on_teardown_concurrent.len())
+            .field("on_interrupted_mode", &self.on_interrupted_mode)
+            .field("on_turn_boundary_mode", &self.on_turn_boundary_mode)
             .field("on_turn_complete_mode", &self.on_turn_complete_mode)
             .field("on_connected_mode", &self.on_connected_mode)
             .field("on_disconnected_mode", &self.on_disconnected_mode)

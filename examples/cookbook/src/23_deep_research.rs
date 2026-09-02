@@ -296,12 +296,16 @@ fn main() {
             "Research: autonomous vehicles market",
             "The autonomous vehicle market is projected to reach $2T by 2030",
         )
-        .criteria(&["contains_match", "safety", "semantic_match"]);
+        .criteria(
+            E::contains_match()
+                | E::custom("safety", |_, _| 1.0)
+                | E::custom("semantic_match", |_, _| 1.0),
+        );
 
     println!(
         "Built eval suite: {} cases, {} criteria",
         eval.len(),
-        eval.criteria_names.len()
+        eval.criteria.len()
     );
 
     println!("\nDeep research pipeline example completed successfully!");

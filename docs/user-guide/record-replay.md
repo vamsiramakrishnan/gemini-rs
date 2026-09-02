@@ -16,7 +16,7 @@ use gemini_adk_fluent_rs::prelude::*;
 
 let handle = Live::builder()
     .instruction("You are a weather assistant")
-    .tools(dispatcher)
+    .dispatcher(dispatcher)
     .record_wire("/var/log/sessions/user-123.wire.jsonl")
     .connect_from_env()
     .await?;

@@ -177,7 +177,7 @@ impl DemoApp for AllConfig {
 
         // Transcription (enabled by default for audio modes).
         if opts.enable_transcription.unwrap_or(is_audio) {
-            live = live.transcription(true, true);
+            live = live.transcription();
         }
 
         // Google Search.
@@ -221,7 +221,7 @@ impl DemoApp for AllConfig {
 
         // Session resumption.
         if opts.enable_session_resumption.unwrap_or(false) {
-            live = live.session_resume(true);
+            live = live.session_resume();
         }
 
         // Tool call handler for mock tools (ACTION callback — not covered by wire_live).

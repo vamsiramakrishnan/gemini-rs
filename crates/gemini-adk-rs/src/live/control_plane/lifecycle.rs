@@ -261,7 +261,10 @@ pub(in crate::live) async fn handle_turn_complete(
 
     // 15. Turn boundary hook
     if let Some(cb) = &callbacks.on_turn_boundary {
-        cb(state.clone(), writer.clone()).await;
+        dispatch_callback!(
+            callbacks.on_turn_boundary_mode,
+            cb(state.clone(), writer.clone())
+        );
     }
 
     // 16. User turn-complete callback

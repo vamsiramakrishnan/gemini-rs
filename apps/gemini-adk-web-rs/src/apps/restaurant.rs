@@ -623,7 +623,7 @@ impl DemoApp for Restaurant {
 
                 live.voice(selected_voice)
                     .instruction(SYSTEM_INSTRUCTION)
-                    .transcription(true, true)
+                    .transcription()
                     .add_tool(restaurant_tools())
                     .steering_mode(SteeringMode::ContextInjection)
                     .context_delivery(ContextDelivery::Deferred)
@@ -671,7 +671,7 @@ impl DemoApp for Restaurant {
                     // Phase 1: Greeting
                     .phase("greeting")
                         .instruction(GREETING_INSTRUCTION)
-                        .prompt_on_enter(true)
+                        .prompt_on_enter()
                         .needs(&["guest_name", "party_size", "intent"])
                         .transition_with("check_availability", |s| {
                             S::eq("intent", "new_booking")(s)

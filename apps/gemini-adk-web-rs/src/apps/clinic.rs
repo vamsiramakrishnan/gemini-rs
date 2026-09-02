@@ -669,7 +669,7 @@ impl DemoApp for Clinic {
                             .as_deref()
                             .unwrap_or(SYSTEM_INSTRUCTION),
                     )
-                    .transcription(true, true)
+                    .transcription()
                     .add_tool(clinic_tools())
                     .steering_mode(SteeringMode::ContextInjection)
                     .context_delivery(ContextDelivery::Deferred)
@@ -764,7 +764,7 @@ impl DemoApp for Clinic {
                     // Phase 1: Greeting
                     .phase("greeting")
                         .instruction(GREETING_INSTRUCTION)
-                        .prompt_on_enter(true)
+                        .prompt_on_enter()
                         .needs(&["intent"])
                         .transition_with("symptom_triage", S::eq("intent", "new_appointment"), "when intent is new_appointment")
                         .transition_with("rescheduling", S::one_of("intent", &["reschedule", "cancel"]), "when intent is reschedule or cancel")

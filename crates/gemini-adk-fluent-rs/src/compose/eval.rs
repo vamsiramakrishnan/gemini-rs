@@ -56,14 +56,14 @@ fn trajectory_score(actual: &[String], expected: &[String], mode: TrajectoryMatc
 
 /// An evaluation criterion applied to agent output.
 #[derive(Clone)]
-pub struct ECriterion {
-    name: &'static str,
-    kind: ECriterionKind,
+pub struct EvalCriterion {
+    name: String,
+    kind: EvalCriterionKind,
 }
 
 /// How a criterion produces its score.
 #[derive(Clone)]
-enum ECriterionKind {
+enum EvalCriterionKind {
     /// Deterministic scoring over `(output, expected)`.
     Sync(#[allow(clippy::type_complexity)] Arc<dyn Fn(&str, &str) -> f64 + Send + Sync>),
     /// LLM-as-judge: `1.0` when the judge does **not** flag a violation, else `0.0`.
@@ -71,33 +71,33 @@ enum ECriterionKind {
     Judge(LlmJudge),
 }
 
-impl ECriterion {
-    fn new(name: &'static str, f: impl Fn(&str, &str) -> f64 + Send + Sync + 'static) -> Self {
+impl EvalCriterion {
+    fn new(name: impl Into<String>, f: impl Fn(&str, &str) -> f64 + Send + Sync + 'static) -> Self {
         Self {
-            name,
-            kind: ECriterionKind::Sync(Arc::new(f)),
+            name: name.into(),
+            kind: EvalCriterionKind::Sync(Arc::new(f)),
         }
     }
 
-    fn judge(name: &'static str, judge: LlmJudge) -> Self {
+    fn judge(name: impl Into<String>, judge: LlmJudge) -> Self {
         Self {
-            name,
-            kind: ECriterionKind::Judge(judge),
+            name: name.into(),
+            kind: EvalCriterionKind::Judge(judge),
         }
     }
 
     /// Name of this criterion.
     pub fn name(&self) -> &str {
-        self.name
+        &self.name
     }
 
     /// Synchronously score the output against expected (0.0–1.0). LLM-judge
     /// criteria cannot run on the sync path and return `1.0` here — use
-    /// [`ECriterion::score_async`] for those.
+    /// [`EvalCriterion::score_async`] for those.
     pub fn score(&self, output: &str, expected: &str) -> f64 {
         match &self.kind {
-            ECriterionKind::Sync(f) => f(output, expected),
-            ECriterionKind::Judge(_) => 1.0,
+            EvalCriterionKind::Sync(f) => f(output, expected),
+            EvalCriterionKind::Judge(_) => 1.0,
         }
     }
 
@@ -105,8 +105,8 @@ impl ECriterion {
     /// A judge criterion scores `1.0` when no violation is flagged, else `0.0`.
     pub async fn score_async(&self, output: &str, expected: &str) -> f64 {
         match &self.kind {
-            ECriterionKind::Sync(f) => f(output, expected),
-            ECriterionKind::Judge(judge) => {
+            EvalCriterionKind::Sync(f) => f(output, expected),
+            EvalCriterionKind::Judge(judge) => {
                 let verdict = judge.judge(output, Some(expected)).await;
                 if verdict.flagged { 0.0 } else { 1.0 }
             }
@@ -114,33 +114,44 @@ impl ECriterion {
     }
 }
 
-impl std::fmt::Debug for ECriterion {
+impl std::fmt::Debug for EvalCriterion {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ECriterion")
+        f.debug_struct("EvalCriterion")
             .field("name", &self.name)
             .finish()
     }
 }
 
 /// Compose two criteria with `|`.
-impl std::ops::BitOr for ECriterion {
-    type Output = EComposite;
+impl std::ops::BitOr for EvalCriterion {
+    type Output = EvalComposite;
 
-    fn bitor(self, rhs: ECriterion) -> Self::Output {
-        EComposite {
+    fn bitor(self, rhs: EvalCriterion) -> Self::Output {
+        EvalComposite {
             criteria: vec![self, rhs],
         }
     }
 }
 
-/// A composite of evaluation criteria.
-#[derive(Clone)]
-pub struct EComposite {
+/// A composite of evaluation criteria (`E::a() | E::b()`).
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub struct EvalComposite {
     /// The list of criteria in this composite.
-    pub criteria: Vec<ECriterion>,
+    pub criteria: Vec<EvalCriterion>,
 }
 
-impl EComposite {
+/// A single criterion is a one-element composite, so
+/// `E::suite().criteria(E::response_match())` works without an explicit `|`.
+impl From<EvalCriterion> for EvalComposite {
+    fn from(criterion: EvalCriterion) -> Self {
+        EvalComposite {
+            criteria: vec![criterion],
+        }
+    }
+}
+
+impl EvalComposite {
     /// Score the output against expected, returning per-criterion scores
     /// (sync path; LLM-judge criteria report `1.0`).
     pub fn score_all(&self, output: &str, expected: &str) -> Vec<(&str, f64)> {
@@ -170,10 +181,10 @@ impl EComposite {
     }
 }
 
-impl std::ops::BitOr<ECriterion> for EComposite {
-    type Output = EComposite;
+impl std::ops::BitOr<EvalCriterion> for EvalComposite {
+    type Output = EvalComposite;
 
-    fn bitor(mut self, rhs: ECriterion) -> Self::Output {
+    fn bitor(mut self, rhs: EvalCriterion) -> Self::Output {
         self.criteria.push(rhs);
         self
     }
@@ -193,8 +204,8 @@ pub struct EvalCase {
 pub struct EvalSuite {
     /// The cases in this suite.
     pub cases: Vec<EvalCase>,
-    /// The criteria to apply to each case.
-    pub criteria_names: Vec<String>,
+    /// The criteria applied to each case.
+    pub criteria: EvalComposite,
 }
 
 impl EvalSuite {
@@ -207,9 +218,10 @@ impl EvalSuite {
         self
     }
 
-    /// Set criteria names for this suite.
-    pub fn criteria(mut self, names: &[&str]) -> Self {
-        self.criteria_names = names.iter().map(std::string::ToString::to_string).collect();
+    /// Set the criteria applied to every case — a single `E::` criterion or
+    /// a `|`-composed [`EvalComposite`].
+    pub fn criteria(mut self, criteria: impl Into<EvalComposite>) -> Self {
+        self.criteria = criteria.into();
         self
     }
 
@@ -232,13 +244,15 @@ impl E {
     pub fn suite() -> EvalSuite {
         EvalSuite {
             cases: Vec::new(),
-            criteria_names: Vec::new(),
+            criteria: EvalComposite {
+                criteria: Vec::new(),
+            },
         }
     }
 
     /// Exact response match criterion.
-    pub fn response_match() -> ECriterion {
-        ECriterion::new("response_match", |output, expected| {
+    pub fn response_match() -> EvalCriterion {
+        EvalCriterion::new("response_match", |output, expected| {
             if output.trim() == expected.trim() {
                 1.0
             } else {
@@ -248,8 +262,8 @@ impl E {
     }
 
     /// Substring containment criterion — scores 1.0 if output contains expected.
-    pub fn contains_match() -> ECriterion {
-        ECriterion::new("contains_match", |output, expected| {
+    pub fn contains_match() -> EvalCriterion {
+        EvalCriterion::new("contains_match", |output, expected| {
             if output.contains(expected) { 1.0 } else { 0.0 }
         })
     }
@@ -257,8 +271,8 @@ impl E {
     /// Safety criterion — LLM judge; scores `1.0` when the output is safe.
     ///
     /// Mirrors ADK's safety evaluation, run locally against the judge `llm`.
-    pub fn safety(llm: Arc<dyn gemini_adk_rs::llm::BaseLlm>) -> ECriterion {
-        ECriterion::judge(
+    pub fn safety(llm: Arc<dyn gemini_adk_rs::llm::BaseLlm>) -> EvalCriterion {
+        EvalCriterion::judge(
             "safety",
             LlmJudge::new(
                 llm,
@@ -271,8 +285,8 @@ impl E {
     /// reference answer; scores `1.0` when they convey the same answer.
     ///
     /// Mirrors ADK's `final_response_match_v2` (LLM-as-judge with a reference).
-    pub fn semantic_match(llm: Arc<dyn gemini_adk_rs::llm::BaseLlm>) -> ECriterion {
-        ECriterion::judge(
+    pub fn semantic_match(llm: Arc<dyn gemini_adk_rs::llm::BaseLlm>) -> EvalCriterion {
+        EvalCriterion::judge(
             "semantic_match",
             LlmJudge::new(
                 llm,
@@ -285,8 +299,8 @@ impl E {
 
     /// Hallucination criterion — LLM judge; scores `1.0` when the output is free
     /// of fabricated claims relative to the expected reference.
-    pub fn hallucination(llm: Arc<dyn gemini_adk_rs::llm::BaseLlm>) -> ECriterion {
-        ECriterion::judge(
+    pub fn hallucination(llm: Arc<dyn gemini_adk_rs::llm::BaseLlm>) -> EvalCriterion {
+        EvalCriterion::judge(
             "hallucination",
             LlmJudge::new(
                 llm,
@@ -302,8 +316,8 @@ impl E {
     /// sequences (a JSON array of names/objects, or a comma-separated list), so an
     /// eval harness can score the agent's captured tool calls against an expected
     /// sequence. Scores `1.0` on an exact match, else `0.0`.
-    pub fn trajectory() -> ECriterion {
-        ECriterion::new("trajectory", |output, expected| {
+    pub fn trajectory() -> EvalCriterion {
+        EvalCriterion::new("trajectory", |output, expected| {
             trajectory_score(
                 &parse_tool_seq(output),
                 &parse_tool_seq(expected),
@@ -314,8 +328,8 @@ impl E {
 
     /// Tool-trajectory criterion requiring the expected calls in order
     /// (extras allowed in between) — ADK's `IN_ORDER` mode.
-    pub fn trajectory_in_order() -> ECriterion {
-        ECriterion::new("trajectory_in_order", |output, expected| {
+    pub fn trajectory_in_order() -> EvalCriterion {
+        EvalCriterion::new("trajectory_in_order", |output, expected| {
             trajectory_score(
                 &parse_tool_seq(output),
                 &parse_tool_seq(expected),
@@ -326,8 +340,8 @@ impl E {
 
     /// Tool-trajectory criterion requiring the expected calls in any order
     /// (extras allowed) — ADK's `ANY_ORDER` mode.
-    pub fn trajectory_any_order() -> ECriterion {
-        ECriterion::new("trajectory_any_order", |output, expected| {
+    pub fn trajectory_any_order() -> EvalCriterion {
+        EvalCriterion::new("trajectory_any_order", |output, expected| {
             trajectory_score(
                 &parse_tool_seq(output),
                 &parse_tool_seq(expected),
@@ -338,10 +352,10 @@ impl E {
 
     /// Custom evaluation criterion from a scoring function.
     pub fn custom(
-        name: &'static str,
+        name: impl Into<String>,
         f: impl Fn(&str, &str) -> f64 + Send + Sync + 'static,
-    ) -> ECriterion {
-        ECriterion::new(name, f)
+    ) -> EvalCriterion {
+        EvalCriterion::new(name, f)
     }
 
     /// Load eval cases from a file path.
@@ -369,7 +383,9 @@ impl E {
 
         EvalSuite {
             cases,
-            criteria_names: Vec::new(),
+            criteria: EvalComposite {
+                criteria: Vec::new(),
+            },
         }
     }
 
@@ -377,13 +393,14 @@ impl E {
     ///
     /// The persona describes a simulated user with a given name and description,
     /// which can be used to generate realistic test interactions.
-    pub fn persona(name: &'static str, description: &'static str) -> ECriterion {
-        ECriterion::new(name, move |output, _expected| {
+    pub fn persona(name: impl Into<String>, description: impl Into<String>) -> EvalCriterion {
+        let description = description.into();
+        EvalCriterion::new(name, move |output, _expected| {
             // Persona evaluator checks that the agent's output is appropriate
             // for the described persona. Placeholder scoring: returns 0.5
             // indicating neutral — real implementation requires an LLM judge
             // parameterized with the persona description.
-            let _ = description;
+            let _ = &description;
             if output.is_empty() { 0.0 } else { 0.5 }
         })
     }
@@ -458,9 +475,9 @@ mod tests {
         let suite = E::suite()
             .case("What is 2+2?", "4")
             .case("Hello", "Hi")
-            .criteria(&["response_match", "safety"]);
+            .criteria(E::response_match() | E::contains_match());
         assert_eq!(suite.len(), 2);
-        assert_eq!(suite.criteria_names.len(), 2);
+        assert_eq!(suite.criteria.len(), 2);
     }
 
     #[test]

@@ -46,9 +46,10 @@ fn readme_quickstart_programs_are_the_compiled_binaries() {
 fn readme_quickstart_manifest_names_the_required_dependencies() {
     let readme = readme();
     let manifest = fenced_block(&readme, "Cargo.toml");
+    // `gemini-llm` is a default feature, so the manifest need not name it;
+    // `voice-io` is opt-in and the voice program will not compile without it.
     for needle in [
         "gemini-adk-fluent-rs",
-        "gemini-llm",
         "voice-io",
         "tokio",
         "macros",

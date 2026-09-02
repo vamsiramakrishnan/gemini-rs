@@ -14,7 +14,7 @@
 //!   is not asked again for something they already said last week;
 //! - `phase.requires(&["user:diet"])` — a hard gate a memory can open;
 //! - `Flow` guards, `done(captured(["user:diet"]))`;
-//! - `P::with_state(&["user:diet"])` — the value in the phase instruction;
+//! - `P::show_state(&["user:diet"])` — the value in the phase instruction;
 //! - watchers and repair, which read the same keys.
 //!
 //! Each turn the extractor does three things: ingest the finalized utterance,

@@ -28,7 +28,7 @@ fn main() {
     println!("    .voice(Voice::Kore)");
     println!("    .instruction(\"You are a helpful assistant\")");
     println!("    .greeting(\"Hello! How can I help you today?\")");
-    println!("    .transcription(true, true)");
+    println!("    .transcription()");
     println!("    .on_audio(|data| {{ /* play audio */ }})");
     println!("    .on_text(|t| print!(\"{{t}}\"))");
     println!("    .connect_google_ai(api_key)  // not called in demo");
@@ -44,7 +44,7 @@ fn main() {
     println!("  .phase(\"greeting\")");
     println!("      .instruction(\"Welcome the caller warmly\")");
     println!("      .transition(\"identification\", S::is_true(\"greeted\"))");
-    println!("      .prompt_on_enter(true)");
+    println!("      .prompt_on_enter()");
     println!("      .done()");
     println!("  .phase(\"identification\")");
     println!("      .instruction(\"Verify the caller's identity\")");
@@ -282,15 +282,15 @@ fn main() {
     println!("    .voice(Voice::Kore)");
     println!("    .instruction(\"You are a customer support agent for Acme Corp.\")");
     println!("    .greeting(\"Hello! Welcome to Acme support. How can I help?\")");
-    println!("    .tools(dispatcher)");
-    println!("    .transcription(true, true)");
+    println!("    .dispatcher(dispatcher)");
+    println!("    .transcription()");
     println!("    .thinking(1024)");
     println!("    .include_thoughts()");
     println!("    // Phases");
     println!("    .phase(\"greeting\")");
     println!("        .instruction(\"Welcome the caller\")");
     println!("        .transition(\"identify\", S::is_true(\"greeted\"))");
-    println!("        .prompt_on_enter(true)");
+    println!("        .prompt_on_enter()");
     println!("        .done()");
     println!("    .phase(\"identify\")");
     println!("        .instruction(\"Verify identity\")");

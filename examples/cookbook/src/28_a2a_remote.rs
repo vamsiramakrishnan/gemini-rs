@@ -1,15 +1,15 @@
 //! Cookbook #28 — Agent-to-Agent (A2A) Protocol
 //!
-//! Demonstrates RemoteAgent and A2AServer for inter-agent communication.
+//! Demonstrates RemoteAgent and A2aServer for inter-agent communication.
 //!
 //! Patterns shown:
 //!   1. RemoteAgent: client-side reference to a remote agent
-//!   2. A2AServer: publishing a local agent for remote invocation
+//!   2. A2aServer: publishing a local agent for remote invocation
 //!   3. A2aRegistry: discovering remote agents
 //!   4. SkillDeclaration: advertising agent capabilities
-//!   5. T::a2a: using remote agents as tools
+//!   5. Remote agents behind local proxy tools
 
-use gemini_adk_fluent_rs::a2a::{A2AServer, A2aRegistry, RemoteAgent, SkillDeclaration};
+use gemini_adk_fluent_rs::a2a::{A2aRegistry, A2aServer, RemoteAgent, SkillDeclaration};
 use gemini_adk_fluent_rs::prelude::*;
 use serde_json::json;
 use std::time::Duration;
@@ -88,11 +88,11 @@ fn main() {
     println!("  In production, agents register here for discovery");
     println!("  Other agents can query the registry to find capabilities");
 
-    // ── 4. A2AServer: publishing a local agent ──
+    // ── 4. A2aServer: publishing a local agent ──
     println!("\n--- 4. A2A Server Setup ---\n");
 
     // Publish a local agent for remote invocation
-    let support_server = A2AServer::new("customer-support")
+    let support_server = A2aServer::new("customer-support")
         .host("0.0.0.0")
         .port(8080)
         .health_check("/health")
@@ -106,12 +106,12 @@ fn main() {
     );
 
     // Multiple servers for a microservices architecture
-    let billing_server = A2AServer::new("billing-service")
+    let billing_server = A2aServer::new("billing-service")
         .host("0.0.0.0")
         .port(8081)
         .health_check("/healthz");
 
-    let notification_server = A2AServer::new("notification-service")
+    let notification_server = A2aServer::new("notification-service")
         .host("0.0.0.0")
         .port(8082)
         .health_check("/health");
@@ -133,33 +133,45 @@ fn main() {
         notification_server.get_port()
     );
 
-    // ── 5. T::a2a: Remote agents as tools ──
+    // ── 5. Remote agents as tools ──
     println!("\n--- 5. Remote Agents as Tools ---\n");
 
-    // Compose remote agents as tools alongside local tools
-    let tools = T::a2a("https://verify.agents.example.com/a2a", "verify_identity")
-        | T::a2a("https://payments.agents.example.com/a2a", "process_payment")
-        | T::a2a("https://fraud.agents.example.com/a2a", "score_transaction")
-        | T::simple(
-            "lookup_account",
-            "Look up account details",
-            |args| async move {
-                let id = args
-                    .get("account_id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown");
-                Ok(json!({
-                    "account_id": id,
-                    "name": "Alice Johnson",
-                    "status": "active",
-                    "tier": "premium"
-                }))
-            },
-        )
-        | T::google_search();
+    // A remote agent is reached through a local tool that calls its endpoint
+    // (an `A2aRemoteAgent` from `gemini_adk_rs::a2a` does the HTTP); the
+    // composite below mixes such proxies with local and built-in tools.
+    let remote_proxy = |name: &'static str, skill: &'static str| {
+        T::simple(name, skill, move |args| async move {
+            Ok(json!({"skill": skill, "args": args, "status": "delegated"}))
+        })
+    };
+    let tools = remote_proxy(
+        "verify_identity",
+        "Verify the caller via the identity service",
+    ) | remote_proxy(
+        "process_payment",
+        "Process a payment via the payments service",
+    ) | remote_proxy(
+        "score_transaction",
+        "Score a transaction via the fraud service",
+    ) | T::simple(
+        "lookup_account",
+        "Look up account details",
+        |args| async move {
+            let id = args
+                .get("account_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            Ok(json!({
+                "account_id": id,
+                "name": "Alice Johnson",
+                "status": "active",
+                "tier": "premium"
+            }))
+        },
+    ) | T::google_search();
 
     println!(
-        "Tool composite: {} tools (3 remote A2A + 1 local + 1 built-in)",
+        "Tool composite: {} tools (3 remote proxies + 1 local + 1 built-in)",
         tools.len()
     );
 
@@ -246,16 +258,16 @@ fn main() {
         println!("  {} --[{}]--> {}", edge.producer, edge.key, edge.consumer);
     }
 
-    // ── 7. T module: MCP and OpenAPI integrations ──
-    println!("\n--- 7. MCP and OpenAPI Tools ---\n");
+    // ── 7. T module: MCP integration ──
+    println!("\n--- 7. MCP Tools ---\n");
 
-    let extended_tools = T::mcp("npx @modelcontextprotocol/server-filesystem /data")
-        | T::openapi("crm-api", "https://api.example.com/openapi.json")
-        | T::search("knowledge-base", "Search internal knowledge base")
-        | T::a2a("https://agents.example.com/analytics", "run_report");
+    // `T::mcp` is resolved at `Live::connect` (an async handshake); a text
+    // `AgentBuilder::build` rejects it with a `ConfigError`.
+    let extended_tools =
+        T::mcp("npx @modelcontextprotocol/server-filesystem /data") | T::google_search();
 
     println!("Extended tool composite: {} entries", extended_tools.len());
-    println!("  Includes: MCP, OpenAPI, BM25 search, and A2A tools");
+    println!("  Includes: an MCP toolset (connected at Live::connect) and a built-in");
 
     // ── 8. Production A2A architecture ──
     println!("\n--- 8. Production Architecture ---\n");

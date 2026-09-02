@@ -10,18 +10,24 @@
 //! - **Default methods** (e.g., `.on_turn_complete()`) → [`gemini_adk_rs::live::ExecutionMode::Blocking`]
 //! - **`_concurrent` methods** (e.g., `.on_turn_complete_concurrent()`) → [`gemini_adk_rs::live::ExecutionMode::Concurrent`]
 //!
-//! Use concurrent mode for fire-and-forget work (logging, analytics, webhook dispatch).
+//! Use concurrent mode for fire-and-forget work (logging, analytics, webhook
+//! dispatch). The lane rule for every callback is written once, at the top of
+//! the callbacks module (see the `Live` callback setters).
 //!
 //! # Background Tool Execution
 //!
 //! Mark tools for background execution to eliminate dead air in voice sessions:
 //!
-//! ```rust,ignore
+//! ```no_run
+//! # use gemini_adk_fluent_rs::prelude::*;
+//! # async fn run(tools: gemini_adk_fluent_rs::compose::tools::ToolComposite) -> Result<(), AgentError> {
 //! Live::builder()
-//!     .tools(dispatcher)
+//!     .tools(tools)
 //!     .tool_background("search_kb")
-//!     .connect_vertex(project, location, token)
+//!     .connect_from_env()
 //!     .await?;
+//! # Ok(())
+//! # }
 //! ```
 
 mod callbacks;
@@ -63,18 +69,19 @@ use gemini_genai_rs::prelude::*;
 pub use gemini_adk_rs::live::{
     ActivityAuthority, BackendInputVad, BackendVadSnapshot, BackgroundAgentDispatcher,
     BackgroundToolTracker, ComputedContract, ComputedVar, ConsecutiveFailureDetector,
-    ContextBuilder, ControlContract, DefaultResultFormatter, DeferredWriter, EffectPolicy,
-    ExecutionMode, ExtractionTrigger, ExtractorContract, FieldPromotion, FsPersistence,
-    InputAudioProcessor, LiveEffect, LiveEffectExecutor, LiveEvent, LiveEventStream, LiveHandle,
-    LiveReactor, LiveSessionBuilder, LlmExtractor, MemoryPersistence, MergePolicy,
-    NeedsFulfillment, PatternDetector, PendingContext, PhaseContract, PhaseInstruction,
-    PhaseMachine, PhasePreparation, PredicateFn, PreparationContract, PromotionContract,
-    RateDetector, Reaction, ReactorEvent, ReactorRule, RepairAction, ResultFormatter,
-    RuntimeContract, SessionHook, SessionSignals, SessionSnapshot, SessionTelemetry, SessionType,
-    SoftTurnDetector, SustainedDetector, ToolCallSummary, ToolContract, TranscriptBuffer,
-    TranscriptTurn, TranscriptWindow, Transition, TransitionContract, TransitionEvaluation,
-    TransitionRecord, TransitionResult, TransitionTrigger, TurnCommitConfig, TurnCommitPolicy,
-    TurnCountDetector, TurnSignal, VoiceRuntimeState, WatchPredicate, Watcher, WatcherContract,
+    ContextBuilder, ControlContract, DefaultResultFormatter, DeferredWriter, Delivery,
+    DeliveryConfig, EffectPolicy, ExecutionMode, ExtractionTrigger, ExtractorContract,
+    FieldPromotion, FsPersistence, InputAudioProcessor, LiveEffect, LiveEffectExecutor, LiveEvent,
+    LiveEventStream, LiveHandle, LiveReactor, LiveSessionBuilder, LlmExtractor, MemoryPersistence,
+    MergePolicy, NeedsFulfillment, PatternDetector, PendingContext, PhaseContract,
+    PhaseInstruction, PhaseMachine, PhasePreparation, PredicateFn, PreparationContract,
+    PromotionContract, RateDetector, Reaction, ReactorEvent, ReactorRule, RepairAction,
+    ResultFormatter, RuntimeContract, SessionHook, SessionSignals, SessionSnapshot,
+    SessionTelemetry, SessionType, SoftTurnDetector, SustainedDetector, ToolCallSummary,
+    ToolContract, TranscriptBuffer, TranscriptTurn, TranscriptWindow, Transition,
+    TransitionContract, TransitionEvaluation, TransitionRecord, TransitionResult,
+    TransitionTrigger, TurnCommitConfig, TurnCommitPolicy, TurnCountDetector, TurnSignal,
+    VoiceRuntimeState, WatchPredicate, Watcher, WatcherContract,
 };
 // Offline record/replay harness (Milestone 7 determinism spine).
 pub use gemini_adk_rs::live::replay::{
@@ -99,23 +106,30 @@ pub(crate) struct DeferredAgentTool {
 /// execution via [`tool_background()`](Self::tool_background).
 ///
 /// # Example
-/// ```ignore
+/// ```no_run
+/// # use gemini_adk_fluent_rs::prelude::*;
+/// # async fn run(tools: gemini_adk_fluent_rs::compose::tools::ToolComposite) -> Result<(), AgentError> {
 /// let session = Live::builder()
-///     .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
 ///     .voice(Voice::Kore)
 ///     .instruction("You are a weather assistant")
-///     .tools(dispatcher)
-///     .on_audio(|data| playback_tx.send(data.clone()).ok())
+///     .tools(tools)
+///     .on_audio(|data| { let _ = data; })
 ///     .on_text(|t| print!("{t}"))
-///     .on_interrupted(|| async { playback.flush().await; })
-///     .connect_vertex("project", "us-central1", token)
+///     .on_interrupted(|| async { /* flush playback */ })
+///     .connect_from_env()
 ///     .await?;
+/// # let _ = session; Ok(())
+/// # }
 /// ```
 ///
 /// # Extraction Pipeline
-/// ```ignore
+/// ```no_run
+/// # use gemini_adk_fluent_rs::prelude::*;
+/// # use std::sync::Arc;
+/// # #[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+/// # struct OrderState { items: Vec<String> }
+/// # async fn run(flash_llm: Arc<dyn BaseLlm>) -> Result<(), AgentError> {
 /// let handle = Live::builder()
-///     .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
 ///     .instruction("You are a restaurant order assistant")
 ///     .extract_turns::<OrderState>(
 ///         flash_llm,
@@ -124,11 +138,13 @@ pub(crate) struct DeferredAgentTool {
 ///     .on_extracted(|name, value| async move {
 ///         println!("Extracted {name}: {value}");
 ///     })
-///     .connect_vertex(project, location, token)
+///     .connect_from_env()
 ///     .await?;
 ///
 /// // Read latest extraction from shared State at any time:
 /// let order: Option<OrderState> = handle.extracted("OrderState");
+/// # let _ = order; Ok(())
+/// # }
 /// ```
 pub struct Live {
     pub(crate) config: SessionConfig,
@@ -206,28 +222,30 @@ impl Live {
     ///
     /// Minimal live session setup:
     ///
-    /// ```rust,ignore
-    /// use gemini_adk_fluent_rs::prelude::*;
-    ///
+    /// ```no_run
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// # async fn run() -> Result<(), AgentError> {
     /// let handle = Live::builder()
-    ///     .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
     ///     .voice(Voice::Kore)
     ///     .instruction("You are a helpful assistant")
     ///     .greeting("Hello! How can I help?")
-    ///     .on_audio(|data| { /* send to speaker */ })
+    ///     .on_audio(|data| { let _ = data; /* send to speaker */ })
     ///     .on_text(|t| print!("{t}"))
     ///     .connect_google_ai("API_KEY")
     ///     .await?;
     ///
     /// handle.send_text("What is the weather?").await?;
     /// handle.disconnect().await?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// With phases and state-based transitions:
     ///
-    /// ```rust,ignore
+    /// ```no_run
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// # async fn run() -> Result<(), AgentError> {
     /// let handle = Live::builder()
-    ///     .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
     ///     .phase("greeting")
     ///         .instruction("Welcome the user")
     ///         .transition("main", S::is_true("greeted"))
@@ -239,6 +257,8 @@ impl Live {
     ///     .initial_phase("greeting")
     ///     .connect_google_ai("API_KEY")
     ///     .await?;
+    /// # let _ = handle; Ok(())
+    /// # }
     /// ```
     pub fn builder() -> Self {
         Self {
@@ -309,8 +329,8 @@ impl Live {
     /// # use gemini_adk_rs::State;
     /// let state = State::new();
     /// Live::builder()
-    ///     .state(state.clone())        // the session runs on this
-    ///     .with_tools(my_tools(state)); // and so do the tools
+    ///     .state(state.clone())   // the session runs on this
+    ///     .tools(my_tools(state)); // and so do the tools
     /// # fn my_tools(_: State) -> gemini_adk_fluent_rs::compose::tools::ToolComposite { todo!() }
     /// ```
     ///
@@ -394,7 +414,7 @@ impl Live {
     /// [`AgentMode::Call`]: gemini_adk_rs::orchestration::AgentMode::Call
     /// [`AgentMode::Dispatch`]: gemini_adk_rs::orchestration::AgentMode::Dispatch
     /// [`AgentMode::Background`]: gemini_adk_rs::orchestration::AgentMode::Background
-    pub fn on_enter(
+    pub fn on_step_enter(
         mut self,
         step: impl Into<String>,
         agent: Arc<dyn gemini_adk_rs::text::TextAgent>,
@@ -422,8 +442,8 @@ impl Live {
         self
     }
 
-    /// Attach a [`MiddlewareComposite`](crate::compose::middleware::MiddlewareComposite)
-    /// — every layer runs around tool
+    /// Attach middleware — a [`MiddlewareComposite`](crate::compose::middleware::MiddlewareComposite)
+    /// or a single `Arc<dyn Middleware>` — every layer runs around tool
     /// dispatch in the control lane (`before_tool` can veto a call,
     /// `after_tool` and `on_tool_error` observe results).
     ///
@@ -433,9 +453,9 @@ impl Live {
     /// pipeline concepts and do not apply to a streaming Live session.
     pub fn middleware(
         mut self,
-        composite: crate::compose::middleware::MiddlewareComposite,
+        middleware: impl Into<crate::compose::middleware::MiddlewareComposite>,
     ) -> Self {
-        self.middleware_layers.extend(composite.layers);
+        self.middleware_layers.extend(middleware.into().layers);
         self
     }
 
@@ -463,9 +483,10 @@ mod tests {
             .instruction("Test")
             .temperature(0.7)
             .google_search()
-            .transcription(true, true)
-            .affective_dialog(true)
-            .session_resume(true)
+            .transcription()
+            .affective_dialog()
+            .session_resume()
+            .no_tool_advisory()
             .context_compression(4000, 2000)
             .on_audio(|_data| {})
             .on_text(|_t| {})

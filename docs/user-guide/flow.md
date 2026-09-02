@@ -55,7 +55,7 @@ fails fast rather than misbehaving live.
 
 ```rust,ignore
 let handle = Live::builder()
-    .tools(dispatcher)
+    .dispatcher(dispatcher)
     .govern(flow)              // enforce — block inadmissible tools, steer per active step
     .connect_from_env()
     .await?;
@@ -84,7 +84,7 @@ let compiled = flow.compile_with_tools(&["lookup_account", "charge_card"])?;
 
 // Govern many sessions; connect does NOT re-validate or re-compile.
 let handle = Live::builder()
-    .tools(dispatcher)
+    .dispatcher(dispatcher)
     .govern_compiled(compiled)     // or .observe_compiled(compiled)
     .connect_from_env()
     .await?;
@@ -115,11 +115,11 @@ orchestration in-session:
 
 ```rust,ignore
 let handle = Live::builder()
-    .tools(dispatcher)
+    .dispatcher(dispatcher)
     .govern(booking_flow)
     // when `check` activates, run the availability agent; its result lands in
     // `check:result`, which the step completes on via `done(resolved("check"))`.
-    .on_enter("check", availability_agent, AgentMode::Call)
+    .on_step_enter("check", availability_agent, AgentMode::Call)
     .connect_from_env()
     .await?;
 ```

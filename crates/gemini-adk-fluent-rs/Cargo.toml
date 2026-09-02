@@ -52,9 +52,11 @@ parking_lot = "0.12"
 
 [features]
 templates = ["gemini-adk-rs/templates"]
-# One TLS backend on by default (see gemini-adk-rs); swap with
-# `--no-default-features --features tls-rustls`.
-default = ["tls-native"]
+# One TLS backend and text generation are on by default: `AgentBuilder::build`
+# runs on `GeminiLlm`, which is pure Rust, so a plain `cargo add` answers a
+# question. Swap the TLS backend with `--no-default-features --features
+# tls-rustls,gemini-llm`.
+default = ["tls-native", "gemini-llm"]
 gemini-llm = ["gemini-adk-rs/gemini-llm"]
 # HTTP tool bindings in `spec` (SessionSpec `tools[].http`).
 http-tools = ["dep:reqwest"]

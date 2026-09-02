@@ -26,7 +26,7 @@ use gemini_adk_rs::*;
 use gemini_genai_rs::prelude::*;
 ```
 
-### Prelude kernel + submodule homes (gap #9 carve)
+### Prelude kernel + submodule homes
 
 The L2 `prelude` is a **kernel**, not an everything-glob: builders, the
 `S·C·T·P·M·A·E·G` algebra, operators/patterns, `Live`, `State`/`StateKey`,
@@ -44,22 +44,23 @@ use gemini_adk_fluent_rs::text::*;          // text-agent runtime details
 use gemini_adk_fluent_rs::tools::*;         // toolsets, confirmation, frames, recognizers
 use gemini_adk_fluent_rs::state::*;         // prefix scopes, SlotEvidence
 use gemini_adk_fluent_rs::flow::*;          // full flow vocabulary (CompiledFlow, StepAction, …)
-use gemini_adk_fluent_rs::agents::*;        // AgentTrait, orchestration (call_agent, AgentMode), agent_session
+use gemini_adk_fluent_rs::agents::*;        // Agent, orchestration (call_agent, AgentMode), agent_session
 use gemini_adk_fluent_rs::llm::*;           // LlmRequest/Response/Params/Registry
 use gemini_adk_fluent_rs::conversation::*;  // Conversation, ConversationSpec, CompiledConversation
 use gemini_adk_fluent_rs::wire::*;          // raw L0 wire types
 // a2a, motifs, policy, simulation, testing — the same-named module.
 ```
 
-The L1 `Agent` *trait* is re-exported (in `prelude` and `agents`) as
-`AgentTrait` to avoid colliding with the L2 `Agent` builder alias.
+`Agent` in the L2 `prelude` (and `agents`) is the L1 `Agent` *trait*
+(`name()` + `run_live()`). The L2 builder is `AgentBuilder` — there is no
+`Agent` type alias for it, so the two names never collide.
 
 ## Core API Patterns
 
 ### Fluent Agent Builder (Text Agents)
 
 ```rust
-// Requires the `gemini-llm` feature on gemini-adk-fluent-rs for real generation.
+// Text generation is on by default (feature `gemini-llm`, pure Rust).
 // Model may be omitted: GeminiLlm defaults to GEMINI_TEXT_MODEL (then GEMINI_MODEL) or `gemini-flash-latest`.
 let agent = AgentBuilder::new("analyst")
     .model(ModelId::FLASH_LATEST)      // or any name: ModelId::new("…") / "…".into()
@@ -67,7 +68,7 @@ let agent = AgentBuilder::new("analyst")
     .temperature(0.3)
     .google_search()
     .thinking(2048)
-    .build(llm);
+    .build(llm)?;
 
 let result = agent.run(&state).await?;
 ```
@@ -83,8 +84,8 @@ let handle = Live::builder()
     .voice(Voice::Kore)
     .instruction("You are a weather assistant")
     .greeting("Greet the user and ask how you can help.")
-    .tools(dispatcher)
-    .transcription(true, true)
+    .tools(get_weather() | T::google_search())   // any ToolFunction or a `T::` composite
+    .transcription()                              // both directions; `.input_transcription()` for one
     .on_audio(|data| playback_tx.send(data.clone()).ok())
     .thinking(1024)                    // thinking budget (Google AI only)
     .include_thoughts()                // receive thought summaries
@@ -99,6 +100,21 @@ handle.send_audio(pcm_bytes).await?;
 handle.send_text("Hello").await?;
 handle.disconnect().await?;
 ```
+
+`Live::tools(..)` takes anything `Into<ToolComposite>` — a `T::` composite or
+a single `ToolFunction` (`SimpleTool`, `TypedTool`, the value a `#[tool]` fn
+returns, an `Arc<dyn ToolFunction>`); `Live::tool(f)` registers one;
+`Live::dispatcher(ToolDispatcher)` is the escape hatch for a dispatcher you
+built yourself. `AgentBuilder::tools`/`tool` accept the same values.
+
+**Boolean-setter rule** (every L2 builder): a capability that is *off by
+default* is enabled by a no-argument verb — `.transcription()`,
+`.input_transcription()`, `.output_transcription()`, `.session_resume()`,
+`.affective_dialog()`, `.proactive_audio()`, `.include_thoughts()`,
+`.prompt_on_enter()`; one that is *on by default* is disabled by `no_<x>()` —
+`.no_tool_advisory()`. A `bool` parameter appears only where both values
+routinely come from data (a `SessionSpec` mapping onto the builder). There is
+no `.x(true)`/`.x(false)` pair to remember.
 
 ### Live Session Callbacks
 
@@ -130,7 +146,7 @@ Both `on_input_transcript` and `on_output_transcript` follow a partial/final ASR
 
 #### Control Lane — async, may block
 
-These callbacks run in the async control lane and may perform I/O, acquire locks, or call async functions. Most have a `_concurrent` variant (e.g. `.on_tool_call_concurrent(...)`) that spawns a detached task for fire-and-forget behavior, preventing the callback from blocking the processor loop.
+These callbacks run in the async control lane and may perform I/O, acquire locks, or call async functions. Most have a `_concurrent` variant (e.g. `.on_turn_complete_concurrent(...)`) that spawns a detached task for fire-and-forget behavior, preventing the callback from blocking the processor loop. The lane rule is written once at the top of `live/callbacks.rs`.
 
 | Setter | Arguments | Purpose |
 |--------|-----------|---------|
@@ -160,7 +176,7 @@ These two callbacks mark different points in the model lifecycle:
 
 ##### `_concurrent` variants
 
-Appending `_concurrent` to a control-lane setter (e.g. `.on_tool_call_concurrent(...)`) spawns the callback body in a detached async task. Use this for fire-and-forget side effects (logging, analytics, database writes) where you do not need to block the processor or return a value. Hooks that return values (e.g. `on_tool_call`, `before_tool_response`) do not have a `_concurrent` variant.
+Appending `_concurrent` to a control-lane setter (e.g. `.on_turn_complete_concurrent(...)`) spawns the callback body in a detached async task. Use this for fire-and-forget side effects (logging, analytics, database writes) where you do not need to block the processor or return a value. Hooks that return values (`on_tool_call`, `before_tool_response`) do not have a `_concurrent` variant. Three twins exist only for bookkeeping bodies and forfeit an ordering guarantee: `on_interrupted_concurrent` (audio forwarding resumes without waiting — a playback flush must stay on the blocking `on_interrupted`), `on_turn_boundary_concurrent` (the next turn does not wait for injected context), `on_teardown_concurrent` (disconnect does not wait; durable flushes belong in `on_teardown`).
 
 ### Tool Definition
 
@@ -195,18 +211,23 @@ let tool = TypedTool::<WeatherArgs>::new(
 );
 ```
 
-**T module composition** for Live sessions:
+**T module composition** for Live sessions (and `AgentBuilder::tools`):
 
 ```rust
 Live::builder()
-    .with_tools(
+    .tools(
         T::simple("get_weather", "Get weather", |args| async move {
             Ok(json!({"temp": 22}))
         })
         | T::google_search()
         | T::code_execution()
     )
+    .tool(lookup_account())   // one `#[tool]` fn / SimpleTool / TypedTool / Arc<dyn ToolFunction>
 ```
+
+`T::mcp(..)` is connected at `Live::connect`; on a text `AgentBuilder` it is a
+`build()` error (`ConfigError`) naming the tool, never a silent drop —
+`AgentBuilder::build` and `Composable::compile` return `Result<_, ConfigError>`.
 
 ### State Management
 
@@ -275,9 +296,9 @@ Live::builder()
     .initial_phase("greeting")
     // Phase defaults inherited by all phases
     .phase_defaults(|p| {
-        p.with_state(&["emotional_state", "risk_level"])
+        p.show_state(&["emotional_state", "risk_level"])
          .when(|s| s.get::<String>("risk").unwrap_or_default() == "high", "Show extra empathy.")
-         .prompt_on_enter(true)
+         .prompt_on_enter()
     })
 ```
 
@@ -318,7 +339,7 @@ let converge = AgentBuilder::new("iterate") * until(|v| v["done"].as_bool().unwr
 let robust = AgentBuilder::new("primary") / AgentBuilder::new("fallback");
 
 // Compile and run
-let agent = pipeline.compile(llm);
+let agent = pipeline.compile(llm)?;
 let result = agent.run(&state).await?;
 ```
 
@@ -346,7 +367,7 @@ Live::builder()
 ```rust
 let verifier = AgentBuilder::new("verifier")
     .instruction("Verify caller identity")
-    .build(llm.clone());
+    .build(llm.clone())?;
 
 Live::builder()
     .agent_tool("verify_identity", "Verify caller identity", verifier)
@@ -444,12 +465,11 @@ Live::builder()
         .done()
 ```
 
-**Tool Availability Advisory** — Proactively signal available tools on phase transitions:
+**Tool Availability Advisory** — on by default: on each phase transition the SDK injects a model-role context turn naming the tools available in the new phase.
 
 ```rust
 Live::builder()
-    .tool_advisory(true)   // default: enabled
-    .tool_advisory(false)  // disable proactive signaling
+    .no_tool_advisory()  // disable proactive signaling
 ```
 
 **Session Persistence** — Survive process restarts:
@@ -481,7 +501,7 @@ Eight namespaces for composing agent configuration aspects (S/C/T/P/M/A plus
 | `S::` | `>>` | State transforms | `pick`, `rename`, `merge`, `flatten`, `set`, `defaults`, `drop`, `map`, `is_true`, `eq`, `one_of` |
 | `C::` | `+` | Context engineering | `window`, `user_only`, `model_only`, `head`, `sample`, `truncate`, `exclude_tools`, `prepend`, `append`, `from_state`, `dedup`, `empty`, `filter`, `map` |
 | `T::` | `\|` | Tool composition | `simple`, `function`, `google_search`, `url_context`, `code_execution`, `toolset`, `agent`, `mock`, `transform`, `mcp` |
-| `P::` | `+` | Prompt composition | `role`, `task`, `constraint`, `format`, `example`, `text`, `context`, `persona`, `guidelines`, `with_state`, `when`, `context_fn` |
+| `P::` | `+` | Prompt composition | `role`, `task`, `constraint`, `format`, `example`, `text`, `context`, `persona`, `guidelines`, `show_state`, `when`, `context_fn` |
 | `M::` | `\|` | Middleware composition | `log`, `latency`, `retry`, `cost`, `cache`, `dedup`, `rate_limit`, `circuit_breaker`, `trace`, `audit`, `metrics`, `validate`, `before_tool`, `after_tool`, `before_model`, `after_model` |
 | `A::` | `+` | Artifact schemas | `output`, `input`, `json_output`, `json_input`, `text_output`, `text_input` |
 | `E::` | `\|` | Evaluation criteria | deterministic: `exact_match`, `contains_match`, `trajectory`/`trajectory_in_order`/`trajectory_any_order`, `custom`; LLM-judge (take a judge LLM, scored via `score_async`): `safety(llm)`, `semantic_match(llm)`, `hallucination(llm)` |
@@ -612,7 +632,7 @@ let artifacts = A::json_output("report", "Analysis report")
 | `let_clone!` | Macro to reduce Arc/clone boilerplate in closures |
 | `telephony::bridge` | Vendor-neutral connector components: shared `telephony:*` state keys, `record_dtmf`, `DtmfDeduper` (RFC 4733 end-packet dedup), `FillerConfig`/`spawn_latency_filler` (latency-masking clip when the model stays silent after VadEnd) |
 | `handoff::{HandoffRecorder, HandoffPacket}` | Warm-handoff context packet: recorded (redacted) transcript tail + selected state keys + flow standing (done/active/missing) + optional LLM summary; delivery is the connector's job |
-| `voice::{MicProcessor, NoiseGate, pump_processed}` | Mic-chain seam for denoisers/VAD gates applied per frame before resampling; `NoiseGate` is the reference impl |
+| `voice::{InputAudioProcessor, NoiseGate, pump_processed}` | Mic-chain seam for denoisers/VAD gates applied per frame before resampling (`InputAudioProcessor` is the L1 trait, re-exported; `NoiseGate::new(threshold_rms, hold_frames)` is the reference impl) |
 | `voice::dsp` | DSP-grade mic chain (feature `dsp` for FFT/resampler stages): `DspChain` — float bus with ONE int boundary at entry/exit (counted clipping), per-stage peak/RMS meters (`ChainMetrics::snapshot()`), declared group-delay budget. Stages: `HighPass` (RBJ biquad), `Agc` (AGC2-style, RNNoise-gateable via `set_speech_probability`), `Limiter` (5 ms lookahead), `SincResampler` (rubato 128-tap windowed sinc), `Stft`/`SpectralStage` (WOLA sqrt-Hann, COLA-exact) + `SpectralFloor`, `Aec` (PBFDAF NLMS echo canceller: `AecFarEnd` fed from the playback path, double-talk freeze, `erle_db()`). Canonical order HPF → AEC → denoise → AGC → gate → limiter; `IntStage` wraps legacy i16 processors; `DspChain` implements `InputAudioProcessor` so it drops into `mic_processor(..)` |
 | `voice::Denoiser` | RNNoise speech enhancement as a mic-chain stage (feature `denoise`, pure Rust): clears the energy VAD's stuck-open (white) and missed-speech (pink) noise pathologies down to 0 dB SNR at ~0.008× realtime; does NOT reject competing speech — chain a calibrated `NoiseGate` after it for near-talker preference. `vad_probability()` exposes the network's per-10 ms VAD head — a learned speech classifier that beats WebRTC VAD on every measured noise condition (street traffic 10 dB: 0 false/0% open vs 4 false/53%); wrap it in hysteresis, and note babble still reads as speech |
 
@@ -699,7 +719,7 @@ just release-status
 
 ## Best Practices
 
-- Import from `gemini_adk_fluent_rs::prelude::*` for application code -- it re-exports all three layers.
+- Import from `gemini_adk_fluent_rs::prelude::*` for application code -- it is a kernel (the ~40 types most applications touch, plus the L0 wire prelude); the rest lives one `use gemini_adk_fluent_rs::{live, text, tools, …}::*` away.
 - Use `TypedTool` over `SimpleTool` when possible -- auto-generated schemas prevent drift. It narrows the derived draft-07 schema to the API's subset (inlines subschemas, strips `$schema`/`definitions`, collapses `Option<T>`'s `"type": ["string","null"]` union, flattens `oneOf`-of-`enum`). Hand-written `SimpleTool` schemas get no such treatment -- a union type is rejected outright and closes a Live session mid-handshake; a `$ref` or `oneOf` is silently ignored, so the constraint stops applying.
 - Use `State::modify()` for atomic read-modify-write instead of separate `get()` + `set()`.
 - Use `StateKey<T>` constants for frequently accessed keys to prevent typos.
@@ -716,7 +736,7 @@ just release-status
 - **Wrong audio model**: The native-audio Live models only support `Modality::Audio` output, NOT `Modality::Text`. Use `.text_only()` for text-only mode.
 - **Live model names differ by platform**, and Google AI retires dated names. When no `.model(..)` is set (`SessionConfig.model` is `Option<ModelId>`), connect resolves a platform-appropriate default via `ModelId::live_default(vertex)`: `GEMINI_LIVE_MODEL`, then `GEMINI_MODEL`, from the environment (bare names get the `models/` prefix), else `ModelId::FLASH_2_5_NATIVE_AUDIO_LATEST` (`models/gemini-2.5-flash-native-audio-latest`, a rolling alias, verified 2026-08) on Google AI, else `ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO` (`models/gemini-live-2.5-flash-native-audio`, Vertex AI's GA name per Google Cloud docs). Set `.model(ModelId::new("models/…"))` only when you need a specific model. `GEMINI_MODEL` is shared with the text LLM, so a native-audio name there 404s every `generateContent` call: use `GEMINI_LIVE_MODEL` / `GEMINI_TEXT_MODEL` to pin the two separately (`GeminiLlm` warns when it resolves a Live model name).
 - **Dated model names drift**: `gemini-2.0-flash-live-001` is gone from the Google AI catalog and `gemini-live-2.5-flash-native-audio` is Vertex-only — which is why `ModelId` is a string newtype with rolling-alias constants rather than an enum of dated names. Confirm what a key can reach: `curl "https://generativelanguage.googleapis.com/v1beta/models?key=$GEMINI_API_KEY" | jq -r '.models[] | select(.supportedGenerationMethods[]? == "bidiGenerateContent") | .name'`. The same catalog drift hits text models: `gemini-2.5-flash` 404s on Google AI `generateContent`; `GeminiLlm` therefore defaults to the `gemini-flash-latest` alias there (`gemini-2.5-flash` still on Vertex).
-- **Feature flags gate real work**: `gemini-adk-fluent-rs` ships `default = []` — text generation needs `gemini-llm` (without it `GeminiLlm` compiles but errors at runtime), `talk()` needs `voice-io`. Typed tools need `schemars = "0.8"`, not 1.x.
+- **Feature flags gate real work**: `gemini-adk-fluent-rs` and `gemini-adk-rs` ship `default = ["tls-native", "gemini-llm"]`, so text generation works out of the box; with `--no-default-features` (CI's feature-isolation job) `GeminiLlm` compiles but errors at runtime until `gemini-llm` is re-enabled. `talk()` needs `voice-io` (opt-in: it pulls `cpal`, Linux needs `libasound2-dev`) — without it there is no `talk()` method on the handle. Typed tools need `schemars = "0.8"`, not 1.x.
 - **Vertex AI binary frames**: Vertex AI sends Binary WebSocket frames (not Text) -- handled automatically by `TungsteniteTransport`.
 - **Vertex AI endpoint**: Use `wss://aiplatform.googleapis.com/...` (NOT `global-aiplatform.googleapis.com`).
 - **API versions**: Google AI = `v1beta`, Vertex AI = `v1beta1` -- handled by `ApiEndpoint`.
@@ -725,7 +745,7 @@ just release-status
 - **Thinking is Google AI only**: `thinkingConfig` is auto-stripped for Vertex AI. `.on_thought()` won't fire on Vertex.
 - **Forgetting `.done()`**: Phase builder chains must end with `.done()` to return to the `Live` builder.
 - **Forgetting `.initial_phase()`**: Phase machine requires an explicit initial phase name.
-- **Using `instruction_template` with phases**: Template replaces the entire instruction -- use `instruction_amendment` or phase modifiers (`P::with_state`, `P::when`) for additive composition.
+- **Using `instruction_template` with phases**: Template replaces the entire instruction -- use `instruction_amendment` or phase modifiers (`P::show_state`, `P::when`) for additive composition.
 - **State prefix tax**: `state.get("risk")` auto-falls back to `derived:risk` -- no need to manually check both.
 
 ## Workspace Structure

@@ -400,7 +400,7 @@ impl DemoApp for Playbook {
                 // =================================================================
                 live.model(super::live_model())
                     .voice(voice)
-                    .transcription(true, true)
+                    .transcription()
                     .steering_mode(SteeringMode::ContextInjection)
                     // Model greets the customer immediately on connect
                     .greeting("Begin the conversation. Welcome the customer warmly.")

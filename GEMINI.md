@@ -34,7 +34,7 @@ let agent = AgentBuilder::new("analyst")
     .temperature(0.3)
     .google_search()
     .thinking(2048)
-    .build(llm);
+    .build(llm)?;
 
 let result = agent.run(&state).await?;
 ```
@@ -48,8 +48,8 @@ let handle = Live::builder()
     .voice(Voice::Kore)
     .instruction("You are a weather assistant")
     .greeting("Greet the user and ask how you can help.")
-    .tools(dispatcher)
-    .transcription(true, true)
+    .tools(get_weather() | T::google_search())   // any ToolFunction or a `T::` composite
+    .transcription()                              // both directions
     .on_audio(|data| playback_tx.send(data.clone()).ok())
     .on_text(|t| print!("{t}"))
     .on_interrupted(|| async { playback.flush().await })
@@ -61,6 +61,14 @@ handle.send_audio(pcm_bytes).await?;
 handle.send_text("Hello").await?;
 handle.disconnect().await?;
 ```
+
+**Boolean-setter rule** (every L2 builder): a capability that is *off by
+default* is enabled by a no-argument verb (`.transcription()`,
+`.session_resume()`, `.affective_dialog()`, `.proactive_audio()`,
+`.include_thoughts()`, `.prompt_on_enter()`); one that is *on by default* is
+disabled by `no_<x>()` (`.no_tool_advisory()`). `Live::tools(..)` takes a
+`T::` composite or any single `ToolFunction`; `Live::dispatcher(..)` takes a
+`ToolDispatcher` you built yourself.
 
 ### Tool Definition
 
@@ -98,7 +106,7 @@ let tool = TypedTool::new::<WeatherArgs>(
 
 ```rust
 Live::builder()
-    .with_tools(
+    .tools(
         T::simple("get_weather", "Get weather", |args| async move {
             Ok(json!({"temp": 22}))
         })
@@ -174,9 +182,9 @@ Live::builder()
     .initial_phase("greeting")
     // Phase defaults inherited by all phases
     .phase_defaults(|p| {
-        p.with_state(&["emotional_state", "risk_level"])
+        p.show_state(&["emotional_state", "risk_level"])
          .when(|s| s.get::<String>("risk").unwrap_or_default() == "high", "Show extra empathy.")
-         .prompt_on_enter(true)
+         .prompt_on_enter()
     })
 ```
 
@@ -217,7 +225,7 @@ let converge = AgentBuilder::new("iterate") * until(|v| v["done"].as_bool().unwr
 let robust = AgentBuilder::new("primary") / AgentBuilder::new("fallback");
 
 // Compile and run
-let agent = pipeline.compile(llm);
+let agent = pipeline.compile(llm)?;
 let result = agent.run(&state).await?;
 ```
 
@@ -245,7 +253,7 @@ Live::builder()
 ```rust
 let verifier = AgentBuilder::new("verifier")
     .instruction("Verify caller identity")
-    .build(llm.clone());
+    .build(llm.clone())?;
 
 Live::builder()
     .agent_tool("verify_identity", "Verify caller identity", verifier)
@@ -261,7 +269,7 @@ Six namespaces for composing agent configuration aspects:
 | `S::` | `>>` | State transforms | `pick`, `rename`, `merge`, `flatten`, `set`, `defaults`, `drop`, `map`, `is_true`, `eq`, `one_of` |
 | `C::` | `+` | Context engineering | `window`, `user_only`, `model_only`, `head`, `sample`, `truncate`, `exclude_tools`, `prepend`, `append`, `from_state`, `dedup`, `empty`, `filter`, `map` |
 | `T::` | `\|` | Tool composition | `simple`, `function`, `google_search`, `url_context`, `code_execution`, `toolset` |
-| `P::` | `+` | Prompt composition | `role`, `task`, `constraint`, `format`, `example`, `text`, `context`, `persona`, `guidelines`, `with_state`, `when`, `context_fn` |
+| `P::` | `+` | Prompt composition | `role`, `task`, `constraint`, `format`, `example`, `text`, `context`, `persona`, `guidelines`, `show_state`, `when`, `context_fn` |
 | `M::` | `\|` | Middleware composition | (reserved) |
 | `A::` | `+` | Artifact schemas | `output`, `input`, `json_output`, `json_input`, `text_output`, `text_input` |
 
@@ -380,7 +388,7 @@ cargo build -p gemini-genai-rs --features "vad,generate,tokens"
 
 ## Best Practices
 
-- Import from `gemini_adk_fluent_rs::prelude::*` for application code -- it re-exports all three layers.
+- Import from `gemini_adk_fluent_rs::prelude::*` for application code -- it is a kernel (the ~40 types most applications touch, plus the L0 wire prelude); the rest lives one `use gemini_adk_fluent_rs::{live, text, tools, …}::*` away.
 - Use `TypedTool` over `SimpleTool` when possible -- auto-generated schemas prevent drift.
 - Use `State::modify()` for atomic read-modify-write instead of separate `get()` + `set()`.
 - Use `StateKey<T>` constants for frequently accessed keys to prevent typos.
@@ -394,6 +402,7 @@ cargo build -p gemini-genai-rs --features "vad,generate,tokens"
 ## Common Mistakes
 
 - **Wrong audio model**: The native-audio Live models only support `Modality::Audio` output, NOT `Modality::Text`. Use `.text_only()` for text-only mode.
+- **Feature flags gate real work**: `gemini-adk-fluent-rs` and `gemini-adk-rs` ship `default = ["tls-native", "gemini-llm"]`, so text generation works out of the box; with `--no-default-features` `GeminiLlm` compiles but errors at runtime until `gemini-llm` is re-enabled. `talk()` needs `voice-io` (opt-in; Linux needs `libasound2-dev`) — without it there is no `talk()` method on the handle. Typed tools need `schemars = "0.8"`, not 1.x.
 - **Vertex AI binary frames**: Vertex AI sends Binary WebSocket frames (not Text) -- handled automatically by `TungsteniteTransport`.
 - **Vertex AI endpoint**: Use `wss://aiplatform.googleapis.com/...` (NOT `global-aiplatform.googleapis.com`).
 - **API versions**: Google AI = `v1beta`, Vertex AI = `v1beta1` -- handled by `ApiEndpoint`.
@@ -401,7 +410,7 @@ cargo build -p gemini-genai-rs --features "vad,generate,tokens"
 - **Fast lane callbacks must be sync and under 1ms**: No allocations, no locks, no async in `on_audio`, `on_text`, `on_vad_*`.
 - **Forgetting `.done()`**: Phase builder chains must end with `.done()` to return to the `Live` builder.
 - **Forgetting `.initial_phase()`**: Phase machine requires an explicit initial phase name.
-- **Using `instruction_template` with phases**: Template replaces the entire instruction -- use `instruction_amendment` or phase modifiers (`P::with_state`, `P::when`) for additive composition.
+- **Using `instruction_template` with phases**: Template replaces the entire instruction -- use `instruction_amendment` or phase modifiers (`P::show_state`, `P::when`) for additive composition.
 - **State prefix tax**: `state.get("risk")` auto-falls back to `derived:risk` -- no need to manually check both.
 
 ## Workspace Structure

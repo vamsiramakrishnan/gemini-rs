@@ -34,8 +34,12 @@ use gemini_adk_rs::context::AgentEvent;
 use gemini_adk_rs::error::{AgentError, ToolError};
 use gemini_adk_rs::middleware::{LatencyMiddleware, LogMiddleware, Middleware};
 
-/// A middleware composite — one or more middleware layers.
+/// A middleware composite — one or more middleware layers (`M::a() | M::b()`).
+///
+/// A single `Arc<dyn Middleware>` converts into a one-layer composite, so
+/// `.middleware(Arc::new(MyLayer))` works without the namespace.
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct MiddlewareComposite {
     /// The ordered list of middleware layers.
     pub layers: Vec<Arc<dyn Middleware>>,
@@ -57,6 +61,12 @@ impl MiddlewareComposite {
     /// Whether empty.
     pub fn is_empty(&self) -> bool {
         self.layers.is_empty()
+    }
+}
+
+impl From<Arc<dyn Middleware>> for MiddlewareComposite {
+    fn from(layer: Arc<dyn Middleware>) -> Self {
+        Self::new(layer)
     }
 }
 

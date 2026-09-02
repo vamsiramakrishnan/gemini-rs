@@ -169,10 +169,10 @@ fn main() {
         .case("What is the capital of France?", "Paris")
         .case("Is Rust memory safe?", "Yes")
         .case("What color is the sky?", "Blue")
-        .criteria(&["response_match", "contains_match", "safety"]);
+        .criteria(E::response_match() | E::contains_match() | E::custom("safety", |_, _| 1.0));
 
     println!("  Suite: {} test cases", suite.len());
-    println!("  Criteria: {:?}", suite.criteria_names);
+    println!("  Criteria: {:?}", suite.criteria);
 
     // Run the suite against simulated agent outputs
     let simulated_outputs = [

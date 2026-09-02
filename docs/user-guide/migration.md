@@ -47,6 +47,23 @@ constructed. Everything below is mechanical.
 | Configuration errors | `ComputedRegistry::register` panicked on a dependency cycle; `Flow::validate` → `Result<(), Vec<String>>`, `FlowBuilder::build` → `Result<Flow, Vec<String>>`, `PhaseMachine::validate` / `ComputedRegistry::validate` → `Result<(), String>` | `ComputedRegistry::register` → `Result<(), ConfigError>` (never panics; a rejected registration leaves the registry unchanged — L2 `Live::computed(..)` defers the error to `connect`); all three `validate`s and `FlowBuilder::build` return `error::ConfigError { issues: Vec<String> }` (`Display` joins with `"; "`; `From<ConfigError> for AgentError`) |
 | Session persistence errors | `SessionPersistence::{save, load, delete}` → `Result<_, Box<dyn Error + Send + Sync>>` | `Result<_, PersistenceError>` (`Io`, `Serde`, `NotFound`, `Backend(String)`) |
 | Combinator middleware | `with_middleware_chain` on `LoopTextAgent`, `FallbackTextAgent`, `RouteTextAgent` only | Also on `Sequential`, `Parallel`, `Race`, `Timeout`, `MapOver`, `Dispatch`, `Join` text agents (`AgentStarted`/`AgentCompleted`, `LoopIteration`, `Timeout` `on_event`s); `TapTextAgent` documents why it has none |
+| Default features | `gemini-adk-rs` / `gemini-adk-fluent-rs` `default = ["tls-native"]` (text generation needed `features = ["gemini-llm"]`) | `default = ["tls-native", "gemini-llm"]` on both — `GeminiLlm` generates out of the box; `--no-default-features` still builds. `voice-io` stays opt-in and is the only way to get `talk()` |
+| L2 `Agent` names | `pub type Agent = AgentBuilder`; the L1 trait re-exported as `AgentTrait` (`prelude`, `agents`) | Alias and `AgentTrait` removed: `Agent` in the L2 `prelude`/`agents` **is** the L1 trait; write `AgentBuilder::new(..)` |
+| Registering tools | `Live::tools(ToolDispatcher)`, `Live::with_tools(ToolComposite)`, `AgentBuilder::tools(ToolComposite)`, `AgentBuilder::tool(Arc<dyn ToolFunction>)` | `Live::tools(impl Into<ToolComposite>)` and `AgentBuilder::tools(impl Into<ToolComposite>)` (a `T::` composite or any single `ToolFunction` — `From<F: ToolFunction>`); `Live::tool(f)` / `AgentBuilder::tool(f)` take `impl ToolFunction` (a `#[tool]` fn's value, a `SimpleTool`, an `Arc<dyn ToolFunction>` — L1 now implements `ToolFunction` for `Arc<T>`); `Live::dispatcher(ToolDispatcher)` is the escape hatch; `with_tools` removed |
+| Building text agents | `AgentBuilder::build(llm) -> Arc<dyn TextAgent>`, `Composable::compile(llm) -> Arc<dyn TextAgent>`; `T::mcp` on a text agent was dropped with a warning | Both return `Result<Arc<dyn TextAgent>, ConfigError>`; a `T::mcp` entry is a build error naming the tool (only `Live::connect` performs the MCP handshake) |
+| Unimplemented tool kinds | `T::a2a`, `T::openapi`, `T::search` (connect-time "not yet implemented" errors), `ToolCompositeEntry::{A2a, OpenApi, Search}`, `DeferredTool::{A2a, OpenApi, Search}` | Removed — they had no consumer. `DeferredTool` has one variant, `Mcp` |
+| Showing state to the model | `PhaseBuilder::with_state(&[..])`, `PhaseDefaults::with_state`, `P::with_state` | `show_state` on all three |
+| Step-enter agents | `Live::on_enter(step, agent, mode)` | `Live::on_step_enter(step, agent, mode)` (`PhaseBuilder::on_enter(f)` unchanged) |
+| Conversation stage exits | `Conversation::done(guard)`, `Conversation::done_overlay()` | `complete_when(guard)`, `end_overlay()` (`PhaseBuilder::done()` and `WatchBuilder::then(f)` unchanged) |
+| L2 boolean setters | `transcription(bool, bool)`, `session_resume(bool)`, `affective_dialog(bool)`, `proactive_audio(bool)`, `prompt_on_enter(bool)`, `tool_advisory(bool)` | Off-by-default capabilities are no-arg verbs: `transcription()` (both), `input_transcription()`, `output_transcription()`, `session_resume()`, `affective_dialog()`, `proactive_audio()`, `prompt_on_enter()`; the on-by-default advisory is disabled by `no_tool_advisory()`. Rule documented in `live/config.rs` |
+| `_concurrent` twins | `on_interrupted`, `on_turn_boundary`, `on_teardown` blocking only | `on_interrupted_concurrent`, `on_turn_boundary_concurrent`, `on_teardown_concurrent` added (L1: `EventCallbacks::{on_interrupted_mode, on_turn_boundary_mode, on_teardown_concurrent}`); transcript callbacks document their `bool` as `is_final` |
+| Algebra dead entries | `C::last/none/recent/rolling/fresh/compact/budget`, `G::rate_limit/max_turns/output/input`, `Loop::max`, free `spec::run_tests`, `Ctx::builder()` | Removed (`C::window`/`empty`/`exclude_tools`/`truncate`, `G::custom`, `Loop::max_iterations`, `SessionSpec::run_tests()`); `Ctx::section(name)` starts a context |
+| Named combinators | `Pipeline/FanOut/Loop::builder(name)` and `.describe(desc)` discarded their arguments | Stored as `name`/`description` fields (the name becomes the compiled agent's name; both appear in `Debug`) |
+| Map patterns | `map_over(agent, concurrency) -> MapOver`, `map_reduce(mapper, reducer, concurrency) -> MapReduce` (inert structs) | `map_over(agent, list_key) -> Composable` (`Composable::MapOver`, compiles to `MapOverTextAgent`), `map_reduce(mapper, reducer, list_key) -> Composable` (a pipeline); `MapReduce` removed |
+| Composite names | `ContextPolicyChain`, `StateTransformChain`, `GComposite`/`GGuard`, `EComposite`/`ECriterion`, `judge::Verdict`; `compose::middleware` was `#[doc(hidden)]` | `ContextComposite`, `StateComposite`, `GuardComposite`/`GuardRule`, `EvalComposite`/`EvalCriterion`, `JudgeVerdict`; all composites `#[non_exhaustive]`; `compose::middleware` documented |
+| Composite parameters | `AgentBuilder::middleware(MiddlewareComposite)` (also `Live`, `Composable`, `Loop`, `Fallback`); `EvalSuite::criteria(&[&str])` + `criteria_names: Vec<String>`; `E::persona(&'static str, &'static str)`, `E::custom(&'static str, ..)`, `LlmJudge::with_context(&'static str)` | `impl Into<MiddlewareComposite>` (`From<Arc<dyn Middleware>>`); `criteria(impl Into<EvalComposite>)` with field `criteria: EvalComposite`; `impl Into<String>` names/labels |
+| A2A server | `a2a::A2AServer` | `a2a::A2aServer` (matches `A2aRegistry`) |
+| Mic chain | `voice::MicProcessor` (`process`), `pump_processed(.., Vec<Box<dyn MicProcessor>>, ..)`, `NoiseGate::new(threshold_rms, hang_frames)` | One trait: L1 `InputAudioProcessor` (`process_frame`), re-exported as `voice::InputAudioProcessor`; `NoiseGate::new(threshold_rms, hold_frames)` |
 
 Toolchain: the workspace is Rust edition 2024 with MSRV 1.93. `gemini-genai-rs`
 default features are `["live", "tls-native"]` (`tls-rustls` is the alternative;
@@ -89,9 +106,9 @@ submodule when the compiler says a name isn't found.
 
 **In the kernel `prelude`:**
 
-- Builders & composition: `AgentBuilder`/`Agent`, the `S·C·T·P·M·A·E·G·Ctx`
+- Builders & composition: `AgentBuilder`, the `S·C·T·P·M·A·E·G·Ctx`
   algebra, operators (`>> | * /`) and patterns (`until`, `review_loop`,
-  `fan_out_merge`, `supervised`), `Live`.
+  `fan_out_merge`, `supervised`, `map_over`), `Live`; the L1 `Agent` trait.
 - State: `State`, `StateKey`.
 - Flow (core): `Flow`, `Guard`, `FlowMonitor`, `Enforcement`, `Verdict`.
 - Tools (core): `SimpleTool`, `TypedTool`, `ToolFunction`, `ToolDispatcher`,
@@ -118,16 +135,16 @@ submodule when the compiler says a name isn't found.
 | `Toolset`, `StaticToolset`, `ConfirmationProvider`, `Recognizer`, `RecordExtractor`, `FrameSpec`, `SlotSpec`, … | `gemini_adk_fluent_rs::tools` |
 | `SlotEvidence`, prefix-scope helpers | `gemini_adk_fluent_rs::state` |
 | `CompiledFlow`, `StepAction`, `Violation`, `FlowExplanation`, `ToolSurface`, `on_enter`, `render_ground`, … | `gemini_adk_fluent_rs::flow` |
-| `AgentTrait` (L1 `Agent` trait), `call_agent`, `AgentMode`, `provenance`, `Resolver`, `agent_session::*` | `gemini_adk_fluent_rs::agents` |
+| `Agent` (L1 `Agent` trait), `call_agent`, `AgentMode`, `provenance`, `Resolver`, `agent_session::*` | `gemini_adk_fluent_rs::agents` |
 | `LlmRequest`, `LlmResponse`, `GeminiLlmParams`, `LlmRegistry` | `gemini_adk_fluent_rs::llm` |
 | `Conversation`, `ConversationSpec`, `CompiledConversation`, `FlowStack`, … | `gemini_adk_fluent_rs::conversation` |
-| `A2AServer`, `RemoteAgent`, `SkillDeclaration` | `gemini_adk_fluent_rs::a2a` |
+| `A2aServer`, `RemoteAgent`, `SkillDeclaration` | `gemini_adk_fluent_rs::a2a` |
 | `Scenario`, `Sim`, `SimStep` | `gemini_adk_fluent_rs::simulation` |
 | `Motif`, `CommitPolicy`, `Policy` | `gemini_adk_fluent_rs::{motifs, policy}` |
 | Raw L0 wire types | `gemini_adk_fluent_rs::wire` |
 
-> The L1 `Agent` *trait* is exposed as `AgentTrait` (in both `prelude` and
-> `agents`) to avoid colliding with the L2 `Agent` builder alias.
+> `Agent` (in both `prelude` and `agents`) is the L1 *trait*; the L2 builder
+> is `AgentBuilder` and has no `Agent` alias.
 
 ## 0.8 feature changes (slim defaults)
 
@@ -317,7 +334,7 @@ use serde_json::json;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let handle = Live::builder()
         .instruction("You are a weather assistant. Use get_weather for queries.")
-        .with_tools(
+        .tools(
             T::simple("get_weather", "Get current weather for a city", |args| async move {
                 let city = args["city"].as_str().unwrap_or("unknown");
                 Ok(json!({ "city": city, "temp_c": 22, "condition": "sunny" }))
@@ -337,7 +354,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 **Lines of code**: ~20
 **What changed**: No `SessionConfig` construction. No `ToolDispatcher`
 setup. No `EventCallbacks` struct. The builder infers everything:
-- `.with_tools()` creates and configures the `ToolDispatcher`
+- `.tools()` creates and configures the `ToolDispatcher`
 - `.instruction()` sets the system instruction on the underlying `SessionConfig`
 - `.connect_google_ai()` builds the endpoint and connects in one call
 
@@ -348,7 +365,7 @@ Tools compose with the `|` operator:
 ```rust,ignore
 let handle = Live::builder()
     .instruction("You are a helpful assistant with access to tools.")
-    .with_tools(
+    .tools(
         T::simple("get_weather", "Get weather", |args| async move {
             Ok(json!({ "temp_c": 22 }))
         })
@@ -369,7 +386,7 @@ let handle = Live::builder()
 | WebSocket connection | `connect(config)` (or `ConnectBuilder::new(config)….connect()`) | `LiveSessionBuilder::new(config).connect()` | `Live::builder().connect_*()` |
 | Event loop | Manual `while let` + `match` | Automatic (three-lane processor) | Automatic |
 | Audio callback | Manual `match SessionEvent::AudioData` | `callbacks.on_audio = Some(...)` | `.on_audio(\|data\| ...)` |
-| Tool dispatch | Manual match + response send | `ToolDispatcher` auto-dispatch | `.tools()` or `.with_tools()` |
+| Tool dispatch | Manual match + response send | `ToolDispatcher` auto-dispatch | `.tools()` or `.tools()` |
 | Tool declaration | Manual `Tool` + `FunctionDeclaration` | Auto from `ToolFunction::parameters()` | Auto from `T::simple()` |
 | State management | None (DIY) | `State` with prefixes | `State` with prefixes |
 | Phase machine | None (DIY) | `PhaseMachine::new()` | `.phase("name").instruction().done()` |
@@ -379,7 +396,7 @@ let handle = Live::builder()
 | Greeting | `handle.send_text()` after connect | `builder.greeting("...")` | `.greeting("...")` |
 | Telemetry | None | `SessionTelemetry` auto-collected | Auto-collected |
 | Session signals | None | `SessionSignals` auto-collected | Auto-collected |
-| Transcription toggle | `config.input_transcription(true)` | Same | `.transcription(true, true)` |
+| Transcription toggle | `config.input_transcription(true)` | Same | `.transcription()` |
 | Computed state | None | `ComputedRegistry` | `.computed("key", &["deps"], \|s\| ...)` |
 | Temporal patterns | None | `TemporalRegistry` | `.when_sustained()` / `.when_rate()` |
 | Text agent tools | None | `TextAgentTool` | `.agent_tool("name", "desc", agent)` |
@@ -489,7 +506,7 @@ let phase = session.phase();
 When migrating from L0 to L2:
 
 1. Replace `SessionConfig::from_endpoint(...)` with `Live::builder().instruction()` (the model stays optional at every layer)
-2. Replace manual `Tool` declarations with `.tools(dispatcher)` or `.with_tools(T::simple(...))`
+2. Replace manual `Tool` declarations with `.dispatcher(dispatcher)` or `.tools(T::simple(...))`
 3. Replace the `while let Some(event) = recv_event(...)` loop with callbacks
 4. Replace `match SessionEvent::AudioData` with `.on_audio()`
 5. Replace `match SessionEvent::TextDelta` with `.on_text()`

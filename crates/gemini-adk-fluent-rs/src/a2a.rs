@@ -6,11 +6,14 @@ use std::time::Duration;
 
 /// Builder for a remote agent reference (client-side).
 ///
-/// ```ignore
+/// ```
+/// # use gemini_adk_fluent_rs::a2a::RemoteAgent;
+/// # use std::time::Duration;
 /// let remote = RemoteAgent::new("verifier")
 ///     .endpoint("https://agent.example.com")
 ///     .timeout(Duration::from_secs(30))
 ///     .describe("Verifies caller identity");
+/// assert_eq!(remote.name(), "verifier");
 /// ```
 #[derive(Clone, Debug)]
 pub struct RemoteAgent {
@@ -75,14 +78,16 @@ impl RemoteAgent {
 
 /// Builder for an A2A server that exposes a local agent.
 ///
-/// ```ignore
-/// let server = A2AServer::new(my_agent)
+/// ```
+/// # use gemini_adk_fluent_rs::a2a::A2aServer;
+/// let server = A2aServer::new("my-agent")
 ///     .host("0.0.0.0")
 ///     .port(8080)
 ///     .health_check("/health");
+/// assert_eq!(server.get_port(), 8080);
 /// ```
 #[derive(Clone, Debug)]
-pub struct A2AServer {
+pub struct A2aServer {
     agent_name: String,
     host: String,
     port: u16,
@@ -90,7 +95,7 @@ pub struct A2AServer {
     streaming: bool,
 }
 
-impl A2AServer {
+impl A2aServer {
     /// Create a new A2A server for the given agent name.
     pub fn new(agent_name: impl Into<String>) -> Self {
         Self {
@@ -209,7 +214,7 @@ mod tests {
 
     #[test]
     fn a2a_server_builder() {
-        let server = A2AServer::new("my-agent")
+        let server = A2aServer::new("my-agent")
             .host("127.0.0.1")
             .port(9090)
             .health_check("/ping")

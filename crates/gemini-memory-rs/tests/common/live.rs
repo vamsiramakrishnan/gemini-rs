@@ -252,7 +252,7 @@ pub async fn connect(
         }))
         // Input transcription feeds ingestion; output transcription is what the
         // assertions read, since the model answers in audio.
-        .transcription(true, true)
+        .transcription()
         .on_output_transcript(move |text, is_final| {
             if is_final && !text.trim().is_empty() {
                 spoken.spoken.lock().push(text.to_string());

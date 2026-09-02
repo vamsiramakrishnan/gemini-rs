@@ -250,11 +250,11 @@ fn main() {
             "Summarize quantum computing",
             "Quantum computing uses qubits",
         )
-        .criteria(&["response_match", "contains_match", "safety"]);
+        .criteria(E::response_match() | E::contains_match() | E::custom("safety", |_, _| 1.0));
     println!(
         "   Eval suite: {} cases, {} criteria",
         suite.len(),
-        suite.criteria_names.len()
+        suite.criteria.len()
     );
 
     // ── 13. A module: Artifact schemas ──
@@ -309,12 +309,12 @@ fn main() {
     println!("   chain: 4 agents in sequence");
 
     // Map-over pattern
-    let _map = map_over(writer.clone(), 4);
-    println!("   map_over: apply writer to items, concurrency=4");
+    let _map = map_over(writer.clone(), "items");
+    println!("   map_over: apply writer to each entry of state[\"items\"]");
 
     // Map-reduce pattern
-    let _mr = map_reduce(researcher.clone(), analyst.clone(), 8);
-    println!("   map_reduce: researcher maps, analyst reduces, concurrency=8");
+    let _mr = map_reduce(researcher.clone(), analyst.clone(), "items");
+    println!("   map_reduce: researcher maps over state[\"items\"], analyst reduces");
 
     // ── 15. Contract validation on the full pipeline ──
     println!("\n--- Contract Validation ---");

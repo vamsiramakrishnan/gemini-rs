@@ -8,13 +8,19 @@
 //! compiler lowers it into concrete machinery (a safety digression, a redaction
 //! set, commit governance), always through the validated IR.
 //!
-//! ```ignore
+//! ```no_run
+//! # use gemini_adk_fluent_rs::conversation::Conversation;
+//! # use gemini_adk_fluent_rs::policy::Policy;
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! Conversation::new("payment")
 //!     .policy(Policy::redact(["card_number", "cvv"]))
 //!     .policy(Policy::commit("charge_card").idempotency_key("{user_id}:{amount}").compensate_with("refund"))
 //!     .policy(Policy::safety_handoff(["self_harm", "abuse"]))
-//!     /* … stages … */
+//!     .stage("pay").terminal()   // … the real stages go here …
+//!     .require(["pay"])
 //!     .compile()?;
+//! # Ok(())
+//! # }
 //! ```
 
 use serde::{Deserialize, Serialize};

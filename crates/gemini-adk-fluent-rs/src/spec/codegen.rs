@@ -164,10 +164,10 @@ impl SessionSpec {
         }
         out.push_str("        .state(state.clone())\n");
         if !self.tools.is_empty() {
-            out.push_str("        .tools(tools)\n");
+            out.push_str("        .dispatcher(tools)\n");
         }
         for params in &self.mcp {
-            let _ = writeln!(out, "        .with_tools(T::mcp({}))", rust_str(params));
+            let _ = writeln!(out, "        .tools(T::mcp({}))", rust_str(params));
         }
         if !flow.steps.is_empty() {
             out.push_str("        .govern(flow)\n");
@@ -532,8 +532,8 @@ fn gen_phase(phase: &super::PhaseSpec) -> String {
     if !phase.needs.is_empty() {
         let _ = writeln!(out, "            .needs(&{})", str_slice(&phase.needs));
     }
-    if let Some(prompt) = phase.prompt_on_enter {
-        let _ = writeln!(out, "            .prompt_on_enter({prompt})");
+    if phase.prompt_on_enter == Some(true) {
+        out.push_str("            .prompt_on_enter()\n");
     }
     for transition in &phase.transitions {
         let guard = gen_guard(&transition.when);
@@ -704,10 +704,15 @@ fn gen_runtime(runtime: &RuntimeSpec) -> String {
         out.push_str("        .include_thoughts()\n");
     }
     if let Some(t) = runtime.transcription {
-        let _ = writeln!(out, "        .transcription({}, {})", t.input, t.output);
+        match (t.input, t.output) {
+            (true, true) => out.push_str("        .transcription()\n"),
+            (true, false) => out.push_str("        .input_transcription()\n"),
+            (false, true) => out.push_str("        .output_transcription()\n"),
+            (false, false) => {}
+        }
     }
-    if let Some(enabled) = runtime.proactive_audio {
-        let _ = writeln!(out, "        .proactive_audio({enabled})");
+    if runtime.proactive_audio == Some(true) {
+        out.push_str("        .proactive_audio()\n");
     }
     if let Some(vad) = &runtime.vad {
         out.push_str("        .vad(AutomaticActivityDetection {\n");

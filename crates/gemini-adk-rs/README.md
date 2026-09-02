@@ -14,6 +14,14 @@ Agent runtime for Gemini Live — tools, streaming, agent transfer, middleware. 
 - **Text agents** — 15+ combinators: Sequential, Parallel, Loop, Fallback,
   Route, Race, Timeout, MapOver, Tap, Dispatch, Join, and more
 
+## Feature flags
+
+| Feature | Default | Enables |
+|---|---|---|
+| `gemini-llm` | on | `GeminiLlm` text generation over REST (pure Rust) |
+| `tls-native` | on | the TLS backend (`tls-rustls` is the alternative) |
+| `templates`, `metrics`, `mcp-http`, `vertex-ai-*`, `database-sessions`, `otel*` | off | opt-in integrations |
+
 ## Quick Start
 
 ```rust,ignore

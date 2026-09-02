@@ -84,17 +84,17 @@ let handle = Live::builder()
     .instruction("You are a restaurant order assistant.")
 
     // Tools (auto-dispatched when model calls them)
-    .tools(dispatcher)
+    .dispatcher(dispatcher)
 
     // Audio/transcription config
-    .transcription(true, true)   // input, output
-    .affective_dialog(true)      // emotionally expressive responses
+    .transcription()         // both directions (.input_transcription() / .output_transcription() for one)
+    .affective_dialog()      // emotionally expressive responses
 
     // Server-side VAD
     .vad(AutomaticActivityDetection::default())
 
     // Session lifecycle
-    .session_resume(true)
+    .session_resume()
     .context_compression(4000, 2000)  // trigger_tokens, target_tokens
 
     // Greeting (model speaks first)
@@ -234,7 +234,7 @@ dispatcher.register(SimpleTool::new(
 
 let handle = Live::builder()
     .instruction("You are a weather assistant. Use get_weather to answer questions.")
-    .tools(dispatcher)
+    .dispatcher(dispatcher)
     .on_text(|t| print!("{t}"))
     .connect_google_ai(api_key)
     .await?;
@@ -285,7 +285,7 @@ the user said and what the model said:
 
 ```rust,ignore
 let handle = Live::builder()
-    .transcription(true, true)  // input, output
+    .transcription()  // both directions
     .on_input_transcript(|text, is_final| {
         if is_final {
             println!("User: {text}");  // final, suitable for storage
@@ -330,7 +330,7 @@ A session progresses through these phases:
 
 The `GoAway` event signals the server will disconnect soon (the
 `on_go_away` callback receives the server's time-left hint as a `Duration`).
-Save state and prepare to reconnect. With `.session_resume(true)`, the server
+Save state and prepare to reconnect. With `.session_resume()`, the server
 keeps issuing resumption handles; `handle.resume_handle()` returns the latest
 one, which can be used to continue the conversation in a new session.
 

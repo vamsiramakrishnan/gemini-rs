@@ -78,7 +78,7 @@ equivalent.
 | Voice session | `Live` (builder → connect → `LiveHandle`) |
 | Text agents | `AgentBuilder`, `Pipeline` `>>`, `FanOut` `\|`, `*` loops, `until`, `/` fallback |
 | The algebra | `S`, `C`, `T`, `P`, `M`, `A`, `E`, `G` |
-| Session as data | `SessionSpec`, `SpecResources`, `SpecTest`, `run_tests` |
+| Session as data | `SessionSpec` (`.run_tests()`), `SpecResources`, `SpecTest` |
 | Proof before connect | `check_contracts`, `ContractViolation` |
 | Voice I/O | `voice::pump`, `voice::Playback`, `voice::Talk` *(feature `voice-io`)* |
 | Telephony | `telephony::TwilioCall`, `telephony::sip::SipAgent` *(feature `sip`)*, `telephony::{g711, rtp, sdp}` — a phone call on the same pump |

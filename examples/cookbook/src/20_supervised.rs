@@ -246,6 +246,9 @@ async fn main() {
         let indent = "  ".repeat(depth);
         match c {
             Composable::Agent(a) => println!("{indent}Agent({})", a.name()),
+            Composable::MapOver(m) => {
+                println!("{indent}MapOver({} over {})", m.agent.name(), m.list_key);
+            }
             Composable::Pipeline(p) => {
                 println!("{indent}Pipeline({} steps):", p.steps.len());
                 for step in &p.steps {

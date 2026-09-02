@@ -163,7 +163,7 @@ impl AgentSource for ManifestApp {
             .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
             .instruction(&manifest.instruction)
             .voice(voice)
-            .transcription(true, true)
+            .transcription()
             .on_audio(move |data| {
                 tx_audio
                     .send(ServerMessage::Audio {

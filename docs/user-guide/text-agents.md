@@ -311,7 +311,7 @@ let robust = AgentBuilder::new("primary").instruction("Try this first")
     / AgentBuilder::new("backup").instruction("Fall back to this");
 
 // Compile the tree into an executable TextAgent
-let agent = pipeline.compile(llm);
+let agent = pipeline.compile(llm)?;
 let result = agent.run(&state).await?;
 ```
 
@@ -338,7 +338,7 @@ let summarize = AgentBuilder::new("summarize")
 // extract -> validate -> summarize
 let pipeline = extract >> validate >> summarize;
 
-let agent = pipeline.compile(llm);
+let agent = pipeline.compile(llm)?;
 let state = State::new();
 state.set("input", document_text);
 

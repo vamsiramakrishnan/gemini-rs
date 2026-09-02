@@ -139,8 +139,8 @@ fn main() {
     let _supervised = supervised(writer.clone(), reviewer.clone(), 5);
     println!("Supervised: writer supervised by reviewer (max 5 revisions)");
 
-    let _map = map_over(writer.clone(), 4);
-    println!("Map-over: apply writer to items (concurrency=4)");
+    let _map = map_over(writer.clone(), "items");
+    println!("Map-over: apply writer to each entry of state[\"items\"]");
 
     // ── Step 6: Contract validation ──
 

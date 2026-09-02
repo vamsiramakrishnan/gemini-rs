@@ -299,12 +299,12 @@ fn main() {
             "Can you tell me about your pricing?",
             "pricing information provided",
         )
-        .criteria(&["contains_match", "safety"]);
+        .criteria(E::contains_match() | E::custom("safety", |_, _| 1.0));
 
     println!(
         "Eval suite: {} test cases, {} criteria",
         eval_suite.len(),
-        eval_suite.criteria_names.len()
+        eval_suite.criteria.len()
     );
 
     let eval_criteria = E::contains_match() | E::custom("safety", |_, _| 1.0);

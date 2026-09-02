@@ -530,7 +530,7 @@ mod tests {
     fn a_clean_session_reports_nothing() {
         let live = Live::builder()
             .instruction("Be helpful.")
-            .with_tools(book_tool())
+            .tools(book_tool())
             .govern(
                 Flow::new()
                     .step("book")
@@ -548,7 +548,7 @@ mod tests {
 
     #[test]
     fn a_flow_tool_typo_is_caught_before_connecting() {
-        let live = Live::builder().with_tools(book_tool()).govern(
+        let live = Live::builder().tools(book_tool()).govern(
             Flow::new()
                 .step("book")
                 .allow(["book_tabel"])
@@ -577,7 +577,7 @@ mod tests {
         // includes builder-registered ambient tools — otherwise it reports a
         // failure that will not happen.
         let live = Live::builder()
-            .with_tools(book_tool())
+            .tools(book_tool())
             .ambient_tools(["book_table"])
             .govern(
                 Flow::new()

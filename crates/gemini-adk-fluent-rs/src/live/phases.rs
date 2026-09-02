@@ -27,15 +27,16 @@ impl Live {
     /// is not sent twice). Returns `None` to leave the instruction unchanged.
     ///
     /// # Example
-    /// ```ignore
-    /// .instruction_template(|state| {
+    /// ```no_run
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// Live::builder().instruction_template(|state| {
     ///     let phase: String = state.get("phase").unwrap_or_default();
     ///     match phase.as_str() {
     ///         "ordering" => Some("Focus on taking the order accurately.".into()),
     ///         "confirming" => Some("Summarize and confirm the order.".into()),
     ///         _ => None,
     ///     }
-    /// })
+    /// });
     /// ```
     pub fn instruction_template(
         mut self,
@@ -52,15 +53,16 @@ impl Live {
     /// to know or repeat the base instruction.
     ///
     /// # Example
-    /// ```ignore
-    /// .instruction_amendment(|state| {
+    /// ```no_run
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// Live::builder().instruction_amendment(|state| {
     ///     let risk: String = state.get("derived:risk").unwrap_or_default();
     ///     if risk == "high" {
     ///         Some("[IMPORTANT: Use empathetic language. Do not threaten.]".into())
     ///     } else {
     ///         None
     ///     }
-    /// })
+    /// });
     /// ```
     pub fn instruction_amendment(
         mut self,
@@ -101,15 +103,16 @@ impl Live {
     ///
     /// Phase-specific modifiers are applied *after* defaults, so they extend (not replace).
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # use gemini_adk_fluent_rs::prelude::*;
     /// Live::builder()
     ///     .phase_defaults(|p| {
-    ///         p.with_state(&["emotional_state", "risk_level"])
-    ///          .when(risk_is_elevated, "Show extra empathy.")
-    ///          .prompt_on_enter(true)
+    ///         p.show_state(&["emotional_state", "risk_level"])
+    ///          .when(|s| s.get::<String>("risk").unwrap_or_default() == "high", "Show extra empathy.")
+    ///          .prompt_on_enter()
     ///     })
     ///     .phase("greet").instruction("...").done()
-    ///     .phase("close").instruction("...").done()
+    ///     .phase("close").instruction("...").done();
     ///     // Both phases inherit the modifiers and prompt_on_enter.
     /// ```
     pub fn phase_defaults(mut self, f: impl FnOnce(PhaseDefaults) -> PhaseDefaults) -> Self {

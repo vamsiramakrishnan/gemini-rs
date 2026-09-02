@@ -55,7 +55,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for w in &validation.warnings {
         println!("  warning: {w}");
     }
-    for report in gemini_adk_fluent_rs::spec::run_tests(&spec) {
+    for report in spec.run_tests() {
         println!(
             "  embedded test `{}`: {} ({} events)",
             report.name,
@@ -68,7 +68,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let state = State::new();
     let live = Live::builder()
         .model(ModelId::new(LIVE_MODEL))
-        .transcription(true, true);
+        .transcription();
     let live = spec
         .apply(live, &state, &SpecResources::default())
         .map_err(|e| format!("spec.apply: {e}"))?;

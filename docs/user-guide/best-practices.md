@@ -84,7 +84,7 @@ let tool = SimpleTool::new("lookup", "Quick lookup", None, |args| async move {
 
 // Option 2: background execution — model gets an ack immediately
 Live::builder()
-    .tools(dispatcher)
+    .dispatcher(dispatcher)
     .tool_background("search_knowledge_base")  // zero dead-air
 ```
 
@@ -154,7 +154,7 @@ Voice sessions (Live API) do not support adding or removing tool definitions mid
 ```rust,ignore
 // Tools declared at build time -- cannot change after connect
 let handle = Live::builder()
-    .tools(dispatcher)  // fixed for the session's lifetime
+    .dispatcher(dispatcher)  // fixed for the session's lifetime
     .connect_vertex(project, location, token)
     .await?;
 
@@ -379,7 +379,7 @@ Live::builder()
 .phase("main")
     .instruction("Handle customer requests")
     .modifiers(vec![
-        P::with_state(&["emotional_state"]),
+        P::show_state(&["emotional_state"]),
         P::context_fn(|s| format!("Customer: {}", s.get::<String>("name").unwrap_or_default())),
     ])
     .done()
@@ -452,7 +452,7 @@ async fn test_pipeline() {
     let llm: Arc<dyn BaseLlm> = Arc::new(MockLlm("mock output".into()));
     let agent = AgentBuilder::new("test")
         .instruction("Analyze this")
-        .build(llm);
+        .build(llm)?;
 
     let state = State::new();
     state.set("input", "test data");

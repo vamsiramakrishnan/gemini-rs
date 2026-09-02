@@ -11,6 +11,7 @@
 
 use std::sync::Arc;
 
+use gemini_adk_rs::error::ConfigError;
 use gemini_adk_rs::llm::BaseLlm;
 use gemini_adk_rs::middleware::{Middleware, MiddlewareChain};
 use gemini_adk_rs::text::{
@@ -33,20 +34,31 @@ pub enum Composable {
     Loop(Loop),
     /// A fallback chain (try each until one succeeds).
     Fallback(Fallback),
+    /// One agent applied to every item of a state list
+    /// ([`patterns::map_over`](crate::patterns::map_over)).
+    MapOver(crate::patterns::MapOver),
 }
 
 /// Sequential pipeline: execute steps in order, passing state between them.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Pipeline {
     /// Ordered steps to execute sequentially.
     pub steps: Vec<Composable>,
+    /// Name given to the compiled agent (default `"pipeline"`).
+    pub name: Option<String>,
+    /// Human-readable description, shown in `Debug` output.
+    pub description: Option<String>,
 }
 
 /// Parallel fan-out: execute branches concurrently, merge results.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct FanOut {
     /// Branches to execute concurrently.
     pub branches: Vec<Composable>,
+    /// Name given to the compiled agent (default `"fan_out"`).
+    pub name: Option<String>,
+    /// Human-readable description, shown in `Debug` output.
+    pub description: Option<String>,
 }
 
 /// Loop: repeat an agent or pipeline up to `max` times, or until a predicate.
@@ -63,6 +75,10 @@ pub struct Loop {
     /// `Vec::new()` in literals.
     #[doc(hidden)]
     pub middleware: Vec<Arc<dyn Middleware>>,
+    /// Name given to the compiled agent (default `"loop"`).
+    pub name: Option<String>,
+    /// Human-readable description, shown in `Debug` output.
+    pub description: Option<String>,
 }
 
 /// Predicate for conditional loop termination.
@@ -97,6 +113,8 @@ impl std::fmt::Debug for Loop {
             .field("body", &self.body)
             .field("max", &self.max)
             .field("until", &self.until)
+            .field("name", &self.name)
+            .field("description", &self.description)
             .finish()
     }
 }
@@ -157,6 +175,12 @@ impl From<Fallback> for Composable {
     }
 }
 
+impl From<crate::patterns::MapOver> for Composable {
+    fn from(m: crate::patterns::MapOver) -> Self {
+        Composable::MapOver(m)
+    }
+}
+
 // ── Compilation: Composable → TextAgent ──
 
 impl Composable {
@@ -164,42 +188,73 @@ impl Composable {
     ///
     /// Recursively compiles the tree: pipelines become `SequentialTextAgent`,
     /// fan-outs become `ParallelTextAgent`, loops become `LoopTextAgent`,
-    /// fallbacks become `FallbackTextAgent`, and agents compile via
-    /// `AgentBuilder::build()`.
+    /// fallbacks become `FallbackTextAgent`, map-overs become
+    /// `MapOverTextAgent`, and agents compile via `AgentBuilder::build()` —
+    /// whose [`ConfigError`] (an MCP toolset on a text agent) is the only way
+    /// this fails.
     ///
-    /// ```rust,ignore
+    /// ```no_run
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// # use std::sync::Arc;
+    /// # async fn run(llm: Arc<dyn BaseLlm>) -> Result<(), AgentError> {
     /// let pipeline = AgentBuilder::new("writer").instruction("Write a draft")
     ///     >> AgentBuilder::new("reviewer").instruction("Review and improve");
     ///
-    /// let agent = pipeline.compile(llm);
+    /// let agent = pipeline.compile(llm)?;
+    /// let state = State::new();
     /// let result = agent.run(&state).await?;
+    /// # let _ = result; Ok(())
+    /// # }
     /// ```
-    pub fn compile(self, llm: Arc<dyn BaseLlm>) -> Arc<dyn TextAgent> {
-        match self {
-            Composable::Agent(builder) => builder.build(llm),
+    pub fn compile(self, llm: Arc<dyn BaseLlm>) -> Result<Arc<dyn TextAgent>, ConfigError> {
+        Ok(match self {
+            Composable::Agent(builder) => builder.build(llm)?,
 
             Composable::Pipeline(pipeline) => {
-                let children: Vec<Arc<dyn TextAgent>> = pipeline
+                let children = pipeline
                     .steps
                     .into_iter()
                     .map(|step| step.compile(llm.clone()))
-                    .collect();
-                Arc::new(SequentialTextAgent::new("pipeline", children))
+                    .collect::<Result<Vec<Arc<dyn TextAgent>>, ConfigError>>()?;
+                Arc::new(SequentialTextAgent::new(
+                    pipeline.name.as_deref().unwrap_or("pipeline"),
+                    children,
+                ))
             }
 
             Composable::FanOut(fan_out) => {
-                let branches: Vec<Arc<dyn TextAgent>> = fan_out
+                let branches = fan_out
                     .branches
                     .into_iter()
                     .map(|branch| branch.compile(llm.clone()))
-                    .collect();
-                Arc::new(ParallelTextAgent::new("fan_out", branches))
+                    .collect::<Result<Vec<Arc<dyn TextAgent>>, ConfigError>>()?;
+                Arc::new(ParallelTextAgent::new(
+                    fan_out.name.as_deref().unwrap_or("fan_out"),
+                    branches,
+                ))
+            }
+
+            Composable::MapOver(map) => {
+                let agent = map.agent.build(llm)?;
+                Arc::new(
+                    gemini_adk_rs::text::MapOverTextAgent::new(
+                        map.name.as_deref().unwrap_or("map_over"),
+                        agent,
+                        map.list_key,
+                    )
+                    .item_key(map.item_key)
+                    .output_key(map.output_key),
+                )
             }
 
             Composable::Loop(loop_node) => {
                 let middleware = loop_node.middleware;
-                let body = loop_node.body.compile(llm);
-                let mut loop_agent = LoopTextAgent::new("loop", body, loop_node.max);
+                let body = loop_node.body.compile(llm)?;
+                let mut loop_agent = LoopTextAgent::new(
+                    loop_node.name.as_deref().unwrap_or("loop"),
+                    body,
+                    loop_node.max,
+                );
 
                 if let Some(predicate) = loop_node.until {
                     loop_agent = loop_agent.until(move |state: &gemini_adk_rs::State| {
@@ -224,18 +279,18 @@ impl Composable {
 
             Composable::Fallback(fallback) => {
                 let middleware = fallback.middleware;
-                let candidates: Vec<Arc<dyn TextAgent>> = fallback
+                let candidates = fallback
                     .candidates
                     .into_iter()
                     .map(|c| c.compile(llm.clone()))
-                    .collect();
+                    .collect::<Result<Vec<Arc<dyn TextAgent>>, ConfigError>>()?;
                 let mut agent = FallbackTextAgent::new("fallback", candidates);
                 if !middleware.is_empty() {
                     agent = agent.with_middleware_chain(chain_from(middleware));
                 }
                 Arc::new(agent)
             }
-        }
+        })
     }
 }
 
@@ -252,13 +307,13 @@ impl Composable {
     /// Attach middleware to a `Loop` or `Fallback` node — the place where
     /// combinator-level observers (`M::on_loop`, `M::on_fallback`) live.
     ///
-    /// For other node kinds (single agent, pipeline, fan-out) this is a no-op:
-    /// attach `M::` middleware to the agent itself via
+    /// For other node kinds (single agent, pipeline, fan-out, map-over) this
+    /// is a no-op: attach `M::` middleware to the agent itself via
     /// [`AgentBuilder::middleware`](crate::builder::AgentBuilder::middleware) instead.
-    pub fn middleware(self, composite: MiddlewareComposite) -> Self {
+    pub fn middleware(self, middleware: impl Into<MiddlewareComposite>) -> Self {
         match self {
-            Composable::Loop(l) => Composable::Loop(l.middleware(composite)),
-            Composable::Fallback(f) => Composable::Fallback(f.middleware(composite)),
+            Composable::Loop(l) => Composable::Loop(l.middleware(middleware)),
+            Composable::Fallback(f) => Composable::Fallback(f.middleware(middleware)),
             other => other,
         }
     }
@@ -346,19 +401,28 @@ impl Composable {
 impl Pipeline {
     /// Create a pipeline from the given steps.
     pub fn new(steps: Vec<Composable>) -> Self {
-        Self { steps }
+        Self {
+            steps,
+            ..Default::default()
+        }
     }
 
-    /// Create an empty named pipeline (fluent builder entry point).
+    /// Create an empty named pipeline (fluent builder entry point). The name
+    /// becomes the compiled `SequentialTextAgent`'s name.
     ///
-    /// ```ignore
-    /// Pipeline::builder("etl")
-    ///     .step(extract_agent)
-    ///     .step(transform_agent)
-    ///     .step(load_agent)
     /// ```
-    pub fn builder(_name: &str) -> Self {
-        Self { steps: Vec::new() }
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// let etl = Pipeline::builder("etl")
+    ///     .step(AgentBuilder::new("extract"))
+    ///     .step(AgentBuilder::new("transform"))
+    ///     .step(AgentBuilder::new("load"));
+    /// assert_eq!(etl.name.as_deref(), Some("etl"));
+    /// ```
+    pub fn builder(name: &str) -> Self {
+        Self {
+            name: Some(name.to_string()),
+            ..Default::default()
+        }
     }
 
     /// Add a sequential step to this pipeline (fluent builder).
@@ -372,8 +436,9 @@ impl Pipeline {
         self.step(agent)
     }
 
-    /// Set a description (metadata, not used at runtime).
-    pub fn describe(self, _desc: &str) -> Self {
+    /// Set a description (metadata: shown in `Debug` output, not sent to the model).
+    pub fn describe(mut self, desc: &str) -> Self {
+        self.description = Some(desc.to_string());
         self
     }
 
@@ -389,19 +454,25 @@ impl Pipeline {
 impl FanOut {
     /// Create a fan-out from the given branches.
     pub fn new(branches: Vec<Composable>) -> Self {
-        Self { branches }
+        Self {
+            branches,
+            ..Default::default()
+        }
     }
 
     /// Create an empty named fan-out (fluent builder entry point).
     ///
-    /// ```ignore
-    /// FanOut::builder("research")
-    ///     .branch(web_agent)
-    ///     .branch(db_agent)
     /// ```
-    pub fn builder(_name: &str) -> Self {
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// let research = FanOut::builder("research")
+    ///     .branch(AgentBuilder::new("web"))
+    ///     .branch(AgentBuilder::new("db"));
+    /// assert_eq!(research.branches.len(), 2);
+    /// ```
+    pub fn builder(name: &str) -> Self {
         Self {
-            branches: Vec::new(),
+            name: Some(name.to_string()),
+            ..Default::default()
         }
     }
 
@@ -416,8 +487,9 @@ impl FanOut {
         self.branch(agent)
     }
 
-    /// Set a description (metadata, not used at runtime).
-    pub fn describe(self, _desc: &str) -> Self {
+    /// Set a description (metadata: shown in `Debug` output, not sent to the model).
+    pub fn describe(mut self, desc: &str) -> Self {
+        self.description = Some(desc.to_string());
         self
     }
 
@@ -440,8 +512,8 @@ impl Fallback {
 
     /// Attach middleware to the fallback agent (e.g. `M::on_fallback(|name| …)`),
     /// observed when a fallback branch activates.
-    pub fn middleware(mut self, composite: MiddlewareComposite) -> Self {
-        self.middleware.extend(composite.layers);
+    pub fn middleware(mut self, middleware: impl Into<MiddlewareComposite>) -> Self {
+        self.middleware.extend(middleware.into().layers);
         self
     }
 
@@ -560,6 +632,8 @@ impl std::ops::Mul<u32> for AgentBuilder {
             max: rhs,
             until: None,
             middleware: Vec::new(),
+            name: None,
+            description: None,
         })
     }
 }
@@ -574,6 +648,8 @@ impl std::ops::Mul<u32> for Composable {
             max: rhs,
             until: None,
             middleware: Vec::new(),
+            name: None,
+            description: None,
         })
     }
 }
@@ -588,6 +664,8 @@ impl std::ops::Mul<LoopPredicate> for AgentBuilder {
             max: u32::MAX,
             until: Some(rhs),
             middleware: Vec::new(),
+            name: None,
+            description: None,
         })
     }
 }
@@ -602,6 +680,8 @@ impl std::ops::Mul<LoopPredicate> for Composable {
             max: u32::MAX,
             until: Some(rhs),
             middleware: Vec::new(),
+            name: None,
+            description: None,
         })
     }
 }
@@ -654,24 +734,28 @@ impl std::ops::Div for Composable {
 impl Loop {
     /// Create a loop builder with a body agent and default max iterations.
     ///
-    /// ```ignore
-    /// Loop::builder("refine")
-    ///     .step(refine_agent)
-    ///     .max_iterations(5)
     /// ```
-    pub fn builder(_name: &str) -> Self {
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// let refine = Loop::builder("refine")
+    ///     .step(AgentBuilder::new("refine"))
+    ///     .max_iterations(5);
+    /// assert_eq!(refine.max, 5);
+    /// ```
+    pub fn builder(name: &str) -> Self {
         Self {
             body: Box::new(Composable::Pipeline(Pipeline::new(Vec::new()))),
             max: 10,
             until: None,
             middleware: Vec::new(),
+            name: Some(name.to_string()),
+            description: None,
         }
     }
 
     /// Attach middleware to the loop agent (e.g. `M::on_loop(|i| …)`), observed
     /// on every iteration.
-    pub fn middleware(mut self, composite: MiddlewareComposite) -> Self {
-        self.middleware.extend(composite.layers);
+    pub fn middleware(mut self, middleware: impl Into<MiddlewareComposite>) -> Self {
+        self.middleware.extend(middleware.into().layers);
         self
     }
 
@@ -687,14 +771,9 @@ impl Loop {
         self
     }
 
-    /// Set a maximum number of iterations for a conditional loop.
-    pub fn max(mut self, max: u32) -> Self {
-        self.max = max;
-        self
-    }
-
-    /// Set a description (metadata, not used at runtime).
-    pub fn describe(self, _desc: &str) -> Self {
+    /// Set a description (metadata: shown in `Debug` output, not sent to the model).
+    pub fn describe(mut self, desc: &str) -> Self {
+        self.description = Some(desc.to_string());
         self
     }
 }
@@ -904,7 +983,7 @@ mod tests {
         #[tokio::test]
         async fn compile_single_agent() {
             let composable = Composable::Agent(AgentBuilder::new("solo").instruction("hello"));
-            let agent = composable.compile(llm());
+            let agent = composable.compile(llm()).unwrap();
             let state = gemini_adk_rs::State::new();
             let result = agent.run(&state).await.unwrap();
             assert_eq!(result, "hello");
@@ -913,7 +992,7 @@ mod tests {
         #[tokio::test]
         async fn compile_pipeline() {
             let pipeline = agent("a").instruction("step-a") >> agent("b").instruction("step-b");
-            let compiled = pipeline.compile(llm());
+            let compiled = pipeline.compile(llm()).unwrap();
             let state = gemini_adk_rs::State::new();
             let result = compiled.run(&state).await.unwrap();
             // Sequential: last agent's output wins. step-b echoes its instruction.
@@ -924,7 +1003,7 @@ mod tests {
         async fn compile_fan_out() {
             let fan_out = Composable::Agent(agent("a").instruction("branch-a"))
                 | Composable::Agent(agent("b").instruction("branch-b"));
-            let compiled = fan_out.compile(llm());
+            let compiled = fan_out.compile(llm()).unwrap();
             let state = gemini_adk_rs::State::new();
             let result = compiled.run(&state).await.unwrap();
             assert!(result.contains("branch-a"));
@@ -934,7 +1013,7 @@ mod tests {
         #[tokio::test]
         async fn compile_loop() {
             let looped = agent("counter").instruction("tick") * 3;
-            let compiled = looped.compile(llm());
+            let compiled = looped.compile(llm()).unwrap();
             let state = gemini_adk_rs::State::new();
             let result = compiled.run(&state).await.unwrap();
             assert_eq!(result, "tick");
@@ -943,7 +1022,7 @@ mod tests {
         #[tokio::test]
         async fn compile_fallback() {
             let fallback = agent("a").instruction("first") / agent("b").instruction("second");
-            let compiled = fallback.compile(llm());
+            let compiled = fallback.compile(llm()).unwrap();
             let state = gemini_adk_rs::State::new();
             let result = compiled.run(&state).await.unwrap();
             // First agent succeeds, so its result is returned.
@@ -962,7 +1041,7 @@ mod tests {
                 (agent("counter").instruction("tick") * 3).middleware(M::on_loop(move |_i| {
                     c2.fetch_add(1, Ordering::SeqCst);
                 }));
-            let compiled = looped.compile(llm());
+            let compiled = looped.compile(llm()).unwrap();
             let state = gemini_adk_rs::State::new();
             compiled.run(&state).await.unwrap();
             // Three iterations → three LoopIteration events observed.
@@ -1002,7 +1081,7 @@ mod tests {
             // Compile it. The predicate checks state for "n" >= 3, but
             // the mock LLM doesn't set "n". Loop will run max iterations.
             // This tests that the predicate is wired through.
-            let compiled = looped.compile(Arc::new(IncrementLlm));
+            let compiled = looped.compile(Arc::new(IncrementLlm)).unwrap();
             let state = gemini_adk_rs::State::new();
             let _ = state.set("n", 5); // Pre-set to pass predicate immediately.
             let result = compiled.run(&state).await.unwrap();
@@ -1014,7 +1093,7 @@ mod tests {
             let mixed = agent("a").instruction("start")
                 >> (Composable::Agent(agent("b").instruction("left"))
                     | Composable::Agent(agent("c").instruction("right")));
-            let compiled = mixed.compile(llm());
+            let compiled = mixed.compile(llm()).unwrap();
             let state = gemini_adk_rs::State::new();
             let result = compiled.run(&state).await.unwrap();
             assert!(result.contains("left"));

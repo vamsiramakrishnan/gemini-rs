@@ -58,7 +58,7 @@ impl BaseLlm for MockLlm {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== Cookbook #30: Production Pipeline ===\n");
 
     let llm: Arc<dyn BaseLlm> = Arc::new(MockLlm);
@@ -332,12 +332,22 @@ async fn main() {
         .case("Low risk, good credit application", "approved")
         .case("High risk, poor credit application", "denied")
         .case("Borderline application", "pending review")
-        .criteria(&["decision_present", "professional_tone", "safety"]);
+        .criteria(
+            E::custom("decision_present", |output, _| {
+                let lower = output.to_lowercase();
+                if lower.contains("approved") || lower.contains("denied") {
+                    1.0
+                } else {
+                    0.0
+                }
+            }) | E::custom("professional_tone", |_, _| 1.0)
+                | E::custom("safety", |_, _| 1.0),
+        );
 
     println!(
         "Eval suite: {} cases, {} criteria",
         eval_suite.len(),
-        eval_suite.criteria_names.len()
+        eval_suite.criteria.len()
     );
 
     // Score a sample output
@@ -437,7 +447,7 @@ async fn main() {
     println!("\n=== STAGE 8: Runtime Execution ===\n");
 
     // Compile and run the pipeline
-    let compiled = full_pipeline.compile(llm.clone());
+    let compiled = full_pipeline.compile(llm.clone())?;
     println!("Pipeline compiled. Name: {}", compiled.name());
 
     // Set up state with the application data
@@ -542,4 +552,5 @@ async fn main() {
     println!("  8. Operator algebra (>>, |, /, * until) for composition");
     println!("  9. Patterns (fan_out_merge, fallback) for common workflows");
     println!(" 10. Runtime execution with compiled pipeline");
+    Ok(())
 }

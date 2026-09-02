@@ -244,7 +244,7 @@ impl DemoApp for Guardrails {
                 live.model(super::live_model())
                     .voice(voice)
                     .instruction(BASE_INSTRUCTION)
-                    .transcription(true, true)
+                    .transcription()
                     .extractor(extractor)
                     // Watcher: detect violations and send to browser.
                     .watch("guardrails_state")

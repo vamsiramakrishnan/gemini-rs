@@ -392,7 +392,7 @@ fn live_builder_with_transcription() {
     // Verify the transcription builder method compiles and chains.
     let _live = Live::builder()
         .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
-        .transcription(true, true)
+        .transcription()
         .instruction("Transcribe everything");
 }
 

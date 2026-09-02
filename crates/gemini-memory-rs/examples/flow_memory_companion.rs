@@ -4,7 +4,7 @@
 //! The point of this example is the *absence* of memory-specific plumbing. A
 //! remembered fact fills a governed `State` slot, and from there every existing
 //! mechanism reads it: `needs` stops the model re-asking, `requires` gates a
-//! phase, `Flow` guards advance, `P::with_state` puts the value in the prompt.
+//! phase, `Flow` guards advance, `P::show_state` puts the value in the prompt.
 //! The application declares what it needs and never has to ask whether the
 //! answer arrived this minute or last month.
 //!
@@ -83,7 +83,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .voice(Voice::Kore)
         .instruction("You are B, a companion. Be brief and concrete.")
         .with_memory_slots(session.clone(), slots())
-        .with_tools(T::google_search())
+        .tools(T::google_search())
         .govern(flow_spec())
         // Gathering: only entered while something is still unknown. For a
         // returning user memory has already filled these, so the phase is
@@ -111,7 +111,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Phase-wide prompt composition reads the same slots, so every phase
         // instruction carries what memory knows without repeating itself.
         .phase_defaults(|p| {
-            p.with_state(&["user:diet", "user:partner"]).when(
+            p.show_state(&["user:diet", "user:partner"]).when(
                 |s: &State| s.contains("user:diet"),
                 "You already know their dietary preference. Do not ask again.",
             )

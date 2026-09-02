@@ -24,8 +24,7 @@ mod codegen;
 mod simulate;
 
 pub use simulate::{
-    SimEvent, SimSnapshot, SpecTest, TestExpectation, TestReport, TestStepResult, run_tests,
-    trace_test,
+    SimEvent, SimSnapshot, SpecTest, TestExpectation, TestReport, TestStepResult, trace_test,
 };
 
 use std::collections::BTreeMap;
@@ -822,7 +821,8 @@ pub struct SessionSpec {
     /// The governed flow DAG (optional — a spec may be phases-only).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flow: Option<Flow>,
-    /// Embedded conformance tests, replayed offline by [`run_tests`].
+    /// Embedded conformance tests, replayed offline by
+    /// [`SessionSpec::run_tests`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tests: Vec<SpecTest>,
 }
@@ -1439,13 +1439,13 @@ impl SessionSpec {
     /// Run the embedded test suite offline (no model, no network) — scripted
     /// events replayed through the real [`FlowMonitor`](gemini_adk_rs::flow::FlowMonitor).
     pub fn run_tests(&self) -> Vec<TestReport> {
-        run_tests(self)
+        simulate::run_tests(self)
     }
 
     /// Configure a [`Live`] builder from this spec.
     ///
     /// `state` is the session state the declared tools bind to — pass the
-    /// same one via `.with_state` (this method does). Returns an error when
+    /// same one via `.state` (this method does). Returns an error when
     /// the spec fails validation or requires a resource `resources` lacks.
     /// Everything code-only (callbacks, custom guards, middleware) is added on
     /// the returned builder afterwards.
@@ -1492,10 +1492,10 @@ impl SessionSpec {
 
         // Tools: declared (mock/HTTP) via the dispatcher, MCP merged on top.
         if !self.tools.is_empty() {
-            live = live.tools(self.build_dispatcher(state));
+            live = live.dispatcher(self.build_dispatcher(state));
         }
         for params in &self.mcp {
-            live = live.with_tools(T::mcp(params.clone()));
+            live = live.tools(T::mcp(params.clone()));
         }
 
         // Governance.
@@ -1567,8 +1567,8 @@ impl SessionSpec {
                 let refs: Vec<&str> = p.needs.iter().map(String::as_str).collect();
                 builder = builder.needs(&refs);
             }
-            if let Some(prompt) = p.prompt_on_enter {
-                builder = builder.prompt_on_enter(prompt);
+            if p.prompt_on_enter == Some(true) {
+                builder = builder.prompt_on_enter();
             }
             if p.terminal {
                 builder = builder.terminal();
@@ -1718,10 +1718,15 @@ fn apply_runtime(mut live: Live, runtime: &RuntimeSpec) -> Live {
         live = live.include_thoughts();
     }
     if let Some(t) = runtime.transcription {
-        live = live.transcription(t.input, t.output);
+        if t.input {
+            live = live.input_transcription();
+        }
+        if t.output {
+            live = live.output_transcription();
+        }
     }
-    if let Some(enabled) = runtime.proactive_audio {
-        live = live.proactive_audio(enabled);
+    if runtime.proactive_audio == Some(true) {
+        live = live.proactive_audio();
     }
     if let Some(vad) = &runtime.vad {
         live = live.vad(AutomaticActivityDetection {

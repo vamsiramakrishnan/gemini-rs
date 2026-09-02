@@ -40,6 +40,7 @@ pub trait Talk {
     /// See the trait docs. The five-line voice app:
     ///
     /// ```ignore
+    /// // `ignore`: opens the default microphone and speakers (feature `voice-io`).
     /// Live::builder()
     ///     .instruction("You are a helpful concierge.")
     ///     .greeting("Greet the caller.")

@@ -12,6 +12,7 @@
 //! other audio surface.
 //!
 //! ```ignore
+//! // `ignore`: `SipAgent` needs the `sip` feature and a bound UDP socket.
 //! let mut agent = SipAgent::bind("0.0.0.0:5060".parse()?).await?;
 //! while let Some(incoming) = agent.next_call().await {
 //!     let session = Live::builder()

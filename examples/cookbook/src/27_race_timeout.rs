@@ -40,7 +40,7 @@ impl BaseLlm for DelayLlm {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== Cookbook #27: RaceTextAgent + TimeoutTextAgent ===\n");
 
     // ── 1. Basic race: fast vs slow agent ──
@@ -60,11 +60,11 @@ async fn main() {
 
     let fast_agent = AgentBuilder::new("fast-responder")
         .instruction("Quick response")
-        .build(fast_llm.clone());
+        .build(fast_llm.clone())?;
 
     let slow_agent = AgentBuilder::new("slow-responder")
         .instruction("Detailed response")
-        .build(slow_llm.clone());
+        .build(slow_llm.clone())?;
 
     let race = RaceTextAgent::new("speed-race", vec![fast_agent.clone(), slow_agent.clone()]);
 
@@ -103,13 +103,13 @@ async fn main() {
 
     let agent_a = AgentBuilder::new("provider-a")
         .instruction("Analyze")
-        .build(provider_a);
+        .build(provider_a)?;
     let agent_b = AgentBuilder::new("provider-b")
         .instruction("Analyze")
-        .build(provider_b);
+        .build(provider_b)?;
     let agent_c = AgentBuilder::new("provider-c")
         .instruction("Analyze")
-        .build(provider_c);
+        .build(provider_c)?;
 
     let multi_race = RaceTextAgent::new("provider-race", vec![agent_a, agent_b, agent_c]);
 
@@ -173,7 +173,10 @@ async fn main() {
                 delay: Duration::from_millis(delay_ms),
                 response: response.into(),
             });
-            let agent = AgentBuilder::new(name).instruction("Respond").build(llm);
+            let agent = AgentBuilder::new(name)
+                .instruction("Respond")
+                .build(llm)
+                .expect("no MCP tools: build cannot fail");
             Arc::new(TimeoutTextAgent::new(
                 format!("{name}-timeout"),
                 agent,
@@ -203,7 +206,7 @@ async fn main() {
         "fast-try",
         AgentBuilder::new("fast")
             .instruction("Quick")
-            .build(fast_llm.clone()),
+            .build(fast_llm.clone())?,
         Duration::from_millis(30),
     ));
 
@@ -216,7 +219,7 @@ async fn main() {
         "medium-try",
         AgentBuilder::new("medium")
             .instruction("Moderate")
-            .build(medium_llm),
+            .build(medium_llm)?,
         Duration::from_millis(200),
     ));
 
@@ -224,7 +227,7 @@ async fn main() {
         "slow-try",
         AgentBuilder::new("slow")
             .instruction("Thorough")
-            .build(slow_llm.clone()),
+            .build(slow_llm.clone())?,
         Duration::from_millis(500),
     ));
 
@@ -284,4 +287,5 @@ async fn main() {
     }
 
     println!("\nRace/Timeout pipeline example completed successfully!");
+    Ok(())
 }

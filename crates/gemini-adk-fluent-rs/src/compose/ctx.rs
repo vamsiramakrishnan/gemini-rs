@@ -5,11 +5,10 @@
 //!
 //! # Example
 //!
-//! ```ignore
+//! ```no_run
 //! use gemini_adk_fluent_rs::prelude::*;
 //!
-//! let ctx = Ctx::builder()
-//!     .section("Caller")
+//! let ctx = Ctx::section("Caller")
 //!         .field("caller_name", "Name")
 //!         .flag("is_known_contact", "Known contact")
 //!     .section("Call")
@@ -19,7 +18,7 @@
 //!
 //! // Use with phase_defaults:
 //! Live::builder()
-//!     .phase_defaults(|d| d.context(ctx))
+//!     .phase_defaults(|d| d.context(ctx));
 //! ```
 
 pub use gemini_adk_rs::live::context_builder::{ContextBuilder, SectionBuilder};
@@ -28,16 +27,17 @@ pub use gemini_adk_rs::live::context_builder::{ContextBuilder, SectionBuilder};
 pub struct Ctx;
 
 impl Ctx {
-    /// Start building a new context with the first section.
+    /// Start a context with its first section, labelled `name`.
     ///
-    /// Returns a [`SectionBuilder`] — add fields, flags, sentiments,
-    /// then call `.build()` to get a [`ContextBuilder`].
+    /// Returns a [`SectionBuilder`] — add fields, flags, sentiments, open
+    /// further sections with `.section(..)`, then call `.build()` to get a
+    /// [`ContextBuilder`].
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// let ctx = Ctx::builder()
-    ///     .section("Caller")
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// let ctx = Ctx::section("Caller")
     ///         .field("caller_name", "Name")
     ///         .field("caller_organization", "Organization")
     ///         .flag("is_known_contact", "Known contact")
@@ -46,7 +46,7 @@ impl Ctx {
     ///         .sentiment("caller_sentiment")
     ///     .build();
     /// ```
-    pub fn builder() -> SectionBuilder {
-        ContextBuilder::new()
+    pub fn section(name: &str) -> SectionBuilder {
+        ContextBuilder::new().section(name)
     }
 }

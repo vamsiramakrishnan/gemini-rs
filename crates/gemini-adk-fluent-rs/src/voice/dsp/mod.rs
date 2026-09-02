@@ -9,6 +9,8 @@
 //! *counted*, not silent.
 //!
 //! ```ignore
+//! // `ignore`: the resampler/STFT stages need the `dsp` feature and the
+//! // denoiser the `denoise` feature; `live` is a `Live` builder.
 //! let chain = DspChain::new(16_000)
 //!     .stage(HighPass::speech_default(16_000))   // DC / rumble removal
 //!     .stage(IntStage::new(Denoiser::new(16_000))) // legacy i16 stage, one boundary

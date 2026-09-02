@@ -144,7 +144,7 @@ pub(in crate::live) async fn run_control_lane(
                 // Truncate current model turn on interruption (no mutex)
                 transcript_buffer.truncate_current_model_turn();
                 if let Some(cb) = &callbacks.on_interrupted {
-                    cb().await;
+                    dispatch_callback!(callbacks.on_interrupted_mode, cb());
                 }
                 // Resume audio forwarding after interrupt callback completes
                 shared.interrupted.store(false, Ordering::Release);
@@ -218,6 +218,9 @@ pub(in crate::live) async fn run_control_lane(
                 // Teardown first, and always awaited: these flush durable state
                 // (memory reconciliation, for one), so the application's own
                 // handler should observe a settled world rather than race it.
+                for hook in &callbacks.on_teardown_concurrent {
+                    tokio::spawn(hook());
+                }
                 for hook in &callbacks.on_teardown {
                     hook().await;
                 }

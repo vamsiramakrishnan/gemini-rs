@@ -40,23 +40,24 @@ impl std::fmt::Debug for StateTransform {
 
 /// Compose two state transforms sequentially with `>>`.
 impl std::ops::Shr for StateTransform {
-    type Output = StateTransformChain;
+    type Output = StateComposite;
 
     fn shr(self, rhs: StateTransform) -> Self::Output {
-        StateTransformChain {
+        StateComposite {
             steps: vec![self, rhs],
         }
     }
 }
 
-/// A chain of state transforms applied sequentially.
+/// A chain of state transforms applied sequentially (`S::a() >> S::b()`).
 #[derive(Clone)]
-pub struct StateTransformChain {
+#[non_exhaustive]
+pub struct StateComposite {
     /// The ordered list of transforms applied sequentially.
     pub steps: Vec<StateTransform>,
 }
 
-impl StateTransformChain {
+impl StateComposite {
     /// Apply all transforms in order.
     pub fn apply(&self, state: &mut serde_json::Value) {
         for step in &self.steps {
@@ -66,8 +67,8 @@ impl StateTransformChain {
 }
 
 /// Extend the chain with `>>`.
-impl std::ops::Shr<StateTransform> for StateTransformChain {
-    type Output = StateTransformChain;
+impl std::ops::Shr<StateTransform> for StateComposite {
+    type Output = StateComposite;
 
     fn shr(mut self, rhs: StateTransform) -> Self::Output {
         self.steps.push(rhs);
@@ -170,8 +171,9 @@ impl S {
     ///
     /// Replaces the common pattern `|s| s.get::<String>("key").is_some()`.
     ///
-    /// ```ignore
-    /// .transition("next_phase", S::is_set("caller_name"))
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// Live::builder().phase("greet").transition("next_phase", S::is_set("caller_name")).done();
     /// ```
     pub fn is_set(
         key: &str,
@@ -182,8 +184,9 @@ impl S {
 
     /// Returns `true` if the given key holds a truthy boolean.
     ///
-    /// ```ignore
-    /// .transition("next_phase", S::is_true("disclosure_given"))
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// Live::builder().phase("disclose").transition("next_phase", S::is_true("disclosure_given")).done();
     /// ```
     pub fn is_true(
         key: &str,
@@ -194,8 +197,9 @@ impl S {
 
     /// Returns `true` if the given key equals the expected string value.
     ///
-    /// ```ignore
-    /// .transition("tech:greet", S::eq("issue_type", "technical"))
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// Live::builder().phase("triage").transition("tech:greet", S::eq("issue_type", "technical")).done();
     /// ```
     pub fn eq(
         key: &str,
@@ -212,8 +216,12 @@ impl S {
 
     /// Returns `true` if the given key matches any of the provided string values.
     ///
-    /// ```ignore
-    /// .transition("arrange_payment", S::one_of("negotiation_intent", &["full_pay", "partial_pay"]))
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// Live::builder()
+    ///     .phase("negotiate")
+    ///     .transition("arrange_payment", S::one_of("negotiation_intent", &["full_pay", "partial_pay"]))
+    ///     .done();
     /// ```
     pub fn one_of(
         key: &str,
@@ -348,8 +356,10 @@ impl S {
     /// Useful for debugging transform pipelines — prints the message to stderr
     /// each time the transform is applied.
     ///
-    /// ```ignore
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
     /// let chain = S::pick(&["a"]) >> S::log("after pick") >> S::rename(&[("a", "x")]);
+    /// # let _ = chain;
     /// ```
     pub fn log(message: &str) -> StateTransform {
         let message = message.to_string();
@@ -364,8 +374,10 @@ impl S {
     /// For example, `{"addr.city": "NYC", "addr.zip": "10001"}` with `unflatten("addr")`
     /// becomes `{"addr": {"city": "NYC", "zip": "10001"}}`.
     ///
-    /// ```ignore
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
     /// let t = S::unflatten("addr");
+    /// # let _ = t;
     /// ```
     pub fn unflatten(key: &str) -> StateTransform {
         let key = key.to_string();
@@ -402,9 +414,11 @@ impl S {
     /// where element `i` contains `[keys[0][i], keys[1][i], ...]`.
     /// Arrays are zipped to the length of the shortest.
     ///
-    /// ```ignore
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
     /// // {"names": ["a","b"], "scores": [1,2]} -> {"zipped": [["a",1], ["b",2]]}
     /// let t = S::zip(&["names", "scores"], "zipped");
+    /// # let _ = t;
     /// ```
     pub fn zip(keys: &[&str], into: &str) -> StateTransform {
         let keys: Vec<String> = keys.iter().map(std::string::ToString::to_string).collect();
@@ -435,10 +449,12 @@ impl S {
     /// Takes the array at `source`, groups its elements by the string value of `key`,
     /// and writes the resulting object (field value -> array of elements) to `into`.
     ///
-    /// ```ignore
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
     /// // {"items": [{"type":"a","v":1}, {"type":"b","v":2}, {"type":"a","v":3}]}
     /// // -> {"grouped": {"a": [{"type":"a","v":1}, {"type":"a","v":3}], "b": [{"type":"b","v":2}]}}
     /// let t = S::group_by("items", "type", "grouped");
+    /// # let _ = t;
     /// ```
     pub fn group_by(source: &str, key: &str, into: &str) -> StateTransform {
         let source = source.to_string();
@@ -472,8 +488,10 @@ impl S {
     /// Each time this transform runs, the current value of `key` is appended to
     /// `{key}_history`. The history array is capped at `max` entries (oldest dropped).
     ///
-    /// ```ignore
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
     /// let t = S::history("score", 5); // keeps last 5 score values in "score_history"
+    /// # let _ = t;
     /// ```
     pub fn history(key: &str, max: usize) -> StateTransform {
         let key = key.to_string();
@@ -501,7 +519,9 @@ impl S {
     /// `required` array is missing, or if a key's type doesn't match the schema's
     /// `properties.{key}.type` declaration.
     ///
-    /// ```ignore
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// # use serde_json::json;
     /// let t = S::validate(json!({
     ///     "required": ["name", "age"],
     ///     "properties": {
@@ -555,7 +575,9 @@ impl S {
     ///
     /// Applies `if_true` when the predicate returns `true`, otherwise applies `if_false`.
     ///
-    /// ```ignore
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// # use serde_json::json;
     /// let t = S::branch(
     ///     |s| s.get("premium").and_then(serde_json::Value::as_bool).unwrap_or(false),
     ///     S::set("tier", json!("gold")),

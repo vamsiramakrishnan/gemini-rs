@@ -26,7 +26,7 @@
 //! | Voice session | [`Live`] (·builder → connect → [`LiveHandle`](gemini_adk_rs::live::LiveHandle)) |
 //! | Text agents | [`AgentBuilder`], [`Pipeline`] `>>`, [`FanOut`] `\|`, `*` loops, [`until`], `/` fallback |
 //! | The algebra | [`S`], [`C`], [`T`], [`P`], [`M`], [`A`], [`E`], [`G`] |
-//! | Session as data | [`SessionSpec`], [`SpecResources`], [`SpecTest`], [`run_tests`] |
+//! | Session as data | [`SessionSpec`], [`SpecResources`], [`SpecTest`] (`SessionSpec::run_tests`) |
 //! | Proof before connect | [`check_contracts`], [`ContractViolation`] |
 //! | Telephony | [`TwilioCall`] (·attach — a phone call on the same pump as a microphone) |
 //! | Ergonomics | [`let_clone!`](crate::let_clone) |
@@ -35,6 +35,7 @@
 //! `voice::Talk::talk`):
 //!
 //! ```ignore
+//! // `ignore`: `.talk()` exists only with the `voice-io` feature.
 //! let session = Live::builder()
 //!     .instruction("You are a helpful concierge.")
 //!     .greeting("Greet the caller.")
@@ -57,7 +58,7 @@ pub use crate::compose::prompt::P;
 pub use crate::compose::state::S;
 pub use crate::compose::tools::T;
 
-pub use crate::spec::{SessionSpec, SpecResources, SpecTest, run_tests};
+pub use crate::spec::{SessionSpec, SpecResources, SpecTest};
 
 pub use crate::telephony::TwilioCall;
 pub use crate::testing::{ContractViolation, check_contracts};
@@ -88,7 +89,6 @@ mod contract {
         is_type::<SpecTest>();
         is_type::<ContractViolation>();
         let _ = until(|_| true);
-        let _ = run_tests;
         let _ = check_contracts;
     }
 }

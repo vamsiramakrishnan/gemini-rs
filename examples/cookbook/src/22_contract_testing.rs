@@ -283,6 +283,14 @@ fn main() {
         for (i, step) in p.steps.iter().enumerate() {
             match step {
                 Composable::Agent(a) => println!("    Step {}: Agent({})", i, a.name()),
+                Composable::MapOver(m) => {
+                    println!(
+                        "    Step {}: MapOver({} over {})",
+                        i,
+                        m.agent.name(),
+                        m.list_key
+                    );
+                }
                 Composable::FanOut(f) => {
                     println!("    Step {}: FanOut({} branches)", i, f.branches.len());
                 }

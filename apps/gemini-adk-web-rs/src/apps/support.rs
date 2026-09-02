@@ -511,7 +511,7 @@ impl DemoApp for SupportAssistant {
                             .as_deref()
                             .unwrap_or(BILLING_PHASES[0].instruction),
                     )
-                    .transcription(true, true)
+                    .transcription()
                     .steering_mode(SteeringMode::ContextInjection)
                     .context_delivery(ContextDelivery::Deferred)
                     // Model greets the caller immediately on connect

@@ -75,7 +75,6 @@ Context policies filter and transform conversation history. Compose them with `+
 |---|---|
 | `C::window(n)` | Keep only the last `n` messages |
 | `C::head(n)` | Keep only the first `n` messages |
-| `C::last(n)` | Alias for `window(n)` |
 | `C::user_only()` | Keep only user messages |
 | `C::model_only()` | Keep only model messages |
 | `C::text_only()` | Keep only messages containing text parts |
@@ -138,7 +137,7 @@ assert_eq!(tools.len(), 3);
 
 // Use in a Live session builder
 Live::builder()
-    .with_tools(tools)
+    .tools(tools)
 ```
 
 ## P -- Prompt Composition
@@ -181,7 +180,7 @@ The `PromptSectionKind` enum provides semantic categories:
 
 | Method | What it does |
 |---|---|
-| `P::with_state(&["key1", "key2"])` | Append selected state keys to the instruction |
+| `P::show_state(&["key1", "key2"])` | Append selected state keys to the instruction |
 | `P::when(predicate, text)` | Conditionally append text based on state |
 | `P::context_fn(fn)` | Append dynamic text from a formatting function |
 
@@ -211,7 +210,7 @@ Live::builder()
     .phase("negotiation")
         .instruction("Negotiate a payment arrangement")
         .modifiers(vec![
-            P::with_state(&["emotional_state", "willingness_to_pay"]),
+            P::show_state(&["emotional_state", "willingness_to_pay"]),
             P::when(
                 |s| s.get::<String>("risk").unwrap_or_default() == "high",
                 "IMPORTANT: Show extra empathy and offer flexible options.",
@@ -323,7 +322,7 @@ let workflow = AgentBuilder::new("research").instruction("Research the topic")
     >> AgentBuilder::new("merge").instruction("Merge perspectives");
 
 // Compile and execute
-let agent = workflow.compile(llm);
+let agent = workflow.compile(llm)?;
 let result = agent.run(&state).await?;
 ```
 
@@ -376,7 +375,7 @@ let agent = AgentBuilder::new("support")
     .thinking(2048)
     .writes("resolution")
     .reads("customer_name")
-    .build(llm);
+    .build(llm)?;
 
 let result = agent.run(&state).await?;
 ```
@@ -412,8 +411,9 @@ let multi = fan_out_merge(vec![analyst_a, analyst_b, analyst_c]);
 // Supervised: worker -> supervisor -> repeat until approval
 let approved = supervised(drafter, supervisor, "approved", 5);
 
-// Map-over: apply agent to each item with concurrency limit
-let batch = map_over(item_processor, 4);
+// Map-over: apply agent to every item of the JSON array at state["items"]
+// (a Composable node — compiles to MapOverTextAgent, composes with >>)
+let batch = map_over(item_processor, "items");
 ```
 
 ## See also

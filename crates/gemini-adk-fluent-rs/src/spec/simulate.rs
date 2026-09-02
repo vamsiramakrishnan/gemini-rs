@@ -209,7 +209,7 @@ fn replay(
 }
 
 /// Run every embedded test in the spec against its effective flow.
-pub fn run_tests(spec: &SessionSpec) -> Vec<TestReport> {
+pub(crate) fn run_tests(spec: &SessionSpec) -> Vec<TestReport> {
     let flow = match spec.effective_flow() {
         Ok(flow) => flow,
         Err(errors) => {

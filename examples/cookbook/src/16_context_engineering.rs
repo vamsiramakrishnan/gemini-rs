@@ -1,4 +1,4 @@
-//! Walk Example 16: Context Engineering — C::window, C::user_only, C::from_state, C::budget, C::redact
+//! Walk Example 16: Context Engineering — C::window, C::user_only, C::from_state, C::truncate, C::redact
 //!
 //! Demonstrates the C namespace for controlling what conversation history
 //! (context) an agent sees. Context engineering is critical for managing
@@ -9,7 +9,7 @@
 //!   - C::window (sliding window of recent messages)
 //!   - C::user_only / C::model_only (role-based filtering)
 //!   - C::from_state (inject state values as context)
-//!   - C::budget (token-aware truncation)
+//!   - C::truncate (character-budget truncation; ~4 chars per token)
 //!   - C::redact (PII/sensitive data masking)
 //!   - C::exclude_tools (strip tool call noise)
 //!   - C::head / C::sample / C::truncate (various selection strategies)
@@ -76,11 +76,12 @@ fn main() {
     println!("  Total messages after injection: {}", with_state.len());
     print_content(&with_state[0]); // The injected context message
 
-    // ── C::budget — Token-Aware Truncation ───────────────────────────────
+    // ── C::truncate — Character-Budget Truncation ────────────────────────
+    // ~4 characters per token, so 200 chars is roughly a 50-token budget.
 
-    println!("\n--- C::budget(50) — ~50 Token Budget ---");
-    let budgeted = C::budget(50).apply(&history);
-    println!("  Kept {} messages within ~50 token budget", budgeted.len());
+    println!("\n--- C::truncate(200) — ~50 Token Budget ---");
+    let budgeted = C::truncate(200).apply(&history);
+    println!("  Kept {} messages within ~200 chars", budgeted.len());
 
     // ── C::redact — Mask Sensitive Data ──────────────────────────────────
 

@@ -16,12 +16,18 @@
 //! a screen-pop payload, SIP headers, a CRM note. Assembly is transport-
 //! agnostic by design; delivering it is the connector's job.
 //!
-//! ```ignore
+//! ```no_run
+//! # use gemini_adk_fluent_rs::prelude::*;
+//! # use gemini_adk_fluent_rs::handoff::HandoffRecorder;
+//! # use std::sync::Arc;
+//! # async fn run(handle: LiveHandle, flash_llm: Arc<dyn BaseLlm>) -> Result<(), Box<dyn std::error::Error>> {
 //! let recorder = HandoffRecorder::attach(&handle, 40);
 //! // … the call runs; escalation triggers …
 //! let mut packet = recorder.packet(&handle, &["telephony:caller", "intent", "verified"]);
 //! packet.summarize(&*flash_llm).await.ok();  // optional 2–3 sentence summary
-//! deliver_to_agent_desktop(serde_json::to_string(&packet)?);
+//! let json = serde_json::to_string(&packet)?;  // hand this to the agent desktop
+//! # let _ = json; Ok(())
+//! # }
 //! ```
 
 use std::collections::{BTreeMap, VecDeque};

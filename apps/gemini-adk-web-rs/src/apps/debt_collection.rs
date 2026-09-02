@@ -810,7 +810,7 @@ impl DemoApp for DebtCollection {
                             .as_deref()
                             .unwrap_or(DISCLOSURE_INSTRUCTION),
                     )
-                    .transcription(true, true)
+                    .transcription()
                     .add_tool(debt_collection_tools())
                     .steering_mode(SteeringMode::ContextInjection)
                     .context_delivery(ContextDelivery::Deferred)
@@ -922,7 +922,7 @@ impl DemoApp for DebtCollection {
                         .instruction(DISCLOSURE_INSTRUCTION)
                         .tools(vec!["log_compliance_event".into()])
                         .needs(&["disclosure_given"])
-                        .prompt_on_enter(true)
+                        .prompt_on_enter()
                         .transition_with("verify_identity", S::is_true("disclosure_given"), "when disclosure has been given")
                         .transition_with("close", S::is_true("cease_desist_requested"), "when debtor requests cease and desist")
                         .done()

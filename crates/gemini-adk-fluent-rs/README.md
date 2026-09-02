@@ -8,21 +8,28 @@ Fluent developer experience for Gemini Live — builder API, operator algebra, a
 - **S-C-T-P-M-A operators** — composable algebra for state, context, tools, phases, middleware, and agents
 - **`Live` session** — callback-driven full-duplex voice/text event handling
 - **Pre-built patterns** — common agent compositions ready to use
-- **Full re-exports** — `gemini_adk_fluent_rs::prelude::*` re-exports all three
-  layers (L0 `gemini_genai_rs`, L1 `gemini_adk_rs`, and L2 itself), so a
-  single `use` statement is enough for most applications
+- **A kernel prelude** — `gemini_adk_fluent_rs::prelude::*` re-exports the ~40
+  types a typical application touches (builders, the algebra, `Live`, `State`,
+  core tools/flow/errors, the L0 wire prelude); everything else has a focused
+  home one import away (`live`, `text`, `tools`, `state`, `flow`, `agents`,
+  `llm`, `conversation`, `wire`, …)
 
 ## Quick Start
 
 ```toml
 [dependencies]
-gemini-adk-fluent-rs = { version = "1.0", features = ["gemini-llm", "voice-io"] }
+gemini-adk-fluent-rs = { version = "1.0", features = ["voice-io"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
-`gemini-llm` enables text generation through `GeminiLlm` (off by default);
-`voice-io` enables the `talk()` microphone/speaker loop (Linux needs
-`libasound2-dev`). Export `GEMINI_API_KEY`, then:
+| Feature | Default | Enables |
+|---|---|---|
+| `gemini-llm` | on | text generation through `GeminiLlm` (pure Rust) |
+| `tls-native` | on | the TLS backend (`tls-rustls` is the alternative) |
+| `voice-io` | off | the `talk()` microphone/speaker loop — without it there is no `talk()` method on the handle (Linux needs `libasound2-dev`) |
+| `denoise`, `dsp`, `sip`, `http-tools`, `templates` | off | RNNoise stage, DSP chain, SIP agent, spec HTTP tools, Jinja instructions |
+
+Export `GEMINI_API_KEY`, then:
 
 ```rust,ignore
 use gemini_adk_fluent_rs::prelude::*;
@@ -34,7 +41,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let llm = Arc::new(GeminiLlm::new(GeminiLlmParams::default()));
     let agent = AgentBuilder::new("assistant")
         .instruction("You are a concise assistant.")
-        .build(llm);
+        .build(llm)?;
     let state = State::new();
     state.set("input", "Say hello in one sentence.")?;
     println!("{}", agent.run(&state).await?);

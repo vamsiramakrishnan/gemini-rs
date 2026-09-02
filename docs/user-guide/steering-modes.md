@@ -23,7 +23,7 @@ Live::builder()
 
 **What happens on phase transition:**
 1. The phase instruction ("Welcome the guest...") is sent as a model-role content turn
-2. Per-turn modifiers (`with_context`, `with_state`, `when`) are also sent as model-role turns
+2. Per-turn modifiers (`with_context`, `show_state`, `when`) are also sent as model-role turns
 3. The system instruction ("You are a restaurant...") is **never touched**
 
 **When to use:** Most multi-phase voice apps. The base persona stays stable across phases, and phase-specific behavior is guided through conversational context. Lower latency, no instruction re-processing spikes.
@@ -246,7 +246,7 @@ If a prompt is needed (`prompt_on_enter: true` or a repair nudge on the first at
 | Feature | InstructionUpdate | ContextInjection | Hybrid |
 |---------|-------------------|------------------|--------|
 | `with_context(fn)` | Appended to instruction text | Sent as model-role turn | Sent as model-role turn |
-| `with_state(&[keys])` | Baked into instruction | Sent as model-role turn | Sent as model-role turn |
+| `show_state(&[keys])` | Baked into instruction | Sent as model-role turn | Sent as model-role turn |
 | `when(pred, text)` | Baked into instruction | Sent as model-role turn | Sent as model-role turn |
 | `instruction_amendment` | Appended to instruction | Appended to context turn | Appended to instruction |
 | `instruction_template` | Replaces instruction | Sent as context turn | Replaces instruction |

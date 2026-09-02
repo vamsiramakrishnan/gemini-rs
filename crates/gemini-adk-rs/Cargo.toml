@@ -46,11 +46,12 @@ tokio-test = "0.4"
 proptest = "1"
 
 [features]
-# One TLS backend is on by default so a plain `cargo add` can dial `wss://`.
-# Pick the other with `--no-default-features --features tls-rustls`; the two
-# are mutually exclusive by construction (each selects its own reqwest and
-# tungstenite backend and nothing else selects one).
-default = ["tls-native"]
+# One TLS backend is on by default so a plain `cargo add` can dial `wss://`,
+# and `gemini-llm` so `GeminiLlm` generates instead of erroring at runtime.
+# Pick the other TLS backend with `--no-default-features --features
+# tls-rustls,gemini-llm`; the two are mutually exclusive by construction (each
+# selects its own reqwest and tungstenite backend and nothing else selects one).
+default = ["tls-native", "gemini-llm"]
 gemini-llm = ["gemini-genai-rs/http", "gemini-genai-rs/generate"]
 # Pulls the optional reqwest HTTP client; enabled transitively by the
 # REST-backed feature areas below.

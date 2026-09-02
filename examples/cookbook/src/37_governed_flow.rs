@@ -59,7 +59,7 @@ fn main() {
     // In a live session you'd simply: `Live::builder().govern(flow).connect_from_env()`
     println!("--- In a live session ---");
     println!(
-        "    Live::builder()\n        .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)\n        .tools(dispatcher)\n        .govern(flow)            // enforce the DAG\n        .connect_from_env().await?;\n"
+        "    Live::builder()\n        .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)\n        .dispatcher(dispatcher)\n        .govern(flow)            // enforce the DAG\n        .connect_from_env().await?;\n"
     );
 
     // Drive a monitor through a simulated conversation.

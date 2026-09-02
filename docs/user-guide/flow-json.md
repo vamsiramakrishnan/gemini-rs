@@ -18,7 +18,7 @@ let flow: Flow = serde_json::from_str(&std::fs::read_to_string("flow.json")?)?;
 let compiled = flow.compile_with_tools(&["verify_identity", "charge_card"])?;
 
 let handle = Live::builder()
-    .tools(dispatcher)
+    .dispatcher(dispatcher)
     .govern_compiled(compiled)
     .connect_from_env()
     .await?;

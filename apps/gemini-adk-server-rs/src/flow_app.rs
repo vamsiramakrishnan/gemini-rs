@@ -11,7 +11,7 @@
 pub use gemini_adk_fluent_rs::spec::{
     EffectSpec, ExtractSpec, HttpBinding, PhaseSpec, PromotePolicy, PromoteSpec, SessionSpec,
     SimEvent, SpecModality, SpecResources, SpecTest, SpecValidation, TestExpectation, TestReport,
-    ToolSpec, TransitionSpec, TriggerSpec, UseFragment, WatchCondition, WatchSpec, run_tests,
+    ToolSpec, TransitionSpec, TriggerSpec, UseFragment, WatchCondition, WatchSpec,
 };
 
 /// The original name for the app document. Alias of [`SessionSpec`]; every

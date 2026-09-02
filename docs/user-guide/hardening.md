@@ -100,12 +100,12 @@ screen-pop payload, SIP headers, a CRM note) is the connector's job.
 
 Phone-line and contact-center audio is noisier than a laptop microphone.
 [`voice::pump_processed`](../api/gemini_adk_fluent_rs/voice/fn.pump_processed.html)
-accepts a chain of `MicProcessor` stages applied to each frame before
+accepts a chain of `InputAudioProcessor` stages applied to each frame before
 resampling — the insertion point for denoisers and client-side
 voice-activity gates:
 
 ```rust,ignore
-use gemini_adk_fluent_rs::voice::{pump_processed, MicProcessor, NoiseGate};
+use gemini_adk_fluent_rs::voice::{pump_processed, InputAudioProcessor, NoiseGate};
 
 let running = pump_processed(
     &handle,
@@ -118,7 +118,7 @@ let running = pump_processed(
 `NoiseGate` is the reference implementation — an energy gate with
 hangover, a floor rather than a denoiser. Third-party front ends (a
 DeepFilterNet-style neural denoiser, a Silero-style VAD, a vendor SDK)
-plug in as one `impl MicProcessor` each, with no pump changes. Evaluate
+plug in as one `impl InputAudioProcessor` each, with no pump changes. Evaluate
 candidates the way everything else in this SDK is evaluated: the same
 recorded call set, scored on both transcription accuracy *and* added
 latency — a stage that cleans the audio but spends 200 ms per frame
@@ -176,7 +176,7 @@ inference at ~0.12× realtime — matches these results on the same
 benchmark and preserves more speech quality at very low SNR. Its
 inference crate is published only as a git dependency, which a crates.io
 release cannot carry, so it slots in as an application-side
-`impl MicProcessor` rather than an SDK feature.
+`impl InputAudioProcessor` rather than an SDK feature.
 
 ### A learned VAD, already paid for
 

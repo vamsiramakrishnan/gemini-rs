@@ -218,7 +218,7 @@ fn main() {
     //   // Option A: T::mcp() fluent shorthand
     //   let handle = Live::builder()
     //       .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
-    //       .with_tools(T::mcp("node ./my-mcp-server.js") | T::google_search())
+    //       .tools(T::mcp("node ./my-mcp-server.js") | T::google_search())
     //       .connect_from_env()
     //       .await?;
     //
@@ -239,7 +239,7 @@ fn main() {
     println!("  //");
     println!("  // let handle = Live::builder()");
     println!("  //     .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)");
-    println!("  //     .with_tools(T::mcp(\"node ./my-mcp-server.js\"))");
+    println!("  //     .tools(T::mcp(\"node ./my-mcp-server.js\"))");
     println!("  //     .connect_from_env()");
     println!("  //     .await?;");
     println!();

@@ -428,9 +428,11 @@ impl P {
     /// Sections whose names match the given order come first (in order);
     /// unmatched sections are appended at the end in their original order.
     ///
-    /// ```ignore
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
     /// let prompt = (P::role("analyst") + P::task("analyze") + P::format("JSON"))
     ///     .reorder_by_name(&["format", "role", "task"]);
+    /// # let _: String = prompt.into();
     /// ```
     pub fn reorder(order: &[&str]) -> PromptTransform {
         let order: Vec<String> = order.iter().map(std::string::ToString::to_string).collect();
@@ -439,9 +441,11 @@ impl P {
 
     /// Keep only sections whose names match the given list.
     ///
-    /// ```ignore
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
     /// let prompt = (P::role("analyst") + P::task("analyze") + P::format("JSON"))
     ///     .only_by_name(&["role", "task"]);
+    /// # let _: String = prompt.into();
     /// ```
     pub fn only(names: &[&str]) -> PromptTransform {
         let names: Vec<String> = names.iter().map(std::string::ToString::to_string).collect();
@@ -450,9 +454,11 @@ impl P {
 
     /// Remove sections whose names match the given list.
     ///
-    /// ```ignore
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
     /// let prompt = (P::role("analyst") + P::task("analyze") + P::format("JSON"))
     ///     .without_by_name(&["format"]);
+    /// # let _: String = prompt.into();
     /// ```
     pub fn without(names: &[&str]) -> PromptTransform {
         let names: Vec<String> = names.iter().map(std::string::ToString::to_string).collect();
@@ -477,7 +483,8 @@ impl P {
     /// The function receives context (e.g., token budget, turn count) and returns
     /// the adapted prompt text.
     ///
-    /// ```ignore
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
     /// let prompt = P::adapt(|ctx| {
     ///     if ctx.contains("detailed") {
     ///         "Provide a thorough analysis with citations.".to_string()
@@ -501,8 +508,10 @@ impl P {
 
     /// Create a step-by-step scaffolded prompt from ordered steps.
     ///
-    /// ```ignore
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
     /// let prompt = P::scaffolded(&["Identify the problem", "Gather data", "Analyze", "Conclude"]);
+    /// # let _ = prompt;
     /// ```
     pub fn scaffolded(steps: &[&str]) -> PromptSection {
         let content = steps
@@ -521,8 +530,10 @@ impl P {
 
     /// Create a versioned prompt section with a version tag.
     ///
-    /// ```ignore
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
     /// let prompt = P::versioned("v2.1", "Analyze the data using the new methodology");
+    /// # let _ = prompt;
     /// ```
     pub fn versioned(version: &str, text: &str) -> PromptSection {
         PromptSection {
@@ -536,12 +547,14 @@ impl P {
     // ── Instruction modifier factories ──────────────────────────────────────
     // Bridge P-module composition to the InstructionModifier system.
 
-    /// Create a state-append modifier that renders selected state keys into the instruction.
+    /// Create a modifier that shows the selected state keys to the model by
+    /// rendering them into the instruction.
     ///
-    /// ```ignore
-    /// let modifiers = P::with_state(&["emotional_state", "willingness_to_pay"]);
     /// ```
-    pub fn with_state(keys: &[&str]) -> gemini_adk_rs::live::InstructionModifier {
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// let modifier = P::show_state(&["emotional_state", "willingness_to_pay"]);
+    /// ```
+    pub fn show_state(keys: &[&str]) -> gemini_adk_rs::live::InstructionModifier {
         gemini_adk_rs::live::InstructionModifier::StateAppend(
             keys.iter().map(std::string::ToString::to_string).collect(),
         )
@@ -549,8 +562,11 @@ impl P {
 
     /// Create a conditional modifier that appends text when the predicate is true.
     ///
-    /// ```ignore
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// # fn risk_is_elevated(s: &State) -> bool { s.get::<String>("risk").unwrap_or_default() == "high" }
     /// let risk_mod = P::when(risk_is_elevated, "IMPORTANT: Show extra empathy.");
+    /// # let _ = risk_mod;
     /// ```
     pub fn when(
         predicate: impl Fn(&gemini_adk_rs::State) -> bool + Send + Sync + 'static,
@@ -564,8 +580,10 @@ impl P {
 
     /// Create a custom-append modifier from a formatting function.
     ///
-    /// ```ignore
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
     /// let ctx = P::context_fn(|s| format!("Customer: {}", s.get::<String>("name").unwrap_or_default()));
+    /// # let _ = ctx;
     /// ```
     pub fn context_fn(
         f: impl Fn(&gemini_adk_rs::State) -> String + Send + Sync + 'static,

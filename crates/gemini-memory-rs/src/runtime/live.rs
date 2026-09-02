@@ -100,7 +100,7 @@ impl LiveMemoryExt for Live {
         let extractor = MemoryTurnExtractor::new(session.clone()).slots(slots);
         let vocabulary = session.clone();
         let teardown_session = session.clone();
-        self.with_tools(memory_tools(session))
+        self.tools(memory_tools(session))
             // Memory serves the whole conversation, not one step of it. A step
             // that whitelists its own tools — `.allow(["book_table"])` — is
             // saying "book here, don't search the catalogue"; it is not asking

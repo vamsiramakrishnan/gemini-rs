@@ -3,7 +3,9 @@
 //! These builders use a "move self, return `Live`" pattern so that the
 //! caller's chain stays fully typed and fluent:
 //!
-//! ```ignore
+//! ```no_run
+//! # use gemini_adk_fluent_rs::prelude::*;
+//! # async fn run() -> Result<(), AgentError> {
 //! Live::builder()
 //!     .phase("greeting")
 //!         .instruction("Welcome the user")
@@ -14,8 +16,10 @@
 //!         .terminal()
 //!         .done()
 //!     .initial_phase("greeting")
-//!     .connect_vertex(project, location, token)
+//!     .connect_from_env()
 //!     .await?;
+//! # Ok(())
+//! # }
 //! ```
 
 use std::future::Future;
@@ -51,8 +55,9 @@ impl PhaseDefaults {
         }
     }
 
-    /// Append state keys to every phase's instruction at runtime.
-    pub fn with_state(mut self, keys: &[&str]) -> Self {
+    /// Show the given state keys to the model by appending them to every
+    /// phase's instruction at runtime (`[Context: key=value, …]`).
+    pub fn show_state(mut self, keys: &[&str]) -> Self {
         self.modifiers.push(InstructionModifier::StateAppend(
             keys.iter().map(std::string::ToString::to_string).collect(),
         ));
@@ -86,14 +91,14 @@ impl PhaseDefaults {
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// .phase_defaults(|d| d.context(
-    ///     Ctx::builder()
-    ///         .section("Caller")
+    /// ```no_run
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// Live::builder().phase_defaults(|d| d.context(
+    ///     Ctx::section("Caller")
     ///         .field("caller_name", "Name")
     ///         .flag("is_known_contact", "Known contact")
     ///         .build()
-    /// ))
+    /// ));
     /// ```
     pub fn context(mut self, ctx: gemini_adk_rs::live::context_builder::ContextBuilder) -> Self {
         self.modifiers.push(ctx.into_modifier());
@@ -118,9 +123,10 @@ impl PhaseDefaults {
         self
     }
 
-    /// Enable `prompt_on_enter` for all phases (model responds immediately on entry).
-    pub fn prompt_on_enter(mut self, enabled: bool) -> Self {
-        self.prompt_on_enter = enabled;
+    /// Prompt the model on entry to every phase (it responds immediately
+    /// after the phase instruction and context are delivered).
+    pub fn prompt_on_enter(mut self) -> Self {
+        self.prompt_on_enter = true;
         self
     }
 }
@@ -182,12 +188,14 @@ impl PhaseBuilder {
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// .phase("identify_caller")
+    /// ```no_run
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// Live::builder()
+    ///     .phase("identify_caller")
     ///     .instruction("Get the caller's name and organization.")
     ///     .needs(&["caller_name", "caller_organization"])
     ///     .transition("determine_purpose", S::is_set("caller_name"))
-    ///     .done()
+    ///     .done();
     /// ```
     pub fn needs(mut self, keys: &[&str]) -> Self {
         self.needs = keys.iter().map(std::string::ToString::to_string).collect();
@@ -201,11 +209,13 @@ impl PhaseBuilder {
     /// that must be produced by tools, callbacks, retrieval, or other runtime
     /// mechanisms before the model can operate in the phase.
     ///
-    /// ```ignore
-    /// .phase("quote_price")
+    /// ```no_run
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// Live::builder()
+    ///     .phase("quote_price")
     ///     .requires(&["catalog_item_loaded", "price"])
     ///     .instruction("Quote only the loaded catalog price.")
-    ///     .done()
+    ///     .done();
     /// ```
     pub fn requires(mut self, keys: &[&str]) -> Self {
         self.requires = keys.iter().map(std::string::ToString::to_string).collect();
@@ -365,9 +375,10 @@ impl PhaseBuilder {
         self
     }
 
-    /// Append state keys to the instruction at runtime.
-    /// Renders as `[Context: key1=val1, key2=val2, ...]`.
-    pub fn with_state(mut self, keys: &[&str]) -> Self {
+    /// Show the given state keys to the model by appending them to this
+    /// phase's instruction at runtime, rendered as
+    /// `[Context: key1=val1, key2=val2, ...]`.
+    pub fn show_state(mut self, keys: &[&str]) -> Self {
         self.modifiers.push(InstructionModifier::StateAppend(
             keys.iter().map(std::string::ToString::to_string).collect(),
         ));
@@ -402,8 +413,8 @@ impl PhaseBuilder {
 
     /// Send `turnComplete: true` after instruction + context on phase entry,
     /// causing the model to generate a response immediately.
-    pub fn prompt_on_enter(mut self, enabled: bool) -> Self {
-        self.prompt_on_enter_flag = enabled;
+    pub fn prompt_on_enter(mut self) -> Self {
+        self.prompt_on_enter_flag = true;
         self
     }
 
@@ -419,14 +430,17 @@ impl PhaseBuilder {
 
     /// Inject a model-role bridge message on phase entry and prompt immediately.
     ///
-    /// Combines `on_enter_context` + `prompt_on_enter(true)` into a single call,
+    /// Combines `on_enter_context` + `prompt_on_enter()` into a single call,
     /// eliminating the need to import `Content` in application code.
     ///
-    /// ```ignore
-    /// .phase("verify_identity")
+    /// ```no_run
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// # const VERIFY_IDENTITY_INSTRUCTION: &str = "Verify the caller's identity.";
+    /// Live::builder()
+    ///     .phase("verify_identity")
     ///     .instruction(VERIFY_IDENTITY_INSTRUCTION)
     ///     .enter_prompt("The caller confirmed the disclosure. I'll now verify their identity.")
-    ///     .done()
+    ///     .done();
     /// ```
     pub fn enter_prompt(mut self, message: impl Into<String>) -> Self {
         let msg = message.into();
@@ -439,14 +453,18 @@ impl PhaseBuilder {
 
     /// Like [`enter_prompt`](Self::enter_prompt) but with a state-aware closure.
     ///
-    /// ```ignore
-    /// .enter_prompt_fn(|state, _tw| {
-    ///     if state.get::<bool>("cease_desist_requested").unwrap_or(false) {
-    ///         "Cease-and-desist requested. Closing call respectfully.".into()
-    ///     } else {
-    ///         "Wrapping up the call.".into()
-    ///     }
-    /// })
+    /// ```no_run
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// Live::builder()
+    ///     .phase("close")
+    ///     .enter_prompt_fn(|state, _tw| {
+    ///         if state.get::<bool>("cease_desist_requested").unwrap_or(false) {
+    ///             "Cease-and-desist requested. Closing call respectfully.".into()
+    ///         } else {
+    ///             "Wrapping up the call.".into()
+    ///         }
+    ///     })
+    ///     .done();
     /// ```
     pub fn enter_prompt_fn<F>(mut self, f: F) -> Self
     where
@@ -475,12 +493,14 @@ impl PhaseBuilder {
 
     /// Apply a slice of pre-built instruction modifiers to this phase.
     ///
-    /// Use with `P::with_state()`, `P::when()`, `P::context_fn()` factories.
+    /// Use with `P::show_state()`, `P::when()`, `P::context_fn()` factories.
     ///
-    /// ```ignore
-    /// .phase("disclosure")
-    ///     .modifiers(&[P::with_state(KEYS), P::when(pred, "warning")])
-    ///     .done()
+    /// ```no_run
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// Live::builder()
+    ///     .phase("disclosure")
+    ///     .modifiers(&[P::show_state(&["balance"]), P::when(|_| true, "warning")])
+    ///     .done();
     /// ```
     pub fn modifiers(mut self, mods: &[InstructionModifier]) -> Self {
         self.modifiers.extend(mods.iter().cloned());

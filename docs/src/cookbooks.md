@@ -87,7 +87,7 @@ Full-system compositions covering real-world architectures and every SDK capabil
 | 25 | `25_code_review` | Automated code review: linting agent, security agent, summary agent in a `>>` pipeline |
 | 26 | `26_dispatch_join` | `DispatchTextAgent` + `JoinTextAgent`: fire-and-forget dispatch with join synchronization |
 | 27 | `27_race_timeout` | `RaceTextAgent`: first-to-finish wins; `TimeoutTextAgent`: deadline enforcement |
-| 28 | `28_a2a_remote` | Agent-to-agent protocol: remote agent declaration, `T::a2a` tool composition |
+| 28 | `28_a2a_remote` | Agent-to-agent protocol: `RemoteAgent`, `A2aServer`, `A2aRegistry`, remote agents behind local proxy tools |
 | 29 | `29_live_voice` | Full `Live::builder()` API: phases, tools, extraction, watchers, steering, repair, persistence |
 | 30 | `30_production_pipeline` | End-to-end production pipeline: telemetry, middleware, evaluation, artifact publishing |
 

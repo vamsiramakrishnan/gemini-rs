@@ -176,8 +176,8 @@ impl Live {
         }
 
         // Capture the resolved tool names before the dispatcher moves into the
-        // builder. This is the only point where the set is complete: MCP/A2A/
-        // OpenAPI tools exist only after the handshakes above.
+        // builder. This is the only point where the set is complete: MCP tools
+        // exist only after the handshakes above.
         let resolved_tool_names: Vec<String> = {
             let mut names = super::introspect::declaration_names(&builder_config_tools);
             if let Some(d) = &dispatcher {
@@ -396,18 +396,6 @@ async fn resolve_deferred_tool(
             }
             Ok(())
         }
-        // The following are part of the ADK-parity toolset roadmap; they are
-        // surfaced as explicit connect-time errors rather than silently dropped.
-        DeferredTool::A2a { url, skill } => Err(AgentError::Config(format!(
-            "T::a2a(url={url:?}, skill={skill:?}) is not yet implemented; tracked for ADK parity"
-        ))),
-        DeferredTool::OpenApi { name, spec_url } => Err(AgentError::Config(format!(
-            "T::openapi(name={name:?}, spec_url={spec_url:?}) is not yet implemented; \
-             tracked for ADK parity"
-        ))),
-        DeferredTool::Search { name, .. } => Err(AgentError::Config(format!(
-            "T::search(name={name:?}) is not yet implemented; tracked for ADK parity"
-        ))),
     }
 }
 
@@ -535,7 +523,7 @@ mod tests {
             .expect("structurally valid — the name is the problem, not the shape");
 
         let err = Live::builder()
-            .with_tools(book_tool())
+            .tools(book_tool())
             .govern(flow)
             .connect_google_ai("not-a-real-key")
             .await
@@ -565,7 +553,7 @@ mod tests {
             .expect("valid");
 
         let err = Live::builder()
-            .with_tools(book_tool())
+            .tools(book_tool())
             .govern(flow)
             .connect_google_ai("not-a-real-key")
             .await
@@ -590,7 +578,7 @@ mod tests {
             .expect("valid");
 
         let err = Live::builder()
-            .with_tools(book_tool())
+            .tools(book_tool())
             .govern(flow)
             .connect_google_ai("not-a-real-key")
             .await
@@ -618,7 +606,7 @@ mod tests {
             .expect("compiles without a tool registry");
 
         let err = Live::builder()
-            .with_tools(book_tool())
+            .tools(book_tool())
             .govern_compiled(compiled)
             .connect_google_ai("not-a-real-key")
             .await

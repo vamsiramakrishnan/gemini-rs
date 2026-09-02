@@ -169,7 +169,7 @@ mod tests {
 
     #[test]
     fn declared_tool_names_sees_dispatcher_and_builtins() {
-        let live = Live::builder().with_tools(sample_tool() | T::google_search());
+        let live = Live::builder().tools(sample_tool() | T::google_search());
         let names = live.declared_tool_names();
         assert!(names.contains(&"book_table".to_string()), "{names:?}");
         assert!(names.contains(&"google_search".to_string()), "{names:?}");
@@ -186,7 +186,8 @@ mod tests {
         // check must not report them missing.
         let verifier = crate::builder::AgentBuilder::new("verifier")
             .instruction("Verify the caller")
-            .build(std::sync::Arc::new(InertLlm));
+            .build(std::sync::Arc::new(InertLlm))
+            .expect("builds");
         let live = Live::builder().agent_tool_arc("verify_identity", "Verify caller", verifier);
         assert!(
             live.declared_tool_names()

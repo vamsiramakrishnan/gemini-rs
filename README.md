@@ -21,17 +21,17 @@ Every snippet below is a complete file, compiled in CI exactly as printed
 ([`examples/quickstart`](examples/quickstart) — a drift test fails if the README
 and the compiled programs ever disagree).
 
-**1. Add the dependencies** — one crate, two feature flags, and tokio:
+**1. Add the dependencies** — one crate, one feature flag, and tokio:
 
 <!-- quickstart:Cargo.toml -->
 ```toml
 [dependencies]
-gemini-adk-fluent-rs = { version = "1.0", features = ["gemini-llm", "voice-io"] }
+gemini-adk-fluent-rs = { version = "1.0", features = ["voice-io"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
-`gemini-llm` powers text agents (off by default — without it, `GeminiLlm` compiles
-but refuses to generate). `voice-io` powers `talk()`. Writing typed tools later
+Text agents work out of the box (`gemini-llm` is a default feature). `voice-io`
+powers `talk()` and is opt-in because it pulls in system audio. Writing typed tools later
 adds `serde`, `serde_json`, and `schemars = "0.8"` (the 0.8 pin matters — schemars 1.x
 is a different trait).
 
@@ -83,7 +83,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let agent = AgentBuilder::new("assistant")
         .instruction("You are a concise assistant.")
-        .build(llm);
+        .build(llm)?;
 
     let state = State::new();
     state.set("input", "In one sentence: what is the Gemini Live API?")?;
@@ -228,7 +228,7 @@ cargo run -p gemini-adk-web-rs  # Web UI + Flow Studio → :25125
 | Symptom | Cause and fix |
 |---|---|
 | Connect fails: *"model not found for API version v1beta"* or setup closes without `setupComplete` | The model isn't in your platform's Live catalog — Google AI and Vertex AI serve **different model names**. Leave `.model()` unset to get a platform-appropriate default, or list what your key can reach: `curl "https://generativelanguage.googleapis.com/v1beta/models?key=$GEMINI_API_KEY"` and look for `bidiGenerateContent` under `supportedGenerationMethods`. |
-| Text agent errors: *"GeminiLlm requires the 'gemini-llm' feature flag"* | Add `features = ["gemini-llm"]` to `gemini-adk-fluent-rs` — it's off by default. |
+| Text agent errors: *"GeminiLlm requires the 'gemini-llm' feature flag"* | You built with `--no-default-features`; add `gemini-llm` back to the feature list (it is on by default). |
 | No `talk()` method on the handle | Add `features = ["voice-io"]`; on Linux install `libasound2-dev` first. |
 | `JsonSchema` trait bound errors on your tool structs, or "multiple versions of crate schemars" | Pin `schemars = "0.8"` — plain `cargo add schemars` installs 1.x, a different trait. |
 | Live connects but the text agent authenticates with an empty key | You exported only `GOOGLE_API_KEY` with an older SDK — use `GEMINI_API_KEY`; since 1.0.1 all three names work everywhere. |

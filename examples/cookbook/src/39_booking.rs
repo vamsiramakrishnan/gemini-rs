@@ -67,7 +67,7 @@ async fn main() {
 
     // The `check` step orchestrates the availability agent the moment it
     // activates — no manual call, just `on_enter`. In a Live session this is
-    // `Live::builder().govern(flow).on_enter("check", agent, AgentMode::Call)`.
+    // `Live::builder().govern(flow).on_step_enter("check", agent, AgentMode::Call)`.
     let mut mon = FlowMonitor::new(flow, Enforcement::Enforce)
         .on_enter("check", on_enter(availability_agent(), AgentMode::Call));
     let state = State::new();

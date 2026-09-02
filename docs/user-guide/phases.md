@@ -154,7 +154,7 @@ types are available:
 .phase("negotiate")
     .instruction("Help the customer resolve their debt.")
     // Appends: [Context: emotional_state=frustrated, willingness_to_pay=0.3]
-    .with_state(&["emotional_state", "willingness_to_pay", "derived:call_risk_level"])
+    .show_state(&["emotional_state", "willingness_to_pay", "derived:call_risk_level"])
     .done()
 ```
 
@@ -248,7 +248,7 @@ benefit:
 ```rust,ignore
 Live::builder()
     .phase_defaults(|d| d
-        .with_state(&["caller_name", "caller_org"])
+        .show_state(&["caller_name", "caller_org"])
         .navigation()  // inject navigation context into every phase
     )
 ```
@@ -324,18 +324,18 @@ const DEBT_STATE_KEYS: &[&str] = &[
 
 Live::builder()
     .phase_defaults(|d| d
-        .with_state(DEBT_STATE_KEYS)
+        .show_state(DEBT_STATE_KEYS)
         .when(risk_is_elevated, "IMPORTANT: Use extra empathy.")
-        .prompt_on_enter(true)
+        .prompt_on_enter()
     )
     .phase("disclosure")
         .instruction(DISCLOSURE_INSTRUCTION)
-        // Inherits with_state, when(), and prompt_on_enter from defaults
+        // Inherits show_state, when(), and prompt_on_enter from defaults
         .done()
     .phase("negotiate")
         .instruction(NEGOTIATE_INSTRUCTION)
         // Phase-specific modifier is appended after defaults
-        .with_state(&["negotiation_intent"])
+        .show_state(&["negotiation_intent"])
         .done()
 ```
 
@@ -348,8 +348,8 @@ covered above:
 Live::builder()
     .greeting("Greet the user warmly.")
     .phase_defaults(|d| d
-        .with_state(&["customer_name", "derived:sentiment"])
-        .prompt_on_enter(true)
+        .show_state(&["customer_name", "derived:sentiment"])
+        .prompt_on_enter()
     )
     .phase("greeting")
         .instruction("Welcome the customer. Ask for their name.")
