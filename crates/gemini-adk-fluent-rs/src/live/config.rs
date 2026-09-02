@@ -85,7 +85,7 @@ impl Live {
     /// Record every wire byte (both directions) to a JSONL log at `path`.
     ///
     /// The log is written by a
-    /// [`FileWireRecorder`] created at connect time (a connect error is returned if the file cannot
+    /// [`FileWireRecorder`](gemini_genai_rs::transport::FileWireRecorder) created at connect time (a connect error is returned if the file cannot
     /// be created). Replay it offline with `adk session replay <path>` or
     /// [`gemini_adk_rs::live::replay::replay_session`].
     ///
@@ -102,7 +102,7 @@ impl Live {
     }
 
     /// Record every wire byte to a custom
-    /// [`WireRecorder`] implementation.
+    /// [`WireRecorder`](gemini_genai_rs::transport::WireRecorder) implementation.
     ///
     /// Overrides (and is overridden by) the most recent of this and
     /// [`record_wire`](Self::record_wire).
