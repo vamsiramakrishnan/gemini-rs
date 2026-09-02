@@ -40,9 +40,13 @@ pub trait TextAgent: Send + Sync {
 
 ```rust,ignore
 use gemini_adk_rs::text::LlmTextAgent;
-use gemini_adk_rs::llm::GeminiLlm;
+use gemini_adk_rs::llm::{GeminiLlm, GeminiLlmParams};
 
-let llm = Arc::new(GeminiLlm::new(GeminiModel::Gemini2_0Flash));
+// `model: None` resolves GEMINI_MODEL, then the platform's Flash alias.
+let llm = Arc::new(GeminiLlm::new(GeminiLlmParams {
+    model: Some("gemini-flash-latest".into()),
+    ..Default::default()
+}));
 
 let agent = LlmTextAgent::new("analyst", llm)
     .instruction("Analyze the given topic and produce a summary.")

@@ -117,43 +117,52 @@ fn wire_type_map() -> HashMap<&'static str, &'static str> {
     );
     m.insert(
         "LiveServerSetupComplete",
-        "gemini_genai_rs::prelude::SetupCompletePayload",
+        "gemini_genai_rs::protocol::messages::SetupCompletePayload",
     );
     m.insert(
         "LiveServerContent",
-        "gemini_genai_rs::prelude::ServerContentPayload",
+        "gemini_genai_rs::protocol::messages::ServerContentPayload",
     );
     m.insert(
         "LiveServerToolCall",
-        "gemini_genai_rs::prelude::ToolCallPayload",
+        "gemini_genai_rs::protocol::messages::ToolCallPayload",
     );
     m.insert(
         "LiveServerToolCallCancellation",
-        "gemini_genai_rs::prelude::ToolCallCancellationPayload",
+        "gemini_genai_rs::protocol::messages::ToolCallCancellationPayload",
     );
     m.insert(
         "LiveServerGoAway",
-        "gemini_genai_rs::prelude::GoAwayPayload",
+        "gemini_genai_rs::protocol::messages::GoAwayPayload",
     );
     m.insert(
         "LiveServerSessionResumptionUpdate",
-        "gemini_genai_rs::prelude::SessionResumptionUpdatePayload",
+        "gemini_genai_rs::protocol::messages::SessionResumptionUpdatePayload",
     );
     m.insert(
         "LiveClientContent",
-        "gemini_genai_rs::prelude::ClientContentPayload",
+        "gemini_genai_rs::protocol::messages::ClientContentPayload",
     );
     m.insert(
         "LiveClientRealtimeInput",
-        "gemini_genai_rs::prelude::RealtimeInputPayload",
+        "gemini_genai_rs::protocol::messages::RealtimeInputPayload",
     );
     m.insert(
         "LiveClientToolResponse",
-        "gemini_genai_rs::prelude::ToolResponsePayload",
+        "gemini_genai_rs::protocol::messages::ToolResponsePayload",
     );
-    m.insert("LiveClientSetup", "gemini_genai_rs::prelude::SetupPayload");
-    m.insert("ActivityStart", "gemini_genai_rs::prelude::ActivityStart");
-    m.insert("ActivityEnd", "gemini_genai_rs::prelude::ActivityEnd");
+    m.insert(
+        "LiveClientSetup",
+        "gemini_genai_rs::protocol::messages::SetupPayload",
+    );
+    m.insert(
+        "ActivityStart",
+        "gemini_genai_rs::protocol::messages::ActivityStart",
+    );
+    m.insert(
+        "ActivityEnd",
+        "gemini_genai_rs::protocol::messages::ActivityEnd",
+    );
 
     // Session abstraction
     m.insert("Session", "gemini_genai_rs::prelude::SessionHandle");
@@ -161,7 +170,7 @@ fn wire_type_map() -> HashMap<&'static str, &'static str> {
     // Transcription
     m.insert(
         "Transcription",
-        "gemini_genai_rs::prelude::TranscriptionPayload",
+        "gemini_genai_rs::protocol::messages::TranscriptionPayload",
     );
 
     m

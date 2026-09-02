@@ -217,7 +217,7 @@ fn main() {
     //
     //   // Option A: T::mcp() fluent shorthand
     //   let handle = Live::builder()
-    //       .model(GeminiModel::Gemini2_0FlashLive)
+    //       .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
     //       .with_tools(T::mcp("node ./my-mcp-server.js") | T::google_search())
     //       .connect_from_env()
     //       .await?;
@@ -225,7 +225,7 @@ fn main() {
     //   // Option B: McpToolset for finer-grained control
     //   let toolset = McpToolset::new(manager).with_filter(vec!["search".to_string()]);
     //   let handle = Live::builder()
-    //       .model(GeminiModel::Gemini2_0FlashLive)
+    //       .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
     //       // ... register toolset manually ...
     //       .connect_from_env()
     //       .await?;
@@ -238,7 +238,7 @@ fn main() {
     println!("  // }}));");
     println!("  //");
     println!("  // let handle = Live::builder()");
-    println!("  //     .model(GeminiModel::Gemini2_0FlashLive)");
+    println!("  //     .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)");
     println!("  //     .with_tools(T::mcp(\"node ./my-mcp-server.js\"))");
     println!("  //     .connect_from_env()");
     println!("  //     .await?;");

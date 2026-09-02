@@ -160,7 +160,7 @@ impl AgentSource for ManifestApp {
         let tx_thought = tx.clone();
 
         let mut builder = Live::builder()
-            .model(GeminiModel::Gemini2_0FlashLive)
+            .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
             .instruction(&manifest.instruction)
             .voice(voice)
             .transcription(true, true)

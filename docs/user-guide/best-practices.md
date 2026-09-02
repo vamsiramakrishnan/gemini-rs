@@ -258,15 +258,15 @@ Vertex AI sends Binary frames, not Text frames. The `TungsteniteTransport` handl
 
 ### Native audio model only supports AUDIO output
 
-The `Gemini2_0FlashLive` model supports only `Modality::Audio` output, not `Modality::Text`. If you need text responses, use `.text_only()` on the builder, which sets `Modality::Text` explicitly:
+The native-audio Live models support only `Modality::Audio` output, not `Modality::Text`. If you need text responses, use `.text_only()` on the builder, which sets `Modality::Text` explicitly:
 
 ```rust,ignore
-// Voice output (default for live model)
-Live::builder().model(GeminiModel::Gemini2_0FlashLive)
+// Voice output (default for live models)
+Live::builder()
     // response_modalities defaults to [Audio]
 
 // Text-only output
-Live::builder().model(GeminiModel::Gemini2_0FlashLive).text_only()
+Live::builder().text_only()
     // response_modalities set to [Text]
 ```
 
@@ -290,11 +290,11 @@ The processor rejects tool calls not in the current phase's `tools_enabled` list
 
 ### Wrong Vertex AI endpoint
 
-The global Vertex AI endpoint is `wss://aiplatform.googleapis.com/...`, NOT `wss://global-aiplatform.googleapis.com/...`. This is handled automatically by the `Platform` enum, but matters if you are constructing URLs manually.
+The global Vertex AI endpoint is `wss://aiplatform.googleapis.com/...`, NOT `wss://global-aiplatform.googleapis.com/...`. This is handled automatically by `ApiEndpoint`, but matters if you are constructing URLs manually.
 
 ### API version mismatch
 
-Google AI uses `v1beta`, Vertex AI uses `v1beta1`. Again, the `Platform` enum handles this, but be aware when reading API docs.
+Google AI uses `v1beta`, Vertex AI uses `v1beta1`. Again, `ApiEndpoint` handles this, but be aware when reading API docs.
 
 ### State prefix confusion
 
@@ -392,17 +392,16 @@ Live::builder()
 `MockTransport` lets you test without real WebSocket connections. Inject scripted server responses:
 
 ```rust,ignore
-use gemini_genai_rs::transport::MockTransport;
+use gemini_genai_rs::prelude::*;
 
-let mock = MockTransport::new(vec![
-    // Scripted server messages
-    ServerMessage::SetupComplete { ... },
-    ServerMessage::ServerContent { ... },
-]);
+let mut mock = MockTransport::new();
+// Scripted server frames (raw JSON bytes, in the order the server would send them)
+mock.script_recv(br#"{"setupComplete":{}}"#.to_vec());
+mock.script_recv(br#"{"serverContent":{"turnComplete":true}}"#.to_vec());
 
-let (handle, _) = ConnectBuilder::new(config)
+let handle = ConnectBuilder::new(config)
     .transport(mock)
-    .build()
+    .connect()
     .await?;
 ```
 

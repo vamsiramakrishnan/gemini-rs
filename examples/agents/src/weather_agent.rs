@@ -101,7 +101,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Configure session with text model and tools
     let mut config = base_config
-        .model(GeminiModel::Gemini2_0FlashLive)
+        .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
         .text_only()
         .system_instruction(
             "You are a weather assistant. Use the get_weather and get_forecast tools \
@@ -114,7 +114,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Connect
     println!("Connecting to Gemini Live...");
-    let session = connect(config, TransportConfig::default()).await?;
+    let session = connect(config).await?;
     let mut events = session.subscribe();
 
     // Wait for active

@@ -35,7 +35,7 @@ fn agents() {
 
     // AgentBuilder uses copy-on-write: each setter returns a new builder.
     let agent = AgentBuilder::new("analyst")
-        .model(GeminiModel::Gemini2_0FlashLive)
+        .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
         .instruction("Analyze the given topic and provide key insights.")
         .temperature(0.3);
 
@@ -58,7 +58,7 @@ fn agents() {
 
     // Additional sampling parameters + thinking budget.
     let detailed = AgentBuilder::new("detailed-analyst")
-        .model(GeminiModel::Gemini2_0FlashLive)
+        .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
         .instruction("Provide thorough analysis with citations.")
         .temperature(0.5)
         .top_p(0.9)

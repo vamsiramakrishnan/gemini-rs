@@ -55,7 +55,6 @@ fails fast rather than misbehaving live.
 
 ```rust,ignore
 let handle = Live::builder()
-    .model(GeminiModel::Gemini2_0FlashLive)
     .tools(dispatcher)
     .govern(flow)              // enforce — block inadmissible tools, steer per active step
     .connect_from_env()
@@ -85,7 +84,6 @@ let compiled = flow.compile_with_tools(&["lookup_account", "charge_card"])?;
 
 // Govern many sessions; connect does NOT re-validate or re-compile.
 let handle = Live::builder()
-    .model(GeminiModel::Gemini2_0FlashLive)
     .tools(dispatcher)
     .govern_compiled(compiled)     // or .observe_compiled(compiled)
     .connect_from_env()

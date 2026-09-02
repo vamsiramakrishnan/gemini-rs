@@ -14,7 +14,6 @@ for local development.
 use gemini_adk_fluent_rs::prelude::*;
 
 let handle = Live::builder()
-    .model(GeminiModel::Gemini2_0FlashLive)
     .voice(Voice::Kore)
     .instruction("You are a helpful voice assistant.")
     .connect_from_env()
@@ -38,7 +37,6 @@ let token = if let Ok(tok) = std::env::var("GOOGLE_ACCESS_TOKEN") {
 };
 
 let handle = Live::builder()
-    .model(GeminiModel::Gemini2_0FlashLive)
     .connect_vertex(project, location, token)
     .await?;
 ```
@@ -102,7 +100,6 @@ environment, or when the platform is fixed at compile time.
 
 ```rust,ignore
 let handle = Live::builder()
-    .model(GeminiModel::Gemini2_0FlashLive)
     .connect_google_ai(std::env::var("GEMINI_API_KEY")?)
     .await?;
 ```
@@ -115,13 +112,37 @@ The API key is appended to the WebSocket URL as `?key={api_key}`.
 let token = std::env::var("GOOGLE_ACCESS_TOKEN")?;
 
 let handle = Live::builder()
-    .model(GeminiModel::Gemini2_0FlashLive)
     .connect_vertex("my-gcp-project", "us-central1", token)
     .await?;
 ```
 
 The access token is sent as an `Authorization: Bearer {token}` header during
 the WebSocket upgrade handshake.
+
+#### Refreshing tokens
+
+Vertex access tokens expire after about an hour, which is shorter than many
+voice sessions plus their reconnects. `connect_vertex` accepts anything
+`Into<AccessToken>`: a `&str`/`String` becomes `AccessToken::Static`, and
+`AccessToken::from_fn(..)` is a `Dynamic` source consulted on every connection
+attempt — including reconnects — so a reconnect never carries a stale
+credential.
+
+```rust,ignore
+let handle = Live::builder()
+    .connect_vertex(
+        "my-gcp-project",
+        "us-central1",
+        AccessToken::from_fn(|| fetch_token_from_metadata_server()),
+    )
+    .await?;
+```
+
+At L0 the same thing is `ApiEndpoint::vertex_refreshing(project, location, || token())`
+(and `SessionConfig::from_vertex(..)` / `ApiEndpoint::vertex(..)` take the same
+`Into<AccessToken>`). `AccessToken`'s and `ApiEndpoint`'s `Debug` output never
+show the token; `SessionConfig::bearer_token()` returns the current one as
+`Option<String>` (it is `None` on Google AI).
 
 ### `connect(SessionConfig)`
 
@@ -141,8 +162,7 @@ let config = SessionConfig::from_endpoint(
         token,
         "custom-vpc-endpoint.example.com",
     )
-)
-.model(GeminiModel::Gemini2_0FlashLive);
+);
 
 let handle = Live::builder()
     .instruction("You are a helpful assistant.")
@@ -162,7 +182,7 @@ use gemini_genai_rs::protocol::types::ApiEndpoint;
 
 let endpoint = ApiEndpoint::from_env()?;
 let config = SessionConfig::from_endpoint(endpoint)
-    .model(GeminiModel::Gemini2_0FlashLive);
+    .system_instruction("You are a helpful assistant.");
 ```
 
 `from_env()` returns `Err(EndpointEnvError::Missing(var_name))` naming the

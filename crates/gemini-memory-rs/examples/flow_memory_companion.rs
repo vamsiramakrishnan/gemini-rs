@@ -20,7 +20,7 @@ use gemini_adk_fluent_rs::compose::T;
 use gemini_adk_fluent_rs::live::Live;
 use gemini_adk_rs::flow::{Enforcement, Flow, FlowMonitor, Guard};
 use gemini_adk_rs::state::State;
-use gemini_genai_rs::prelude::{GeminiModel, Voice};
+use gemini_genai_rs::prelude::{ModelId, Voice};
 
 use gemini_memory_rs::core::{SessionId, UserId};
 use gemini_memory_rs::engine::MemoryEngine;
@@ -79,7 +79,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // below it is ordinary phase-machine and flow code that knows nothing about
     // memory.
     let _live = Live::builder()
-        .model(GeminiModel::Gemini2_0FlashLive)
+        .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
         .voice(Voice::Kore)
         .instruction("You are B, a companion. Be brief and concrete.")
         .with_memory_slots(session.clone(), slots())

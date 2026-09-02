@@ -289,7 +289,7 @@ impl LiveSessionBuilder {
         // the rest of the plan can be moved into the runtime stage).
         let config = plan.config.take().expect("plan always carries a config");
         let session = ConnectBuilder::new(config)
-            .build()
+            .connect()
             .await
             .map_err(AgentError::Session)?;
 
@@ -610,7 +610,7 @@ async fn wait_for_connect_failure(
     let mut last_error: Option<String> = None;
     loop {
         match events.recv().await {
-            Ok(SessionEvent::Error(msg)) => last_error = Some(msg),
+            Ok(SessionEvent::Error(err)) => last_error = Some(err.to_string()),
             Ok(SessionEvent::Disconnected(reason)) => {
                 let reason = reason.unwrap_or_else(|| "connection closed".to_string());
                 return match last_error {

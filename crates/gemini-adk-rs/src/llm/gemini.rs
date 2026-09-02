@@ -56,7 +56,7 @@ pub struct GeminiLlm {
     token_provider: Arc<dyn TokenProvider>,
     /// Cached gemini-live Client, created once at construction time.
     #[cfg(feature = "gemini-llm")]
-    client: gemini_genai_rs::prelude::Client,
+    client: gemini_genai_rs::Client,
 }
 
 static SUPPORTED_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
@@ -141,11 +141,11 @@ impl GeminiLlm {
         // errors from stale tokens during long-running sessions.
         #[cfg(feature = "gemini-llm")]
         let client = {
-            use gemini_genai_rs::prelude::*;
+            use gemini_genai_rs::{Client, prelude::ModelId};
             match variant {
                 GoogleLlmVariant::GeminiApi => {
                     let api_key = params.api_key.as_deref().unwrap_or("");
-                    Client::from_api_key(api_key).model(GeminiModel::Custom(model.clone()))
+                    Client::from_api_key(api_key).model(ModelId::new(model.clone()))
                 }
                 GoogleLlmVariant::VertexAi => {
                     let project = params.project.as_deref().unwrap_or("").to_string();
@@ -156,7 +156,7 @@ impl GeminiLlm {
                         .to_string();
                     let tp = token_provider.clone();
                     Client::from_vertex_refreshable(project, location, move || tp.token())
-                        .model(GeminiModel::Custom(model.clone()))
+                        .model(ModelId::new(model.clone()))
                 }
             }
         };

@@ -4,7 +4,7 @@ Interactive web UI for ADK agent development and debugging. Mirrors upstream `ad
 
 ## Prerequisites
 
-- **Rust toolchain** (stable, 1.75+)
+- **Rust toolchain** (stable, 1.93+; edition 2024)
 - **Google Cloud project** with the Gemini API enabled
 - **Authentication** — one of:
   - `gcloud` CLI authenticated (`gcloud auth application-default login`)

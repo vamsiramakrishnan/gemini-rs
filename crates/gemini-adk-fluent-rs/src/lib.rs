@@ -26,7 +26,7 @@
 //! use gemini_adk_fluent_rs::prelude::*;
 //!
 //! let agent = AgentBuilder::new("my-agent")
-//!     .model(GeminiModel::Gemini2_0Flash)
+//!     .model(ModelId::FLASH_LATEST)
 //!     .instruction("You are a helpful assistant.")
 //!     .build();
 //! ```
@@ -233,6 +233,6 @@ pub mod prelude {
         TimeoutTextAgent,
     };
 
-    // ── L0 wire protocol (GeminiModel, Voice, Content, Part, Role, …) ──
+    // ── L0 wire protocol (ModelId, Voice, Content, Part, Role, …) ──
     pub use gemini_genai_rs::prelude::*;
 }

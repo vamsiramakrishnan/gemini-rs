@@ -9,7 +9,7 @@ use gemini_adk_rs::llm::BaseLlm;
 use gemini_adk_rs::middleware::Middleware;
 use gemini_adk_rs::text::{LlmTextAgent, TextAgent};
 use gemini_adk_rs::tool::{ToolDispatcher, ToolFunction, ToolKind};
-use gemini_genai_rs::prelude::{GeminiModel, Modality, Tool, Voice};
+use gemini_genai_rs::prelude::{Modality, ModelId, Tool, Voice};
 
 use crate::compose::context::ContextPolicyChain;
 use crate::compose::guards::GComposite;
@@ -22,7 +22,7 @@ type LlmProviderFn = Arc<dyn Fn(&gemini_adk_rs::State) -> Arc<dyn BaseLlm> + Sen
 #[derive(Clone)]
 struct AgentBuilderInner {
     name: String,
-    model: Option<GeminiModel>,
+    model: Option<ModelId>,
     instruction: Option<String>,
     instruction_provider: Option<Arc<dyn gemini_adk_rs::instruction::InstructionProvider>>,
     llm_provider: Option<LlmProviderFn>,
@@ -78,10 +78,10 @@ pub type Agent = AgentBuilder;
 ///
 /// ```rust
 /// use gemini_adk_fluent_rs::builder::AgentBuilder;
-/// use gemini_genai_rs::prelude::GeminiModel;
+/// use gemini_genai_rs::prelude::ModelId;
 ///
 /// let agent = AgentBuilder::new("analyst")
-///     .model(GeminiModel::Gemini2_0FlashLive)
+///     .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
 ///     .instruction("Analyze the given topic")
 ///     .temperature(0.3);
 ///
@@ -208,7 +208,7 @@ impl AgentBuilder {
     }
 
     /// Configured model, if any.
-    pub fn get_model(&self) -> Option<&GeminiModel> {
+    pub fn get_model(&self) -> Option<&ModelId> {
         self.inner.model.as_ref()
     }
 
@@ -319,7 +319,7 @@ impl AgentBuilder {
     // ── Fluent Setters (copy-on-write) ──
 
     /// Set the Gemini model.
-    pub fn model(self, model: GeminiModel) -> Self {
+    pub fn model(self, model: ModelId) -> Self {
         let mut inner = self.mutate();
         inner.model = Some(model);
         Self::with(inner)
@@ -791,11 +791,11 @@ mod tests {
         let b = AgentBuilder::new("agent")
             .instruction("Be helpful")
             .temperature(0.7)
-            .model(GeminiModel::Gemini2_0FlashLive);
+            .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO);
 
         assert_eq!(b.get_instruction(), Some("Be helpful"));
         assert_eq!(b.get_temperature(), Some(0.7));
-        assert_eq!(b.get_model(), Some(&GeminiModel::Gemini2_0FlashLive));
+        assert_eq!(b.get_model(), Some(&ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO));
     }
 
     #[test]
@@ -915,7 +915,7 @@ mod tests {
     #[test]
     fn full_fluent_chain() {
         let b = AgentBuilder::new("full-agent")
-            .model(GeminiModel::Gemini2_0FlashLive)
+            .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
             .instruction("Be helpful")
             .temperature(0.7)
             .top_p(0.95)

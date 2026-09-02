@@ -36,7 +36,7 @@ impl Live {
     /// (`done(captured([...]))`) and repair read them. Composes with
     /// `extract_turns` (LLM) on the same session for a cheap-first cascade.
     pub fn extract_record(mut self, spec: gemini_adk_rs::extract::Extract) -> Self {
-        self.config = self.config.enable_input_transcription();
+        self.config = self.config.input_transcription(true);
         self.extractors.push(spec.into_extractor());
         self
     }
@@ -54,8 +54,8 @@ impl Live {
         // Auto-enable transcription
         self.config = self
             .config
-            .enable_input_transcription()
-            .enable_output_transcription();
+            .input_transcription(true)
+            .output_transcription(true);
 
         // Derive name from type
         let name = std::any::type_name::<T>()
@@ -96,8 +96,8 @@ impl Live {
         // Auto-enable transcription
         self.config = self
             .config
-            .enable_input_transcription()
-            .enable_output_transcription();
+            .input_transcription(true)
+            .output_transcription(true);
 
         let name = std::any::type_name::<T>()
             .rsplit("::")
@@ -137,8 +137,8 @@ impl Live {
     {
         self.config = self
             .config
-            .enable_input_transcription()
-            .enable_output_transcription();
+            .input_transcription(true)
+            .output_transcription(true);
 
         let name = std::any::type_name::<T>()
             .rsplit("::")
@@ -180,8 +180,8 @@ impl Live {
     ) -> Self {
         self.config = self
             .config
-            .enable_input_transcription()
-            .enable_output_transcription();
+            .input_transcription(true)
+            .output_transcription(true);
         self.warm_up_llms.push(llm.clone());
         let extractor = LlmExtractor::new(name.into(), llm, prompt.into(), 3)
             .with_schema(schema)
@@ -195,8 +195,8 @@ impl Live {
         // Auto-enable transcription
         self.config = self
             .config
-            .enable_input_transcription()
-            .enable_output_transcription();
+            .input_transcription(true)
+            .output_transcription(true);
         self.extractors.push(extractor);
         self
     }

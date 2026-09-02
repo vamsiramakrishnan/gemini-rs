@@ -1,4 +1,45 @@
-# Migration Guide: L0 -> L1 -> L2
+# Migration Guide
+
+## 1.x → 2.0
+
+The 2.0 release tightens the L0 (`gemini-genai-rs`) surface. Nothing changes
+in how a session behaves; what changes is how a few things are named and
+constructed. Everything below is mechanical.
+
+| Area | 1.x | 2.0 |
+|------|-----|-----|
+| Model type | `GeminiModel` enum (`Gemini2_0FlashLive`, `GeminiLive2_5FlashNativeAudio`, `Gemini2_0Flash`, `Custom(s)`) | `ModelId` string newtype: `ModelId::new("…")`, `"…".into()`, `ModelId::from_static("…")`; constants `ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO` (Vertex GA), `ModelId::FLASH_2_5_NATIVE_AUDIO_LATEST` (Google AI alias), `ModelId::FLASH_LATEST` (text). `GeminiModel::Custom(s)` → `ModelId::new(s)` |
+| Choosing a model | `.model(GeminiModel::…)` was effectively required | `SessionConfig.model` is `Option<ModelId>`; leave it unset and connect resolves `ModelId::live_default(vertex)` (honours `GEMINI_MODEL`, prefixes bare names with `models/`). `Live::builder().model(..)` and `AgentBuilder::model(..)` take a `ModelId` |
+| Connecting | `connect(config, TransportConfig::default())` | `connect(config)` |
+| Connecting with options | `connect_with(config, tc, transport, codec)` / `ConnectBuilder::new(config).build()` | `ConnectBuilder::new(config).transport_config(tc).transport(t).codec(c).connect().await` (`connect_with` is crate-private) |
+| Shortcuts | `quick_connect(key, model)`, `quick_connect_vertex(..)` | `connect(SessionConfig::new(key)).await` |
+| REST client → Live | `Client::live(model)` returning a `LiveSessionBuilder` | `Client::live(Option<ModelId>)` returns a `ConnectBuilder`: `client.live(None).connect().await` (tune with `.configure(..)`) |
+| Vertex credentials | `String` access token only | `AccessToken` — `Static(String)` or `Dynamic(closure)`; `SessionConfig::from_vertex(..)`, `ApiEndpoint::vertex(..)` and `Live::builder().connect_vertex(..)` accept `Into<AccessToken>` (a `&str`/`String` still works); `ApiEndpoint::vertex_refreshing(project, location, \|\| token())` and `Client::from_vertex_refreshable(..)` refresh on every (re)connect |
+| Token access | `SessionConfig::bearer_token() -> Option<&str>` | `-> Option<String>`, read on every connection attempt (`None` on Google AI); `ApiEndpoint`'s `Debug` output redacts secrets |
+| Error event | `SessionEvent::Error(String)` | `SessionEvent::Error(SessionError)` — print with `{e}` or match `Codec(..)`, `WebSocket(..)`, `Timeout { phase, .. }`, `SetupFailed(..)`; `SessionError` gained `Codec(CodecError)` |
+| GoAway | `SessionEvent::GoAway(Option<String>)`, `GoAwayPayload.time_left: Option<String>` | `SessionEvent::GoAway(Option<Duration>)`, `GoAwayPayload.time_left: Option<Duration>` |
+| Audio / video payloads | `SessionCommand::SendAudio(Vec<u8>)` / `SendVideo(Vec<u8>)`; `SessionWriter::send_audio(Vec<u8>)` | `Bytes` throughout: `SessionCommand::SendAudio(Bytes)`, `SessionWriter::send_audio(Bytes)`, `SessionHandle::send_audio(impl Into<Bytes>)`; L1 `LiveHandle`/`AgentSession::send_audio`/`send_video` take `impl Into<Bytes>` (a `Vec<u8>` still works), `InputEvent::Audio` carries `Bytes` |
+| Transcription setters | `enable_input_transcription()`, `enable_output_transcription()` | `input_transcription(true)`, `output_transcription(true)` |
+| Thoughts | `include_thoughts()` | `include_thoughts(true)` (L2 `Live::builder().include_thoughts()` is unchanged) |
+| Resumption setters | `session_resumption(None)`, `session_resumption(Some(h))` | `session_resumption()`, `resume_from(h)` |
+| Audio format setters | `input_audio(format, rate)`, `output_audio(format, rate)`, fields `output_audio_format`, `input_sample_rate`, `output_sample_rate` | Removed — `input_audio_format(fmt)` remains; rates are fixed by the API (16 kHz in, 24 kHz out) |
+| Capability checks | `supports_async_tools()` | `supports_async_tools()` plus new `supports_thinking()`; `Voice` implements `Display` |
+| `SessionHandle` fields | public `command_tx`, `state` | private; `SessionHandle::resume_handle()` added; `event_sender()` is for runtimes only |
+| Prelude: wire envelopes | `SetupPayload`, `RealtimeInputPayload`, `ServerMessageWrapper`, `MediaChunk`, `ActivityStart`/`ActivityEnd`, `GoAwayPayload`, `TranscriptionPayload`, … in `prelude::*` | `gemini_genai_rs::protocol::messages::*` (`ServerMessage` stays in the prelude) |
+| Prelude: REST & tooling | `Client`, `File`/`FileSource`/`FileState`, `TaskType`, `Candidate`, `ModelInfo`, `BatchJob`, `TelemetryConfig`, `FileWireRecorder`, `MemoryWireRecorder`, `WireRecorder`, `WireEntry`, `WireDirection`, `read_wire_log`, `ReplayTransport`, `ReplayControl` in `prelude::*` | `gemini_genai_rs::Client`, the REST modules, `gemini_genai_rs::telemetry::TelemetryConfig`, `gemini_genai_rs::transport::…` for recording/replay |
+| Prelude additions | — | `AccessToken`, `ModelId`, `TungsteniteError`, `VadState`, `BufferState` |
+| Removed types | `Platform` enum, `ToolDeclaration` alias | Use `ApiEndpoint` (host/version) and `FunctionDeclaration` |
+| Error types | `TungsteniteError::WebSocket(tungstenite::Error)`; REST errors `Auth(String)` | `TungsteniteError::WebSocket` boxes its source (no `tungstenite::Error` in the public API); `GenerateError`, `TokensError`, … carry `Auth(AuthError)`; `FilesError` gained `Decode(String)` |
+
+Toolchain: the workspace is Rust edition 2024 with MSRV 1.93. `gemini-genai-rs`
+default features are `["live", "tls-native"]` (`tls-rustls` is the alternative;
+`vad`, `vad-wavekat`, `tracing-subscriber`, and the REST features are opt-in;
+there is no `opus` feature). `gemini-adk-rs` no longer gates tracing behind
+`tracing-support`. The OTel endpoint is configured via
+`TelemetryConfig.otel_endpoint` / `TelemetrySetup::with_otlp(..)`, not an
+environment variable.
+
+## L0 -> L1 -> L2
 
 This guide shows the same voice agent implemented at all three layers,
 so you can see what each layer adds and decide where to build.
@@ -48,7 +89,7 @@ submodule when the compiler says a name isn't found.
 - Text-agent combinators (`LlmTextAgent`, `SequentialTextAgent`, …).
 - Build-time validation: `check_contracts`, `ContractViolation`, `diagnose`,
   `infer_data_flow`, `AgentHarness`, `DataFlowEdge`.
-- The L0 wire prelude (`GeminiModel`, `Voice`, `Content`, `Part`, `Role`, …).
+- The L0 wire prelude (`ModelId`, `AccessToken`, `Voice`, `Content`, `Part`, `Role`, …).
 
 **Moved to submodules** (import the named module):
 
@@ -84,7 +125,8 @@ submodule when the compiler says a name isn't found.
 - **Tracing facade vs subscriber.** The `tracing` facade is always compiled
   (spans/events are no-ops without a subscriber). `TelemetryConfig::init`'s
   console-logging machinery now sits behind the `tracing-subscriber` feature.
-  The old `tracing-support` feature is a deprecated no-op for one release.
+  The old `tracing-support` feature (on `gemini-genai-rs` and `gemini-adk-rs`)
+  is a no-op kept only so existing manifests resolve — tracing is unconditional.
 - **No more `tokio/full`.** The published crates declare only the tokio
   features they use; applications control their own tokio feature set.
 
@@ -103,10 +145,10 @@ use serde_json::json;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 1. Build session config with tool declaration
+    // (no `.model(..)`: connect resolves the platform's default Live model)
     let config = SessionConfig::from_endpoint(
         ApiEndpoint::google_ai(std::env::var("GEMINI_API_KEY")?)
     )
-        .model(GeminiModel::Gemini2_0FlashLive)
         .system_instruction("You are a weather assistant. Use get_weather for queries.")
         .add_tool(Tool {
             function_declarations: Some(vec![FunctionDeclaration {
@@ -119,12 +161,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     },
                     "required": ["city"]
                 })),
+                behavior: None,
             }]),
             ..Default::default()
         });
 
     // 2. Connect
-    let handle = ConnectBuilder::new(config).build().await?;
+    let handle = connect(config).await?;
     handle.wait_for_phase(SessionPhase::Active).await;
 
     // 3. Subscribe to events
@@ -159,11 +202,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         name: call.name.clone(),
                         id: call.id.clone(),
                         response: result,
+                        scheduling: None,
                     });
                 }
                 // Manual response send
                 handle.send_tool_response(responses).await?;
             }
+            SessionEvent::Error(e) => eprintln!("session error: {e}"),
             SessionEvent::Disconnected(_) => break,
             _ => {}
         }
@@ -208,7 +253,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = SessionConfig::from_endpoint(
         ApiEndpoint::google_ai(std::env::var("GEMINI_API_KEY")?)
     )
-        .model(GeminiModel::Gemini2_0FlashLive)
         .system_instruction("You are a weather assistant. Use get_weather for queries.");
 
     // 3. Build callbacks
@@ -254,7 +298,6 @@ use serde_json::json;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let handle = Live::builder()
-        .model(GeminiModel::Gemini2_0FlashLive)
         .instruction("You are a weather assistant. Use get_weather for queries.")
         .with_tools(
             T::simple("get_weather", "Get current weather for a city", |args| async move {
@@ -286,7 +329,6 @@ Tools compose with the `|` operator:
 
 ```rust,ignore
 let handle = Live::builder()
-    .model(GeminiModel::Gemini2_0FlashLive)
     .instruction("You are a helpful assistant with access to tools.")
     .with_tools(
         T::simple("get_weather", "Get weather", |args| async move {
@@ -306,7 +348,7 @@ let handle = Live::builder()
 
 | Feature | L0 | L1 | L2 |
 |---------|:--:|:--:|:--:|
-| WebSocket connection | `ConnectBuilder::new(config).build()` | `LiveSessionBuilder::new(config).connect()` | `Live::builder().connect_*()` |
+| WebSocket connection | `connect(config)` (or `ConnectBuilder::new(config)….connect()`) | `LiveSessionBuilder::new(config).connect()` | `Live::builder().connect_*()` |
 | Event loop | Manual `while let` + `match` | Automatic (three-lane processor) | Automatic |
 | Audio callback | Manual `match SessionEvent::AudioData` | `callbacks.on_audio = Some(...)` | `.on_audio(\|data\| ...)` |
 | Tool dispatch | Manual match + response send | `ToolDispatcher` auto-dispatch | `.tools()` or `.with_tools()` |
@@ -319,7 +361,7 @@ let handle = Live::builder()
 | Greeting | `handle.send_text()` after connect | `builder.greeting("...")` | `.greeting("...")` |
 | Telemetry | None | `SessionTelemetry` auto-collected | Auto-collected |
 | Session signals | None | `SessionSignals` auto-collected | Auto-collected |
-| Transcription toggle | `config.enable_input_transcription()` | Same | `.transcription(true, true)` |
+| Transcription toggle | `config.input_transcription(true)` | Same | `.transcription(true, true)` |
 | Computed state | None | `ComputedRegistry` | `.computed("key", &["deps"], \|s\| ...)` |
 | Temporal patterns | None | `TemporalRegistry` | `.when_sustained()` / `.when_rate()` |
 | Text agent tools | None | `TextAgentTool` | `.agent_tool("name", "desc", agent)` |
@@ -335,7 +377,7 @@ use a Unix socket, or implement a custom reconnection strategy.
 let handle = ConnectBuilder::new(config)
     .transport(MyCustomTransport::new())
     .codec(MyCustomCodec::new())
-    .build()
+    .connect()
     .await?;
 ```
 
@@ -428,13 +470,13 @@ let phase = session.phase();
 
 When migrating from L0 to L2:
 
-1. Replace `SessionConfig::from_endpoint(...)` with `Live::builder().model().instruction()`
+1. Replace `SessionConfig::from_endpoint(...)` with `Live::builder().instruction()` (the model stays optional at every layer)
 2. Replace manual `Tool` declarations with `.tools(dispatcher)` or `.with_tools(T::simple(...))`
 3. Replace the `while let Some(event) = recv_event(...)` loop with callbacks
 4. Replace `match SessionEvent::AudioData` with `.on_audio()`
 5. Replace `match SessionEvent::TextDelta` with `.on_text()`
 6. Replace manual `send_tool_response()` with `ToolDispatcher` auto-dispatch
-7. Replace `ConnectBuilder::new(config).build()` with `.connect_google_ai()` or `.connect_vertex()`
+7. Replace `connect(config)` / `ConnectBuilder::new(config).connect()` with `.connect_google_ai()` or `.connect_vertex()`
 8. Replace manual phase tracking with `.phase("name").instruction().transition().done()`
 9. Replace manual state HashMaps with `.extract_turns::<T>()` and `handle.state()`
 10. Remove the `tokio::select!` loop -- the three-lane processor handles it

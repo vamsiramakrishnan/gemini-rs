@@ -877,7 +877,7 @@ impl crate::live::Live {
     /// ```ignore
     /// let convo = Conversation::new("booking")./* … */.compile()?;
     /// let handle = Live::builder()
-    ///     .model(GeminiModel::Gemini2_0FlashLive)
+    ///     .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
     ///     .converse(&convo)
     ///     .connect_from_env()
     ///     .await?;

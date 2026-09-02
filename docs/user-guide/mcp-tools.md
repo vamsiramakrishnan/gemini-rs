@@ -235,7 +235,6 @@ for info in tool_infos {
 }
 
 let handle = Live::builder()
-    .model(GeminiModel::Gemini2_0FlashLive)
     .instruction("You can read and list files on the server filesystem.")
     .tools(dispatcher)
     .connect_from_env()

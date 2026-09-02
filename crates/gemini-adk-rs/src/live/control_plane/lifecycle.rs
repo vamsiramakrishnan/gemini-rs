@@ -847,7 +847,7 @@ mod harness {
 
     #[async_trait::async_trait]
     impl SessionWriter for RecordingWriter {
-        async fn send_audio(&self, _: Vec<u8>) -> Result<(), SessionError> {
+        async fn send_audio(&self, _: bytes::Bytes) -> Result<(), SessionError> {
             Ok(())
         }
         async fn send_text(&self, _: String) -> Result<(), SessionError> {
@@ -882,7 +882,7 @@ mod harness {
             });
             Ok(())
         }
-        async fn send_video(&self, _: Vec<u8>) -> Result<(), SessionError> {
+        async fn send_video(&self, _: bytes::Bytes) -> Result<(), SessionError> {
             Ok(())
         }
         async fn update_instruction(&self, instruction: String) -> Result<(), SessionError> {

@@ -153,7 +153,7 @@ mod tests {
 
     #[async_trait]
     impl SessionWriter for MockWriter {
-        async fn send_audio(&self, _data: Vec<u8>) -> Result<(), SessionError> {
+        async fn send_audio(&self, _data: bytes::Bytes) -> Result<(), SessionError> {
             Ok(())
         }
 
@@ -180,7 +180,7 @@ mod tests {
             Ok(())
         }
 
-        async fn send_video(&self, _jpeg_data: Vec<u8>) -> Result<(), SessionError> {
+        async fn send_video(&self, _jpeg_data: bytes::Bytes) -> Result<(), SessionError> {
             Ok(())
         }
 
@@ -310,7 +310,7 @@ mod tests {
         struct FailWriter;
         #[async_trait]
         impl SessionWriter for FailWriter {
-            async fn send_audio(&self, _: Vec<u8>) -> Result<(), SessionError> {
+            async fn send_audio(&self, _: bytes::Bytes) -> Result<(), SessionError> {
                 Ok(())
             }
             async fn send_text(&self, _: String) -> Result<(), SessionError> {
@@ -329,7 +329,7 @@ mod tests {
             ) -> Result<(), SessionError> {
                 Err(SessionError::NotConnected)
             }
-            async fn send_video(&self, _: Vec<u8>) -> Result<(), SessionError> {
+            async fn send_video(&self, _: bytes::Bytes) -> Result<(), SessionError> {
                 Ok(())
             }
             async fn update_instruction(&self, _: String) -> Result<(), SessionError> {

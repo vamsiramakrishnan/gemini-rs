@@ -70,7 +70,6 @@ Or with explicit callbacks:
 use gemini_adk_fluent_rs::prelude::*;
 
 let handle = Live::builder()
-    .model(GeminiModel::Gemini2_0FlashLive)
     .voice(Voice::Kore)
     .instruction("You are a helpful voice assistant.")
     .on_audio(|pcm| { /* play audio */ })

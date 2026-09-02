@@ -247,7 +247,7 @@ impl LlmAgent {
                 SessionEvent::Error(ref e) => {
                     ctx.emit(AgentEvent::Session(event.clone()));
                     crate::telemetry::metrics::record_agent_error(agent_name, "session_error");
-                    crate::telemetry::logging::log_agent_error(agent_name, e);
+                    crate::telemetry::logging::log_agent_error(agent_name, &e.to_string());
                 }
                 other => {
                     // Pass through all other events (TextDelta, AudioData, etc.)
@@ -554,7 +554,7 @@ mod tests {
 
     #[async_trait]
     impl SessionWriter for MockWriter {
-        async fn send_audio(&self, _data: Vec<u8>) -> Result<(), SessionError> {
+        async fn send_audio(&self, _data: bytes::Bytes) -> Result<(), SessionError> {
             Ok(())
         }
         async fn send_text(&self, _text: String) -> Result<(), SessionError> {
@@ -573,7 +573,7 @@ mod tests {
         ) -> Result<(), SessionError> {
             Ok(())
         }
-        async fn send_video(&self, _jpeg_data: Vec<u8>) -> Result<(), SessionError> {
+        async fn send_video(&self, _jpeg_data: bytes::Bytes) -> Result<(), SessionError> {
             Ok(())
         }
         async fn update_instruction(&self, _instruction: String) -> Result<(), SessionError> {
@@ -881,7 +881,13 @@ mod tests {
 
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            let _ = evt_tx.send(SessionEvent::Error("something broke".to_string()));
+            let _ = evt_tx.send(SessionEvent::Error(
+                gemini_genai_rs::session::SessionError::WebSocket(
+                    gemini_genai_rs::session::WebSocketError::ProtocolError(
+                        "something broke".to_string(),
+                    ),
+                ),
+            ));
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
             let _ = evt_tx.send(SessionEvent::TurnComplete);
         });
@@ -892,7 +898,7 @@ mod tests {
         let mut saw_error = false;
         while let Ok(event) = agent_events.try_recv() {
             if let AgentEvent::Session(SessionEvent::Error(e)) = event {
-                assert_eq!(e, "something broke");
+                assert!(e.to_string().contains("something broke"), "{e}");
                 saw_error = true;
             }
         }

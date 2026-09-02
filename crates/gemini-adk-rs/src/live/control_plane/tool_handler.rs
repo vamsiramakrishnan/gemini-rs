@@ -453,7 +453,7 @@ mod tests {
     struct NoopWriter;
     #[async_trait]
     impl SessionWriter for NoopWriter {
-        async fn send_audio(&self, _: Vec<u8>) -> Result<(), SessionError> {
+        async fn send_audio(&self, _: bytes::Bytes) -> Result<(), SessionError> {
             Ok(())
         }
         async fn send_text(&self, _: String) -> Result<(), SessionError> {
@@ -465,7 +465,7 @@ mod tests {
         async fn send_client_content(&self, _: Vec<Content>, _: bool) -> Result<(), SessionError> {
             Ok(())
         }
-        async fn send_video(&self, _: Vec<u8>) -> Result<(), SessionError> {
+        async fn send_video(&self, _: bytes::Bytes) -> Result<(), SessionError> {
             Ok(())
         }
         async fn update_instruction(&self, _: String) -> Result<(), SessionError> {
@@ -580,7 +580,7 @@ mod tests {
     }
     #[async_trait]
     impl SessionWriter for RecordingToolWriter {
-        async fn send_audio(&self, _: Vec<u8>) -> Result<(), SessionError> {
+        async fn send_audio(&self, _: bytes::Bytes) -> Result<(), SessionError> {
             Ok(())
         }
         async fn send_text(&self, _: String) -> Result<(), SessionError> {
@@ -596,7 +596,7 @@ mod tests {
         async fn send_client_content(&self, _: Vec<Content>, _: bool) -> Result<(), SessionError> {
             Ok(())
         }
-        async fn send_video(&self, _: Vec<u8>) -> Result<(), SessionError> {
+        async fn send_video(&self, _: bytes::Bytes) -> Result<(), SessionError> {
             Ok(())
         }
         async fn update_instruction(&self, _: String) -> Result<(), SessionError> {

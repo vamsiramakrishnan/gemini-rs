@@ -385,7 +385,7 @@ mod tests {
     impl SessionWriter for MockWriter {
         async fn send_audio(
             &self,
-            _: Vec<u8>,
+            _: bytes::Bytes,
         ) -> Result<(), gemini_genai_rs::session::SessionError> {
             Ok(())
         }
@@ -407,7 +407,7 @@ mod tests {
         }
         async fn send_video(
             &self,
-            _: Vec<u8>,
+            _: bytes::Bytes,
         ) -> Result<(), gemini_genai_rs::session::SessionError> {
             Ok(())
         }

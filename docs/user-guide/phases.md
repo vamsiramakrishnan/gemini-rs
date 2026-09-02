@@ -27,7 +27,6 @@ Use the fluent `Live::builder()` API. Each `.phase()` call starts a
 use gemini_adk_fluent_rs::prelude::*;
 
 let handle = Live::builder()
-    .model(GeminiModel::Gemini2_0FlashLive)
     .phase("greeting")
         .instruction("Welcome the user warmly and ask how you can help.")
         .transition("main", |s| s.get::<bool>("greeted").unwrap_or(false))
@@ -347,7 +346,6 @@ covered above:
 
 ```rust,ignore
 Live::builder()
-    .model(GeminiModel::Gemini2_0FlashLive)
     .greeting("Greet the user warmly.")
     .phase_defaults(|d| d
         .with_state(&["customer_name", "derived:sentiment"])

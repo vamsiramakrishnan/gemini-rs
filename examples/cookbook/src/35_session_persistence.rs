@@ -166,7 +166,7 @@ async fn main() {
     // In a real app:
     //
     //   let handle = Live::builder()
-    //       .model(GeminiModel::Gemini2_0FlashLive)
+    //       .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
     //       .persistence(Arc::new(FsPersistence::new("/tmp/sessions")))
     //       .session_id("user-123-session-456")
     //       .connect_from_env()

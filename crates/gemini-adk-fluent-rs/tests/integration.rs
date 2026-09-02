@@ -9,11 +9,11 @@ use serde_json::json;
 #[test]
 fn agent_builder_basic() {
     let b = AgentBuilder::new("analyst")
-        .model(GeminiModel::Gemini2_0FlashLive)
+        .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
         .instruction("Analyze the given topic");
 
     assert_eq!(b.name(), "analyst");
-    assert_eq!(b.get_model(), Some(&GeminiModel::Gemini2_0FlashLive));
+    assert_eq!(b.get_model(), Some(&ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO));
     assert_eq!(b.get_instruction(), Some("Analyze the given topic"));
 }
 
@@ -66,7 +66,7 @@ fn agent_builder_with_thinking() {
 #[test]
 fn agent_builder_full_chain() {
     let b = AgentBuilder::new("full")
-        .model(GeminiModel::Gemini2_0FlashLive)
+        .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
         .instruction("Be helpful")
         .temperature(0.3)
         .top_p(0.9)
@@ -373,7 +373,7 @@ fn live_builder_basic_config() {
     // Verify the full builder chain compiles and produces a valid Live instance.
     // Fields are pub(crate), so we verify compilation rather than field access.
     let _live = Live::builder()
-        .model(GeminiModel::Gemini2_0FlashLive)
+        .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
         .voice(Voice::Kore)
         .instruction("You are a weather assistant")
         .temperature(0.7);
@@ -383,7 +383,7 @@ fn live_builder_basic_config() {
 fn live_builder_with_greeting() {
     // Verify greeting builder method chains correctly.
     let _live = Live::builder()
-        .model(GeminiModel::Gemini2_0FlashLive)
+        .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
         .greeting("Hello! How can I help you today?");
 }
 
@@ -391,7 +391,7 @@ fn live_builder_with_greeting() {
 fn live_builder_with_transcription() {
     // Verify the transcription builder method compiles and chains.
     let _live = Live::builder()
-        .model(GeminiModel::Gemini2_0FlashLive)
+        .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
         .transcription(true, true)
         .instruction("Transcribe everything");
 }
@@ -399,7 +399,7 @@ fn live_builder_with_transcription() {
 #[test]
 fn live_builder_with_thinking() {
     let _live = Live::builder()
-        .model(GeminiModel::Gemini2_0FlashLive)
+        .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
         .thinking(1024)
         .include_thoughts()
         .on_thought(|_text| {});
@@ -408,7 +408,7 @@ fn live_builder_with_thinking() {
 #[test]
 fn live_builder_with_callbacks() {
     let _live = Live::builder()
-        .model(GeminiModel::Gemini2_0FlashLive)
+        .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
         .on_audio(|_data| {})
         .on_text(|_text| {})
         .on_vad_start(|| {})
@@ -419,7 +419,7 @@ fn live_builder_with_callbacks() {
 #[test]
 fn live_builder_with_google_search() {
     let _live = Live::builder()
-        .model(GeminiModel::Gemini2_0FlashLive)
+        .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
         .google_search()
         .code_execution();
 }
@@ -428,7 +428,7 @@ fn live_builder_with_google_search() {
 fn live_builder_with_phases() {
     // Verify phase builder chain compiles with transitions and terminal phases.
     let _live = Live::builder()
-        .model(GeminiModel::Gemini2_0FlashLive)
+        .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
         .phase("greeting")
         .instruction("Welcome the user")
         .transition("main", S::is_true("greeted"))
@@ -443,7 +443,7 @@ fn live_builder_with_phases() {
 #[test]
 fn live_builder_with_background_tools() {
     let _live = Live::builder()
-        .model(GeminiModel::Gemini2_0FlashLive)
+        .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
         .tool_background("slow_search")
         .tool_background_with_scheduling("log_event", FunctionResponseScheduling::Silent);
 }
@@ -452,7 +452,7 @@ fn live_builder_with_background_tools() {
 fn live_builder_with_steering_mode() {
     // Verify steering mode builder method chains correctly.
     let _live = Live::builder()
-        .model(GeminiModel::Gemini2_0FlashLive)
+        .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
         .steering_mode(SteeringMode::ContextInjection);
 }
 

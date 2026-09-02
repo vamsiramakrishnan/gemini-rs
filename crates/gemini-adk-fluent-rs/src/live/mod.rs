@@ -101,7 +101,7 @@ pub(crate) struct DeferredAgentTool {
 /// # Example
 /// ```ignore
 /// let session = Live::builder()
-///     .model(GeminiModel::Gemini2_0FlashLive)
+///     .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
 ///     .voice(Voice::Kore)
 ///     .instruction("You are a weather assistant")
 ///     .tools(dispatcher)
@@ -115,7 +115,7 @@ pub(crate) struct DeferredAgentTool {
 /// # Extraction Pipeline
 /// ```ignore
 /// let handle = Live::builder()
-///     .model(GeminiModel::Gemini2_0FlashLive)
+///     .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
 ///     .instruction("You are a restaurant order assistant")
 ///     .extract_turns::<OrderState>(
 ///         flash_llm,
@@ -193,12 +193,6 @@ pub struct Live {
     )>,
     // Wire-log path: a FileWireRecorder is created here at connect time.
     pub(crate) record_wire_path: Option<std::path::PathBuf>,
-    /// True once the application chose a model via `.model(..)` or
-    /// `.connect(config)`. When false, connect resolves a per-platform
-    /// default that the target platform actually serves (the wire-level
-    /// `GeminiModel::default()` is not accepted everywhere), honoring the
-    /// `GEMINI_MODEL` environment variable first.
-    pub(crate) model_explicit: bool,
 }
 
 impl Live {
@@ -212,7 +206,7 @@ impl Live {
     /// use gemini_adk_fluent_rs::prelude::*;
     ///
     /// let handle = Live::builder()
-    ///     .model(GeminiModel::Gemini2_0FlashLive)
+    ///     .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
     ///     .voice(Voice::Kore)
     ///     .instruction("You are a helpful assistant")
     ///     .greeting("Hello! How can I help?")
@@ -229,7 +223,7 @@ impl Live {
     ///
     /// ```rust,ignore
     /// let handle = Live::builder()
-    ///     .model(GeminiModel::Gemini2_0FlashLive)
+    ///     .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
     ///     .phase("greeting")
     ///         .instruction("Welcome the user")
     ///         .transition("main", S::is_true("greeted"))
@@ -279,7 +273,6 @@ impl Live {
             state: None,
             flow_actions: Vec::new(),
             record_wire_path: None,
-            model_explicit: false,
             input_audio: crate::live::config::InputAudioConfig::default(),
         }
     }
@@ -460,7 +453,7 @@ mod tests {
     #[test]
     fn builder_chain_compiles() {
         let _live = Live::builder()
-            .model(GeminiModel::Gemini2_0FlashLive)
+            .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
             .voice(Voice::Kore)
             .instruction("Test")
             .temperature(0.7)
@@ -531,7 +524,7 @@ mod tests {
         }
 
         let _live = Live::builder()
-            .model(GeminiModel::Gemini2_0FlashLive)
+            .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
             .instruction("Restaurant order assistant")
             .extract_turns::<OrderState>(
                 Arc::new(FakeLlm),
@@ -560,7 +553,7 @@ mod tests {
     #[test]
     fn builder_with_computed_state_compiles() {
         let _live = Live::builder()
-            .model(GeminiModel::Gemini2_0FlashLive)
+            .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
             .instruction("Test computed state")
             .computed("doubled", &["app:count"], |state| {
                 let count: i64 = state.get("app:count")?;
@@ -579,7 +572,7 @@ mod tests {
     #[test]
     fn builder_with_phases_compiles() {
         let _live = Live::builder()
-            .model(GeminiModel::Gemini2_0FlashLive)
+            .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
             .phase("greeting")
             .instruction("Welcome the user warmly")
             .transition("main", |s| s.get::<bool>("greeted").unwrap_or(false))
@@ -605,7 +598,7 @@ mod tests {
     #[test]
     fn builder_with_phase_guard_compiles() {
         let _live = Live::builder()
-            .model(GeminiModel::Gemini2_0FlashLive)
+            .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
             .phase("start")
             .instruction("Begin")
             .transition("secure", |_| true)
@@ -624,7 +617,7 @@ mod tests {
     #[test]
     fn builder_with_watchers_compiles() {
         let _live = Live::builder()
-            .model(GeminiModel::Gemini2_0FlashLive)
+            .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
             .watch("app:score")
             .crossed_above(0.9)
             .then(|_old, _new, state| async move {
@@ -646,7 +639,7 @@ mod tests {
     #[test]
     fn builder_with_temporal_patterns_compiles() {
         let _live = Live::builder()
-            .model(GeminiModel::Gemini2_0FlashLive)
+            .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
             .when_sustained(
                 "user_confused",
                 |s| s.get::<bool>("confused").unwrap_or(false),
@@ -678,7 +671,7 @@ mod tests {
     fn builder_full_l1_chain_compiles() {
         // Full chain combining all L1 features in a single builder
         let _live = Live::builder()
-            .model(GeminiModel::Gemini2_0FlashLive)
+            .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
             .voice(Voice::Kore)
             .instruction("Full featured agent")
             // Computed state
@@ -724,7 +717,7 @@ mod tests {
     #[test]
     fn builder_with_callback_modes_compiles() {
         let _live = Live::builder()
-            .model(GeminiModel::Gemini2_0FlashLive)
+            .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
             .on_turn_complete_concurrent(|| async {})
             .on_error_concurrent(|_e| async {})
             .on_extracted_concurrent(|_name, _val| async {})
@@ -739,7 +732,7 @@ mod tests {
         use gemini_adk_rs::live::DefaultResultFormatter;
 
         let _live = Live::builder()
-            .model(GeminiModel::Gemini2_0FlashLive)
+            .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
             .tool_background("search_kb")
             .tool_background_with_formatter("analyze_document", Arc::new(DefaultResultFormatter));
     }
@@ -749,7 +742,7 @@ mod tests {
         use gemini_adk_rs::live::DefaultResultFormatter;
 
         let _live = Live::builder()
-            .model(GeminiModel::Gemini2_0FlashLive)
+            .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
             .voice(Voice::Kore)
             .instruction("Full featured agent")
             .tool_background("slow_tool")

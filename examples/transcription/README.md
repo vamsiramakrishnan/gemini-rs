@@ -19,4 +19,4 @@ cargo run -p example-transcription
 - Context window compression
 - Session resumption (`ResumeInfo`)
 - Affective dialog
-- All `SessionConfig` fields wired through `ConnectBuilder`
+- All `SessionConfig` fields wired through `connect(config)`

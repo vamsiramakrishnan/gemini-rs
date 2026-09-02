@@ -180,14 +180,14 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
 
                     // Text-only: use gemini-2.0-flash-live-001 with TEXT modality
                     let mut config = base_config
-                        .model(GeminiModel::Gemini2_0FlashLive)
+                        .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
                         .text_only();
 
                     if let Some(sys) = system_instruction {
                         config = config.system_instruction(sys);
                     }
 
-                    match connect(config, TransportConfig::default()).await {
+                    match connect(config).await {
                         Ok(session) => {
                             session_handle = Some(session.clone());
                             let mut events = session.subscribe();
@@ -244,8 +244,11 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                                         }
                                         SessionEvent::Error(e) => {
                                             error!("Session error: {}", e);
-                                            let _ =
-                                                tx.send(ServerMessage::Error { message: e }).await;
+                                            let _ = tx
+                                                .send(ServerMessage::Error {
+                                                    message: e.to_string(),
+                                                })
+                                                .await;
                                         }
                                         _ => {}
                                     }

@@ -264,8 +264,8 @@ fn filler_config() -> Option<bridge::FillerConfig> {
 
 /// Live model from `GEMINI_LIVE_MODEL`, defaulting to the Google AI
 /// native-audio preview (see CLAUDE.md: Live model names differ by platform).
-fn live_model() -> GeminiModel {
-    GeminiModel::Custom(
+fn live_model() -> ModelId {
+    ModelId::new(
         std::env::var("GEMINI_LIVE_MODEL")
             .unwrap_or_else(|_| "models/gemini-2.5-flash-native-audio-preview-12-2025".into()),
     )

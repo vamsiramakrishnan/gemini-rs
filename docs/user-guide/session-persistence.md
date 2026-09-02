@@ -51,7 +51,6 @@ use gemini_adk_rs::live::persistence::FsPersistence;
 use std::sync::Arc;
 
 Live::builder()
-    .model(GeminiModel::Gemini2_0FlashLive)
     .instruction("You are a helpful assistant")
     .persistence(Arc::new(FsPersistence::new("/var/lib/myapp/sessions")))
     .session_id("user-42-session-7")

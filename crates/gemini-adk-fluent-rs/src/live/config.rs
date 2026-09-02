@@ -20,9 +20,8 @@ impl Live {
     /// Without this, connect resolves a default the target platform actually
     /// serves (overridable via the `GEMINI_MODEL` environment variable) —
     /// see the `connect_from_env` docs on [`Live`].
-    pub fn model(mut self, model: GeminiModel) -> Self {
+    pub fn model(mut self, model: ModelId) -> Self {
         self.config = self.config.model(model);
-        self.model_explicit = true;
         self
     }
 
@@ -41,7 +40,7 @@ impl Live {
     /// Switch to text-only mode (no audio output).
     ///
     /// Sets response modality to `Text` and disables speech config.
-    /// Use with `GeminiModel::Gemini2_0FlashLive` for text-only conversations.
+    /// Use with `ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO` for text-only conversations.
     pub fn text_only(mut self) -> Self {
         self.config = self.config.text_only();
         self
@@ -63,7 +62,7 @@ impl Live {
     ///
     /// ```ignore
     /// let handle = Live::builder()
-    ///     .model(GeminiModel::Gemini2_0FlashLive)
+    ///     .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
     ///     .instruction("You are a friendly assistant")
     ///     .greeting("Greet the user warmly and introduce yourself.")
     ///     .connect_vertex(project, location, token)
@@ -92,7 +91,7 @@ impl Live {
     ///
     /// ```ignore
     /// let handle = Live::builder()
-    ///     .model(GeminiModel::Gemini2_0FlashLive)
+    ///     .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
     ///     .record_wire("/tmp/session.wire.jsonl")
     ///     .connect_from_env()
     ///     .await?;
@@ -109,7 +108,7 @@ impl Live {
     /// [`record_wire`](Self::record_wire).
     pub fn wire_recorder(
         mut self,
-        recorder: Arc<dyn gemini_genai_rs::prelude::WireRecorder>,
+        recorder: Arc<dyn gemini_genai_rs::transport::WireRecorder>,
     ) -> Self {
         self.record_wire_path = None;
         self.config = self.config.record_wire(recorder);
@@ -290,10 +289,10 @@ impl Live {
     /// Enable input and/or output transcription.
     pub fn transcription(mut self, input: bool, output: bool) -> Self {
         if input {
-            self.config = self.config.enable_input_transcription();
+            self.config = self.config.input_transcription(true);
         }
         if output {
-            self.config = self.config.enable_output_transcription();
+            self.config = self.config.output_transcription(true);
         }
         self
     }
@@ -324,7 +323,7 @@ impl Live {
     ///
     /// **Platform support:** Google AI only. Stripped on Vertex AI.
     pub fn include_thoughts(mut self) -> Self {
-        self.config = self.config.include_thoughts();
+        self.config = self.config.include_thoughts(true);
         self
     }
 
@@ -471,7 +470,7 @@ impl Live {
     /// Enable session resumption.
     pub fn session_resume(mut self, enabled: bool) -> Self {
         if enabled {
-            self.config = self.config.session_resumption(None);
+            self.config = self.config.session_resumption();
         }
         self
     }
@@ -485,7 +484,7 @@ impl Live {
     /// here on the next connect. Resumption stays enabled for the new session,
     /// so fresh handles keep arriving. No automatic reconnect is performed.
     pub fn session_resume_from(mut self, handle: impl Into<String>) -> Self {
-        self.config = self.config.session_resumption(Some(handle.into()));
+        self.config = self.config.resume_from(handle);
         self
     }
 

@@ -263,9 +263,10 @@ async fn a_governed_collections_call_is_evaluated_end_to_end() {
 
     // ── render ──────────────────────────────────────────────────────────────
     let run_at = format!("{:?} into the process", started.elapsed());
+    let live_model = common::live::live_model();
     let input = ReportInput {
         title: "Governed debt-collection call — voice evaluation",
-        model: &common::live::live_model().to_string(),
+        model: live_model.as_ref(),
         run_at: &run_at,
         evaluation: &evaluation,
         transcript: &transcript,

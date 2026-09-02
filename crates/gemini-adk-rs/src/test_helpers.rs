@@ -9,7 +9,7 @@ pub(crate) struct MockWriter;
 
 #[async_trait]
 impl SessionWriter for MockWriter {
-    async fn send_audio(&self, _data: Vec<u8>) -> Result<(), SessionError> {
+    async fn send_audio(&self, _data: bytes::Bytes) -> Result<(), SessionError> {
         Ok(())
     }
     async fn send_text(&self, _text: String) -> Result<(), SessionError> {
@@ -28,7 +28,7 @@ impl SessionWriter for MockWriter {
     ) -> Result<(), SessionError> {
         Ok(())
     }
-    async fn send_video(&self, _jpeg_data: Vec<u8>) -> Result<(), SessionError> {
+    async fn send_video(&self, _jpeg_data: bytes::Bytes) -> Result<(), SessionError> {
         Ok(())
     }
     async fn update_instruction(&self, _instruction: String) -> Result<(), SessionError> {

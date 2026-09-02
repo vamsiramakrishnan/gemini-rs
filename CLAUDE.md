@@ -62,7 +62,7 @@ The L1 `Agent` *trait* is re-exported (in `prelude` and `agents`) as
 // Requires the `gemini-llm` feature on gemini-adk-fluent-rs for real generation.
 // Model may be omitted: GeminiLlm defaults to GEMINI_MODEL or `gemini-flash-latest`.
 let agent = AgentBuilder::new("analyst")
-    .model(GeminiModel::Custom("gemini-flash-latest".into()))
+    .model(ModelId::FLASH_LATEST)      // or any name: ModelId::new("…") / "…".into()
     .instruction("Analyze the given topic")
     .temperature(0.3)
     .google_search()
@@ -287,7 +287,6 @@ Live::builder()
 struct OrderState { items: Vec<String>, phase: String }
 
 let handle = Live::builder()
-    .model(GeminiModel::Gemini2_0FlashLive)
     .instruction("Restaurant order assistant")
     .extract_turns::<OrderState>(flash_llm, "Extract order items and phase")
     .on_extracted(|name, value| async move { println!("{name}: {value}"); })
@@ -533,9 +532,9 @@ let artifacts = A::json_output("report", "Analysis report")
 | `SessionHandle` | Connected session -- implements `SessionWriter` + `SessionReader` |
 | `SessionWriter` | Trait: send audio/text/video/tool responses |
 | `SessionReader` | Trait: subscribe to events |
-| `ConnectBuilder` | Ergonomic `ConnectBuilder::new(config).build()` |
+| `connect` / `ConnectBuilder` | `connect(config).await` for the default transport; `ConnectBuilder::new(config).transport_config(..).transport(..).codec(..).connect().await` when you need options |
 | `Content` / `Part` / `Role` | Wire-format message types with builders (`Content::user()`, `Part::text()`) |
-| `GeminiModel` | Enum of available models |
+| `ModelId` | Model identifier newtype: `ModelId::new("…")`, `"…".into()`, or the constants `LIVE_2_5_FLASH_NATIVE_AUDIO` (Vertex GA), `FLASH_2_5_NATIVE_AUDIO_LATEST` (Google AI alias), `FLASH_LATEST` (text). Leave `SessionConfig.model` as `None` and connect resolves `ModelId::live_default(vertex)` |
 | `Voice` | Output voice selection |
 | `Tool` / `FunctionDeclaration` | Tool declarations for setup message |
 | `FunctionCall` / `FunctionResponse` | Tool call/response wire types |
@@ -543,10 +542,10 @@ let artifacts = A::json_output("report", "Analysis report")
 | `Transport` / `TungsteniteTransport` | WebSocket transport trait + default impl |
 | `Codec` / `JsonCodec` | Message encoding trait + default impl |
 | `AuthProvider` / `VertexAIAuth` / `GoogleAIAuth` | Authentication providers |
-| `Platform` | GoogleAI vs VertexAI URL/version logic |
+| `AccessToken` | Bearer credential for Vertex: `Static(String)` or `Dynamic(closure)` re-read on every (re)connect; `Debug` redacts it |
 | `VadConfig` / `VoiceActivityDetector` | Voice activity detection |
 | `SpscRing` / `AudioJitterBuffer` | Lock-free audio buffers |
-| `ApiEndpoint` | Connection endpoint configuration |
+| `ApiEndpoint` | Connection endpoint configuration (Google AI vs Vertex AI host, API version, credentials; `Debug` redacts secrets) |
 | `ResumeInfo` | Session resumption info: handle, resumable flag, last consumed index |
 | `UsageInfo` | Token usage metadata: total, prompt, response token counts |
 
@@ -713,13 +712,13 @@ just release-status
 
 ## Common Mistakes
 
-- **Wrong audio model**: Native audio model (`Gemini2_0FlashLive`) only supports `Modality::Audio` output, NOT `Modality::Text`. Use `.text_only()` for text-only mode with `Gemini2_0FlashLive`.
-- **Live model names differ by platform**, and Google AI retires dated names. When no `.model(..)` is set, connect resolves a platform-appropriate default: `GEMINI_MODEL` from the environment, else `models/gemini-2.5-flash-native-audio-latest` (a rolling alias, verified 2026-08) on Google AI, else the wire default `gemini-live-2.5-flash-native-audio` (Vertex AI's GA name per Google Cloud docs). Set `.model(GeminiModel::Custom("models/…"))` only when you need a specific model.
-- **Stale `GeminiModel` variants**: neither named Live variant works on Google AI — `Gemini2_0FlashLive` (`gemini-2.0-flash-live-001`) is gone from the catalog and `GeminiLive2_5FlashNativeAudio` (`gemini-live-2.5-flash-native-audio`) is Vertex-only. Confirm what a key can reach: `curl "https://generativelanguage.googleapis.com/v1beta/models?key=$GEMINI_API_KEY" | jq -r '.models[] | select(.supportedGenerationMethods[]? == "bidiGenerateContent") | .name'`. The same catalog drift hits text models: `gemini-2.5-flash` 404s on Google AI `generateContent`; `GeminiLlm` therefore defaults to the `gemini-flash-latest` alias there (`gemini-2.5-flash` still on Vertex).
+- **Wrong audio model**: The native-audio Live models only support `Modality::Audio` output, NOT `Modality::Text`. Use `.text_only()` for text-only mode.
+- **Live model names differ by platform**, and Google AI retires dated names. When no `.model(..)` is set (`SessionConfig.model` is `Option<ModelId>`), connect resolves a platform-appropriate default via `ModelId::live_default(vertex)`: `GEMINI_MODEL` from the environment (bare names get the `models/` prefix), else `ModelId::FLASH_2_5_NATIVE_AUDIO_LATEST` (`models/gemini-2.5-flash-native-audio-latest`, a rolling alias, verified 2026-08) on Google AI, else `ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO` (`models/gemini-live-2.5-flash-native-audio`, Vertex AI's GA name per Google Cloud docs). Set `.model(ModelId::new("models/…"))` only when you need a specific model.
+- **Dated model names drift**: `gemini-2.0-flash-live-001` is gone from the Google AI catalog and `gemini-live-2.5-flash-native-audio` is Vertex-only — which is why `ModelId` is a string newtype with rolling-alias constants rather than an enum of dated names. Confirm what a key can reach: `curl "https://generativelanguage.googleapis.com/v1beta/models?key=$GEMINI_API_KEY" | jq -r '.models[] | select(.supportedGenerationMethods[]? == "bidiGenerateContent") | .name'`. The same catalog drift hits text models: `gemini-2.5-flash` 404s on Google AI `generateContent`; `GeminiLlm` therefore defaults to the `gemini-flash-latest` alias there (`gemini-2.5-flash` still on Vertex).
 - **Feature flags gate real work**: `gemini-adk-fluent-rs` ships `default = []` — text generation needs `gemini-llm` (without it `GeminiLlm` compiles but errors at runtime), `talk()` needs `voice-io`. Typed tools need `schemars = "0.8"`, not 1.x.
 - **Vertex AI binary frames**: Vertex AI sends Binary WebSocket frames (not Text) -- handled automatically by `TungsteniteTransport`.
 - **Vertex AI endpoint**: Use `wss://aiplatform.googleapis.com/...` (NOT `global-aiplatform.googleapis.com`).
-- **API versions**: Google AI = `v1beta`, Vertex AI = `v1beta1` -- handled by `Platform` enum.
+- **API versions**: Google AI = `v1beta`, Vertex AI = `v1beta1` -- handled by `ApiEndpoint`.
 - **Cannot update tool definitions mid-session**: Voice sessions only allow instruction updates. Tool declarations are fixed at connect time.
 - **Fast lane callbacks must be sync and under 1ms**: No allocations, no locks, no async in `on_audio`, `on_text`, `on_thought`, `on_vad_*`.
 - **Thinking is Google AI only**: `thinkingConfig` is auto-stripped for Vertex AI. `.on_thought()` won't fire on Vertex.

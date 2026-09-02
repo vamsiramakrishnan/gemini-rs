@@ -233,12 +233,12 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                     // Demonstrate ALL configurable Gemini Live API properties
                     let config = base_config
                             // Model
-                            .model(GeminiModel::GeminiLive2_5FlashNativeAudio)
+                            .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
                             // Voice
                             .voice(voice_enum)
                             // Transcription — the focus of this example
-                            .enable_input_transcription()
-                            .enable_output_transcription()
+                            .input_transcription(true)
+                            .output_transcription(true)
                             // System instruction
                             .system_instruction(
                                 system_instruction
@@ -260,7 +260,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                             // Context window compression for long sessions
                             .context_window_compression(2048)
                             // Session resumption — enables reconnection with state
-                            .session_resumption(None)
+                            .session_resumption()
                             // Thinking — commented out: native audio model doesn't support thinking
                             // .thinking(1024).include_thoughts()
                             // Affective dialog — emotionally expressive responses
@@ -268,7 +268,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
 
                     info!("Config built with all properties, connecting...");
 
-                    match connect(config, TransportConfig::default()).await {
+                    match connect(config).await {
                         Ok(session) => {
                             session_handle = Some(session.clone());
                             let mut events = session.subscribe();
@@ -352,8 +352,11 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                                         }
                                         SessionEvent::Error(e) => {
                                             error!("Session error: {}", e);
-                                            let _ =
-                                                tx.send(ServerMessage::Error { message: e }).await;
+                                            let _ = tx
+                                                .send(ServerMessage::Error {
+                                                    message: e.to_string(),
+                                                })
+                                                .await;
                                         }
                                         _ => {}
                                     }

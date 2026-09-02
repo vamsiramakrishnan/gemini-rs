@@ -369,7 +369,7 @@ let middleware = M::log() | M::latency() | M::audit();
 use gemini_adk_fluent_rs::builder::AgentBuilder;
 
 let agent = AgentBuilder::new("support")
-    .model(GeminiModel::Gemini2_0Flash)
+    .model(ModelId::FLASH_LATEST)
     .instruction("Help the customer")   // or use P:: composition
     .temperature(0.5)
     .google_search()                     // or use T:: composition

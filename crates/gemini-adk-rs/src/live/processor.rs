@@ -245,7 +245,7 @@ pub(crate) enum ControlEvent {
     TurnComplete,
     /// Model finished generating (even if interrupted). Fires before TurnComplete.
     GenerationComplete,
-    GoAway(Option<String>),
+    GoAway(Option<std::time::Duration>),
     Connected,
     Disconnected(Option<String>),
     SessionResumeUpdate(gemini_genai_rs::session::ResumeInfo),
@@ -725,7 +725,7 @@ async fn route_event(
             let _ = ctrl_tx.send(ControlEvent::Disconnected(reason)).await;
         }
         SessionEvent::Error(err) => {
-            let _ = ctrl_tx.send(ControlEvent::Error(err)).await;
+            let _ = ctrl_tx.send(ControlEvent::Error(err.to_string())).await;
         }
         // SessionEvent is #[non_exhaustive]: future wire events the runtime
         // doesn't understand yet are surfaced (not silently dropped) so
@@ -1346,7 +1346,7 @@ mod tests {
         impl SessionWriter for RecordingWriter {
             async fn send_audio(
                 &self,
-                _data: Vec<u8>,
+                _data: bytes::Bytes,
             ) -> Result<(), gemini_genai_rs::session::SessionError> {
                 Ok(())
             }
@@ -1358,7 +1358,7 @@ mod tests {
             }
             async fn send_video(
                 &self,
-                _data: Vec<u8>,
+                _data: bytes::Bytes,
             ) -> Result<(), gemini_genai_rs::session::SessionError> {
                 Ok(())
             }

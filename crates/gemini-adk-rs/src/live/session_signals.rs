@@ -118,7 +118,7 @@ impl SessionSignals {
             SessionEvent::Error(msg) => {
                 let count: u64 = self.state.session().get("error_count").unwrap_or(0);
                 let _ = self.state.session().set("error_count", count + 1);
-                let _ = self.state.session().set("last_error", msg.clone());
+                let _ = self.state.session().set("last_error", msg.to_string());
             }
 
             SessionEvent::PhaseChanged(phase) => {
@@ -133,15 +133,11 @@ impl SessionSignals {
             SessionEvent::GoAway(time_left) => {
                 let _ = self.state.session().set("go_away_received", true);
                 if let Some(tl) = time_left {
-                    let _ = self.state.session().set("go_away_time_left", tl.clone());
-                    if let Ok(secs) = tl.trim_end_matches('s').parse::<u64>() {
-                        let deadline = Instant::now() + std::time::Duration::from_secs(secs);
-                        *self.go_away_at.lock() = Some(deadline);
-                        let _ = self
-                            .state
-                            .session()
-                            .set("go_away_time_left_ms", secs * 1000);
-                    }
+                    *self.go_away_at.lock() = Some(Instant::now() + *tl);
+                    let _ = self
+                        .state
+                        .session()
+                        .set("go_away_time_left_ms", tl.as_millis() as u64);
                 }
             }
 
@@ -349,18 +345,19 @@ mod tests {
     fn error_increments_count() {
         let s = signals();
         s.on_event(&SessionEvent::Connected);
-        s.on_event(&SessionEvent::Error("oops".into()));
+        let err = |m: &str| {
+            SessionEvent::Error(gemini_genai_rs::session::SessionError::WebSocket(
+                gemini_genai_rs::session::WebSocketError::ProtocolError(m.into()),
+            ))
+        };
+        s.on_event(&err("oops"));
         assert_eq!(s.state.session().get::<u64>("error_count"), Some(1));
-        assert_eq!(
-            s.state.session().get::<String>("last_error"),
-            Some("oops".into())
-        );
-        s.on_event(&SessionEvent::Error("oops2".into()));
+        let last: String = s.state.session().get("last_error").unwrap();
+        assert!(last.contains("oops"), "{last}");
+        s.on_event(&err("oops2"));
         assert_eq!(s.state.session().get::<u64>("error_count"), Some(2));
-        assert_eq!(
-            s.state.session().get::<String>("last_error"),
-            Some("oops2".into())
-        );
+        let last: String = s.state.session().get("last_error").unwrap();
+        assert!(last.contains("oops2"), "{last}");
     }
 
     #[test]
@@ -391,14 +388,12 @@ mod tests {
     fn go_away_sets_state() {
         let s = signals();
         s.on_event(&SessionEvent::Connected);
-        s.on_event(&SessionEvent::GoAway(Some("60s".into())));
+        s.on_event(&SessionEvent::GoAway(Some(std::time::Duration::from_secs(
+            60,
+        ))));
         assert_eq!(
             s.state.session().get::<bool>("go_away_received"),
             Some(true)
-        );
-        assert_eq!(
-            s.state.session().get::<String>("go_away_time_left"),
-            Some("60s".into())
         );
         assert_eq!(
             s.state.session().get::<u64>("go_away_time_left_ms"),
@@ -416,7 +411,7 @@ mod tests {
             s.state.session().get::<bool>("go_away_received"),
             Some(true)
         );
-        assert_eq!(s.state.session().get::<String>("go_away_time_left"), None);
+        assert_eq!(s.state.session().get::<u64>("go_away_time_left_ms"), None);
         assert!(s.go_away_at.lock().is_none());
     }
 

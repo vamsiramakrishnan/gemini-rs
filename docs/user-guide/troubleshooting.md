@@ -36,8 +36,8 @@ mean the runtime trait.
 
 ### No audio output / model returns text but I asked for audio
 
-The native-audio model (`Gemini2_0FlashLive`) only supports `Modality::Audio`
-output. For text, call `.text_only()`.
+The native-audio Live models only support `Modality::Audio` output. For text,
+call `.text_only()`.
 
 ### `on_thought` never fires
 
@@ -62,7 +62,7 @@ declarations are fixed at connect time. Declare every tool up front.
 
 Use `wss://aiplatform.googleapis.com/...` (not `global-aiplatform…`). Vertex
 sends Binary WebSocket frames (handled automatically). API versions differ
-(`v1beta` for Google AI, `v1beta1` for Vertex) — the `Platform` enum handles it.
+(`v1beta` for Google AI, `v1beta1` for Vertex) — `ApiEndpoint` handles it.
 
 ### Async tool calling (`NonBlocking` / scheduling) seems ignored
 

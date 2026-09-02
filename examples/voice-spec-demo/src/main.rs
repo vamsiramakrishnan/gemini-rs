@@ -67,7 +67,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ── 2. The session, configured entirely from the document ───────────
     let state = State::new();
     let live = Live::builder()
-        .model(GeminiModel::Custom(LIVE_MODEL.into()))
+        .model(ModelId::new(LIVE_MODEL))
         .transcription(true, true);
     let live = spec
         .apply(live, &state, &SpecResources::default())

@@ -145,7 +145,8 @@ impl LiveHandle {
     /// edges are forwarded to the server as activityStart/activityEnd.
     /// When deferred context delivery is enabled, any pending model-role
     /// context turns are flushed to the wire before the audio frame.
-    pub async fn send_audio(&self, data: Vec<u8>) -> Result<(), SessionError> {
+    pub async fn send_audio(&self, data: impl Into<bytes::Bytes>) -> Result<(), SessionError> {
+        let data: bytes::Bytes = data.into();
         let data = {
             let mut processors = self.input_processors.lock();
             if processors.is_empty() {
@@ -296,8 +297,8 @@ impl LiveHandle {
     ///
     /// When deferred context delivery is enabled, any pending model-role
     /// context turns are flushed to the wire before the video frame.
-    pub async fn send_video(&self, jpeg_data: Vec<u8>) -> Result<(), SessionError> {
-        self.writer.send_video(jpeg_data).await
+    pub async fn send_video(&self, jpeg_data: impl Into<bytes::Bytes>) -> Result<(), SessionError> {
+        self.writer.send_video(jpeg_data.into()).await
     }
 
     /// Update the system instruction mid-session.
@@ -457,14 +458,14 @@ impl LiveHandle {
     ///
     /// To survive a server-initiated `GoAway` or a planned restart, read this
     /// handle (e.g. from the `on_go_away` callback) and pass it to
-    /// `session_resumption(Some(handle))` on the next connect's
+    /// `resume_from(handle)` on the next connect's
     /// [`SessionConfig`](gemini_genai_rs::prelude::SessionConfig). No
     /// automatic reconnect is performed — resumption is an explicit caller
     /// decision.
     ///
     /// Returns `None` when resumption is disabled or no update has arrived yet.
     pub fn resume_handle(&self) -> Option<String> {
-        self.session.state.resume_handle.lock().clone()
+        self.session.resume_handle()
     }
 
     /// Access the shared State container.
@@ -610,6 +611,36 @@ mod tests {
         make_handle_with_lanes(tokio::spawn(async {}), tokio::spawn(async {}))
     }
 
+    /// Like [`make_handle`] but also hands back the L0 session state, for
+    /// tests that simulate what the transport writes there.
+    fn make_handle_and_state() -> (
+        LiveHandle,
+        tokio::sync::mpsc::Receiver<SessionCommand>,
+        Arc<SessionState>,
+    ) {
+        let (command_tx, command_rx) = tokio::sync::mpsc::channel(8);
+        let (event_tx, _) = broadcast::channel(16);
+        let (phase_tx, phase_rx) = tokio::sync::watch::channel(SessionPhase::Active);
+        let state = Arc::new(SessionState::with_events(phase_tx, event_tx.clone()));
+        let session = SessionHandle::new(command_tx, event_tx, state.clone(), phase_rx);
+        let writer: Arc<dyn SessionWriter> = Arc::new(session.clone());
+        let (live_tx, _) = broadcast::channel(16);
+        let handle = LiveHandle::new(
+            session,
+            writer,
+            tokio::spawn(async {}),
+            tokio::spawn(async {}),
+            State::new(),
+            Arc::new(SessionTelemetry::new()),
+            live_tx,
+            None,
+            None,
+            Arc::new(BackgroundToolTracker::new()),
+            CancellationToken::new(),
+        );
+        (handle, command_rx, state)
+    }
+
     /// Sets a flag when dropped — observes that an aborted task's future was
     /// actually torn down.
     struct SetOnDrop(Arc<std::sync::atomic::AtomicBool>);
@@ -690,11 +721,11 @@ mod tests {
 
     #[tokio::test]
     async fn resume_handle_surfaces_latest_server_handle() {
-        let (handle, _cmd_rx) = make_handle();
+        let (handle, _cmd_rx, state) = make_handle_and_state();
         assert_eq!(handle.resume_handle(), None, "no update yet");
 
         // Simulate the L0 transport storing a SessionResumptionUpdate.
-        *handle.session.state.resume_handle.lock() = Some("rh-42".into());
+        *state.resume_handle.lock() = Some("rh-42".into());
         assert_eq!(handle.resume_handle(), Some("rh-42".to_string()));
     }
 

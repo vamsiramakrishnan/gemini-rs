@@ -197,11 +197,7 @@ pub(in crate::live) async fn run_control_lane(
                 let _ = event_tx.send(LiveEvent::TurnComplete);
             }
             ControlEvent::GoAway(time_left) => {
-                let duration = time_left
-                    .as_deref()
-                    .and_then(|s| s.trim_end_matches('s').parse::<u64>().ok())
-                    .map(Duration::from_secs)
-                    .unwrap_or(Duration::from_secs(60));
+                let duration = time_left.unwrap_or(Duration::from_secs(60));
                 if let Some(cb) = &callbacks.on_go_away {
                     dispatch_callback!(callbacks.on_go_away_mode, cb(duration));
                 }

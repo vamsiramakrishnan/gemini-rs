@@ -29,7 +29,7 @@ use gemini_genai_rs::prelude::*;
 
 ```rust
 let agent = AgentBuilder::new("analyst")
-    .model(GeminiModel::Gemini2_0Flash)
+    .model(ModelId::FLASH_LATEST)   // optional: GeminiLlm defaults to GEMINI_MODEL or this alias
     .instruction("Analyze the given topic")
     .temperature(0.3)
     .google_search()
@@ -45,7 +45,6 @@ Copy-on-write immutable builders -- every setter returns a new builder, original
 
 ```rust
 let handle = Live::builder()
-    .model(GeminiModel::Gemini2_0FlashLive)
     .voice(Voice::Kore)
     .instruction("You are a weather assistant")
     .greeting("Greet the user and ask how you can help.")
@@ -187,7 +186,6 @@ Live::builder()
 struct OrderState { items: Vec<String>, phase: String }
 
 let handle = Live::builder()
-    .model(GeminiModel::Gemini2_0FlashLive)
     .instruction("Restaurant order assistant")
     .extract_turns::<OrderState>(flash_llm, "Extract order items and phase")
     .on_extracted(|name, value| async move { println!("{name}: {value}"); })
@@ -299,9 +297,9 @@ let artifacts = A::json_output("report", "Analysis report")
 | `SessionHandle` | Connected session -- implements `SessionWriter` + `SessionReader` |
 | `SessionWriter` | Trait: send audio/text/video/tool responses |
 | `SessionReader` | Trait: subscribe to events |
-| `ConnectBuilder` | Ergonomic `ConnectBuilder::new(config).build()` |
+| `connect` / `ConnectBuilder` | `connect(config).await` for the default transport; `ConnectBuilder::new(config).transport_config(..).transport(..).codec(..).connect().await` when you need options |
 | `Content` / `Part` / `Role` | Wire-format message types with builders (`Content::user()`, `Part::text()`) |
-| `GeminiModel` | Enum of available models |
+| `ModelId` | Model identifier newtype: `ModelId::new("…")`, `"…".into()`, or the constants `LIVE_2_5_FLASH_NATIVE_AUDIO` (Vertex GA), `FLASH_2_5_NATIVE_AUDIO_LATEST` (Google AI alias), `FLASH_LATEST` (text). Leave `SessionConfig.model` as `None` and connect resolves `ModelId::live_default(vertex)` |
 | `Voice` | Output voice selection |
 | `Tool` / `FunctionDeclaration` | Tool declarations for setup message |
 | `FunctionCall` / `FunctionResponse` | Tool call/response wire types |
@@ -309,10 +307,10 @@ let artifacts = A::json_output("report", "Analysis report")
 | `Transport` / `TungsteniteTransport` | WebSocket transport trait + default impl |
 | `Codec` / `JsonCodec` | Message encoding trait + default impl |
 | `AuthProvider` / `VertexAIAuth` / `GoogleAIAuth` | Authentication providers |
-| `Platform` | GoogleAI vs VertexAI URL/version logic |
+| `AccessToken` | Bearer credential for Vertex: `Static(String)` or `Dynamic(closure)` re-read on every (re)connect; `Debug` redacts it |
 | `VadConfig` / `VoiceActivityDetector` | Voice activity detection |
 | `SpscRing` / `AudioJitterBuffer` | Lock-free audio buffers |
-| `ApiEndpoint` | Connection endpoint configuration |
+| `ApiEndpoint` | Connection endpoint configuration (Google AI vs Vertex AI host, API version, credentials; `Debug` redacts secrets) |
 
 ### L1 (gemini-adk-rs) -- Agent Runtime
 
@@ -394,10 +392,10 @@ cargo build -p gemini-genai-rs --features "vad,generate,tokens"
 
 ## Common Mistakes
 
-- **Wrong audio model**: Native audio model (`Gemini2_0FlashLive`) only supports `Modality::Audio` output, NOT `Modality::Text`. Use `.text_only()` for text-only mode with `Gemini2_0FlashLive`.
+- **Wrong audio model**: The native-audio Live models only support `Modality::Audio` output, NOT `Modality::Text`. Use `.text_only()` for text-only mode.
 - **Vertex AI binary frames**: Vertex AI sends Binary WebSocket frames (not Text) -- handled automatically by `TungsteniteTransport`.
 - **Vertex AI endpoint**: Use `wss://aiplatform.googleapis.com/...` (NOT `global-aiplatform.googleapis.com`).
-- **API versions**: Google AI = `v1beta`, Vertex AI = `v1beta1` -- handled by `Platform` enum.
+- **API versions**: Google AI = `v1beta`, Vertex AI = `v1beta1` -- handled by `ApiEndpoint`.
 - **Cannot update tool definitions mid-session**: Voice sessions only allow instruction updates. Tool declarations are fixed at connect time.
 - **Fast lane callbacks must be sync and under 1ms**: No allocations, no locks, no async in `on_audio`, `on_text`, `on_vad_*`.
 - **Forgetting `.done()`**: Phase builder chains must end with `.done()` to return to the `Live` builder.

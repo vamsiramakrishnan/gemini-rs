@@ -17,7 +17,8 @@ use std::time::Duration;
 
 use gemini_adk_rs::live::LiveSessionBuilder;
 use gemini_adk_rs::live::replay::{collect_events_until_idle, replay_session};
-use gemini_genai_rs::prelude::{GeminiModel, SessionConfig, WireDirection, WireEntry};
+use gemini_genai_rs::prelude::{ModelId, SessionConfig};
+use gemini_genai_rs::transport::{WireDirection, WireEntry};
 
 /// The minimum viable server script: complete the handshake and finish a turn.
 fn server_script() -> Vec<WireEntry> {
@@ -39,7 +40,7 @@ fn server_script() -> Vec<WireEntry> {
 
 /// Run a session to disconnect with the given callbacks installed.
 async fn run_to_disconnect(callbacks: gemini_adk_rs::live::EventCallbacks) {
-    let config = SessionConfig::new("test-key").model(GeminiModel::Gemini2_0FlashLive);
+    let config = SessionConfig::new("test-key").model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO);
     let builder = LiveSessionBuilder::new(config.clone()).callbacks(callbacks);
 
     let replay = replay_session(config, builder, &server_script())

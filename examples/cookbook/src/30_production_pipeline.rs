@@ -134,7 +134,7 @@ async fn main() {
              debt-to-income ratio, employment history, and loan amount. \
              Output a risk score (0-1), risk level, and key risk factors.",
         )
-        .model(GeminiModel::Gemini2_0FlashLive)
+        .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
         .temperature(0.1)
         .thinking(4096)
         .output_schema(json!({
@@ -162,7 +162,7 @@ async fn main() {
             "Check the loan application against regulatory compliance rules: \
              KYC, AML, fair lending, and consumer protection regulations.",
         )
-        .model(GeminiModel::Gemini2_0FlashLive)
+        .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
         .temperature(0.0)
         .reads("applicant_name")
         .reads("loan_amount")

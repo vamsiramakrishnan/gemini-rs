@@ -28,7 +28,7 @@ use crate::state::State;
 ///
 /// runner.run(|agent| async move {
 ///     let config = SessionConfig::new(&api_key)
-///         .model(GeminiModel::GeminiLive2_5FlashNativeAudio);
+///         .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO);
 ///     // Add agent's tools to config
 ///     let session = connect(config, TransportConfig::default()).await?;
 ///     Ok(AgentSession::new(session))

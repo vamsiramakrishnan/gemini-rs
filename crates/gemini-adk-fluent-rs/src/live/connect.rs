@@ -28,11 +28,15 @@ impl Live {
     }
 
     /// Connect using Vertex AI credentials.
+    ///
+    /// `access_token` is a fixed token or an [`AccessToken`]; pass
+    /// `AccessToken::from_fn(..)` for a source that is consulted on every
+    /// reconnect, since Vertex tokens expire after about an hour.
     pub async fn connect_vertex(
         mut self,
         project: impl Into<String>,
         location: impl Into<String>,
-        access_token: impl Into<String>,
+        access_token: impl Into<AccessToken>,
     ) -> Result<LiveHandle, gemini_adk_rs::error::AgentError> {
         self.config.endpoint = ApiEndpoint::vertex(project, location, access_token);
         self.build_and_connect().await
@@ -50,11 +54,10 @@ impl Live {
     /// - otherwise → Google AI using `GEMINI_API_KEY` (or
     ///   `GOOGLE_GENAI_API_KEY` / `GOOGLE_API_KEY`).
     ///
-    /// When no `.model(..)` was set, every connect method resolves a default
-    /// the target platform actually serves: `GEMINI_MODEL` from the
-    /// environment if present, else `models/gemini-2.5-flash-native-audio-latest`
-    /// on Google AI (audio output) or the wire default
-    /// (`gemini-live-2.5-flash-native-audio`) on Vertex AI.
+    /// When no `.model(..)` was set, the wire layer resolves a default the
+    /// target platform actually serves (`ModelId::live_default`): `GEMINI_MODEL`
+    /// from the environment if present, else the platform's current
+    /// native-audio Flash model.
     ///
     /// ```no_run
     /// # use gemini_adk_fluent_rs::prelude::*;
@@ -85,18 +88,10 @@ impl Live {
         // Merge auth/model from external config, keep everything else from builder.
         self.config.endpoint = config.endpoint;
         self.config.model = config.model;
-        self.model_explicit = true;
         self.build_and_connect().await
     }
 
     async fn build_and_connect(mut self) -> Result<LiveHandle, gemini_adk_rs::error::AgentError> {
-        if !self.model_explicit {
-            self.config.model = resolve_default_model(
-                &self.config.endpoint,
-                std::env::var("GEMINI_MODEL").ok(),
-                uses_audio_output(&self.config),
-            );
-        }
         if uses_audio_output(&self.config) {
             self.config = self.config.voice_realtime_defaults();
         }
@@ -120,12 +115,13 @@ impl Live {
         // Resolve a `.record_wire(path)` request into a FileWireRecorder now
         // that we are actually connecting.
         if let Some(path) = self.record_wire_path.take() {
-            let recorder = FileWireRecorder::create(&path).map_err(|e| {
-                gemini_adk_rs::error::AgentError::Config(format!(
-                    "failed to create wire log at {}: {e}",
-                    path.display()
-                ))
-            })?;
+            let recorder =
+                gemini_genai_rs::transport::FileWireRecorder::create(&path).map_err(|e| {
+                    gemini_adk_rs::error::AgentError::Config(format!(
+                        "failed to create wire log at {}: {e}",
+                        path.display()
+                    ))
+                })?;
             self.config = self.config.record_wire(std::sync::Arc::new(recorder));
         }
 
@@ -310,41 +306,6 @@ impl Live {
     }
 }
 
-/// Pick the model to connect with when the application never chose one.
-///
-/// The wire-level `GeminiModel::default()` is not accepted by every platform:
-/// Vertex AI serves it as GA, but Google AI's bidi catalog only carries
-/// dated previews plus the rolling `-latest` alias for native audio. The
-/// `GEMINI_MODEL` environment variable wins over both platform defaults
-/// (a bare model name gets the `models/` prefix the wire expects).
-fn resolve_default_model(
-    endpoint: &ApiEndpoint,
-    env_model: Option<String>,
-    audio_output: bool,
-) -> GeminiModel {
-    if let Some(m) = env_model {
-        let m = m.trim();
-        if !m.is_empty() {
-            let name = if m.contains('/') {
-                m.to_string()
-            } else {
-                format!("models/{m}")
-            };
-            return GeminiModel::Custom(name);
-        }
-    }
-    match endpoint {
-        ApiEndpoint::VertexAI(_) => GeminiModel::default(),
-        _ if audio_output => {
-            GeminiModel::Custom("models/gemini-2.5-flash-native-audio-latest".into())
-        }
-        // No Google AI catalog model currently accepts a TEXT-modality bidi
-        // setup, so keep the wire default and let the server name the
-        // failure — text sessions should pick `.model(..)` (or GEMINI_MODEL).
-        _ => GeminiModel::default(),
-    }
-}
-
 /// Resolve an [`ApiEndpoint`] from the environment, with a `gcloud` token
 /// fallback for Vertex AI when `GOOGLE_ACCESS_TOKEN` is not set.
 fn resolve_endpoint_from_env() -> Result<ApiEndpoint, gemini_adk_rs::error::AgentError> {
@@ -494,65 +455,14 @@ mod tests {
     // ─── default model resolution ───────────────────────────────────────────
 
     #[test]
-    fn default_model_google_ai_audio_is_the_rolling_alias() {
-        let m = resolve_default_model(&ApiEndpoint::google_ai("k"), None, true);
+    fn unset_model_is_left_to_the_wire_layer_to_resolve() {
+        let live = Live::builder();
+        assert!(live.config.model.is_none(), "no default is baked in at L2");
+        let live = Live::builder().model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO);
         assert_eq!(
-            m,
-            GeminiModel::Custom("models/gemini-2.5-flash-native-audio-latest".into())
+            live.config.model.as_ref(),
+            Some(&ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
         );
-    }
-
-    #[test]
-    fn default_model_vertex_keeps_the_wire_default() {
-        let vertex = ApiEndpoint::vertex("proj", "us-central1", "tok");
-        assert_eq!(
-            resolve_default_model(&vertex, None, true),
-            GeminiModel::default()
-        );
-    }
-
-    #[test]
-    fn default_model_google_ai_text_keeps_the_wire_default() {
-        assert_eq!(
-            resolve_default_model(&ApiEndpoint::google_ai("k"), None, false),
-            GeminiModel::default()
-        );
-    }
-
-    #[test]
-    fn default_model_env_override_wins_and_gets_prefixed() {
-        let m = resolve_default_model(
-            &ApiEndpoint::google_ai("k"),
-            Some("gemini-2.5-flash-native-audio-preview-12-2025".into()),
-            true,
-        );
-        assert_eq!(
-            m,
-            GeminiModel::Custom("models/gemini-2.5-flash-native-audio-preview-12-2025".into())
-        );
-        // Already-qualified names pass through untouched.
-        let m = resolve_default_model(
-            &ApiEndpoint::vertex("p", "l", "t"),
-            Some("projects/p/models/gemini-x".into()),
-            true,
-        );
-        assert_eq!(m, GeminiModel::Custom("projects/p/models/gemini-x".into()));
-    }
-
-    #[test]
-    fn default_model_blank_env_is_ignored() {
-        let vertex = ApiEndpoint::vertex("p", "l", "t");
-        assert_eq!(
-            resolve_default_model(&vertex, Some("   ".into()), true),
-            GeminiModel::default()
-        );
-    }
-
-    #[test]
-    fn explicit_model_survives_connect_time_resolution() {
-        let live = Live::builder().model(GeminiModel::Gemini2_0FlashLive);
-        assert!(live.model_explicit);
-        assert!(!Live::builder().model_explicit);
     }
 
     // ─── ambient tool merge ─────────────────────────────────────────────────

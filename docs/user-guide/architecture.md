@@ -18,7 +18,7 @@ logic, no opinions about how you structure your app.
 What it provides:
 - `SessionConfig` for building the setup message (model, voice, tools, VAD)
 - `SessionHandle` for sending commands and subscribing to events
-- `ConnectBuilder` for establishing the WebSocket connection
+- `connect(config)` / `ConnectBuilder` for establishing the WebSocket connection
 - `Transport` / `Codec` / `AuthProvider` traits for pluggable I/O
 - `SessionEvent` enum (17 variants) for everything the server can send
 - `SessionCommand` enum (9 variants) for everything you can send
@@ -163,10 +163,10 @@ no telemetry, no allocations on the hot path.
 ```rust,ignore
 use gemini_genai_rs::prelude::*;
 
-let config = SessionConfig::from_endpoint(ApiEndpoint::google_ai("YOUR_KEY"))
-    .model(GeminiModel::Gemini2_0FlashLive);
+// No `.model(..)`: connect resolves the platform's default Live model.
+let config = SessionConfig::from_endpoint(ApiEndpoint::google_ai("YOUR_KEY"));
 
-let handle = ConnectBuilder::new(config).build().await?;
+let handle = connect(config).await?;
 let mut events = handle.subscribe();
 
 handle.send_text("Hello").await?;
@@ -200,7 +200,6 @@ while let Some(event) = recv_event(&mut events).await {
 use gemini_adk_fluent_rs::prelude::*;
 
 let handle = Live::builder()
-    .model(GeminiModel::Gemini2_0FlashLive)
     .voice(Voice::Kore)
     .instruction("You are a helpful assistant")
     .on_audio(|data| { /* play audio */ })

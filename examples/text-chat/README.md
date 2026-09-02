@@ -2,7 +2,7 @@
 
 Simple text-only chat with Gemini Live using the L0 wire protocol (`gemini-genai-rs`).
 
-Connects to `gemini-2.0-flash-live` in text-only mode, sends user text, and streams back text responses over a WebSocket-backed web UI.
+Connects to the native-audio Live model (`ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO`) in text-only mode, sends user text, and streams back text responses over a WebSocket-backed web UI.
 
 ## Run
 
@@ -14,6 +14,6 @@ cargo run -p example-text-chat
 
 ## What it demonstrates
 
-- `ConnectBuilder` with `Modality::Text` output
-- WebSocket event loop: `SessionEvent::Text`, `SessionEvent::TurnComplete`
+- `connect(config)` with `Modality::Text` output
+- WebSocket event loop: `SessionEvent::TextDelta`, `SessionEvent::TurnComplete`, `SessionEvent::Error`
 - Axum WebSocket bridge between browser and Gemini Live

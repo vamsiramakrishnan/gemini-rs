@@ -305,7 +305,6 @@ let is_speaking = Arc::new(AtomicBool::new(false));
 let is_speaking2 = is_speaking.clone();
 
 let handle = Live::builder()
-    .model(GeminiModel::Gemini2_0FlashLive)
     .voice(Voice::Kore)
     .instruction("You are a customer service agent.")
     .transcription(true, true)

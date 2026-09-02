@@ -24,7 +24,7 @@ fn main() {
     // In production, you would call .connect_google_ai(key) or
     // .connect_vertex(project, location, token) at the end.
     println!("Live::builder()");
-    println!("    .model(GeminiModel::Gemini2_0FlashLive)");
+    println!("    .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)");
     println!("    .voice(Voice::Kore)");
     println!("    .instruction(\"You are a helpful assistant\")");
     println!("    .greeting(\"Hello! How can I help you today?\")");
@@ -278,7 +278,7 @@ fn main() {
 
     println!("// Full production Live session setup:");
     println!("let handle = Live::builder()");
-    println!("    .model(GeminiModel::Gemini2_0FlashLive)");
+    println!("    .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)");
     println!("    .voice(Voice::Kore)");
     println!("    .instruction(\"You are a customer support agent for Acme Corp.\")");
     println!("    .greeting(\"Hello! Welcome to Acme support. How can I help?\")");

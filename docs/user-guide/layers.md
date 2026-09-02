@@ -29,9 +29,9 @@ or decides when to speak.
 
 | Concern | Primitives |
 |---|---|
-| Connect | `SessionConfig`, `ConnectBuilder`, `ApiEndpoint`, `Platform`, `ResumeInfo` |
+| Connect | `SessionConfig`, `connect`, `ConnectBuilder`, `ApiEndpoint`, `AccessToken`, `ResumeInfo` |
 | Speak / listen | `SessionHandle`, `SessionWriter`, `SessionReader`, `SessionEvent`, `SessionPhase` |
-| Say things | `Content`, `Part`, `Role`, `GeminiModel`, `Voice`, `Modality` |
+| Say things | `Content`, `Part`, `Role`, `ModelId`, `Voice`, `Modality` |
 | Tools on the wire | `Tool`, `FunctionDeclaration`, `FunctionCall`, `FunctionResponse`, `FunctionCallingBehavior`, `FunctionResponseScheduling` |
 | Real time | `SpscRing`, `AudioJitterBuffer`, `bytes_to_i16`, `i16_to_bytes`, `BargeInDetector`, `TurnDetector` |
 | Access | `AuthProvider`, `GoogleAIAuth`, `VertexAIAuth`, `Transport`, `TungsteniteTransport`, `Codec`, `JsonCodec` |

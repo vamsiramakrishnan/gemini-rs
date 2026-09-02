@@ -363,7 +363,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                     });
 
                     let mut config = base_config
-                        .model(GeminiModel::Gemini2_0FlashLive)
+                        .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
                         .text_only()
                         .system_instruction(sys_instruction);
 
@@ -372,7 +372,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                         config = config.add_tool(tool);
                     }
 
-                    match connect(config, TransportConfig::default()).await {
+                    match connect(config).await {
                         Ok(session) => {
                             session_handle = Some(session.clone());
                             let mut events = session.subscribe();
@@ -474,8 +474,11 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                                         }
                                         SessionEvent::Error(e) => {
                                             error!("Session error: {}", e);
-                                            let _ =
-                                                tx.send(ServerMessage::Error { message: e }).await;
+                                            let _ = tx
+                                                .send(ServerMessage::Error {
+                                                    message: e.to_string(),
+                                                })
+                                                .await;
                                         }
                                         _ => {}
                                     }

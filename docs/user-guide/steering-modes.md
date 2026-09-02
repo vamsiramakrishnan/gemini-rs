@@ -10,7 +10,6 @@ The system instruction is set **once at connect time** and never updated. Phase 
 
 ```rust,ignore
 Live::builder()
-    .model(GeminiModel::Gemini2_0FlashLive)
     .instruction("You are a restaurant reservation assistant at Sapore d'Italia.")
     .steering_mode(SteeringMode::ContextInjection)
     .phase("greeting")
@@ -35,7 +34,6 @@ The system instruction is **replaced** on every phase transition. Per-turn modif
 
 ```rust,ignore
 Live::builder()
-    .model(GeminiModel::Gemini2_0FlashLive)
     .instruction("You are a helpful assistant.")
     .steering_mode(SteeringMode::InstructionUpdate)  // this is the default
     .phase("receptionist")

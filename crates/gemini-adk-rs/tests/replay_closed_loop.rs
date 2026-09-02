@@ -45,9 +45,8 @@ use gemini_adk_rs::live::replay::{collect_events_until_idle, replay_session};
 use gemini_adk_rs::live::{LiveEvent, LiveSessionBuilder};
 use gemini_adk_rs::state::{MemoryJournalSink, State, StateMutation, StateMutationOrigin};
 use gemini_adk_rs::tool::{SimpleTool, ToolDispatcher};
-use gemini_genai_rs::prelude::{
-    GeminiModel, MemoryWireRecorder, SessionConfig, WireDirection, WireEntry,
-};
+use gemini_genai_rs::prelude::{ModelId, SessionConfig};
+use gemini_genai_rs::transport::{MemoryWireRecorder, WireDirection, WireEntry};
 
 /// Handcrafted "server" script: setup handshake, a greeting turn, a tool
 /// call, and the post-tool answer turn.
@@ -113,7 +112,7 @@ async fn run_session(
     let sink = Arc::new(MemoryJournalSink::new());
     state.set_journal_sink(sink.clone());
 
-    let mut config = SessionConfig::new("test-key").model(GeminiModel::Gemini2_0FlashLive);
+    let mut config = SessionConfig::new("test-key").model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO);
     if let Some(rec) = recorder {
         config = config.record_wire(rec);
     }

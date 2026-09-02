@@ -198,16 +198,16 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
 
                     // Native audio model with transcription enabled
                     let mut config = base_config
-                        .model(GeminiModel::GeminiLive2_5FlashNativeAudio)
+                        .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
                         .voice(voice_enum)
-                        .enable_input_transcription()
-                        .enable_output_transcription();
+                        .input_transcription(true)
+                        .output_transcription(true);
 
                     if let Some(sys) = system_instruction {
                         config = config.system_instruction(sys);
                     }
 
-                    match connect(config, TransportConfig::default()).await {
+                    match connect(config).await {
                         Ok(session) => {
                             session_handle = Some(session.clone());
                             let mut events = session.subscribe();
@@ -284,8 +284,11 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                                         }
                                         SessionEvent::Error(e) => {
                                             error!("Session error: {}", e);
-                                            let _ =
-                                                tx.send(ServerMessage::Error { message: e }).await;
+                                            let _ = tx
+                                                .send(ServerMessage::Error {
+                                                    message: e.to_string(),
+                                                })
+                                                .await;
                                         }
                                         _ => {}
                                     }
