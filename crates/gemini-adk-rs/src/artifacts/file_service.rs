@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use async_trait::async_trait;
 use tokio::fs;
 
-use super::{now_secs, Artifact, ArtifactError, ArtifactMetadata, ArtifactService};
+use super::{Artifact, ArtifactError, ArtifactMetadata, ArtifactService, now_secs};
 
 /// Filesystem-backed artifact storage with versioning.
 ///
@@ -27,7 +27,7 @@ impl FileArtifactService {
         let root = root_dir.into();
         // Create root dir if it doesn't exist (use std::fs since this is construction)
         std::fs::create_dir_all(&root)
-            .map_err(|e| ArtifactError::Storage(format!("Failed to create root dir: {}", e)))?;
+            .map_err(|e| ArtifactError::Storage(format!("Failed to create root dir: {e}")))?;
         Ok(Self { root_dir: root })
     }
 
@@ -40,7 +40,7 @@ impl FileArtifactService {
 
     fn version_dir(&self, session_id: &str, name: &str, version: u32) -> PathBuf {
         self.artifact_dir(session_id, name)
-            .join(format!("v{}", version))
+            .join(format!("v{version}"))
     }
 
     /// Get the next version number by counting existing version directories.
@@ -52,12 +52,11 @@ impl FileArtifactService {
         let mut max_version = 0u32;
         if let Ok(mut entries) = fs::read_dir(&dir).await {
             while let Ok(Some(entry)) = entries.next_entry().await {
-                if let Some(name) = entry.file_name().to_str() {
-                    if let Some(v) = name.strip_prefix('v') {
-                        if let Ok(version) = v.parse::<u32>() {
-                            max_version = max_version.max(version);
-                        }
-                    }
+                if let Some(name) = entry.file_name().to_str()
+                    && let Some(v) = name.strip_prefix('v')
+                    && let Ok(version) = v.parse::<u32>()
+                {
+                    max_version = max_version.max(version);
                 }
             }
         }

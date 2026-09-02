@@ -1,3 +1,5 @@
+#![warn(unreachable_pub)]
+#![forbid(unsafe_code)]
 #![warn(missing_docs)]
 //! # gemini-adk-fluent-rs
 //!
@@ -11,29 +13,49 @@
 //! | Module | Purpose |
 //! |--------|---------|
 //! | [`builder`] | Copy-on-write immutable `AgentBuilder` for declarative agent configuration |
-//! | [`compose`] | S·C·T·P·M·A operator algebra for composing agent primitives |
-//! | [`live`] | `Live` session handle — callback-driven full-duplex event handling |
-//! | [`live_builders`] | Builder types for live session configuration |
-//! | [`operators`] | Operator combinators for composing agents |
+//! | [`compose`] | The eight-namespace operator algebra — `S` state, `C` context, `T` tools, `P` prompts, `M` middleware, `A` artifacts, `E` evaluation, `G` guards |
+//! | [`live`] | `Live` session builder — callback-driven full-duplex event handling |
+//! | [`live_builders`] | Phase and watcher sub-builders for `Live` |
+//! | [`operators`] | `>> | * /` combinators for composing agents |
 //! | [`patterns`] | Pre-built composition patterns for common use cases |
-//! | [`testing`] | Test utilities and mock helpers |
+//! | [`voice`] | Microphone/speaker plumbing; `talk()` needs the `voice-io` feature |
+//! | [`testing`] | Contract checks, data-flow inference, mock harnesses |
 //!
 //! ## Quick Start
 //!
-//! ```rust,ignore
-//! use gemini_adk_fluent_rs::prelude::*;
+//! Text generation is on by default (feature `gemini-llm`); set
+//! `GEMINI_API_KEY` and ask a question:
 //!
-//! let agent = AgentBuilder::new("my-agent")
-//!     .model(GeminiModel::Gemini2_0Flash)
-//!     .instruction("You are a helpful assistant.")
-//!     .build();
+//! ```no_run
+//! use gemini_adk_fluent_rs::prelude::*;
+//! use std::sync::Arc;
+//!
+//! # async fn run() -> Result<(), Box<dyn std::error::Error>> {
+//! let llm = Arc::new(GeminiLlm::new(GeminiLlmParams::default()));
+//! let agent = AgentBuilder::new("assistant")
+//!     .instruction("You are a concise assistant.")
+//!     .build(llm)?;
+//! let state = State::new();
+//! state.set("input", "Say hello in one sentence.")?;
+//! println!("{}", agent.run(&state).await?);
+//!
+//! // Voice: microphone in, speakers out, barge-in handled — `.talk()` exists
+//! // only with the `voice-io` feature (Linux: libasound2-dev).
+//! let handle = Live::builder()
+//!     .instruction("You are a helpful concierge.")
+//!     .greeting("Greet the caller.")
+//!     .connect_from_env()
+//!     .await?;
+//! # let _ = handle;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## Relationship to Other Crates
 //!
-//! - **`gemini-live`** (L0): Wire protocol, transport, types — re-exported via [`gemini_genai_rs`]
-//! - **`gemini-adk-rs`** (L1): Agent runtime, tools, sessions — re-exported via [`gemini_adk_rs`]
-//! - **`gemini-adk-fluent-rs`** (L2): This crate — ergonomic builder API and composition
+//! - **`gemini-genai-rs`** (L0): wire protocol, transport, types — re-exported as [`gemini_genai_rs`]
+//! - **`gemini-adk-rs`** (L1): agent runtime, tools, sessions — re-exported as [`gemini_adk_rs`]
+//! - **`gemini-adk-fluent-rs`** (L2): this crate — the builder API and composition algebra
 
 pub mod a2a;
 pub mod builder;
@@ -58,7 +80,7 @@ pub use gemini_adk_rs;
 pub use gemini_genai_rs;
 
 // ---------------------------------------------------------------------------
-// Curated submodule homes (gap #9 — prelude hard carve).
+// Curated submodule homes (the prelude is a kernel, not an everything-glob).
 //
 // The kernel `prelude` (below) re-exports only the ~30 types a typical app
 // touches. Everything else lives in these focused, discoverable modules so
@@ -101,21 +123,16 @@ pub mod flow {
     pub use gemini_adk_rs::flow::*;
 }
 
-/// Agent builders, the agent trait, and the operator/pattern combinators.
-///
-/// Note: the L1 [`gemini_adk_rs::agent::Agent`] *trait* is re-exported here as
-/// `AgentTrait` to avoid colliding with the L2 `Agent` (the [`AgentBuilder`](crate::builder::AgentBuilder))
-/// builder alias.
+/// Agent builders, the L1 [`Agent`](gemini_adk_rs::agent::Agent) trait, and
+/// the operator/pattern combinators.
 pub mod agents {
     pub use crate::builder::*;
     pub use crate::operators::*;
     pub use crate::patterns::*;
     #[doc(inline)]
-    pub use gemini_adk_rs::agent::Agent as AgentTrait;
+    pub use gemini_adk_rs::agent::Agent;
     pub use gemini_adk_rs::agent_session::*;
-    pub use gemini_adk_rs::orchestration::{
-        self, call as call_agent, provenance, Mode as AgentMode, Resolver,
-    };
+    pub use gemini_adk_rs::orchestration::{self, AgentMode, Resolver, call_agent, provenance};
 }
 
 /// L0 wire-protocol types for raw WebSocket access.
@@ -127,7 +144,7 @@ pub mod wire {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```
 /// use gemini_adk_fluent_rs::let_clone;
 /// use std::sync::Arc;
 ///
@@ -135,9 +152,8 @@ pub mod wire {
 /// let writer = Arc::new("hello");
 ///
 /// let_clone!(state, writer);
-/// tokio::spawn(async move {
-///     println!("{state} {writer}");
-/// });
+/// let task = move || format!("{state} {writer}");
+/// assert_eq!(task(), "42 hello");
 /// ```
 #[macro_export]
 macro_rules! let_clone {
@@ -148,8 +164,8 @@ macro_rules! let_clone {
 
 /// The kernel prelude — the ~40 types a typical application touches.
 ///
-/// Gap #9 carved this down from the previous everything-prelude. Anything not
-/// here now lives in a focused submodule and is one import away:
+/// Deliberately a kernel, not an everything-glob. Anything not here lives in
+/// a focused submodule and is one import away:
 ///
 /// | Need | Import |
 /// |------|--------|
@@ -158,7 +174,7 @@ macro_rules! let_clone {
 /// | Toolsets, confirmation, frames | `use gemini_adk_fluent_rs::tools::*;` |
 /// | State prefixes / `SlotEvidence` | `use gemini_adk_fluent_rs::state::*;` |
 /// | Full flow vocabulary (`CompiledFlow`, `StepAction`, `Violation`, …) | `use gemini_adk_fluent_rs::flow::*;` |
-/// | Agent trait + operator/pattern internals | `use gemini_adk_fluent_rs::agents::*;` |
+/// | `Agent` trait + operator/pattern internals | `use gemini_adk_fluent_rs::agents::*;` |
 /// | Conversation compiler (`Conversation`, `ConversationSpec`, …) | `use gemini_adk_fluent_rs::conversation::*;` |
 /// | A2A, motifs, policy, simulation, testing, orchestration, credentials, run_config | the same-named module, e.g. `use gemini_adk_fluent_rs::simulation::*;` |
 /// | Raw L0 wire types | `use gemini_adk_fluent_rs::wire::*;` |
@@ -169,7 +185,7 @@ pub mod prelude {
 
     // ── Builders, composition algebra, operators, patterns (headline DX) ──
     pub use crate::builder::*;
-    pub use crate::compose::{Ctx, A, C, E, G, M, P, S, T};
+    pub use crate::compose::{A, C, Ctx, E, G, M, P, S, T};
     pub use crate::live::Live;
     // Dynamic instructions (ADK instruction-provider pattern) + tool media.
     pub use crate::operators::*;
@@ -180,23 +196,20 @@ pub mod prelude {
     pub use gemini_adk_rs::tool::media as tool_media;
     // Build-time validation DX (contract checking, data-flow inference, harness).
     pub use crate::testing::{
-        check_contracts, check_live, diagnose, infer_data_flow, AgentHarness, ContractViolation,
-        DataFlowEdge, LiveViolation,
+        AgentHarness, ContractViolation, DataFlowEdge, LiveViolation, check_contracts, check_live,
+        diagnose, infer_data_flow,
     };
 
-    // The L1 `gemini_adk_rs::agent::Agent` *trait* collides with the L2 `Agent`
-    // type alias (= AgentBuilder), so it is re-exported under the disambiguated
-    // name `AgentTrait` (also available at `gemini_adk_fluent_rs::agents::AgentTrait`).
+    // The L1 `Agent` trait (`name()` + `run_live()`); the L2 builder is
+    // `AgentBuilder`, so the two names never collide.
     #[doc(inline)]
-    pub use gemini_adk_rs::agent::Agent as AgentTrait;
+    pub use gemini_adk_rs::agent::Agent;
 
     // ── Errors ──
-    pub use gemini_adk_rs::error::{AgentError, AgentResult, ToolError};
+    pub use gemini_adk_rs::error::{AgentError, AgentResult, ConfigError, ToolError};
 
     // ── Governed flow (core vocabulary; full set in `crate::flow`) ──
-    pub use gemini_adk_rs::flow::{
-        Enforcement as FlowMode, Flow, FlowMonitor, Guard, ToolPolicy, Verdict,
-    };
+    pub use gemini_adk_rs::flow::{Enforcement, Flow, FlowMonitor, Guard, Verdict};
 
     // ── State (prefix scopes + `SlotEvidence` in `crate::state`) ──
     pub use gemini_adk_rs::state::{State, StateKey};
@@ -205,7 +218,9 @@ pub mod prelude {
     pub use gemini_adk_rs::llm::{BaseLlm, GeminiLlm, GeminiLlmParams};
 
     // ── Tools ──
-    pub use gemini_adk_rs::tool::{SimpleTool, ToolDispatcher, ToolFunction, TypedTool};
+    pub use gemini_adk_rs::tool::{
+        SimpleTool, ToolDispatcher, ToolFunction, ToolPolicy, TypedTool,
+    };
     // The `#[tool]` attribute macro — turns an `async fn` into a registrable tool.
     pub use gemini_adk_rs::tool;
     // Brings in both the `Extract` struct and the `#[derive(Extract)]` macro.
@@ -219,8 +234,8 @@ pub mod prelude {
     // ── Common Live session types (full control plane in `crate::live`) ──
     pub use gemini_adk_rs::live::{
         ContextDelivery, EventCallbacks, ExtractionTrigger, FsPersistence, LiveHandle,
-        LlmExtractor, MemoryPersistence, RepairConfig, SessionPersistence, SoftTurnDetector,
-        SteeringMode, TranscriptBuffer, TranscriptTurn, TurnExtractor,
+        LlmExtractor, MemoryPersistence, PersistenceError, RepairConfig, SessionPersistence,
+        SoftTurnDetector, SteeringMode, TranscriptBuffer, TranscriptTurn, TurnExtractor,
     };
 
     // ── Text-agent combinators (runtime details in `crate::text`) ──
@@ -231,6 +246,6 @@ pub mod prelude {
         TimeoutTextAgent,
     };
 
-    // ── L0 wire protocol (GeminiModel, Voice, Content, Part, Role, …) ──
+    // ── L0 wire protocol (ModelId, Voice, Content, Part, Role, …) ──
     pub use gemini_genai_rs::prelude::*;
 }

@@ -21,7 +21,7 @@ use super::handle::LiveHandle;
 use super::needs::{NeedsFulfillment, RepairConfig};
 use super::persistence::SessionPersistence;
 use super::phase::PhaseMachine;
-use super::processor::{spawn_event_processor, spawn_telemetry_lane, ControlPlaneConfig};
+use super::processor::{ControlPlaneConfig, spawn_event_processor, spawn_telemetry_lane};
 use super::session_signals::SessionSignals;
 use super::soft_turn::SoftTurnDetector;
 use super::steering::{ContextDelivery, SteeringMode};
@@ -127,7 +127,7 @@ impl LiveSessionBuilder {
     /// If not set, a new State is created at connect time. Use this when
     /// the State needs to be shared with tools or other components before
     /// the session connects.
-    pub fn with_state(mut self, state: State) -> Self {
+    pub fn state(mut self, state: State) -> Self {
         self.state = Some(state);
         self
     }
@@ -289,7 +289,7 @@ impl LiveSessionBuilder {
         // the rest of the plan can be moved into the runtime stage).
         let config = plan.config.take().expect("plan always carries a config");
         let session = ConnectBuilder::new(config)
-            .build()
+            .connect()
             .await
             .map_err(AgentError::Session)?;
 
@@ -328,10 +328,10 @@ impl LiveSessionBuilder {
     pub(crate) fn into_plan(self) -> Result<SessionPlan, AgentError> {
         // Build-time validations
         if let Some(ref pm) = self.phase_machine {
-            pm.validate().map_err(AgentError::Config)?;
+            pm.validate()?;
         }
         if let Some(ref computed) = self.computed {
-            computed.validate().map_err(AgentError::Config)?;
+            computed.validate()?;
         }
 
         // Apply NON_BLOCKING behavior to tool declarations for background tools
@@ -480,7 +480,7 @@ pub(crate) struct SessionRuntime {
 /// telemetry handle — but does not spawn any lanes.
 pub(crate) fn build_runtime(plan: SessionPlan, session: SessionHandle) -> SessionRuntime {
     // Share the governed-flow monitor between the control lane (which
-    // advances it) and the LiveHandle (which snapshots explain/why_blocked).
+    // advances it) and the LiveHandle (which snapshots explain).
     let flow_monitor = plan.flow.map(crate::flow::FlowMonitor::into_shared);
     let mut callbacks = plan.callbacks;
     let on_usage_cb = callbacks.on_usage.take();
@@ -495,10 +495,10 @@ pub(crate) fn build_runtime(plan: SessionPlan, session: SessionHandle) -> Sessio
     // Store initial phase's `needs` metadata for ContextBuilder.
     if let Some(ref pm) = plan.phase_machine {
         let _ = state.session().set("phase", pm.current());
-        if let Some(phase) = pm.current_phase() {
-            if !phase.needs.is_empty() {
-                let _ = state.set("session:phase_needs", phase.needs.clone());
-            }
+        if let Some(phase) = pm.current_phase()
+            && !phase.needs.is_empty()
+        {
+            let _ = state.set("session:phase_needs", phase.needs.clone());
         }
     }
 
@@ -610,7 +610,7 @@ async fn wait_for_connect_failure(
     let mut last_error: Option<String> = None;
     loop {
         match events.recv().await {
-            Ok(SessionEvent::Error(msg)) => last_error = Some(msg),
+            Ok(SessionEvent::Error(err)) => last_error = Some(err.to_string()),
             Ok(SessionEvent::Disconnected(reason)) => {
                 let reason = reason.unwrap_or_else(|| "connection closed".to_string());
                 return match last_error {
@@ -674,20 +674,20 @@ pub(crate) async fn spawn_lanes(rt: SessionRuntime) -> Result<LiveHandle, AgentE
                     let tc = obj
                         .get("turn_count")
                         .or_else(|| obj.get("response_count"))
-                        .and_then(|v| v.as_u64())
+                        .and_then(serde_json::Value::as_u64)
                         .unwrap_or(0);
                     if tc > prev_turns {
                         let latency = obj
                             .get("last_response_latency_ms")
-                            .and_then(|v| v.as_u64())
+                            .and_then(serde_json::Value::as_u64)
                             .unwrap_or(0) as u32;
                         let prompt = obj
                             .get("prompt_token_count")
-                            .and_then(|v| v.as_u64())
+                            .and_then(serde_json::Value::as_u64)
                             .unwrap_or(0) as u32;
                         let response = obj
                             .get("response_token_count")
-                            .and_then(|v| v.as_u64())
+                            .and_then(serde_json::Value::as_u64)
                             .unwrap_or(0) as u32;
                         let _ = telem_tx.send(LiveEvent::TurnMetrics {
                             turn: tc as u32,

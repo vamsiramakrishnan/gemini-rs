@@ -29,12 +29,12 @@ use gemini_genai_rs::prelude::*;
 
 ```rust
 let agent = AgentBuilder::new("analyst")
-    .model(GeminiModel::Gemini2_0Flash)
+    .model(ModelId::FLASH_LATEST)   // optional: GeminiLlm defaults to GEMINI_TEXT_MODEL or this alias
     .instruction("Analyze the given topic")
     .temperature(0.3)
     .google_search()
     .thinking(2048)
-    .build(llm);
+    .build(llm)?;
 
 let result = agent.run(&state).await?;
 ```
@@ -45,12 +45,11 @@ Copy-on-write immutable builders -- every setter returns a new builder, original
 
 ```rust
 let handle = Live::builder()
-    .model(GeminiModel::Gemini2_0FlashLive)
     .voice(Voice::Kore)
     .instruction("You are a weather assistant")
     .greeting("Greet the user and ask how you can help.")
-    .tools(dispatcher)
-    .transcription(true, true)
+    .tools(get_weather() | T::google_search())   // any ToolFunction or a `T::` composite
+    .transcription()                              // both directions
     .on_audio(|data| playback_tx.send(data.clone()).ok())
     .on_text(|t| print!("{t}"))
     .on_interrupted(|| async { playback.flush().await })
@@ -62,6 +61,14 @@ handle.send_audio(pcm_bytes).await?;
 handle.send_text("Hello").await?;
 handle.disconnect().await?;
 ```
+
+**Boolean-setter rule** (every L2 builder): a capability that is *off by
+default* is enabled by a no-argument verb (`.transcription()`,
+`.session_resume()`, `.affective_dialog()`, `.proactive_audio()`,
+`.include_thoughts()`, `.prompt_on_enter()`); one that is *on by default* is
+disabled by `no_<x>()` (`.no_tool_advisory()`). `Live::tools(..)` takes a
+`T::` composite or any single `ToolFunction`; `Live::dispatcher(..)` takes a
+`ToolDispatcher` you built yourself.
 
 ### Tool Definition
 
@@ -99,7 +106,7 @@ let tool = TypedTool::new::<WeatherArgs>(
 
 ```rust
 Live::builder()
-    .with_tools(
+    .tools(
         T::simple("get_weather", "Get weather", |args| async move {
             Ok(json!({"temp": 22}))
         })
@@ -115,7 +122,8 @@ let state = State::new();
 
 // Basic get/set with automatic serde serialization
 state.set("name", "Alice");
-let name: Option<String> = state.get("name");
+let name: Option<String> = state.get("name");          // lenient: wrong type reads as None
+let name: Option<String> = state.try_get("name")?;     // strict: StateError::WrongType if mistyped
 
 // Atomic read-modify-write
 let count = state.modify("count", 0u32, |n| n + 1);
@@ -174,9 +182,9 @@ Live::builder()
     .initial_phase("greeting")
     // Phase defaults inherited by all phases
     .phase_defaults(|p| {
-        p.with_state(&["emotional_state", "risk_level"])
+        p.show_state(&["emotional_state", "risk_level"])
          .when(|s| s.get::<String>("risk").unwrap_or_default() == "high", "Show extra empathy.")
-         .prompt_on_enter(true)
+         .prompt_on_enter()
     })
 ```
 
@@ -187,7 +195,6 @@ Live::builder()
 struct OrderState { items: Vec<String>, phase: String }
 
 let handle = Live::builder()
-    .model(GeminiModel::Gemini2_0FlashLive)
     .instruction("Restaurant order assistant")
     .extract_turns::<OrderState>(flash_llm, "Extract order items and phase")
     .on_extracted(|name, value| async move { println!("{name}: {value}"); })
@@ -218,7 +225,7 @@ let converge = AgentBuilder::new("iterate") * until(|v| v["done"].as_bool().unwr
 let robust = AgentBuilder::new("primary") / AgentBuilder::new("fallback");
 
 // Compile and run
-let agent = pipeline.compile(llm);
+let agent = pipeline.compile(llm)?;
 let result = agent.run(&state).await?;
 ```
 
@@ -246,7 +253,7 @@ Live::builder()
 ```rust
 let verifier = AgentBuilder::new("verifier")
     .instruction("Verify caller identity")
-    .build(llm.clone());
+    .build(llm.clone())?;
 
 Live::builder()
     .agent_tool("verify_identity", "Verify caller identity", verifier)
@@ -262,7 +269,7 @@ Six namespaces for composing agent configuration aspects:
 | `S::` | `>>` | State transforms | `pick`, `rename`, `merge`, `flatten`, `set`, `defaults`, `drop`, `map`, `is_true`, `eq`, `one_of` |
 | `C::` | `+` | Context engineering | `window`, `user_only`, `model_only`, `head`, `sample`, `truncate`, `exclude_tools`, `prepend`, `append`, `from_state`, `dedup`, `empty`, `filter`, `map` |
 | `T::` | `\|` | Tool composition | `simple`, `function`, `google_search`, `url_context`, `code_execution`, `toolset` |
-| `P::` | `+` | Prompt composition | `role`, `task`, `constraint`, `format`, `example`, `text`, `context`, `persona`, `guidelines`, `with_state`, `when`, `context_fn` |
+| `P::` | `+` | Prompt composition | `role`, `task`, `constraint`, `format`, `example`, `text`, `context`, `persona`, `guidelines`, `show_state`, `when`, `context_fn` |
 | `M::` | `\|` | Middleware composition | (reserved) |
 | `A::` | `+` | Artifact schemas | `output`, `input`, `json_output`, `json_input`, `text_output`, `text_input` |
 
@@ -299,9 +306,9 @@ let artifacts = A::json_output("report", "Analysis report")
 | `SessionHandle` | Connected session -- implements `SessionWriter` + `SessionReader` |
 | `SessionWriter` | Trait: send audio/text/video/tool responses |
 | `SessionReader` | Trait: subscribe to events |
-| `ConnectBuilder` | Ergonomic `ConnectBuilder::new(config).build()` |
+| `connect` / `ConnectBuilder` | `connect(config).await` for the default transport; `ConnectBuilder::new(config).transport_config(..).transport(..).codec(..).connect().await` when you need options |
 | `Content` / `Part` / `Role` | Wire-format message types with builders (`Content::user()`, `Part::text()`) |
-| `GeminiModel` | Enum of available models |
+| `ModelId` | Model identifier newtype: `ModelId::new("…")`, `"…".into()`, or the constants `LIVE_2_5_FLASH_NATIVE_AUDIO` (Vertex GA), `FLASH_2_5_NATIVE_AUDIO_LATEST` (Google AI alias), `FLASH_LATEST` (text). Leave `SessionConfig.model` as `None` and connect resolves `ModelId::live_default(vertex)` |
 | `Voice` | Output voice selection |
 | `Tool` / `FunctionDeclaration` | Tool declarations for setup message |
 | `FunctionCall` / `FunctionResponse` | Tool call/response wire types |
@@ -309,10 +316,10 @@ let artifacts = A::json_output("report", "Analysis report")
 | `Transport` / `TungsteniteTransport` | WebSocket transport trait + default impl |
 | `Codec` / `JsonCodec` | Message encoding trait + default impl |
 | `AuthProvider` / `VertexAIAuth` / `GoogleAIAuth` | Authentication providers |
-| `Platform` | GoogleAI vs VertexAI URL/version logic |
+| `AccessToken` | Bearer credential for Vertex: `Static(String)` or `Dynamic(closure)` re-read on every (re)connect; `Debug` redacts it |
 | `VadConfig` / `VoiceActivityDetector` | Voice activity detection |
 | `SpscRing` / `AudioJitterBuffer` | Lock-free audio buffers |
-| `ApiEndpoint` | Connection endpoint configuration |
+| `ApiEndpoint` | Connection endpoint configuration (Google AI vs Vertex AI host, API version, credentials; `Debug` redacts secrets) |
 
 ### L1 (gemini-adk-rs) -- Agent Runtime
 
@@ -381,7 +388,7 @@ cargo build -p gemini-genai-rs --features "vad,generate,tokens"
 
 ## Best Practices
 
-- Import from `gemini_adk_fluent_rs::prelude::*` for application code -- it re-exports all three layers.
+- Import from `gemini_adk_fluent_rs::prelude::*` for application code -- it is a kernel (the ~40 types most applications touch, plus the L0 wire prelude); the rest lives one `use gemini_adk_fluent_rs::{live, text, tools, …}::*` away.
 - Use `TypedTool` over `SimpleTool` when possible -- auto-generated schemas prevent drift.
 - Use `State::modify()` for atomic read-modify-write instead of separate `get()` + `set()`.
 - Use `StateKey<T>` constants for frequently accessed keys to prevent typos.
@@ -394,15 +401,16 @@ cargo build -p gemini-genai-rs --features "vad,generate,tokens"
 
 ## Common Mistakes
 
-- **Wrong audio model**: Native audio model (`Gemini2_0FlashLive`) only supports `Modality::Audio` output, NOT `Modality::Text`. Use `.text_only()` for text-only mode with `Gemini2_0FlashLive`.
+- **Wrong audio model**: The native-audio Live models only support `Modality::Audio` output, NOT `Modality::Text`. Use `.text_only()` for text-only mode.
+- **Feature flags gate real work**: `gemini-adk-fluent-rs` and `gemini-adk-rs` ship `default = ["tls-native", "gemini-llm"]`, so text generation works out of the box; with `--no-default-features` `GeminiLlm` compiles but errors at runtime until `gemini-llm` is re-enabled. `talk()` needs `voice-io` (opt-in; Linux needs `libasound2-dev`) — without it there is no `talk()` method on the handle. Typed tools need `schemars = "0.8"`, not 1.x.
 - **Vertex AI binary frames**: Vertex AI sends Binary WebSocket frames (not Text) -- handled automatically by `TungsteniteTransport`.
 - **Vertex AI endpoint**: Use `wss://aiplatform.googleapis.com/...` (NOT `global-aiplatform.googleapis.com`).
-- **API versions**: Google AI = `v1beta`, Vertex AI = `v1beta1` -- handled by `Platform` enum.
+- **API versions**: Google AI = `v1beta`, Vertex AI = `v1beta1` -- handled by `ApiEndpoint`.
 - **Cannot update tool definitions mid-session**: Voice sessions only allow instruction updates. Tool declarations are fixed at connect time.
 - **Fast lane callbacks must be sync and under 1ms**: No allocations, no locks, no async in `on_audio`, `on_text`, `on_vad_*`.
 - **Forgetting `.done()`**: Phase builder chains must end with `.done()` to return to the `Live` builder.
 - **Forgetting `.initial_phase()`**: Phase machine requires an explicit initial phase name.
-- **Using `instruction_template` with phases**: Template replaces the entire instruction -- use `instruction_amendment` or phase modifiers (`P::with_state`, `P::when`) for additive composition.
+- **Using `instruction_template` with phases**: Template replaces the entire instruction -- use `instruction_amendment` or phase modifiers (`P::show_state`, `P::when`) for additive composition.
 - **State prefix tax**: `state.get("risk")` auto-falls back to `derived:risk` -- no need to manually check both.
 
 ## Workspace Structure

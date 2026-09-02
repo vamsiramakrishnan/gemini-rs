@@ -10,8 +10,8 @@ use chrono::{DateTime, Duration, Utc};
 use std::collections::HashMap;
 
 use super::plan::{RetrievalEntity, RetrievalIntent, RetrievalPlan, TemporalConstraint};
-use crate::bm25::{tokenize, MemoryIndex};
-use crate::core::{normalize_token, stable_hash, CanonicalPredicate, MemoryKind, PlanId, TurnId};
+use crate::bm25::{MemoryIndex, tokenize};
+use crate::core::{CanonicalPredicate, MemoryKind, PlanId, TurnId, normalize_token, stable_hash};
 
 /// A signal the rules recognised in the transcript.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -699,10 +699,11 @@ mod tests {
     fn several_independent_queries_are_produced_for_fusion() {
         let plan = plan_for("what restaurants does Rhea like");
         assert!(plan.lexical_queries.len() >= 2);
-        assert!(plan
-            .lexical_queries
-            .iter()
-            .any(|q| q.contains("rhea") || q.to_lowercase().contains("rhea")));
+        assert!(
+            plan.lexical_queries
+                .iter()
+                .any(|q| q.contains("rhea") || q.to_lowercase().contains("rhea"))
+        );
     }
 
     #[test]
@@ -770,13 +771,17 @@ mod tests {
         known.insert("ann", "ann");
         let planner = DeterministicPlanner::with_entities(known);
         // "annoying" must not match the entity "ann".
-        assert!(!planner
-            .signals("that was annoying")
-            .iter()
-            .any(|s| matches!(s, RetrievalSignal::KnownEntity(_))));
-        assert!(planner
-            .signals("ann called")
-            .iter()
-            .any(|s| matches!(s, RetrievalSignal::KnownEntity(_))));
+        assert!(
+            !planner
+                .signals("that was annoying")
+                .iter()
+                .any(|s| matches!(s, RetrievalSignal::KnownEntity(_)))
+        );
+        assert!(
+            planner
+                .signals("ann called")
+                .iter()
+                .any(|s| matches!(s, RetrievalSignal::KnownEntity(_)))
+        );
     }
 }

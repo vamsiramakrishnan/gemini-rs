@@ -10,34 +10,29 @@ use tokio::sync::{broadcast, mpsc, watch};
 
 use crate::protocol::types::*;
 use crate::session::{SessionHandle, SessionPhase, SessionState};
+use crate::transport::TransportConfig;
 use crate::transport::codec::{Codec, JsonCodec};
 use crate::transport::ws::{Transport, TungsteniteTransport};
-use crate::transport::TransportConfig;
 
-/// Connect to the Gemini Multimodal Live API and return a session handle.
+/// Connect to the Gemini Multimodal Live API with the default transport and
+/// return a session handle.
 ///
-/// This is the main entry point. It uses the default [`TungsteniteTransport`]
-/// and [`JsonCodec`]. For custom transports or codecs (e.g. testing with
-/// [`MockTransport`](crate::transport::ws::MockTransport)), use [`connect_with`].
-pub async fn connect(
-    config: SessionConfig,
-    transport_config: TransportConfig,
-) -> Result<SessionHandle, crate::session::SessionError> {
+/// Timeouts, reconnection, a custom transport or codec, or a wire recorder:
+/// [`ConnectBuilder`](crate::transport::ConnectBuilder), of which this is the
+/// zero-option form.
+pub async fn connect(config: SessionConfig) -> Result<SessionHandle, crate::session::SessionError> {
     connect_with(
         config,
-        transport_config,
+        TransportConfig::default(),
         TungsteniteTransport::new(),
         JsonCodec,
     )
     .await
 }
 
-/// Connect with a custom transport and codec.
-///
-/// This is the generic entry point that accepts any [`Transport`] + [`Codec`]
-/// implementation. The default [`connect`] delegates here with
-/// [`TungsteniteTransport`] and [`JsonCodec`].
-pub async fn connect_with<T, C>(
+/// Connect with an explicit transport config, transport, and codec — the
+/// one path every public entry point ends in.
+pub(crate) async fn connect_with<T, C>(
     config: SessionConfig,
     transport_config: TransportConfig,
     transport: T,
@@ -99,7 +94,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::message_handler::{handle_server_msg, MessageAction};
+    use super::message_handler::{MessageAction, handle_server_msg};
     use super::reconnect::reconnect_delay;
     use super::*;
 
@@ -131,7 +126,8 @@ mod tests {
                 .to_vec(),
         );
 
-        let config = SessionConfig::new("test-key").model(GeminiModel::Gemini2_0FlashLive);
+        let config = SessionConfig::new("test-key")
+            .model(ModelId::from_static("models/gemini-2.0-flash-live-001"));
 
         let handle = connect_with(config, no_reconnect_config(), transport, JsonCodec)
             .await
@@ -151,7 +147,8 @@ mod tests {
                 .to_vec(),
         );
 
-        let config = SessionConfig::new("test-key").model(GeminiModel::Gemini2_0FlashLive);
+        let config = SessionConfig::new("test-key")
+            .model(ModelId::from_static("models/gemini-2.0-flash-live-001"));
         let handle = connect_with(config, no_reconnect_config(), transport, JsonCodec)
             .await
             .unwrap();
@@ -200,7 +197,8 @@ mod tests {
                 .to_vec(),
         );
 
-        let config = SessionConfig::new("test-key").model(GeminiModel::Gemini2_0FlashLive);
+        let config = SessionConfig::new("test-key")
+            .model(ModelId::from_static("models/gemini-2.0-flash-live-001"));
         let handle = connect_with(config, no_reconnect_config(), transport, JsonCodec)
             .await
             .unwrap();
@@ -237,7 +235,8 @@ mod tests {
                 .to_vec(),
         );
 
-        let config = SessionConfig::new("test-key").model(GeminiModel::Gemini2_0FlashLive);
+        let config = SessionConfig::new("test-key")
+            .model(ModelId::from_static("models/gemini-2.0-flash-live-001"));
         let handle = connect_with(config, no_reconnect_config(), transport, JsonCodec)
             .await
             .unwrap();
@@ -306,7 +305,8 @@ mod tests {
         let mut transport = MockTransport::new();
         transport.script_recv(br#"{"setupComplete":{}}"#.to_vec());
 
-        let config = SessionConfig::new("test-key").model(GeminiModel::Gemini2_0FlashLive);
+        let config = SessionConfig::new("test-key")
+            .model(ModelId::from_static("models/gemini-2.0-flash-live-001"));
         let handle = connect_with(config, no_reconnect_config(), transport, JsonCodec)
             .await
             .unwrap();
@@ -327,7 +327,8 @@ mod tests {
         let mut transport = MockTransport::new();
         transport.script_recv(br#"{"setupComplete":{}}"#.to_vec());
 
-        let config = SessionConfig::new("test-key").model(GeminiModel::Gemini2_0FlashLive);
+        let config = SessionConfig::new("test-key")
+            .model(ModelId::from_static("models/gemini-2.0-flash-live-001"));
         let handle = connect_with(config, no_reconnect_config(), transport, JsonCodec)
             .await
             .unwrap();

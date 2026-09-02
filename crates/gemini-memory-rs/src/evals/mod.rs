@@ -11,6 +11,6 @@ pub mod harness;
 pub mod metrics;
 
 pub use fixtures::{
-    corpus, eval_user, ingestion_cases, retrieval_cases, IngestionCase, RetrievalCase,
+    IngestionCase, RetrievalCase, corpus, eval_user, ingestion_cases, retrieval_cases,
 };
-pub use harness::{run_ingestion_eval, run_retrieval_eval, IngestionReport, RetrievalReport};
+pub use harness::{IngestionReport, RetrievalReport, run_ingestion_eval, run_retrieval_eval};

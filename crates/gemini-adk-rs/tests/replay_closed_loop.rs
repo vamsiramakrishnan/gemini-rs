@@ -39,15 +39,14 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use gemini_adk_rs::live::replay::{collect_events_until_idle, replay_session};
 use gemini_adk_rs::live::{LiveEvent, LiveSessionBuilder};
 use gemini_adk_rs::state::{MemoryJournalSink, State, StateMutation, StateMutationOrigin};
 use gemini_adk_rs::tool::{SimpleTool, ToolDispatcher};
-use gemini_genai_rs::prelude::{
-    GeminiModel, MemoryWireRecorder, SessionConfig, WireDirection, WireEntry,
-};
+use gemini_genai_rs::prelude::{ModelId, SessionConfig};
+use gemini_genai_rs::transport::{MemoryWireRecorder, WireDirection, WireEntry};
 
 /// Handcrafted "server" script: setup handshake, a greeting turn, a tool
 /// call, and the post-tool answer turn.
@@ -113,14 +112,14 @@ async fn run_session(
     let sink = Arc::new(MemoryJournalSink::new());
     state.set_journal_sink(sink.clone());
 
-    let mut config = SessionConfig::new("test-key").model(GeminiModel::Gemini2_0FlashLive);
+    let mut config = SessionConfig::new("test-key").model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO);
     if let Some(rec) = recorder {
         config = config.record_wire(rec);
     }
 
     let builder = LiveSessionBuilder::new(config.clone())
         .dispatcher(weather_dispatcher(state.clone()))
-        .with_state(state.clone());
+        .state(state.clone());
 
     let replay = replay_session(config, builder, entries)
         .await
@@ -329,11 +328,15 @@ async fn closed_loop_record_then_replay_through_real_processor() {
         "tool response differs between record and replay"
     );
     // User-originated text is recorded but, by design, not regenerated.
-    assert!(recorded_outbound
-        .iter()
-        .any(|e| String::from_utf8_lossy(&e.payload).contains("What's the weather")));
-    assert!(!replayed
-        .outbound
-        .iter()
-        .any(|f| String::from_utf8_lossy(f).contains("What's the weather")));
+    assert!(
+        recorded_outbound
+            .iter()
+            .any(|e| String::from_utf8_lossy(&e.payload).contains("What's the weather"))
+    );
+    assert!(
+        !replayed
+            .outbound
+            .iter()
+            .any(|f| String::from_utf8_lossy(f).contains("What's the weather"))
+    );
 }

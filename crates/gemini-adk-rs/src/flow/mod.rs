@@ -8,7 +8,7 @@
 //! the session trace, **projects** active steps' postures into turn-boundary
 //! steering, and **enforces** ordering by admitting/denying tool calls.
 //!
-//! The vocabulary is deliberately closed (see the crate docs / RFC): the only
+//! The vocabulary is deliberately closed: the only
 //! nouns are `Flow`, `Step`, `Guard`, `Posture`, `Marking`, `Verdict`. Words
 //! like *phase*, *transition*, *watch*, *needs* are lowering details and never
 //! appear here.
@@ -24,7 +24,8 @@ use std::sync::Arc;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 
-use crate::orchestration::{call, Mode as AgentMode};
+use crate::error::ConfigError;
+use crate::orchestration::{AgentMode, call_agent};
 use crate::state::State;
 use crate::text::TextAgent;
 
@@ -437,7 +438,7 @@ impl schemars::JsonSchema for Guard {
     fn schema_name() -> String {
         "Guard".to_string()
     }
-    fn json_schema(generator: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+    fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
         generator.subschema_for::<Pred>()
     }
 }
@@ -530,7 +531,7 @@ impl schemars::JsonSchema for Edge {
     fn schema_name() -> String {
         "Edge".to_string()
     }
-    fn json_schema(generator: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+    fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
         #[derive(schemars::JsonSchema)]
         #[serde(untagged)]
         #[allow(dead_code)]
@@ -667,8 +668,9 @@ impl Flow {
         self.steps.iter().find(|s| s.id == id)
     }
 
-    /// Validate referential integrity and acyclicity.
-    pub fn validate(&self) -> Result<(), Vec<String>> {
+    /// Validate referential integrity and acyclicity. Every problem found is
+    /// reported in the returned [`ConfigError`], not just the first.
+    pub fn validate(&self) -> Result<(), ConfigError> {
         let mut errs = Vec::new();
         let ids: BTreeSet<&str> = self.steps.iter().map(|s| s.id.as_str()).collect();
         if ids.len() != self.steps.len() {
@@ -745,15 +747,11 @@ impl Flow {
         if self.has_cycle() {
             errs.push("flow dependency graph has a cycle (must be a DAG)".into());
         }
-        if errs.is_empty() {
-            Ok(())
-        } else {
-            Err(errs)
-        }
+        ConfigError::from_issues(errs)
     }
 
     /// Every tool name referenced anywhere in the flow (allow/deny/once/
-    /// never_until/confirm). The universe over which [`ToolPolicy`] reasons.
+    /// never_until/confirm). The universe over which [`ToolSurface`] reasons.
     fn tool_universe(&self) -> BTreeSet<String> {
         let mut tools = BTreeSet::new();
         for s in &self.steps {
@@ -821,10 +819,11 @@ impl Flow {
             }
         }
         for c in &self.constraints {
-            if let Constraint::Before(a, b) = c {
-                if ids.contains(a.as_str()) && ids.contains(b.as_str()) {
-                    succ.entry(a.as_str()).or_default().push(b.as_str());
-                }
+            if let Constraint::Before(a, b) = c
+                && ids.contains(a.as_str())
+                && ids.contains(b.as_str())
+            {
+                succ.entry(a.as_str()).or_default().push(b.as_str());
             }
         }
         let roots: Vec<&str> = self
@@ -836,10 +835,10 @@ impl Flow {
         let mut seen = BTreeSet::new();
         let mut stack = roots;
         while let Some(id) = stack.pop() {
-            if seen.insert(id.to_string()) {
-                if let Some(next) = succ.get(id) {
-                    stack.extend(next.iter().copied());
-                }
+            if seen.insert(id.to_string())
+                && let Some(next) = succ.get(id)
+            {
+                stack.extend(next.iter().copied());
             }
         }
         seen
@@ -854,7 +853,7 @@ impl Flow {
     /// confirm-before-commit contract), `never…until` guards whose `done(step)`
     /// atoms reference unknown steps (unsatisfiable — the tool would be forbidden
     /// forever), and ordering cycles across the combined `after` + `before` edges
-    /// (which deadlock every step on the cycle). Precomputes the [`ToolPolicy`]
+    /// (which deadlock every step on the cycle). Precomputes the [`ToolSurface`]
     /// universe.
     ///
     /// To additionally validate tool names against a known registry, use
@@ -881,8 +880,8 @@ impl Flow {
 
     fn compile_internal(self, registry: Option<&[&str]>) -> Result<CompiledFlow, FlowErrors> {
         let mut errors = Vec::new();
-        if let Err(errs) = self.validate() {
-            errors.extend(errs.into_iter().map(FlowError::Invalid));
+        if let Err(err) = self.validate() {
+            errors.extend(err.issues.into_iter().map(FlowError::Invalid));
         }
 
         // Graph-shape checks (only meaningful once the graph is acyclic/valid).
@@ -945,10 +944,13 @@ impl Flow {
         }
 
         if errors.is_empty() {
-            let policy = ToolPolicy {
+            let surface = ToolSurface {
                 tools: self.tool_universe(),
             };
-            Ok(CompiledFlow { flow: self, policy })
+            Ok(CompiledFlow {
+                flow: self,
+                surface,
+            })
         } else {
             Err(FlowErrors(errors))
         }
@@ -982,7 +984,12 @@ impl Flow {
                 match color.get(d).copied() {
                     Some(1) => {
                         let start = path.iter().position(|p| p == d).unwrap_or(0);
-                        return Some(path[start..].iter().map(|s| s.to_string()).collect());
+                        return Some(
+                            path[start..]
+                                .iter()
+                                .map(std::string::ToString::to_string)
+                                .collect(),
+                        );
                     }
                     Some(2) => {}
                     _ => {
@@ -1100,9 +1107,8 @@ pub struct Violation {
 
 /// How a [`FlowMonitor`] treats off-path activity — enforcement vs observation.
 ///
-/// Renamed from `Mode` to remove the collision with
-/// [`orchestration::Mode`](crate::orchestration::Mode) (`Call`/`Dispatch`/
-/// `Background`), which is the unrelated *resolver execution discipline*.
+/// Distinct from [`AgentMode`], which is the unrelated *resolver execution
+/// discipline* (`Call`/`Dispatch`/`Background`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Enforcement {
     /// Block inadmissible tool calls and steer back on-path.
@@ -1112,12 +1118,8 @@ pub enum Enforcement {
     Observe,
 }
 
-/// Deprecated alias for [`Enforcement`], kept for one release.
-#[deprecated(note = "renamed to `Enforcement` to avoid colliding with orchestration::Mode")]
-pub type Mode = Enforcement;
-
 /// An action fired the first time a step becomes active: run an agent in an
-/// [`AgentMode`]. Built with [`run`]. The result lands in `{name}:result` (the
+/// [`AgentMode`]. Built with [`on_enter`]. The result lands in `{name}:result` (the
 /// name defaults to the step id), so a *downstream* step can complete on it via
 /// [`Guard::resolved`] — this is how a flow drives orchestration in-session.
 #[derive(Clone)]
@@ -1132,9 +1134,9 @@ pub struct StepAction {
 ///
 /// ```ignore
 /// let mon = FlowMonitor::new(flow, Enforcement::Enforce)
-///     .on_enter("check", run(availability_agent, AgentMode::Dispatch));
+///     .on_enter("check", on_enter(availability_agent, AgentMode::Dispatch));
 /// ```
-pub fn run(agent: Arc<dyn TextAgent>, mode: AgentMode) -> StepAction {
+pub fn on_enter(agent: Arc<dyn TextAgent>, mode: AgentMode) -> StepAction {
     StepAction {
         name: None,
         agent,
@@ -1155,13 +1157,13 @@ impl StepAction {
         let name = self.name.clone().unwrap_or_else(|| step_id.to_string());
         match self.mode {
             AgentMode::Call => {
-                let _ = call(&name, self.agent.clone(), state).await;
+                let _ = call_agent(&name, self.agent.clone(), state).await;
             }
             AgentMode::Dispatch | AgentMode::Background => {
                 let agent = self.agent.clone();
                 let state = state.clone();
                 tokio::spawn(async move {
-                    let _ = call(&name, agent, &state).await;
+                    let _ = call_agent(&name, agent, &state).await;
                 });
             }
         }
@@ -1170,7 +1172,7 @@ impl StepAction {
 
 /// A shared, lock-protected [`FlowMonitor`] — the form in which the Live
 /// control plane owns a governed flow, so runtime surfaces (e.g.
-/// [`LiveHandle::why_blocked`](crate::live::LiveHandle::why_blocked)) can
+/// [`LiveHandle::explain`](crate::live::LiveHandle::explain)) can
 /// snapshot it concurrently. All monitor methods are synchronous: lock
 /// briefly and never hold the guard across an `await`.
 pub type SharedFlowMonitor = Arc<parking_lot::Mutex<FlowMonitor>>;
@@ -1264,14 +1266,8 @@ impl FlowMonitor {
         }
     }
 
-    /// Why the flow is blocked right now — alias of [`explain`](Self::explain),
-    /// named for the common debugging question.
-    pub fn why_blocked(&self, state: &State) -> FlowExplanation {
-        self.explain(state)
-    }
-
     /// Attach an action fired the first time `step` becomes active (see
-    /// [`run`]). Chainable at construction time.
+    /// [`on_enter`](on_enter())). Chainable at construction time.
     pub fn on_enter(mut self, step: impl Into<String>, action: StepAction) -> Self {
         self.enter_actions.insert(step.into(), action);
         self
@@ -1541,10 +1537,10 @@ impl FlowMonitor {
         if self.marking.done.contains(step_id) {
             return Verdict::Done;
         }
-        if let Some(step) = self.flow.step(step_id) {
-            if self.eligible(step, state) {
-                return Verdict::Active;
-            }
+        if let Some(step) = self.flow.step(step_id)
+            && self.eligible(step, state)
+        {
+            return Verdict::Active;
         }
         // Skipped: a successor is done but this step never completed.
         let bypassed = self.flow.steps.iter().any(|s| {
@@ -1574,18 +1570,20 @@ impl FlowMonitor {
     fn admissibility(&self, tool: &str, state: &State) -> Result<(), Denial> {
         // 1. once(tool)
         for c in &self.flow.constraints {
-            if let Constraint::Once(t) = c {
-                if t == tool && self.marking.tool_ok.contains_key(tool) {
-                    return Err(Denial::OnceExhausted);
-                }
+            if let Constraint::Once(t) = c
+                && t == tool
+                && self.marking.tool_ok.contains_key(tool)
+            {
+                return Err(Denial::OnceExhausted);
             }
         }
         // 2. never(tool).until(guard)
         for c in &self.flow.constraints {
-            if let Constraint::NeverUntil { tool: t, until } = c {
-                if t == tool && !until.eval(&self.ctx(state)) {
-                    return Err(Denial::NotYet(until.describe()));
-                }
+            if let Constraint::NeverUntil { tool: t, until } = c
+                && t == tool
+                && !until.eval(&self.ctx(state))
+            {
+                return Err(Denial::NotYet(until.describe()));
             }
         }
         // 3. active allow/deny (whitelist while any active step restricts).
@@ -1678,13 +1676,13 @@ impl FlowMonitor {
     /// already gated via [`admits_tool`](Self::admits_tool); this records the
     /// call and, in Observe mode, logs a deviation if it was inadmissible.
     pub fn observe_tool(&mut self, tool: &str, ok: bool, state: &State) {
-        if self.mode == Enforcement::Observe {
-            if let Err(reason) = self.admits_tool(tool, state) {
-                self.violations.push(Violation {
-                    subject: tool.to_string(),
-                    reason,
-                });
-            }
+        if self.mode == Enforcement::Observe
+            && let Err(reason) = self.admits_tool(tool, state)
+        {
+            self.violations.push(Violation {
+                subject: tool.to_string(),
+                reason,
+            });
         }
         if ok {
             self.on_tool_ok(tool, state);
@@ -1785,15 +1783,18 @@ impl std::fmt::Display for FlowErrors {
 
 impl std::error::Error for FlowErrors {}
 
-/// The precomputed tool-gating surface of a compiled flow: every tool name the
-/// flow reasons about, so introspection can enumerate and explain decisions.
+/// The precomputed tool surface of a compiled flow: every tool name the flow
+/// reasons about (step `allow`/`deny`, `once`, `never…until`, confirm), so
+/// introspection can enumerate and explain gating decisions. Distinct from
+/// [`tool::ToolPolicy`](crate::tool::ToolPolicy), which is a per-tool runtime
+/// policy (timeout/cache/confirm).
 #[derive(Debug, Clone, Default)]
-pub struct ToolPolicy {
+pub struct ToolSurface {
     /// Every tool referenced anywhere in the flow.
     pub tools: BTreeSet<String>,
 }
 
-/// A validated [`Flow`] plus its precomputed [`ToolPolicy`].
+/// A validated [`Flow`] plus its precomputed [`ToolSurface`].
 ///
 /// Produced by [`Flow::compile`]. Holding one is proof the flow passed
 /// compilation, so the runtime never re-discovers structural errors. This is the
@@ -1801,7 +1802,7 @@ pub struct ToolPolicy {
 #[derive(Debug, Clone)]
 pub struct CompiledFlow {
     flow: Flow,
-    policy: ToolPolicy,
+    surface: ToolSurface,
 }
 
 impl CompiledFlow {
@@ -1809,9 +1810,9 @@ impl CompiledFlow {
     pub fn flow(&self) -> &Flow {
         &self.flow
     }
-    /// The precomputed tool policy.
-    pub fn tool_policy(&self) -> &ToolPolicy {
-        &self.policy
+    /// The precomputed tool surface.
+    pub fn tool_surface(&self) -> &ToolSurface {
+        &self.surface
     }
     /// Render the flow as a Mermaid diagram.
     pub fn to_mermaid(&self) -> String {
@@ -2029,7 +2030,7 @@ impl FlowBuilder {
     }
 
     /// Finalize and validate the flow.
-    pub fn build(self) -> Result<Flow, Vec<String>> {
+    pub fn build(self) -> Result<Flow, ConfigError> {
         let flow = Flow {
             steps: self.steps,
             constraints: self.constraints,
@@ -2379,8 +2380,8 @@ mod tests {
     fn compile_accepts_valid_flow_and_collects_tool_universe() {
         let compiled = debt_flow().compile().expect("valid flow compiles");
         // Tool universe spans allow/deny/once/never_until/confirm.
-        assert!(compiled.tool_policy().tools.contains("charge_card"));
-        assert!(compiled.tool_policy().tools.contains("lookup_account"));
+        assert!(compiled.tool_surface().tools.contains("charge_card"));
+        assert!(compiled.tool_surface().tools.contains("lookup_account"));
         let _ = FlowMonitor::compiled(compiled, Enforcement::Enforce);
     }
 
@@ -2420,10 +2421,11 @@ mod tests {
         let err = flow
             .compile()
             .expect_err("unguarded commit must fail to compile");
-        assert!(err
-            .0
-            .iter()
-            .any(|e| matches!(e, FlowError::UnguardedCommitTool(t) if t == "pay")));
+        assert!(
+            err.0
+                .iter()
+                .any(|e| matches!(e, FlowError::UnguardedCommitTool(t) if t == "pay"))
+        );
     }
 
     #[test]
@@ -2431,7 +2433,7 @@ mod tests {
         let compiled = debt_flow()
             .compile_with_tools(&["lookup_account", "charge_card", "unrelated_extra"])
             .expect("registry covers the flow's tool universe");
-        assert!(compiled.tool_policy().tools.contains("charge_card"));
+        assert!(compiled.tool_surface().tools.contains("charge_card"));
     }
 
     #[test]
@@ -2441,10 +2443,11 @@ mod tests {
         let err = debt_flow()
             .compile_with_tools(&["lookup_account"])
             .expect_err("dangling tool must fail to compile");
-        assert!(err
-            .0
-            .iter()
-            .any(|e| matches!(e, FlowError::UnknownTool(t) if t == "charge_card")));
+        assert!(
+            err.0
+                .iter()
+                .any(|e| matches!(e, FlowError::UnknownTool(t) if t == "charge_card"))
+        );
         // Plain compile() stays registry-agnostic.
         assert!(debt_flow().compile().is_ok());
     }
@@ -2501,8 +2504,6 @@ mod tests {
         // In the initial `verify` step, charge_card is blocked; explain says so.
         assert!(ex.blocked_tools.contains_key("charge_card"));
         assert!(ex.active.contains(&"verify".to_string()));
-        // why_blocked is the same view.
-        assert_eq!(mon.why_blocked(&state).blocked_tools, ex.blocked_tools);
     }
 
     #[test]
@@ -2623,7 +2624,7 @@ mod tests {
             .expect("valid flow");
 
         let mut mon = FlowMonitor::new(flow, Enforcement::Enforce)
-            .on_enter("check", run(Arc::new(WriteAgent), AgentMode::Call));
+            .on_enter("check", on_enter(Arc::new(WriteAgent), AgentMode::Call));
         let state = State::new();
 
         // Only `collect` is active at the start.

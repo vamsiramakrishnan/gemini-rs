@@ -24,6 +24,10 @@ let count: Option<u32> = state.get("turn_count");
 // Read with a default fallback
 let count: u32 = state.get("turn_count").unwrap_or(0);
 
+// `get` is lenient: a value that exists but is the wrong type reads as `None`.
+// `try_get` tells the two apart (`StateError::WrongType` names the key).
+let count: Option<u32> = state.try_get("turn_count")?;
+
 // Check existence
 if state.contains("customer_name") {
     // ...

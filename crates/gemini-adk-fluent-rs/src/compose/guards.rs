@@ -4,9 +4,9 @@
 //!
 //! ## Wiring
 //!
-//! A [`GComposite`] attached via `AgentBuilder::guard` is installed on the
+//! A [`GuardComposite`] attached via `AgentBuilder::guard` is installed on the
 //! compiled `LlmTextAgent` as an `after_model` middleware layer (see
-//! [`GComposite::into_middleware`]). Every model response is checked against
+//! [`GuardComposite::into_middleware`]). Every model response is checked against
 //! all guards; if any guard rejects the output the agent run fails with an
 //! [`AgentError`] enumerating the violations, vetoing the response.
 
@@ -17,11 +17,11 @@ use gemini_adk_rs::error::AgentError;
 use gemini_adk_rs::llm::{BaseLlm, LlmRequest, LlmResponse};
 use gemini_adk_rs::middleware::Middleware;
 
-use crate::compose::judge::{render_contents, LlmJudge};
+use crate::compose::judge::{LlmJudge, render_contents};
 
 /// A guard that validates agent output.
 #[derive(Clone)]
-pub struct GGuard {
+pub struct GuardRule {
     name: &'static str,
     kind: GuardKind,
 }
@@ -35,7 +35,7 @@ enum GuardKind {
     Judge(LlmJudge),
 }
 
-impl GGuard {
+impl GuardRule {
     fn new(
         name: &'static str,
         f: impl Fn(&str) -> Result<(), String> + Send + Sync + 'static,
@@ -59,7 +59,7 @@ impl GGuard {
     }
 
     /// Synchronously check the output. LLM-judge guards cannot run on the sync
-    /// path and always return `Ok(())` here — use [`GGuard::check_async`] (the
+    /// path and always return `Ok(())` here — use [`GuardRule::check_async`] (the
     /// guard middleware uses the async path).
     pub fn check(&self, output: &str) -> Result<(), String> {
         match &self.kind {
@@ -85,18 +85,20 @@ impl GGuard {
     }
 }
 
-impl std::fmt::Debug for GGuard {
+impl std::fmt::Debug for GuardRule {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("GGuard").field("name", &self.name).finish()
+        f.debug_struct("GuardRule")
+            .field("name", &self.name)
+            .finish()
     }
 }
 
 /// Compose two guards with `|`.
-impl std::ops::BitOr for GGuard {
-    type Output = GComposite;
+impl std::ops::BitOr for GuardRule {
+    type Output = GuardComposite;
 
-    fn bitor(self, rhs: GGuard) -> Self::Output {
-        GComposite {
+    fn bitor(self, rhs: GuardRule) -> Self::Output {
+        GuardComposite {
             guards: vec![self, rhs],
         }
     }
@@ -104,14 +106,15 @@ impl std::ops::BitOr for GGuard {
 
 /// A composite of guards — all must pass for output to be accepted.
 #[derive(Clone)]
-pub struct GComposite {
+#[non_exhaustive]
+pub struct GuardComposite {
     /// The guards in this composite.
-    pub guards: Vec<GGuard>,
+    pub guards: Vec<GuardRule>,
 }
 
-impl GComposite {
+impl GuardComposite {
     /// Check all guards against the output (sync path; LLM-judge guards are
-    /// skipped — see [`GComposite::check_all_async`]). Returns all violations.
+    /// skipped — see [`GuardComposite::check_all_async`]). Returns all violations.
     pub fn check_all(&self, output: &str) -> Vec<String> {
         self.guards
             .iter()
@@ -142,10 +145,10 @@ impl GComposite {
     }
 }
 
-impl std::ops::BitOr<GGuard> for GComposite {
-    type Output = GComposite;
+impl std::ops::BitOr<GuardRule> for GuardComposite {
+    type Output = GuardComposite;
 
-    fn bitor(mut self, rhs: GGuard) -> Self::Output {
+    fn bitor(mut self, rhs: GuardRule) -> Self::Output {
         self.guards.push(rhs);
         self
     }
@@ -153,15 +156,15 @@ impl std::ops::BitOr<GGuard> for GComposite {
 
 /// A single guard is a one-element composite, so `.guard(G::pii())` works
 /// without an explicit `| `.
-impl From<GGuard> for GComposite {
-    fn from(guard: GGuard) -> Self {
-        GComposite {
+impl From<GuardRule> for GuardComposite {
+    fn from(guard: GuardRule) -> Self {
+        GuardComposite {
             guards: vec![guard],
         }
     }
 }
 
-impl GComposite {
+impl GuardComposite {
     /// Adapt this guard composite into an `after_model` middleware layer that
     /// vetoes any model response failing one or more guards.
     pub fn into_middleware(self) -> Arc<dyn Middleware> {
@@ -169,9 +172,9 @@ impl GComposite {
     }
 }
 
-/// Middleware adapter that enforces a [`GComposite`] on every model response.
+/// Middleware adapter that enforces a [`GuardComposite`] on every model response.
 struct GuardMiddleware {
-    guards: GComposite,
+    guards: GuardComposite,
 }
 
 #[async_trait]
@@ -208,13 +211,13 @@ pub struct G;
 
 impl G {
     /// Length guard — output must be within bounds.
-    pub fn length(min: usize, max: usize) -> GGuard {
-        GGuard::new("length", move |output| {
+    pub fn length(min: usize, max: usize) -> GuardRule {
+        GuardRule::new("length", move |output| {
             let len = output.len();
             if len < min {
-                Err(format!("Output too short: {} < {}", len, min))
+                Err(format!("Output too short: {len} < {min}"))
             } else if len > max {
-                Err(format!("Output too long: {} > {}", len, max))
+                Err(format!("Output too long: {len} > {max}"))
             } else {
                 Ok(())
             }
@@ -222,12 +225,12 @@ impl G {
     }
 
     /// Regex guard — output must match (or not match) a pattern.
-    pub fn regex(pattern: &str) -> GGuard {
+    pub fn regex(pattern: &str) -> GuardRule {
         let pattern = pattern.to_string();
-        GGuard::new("regex", move |output| {
+        GuardRule::new("regex", move |output| {
             // Simple substring check — full regex requires the `regex` crate.
             if output.contains(&pattern) {
-                Err(format!("Output matches forbidden pattern: {}", pattern))
+                Err(format!("Output matches forbidden pattern: {pattern}"))
             } else {
                 Ok(())
             }
@@ -235,14 +238,13 @@ impl G {
     }
 
     /// Budget guard — output must not exceed a token estimate.
-    pub fn budget(max_tokens: usize) -> GGuard {
-        GGuard::new("budget", move |output| {
+    pub fn budget(max_tokens: usize) -> GuardRule {
+        GuardRule::new("budget", move |output| {
             // Rough estimate: 4 chars per token.
             let estimated_tokens = output.len() / 4;
             if estimated_tokens > max_tokens {
                 Err(format!(
-                    "Output exceeds token budget: ~{} > {}",
-                    estimated_tokens, max_tokens
+                    "Output exceeds token budget: ~{estimated_tokens} > {max_tokens}"
                 ))
             } else {
                 Ok(())
@@ -251,26 +253,17 @@ impl G {
     }
 
     /// JSON guard — output must be valid JSON.
-    pub fn json() -> GGuard {
-        GGuard::new("json", |output| {
+    pub fn json() -> GuardRule {
+        GuardRule::new("json", |output| {
             serde_json::from_str::<serde_json::Value>(output)
                 .map(|_| ())
-                .map_err(|e| format!("Invalid JSON: {}", e))
-        })
-    }
-
-    /// Max turns guard — placeholder for turn limit enforcement.
-    pub fn max_turns(n: u32) -> GGuard {
-        GGuard::new("max_turns", move |_output| {
-            // Turn counting happens at runtime, not at output validation.
-            let _ = n;
-            Ok(())
+                .map_err(|e| format!("Invalid JSON: {e}"))
         })
     }
 
     /// PII guard — checks for common PII patterns (email, phone).
-    pub fn pii() -> GGuard {
-        GGuard::new("pii", |output| {
+    pub fn pii() -> GuardRule {
+        GuardRule::new("pii", |output| {
             // Simple heuristic checks for common PII patterns.
             if output.contains('@') && output.contains('.') {
                 // Might be an email — flag it.
@@ -281,13 +274,13 @@ impl G {
     }
 
     /// Topic restriction guard — output must not mention denied topics.
-    pub fn topic(deny: &[&str]) -> GGuard {
+    pub fn topic(deny: &[&str]) -> GuardRule {
         let deny: Vec<String> = deny.iter().map(|s| s.to_lowercase()).collect();
-        GGuard::new("topic", move |output| {
+        GuardRule::new("topic", move |output| {
             let lower = output.to_lowercase();
             for topic in &deny {
                 if lower.contains(topic.as_str()) {
-                    return Err(format!("Output mentions denied topic: {}", topic));
+                    return Err(format!("Output mentions denied topic: {topic}"));
                 }
             }
             Ok(())
@@ -295,27 +288,8 @@ impl G {
     }
 
     /// Custom guard from a validation function.
-    pub fn custom(f: impl Fn(&str) -> Result<(), String> + Send + Sync + 'static) -> GGuard {
-        GGuard::new("custom", f)
-    }
-
-    /// Output guard — validates model output content via a predicate function.
-    pub fn output(f: impl Fn(&str) -> Result<(), String> + Send + Sync + 'static) -> GGuard {
-        GGuard::new("output", f)
-    }
-
-    /// Input guard — validates user input content via a predicate function.
-    pub fn input(f: impl Fn(&str) -> Result<(), String> + Send + Sync + 'static) -> GGuard {
-        GGuard::new("input", f)
-    }
-
-    /// Rate limiting guard — enforces a maximum number of checks per minute.
-    pub fn rate_limit(max_per_minute: u32) -> GGuard {
-        GGuard::new("rate_limit", move |_output| {
-            // Rate limiting is enforced at runtime by the processor.
-            let _ = max_per_minute;
-            Ok(())
-        })
+    pub fn custom(f: impl Fn(&str) -> Result<(), String> + Send + Sync + 'static) -> GuardRule {
+        GuardRule::new("custom", f)
     }
 
     /// Toxicity guard — flags toxic/abusive output using an LLM judge.
@@ -323,8 +297,8 @@ impl G {
     /// Vetoes the response if the judge model decides it contains toxic, hateful,
     /// harassing, sexual, or abusive content (mirrors ADK's safety evaluation,
     /// but runs locally against the provided judge LLM).
-    pub fn toxicity(judge: Arc<dyn BaseLlm>) -> GGuard {
-        GGuard::judge(
+    pub fn toxicity(judge: Arc<dyn BaseLlm>) -> GuardRule {
+        GuardRule::judge(
             "toxicity",
             LlmJudge::new(
                 judge,
@@ -338,8 +312,8 @@ impl G {
     ///
     /// The judge sees the model's input history as CONTEXT and vetoes the
     /// response if it makes factual claims not supported by that context.
-    pub fn grounded(judge: Arc<dyn BaseLlm>) -> GGuard {
-        GGuard::judge(
+    pub fn grounded(judge: Arc<dyn BaseLlm>) -> GuardRule {
+        GuardRule::judge(
             "grounded",
             LlmJudge::new(
                 judge,
@@ -351,8 +325,8 @@ impl G {
     }
 
     /// Hallucination guard — flags fabricated/unverifiable claims via an LLM judge.
-    pub fn hallucination(judge: Arc<dyn BaseLlm>) -> GGuard {
-        GGuard::judge(
+    pub fn hallucination(judge: Arc<dyn BaseLlm>) -> GuardRule {
+        GuardRule::judge(
             "hallucination",
             LlmJudge::new(
                 judge,
@@ -364,8 +338,11 @@ impl G {
     }
 
     /// Conditional guard — only applies `inner` when `predicate` returns true.
-    pub fn when(predicate: impl Fn(&str) -> bool + Send + Sync + 'static, inner: GGuard) -> GGuard {
-        GGuard::new("when", move |output| {
+    pub fn when(
+        predicate: impl Fn(&str) -> bool + Send + Sync + 'static,
+        inner: GuardRule,
+    ) -> GuardRule {
+        GuardRule::new("when", move |output| {
             if predicate(output) {
                 inner.check(output)
             } else {
@@ -379,18 +356,18 @@ impl G {
     /// `rubric` describes the condition that constitutes a *violation*; the judge
     /// model vetoes the response when that condition holds. Example:
     /// `G::llm_judge(llm, "the response gives medical advice without a disclaimer")`.
-    pub fn llm_judge(judge: Arc<dyn BaseLlm>, rubric: impl Into<String>) -> GGuard {
-        GGuard::judge("llm_judge", LlmJudge::new(judge, rubric))
+    pub fn llm_judge(judge: Arc<dyn BaseLlm>, rubric: impl Into<String>) -> GuardRule {
+        GuardRule::judge("llm_judge", LlmJudge::new(judge, rubric))
     }
 
     /// Named custom judge function guard.
     pub fn custom_judge(
         name: &str,
         f: impl Fn(&str) -> Result<(), String> + Send + Sync + 'static,
-    ) -> GGuard {
-        // Leak the name to get a 'static str, matching the GGuard field type.
+    ) -> GuardRule {
+        // Leak the name to get a 'static str, matching the GuardRule field type.
         let name: &'static str = Box::leak(name.to_string().into_boxed_str());
-        GGuard::new(name, f)
+        GuardRule::new(name, f)
     }
 }
 
@@ -472,41 +449,6 @@ mod tests {
         });
         assert!(g.check("good output").is_ok());
         assert!(g.check("bad output").is_err());
-    }
-
-    #[test]
-    fn output_guard() {
-        let g = G::output(|output| {
-            if output.contains("forbidden") {
-                Err("Forbidden content".into())
-            } else {
-                Ok(())
-            }
-        });
-        assert!(g.check("safe content").is_ok());
-        assert!(g.check("forbidden content").is_err());
-        assert_eq!(g.name(), "output");
-    }
-
-    #[test]
-    fn input_guard() {
-        let g = G::input(|input| {
-            if input.is_empty() {
-                Err("Empty input".into())
-            } else {
-                Ok(())
-            }
-        });
-        assert!(g.check("hello").is_ok());
-        assert!(g.check("").is_err());
-        assert_eq!(g.name(), "input");
-    }
-
-    #[test]
-    fn rate_limit_guard() {
-        let g = G::rate_limit(60);
-        assert!(g.check("anything").is_ok());
-        assert_eq!(g.name(), "rate_limit");
     }
 
     // A no-op judge LLM for constructing LLM-backed guards in unit tests

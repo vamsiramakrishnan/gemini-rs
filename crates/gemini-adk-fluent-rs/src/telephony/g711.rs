@@ -266,9 +266,7 @@ mod tests {
             assert_eq!(
                 pos_rt as i32 + neg_rt as i32,
                 0,
-                "μ-law should preserve sign symmetry: {} + {} != 0",
-                pos_rt,
-                neg_rt
+                "μ-law should preserve sign symmetry: {pos_rt} + {neg_rt} != 0"
             );
         }
     }
@@ -282,9 +280,7 @@ mod tests {
             assert_eq!(
                 pos_rt as i32 + neg_rt as i32,
                 0,
-                "A-law should preserve sign symmetry: {} + {} != 0",
-                pos_rt,
-                neg_rt
+                "A-law should preserve sign symmetry: {pos_rt} + {neg_rt} != 0"
             );
         }
     }

@@ -19,9 +19,9 @@
 //!
 //! | Concern | Primitives |
 //! |---|---|
-//! | Connect | [`SessionConfig`], [`ConnectBuilder`], [`ApiEndpoint`], [`Platform`], [`ResumeInfo`] |
+//! | Connect | [`SessionConfig`], [`ConnectBuilder`], [`ApiEndpoint`], [`ResumeInfo`] |
 //! | Speak / listen | [`SessionHandle`], [`SessionWriter`], [`SessionReader`], [`SessionEvent`], [`SessionPhase`] |
-//! | Say things | [`Content`], [`Part`], [`Role`], [`GeminiModel`], [`Voice`], [`Modality`] |
+//! | Say things | [`Content`], [`Part`], [`Role`], [`ModelId`], [`Voice`], [`Modality`] |
 //! | Tools on the wire | [`Tool`], [`FunctionDeclaration`], [`FunctionCall`], [`FunctionResponse`], [`FunctionCallingBehavior`], [`FunctionResponseScheduling`] |
 //! | Real time | [`SpscRing`], [`AudioJitterBuffer`], [`bytes_to_i16`], [`i16_to_bytes`], [`BargeInDetector`], [`TurnDetector`] |
 //! | Access | [`AuthProvider`], [`GoogleAIAuth`], [`VertexAIAuth`], [`Transport`], [`TungsteniteTransport`], [`Codec`], [`JsonCodec`] |
@@ -29,10 +29,9 @@
 
 pub use crate::protocol::types::{
     ApiEndpoint, Content, FunctionCall, FunctionCallingBehavior, FunctionDeclaration,
-    FunctionResponse, FunctionResponseScheduling, GeminiModel, Modality, Part, Role, SessionConfig,
+    FunctionResponse, FunctionResponseScheduling, Modality, ModelId, Part, Role, SessionConfig,
     Tool, UsageMetadata, Voice,
 };
-pub use crate::protocol::Platform;
 
 pub use crate::session::{
     ResumeInfo, SessionError, SessionEvent, SessionHandle, SessionPhase, SessionReader,
@@ -43,7 +42,9 @@ pub use crate::transport::auth::{AuthProvider, GoogleAIAuth, VertexAIAuth};
 pub use crate::transport::ws::{Transport, TungsteniteTransport};
 pub use crate::transport::{Codec, ConnectBuilder, JsonCodec};
 
-pub use crate::buffer::{bytes_to_i16, i16_to_bytes, AudioJitterBuffer, SpscRing};
+pub use crate::buffer::{
+    AudioJitterBuffer, SpscConsumer, SpscProducer, SpscRing, bytes_to_i16, i16_to_bytes,
+};
 pub use crate::turn::{BargeInDetector, TurnDetector};
 
 #[cfg(test)]
@@ -58,7 +59,6 @@ mod contract {
         is_type::<SessionConfig>();
         is_type::<ConnectBuilder>();
         is_type::<ApiEndpoint>();
-        is_type::<Platform>();
         is_type::<ResumeInfo>();
         is_type::<SessionHandle>();
         is_type::<dyn SessionWriter>();
@@ -68,7 +68,7 @@ mod contract {
         is_type::<Content>();
         is_type::<Part>();
         is_type::<Role>();
-        is_type::<GeminiModel>();
+        is_type::<ModelId>();
         is_type::<Voice>();
         is_type::<Modality>();
         is_type::<Tool>();
@@ -78,6 +78,8 @@ mod contract {
         is_type::<FunctionCallingBehavior>();
         is_type::<FunctionResponseScheduling>();
         is_type::<SpscRing<i16>>();
+        is_type::<SpscProducer<i16>>();
+        is_type::<SpscConsumer<i16>>();
         is_type::<AudioJitterBuffer>();
         is_type::<BargeInDetector>();
         is_type::<TurnDetector>();

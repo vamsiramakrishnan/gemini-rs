@@ -4,9 +4,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::client::http::HttpError;
 use crate::client::Client;
-use crate::protocol::types::{Content, GeminiModel};
+use crate::client::http::HttpError;
+use crate::protocol::types::{Content, ModelId};
 use crate::transport::auth::ServiceEndpoint;
 
 /// Response from countTokens.
@@ -31,7 +31,7 @@ pub enum TokensError {
     Parse(#[from] serde_json::Error),
     #[error("Auth error: {0}")]
     /// Authentication/authorization failure.
-    Auth(String),
+    Auth(#[from] crate::session::AuthError),
 }
 
 impl Client {
@@ -47,14 +47,11 @@ impl Client {
     pub async fn count_tokens_for(
         &self,
         contents: Vec<Content>,
-        model: Option<&GeminiModel>,
+        model: Option<&ModelId>,
     ) -> Result<CountTokensResponse, TokensError> {
         let model = model.unwrap_or(self.default_model());
         let url = self.rest_url_for(ServiceEndpoint::CountTokens, model);
-        let headers = self
-            .auth_headers()
-            .await
-            .map_err(|e| TokensError::Auth(e.to_string()))?;
+        let headers = self.auth_headers().await?;
 
         let body = serde_json::json!({ "contents": contents });
         let json = self.http_client().post_json(&url, headers, &body).await?;

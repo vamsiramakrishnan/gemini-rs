@@ -11,7 +11,14 @@ use gemini_adk_rs::tool::{PolicyTool, SimpleTool, ToolFunction, ToolPolicy};
 use gemini_genai_rs::prelude::{FunctionDeclaration, Tool};
 
 /// A tool composite — one or more tool entries.
+///
+/// Built from the `T` namespace and composed with `|`. Any single
+/// [`ToolFunction`] (a `SimpleTool`, a `TypedTool`, the value a `#[tool]`
+/// function returns, or an `Arc<dyn ToolFunction>`) converts into a
+/// one-entry composite via `From`, so `.tools(get_weather())` works without
+/// the namespace.
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct ToolComposite {
     /// The tool entries in this composite.
     pub entries: Vec<ToolCompositeEntry>,
@@ -45,13 +52,6 @@ pub enum ToolCompositeEntry {
         /// Connection params (e.g. URL or command string).
         params: String,
     },
-    /// A remote agent-to-agent tool.
-    A2a {
-        /// URL of the remote agent.
-        url: String,
-        /// Skill to invoke on the remote agent.
-        skill: String,
-    },
     /// A mock tool that returns a fixed response (useful for testing).
     Mock {
         /// Tool name.
@@ -60,20 +60,6 @@ pub enum ToolCompositeEntry {
         description: String,
         /// Fixed response to return.
         response: serde_json::Value,
-    },
-    /// An OpenAPI spec-driven tool (placeholder/marker).
-    OpenApi {
-        /// Tool name.
-        name: String,
-        /// URL to the OpenAPI spec.
-        spec_url: String,
-    },
-    /// A BM25 search tool (placeholder/marker).
-    Search {
-        /// Tool name.
-        name: String,
-        /// Tool description.
-        description: String,
     },
     /// A schema-defined tool (placeholder/marker).
     Schema {
@@ -138,6 +124,14 @@ impl ToolComposite {
             })
             .collect();
         self
+    }
+}
+
+/// A single tool is a one-entry composite, so `.tools(my_tool)` and
+/// `.tool(my_tool)` accept the same values.
+impl<F: ToolFunction + 'static> From<F> for ToolComposite {
+    fn from(f: F) -> Self {
+        Self::from_function(Arc::new(f))
     }
 }
 
@@ -234,7 +228,7 @@ impl T {
     /// identical arguments return the cached value without re-invoking the tool.
     /// Errors are not cached. Built-in/placeholder entries are left unchanged.
     pub fn cached(tool: ToolComposite) -> ToolComposite {
-        tool.map_function_policy(|p| p.with_cache())
+        tool.map_function_policy(gemini_adk_rs::tool::ToolPolicy::with_cache)
     }
 
     /// Combine multiple tool functions into a single composite.
@@ -277,18 +271,6 @@ impl T {
         }
     }
 
-    /// Create a remote agent-to-agent tool.
-    ///
-    /// Routes tool calls to a remote agent at `url`, invoking the given `skill`.
-    pub fn a2a(url: impl Into<String>, skill: impl Into<String>) -> ToolComposite {
-        ToolComposite {
-            entries: vec![ToolCompositeEntry::A2a {
-                url: url.into(),
-                skill: skill.into(),
-            }],
-        }
-    }
-
     /// Create a mock tool that returns a fixed response.
     ///
     /// Useful for testing and prototyping without real tool implementations.
@@ -302,31 +284,6 @@ impl T {
                 name: name.into(),
                 description: description.into(),
                 response,
-            }],
-        }
-    }
-
-    /// Create an OpenAPI spec-driven tool (placeholder/marker).
-    ///
-    /// At runtime, the spec at `spec_url` is fetched and used to generate
-    /// tool declarations and HTTP call routing.
-    pub fn openapi(name: impl Into<String>, spec_url: impl Into<String>) -> ToolComposite {
-        ToolComposite {
-            entries: vec![ToolCompositeEntry::OpenApi {
-                name: name.into(),
-                spec_url: spec_url.into(),
-            }],
-        }
-    }
-
-    /// Create a BM25 search tool (placeholder/marker).
-    ///
-    /// Declares a search tool that performs BM25 retrieval at runtime.
-    pub fn search(name: impl Into<String>, description: impl Into<String>) -> ToolComposite {
-        ToolComposite {
-            entries: vec![ToolCompositeEntry::Search {
-                name: name.into(),
-                description: description.into(),
             }],
         }
     }
@@ -374,34 +331,14 @@ impl T {
 
 /// A tool entry that needs asynchronous I/O (network or subprocess) to resolve,
 /// and is therefore resolved at connect time rather than when the composite is
-/// built. See [`crate::live::Live`] connection methods.
+/// built. See [`crate::live::Live`] connection methods. A text
+/// [`AgentBuilder`](crate::builder::AgentBuilder) rejects these at `build`.
 #[derive(Clone, Debug)]
 pub enum DeferredTool {
     /// MCP server connection — a stdio command line or an SSE/HTTP URL.
     Mcp {
         /// Connection string: an `http(s)://` URL (SSE) or a command line (stdio).
         params: String,
-    },
-    /// Remote agent-to-agent skill invocation.
-    A2a {
-        /// URL of the remote agent.
-        url: String,
-        /// Skill to invoke on the remote agent.
-        skill: String,
-    },
-    /// OpenAPI spec-driven toolset — one tool per operation in the spec.
-    OpenApi {
-        /// Toolset name.
-        name: String,
-        /// URL of the OpenAPI document.
-        spec_url: String,
-    },
-    /// Search/retrieval tool.
-    Search {
-        /// Tool name.
-        name: String,
-        /// Tool description.
-        description: String,
     },
 }
 
@@ -429,6 +366,14 @@ pub(crate) enum ToolResolution {
 }
 
 impl ToolCompositeEntry {
+    #[cfg(test)]
+    fn classify_name(self) -> String {
+        match self.classify() {
+            ToolResolution::Runtime(f) => f.name().to_string(),
+            _ => String::new(),
+        }
+    }
+
     /// Classify this entry into its concrete [`ToolResolution`]. Exhaustive by
     /// construction — adding a variant forces every consumer to handle it.
     pub(crate) fn classify(self) -> ToolResolution {
@@ -479,15 +424,6 @@ impl ToolCompositeEntry {
             }
             ToolCompositeEntry::Mcp { params } => {
                 ToolResolution::Deferred(DeferredTool::Mcp { params })
-            }
-            ToolCompositeEntry::A2a { url, skill } => {
-                ToolResolution::Deferred(DeferredTool::A2a { url, skill })
-            }
-            ToolCompositeEntry::OpenApi { name, spec_url } => {
-                ToolResolution::Deferred(DeferredTool::OpenApi { name, spec_url })
-            }
-            ToolCompositeEntry::Search { name, description } => {
-                ToolResolution::Deferred(DeferredTool::Search { name, description })
             }
         }
     }
@@ -561,18 +497,19 @@ mod tests {
             classify_one(T::mcp("node ./server.js")),
             ToolResolution::Deferred(DeferredTool::Mcp { .. })
         ));
-        assert!(matches!(
-            classify_one(T::a2a("http://x", "skill")),
-            ToolResolution::Deferred(DeferredTool::A2a { .. })
-        ));
-        assert!(matches!(
-            classify_one(T::openapi("o", "http://x/openapi.json")),
-            ToolResolution::Deferred(DeferredTool::OpenApi { .. })
-        ));
-        assert!(matches!(
-            classify_one(T::search("s", "d")),
-            ToolResolution::Deferred(DeferredTool::Search { .. })
-        ));
+    }
+
+    #[test]
+    fn a_single_tool_function_converts_into_a_composite() {
+        let composite: ToolComposite =
+            SimpleTool::new("one", "one", None, |_| async { Ok(serde_json::json!(1)) }).into();
+        assert_eq!(composite.len(), 1);
+        let arc: Arc<dyn ToolFunction> = Arc::new(SimpleTool::new("two", "two", None, |_| async {
+            Ok(serde_json::json!(2))
+        }));
+        let composite: ToolComposite = arc.into();
+        assert_eq!(composite.len(), 1);
+        assert_eq!(composite.entries[0].clone().classify_name(), "two");
     }
 
     #[tokio::test]

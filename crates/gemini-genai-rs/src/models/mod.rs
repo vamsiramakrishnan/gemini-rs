@@ -4,9 +4,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::client::http::HttpError;
 use crate::client::Client;
-use crate::protocol::types::GeminiModel;
+use crate::client::http::HttpError;
+use crate::protocol::types::ModelId;
 use crate::transport::auth::ServiceEndpoint;
 
 /// Model metadata returned by the API.
@@ -77,29 +77,23 @@ pub enum ModelsError {
     Parse(#[from] serde_json::Error),
     #[error("Auth error: {0}")]
     /// Authentication/authorization failure.
-    Auth(String),
+    Auth(#[from] crate::session::AuthError),
 }
 
 impl Client {
     /// List available models.
     pub async fn list_models(&self) -> Result<ListModelsResponse, ModelsError> {
         let url = self.rest_url_for(ServiceEndpoint::ListModels, self.default_model());
-        let headers = self
-            .auth_headers()
-            .await
-            .map_err(|e| ModelsError::Auth(e.to_string()))?;
+        let headers = self.auth_headers().await?;
 
         let json = self.http_client().get_json(&url, headers).await?;
         Ok(serde_json::from_value(json)?)
     }
 
     /// Get metadata for a specific model.
-    pub async fn get_model(&self, model: &GeminiModel) -> Result<ModelInfo, ModelsError> {
+    pub async fn get_model(&self, model: &ModelId) -> Result<ModelInfo, ModelsError> {
         let url = self.rest_url_for(ServiceEndpoint::GetModel, model);
-        let headers = self
-            .auth_headers()
-            .await
-            .map_err(|e| ModelsError::Auth(e.to_string()))?;
+        let headers = self.auth_headers().await?;
 
         let json = self.http_client().get_json(&url, headers).await?;
         Ok(serde_json::from_value(json)?)

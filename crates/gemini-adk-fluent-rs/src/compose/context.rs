@@ -51,23 +51,24 @@ impl std::fmt::Debug for ContextPolicy {
 /// Compose two context policies additively with `+`.
 /// The combined policy applies both filters and merges (deduplicates) results.
 impl std::ops::Add for ContextPolicy {
-    type Output = ContextPolicyChain;
+    type Output = ContextComposite;
 
     fn add(self, rhs: ContextPolicy) -> Self::Output {
-        ContextPolicyChain {
+        ContextComposite {
             policies: vec![self, rhs],
         }
     }
 }
 
-/// A chain of context policies applied in combination.
+/// A chain of context policies applied in combination (`C::a() + C::b()`).
 #[derive(Clone)]
-pub struct ContextPolicyChain {
+#[non_exhaustive]
+pub struct ContextComposite {
     /// The ordered list of policies in this chain.
     pub policies: Vec<ContextPolicy>,
 }
 
-impl ContextPolicyChain {
+impl ContextComposite {
     /// Apply all policies in sequence, piping each policy's output into the
     /// next. For `C::window(10) + C::user_only()` this means "take the last 10
     /// turns, then keep only the user turns" — the additive `+` composes the
@@ -89,18 +90,18 @@ impl ContextPolicyChain {
 
 /// A single policy is a one-element chain, so `.context(C::window(10))` works
 /// without an explicit `+`.
-impl From<ContextPolicy> for ContextPolicyChain {
+impl From<ContextPolicy> for ContextComposite {
     fn from(policy: ContextPolicy) -> Self {
-        ContextPolicyChain {
+        ContextComposite {
             policies: vec![policy],
         }
     }
 }
 
-/// Middleware adapter that applies a [`ContextPolicyChain`] to the request
+/// Middleware adapter that applies a [`ContextComposite`] to the request
 /// history on every model call.
 struct ContextMiddleware {
-    chain: ContextPolicyChain,
+    chain: ContextComposite,
 }
 
 #[async_trait]
@@ -115,8 +116,8 @@ impl Middleware for ContextMiddleware {
     }
 }
 
-impl std::ops::Add<ContextPolicy> for ContextPolicyChain {
-    type Output = ContextPolicyChain;
+impl std::ops::Add<ContextPolicy> for ContextComposite {
+    type Output = ContextComposite;
 
     fn add(mut self, rhs: ContextPolicy) -> Self::Output {
         self.policies.push(rhs);
@@ -272,12 +273,6 @@ impl C {
         })
     }
 
-    /// Keep messages within a time window (by index offset from end).
-    /// Alias for `window` — provided for API symmetry.
-    pub fn last(n: usize) -> ContextPolicy {
-        Self::window(n)
-    }
-
     /// Return an empty context (useful for isolated agents).
     pub fn empty() -> ContextPolicy {
         ContextPolicy::new("empty", |_| Vec::new())
@@ -289,12 +284,14 @@ impl C {
     /// formatted state values as a system context message.
     ///
     /// # Example
-    /// ```ignore
-    /// C::from_state(&["user:name", "app:account_balance", "derived:risk"])
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// let policy = C::from_state(&["user:name", "app:account_balance", "derived:risk"]);
     /// // Produces: "[Context: name=John, account_balance=$5230, risk=0.72]"
+    /// # let _ = policy;
     /// ```
     pub fn from_state(keys: &[&str]) -> ContextPolicy {
-        let owned_keys: Vec<String> = keys.iter().map(|k| k.to_string()).collect();
+        let owned_keys: Vec<String> = keys.iter().map(std::string::ToString::to_string).collect();
         ContextPolicy::new("from_state", move |history| {
             // Note: This policy captures keys but cannot access State at filter time.
             // The actual state injection happens at the Live session level via
@@ -303,21 +300,11 @@ impl C {
             let mut result = Vec::new();
             if !owned_keys.is_empty() {
                 let key_list = owned_keys.join(", ");
-                result.push(Content::user(format!("[Context keys: {}]", key_list)));
+                result.push(Content::user(format!("[Context keys: {key_list}]")));
             }
             result.extend(history.iter().cloned());
             result
         })
-    }
-
-    /// Alias for [`empty`](Self::empty) — matches upstream Python `C.none()`.
-    pub fn none() -> ContextPolicy {
-        Self::empty()
-    }
-
-    /// Alias for [`window`](Self::window) — matches upstream Python `C.recent()`.
-    pub fn recent(n: usize) -> ContextPolicy {
-        Self::window(n)
     }
 
     /// Template-based context injection with `{key}` placeholders.
@@ -348,32 +335,13 @@ impl C {
         })
     }
 
-    /// Rolling window — keeps last N messages (alias with summarization hint).
-    pub fn rolling(n: usize) -> ContextPolicy {
-        Self::window(n)
-    }
-
-    /// Compact context — removes tool call/response parts to reduce token usage.
-    pub fn compact() -> ContextPolicy {
-        Self::exclude_tools()
-    }
-
-    /// Budget context — truncate to approximate token count.
-    ///
-    /// Rough estimate: 4 chars per token.
-    pub fn budget(max_tokens: usize) -> ContextPolicy {
-        Self::truncate(max_tokens * 4)
-    }
-
-    /// Freshness filter — keep only messages within the last N entries.
-    pub fn fresh(max_entries: usize) -> ContextPolicy {
-        Self::window(max_entries)
-    }
-
     /// Redact patterns from context messages.
     pub fn redact(patterns: &[&str]) -> ContextPolicy {
         use gemini_genai_rs::prelude::Part;
-        let patterns: Vec<String> = patterns.iter().map(|p| p.to_string()).collect();
+        let patterns: Vec<String> = patterns
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect();
         ContextPolicy::new("redact", move |history| {
             history
                 .iter()
@@ -408,13 +376,15 @@ impl C {
     /// marker so the runtime knows summarization is requested.
     ///
     /// # Example
-    /// ```ignore
-    /// C::summarize("Summarize the conversation focusing on action items")
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// let policy = C::summarize("Summarize the conversation focusing on action items");
+    /// # let _ = policy;
     /// ```
     pub fn summarize(prompt: &str) -> ContextPolicy {
         let prompt = prompt.to_string();
         ContextPolicy::new("summarize", move |history| {
-            let mut result = vec![Content::user(format!("[Summarize context: {}]", prompt))];
+            let mut result = vec![Content::user(format!("[Summarize context: {prompt}]"))];
             result.extend(history.iter().cloned());
             result
         })
@@ -426,15 +396,16 @@ impl C {
     /// the referenced state key's value to filter context entries by relevance.
     ///
     /// # Example
-    /// ```ignore
-    /// C::relevant("user:current_topic")
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// let policy = C::relevant("user:current_topic");
+    /// # let _ = policy;
     /// ```
     pub fn relevant(query_key: &str) -> ContextPolicy {
         let key = query_key.to_string();
         ContextPolicy::new("relevant", move |history| {
             let mut result = vec![Content::user(format!(
-                "[Filter context relevant to state key: {}]",
-                key
+                "[Filter context relevant to state key: {key}]"
             ))];
             result.extend(history.iter().cloned());
             result
@@ -447,11 +418,13 @@ impl C {
     /// pieces of information from the conversation history via an LLM call.
     ///
     /// # Example
-    /// ```ignore
-    /// C::extract(&["customer_name", "order_id", "complaint"])
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// let policy = C::extract(&["customer_name", "order_id", "complaint"]);
+    /// # let _ = policy;
     /// ```
     pub fn extract(keys: &[&str]) -> ContextPolicy {
-        let owned_keys: Vec<String> = keys.iter().map(|k| k.to_string()).collect();
+        let owned_keys: Vec<String> = keys.iter().map(std::string::ToString::to_string).collect();
         ContextPolicy::new("extract", move |history| {
             let mut result = vec![Content::user(format!(
                 "[Extract from context: {}]",
@@ -468,13 +441,15 @@ impl C {
     /// focused on extracting only the essential facts per the given instruction.
     ///
     /// # Example
-    /// ```ignore
-    /// C::distill("Keep only decisions made and their rationale")
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// let policy = C::distill("Keep only decisions made and their rationale");
+    /// # let _ = policy;
     /// ```
     pub fn distill(instruction: &str) -> ContextPolicy {
         let instruction = instruction.to_string();
         ContextPolicy::new("distill", move |history| {
-            let mut result = vec![Content::user(format!("[Distill context: {}]", instruction))];
+            let mut result = vec![Content::user(format!("[Distill context: {instruction}]"))];
             result.extend(history.iter().cloned());
             result
         })
@@ -487,8 +462,10 @@ impl C {
     /// Weights are encoded as a marker for runtime processing.
     ///
     /// # Example
-    /// ```ignore
-    /// C::priority(&[("user", 1.0), ("model", 0.5), ("tool", 0.2)])
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// let policy = C::priority(&[("user", 1.0), ("model", 0.5), ("tool", 0.2)]);
+    /// # let _ = policy;
     /// ```
     pub fn priority(weights: &[(&str, f64)]) -> ContextPolicy {
         let owned_weights: Vec<(String, f64)> =
@@ -496,10 +473,10 @@ impl C {
         ContextPolicy::new("priority", move |history| {
             let weight_str = owned_weights
                 .iter()
-                .map(|(k, v)| format!("{}={}", k, v))
+                .map(|(k, v)| format!("{k}={v}"))
                 .collect::<Vec<_>>()
                 .join(", ");
-            let mut result = vec![Content::user(format!("[Priority weights: {}]", weight_str))];
+            let mut result = vec![Content::user(format!("[Priority weights: {weight_str}]"))];
             result.extend(history.iter().cloned());
             result
         })
@@ -507,13 +484,15 @@ impl C {
 
     /// Fit context to a token budget with smart truncation.
     ///
-    /// Similar to [`budget`](Self::budget) but adds a truncation marker so the
+    /// Similar to [`truncate`](Self::truncate) (a character budget, ~4 chars per token) but adds a truncation marker so the
     /// runtime knows content was trimmed, allowing the agent to request more
     /// context if needed.
     ///
     /// # Example
-    /// ```ignore
-    /// C::fit(4096)
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// let policy = C::fit(4096);
+    /// # let _ = policy;
     /// ```
     pub fn fit(max_tokens: usize) -> ContextPolicy {
         use gemini_genai_rs::prelude::Part;
@@ -554,11 +533,16 @@ impl C {
     /// from structured content in the conversation history.
     ///
     /// # Example
-    /// ```ignore
-    /// C::project(&["name", "status", "priority"])
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// let policy = C::project(&["name", "status", "priority"]);
+    /// # let _ = policy;
     /// ```
     pub fn project(fields: &[&str]) -> ContextPolicy {
-        let owned_fields: Vec<String> = fields.iter().map(|f| f.to_string()).collect();
+        let owned_fields: Vec<String> = fields
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect();
         ContextPolicy::new("project", move |history| {
             let mut result = vec![Content::user(format!(
                 "[Project fields: {}]",
@@ -585,11 +569,13 @@ impl C {
     /// Agent attribution is detected via `[Agent: name]` markers in content.
     ///
     /// # Example
-    /// ```ignore
-    /// C::from_agents(&["researcher", "analyst"])
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// let policy = C::from_agents(&["researcher", "analyst"]);
+    /// # let _ = policy;
     /// ```
     pub fn from_agents(names: &[&str]) -> ContextPolicy {
-        let owned_names: Vec<String> = names.iter().map(|n| n.to_string()).collect();
+        let owned_names: Vec<String> = names.iter().map(std::string::ToString::to_string).collect();
         ContextPolicy::new("from_agents", move |history| {
             history
                 .iter()
@@ -597,7 +583,7 @@ impl C {
                     c.parts.iter().any(|p| match p {
                         gemini_genai_rs::prelude::Part::Text { text } => owned_names
                             .iter()
-                            .any(|name| text.contains(&format!("[Agent: {}]", name))),
+                            .any(|name| text.contains(&format!("[Agent: {name}]"))),
                         _ => false,
                     })
                 })
@@ -612,11 +598,13 @@ impl C {
     /// is detected via `[Agent: name]` markers in content.
     ///
     /// # Example
-    /// ```ignore
-    /// C::exclude_agents(&["logger", "debugger"])
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// let policy = C::exclude_agents(&["logger", "debugger"]);
+    /// # let _ = policy;
     /// ```
     pub fn exclude_agents(names: &[&str]) -> ContextPolicy {
-        let owned_names: Vec<String> = names.iter().map(|n| n.to_string()).collect();
+        let owned_names: Vec<String> = names.iter().map(std::string::ToString::to_string).collect();
         ContextPolicy::new("exclude_agents", move |history| {
             history
                 .iter()
@@ -624,7 +612,7 @@ impl C {
                     !c.parts.iter().any(|p| match p {
                         gemini_genai_rs::prelude::Part::Text { text } => owned_names
                             .iter()
-                            .any(|name| text.contains(&format!("[Agent: {}]", name))),
+                            .any(|name| text.contains(&format!("[Agent: {name}]"))),
                         _ => false,
                     })
                 })
@@ -639,16 +627,15 @@ impl C {
     /// context. Useful for maintaining running notes across turns.
     ///
     /// # Example
-    /// ```ignore
-    /// C::notes("session:scratchpad")
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// let policy = C::notes("session:scratchpad");
+    /// # let _ = policy;
     /// ```
     pub fn notes(key: &str) -> ContextPolicy {
         let key = key.to_string();
         ContextPolicy::new("notes", move |history| {
-            let mut result = vec![Content::user(format!(
-                "[Scratchpad from state key: {}]",
-                key
-            ))];
+            let mut result = vec![Content::user(format!("[Scratchpad from state key: {key}]"))];
             result.extend(history.iter().cloned());
             result
         })
@@ -661,8 +648,10 @@ impl C {
     /// context; later stages receive only the outputs of preceding stages.
     ///
     /// # Example
-    /// ```ignore
-    /// C::pipeline_aware()
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// let policy = C::pipeline_aware();
+    /// # let _ = policy;
     /// ```
     pub fn pipeline_aware() -> ContextPolicy {
         ContextPolicy::new("pipeline_aware", |history| {
@@ -737,7 +726,7 @@ mod tests {
 
     #[test]
     fn chain_extends_with_add() {
-        let chain = C::window(10) + C::user_only() + C::custom(|h| h.to_vec());
+        let chain = C::window(10) + C::user_only() + C::custom(<[Content]>::to_vec);
         assert_eq!(chain.policies.len(), 3);
     }
 
@@ -777,7 +766,7 @@ mod tests {
     #[test]
     fn last_is_alias_for_window() {
         let history = vec![Content::user("a"), Content::model("b"), Content::user("c")];
-        let result = C::last(1).apply(&history);
+        let result = C::window(1).apply(&history);
         assert_eq!(result.len(), 1);
     }
 

@@ -122,12 +122,12 @@ use std::collections::HashMap;
 
 use common::corpus::{self, PROBES};
 use common::paraphrase;
-use common::rank::{as_hits, fuse, lexical, rank_of, CANDIDATES};
+use common::rank::{CANDIDATES, as_hits, fuse, lexical, rank_of};
 use common::views::structural_view;
-use common::{file_backed_engine, ScratchDir};
+use common::{ScratchDir, file_backed_engine};
 
 use gemini_memory_rs::bm25::{IndexedMemory, MemoryIndex, SearchHit};
-use gemini_memory_rs::core::{stable_hash, CanonicalMemory, MemoryId, MemoryKind, MemoryStatus};
+use gemini_memory_rs::core::{CanonicalMemory, MemoryId, MemoryKind, MemoryStatus, stable_hash};
 
 const EMBEDDING_MODEL: &str = "gemini-embedding-2";
 const WIDTH: usize = 768;
@@ -157,20 +157,20 @@ struct Filter {
 
 impl Filter {
     fn matches(&self, memory: &CanonicalMemory) -> bool {
-        if let Some(about) = &self.about {
-            if !memory.retrieval.subject.eq_ignore_ascii_case(about) {
-                return false;
-            }
+        if let Some(about) = &self.about
+            && !memory.retrieval.subject.eq_ignore_ascii_case(about)
+        {
+            return false;
         }
-        if let Some(attribute) = &self.attribute {
-            if memory.predicate.as_str() != attribute {
-                return false;
-            }
+        if let Some(attribute) = &self.attribute
+            && memory.predicate.as_str() != attribute
+        {
+            return false;
         }
-        if let Some(kind) = &self.kind {
-            if memory.kind != *kind {
-                return false;
-            }
+        if let Some(kind) = &self.kind
+            && memory.kind != *kind
+        {
+            return false;
         }
         for entity in &self.mentions {
             if !memory
@@ -342,7 +342,7 @@ async fn what_a_model_written_filter_would_buy_and_what_it_risks() {
                     Shape::About => {}
                     Shape::AboutKind => filter.kind = Some(memory.kind),
                     Shape::AboutAttribute => {
-                        filter.attribute = Some(memory.predicate.as_str().to_string())
+                        filter.attribute = Some(memory.predicate.as_str().to_string());
                     }
                 }
                 filter

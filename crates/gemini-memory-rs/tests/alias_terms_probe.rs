@@ -118,12 +118,12 @@ use std::collections::HashMap;
 
 use common::corpus::{self, PROBES};
 use common::paraphrase;
-use common::rank::{as_hits, fuse, lexical, rank_of, CANDIDATES};
+use common::rank::{CANDIDATES, as_hits, fuse, lexical, rank_of};
 use common::views::structural_view;
-use common::{file_backed_engine, have_api_key, skip, ScratchDir};
+use common::{ScratchDir, file_backed_engine, have_api_key, skip};
 
 use gemini_memory_rs::bm25::{IndexedMemory, MemoryIndex};
-use gemini_memory_rs::core::{stable_hash, CanonicalMemory, MemoryId, MemoryStatus};
+use gemini_memory_rs::core::{CanonicalMemory, MemoryId, MemoryStatus, stable_hash};
 
 const EMBEDDING_MODEL: &str = "gemini-embedding-2";
 const WIDTH: usize = 768;
@@ -183,10 +183,9 @@ async fn post(
             .json(body)
             .send()
             .await
+            && response.status().is_success()
         {
-            if response.status().is_success() {
-                return response.json().await.ok();
-            }
+            return response.json().await.ok();
         }
         tokio::time::sleep(backoff).await;
         backoff *= 2;
@@ -246,7 +245,7 @@ async fn embed(client: &reqwest::Client, key: &str, text: &str) -> Option<Vec<f3
     let values = json["embedding"]["values"].as_array()?;
     let mut vector: Vec<f32> = values
         .iter()
-        .filter_map(|v| v.as_f64())
+        .filter_map(serde_json::Value::as_f64)
         .map(|v| v as f32)
         .collect();
     let norm = vector.iter().map(|v| v * v).sum::<f32>().sqrt();

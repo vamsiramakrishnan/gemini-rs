@@ -16,11 +16,11 @@
 
 use std::sync::Arc;
 
-use gemini_adk_fluent_rs::agents::{provenance, AgentMode};
-use gemini_adk_fluent_rs::flow::run as run_on_enter;
+use gemini_adk_fluent_rs::agents::{AgentMode, provenance};
+use gemini_adk_fluent_rs::flow::on_enter;
 use gemini_adk_fluent_rs::prelude::*;
 use gemini_adk_fluent_rs::tools::Recognizer;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 fn booking_flow() -> Flow {
     Flow::new()
@@ -67,9 +67,9 @@ async fn main() {
 
     // The `check` step orchestrates the availability agent the moment it
     // activates — no manual call, just `on_enter`. In a Live session this is
-    // `Live::builder().govern(flow).on_enter("check", agent, AgentMode::Call)`.
-    let mut mon = FlowMonitor::new(flow, FlowMode::Enforce)
-        .on_enter("check", run_on_enter(availability_agent(), AgentMode::Call));
+    // `Live::builder().govern(flow).on_step_enter("check", agent, AgentMode::Call)`.
+    let mut mon = FlowMonitor::new(flow, Enforcement::Enforce)
+        .on_enter("check", on_enter(availability_agent(), AgentMode::Call));
     let state = State::new();
 
     // 1. EXTRACT — deterministic recognizers fill the slots from what was said.

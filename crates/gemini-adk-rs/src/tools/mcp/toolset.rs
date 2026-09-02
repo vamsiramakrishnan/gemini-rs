@@ -43,7 +43,7 @@ impl McpToolset {
 
 #[async_trait]
 impl Toolset for McpToolset {
-    fn get_tools(&self) -> Vec<Arc<dyn ToolFunction>> {
+    fn tools(&self) -> Vec<Arc<dyn ToolFunction>> {
         // Note: This is synchronous in the trait, but tool discovery is async.
         // In practice, tools should be pre-loaded. For now, return empty.
         // A more complete implementation would cache tools after async initialization.

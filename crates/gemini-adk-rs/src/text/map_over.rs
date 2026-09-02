@@ -3,7 +3,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use super::TextAgent;
+use crate::context::AgentEvent;
 use crate::error::AgentError;
+use crate::middleware::MiddlewareChain;
 use crate::state::State;
 
 /// Iterates a single agent over each item in a state list.
@@ -15,6 +17,7 @@ pub struct MapOverTextAgent {
     list_key: String,
     item_key: String,
     output_key: String,
+    middleware: MiddlewareChain,
 }
 
 impl MapOverTextAgent {
@@ -30,7 +33,16 @@ impl MapOverTextAgent {
             list_key: list_key.into(),
             item_key: "_item".into(),
             output_key: "_results".into(),
+            middleware: MiddlewareChain::new(),
         }
+    }
+
+    /// Attach a middleware chain. `AgentEvent::LoopIteration` is emitted
+    /// through it before each item is processed (zero-based), so `on_event`
+    /// observers (e.g. `M::on_loop`) fire per item.
+    pub fn with_middleware_chain(mut self, chain: MiddlewareChain) -> Self {
+        self.middleware = chain;
+        self
     }
 
     /// Set the state key for the current item (default: "_item").
@@ -57,7 +69,13 @@ impl TextAgent for MapOverTextAgent {
 
         let mut results = Vec::with_capacity(items.len());
 
-        for item in &items {
+        for (iteration, item) in items.iter().enumerate() {
+            let _ = self
+                .middleware
+                .run_on_event(&AgentEvent::LoopIteration {
+                    iteration: iteration as u32,
+                })
+                .await;
             let _ = state.set(&self.item_key, item);
             let _ = state.set("input", item.to_string());
             let result = self.agent.run(state).await?;

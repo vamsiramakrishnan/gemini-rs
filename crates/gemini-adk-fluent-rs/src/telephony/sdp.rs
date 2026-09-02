@@ -63,10 +63,10 @@ pub fn parse_audio_offer(sdp: &str) -> Option<AudioOffer> {
             // a=rtpmap:101 telephone-event/8000
             if in_audio && telephone_event_pt.is_none() {
                 let mut parts = rest.split_whitespace();
-                if let (Some(pt), Some(codec)) = (parts.next(), parts.next()) {
-                    if codec.eq_ignore_ascii_case("telephone-event/8000") {
-                        telephone_event_pt = pt.parse().ok();
-                    }
+                if let (Some(pt), Some(codec)) = (parts.next(), parts.next())
+                    && codec.eq_ignore_ascii_case("telephone-event/8000")
+                {
+                    telephone_event_pt = pt.parse().ok();
                 }
             }
         } else if let Some(rest) = line.strip_prefix("m=") {

@@ -27,7 +27,7 @@ pub fn read_source_dir(source_dir: &Path) -> Result<AdkSchema, String> {
 
     let ts_files: Vec<_> = WalkDir::new(source_dir)
         .into_iter()
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .filter(|e| {
             e.path()
                 .extension()

@@ -18,7 +18,7 @@ let flow: Flow = serde_json::from_str(&std::fs::read_to_string("flow.json")?)?;
 let compiled = flow.compile_with_tools(&["verify_identity", "charge_card"])?;
 
 let handle = Live::builder()
-    .tools(dispatcher)
+    .dispatcher(dispatcher)
     .govern_compiled(compiled)
     .connect_from_env()
     .await?;
@@ -429,7 +429,7 @@ The Studio is a drag-and-drop editor over exactly this document:
   tools, extraction, phases, watchers), and after every turn, tool call, and
   extraction the server pushes a `flowStatus` snapshot — active steps light
   up blue and done steps green on your canvas while you chat, and the Run tab
-  lists admitted tools, blocked tools (with reasons, from `why_blocked()`),
+  lists admitted tools, blocked tools (with reasons, from `explain()`),
   unmet requirements, and each active step's **guard truth tree**: exactly
   which atom it is waiting on.
 - **Live posture editing** — while a session runs, committing a posture or

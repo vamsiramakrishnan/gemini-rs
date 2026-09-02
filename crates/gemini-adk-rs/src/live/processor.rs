@@ -6,8 +6,8 @@
 //! **Telemetry lane**: SessionSignals + SessionTelemetry (debounced state writes,
 //!   runs on its own broadcast receiver — zero work on the router hot path)
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -173,7 +173,7 @@ impl DroppedFrames {
     /// Currently only consumed by tests; the per-class atomics are read
     /// directly elsewhere. Kept test-gated until a handle accessor surfaces it.
     #[cfg(test)]
-    pub fn total(&self) -> u64 {
+    pub(crate) fn total(&self) -> u64 {
         self.audio.load(Ordering::Relaxed)
             + self.text.load(Ordering::Relaxed)
             + self.transcript.load(Ordering::Relaxed)
@@ -245,7 +245,7 @@ pub(crate) enum ControlEvent {
     TurnComplete,
     /// Model finished generating (even if interrupted). Fires before TurnComplete.
     GenerationComplete,
-    GoAway(Option<String>),
+    GoAway(Option<std::time::Duration>),
     Connected,
     Disconnected(Option<String>),
     SessionResumeUpdate(gemini_genai_rs::session::ResumeInfo),
@@ -333,7 +333,7 @@ pub(crate) struct ControlPlaneConfig {
     /// Optional governed-flow monitor: gates tool calls, projects active-step
     /// postures into steering, and drives repair from unmet requirements.
     /// Shared (`Arc<Mutex<..>>`) so the [`LiveHandle`](super::handle::LiveHandle)
-    /// can snapshot `explain`/`why_blocked` while the control lane advances it.
+    /// can snapshot `explain` while the control lane advances it.
     /// Lock briefly; never hold the guard across an `await`.
     pub flow: Option<crate::flow::SharedFlowMonitor>,
     /// Fast-lane delivery (backpressure) policy per event class. Defaults to
@@ -438,9 +438,7 @@ pub(crate) fn spawn_event_processor(
                     }
                 }
                 Err(broadcast::error::RecvError::Lagged(n)) => {
-                    #[cfg(feature = "tracing-support")]
                     tracing::warn!(skipped = n, "Event processor lagged, skipped events");
-                    let _ = n;
                 }
                 Err(broadcast::error::RecvError::Closed) => break,
             }
@@ -493,24 +491,24 @@ pub(crate) fn spawn_event_processor(
     });
 
     // Optional timer task for sustained temporal patterns
-    if let Some(ref temporal_ref) = timer_temporal {
-        if temporal_ref.needs_timer() {
-            let t = temporal_ref.clone();
-            let cancel = timer_cancel.clone();
-            tokio::spawn(async move {
-                let mut interval = tokio::time::interval(Duration::from_millis(500));
-                loop {
-                    tokio::select! {
-                        _ = cancel.cancelled() => break,
-                        _ = interval.tick() => {
-                            for action in t.check_all(&timer_state, None, &timer_writer) {
-                                tokio::spawn(action);
-                            }
+    if let Some(ref temporal_ref) = timer_temporal
+        && temporal_ref.needs_timer()
+    {
+        let t = temporal_ref.clone();
+        let cancel = timer_cancel.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_millis(500));
+            loop {
+                tokio::select! {
+                    _ = cancel.cancelled() => break,
+                    _ = interval.tick() => {
+                        for action in t.check_all(&timer_state, None, &timer_writer) {
+                            tokio::spawn(action);
                         }
                     }
                 }
-            });
-        }
+            }
+        });
     }
 
     // Handed to `LiveHandle` so `send_text` can record a typed turn on the
@@ -564,7 +562,7 @@ pub(crate) fn spawn_telemetry_lane(
                                 SessionEvent::VoiceActivityStart => {
                                     telemetry.mark_turn_start();
                                 }
-                                SessionEvent::Usage(ref usage) => {
+                                SessionEvent::Usage(usage) => {
                                     telemetry.record_usage(
                                         usage.total_token_count,
                                         usage.prompt_token_count,
@@ -582,9 +580,7 @@ pub(crate) fn spawn_telemetry_lane(
                             signals.on_event(&event);
                         }
                         Err(broadcast::error::RecvError::Lagged(n)) => {
-                            #[cfg(feature = "tracing-support")]
                             tracing::warn!(skipped = n, "Telemetry lane lagged");
-                            let _ = n;
                         }
                         Err(broadcast::error::RecvError::Closed) => break,
                     }
@@ -729,16 +725,13 @@ async fn route_event(
             let _ = ctrl_tx.send(ControlEvent::Disconnected(reason)).await;
         }
         SessionEvent::Error(err) => {
-            let _ = ctrl_tx.send(ControlEvent::Error(err)).await;
+            let _ = ctrl_tx.send(ControlEvent::Error(err.to_string())).await;
         }
         // SessionEvent is #[non_exhaustive]: future wire events the runtime
         // doesn't understand yet are surfaced (not silently dropped) so
         // applications on an older runtime can observe them.
         other => {
-            #[cfg(feature = "tracing-support")]
             tracing::debug!(?other, "unhandled SessionEvent variant (newer wire event?)");
-            #[cfg(not(feature = "tracing-support"))]
-            let _ = other;
         }
     }
 }
@@ -813,7 +806,7 @@ async fn run_fast_lane(
                 let _ = event_tx.send(LiveEvent::VadEnd);
             }
             FastEvent::Phase(phase) => {
-                if let Some(cb) = &callbacks.on_phase {
+                if let Some(cb) = &callbacks.on_session_phase {
                     cb(phase);
                 }
                 // Phase is L0-level wire event, not emitted as LiveEvent
@@ -1353,7 +1346,7 @@ mod tests {
         impl SessionWriter for RecordingWriter {
             async fn send_audio(
                 &self,
-                _data: Vec<u8>,
+                _data: bytes::Bytes,
             ) -> Result<(), gemini_genai_rs::session::SessionError> {
                 Ok(())
             }
@@ -1365,7 +1358,7 @@ mod tests {
             }
             async fn send_video(
                 &self,
-                _data: Vec<u8>,
+                _data: bytes::Bytes,
             ) -> Result<(), gemini_genai_rs::session::SessionError> {
                 Ok(())
             }
@@ -1468,7 +1461,7 @@ mod tests {
 
     #[tokio::test]
     async fn callback_mode_blocking_awaits_inline() {
-        use crate::live::callbacks::CallbackMode;
+        use crate::live::ExecutionMode;
         use std::sync::atomic::AtomicU32;
 
         let order = Arc::new(AtomicU32::new(0));
@@ -1484,7 +1477,7 @@ mod tests {
                     o.store(1, Ordering::SeqCst);
                 })
             })),
-            on_turn_complete_mode: CallbackMode::Blocking,
+            on_turn_complete_mode: ExecutionMode::Blocking,
             ..Default::default()
         };
         let callbacks = Arc::new(callbacks);
@@ -1693,7 +1686,7 @@ mod tests {
 
     #[tokio::test]
     async fn callback_mode_concurrent_spawns_task() {
-        use crate::live::callbacks::CallbackMode;
+        use crate::live::ExecutionMode;
 
         let called = Arc::new(AtomicBool::new(false));
         let called_clone = called.clone();
@@ -1706,7 +1699,7 @@ mod tests {
                     c.store(true, Ordering::SeqCst);
                 })
             })),
-            on_turn_complete_mode: CallbackMode::Concurrent,
+            on_turn_complete_mode: ExecutionMode::Concurrent,
             ..Default::default()
         };
         let callbacks = Arc::new(callbacks);

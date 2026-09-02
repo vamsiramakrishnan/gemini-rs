@@ -15,7 +15,7 @@ mod common;
 
 use std::time::Instant;
 
-use common::{have_api_key, model_backed_engine, skip, ScratchDir};
+use common::{ScratchDir, have_api_key, model_backed_engine, skip};
 use gemini_memory_rs::core::{SessionId, TurnId};
 
 const UTTERANCES: &[&str] = &[

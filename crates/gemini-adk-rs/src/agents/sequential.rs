@@ -200,7 +200,7 @@ mod tests {
             Err(AgentError::TransferRequested(target)) => {
                 assert_eq!(target, "target_agent");
             }
-            other => panic!("expected TransferRequested, got {:?}", other),
+            other => panic!("expected TransferRequested, got {other:?}"),
         }
         let entries = log.lock().clone();
         assert_eq!(entries, vec!["a", "b"]); // c never ran

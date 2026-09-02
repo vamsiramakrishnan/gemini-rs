@@ -10,7 +10,6 @@ publish = false
 
 [dependencies]
 gemini-adk-fluent-rs = { path = "../../crates/gemini-adk-fluent-rs", features = [
-    "gemini-llm",
     "voice-io",
 ] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

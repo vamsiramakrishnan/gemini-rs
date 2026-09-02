@@ -14,20 +14,35 @@ Agent runtime for Gemini Live — tools, streaming, agent transfer, middleware. 
 - **Text agents** — 15+ combinators: Sequential, Parallel, Loop, Fallback,
   Route, Race, Timeout, MapOver, Tap, Dispatch, Join, and more
 
+## Feature flags
+
+| Feature | Default | Enables |
+|---|---|---|
+| `gemini-llm` | on | `GeminiLlm` text generation over REST (pure Rust) |
+| `tls-native` | on | the TLS backend (`tls-rustls` is the alternative) |
+| `templates`, `metrics`, `mcp-http`, `vertex-ai-*`, `database-sessions`, `otel*` | off | opt-in integrations |
+
 ## Quick Start
 
 ```rust,ignore
 use gemini_adk_rs::*;
+use gemini_genai_rs::prelude::*;
 
-let tool = SimpleTool::new("get_weather", "Get current weather", |args| async {
-    Ok(serde_json::json!({"temp": 72, "unit": "F"}))
-});
+let mut dispatcher = ToolDispatcher::new();
+dispatcher.register(SimpleTool::new(
+    "get_weather",
+    "Get current weather",
+    None, // JSON Schema for parameters (None = no declared schema)
+    |_args| async move { Ok(serde_json::json!({"temp": 72, "unit": "F"})) },
+));
 
-let session = LiveSessionBuilder::new()
-    .model(gemini_genai_rs::prelude::GeminiModel::Gemini2_0Flash)
-    .instruction("You are a weather assistant.")
-    .tool(tool)
-    .build()
+// No `.model(..)`: connect resolves the platform's default Live model.
+let config = SessionConfig::new(std::env::var("GEMINI_API_KEY")?)
+    .system_instruction("You are a weather assistant.");
+
+let handle = LiveSessionBuilder::new(config)
+    .dispatcher(dispatcher)
+    .connect()
     .await?;
 ```
 

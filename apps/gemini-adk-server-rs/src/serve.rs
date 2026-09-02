@@ -7,7 +7,7 @@
 
 use std::path::PathBuf;
 
-use crate::{build_api_router, ServerAgentRegistry, ServerState};
+use crate::{ServerAgentRegistry, ServerState, build_api_router};
 
 /// Configuration for serving the ADK REST API.
 pub struct ServeConfig {

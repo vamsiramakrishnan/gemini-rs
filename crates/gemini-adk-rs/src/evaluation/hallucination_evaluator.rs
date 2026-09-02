@@ -68,7 +68,7 @@ impl HallucinationEvaluator {
                 }
                 "model" if !turn.tool_results.is_empty() => {
                     for result in &turn.tool_results {
-                        context.push_str(&format!("TOOL RESULT: {}\n", result));
+                        context.push_str(&format!("TOOL RESULT: {result}\n"));
                     }
                 }
                 _ => {}
@@ -128,12 +128,12 @@ impl HallucinationEvaluator {
         }
 
         // Try finding embedded JSON
-        if let Some(start) = text.find('{') {
-            if let Some(end) = text[start..].rfind('}') {
-                let json_str = &text[start..=start + end];
-                if let Ok(v) = serde_json::from_str::<serde_json::Value>(json_str) {
-                    return extract_score_and_explanation(&v);
-                }
+        if let Some(start) = text.find('{')
+            && let Some(end) = text[start..].rfind('}')
+        {
+            let json_str = &text[start..=start + end];
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(json_str) {
+                return extract_score_and_explanation(&v);
             }
         }
 

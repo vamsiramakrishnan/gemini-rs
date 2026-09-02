@@ -1,12 +1,12 @@
 //! REST API router builder — single router shared by all server surfaces.
 
 use axum::{
-    routing::{get, post},
     Router,
+    routing::{get, post},
 };
 use tower_http::cors::CorsLayer;
 
-use crate::{handlers, ServerState};
+use crate::{ServerState, handlers};
 
 /// Build the complete REST API router with all upstream ADK endpoints.
 ///

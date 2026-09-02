@@ -15,7 +15,7 @@ use async_trait::async_trait;
 use serde_json::json;
 use tokio::sync::broadcast;
 
-use gemini_genai_rs::prelude::{recv_event, FunctionResponse, Tool};
+use gemini_genai_rs::prelude::{FunctionResponse, Tool, recv_event};
 use gemini_genai_rs::session::SessionEvent;
 
 use crate::agent::Agent;
@@ -100,13 +100,12 @@ impl LlmAgent {
                             PluginResult::Deny(reason) => {
                                 ctx.emit(AgentEvent::ToolCallFailed {
                                     name: call.name.clone(),
-                                    error: format!("Denied by plugin: {}", reason),
+                                    error: format!("Denied by plugin: {reason}"),
                                 });
                                 responses.push(ToolDispatcher::build_response(
                                     call,
                                     Err(ToolError::ExecutionFailed(format!(
-                                        "Denied by plugin: {}",
-                                        reason
+                                        "Denied by plugin: {reason}"
                                     ))),
                                 ));
                                 continue;
@@ -248,7 +247,7 @@ impl LlmAgent {
                 SessionEvent::Error(ref e) => {
                     ctx.emit(AgentEvent::Session(event.clone()));
                     crate::telemetry::metrics::record_agent_error(agent_name, "session_error");
-                    crate::telemetry::logging::log_agent_error(agent_name, e);
+                    crate::telemetry::logging::log_agent_error(agent_name, &e.to_string());
                 }
                 other => {
                     // Pass through all other events (TextDelta, AudioData, etc.)
@@ -444,10 +443,10 @@ impl LlmAgentBuilder {
         // Auto-register transfer tools for sub-agents
         for sub in &self.sub_agents {
             let target_name = sub.name().to_string();
-            let tool_name = format!("transfer_to_{}", target_name);
+            let tool_name = format!("transfer_to_{target_name}");
             let transfer_tool = SimpleTool::new(
                 tool_name,
-                format!("Transfer conversation to the {} agent", target_name),
+                format!("Transfer conversation to the {target_name} agent"),
                 Some(json!({
                     "type": "object",
                     "properties": {},
@@ -495,8 +494,7 @@ impl Agent for LlmAgent {
         let plugin_result = self.plugins.run_before_agent(ctx).await;
         if let PluginResult::Deny(reason) = plugin_result {
             return Err(AgentError::Other(format!(
-                "Agent denied by plugin: {}",
-                reason
+                "Agent denied by plugin: {reason}"
             )));
         }
 
@@ -556,7 +554,7 @@ mod tests {
 
     #[async_trait]
     impl SessionWriter for MockWriter {
-        async fn send_audio(&self, _data: Vec<u8>) -> Result<(), SessionError> {
+        async fn send_audio(&self, _data: bytes::Bytes) -> Result<(), SessionError> {
             Ok(())
         }
         async fn send_text(&self, _text: String) -> Result<(), SessionError> {
@@ -575,7 +573,7 @@ mod tests {
         ) -> Result<(), SessionError> {
             Ok(())
         }
-        async fn send_video(&self, _jpeg_data: Vec<u8>) -> Result<(), SessionError> {
+        async fn send_video(&self, _jpeg_data: bytes::Bytes) -> Result<(), SessionError> {
             Ok(())
         }
         async fn update_instruction(&self, _instruction: String) -> Result<(), SessionError> {
@@ -788,11 +786,11 @@ mod tests {
         // Check that we got a ToolCallFailed event
         let mut saw_tool_failed = false;
         while let Ok(event) = agent_events.try_recv() {
-            if let AgentEvent::ToolCallFailed { name, error } = event {
-                if name == "nonexistent_tool" {
-                    assert!(error.contains("not found") || error.contains("Not found"));
-                    saw_tool_failed = true;
-                }
+            if let AgentEvent::ToolCallFailed { name, error } = event
+                && name == "nonexistent_tool"
+            {
+                assert!(error.contains("not found") || error.contains("Not found"));
+                saw_tool_failed = true;
             }
         }
         assert!(
@@ -824,7 +822,7 @@ mod tests {
         let result = agent.run_live(&mut ctx).await;
         match result {
             Err(AgentError::TransferRequested(target)) => assert_eq!(target, "billing"),
-            other => panic!("expected TransferRequested, got: {:?}", other),
+            other => panic!("expected TransferRequested, got: {other:?}"),
         }
 
         // Check that AgentTransfer event was emitted
@@ -883,7 +881,13 @@ mod tests {
 
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            let _ = evt_tx.send(SessionEvent::Error("something broke".to_string()));
+            let _ = evt_tx.send(SessionEvent::Error(
+                gemini_genai_rs::session::SessionError::WebSocket(
+                    gemini_genai_rs::session::WebSocketError::ProtocolError(
+                        "something broke".to_string(),
+                    ),
+                ),
+            ));
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
             let _ = evt_tx.send(SessionEvent::TurnComplete);
         });
@@ -894,7 +898,7 @@ mod tests {
         let mut saw_error = false;
         while let Ok(event) = agent_events.try_recv() {
             if let AgentEvent::Session(SessionEvent::Error(e)) = event {
-                assert_eq!(e, "something broke");
+                assert!(e.to_string().contains("something broke"), "{e}");
                 saw_error = true;
             }
         }
@@ -931,8 +935,7 @@ mod tests {
         let last = events.last().unwrap();
         assert!(
             matches!(last, AgentEvent::AgentCompleted { name } if name == "lifecycle_test"),
-            "last event should be AgentCompleted, got: {:?}",
-            last
+            "last event should be AgentCompleted, got: {last:?}"
         );
     }
 
@@ -961,11 +964,11 @@ mod tests {
 
         let mut saw_tool_failed = false;
         while let Ok(event) = agent_events.try_recv() {
-            if let AgentEvent::ToolCallFailed { name, error } = event {
-                if name == "failing_tool" {
-                    assert!(error.contains("kaboom"));
-                    saw_tool_failed = true;
-                }
+            if let AgentEvent::ToolCallFailed { name, error } = event
+                && name == "failing_tool"
+            {
+                assert!(error.contains("kaboom"));
+                saw_tool_failed = true;
             }
         }
         assert!(saw_tool_failed, "should have emitted ToolCallFailed");

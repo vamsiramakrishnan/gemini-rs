@@ -70,6 +70,31 @@ pub trait ToolFunction: Send + Sync + 'static {
     }
 }
 
+/// An `Arc<dyn ToolFunction>` (or `Arc<SomeTool>`) is itself a tool, so a
+/// setter that takes `impl ToolFunction` accepts a shared handle as readily as
+/// a fresh value.
+#[async_trait]
+impl<T: ToolFunction + ?Sized> ToolFunction for Arc<T> {
+    fn name(&self) -> &str {
+        (**self).name()
+    }
+    fn description(&self) -> &str {
+        (**self).description()
+    }
+    fn parameters(&self) -> Option<serde_json::Value> {
+        (**self).parameters()
+    }
+    async fn call(&self, args: serde_json::Value) -> Result<serde_json::Value, ToolError> {
+        (**self).call(args).await
+    }
+    fn requires_confirmation(&self) -> bool {
+        (**self).requires_confirmation()
+    }
+    fn confirmation_message(&self) -> Option<&str> {
+        (**self).confirmation_message()
+    }
+}
+
 /// A streaming tool — runs in background, yields multiple results.
 #[async_trait]
 pub trait StreamingTool: Send + Sync + 'static {

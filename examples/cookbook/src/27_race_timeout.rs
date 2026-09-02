@@ -40,7 +40,7 @@ impl BaseLlm for DelayLlm {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== Cookbook #27: RaceTextAgent + TimeoutTextAgent ===\n");
 
     // ── 1. Basic race: fast vs slow agent ──
@@ -60,11 +60,11 @@ async fn main() {
 
     let fast_agent = AgentBuilder::new("fast-responder")
         .instruction("Quick response")
-        .build(fast_llm.clone());
+        .build(fast_llm.clone())?;
 
     let slow_agent = AgentBuilder::new("slow-responder")
         .instruction("Detailed response")
-        .build(slow_llm.clone());
+        .build(slow_llm.clone())?;
 
     let race = RaceTextAgent::new("speed-race", vec![fast_agent.clone(), slow_agent.clone()]);
 
@@ -73,11 +73,8 @@ async fn main() {
     let result = race.run(&state).await.unwrap();
     let elapsed = start.elapsed();
 
-    println!("Race result: '{}'", result);
-    println!(
-        "Completed in {:?} (fast agent won, slow cancelled)",
-        elapsed
-    );
+    println!("Race result: '{result}'");
+    println!("Completed in {elapsed:?} (fast agent won, slow cancelled)");
     assert!(
         elapsed < Duration::from_millis(150),
         "Fast agent should win"
@@ -106,18 +103,18 @@ async fn main() {
 
     let agent_a = AgentBuilder::new("provider-a")
         .instruction("Analyze")
-        .build(provider_a);
+        .build(provider_a)?;
     let agent_b = AgentBuilder::new("provider-b")
         .instruction("Analyze")
-        .build(provider_b);
+        .build(provider_b)?;
     let agent_c = AgentBuilder::new("provider-c")
         .instruction("Analyze")
-        .build(provider_c);
+        .build(provider_c)?;
 
     let multi_race = RaceTextAgent::new("provider-race", vec![agent_a, agent_b, agent_c]);
 
     let result = multi_race.run(&state).await.unwrap();
-    println!("Multi-provider race winner: '{}'", result);
+    println!("Multi-provider race winner: '{result}'");
 
     // ── 3. Basic timeout ──
     println!("\n--- 3. Basic Timeout ---\n");
@@ -143,7 +140,7 @@ async fn main() {
         result.is_err()
     );
     if let Err(ref e) = result {
-        println!("  Error: {}", e);
+        println!("  Error: {e}");
     }
 
     // ── 4. Timeout + Fallback ──
@@ -162,7 +159,7 @@ async fn main() {
     );
 
     let result = with_fallback.run(&state).await.unwrap();
-    println!("Timeout+fallback result: '{}'", result);
+    println!("Timeout+fallback result: '{result}'");
     println!("  Slow agent timed out, fast agent took over");
 
     // ── 5. Race + Timeout for production resilience ──
@@ -176,9 +173,12 @@ async fn main() {
                 delay: Duration::from_millis(delay_ms),
                 response: response.into(),
             });
-            let agent = AgentBuilder::new(name).instruction("Respond").build(llm);
+            let agent = AgentBuilder::new(name)
+                .instruction("Respond")
+                .build(llm)
+                .expect("no MCP tools: build cannot fail");
             Arc::new(TimeoutTextAgent::new(
-                format!("{}-timeout", name),
+                format!("{name}-timeout"),
                 agent,
                 Duration::from_millis(timeout_ms),
             ))
@@ -196,7 +196,7 @@ async fn main() {
     let start = std::time::Instant::now();
     let result = resilient.run(&state).await.unwrap();
     let elapsed = start.elapsed();
-    println!("Resilient race: '{}' in {:?}", result, elapsed);
+    println!("Resilient race: '{result}' in {elapsed:?}");
 
     // ── 6. Cascading timeouts (increasing patience) ──
     println!("\n--- 6. Cascading Timeouts ---\n");
@@ -206,7 +206,7 @@ async fn main() {
         "fast-try",
         AgentBuilder::new("fast")
             .instruction("Quick")
-            .build(fast_llm.clone()),
+            .build(fast_llm.clone())?,
         Duration::from_millis(30),
     ));
 
@@ -219,7 +219,7 @@ async fn main() {
         "medium-try",
         AgentBuilder::new("medium")
             .instruction("Moderate")
-            .build(medium_llm),
+            .build(medium_llm)?,
         Duration::from_millis(200),
     ));
 
@@ -227,14 +227,14 @@ async fn main() {
         "slow-try",
         AgentBuilder::new("slow")
             .instruction("Thorough")
-            .build(slow_llm.clone()),
+            .build(slow_llm.clone())?,
         Duration::from_millis(500),
     ));
 
     let cascade = FallbackTextAgent::new("cascading-timeout", vec![fast_try, medium_try, slow_try]);
 
     let result = cascade.run(&state).await.unwrap();
-    println!("Cascading timeout result: '{}'", result);
+    println!("Cascading timeout result: '{result}'");
 
     // ── 7. Race with observation (Tap) ──
     println!("\n--- 7. Race with Observation ---\n");
@@ -287,4 +287,5 @@ async fn main() {
     }
 
     println!("\nRace/Timeout pipeline example completed successfully!");
+    Ok(())
 }

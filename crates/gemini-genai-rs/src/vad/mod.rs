@@ -309,6 +309,11 @@ impl VoiceActivityDetector {
         self.noise_floor_db = self.noise_floor_db * (1.0 - alpha) + energy_db * alpha;
     }
 
+    #[allow(
+        clippy::unused_self,
+        reason = "self carries the backend and last probability once `vad-wavekat` is compiled in; \
+                  the feature-off body is a stub behind the same call site"
+    )]
     fn wavekat_decision(&mut self, samples: &[i16]) -> Option<bool> {
         #[cfg(feature = "vad-wavekat")]
         {

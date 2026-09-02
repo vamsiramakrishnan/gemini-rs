@@ -4,8 +4,8 @@
 //! live in `tests/` and exercise the generated code against the real
 //! `gemini-adk-rs` crate graph.
 
-use gemini_adk_rs::frame::{ConfirmPolicy, SlotRecognizer, SlotValidator};
-use gemini_adk_rs::Frame; // brings both the `Frame` trait and the `#[derive(Frame)]` macro
+use gemini_adk_rs::Frame;
+use gemini_adk_rs::frame::{ConfirmPolicy, SlotRecognizer, SlotValidator}; // brings both the `Frame` trait and the `#[derive(Frame)]` macro
 
 #[derive(Frame)]
 #[frame(name = "booking")]

@@ -40,23 +40,24 @@ impl std::fmt::Debug for StateTransform {
 
 /// Compose two state transforms sequentially with `>>`.
 impl std::ops::Shr for StateTransform {
-    type Output = StateTransformChain;
+    type Output = StateComposite;
 
     fn shr(self, rhs: StateTransform) -> Self::Output {
-        StateTransformChain {
+        StateComposite {
             steps: vec![self, rhs],
         }
     }
 }
 
-/// A chain of state transforms applied sequentially.
+/// A chain of state transforms applied sequentially (`S::a() >> S::b()`).
 #[derive(Clone)]
-pub struct StateTransformChain {
+#[non_exhaustive]
+pub struct StateComposite {
     /// The ordered list of transforms applied sequentially.
     pub steps: Vec<StateTransform>,
 }
 
-impl StateTransformChain {
+impl StateComposite {
     /// Apply all transforms in order.
     pub fn apply(&self, state: &mut serde_json::Value) {
         for step in &self.steps {
@@ -66,8 +67,8 @@ impl StateTransformChain {
 }
 
 /// Extend the chain with `>>`.
-impl std::ops::Shr<StateTransform> for StateTransformChain {
-    type Output = StateTransformChain;
+impl std::ops::Shr<StateTransform> for StateComposite {
+    type Output = StateComposite;
 
     fn shr(mut self, rhs: StateTransform) -> Self::Output {
         self.steps.push(rhs);
@@ -81,7 +82,7 @@ pub struct S;
 impl S {
     /// Keep only the specified keys.
     pub fn pick(keys: &[&str]) -> StateTransform {
-        let keys: Vec<String> = keys.iter().map(|k| k.to_string()).collect();
+        let keys: Vec<String> = keys.iter().map(std::string::ToString::to_string).collect();
         StateTransform::new("pick", move |state| {
             if let Some(obj) = state.as_object_mut() {
                 obj.retain(|k, _| keys.contains(k));
@@ -108,7 +109,7 @@ impl S {
 
     /// Merge the specified keys into a single key as an object.
     pub fn merge(keys: &[&str], into: &str) -> StateTransform {
-        let keys: Vec<String> = keys.iter().map(|k| k.to_string()).collect();
+        let keys: Vec<String> = keys.iter().map(std::string::ToString::to_string).collect();
         let into = into.to_string();
         StateTransform::new("merge", move |state| {
             if let Some(obj) = state.as_object_mut() {
@@ -143,11 +144,11 @@ impl S {
     pub fn flatten(key: &str) -> StateTransform {
         let key = key.to_string();
         StateTransform::new("flatten", move |state| {
-            if let Some(obj) = state.as_object_mut() {
-                if let Some(serde_json::Value::Object(nested)) = obj.remove(&key) {
-                    for (k, v) in nested {
-                        obj.insert(k, v);
-                    }
+            if let Some(obj) = state.as_object_mut()
+                && let Some(serde_json::Value::Object(nested)) = obj.remove(&key)
+            {
+                for (k, v) in nested {
+                    obj.insert(k, v);
                 }
             }
         })
@@ -170,33 +171,40 @@ impl S {
     ///
     /// Replaces the common pattern `|s| s.get::<String>("key").is_some()`.
     ///
-    /// ```ignore
-    /// .transition("next_phase", S::is_set("caller_name"))
     /// ```
-    pub fn is_set(key: &str) -> impl Fn(&gemini_adk_rs::State) -> bool + Send + Sync + 'static {
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// Live::builder().phase("greet").transition("next_phase", S::is_set("caller_name")).done();
+    /// ```
+    pub fn is_set(
+        key: &str,
+    ) -> impl Fn(&gemini_adk_rs::State) -> bool + use<> + Send + Sync + 'static {
         let key = key.to_string();
         move |s: &gemini_adk_rs::State| s.contains(&key)
     }
 
     /// Returns `true` if the given key holds a truthy boolean.
     ///
-    /// ```ignore
-    /// .transition("next_phase", S::is_true("disclosure_given"))
     /// ```
-    pub fn is_true(key: &str) -> impl Fn(&gemini_adk_rs::State) -> bool + Send + Sync + 'static {
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// Live::builder().phase("disclose").transition("next_phase", S::is_true("disclosure_given")).done();
+    /// ```
+    pub fn is_true(
+        key: &str,
+    ) -> impl Fn(&gemini_adk_rs::State) -> bool + use<> + Send + Sync + 'static {
         let key = key.to_string();
         move |s: &gemini_adk_rs::State| s.get::<bool>(&key).unwrap_or(false)
     }
 
     /// Returns `true` if the given key equals the expected string value.
     ///
-    /// ```ignore
-    /// .transition("tech:greet", S::eq("issue_type", "technical"))
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// Live::builder().phase("triage").transition("tech:greet", S::eq("issue_type", "technical")).done();
     /// ```
     pub fn eq(
         key: &str,
         expected: &str,
-    ) -> impl Fn(&gemini_adk_rs::State) -> bool + Send + Sync + 'static {
+    ) -> impl Fn(&gemini_adk_rs::State) -> bool + use<> + Send + Sync + 'static {
         let key = key.to_string();
         let expected = expected.to_string();
         move |s: &gemini_adk_rs::State| {
@@ -208,15 +216,22 @@ impl S {
 
     /// Returns `true` if the given key matches any of the provided string values.
     ///
-    /// ```ignore
-    /// .transition("arrange_payment", S::one_of("negotiation_intent", &["full_pay", "partial_pay"]))
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// Live::builder()
+    ///     .phase("negotiate")
+    ///     .transition("arrange_payment", S::one_of("negotiation_intent", &["full_pay", "partial_pay"]))
+    ///     .done();
     /// ```
     pub fn one_of(
         key: &str,
         values: &[&str],
-    ) -> impl Fn(&gemini_adk_rs::State) -> bool + Send + Sync + 'static {
+    ) -> impl Fn(&gemini_adk_rs::State) -> bool + use<> + Send + Sync + 'static {
         let key = key.to_string();
-        let values: Vec<String> = values.iter().map(|v| v.to_string()).collect();
+        let values: Vec<String> = values
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect();
         move |s: &gemini_adk_rs::State| s.get::<String>(&key).is_some_and(|v| values.contains(&v))
     }
 
@@ -227,10 +242,10 @@ impl S {
     ) -> StateTransform {
         let key = key.to_string();
         StateTransform::new("transform", move |state| {
-            if let Some(obj) = state.as_object_mut() {
-                if let Some(val) = obj.remove(&key) {
-                    obj.insert(key.clone(), f(val));
-                }
+            if let Some(obj) = state.as_object_mut()
+                && let Some(val) = obj.remove(&key)
+            {
+                obj.insert(key.clone(), f(val));
             }
         })
     }
@@ -265,14 +280,14 @@ impl S {
         let source = source_key.to_string();
         let into = into.to_string();
         StateTransform::new("accumulate", move |state| {
-            if let Some(obj) = state.as_object_mut() {
-                if let Some(val) = obj.get(&source).cloned() {
-                    let arr = obj
-                        .entry(into.clone())
-                        .or_insert_with(|| serde_json::Value::Array(Vec::new()));
-                    if let Some(arr) = arr.as_array_mut() {
-                        arr.push(val);
-                    }
+            if let Some(obj) = state.as_object_mut()
+                && let Some(val) = obj.get(&source).cloned()
+            {
+                let arr = obj
+                    .entry(into.clone())
+                    .or_insert_with(|| serde_json::Value::Array(Vec::new()));
+                if let Some(arr) = arr.as_array_mut() {
+                    arr.push(val);
                 }
             }
         })
@@ -283,7 +298,10 @@ impl S {
         let key = key.to_string();
         StateTransform::new("counter", move |state| {
             if let Some(obj) = state.as_object_mut() {
-                let current = obj.get(&key).and_then(|v| v.as_i64()).unwrap_or(0);
+                let current = obj
+                    .get(&key)
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap_or(0);
                 obj.insert(key.clone(), serde_json::json!(current + step));
             }
         })
@@ -291,14 +309,13 @@ impl S {
 
     /// Require that specified keys exist.
     pub fn require(keys: &[&str]) -> StateTransform {
-        let keys: Vec<String> = keys.iter().map(|k| k.to_string()).collect();
+        let keys: Vec<String> = keys.iter().map(std::string::ToString::to_string).collect();
         StateTransform::new("require", move |state| {
             if let Some(obj) = state.as_object() {
                 for key in &keys {
                     assert!(
                         obj.contains_key(key),
-                        "Required key '{}' missing from state",
-                        key
+                        "Required key '{key}' missing from state"
                     );
                 }
             }
@@ -324,7 +341,7 @@ impl S {
 
     /// Drop the specified keys.
     pub fn drop(keys: &[&str]) -> StateTransform {
-        let keys: Vec<String> = keys.iter().map(|k| k.to_string()).collect();
+        let keys: Vec<String> = keys.iter().map(std::string::ToString::to_string).collect();
         StateTransform::new("drop", move |state| {
             if let Some(obj) = state.as_object_mut() {
                 for key in &keys {
@@ -339,13 +356,15 @@ impl S {
     /// Useful for debugging transform pipelines — prints the message to stderr
     /// each time the transform is applied.
     ///
-    /// ```ignore
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
     /// let chain = S::pick(&["a"]) >> S::log("after pick") >> S::rename(&[("a", "x")]);
+    /// # let _ = chain;
     /// ```
     pub fn log(message: &str) -> StateTransform {
         let message = message.to_string();
         StateTransform::new("log", move |_state| {
-            eprintln!("[S::log] {}", message);
+            eprintln!("[S::log] {message}");
         })
     }
 
@@ -355,14 +374,16 @@ impl S {
     /// For example, `{"addr.city": "NYC", "addr.zip": "10001"}` with `unflatten("addr")`
     /// becomes `{"addr": {"city": "NYC", "zip": "10001"}}`.
     ///
-    /// ```ignore
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
     /// let t = S::unflatten("addr");
+    /// # let _ = t;
     /// ```
     pub fn unflatten(key: &str) -> StateTransform {
         let key = key.to_string();
         StateTransform::new("unflatten", move |state| {
             if let Some(obj) = state.as_object_mut() {
-                let prefix = format!("{}.", key);
+                let prefix = format!("{key}.");
                 let dotted: Vec<(String, serde_json::Value)> = obj
                     .keys()
                     .filter(|k| k.starts_with(&prefix))
@@ -393,12 +414,14 @@ impl S {
     /// where element `i` contains `[keys[0][i], keys[1][i], ...]`.
     /// Arrays are zipped to the length of the shortest.
     ///
-    /// ```ignore
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
     /// // {"names": ["a","b"], "scores": [1,2]} -> {"zipped": [["a",1], ["b",2]]}
     /// let t = S::zip(&["names", "scores"], "zipped");
+    /// # let _ = t;
     /// ```
     pub fn zip(keys: &[&str], into: &str) -> StateTransform {
-        let keys: Vec<String> = keys.iter().map(|k| k.to_string()).collect();
+        let keys: Vec<String> = keys.iter().map(std::string::ToString::to_string).collect();
         let into = into.to_string();
         StateTransform::new("zip", move |state| {
             if let Some(obj) = state.as_object_mut() {
@@ -426,35 +449,36 @@ impl S {
     /// Takes the array at `source`, groups its elements by the string value of `key`,
     /// and writes the resulting object (field value -> array of elements) to `into`.
     ///
-    /// ```ignore
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
     /// // {"items": [{"type":"a","v":1}, {"type":"b","v":2}, {"type":"a","v":3}]}
     /// // -> {"grouped": {"a": [{"type":"a","v":1}, {"type":"a","v":3}], "b": [{"type":"b","v":2}]}}
     /// let t = S::group_by("items", "type", "grouped");
+    /// # let _ = t;
     /// ```
     pub fn group_by(source: &str, key: &str, into: &str) -> StateTransform {
         let source = source.to_string();
         let key = key.to_string();
         let into = into.to_string();
         StateTransform::new("group_by", move |state| {
-            if let Some(obj) = state.as_object_mut() {
-                if let Some(arr) = obj.get(&source).and_then(|v| v.as_array()) {
-                    let mut groups: serde_json::Map<String, serde_json::Value> =
-                        serde_json::Map::new();
-                    for item in arr {
-                        let group_key = item
-                            .get(&key)
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("_unknown")
-                            .to_string();
-                        let group = groups
-                            .entry(group_key)
-                            .or_insert_with(|| serde_json::Value::Array(Vec::new()));
-                        if let Some(arr) = group.as_array_mut() {
-                            arr.push(item.clone());
-                        }
+            if let Some(obj) = state.as_object_mut()
+                && let Some(arr) = obj.get(&source).and_then(|v| v.as_array())
+            {
+                let mut groups: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
+                for item in arr {
+                    let group_key = item
+                        .get(&key)
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("_unknown")
+                        .to_string();
+                    let group = groups
+                        .entry(group_key)
+                        .or_insert_with(|| serde_json::Value::Array(Vec::new()));
+                    if let Some(arr) = group.as_array_mut() {
+                        arr.push(item.clone());
                     }
-                    obj.insert(into.clone(), serde_json::Value::Object(groups));
                 }
+                obj.insert(into.clone(), serde_json::Value::Object(groups));
             }
         })
     }
@@ -464,14 +488,16 @@ impl S {
     /// Each time this transform runs, the current value of `key` is appended to
     /// `{key}_history`. The history array is capped at `max` entries (oldest dropped).
     ///
-    /// ```ignore
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
     /// let t = S::history("score", 5); // keeps last 5 score values in "score_history"
+    /// # let _ = t;
     /// ```
     pub fn history(key: &str, max: usize) -> StateTransform {
         let key = key.to_string();
         StateTransform::new("history", move |state| {
             if let Some(obj) = state.as_object_mut() {
-                let history_key = format!("{}_history", key);
+                let history_key = format!("{key}_history");
                 if let Some(val) = obj.get(&key).cloned() {
                     let arr = obj
                         .entry(history_key)
@@ -493,7 +519,9 @@ impl S {
     /// `required` array is missing, or if a key's type doesn't match the schema's
     /// `properties.{key}.type` declaration.
     ///
-    /// ```ignore
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// # use serde_json::json;
     /// let t = S::validate(json!({
     ///     "required": ["name", "age"],
     ///     "properties": {
@@ -511,8 +539,7 @@ impl S {
                         if let Some(key) = req.as_str() {
                             assert!(
                                 obj.contains_key(key),
-                                "Validation failed: required key '{}' missing from state",
-                                key
+                                "Validation failed: required key '{key}' missing from state"
                             );
                         }
                     }
@@ -520,25 +547,23 @@ impl S {
                 // Check property types
                 if let Some(properties) = schema.get("properties").and_then(|v| v.as_object()) {
                     for (key, prop_schema) in properties {
-                        if let Some(val) = obj.get(key) {
-                            if let Some(expected_type) =
+                        if let Some(val) = obj.get(key)
+                            && let Some(expected_type) =
                                 prop_schema.get("type").and_then(|v| v.as_str())
-                            {
-                                let actual_ok = match expected_type {
-                                    "string" => val.is_string(),
-                                    "number" | "integer" => val.is_number(),
-                                    "boolean" => val.is_boolean(),
-                                    "array" => val.is_array(),
-                                    "object" => val.is_object(),
-                                    "null" => val.is_null(),
-                                    _ => true,
-                                };
-                                assert!(
-                                    actual_ok,
-                                    "Validation failed: key '{}' expected type '{}', got {:?}",
-                                    key, expected_type, val
-                                );
-                            }
+                        {
+                            let actual_ok = match expected_type {
+                                "string" => val.is_string(),
+                                "number" | "integer" => val.is_number(),
+                                "boolean" => val.is_boolean(),
+                                "array" => val.is_array(),
+                                "object" => val.is_object(),
+                                "null" => val.is_null(),
+                                _ => true,
+                            };
+                            assert!(
+                                actual_ok,
+                                "Validation failed: key '{key}' expected type '{expected_type}', got {val:?}"
+                            );
                         }
                     }
                 }
@@ -550,9 +575,11 @@ impl S {
     ///
     /// Applies `if_true` when the predicate returns `true`, otherwise applies `if_false`.
     ///
-    /// ```ignore
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// # use serde_json::json;
     /// let t = S::branch(
-    ///     |s| s.get("premium").and_then(|v| v.as_bool()).unwrap_or(false),
+    ///     |s| s.get("premium").and_then(serde_json::Value::as_bool).unwrap_or(false),
     ///     S::set("tier", json!("gold")),
     ///     S::set("tier", json!("basic")),
     /// );
@@ -617,7 +644,7 @@ mod tests {
     fn map_custom_transform() {
         let mut state = json!({"count": 5});
         S::map(|s| {
-            if let Some(n) = s.get("count").and_then(|v| v.as_i64()) {
+            if let Some(n) = s.get("count").and_then(serde_json::Value::as_i64) {
                 s["count"] = json!(n * 2);
             }
         })
@@ -772,7 +799,11 @@ mod tests {
     fn branch_takes_true_path() {
         let mut state = json!({"premium": true});
         S::branch(
-            |s| s.get("premium").and_then(|v| v.as_bool()).unwrap_or(false),
+            |s| {
+                s.get("premium")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false)
+            },
             S::set("tier", json!("gold")),
             S::set("tier", json!("basic")),
         )
@@ -784,7 +815,11 @@ mod tests {
     fn branch_takes_false_path() {
         let mut state = json!({"premium": false});
         S::branch(
-            |s| s.get("premium").and_then(|v| v.as_bool()).unwrap_or(false),
+            |s| {
+                s.get("premium")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false)
+            },
             S::set("tier", json!("gold")),
             S::set("tier", json!("basic")),
         )

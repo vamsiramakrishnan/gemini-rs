@@ -24,11 +24,11 @@ fn main() {
     // In production, you would call .connect_google_ai(key) or
     // .connect_vertex(project, location, token) at the end.
     println!("Live::builder()");
-    println!("    .model(GeminiModel::Gemini2_0FlashLive)");
+    println!("    .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)");
     println!("    .voice(Voice::Kore)");
     println!("    .instruction(\"You are a helpful assistant\")");
     println!("    .greeting(\"Hello! How can I help you today?\")");
-    println!("    .transcription(true, true)");
+    println!("    .transcription()");
     println!("    .on_audio(|data| {{ /* play audio */ }})");
     println!("    .on_text(|t| print!(\"{{t}}\"))");
     println!("    .connect_google_ai(api_key)  // not called in demo");
@@ -44,7 +44,7 @@ fn main() {
     println!("  .phase(\"greeting\")");
     println!("      .instruction(\"Welcome the caller warmly\")");
     println!("      .transition(\"identification\", S::is_true(\"greeted\"))");
-    println!("      .prompt_on_enter(true)");
+    println!("      .prompt_on_enter()");
     println!("      .done()");
     println!("  .phase(\"identification\")");
     println!("      .instruction(\"Verify the caller's identity\")");
@@ -88,7 +88,10 @@ fn main() {
         "process_refund",
         "Process a refund for the customer",
         |args| async move {
-            let amount = args.get("amount").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let amount = args
+                .get("amount")
+                .and_then(serde_json::Value::as_f64)
+                .unwrap_or(0.0);
             Ok(json!({
                 "refund_id": "REF-12345",
                 "amount": amount,
@@ -275,19 +278,19 @@ fn main() {
 
     println!("// Full production Live session setup:");
     println!("let handle = Live::builder()");
-    println!("    .model(GeminiModel::Gemini2_0FlashLive)");
+    println!("    .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)");
     println!("    .voice(Voice::Kore)");
     println!("    .instruction(\"You are a customer support agent for Acme Corp.\")");
     println!("    .greeting(\"Hello! Welcome to Acme support. How can I help?\")");
-    println!("    .tools(dispatcher)");
-    println!("    .transcription(true, true)");
+    println!("    .dispatcher(dispatcher)");
+    println!("    .transcription()");
     println!("    .thinking(1024)");
     println!("    .include_thoughts()");
     println!("    // Phases");
     println!("    .phase(\"greeting\")");
     println!("        .instruction(\"Welcome the caller\")");
     println!("        .transition(\"identify\", S::is_true(\"greeted\"))");
-    println!("        .prompt_on_enter(true)");
+    println!("        .prompt_on_enter()");
     println!("        .done()");
     println!("    .phase(\"identify\")");
     println!("        .instruction(\"Verify identity\")");

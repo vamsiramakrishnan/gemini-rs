@@ -103,7 +103,7 @@ pub fn extract_enums(source: &str) -> Vec<(String, Option<String>, Vec<String>)>
         if let Some(body) = extract_brace_block(source, body_start) {
             let variants: Vec<String> = body
                 .split(',')
-                .map(|s| s.trim())
+                .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .map(|s| {
                     if let Some(eq_pos) = s.find('=') {
@@ -134,7 +134,7 @@ pub fn extract_helper_functions(source: &str) -> Vec<(String, String)> {
         let name = cap[1].to_string();
         let params = cap[2].trim().to_string();
         let return_type = cap[3].trim().to_string();
-        let signature = format!("({}) => {}", params, return_type);
+        let signature = format!("({params}) => {return_type}");
         results.push((name, signature));
     }
     results
@@ -267,12 +267,12 @@ pub fn map_ts_to_rust(ts_type: &str) -> String {
     // Array types: `Foo[]` or `Array<Foo>`
     if let Some(inner) = ts.strip_suffix("[]") {
         let rust_inner = map_ts_to_rust(inner);
-        return format!("Vec<{}>", rust_inner);
+        return format!("Vec<{rust_inner}>");
     }
     let array_re = Regex::new(r"^Array<(.+)>$").unwrap();
     if let Some(cap) = array_re.captures(ts) {
         let rust_inner = map_ts_to_rust(&cap[1]);
-        return format!("Vec<{}>", rust_inner);
+        return format!("Vec<{rust_inner}>");
     }
 
     // String literal unions: `'default' | 'none'`
@@ -282,7 +282,7 @@ pub fn map_ts_to_rust(ts_type: &str) -> String {
 
     // Union types with classes
     if ts.contains('|') {
-        let parts: Vec<&str> = ts.split('|').map(|s| s.trim()).collect();
+        let parts: Vec<&str> = ts.split('|').map(str::trim).collect();
         if parts.contains(&"string") {
             return "String".to_string();
         }
@@ -304,10 +304,10 @@ pub fn map_ts_to_rust(ts_type: &str) -> String {
         "Content" => "Content".to_string(),
         "Schema" => "serde_json::Value".to_string(),
         _ => {
-            if ts.chars().next().is_some_and(|c| c.is_uppercase()) {
+            if ts.chars().next().is_some_and(char::is_uppercase) {
                 ts.to_string()
             } else {
-                format!("/* {} */ String", ts)
+                format!("/* {ts} */ String")
             }
         }
     }
@@ -322,7 +322,7 @@ fn is_callback_type(ts_type: &str) -> bool {
     let normalized = ts_type.trim().trim_end_matches("[]");
 
     if normalized.contains('|') {
-        let parts: Vec<&str> = normalized.split('|').map(|s| s.trim()).collect();
+        let parts: Vec<&str> = normalized.split('|').map(str::trim).collect();
         return parts.iter().all(|p| {
             let p = p.trim_end_matches("[]");
             CALLBACK_TYPE_NAMES.contains(&p) || p.contains("=>")
@@ -343,7 +343,7 @@ fn is_callback_type(ts_type: &str) -> bool {
 
 /// Check if a type alias value is a string literal union.
 pub fn is_string_union(value: &str) -> bool {
-    let parts: Vec<&str> = value.split('|').map(|s| s.trim()).collect();
+    let parts: Vec<&str> = value.split('|').map(str::trim).collect();
     parts.len() >= 2
         && parts.iter().all(|p| {
             let p = p.trim();
@@ -355,7 +355,7 @@ pub fn is_string_union(value: &str) -> bool {
 pub fn parse_string_union_variants(value: &str) -> Vec<String> {
     value
         .split('|')
-        .map(|s| s.trim())
+        .map(str::trim)
         .map(|s| s.trim_matches('\'').trim_matches('"').to_string())
         .filter(|s| !s.is_empty())
         .collect()
@@ -495,10 +495,7 @@ pub fn chrono_like_now() -> String {
     let minutes = (remaining % 3600) / 60;
     let seconds = remaining % 60;
     let (year, month, day) = days_to_ymd(days);
-    format!(
-        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
-        year, month, day, hours, minutes, seconds
-    )
+    format!("{year:04}-{month:02}-{day:02}T{hours:02}:{minutes:02}:{seconds:02}Z")
 }
 
 fn days_to_ymd(mut days: u64) -> (u64, u64, u64) {

@@ -12,7 +12,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use super::assembler::ContextAssembler;
-use super::fusion::{reciprocal_rank_fusion, FusedCandidate};
+use super::fusion::{FusedCandidate, reciprocal_rank_fusion};
 use super::plan::RetrievalPlan;
 use super::snapshot::PreparedMemorySnapshot;
 use crate::bm25::{MemoryIndex, Query, SearchHit};
@@ -494,15 +494,15 @@ impl LocalMemoryRetriever {
                 // demoting the freshest record in memory.
                 return true;
             };
-            if let Some(subject) = &subject {
-                if &doc.subject_form != subject {
-                    return false;
-                }
+            if let Some(subject) = &subject
+                && &doc.subject_form != subject
+            {
+                return false;
             }
-            if let Some(predicate) = &predicate {
-                if &crate::core::normalize_token(doc.predicate.as_str()) != predicate {
-                    return false;
-                }
+            if let Some(predicate) = &predicate
+                && &crate::core::normalize_token(doc.predicate.as_str()) != predicate
+            {
+                return false;
             }
             true
         };
@@ -588,13 +588,13 @@ impl MemoryRetriever for LocalMemoryRetriever {
             self.canonical.revision(),
             self.overlay.revision()
         );
-        if let Some(cached) = self.cache.read().get(&key) {
-            if cached.is_fresh(request.now) {
-                let mut snapshot = cached.clone();
-                snapshot.source_turn_id = plan.turn_id;
-                snapshot.eligible_from_turn = TurnId(plan.turn_id.0 + 1);
-                return Ok(snapshot);
-            }
+        if let Some(cached) = self.cache.read().get(&key)
+            && cached.is_fresh(request.now)
+        {
+            let mut snapshot = cached.clone();
+            snapshot.source_turn_id = plan.turn_id;
+            snapshot.eligible_from_turn = TurnId(plan.turn_id.0 + 1);
+            return Ok(snapshot);
         }
 
         let snapshot = self
@@ -699,10 +699,12 @@ mod tests {
             .await
             .unwrap();
         assert!(!snapshot.is_empty());
-        assert!(snapshot
-            .facts
-            .iter()
-            .any(|f| f.statement.contains("quiet restaurants")));
+        assert!(
+            snapshot
+                .facts
+                .iter()
+                .any(|f| f.statement.contains("quiet restaurants"))
+        );
     }
 
     #[tokio::test]
@@ -786,10 +788,12 @@ mod tests {
             .retrieve_immediate("dinner tonight", TurnId(4), RetrievalBudget::interactive())
             .await
             .unwrap();
-        assert!(snapshot
-            .facts
-            .iter()
-            .any(|f| f.memory_id.as_str() == "mem_session"));
+        assert!(
+            snapshot
+                .facts
+                .iter()
+                .any(|f| f.memory_id.as_str() == "mem_session")
+        );
     }
 
     #[tokio::test]
@@ -845,10 +849,12 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(snapshot
-            .facts
-            .iter()
-            .any(|f| f.memory_id.as_str() == "mem_diet"));
+        assert!(
+            snapshot
+                .facts
+                .iter()
+                .any(|f| f.memory_id.as_str() == "mem_diet")
+        );
     }
 
     #[tokio::test]

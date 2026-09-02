@@ -15,7 +15,7 @@ pub use vertex::*;
 
 use async_trait::async_trait;
 
-use crate::protocol::types::GeminiModel;
+use crate::protocol::types::ModelId;
 use crate::session::AuthError;
 
 /// Identifies which Gemini API service to connect to.
@@ -81,7 +81,7 @@ impl ServiceEndpoint {
 #[async_trait]
 pub trait AuthProvider: Send + Sync + 'static {
     /// Build the WebSocket URL for the given model.
-    fn ws_url(&self, model: &GeminiModel) -> String;
+    fn ws_url(&self, model: &ModelId) -> String;
 
     /// HTTP headers for the WebSocket upgrade request (e.g., Bearer token).
     async fn auth_headers(&self) -> Result<Vec<(String, String)>, AuthError>;
@@ -105,7 +105,7 @@ pub trait AuthProvider: Send + Sync + 'static {
 /// `unimplemented!()` default with a compile-time guarantee.
 pub trait RestAuth: AuthProvider {
     /// Build a REST API URL for the given service endpoint and model.
-    fn rest_url(&self, endpoint: ServiceEndpoint, model: Option<&GeminiModel>) -> String;
+    fn rest_url(&self, endpoint: ServiceEndpoint, model: Option<&ModelId>) -> String;
 }
 
 // ---------------------------------------------------------------------------
@@ -115,12 +115,12 @@ pub trait RestAuth: AuthProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::types::GeminiModel;
+    use crate::protocol::types::ModelId;
 
     #[test]
     fn google_ai_auth_url() {
         let auth = GoogleAIAuth::new("test-key-123");
-        let url = auth.ws_url(&GeminiModel::default());
+        let url = auth.ws_url(&ModelId::FLASH_LATEST);
         assert!(url.contains("generativelanguage.googleapis.com"));
         assert!(url.contains("v1beta"));
         assert!(url.contains("key=test-key-123"));
@@ -136,16 +136,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn google_ai_auth_headers_empty() {
+    async fn google_ai_rest_key_travels_in_a_header_not_the_url() {
         let auth = GoogleAIAuth::new("test-key");
         let headers = auth.auth_headers().await.unwrap();
-        assert!(headers.is_empty());
+        assert_eq!(
+            headers,
+            vec![("x-goog-api-key".to_string(), "test-key".to_string())]
+        );
+        let url = auth.rest_url(
+            ServiceEndpoint::GenerateContent,
+            Some(&ModelId::FLASH_LATEST),
+        );
+        assert!(!url.contains("test-key"), "{url}");
     }
 
     #[test]
     fn google_ai_token_auth_url() {
         let auth = GoogleAITokenAuth::new("oauth2-token-abc");
-        let url = auth.ws_url(&GeminiModel::default());
+        let url = auth.ws_url(&ModelId::FLASH_LATEST);
         assert!(url.contains("generativelanguage.googleapis.com"));
         assert!(url.contains("access_token=oauth2-token-abc"));
         assert!(url.contains("v1alpha"));
@@ -154,7 +162,7 @@ mod tests {
     #[test]
     fn vertex_ai_auth_url_regional() {
         let auth = VertexAIAuth::new("my-project", "us-central1", "token");
-        let url = auth.ws_url(&GeminiModel::default());
+        let url = auth.ws_url(&ModelId::FLASH_LATEST);
         assert!(url.contains("us-central1-aiplatform.googleapis.com"));
         assert!(url.contains("v1beta1"));
         assert!(url.contains("x-goog-project-id=my-project"));
@@ -163,7 +171,7 @@ mod tests {
     #[test]
     fn vertex_ai_auth_url_global() {
         let auth = VertexAIAuth::new("my-project", "global", "token");
-        let url = auth.ws_url(&GeminiModel::default());
+        let url = auth.ws_url(&ModelId::FLASH_LATEST);
         // Global uses aiplatform.googleapis.com without location prefix.
         assert!(url.starts_with("wss://aiplatform.googleapis.com/"));
         assert!(!url.contains("global-aiplatform"));
@@ -181,7 +189,7 @@ mod tests {
     #[test]
     fn vertex_ai_auth_url_contains_model() {
         let auth = VertexAIAuth::new("proj", "us-central1", "tok");
-        let url = auth.ws_url(&GeminiModel::Gemini2_0FlashLive);
+        let url = auth.ws_url(&ModelId::from_static("models/gemini-2.0-flash-live-001"));
         assert!(url.contains("model=gemini-2.0-flash-live-001"));
     }
 
@@ -211,31 +219,34 @@ mod tests {
     #[test]
     fn google_ai_rest_url_generate_content() {
         let auth = GoogleAIAuth::new("test-key");
-        let model = GeminiModel::Gemini2_0FlashLive;
+        let model = ModelId::from_static("models/gemini-2.0-flash-live-001");
         let url = auth.rest_url(ServiceEndpoint::GenerateContent, Some(&model));
         assert!(url.starts_with("https://generativelanguage.googleapis.com/v1beta/"));
         assert!(url.contains(":generateContent"));
-        assert!(url.contains("key=test-key"));
+        assert!(
+            !url.contains("test-key"),
+            "the key rides in a header: {url}"
+        );
     }
 
     #[test]
     fn google_ai_rest_url_list_models() {
         let auth = GoogleAIAuth::new("key123");
         let url = auth.rest_url(ServiceEndpoint::ListModels, None);
-        assert!(url.contains("/models?key=key123"));
+        assert!(url.ends_with("/models"), "{url}");
     }
 
     #[test]
     fn google_ai_rest_url_files() {
         let auth = GoogleAIAuth::new("key");
         let url = auth.rest_url(ServiceEndpoint::Files, None);
-        assert!(url.contains("/files?key=key"));
+        assert!(url.ends_with("/files"), "{url}");
     }
 
     #[test]
     fn google_ai_token_rest_url_no_key_in_url() {
         let auth = GoogleAITokenAuth::new("oauth-token");
-        let url = auth.rest_url(ServiceEndpoint::CountTokens, Some(&GeminiModel::default()));
+        let url = auth.rest_url(ServiceEndpoint::CountTokens, Some(&ModelId::FLASH_LATEST));
         assert!(url.contains(":countTokens"));
         assert!(!url.contains("key="));
         assert!(!url.contains("access_token="));
@@ -244,7 +255,7 @@ mod tests {
     #[test]
     fn vertex_rest_url_generate_content() {
         let auth = VertexAIAuth::new("my-project", "us-central1", "token");
-        let model = GeminiModel::Gemini2_0FlashLive;
+        let model = ModelId::from_static("models/gemini-2.0-flash-live-001");
         let url = auth.rest_url(ServiceEndpoint::GenerateContent, Some(&model));
         assert!(url.starts_with("https://us-central1-aiplatform.googleapis.com/v1beta1/"));
         assert!(url.contains("projects/my-project/locations/us-central1"));
@@ -261,7 +272,7 @@ mod tests {
     #[test]
     fn vertex_rest_url_global() {
         let auth = VertexAIAuth::new("proj", "global", "tok");
-        let model = GeminiModel::default();
+        let model = ModelId::FLASH_LATEST;
         let url = auth.rest_url(ServiceEndpoint::EmbedContent, Some(&model));
         assert!(url.starts_with("https://aiplatform.googleapis.com/"));
         assert!(!url.contains("global-aiplatform"));

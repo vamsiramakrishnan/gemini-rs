@@ -334,11 +334,15 @@ mod tests {
                 .len(),
             0
         );
-        assert!(evalset.eval_cases[0].conversation[0]
-            .expected_response
-            .is_none());
-        assert!(evalset.eval_cases[0].conversation[0]
-            .intermediate_data
-            .is_none());
+        assert!(
+            evalset.eval_cases[0].conversation[0]
+                .expected_response
+                .is_none()
+        );
+        assert!(
+            evalset.eval_cases[0].conversation[0]
+                .intermediate_data
+                .is_none()
+        );
     }
 }

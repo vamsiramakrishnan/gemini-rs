@@ -105,13 +105,13 @@ pub fn to_structured_events(event: &super::Event) -> Vec<StructuredEvent> {
     let mut out = Vec::new();
 
     // Content → Content or Thought
-    if let Some(text) = &event.content {
-        if !text.is_empty() {
-            out.push(StructuredEvent::Content {
-                text: text.clone(),
-                author: event.author.clone(),
-            });
-        }
+    if let Some(text) = &event.content
+        && !text.is_empty()
+    {
+        out.push(StructuredEvent::Content {
+            text: text.clone(),
+            author: event.author.clone(),
+        });
     }
 
     // Transfer → Activity

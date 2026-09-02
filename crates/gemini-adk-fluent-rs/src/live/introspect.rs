@@ -14,9 +14,9 @@
 //! Anything validating tool names must either run after connect resolution or
 //! treat the deferred count as an admission of incompleteness.
 
+use gemini_adk_rs::State;
 use gemini_adk_rs::flow::{Enforcement, Flow};
 use gemini_adk_rs::live::Phase;
-use gemini_adk_rs::State;
 use gemini_genai_rs::prelude::Tool;
 
 use super::Live;
@@ -121,7 +121,7 @@ impl Live {
         self.persistence.is_some()
     }
 
-    /// The caller-supplied session `State`, if [`with_state`](Live::with_state)
+    /// The caller-supplied session `State`, if [`state`](Live::state)
     /// was called.
     pub fn shared_state(&self) -> Option<&State> {
         self.state.as_ref()
@@ -169,7 +169,7 @@ mod tests {
 
     #[test]
     fn declared_tool_names_sees_dispatcher_and_builtins() {
-        let live = Live::builder().with_tools(sample_tool() | T::google_search());
+        let live = Live::builder().tools(sample_tool() | T::google_search());
         let names = live.declared_tool_names();
         assert!(names.contains(&"book_table".to_string()), "{names:?}");
         assert!(names.contains(&"google_search".to_string()), "{names:?}");
@@ -186,11 +186,13 @@ mod tests {
         // check must not report them missing.
         let verifier = crate::builder::AgentBuilder::new("verifier")
             .instruction("Verify the caller")
-            .build(std::sync::Arc::new(InertLlm));
+            .build(std::sync::Arc::new(InertLlm))
+            .expect("builds");
         let live = Live::builder().agent_tool_arc("verify_identity", "Verify caller", verifier);
-        assert!(live
-            .declared_tool_names()
-            .contains(&"verify_identity".to_string()));
+        assert!(
+            live.declared_tool_names()
+                .contains(&"verify_identity".to_string())
+        );
     }
 
     #[test]
@@ -226,7 +228,7 @@ mod tests {
         // condition was in fact satisfied.
         let state = gemini_adk_rs::State::new();
         let _ = state.set("identity_verified", true);
-        let live = Live::builder().with_state(state.clone());
+        let live = Live::builder().state(state.clone());
         assert_eq!(
             live.shared_state()
                 .and_then(|s| s.get::<bool>("identity_verified")),

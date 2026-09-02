@@ -22,7 +22,7 @@ mod common;
 use gemini_memory_rs::core::{CanonicalMemory, SessionId, TurnId};
 use gemini_memory_rs::engine::MemorySession;
 
-use common::{active, describe, diagnose, have_api_key, model_backed_engine, skip, ScratchDir};
+use common::{ScratchDir, active, describe, diagnose, have_api_key, model_backed_engine, skip};
 
 async fn say(session: &MemorySession, turn: u64, utterance: &str) {
     let turn_id = TurnId(turn);

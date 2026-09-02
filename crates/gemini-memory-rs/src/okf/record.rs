@@ -9,10 +9,9 @@ use chrono::{DateTime, Utc};
 use super::document::OkfDocument;
 use super::yaml::{self, Yaml};
 use crate::core::{
-    ids::EntityId, CanonicalMemory, CanonicalPredicate, EntityRef, EvidenceCounters, MemoryError,
-    MemoryId, MemoryKind, MemorySource, MemoryStatus, MemoryValue, PrivacyMetadata,
-    RetrievalMetadata, SensitivityClass, SessionId, TemporalMetadata, TemporalScope, TurnId,
-    UserId,
+    CanonicalMemory, CanonicalPredicate, EntityRef, EvidenceCounters, MemoryError, MemoryId,
+    MemoryKind, MemorySource, MemoryStatus, MemoryValue, PrivacyMetadata, RetrievalMetadata,
+    SensitivityClass, SessionId, TemporalMetadata, TemporalScope, TurnId, UserId, ids::EntityId,
 };
 
 /// The format version written into every record.
@@ -526,7 +525,7 @@ fn parse_kind(raw: &str) -> Option<MemoryKind> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{ids::SessionId, Explicitness};
+    use crate::core::{Explicitness, ids::SessionId};
 
     fn sample() -> CanonicalMemory {
         let now = DateTime::parse_from_rfc3339("2026-07-26T09:12:14Z")

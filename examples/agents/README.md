@@ -1,22 +1,22 @@
 # Agent Examples
 
-Standalone agent examples demonstrating the L1 runtime (`gemini-adk-rs`) and L2 fluent DX (`gemini-adk-fluent-rs`).
+Standalone agent examples on the L2 fluent DX (`gemini-adk-fluent-rs`).
 
 ## Examples
 
 ### Weather Agent
 
-CLI demo: connects to Gemini Live, asks about weather, dispatches a `TypedTool` call, and prints the model's response.
+CLI demo: opens a text-only Live session with two `#[tool]` functions (`get_weather`, `get_forecast`), asks about the weather, lets the runtime dispatch the model's tool calls, and prints the streamed answer. Auth and model come from the environment via `connect_from_env()` (`GEMINI_LIVE_MODEL` overrides the platform default).
 
 ```bash
-export GOOGLE_GENAI_API_KEY="your-key"
-cargo run -p agents-example --bin weather-agent
+export GEMINI_API_KEY="your-key"   # or the Vertex AI env vars — see ../INDEX.md
+cargo run -p example-agents --bin weather-agent
 ```
 
 ### Research Pipeline
 
-Demonstrates the full L2 fluent API: `AgentBuilder`, operator combinators (`>>`, `|`, `*`, `/`), composition modules (`S`, `P`, `T`), and pre-built patterns.
+Demonstrates the full L2 fluent API: `AgentBuilder`, operator combinators (`>>`, `|`, `*`, `/`), composition modules (`S`, `P`, `T`), and pre-built patterns. Builds and validates the pipeline offline — no API key required.
 
 ```bash
-cargo run -p agents-example --bin research-pipeline
+cargo run -p example-agents --bin research-pipeline
 ```

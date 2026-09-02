@@ -22,8 +22,8 @@ mod user_simulator_evaluator;
 pub use eval_case::{EvalCase, EvalSet, Invocation, InvocationTurn};
 pub use eval_result::{EvalMetric, EvalResult, PerInvocationResult};
 pub use evalset_parser::{
-    parse_evalset, parse_evalset_str, EvalCaseFile, EvalSetFile, ExpectedToolUse, IntermediateData,
-    InvocationFile, ToolUseRecord,
+    EvalCaseFile, EvalSetFile, ExpectedToolUse, IntermediateData, InvocationFile, ToolUseRecord,
+    parse_evalset, parse_evalset_str,
 };
 pub use evaluator::{EvalError, Evaluator};
 pub use hallucination_evaluator::HallucinationEvaluator;
@@ -32,6 +32,6 @@ pub use match_type::TrajectoryMatchType;
 pub use response_evaluator::{MatchStrategy, ResponseEvaluator};
 pub use rubric_evaluator::{RubricEvaluator, RubricMode};
 pub use safety_evaluator::{SafetyCategory, SafetyEvaluator, SafetySignal};
-pub use test_config::{parse_test_config, parse_test_config_str, CriterionConfig, TestConfig};
+pub use test_config::{CriterionConfig, TestConfig, parse_test_config, parse_test_config_str};
 pub use trajectory_evaluator::TrajectoryEvaluator;
 pub use user_simulator_evaluator::UserSimulatorEvaluator;

@@ -93,7 +93,7 @@ fn main() {
         * until(|state| {
             state
                 .get("approved")
-                .and_then(|v| v.as_bool())
+                .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false)
         });
     println!("5. Conditional loop (* until): write >> review, until approved=true");
@@ -114,11 +114,13 @@ fn main() {
         >> analyst.clone()                                                // sequential
         >> (((writer.clone() / fallback_writer.clone())                   // fallback writer
             >> reviewer.clone())                                         // then review
-            * until(|s| s.get("approved").and_then(|v| v.as_bool()).unwrap_or(false)))  // loop
+            * until(|s| s.get("approved").and_then(serde_json::Value::as_bool).unwrap_or(false)))  // loop
         >> (editor.clone() * 3); // polish loop
 
     println!("\n6. Full pipeline combining all operators:");
-    println!("   (researcher | fast_researcher) >> analyst >> (writer/fallback >> reviewer)*until >> editor*3");
+    println!(
+        "   (researcher | fast_researcher) >> analyst >> (writer/fallback >> reviewer)*until >> editor*3"
+    );
     if let Composable::Pipeline(p) = &full_pipeline {
         println!("   Top-level pipeline with {} steps", p.steps.len());
     }
@@ -237,7 +239,7 @@ fn main() {
     let scores = eval.score_all("The answer is 42", "42");
     println!("   Evaluation scores:");
     for (name, score) in &scores {
-        println!("     {}: {:.2}", name, score);
+        println!("     {name}: {score:.2}");
     }
 
     // Build an eval suite
@@ -248,11 +250,11 @@ fn main() {
             "Summarize quantum computing",
             "Quantum computing uses qubits",
         )
-        .criteria(&["response_match", "contains_match", "safety"]);
+        .criteria(E::response_match() | E::contains_match() | E::custom("safety", |_, _| 1.0));
     println!(
         "   Eval suite: {} cases, {} criteria",
         suite.len(),
-        suite.criteria_names.len()
+        suite.criteria.len()
     );
 
     // ── 13. A module: Artifact schemas ──
@@ -307,12 +309,12 @@ fn main() {
     println!("   chain: 4 agents in sequence");
 
     // Map-over pattern
-    let _map = map_over(writer.clone(), 4);
-    println!("   map_over: apply writer to items, concurrency=4");
+    let _map = map_over(writer.clone(), "items");
+    println!("   map_over: apply writer to each entry of state[\"items\"]");
 
     // Map-reduce pattern
-    let _mr = map_reduce(researcher.clone(), analyst.clone(), 8);
-    println!("   map_reduce: researcher maps, analyst reduces, concurrency=8");
+    let _mr = map_reduce(researcher.clone(), analyst.clone(), "items");
+    println!("   map_reduce: researcher maps over state[\"items\"], analyst reduces");
 
     // ── 15. Contract validation on the full pipeline ──
     println!("\n--- Contract Validation ---");
@@ -331,19 +333,13 @@ fn main() {
     for v in &violations {
         match v {
             ContractViolation::UnproducedKey { consumer, key } => {
-                println!(
-                    "     UNPRODUCED: '{}' reads '{}' -- nobody writes it",
-                    consumer, key
-                );
+                println!("     UNPRODUCED: '{consumer}' reads '{key}' -- nobody writes it");
             }
             ContractViolation::DuplicateWrite { agents, key } => {
-                println!("     DUPLICATE: '{}' written by {:?}", key, agents);
+                println!("     DUPLICATE: '{key}' written by {agents:?}");
             }
             ContractViolation::OrphanedOutput { producer, key } => {
-                println!(
-                    "     ORPHANED: '{}' writes '{}' -- nobody reads it",
-                    producer, key
-                );
+                println!("     ORPHANED: '{producer}' writes '{key}' -- nobody reads it");
             }
         }
     }

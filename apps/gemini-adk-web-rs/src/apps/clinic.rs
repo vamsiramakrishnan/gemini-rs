@@ -132,17 +132,17 @@ fn clinic_context(s: &State) -> String {
     }
 
     // Insurance
-    if let Some(ins) = s.get::<String>("insurance_provider") {
-        if !ins.is_empty() {
-            ctx.push(format!("Insurance: {ins}."));
-        }
+    if let Some(ins) = s.get::<String>("insurance_provider")
+        && !ins.is_empty()
+    {
+        ctx.push(format!("Insurance: {ins}."));
     }
 
     // Symptoms
-    if let Some(symptoms) = s.get::<String>("symptoms") {
-        if !symptoms.is_empty() {
-            ctx.push(format!("Symptoms: {symptoms}."));
-        }
+    if let Some(symptoms) = s.get::<String>("symptoms")
+        && !symptoms.is_empty()
+    {
+        ctx.push(format!("Symptoms: {symptoms}."));
     }
 
     // Urgency
@@ -168,10 +168,10 @@ fn clinic_context(s: &State) -> String {
     }
 
     // Doctor
-    if let Some(doc) = s.get::<String>("doctor_name") {
-        if !doc.is_empty() {
-            ctx.push(format!("Doctor: {doc}."));
-        }
+    if let Some(doc) = s.get::<String>("doctor_name")
+        && !doc.is_empty()
+    {
+        ctx.push(format!("Doctor: {doc}."));
     }
 
     // Appointment
@@ -193,17 +193,17 @@ fn clinic_context(s: &State) -> String {
     }
 
     // Intent
-    if let Some(intent) = s.get::<String>("intent") {
-        if !intent.is_empty() {
-            let label = match intent.as_str() {
-                "new_appointment" => "booking a new appointment",
-                "reschedule" => "rescheduling an existing appointment",
-                "cancel" => "cancelling an appointment",
-                "inquiry" => "general inquiry",
-                other => other,
-            };
-            ctx.push(format!("Intent: {label}."));
-        }
+    if let Some(intent) = s.get::<String>("intent")
+        && !intent.is_empty()
+    {
+        let label = match intent.as_str() {
+            "new_appointment" => "booking a new appointment",
+            "reschedule" => "rescheduling an existing appointment",
+            "cancel" => "cancelling an appointment",
+            "inquiry" => "general inquiry",
+            other => other,
+        };
+        ctx.push(format!("Intent: {label}."));
     }
 
     if ctx.is_empty() {
@@ -669,7 +669,7 @@ impl DemoApp for Clinic {
                             .as_deref()
                             .unwrap_or(SYSTEM_INSTRUCTION),
                     )
-                    .transcription(true, true)
+                    .transcription()
                     .add_tool(clinic_tools())
                     .steering_mode(SteeringMode::ContextInjection)
                     .context_delivery(ContextDelivery::Deferred)
@@ -719,20 +719,18 @@ impl DemoApp for Clinic {
                                         "register_patient" => {
                                             if r.response.get("status").and_then(|v| v.as_str())
                                                 == Some("registered")
-                                            {
-                                                if let Some(pid) =
+                                                && let Some(pid) =
                                                     r.response.get("patient_id").and_then(|v| v.as_str())
                                                 {
                                                     state.set("patient_id", pid.to_string());
                                                     state.set("is_new_patient", false);
                                                 }
-                                            }
                                         }
                                         "lookup_patient" => {
                                             let found = r
                                                 .response
                                                 .get("found")
-                                                .and_then(|v| v.as_bool())
+                                                .and_then(serde_json::Value::as_bool)
                                                 .unwrap_or(false);
                                             if found {
                                                 if let Some(pid) =
@@ -766,7 +764,7 @@ impl DemoApp for Clinic {
                     // Phase 1: Greeting
                     .phase("greeting")
                         .instruction(GREETING_INSTRUCTION)
-                        .prompt_on_enter(true)
+                        .prompt_on_enter()
                         .needs(&["intent"])
                         .transition_with("symptom_triage", S::eq("intent", "new_appointment"), "when intent is new_appointment")
                         .transition_with("rescheduling", S::one_of("intent", &["reschedule", "cancel"]), "when intent is reschedule or cancel")
@@ -1025,10 +1023,12 @@ mod tests {
             }),
         );
         assert_eq!(result["status"], "confirmed");
-        assert!(result["appointment_id"]
-            .as_str()
-            .unwrap()
-            .starts_with("APT-"));
+        assert!(
+            result["appointment_id"]
+                .as_str()
+                .unwrap()
+                .starts_with("APT-")
+        );
         assert_eq!(result["doctor"], "Dr. Sarah Chen");
     }
 

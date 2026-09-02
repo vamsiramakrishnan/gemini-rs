@@ -112,7 +112,7 @@ for info in tools {
 
 // 3. Pass the dispatcher to the Live builder
 Live::builder()
-    .tools(dispatcher)
+    .dispatcher(dispatcher)
     .connect_from_env()
     .await?;
 ```
@@ -176,20 +176,23 @@ match manager.list_tools().await {
 
 ## Using T:: with MCP
 
-The `T::mcp` entry in the tool composite is a marker that signals MCP wiring
-should be established at session startup. In the current implementation, actual
-tool discovery and dispatcher registration use `McpSessionManager` directly
-(as shown above). The `T::mcp` entry is present for future integration with the
-fluent builder:
+`T::mcp(params)` is a deferred entry: `Live::connect` opens the MCP session
+(an `http(s)://` URL becomes SSE, anything else a stdio command line), lists
+its tools, and registers one `McpTool` per discovered tool on the session's
+dispatcher before the Live handshake. A discovery failure is a connect error.
 
 ```rust,ignore
-// Marker form — not yet wired to automatic discovery in Live::builder()
 Live::builder()
-    .with_tools(T::mcp("npx -y @modelcontextprotocol/server-filesystem"))
+    .tools(T::mcp("npx -y @modelcontextprotocol/server-filesystem") | T::google_search())
+    .connect_from_env()
+    .await?;
 ```
 
-For production use today, discover tools manually via `McpSessionManager::list_tools`
-and register them in a `ToolDispatcher` as shown in the previous section.
+A text `AgentBuilder` cannot perform that handshake — `AgentBuilder::build`
+rejects a composite containing `T::mcp` with a `ConfigError` naming the tool,
+so the entry is never dropped silently. For a text agent, discover tools via
+`McpSessionManager::list_tools` and register them on a `ToolDispatcher` as in
+the previous section.
 
 ---
 
@@ -235,9 +238,8 @@ for info in tool_infos {
 }
 
 let handle = Live::builder()
-    .model(GeminiModel::Gemini2_0FlashLive)
     .instruction("You can read and list files on the server filesystem.")
-    .tools(dispatcher)
+    .dispatcher(dispatcher)
     .connect_from_env()
     .await?;
 

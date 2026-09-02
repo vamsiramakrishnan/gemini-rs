@@ -64,7 +64,7 @@ impl Agent for ParallelAgent {
         for handle in handles {
             handle
                 .await
-                .map_err(|e| AgentError::Other(format!("Join error: {}", e)))??;
+                .map_err(|e| AgentError::Other(format!("Join error: {e}")))??;
         }
 
         Ok(())

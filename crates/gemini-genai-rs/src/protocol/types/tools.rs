@@ -157,9 +157,6 @@ pub struct ToolCodeExecution {}
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GoogleSearchRetrieval {}
 
-/// Backward-compatible alias for `Tool`.
-pub type ToolDeclaration = Tool;
-
 /// Controls how and when the model uses tools.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -243,7 +240,6 @@ mod tests {
     #[test]
     fn tool_backward_compat_alias() {
         // ToolDeclaration is a type alias for Tool
-        let _td: ToolDeclaration = Tool::functions(vec![]);
     }
 
     // ── ToolProvider trait tests ──

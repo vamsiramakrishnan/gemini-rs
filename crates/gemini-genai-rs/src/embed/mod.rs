@@ -4,9 +4,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::client::http::HttpError;
 use crate::client::Client;
-use crate::protocol::types::{Content, GeminiModel};
+use crate::client::http::HttpError;
+use crate::protocol::types::{Content, ModelId};
 use crate::transport::auth::ServiceEndpoint;
 
 /// Configuration for embed requests.
@@ -99,7 +99,7 @@ pub enum EmbedError {
     Parse(#[from] serde_json::Error),
     #[error("Auth error: {0}")]
     /// Authentication/authorization failure.
-    Auth(String),
+    Auth(#[from] crate::session::AuthError),
 }
 
 impl Client {
@@ -116,14 +116,11 @@ impl Client {
     pub async fn embed_content_with(
         &self,
         config: EmbedContentConfig,
-        model: Option<&GeminiModel>,
+        model: Option<&ModelId>,
     ) -> Result<EmbedContentResponse, EmbedError> {
         let model = model.unwrap_or(self.default_model());
         let url = self.rest_url_for(ServiceEndpoint::EmbedContent, model);
-        let headers = self
-            .auth_headers()
-            .await
-            .map_err(|e| EmbedError::Auth(e.to_string()))?;
+        let headers = self.auth_headers().await?;
 
         let mut body = serde_json::json!({
             "content": config.content,

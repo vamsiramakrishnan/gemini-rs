@@ -1,4 +1,4 @@
-//! Agent orchestration — invoke an agent in a [`Mode`].
+//! Agent orchestration — invoke an agent in a [`AgentMode`].
 //!
 //! An agent is a value ([`TextAgent`] — a local agent, a composed pipeline, or a
 //! remote A2A agent). Orchestration is the single question of *how* you invoke
@@ -8,20 +8,20 @@
 //!
 //! | Mode | Sync? | Lowers to |
 //! |------|-------|-----------|
-//! | [`Mode::Call`] | sync — caller awaits | [`call`] (agent-as-tool, awaited inline) |
-//! | [`Mode::Dispatch`] | async, fire-and-forget | [`BackgroundAgentDispatcher::dispatch`](crate::live::BackgroundAgentDispatcher) |
-//! | [`Mode::Background`] | async, model-aware | an agent-tool marked [`ToolExecutionMode::Background`](crate::live::ToolExecutionMode) |
+//! | [`AgentMode::Call`] | sync — caller awaits | [`call_agent`] (agent-as-tool, awaited inline) |
+//! | [`AgentMode::Dispatch`] | async, fire-and-forget | [`BackgroundAgentDispatcher::dispatch`](crate::live::BackgroundAgentDispatcher) |
+//! | [`AgentMode::Background`] | async, model-aware | an agent-tool marked [`ToolExecutionMode::Background`](crate::live::ToolExecutionMode) |
 //!
 //! All three write `{name}:result`, so a `Flow` step can complete on a resolved
 //! result via [`Guard::resolved`](crate::flow::Guard::resolved), and any
 //! consumer reads the value the same way.
 
 use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use serde_json::Value;
 
+use crate::AsyncSourceFn;
 use crate::error::AgentError;
 use crate::llm::{BaseLlm, LlmRequest};
 use crate::state::State;
@@ -29,7 +29,7 @@ use crate::text::TextAgent;
 
 /// How an agent is invoked.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Mode {
+pub enum AgentMode {
     /// Synchronous — the caller awaits the result. Use only for *fast*
     /// dependencies (a voice session should not block on slow work).
     Call,
@@ -61,10 +61,10 @@ pub fn provenance(state: &State, key: &str) -> Option<String> {
 /// Invoke `agent` **synchronously**: run it to completion, write its result to
 /// `{name}:result` (or its error to `{name}:error`), and return the result.
 ///
-/// This is the [`Mode::Call`] lowering. It uses the same `{name}:result`
+/// This is the [`AgentMode::Call`] lowering. It uses the same `{name}:result`
 /// convention as [`BackgroundAgentDispatcher::dispatch`](crate::live::BackgroundAgentDispatcher),
 /// so sync and async invocations are observed identically.
-pub async fn call(
+pub async fn call_agent(
     name: &str,
     agent: Arc<dyn TextAgent>,
     state: &State,
@@ -86,16 +86,12 @@ pub async fn call(
     result
 }
 
-/// The async source of a value, bound from `State`.
-type FetchFn =
-    Arc<dyn Fn(State) -> Pin<Box<dyn Future<Output = Result<Value, String>> + Send>> + Send + Sync>;
-
 enum Source {
     /// Run a [`TextAgent`] (which reads its inputs from `State`).
     Agent(Arc<dyn TextAgent>),
     /// Run an async closure that reads `State` and returns a value — the seam
     /// for a tool call, an HTTP fetch, or an MCP request.
-    Fetch(FetchFn),
+    Fetch(AsyncSourceFn),
     /// One-shot OOB LLM completion over a `State`-interpolated prompt.
     Llm {
         /// The out-of-band LLM.
@@ -134,7 +130,7 @@ fn interpolate(template: &str, state: &State) -> String {
 /// `Resolver` is the async sibling of the deterministic
 /// [`Recognizer`](crate::extract::Recognizer): both are *inputs from State →
 /// value*. A `Resolver`
-/// generalizes [`call`] from "a sub-agent" to **any** async source — a sub-agent
+/// generalizes [`call_agent`] from "a sub-agent" to **any** async source — a sub-agent
 /// ([`Resolver::agent`]) or a system fetch / tool call / MCP request
 /// ([`Resolver::fetch`]) — under one result convention, so a `Flow` step can
 /// complete on it via [`Guard::resolved`](crate::flow::Guard::resolved)
@@ -197,7 +193,7 @@ impl Resolver {
         }
     }
 
-    /// Resolve **synchronously** ([`Mode::Call`]): await the source, write its
+    /// Resolve **synchronously** ([`AgentMode::Call`]): await the source, write its
     /// value to `{name}:result` (or its error to `{name}:error`), record its
     /// provenance under `state_meta:{name}:result`, and return it.
     pub async fn resolve(&self, state: &State) -> Result<Value, String> {
@@ -232,7 +228,7 @@ impl Resolver {
         outcome
     }
 
-    /// Resolve **detached** ([`Mode::Dispatch`]): spawn the resolution on the
+    /// Resolve **detached** ([`AgentMode::Dispatch`]): spawn the resolution on the
     /// runtime and return immediately. The conversation does not wait; consumers
     /// observe completion reactively via `{name}:result`.
     pub fn dispatch(self, state: State) {
@@ -273,7 +269,7 @@ mod tests {
     #[tokio::test]
     async fn call_writes_result_to_state() {
         let state = State::new();
-        let out = call("verify", Arc::new(Echo("ok-123")), &state)
+        let out = call_agent("verify", Arc::new(Echo("ok-123")), &state)
             .await
             .unwrap();
         assert_eq!(out, "ok-123");
@@ -286,7 +282,7 @@ mod tests {
     #[tokio::test]
     async fn call_writes_error_to_state() {
         let state = State::new();
-        let r = call("verify", Arc::new(Boom), &state).await;
+        let r = call_agent("verify", Arc::new(Boom), &state).await;
         assert!(r.is_err());
         assert!(state.contains("verify:error"));
         assert!(!state.contains("verify:result"));

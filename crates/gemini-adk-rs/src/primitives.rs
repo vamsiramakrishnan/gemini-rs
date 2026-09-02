@@ -8,7 +8,7 @@
 //! shared [`State`], tool dispatch, governed flows with load-time compilation
 //! and a self-explaining monitor, out-of-band extraction that fills the state
 //! guards read, phases and watchers, transcripts, persistence, and a
-//! [`LiveHandle`] that can always answer *why* (`why_blocked`, truth traces)
+//! [`LiveHandle`] that can always answer *why* (`explain`, truth traces)
 //! and steer *now* (`update_step_posture`).
 //!
 //! **L1 never:** opens its own idea of a socket beyond L0's transport,

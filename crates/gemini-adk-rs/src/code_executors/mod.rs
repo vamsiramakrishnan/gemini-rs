@@ -187,8 +187,7 @@ mod tests {
             .unwrap_err();
         assert!(
             err.to_string().contains("Gemini 2.0+"),
-            "expected UnsupportedModel error, got: {}",
-            err
+            "expected UnsupportedModel error, got: {err}"
         );
         assert!(request.tools.is_empty());
     }
@@ -251,7 +250,7 @@ mod tests {
                 assert_eq!(executable_code.language, "PYTHON");
                 assert_eq!(executable_code.code, "x = 1");
             }
-            other => panic!("expected ExecutableCode, got: {:?}", other),
+            other => panic!("expected ExecutableCode, got: {other:?}"),
         }
     }
 
@@ -265,7 +264,7 @@ mod tests {
                 assert_eq!(code_execution_result.outcome, "OK");
                 assert_eq!(code_execution_result.output.as_deref(), Some("42\n"));
             }
-            other => panic!("expected CodeExecutionResult, got: {:?}", other),
+            other => panic!("expected CodeExecutionResult, got: {other:?}"),
         }
     }
 
@@ -282,7 +281,7 @@ mod tests {
                 assert!(output.contains("partial output"));
                 assert!(output.contains("NameError: x not defined"));
             }
-            other => panic!("expected CodeExecutionResult, got: {:?}", other),
+            other => panic!("expected CodeExecutionResult, got: {other:?}"),
         }
     }
 }

@@ -25,7 +25,8 @@
 //! # async fn demo() -> Result<(), Box<dyn std::error::Error>> {
 //! use gemini_adk_rs::live::replay::replay_session;
 //! use gemini_adk_rs::live::LiveSessionBuilder;
-//! use gemini_genai_rs::prelude::{read_wire_log, SessionConfig};
+//! use gemini_genai_rs::prelude::SessionConfig;
+//! use gemini_genai_rs::transport::read_wire_log;
 //!
 //! let entries = read_wire_log("session.wire.jsonl")?;
 //! let config = SessionConfig::new("offline");
@@ -42,14 +43,14 @@
 
 use std::time::Duration;
 
-use gemini_genai_rs::prelude::{SessionConfig, SessionPhase, WireEntry};
+use gemini_genai_rs::prelude::{SessionConfig, SessionPhase};
 use gemini_genai_rs::session::SessionHandle;
 use gemini_genai_rs::transport::replay::{ReplayControl, ReplayTransport};
-use gemini_genai_rs::transport::{connect_with, JsonCodec, TransportConfig};
+use gemini_genai_rs::transport::{ConnectBuilder, TransportConfig, WireEntry};
 
 use crate::error::AgentError;
 
-use super::builder::{build_runtime, spawn_lanes, LiveSessionBuilder};
+use super::builder::{LiveSessionBuilder, build_runtime, spawn_lanes};
 use super::events::LiveEvent;
 use super::handle::LiveHandle;
 
@@ -146,7 +147,10 @@ pub async fn replay_session(
         setup_timeout_secs: 5,
         ..TransportConfig::default()
     };
-    let session = connect_with(config, transport_config, transport, JsonCodec)
+    let session = ConnectBuilder::new(config)
+        .transport_config(transport_config)
+        .transport(transport)
+        .connect()
         .await
         .map_err(AgentError::Session)?;
     let handle = attach_session(builder, session).await?;
@@ -181,27 +185,28 @@ pub async fn collect_events_until_idle(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gemini_genai_rs::prelude::GeminiModel;
+    use gemini_genai_rs::prelude::ModelId;
+    use gemini_genai_rs::transport::WireDirection;
 
     #[tokio::test]
     async fn replay_session_reaches_active_and_emits_events() {
         let entries = vec![
             WireEntry {
                 seq: 1,
-                dir: gemini_genai_rs::prelude::WireDirection::Inbound,
+                dir: WireDirection::Inbound,
                 ts_ms: 1,
                 payload: br#"{"setupComplete":{}}"#.to_vec(),
             },
             WireEntry {
                 seq: 2,
-                dir: gemini_genai_rs::prelude::WireDirection::Inbound,
+                dir: WireDirection::Inbound,
                 ts_ms: 2,
                 payload:
                     br#"{"serverContent":{"modelTurn":{"parts":[{"text":"Hi"}]},"turnComplete":true}}"#
                         .to_vec(),
             },
         ];
-        let config = SessionConfig::new("offline").model(GeminiModel::Gemini2_0FlashLive);
+        let config = SessionConfig::new("offline").model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO);
         let builder = LiveSessionBuilder::new(config.clone());
 
         let replay = replay_session(config, builder, &entries).await.unwrap();
@@ -222,16 +227,20 @@ mod tests {
                 .any(|e| matches!(e, LiveEvent::TextDelta(t) if t == "Hi")),
             "expected replayed TextDelta, got {collected:?}"
         );
-        assert!(collected
-            .iter()
-            .any(|e| matches!(e, LiveEvent::TurnComplete)));
+        assert!(
+            collected
+                .iter()
+                .any(|e| matches!(e, LiveEvent::TurnComplete))
+        );
 
         // The replayed session re-encoded and "sent" the setup message.
         let outbound = replay.outbound_frames();
         assert!(!outbound.is_empty());
-        assert!(String::from_utf8(outbound[0].clone())
-            .unwrap()
-            .contains("\"setup\""));
+        assert!(
+            String::from_utf8(outbound[0].clone())
+                .unwrap()
+                .contains("\"setup\"")
+        );
 
         replay.disconnect().await.unwrap();
     }

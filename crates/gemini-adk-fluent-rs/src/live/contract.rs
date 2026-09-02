@@ -25,7 +25,7 @@ impl Live {
 
         RuntimeContract {
             version: 1,
-            model: self.config.model.to_string(),
+            model: self.config.resolved_model().to_string(),
             tools,
             phases: self.phases.iter().map(describe_phase).collect(),
             initial_phase: self.initial_phase.clone(),

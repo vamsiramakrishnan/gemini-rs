@@ -99,7 +99,7 @@ impl Evaluator for LlmAsJudge {
 
             per_invocation.push(PerInvocationResult {
                 invocation_id: if actual_inv.id.is_empty() {
-                    format!("inv-{}", i)
+                    format!("inv-{i}")
                 } else {
                     actual_inv.id.clone()
                 },
@@ -138,17 +138,17 @@ fn parse_judge_response(text: &str) -> (f64, String) {
     }
 
     // Try to find JSON in the response text
-    if let Some(start) = text.find('{') {
-        if let Some(end) = text[start..].rfind('}') {
-            let json_str = &text[start..=start + end];
-            if let Ok(v) = serde_json::from_str::<serde_json::Value>(json_str) {
-                let score = v["score"].as_f64().unwrap_or(0.0).clamp(0.0, 1.0);
-                let explanation = v["explanation"]
-                    .as_str()
-                    .unwrap_or("No explanation")
-                    .to_string();
-                return (score, explanation);
-            }
+    if let Some(start) = text.find('{')
+        && let Some(end) = text[start..].rfind('}')
+    {
+        let json_str = &text[start..=start + end];
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(json_str) {
+            let score = v["score"].as_f64().unwrap_or(0.0).clamp(0.0, 1.0);
+            let explanation = v["explanation"]
+                .as_str()
+                .unwrap_or("No explanation")
+                .to_string();
+            return (score, explanation);
         }
     }
 

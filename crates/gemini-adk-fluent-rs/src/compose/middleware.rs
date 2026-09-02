@@ -34,8 +34,12 @@ use gemini_adk_rs::context::AgentEvent;
 use gemini_adk_rs::error::{AgentError, ToolError};
 use gemini_adk_rs::middleware::{LatencyMiddleware, LogMiddleware, Middleware};
 
-/// A middleware composite — one or more middleware layers.
+/// A middleware composite — one or more middleware layers (`M::a() | M::b()`).
+///
+/// A single `Arc<dyn Middleware>` converts into a one-layer composite, so
+/// `.middleware(Arc::new(MyLayer))` works without the namespace.
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct MiddlewareComposite {
     /// The ordered list of middleware layers.
     pub layers: Vec<Arc<dyn Middleware>>,
@@ -57,6 +61,12 @@ impl MiddlewareComposite {
     /// Whether empty.
     pub fn is_empty(&self) -> bool {
         self.layers.is_empty()
+    }
+}
+
+impl From<Arc<dyn Middleware>> for MiddlewareComposite {
+    fn from(layer: Arc<dyn Middleware>) -> Self {
+        Self::new(layer)
     }
 }
 
@@ -247,9 +257,9 @@ impl M {
     /// Shortcut for a before-agent hook.
     pub fn before_agent(
         f: impl Fn(&gemini_adk_rs::context::InvocationContext) -> Result<(), String>
-            + Send
-            + Sync
-            + 'static,
+        + Send
+        + Sync
+        + 'static,
     ) -> MiddlewareComposite {
         MiddlewareComposite::new(Arc::new(BeforeAgentMiddleware {
             handler: Arc::new(f),
@@ -259,9 +269,9 @@ impl M {
     /// Shortcut for an after-agent hook.
     pub fn after_agent(
         f: impl Fn(&gemini_adk_rs::context::InvocationContext) -> Result<(), String>
-            + Send
-            + Sync
-            + 'static,
+        + Send
+        + Sync
+        + 'static,
     ) -> MiddlewareComposite {
         MiddlewareComposite::new(Arc::new(AfterAgentMiddleware {
             handler: Arc::new(f),
@@ -280,12 +290,12 @@ impl M {
     /// Shortcut for an after-model hook.
     pub fn after_model(
         f: impl Fn(
-                &gemini_adk_rs::llm::LlmRequest,
-                &gemini_adk_rs::llm::LlmResponse,
-            ) -> Result<(), String>
-            + Send
-            + Sync
-            + 'static,
+            &gemini_adk_rs::llm::LlmRequest,
+            &gemini_adk_rs::llm::LlmResponse,
+        ) -> Result<(), String>
+        + Send
+        + Sync
+        + 'static,
     ) -> MiddlewareComposite {
         MiddlewareComposite::new(Arc::new(AfterModelMiddleware {
             handler: Arc::new(f),
@@ -544,7 +554,7 @@ impl Middleware for CircuitBreakerMiddleware {
 // ── Trace Middleware ──────────────────────────────────────────────────────
 
 /// Middleware that creates tracing spans for agent and tool lifecycle events.
-/// When `tracing-support` is enabled, these spans are picked up by
+/// With an OTel exporter feature enabled, these spans are picked up by
 /// `tracing-opentelemetry` and exported as OTel spans.
 struct TraceMiddleware;
 
@@ -727,7 +737,7 @@ impl Middleware for CacheMiddleware {
     ) -> Result<Option<gemini_adk_rs::llm::LlmResponse>, AgentError> {
         use std::hash::{Hash, Hasher};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        format!("{:?}", request).hash(&mut hasher);
+        format!("{request:?}").hash(&mut hasher);
         let key = hasher.finish();
         let cache = self.cache.lock();
         Ok(cache.get(&key).cloned())
@@ -740,7 +750,7 @@ impl Middleware for CacheMiddleware {
     ) -> Result<Option<gemini_adk_rs::llm::LlmResponse>, AgentError> {
         use std::hash::{Hash, Hasher};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        format!("{:?}", request).hash(&mut hasher);
+        format!("{request:?}").hash(&mut hasher);
         let key = hasher.finish();
         self.cache.lock().insert(key, response.clone());
         Ok(None) // don't replace the response
@@ -767,7 +777,7 @@ impl Middleware for DedupMiddleware {
     ) -> Result<Option<gemini_adk_rs::llm::LlmResponse>, AgentError> {
         use std::hash::{Hash, Hasher};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        format!("{:?}", request).hash(&mut hasher);
+        format!("{request:?}").hash(&mut hasher);
         let hash = hasher.finish();
         let mut last = self.last_request_hash.lock();
         if *last == Some(hash) {

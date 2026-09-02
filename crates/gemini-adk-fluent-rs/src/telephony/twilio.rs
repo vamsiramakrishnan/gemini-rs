@@ -33,7 +33,7 @@ use tokio::task::JoinHandle;
 use gemini_adk_rs::live::LiveHandle;
 
 use super::g711;
-use crate::voice::{pump, Playback, VoicePump};
+use crate::voice::{Playback, VoicePump, pump};
 
 /// The sample rate of every Twilio Media Stream, both directions.
 pub const TWILIO_HZ: u32 = 8_000;
@@ -264,6 +264,7 @@ pub fn mark_frame(stream_sid: &str, name: &str) -> String {
 /// [`to_twilio`](TwilioCall::to_twilio) back over the socket.
 ///
 /// ```ignore
+/// // `ignore`: `ws` is the application's Twilio WebSocket (see examples/telephony).
 /// let session = Live::builder()
 ///     .instruction("You are the front desk. Answer the call.")
 ///     .greeting("Greet the caller.")

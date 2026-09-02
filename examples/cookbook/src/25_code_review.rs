@@ -68,7 +68,7 @@ fn main() {
     println!("Review agents defined:");
     for agent in &[&linter, &test_analyzer, &code_reviewer, &security_scanner] {
         let diag = diagnose(agent);
-        println!("{}\n", diag);
+        println!("{diag}\n");
     }
 
     // ── 2. Define merge and decision agents ──
@@ -155,18 +155,21 @@ fn main() {
     println!("\n--- Score Aggregation ---\n");
 
     let compute_aggregate = S::compute("aggregate_score", |s| {
-        let lint = s.get("lint_score").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let lint = s
+            .get("lint_score")
+            .and_then(serde_json::Value::as_f64)
+            .unwrap_or(0.0);
         let coverage = s
             .get("coverage_score")
-            .and_then(|v| v.as_f64())
+            .and_then(serde_json::Value::as_f64)
             .unwrap_or(0.0);
         let quality = s
             .get("quality_score")
-            .and_then(|v| v.as_f64())
+            .and_then(serde_json::Value::as_f64)
             .unwrap_or(0.0);
         let security = s
             .get("security_score")
-            .and_then(|v| v.as_f64())
+            .and_then(serde_json::Value::as_f64)
             .unwrap_or(0.0);
 
         // Weighted average: security most important
@@ -175,7 +178,7 @@ fn main() {
     }) >> S::branch(
         |s| {
             s.get("aggregate_score")
-                .and_then(|v| v.as_f64())
+                .and_then(serde_json::Value::as_f64)
                 .unwrap_or(0.0)
                 >= 7.0
         },
@@ -261,17 +264,16 @@ fn main() {
     for v in &violations {
         match v {
             ContractViolation::UnproducedKey { consumer, key } => {
-                println!("  UNPRODUCED: '{}' reads '{}'", consumer, key);
+                println!("  UNPRODUCED: '{consumer}' reads '{key}'");
             }
             ContractViolation::DuplicateWrite { agents, key } => {
                 // Expected: multiple reviewers write scores
                 println!(
-                    "  DUPLICATE: '{}' written by {:?} (expected for parallel reviewers)",
-                    key, agents
+                    "  DUPLICATE: '{key}' written by {agents:?} (expected for parallel reviewers)"
                 );
             }
             ContractViolation::OrphanedOutput { producer, key } => {
-                println!("  ORPHANED: '{}' writes '{}'", producer, key);
+                println!("  ORPHANED: '{producer}' writes '{key}'");
             }
         }
     }
@@ -301,11 +303,7 @@ fn main() {
             || output.contains("file")
             || output.contains("function")
             || output.contains("```");
-        if has_specifics {
-            1.0
-        } else {
-            0.5
-        }
+        if has_specifics { 1.0 } else { 0.5 }
     }) | E::custom("safety", |_, _| 1.0);
 
     let test_review = "In file main.rs, line 42: function `process` should handle the error case. \
@@ -313,7 +311,7 @@ fn main() {
     let scores = eval.score_all(test_review, "");
     println!("Review quality scores:");
     for (name, score) in &scores {
-        println!("  {}: {:.2}", name, score);
+        println!("  {name}: {score:.2}");
     }
 
     println!("\nCode review pipeline example completed successfully!");

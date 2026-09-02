@@ -26,11 +26,11 @@ use crate::ingestion::{
     ScheduledWork, SessionLedger, SessionMemoryOverlay,
 };
 use crate::okf::{MemoryRepository, OkfRepository};
-use crate::reconcile::{consolidate, MemoryCommitter, ReconciliationReport};
+use crate::reconcile::{MemoryCommitter, ReconciliationReport, consolidate};
 use crate::retrieval::{
-    context_for, fuse_snapshots, DeterministicPlanExtractor, DeterministicPlanner, IndexHandle,
-    KnownEntities, LocalMemoryRetriever, MemoryRetriever, PreparedMemorySnapshot, RetrievalBudget,
-    RetrievalPlanExtractor, RetrievalRequest, SemanticFallback,
+    DeterministicPlanExtractor, DeterministicPlanner, IndexHandle, KnownEntities,
+    LocalMemoryRetriever, MemoryRetriever, PreparedMemorySnapshot, RetrievalBudget,
+    RetrievalPlanExtractor, RetrievalRequest, SemanticFallback, context_for, fuse_snapshots,
 };
 use crate::transcript::GenerationGuard;
 
@@ -1280,10 +1280,12 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(snapshot
-            .facts
-            .iter()
-            .any(|f| f.statement.contains("pescatarian")));
+        assert!(
+            snapshot
+                .facts
+                .iter()
+                .any(|f| f.statement.contains("pescatarian"))
+        );
     }
 
     #[tokio::test]

@@ -11,23 +11,24 @@ pub mod ids;
 pub mod policy;
 
 pub use domain::{
-    normalize_token, stable_hash, CanonicalMemory, CanonicalPredicate, EntityRef, EvidenceCounters,
-    Explicitness, FactFingerprint, MemoryKind, MemoryObservation, MemorySource, MemoryStatus,
-    MemoryValue, MutationIntent, PrivacyMetadata, ProposedPersistence, RetrievalMetadata,
-    SensitivityClass, SpeakerAttribution, TemporalMetadata, TemporalScope, TranscriptEvidence,
+    CanonicalMemory, CanonicalPredicate, EntityRef, EvidenceCounters, Explicitness,
+    FactFingerprint, MemoryKind, MemoryObservation, MemorySource, MemoryStatus, MemoryValue,
+    MutationIntent, PrivacyMetadata, ProposedPersistence, RetrievalMetadata, SensitivityClass,
+    SpeakerAttribution, TemporalMetadata, TemporalScope, TranscriptEvidence, normalize_token,
+    stable_hash,
 };
 pub use error::MemoryError;
 pub use events::{
-    CommitReceipt, InMemoryEventLog, MemoryEvent, MemoryEventEnvelope, MemoryEventLog,
-    SessionEventWriter, EVENT_SCHEMA_VERSION,
+    CommitReceipt, EVENT_SCHEMA_VERSION, InMemoryEventLog, MemoryEvent, MemoryEventEnvelope,
+    MemoryEventLog, SessionEventWriter,
 };
 pub use ids::{
     ConnectionId, EntityId, EventId, MemoryId, ObservationId, PlanId, SessionId, SnapshotId,
     TurnId, UserId,
 };
 pub use policy::{
-    admit_observation, aggregate_confidence, contains_instruction_shaped_content,
-    default_episodic_ttl, meets_promotion_criteria, resolve_expiry, speaker_is_admissible,
     AdmissionVerdict, CadenceConfig, DiscardReason, IngestionConfig, MemoryRuntimeConfig,
     PromotionConfig, PromotionEvidence, RetrievalConfig, SessionConfig, TranscriptConfig,
+    admit_observation, aggregate_confidence, contains_instruction_shaped_content,
+    default_episodic_ttl, meets_promotion_criteria, resolve_expiry, speaker_is_admissible,
 };

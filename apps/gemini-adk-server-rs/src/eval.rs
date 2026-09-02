@@ -26,9 +26,9 @@ use gemini_adk_rs::evaluation::{
 };
 use gemini_adk_rs::{BaseLlm, GeminiLlm, GeminiLlmParams};
 
-use crate::execution::{build_text_agent, run_agent_turn};
-use crate::types::{now_iso8601, EvalResultSummary, EvalRunRequest};
 use crate::ServerState;
+use crate::execution::{build_text_agent, run_agent_turn};
+use crate::types::{EvalResultSummary, EvalRunRequest, now_iso8601};
 
 /// Default pass threshold applied to a criterion that does not specify its own.
 pub const DEFAULT_PASS_THRESHOLD: f64 = 0.7;
@@ -128,9 +128,44 @@ fn load_eval_set(eval_set: &Option<String>) -> Result<EvalSet, String> {
     if let Ok(set) = serde_json::from_str::<EvalSet>(raw) {
         return Ok(set);
     }
-    let contents = std::fs::read_to_string(raw)
+    let path = eval_set_path(raw)?;
+    let contents = std::fs::read_to_string(&path)
         .map_err(|e| format!("eval_set is neither valid JSON nor a readable file: {e}"))?;
     serde_json::from_str::<EvalSet>(&contents).map_err(|e| format!("failed to parse evalset: {e}"))
+}
+
+/// Resolve a request-supplied evalset path and refuse anything outside the
+/// server's working directory.
+///
+/// The value comes off the wire, so it is a path-traversal vector: `..` and
+/// absolute paths would let a caller read any file the server can. Both are
+/// rejected before the read, and the resolved path must still sit under the
+/// canonical working directory after symlinks are followed.
+fn eval_set_path(raw: &str) -> Result<std::path::PathBuf, String> {
+    use std::path::{Component, Path};
+    let requested = Path::new(raw);
+    if requested.is_absolute()
+        || requested
+            .components()
+            .any(|c| matches!(c, Component::ParentDir | Component::Prefix(_)))
+    {
+        return Err(
+            "eval_set file paths must be relative to the server's working directory \
+             and may not contain `..`"
+                .to_string(),
+        );
+    }
+    let base = std::env::current_dir()
+        .and_then(|d| d.canonicalize())
+        .map_err(|e| format!("cannot resolve the server's working directory: {e}"))?;
+    let resolved = base
+        .join(requested)
+        .canonicalize()
+        .map_err(|e| format!("eval_set is neither valid JSON nor a readable file: {e}"))?;
+    if !resolved.starts_with(&base) {
+        return Err("eval_set file path escapes the server's working directory".to_string());
+    }
+    Ok(resolved)
 }
 
 /// Run an agent over the user turns of an expected invocation to produce an
@@ -415,5 +450,34 @@ mod tests {
         assert_eq!(summary.passed, 1);
         assert_eq!(summary.failed, 1);
         assert_eq!(summary.pass_rate, 0.5);
+    }
+}
+
+#[cfg(test)]
+mod eval_set_path_tests {
+    use super::eval_set_path;
+
+    #[test]
+    fn rejects_traversal_and_absolute_paths() {
+        assert!(eval_set_path("../etc/passwd").is_err());
+        assert!(eval_set_path("a/../../b.json").is_err());
+        assert!(eval_set_path("/etc/passwd").is_err());
+    }
+
+    #[test]
+    fn resolves_a_file_under_the_working_directory() {
+        let dir = std::env::current_dir().unwrap();
+        let name = format!("evalset-path-test-{}.json", std::process::id());
+        std::fs::write(dir.join(&name), "{}").unwrap();
+        let resolved = eval_set_path(&name);
+        let _ = std::fs::remove_file(dir.join(&name));
+        let resolved = resolved.expect("relative file under cwd resolves");
+        assert!(resolved.starts_with(dir.canonicalize().unwrap()));
+    }
+
+    #[test]
+    fn missing_file_is_reported_as_unreadable() {
+        let err = eval_set_path("definitely-not-here-12345.json").unwrap_err();
+        assert!(err.contains("readable"), "{err}");
     }
 }

@@ -9,13 +9,13 @@ use chrono::Utc;
 use std::sync::Arc;
 
 use super::fixtures::{
-    corpus, eval_user, ingestion_cases, retrieval_cases, IngestionCase, RetrievalCase,
+    IngestionCase, RetrievalCase, corpus, eval_user, ingestion_cases, retrieval_cases,
 };
 use super::metrics;
 use crate::bm25::{IndexedMemory, MemoryIndex};
 use crate::core::{
-    admit_observation, AdmissionVerdict, IngestionConfig, MemoryError, MemoryStatus,
-    RetrievalConfig, SessionId, TurnId,
+    AdmissionVerdict, IngestionConfig, MemoryError, MemoryStatus, RetrievalConfig, SessionId,
+    TurnId, admit_observation,
 };
 use crate::ingestion::{
     MemoryObservationExtractor, ObservationExtractionContext, RuleBasedObservationExtractor,
@@ -95,7 +95,12 @@ impl RetrievalReport {
         let _ = writeln!(
             out,
             "\nprecision={:.3} recall={:.3} mrr={:.3} skip={:.3} tokens(mean)={:.1} tokens(p95)={:.1}",
-            self.precision, self.recall, self.mrr, self.skip_accuracy, self.mean_tokens, self.p95_tokens
+            self.precision,
+            self.recall,
+            self.mrr,
+            self.skip_accuracy,
+            self.mean_tokens,
+            self.p95_tokens
         );
         out
     }
@@ -303,23 +308,23 @@ fn check_expectations(
     observation: &crate::core::MemoryObservation,
     detail: &mut Option<String>,
 ) -> bool {
-    if let Some(expected) = case.kind {
-        if observation.kind != expected {
-            *detail = Some(format!(
-                "expected kind {expected:?}, got {:?}",
-                observation.kind
-            ));
-            return false;
-        }
+    if let Some(expected) = case.kind
+        && observation.kind != expected
+    {
+        *detail = Some(format!(
+            "expected kind {expected:?}, got {:?}",
+            observation.kind
+        ));
+        return false;
     }
-    if let Some(expected) = case.explicitness {
-        if observation.explicitness != expected {
-            *detail = Some(format!(
-                "expected explicitness {expected:?}, got {:?}",
-                observation.explicitness
-            ));
-            return false;
-        }
+    if let Some(expected) = case.explicitness
+        && observation.explicitness != expected
+    {
+        *detail = Some(format!(
+            "expected explicitness {expected:?}, got {:?}",
+            observation.explicitness
+        ));
+        return false;
     }
     true
 }

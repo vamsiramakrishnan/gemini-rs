@@ -19,23 +19,26 @@ All examples read from a shared `.env` at the workspace root via [`dotenvy`](htt
 | `GOOGLE_CLOUD_PROJECT` | with Vertex | GCP project ID (e.g. `my-project-123`). |
 | `GOOGLE_CLOUD_LOCATION` | with Vertex | Region for the Live endpoint. Defaults to `us-central1`. |
 | `GOOGLE_ACCESS_TOKEN` | optional | Explicit OAuth2 token. Falls back to `gcloud auth print-access-token`. |
-| `GEMINI_MODEL` | optional | Override the default model (see below). |
+| `GEMINI_LIVE_MODEL` | optional | Override the Live model (see below). `GEMINI_TEXT_MODEL` does the same for text agents; `GEMINI_MODEL` is the shared fallback for both. |
 
 > **Tip:** The ADK Web UI also accepts `GOOGLE_GENAI_API_KEY` as an alias for `GEMINI_API_KEY`.
 
 #### Model string format
 
-Always use the full `models/` prefix — the SDK normalizes it per-platform:
+Use the full `models/` prefix (a bare name is given one); the SDK then builds the per-platform URI:
 
 ```bash
-# Works on both Google AI and Vertex AI:
-GEMINI_MODEL=models/gemini-2.5-flash-native-audio-preview-12-2025
+# Google AI:
+GEMINI_LIVE_MODEL=models/gemini-2.5-flash-native-audio-latest
+# Vertex AI (a different catalog — the Google AI alias is not served there):
+GEMINI_LIVE_MODEL=models/gemini-live-2.5-flash-native-audio
 
 # Google AI  → sent as-is in the setup message
-# Vertex AI  → stripped to: projects/{project}/locations/{loc}/publishers/google/models/gemini-2.5-flash-native-audio-preview-12-2025
+# Vertex AI  → `models/` is replaced by the publisher path:
+#              projects/{project}/locations/{loc}/publishers/google/models/gemini-live-2.5-flash-native-audio
 ```
 
-Omit `GEMINI_MODEL` to use the SDK default — connect resolves one the target
+Omit `GEMINI_LIVE_MODEL` to use the SDK default — connect resolves one the target
 platform actually serves (`models/gemini-2.5-flash-native-audio-latest` on
 Google AI, `models/gemini-live-2.5-flash-native-audio` on Vertex AI).
 
@@ -45,7 +48,7 @@ Examples use **two separate models** that share the same auth credentials:
 
 | Role | Model | Protocol | Configured via |
 |------|-------|----------|----------------|
-| **Live session** | `gemini-genai-2.5-flash-native-audio` | WebSocket | `GEMINI_MODEL` env var |
+| **Live session** | `models/gemini-2.5-flash-native-audio-latest` (Google AI) / `gemini-live-2.5-flash-native-audio` (Vertex) | WebSocket | `GEMINI_LIVE_MODEL` env var |
 | **Text LLM** | `gemini-3.1-flash-lite-preview` | REST | `GeminiLlmParams` in code |
 
 The text LLM powers extractors, agent-as-tool pipelines, and background analysis in advanced examples. It reads the **same auth env vars** — no extra configuration needed.
@@ -89,40 +92,41 @@ All apps listed below are available in the multi-app UI with a shared devtools p
 
 ## Standalone Examples
 
-### text-chat (L0 Wire)
+### text-chat (L2 Fluent)
 
-Minimal text-only Gemini Live session. Connects via WebSocket, sends text, receives streaming deltas. No microphone required.
+Minimal text-only Gemini Live session: `Live::builder().text_only()…connect_from_env()`, with `on_text` / `on_text_complete` / `on_turn_complete` streaming the reply to the browser. No microphone required.
 
 - **Port:** 3001
-- **Layer:** L0 (`gemini_genai_rs::prelude::*`)
-- **Features:** Text I/O, streaming text deltas, turn lifecycle
+- **Layer:** L2 (`gemini_adk_fluent_rs::prelude::*`)
+- **Model:** platform default (`GEMINI_LIVE_MODEL` overrides); `.text_only()` asks the native-audio model for text
+- **Features:** Text I/O, streaming text deltas, turn lifecycle callbacks, `connect_from_env()`
 
-### voice-chat (L0 Wire)
+### voice-chat (L2 Fluent)
 
-Native audio voice chat with bidirectional audio streaming. Demonstrates voice selection, VAD events, and real-time transcription.
+Native audio voice chat with bidirectional audio streaming: `Live::builder().voice(..).transcription()…connect_from_env()`, with `on_audio`, `on_input_transcript` / `on_output_transcript`, and `on_vad_start` / `on_vad_end` feeding the browser.
 
 - **Port:** 3002
-- **Layer:** L0 (`gemini_genai_rs::prelude::*`)
-- **Model:** `GeminiLive2_5FlashNativeAudio`
-- **Features:** Bidirectional audio, input/output transcription, VAD events
+- **Layer:** L2 (`gemini_adk_fluent_rs::prelude::*`)
+- **Model:** platform default (`models/gemini-2.5-flash-native-audio-latest` on Google AI, `gemini-live-2.5-flash-native-audio` on Vertex AI; `GEMINI_LIVE_MODEL` overrides)
+- **Features:** Bidirectional audio, input/output transcription, VAD callbacks, fast-lane callbacks feeding an `mpsc` channel
 - **Voices:** Puck, Charon, Kore, Fenrir, Aoede
 
-### tool-calling (L1 Runtime)
+### tool-calling (L2 Fluent)
 
-Function calling with `TypedTool` and auto-generated JSON Schema from Rust structs. Shows `ToolDispatcher` routing tool calls by function name.
+Function calling with `#[tool]` functions: the macro derives the JSON Schema from each `async fn`'s parameters, `.tool(get_weather())` registers it, and the runtime dispatches the model's calls. `on_tool_call` returns `None` to observe calls without taking over dispatch.
 
 - **Port:** 3003
-- **Layer:** L1 (`gemini_adk_rs::tool::{ToolDispatcher, TypedTool}`)
-- **Features:** TypedTool with `JsonSchema` derive, ToolDispatcher, SessionEvent::ToolCall handling
+- **Layer:** L2 (`gemini_adk_fluent_rs::prelude::*`; `gemini-adk-rs` as a direct dependency for the macro expansion)
+- **Features:** `#[tool]` + `.tool(..)`, runtime tool dispatch, `on_tool_call` / `on_tool_cancelled` hooks, `.text_only()`
 - **Tools:** `get_weather(city)`, `calculate(expression)`
 
-### transcription (L0 Wire)
+### transcription (L2 Fluent)
 
-Comprehensive showcase of every Gemini Live API configuration property. The most complete reference for wire-level options.
+Tour of the `Live` builder's voice-session configuration surface — every option in one place.
 
 - **Port:** 3004
-- **Layer:** L0 (`gemini_genai_rs::prelude::*`)
-- **Features:** Input/output transcription, activity handling (`StartOfActivityInterrupts`), turn coverage, server VAD with automatic sensitivity, context window compression (2048 tokens), session resumption, affective dialog
+- **Layer:** L2 (`gemini_adk_fluent_rs::prelude::*`)
+- **Features:** `.transcription()`, `.activity_handling(StartOfActivityInterrupts)`, `.turn_coverage(..)`, `.vad(..)` with automatic sensitivity, `.context_compression(4096, 2048)`, `.session_resume()`, `.affective_dialog()`
 
 ### telephony (L2 Fluent)
 
@@ -159,12 +163,12 @@ Writes a transcript, a stereo recording (collector left, caller right, so crosst
 - **Features:** 24→16 kHz resampling, realtime-paced jitter buffer, open-line silence so VAD can close a turn, barge-in flush, full duplex on purpose
 - **Costs money:** two concurrent native-audio sessions for the wall-clock duration of the call
 
-### agents (L1/L2 Runtime + Fluent)
+### agents (L2 Fluent)
 
-CLI-based examples demonstrating text agent combinators and typed tool dispatch.
+CLI-based examples demonstrating `#[tool]` dispatch in a Live session and text agent combinators.
 
-- **Layer:** L1/L2 (`gemini_adk_rs::tool::*`, `gemini_adk_fluent_rs::prelude::*`)
-- **Binaries:** `weather-agent` (TypedTool dispatch), `research-pipeline` (agent composition)
+- **Layer:** L2 (`gemini_adk_fluent_rs::prelude::*`)
+- **Binaries:** `weather-agent` (text-only Live session, `#[tool]` functions, `on_tool_call` / `before_tool_response` hooks), `research-pipeline` (agent composition, runs offline)
 - **Features:** Agent combinators (`>>`, `|`, `/`), copy-on-write builder templates, `S::pick()` / `S::rename()` state transforms, `review_loop()` pattern
 
 ---
@@ -286,8 +290,9 @@ All examples work with both **Google AI** (API key) and **Vertex AI** (project/l
 | Async tool calling (`NonBlocking`) | Supported | Stripped automatically |
 | Response scheduling (`WhenIdle`/`Silent`) | Supported | Stripped automatically |
 | Thinking (`thinkingConfig`) | Supported | Stripped automatically |
-| Audio model | `GeminiLive2_5FlashNativeAudio` | `GeminiLive2_5FlashNativeAudio` |
-| Text model | `Gemini2_0FlashLive` | `Gemini2_0FlashLive` |
+| Default Live model | `models/gemini-2.5-flash-native-audio-latest` | `gemini-live-2.5-flash-native-audio` |
+| Live model override | `GEMINI_LIVE_MODEL` | `GEMINI_LIVE_MODEL` |
+| Text output from a Live session | `.text_only()` | `.text_only()` |
 | WebSocket frames | Text | Binary (handled automatically) |
 
 The SDK detects your authentication method and strips unsupported wire fields transparently — no code changes needed across platforms.

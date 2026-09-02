@@ -107,7 +107,7 @@ fn main() {
                 println!("  - {consumer} reads '{key}' but nobody produces it");
             }
             ContractViolation::DuplicateWrite { agents, key } => {
-                println!("  - Multiple agents write '{key}': {:?}", agents);
+                println!("  - Multiple agents write '{key}': {agents:?}");
             }
             ContractViolation::OrphanedOutput { producer, key } => {
                 println!("  - {producer} writes '{key}' but nobody reads it");

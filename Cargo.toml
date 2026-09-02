@@ -33,7 +33,7 @@ exclude = [
 
 [workspace.package]
 version = "1.0.0"
-edition = "2021"
+edition = "2024"
 rust-version = "1.93"
 license = "MIT"
 repository = "https://github.com/vamsiramakrishnan/gemini-rs"
@@ -41,14 +41,39 @@ repository = "https://github.com/vamsiramakrishnan/gemini-rs"
 # Internal workspace crates — version mirrors [workspace.package].version above.
 # Update ONLY [workspace.package].version when releasing; release.sh handles the rest.
 [workspace.dependencies]
-gemini-genai-rs      = { path = "crates/gemini-genai-rs",      version = "1.0.0" }
+# `default-features = false` here so that L1/L2 can own the TLS-backend choice
+# (a member cannot narrow an inherited dependency's defaults, only widen them).
+# Direct consumers that want L0's defaults say `default-features = true`.
+gemini-genai-rs      = { path = "crates/gemini-genai-rs",      version = "1.0.0", default-features = false }
 gemini-adk-macros-rs = { path = "crates/gemini-adk-macros-rs", version = "1.0.0" }
-gemini-adk-rs        = { path = "crates/gemini-adk-rs",        version = "1.0.0" }
+gemini-adk-rs        = { path = "crates/gemini-adk-rs",        version = "1.0.0", default-features = false }
 gemini-adk-fluent-rs = { path = "crates/gemini-adk-fluent-rs", version = "1.0.0" }
 gemini-memory-rs     = { path = "crates/gemini-memory-rs",     version = "1.0.0" }
 gemini-adk-server-rs = { path = "apps/gemini-adk-server-rs",   version = "1.0.0" }
 
+[workspace.lints.rust]
+# Every crate is unsafe-free and says so with `#![forbid(unsafe_code)]` (the
+# audio ring is `rtrb`); this keeps any new `unsafe` visible in review.
+unsafe_code = "warn"
+# `unreachable_pub` lives in each library crate's lib.rs rather than here:
+# it is the right lint for a library and pure noise for a binary.
+#
+# Next lints to turn on, each its own change (measured backlog in brackets):
+# missing_debug_implementations [224 types, mostly `dyn Fn` fields needing a
+# hand-written impl], clippy::must_use_candidate [1119],
+# clippy::doc_markdown [714], clippy::missing_errors_doc [163],
+# clippy::needless_pass_by_value [15, all public signatures].
+
 [workspace.lints.clippy]
-# All style/correctness lints are ON workspace-wide. The handful of deliberate
-# exceptions (control-plane plumbing fns, builder entry points) carry targeted
-# `#[allow(lint, reason = "…")]` at the site.
+# Lints every crate holds today. Deliberate exceptions carry
+# `#[allow(lint, reason = "…")]` at the site so the reason travels with
+# the code.
+dbg_macro = "warn"
+todo = "warn"
+unimplemented = "warn"
+redundant_closure_for_method_calls = "warn"
+semicolon_if_nothing_returned = "warn"
+uninlined_format_args = "warn"
+unnecessary_wraps = "warn"
+unused_async = "warn"
+unused_self = "warn"

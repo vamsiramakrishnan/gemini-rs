@@ -41,7 +41,7 @@ Repo examples also read these from a `.env` at the workspace root
 (`cp .env.example .env`).
 
 You normally don't pick a model: connect resolves a default the target platform
-actually serves, and `GEMINI_MODEL=…` (or `.model(…)` in code) overrides it.
+actually serves, and `GEMINI_LIVE_MODEL=…` (or `.model(…)` in code) overrides it.
 
 ## Path A — build your own project
 
@@ -51,16 +51,17 @@ cargo new my-agent && cd my-agent
 
 ```toml
 [dependencies]
-gemini-adk-fluent-rs = { version = "1.0", features = ["gemini-llm", "voice-io"] }
+gemini-adk-fluent-rs = { version = "1.0", features = ["voice-io"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
-Two feature flags matter on day one — the crate ships `default = []`:
+Two feature flags matter on day one — the crate ships
+`default = ["tls-native", "gemini-llm"]`:
 
-| Feature | Enables | Without it |
-|---|---|---|
-| `gemini-llm` | Text generation via `GeminiLlm` | Compiles, then errors at runtime: *"requires the 'gemini-llm' feature flag"* |
-| `voice-io` | `talk()` microphone/speaker duplex | No `talk()` method on the handle |
+| Feature | Default | Enables | Without it |
+|---|---|---|---|
+| `gemini-llm` | on | Text generation via `GeminiLlm` | Only with `--no-default-features`: compiles, then errors at runtime: *"requires the 'gemini-llm' feature flag"* |
+| `voice-io` | off | `talk()` microphone/speaker duplex | No `talk()` method on the handle |
 
 Then copy either Quickstart program from the
 [workspace README](https://github.com/vamsiramakrishnan/gemini-rs#quickstart)
@@ -140,7 +141,7 @@ node --check apps/gemini-adk-web-rs/static/js/devtools.js
 | Symptom | Check |
 |---------|-------|
 | Connect fails: *"not found for API version v1beta"* / setup closes without `setupComplete` | The model isn't in your platform's catalog. Leave `.model()` unset for a platform-appropriate default, or list what your key reaches: `curl "https://generativelanguage.googleapis.com/v1beta/models?key=$GEMINI_API_KEY"` and look for `bidiGenerateContent` (Live) or `generateContent` (text) under `supportedGenerationMethods`. |
-| *"GeminiLlm requires the 'gemini-llm' feature flag"* | Add `features = ["gemini-llm"]` — it is off by default. |
+| *"GeminiLlm requires the 'gemini-llm' feature flag"* | You built with `--no-default-features`; add `gemini-llm` back (it is on by default). |
 | No `talk()` method | Add `features = ["voice-io"]`; Linux also needs `libasound2-dev`. |
 | `JsonSchema` bound errors / "multiple versions of crate schemars" | Pin `schemars = "0.8"`. |
 | Web UI does not open | Confirm the server printed `http://localhost:25125` and no firewall blocks the port. |

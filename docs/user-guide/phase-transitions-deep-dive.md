@@ -281,7 +281,7 @@ let handle = Live::builder()
                     // Dispatch a background agent to analyze the caller
                     let analyzer = AgentBuilder::new("caller_analyzer")
                         .instruction("Analyze caller risk profile")
-                        .build(llm);
+                        .build(llm)?;
                     bg.dispatch("analyze_caller", analyzer, state.clone());
                 }
             }
@@ -297,7 +297,7 @@ When the model needs to wait for the agent's result:
 ```rust,ignore
 let verifier = AgentBuilder::new("verifier")
     .instruction("Verify caller identity against database")
-    .build(llm.clone());
+    .build(llm.clone())?;
 
 Live::builder()
     .agent_tool("verify_identity", "Verify caller", verifier)
@@ -320,7 +320,7 @@ background execution eliminates silence in voice sessions:
 
 ```rust,ignore
 Live::builder()
-    .tools(dispatcher)
+    .dispatcher(dispatcher)
     .tool_background("search_knowledge_base")
     .tool_background_with_formatter("analyze_doc", Arc::new(VerboseFormatter))
     .connect_vertex(project, location, token)

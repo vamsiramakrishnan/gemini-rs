@@ -4,8 +4,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::client::http::HttpError;
 use crate::client::Client;
+use crate::client::http::HttpError;
 use crate::transport::auth::ServiceEndpoint;
 
 /// State of a batch job.
@@ -123,17 +123,14 @@ pub enum BatchesError {
     Parse(#[from] serde_json::Error),
     #[error("Auth error: {0}")]
     /// Authentication/authorization failure.
-    Auth(String),
+    Auth(#[from] crate::session::AuthError),
 }
 
 impl Client {
     /// List batch jobs.
     pub async fn list_batch_jobs(&self) -> Result<ListBatchJobsResponse, BatchesError> {
         let url = self.rest_url(ServiceEndpoint::BatchJobs);
-        let headers = self
-            .auth_headers()
-            .await
-            .map_err(|e| BatchesError::Auth(e.to_string()))?;
+        let headers = self.auth_headers().await?;
         let json = self.http_client().get_json(&url, headers).await?;
         if json.is_null() {
             return Ok(ListBatchJobsResponse {
@@ -150,10 +147,7 @@ impl Client {
         config: CreateBatchJobConfig,
     ) -> Result<BatchJob, BatchesError> {
         let url = self.rest_url(ServiceEndpoint::BatchJobs);
-        let headers = self
-            .auth_headers()
-            .await
-            .map_err(|e| BatchesError::Auth(e.to_string()))?;
+        let headers = self.auth_headers().await?;
 
         let mut body = serde_json::json!({
             "model": config.model,
@@ -182,10 +176,7 @@ impl Client {
     pub async fn get_batch_job(&self, name: &str) -> Result<BatchJob, BatchesError> {
         let base_url = self.rest_url(ServiceEndpoint::BatchJobs);
         let url = format!("{base_url}/{name}");
-        let headers = self
-            .auth_headers()
-            .await
-            .map_err(|e| BatchesError::Auth(e.to_string()))?;
+        let headers = self.auth_headers().await?;
         let json = self.http_client().get_json(&url, headers).await?;
         Ok(serde_json::from_value(json)?)
     }
@@ -194,10 +185,7 @@ impl Client {
     pub async fn cancel_batch_job(&self, name: &str) -> Result<(), BatchesError> {
         let base_url = self.rest_url(ServiceEndpoint::BatchJobs);
         let url = format!("{base_url}/{name}:cancel");
-        let headers = self
-            .auth_headers()
-            .await
-            .map_err(|e| BatchesError::Auth(e.to_string()))?;
+        let headers = self.auth_headers().await?;
         self.http_client()
             .post_json(&url, headers, &serde_json::json!({}))
             .await?;
@@ -208,10 +196,7 @@ impl Client {
     pub async fn delete_batch_job(&self, name: &str) -> Result<(), BatchesError> {
         let base_url = self.rest_url(ServiceEndpoint::BatchJobs);
         let url = format!("{base_url}/{name}");
-        let headers = self
-            .auth_headers()
-            .await
-            .map_err(|e| BatchesError::Auth(e.to_string()))?;
+        let headers = self.auth_headers().await?;
         self.http_client().delete(&url, headers).await?;
         Ok(())
     }

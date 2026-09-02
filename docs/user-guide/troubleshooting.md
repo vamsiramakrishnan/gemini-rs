@@ -16,28 +16,28 @@ there, but advanced ones moved to focused submodules. Add the matching import:
 | `LiveEvent`, `RuntimeContract`, `FieldPromotion`, `SessionSnapshot`, `LiveSessionBuilder`, `ToolExecutionMode`, `*Contract` | `use gemini_adk_fluent_rs::live::*;` |
 | `Toolset`, `ConfirmationProvider`, `Recognizer`, `FrameSpec`, `SlotSpec` | `use gemini_adk_fluent_rs::tools::*;` |
 | `Conversation`, `ConversationSpec`, `CompiledConversation` | `use gemini_adk_fluent_rs::conversation::*;` |
-| `call_agent`, `AgentMode`, `provenance`, `AgentTrait` | `use gemini_adk_fluent_rs::agents::*;` |
+| `call_agent`, `AgentMode`, `provenance`, `Agent` | `use gemini_adk_fluent_rs::agents::*;` |
 | `LlmRequest`, `LlmResponse`, `GeminiLlmParams`, `LlmRegistry` | `use gemini_adk_fluent_rs::llm::*;` |
 | `SlotEvidence` | `use gemini_adk_fluent_rs::state::*;` |
 | `CompiledFlow`, `StepAction`, `Violation` | `use gemini_adk_fluent_rs::flow::*;` |
 | `Scenario`, `Sim`, `Motif` | `gemini_adk_fluent_rs::{simulation, motifs}` |
 
-### "method `get_tools` not found … trait `Toolset` is not in scope"
+### "method `tools` not found … trait `Toolset` is not in scope"
 
 A trait method needs the trait in scope. `use gemini_adk_fluent_rs::tools::Toolset;`.
 
-### `Agent` is ambiguous / the trait and the builder collide
+### `Agent` vs `AgentBuilder`
 
-The L1 `Agent` *trait* is exported as **`AgentTrait`** (in `prelude` and
-`agents`); `Agent` at L2 is the `AgentBuilder` alias. Use `AgentTrait` when you
-mean the runtime trait.
+`Agent` (in `prelude` and `agents`) is the L1 runtime *trait* (`name()` +
+`run_live()`). The L2 builder is `AgentBuilder`; there is no `Agent` alias
+for it, so `Agent::new(..)` does not exist — write `AgentBuilder::new(..)`.
 
 ## Live sessions
 
 ### No audio output / model returns text but I asked for audio
 
-The native-audio model (`Gemini2_0FlashLive`) only supports `Modality::Audio`
-output. For text, call `.text_only()`.
+The native-audio Live models only support `Modality::Audio` output. For text,
+call `.text_only()`.
 
 ### `on_thought` never fires
 
@@ -62,7 +62,7 @@ declarations are fixed at connect time. Declare every tool up front.
 
 Use `wss://aiplatform.googleapis.com/...` (not `global-aiplatform…`). Vertex
 sends Binary WebSocket frames (handled automatically). API versions differ
-(`v1beta` for Google AI, `v1beta1` for Vertex) — the `Platform` enum handles it.
+(`v1beta` for Google AI, `v1beta1` for Vertex) — `ApiEndpoint` handles it.
 
 ### Async tool calling (`NonBlocking` / scheduling) seems ignored
 
@@ -80,7 +80,7 @@ explicit `.initial_phase("...")`.
 ### My phase instructions aren't being applied additively
 
 `instruction_template` replaces the entire instruction. For additive
-composition use `instruction_amendment` or phase modifiers (`P::with_state`,
+composition use `instruction_amendment` or phase modifiers (`P::show_state`,
 `P::when`).
 
 ## Connecting & auth
