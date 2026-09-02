@@ -30,7 +30,7 @@ use crate::state::State;
 ///     let config = SessionConfig::new(&api_key)
 ///         .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO);
 ///     // Add agent's tools to config
-///     let session = connect(config, TransportConfig::default()).await?;
+///     let session = connect(config).await?;
 ///     Ok(AgentSession::new(session))
 /// }).await?;
 /// ```

@@ -45,8 +45,6 @@ pub mod prelude {
     // envelopes (`SetupMessage`, `RealtimeInputPayload`, `ServerMessageWrapper`,
     // …) stay public at `protocol::messages` for anyone writing a codec, but
     // they are not something a glob import should hand every caller.
-    #[allow(deprecated)]
-    pub use crate::protocol::types::GeminiModel;
     pub use crate::protocol::types::{
         AccessToken, ActivityHandling, ApiEndpoint, AudioFormat, AutomaticActivityDetection, Blob,
         CodeExecutionResult, Content, ContextWindowCompressionConfig, EndpointEnvError,

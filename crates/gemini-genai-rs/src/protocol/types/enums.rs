@@ -157,17 +157,6 @@ impl PartialEq<&str> for ModelId {
     }
 }
 
-/// The pre-2.0 name of [`ModelId`].
-///
-/// The enum it used to be had three variants, two of which named models that
-/// were retired from the catalog; only `Custom(String)` still worked. Build a
-/// [`ModelId`] with `ModelId::new(..)`, `"…".into()`, or one of the constants.
-#[deprecated(
-    since = "2.0.0",
-    note = "renamed to `ModelId`; see the type docs for construction"
-)]
-pub type GeminiModel = ModelId;
-
 /// Available voice presets for Gemini Live audio output.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[non_exhaustive]
