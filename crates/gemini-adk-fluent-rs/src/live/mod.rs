@@ -32,7 +32,10 @@
 
 mod callbacks;
 mod config;
-pub use config::{InputAudioConfig, InputStage};
+pub use config::{
+    DEFAULT_COMPRESSION_TARGET_TOKENS, DEFAULT_COMPRESSION_TRIGGER_TOKENS, InputAudioConfig,
+    InputStage,
+};
 mod connect;
 mod contract;
 mod extraction;
@@ -71,12 +74,12 @@ pub use gemini_adk_rs::live::{
     BackgroundToolTracker, ComputedContract, ComputedVar, ConsecutiveFailureDetector,
     ContextBuilder, ControlContract, DefaultResultFormatter, DeferredWriter, Delivery,
     DeliveryConfig, EffectPolicy, ExecutionMode, ExtractionTrigger, ExtractorContract,
-    FieldPromotion, FsPersistence, InputAudioProcessor, LiveEffect, LiveEffectExecutor, LiveEvent,
-    LiveEventStream, LiveHandle, LiveReactor, LiveSessionBuilder, LlmExtractor, MemoryPersistence,
-    MergePolicy, NeedsFulfillment, PatternDetector, PendingContext, PhaseContract,
-    PhaseInstruction, PhaseMachine, PhasePreparation, PredicateFn, PreparationContract,
-    PromotionContract, RateDetector, Reaction, ReactorEvent, ReactorRule, RepairAction,
-    ResultFormatter, RuntimeContract, SessionHook, SessionSignals, SessionSnapshot,
+    FieldPromotion, FsPersistence, InputAudioProcessor, LatencyBucket, LatencyStats, LiveEffect,
+    LiveEffectExecutor, LiveEvent, LiveEventStream, LiveHandle, LiveReactor, LiveSessionBuilder,
+    LlmExtractor, MemoryPersistence, MergePolicy, NeedsFulfillment, PatternDetector,
+    PendingContext, PhaseContract, PhaseInstruction, PhaseMachine, PhasePreparation, PredicateFn,
+    PreparationContract, PromotionContract, RateDetector, Reaction, ReactorEvent, ReactorRule,
+    RepairAction, ResultFormatter, RuntimeContract, SessionHook, SessionSignals, SessionSnapshot,
     SessionTelemetry, SessionType, SoftTurnDetector, SustainedDetector, ToolCallSummary,
     ToolContract, TranscriptBuffer, TranscriptTurn, TranscriptWindow, Transition,
     TransitionContract, TransitionEvaluation, TransitionRecord, TransitionResult,
@@ -262,7 +265,9 @@ impl Live {
     /// ```
     pub fn builder() -> Self {
         Self {
-            config: SessionConfig::from_endpoint(ApiEndpoint::google_ai("")),
+            config: SessionConfig::from_endpoint(ApiEndpoint::google_ai(""))
+                .context_window_trigger_tokens(config::DEFAULT_COMPRESSION_TRIGGER_TOKENS)
+                .context_window_compression(config::DEFAULT_COMPRESSION_TARGET_TOKENS),
             callbacks: EventCallbacks::default(),
             dispatcher: None,
             extractors: Vec::new(),

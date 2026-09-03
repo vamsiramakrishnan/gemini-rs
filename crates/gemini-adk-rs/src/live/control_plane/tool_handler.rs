@@ -140,6 +140,7 @@ pub(in crate::live) async fn handle_tool_calls(
                             }
                         };
                         if let Some(reason) = denial {
+                            tracing::info!(tool = %call.name, %reason, "tool denied by the flow gate");
                             results.push(FunctionResponse {
                                 name: call.name.clone(),
                                 response: serde_json::json!({ "error": reason }),
@@ -161,6 +162,7 @@ pub(in crate::live) async fn handle_tool_calls(
                                 .map(std::convert::AsRef::as_ref)
                                 .unwrap_or(&crate::live::background_tool::DefaultResultFormatter);
                             let ack = fmt.format_running(call);
+                            tracing::debug!(tool = %call.name, "background tool started");
                             results.push(FunctionResponse {
                                 name: call.name.clone(),
                                 response: ack,
@@ -182,6 +184,7 @@ pub(in crate::live) async fn handle_tool_calls(
                             // Standard: execute inline, wrapped in middleware hooks.
                             // A `before_tool` error vetoes execution (e.g. guardrails).
                             if let Err(e) = middleware.run_before_tool(call).await {
+                                tracing::info!(tool = %call.name, error = %e, "tool vetoed by middleware");
                                 results.push(FunctionResponse {
                                     name: call.name.clone(),
                                     response: serde_json::json!({"error": e.to_string()}),
@@ -194,6 +197,7 @@ pub(in crate::live) async fn handle_tool_calls(
                             // interruption is never stuck behind a slow tool.
                             // `biased` makes an already-cancelled token win
                             // without polling the tool future at all.
+                            let started = std::time::Instant::now();
                             let dispatched = tokio::select! {
                                 biased;
                                 _ = barge_in.cancelled() => None,
@@ -205,11 +209,18 @@ pub(in crate::live) async fn handle_tool_calls(
                                 // Cancelled: the tool future was dropped at its
                                 // current await point. No response, no gate
                                 // advance — the model's turn was interrupted.
+                                tracing::debug!(
+                                    tool = %call.name,
+                                    duration_ms = started.elapsed().as_millis() as u64,
+                                    "tool cancelled by barge-in"
+                                );
                                 cancelled_calls.push(call.id.clone().unwrap_or_default());
                                 continue;
                             };
+                            let duration_ms = started.elapsed().as_millis() as u64;
                             match call_result {
                                 Ok(result) => {
+                                    tracing::info!(tool = %call.name, duration_ms, "tool call");
                                     let _ = middleware.run_after_tool(call, &result).await;
                                     // Inline completion advances the governed flow
                                     // through the single shared gate (#7).
@@ -228,6 +239,7 @@ pub(in crate::live) async fn handle_tool_calls(
                                     });
                                 }
                                 Err(e) => {
+                                    tracing::warn!(tool = %call.name, duration_ms, error = %e, "tool call failed");
                                     let _ = middleware.run_on_tool_error(call, &e).await;
                                     tool_gate.observe_completion(
                                         call.id.as_deref().unwrap_or(""),

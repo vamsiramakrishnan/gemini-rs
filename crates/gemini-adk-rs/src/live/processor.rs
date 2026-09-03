@@ -13,6 +13,7 @@ use std::time::Duration;
 use bytes::Bytes;
 use tokio::sync::{broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
+use tracing::Instrument;
 
 use gemini_genai_rs::prelude::{SessionEvent, SessionPhase};
 use gemini_genai_rs::session::SessionWriter;
@@ -421,6 +422,8 @@ pub(crate) fn spawn_event_processor(
     let ctrl_tx_clone = ctrl_tx.clone();
     let shared_clone = shared.clone();
     tokio::spawn(async move {
+        // One span per turn; see `turn_trace` for why each lane keeps its own.
+        let mut turn = super::turn_trace::TurnTrace::new();
         loop {
             match event_rx.recv().await {
                 Ok(event) => {
@@ -432,7 +435,14 @@ pub(crate) fn spawn_event_processor(
                     // idling forever on a broadcast channel that never closes
                     // while the `SessionHandle` is alive.
                     let terminal = matches!(event, SessionEvent::Disconnected(_));
-                    route_event(event, &fast_tx_clone, &ctrl_tx_clone, &shared_clone).await;
+                    let boundary = matches!(event, SessionEvent::TurnComplete);
+                    route_event(event, &fast_tx_clone, &ctrl_tx_clone, &shared_clone)
+                        .instrument(turn.span())
+                        .await;
+                    if boundary {
+                        turn.advance();
+                        tracing::debug!(parent: &turn.span(), "turn started");
+                    }
                     if terminal {
                         break;
                     }
@@ -536,48 +546,69 @@ pub(crate) fn spawn_telemetry_lane(
         let mut debounce = tokio::time::interval(Duration::from_millis(100));
         // Consume the first immediate tick
         debounce.tick().await;
+        // One span per turn; see `turn_trace` for why each lane keeps its own.
+        let mut turn = super::turn_trace::TurnTrace::new();
         loop {
             tokio::select! {
                 biased;
                 result = telem_rx.recv() => {
                     match result {
                         Ok(event) => {
-                            // SessionTelemetry: record atomic counters
-                            match &event {
-                                SessionEvent::AudioData(data) => {
-                                    telemetry.record_audio_out(data.len());
-                                }
-                                SessionEvent::TextDelta(_) => {
-                                    telemetry.record_text_out();
-                                }
-                                SessionEvent::VoiceActivityEnd => {
-                                    telemetry.record_vad_end();
-                                }
-                                SessionEvent::Interrupted => {
-                                    telemetry.record_interruption();
-                                }
-                                SessionEvent::TurnComplete => {
-                                    telemetry.record_turn_complete();
-                                }
-                                SessionEvent::VoiceActivityStart => {
-                                    telemetry.mark_turn_start();
-                                }
-                                SessionEvent::Usage(usage) => {
-                                    telemetry.record_usage(
-                                        usage.total_token_count,
-                                        usage.prompt_token_count,
-                                        usage.response_token_count,
-                                        usage.cached_content_token_count,
-                                        usage.thoughts_token_count,
-                                    );
-                                    if let Some(cb) = &on_usage {
-                                        cb(usage);
+                            // Sync section: no await inside, so entering the
+                            // span for its duration is sound.
+                            turn.span().in_scope(|| {
+                                // SessionTelemetry: record atomic counters
+                                match &event {
+                                    SessionEvent::AudioData(data) => {
+                                        if let Some(latency) = telemetry.record_audio_out(data.len()) {
+                                            signals.record_response_latency(latency);
+                                            tracing::info!(
+                                                latency_ms = latency.as_millis() as u64,
+                                                "first model audio after the user's turn"
+                                            );
+                                        }
                                     }
+                                    SessionEvent::TextDelta(_) => {
+                                        if let Some(latency) = telemetry.record_text_out() {
+                                            signals.record_response_latency(latency);
+                                            tracing::info!(
+                                                latency_ms = latency.as_millis() as u64,
+                                                "first model text after the user's turn"
+                                            );
+                                        }
+                                    }
+                                    SessionEvent::VoiceActivityEnd => {
+                                        telemetry.record_vad_end();
+                                    }
+                                    SessionEvent::Interrupted => {
+                                        telemetry.record_interruption();
+                                    }
+                                    SessionEvent::TurnComplete => {
+                                        telemetry.record_turn_complete();
+                                    }
+                                    SessionEvent::VoiceActivityStart => {
+                                        telemetry.mark_turn_start();
+                                    }
+                                    SessionEvent::Usage(usage) => {
+                                        telemetry.record_usage(
+                                            usage.total_token_count,
+                                            usage.prompt_token_count,
+                                            usage.response_token_count,
+                                            usage.cached_content_token_count,
+                                            usage.thoughts_token_count,
+                                        );
+                                        if let Some(cb) = &on_usage {
+                                            cb(usage);
+                                        }
+                                    }
+                                    _ => {}
                                 }
-                                _ => {}
+                                // SessionSignals: update state keys + atomic timestamps
+                                signals.on_event(&event);
+                            });
+                            if matches!(event, SessionEvent::TurnComplete) {
+                                turn.advance();
                             }
-                            // SessionSignals: update state keys + atomic timestamps
-                            signals.on_event(&event);
                         }
                         Err(broadcast::error::RecvError::Lagged(n)) => {
                             tracing::warn!(skipped = n, "Telemetry lane lagged");
@@ -671,9 +702,11 @@ async fn route_event(
             .await;
         }
         SessionEvent::VoiceActivityStart => {
+            tracing::debug!("user started speaking");
             deliver_fast(fast_tx, FastEvent::VadStart, delivery.vad, &dropped.vad).await;
         }
         SessionEvent::VoiceActivityEnd => {
+            tracing::debug!("user stopped speaking");
             deliver_fast(fast_tx, FastEvent::VadEnd, delivery.vad, &dropped.vad).await;
         }
         SessionEvent::PhaseChanged(phase) => {
@@ -701,6 +734,7 @@ async fn route_event(
             let _ = ctrl_tx.send(ControlEvent::ToolCallCancelled(ids)).await;
         }
         SessionEvent::Interrupted => {
+            tracing::debug!("user interrupted the model");
             // Signal BOTH lanes
             shared.interrupted.store(true, Ordering::Release);
             // Cancel any in-flight inline tool dispatch immediately: the

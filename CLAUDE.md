@@ -112,7 +112,7 @@ default* is enabled by a no-argument verb — `.transcription()`,
 `.input_transcription()`, `.output_transcription()`, `.session_resume()`,
 `.affective_dialog()`, `.proactive_audio()`, `.include_thoughts()`,
 `.prompt_on_enter()`; one that is *on by default* is disabled by `no_<x>()` —
-`.no_tool_advisory()`. A `bool` parameter appears only where both values
+`.no_tool_advisory()`, `.no_context_compression()`. A `bool` parameter appears only where both values
 routinely come from data (a `SessionSpec` mapping onto the builder). There is
 no `.x(true)`/`.x(false)` pair to remember.
 
@@ -472,6 +472,31 @@ Live::builder()
     .no_tool_advisory()  // disable proactive signaling
 ```
 
+**Response Latency** — the number a voice product is judged on, measured per turn:
+
+```rust
+// End of user speech → first model audio byte (or text send → first output).
+let latency = handle.telemetry().latency();     // LatencyStats
+println!("{latency}");                           // turns=12 last=420ms p50=380ms p90=610ms …
+latency.p90_ms; latency.histogram;               // typed; also in telemetry().snapshot()["response_latency"]
+```
+
+**Per-turn tracing** — every processor lane wraps its work in a `turn` span
+carrying the turn number, so one filter shows why a turn was slow: the VAD
+edges, the response latency, each tool call with its duration and outcome,
+flow-gate denials, interruptions and the turn boundary.
+
+```bash
+RUST_LOG=gemini_adk_rs::live=debug cargo run …   # info: latency, tools, turn complete; debug: VAD edges, cancellations
+```
+
+**Context Window Compression** — on by default, so a long call keeps going
+instead of ending when the model's context fills. The default sliding window
+triggers at 100k tokens and compresses to 50k (roughly an hour of audio
+before it first fires, every current Live model has a 128k window);
+`.context_compression(trigger, target)` tunes it, `.no_context_compression()`
+turns it off.
+
 **Session Persistence** — Survive process restarts:
 
 ```rust
@@ -576,7 +601,7 @@ let artifacts = A::json_output("report", "Analysis report")
 |------|---------|
 | `Agent` | Core trait: `name()` + `run_live()` |
 | `LiveSessionBuilder` | Builder for callback-driven sessions |
-| `LiveHandle` | Runtime handle: `send_audio/text`, `state()`, `telemetry()`, `extracted()` |
+| `LiveHandle` | Runtime handle: `send_audio/text`, `state()`, `telemetry()` (`.latency()` for the per-turn response-latency distribution), `extracted()` |
 | `EventCallbacks` | All callback registrations (audio, text, tool, lifecycle) |
 | `State` / `PrefixedState` / `StateKey<T>` | Concurrent typed key-value state with prefix scoping |
 | `ToolFunction` / `SimpleTool` / `TypedTool` | Tool traits and implementations |
@@ -595,7 +620,7 @@ let artifacts = A::json_output("report", "Analysis report")
 | `ComputedRegistry` / `ComputedVar` | Derived state variables (`register` rejects dependency cycles with a `ConfigError`) |
 | `Watcher` / `WatcherRegistry` | State change watchers |
 | `TemporalPattern` / `TemporalRegistry` | Time/turn-based pattern detection |
-| `SessionSignals` / `SessionTelemetry` | Auto-collected session metrics |
+| `SessionSignals` / `SessionTelemetry` | Auto-collected session metrics. `SessionTelemetry::latency()` returns `LatencyStats` — per-turn response latency (end of user speech → first model audio, or text send → first output): last/min/max/mean, p50/p90/p99 over the last 256 turns, and a fixed-bucket histogram; `Display` prints one log line. The same number lands in state as `session:last_response_latency_ms` |
 | `BaseLlm` / `GeminiLlm` | LLM abstraction for text agents |
 | `InstructionProvider` / `TemplateInstruction` | Dynamic instructions: any `Fn(&State) -> String`, or Jinja2-syntax templates over state (feature `templates`, minijinja) — resolved per run via `.instruction_provider(..)` on `LlmTextAgent`/`AgentBuilder` |
 | `tool::media` | Tool media returns (ADK pattern): `media::attach(&mut result, mime, bytes)` in any tool; the text-agent loop lifts `_media` out of the JSON and delivers it to the model as `inline_data` parts |

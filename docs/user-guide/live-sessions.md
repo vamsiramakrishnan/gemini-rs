@@ -95,7 +95,8 @@ let handle = Live::builder()
 
     // Session lifecycle
     .session_resume()
-    .context_compression(4000, 2000)  // trigger_tokens, target_tokens
+    .context_compression(4000, 2000)  // trigger_tokens, target_tokens (on by default at 100k/50k;
+                                      // `.no_context_compression()` turns it off)
 
     // Greeting (model speaks first)
     .greeting("Greet the customer and ask what they'd like to order.")
@@ -356,6 +357,10 @@ let order: Option<OrderState> = handle.extracted("OrderState");
 
 // Access telemetry
 let snapshot = handle.telemetry().snapshot();
+// Per-turn response latency (end of user speech → first model audio):
+// last/min/max/mean, p50/p90/p99, histogram. `Display` prints one line.
+let latency = handle.telemetry().latency();
+println!("{latency}"); // turns=12 last=420ms p50=380ms p90=610ms …
 
 // Get current session phase
 let phase = handle.phase();

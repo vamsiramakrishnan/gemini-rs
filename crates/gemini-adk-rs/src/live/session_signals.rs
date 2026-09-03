@@ -253,6 +253,18 @@ impl SessionSignals {
         self.start.elapsed().as_nanos() as u64
     }
 
+    /// Record the turn's response latency (end of user speech, or text send,
+    /// to the model's first output) as `session:last_response_latency_ms`, so
+    /// instruction templates, watchers and computed vars can react to a slow
+    /// turn. Called by the telemetry lane once per measured turn.
+    pub fn record_response_latency(&self, latency: std::time::Duration) {
+        let _ = self
+            .state
+            .session()
+            .set("last_response_latency_ms", latency.as_millis() as u64);
+        self.touch_activity();
+    }
+
     /// Returns the current session type based on whether video has been sent.
     pub fn session_type(&self) -> SessionType {
         if self.has_video.load(Ordering::Relaxed) {
