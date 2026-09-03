@@ -26,7 +26,7 @@ and the compiled programs ever disagree).
 <!-- quickstart:Cargo.toml -->
 ```toml
 [dependencies]
-gemini-adk-fluent-rs = "1.0"
+gemini-adk-fluent-rs = "2.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -39,7 +39,7 @@ because it pulls in system audio:
 
 <!-- quickstart:Cargo.toml:voice -->
 ```toml
-gemini-adk-fluent-rs = { version = "1.0", features = ["voice-io"] }
+gemini-adk-fluent-rs = { version = "2.0", features = ["voice-io"] }
 ```
 
 That one is what needs the audio headers above (`libasound2-dev` on Linux), because

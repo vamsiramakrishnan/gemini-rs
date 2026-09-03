@@ -51,7 +51,7 @@ cargo new my-agent && cd my-agent
 
 ```toml
 [dependencies]
-gemini-adk-fluent-rs = { version = "1.0", features = ["voice-io"] }
+gemini-adk-fluent-rs = { version = "2.0", features = ["voice-io"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
