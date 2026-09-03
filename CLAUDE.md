@@ -481,6 +481,11 @@ println!("{latency}");                           // turns=12 last=420ms p50=380m
 latency.p90_ms; latency.histogram;               // typed; also in telemetry().snapshot()["response_latency"]
 ```
 
+The same measurement lands in state as `session:last_response_latency_ms` when
+the turn's first output event is seen. The telemetry lane writes it
+independently of the control lane, so read it as the latest measurement rather
+than one synchronised to the turn a watcher is currently handling.
+
 **Per-turn tracing** — every processor lane wraps its work in a `turn` span
 carrying the turn number, so one filter shows why a turn was slow: the VAD
 edges, the response latency, each tool call with its duration and outcome,

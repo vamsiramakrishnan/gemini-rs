@@ -257,6 +257,14 @@ impl SessionSignals {
     /// to the model's first output) as `session:last_response_latency_ms`, so
     /// instruction templates, watchers and computed vars can react to a slow
     /// turn. Called by the telemetry lane once per measured turn.
+    ///
+    /// The write happens when the turn's *first* output event is observed, so
+    /// for a spoken turn it lands a whole model response before the boundary.
+    /// The telemetry and control lanes are independent readers of the same
+    /// event stream, though, with no barrier between them: if the telemetry
+    /// lane is running behind, a turn-boundary reader can still see the
+    /// previous turn's value. Treat the key as the latest measurement, not as
+    /// one synchronised to the current turn.
     pub fn record_response_latency(&self, latency: std::time::Duration) {
         let _ = self
             .state
