@@ -12,7 +12,10 @@
 //! [`SessionTelemetry::latency`] or [`SessionTelemetry::snapshot`].
 
 use std::fmt;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
+use std::sync::atomic::{
+    AtomicBool, AtomicU64,
+    Ordering::{Acquire, Relaxed, Release},
+};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -118,11 +121,18 @@ impl LatencyRecorder {
         }
     }
 
+    /// Record one turn's latency.
+    ///
+    /// `count` is the publication point and is written **last**, with
+    /// [`Release`]: a reader that observes `count == n` (with [`Acquire`], as
+    /// [`stats`](Self::stats) does) is guaranteed to see all `n` samples in the
+    /// ring and in the scalars. Bumping it first would let a reader see
+    /// `count == 1` while the first ring slot was still unwritten, and compute
+    /// a percentile over an empty window.
     #[inline]
     fn record(&self, latency_ns: u64) {
         self.last_ns.store(latency_ns, Relaxed);
         self.sum_ns.fetch_add(latency_ns, Relaxed);
-        self.count.fetch_add(1, Relaxed);
         self.min_ns.fetch_min(latency_ns, Relaxed);
         self.max_ns.fetch_max(latency_ns, Relaxed);
 
@@ -136,10 +146,16 @@ impl LatencyRecorder {
         // Ring of recent samples: one atomic slot per turn, index wraps.
         let slot = self.recent_next.fetch_add(1, Relaxed) as usize % LATENCY_RECENT_WINDOW;
         self.recent[slot].store(latency_ns, Relaxed);
+
+        self.count.fetch_add(1, Release);
     }
 
     fn stats(&self) -> LatencyStats {
-        let count = self.count.load(Relaxed);
+        // Acquire pairs with the Release in `record`: every sample counted here
+        // is already visible in the ring and the scalars.
+        // Acquire pairs with the Release in `record`: every sample counted here
+        // is already visible in the ring and the scalars.
+        let count = self.count.load(Acquire);
         let histogram = self
             .buckets
             .iter()
@@ -156,8 +172,13 @@ impl LatencyRecorder {
             };
         }
 
-        let written = self.recent_next.load(Relaxed) as usize;
-        let filled = written.min(LATENCY_RECENT_WINDOW);
+        // `count` and `recent_next` advance together, one per sample, so the
+        // count sizes the window too — and reading one atomic instead of two
+        // leaves no room for the pair to disagree.
+        // `count` and `recent_next` advance together, one per sample, so the
+        // count sizes the window too — and reading one atomic instead of two
+        // leaves no room for the pair to disagree.
+        let filled = (count as usize).min(LATENCY_RECENT_WINDOW);
         let mut recent: Vec<u64> = self.recent[..filled]
             .iter()
             .map(|s| s.load(Relaxed))
@@ -166,7 +187,7 @@ impl LatencyRecorder {
         // Nearest-rank percentile over the sorted recent window.
         let pct = |p: usize| -> u64 {
             let rank = (p * recent.len()).div_ceil(100).max(1);
-            recent[rank - 1] / 1_000_000
+            recent.get(rank - 1).copied().unwrap_or(0) / 1_000_000
         };
 
         LatencyStats {
@@ -638,6 +659,66 @@ mod tests {
             s.to_string(),
             "turns=5 last=400ms p50=300ms p90=500ms p99=500ms min=100ms max=500ms"
         );
+    }
+
+    #[test]
+    fn recorder_first_sample_is_visible_to_percentiles() {
+        // A count of 1 must come with a window of 1 — never an empty window
+        // that the nearest-rank index would then read past the end of.
+        let r = LatencyRecorder::new();
+        r.record(ms(420));
+        let s = r.stats();
+        assert_eq!(s.count, 1);
+        assert_eq!((s.p50_ms, s.p90_ms, s.p99_ms), (420, 420, 420));
+        assert_eq!(s.mean_ms, 420);
+    }
+
+    #[test]
+    fn recorder_stats_survives_a_count_without_its_sample() {
+        // The panic this pins: `stats()` gated on `count` but sized its
+        // percentile window from `recent_next`. A count that ran ahead of the
+        // ring — as it did while `record` bumped the count first — left an
+        // empty window that the nearest-rank index then read past the end of.
+        // `stats()` now sizes the window from the same counter it gates on.
+        let r = LatencyRecorder::new();
+        r.count.store(1, Release); // counted, ring slot not yet written
+        let s = r.stats();
+        assert_eq!(s.count, 1);
+        assert_eq!((s.p50_ms, s.p90_ms, s.p99_ms), (0, 0, 0));
+    }
+
+    #[test]
+    fn recorder_snapshots_stay_consistent_under_concurrent_records() {
+        // `stats()` runs on whatever thread the caller likes while the
+        // telemetry lane records; no snapshot may mix samples from different
+        // moments into an impossible summary.
+        use std::sync::Arc;
+        use std::sync::atomic::AtomicBool;
+
+        let r = Arc::new(LatencyRecorder::new());
+        let done = Arc::new(AtomicBool::new(false));
+
+        let reader = {
+            let r = Arc::clone(&r);
+            let done = Arc::clone(&done);
+            std::thread::spawn(move || {
+                while !done.load(Relaxed) {
+                    let s = r.stats();
+                    if s.count > 0 {
+                        assert!(s.p99_ms >= s.p50_ms);
+                        assert!(s.max_ms >= s.p99_ms);
+                        assert!(s.min_ms <= s.max_ms);
+                    }
+                }
+            })
+        };
+
+        for _ in 0..2_000 {
+            r.record(ms(100));
+        }
+        done.store(true, Relaxed);
+        reader.join().expect("reader saw an inconsistent snapshot");
+        assert_eq!(r.stats().count, 2_000);
     }
 
     #[test]
