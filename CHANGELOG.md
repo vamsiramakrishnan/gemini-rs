@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Highlights
+
+2.0 is the SDK-surface cut: the crates expose one name per concept, one
+shape per idea, and defaults that work out of the box. Every rename, removal
+and shape change is tabulated old → new in
+[`docs/user-guide/migration.md`](docs/user-guide/migration.md).
+
+- **Models.** `ModelId` (a string newtype with rolling-alias constants) replaces
+  the `GeminiModel` enum; leave the model unset and connect resolves a
+  platform default (`GEMINI_LIVE_MODEL`, then `GEMINI_MODEL`; text agents read
+  `GEMINI_TEXT_MODEL` first, so one shared variable can no longer 404 every
+  `generateContent` call).
+- **Wire (L0).** One connect path (`connect(config)` / `ConnectBuilder`);
+  typed `SessionEvent::Error(SessionError)` and `GoAway(Option<Duration>)`;
+  `Bytes` audio both ways; `AccessToken` so Vertex reconnects carry a fresh
+  credential; the REST key travels in a header, not the URL; an `rtrb`-backed
+  SPSC ring split into `Send`-but-not-`Sync` halves; no `unsafe` left.
+- **Runtime (L1).** One name per concept (`ToolSurface`, `Enforcement`,
+  `ExecutionMode`, `StatePredicate`, `TextRunner`, `on_session_phase`, …);
+  `ConfigError` instead of panics; `State::try_get` tells wrong-type from
+  absent; typed `PersistenceError`; lossless session-event replay.
+- **Fluent (L2).** `gemini-llm` is a default feature; `tools(..)` / `tool(f)`
+  on both `Live` and `AgentBuilder`; `build` / `compile` return `Result`;
+  one bool-setter rule (`transcription()`, `session_resume()`,
+  `no_tool_advisory()`, `no_context_compression()`); `#[tool]` works from
+  the prelude with a single dependency.
+- **Live sessions.** Per-turn response latency as a distribution
+  (`telemetry().latency()`: p50/p90/p99 and a histogram); one `turn` tracing
+  span per turn across VAD, tools and the turn boundary; context window
+  compression on by default so long calls keep going.
+- **Examples and docs.** The flagship examples are L2 programs; the README
+  quickstart is compiled in CI; edition 2024, `forbid(unsafe_code)` in every
+  crate.
+
 ## [1.0.0] - 2026-08-30
 
 ### Bug Fixes
