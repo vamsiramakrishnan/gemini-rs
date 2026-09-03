@@ -11,8 +11,13 @@
 //! tahini safe for me", which shares no word at all with "The user is allergic
 //! to sesame."
 //!
-//! BM25 cannot bridge any of that. `SemanticFallback` is the seam meant to, and
-//! it has no implementation. This file measures the size of the hole.
+//! BM25 cannot bridge any of that. `SemanticFallback` is the seam meant to.
+//! It now has an implementation — `PrecomputedSemanticIndex`, embedded at
+//! ingestion and searched with a quantized scan — but wiring it here needs an
+//! `Embedder`, and the query embedding is a network round trip (259 ms at p50,
+//! measured). So this file still measures the lexical engine, which is what
+//! runs when no embedder is configured, and reports the size of the hole a
+//! semantic layer has to fill.
 //!
 //! # The method
 //!
@@ -62,11 +67,12 @@
 //! # What this file asserts
 //!
 //! Only the tiers that work today, as a regression guard. The rest is reported,
-//! not asserted — a test that demanded the current engine answer an inferential
-//! question would fail forever and tell nobody anything. The target for a
-//! semantic layer is written down in
+//! not asserted — a test that demanded the *lexical* engine answer an
+//! inferential question would fail forever and tell nobody anything. The target
+//! a semantic layer has to hit is written down in
 //! [`paraphrase_recall_survives_the_way_people_actually_talk`], which is
-//! `#[ignore]`d and will pass when there is one.
+//! `#[ignore]`d because it needs an embedder this suite does not have, not
+//! because the seam is empty.
 
 mod common;
 
@@ -228,7 +234,11 @@ async fn how_far_retrieval_falls_when_the_question_is_not_phrased_like_the_answe
     );
 }
 
-/// The target, once there is a semantic layer.
+/// The target for a semantic layer, measured the same way as everything above.
+///
+/// `SemanticFallback` has an implementation (`PrecomputedSemanticIndex`); what
+/// this fixture lacks is an `Embedder` to build and query it with. Wire one in
+/// and this becomes the acceptance test for whether the layer earns its keep.
 ///
 /// Not a wish-list: this is the threshold at which the failures above stop
 /// being product failures. Somebody asking "who's my hairdresser" or "is tahini
@@ -240,7 +250,7 @@ async fn how_far_retrieval_falls_when_the_question_is_not_phrased_like_the_answe
 /// retrieval; three quarters overall, with nothing worse than half in any
 /// single tier or mode, is the bar for calling the semantic layer done.
 #[tokio::test]
-#[ignore = "needs the SemanticFallback seam implemented — this is its acceptance test"]
+#[ignore = "needs an Embedder wired into the fixture: the acceptance test for a semantic layer, not for the lexical engine this suite measures"]
 async fn paraphrase_recall_survives_the_way_people_actually_talk() {
     let (by_tier, by_mode, _) = measure().await;
     let asked: usize = by_tier.iter().map(|t| t.asked).sum();

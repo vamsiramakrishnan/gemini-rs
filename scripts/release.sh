@@ -14,8 +14,8 @@
 #   5.  Validate: check, clippy, test
 #   6.  Pre-publish: cargo publish --dry-run for each crate
 #   7.  Generate changelog from conventional commits
-#   8.  Bump version in Cargo.toml + regenerate Cargo.lock
-#   9.  Commit "chore(release): vX.Y.Z"
+#   8.  Bump version in Cargo.toml + update Cargo.lock (workspace members only)
+#   9.  Re-validate the bumped tree, then commit "chore(release): vX.Y.Z"
 #  10.  Annotated tag vX.Y.Z
 #  11.  Push release branch + tag → CI validates + publishes to crates.io
 #  12.  Print instructions to merge release branch back to main
@@ -156,13 +156,45 @@ ok "All checks passed"
 # ── Pre-publish dry-run ───────────────────────────────────────────────────
 step "Pre-publish verification (cargo publish --dry-run)"
 
+# A dry-run for a crate whose workspace dependencies are not on crates.io yet
+# cannot succeed: `gemini-adk-rs` 2.0.0 has no `gemini-genai-rs` 2.0.0 to
+# resolve against until the latter is published. That failure is expected and
+# is not a defect. Every *other* failure is one, and blanket-warning on all of
+# them meant a real manifest error would have been reported as "expected" and
+# then followed by "All crates pass publish verification" — a gate that always
+# passed and so verified nothing. Tell the two apart, and only claim what was
+# actually checked.
+#
+# `gemini-genai-rs|gemini-adk-rs|…` for the grep below. `${arr[*]// /|}`
+# substitutes *within* each element and joins with IFS, which is a space — it
+# does not join with pipes, and the resulting pattern matches nothing.
+CRATE_ALT=$(IFS='|'; echo "${PUBLISH_CRATES[*]}")
+
+VERIFIED=(); DEFERRED=()
 for crate in "${PUBLISH_CRATES[@]}"; do
   info "Verifying $crate..."
-  if ! $DRY_RUN; then
-    cargo publish -p "$crate" --dry-run 2>&1 | tail -3 || warn "  $crate: dry-run failed (expected for first-time publishes with unpublished deps)"
+  if $DRY_RUN; then continue; fi
+
+  if OUTPUT=$(cargo publish -p "$crate" --dry-run --locked 2>&1); then
+    VERIFIED+=("$crate")
+    continue
   fi
+
+  # Unresolvable *workspace* dependency at the new version → expected.
+  if echo "$OUTPUT" | grep -qE "failed to select a version for \`(${CRATE_ALT})\`|no matching package named \`(${CRATE_ALT})\`|could not compile \`(${CRATE_ALT})\`"; then
+    DEFERRED+=("$crate")
+    warn "  $crate: deferred — its workspace deps are not on crates.io at ${VERSION} yet"
+    continue
+  fi
+
+  echo "$OUTPUT" | tail -20
+  die "$crate: publish dry-run failed for a reason other than an unpublished workspace dependency"
 done
-ok "All crates pass publish verification"
+
+if ! $DRY_RUN; then
+  ok "Publish verification: ${#VERIFIED[@]} verified, ${#DEFERRED[@]} deferred to the publish chain"
+  [[ ${#DEFERRED[@]} -eq 0 ]] || info "  deferred: ${DEFERRED[*]}"
+fi
 
 # ── Generate changelog ────────────────────────────────────────────────────
 step "Generating changelog"
@@ -292,8 +324,29 @@ if ! $DRY_RUN; then
   [[ "$FOUND" -ge 2 ]] || die "Version bump landed only $FOUND time(s) — expected ≥2"
   ok "Cargo.toml bumped ($FOUND occurrences)"
 
-  cargo generate-lockfile --quiet 2>/dev/null || cargo check --quiet 2>/dev/null || true
-  ok "Cargo.lock regenerated"
+  # `cargo update --workspace`, NOT `cargo generate-lockfile`.
+  #
+  # A version bump changes the workspace members' own versions and nothing
+  # else, so that is all the lockfile should record. `generate-lockfile`
+  # re-resolves the entire graph against whatever is newest on crates.io, which
+  # turns a release into an unreviewed dependency-upgrade wave: v2.0.0 picked up
+  # ~20 third-party bumps nobody asked for, one of which (tinyvec 1.13.0) did
+  # not compile, and CI went red on the release branch.
+  cargo update --workspace --quiet || die "Could not update Cargo.lock for the new version"
+  ok "Cargo.lock updated (workspace members only)"
+
+  # Re-validate AFTER the bump.
+  #
+  # The validation suite above ran against the pre-bump tree, so without this
+  # the commit that gets tagged and published is the one tree nobody ever
+  # built. Cheap here — the earlier run warmed the cache — and it is the check
+  # that would have caught the lockfile break before it reached a branch.
+  step "Re-validating the bumped tree"
+  cargo check --workspace --all-targets --locked \
+    || die "The bumped tree does not build — refusing to tag it"
+  cargo test --workspace --locked \
+    || die "The bumped tree fails its tests — refusing to tag it"
+  ok "Bumped tree builds and passes its tests"
 fi
 
 # ── Commit + Tag ──────────────────────────────────────────────────────────

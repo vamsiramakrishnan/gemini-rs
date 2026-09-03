@@ -176,13 +176,21 @@ fn try_parse_json(text: &str) -> Option<(f64, String)> {
     let score = if let Some(overall) = v["overall_score"].as_f64() {
         overall.clamp(0.0, 1.0)
     } else if let Some(scores) = v["scores"].as_array() {
-        let sum: f64 = scores
+        // Average only the entries that are actually numbers. Dividing by
+        // `scores.len()` counted entries the numerator never received — a judge
+        // emitting `[0.9, "n/a"]` for a criterion it could not score scored the
+        // candidate 0.45 — and an empty array averaged to a confident 0.0, a
+        // failing grade for a response nobody graded. Both are "unparseable",
+        // which is what `None` means here, as it does in the sibling evaluator.
+        let graded: Vec<f64> = scores
             .iter()
             .filter_map(serde_json::Value::as_f64)
             .map(|s| s.clamp(0.0, 1.0))
-            .sum();
-        let count = scores.len().max(1) as f64;
-        sum / count
+            .collect();
+        if graded.is_empty() {
+            return None;
+        }
+        graded.iter().sum::<f64>() / graded.len() as f64
     } else {
         return None;
     };
@@ -275,6 +283,33 @@ mod tests {
         let json = r#"{"scores": [0.8, 0.6]}"#;
         let (score, _) = RubricEvaluator::parse_response(json, 2);
         assert!((score - 0.7).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn ungradeable_entries_do_not_dilute_the_average() {
+        // The denominator is the number of criteria actually scored. Counting
+        // the ones the judge could not score halved a good response's grade.
+        let json = r#"{"scores": [0.9, "n/a", null]}"#;
+        let (score, _) = RubricEvaluator::parse_response(json, 3);
+        assert!(
+            (score - 0.9).abs() < f64::EPSILON,
+            "one criterion scored 0.9 and two were ungradeable, so the score is \
+             0.9, not 0.9 spread over three: got {score}"
+        );
+    }
+
+    #[test]
+    fn an_empty_score_array_is_unparseable_not_zero() {
+        // Zero is a grade. A judge that graded nothing has not awarded it, so
+        // this must fall through to the parse failure rather than report 0.0 as
+        // if it were the judge's verdict.
+        let (score, explanation) = RubricEvaluator::parse_response(r#"{"scores": []}"#, 2);
+        assert!((score - 0.0).abs() < f64::EPSILON);
+        assert!(
+            explanation.contains("Failed to parse"),
+            "an empty score array must read as unparseable, not as a zero \
+             verdict: {explanation}"
+        );
     }
 
     #[test]
