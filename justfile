@@ -10,14 +10,21 @@ setup:
     cargo build --workspace
     @echo ""
     @echo "Setup complete. Run 'just test' to verify."
+    @echo ""
+    @echo "For 'just ci' (the full GitHub Actions mirror):"
+    @echo "  cargo install cargo-hack   # per-feature checks"
+    @echo "  cargo install cargo-deny   # licences and advisories"
     @echo "Optional: cargo install cargo-watch  (for 'just watch')"
 
 # ─── Quality ─────────────────────────────────────────────────
 
-# Run all quality checks (exact CI parity — run before pushing)
+# This is NOT the full CI matrix — `just ci` is. Use this while working, and
+# `just ci` before pushing.
+#
+# The fast inner loop: formatting, clippy, tests
 check: fmt-check lint test
     @echo ""
-    @echo "✓ All checks passed. Safe to push."
+    @echo "✓ fmt, clippy and tests passed. Run 'just ci' for the full matrix."
 
 # Pre-commit check (alias for 'check')
 pre-commit: check
@@ -32,17 +39,17 @@ fmt-check:
 
 # Compile check with -D warnings (catches unused imports, dead code, etc.)
 warn-check:
-    RUSTFLAGS="-D warnings" cargo check --workspace --all-targets
+    RUSTFLAGS="-D warnings" cargo check --workspace --all-targets --locked
 
 # Run clippy lints (includes -D warnings for all targets)
 lint:
-    RUSTFLAGS="-D warnings" cargo clippy --workspace --all-targets -- -D warnings
+    RUSTFLAGS="-D warnings" cargo clippy --workspace --all-targets --locked -- -D warnings
 
 # ─── Testing ─────────────────────────────────────────────────
 
 # Run all workspace tests (with warnings as errors, matches CI)
 test:
-    RUSTFLAGS="-D warnings" cargo test --workspace
+    RUSTFLAGS="-D warnings" cargo test --workspace --locked
 
 # Run fast lib-only tests (no doc tests, no -D warnings)
 test-fast:
@@ -64,7 +71,7 @@ docs:
 
 # Check docs build with strict warnings (mirrors CI)
 doc-check:
-    RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace
+    RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace --locked
 
 # ─── Build ───────────────────────────────────────────────────
 
@@ -120,10 +127,44 @@ watch-check:
 
 # ─── CI ──────────────────────────────────────────────────────
 
-# Run the full CI pipeline locally (exact mirror of GitHub Actions)
-ci: fmt-check lint doc-check test
+# `cargo test --workspace` uses default features, so a whole suite can stop
+# compiling without it noticing.
+#
+# Compile every test file, including those behind non-default features
+test-all-features:
+    cargo check --workspace --all-features --all-targets --locked
+
+# `--no-default-features` is the end that catches a type which only exists
+# when a feature is on.
+#
+# Check both ends of the feature space
+features:
+    cargo check --workspace --no-default-features --locked
+    cargo check --workspace --all-features --locked
+
+# Every feature on its own. Needs `cargo install cargo-hack`.
+feature-isolation:
+    @command -v cargo-hack >/dev/null 2>&1 || { echo "cargo-hack is not installed. Run: cargo install cargo-hack"; exit 1; }
+    cargo hack check --each-feature --no-dev-deps --locked -p gemini-genai-rs -p gemini-adk-rs -p gemini-adk-fluent-rs -p gemini-memory-rs
+
+# Licences and advisories. Needs `cargo install cargo-deny`.
+deny:
+    @command -v cargo-deny >/dev/null 2>&1 || { echo "cargo-deny is not installed. Run: cargo install cargo-deny"; exit 1; }
+    cargo deny check
+
+# The conversation suite the CLI drives.
+conversations:
+    cargo run -p gemini-adk-cli-rs --locked -- flow ci conversations
+
+# This used to be `fmt-check lint doc-check test` while claiming to match
+# Actions exactly — it skipped the feature matrix, cargo-hack, cargo-deny and
+# the conversation suite, so a green run here could still be a red push. It is
+# slower than `just check` because CI is slower than `just check`.
+#
+# Every job GitHub Actions runs, in one command
+ci: fmt-check lint doc-check test test-all-features features feature-isolation deny conversations
     @echo ""
-    @echo "✓ CI pipeline passed. Matches GitHub Actions exactly."
+    @echo "✓ Every job GitHub Actions runs has passed locally."
 
 # ─── Release ─────────────────────────────────────────────────
 # Release branch model: just release 0.6.0
