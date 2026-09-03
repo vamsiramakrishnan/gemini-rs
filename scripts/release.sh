@@ -190,6 +190,11 @@ REFACTORS=$(_bucket "refactor")
 DOCS=$(_bucket "docs")
 STYLES=$(_bucket "style")
 CHORES=$(_bucket "chore")
+# Commits with no conventional prefix (a headline PR titled by hand, say) —
+# without this they would vanish from the notes entirely.
+OTHERS=$(git log --oneline --no-decorate "$RANGE" 2>/dev/null \
+  | grep -viE "^[a-f0-9]+ (feat|fix|perf|refactor|docs|style|chore|test|ci|build)(\(|:|!)" \
+  | sed 's/^[a-f0-9]* /- /' || true)
 
 _section() {
   local title=$1 body=$2
@@ -202,7 +207,8 @@ $(_section "Performance" "$PERFS")\
 $(_section "Refactors" "$REFACTORS")\
 $(_section "Documentation" "$DOCS")\
 $(_section "Style" "$STYLES")\
-$(_section "Chores" "$CHORES")"
+$(_section "Chores" "$CHORES")\
+$(_section "Other" "$OTHERS")"
 
 # Fallback: raw commit list if no conventional commits detected
 if [[ -z "$(echo "$CHANGELOG_BODY" | tr -d '[:space:]')" ]]; then
@@ -253,12 +259,21 @@ step "Updating CHANGELOG.md"
 CHANGELOG_ENTRY="## [${VERSION}] - ${TODAY}
 ${CHANGELOG_BODY}"
 
+# Anything written by hand under `## [Unreleased]` (a Highlights section, say)
+# becomes the head of the new release entry, ahead of the generated commit
+# buckets; `[Unreleased]` is left empty for the next cycle.
+_insert_changelog_entry() {
+  awk -v header="## [${VERSION}] - ${TODAY}" -v body="$CHANGELOG_BODY" '
+    /^## \[Unreleased\]/ { print; print ""; print header; in_unreleased = 1; next }
+    in_unreleased && /^## \[/ { print body; print ""; in_unreleased = 0 }
+    { print }
+    END { if (in_unreleased) { print body } }
+  ' "$1"
+}
+
 if ! $DRY_RUN; then
   if grep -q "^## \[Unreleased\]" CHANGELOG.md; then
-    awk -v entry="$CHANGELOG_ENTRY" '
-      /^## \[Unreleased\]/ { print; print ""; print entry; next }
-      { print }
-    ' CHANGELOG.md > CHANGELOG.md.tmp
+    _insert_changelog_entry CHANGELOG.md > CHANGELOG.md.tmp
     mv CHANGELOG.md.tmp CHANGELOG.md
   else
     warn "No [Unreleased] section found — prepending to CHANGELOG.md"

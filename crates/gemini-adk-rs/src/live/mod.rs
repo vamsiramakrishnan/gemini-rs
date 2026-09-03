@@ -59,6 +59,7 @@ pub mod telemetry;
 pub mod temporal;
 pub mod transcript;
 pub mod turn_commit;
+pub(crate) mod turn_trace;
 pub mod watcher;
 
 pub use background_agent_dispatch::BackgroundAgentDispatcher;
@@ -95,7 +96,9 @@ pub use replay::{ReplaySession, attach_session, collect_events_until_idle, repla
 pub use session_signals::{SessionSignals, SessionType};
 pub use soft_turn::SoftTurnDetector;
 pub use steering::{ContextDelivery, SteeringMode};
-pub use telemetry::SessionTelemetry;
+pub use telemetry::{
+    LATENCY_BUCKETS_MS, LATENCY_RECENT_WINDOW, LatencyBucket, LatencyStats, SessionTelemetry,
+};
 pub use temporal::{
     ConsecutiveFailureDetector, PatternDetector, RateDetector, SustainedDetector, TemporalPattern,
     TemporalRegistry, TurnCountDetector,

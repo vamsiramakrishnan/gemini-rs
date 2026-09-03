@@ -22,6 +22,7 @@ use axum::{
 };
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use futures::{sink::SinkExt, stream::StreamExt};
+use gemini_adk_fluent_rs::live::LiveEvent;
 use gemini_adk_fluent_rs::prelude::*;
 use serde::{Deserialize, Serialize, Serializer};
 use tokio::sync::mpsc;
@@ -286,6 +287,17 @@ async fn handle_socket(socket: WebSocket) {
                     Ok(handle) => {
                         info!("Session active — transcription enabled");
                         let _ = ws_tx.send(ServerMessage::Connected);
+                        // One line per turn: how long the model took to start
+                        // answering (end of user speech → first audio byte).
+                        let telemetry = handle.telemetry().clone();
+                        let mut turns = handle.stream();
+                        tokio::spawn(async move {
+                            while let Some(event) = turns.next().await {
+                                if matches!(event, LiveEvent::TurnComplete) {
+                                    info!("response latency: {}", telemetry.latency());
+                                }
+                            }
+                        });
                         session = Some(handle);
                     }
                     Err(e) => {

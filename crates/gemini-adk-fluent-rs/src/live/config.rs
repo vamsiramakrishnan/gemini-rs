@@ -28,6 +28,20 @@ use gemini_genai_rs::prelude::*;
 
 use super::{DeferredAgentTool, Live};
 
+/// Token count at which the default context window compression kicks in.
+///
+/// Every Live model both platforms serve today has a 128k-token window, and
+/// audio runs at roughly 25 tokens a second in each direction, so this fires
+/// only in a call that is already about an hour old — never in a short or
+/// medium session — while leaving headroom before the hard limit.
+pub const DEFAULT_COMPRESSION_TRIGGER_TOKENS: u32 = 100_000;
+
+/// Token count the default sliding window compresses the history down to.
+///
+/// Half the trigger: enough to keep the last half hour or so of a call in
+/// full, so the model still has the conversation it is in.
+pub const DEFAULT_COMPRESSION_TARGET_TOKENS: u32 = 50_000;
+
 impl Live {
     // -- Model & Voice --
 
@@ -551,12 +565,28 @@ impl Live {
         self
     }
 
-    /// Enable context window compression.
+    /// Set the context window compression thresholds.
+    ///
+    /// Compression is **on by default** at
+    /// [`DEFAULT_COMPRESSION_TRIGGER_TOKENS`] / [`DEFAULT_COMPRESSION_TARGET_TOKENS`],
+    /// so a long call keeps going instead of ending when the model's context
+    /// fills. Use this to tune the thresholds;
+    /// [`no_context_compression`](Self::no_context_compression) turns it off.
     pub fn context_compression(mut self, trigger_tokens: u32, target_tokens: u32) -> Self {
         self.config = self
             .config
             .context_window_compression(target_tokens)
             .context_window_trigger_tokens(trigger_tokens);
+        self
+    }
+
+    /// Disable context window compression.
+    ///
+    /// Without it the server ends the session once the model's context window
+    /// is full. Turn it off only when a session is known to be short, or when
+    /// the whole history must stay verbatim for its full length.
+    pub fn no_context_compression(mut self) -> Self {
+        self.config.context_window_compression = None;
         self
     }
 
@@ -833,5 +863,42 @@ mod input_audio_tests {
             frame.iter().all(|&s| s == 0),
             "gate should silence the doubled but still-quiet frame"
         );
+    }
+}
+
+#[cfg(test)]
+mod compression_default_tests {
+    use super::*;
+    use gemini_genai_rs::prelude::{ContextWindowCompressionConfig, SlidingWindow};
+
+    #[test]
+    fn compression_is_on_by_default_at_the_documented_thresholds() {
+        let live = Live::builder();
+        assert_eq!(
+            live.config.context_window_compression,
+            Some(ContextWindowCompressionConfig {
+                sliding_window: Some(SlidingWindow {
+                    target_tokens: Some(DEFAULT_COMPRESSION_TARGET_TOKENS),
+                }),
+                trigger_tokens: Some(DEFAULT_COMPRESSION_TRIGGER_TOKENS),
+            })
+        );
+    }
+
+    #[test]
+    fn explicit_thresholds_replace_the_default() {
+        let live = Live::builder().context_compression(4096, 2048);
+        let cwc = live
+            .config
+            .context_window_compression
+            .expect("compression set");
+        assert_eq!(cwc.trigger_tokens, Some(4096));
+        assert_eq!(cwc.sliding_window.and_then(|w| w.target_tokens), Some(2048));
+    }
+
+    #[test]
+    fn no_context_compression_turns_it_off() {
+        let live = Live::builder().no_context_compression();
+        assert_eq!(live.config.context_window_compression, None);
     }
 }
