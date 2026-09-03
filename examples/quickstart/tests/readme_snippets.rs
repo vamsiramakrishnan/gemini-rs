@@ -57,6 +57,50 @@ fn readme_quickstart_manifest_names_the_required_dependencies() {
     }
 }
 
+/// The version a reader is told to depend on must be the version being shipped.
+///
+/// The other assertions here check that the manifest block *names* the right
+/// crates and features, which is why `gemini-adk-fluent-rs = "1.0"` sat above
+/// 2.0 programs through a whole major release: the snippet named the right
+/// crate, so nothing complained, and a reader copying both halves got
+/// `AgentBuilder::build(llm)?` — a `Result` in 2.0, an `Arc` in 1.0 — against a
+/// 1.x dependency, which does not compile.
+///
+/// Only the major (and, before 1.0, the minor) is checked. A caret requirement
+/// of `"2.0"` admits every 2.x, so the docs need not be touched for a patch
+/// release; they must be touched for a breaking one.
+#[test]
+fn readme_documents_the_version_it_ships() {
+    let workspace =
+        std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Cargo.toml"))
+            .expect("workspace manifest");
+    let shipped = workspace
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("version = \""))
+        .and_then(|v| v.split('"').next())
+        .expect("[workspace.package] version");
+
+    // "2.0.0" → "2.0"; "0.6.3" → "0.6". The compatibility range a caret
+    // requirement in the docs has to name.
+    let mut parts = shipped.split('.');
+    let (major, minor) = (parts.next().expect("major"), parts.next().expect("minor"));
+    let expected = format!("{major}.{minor}");
+
+    let readme = readme();
+    for block in ["Cargo.toml", "Cargo.toml:voice"] {
+        let manifest = fenced_block(&readme, block);
+        let line = manifest
+            .lines()
+            .find(|l| l.contains("gemini-adk-fluent-rs"))
+            .unwrap_or_else(|| panic!("README block `{block}` no longer pins the crate"));
+        assert!(
+            line.contains(&format!("\"{expected}\"")),
+            "README block `{block}` tells the reader to depend on a version that \
+             is not the one being shipped ({shipped}). Expected `\"{expected}\"` in:\n  {line}"
+        );
+    }
+}
+
 /// The text path is advertised as needing no audio stack, and the crate backs
 /// that up by gating `voice-io` behind an opt-in `voice` feature. If the
 /// README's base manifest ever enables `voice-io` again, that promise silently
