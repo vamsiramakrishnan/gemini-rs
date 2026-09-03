@@ -32,7 +32,7 @@ exclude = [
 ]
 
 [workspace.package]
-version = "1.0.0"
+version = "2.0.0"
 edition = "2024"
 rust-version = "1.93"
 license = "MIT"
@@ -44,12 +44,12 @@ repository = "https://github.com/vamsiramakrishnan/gemini-rs"
 # `default-features = false` here so that L1/L2 can own the TLS-backend choice
 # (a member cannot narrow an inherited dependency's defaults, only widen them).
 # Direct consumers that want L0's defaults say `default-features = true`.
-gemini-genai-rs      = { path = "crates/gemini-genai-rs",      version = "1.0.0", default-features = false }
-gemini-adk-macros-rs = { path = "crates/gemini-adk-macros-rs", version = "1.0.0" }
-gemini-adk-rs        = { path = "crates/gemini-adk-rs",        version = "1.0.0", default-features = false }
-gemini-adk-fluent-rs = { path = "crates/gemini-adk-fluent-rs", version = "1.0.0" }
-gemini-memory-rs     = { path = "crates/gemini-memory-rs",     version = "1.0.0" }
-gemini-adk-server-rs = { path = "apps/gemini-adk-server-rs",   version = "1.0.0" }
+gemini-genai-rs      = { path = "crates/gemini-genai-rs",      version = "2.0.0", default-features = false }
+gemini-adk-macros-rs = { path = "crates/gemini-adk-macros-rs", version = "2.0.0" }
+gemini-adk-rs        = { path = "crates/gemini-adk-rs",        version = "2.0.0", default-features = false }
+gemini-adk-fluent-rs = { path = "crates/gemini-adk-fluent-rs", version = "2.0.0" }
+gemini-memory-rs     = { path = "crates/gemini-memory-rs",     version = "2.0.0" }
+gemini-adk-server-rs = { path = "apps/gemini-adk-server-rs",   version = "2.0.0" }
 
 [workspace.lints.rust]
 # Every crate is unsafe-free and says so with `#![forbid(unsafe_code)]` (the

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-09-03
+
 ### Highlights
 
 2.0 is the SDK-surface cut: the crates expose one name per concept, one
@@ -40,6 +42,28 @@ and shape change is tabulated old → new in
 - **Examples and docs.** The flagship examples are L2 programs; the README
   quickstart is compiled in CI; edition 2024, `forbid(unsafe_code)` in every
   crate.
+
+
+### Features
+
+- feat(live): per-turn response latency, one span per turn, compression on by default (#42)
+- feat(examples): redteam-call — a governed collections agent against an adversarial Live caller (#40)
+- feat: salvage the unmerged tail of the roadmap branch — Conversation CI, resolver registry, Python wheel, run_stream (#34)
+### Bug Fixes
+
+- fix(live): publish the latency count after its sample, not before (#43)
+- fix: post-merge Codex findings on #37 — release blocker, replay fidelity, quickstart promise (#39)
+- fix: post-merge Codex findings + devex overhaul — a first-run path that actually works (#37)
+- fix(cli): vendor web assets inside the crate so the published package compiles (#36)
+- fix(release): make gemini-adk-macros-rs publishable and add it to the publish chain (#35)
+### Chores
+
+- chore(release): v1.0.0 (#33)
+### Other
+
+- SDK surface 2.0: foundations, ModelId, typed events, one connect path, refreshing credentials (#41)
+- Update CodeQL workflow name
+- Add comment for Dependabot configuration
 
 ## [1.0.0] - 2026-08-30
 
