@@ -104,7 +104,7 @@ metrics-exporter-prometheus = { version = "0.16", optional = true }
 
 # OpenTelemetry — shared (otel-base)
 opentelemetry = { version = "0.31", optional = true }
-opentelemetry_sdk = { version = "0.31", features = ["rt-tokio", "metrics"], optional = true }
+opentelemetry_sdk = { version = "0.32", features = ["rt-tokio", "metrics"], optional = true }
 tracing-opentelemetry = { version = "0.32", optional = true }
 
 # OpenTelemetry — generic OTLP exporter (otel-otlp)
