@@ -24,7 +24,7 @@ futures = "0.3"
 async-trait = "0.1"
 
 # Web framework (for `adk web` — embedded UI + WebSocket)
-axum = { version = "0.7", features = ["ws"] }
+axum = { version = "0.8", features = ["ws"] }
 tower-http = { version = "0.5", features = ["cors", "set-header"] }
 rust-embed = "8"
 mime_guess = "2"
