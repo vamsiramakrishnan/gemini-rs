@@ -57,7 +57,7 @@ fn readme_quickstart_manifest_names_the_required_dependencies() {
     }
 }
 
-/// The version a reader is told to depend on must be the version being shipped.
+/// The version a reader is told to depend on must accept the version shipped.
 ///
 /// The other assertions here check that the manifest block *names* the right
 /// crates and features, which is why `gemini-adk-fluent-rs = "1.0"` sat above
@@ -66,11 +66,13 @@ fn readme_quickstart_manifest_names_the_required_dependencies() {
 /// `AgentBuilder::build(llm)?` — a `Result` in 2.0, an `Arc` in 1.0 — against a
 /// 1.x dependency, which does not compile.
 ///
-/// Only the major (and, before 1.0, the minor) is checked. A caret requirement
-/// of `"2.0"` admits every 2.x, so the docs need not be touched for a patch
-/// release; they must be touched for a breaking one.
+/// Compatibility, not equality: a caret requirement of `"2.0"` already admits
+/// every 2.x, so `2.1.0` needs no doc edit and demanding `"2.1"` would fail
+/// every minor release — including inside `release.sh`, which bumps the
+/// manifest and then runs this suite. Only the major is compared, except below
+/// 1.0 where cargo treats the minor as the breaking component.
 #[test]
-fn readme_documents_the_version_it_ships() {
+fn readme_documents_a_version_that_accepts_what_it_ships() {
     let workspace =
         std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Cargo.toml"))
             .expect("workspace manifest");
@@ -80,12 +82,6 @@ fn readme_documents_the_version_it_ships() {
         .and_then(|v| v.split('"').next())
         .expect("[workspace.package] version");
 
-    // "2.0.0" → "2.0"; "0.6.3" → "0.6". The compatibility range a caret
-    // requirement in the docs has to name.
-    let mut parts = shipped.split('.');
-    let (major, minor) = (parts.next().expect("major"), parts.next().expect("minor"));
-    let expected = format!("{major}.{minor}");
-
     let readme = readme();
     for block in ["Cargo.toml", "Cargo.toml:voice"] {
         let manifest = fenced_block(&readme, block);
@@ -93,11 +89,43 @@ fn readme_documents_the_version_it_ships() {
             .lines()
             .find(|l| l.contains("gemini-adk-fluent-rs"))
             .unwrap_or_else(|| panic!("README block `{block}` no longer pins the crate"));
+        let documented = quoted_version(line).unwrap_or_else(|| {
+            panic!("README block `{block}` names no version for the crate:\n  {line}")
+        });
         assert!(
-            line.contains(&format!("\"{expected}\"")),
-            "README block `{block}` tells the reader to depend on a version that \
-             is not the one being shipped ({shipped}). Expected `\"{expected}\"` in:\n  {line}"
+            caret_admits(&documented, shipped),
+            "README block `{block}` documents `{documented}`, which does not admit the \
+             version being shipped ({shipped}):\n  {line}"
         );
+    }
+}
+
+/// The first double-quoted token on the line that starts with a digit — the
+/// version, whether the line is `foo = "2.0"` or `foo = {{ version = "2.0", .. }}`.
+fn quoted_version(line: &str) -> Option<String> {
+    line.split('"')
+        .skip(1)
+        .step_by(2)
+        .find(|t| t.starts_with(|c: char| c.is_ascii_digit()))
+        .map(str::to_string)
+}
+
+/// Does a caret requirement of `req` accept version `shipped`?
+///
+/// Cargo's rule: the leftmost non-zero component is the breaking one, so `"1.2"`
+/// admits any 1.x at or above 1.2, and `"0.6"` admits only 0.6.x. Comparing
+/// that component is enough here — the docs name a floor, and a release only
+/// ever moves the version up.
+fn caret_admits(req: &str, shipped: &str) -> bool {
+    fn parts(v: &str) -> (u64, u64) {
+        let mut it = v.split(['.', '-']).filter_map(|p| p.parse::<u64>().ok());
+        (it.next().unwrap_or(0), it.next().unwrap_or(0))
+    }
+    let ((rmaj, rmin), (smaj, smin)) = (parts(req), parts(shipped));
+    if smaj > 0 {
+        rmaj == smaj
+    } else {
+        rmaj == 0 && rmin == smin
     }
 }
 

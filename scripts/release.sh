@@ -156,44 +156,76 @@ ok "All checks passed"
 # ── Pre-publish dry-run ───────────────────────────────────────────────────
 step "Pre-publish verification (cargo publish --dry-run)"
 
-# A dry-run for a crate whose workspace dependencies are not on crates.io yet
-# cannot succeed: `gemini-adk-rs` 2.0.0 has no `gemini-genai-rs` 2.0.0 to
-# resolve against until the latter is published. That failure is expected and
-# is not a defect. Every *other* failure is one, and blanket-warning on all of
-# them meant a real manifest error would have been reported as "expected" and
-# then followed by "All crates pass publish verification" — a gate that always
-# passed and so verified nothing. Tell the two apart, and only claim what was
-# actually checked.
+# `cargo publish --dry-run` builds the packaged crate, so it can only say
+# something meaningful when that crate's dependencies actually resolve. For a
+# crate that depends on another crate in this release, they do not: at this
+# version its sibling is not on crates.io yet, and cargo falls back to the last
+# published one — so the build fails against an older API and the result is
+# uninterpretable, not informative.
 #
-# `gemini-genai-rs|gemini-adk-rs|…` for the grep below. `${arr[*]// /|}`
-# substitutes *within* each element and joins with IFS, which is a space — it
-# does not join with pipes, and the resulting pattern matches nothing.
-CRATE_ALT=$(IFS='|'; echo "${PUBLISH_CRATES[*]}")
+# The previous version of this ran the dry-run on all seven anyway and then
+# classified the failures by error text, deferring anything that said
+# `could not compile <one of our crates>`. That pattern also matches the crate
+# being published, so a genuine packaging defect — a missing `include`, a file
+# that only exists outside the package — read as "expected" and passed the
+# gate. (Before that it was worse: every failure was warned away and the script
+# printed "All crates pass publish verification" regardless.)
+#
+# So: verify the crates whose dependencies resolve, and do not pretend to
+# verify the rest. Those are checked for real by the publish chain itself —
+# CI publishes in dependency order and each `cargo publish` runs its own
+# verification once its siblings exist.
+_manifest_for() {
+  grep -rl "^name = \"$1\"" --include=Cargo.toml crates apps tools 2>/dev/null | head -1
+}
+
+# Names of other release crates this manifest depends on, ignoring
+# [dev-dependencies] — those are stripped from the package and never block a
+# publish (which is why gemini-adk-macros-rs can depend on gemini-adk-rs).
+_blocking_workspace_deps() {
+  local mf="$1" self="$2" out="" in_dev=0 line other
+  while IFS= read -r line; do
+    case "$line" in
+      \[*dev-dependencies*\]) in_dev=1; continue ;;
+      \[*) in_dev=0; continue ;;
+    esac
+    [[ $in_dev -eq 1 ]] && continue
+    for other in "${PUBLISH_CRATES[@]}"; do
+      [[ "$other" == "$self" ]] && continue
+      case "$line" in
+        "$other "*|"$other="*|"$other."*) out+="$other " ;;
+      esac
+    done
+  done < "$mf"
+  echo "${out% }"
+}
 
 VERIFIED=(); DEFERRED=()
 for crate in "${PUBLISH_CRATES[@]}"; do
-  info "Verifying $crate..."
-  if $DRY_RUN; then continue; fi
+  if $DRY_RUN; then info "Verifying $crate..."; continue; fi
 
+  MANIFEST=$(_manifest_for "$crate")
+  [[ -n "$MANIFEST" ]] || die "Could not find the manifest for $crate"
+  BLOCKING=$(_blocking_workspace_deps "$MANIFEST" "$crate")
+
+  if [[ -n "$BLOCKING" ]]; then
+    DEFERRED+=("$crate")
+    info "  $crate: left to the publish chain — needs $BLOCKING at ${VERSION}"
+    continue
+  fi
+
+  info "Verifying $crate..."
   if OUTPUT=$(cargo publish -p "$crate" --dry-run --locked 2>&1); then
     VERIFIED+=("$crate")
-    continue
+  else
+    echo "$OUTPUT" | tail -20
+    die "$crate: publish dry-run failed, and its dependencies all resolve — this is a real packaging error"
   fi
-
-  # Unresolvable *workspace* dependency at the new version → expected.
-  if echo "$OUTPUT" | grep -qE "failed to select a version for \`(${CRATE_ALT})\`|no matching package named \`(${CRATE_ALT})\`|could not compile \`(${CRATE_ALT})\`"; then
-    DEFERRED+=("$crate")
-    warn "  $crate: deferred — its workspace deps are not on crates.io at ${VERSION} yet"
-    continue
-  fi
-
-  echo "$OUTPUT" | tail -20
-  die "$crate: publish dry-run failed for a reason other than an unpublished workspace dependency"
 done
 
 if ! $DRY_RUN; then
-  ok "Publish verification: ${#VERIFIED[@]} verified, ${#DEFERRED[@]} deferred to the publish chain"
-  [[ ${#DEFERRED[@]} -eq 0 ]] || info "  deferred: ${DEFERRED[*]}"
+  ok "Publish verification: ${#VERIFIED[@]} verified (${VERIFIED[*]:-none})"
+  [[ ${#DEFERRED[@]} -eq 0 ]] || info "  ${#DEFERRED[@]} left to the publish chain: ${DEFERRED[*]}"
 fi
 
 # ── Generate changelog ────────────────────────────────────────────────────
