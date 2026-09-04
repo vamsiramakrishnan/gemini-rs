@@ -8,7 +8,7 @@
 [![Rust](https://img.shields.io/badge/rust-1.93%2B-orange.svg)](rust-toolchain.toml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**v1.0 · MIT** · [book](https://vamsiramakrishnan.github.io/gemini-rs/) · [API reference](https://vamsiramakrishnan.github.io/gemini-rs/api/gemini_genai_rs/index.html)
+**v2.0 · MIT** · [book](https://vamsiramakrishnan.github.io/gemini-rs/) · [API reference](https://vamsiramakrishnan.github.io/gemini-rs/api/gemini_genai_rs/index.html)
 
 gemini-rs is a full Rust SDK for the Gemini Multimodal Live API. A live voice model will happily book the table before checking availability — not because the prompt was wrong, but because a prompt is advice, and advice is not enforcement. Here you declare the conversation as a contract — steps, completion guards, tool gates, ordering constraints — and the runtime enforces it while the model speaks: a tool the flow has not admitted does not execute, whatever the model intends. The same contract is a JSON document you can validate, simulate, test, and code-generate offline, and a canvas you can edit by hand.
 
