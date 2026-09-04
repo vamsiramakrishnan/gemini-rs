@@ -237,7 +237,7 @@ jobs:
           fi
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: "v${{ steps.ver.outputs.version }}"
           body: ${{ steps.body.outputs.body }}
