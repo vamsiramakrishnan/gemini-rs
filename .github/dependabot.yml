@@ -1,11 +1,43 @@
-# To get started with Dependabot version updates, you'll need to specify which
-# package ecosystems to update and where the package manifests are located.
-# Please see the documentation for all configuration options:
-# https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
-# vamramak
 version: 2
 updates:
-  - package-ecosystem: "" # See documentation for possible values
-    directory: "/" # Location of package manifests
+  # The workspace. `directory` is where the manifest lives; Dependabot walks the
+  # workspace members from there, so one entry covers every crate in `members`.
+  - package-ecosystem: cargo
+    directory: "/"
     schedule:
-      interval: "weekly"
+      interval: weekly
+    groups:
+      # Crates that re-export each other's public types have to move together.
+      # A partial bump puts two copies of the shared crate in the graph and the
+      # types stop matching across the seam — a lone `opentelemetry_sdk`
+      # 0.31 → 0.32 bump broke `--all-features` on main exactly that way.
+      opentelemetry:
+        patterns:
+          - "opentelemetry"
+          - "opentelemetry-*"
+          - "opentelemetry_*"
+          - "tracing-opentelemetry"
+      tracing:
+        patterns:
+          - "tracing"
+          - "tracing-subscriber"
+          - "tracing-appender"
+      # Everything else, batched so the queue stays reviewable.
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  # `crates/gemini-adk-py` is excluded from the workspace (maturin builds it,
+  # `cargo build --workspace` does not), so it needs its own entry — and note
+  # that no CI job compiles it, so a bump here is unverified until someone runs
+  # maturin by hand.
+  - package-ecosystem: cargo
+    directory: "/crates/gemini-adk-py"
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly

@@ -1636,7 +1636,7 @@ dependencies = [
  "opentelemetry-gcloud-trace",
  "opentelemetry-otlp",
  "opentelemetry_gcloud_monitoring_exporter",
- "opentelemetry_sdk 0.32.1",
+ "opentelemetry_sdk 0.31.0",
  "parking_lot",
  "proptest",
  "reqwest 0.12.28",
@@ -3322,8 +3322,6 @@ dependencies = [
  "portable-atomic",
  "rand 0.9.5",
  "thiserror 2.0.20",
- "tokio",
- "tokio-stream",
 ]
 
 [[package]]

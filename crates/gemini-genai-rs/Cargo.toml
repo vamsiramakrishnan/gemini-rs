@@ -103,8 +103,18 @@ metrics = { version = "0.24", optional = true }
 metrics-exporter-prometheus = { version = "0.16", optional = true }
 
 # OpenTelemetry — shared (otel-base)
+#
+# These move as a family or not at all. `opentelemetry_sdk` re-exports the
+# `opentelemetry` types in its own public API, and the exporters below carry
+# their own pin on the same pair, so bumping one crate alone puts two
+# incompatible copies of `opentelemetry` in the graph and every `KeyValue`,
+# `Tracer` and `SpanExporter` stops matching across the seam. A lone
+# `opentelemetry_sdk` 0.31 → 0.32 bump broke `--all-features` exactly that way.
+# The current family is 0.31; `opentelemetry-otlp` and the two
+# `opentelemetry*gcloud*` exporters must publish a 0.32-compatible release
+# before this block can move.
 opentelemetry = { version = "0.31", optional = true }
-opentelemetry_sdk = { version = "0.32", features = ["rt-tokio", "metrics"], optional = true }
+opentelemetry_sdk = { version = "0.31", features = ["rt-tokio", "metrics"], optional = true }
 tracing-opentelemetry = { version = "0.32", optional = true }
 
 # OpenTelemetry — generic OTLP exporter (otel-otlp)
