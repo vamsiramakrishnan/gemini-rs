@@ -102,11 +102,18 @@ git clone https://github.com/vamsiramakrishnan/gemini-rs.git
 cd gemini-rs
 
 just setup          # Build workspace
-just test           # Run library tests (no credentials needed)
+just test           # Run the test suite (no credentials needed)
 just docs           # Build and open documentation
-just run-ui         # Run the ADK Web UI (requires .env with credentials)
-just check          # Run full quality check (fmt + lint + docs + tests)
+just run-web        # Run the ADK Web UI (requires .env with credentials)
+just check          # Fast inner loop: fmt + clippy + tests
+just ci             # Every job GitHub Actions runs — do this before pushing
 ```
+
+`just check` is the loop you run while working. `just ci` is the one that tells
+you whether the push will be green: it adds the feature matrix, the per-feature
+`cargo-hack` pass, `cargo-deny` and the conversation suite, which are jobs CI
+runs and `just check` does not. It needs two extra tools, and `just setup`
+prints the install lines.
 
 Or use plain cargo directly:
 
@@ -208,10 +215,13 @@ cargo test -p gemini-adk-fluent-rs --lib
 # With all features enabled
 cargo test -p gemini-genai-rs --all-features --lib
 
-# Check formatting + linting + docs (the full CI check)
+# Formatting, linting and docs. Note this is a subset of CI, not all of it —
+# `just ci` runs the rest (feature matrix, cargo-hack, cargo-deny,
+# conversations). `--locked` because CI passes it: without it cargo may resolve
+# a different dependency set than the one committed in Cargo.lock.
 cargo fmt --check \
-  && cargo clippy --workspace -- -D warnings \
-  && RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace
+  && cargo clippy --workspace --locked -- -D warnings \
+  && RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace --locked
 ```
 
 Tests live alongside the code they test using `#[cfg(test)] mod tests` blocks. The `crates/gemini-adk-rs/src/test_helpers.rs` module provides shared test utilities.

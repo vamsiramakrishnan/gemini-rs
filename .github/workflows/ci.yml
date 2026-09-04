@@ -12,6 +12,15 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
 
+# Every cargo invocation below passes `--locked`. Without it cargo is free to
+# re-resolve and rewrite Cargo.lock in the runner, so CI green means "some
+# resolution builds" rather than "the committed one does" — and the lockfile
+# itself is never actually tested. A release that regenerated the lock caught
+# exactly this: it picked up a dependency version that does not compile, and no
+# check had ever built the file that shipped. `--locked` fails loudly instead,
+# which is the answer you want: an out-of-date lockfile is a change to commit,
+# not something to fix silently on a runner.
+
 jobs:
   check:
     name: Check
@@ -24,7 +33,7 @@ jobs:
           components: clippy, rustfmt
       - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - uses: Swatinem/rust-cache@v2
-      - run: cargo check --workspace --all-targets
+      - run: cargo check --workspace --all-targets --locked
 
   test:
     name: Test
@@ -37,13 +46,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       # `voice-io` (cpal) needs system audio headers to compile.
       - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
-      - run: cargo test --workspace
+      - run: cargo test --workspace --locked
       # `cargo test --workspace` uses default features, so every test file
       # behind `#![cfg(feature = "...")]` is invisible to it — a whole suite can
       # stop compiling without CI noticing, which is exactly what happened to
       # `contradiction_reconciliation`. Compile them; don't run them (the
       # model-backed ones need an API key and would cost money per push).
-      - run: cargo check --workspace --all-features --all-targets
+      - run: cargo check --workspace --all-features --all-targets --locked
 
   clippy:
     name: Clippy
@@ -56,7 +65,7 @@ jobs:
           components: clippy
       - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
   fmt:
     name: Format
@@ -82,8 +91,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       # `voice-io` (cpal) needs system audio headers to compile.
       - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
-      - run: cargo check --workspace --no-default-features
-      - run: cargo check --workspace --all-features
+      - run: cargo check --workspace --no-default-features --locked
+      - run: cargo check --workspace --all-features --locked
 
   # Per-feature isolation: every feature of the published crates must compile on
   # its own (catches missing feature deps that the extremes above can't see).
@@ -99,6 +108,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       # `voice-io` (cpal) needs system audio headers to compile.
       - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      # No `--locked` here, unlike every other cargo call in this file:
+      # `--no-dev-deps` edits the real Cargo.toml while cargo-hack runs, which
+      # changes the resolution and so requires a lockfile update — exactly what
+      # `--locked` forbids. The two cannot both be passed.
       - run: cargo hack check --each-feature --no-dev-deps -p gemini-genai-rs -p gemini-adk-rs -p gemini-adk-fluent-rs -p gemini-memory-rs
 
   # Supply chain: RustSec advisories, license allow-list, source whitelist.
@@ -123,4 +136,4 @@ jobs:
           toolchain: "1.93.1"
       - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - uses: Swatinem/rust-cache@v2
-      - run: cargo run -p gemini-adk-cli-rs -- flow ci conversations
+      - run: cargo run -p gemini-adk-cli-rs --locked -- flow ci conversations

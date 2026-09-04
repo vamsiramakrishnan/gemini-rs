@@ -38,8 +38,10 @@ jobs:
       - name: Install ALSA headers (cpal needs them; all-features rustdoc too)
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - run: cargo fmt --all -- --check
-      - run: cargo test --workspace
-      - run: cargo clippy --workspace --all-targets -- -D warnings
+      # `--locked`: this job gates a publish, so it has to build the lockfile
+      # that is about to ship, not a resolution the runner invented.
+      - run: cargo test --workspace --locked
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       # Pre-publish verification — verify the two independent crates: L0 and the
       # proc-macro crate (external deps only; its dev-dep is stripped on publish).
       # Dependent crates (L1+) can't dry-run until these are on crates.io; they

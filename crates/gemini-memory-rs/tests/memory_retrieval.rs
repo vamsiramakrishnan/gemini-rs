@@ -296,10 +296,12 @@ async fn a_wrongly_narrowed_scope_hides_the_answer_rather_than_ranking_it_lower(
 /// reason: it changed no measured outcome, and tuning it until this test passed
 /// would have been tuning to the fixture. Both cases are asking retrieval to
 /// know that *barber* and *hairdresser* are the same job, and that a question
-/// with no subject is about its owner — which is what the unimplemented
-/// `SemanticFallback` seam is for.
+/// with no subject is about its owner — which is what the `SemanticFallback`
+/// seam is for. It has an implementation (`PrecomputedSemanticIndex`); this
+/// fixture has no `Embedder` to drive it, so the engine under test here is the
+/// lexical one, and ranking alone cannot close either half.
 #[tokio::test]
-#[ignore = "needs semantic retrieval: see the note above — ranking cannot fix either half"]
+#[ignore = "needs an Embedder in the fixture: see the note above — ranking alone cannot fix either half"]
 async fn a_subject_less_recall_does_not_default_to_the_user() {
     // Against the real corpus, not a hand-built handful: with four documents
     // BM25's IDF for a near-universal term is ~0.1, everything falls below the

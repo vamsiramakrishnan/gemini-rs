@@ -312,14 +312,23 @@ async fn a_fact_learned_mid_conversation_beats_the_corpus_and_outlives_it() {
 /// which needs the overlay to both outrank the canonical record *and* suppress
 /// it.
 ///
-/// It does not. Ignored because it fails for a defect rather than a flake:
-/// when the model routes the correction through `manage_memory` the suppression
-/// window is computed from an invented predicate and misses the record it was
-/// meant to hide, so the assistant says "I've corrected that for you" and then
-/// answers the next question with the old value. Reproduced without the network
-/// by `an_explicit_correction_hides_the_record_it_corrects`.
+/// It did not, once. The suppression window was computed from an invented
+/// predicate — every explicit command was filed as `preference`, whatever it
+/// concerned — so it never matched the record it was meant to hide, and the
+/// assistant said "I've corrected that for you" and then answered the next
+/// question with the old value. `apply_explicit_command` now resolves the
+/// target predicate from the corpus before building the observation, and
+/// `manage_memory` routes through that same call, so the model-driven path here
+/// and the direct one share the fix.
+///
+/// Guarded without the network by
+/// `an_explicit_correction_hides_the_record_it_corrects`, which is the cheap
+/// test and the one that will catch a regression first. This one is kept
+/// because it is the only check that the *model* reaches for `manage_memory` at
+/// all when a user corrects something out loud — a prompt or tool-description
+/// change can break that without touching the engine. It skips itself when
+/// there is no API key.
 #[tokio::test]
-#[ignore = "known defect: see `an_explicit_correction_hides_the_record_it_corrects`"]
 async fn a_correction_spoken_out_loud_hides_the_fact_it_replaces() {
     if !have_api_key() {
         return skip("a_correction_spoken_out_loud_hides_the_fact_it_replaces");

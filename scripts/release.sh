@@ -14,8 +14,8 @@
 #   5.  Validate: check, clippy, test
 #   6.  Pre-publish: cargo publish --dry-run for each crate
 #   7.  Generate changelog from conventional commits
-#   8.  Bump version in Cargo.toml + regenerate Cargo.lock
-#   9.  Commit "chore(release): vX.Y.Z"
+#   8.  Bump version in Cargo.toml + update Cargo.lock (workspace members only)
+#   9.  Re-validate the bumped tree, then commit "chore(release): vX.Y.Z"
 #  10.  Annotated tag vX.Y.Z
 #  11.  Push release branch + tag → CI validates + publishes to crates.io
 #  12.  Print instructions to merge release branch back to main
@@ -156,13 +156,77 @@ ok "All checks passed"
 # ── Pre-publish dry-run ───────────────────────────────────────────────────
 step "Pre-publish verification (cargo publish --dry-run)"
 
+# `cargo publish --dry-run` builds the packaged crate, so it can only say
+# something meaningful when that crate's dependencies actually resolve. For a
+# crate that depends on another crate in this release, they do not: at this
+# version its sibling is not on crates.io yet, and cargo falls back to the last
+# published one — so the build fails against an older API and the result is
+# uninterpretable, not informative.
+#
+# The previous version of this ran the dry-run on all seven anyway and then
+# classified the failures by error text, deferring anything that said
+# `could not compile <one of our crates>`. That pattern also matches the crate
+# being published, so a genuine packaging defect — a missing `include`, a file
+# that only exists outside the package — read as "expected" and passed the
+# gate. (Before that it was worse: every failure was warned away and the script
+# printed "All crates pass publish verification" regardless.)
+#
+# So: verify the crates whose dependencies resolve, and do not pretend to
+# verify the rest. Those are checked for real by the publish chain itself —
+# CI publishes in dependency order and each `cargo publish` runs its own
+# verification once its siblings exist.
+_manifest_for() {
+  grep -rl "^name = \"$1\"" --include=Cargo.toml crates apps tools 2>/dev/null | head -1
+}
+
+# Names of other release crates this manifest depends on, ignoring
+# [dev-dependencies] — those are stripped from the package and never block a
+# publish (which is why gemini-adk-macros-rs can depend on gemini-adk-rs).
+_blocking_workspace_deps() {
+  local mf="$1" self="$2" out="" in_dev=0 line other
+  while IFS= read -r line; do
+    case "$line" in
+      \[*dev-dependencies*\]) in_dev=1; continue ;;
+      \[*) in_dev=0; continue ;;
+    esac
+    [[ $in_dev -eq 1 ]] && continue
+    for other in "${PUBLISH_CRATES[@]}"; do
+      [[ "$other" == "$self" ]] && continue
+      case "$line" in
+        "$other "*|"$other="*|"$other."*) out+="$other " ;;
+      esac
+    done
+  done < "$mf"
+  echo "${out% }"
+}
+
+VERIFIED=(); DEFERRED=()
 for crate in "${PUBLISH_CRATES[@]}"; do
+  if $DRY_RUN; then info "Verifying $crate..."; continue; fi
+
+  MANIFEST=$(_manifest_for "$crate")
+  [[ -n "$MANIFEST" ]] || die "Could not find the manifest for $crate"
+  BLOCKING=$(_blocking_workspace_deps "$MANIFEST" "$crate")
+
+  if [[ -n "$BLOCKING" ]]; then
+    DEFERRED+=("$crate")
+    info "  $crate: left to the publish chain — needs $BLOCKING at ${VERSION}"
+    continue
+  fi
+
   info "Verifying $crate..."
-  if ! $DRY_RUN; then
-    cargo publish -p "$crate" --dry-run 2>&1 | tail -3 || warn "  $crate: dry-run failed (expected for first-time publishes with unpublished deps)"
+  if OUTPUT=$(cargo publish -p "$crate" --dry-run --locked 2>&1); then
+    VERIFIED+=("$crate")
+  else
+    echo "$OUTPUT" | tail -20
+    die "$crate: publish dry-run failed, and its dependencies all resolve — this is a real packaging error"
   fi
 done
-ok "All crates pass publish verification"
+
+if ! $DRY_RUN; then
+  ok "Publish verification: ${#VERIFIED[@]} verified (${VERIFIED[*]:-none})"
+  [[ ${#DEFERRED[@]} -eq 0 ]] || info "  ${#DEFERRED[@]} left to the publish chain: ${DEFERRED[*]}"
+fi
 
 # ── Generate changelog ────────────────────────────────────────────────────
 step "Generating changelog"
@@ -292,8 +356,29 @@ if ! $DRY_RUN; then
   [[ "$FOUND" -ge 2 ]] || die "Version bump landed only $FOUND time(s) — expected ≥2"
   ok "Cargo.toml bumped ($FOUND occurrences)"
 
-  cargo generate-lockfile --quiet 2>/dev/null || cargo check --quiet 2>/dev/null || true
-  ok "Cargo.lock regenerated"
+  # `cargo update --workspace`, NOT `cargo generate-lockfile`.
+  #
+  # A version bump changes the workspace members' own versions and nothing
+  # else, so that is all the lockfile should record. `generate-lockfile`
+  # re-resolves the entire graph against whatever is newest on crates.io, which
+  # turns a release into an unreviewed dependency-upgrade wave: v2.0.0 picked up
+  # ~20 third-party bumps nobody asked for, one of which (tinyvec 1.13.0) did
+  # not compile, and CI went red on the release branch.
+  cargo update --workspace --quiet || die "Could not update Cargo.lock for the new version"
+  ok "Cargo.lock updated (workspace members only)"
+
+  # Re-validate AFTER the bump.
+  #
+  # The validation suite above ran against the pre-bump tree, so without this
+  # the commit that gets tagged and published is the one tree nobody ever
+  # built. Cheap here — the earlier run warmed the cache — and it is the check
+  # that would have caught the lockfile break before it reached a branch.
+  step "Re-validating the bumped tree"
+  cargo check --workspace --all-targets --locked \
+    || die "The bumped tree does not build — refusing to tag it"
+  cargo test --workspace --locked \
+    || die "The bumped tree fails its tests — refusing to tag it"
+  ok "Bumped tree builds and passes its tests"
 fi
 
 # ── Commit + Tag ──────────────────────────────────────────────────────────
