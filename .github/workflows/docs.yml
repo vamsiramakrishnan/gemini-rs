@@ -80,7 +80,7 @@ jobs:
           printf '<meta http-equiv="refresh" content="0; url=api/gemini_genai_rs/index.html">' \
             > target/book/api/index.html
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         with:
           path: target/book
