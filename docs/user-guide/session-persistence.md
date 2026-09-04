@@ -248,7 +248,7 @@ in-memory backend so the default build stays dependency-free.
 ```toml
 # Cargo.toml
 [dependencies]
-gemini-adk-rs = { version = "0.6", features = ["database-sessions"] }
+gemini-adk-rs = { version = "2.0", features = ["database-sessions"] }
 ```
 
 ```rust,ignore
@@ -276,7 +276,7 @@ Horizontally scalable persistence for production. Requires the
 
 ```toml
 [dependencies]
-gemini-adk-rs = { version = "0.6", features = ["postgres-sessions"] }
+gemini-adk-rs = { version = "2.0", features = ["postgres-sessions"] }
 ```
 
 ```rust,ignore
@@ -306,7 +306,7 @@ the `vertex-ai-sessions` feature:
 
 ```toml
 [dependencies]
-gemini-adk-rs = { version = "0.6", features = ["vertex-ai-sessions"] }
+gemini-adk-rs = { version = "2.0", features = ["vertex-ai-sessions"] }
 ```
 
 ```rust,ignore
