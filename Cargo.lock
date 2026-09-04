@@ -1632,7 +1632,7 @@ dependencies = [
  "futures-util",
  "metrics",
  "metrics-exporter-prometheus",
- "opentelemetry 0.31.0",
+ "opentelemetry 0.32.0",
  "opentelemetry-gcloud-trace",
  "opentelemetry-otlp",
  "opentelemetry_gcloud_monitoring_exporter",
@@ -1648,7 +1648,7 @@ dependencies = [
  "tokio-test",
  "tokio-tungstenite 0.24.0",
  "tracing",
- "tracing-opentelemetry 0.32.1",
+ "tracing-opentelemetry",
  "tracing-subscriber",
  "uuid",
  "wavekat-vad",
@@ -1828,7 +1828,7 @@ dependencies = [
  "tokio",
  "tonic",
  "tracing",
- "tracing-opentelemetry 0.33.0",
+ "tracing-opentelemetry",
 ]
 
 [[package]]
@@ -2971,7 +2971,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5432,30 +5432,16 @@ dependencies = [
 
 [[package]]
 name = "tracing-opentelemetry"
-version = "0.32.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ac28f2d093c6c477eaa76b23525478f38de514fa9aeb1285738d4b97a9552fc"
-dependencies = [
- "js-sys",
- "opentelemetry 0.31.0",
- "smallvec",
- "tracing",
- "tracing-core",
- "tracing-log",
- "tracing-subscriber",
- "web-time",
-]
-
-[[package]]
-name = "tracing-opentelemetry"
 version = "0.33.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "adbc64cba7137545b8044cb1fe9814f7aacf3c6b5f9b45be8bb5db538befdb26"
 dependencies = [
  "js-sys",
  "opentelemetry 0.32.0",
+ "smallvec",
  "tracing",
  "tracing-core",
+ "tracing-log",
  "tracing-subscriber",
  "web-time",
 ]
