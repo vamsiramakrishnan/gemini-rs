@@ -142,10 +142,13 @@ features:
     cargo check --workspace --no-default-features --locked
     cargo check --workspace --all-features --locked
 
+# No `--locked`: `--no-dev-deps` rewrites Cargo.toml while cargo-hack runs, so
+# the resolution changes and the lockfile has to move. The two are exclusive.
+#
 # Every feature on its own. Needs `cargo install cargo-hack`.
 feature-isolation:
     @command -v cargo-hack >/dev/null 2>&1 || { echo "cargo-hack is not installed. Run: cargo install cargo-hack"; exit 1; }
-    cargo hack check --each-feature --no-dev-deps --locked -p gemini-genai-rs -p gemini-adk-rs -p gemini-adk-fluent-rs -p gemini-memory-rs
+    cargo hack check --each-feature --no-dev-deps -p gemini-genai-rs -p gemini-adk-rs -p gemini-adk-fluent-rs -p gemini-memory-rs
 
 # Licences and advisories. Needs `cargo install cargo-deny`.
 deny:

@@ -108,7 +108,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       # `voice-io` (cpal) needs system audio headers to compile.
       - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
-      - run: cargo hack check --each-feature --no-dev-deps --locked -p gemini-genai-rs -p gemini-adk-rs -p gemini-adk-fluent-rs -p gemini-memory-rs
+      # No `--locked` here, unlike every other cargo call in this file:
+      # `--no-dev-deps` edits the real Cargo.toml while cargo-hack runs, which
+      # changes the resolution and so requires a lockfile update — exactly what
+      # `--locked` forbids. The two cannot both be passed.
+      - run: cargo hack check --each-feature --no-dev-deps -p gemini-genai-rs -p gemini-adk-rs -p gemini-adk-fluent-rs -p gemini-memory-rs
 
   # Supply chain: RustSec advisories, license allow-list, source whitelist.
   # Configuration lives in deny.toml.
