@@ -6,6 +6,16 @@ on:
   pull_request:
     branches: [main]
 
+# Every job here only reads the repository: it checks out, builds and tests.
+# None writes a comment, a check run, a release or a package, so the whole
+# workflow drops to the one scope it needs and any future job that wants more
+# has to say so at the job level. Left implicit, GITHUB_TOKEN carries whatever
+# the repository default grants — write, in a default-permissive repo — to
+# eight jobs that compile third-party build scripts and proc-macros from
+# crates.io. (CodeQL `actions/missing-workflow-permissions`, 8 alerts.)
+permissions:
+  contents: read
+
 env:
   # Node 20 is removed from runners 2026-09; fail loud now, not on the flag day.
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"

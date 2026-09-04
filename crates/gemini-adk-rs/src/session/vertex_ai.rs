@@ -61,19 +61,46 @@ impl VertexAiSessionConfig {
         format!(
             "{}/reasoningEngines/{}/sessions",
             self.base_url(),
-            engine_id,
+            percent_encode(engine_id),
         )
     }
 
     /// Construct the URL for a specific session.
+    ///
+    /// `session_id` reaches this from the caller, so it is encoded rather than
+    /// interpolated: an id containing `/` addresses a different resource, and
+    /// one containing `?` or `#` turns the rest of the path into a query or
+    /// fragment. Encoding keeps it one path segment whatever it holds.
     fn session_url(&self, engine_id: &str, session_id: &str) -> String {
-        format!("{}/{}", self.sessions_url(engine_id), session_id)
+        format!(
+            "{}/{}",
+            self.sessions_url(engine_id),
+            percent_encode(session_id)
+        )
     }
 
     /// Construct the events endpoint URL for a specific session.
     fn events_url(&self, engine_id: &str, session_id: &str) -> String {
         format!("{}/events", self.session_url(engine_id, session_id))
     }
+}
+
+/// Percent-encode one URL path segment or query value.
+///
+/// Escapes everything outside RFC 3986's unreserved set, so the result can only
+/// ever be the single component it was meant to be — it cannot introduce a path
+/// separator, open a query string, or append another query parameter.
+fn percent_encode(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                out.push(byte as char);
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -514,7 +541,10 @@ impl SessionService for VertexAiSessionService {
         // List under the configured engine (where sessions are stored), but
         // keep `app_name` as the logical label on the returned sessions.
         let base_url = self.config.sessions_url(&self.engine_id);
-        let url = format!("{base_url}?filter=userId={user_id}");
+        // `user_id` is encoded, not interpolated: a raw `&` would append a
+        // second query parameter to the request and a raw `#` would truncate
+        // the filter, in both cases listing sessions this call did not ask for.
+        let url = format!("{base_url}?filter=userId={}", percent_encode(user_id));
 
         let resp = self
             .get(&url)?
@@ -640,6 +670,43 @@ mod tests {
                 .events_url("engine-1", "sess-1")
                 .contains("sessions/sess-1/events")
         );
+    }
+
+    #[test]
+    fn a_session_id_cannot_walk_out_of_its_collection() {
+        let config = VertexAiSessionConfig::new("my-project", "us-central1");
+
+        // Without encoding this reads as `.../sessions/../../otherEngine`,
+        // which addresses a resource under a different reasoning engine.
+        let url = config.session_url("engine-1", "../../otherEngine");
+        assert!(
+            url.ends_with("/sessions/..%2F..%2FotherEngine"),
+            "traversal was not encoded: {url}"
+        );
+
+        // And this one would end the path and start a query.
+        let url = config.session_url("engine-1", "sess-1?alt=media");
+        assert!(!url.contains('?'), "query separator survived: {url}");
+        assert!(url.ends_with("/sessions/sess-1%3Falt%3Dmedia"), "{url}");
+
+        // Ordinary ids are untouched — the unreserved set passes through.
+        assert!(
+            config
+                .session_url("engine-1", "sess-1_A.b~2")
+                .ends_with("/sessions/sess-1_A.b~2")
+        );
+    }
+
+    #[test]
+    fn a_user_id_cannot_append_its_own_query_parameter() {
+        // `&pageSize=1000` unencoded becomes a second parameter on the request
+        // rather than part of the userId being filtered on.
+        let encoded = percent_encode("alice&pageSize=1000");
+        assert_eq!(encoded, "alice%26pageSize%3D1000");
+        assert!(!encoded.contains('&'));
+
+        // Non-ASCII is escaped per byte, not dropped or passed through raw.
+        assert_eq!(percent_encode("josé"), "jos%C3%A9");
     }
 
     #[test]
