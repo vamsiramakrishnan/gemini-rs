@@ -1,0 +1,20 @@
+{
+  "name": "@gemini-rs/docs",
+  "type": "module",
+  "private": true,
+  "description": "gemini-rs documentation website — Astro + Starlight. Content is synced from the repo's canonical docs/ tree at build time; this app is presentation only.",
+  "scripts": {
+    "sync": "node scripts/sync-content.mjs",
+    "sync:check": "node scripts/sync-content.mjs --dry-run",
+    "check": "node scripts/sync-content.mjs && node scripts/check-content.mjs",
+    "dev": "node scripts/sync-content.mjs && astro dev",
+    "build": "node scripts/sync-content.mjs && node scripts/check-content.mjs && astro build",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "^0.34",
+    "@fontsource/hanken-grotesk": "^5",
+    "@fontsource/jetbrains-mono": "^5",
+    "astro": "^5"
+  }
+}

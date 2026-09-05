@@ -1,0 +1,487 @@
+/* Brand layer over Starlight — the "Modernist Functionalism" system shared
+ * with vamsiramakrishnan/anvil (its apps/docs/src/styles/custom.css is the
+ * canonical copy; this file is that system trimmed to the components this
+ * site uses — no vendor shelf, no custom footer or theme switch).
+ *
+ * Visual language is Braun/Dieter Rams industrial functionalism: hairlines
+ * instead of shadows, flat geometric shapes, lowercase technical labels,
+ * tonal layering instead of elevation. Color means action or status, never
+ * decoration — blue is reserved for what you can touch (links, hover,
+ * focus, the current nav item). "Less, but better."
+ *
+ * Type: Hanken Grotesk for everything readable, JetBrains Mono for code and
+ * machine labels. */
+@import "@fontsource/hanken-grotesk/500.css";
+@import "@fontsource/hanken-grotesk/600.css";
+@import "@fontsource/hanken-grotesk/700.css";
+@import "@fontsource/jetbrains-mono/400.css";
+@import "@fontsource/jetbrains-mono/500.css";
+@import "@fontsource/jetbrains-mono/600.css";
+
+:root {
+  --ge-display-font: "Hanken Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --sl-font: var(--ge-display-font);
+  --sl-font-mono: "JetBrains Mono", "SFMono-Regular", ui-monospace, menlo, consolas, monospace;
+
+  /* Braun radius scale — small and geometric, never a pill except dots. */
+  --ge-radius-sm: 0.125rem;
+  --ge-radius: 0.25rem;
+  --ge-radius-md: 0.375rem;
+  --ge-radius-lg: 0.5rem;
+  --ge-radius-xl: 0.75rem;
+
+  /* One 4px module; every bespoke margin/padding below is a rung of it. */
+  --ge-space-1: 0.25rem;
+  --ge-space-2: 0.5rem;
+  --ge-space-3: 0.75rem;
+  --ge-space-4: 1rem;
+  --ge-space-5: 1.5rem;
+  --ge-space-6: 2rem;
+  --ge-space-7: 3rem;
+
+  /* Industrial micro-label: the register for machine metadata — tiny,
+   * lowercase, wide-tracked. Never for content read as a sentence. */
+  --ge-label-size: 0.6875rem;
+  --ge-label-tracking: 0.05em;
+
+  --ge-rule: 1px solid var(--sl-color-gray-5);
+  --ge-rule-strong: 2px solid var(--sl-color-white);
+  --sl-nav-height: 4rem;
+}
+
+.ge-label {
+  display: inline-block;
+  font-family: var(--ge-display-font);
+  font-size: var(--ge-label-size);
+  font-weight: 500;
+  line-height: 0.875rem;
+  letter-spacing: var(--ge-label-tracking);
+  text-transform: lowercase;
+  color: var(--sl-color-gray-3);
+}
+
+/* ── Dark palette — cool slate, cobalt signal ─────────────────────────── */
+:root {
+  --sl-color-accent-low: #1a2650;
+  --sl-color-accent: #00408b;
+  --sl-color-accent-high: #b9c8ff;
+  --sl-color-text-accent: #8fa4ff;
+  --sl-color-white: #f2f4f8;
+  --sl-color-gray-1: #dde1e8;
+  --sl-color-gray-2: #b8bfca;
+  --sl-color-gray-3: #8a93a3;
+  --sl-color-gray-4: #565e6c;
+  --sl-color-gray-5: #2a303b;
+  --sl-color-gray-6: #1a1e26;
+  --sl-color-black: #12151b;
+
+  --sl-color-blue: #0057b8;
+  --sl-color-blue-low: #1a2650;
+  --sl-color-blue-high: #b9c8ff;
+  --sl-color-green: #2fae6b;
+  --sl-color-green-low: #0e2b1c;
+  --sl-color-green-high: #a4e5c0;
+  --sl-color-orange: #f08a3c;
+  --sl-color-orange-low: #33210f;
+  --sl-color-orange-high: #f8c79b;
+  --sl-color-red: #ef6355;
+  --sl-color-red-low: #351512;
+  --sl-color-red-high: #f7b3ab;
+  --sl-color-yellow: #d9ad2b;
+  --sl-color-yellow-low: #2f2708;
+  --sl-color-yellow-high: #ecd48b;
+  --sl-color-purple: #9d78ec;
+  --sl-color-purple-low: #241640;
+  --sl-color-purple-high: #cfbcf6;
+}
+
+/* ── Light palette ────────────────────────────────────────────────────── */
+:root[data-theme="light"] {
+  --sl-color-accent-low: #e6ebff;
+  --sl-color-accent: #00408b;
+  --sl-color-accent-high: #001a41;
+  --sl-color-text-accent: #00408b;
+  --sl-color-white: #1b1c1c;
+  --sl-color-gray-1: #2a3038;
+  --sl-color-gray-2: #383e47;
+  --sl-color-gray-3: #565e6c;
+  --sl-color-gray-4: #79818e;
+  --sl-color-gray-5: #c2c6d4;
+  --sl-color-gray-6: #f0eded;
+  --sl-color-gray-7: #f6f3f2;
+  --sl-color-black: #fcf9f8;
+
+  --sl-color-blue: #00408b;
+  --sl-color-blue-low: #e6ebff;
+  --sl-color-blue-high: #1d3fc7;
+  --sl-color-green: #16874a;
+  --sl-color-green-low: #e1f3e7;
+  --sl-color-green-high: #0d6d3a;
+  --sl-color-orange: #d9660a;
+  --sl-color-orange-low: #fbeadb;
+  --sl-color-orange-high: #8f4207;
+  --sl-color-red: #dc3626;
+  --sl-color-red-low: #fce8e5;
+  --sl-color-red-high: #9a1f14;
+  --sl-color-yellow: #ca9a08;
+  --sl-color-yellow-low: #faf2d4;
+  --sl-color-yellow-high: #7a5e05;
+  --sl-color-purple: #7c4fe0;
+  --sl-color-purple-low: #f0eafb;
+  --sl-color-purple-high: #5a34a8;
+}
+
+/* ── Type ─────────────────────────────────────────────────────────────── */
+body {
+  background: var(--sl-color-black);
+  font-family: var(--ge-display-font);
+  font-variant-numeric: tabular-nums;
+}
+
+h1, h2, h3, h4, h5, h6, .site-title {
+  font-family: var(--ge-display-font);
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+h1, h2, h3 { text-wrap: balance; }
+.sl-markdown-content p { text-wrap: pretty; }
+
+/* Section joints: h2 sits on a module seam. */
+.sl-markdown-content h2 {
+  padding-bottom: var(--ge-space-2);
+  border-bottom: 1px solid var(--sl-color-gray-6);
+}
+
+/* ── Header: solid surface, never glass; one hairline underneath. ──────── */
+.header {
+  border: 0;
+  border-bottom: var(--ge-rule);
+  border-radius: 0;
+  background: var(--sl-color-black);
+  box-shadow: none;
+}
+header.header { box-shadow: none; }
+.header .right-group, .header .social-icons { gap: var(--ge-space-4); }
+.header .social-icons::after { border-color: var(--sl-color-gray-5); }
+.header .social-icons a { color: var(--sl-color-white); }
+.header .social-icons a:hover { color: var(--sl-color-text-accent); opacity: 1; }
+
+/* ── Header wordmark: a machined monogram plate + the logotype. The plate
+ * is the header's single accent moment — it IS the brand mark, not chrome. */
+.ge-wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ge-space-3);
+  white-space: nowrap;
+  text-decoration: none;
+  color: var(--sl-color-white);
+}
+
+.ge-monogram {
+  display: grid;
+  place-items: center;
+  width: 1.625rem;
+  height: 1.625rem;
+  flex-shrink: 0;
+  font-family: var(--sl-font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: #f2f4f8;
+  background: var(--sl-color-accent);
+  border-radius: var(--ge-radius-sm);
+}
+
+.ge-wordmark-text {
+  font-family: var(--ge-display-font);
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: lowercase;
+  color: var(--sl-color-white);
+  transition: color 120ms ease;
+}
+
+.ge-wordmark:hover .ge-wordmark-text,
+.ge-wordmark:focus-visible .ge-wordmark-text { color: var(--sl-color-text-accent); }
+
+/* ── Search: a rule, not a box; blue only when you are about to type. ──── */
+@media (min-width: 50rem) {
+  button[data-open-modal] {
+    border: none;
+    border-bottom: 1px solid var(--sl-color-gray-5);
+    border-radius: 0;
+    background-color: transparent;
+  }
+  button[data-open-modal]:hover { border-bottom-color: var(--sl-color-white); }
+  :focus-visible > button[data-open-modal],
+  button[data-open-modal]:focus-visible { border-bottom-color: var(--sl-color-accent); }
+}
+button > kbd { border: 1px solid var(--sl-color-gray-5); background-color: transparent; }
+
+/* ── Sidebar: engraved group captions, one lit dot for the current page,
+ * +/− disclosure marks (a switch position, never a spinning chevron). ──── */
+nav.sidebar .top-level > li > details > summary .group-label > span,
+.right-sidebar-panel h2 {
+  font-family: var(--ge-display-font);
+  font-size: var(--ge-label-size);
+  font-weight: 500;
+  line-height: 0.875rem;
+  letter-spacing: var(--ge-label-tracking);
+  text-transform: lowercase;
+  color: var(--sl-color-gray-3);
+}
+
+nav.sidebar a[aria-current="page"],
+nav.sidebar a[aria-current="page"]:hover,
+nav.sidebar a[aria-current="page"]:focus {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background-color: var(--sl-color-gray-6);
+  color: var(--sl-color-white);
+  font-weight: 600;
+}
+
+nav.sidebar a[aria-current="page"]::before {
+  content: "";
+  width: 0.5rem;
+  height: 0.5rem;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: var(--sl-color-accent);
+}
+
+nav.sidebar .caret { display: none; }
+nav.sidebar summary::after {
+  content: "+";
+  font-family: var(--sl-font-mono);
+  font-size: var(--sl-text-sm);
+  color: var(--sl-color-gray-3);
+}
+nav.sidebar details[open] > summary::after { content: "\2212"; }
+
+.sidebar-pane, .right-sidebar-container { border-color: var(--sl-color-gray-5); box-shadow: none; }
+
+.right-sidebar-panel a[aria-current="true"],
+.right-sidebar-panel a[aria-current="location"] {
+  border-inline-start: 2px solid var(--sl-color-accent);
+  color: var(--sl-color-text-accent);
+  font-weight: 600;
+}
+
+:focus-visible { outline: 2px solid var(--sl-color-accent); outline-offset: 2px; }
+
+/* ── Content rails: linework instead of floating cards. ───────────────── */
+main > .content-panel, .content-panel + .content-panel { border-top: var(--ge-rule-strong); }
+
+/* ── Buttons: one primary action per view, everything else hairline or
+ * text; states shift tone only — no shadow, no movement. ─────────────── */
+.sl-link-button {
+  border-radius: var(--ge-radius);
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+.sl-link-button.primary:hover { background: var(--sl-color-accent-high); border-color: var(--sl-color-accent-high); }
+.sl-link-button.secondary { border-color: var(--sl-color-white); background: transparent; }
+.sl-link-button.secondary:hover { background: var(--sl-color-gray-6); }
+
+/* ── Asides: full hairline + tint, not a thick side stripe. ───────────── */
+.starlight-aside {
+  border: 1px solid color-mix(in srgb, var(--sl-color-asides-border) 55%, transparent);
+  border-radius: var(--ge-radius-md);
+}
+
+/* ── Code: the terminal window. One dark theme in both site themes. ───── */
+.expressive-code .frame { box-shadow: none; }
+.expressive-code .frame.is-terminal .header {
+  font-family: var(--sl-font-mono);
+  font-size: var(--ge-label-size);
+  font-weight: 600;
+  letter-spacing: var(--ge-label-tracking);
+  text-transform: uppercase;
+}
+.sl-markdown-content code:not(pre code) {
+  border: 1px solid var(--sl-color-gray-5);
+  background: var(--sl-color-gray-6);
+  border-radius: var(--ge-radius-sm);
+}
+
+/* Horizontal rules are measuring scales, not blank lines. */
+.sl-markdown-content hr {
+  height: 7px;
+  border: 0;
+  border-bottom: 1px solid var(--sl-color-gray-5);
+  background-image:
+    repeating-linear-gradient(90deg, currentColor 0 1px, transparent 1px 8px),
+    repeating-linear-gradient(90deg, currentColor 0 1px, transparent 1px 48px);
+  background-size: 100% 4px, 100% 100%;
+  background-position: left bottom, left bottom;
+  background-repeat: repeat-x;
+  color: color-mix(in srgb, var(--sl-color-white) 35%, transparent);
+}
+
+/* ── Tables: this site leans on wide reference tables. Horizontal
+ * hairlines only; a row you're reading earns a 2px lit edge, not a wash. ─ */
+.sl-markdown-content table {
+  display: table;
+  width: 100%;
+  border: var(--ge-rule);
+  border-collapse: collapse;
+  border-radius: var(--ge-radius-md);
+  overflow: hidden;
+}
+.sl-markdown-content thead th {
+  background-color: var(--sl-color-gray-6);
+  font-family: var(--ge-display-font);
+  font-size: var(--ge-label-size);
+  font-weight: 500;
+  letter-spacing: var(--ge-label-tracking);
+  text-transform: lowercase;
+  color: var(--sl-color-gray-3);
+  text-align: left;
+}
+.sl-markdown-content th, .sl-markdown-content td {
+  border-inline: 0;
+  border-block: 1px solid var(--sl-color-gray-5);
+  padding: var(--ge-space-3) var(--ge-space-4);
+  vertical-align: middle;
+}
+.sl-markdown-content td { font-variant-numeric: tabular-nums; }
+.sl-markdown-content tbody tr:focus-within,
+.sl-markdown-content tbody tr:hover { box-shadow: inset 2px 0 0 var(--sl-color-accent); }
+
+/* ── Cards: hairline that deepens on hover, never a shadow; one neutral
+ * treatment instead of Starlight's per-position colour rotation. ──────── */
+.card {
+  border-radius: var(--ge-radius-md);
+  transition: border-color 120ms ease, background-color 120ms ease;
+  --sl-card-border: var(--sl-color-gray-5);
+  --sl-card-bg: var(--sl-color-gray-6);
+}
+.card:hover {
+  border-color: var(--sl-color-accent);
+  background-color: color-mix(in srgb, var(--sl-color-accent-low) 40%, transparent);
+}
+.sl-link-card, .pagination-links a, .sl-banner { box-shadow: none; }
+
+/* ── Pagination: a measured footer module. ────────────────────────────── */
+.pagination-links { padding: var(--ge-space-5); border: var(--ge-rule); border-radius: var(--ge-radius-md); }
+.pagination-links a { min-height: 6rem; border-radius: var(--ge-radius); background: transparent; }
+.pagination-links a:hover { border-color: var(--sl-color-white); }
+.pagination-links a svg { display: none; }
+.pagination-links a::before, .pagination-links a::after { font-family: var(--sl-font-mono); color: var(--sl-color-gray-3); }
+.pagination-links a[rel="prev"]::before { content: "← previous"; }
+.pagination-links a[rel="next"]::before { content: "next →"; }
+.pagination-links a[rel="next"] { text-align: end; }
+.pagination-links a[rel="next"]::before { order: -1; }
+
+/* ── Tabs: state is a rule and a weight, not a colour. ───────────────── */
+[role="tablist"] { border-bottom: 1px solid var(--sl-color-gray-5); }
+.tab { margin-bottom: -1px; }
+.tab > [role="tab"] {
+  padding-block: var(--ge-space-2);
+  border-bottom: 2px solid transparent;
+  color: var(--sl-color-gray-3);
+  font-weight: 400;
+}
+.tab [role="tab"][aria-selected="true"] {
+  border-bottom-color: var(--sl-color-white);
+  color: var(--sl-color-white);
+  font-weight: 600;
+}
+
+/* ── Steps: the live-step badge is the one earned solid fill. ─────────── */
+.sl-steps > li::before {
+  color: var(--sl-color-black);
+  background-color: var(--sl-color-accent);
+  border-radius: var(--ge-radius-sm);
+  box-shadow: none;
+}
+
+/* Diagram SVGs are authored on white; frame them so they hold up in dark. */
+.sl-markdown-content img[src$=".svg"] {
+  background: #ffffff;
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: var(--ge-radius-md);
+  padding: 0.75rem;
+}
+
+/* ── Landing hero: instrument-panel wash + a tuning-dial tick strip. ───── */
+.hero { position: relative; overflow: hidden; border-bottom: 1px solid var(--sl-color-gray-5); }
+.hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  height: 28rem;
+  pointer-events: none;
+  background-image: radial-gradient(color-mix(in srgb, var(--sl-color-gray-5) 90%, transparent) 1px, transparent 1px);
+  background-size: 20px 20px;
+  -webkit-mask-image: linear-gradient(to bottom, black, transparent);
+  mask-image: linear-gradient(to bottom, black, transparent);
+  z-index: -1;
+}
+.hero::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  height: 8px;
+  pointer-events: none;
+  background-image:
+    repeating-linear-gradient(90deg, currentColor 0 1px, transparent 1px 8px),
+    repeating-linear-gradient(90deg, currentColor 0 1px, transparent 1px 48px);
+  background-size: 100% 4px, 100% 100%;
+  background-position: left bottom, left bottom;
+  background-repeat: repeat-x;
+  color: color-mix(in srgb, var(--sl-color-white) 38%, transparent);
+}
+/* Starlight's splash hero is a left-aligned column; keep title, tagline and
+ * actions on the same left edge rather than centring only the title. */
+.hero h1 { font-size: clamp(3rem, 9vw, 5.5rem); line-height: 0.95; letter-spacing: -0.02em; }
+.hero .tagline { max-width: 58rem; color: var(--sl-color-gray-2); font-size: clamp(1.05rem, 2vw, 1.35rem); }
+.hero .actions { max-width: 48rem; }
+
+/* One deliberate entrance on the landing hero; nothing loops. */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes ge-rise { from { opacity: 0; transform: translateY(0.75rem); } to { opacity: 1; transform: none; } }
+  .hero h1, .hero .tagline, .hero .actions { animation: ge-rise 620ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+  .hero .tagline { animation-delay: 90ms; }
+  .hero .actions { animation-delay: 180ms; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ge-wordmark-text, .sl-link-button, .card { transition: none; }
+}
+
+/* The version eyebrow under the hero and the stat row: machine labels. */
+.hero-eyebrow { text-align: center; margin-top: calc(-1 * var(--ge-space-4)); }
+.ge-stat-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: var(--ge-space-4);
+  align-items: stretch;
+  margin: var(--ge-space-6) 0;
+}
+.ge-stat {
+  padding: var(--ge-space-4);
+  border: var(--ge-rule);
+  border-radius: var(--ge-radius-md);
+  background: var(--sl-color-gray-6);
+}
+/* Starlight gives the first child of the markdown content a top margin of
+ * zero and every later sibling one; four cards in one row must not inherit
+ * that difference. */
+.ge-stat-row > .ge-stat, .ge-stat > * { margin-top: 0 !important; }
+.ge-stat b { display: block; font-family: var(--ge-display-font); font-size: 1.75rem; font-weight: 700; color: var(--sl-color-white); }
+.ge-stat span { font-family: var(--sl-font-mono); font-size: var(--sl-text-xs); text-transform: lowercase; color: var(--sl-color-gray-3); }
+
+/* ── Mobile: menu button must never sit over the search control; wide
+ * tables scroll inside their own box. ──────────────────────────────────── */
+@media (max-width: 50rem) {
+  :root { --sl-menu-button-size: 2.75rem; }
+  header.header { border-inline: 0; border-radius: 0; padding-inline-end: calc(var(--sl-menu-button-size) + var(--sl-nav-pad-x)); }
+  header.header > .header { padding-inline-end: var(--ge-space-3); }
+  site-search button[data-open-modal] { justify-content: center; min-width: 2.75rem; min-height: 2.75rem; }
+  .hero h1 { font-size: 3rem; line-height: 1; }
+  .sl-markdown-content table { display: block; width: 100%; overflow-x: auto; }
+  .sl-markdown-content table > thead, .sl-markdown-content table > tbody { display: table; width: 38rem; table-layout: fixed; }
+}

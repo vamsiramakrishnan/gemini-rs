@@ -1,14 +1,22 @@
 name: Documentation
 
+# Builds apps/docs (Astro + Starlight, content synced from docs/) plus the
+# rustdoc API reference, and deploys the two together to GitHub Pages. Pull
+# requests run the exact production build but never upload or deploy.
+#
+# Not path-filtered on purpose: the rustdoc half depends on every crate, so a
+# code-only push still has to rebuild and redeploy the site.
 on:
   pull_request:
     branches: [main]
   push:
     branches: [main]
+  workflow_dispatch:
 
 env:
   # Node 20 is removed from runners 2026-09; fail loud now, not on the flag day.
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  ASTRO_TELEMETRY_DISABLED: "1"
 
 permissions:
   contents: read
@@ -23,78 +31,69 @@ jobs:
   build:
     name: Build documentation
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: "1.93.1"
-      - uses: Swatinem/rust-cache@v2
-
-      # ── mdBook + plugins ────────────────────────────────────────────────────
-      # Installed from the release tarball directly: no Node action involved
-      # (peaceiris/actions-mdbook is Node 20-only) and faster than the action.
-      - name: Install mdBook
-        run: |
-          MDBOOK_VERSION="v0.4.40"
-          curl -sfL "https://github.com/rust-lang/mdBook/releases/download/${MDBOOK_VERSION}/mdbook-${MDBOOK_VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
-            | tar -xz -C /usr/local/bin
-          mdbook --version
-
-      - name: Install mdBook plugins
-        run: |
-          cargo install mdbook-pagetoc --locked --version "^0.2"
-
-      # ── Build ───────────────────────────────────────────────────────────────
-      - name: Build mdBook user guide
-        run: mdbook build docs
-
-      # ── Link check (internal/relative links only — no flaky network calls) ──
-      # The api/gemini_* links resolve only in the deployed site (rustdoc is
-      # merged into target/book/api at deploy time below), so exclude them
-      # from the source-tree offline check. Any workspace crate, not a fixed
-      # three: listing them by name went red the day two more were linked.
+      # ── Link check on the SOURCE markdown (offline, no network calls) ───────
+      # The api/gemini_*_rs/ links resolve only in the deployed site (rustdoc
+      # is merged into dist/api below), so exclude them here; the rendered
+      # tree gets its own check inside `npm run build` (check-content.mjs).
       - name: Check Markdown links
         uses: lycheeverse/lychee-action@v2
         with:
           args: >-
             --offline --no-progress
             --exclude 'api/gemini_[a-z_]+_rs/'
-            docs/src README.md
+            docs/src docs/user-guide README.md
           fail: true
 
-      # `--all-features` on both doc builds below: the deployed reference is the
-      # one place a feature-gated module (`vad`, `otel`, `vertex-ai-sessions`,
-      # `dsp`, `sip`, …) is documented in full, since docs.rs cannot build the
+      # ── The website ─────────────────────────────────────────────────────────
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/docs/package-lock.json
+      - name: Install site dependencies
+        run: npm ci
+        working-directory: apps/docs
+      # sync docs/ → content tree, validate every internal link, astro build.
+      - name: Build site
+        run: npm run build
+        working-directory: apps/docs
+
+      # ── The rustdoc API reference ───────────────────────────────────────────
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.93.1"
+      - uses: Swatinem/rust-cache@v2
+      # `--all-features`: the deployed reference is the one place a
+      # feature-gated module (`vad`, `otel`, `vertex-ai-sessions`, `dsp`,
+      # `sip`, …) is documented in full, since docs.rs cannot build the
       # `voice-io` feature at all. ALSA is what `voice-io` needs.
       - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
-      - name: Check rustdoc (no warnings)
+      - name: Build rustdoc (no warnings)
         env:
           RUSTDOCFLAGS: "-D warnings"
         run: cargo doc --no-deps --workspace --all-features --locked
 
-      # ── Upload artifact (main branch only) ──────────────────────────────────
-      - name: Build rustdoc API reference
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: cargo doc --no-deps --workspace --all-features --locked
-
-      - name: Merge rustdoc into mdBook output
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - name: Merge rustdoc into the site
         run: |
-          cp -r target/doc target/book/api
-          printf '<meta http-equiv="refresh" content="0; url=api/gemini_genai_rs/index.html">' \
-            > target/book/api/index.html
+          cp -r target/doc apps/docs/dist/api
+          printf '<meta http-equiv="refresh" content="0; url=gemini_adk_fluent_rs/index.html">' \
+            > apps/docs/dist/api/index.html
 
       - uses: actions/upload-pages-artifact@v5
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         with:
-          path: target/book
+          path: apps/docs/dist
 
   deploy:
     name: Deploy to GitHub Pages
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

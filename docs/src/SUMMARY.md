@@ -1,8 +1,7 @@
 # Summary
 
-[Introduction](./introduction.md)
-
----
+<!-- The landing page is curated in apps/docs/src/content/docs/index.mdx.
+     Every heading below is a sidebar group; every entry is a page, in this order. -->
 
 # Getting Started
 

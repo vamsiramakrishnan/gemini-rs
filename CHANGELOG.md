@@ -22,6 +22,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The documentation website is now Astro + Starlight** (`apps/docs`),
+  replacing mdBook. Content is not authored in the app: every page is synced
+  from `docs/` at build time, `docs/src/SUMMARY.md` remains the single source
+  of structure (its headings are the sidebar groups), and the rustdoc API
+  reference is merged into `/api` on deploy as before. The theme is the
+  Modernist Functionalism system shared with `anvil`. Every mdBook-era
+  `.html` URL redirects to the page's new route, so nothing that linked to
+  the book breaks. `just docs-site` serves it locally (Node 22).
 - **docs.rs now documents every feature it can build.** No crate had
   `[package.metadata.docs.rs]`, so docs.rs showed default features only — no
   `vad`, `otel`, `vertex-ai-sessions`, `dsp`, `denoise`, `sip`, and no badge to

@@ -1,7 +1,7 @@
 # Glossary
 
 Core vocabulary across the three layers. Types link to where they live; see the
-[API reference](../api-reference.md) for full signatures.
+[API reference](../src/api-reference.md) for full signatures.
 
 ## Layers
 

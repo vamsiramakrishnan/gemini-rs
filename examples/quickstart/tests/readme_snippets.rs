@@ -128,12 +128,12 @@ fn the_version_readers_see_first_is_the_one_that_shipped() {
         "README says {eyebrow:?} but the workspace ships {shipped}"
     );
 
-    let hero =
-        std::fs::read_to_string(root.join("docs/src/introduction.md")).expect("book landing page");
+    let hero = std::fs::read_to_string(root.join("apps/docs/src/content/docs/index.mdx"))
+        .expect("site landing page");
     let hero_line = hero
         .lines()
         .find(|l| l.contains("hero-eyebrow"))
-        .expect("book landing has a hero-eyebrow");
+        .expect("site landing has a hero-eyebrow");
     assert!(
         hero_line.contains(&format!(">v{major_minor} ·")),
         "book hero says {:?} but the workspace ships {shipped}",
