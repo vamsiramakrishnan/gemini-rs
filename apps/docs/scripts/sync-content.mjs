@@ -152,7 +152,19 @@ function rewriteLinks(markdown, { src, routeMap }) {
     const suffix = cut === undefined ? "" : target.slice(cut);
     const fromSrc = posix.normalize(posix.join(pageDir, pathPart)); // relative to docs/src
 
-    if (routeMap.has(fromSrc)) return `${routeMap.get(fromSrc)}${suffix}${title}`;
+    // A page may address a sibling through either view: the docs/src symlink
+    // tree SUMMARY.md uses (`./user-guide/x.md`, `../x.md`) or the real
+    // on-disk layout GitHub renders (`../src/x.md` from docs/user-guide/).
+    // Both must reach the same route, so a link stays valid on GitHub and here.
+    const fromReal = posix.normalize(posix.join(posix.dirname(realSource(src)), pathPart)); // repo-relative
+    const realKey = fromReal.startsWith("docs/src/")
+      ? fromReal.slice("docs/src/".length)
+      : fromReal.startsWith("docs/user-guide/")
+        ? `user-guide/${fromReal.slice("docs/user-guide/".length)}`
+        : null;
+    for (const key of [fromSrc, realKey]) {
+      if (key && routeMap.has(key)) return `${routeMap.get(key)}${suffix}${title}`;
+    }
     if (fromSrc === "introduction.md") return `${SITE_BASE}/${suffix}${title}`;
     if (fromSrc.startsWith("api/")) return `${SITE_BASE}/${fromSrc}${suffix}${title}`;
     if (fromSrc.startsWith("assets/")) return `${SITE_BASE}/${fromSrc}${suffix}${title}`;
