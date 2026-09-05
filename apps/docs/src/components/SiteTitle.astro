@@ -1,0 +1,12 @@
+---
+// Header wordmark — an accent monogram plate + the "gemini-rs" logotype, the
+// .ge-wordmark lockup from custom.css. The monogram rides JetBrains Mono (the
+// machine-label register); the logotype is the Hanken display face — two
+// families in one lockup, no third typeface.
+const { siteTitle, siteTitleHref } = Astro.locals.starlightRoute;
+---
+
+<a href={siteTitleHref} class="site-title ge-wordmark" translate="no" aria-label={siteTitle}>
+  <span class="ge-monogram" aria-hidden="true">rs</span>
+  <span class="ge-wordmark-text">gemini-rs</span>
+</a>

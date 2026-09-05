@@ -81,6 +81,21 @@ docs:
 doc-check:
     RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace --all-features --locked
 
+# The website is apps/docs (Astro + Starlight); its pages are synced from
+# docs/ on every run, so edit docs/, not the app. Needs Node 22 + npm.
+#
+# Serve the documentation website locally (syncs docs/ first)
+docs-site:
+    @command -v npm >/dev/null 2>&1 || { echo "npm is not installed (Node 22+)"; exit 1; }
+    cd apps/docs && [ -d node_modules ] || npm install --no-audit --no-fund
+    cd apps/docs && npm run dev
+
+# Build the documentation website exactly as CI does (sync + link check + astro build)
+docs-site-build:
+    @command -v npm >/dev/null 2>&1 || { echo "npm is not installed (Node 22+)"; exit 1; }
+    cd apps/docs && [ -d node_modules ] || npm install --no-audit --no-fund
+    cd apps/docs && npm run build
+
 # ─── Build ───────────────────────────────────────────────────
 
 # Build all crates

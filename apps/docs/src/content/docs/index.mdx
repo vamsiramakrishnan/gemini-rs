@@ -1,0 +1,136 @@
+---
+title: gemini-rs
+description: Full Rust SDK for the Gemini Multimodal Live API — one wire protocol, one governed runtime, one fluent API, in three layered crates.
+template: splash
+hero:
+  tagline: >-
+    The model improvises. The conversation must not. Declare a voice conversation
+    as a contract — steps, completion guards, tool gates, ordering — and the
+    runtime enforces it while the model speaks. Full-duplex Gemini Live agents in
+    Rust, in three layered crates.
+  actions:
+    - text: Get started
+      link: /gemini-rs/start/setup-and-running/
+      icon: right-arrow
+    - text: Browse the cookbook
+      link: /gemini-rs/examples/cookbooks/
+      variant: minimal
+    - text: Open the Flow Studio tour
+      link: /gemini-rs/compose/flow-studio/
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+<p class="hero-eyebrow"><span class="ge-label">v2.0 · Rust SDK</span></p>
+
+<div class="ge-stat-row">
+  <div class="ge-stat"><b>3</b><span>layered crates</span></div>
+  <div class="ge-stat"><b>30</b><span>cookbook recipes</span></div>
+  <div class="ge-stat"><b>2,800+</b><span>tests, no API key</span></div>
+  <div class="ge-stat"><b>6</b><span>Studio cookbooks</span></div>
+</div>
+
+## A conversation as a contract
+
+A live voice model will happily book the table before checking availability —
+not because the prompt was wrong, but because a prompt is advice, and advice is
+not enforcement. gemini-rs treats the conversation as a contract: you declare
+the flow — steps, completion guards, tool gates, ordering constraints — and the
+runtime enforces it while the model speaks. A tool the flow has not admitted
+does not execute, whatever the model intends.
+
+The same contract is a JSON document that validates, simulates, tests, and
+code-generates offline, and a canvas you can edit by hand. Drop to
+`gemini-genai-rs` for byte-level control of the Multimodal Live protocol, or
+reach for `gemini-adk-fluent-rs` and have a governed voice agent talking in five
+lines — the same `State` spine underpins every layer, so you never hit a ceiling.
+
+<p align="center"><img src="/gemini-rs/assets/diagrams/architecture-stack.svg" alt="Three-crate layered architecture: L2 fluent DX over L1 runtime over L0 wire protocol" width="720" /></p>
+
+| Crate | Layer | Use it when… |
+|-------|-------|--------------|
+| `gemini-adk-fluent-rs` | **L2 — Fluent DX** | You're building an application: `Live::builder()`, `AgentBuilder`, the S·C·T·P·M·A algebra, `SessionSpec`, voice I/O, telephony. **Start here.** |
+| `gemini-adk-rs` | **L1 — Agent runtime** | You need the runtime directly: `State`, phases, tool dispatch, `Flow`, extraction, watchers, combinators, telemetry. |
+| `gemini-genai-rs` | **L0 — Wire protocol** | You need raw WebSocket access, custom transports, or the feature-gated REST APIs. |
+
+Plus `gemini-memory-rs`, a [contextual memory engine](/gemini-rs/memory/memory/)
+for Live sessions, independent of the stack.
+
+## Five lines to a voice agent
+
+```rust
+use gemini_adk_fluent_rs::prelude::*;
+
+Live::builder()
+    .instruction("You are a helpful concierge.")
+    .greeting("Greet the caller.")
+    .connect_from_env().await?     // Google AI or Vertex — resolved from env
+    .talk().await?;                // microphone in, speakers out, barge-in handled
+```
+
+Or with explicit callbacks:
+
+```rust
+use gemini_adk_fluent_rs::prelude::*;
+
+let handle = Live::builder()
+    .voice(Voice::Kore)
+    .instruction("You are a helpful voice assistant.")
+    .on_audio(|pcm| { /* play audio */ })
+    .on_text(|text| print!("{text}"))
+    .connect_from_env()
+    .await?;
+
+handle.send_text("What's the weather like?").await?;
+handle.disconnect().await?;
+```
+
+New here? Start with [Setup and Running](/gemini-rs/start/setup-and-running/)
+and [Authentication & Connecting](/gemini-rs/start/auth-and-connecting/), then
+browse the [cookbook](/gemini-rs/examples/cookbooks/) (Crawl → Walk → Run → Governed).
+
+## Sessions as data — and the Flow Studio
+
+A whole governed session — flow DAG, tools, extraction, phases, watchers,
+computed state, memory, runtime tuning, and an embedded test suite — can be one
+JSON document (`SessionSpec`). It validates, simulates, and code-generates
+offline, and the [Flow Studio](/gemini-rs/compose/flow-studio/) is a
+drag-and-drop editor over exactly that document:
+
+<p align="center"><img src="/gemini-rs/assets/studio/flow-studio.gif" alt="Flow Studio click-through: load a cookbook, drag nodes, validate, run embedded tests, scrub a simulated session, read the generated Rust" width="860" /></p>
+
+See [Flows as JSON](/gemini-rs/compose/flow-json/) for the format and
+[the Studio tour](/gemini-rs/compose/flow-studio/) for the editor.
+
+## Find your way around
+
+<CardGrid>
+  <Card title="Getting started" icon="rocket">
+    [Setup](/gemini-rs/start/setup-and-running/), [authentication](/gemini-rs/start/auth-and-connecting/),
+    the [three-layer architecture](/gemini-rs/start/architecture/) and its
+    [contract](/gemini-rs/start/layers/), [migrating](/gemini-rs/start/migration/) from raw WebSockets.
+  </Card>
+  <Card title="Voice & Live sessions" icon="phone">
+    [Live sessions](/gemini-rs/live/live-sessions/) and [callbacks](/gemini-rs/live/live-callbacks/),
+    [voice I/O](/gemini-rs/live/voice/), [telephony](/gemini-rs/live/telephony/),
+    [phases](/gemini-rs/live/phases/), [state](/gemini-rs/live/state/), [persistence](/gemini-rs/live/session-persistence/).
+  </Card>
+  <Card title="Tools & extraction" icon="setting">
+    The [tool system](/gemini-rs/tools/tools/), [per-tool policies](/gemini-rs/tools/tool-policies/),
+    [MCP interop](/gemini-rs/tools/mcp-tools/), and the [extraction pipeline](/gemini-rs/tools/extraction/).
+  </Card>
+  <Card title="Composition & patterns" icon="puzzle">
+    [Governed flows](/gemini-rs/compose/flow/), [flows as JSON](/gemini-rs/compose/flow-json/),
+    [orchestration](/gemini-rs/compose/orchestration/), [text-agent combinators](/gemini-rs/compose/text-agents/),
+    the [S·C·T·P·M·A algebra](/gemini-rs/compose/composition/).
+  </Card>
+  <Card title="Memory" icon="document">
+    The [durable memory engine](/gemini-rs/memory/memory/) — async-prepare,
+    sync-consume — and its declarative binding into governed state.
+  </Card>
+  <Card title="Reference" icon="open-book">
+    The [API reference](/gemini-rs/reference/api-reference/) (every feature, every crate),
+    the [glossary](/gemini-rs/reference/glossary/), and [troubleshooting](/gemini-rs/reference/troubleshooting/).
+  </Card>
+</CardGrid>
