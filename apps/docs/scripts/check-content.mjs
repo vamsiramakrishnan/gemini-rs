@@ -34,13 +34,16 @@ const routes = new Set(
   }),
 );
 
+/** Every regex metacharacter, backslash included — SITE_BASE is config, not a pattern. */
+const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+
 const problems = [];
 for (const page of pages) {
   const text = readFileSync(page, "utf8");
   const rel = relative(APP, page);
   if (!/^---\n[\s\S]*?^title:\s*\S/m.test(text)) problems.push(`${rel}: no frontmatter title`);
 
-  const linkRe = new RegExp(`(?:\\]\\(|src="|href=")(${SITE_BASE.replace(/[/]/g, "\\/")}\\/[^)"#?\\s]*)`, "g");
+  const linkRe = new RegExp(`(?:\\]\\(|src="|href=")(${escapeRegExp(SITE_BASE)}\\/[^)"#?\\s]*)`, "g");
   for (const m of text.matchAll(linkRe)) {
     const target = m[1];
     if (target.startsWith(`${SITE_BASE}/api/`)) continue; // merged in by the workflow
