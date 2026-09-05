@@ -21,6 +21,8 @@
           <div class="fs-menu-items" id="fs-examples-menu"></div>
         </div>
         <button class="fs-btn" id="fs-new-btn" title="Start a blank flow">New</button>
+        <button class="fs-btn" id="fs-open-btn" title="Open a flow JSON file (⌘O / Ctrl+O) — or drop one on the canvas">Open</button>
+        <input type="file" id="fs-open-input" accept=".json,application/json" hidden>
         <button class="fs-btn" id="fs-add-step-btn" title="Add a step node">Add step</button>
         <button class="fs-btn" id="fs-layout-btn" title="Auto-arrange the DAG">Auto layout</button>
         <button class="fs-btn" id="fs-validate-btn" title="Compile the flow server-side">Validate</button>
@@ -41,6 +43,13 @@
           <p>Add a step, then drag from its right port onto another node to declare an
              <code>after</code> dependency. Click a node to edit its posture, tools, and
              completion guard.</p>
+          <p class="fs-canvas-keys">
+            <kbd>Del</kbd> remove step ·
+            <kbd>Esc</kbd> deselect / leave preview ·
+            <kbd>⌘</kbd><kbd>↵</kbd> validate ·
+            <kbd>⌘</kbd><kbd>S</kbd> download JSON ·
+            <kbd>⌘</kbd><kbd>O</kbd> open — or drop a <code>.json</code> here
+          </p>
           <p>The exported JSON is exactly what <code>Live::builder().govern(flow)</code> loads.
              Or start from an example in the toolbar.</p>
         </div>

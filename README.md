@@ -5,6 +5,7 @@
 [![CI](https://github.com/vamsiramakrishnan/gemini-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/vamsiramakrishnan/gemini-rs/actions/workflows/ci.yml)
 [![Docs](https://github.com/vamsiramakrishnan/gemini-rs/actions/workflows/docs.yml/badge.svg)](https://github.com/vamsiramakrishnan/gemini-rs/actions/workflows/docs.yml)
 [![crates.io](https://img.shields.io/crates/v/gemini-adk-fluent-rs.svg)](https://crates.io/crates/gemini-adk-fluent-rs)
+[![docs.rs](https://img.shields.io/docsrs/gemini-adk-fluent-rs)](https://docs.rs/gemini-adk-fluent-rs)
 [![Rust](https://img.shields.io/badge/rust-1.93%2B-orange.svg)](rust-toolchain.toml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 

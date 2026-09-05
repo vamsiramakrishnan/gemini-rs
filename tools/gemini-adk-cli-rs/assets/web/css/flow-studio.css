@@ -778,3 +778,25 @@ html, body {
 #fs-diagnostics-list li.err::before { background: var(--error); }
 #fs-diagnostics-list li.warn::before { background: var(--warning); }
 #fs-diagnostics-list li.ok::before { background: var(--success); }
+
+/* ── Open / keyboard affordances ──────────────────────────────── */
+#fs-canvas-wrap.fs-drop {
+  outline: 2px dashed var(--brand);
+  outline-offset: -6px;
+}
+.fs-canvas-keys {
+  margin-top: 0.75rem;
+  font-size: 0.8em;
+  opacity: 0.75;
+}
+.fs-canvas-keys kbd {
+  display: inline-block;
+  min-width: 1.4em;
+  padding: 0 0.35em;
+  text-align: center;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  font: inherit;
+  line-height: 1.5;
+}
+.fs-canvas-keys kbd + kbd { margin-left: 2px; }

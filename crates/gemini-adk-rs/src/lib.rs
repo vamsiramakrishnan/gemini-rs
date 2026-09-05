@@ -1,11 +1,66 @@
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![warn(unreachable_pub)]
 #![cfg_attr(not(test), forbid(unsafe_code))]
 #![cfg_attr(test, deny(unsafe_code))]
 #![warn(missing_docs)]
 //! # gemini-adk-rs
 //!
-//! Full Rust equivalent of Google's `@google/adk` framework.
-//! Agents, tools, sessions, events, middleware, and runtime.
+//! The agent **runtime** for Gemini Live — layer 1 of a three-crate stack.
+//! Below it, [`gemini_genai_rs`] speaks the wire protocol. Above it,
+//! [`gemini-adk-fluent-rs`](https://docs.rs/gemini-adk-fluent-rs) wraps this
+//! crate in the builder API most applications should start from. Come here
+//! when you are building a custom processor, a tool backend, a persistence
+//! layer, or an evaluation harness — or when you want to see what the fluent
+//! builder actually assembles.
+//!
+//! ## What lives here
+//!
+//! | Concern | Start at |
+//! |---------|----------|
+//! | A Live session and its three-lane processor | [`live::LiveSessionBuilder`], [`live::LiveHandle`] |
+//! | Tools the model can call | [`tool::ToolFunction`], [`tool::SimpleTool`], [`tool::TypedTool`], [`tool::ToolDispatcher`] |
+//! | Concurrent typed state with prefix scopes | [`state::State`], [`state::StateKey`] |
+//! | Text agents and combinators | [`text::LlmTextAgent`] and the `*TextAgent` family in [`text`] |
+//! | Declarative conversation phases | [`live::PhaseMachine`], [`live::Phase`] |
+//! | Governed flows enforced while the model speaks | [`flow::Flow`], [`flow::FlowMonitor`] |
+//! | Turn extraction, watchers, temporal patterns | [`live::TurnExtractor`], [`live::watcher`], [`live::temporal`] |
+//! | Session persistence and telemetry | [`live::persistence`], [`live::SessionTelemetry`] |
+//!
+//! Anything behind a Cargo feature is marked on its page — `vertex-ai-sessions`,
+//! `database-sessions`, `templates`, `otel`, and the rest — and the full list is
+//! in this crate's `Cargo.toml`.
+//!
+//! ## The shape of the runtime
+//!
+//! Every Live session runs one **router** and two lanes. The *fast lane* is
+//! synchronous and handles audio, text deltas and transcripts in under a
+//! millisecond per event; the *control lane* is async and runs tool calls,
+//! phase transitions, extractors and watchers. A third, independent
+//! *telemetry lane* observes both. The callback you register decides which
+//! lane it runs on, and the rule is written once at the top of
+//! [`live::callbacks`].
+//!
+//! ## A first taste
+//!
+//! [`state::State`] is the piece every layer shares — tools write it,
+//! guards read it, extractors fill it — so it is the smallest thing worth
+//! showing on its own:
+//!
+//! ```
+//! use gemini_adk_rs::state::{State, StateKey};
+//!
+//! const TURNS: StateKey<u32> = StateKey::new("session:turn_count");
+//!
+//! let state = State::new();
+//! state.set("user:name", "Alice");
+//! state.modify("session:turn_count", 0u32, |n| n + 1);
+//!
+//! assert_eq!(state.get::<String>("user:name").as_deref(), Some("Alice"));
+//! assert_eq!(state.get_key(&TURNS), Some(1));
+//! ```
+//!
+//! For a running session, see the `examples/` directory of the repository or
+//! the `Live::builder()` walkthrough in the fluent crate's documentation.
 
 // The proc macros expand to `::gemini_adk_rs::…`; this makes that path valid
 // inside the crate itself (its own tests and doctests included).

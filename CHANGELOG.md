@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`--all-features` did not compile** after a lone `opentelemetry_sdk` 0.31 →
+  0.32 bump split the OpenTelemetry family across two versions; the sdk is back
+  on 0.31 with its exporters, the manifest says why they move together, and
+  Dependabot now groups them so a partial bump cannot recur.
+- `session/vertex_ai.rs` interpolated caller-supplied `session_id` and `user_id`
+  into request URLs unencoded — a session id of `../../otherEngine` addressed
+  a different reasoning engine, and a `&` in a user id appended a second query
+  parameter. Both are percent-encoded now.
+- `ci.yml` declared no `permissions`, so every job ran with the repository's
+  default `GITHUB_TOKEN` scope; it is `contents: read`.
+
+### Changed
+
+- **docs.rs now documents every feature it can build.** No crate had
+  `[package.metadata.docs.rs]`, so docs.rs showed default features only — no
+  `vad`, `otel`, `vertex-ai-sessions`, `dsp`, `denoise`, `sip`, and no badge to
+  say they existed. All five library crates declare it, with `doc_cfg` badges;
+  the fluent crate lists every feature except `voice-io` (`cpal` needs ALSA
+  headers the docs.rs builder lacks) and a test keeps that list in step with
+  `[features]`. The deployed API reference is built with `--all-features` too —
+  it had installed ALSA for that purpose and then not passed the flag.
+- Flow Studio: **Open** (⌘O / Ctrl+O, or drop a `.json` on the canvas) is the
+  inverse of Download that was missing; **Delete** removes the selected step,
+  **Esc** deselects / leaves preview / closes diagnostics, **⌘↵** validates,
+  **⌘S** downloads. Nothing fires while a field has focus.
+- `just` alone lists recipes instead of running `setup` (a full workspace
+  build); `just run-studio` starts the web UI and prints the Studio URL.
+- READMEs for the `audiohook`, `sip-agent`, `telephony`, `quickstart` and
+  `voice-spec-demo` examples; an orientation page for `gemini-adk-rs` on
+  docs.rs; the book's API reference page lists all five crates and says when
+  to read docs.rs versus the site.
+- The README and the book landing said **v1.0** for a day after 2.0.0 shipped;
+  a drift test now holds them to the released major.minor.
+
 ## [2.0.0] - 2026-09-03
 
 ### Highlights

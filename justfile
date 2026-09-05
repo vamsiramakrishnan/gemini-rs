@@ -3,6 +3,14 @@
 
 set dotenv-load
 
+# `just` alone used to run the first recipe — `setup`, a full workspace build —
+# because that is what just does without a default. Nothing should start from
+# a bare `just`.
+#
+# List the recipes (what a bare `just` does)
+default:
+    @just --list
+
 # ─── Setup ───────────────────────────────────────────────────
 
 # Install development dependencies
@@ -71,7 +79,7 @@ docs:
 
 # Check docs build with strict warnings (mirrors CI)
 doc-check:
-    RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace --locked
+    RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace --all-features --locked
 
 # ─── Build ───────────────────────────────────────────────────
 
@@ -93,9 +101,25 @@ check-compile:
 run-web:
     cargo run -p gemini-adk-web-rs
 
+# Run the web UI and say where Flow Studio is — the canvas is one route of it
+run-studio:
+    @echo "Flow Studio: http://localhost:25125/flows   (web UI: http://localhost:25125)"
+    cargo run -p gemini-adk-web-rs
+
 # Run the REST API server (mirrors `adk api_server`)
 run-api:
     cargo run -p gemini-adk-api-rs
+
+# `adk web` embeds a copy of the web app's static files inside the CLI crate
+# (rust-embed folders must live in the crate, or `cargo publish` ships an empty
+# set). A drift test fails the build when the two trees differ, so every edit
+# under apps/gemini-adk-web-rs/static/ ends with this.
+#
+# Copy the web app's static files into the CLI crate (after editing Flow Studio)
+sync-web-assets:
+    rm -rf tools/gemini-adk-cli-rs/assets/web
+    cp -r apps/gemini-adk-web-rs/static tools/gemini-adk-cli-rs/assets/web
+    @echo "tools/gemini-adk-cli-rs/assets/web now matches apps/gemini-adk-web-rs/static"
 
 # ─── Examples ────────────────────────────────────────────────
 

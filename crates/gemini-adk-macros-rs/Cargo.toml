@@ -9,6 +9,13 @@ categories = ["api-bindings", "development-tools::procedural-macro-helpers"]
 repository.workspace = true
 documentation = "https://docs.rs/gemini-adk-macros-rs"
 
+# docs.rs builds with default features unless told otherwise, which hides
+# every feature-gated module and prints no "available on crate feature X only"
+# badge for what it does show. `docsrs` turns those badges on.
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [lib]
 name = "gemini_adk_macros_rs"
 proc-macro = true

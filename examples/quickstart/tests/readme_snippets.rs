@@ -100,6 +100,47 @@ fn readme_documents_a_version_that_accepts_what_it_ships() {
     }
 }
 
+/// The version a reader sees before any code: the README's `**vX.Y · MIT**`
+/// line and the book's hero eyebrow. Both said 1.0 for a day after 2.0.0
+/// shipped — the manifest check above could not see them, because they are
+/// prose, not a dependency line. Here they must name the shipped major.minor.
+#[test]
+fn the_version_readers_see_first_is_the_one_that_shipped() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let workspace = std::fs::read_to_string(root.join("Cargo.toml")).expect("workspace manifest");
+    let shipped = workspace
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("version = \""))
+        .and_then(|v| v.split('"').next())
+        .expect("[workspace.package] version");
+    let major_minor = shipped
+        .rsplit_once('.')
+        .map(|(mm, _)| mm)
+        .unwrap_or(shipped);
+
+    let readme = readme();
+    let eyebrow = readme
+        .lines()
+        .find(|l| l.starts_with("**v"))
+        .expect("README has a `**vX.Y · …**` line under the badges");
+    assert!(
+        eyebrow.starts_with(&format!("**v{major_minor} ·")),
+        "README says {eyebrow:?} but the workspace ships {shipped}"
+    );
+
+    let hero =
+        std::fs::read_to_string(root.join("docs/src/introduction.md")).expect("book landing page");
+    let hero_line = hero
+        .lines()
+        .find(|l| l.contains("hero-eyebrow"))
+        .expect("book landing has a hero-eyebrow");
+    assert!(
+        hero_line.contains(&format!(">v{major_minor} ·")),
+        "book hero says {:?} but the workspace ships {shipped}",
+        hero_line.trim()
+    );
+}
+
 /// The first double-quoted token on the line that starts with a digit — the
 /// version, whether the line is `foo = "2.0"` or `foo = {{ version = "2.0", .. }}`.
 fn quoted_version(line: &str) -> Option<String> {

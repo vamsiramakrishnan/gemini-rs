@@ -10,6 +10,13 @@ repository.workspace = true
 documentation = "https://docs.rs/gemini-adk-rs"
 readme = "README.md"
 
+# docs.rs builds with default features unless told otherwise, which hides
+# every feature-gated module and prints no "available on crate feature X only"
+# badge for what it does show. `docsrs` turns those badges on.
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [dependencies]
 # `default-features = false` so this crate — not L0's defaults — decides the
 # TLS backend. Without it `tls-rustls` silently kept native-tls in the tree.

@@ -1962,6 +1962,66 @@
 
   $('fs-preview-btn').addEventListener('click', () => (preview ? exitPreview() : enterPreview()));
   $('fs-preview-exit').addEventListener('click', exitPreview);
+
+  // ── Open ───────────────────────────────────────────────────────
+  // Download had no inverse: a saved flow came back only by pasting it into
+  // the JSON tab and pressing Apply. A file picker and a drop target close
+  // the loop. Both go through applyJson, so an opened file is checked and
+  // normalised exactly as pasted text is.
+  async function openFile(file) {
+    if (!file) return;
+    if (steps().length && !confirm(`Open ${file.name}? The current flow is replaced.`)) return;
+    try {
+      applyJson(await file.text(), { fromImport: true });
+    } catch (err) {
+      const status = $('fs-json-status');
+      status.textContent = `Could not read ${file.name}: ${err.message}`;
+      status.className = 'fs-json-status err';
+    }
+  }
+  $('fs-open-btn').addEventListener('click', () => $('fs-open-input').click());
+  $('fs-open-input').addEventListener('change', (e) => {
+    openFile(e.target.files[0]);
+    e.target.value = ''; // so the same file can be re-opened after a New
+  });
+  const dropTarget = $('fs-canvas-wrap');
+  dropTarget.addEventListener('dragover', (e) => {
+    if (!Array.from(e.dataTransfer.types).includes('Files')) return;
+    e.preventDefault();
+    dropTarget.classList.add('fs-drop');
+  });
+  dropTarget.addEventListener('dragleave', () => dropTarget.classList.remove('fs-drop'));
+  dropTarget.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropTarget.classList.remove('fs-drop');
+    openFile(e.dataTransfer.files[0]);
+  });
+
+  // ── Keyboard ───────────────────────────────────────────────────
+  // Modifier chords work everywhere, like any editor. The bare keys only
+  // act when no field has focus, so Backspace in the step-id box edits the
+  // id rather than deleting the step it belongs to.
+  function typing(el) {
+    return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA'
+      || el.tagName === 'SELECT' || el.isContentEditable);
+  }
+  document.addEventListener('keydown', (e) => {
+    const mod = e.metaKey || e.ctrlKey;
+    if (mod && e.key === 'Enter') { e.preventDefault(); validate(); return; }
+    if (mod && !e.shiftKey && e.key.toLowerCase() === 's') { e.preventDefault(); $('fs-json-download').click(); return; }
+    if (mod && e.key.toLowerCase() === 'o') { e.preventDefault(); $('fs-open-input').click(); return; }
+    if (typing(e.target)) return;
+    if (e.key === 'Escape') {
+      if (preview) { exitPreview(); return; }
+      if (!$('fs-diagnostics').hidden) { $('fs-diagnostics').hidden = true; return; }
+      if (selectedId) { selectedId = null; renderCanvas(); renderStepForm(); }
+      return;
+    }
+    if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId && !preview) {
+      e.preventDefault();
+      deleteStep(selectedId);
+    }
+  });
   $('fs-preview-prev').addEventListener('click', () => {
     if (preview && preview.index > 0) { preview.index -= 1; renderPreview(); }
   });

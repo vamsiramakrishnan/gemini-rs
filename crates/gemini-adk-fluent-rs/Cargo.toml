@@ -10,6 +10,16 @@ repository.workspace = true
 documentation = "https://docs.rs/gemini-adk-fluent-rs"
 readme = "README.md"
 
+# docs.rs builds with default features unless told otherwise, which hides
+# every feature-gated module and prints no "available on crate feature X only"
+# badge for what it does show. `docsrs` turns those badges on.
+# Every feature except `voice-io`: that one pulls `cpal`, whose ALSA backend
+# needs libasound headers at build time and the docs.rs builder has none.
+# `talk()` therefore has no docs.rs page; the book covers it instead.
+[package.metadata.docs.rs]
+features = ["templates", "default", "gemini-llm", "http-tools", "denoise", "dsp", "sip", "tracing-support", "vad-wavekat", "tls-native", "tls-rustls", "otel", "otel-otlp", "otel-gcp"]
+rustdoc-args = ["--cfg", "docsrs"]
+
 [dependencies]
 gemini-genai-rs = { workspace = true, default-features = false, features = ["live"] }
 gemini-adk-rs  = { workspace = true, default-features = false }
