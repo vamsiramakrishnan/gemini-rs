@@ -2,7 +2,7 @@
 
 `gemini-rs` ships **30 runnable cookbook examples** plus interactive web demos.
 The cookbook is organized around the **higher-order, governed-agent
-capabilities** — the powerful primitives this SDK is built on — with the
+capabilities** — the primitives this SDK is built on — with the
 composition foundations beneath them.
 
 ---

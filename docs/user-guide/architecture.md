@@ -1,7 +1,9 @@
 # Architecture Overview
 
-This guide explains how the gemini-genai-rs workspace is structured, how data
-flows through the system, and how to decide which layer to build on.
+Choose the layer your application needs: fluent builders, the agent runtime,
+or the wire transport. This page maps their responsibilities and the event
+path between them. Start with the fluent API and move lower when you need a
+custom processor or transport.
 
 ## The Three-Crate Stack
 
@@ -120,7 +122,8 @@ runs extractors concurrently via `join_all`.
 Runs on its own broadcast receiver. Collects `SessionSignals` (activity
 timestamps, timing, token usage) and `SessionTelemetry` (atomic counters for
 audio chunks, tool calls, interruptions, latency tracking, token counts).
-Flushes periodically (100ms debounce) with zero overhead on the hot path.
+Flushes periodically (100 ms debounce) on a separate receiver. Measure
+scheduling and queue overhead under the target workload.
 
 The telemetry lane also handles `UsageMetadata` events from the Gemini API,
 recording prompt/response/cached/thoughts token counts in both SessionSignals

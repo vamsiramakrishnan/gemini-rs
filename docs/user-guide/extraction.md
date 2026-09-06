@@ -1,5 +1,12 @@
 # Extraction Pipeline
 
+Extract typed values from conversation evidence and use them as inputs to
+state, phase, and tool decisions. Choose when extraction runs and how an error
+or incomplete result affects the workflow.
+
+A value matching the schema can still be factually wrong. Test the evidence
+needed for a transition as well as the JSON shape.
+
 ## What Is Extraction?
 
 Extraction turns unstructured conversation into structured data. As the user

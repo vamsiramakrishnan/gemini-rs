@@ -1,6 +1,9 @@
 # Text Agent Combinators
 
-Text agents are composable units for text-based LLM pipelines. Each one implements the `TextAgent` trait, making a standard request/response call to a language model (no WebSocket session required). You can snap them together -- sequential, parallel, branching, looping -- to build multi-step reasoning pipelines.
+Compose request/response agents with the `TextAgent` interface. Sequential,
+parallel, branching, loop, and fallback combinators determine when each agent
+runs and where its result goes. Text generation does not require a Live
+WebSocket session or local audio dependencies.
 
 ## The TextAgent Trait
 

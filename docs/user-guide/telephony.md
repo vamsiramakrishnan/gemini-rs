@@ -61,10 +61,10 @@ Forward Twilio's text frames into `from_twilio`; forward everything from
   digit) and `telephony:dtmf_history` (all digits, in order) — where flow
   guards, watchers, and phase transitions read them like any other fact:
 
-  ```rust,ignore
+```rust,ignore
   .phase("gather_account")
       .transition("verify", S::eq("telephony:dtmf_history", json!("1234")))
-  ```
+```
 
 - **Call metadata**: `telephony:call_sid` and `telephony:stream_sid` are set
   from the `start` frame; `<Parameter>` values from your TwiML arrive in
