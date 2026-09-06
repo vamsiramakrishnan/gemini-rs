@@ -1,5 +1,7 @@
 # gemini-rs
 
+**Rust SDK and runtime for text agents and live voice conversations.**
+
 Rust SDKs and runtime components for Gemini text agents, Gemini Live sessions, governed conversation flows, typed tools, telephony, and offline flow simulation.
 
 [![CI](https://github.com/vamsiramakrishnan/gemini-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/vamsiramakrishnan/gemini-rs/actions/workflows/ci.yml)
@@ -12,6 +14,20 @@ Rust SDKs and runtime components for Gemini text agents, Gemini Live sessions, g
 Book: <https://vamsiramakrishnan.github.io/gemini-rs/>
 
 API reference: <https://vamsiramakrishnan.github.io/gemini-rs/api/gemini_genai_rs/index.html>
+
+## Choose your first implementation
+
+| Build | Start here | What to verify |
+|---|---|---|
+| A text agent | [Text agent](#text-agent) | One authenticated request and its returned text |
+| A microphone conversation | [Voice session](#voice-session) | Audio dependencies, connection, and playback |
+| A conversation with permitted actions | [Governed flows](#governed-flows) | State transitions and tool admission |
+| A transport integration without the fluent layer | [Crate responsibilities](#what-it-contains) | The smallest crate and feature set you need |
+
+Start with one path. Text agents do not require the system audio stack. Flow
+simulation is useful before a live call, but a passing simulation does not
+establish microphone, telephony, or provider behavior.
+
 
 ## What it contains
 
