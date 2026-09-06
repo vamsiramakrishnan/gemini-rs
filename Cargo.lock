@@ -989,7 +989,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1353,20 +1353,20 @@ dependencies = [
 
 [[package]]
 name = "gcloud-sdk"
-version = "0.28.5"
+version = "0.31.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "90af1cbb38a3b863dc7edad5da87ca80081f8b8c01090a575a70022471e6038b"
+checksum = "ae0e5ee4726919531561eadf5b9c560e1f3f7dcb4f6ea05996681d2fb6b7e2c5"
 dependencies = [
  "async-trait",
  "bytes",
- "chrono",
  "futures",
  "hyper",
+ "jiff",
  "jsonwebtoken",
  "once_cell",
  "prost",
  "prost-types",
- "reqwest 0.12.28",
+ "reqwest 0.13.4",
  "secret-vault-value",
  "serde",
  "serde_json",
@@ -1746,7 +1746,7 @@ dependencies = [
  "hyper",
  "lazy_static",
  "opentelemetry 0.32.0",
- "opentelemetry-semantic-conventions 0.32.1",
+ "opentelemetry-semantic-conventions",
  "opentelemetry_sdk 0.32.1",
  "percent-encoding",
  "pin-project",
@@ -2365,7 +2365,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2532,9 +2532,9 @@ dependencies = [
 
 [[package]]
 name = "jsonwebtoken"
-version = "10.4.0"
+version = "11.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eba32bfb4ffdeaca3e34431072faf01745c9b26d25504aa7a6cf5684334fc4fc"
+checksum = "881733cbc631fc9e472e24447ce32a64bedf2da498d6d8570b08edc87de71f65"
 dependencies = [
  "base64 0.22.1",
  "getrandom 0.2.17",
@@ -2841,7 +2841,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3115,16 +3115,16 @@ dependencies = [
 
 [[package]]
 name = "opentelemetry-gcloud-trace"
-version = "0.22.0"
+version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "875764b9925ebab095d752002d814b2b88efa6d3da66063cc2f5b73959ccc056"
+checksum = "531d19fb2ddfdda975a28a8a39e86319bbbd823af76f13a21d1b724923b51ea3"
 dependencies = [
  "async-trait",
  "futures",
  "gcloud-sdk",
- "opentelemetry 0.31.0",
- "opentelemetry-semantic-conventions 0.31.0",
- "opentelemetry_sdk 0.31.0",
+ "opentelemetry 0.32.0",
+ "opentelemetry-semantic-conventions",
+ "opentelemetry_sdk 0.32.1",
  "rsb_derive",
  "rvstruct",
  "tokio-stream",
@@ -3175,12 +3175,6 @@ dependencies = [
  "tonic",
  "tonic-prost",
 ]
-
-[[package]]
-name = "opentelemetry-semantic-conventions"
-version = "0.31.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e62e29dfe041afb8ed2a6c9737ab57db4907285d999ef8ad3a59092a36bdc846"
 
 [[package]]
 name = "opentelemetry-semantic-conventions"
@@ -3259,6 +3253,8 @@ dependencies = [
  "portable-atomic",
  "rand 0.9.5",
  "thiserror 2.0.20",
+ "tokio",
+ "tokio-stream",
 ]
 
 [[package]]
@@ -3575,7 +3571,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3854,14 +3850,12 @@ dependencies = [
  "tokio",
  "tokio-native-tls",
  "tokio-rustls",
- "tokio-util",
  "tower 0.5.3",
  "tower-http 0.6.11",
  "tower-service",
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
- "wasm-streams",
  "web-sys",
  "webpki-roots 1.0.9",
 ]
@@ -3875,14 +3869,19 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "futures-core",
+ "futures-util",
+ "h2",
  "http",
  "http-body",
  "http-body-util",
  "hyper",
  "hyper-rustls",
+ "hyper-tls",
  "hyper-util",
  "js-sys",
  "log",
+ "mime_guess",
+ "native-tls",
  "percent-encoding",
  "pin-project-lite",
  "quinn",
@@ -3894,13 +3893,16 @@ dependencies = [
  "serde_urlencoded",
  "sync_wrapper",
  "tokio",
+ "tokio-native-tls",
  "tokio-rustls",
+ "tokio-util",
  "tower 0.5.3",
  "tower-http 0.6.11",
  "tower-service",
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "wasm-streams",
  "web-sys",
 ]
 
@@ -4059,7 +4061,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4118,7 +4120,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4839,10 +4841,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5699,9 +5701,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-streams"
-version = "0.4.2"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15053d8d85c7eccdbefef60f06769760a563c7f0a9d6902a13d35c7800b0ad65"
+checksum = "9d1ec4f6517c9e11ae630e200b2b65d193279042e28edd4a2cda233e46670bbb"
 dependencies = [
  "futures-util",
  "js-sys",
@@ -5815,7 +5817,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

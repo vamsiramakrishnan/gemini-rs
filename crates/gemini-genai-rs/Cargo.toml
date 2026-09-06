@@ -128,7 +128,7 @@ tracing-opentelemetry = { version = "0.33", optional = true }
 opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic", "trace", "metrics"], optional = true }
 
 # OpenTelemetry — Google Cloud-native exporters (otel-gcp)
-opentelemetry-gcloud-trace = { version = "0.22", optional = true }
+opentelemetry-gcloud-trace = { version = "0.25", optional = true }
 opentelemetry_gcloud_monitoring_exporter = { version = "0.22", features = ["tokio"], optional = true }
 rtrb = "0.4"
 
