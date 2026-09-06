@@ -1,5 +1,10 @@
 # Migration Guide
 
+Use this reference when updating imports or moving an application between
+API revisions. Apply the relevant changes, compile the affected example, and
+run its behavior tests. Do not combine a version upgrade with an unmeasured
+change of model, transport, and conversation policy.
+
 ## 1.x → 2.0
 
 The 2.0 release tightens the L0 (`gemini-genai-rs`) surface. Nothing changes

@@ -1,13 +1,12 @@
 # Conversation CI
 
-**Unit tests for voice-agent conversations** — deterministic, model-free, and
-fast enough to run on every pull request.
+Run scripted conversation scenarios against the control plane without audio
+or model calls. The tests exercise the conversation specification, guards, and
+allowed transitions before a live session.
 
-A governed conversation is a serializable [`ConversationSpec`](./flow.md): it
-compiles to an enforced Flow DAG, and a model-free [`Sim`](./flow.md) drives that
-same control-plane code with scripted inputs — no audio, no model, no network.
-Conversation CI turns that into a gate: a corpus of specs and scenarios that runs
-in milliseconds and fails the build on any regression.
+A passing scenario establishes behavior for its scripted inputs. It does not
+measure speech recognition, model compliance, provider latency, or a real
+caller's experience.
 
 ## What it checks
 

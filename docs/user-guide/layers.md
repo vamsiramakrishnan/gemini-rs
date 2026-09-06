@@ -1,23 +1,20 @@
 # The Layer Contract (L0 · L1 · L2)
 
-The three crates are not a file-organization convention — they are an
-engineered contract, and each crate now names it in code: a `primitives`
-module per layer is the curated, closed surface that layer exposes upward,
-with a drift test that fails compilation if a named primitive ever moves or
-disappears. `prelude` remains the convenience glob; `primitives` is the
-contract.
+Each layer exposes a `primitives` module for the types intended to be used by
+the next layer. Contract tests detect changes to those exports. The `prelude`
+is a convenience import; specialized APIs also live in named submodules.
+
+| Layer | Responsibility |
+|---|---|
+| L0 | Authentication, protocol frames, transport and wire events |
+| L1 | Session state, callbacks, tool dispatch and conversation control |
+| L2 | Builders and composition APIs for applications |
 
 ```rust,ignore
-use gemini_genai_rs::primitives::*;      // L0 — frames on a wire
-use gemini_adk_rs::primitives::*;        // L1 — the conversation runtime
-use gemini_adk_fluent_rs::primitives::*; // L2 — authoring
+use gemini_genai_rs::primitives::*;
+use gemini_adk_rs::primitives::*;
+use gemini_adk_fluent_rs::primitives::*;
 ```
-
-One sentence each:
-
-- **L0 moves frames and tells the truth about time.**
-- **L1 gives frames meaning — and enforces it.**
-- **L2 makes the application sayable — in one expression, or one document.**
 
 ## L0 — `gemini_genai_rs::primitives`: frames on a wire
 
@@ -42,8 +39,7 @@ or decides when to speak.
 **Promises:** a concurrent session runtime over the L0 stream — typed shared
 state, tool dispatch, governed flows with load-time compilation and a
 self-explaining monitor, extraction that fills the state guards read, phases
-and watchers, transcripts, persistence — and a handle that can always answer
-*why* and steer *now*.
+and watchers, transcripts, persistence — and a handle for inspecting state and requesting control actions.
 **Never:** opens its own idea of a socket beyond L0's transport, renders
 application prose, or hides an enforcement decision — every denial carries
 its reason, every stuck guard can print its atoms.

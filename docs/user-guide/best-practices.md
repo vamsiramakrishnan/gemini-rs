@@ -1,6 +1,9 @@
 # Best Practices & Common Mistakes
 
-Practical guidance for building with the gemini-rs stack. Organized by category: architecture decisions, performance constraints, common pitfalls, and testing patterns.
+Use this checklist while reviewing an implementation: imports and feature
+flags, state updates, callback scheduling, tool execution, and tests. Each rule
+should be checked at the affected API boundary, not inferred from a demo that
+happened to complete.
 
 ## Architecture Best Practices
 

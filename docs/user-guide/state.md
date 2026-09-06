@@ -1,9 +1,11 @@
 # State Management
 
-The `State` type is a shared, concurrent key-value store that flows through every
-component of a live session: callbacks, tool calls, extractors, watchers, phases,
-and computed variables. Values are stored as `serde_json::Value` and deserialized
-on read, giving you type safety without a rigid schema.
+`State` shares JSON values between callbacks, tools, extractors, watchers,
+and phases. Typed accessors deserialize values; `StateKey<T>` gives repeated
+keys a common name and type.
+
+Choose strict access when a missing or mistyped value must stop the workflow.
+Use atomic modification for counters and other read-modify-write operations.
 
 ## Reading and Writing
 

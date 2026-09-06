@@ -1,11 +1,11 @@
 # Agent Orchestration
 
-Orchestration is the single question of *how* you invoke a unit of work — a
-sub-agent, a system fetch, or an OOB LLM — and where its result goes. Every
-mechanism here writes its result to governed `State` under `{name}:result` (or
-`{name}:error`), so coordination is **reactive and uniform**: a `Flow` step
-completes on it via `Guard::resolved(name)`, a watcher fires on it, or the next
-agent reads it — regardless of who produced it.
+Choose how to invoke a sub-agent, service function, or separate model call,
+and how the next step observes its result. The mechanisms below publish
+success or failure into shared state under named keys.
+
+Check completion, cancellation, and error handling separately. A dispatched
+task is not complete merely because its invocation returned.
 
 ## Mode — how an agent is invoked
 

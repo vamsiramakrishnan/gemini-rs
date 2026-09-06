@@ -1,28 +1,27 @@
 # Setup and Running
 
-Two ways in. **Path A** adds the published crates to your own project — start
-here if you want to build something. **Path B** clones this repository — start
-there if you want to run the examples, the Web UI, or contribute.
+Choose the first result you want, then install its dependencies. The workspace
+uses Rust 1.93+ (the checked-in toolchain pins 1.93.1).
 
-Either way you need a stable Rust toolchain (1.93+) and, on Linux, the TLS and
-audio headers:
+| Goal | Path | Additional requirements |
+|---|---|---|
+| Run a text agent | Published crate or `hello-text` example | Model credentials; no audio feature |
+| Run a microphone conversation | `hello-voice` or Live builder | `voice-io`, local audio devices and headers |
+| Test conversation logic | Offline cookbook or conversation CI | No model credentials |
+| Inspect the UI | Repository Web UI | Provider setup for live actions |
 
-```bash
-# Ubuntu / Debian
-sudo apt-get update
-sudo apt-get install -y pkg-config libssl-dev libasound2-dev build-essential
+On Ubuntu/Debian, native TLS builds use `pkg-config`, `libssl-dev`, and the
+normal Rust build toolchain. Install `libasound2-dev` only for local audio
+paths. macOS builds use the Xcode command-line tools. Match dependencies to
+the feature set you compile.
 
-# macOS
-xcode-select --install
-```
-
-## Authentication (both paths)
+## Authentication for live requests
 
 Pick **one** platform. The same variables serve the whole stack — Live voice
 sessions and text agents both accept the `GEMINI_API_KEY` /
 `GOOGLE_GENAI_API_KEY` / `GOOGLE_API_KEY` chain.
 
-### Google AI — fastest
+### Google AI
 
 ```bash
 export GEMINI_API_KEY=your-api-key   # https://aistudio.google.com/apikey
@@ -34,14 +33,15 @@ export GEMINI_API_KEY=your-api-key   # https://aistudio.google.com/apikey
 export GOOGLE_GENAI_USE_VERTEXAI=true
 export GOOGLE_CLOUD_PROJECT=your-project-id
 export GOOGLE_CLOUD_LOCATION=us-central1
-gcloud auth application-default login   # or export GOOGLE_ACCESS_TOKEN=…
+gcloud auth login   # connect_from_env falls back to gcloud auth print-access-token
 ```
 
 Repo examples also read these from a `.env` at the workspace root
 (`cp .env.example .env`).
 
-You normally don't pick a model: connect resolves a default the target platform
-actually serves, and `GEMINI_LIVE_MODEL=…` (or `.model(…)` in code) overrides it.
+The SDK resolves a platform-specific model default. Provider access and model
+availability can change independently of the SDK. Pin `GEMINI_LIVE_MODEL` or
+`.model(...)` when needed; use `GEMINI_TEXT_MODEL` separately for text agents.
 
 ## Path A — build your own project
 
@@ -51,11 +51,13 @@ cargo new my-agent && cd my-agent
 
 ```toml
 [dependencies]
-gemini-adk-fluent-rs = { version = "2.0", features = ["voice-io"] }
+gemini-adk-fluent-rs = "2.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
-Two feature flags matter on day one — the crate ships
+For microphone/speaker use, change the dependency to
+`gemini-adk-fluent-rs = { version = "2.0", features = ["voice-io"] }`.
+The crate ships
 `default = ["tls-native", "gemini-llm"]`:
 
 | Feature | Default | Enables | Without it |
@@ -106,8 +108,9 @@ phases, metrics, tools, and traces. `/flows` is the Flow Studio.
 
 ### The cookbook
 
-Forty progressive binaries, `01-foundations` through `40-screening` — most run
-offline with no credentials:
+The cookbook contains separate examples for configuration, tools, evaluation,
+and live integration. Start with a model-free example before configuring a
+provider. See the source of each binary for its requirements:
 
 ```bash
 cargo run -p example-cookbook --bin 01-foundations

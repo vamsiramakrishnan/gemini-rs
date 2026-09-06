@@ -4,15 +4,20 @@ Thank you for your interest in contributing. This guide covers the codebase layo
 
 ## Prerequisites
 
-- **Rust 1.75+** (edition 2021)
-- **Google Cloud credentials** for Vertex AI testing: `gcloud auth print-access-token` must work, or set `GOOGLE_ACCESS_TOKEN` in your environment
-- **A `.env` file** at the repo root (see [Environment Setup](#environment-setup))
+Use the Rust version declared by the workspace and its toolchain configuration.
+Local documentation builds and model-free library tests do not need cloud
+credentials. Live examples require a configured provider; local audio examples
+also require their feature and system dependencies.
+
+See [Setup and Running](docs/src/setup-and-running.md) for the two installation
+paths and [authentication](docs/user-guide/auth-and-connecting.md) for credential
+resolution. Keep credentials out of source control and build logs.
 
 ## Environment Setup
 
 Copy the `.env` file and fill in your values:
 
-```bash
+   ```bash
 # Required: Google Cloud project and Vertex AI location
 GOOGLE_CLOUD_PROJECT=your-project-id
 GOOGLE_CLOUD_LOCATION=us-central1
@@ -22,7 +27,7 @@ GOOGLE_GENAI_USE_VERTEXAI=TRUE
 
 # Default model for Live sessions (override per-app via browser Start message)
 GEMINI_LIVE_MODEL=models/gemini-2.5-flash-native-audio-latest
-```
+   ```
 
 Alternatively, for Google AI (non-Vertex) usage, set `GOOGLE_GENAI_API_KEY` or `GEMINI_API_KEY` instead.
 
@@ -52,13 +57,13 @@ Additionally:
 
 ### Dependency Flow
 
-```
+   ```
 gemini-adk-fluent-rs (L2)
-    |
+              |
     +---> gemini-adk-rs (L1)
               |
               +---> gemini-genai-rs (L0)
-```
+   ```
 
 Examples depend on `gemini-adk-fluent-rs` (L2) and get the entire stack transitively.
 
@@ -97,7 +102,7 @@ The router (`crates/gemini-adk-rs/src/live/mod.rs`) is a zero-work dispatcher th
 
 We use [just](https://github.com/casey/just) as our task runner. Install it with `cargo install just`.
 
-```bash
+   ```bash
 git clone https://github.com/vamsiramakrishnan/gemini-rs.git
 cd gemini-rs
 
@@ -107,7 +112,7 @@ just docs           # Build and open documentation
 just run-web        # Run the ADK Web UI (requires .env with credentials)
 just check          # Fast inner loop: fmt + clippy + tests
 just ci             # Every job GitHub Actions runs — do this before pushing
-```
+   ```
 
 `just check` is the loop you run while working. `just ci` is the one that tells
 you whether the push will be green: it adds the feature matrix, the per-feature
@@ -117,11 +122,11 @@ prints the install lines.
 
 Or use plain cargo directly:
 
-```bash
+   ```bash
 cargo build --workspace
 cargo test --workspace --lib
 cargo doc --no-deps --workspace --open
-```
+   ```
 
 ## Making Changes
 
@@ -170,9 +175,9 @@ impl CookbookApp for MyExample {
     ) -> Result<(), AppError> {
         // Implementation here
         Ok(())
-    }
 }
-```
+}
+   ```
 
 3. Add the module to `apps/gemini-adk-web-rs/src/apps/mod.rs`
 4. Register it in `apps/gemini-adk-web-rs/src/apps/mod.rs` inside `register_all()`
@@ -203,7 +208,7 @@ Feature flags are used to keep the default build lean. Key flags:
 
 ## Testing
 
-```bash
+   ```bash
 # All library tests (fast, no credentials needed)
 cargo test --workspace --lib
 
@@ -219,10 +224,10 @@ cargo test -p gemini-genai-rs --all-features --lib
 # `just ci` runs the rest (feature matrix, cargo-hack, cargo-deny,
 # conversations). `--locked` because CI passes it: without it cargo may resolve
 # a different dependency set than the one committed in Cargo.lock.
-cargo fmt --check \
+   cargo fmt --check \
   && cargo clippy --workspace --locked -- -D warnings \
   && RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace --locked
-```
+   ```
 
 Tests live alongside the code they test using `#[cfg(test)] mod tests` blocks. The `crates/gemini-adk-rs/src/test_helpers.rs` module provides shared test utilities.
 
@@ -230,14 +235,14 @@ Tests live alongside the code they test using `#[cfg(test)] mod tests` blocks. T
 
 Use [Conventional Commits](https://www.conventionalcommits.org/):
 
-```
+   ```
 feat(gemini-genai-rs): add opus codec support
 fix(gemini-adk-rs): prevent double phase transition on interrupt
 docs: update wire protocol examples
 refactor(gemini-adk-fluent-rs): simplify builder chain
 test(gemini-adk-rs): add extractor concurrency tests
 ci: add clippy to PR checks
-```
+   ```
 
 The scope should be the crate name (`gemini-genai-rs`, `gemini-adk-rs`, `gemini-adk-fluent-rs`) or a top-level area (`examples`, `ci`, `docs`).
 
@@ -245,9 +250,9 @@ The scope should be the crate name (`gemini-genai-rs`, `gemini-adk-rs`, `gemini-
 
 Significant changes should start with a design document in `docs/plans/`. Use the naming convention:
 
-```
+   ```
 docs/plans/YYYY-MM-DD-short-description.md
-```
+   ```
 
 Existing design docs cover the full architecture and can be referenced for context. They are not published externally but serve as internal design records.
 
@@ -274,3 +279,25 @@ A few things worth knowing before diving into the code:
 - **Tool definitions cannot be updated mid-session** in Live API. Only system instructions can be updated after the session is established. Phase-scoped tool filtering works by rejecting tool calls on the SDK side, not by changing the API configuration.
 - **State keys use prefixes** (`session:`, `derived:`, `turn:`, `app:`, `bg:`, `user:`, `temp:`) to control scope and lifecycle. See `crates/gemini-adk-rs/src/state.rs`.
 - **`SessionWriter` is behind `Arc<dyn SessionWriter>`** so that multiple components (phases, extractors, background tools) can share a session handle without ownership conflicts.
+
+## Documentation changes
+
+Write for the reader's next task. A tutorial names prerequisites, runnable
+commands, expected output, and the next useful check. A reference defines
+inputs, outputs, failure behavior, and version or feature boundaries.
+
+Keep supported behavior separate from proposals and dated measurements.
+Performance claims need a workload, revision, method, and result. Test counts,
+shared schemas, and successful compilation do not establish deployment quality.
+Use plain descriptions of the mechanism instead of claims such as seamless,
+production-ready, zero overhead, or guaranteed unless the scope is explicit
+and supported by a check.
+
+Shared workflows must work from a terminal-capable coding agent. Put host
+installation and permission differences in the host-specific guide. Preserve
+real adapter names and historical evidence; do not rename a protocol field or
+pretend an integration exists to make the prose vendor-neutral.
+
+Edit canonical sources. Regenerate site or command-reference projections through
+the repository's existing build. Check links and examples against the current
+checkout. Report local, simulated, and live-provider verification separately.

@@ -1,6 +1,9 @@
 # Steering Modes
 
-How the SDK delivers phase instructions and per-turn context to the model during a Live session. This is the single most impactful configuration choice for multi-phase voice applications.
+Choose how phase instructions and per-turn context reach the Live session.
+The modes change message timing and instruction updates; measure their effect
+with the model and conversation you deploy. Configuration alone does not
+establish lower latency or better adherence.
 
 ## The Three Modes
 

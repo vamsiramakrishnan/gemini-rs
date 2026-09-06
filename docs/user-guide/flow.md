@@ -1,12 +1,12 @@
 # Governed Flows (conversation/tool DAGs)
 
-A `Flow` describes a workflow as a single DAG that governs **both** conversation
-stages and tool-call sequences, and the runtime **enforces** it live: it blocks
-inadmissible tool calls, steers the model with the active stage's instruction at
-each turn boundary, and surfaces what still has to happen.
+A `Flow` declares conversation stages, completion guards, and allowed tool
+sequences. The configured runtime uses it to decide which tool calls may
+proceed and what instructions accompany the active stage.
 
-It is one declarative value in place of the four mechanisms you'd otherwise
-hand-wire (a phase guard + a watcher + a `before_tool` check + repair text).
+Choose the enforcement mode explicitly. A simulated or advisory result is
+not proof that a live tool call was blocked. Test both an allowed transition
+and a denied action before attaching a consequential tool.
 
 ## The model in one breath
 

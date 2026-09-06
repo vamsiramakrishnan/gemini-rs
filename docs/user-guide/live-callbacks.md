@@ -40,33 +40,16 @@ Register these with the synchronous closure variants on `Live::builder()`.
 
 ### Partial and Final Transcript Semantics
 
-Both `on_input_transcript` and `on_output_transcript` implement a streaming
-ASR pattern:
+The callback signature includes an `is_final` flag, but the current fast-lane
+dispatcher emits input and output transcription fragments with `false`. It does
+not emit a final callback at the turn boundary. A consumer that waits for
+`true` will not collect those turns.
 
-- While speech is in progress, callbacks fire repeatedly with `is_final = false`.
-  Each delivery is the server's current best guess; earlier partial results may
-  be revised.
-- At the turn boundary, a single callback fires with `is_final = true` carrying
-  the complete, finalized transcript for the turn.
-
-Only the `is_final = true` delivery is suitable for storage, downstream
-processing, or display in a permanent transcript. Use `is_final = false`
-deliveries for a live "typing" indicator or real-time captions.
-
-```rust,ignore
-.on_input_transcript(|text, is_final| {
-    if is_final {
-        println!("User said: {text}");  // commit to transcript
-    } else {
-        // update live caption display
-    }
-})
-.on_output_transcript(|text, is_final| {
-    if is_final {
-        println!("Model said: {text}");
-    }
-})
-```
+If the application needs a retained transcript, explicitly accumulate fragments
+and close the record at an appropriate turn boundary. Test interruption and
+teardown as well as normal completion. Keep bounded buffering off the audio
+hot path, and apply the [redaction limits](hardening.md#transcript-redaction)
+to the accumulated record before retaining it.
 
 ### The `<1 ms` Rule in Practice
 
@@ -151,7 +134,7 @@ blocking callback in sequence; concurrent variants are spawned as detached tasks
 | Setter | Signature | Description |
 |--------|-----------|-------------|
 | `.on_turn_complete(f)` | `f: Fn() -> impl Future` | Turn boundary reached — the model has finished its (possibly truncated) response for this turn. |
-| `.on_generation_complete(f)` | `f: Fn() -> impl Future` | Model finished its full intended response **before** any interruption truncation. |
+| `.on_generation_complete(f)` | `f: Fn() -> impl Future` | Provider emitted `GenerationComplete`; this does not recover unsent output. |
 
 #### `on_generation_complete` vs `on_turn_complete`
 
@@ -318,16 +301,12 @@ let handle = Live::builder()
         playback_tx.try_send(data.clone()).ok();
     })
 
-    // Fast lane: partial/final transcripts
-    .on_input_transcript(|text, is_final| {
-        if is_final {
-            println!("User: {text}");
-        }
+    // Fast lane: transcription fragments (not a persistence callback)
+    .on_input_transcript(|_text, _is_final| {
+        // Forward to the application's bounded transcript collector.
     })
-    .on_output_transcript(|text, is_final| {
-        if is_final {
-            println!("Agent: {text}");
-        }
+    .on_output_transcript(|_text, _is_final| {
+        // Close accumulated records at a tested turn boundary.
     })
 
     // Fast lane: VAD signals for UI

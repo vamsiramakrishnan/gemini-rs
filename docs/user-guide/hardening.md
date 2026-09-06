@@ -1,11 +1,9 @@
 # Hardening a Voice Deployment
 
-A demo needs audio in and audio out. A production voice line — a bank, a
-clinic, a support desk — needs four more things before anyone should dial
-it: sensitive data kept out of transcripts, silence kept out of the
-caller's ear, a clean handoff when a human takes over, and an audio front
-end that survives real phone-line noise. Each is a small, composable
-capability; none is tied to any one transport.
+Review what the application records, how it handles slow turns, what context
+it hands to a human, and how it processes incoming audio. This guide describes
+the available mechanisms and their limits. Each deployment still needs tests
+against its own transport, retention rules, and audio conditions.
 
 ## Transcript redaction
 
@@ -26,20 +24,25 @@ Live::builder()
     )
 ```
 
-Redaction runs at the event router, **before either lane sees the text**:
-fast-lane callbacks, the transcript buffer, extractors, persistence, and
-the [handoff packet](#warm-handoff) below all receive the redacted form.
-There is deliberately no unredacted side channel.
+The router applies the configured redactor to `TextComplete` and individual
+input/output transcription events before forwarding those events to the fast
+and control lanes. Matching card-number runs are checked with Luhn; a match
+keeps only the configured replacement, such as the last four digits.
 
-The card rule matches 13–19-digit runs (spaces and dashes allowed) and
-verifies the Luhn checksum before replacing — a tracking number is not a
-card. What it keeps, `[card ending 1234]`, is enough for the conversation
-to stay coherent without retaining the number.
+This is a per-event transformation, not a complete data-retention boundary:
 
-Two documented limits: streaming *deltas* are not redacted (a number can
-straddle chunk boundaries — treat transcripts and `TextComplete`, both
-redacted, as the record), and pattern-based scrubbing complements, rather
-than replaces, infrastructure-level DLP on stored audio.
+- A sensitive value split across transcription events can evade a pattern
+ that only sees one event at a time.
+- Streaming `TextDelta` and thought events are forwarded without this scrub.
+- The telemetry receiver subscribes to session events separately from the
+ router. Do not infer that its values were scrubbed by the router.
+- Wire recordings occur below this transformation and can retain original
+ payloads. Audio also remains outside text-pattern scrubbing.
+
+Test each retained surface with complete and fragmented sensitive values.
+Configure logging and retention separately. Installing a redactor alone does
+not establish that callbacks, telemetry, recordings, or a handoff are safe to
+persist for a particular deployment.
 
 ## Latency masking
 
@@ -70,9 +73,9 @@ measured down.
 
 ## Warm handoff
 
-The single UX bar for an escalation: the human who picks up never asks
-the caller to repeat themselves. What the receiving desk needs is a
-compact, serializable packet — not the session.
+Build a handoff packet from the conversation evidence and selected state
+needed by the receiving operator. Verify that the recorder actually collected
+the expected turns before delivering it.
 
 ```rust,ignore
 use gemini_adk_fluent_rs::handoff::HandoffRecorder;
@@ -88,8 +91,8 @@ packet.summarize(&*flash_llm).await.ok();              // optional 2–3 sentenc
 deliver(serde_json::to_string(&packet)?);              // connector-specific
 ```
 
-The packet carries the recorded transcript (already redacted, when
-redaction is installed), the selected state keys, the governed flow's
+The packet carries the transcript collected by the recorder (subject to
+the event and redaction limits above), the selected state keys, the governed flow's
 standing — steps done, steps active, requirements still unmet, which is
 precisely the human's to-do list — and, when the escalation path has the
 latency budget, an LLM-written summary of what the caller wants and what
