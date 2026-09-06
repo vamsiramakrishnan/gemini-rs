@@ -1,7 +1,8 @@
 # Voice & Live Sessions
 
-This guide covers everything you need to build voice-enabled agents with
-the Gemini Multimodal Live API using gemini-genai-rs.
+Build a Live session, send input, handle output and interruptions, and close
+the connection. Complete [authentication](auth-and-connecting.md) first. Local
+microphone and speaker I/O additionally requires the `voice-io` feature.
 
 ## What is a Live Session?
 
@@ -154,10 +155,10 @@ locks, no blocking I/O.
 // Text: incremental deltas as the model generates
 .on_text(|text: &str| { print!("{text}"); })
 
-// Transcription: text version of audio (input or output)
-// Second parameter is `is_final` — only the final delivery is suitable for storage
-.on_input_transcript(|text: &str, is_final: bool| {
-    if is_final { println!("User said: {text}"); }
+// Transcription fragments: the current dispatcher emits is_final=false.
+// This callback is not a completed-transcript persistence hook.
+.on_input_transcript(|_text: &str, _is_final: bool| {
+    // Feed an application-owned bounded collector if needed.
 })
 
 // VAD: voice activity detection events from the server
@@ -183,7 +184,7 @@ detached task instead.
     println!("--- turn complete ---");
 })
 
-// Generation complete: full intended response, before truncation
+// GenerationComplete: a provider lifecycle event
 // Use with .extract_on_generation::<T>() for pre-interruption extraction
 .on_generation_complete(|| async {
     println!("--- generation complete (pre-truncation) ---");
@@ -314,7 +315,7 @@ When you add an extractor, transcription is enabled automatically.
 If the user interrupts the model mid-response, `on_output_transcript` will
 not receive `is_final = true` for the truncated portion. Use
 `on_generation_complete` with `.extract_on_generation::<T>(...)` to capture
-the model's full intended output before truncation.
+the evidence available at that provider event; it cannot recover unsent output.
 
 ## Session Lifecycle
 

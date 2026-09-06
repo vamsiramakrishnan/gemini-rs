@@ -1,9 +1,16 @@
 # Record & Replay
 
-The determinism spine: record every byte that crosses the wire and every state
-mutation, then replay any session offline through the **real** control plane —
-phase machine, extractors, watchers, and tool dispatch all run for real.
-Nothing is mocked above the transport seam.
+Record wire events and state mutations to investigate a session after it ends.
+Choose the replay path according to what must run again:
+
+| Path | Re-executes | Does not establish |
+|---|---|---|
+| CLI replay | Recorded inbound events through the default processor | Original tool behavior or a new model response |
+| Programmatic replay | The processor and application components you attach | Determinism of external services, timers, or side effects |
+
+Use deterministic test tools when replaying application behavior. Attaching a
+real tool can execute its effects again; recorded model frames do not make the
+tool implementation offline.
 
 ## Recording a session
 
@@ -64,7 +71,8 @@ state.set_journal_sink(Arc::new(FileJournalSink::create(
 The sink is shared with all clones and delta views of the `State` and is
 invoked synchronously on the write path — keep it cheap (`FileJournalSink`
 buffers and flushes periodically). The ring stays in place for
-`recent_mutations()` / `evidence()`; the sink adds unbounded durability.
+`recent_mutations()` / `evidence()`. The sink writes beyond the ring's retention
+window; storage capacity, flush behavior, and I/O failure still limit retention.
 Journal entries are serde round-trippable `StateMutation` values:
 
 ```json
@@ -114,8 +122,8 @@ diff.
 
 ### Programmatic: the replay harness
 
-To re-execute your actual tools (and assert full determinism), replay in-process
-with the original dispatcher attached:
+To test tool behavior, replay in-process with a controlled dispatcher attached.
+External calls and tool effects remain the responsibility of that dispatcher:
 
 ```rust
 use gemini_adk_fluent_rs::live::{collect_events_until_idle, replay_session};
@@ -152,7 +160,7 @@ the full three-lane processor onto any pre-connected L0 session
 
 ### What matches, what doesn't
 
-Replaying the same log with the same tools through a fresh `State` reproduces:
+With deterministic tools and matching application configuration, compare:
 
 - the per-lane `LiveEvent` sequences (fast lane and control lane each in order;
   *cross-lane* interleaving is scheduler-dependent, in production too),
