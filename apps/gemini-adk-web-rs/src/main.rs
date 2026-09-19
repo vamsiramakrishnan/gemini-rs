@@ -263,7 +263,8 @@ async fn ws_upgrade(
         ws.on_upgrade(move |socket| ws_handler::handle_ws(socket, app, span_rx))
     } else {
         // Return 404 — upgrade and immediately close
-        ws.on_upgrade(|socket| async move {
+        ws.on_upgrade(|mut socket| async move {
+            use futures::SinkExt as _;
             let _ = socket.close().await;
         })
     }
