@@ -66,9 +66,9 @@ impl Talk for LiveHandle {
             .default_output_config()
             .map_err(|e| VoiceIoError::Backend(e.to_string()))?;
 
-        let mic_hz = input_config.sample_rate().0;
+        let mic_hz = input_config.sample_rate();
         let mic_channels = input_config.channels();
-        let speaker_hz = output_config.sample_rate().0;
+        let speaker_hz = output_config.sample_rate();
         let speaker_channels = output_config.channels();
 
         // Microphone → pump. Bounded; a saturated channel drops the frame
@@ -147,11 +147,11 @@ fn build_input_stream(
     on_mono: impl Fn(Vec<i16>) + Send + 'static,
 ) -> Result<cpal::Stream, VoiceIoError> {
     let stream_config: cpal::StreamConfig = config.config();
-    let err = |e: cpal::BuildStreamError| VoiceIoError::Backend(e.to_string());
+    let err = |e: cpal::Error| VoiceIoError::Backend(e.to_string());
     let stream = match config.sample_format() {
         cpal::SampleFormat::I16 => device
             .build_input_stream(
-                &stream_config,
+                stream_config,
                 move |data: &[i16], _| on_mono(downmix(data, channels)),
                 |e| tracing::warn!("input stream error: {e}"),
                 None,
@@ -159,7 +159,7 @@ fn build_input_stream(
             .map_err(err)?,
         cpal::SampleFormat::F32 => device
             .build_input_stream(
-                &stream_config,
+                stream_config,
                 move |data: &[f32], _| {
                     let pcm: Vec<i16> = data
                         .iter()
@@ -187,12 +187,12 @@ fn build_output_stream(
     ring: Arc<Mutex<VecDeque<i16>>>,
 ) -> Result<cpal::Stream, VoiceIoError> {
     let stream_config: cpal::StreamConfig = config.config();
-    let err = |e: cpal::BuildStreamError| VoiceIoError::Backend(e.to_string());
+    let err = |e: cpal::Error| VoiceIoError::Backend(e.to_string());
     let channels = channels as usize;
     let stream = match config.sample_format() {
         cpal::SampleFormat::I16 => device
             .build_output_stream(
-                &stream_config,
+                stream_config,
                 move |data: &mut [i16], _| {
                     let mut ring = ring.lock().expect("playback ring poisoned");
                     for frame in data.chunks_mut(channels) {
@@ -206,7 +206,7 @@ fn build_output_stream(
             .map_err(err)?,
         cpal::SampleFormat::F32 => device
             .build_output_stream(
-                &stream_config,
+                stream_config,
                 move |data: &mut [f32], _| {
                     let mut ring = ring.lock().expect("playback ring poisoned");
                     for frame in data.chunks_mut(channels) {
