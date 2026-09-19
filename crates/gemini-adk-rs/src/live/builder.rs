@@ -61,7 +61,7 @@ pub struct LiveSessionBuilder {
     tool_advisory: bool,
     telemetry_interval: Option<std::time::Duration>,
     middleware: Vec<Arc<dyn crate::middleware::Middleware>>,
-    flow: Option<crate::flow::FlowMonitor>,
+    flow: Option<crate::flow::FlowStack>,
     redactor: Option<Arc<super::redaction::TranscriptRedactor>>,
 }
 
@@ -116,9 +116,18 @@ impl LiveSessionBuilder {
         self
     }
 
-    /// Attach a governed-flow monitor (built from a `Flow` + `Mode`).
-    pub fn flow_monitor(mut self, monitor: crate::flow::FlowMonitor) -> Self {
-        self.flow = Some(monitor);
+    /// Attach a governed-flow monitor (built from a `Flow` + `Mode`). The
+    /// monitor becomes the main layer of a [`FlowStack`](crate::flow::FlowStack)
+    /// with no digressions.
+    pub fn flow_monitor(self, monitor: crate::flow::FlowMonitor) -> Self {
+        self.flow_stack(monitor.into_stack())
+    }
+
+    /// Attach a governed-flow stack: the main flow plus its digressions and
+    /// repair policies. This is the one governance object the control plane
+    /// drives; `flow_monitor` is the no-digression special case.
+    pub fn flow_stack(mut self, stack: crate::flow::FlowStack) -> Self {
+        self.flow = Some(stack);
         self
     }
 
@@ -434,7 +443,7 @@ pub(crate) struct SessionPlan {
     tool_advisory: bool,
     telemetry_interval: Option<std::time::Duration>,
     middleware: Vec<Arc<dyn crate::middleware::Middleware>>,
-    flow: Option<crate::flow::FlowMonitor>,
+    flow: Option<crate::flow::FlowStack>,
     redactor: Option<Arc<super::redaction::TranscriptRedactor>>,
 }
 
@@ -471,7 +480,7 @@ pub(crate) struct SessionRuntime {
     on_usage_cb: Option<super::callbacks::UsageCallback>,
     live_event_tx: tokio::sync::broadcast::Sender<super::events::LiveEvent>,
     telem_cancel: CancellationToken,
-    flow_monitor: Option<crate::flow::SharedFlowMonitor>,
+    flow_monitor: Option<crate::flow::SharedFlowStack>,
 }
 
 /// Stage 3 input: construct the runtime wiring from a resolved plan and the
@@ -479,9 +488,9 @@ pub(crate) struct SessionRuntime {
 /// control-plane config (including deferred-context writer wrapping), and the
 /// telemetry handle — but does not spawn any lanes.
 pub(crate) fn build_runtime(plan: SessionPlan, session: SessionHandle) -> SessionRuntime {
-    // Share the governed-flow monitor between the control lane (which
+    // Share the governed-flow stack between the control lane (which
     // advances it) and the LiveHandle (which snapshots explain).
-    let flow_monitor = plan.flow.map(crate::flow::FlowMonitor::into_shared);
+    let flow_monitor = plan.flow.map(crate::flow::FlowStack::into_shared);
     let mut callbacks = plan.callbacks;
     let on_usage_cb = callbacks.on_usage.take();
     let callbacks = Arc::new(callbacks);

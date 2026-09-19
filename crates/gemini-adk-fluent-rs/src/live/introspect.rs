@@ -88,6 +88,21 @@ impl Live {
         self.flow_mode
     }
 
+    /// The digressions that will be installed on the session's flow stack, in
+    /// trigger-priority order. Set by [`converse`](Live::converse); empty for
+    /// a bare `govern`/`observe`.
+    pub fn digressions(&self) -> &[gemini_adk_rs::flow::Overlay] {
+        &self.digressions
+    }
+
+    /// The per-step repair policies that will be installed on the session's
+    /// flow stack. Set by [`converse`](Live::converse).
+    pub fn repair_policies(
+        &self,
+    ) -> &std::collections::BTreeMap<String, gemini_adk_rs::flow::RepairPolicy> {
+        &self.repair_policies
+    }
+
     /// The configured phases, in declaration order.
     pub fn phases(&self) -> &[Phase] {
         &self.phases

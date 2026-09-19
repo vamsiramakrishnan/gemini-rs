@@ -261,7 +261,7 @@ pub enum ClientMessage {
         voice: Option<String>,
         /// App-specific configuration payload. For data-driven apps (e.g. the
         /// Flow Studio) this carries the JSON document — a
-        /// [`FlowAppSpec`](crate::flow_app::FlowAppSpec) — that defines the
+        /// [`SessionSpec`](crate::flow_app::SessionSpec) — that defines the
         /// session to run. Apps that take no config ignore it.
         #[serde(default)]
         config: Option<serde_json::Value>,

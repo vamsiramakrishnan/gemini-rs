@@ -188,6 +188,41 @@ flow at connect, so it composes with `.govern(..)` written on either side of it.
 - **Repair from real gaps.** Unmet `require` steps are surfaced at the turn
   boundary so the model gathers what's missing.
 
+## Digressions and repair: the flow stack
+
+A session is never governed by a bare monitor. The control plane drives a
+`FlowStack`: the main flow plus zero or more **digressions** (a side question,
+a cancel, a hand-off) and per-step **repair policies**. A flow attached with
+`govern`/`observe` is a stack with no digressions; a compiled conversation
+attached with `Live::converse(&convo)` installs its digressions and repair
+policies on the same stack. There is one execution model, whichever way you
+authored.
+
+While a digression is active:
+
+- its steps' postures steer the model and its `allow` lists decide admission;
+  the main flow's tools are blocked unless they are ambient;
+- the main flow's marking is untouched, so `Resume::Previous` continues
+  exactly where the caller left off;
+- `flow:overlay` in state names the digression (`null` when the main flow
+  drives), and `handle.explain()` describes the active layer.
+
+`Resume::Restart` resets the main flow's *monitor* (marking, fired
+`on_enter` actions, reset edges) against the existing state. It does not clear
+state: slots the caller already filled stay filled, and the next re-latch runs
+over the same facts. It is a fresh pass over the same conversation, not a new
+business task. `Resume::Terminate` ends the conversation.
+
+Repair policies raise `repair:{step}:reprompt` and `repair:{step}:escalate`
+after a step has been active for the configured number of turns; the
+conversation compiler lowers `escalate_to` into an extra gated edge, so a
+stalled step can hand off deterministically.
+
+The simulator (`Sim`) drives exactly the stack that
+`CompiledConversation::stack()` builds and `converse()` installs, so a
+scenario that passes in [Conversation CI](./conversation-ci.md) describes what
+a live session will do for the same facts.
+
 ## Phases and flows together
 
 A `Flow` does **not** compile down to a `PhaseMachine`. They are independent
@@ -255,8 +290,8 @@ serializable — so the script can be authored as data (e.g. RON/JSON) and edite
 by compliance or ops without a recompile. `flow.to_mermaid()` renders the DAG.
 
 See [Flows as JSON](./flow-json.md) for the JSON format reference, the
-`FlowAppSpec` document that packages a flow into a runnable application (with
-declarative mock tools), and the **Flow Studio** — the drag-and-drop editor at
+`SessionSpec` document that packages a flow into a runnable application (with
+declared tools), and the **Flow Studio** — the drag-and-drop editor at
 `/flows` in `gemini-adk-web-rs` that authors, validates, and live-runs these
 documents.
 

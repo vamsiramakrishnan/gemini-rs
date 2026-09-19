@@ -14,7 +14,7 @@
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let convo = Conversation::new("booking")
 //!     .stage("collect")
-//!         .say("Help the user book a table.")
+//!         .instruction("Help the user book a table.")
 //!         .collect(["party_size", "slot"])
 //!         .next("check", Guard::captured(["party_size", "slot"]))
 //!     .stage("check")
@@ -53,11 +53,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gemini_adk_rs::extract::Extract;
-use gemini_adk_rs::flow::{
-    CompiledFlow, Enforcement, Flow, FlowErrors, FlowExplanation, FlowMonitor, Guard, Pred,
-};
+use gemini_adk_rs::flow::{CompiledFlow, Enforcement, Flow, FlowErrors, FlowMonitor, Guard, Pred};
 use gemini_adk_rs::frame::{Frame, FrameSpec};
-use gemini_adk_rs::state::State;
 
 /// A boxed async fetcher: bind args (a JSON object) → resolved value.
 type SlotFetch =
@@ -221,8 +218,13 @@ pub struct CommitSpec {
 pub struct StageSpec {
     /// Unique stage id.
     pub id: String,
-    /// Instruction projected as steering while the stage is active.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Instruction projected as steering while the stage is active. Serialized
+    /// as `say` for compatibility; `instruction` is accepted on input.
+    #[serde(
+        default,
+        alias = "instruction",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub say: Option<String>,
     /// Grounding template projected while active (`{key}` interpolation).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -261,82 +263,11 @@ pub struct StageSpec {
     pub resolve: Vec<ResolveSpec>,
 }
 
-/// The state key set when a stage's repair policy escalates.
-fn escalate_flag(stage: &str) -> String {
-    format!("repair:{stage}:escalate")
-}
-
-/// The state key set when a stage's repair policy raises a reprompt.
-fn reprompt_flag(stage: &str) -> String {
-    format!("repair:{stage}:reprompt")
-}
-
-/// How the main flow continues after a digression (overlay) completes.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum Resume {
-    /// Resume the main flow exactly where it was suspended (history state).
-    #[default]
-    Previous,
-    /// Re-enter the main flow from its start.
-    Restart,
-    /// End the conversation (e.g. a cancel/handoff digression).
-    Terminate,
-}
-
-fn default_reprompt_after() -> u32 {
-    2
-}
-fn default_escalate_after() -> u32 {
-    4
-}
-
-/// A stage's repair policy for the weird paths (silence, no-match, the user
-/// stalling). The runtime sets `repair:{stage}:reprompt` once the stage has been
-/// active `reprompt_after` turns without completing, and `repair:{stage}:escalate`
-/// after `escalate_after`. When `escalate_to` is set, escalation also *completes*
-/// the stage and routes to that stage — a deterministic "give up and hand off".
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct RepairPolicy {
-    /// Turns the stage may be active before a reprompt signal is raised.
-    #[serde(default = "default_reprompt_after")]
-    pub reprompt_after: u32,
-    /// Turns the stage may be active before an escalation signal is raised.
-    #[serde(default = "default_escalate_after")]
-    pub escalate_after: u32,
-    /// Stage to route to on escalation (also completes the current stage).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub escalate_to: Option<String>,
-}
-
-impl Default for RepairPolicy {
-    fn default() -> Self {
-        Self {
-            reprompt_after: default_reprompt_after(),
-            escalate_after: default_escalate_after(),
-            escalate_to: None,
-        }
-    }
-}
-
-impl RepairPolicy {
-    /// A policy with the given reprompt/escalate turn thresholds.
-    pub fn new(reprompt_after: u32, escalate_after: u32) -> Self {
-        Self {
-            reprompt_after,
-            escalate_after,
-            escalate_to: None,
-        }
-    }
-
-    /// Route to `stage` on escalation (also completes the current stage).
-    pub fn escalate_to(mut self, stage: impl Into<String>) -> Self {
-        self.escalate_to = Some(stage.into());
-        self
-    }
-}
+// The digression/repair vocabulary is owned by the runtime: the authoring layer
+// lowers into it and never reimplements it. Re-exported here so existing
+// `conversation::{Resume, RepairPolicy, FlowStack}` paths keep working.
+pub use gemini_adk_rs::flow::{FlowStack, RepairPolicy, Resume};
+use gemini_adk_rs::flow::{Overlay, escalate_flag};
 
 /// A digression (overlay): a named sub-flow that suspends the main flow when its
 /// `trigger` holds, runs to completion, then resumes per `resume`.
@@ -459,6 +390,20 @@ pub struct CompiledOverlay {
     pub resume: Resume,
 }
 
+impl CompiledOverlay {
+    /// The runtime [`Overlay`] this digression installs: trigger, governed flow
+    /// and resume policy. Extractors are registered separately (see
+    /// [`CompiledConversation::all_extractors`]).
+    pub fn to_runtime(&self) -> Overlay {
+        Overlay::new(
+            self.name.clone(),
+            self.trigger.clone(),
+            self.flow.clone(),
+            self.resume,
+        )
+    }
+}
+
 /// A compiled conversation: the validated main [`CompiledFlow`], the extractors
 /// that fill its frames' slots, any digressions, and the source spec.
 #[derive(Clone)]
@@ -519,10 +464,21 @@ impl CompiledConversation {
         }
         all
     }
-    /// Build the runtime [`FlowStack`] — the main flow plus its digressions, with
-    /// push-on-trigger / resume-on-completion.
+    /// Build the runtime [`FlowStack`] — the main flow plus its digressions and
+    /// repair policies, with push-on-trigger / resume-on-completion.
+    ///
+    /// This is the artifact every execution path drives: the simulator
+    /// ([`Sim`](crate::simulation::Sim)) and a live session
+    /// ([`Live::converse`](crate::live::Live::converse)) both install exactly
+    /// this stack, so what a definition does is the same in each.
     pub fn stack(&self, mode: Enforcement) -> FlowStack {
-        FlowStack::new(self, mode)
+        FlowStack::new(self.flow.clone(), mode)
+            .with_overlays(self.overlays.iter().map(CompiledOverlay::to_runtime))
+            .with_repairs(self.repair.clone())
+    }
+    /// The per-stage repair policies the runtime applies to the main flow.
+    pub fn repair_policies(&self) -> &BTreeMap<String, RepairPolicy> {
+        &self.repair
     }
     /// The authoring spec it was compiled from.
     pub fn spec(&self) -> &ConversationSpec {
@@ -653,10 +609,18 @@ impl Conversation {
             .expect("call .stage(..) before configuring a stage")
     }
 
-    /// Set the stage's steering instruction.
-    pub fn say(mut self, text: impl Into<String>) -> Self {
+    /// Set the stage's instruction: guidance projected to the model while the
+    /// stage is active. It steers what the model says; it is not verbatim
+    /// speech and carries no guarantee of exact wording.
+    pub fn instruction(mut self, text: impl Into<String>) -> Self {
         self.current().say = Some(text.into());
         self
+    }
+
+    /// Alias of [`instruction`](Self::instruction). The name suggests exact
+    /// speech, which this never was; prefer `instruction` in new code.
+    pub fn say(self, text: impl Into<String>) -> Self {
+        self.instruction(text)
     }
 
     /// Set the stage's grounding template.
@@ -883,9 +847,11 @@ impl Conversation {
 
 impl crate::live::Live {
     /// Drive a [`Live`](crate::live::Live) session from a compiled conversation:
-    /// **govern** with its lowered flow and **register** the extractors that fill
-    /// its frames' slots each turn. The one-liner entrypoint for "run this
-    /// conversation".
+    /// **govern** with its lowered flow, **install** its digressions and repair
+    /// policies on the session's [`FlowStack`], and **register** the extractors
+    /// that fill its frames' slots each turn. The one-liner entrypoint for "run
+    /// this conversation": the session drives the same stack
+    /// [`CompiledConversation::stack`] builds for the simulator.
     ///
     /// ```no_run
     /// # use gemini_adk_fluent_rs::prelude::*;
@@ -903,193 +869,32 @@ impl crate::live::Live {
     /// # }
     /// ```
     pub fn converse(self, convo: &CompiledConversation) -> Self {
-        let mut live = self.govern_compiled(convo.flow().clone());
-        for extract in convo.all_extractors() {
-            live = live.extract_record(extract);
-        }
-        live
+        self.govern_compiled(convo.flow().clone())
+            .install_conversation(convo)
     }
 
     /// Like [`converse`](Self::converse) but attaches the flow in **observe** mode
     /// (nothing blocked; deviations recorded) while still registering extractors.
     pub fn converse_observe(self, convo: &CompiledConversation) -> Self {
-        let mut live = self.observe_compiled(convo.flow().clone());
-        for extract in convo.all_extractors() {
-            live = live.extract_record(extract);
-        }
-        live
-    }
-}
-
-/// A digression currently suspending the main flow.
-struct ActiveOverlay {
-    name: String,
-    monitor: FlowMonitor,
-    resume: Resume,
-}
-
-/// The runtime above the DAG: the main flow plus its digressions, with
-/// push-on-trigger and resume-on-completion (MVP: nesting depth 1).
-///
-/// While a digression is active, governance — tool admission, postures/grounds,
-/// `explain()` — delegates to the **active** layer, and the main flow's marking is
-/// untouched, so [`Resume::Previous`] resumes exactly where it left off. Driven by
-/// `State`/guards (model-free, deterministic).
-pub struct FlowStack {
-    main_flow: CompiledFlow,
-    main: FlowMonitor,
-    mode: Enforcement,
-    overlays: Vec<CompiledOverlay>,
-    active: Option<ActiveOverlay>,
-    terminated: bool,
-    /// Per-main-stage repair policies.
-    repair: BTreeMap<String, RepairPolicy>,
-    /// Consecutive turns each main stage has been active without completing.
-    active_turns: BTreeMap<String, u32>,
-}
-
-impl FlowStack {
-    fn new(convo: &CompiledConversation, mode: Enforcement) -> Self {
-        Self {
-            main_flow: convo.flow.clone(),
-            main: FlowMonitor::compiled(convo.flow.clone(), mode),
-            mode,
-            overlays: convo.overlays.clone(),
-            active: None,
-            terminated: false,
-            repair: convo.repair.clone(),
-            active_turns: BTreeMap::new(),
-        }
+        self.observe_compiled(convo.flow().clone())
+            .install_conversation(convo)
     }
 
-    /// Bump per-stage active-turn counters for the main flow and raise repair
-    /// signals (`repair:{stage}:reprompt` / `:escalate`) when thresholds are hit.
-    /// Clears signals for stages that are no longer active.
-    fn apply_repair(&mut self, state: &State) {
-        if self.repair.is_empty() {
-            return;
-        }
-        let active: BTreeSet<String> = self.main.explain(state).active.into_iter().collect();
-        // Reset stages that left active since last turn.
-        let left: Vec<String> = self
-            .active_turns
-            .keys()
-            .filter(|k| !active.contains(*k))
-            .cloned()
-            .collect();
-        for stage in left {
-            self.active_turns.remove(&stage);
-            let _ = state.set(reprompt_flag(&stage), false);
-            let _ = state.set(escalate_flag(&stage), false);
-        }
-        for stage in &active {
-            let count = self.active_turns.entry(stage.clone()).or_insert(0);
-            *count += 1;
-            if let Some(rp) = self.repair.get(stage) {
-                if *count >= rp.reprompt_after {
-                    let _ = state.set(reprompt_flag(stage), true);
-                }
-                if *count >= rp.escalate_after {
-                    let _ = state.set(escalate_flag(stage), true);
-                }
-            }
-        }
-    }
-
-    /// The monitor currently driving — the active overlay if any, else the main flow.
-    pub fn current(&self) -> &FlowMonitor {
-        self.active.as_ref().map_or(&self.main, |a| &a.monitor)
-    }
-
-    /// The name of the active digression, if one is suspending the main flow.
-    pub fn active_overlay(&self) -> Option<&str> {
-        self.active.as_ref().map(|a| a.name.as_str())
-    }
-
-    /// Whether the conversation is finished (main complete, or a `Terminate`
-    /// digression ran).
-    pub fn is_complete(&self) -> bool {
-        self.terminated || (self.active.is_none() && self.main.is_complete())
-    }
-
-    /// Index of the first overlay whose trigger holds against the main context.
-    fn triggered(&self, state: &State) -> Option<usize> {
-        self.overlays
+    /// Everything a compiled conversation declares beyond its main flow: the
+    /// digressions and repair policies (installed on the session's
+    /// [`FlowStack`]) and the extractors (main + overlays). The main flow was
+    /// attached by the caller in the chosen enforcement mode.
+    fn install_conversation(mut self, convo: &CompiledConversation) -> Self {
+        self.digressions = convo
+            .overlays()
             .iter()
-            .position(|ov| self.main.eval(&ov.trigger, state))
-    }
-
-    /// Advance one turn. Enters a triggered digression (suspending the main flow),
-    /// advances an active digression and resumes when it completes, or advances the
-    /// main flow.
-    pub fn on_turn(&mut self, state: &State) {
-        if self.terminated {
-            return;
+            .map(CompiledOverlay::to_runtime)
+            .collect();
+        self.repair_policies = convo.repair_policies().clone();
+        for extract in convo.all_extractors() {
+            self = self.extract_record(extract);
         }
-        match &mut self.active {
-            Some(active) => {
-                active.monitor.on_turn(state);
-                if active.monitor.is_complete() {
-                    let resume = active.resume;
-                    self.active = None;
-                    match resume {
-                        // Main marking was untouched while suspended — nothing to do.
-                        Resume::Previous => {}
-                        Resume::Restart => {
-                            self.main = FlowMonitor::compiled(self.main_flow.clone(), self.mode);
-                        }
-                        Resume::Terminate => self.terminated = true,
-                    }
-                }
-            }
-            None => {
-                if let Some(idx) = self.triggered(state) {
-                    let ov = &self.overlays[idx];
-                    let mut monitor = FlowMonitor::compiled(ov.flow.clone(), self.mode);
-                    // Drive the digression's first turn so single-stage overlays can latch.
-                    monitor.on_turn(state);
-                    if monitor.is_complete() {
-                        match ov.resume {
-                            Resume::Previous => {}
-                            Resume::Restart => {
-                                self.main =
-                                    FlowMonitor::compiled(self.main_flow.clone(), self.mode);
-                            }
-                            Resume::Terminate => self.terminated = true,
-                        }
-                    } else {
-                        self.active = Some(ActiveOverlay {
-                            name: ov.name.clone(),
-                            monitor,
-                            resume: ov.resume,
-                        });
-                    }
-                } else {
-                    // Repair bookkeeping is based on the pre-turn active set so
-                    // an escalation signal can take effect this turn.
-                    self.apply_repair(state);
-                    self.main.on_turn(state);
-                }
-            }
-        }
-    }
-
-    /// Record a successful tool call against the active layer.
-    pub fn on_tool_ok(&mut self, tool: &str, state: &State) {
-        match &mut self.active {
-            Some(active) => active.monitor.on_tool_ok(tool, state),
-            None => self.main.on_tool_ok(tool, state),
-        }
-    }
-
-    /// Whether `tool` is admitted right now (delegates to the active layer).
-    pub fn admits_tool(&self, tool: &str, state: &State) -> Result<(), String> {
-        self.current().admits_tool(tool, state)
-    }
-
-    /// Explain the active layer's control-plane state.
-    pub fn explain(&self, state: &State) -> FlowExplanation {
-        self.current().explain(state)
+        self
     }
 }
 
@@ -1427,7 +1232,7 @@ mod tests {
     fn booking() -> CompiledConversation {
         Conversation::new("booking")
             .stage("collect")
-            .say("Help the user book a table.")
+            .instruction("Help the user book a table.")
             .collect(["party_size", "slot"])
             .next("check", Guard::captured(["party_size", "slot"]))
             .stage("check")
@@ -1908,6 +1713,113 @@ mod tests {
         let _ = state.set("a_done", true);
         stack.on_turn(&state);
         assert!(stack.current().marking().done.contains("a"));
+    }
+
+    /// The artifact `converse()` installs on a live session is the same stack
+    /// the simulator drives. Build both from one compiled conversation, advance
+    /// them over the same state and turn sequence, and require identical
+    /// governance at every turn: active steps, admitted/blocked tools, the
+    /// active digression, and repair signals.
+    #[test]
+    fn live_and_simulator_drive_the_same_stack() {
+        use crate::simulation::Sim;
+
+        let convo = Conversation::new("support")
+            .stage("collect")
+            .allow(["lookup"])
+            .complete_when(Guard::is_true("info"))
+            .next("done", Guard::is_true("info"))
+            .repair(RepairPolicy::new(2, 3).escalate_to("handoff"))
+            .stage("done")
+            .terminal()
+            .stage("handoff")
+            .complete_when(Guard::is_true("handoff_complete"))
+            .overlay("faq")
+            .trigger(Guard::is_true("intent:faq"))
+            .stage("answer")
+            .allow(["search_faq"])
+            .complete_when(Guard::is_true("faq_answered"))
+            .next("faq_end", Guard::is_true("faq_answered"))
+            .stage("faq_end")
+            .terminal()
+            .resume(Resume::Previous)
+            .end_overlay()
+            .compile()
+            .expect("compiles");
+
+        // What a live session installs (the builder's view, no network).
+        let live = crate::live::Live::builder().converse(&convo);
+        assert_eq!(
+            live.digressions()
+                .iter()
+                .map(gemini_adk_rs::flow::Overlay::name)
+                .collect::<Vec<_>>(),
+            ["faq"]
+        );
+        assert!(live.repair_policies().contains_key("collect"));
+        let monitor = FlowMonitor::compiled(convo.flow().clone(), Enforcement::Enforce);
+        let mut installed = crate::live::connect::assemble_stack(
+            monitor,
+            live.digressions().to_vec(),
+            live.repair_policies().clone(),
+            &[],
+        );
+
+        // What the simulator drives.
+        let mut sim = Sim::new(&convo, Enforcement::Enforce);
+        // Both stacks read the same facts.
+        let state = sim.state().clone();
+
+        let script: [&[(&str, bool)]; 6] = [
+            &[],
+            &[("intent:faq", true)],
+            &[("faq_answered", true), ("intent:faq", false)],
+            &[],
+            &[],
+            &[],
+        ];
+        for facts in script {
+            for (k, v) in facts {
+                let _ = state.set(*k, *v);
+            }
+            sim.turn();
+            installed.on_turn(&state);
+            let a = sim.explain();
+            let b = installed.explain(&state);
+            assert_eq!(a.active, b.active);
+            assert_eq!(a.allowed_tools, b.allowed_tools);
+            assert_eq!(a.blocked_tools, b.blocked_tools);
+            assert_eq!(sim.active_overlay(), installed.active_overlay());
+            assert_eq!(sim.is_complete(), installed.is_complete());
+        }
+        // The script exercised a digression and a repair escalation.
+        assert!(
+            installed
+                .explain(&state)
+                .active
+                .contains(&"handoff".to_string())
+        );
+        assert_eq!(state.get::<bool>("repair:collect:escalate"), Some(true));
+    }
+
+    /// Replacing the governing flow discards the conversation's digressions:
+    /// they only mean something relative to the main flow they suspend.
+    #[test]
+    fn regoverning_drops_installed_digressions() {
+        let convo = Conversation::new("s")
+            .stage("a")
+            .terminal()
+            .overlay("faq")
+            .trigger(Guard::is_true("intent:faq"))
+            .stage("x")
+            .terminal()
+            .end_overlay()
+            .compile()
+            .expect("compiles");
+        let live = crate::live::Live::builder().converse(&convo);
+        assert_eq!(live.digressions().len(), 1);
+        let live = live.govern(Flow::new().step("only").terminal().build().expect("valid"));
+        assert!(live.digressions().is_empty());
     }
 
     #[test]

@@ -29,6 +29,12 @@ use crate::orchestration::{AgentMode, call_agent};
 use crate::state::State;
 use crate::text::TextAgent;
 
+pub mod stack;
+pub use stack::{
+    FlowStack, OVERLAY_STATE_KEY, Overlay, RepairPolicy, Resume, SharedFlowStack, escalate_flag,
+    reprompt_flag,
+};
+
 /// Evaluation context handed to a [`Guard`]: the session state plus the
 /// current flow marking.
 pub struct FlowCtx<'a> {
@@ -1228,6 +1234,22 @@ impl FlowMonitor {
     /// [`LiveHandle::explain`](crate::live::LiveHandle::explain)).
     pub fn into_shared(self) -> SharedFlowMonitor {
         Arc::new(parking_lot::Mutex::new(self))
+    }
+
+    /// Wrap this monitor as the main layer of a [`FlowStack`] with no
+    /// digressions — the form the Live control plane drives.
+    pub fn into_stack(self) -> FlowStack {
+        FlowStack::from_monitor(self)
+    }
+
+    /// Re-enter the flow from its start: forget the marking, the fired
+    /// `on_enter` actions and the reset edges. The flow, mode and registered
+    /// actions are kept, and recorded violations stay for audit. `State` is not
+    /// touched — the next re-latch runs against whatever facts it holds.
+    pub fn restart(&mut self) {
+        self.marking = Marking::default();
+        self.announced.clear();
+        self.reset_prev.clear();
     }
 
     /// Explain the current control-plane state: active steps, which tools are

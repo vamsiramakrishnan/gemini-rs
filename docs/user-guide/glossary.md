@@ -85,6 +85,21 @@ Core vocabulary across the three layers. Types link to where they live; see the
   gathered (`RepairConfig`, `NeedsFulfillment`).
 - **Governed flow** — a declarative conversation/tool DAG (`Flow`) enforced live
   via `Live::govern(flow)`: gates tools, projects postures, drives repair.
+- **Flow stack (`FlowStack`)** — the one governance object a session drives:
+  the main flow plus its digressions and repair policies. A bare `govern` is a
+  stack with no digressions; `Live::converse` installs a compiled
+  conversation's digressions on it. Lives in the runtime (`gemini-adk-rs`).
+- **Digression** — a named sub-flow that suspends the main flow when its trigger
+  holds, runs to completion, then resumes per its `Resume` policy
+  (`Previous`, `Restart`, `Terminate`). Spelled `overlay` in the spec and
+  builder (`.overlay(..)`); the two words mean the same thing.
+- **Stage / step / phase** — three words for three layers. A **stage** is what
+  you author in a `Conversation`; it lowers to a **step**, the only node type
+  in a compiled `Flow`; a **phase** is the separate `PhaseMachine` speaking
+  mode and is not part of a flow.
+- **Instruction (`.instruction(..)`)** — a stage's guidance to the model while
+  it is active. It lowers to a step posture and steers the model; it is not
+  verbatim speech. `.say(..)` is the older alias.
 
 ## Extraction & telemetry
 

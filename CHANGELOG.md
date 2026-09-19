@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`Live::converse(&convo)` did not install a conversation's digressions or
+  repair policies.** It attached the main flow and extractors only, while the
+  simulator drove a `FlowStack` with everything the conversation declared, so
+  a scenario could pass in Conversation CI and the same digression never fire
+  on a call. The stack now lives in the runtime (`gemini_adk_rs::flow::FlowStack`)
+  and is the only governance object the control plane drives: a bare `govern`
+  is a stack with no digressions, and `converse` installs the overlays and
+  repair policies on it. A control-plane test drives a digression through the
+  real turn path, and a fluent test asserts the installed stack and the
+  simulator agree turn by turn.
+
 - **`--all-features` did not compile** after a lone `opentelemetry_sdk` 0.31 →
   0.32 bump split the OpenTelemetry family across two versions; the sdk is back
   on 0.31 with its exporters, the manifest says why they move together, and
@@ -20,7 +31,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ci.yml` declared no `permissions`, so every job ran with the repository's
   default `GITHUB_TOKEN` scope; it is `contents: read`.
 
+### Added
+
+- `gemini_adk_rs::flow::{FlowStack, Overlay, Resume, RepairPolicy,
+  SharedFlowStack}`, `FlowMonitor::into_stack`/`restart`,
+  `LiveSessionBuilder::flow_stack`, and the `flow:overlay` state key naming
+  the active digression. The fluent `conversation::{FlowStack, Resume,
+  RepairPolicy}` paths are re-exports of the runtime types.
+- `Live::digressions()` and `Live::repair_policies()` introspection, and
+  `CompiledConversation::repair_policies()`.
+- `Conversation::instruction(..)` as the name for a stage's model guidance;
+  `say(..)` remains as an alias. Spec documents accept `"instruction"` as
+  well as `"say"`.
+
+### Deprecated
+
+- `gemini_adk_server_rs::{FlowAppSpec, MockToolSpec}`: use `SessionSpec` and
+  `ToolSpec`. The document format is unchanged.
+
 ### Changed
+
+- `Resume::Restart` is documented for what it does: it restarts the main
+  flow's monitor against the existing state, not the business task.
+- The Governed Flows guide has a "Digressions and repair: the flow stack"
+  section; the glossary defines flow stack, digression, stage/step/phase and
+  instruction.
 
 - **The documentation website is now Astro + Starlight** (`apps/docs`),
   replacing mdBook. Content is not authored in the app: every page is synced

@@ -57,7 +57,7 @@ pub(in crate::live) async fn handle_tool_calls(
     background_tracker: &Option<Arc<BackgroundToolTracker>>,
     extractors: &[Arc<dyn TurnExtractor>],
     middleware: &Arc<crate::middleware::MiddlewareChain>,
-    flow: &Option<crate::flow::SharedFlowMonitor>,
+    flow: &Option<crate::flow::SharedFlowStack>,
     tool_gate: &mut ToolGate,
     completion_tx: &tokio::sync::mpsc::WeakSender<crate::live::processor::ControlEvent>,
     barge_in: &CancellationToken,
@@ -660,7 +660,11 @@ mod tests {
             .terminal()
             .build()
             .expect("valid flow");
-        let flow = Some(FlowMonitor::new(flow_def, Enforcement::Observe).into_shared());
+        let flow = Some(
+            FlowMonitor::new(flow_def, Enforcement::Observe)
+                .into_stack()
+                .into_shared(),
+        );
         let mut gate = ToolGate::new();
 
         // Barge-in fires 50ms into the 10s tool.
@@ -810,7 +814,11 @@ mod tests {
             .terminal()
             .build()
             .expect("valid flow");
-        let flow = Some(FlowMonitor::new(flow_def, Enforcement::Observe).into_shared());
+        let flow = Some(
+            FlowMonitor::new(flow_def, Enforcement::Observe)
+                .into_stack()
+                .into_shared(),
+        );
         let mut gate = ToolGate::new();
 
         let call = FunctionCall {

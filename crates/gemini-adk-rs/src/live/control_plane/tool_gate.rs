@@ -42,7 +42,7 @@ impl ToolGate {
         call_id: &str,
         name: &str,
         ok: bool,
-        flow: &Option<crate::flow::SharedFlowMonitor>,
+        flow: &Option<crate::flow::SharedFlowStack>,
         state: &State,
     ) {
         if !call_id.is_empty() && !self.observed.insert(call_id.to_string()) {
@@ -57,9 +57,9 @@ impl ToolGate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::flow::{Enforcement, Flow, FlowMonitor, Guard, SharedFlowMonitor};
+    use crate::flow::{Enforcement, Flow, FlowMonitor, Guard, SharedFlowStack};
 
-    fn one_step_flow() -> SharedFlowMonitor {
+    fn one_step_flow() -> SharedFlowStack {
         let flow = Flow::new()
             .step("charge")
             .done(Guard::called_ok("charge_card"))
@@ -68,7 +68,9 @@ mod tests {
             .terminal()
             .build()
             .expect("valid flow");
-        FlowMonitor::new(flow, Enforcement::Observe).into_shared()
+        FlowMonitor::new(flow, Enforcement::Observe)
+            .into_stack()
+            .into_shared()
     }
 
     #[test]
@@ -109,7 +111,7 @@ mod tests {
     #[test]
     fn no_flow_is_a_no_op() {
         let state = State::new();
-        let flow: Option<SharedFlowMonitor> = None;
+        let flow: Option<SharedFlowStack> = None;
         let mut gate = ToolGate::new();
         // Must not panic when no flow governs the session.
         gate.observe_completion("c1", "charge_card", true, &flow, &state);

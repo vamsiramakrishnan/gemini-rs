@@ -170,8 +170,9 @@ pub use error::{AgentError, AgentResult, ConfigError, ToolError};
 pub use events::{Event, EventActions, EventType, StructuredEvent};
 pub use extract::{Extract, Recognizer, RecordExtractor};
 pub use flow::{
-    CompiledFlow, Enforcement, Flow, FlowError, FlowErrors, FlowExplanation, FlowMonitor, Guard,
-    SharedFlowMonitor, StepAction, ToolSurface, Verdict, Violation, on_enter,
+    CompiledFlow, Enforcement, Flow, FlowError, FlowErrors, FlowExplanation, FlowMonitor,
+    FlowStack, Guard, Overlay, RepairPolicy, Resume, SharedFlowMonitor, SharedFlowStack,
+    StepAction, ToolSurface, Verdict, Violation, on_enter,
 };
 pub use frame::{ConfirmPolicy, Frame, FrameSpec, SlotRecognizer, SlotSpec, SlotValidator};
 /// Re-exports the `#[tool]`/`#[derive(..)]` macros route their generated code

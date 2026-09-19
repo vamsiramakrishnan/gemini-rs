@@ -15,9 +15,19 @@ pub use gemini_adk_fluent_rs::spec::{
 };
 
 /// The original name for the app document. Alias of [`SessionSpec`]; every
-/// old `FlowAppSpec` JSON document parses unchanged.
+/// old `FlowAppSpec` JSON document parses unchanged. Compatibility only: new
+/// code and documentation use `SessionSpec`.
+#[deprecated(
+    since = "2.1.0",
+    note = "use `SessionSpec`; the document format is unchanged"
+)]
 pub type FlowAppSpec = SessionSpec;
-/// The original name for a declared tool. Alias of [`ToolSpec`].
+/// The original name for a declared tool. Alias of [`ToolSpec`]. Compatibility
+/// only: a `ToolSpec` can be a real HTTP or MCP binding, not only a mock.
+#[deprecated(
+    since = "2.1.0",
+    note = "use `ToolSpec`; a declared tool is not necessarily a mock"
+)]
 pub type MockToolSpec = ToolSpec;
 /// The original name for the modality. Alias of [`SpecModality`].
 pub type FlowModality = SpecModality;
@@ -33,7 +43,7 @@ mod tests {
     /// must keep parsing and validating identically.
     #[test]
     fn legacy_flow_app_documents_still_parse() {
-        let spec = FlowAppSpec::from_value(json!({
+        let spec = SessionSpec::from_value(json!({
             "name": "collections",
             "instruction": "You collect payments.",
             "modality": "text",
@@ -65,7 +75,7 @@ mod tests {
 
     #[test]
     fn bare_flows_still_wrap() {
-        let spec = FlowAppSpec::from_value(json!({
+        let spec = SessionSpec::from_value(json!({
             "steps": [{"id": "only", "terminal": true}]
         }))
         .expect("bare flow parses");

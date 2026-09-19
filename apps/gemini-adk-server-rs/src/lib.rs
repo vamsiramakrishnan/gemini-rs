@@ -25,6 +25,7 @@ pub use agents::{AgentEntry, ServerAgentRegistry};
 pub use execution::{
     ChannelEvents, LlmFactory, RunOutcome, build_text_agent, build_text_agent_with, run_agent_turn,
 };
+#[allow(deprecated)]
 pub use flow_app::{FlowAppSpec, FlowModality, FlowValidation, MockToolSpec};
 pub use router::build_api_router;
 pub use serve::{ServeConfig, run_server};

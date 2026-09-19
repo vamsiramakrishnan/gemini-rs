@@ -492,7 +492,7 @@ async fn evaluate_repair(
 /// synchronous re-latch + projection; on-enter actions (which may await an
 /// inline agent) fire after the guard is dropped.
 async fn govern_flow(
-    flow: &Option<crate::flow::SharedFlowMonitor>,
+    flow: &Option<crate::flow::SharedFlowStack>,
     state: &State,
     context_buffer: &mut Vec<gemini_genai_rs::prelude::Content>,
 ) {
@@ -508,6 +508,10 @@ async fn govern_flow(
                 .map(|s| s.id.clone())
                 .collect();
             let _ = state.set("flow:active", active);
+            let _ = state.set(
+                crate::flow::OVERLAY_STATE_KEY,
+                mon.active_overlay().map(str::to_string),
+            );
             for posture in mon.active_postures(state) {
                 context_buffer.push(gemini_genai_rs::prelude::Content::model(posture));
             }
@@ -1008,6 +1012,81 @@ mod harness {
         }
     }
 
+    /// A digression installed on the session's stack must take effect through
+    /// the real turn path: its posture steers, its tools are the admitted ones,
+    /// the state key names it, and the main flow resumes untouched.
+    #[tokio::test]
+    async fn a_digression_suspends_and_resumes_the_main_flow_through_the_turn_path() {
+        use crate::flow::{FlowStack, Overlay, Resume};
+
+        let main = Flow::new()
+            .step("collect")
+            .allow(["lookup"])
+            .posture("MAIN-POSTURE")
+            .done(Guard::is_true("info"))
+            .step("done")
+            .after("collect")
+            .terminal()
+            .require(["done"])
+            .build()
+            .expect("valid flow")
+            .compile()
+            .expect("compiles");
+        let faq = Flow::new()
+            .step("answer")
+            .allow(["search_faq"])
+            .posture("FAQ-POSTURE")
+            .done(Guard::is_true("faq_answered"))
+            .step("faq_end")
+            .after("answer")
+            .terminal()
+            .require(["faq_end"])
+            .build()
+            .expect("valid flow")
+            .compile()
+            .expect("compiles");
+        let stack = FlowStack::new(main, Enforcement::Enforce).with_overlay(Overlay::new(
+            "faq",
+            Guard::is_true("intent:faq"),
+            faq,
+            Resume::Previous,
+        ));
+        let shared = stack.into_shared();
+
+        let mut h = Harness::new();
+        h.control.steering_mode = SteeringMode::ContextInjection;
+        h.control.flow = Some(shared.clone());
+
+        // Turn 1: main flow drives.
+        h.run_turn().await;
+        assert_eq!(h.state.get::<Option<String>>("flow:overlay"), Some(None));
+        assert!(shared.lock().admits_tool("lookup", &h.state).is_ok());
+        assert!(shared.lock().admits_tool("search_faq", &h.state).is_err());
+
+        // Turn 2: the user digresses. The overlay drives: its posture steers and
+        // its tools are the admitted ones.
+        let _ = h.state.set("intent:faq", true);
+        h.run_turn().await;
+        assert_eq!(
+            h.state.get::<Option<String>>("flow:overlay"),
+            Some(Some("faq".to_string()))
+        );
+        let last = h.batches().last().cloned().unwrap_or_default();
+        assert!(last.iter().any(|t| t.contains("FAQ-POSTURE")), "{last:?}");
+        assert!(shared.lock().admits_tool("search_faq", &h.state).is_ok());
+        assert!(shared.lock().admits_tool("lookup", &h.state).is_err());
+
+        // Turn 3: the digression completes; the main flow resumes where it was.
+        let _ = h.state.set("faq_answered", true);
+        let _ = h.state.set("intent:faq", false);
+        h.run_turn().await;
+        assert_eq!(h.state.get::<Option<String>>("flow:overlay"), Some(None));
+        let active: Vec<String> = h.state.get("flow:active").unwrap_or_default();
+        assert_eq!(active, ["collect"]);
+        let last = h.batches().last().cloned().unwrap_or_default();
+        assert!(last.iter().any(|t| t.contains("MAIN-POSTURE")), "{last:?}");
+    }
+
     /// An amendment must reach the model in a session with no phase machine.
     ///
     /// This is the ordinary shape of a Live session —
@@ -1270,7 +1349,11 @@ mod harness {
 
         let mut h = Harness::new();
         h.control.steering_mode = SteeringMode::ContextInjection;
-        h.control.flow = Some(FlowMonitor::new(flow, Enforcement::Observe).into_shared());
+        h.control.flow = Some(
+            FlowMonitor::new(flow, Enforcement::Observe)
+                .into_stack()
+                .into_shared(),
+        );
         h.phase = Some(tokio::sync::Mutex::new(machine));
 
         h.run_turn().await;
@@ -1315,7 +1398,11 @@ mod harness {
             .expect("valid flow");
 
         let mut h = Harness::new();
-        h.control.flow = Some(FlowMonitor::new(flow, Enforcement::Observe).into_shared());
+        h.control.flow = Some(
+            FlowMonitor::new(flow, Enforcement::Observe)
+                .into_stack()
+                .into_shared(),
+        );
 
         // Four turns of the caller stalling before the digits arrive.
         for _ in 0..4 {
@@ -1356,7 +1443,11 @@ mod harness {
             .expect("valid flow");
 
         let mut h = Harness::new();
-        h.control.flow = Some(FlowMonitor::new(flow, Enforcement::Observe).into_shared());
+        h.control.flow = Some(
+            FlowMonitor::new(flow, Enforcement::Observe)
+                .into_stack()
+                .into_shared(),
+        );
 
         h.run_turn().await;
         h.run_turn().await;
@@ -1406,7 +1497,11 @@ mod harness {
 
         let mut h = Harness::new();
         h.control.steering_mode = SteeringMode::ContextInjection;
-        h.control.flow = Some(FlowMonitor::new(flow, Enforcement::Observe).into_shared());
+        h.control.flow = Some(
+            FlowMonitor::new(flow, Enforcement::Observe)
+                .into_stack()
+                .into_shared(),
+        );
         h.phase = Some(tokio::sync::Mutex::new(machine));
         let _ = h.state.set("advance", true);
 
@@ -1447,7 +1542,11 @@ mod harness {
             .build()
             .expect("valid flow");
         let mut h = Harness::new();
-        h.control.flow = Some(FlowMonitor::new(flow, Enforcement::Observe).into_shared());
+        h.control.flow = Some(
+            FlowMonitor::new(flow, Enforcement::Observe)
+                .into_stack()
+                .into_shared(),
+        );
 
         // Not yet greeted -> greet is the active step, nothing done.
         h.run_turn().await;
@@ -1487,7 +1586,9 @@ mod harness {
             .terminal()
             .build()
             .expect("valid flow");
-        let shared = FlowMonitor::new(flow, Enforcement::Enforce).into_shared();
+        let shared = FlowMonitor::new(flow, Enforcement::Enforce)
+            .into_stack()
+            .into_shared();
         let mut h = Harness::new();
         h.control.flow = Some(shared.clone());
 
