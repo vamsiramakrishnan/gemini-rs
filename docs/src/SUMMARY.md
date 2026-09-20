@@ -26,6 +26,7 @@
 - [State Watchers & Temporal Patterns](./user-guide/watchers.md)
 - [Session Persistence & Resumption](./user-guide/session-persistence.md)
 - [Record & Replay](./user-guide/record-replay.md)
+- [Capacity and Cost per Session](./user-guide/capacity.md)
 
 # Tools & Extraction
 

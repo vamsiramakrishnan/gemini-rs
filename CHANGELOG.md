@@ -43,6 +43,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Conversation::instruction(..)` as the name for a stage's model guidance;
   `say(..)` remains as an alias. Spec documents accept `"instruction"` as
   well as `"say"`.
+- **`example-session-bench`, a concurrent-session capacity harness.** Holds
+  `N` Live sessions open in one process, each the real L1 control plane over
+  a scripted L0 transport that answers every turn after a fixed delay, and
+  reports resident memory (baseline, connected, peak, after disconnect, per
+  session), `connect` time, `send_text` → first text and → `TurnComplete`
+  percentiles, and a cross-check of the runtime's own telemetry against the
+  turns it drove. `just bench-sessions 100`; JSON output; a four-session
+  smoke test runs under `cargo test --workspace`. The guide is
+  `docs/user-guide/capacity.md`. No credentials, no network.
+- `Conversation`, `ConversationSpec`, `CompiledConversation` and `Sim` are in
+  the fluent prelude. The authoring model and the model-free simulator were
+  the one headline feature that needed a second import line.
+- `gemini-adk-fluent-rs` feature bundles: `voice` (`voice-io`, `denoise`,
+  `dsp`, `vad-wavekat`) and `full` (`voice` plus `sip`, `http-tools`,
+  `templates`, `otel-otlp`, with the default TLS backend).
+- `TungsteniteError::NoTlsBackend` and `transport::HAS_TLS_BACKEND`: a build
+  with neither `tls-native` nor `tls-rustls` still compiles, but a `wss://`
+  dial now fails before any socket is opened, with an error that names the
+  feature to enable, instead of a handshake error from inside the WebSocket
+  stack.
+
+### Removed
+
+- The root `benches/` directory. Its two files were never part of any
+  package (the workspace root has no `[package]`) and called a ring-buffer
+  API that no longer exists; the live benchmark is
+  `crates/gemini-genai-rs/benches/audio_pipeline.rs`.
 
 ### Deprecated
 

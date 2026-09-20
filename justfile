@@ -154,6 +154,11 @@ run-tool-calling:
 run-transcription:
     cargo run -p example-transcription
 
+# Hold N concurrent Live sessions open against a scripted transport and print
+# memory and turn-latency numbers. No model, no network. `just bench-sessions 100`.
+bench-sessions sessions="50" turns="10":
+    cargo run --release -p example-session-bench -- --sessions {{sessions}} --turns {{turns}} --json target/session-bench.json
+
 # ─── Watch Mode ──────────────────────────────────────────────
 
 # Watch for changes and run tests (requires cargo-watch)
