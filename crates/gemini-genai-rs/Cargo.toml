@@ -26,7 +26,9 @@ live = []
 vad = []
 vad-wavekat = ["vad", "dep:wavekat-vad"]
 # TLS backend for the WebSocket (and optional REST) transport. Enable exactly
-# one. With neither, the crate compiles but cannot dial `wss://`/`https://`.
+# one. With neither, the crate compiles (so `--no-default-features` and
+# feature-isolation builds stay green) but a `wss://` dial is refused up front
+# with `TungsteniteError::NoTlsBackend`, which names the feature to enable.
 tls-native = ["tokio-tungstenite/native-tls", "reqwest?/native-tls"]
 tls-rustls = ["tokio-tungstenite/rustls-tls-native-roots", "reqwest?/rustls-tls"]
 http = ["dep:reqwest"]
