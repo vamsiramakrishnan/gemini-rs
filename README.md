@@ -47,6 +47,7 @@ The same flow can be serialized, validated, simulated offline, edited in Flow St
 
 Text agents need Rust 1.93+.
 
+<!-- quickstart:Cargo.toml -->
 ```toml
 [dependencies]
 gemini-adk-fluent-rs = "2.0"
@@ -55,6 +56,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 Voice I/O is optional:
 
+<!-- quickstart:Cargo.toml:voice -->
 ```toml
 gemini-adk-fluent-rs = { version = "2.0", features = ["voice-io"] }
 ```
@@ -82,6 +84,7 @@ Live sessions and text agents use the same environment-based credential resoluti
 
 ## Text agent
 
+<!-- quickstart:src/bin/hello_text.rs -->
 ```rust
 use gemini_adk_fluent_rs::prelude::*;
 use std::sync::Arc;
@@ -110,6 +113,7 @@ cargo run -p example-quickstart --bin hello-text
 
 ## Voice session
 
+<!-- quickstart:src/bin/hello_voice.rs -->
 ```rust
 use gemini_adk_fluent_rs::prelude::*;
 

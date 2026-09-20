@@ -100,10 +100,12 @@ fn readme_documents_a_version_that_accepts_what_it_ships() {
     }
 }
 
-/// The version a reader sees before any code: the README's `**vX.Y · MIT**`
-/// line and the book's hero eyebrow. Both said 1.0 for a day after 2.0.0
-/// shipped — the manifest check above could not see them, because they are
-/// prose, not a dependency line. Here they must name the shipped major.minor.
+/// The version a reader sees before any code: the book's hero eyebrow. It said
+/// 1.0 for a day after 2.0.0 shipped — the manifest check above could not see
+/// it, because it is prose, not a dependency line. Here it must name the
+/// shipped major.minor. (The README's own `**vX.Y · …**` line was retired with
+/// the README overhaul; its crates.io badge tracks the published version, and
+/// the install blocks above are pinned by the manifest checks.)
 #[test]
 fn the_version_readers_see_first_is_the_one_that_shipped() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -117,16 +119,6 @@ fn the_version_readers_see_first_is_the_one_that_shipped() {
         .rsplit_once('.')
         .map(|(mm, _)| mm)
         .unwrap_or(shipped);
-
-    let readme = readme();
-    let eyebrow = readme
-        .lines()
-        .find(|l| l.starts_with("**v"))
-        .expect("README has a `**vX.Y · …**` line under the badges");
-    assert!(
-        eyebrow.starts_with(&format!("**v{major_minor} ·")),
-        "README says {eyebrow:?} but the workspace ships {shipped}"
-    );
 
     let hero = std::fs::read_to_string(root.join("apps/docs/src/content/docs/index.mdx"))
         .expect("site landing page");
