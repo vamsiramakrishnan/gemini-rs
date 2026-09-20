@@ -176,8 +176,9 @@ macro_rules! let_clone {
 /// | State prefixes / `SlotEvidence` | `use gemini_adk_fluent_rs::state::*;` |
 /// | Full flow vocabulary (`CompiledFlow`, `StepAction`, `Violation`, …) | `use gemini_adk_fluent_rs::flow::*;` |
 /// | `Agent` trait + operator/pattern internals | `use gemini_adk_fluent_rs::agents::*;` |
-/// | Conversation compiler (`Conversation`, `ConversationSpec`, …) | `use gemini_adk_fluent_rs::conversation::*;` |
-/// | A2A, motifs, policy, simulation, testing, orchestration, credentials, run_config | the same-named module, e.g. `use gemini_adk_fluent_rs::simulation::*;` |
+/// | Conversation compiler internals (`ResolverRegistry`, `StageSpec`, `OverlaySpec`, …) | `use gemini_adk_fluent_rs::conversation::*;` (`Conversation`, `ConversationSpec`, `CompiledConversation` are in the prelude) |
+/// | Serializable scenarios (`Scenario`, `SimStep`) | `use gemini_adk_fluent_rs::simulation::*;` (`Sim` is in the prelude) |
+/// | A2A, motifs, policy, testing, orchestration, credentials, run_config | the same-named module, e.g. `use gemini_adk_fluent_rs::policy::*;` |
 /// | Raw L0 wire types | `use gemini_adk_fluent_rs::wire::*;` |
 pub mod prelude {
     // ── Voice I/O: `.talk()` on a connected handle (feature `voice-io`) ──
@@ -211,6 +212,15 @@ pub mod prelude {
 
     // ── Governed flow (core vocabulary; full set in `crate::flow`) ──
     pub use gemini_adk_rs::flow::{Enforcement, Flow, FlowMonitor, Guard, Verdict};
+
+    // ── Conversations and the model-free simulator ──
+    // The authoring model above `Flow` and the deterministic driver that runs
+    // it without a model. They are the flagship of the crate, so they live on
+    // the same import line as `Live`; the compiler internals stay in
+    // `crate::conversation` and the serializable `Scenario` in
+    // `crate::simulation`.
+    pub use crate::conversation::{CompiledConversation, Conversation, ConversationSpec};
+    pub use crate::simulation::Sim;
 
     // ── State (prefix scopes + `SlotEvidence` in `crate::state`) ──
     pub use gemini_adk_rs::state::{State, StateKey};

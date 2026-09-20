@@ -9,7 +9,11 @@ use std::collections::BTreeSet;
 const MANIFEST: &str = include_str!("../Cargo.toml");
 
 /// Features docs.rs must not enable, with the reason it must not.
-const EXCLUDED: &[(&str, &str)] = &[("voice-io", "cpal needs libasound headers at build time")];
+const EXCLUDED: &[(&str, &str)] = &[
+    ("voice-io", "cpal needs libasound headers at build time"),
+    ("voice", "bundle that includes voice-io"),
+    ("full", "bundle that includes voice (and so voice-io)"),
+];
 
 /// Names declared under `[features]`.
 fn declared_features() -> BTreeSet<String> {

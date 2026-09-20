@@ -64,6 +64,13 @@ The crate ships
 |---|---|---|---|
 | `gemini-llm` | on | Text generation via `GeminiLlm` | Only with `--no-default-features`: compiles, then errors at runtime: *"requires the 'gemini-llm' feature flag"* |
 | `voice-io` | off | `talk()` microphone/speaker duplex | No `talk()` method on the handle |
+| `voice` | off | Bundle: `voice-io`, `denoise`, `dsp`, `vad-wavekat` | Enable the pieces you need individually |
+| `full` | off | Bundle: `voice` plus `sip`, `http-tools`, `templates`, `otel-otlp` | Same |
+
+`--no-default-features` drops the TLS backend along with `gemini-llm`. Name
+`tls-native` or `tls-rustls` again when you do that: with neither, the
+crate still compiles, and the first `wss://` dial fails immediately with
+`NoTlsBackend`, an error that names the feature to enable.
 
 Then copy either Quickstart program from the
 [workspace README](https://github.com/vamsiramakrishnan/gemini-rs#quickstart)
