@@ -495,7 +495,7 @@ impl FlowStack {
     ///
     /// A tool can itself fire a reset (`reset(..).when(called_ok(..))`), so the
     /// main layer sheds the repair signals of whatever that un-latches, exactly
-    /// as [`advance_main`](Self::advance_main) does at a turn boundary. Repair
+    /// as the main layer does at a turn boundary. Repair
     /// is tracked for the main flow only, so a digression just delegates.
     pub fn on_tool_ok(&mut self, tool: &str, state: &State) {
         if self.terminated.is_some() {
