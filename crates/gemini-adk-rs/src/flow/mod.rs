@@ -1534,8 +1534,22 @@ impl FlowMonitor {
 
     /// Record a successful tool call, then re-latch.
     pub fn on_tool_ok(&mut self, tool: &str, state: &State) {
-        *self.marking.tool_ok.entry(tool.to_string()).or_insert(0) += 1;
+        self.begin_tool_ok(tool, state);
         self.relatch(state);
+    }
+
+    /// The first half of [`on_tool_ok`](Self::on_tool_ok): count the call and
+    /// apply [`Constraint::Reset`] edges, returning the steps that were
+    /// un-latched.
+    ///
+    /// A reset can be gated on a tool — `reset(..).when(called_ok("start_over"))`
+    /// — in which case its edge fires here rather than at a turn boundary. A
+    /// caller holding evidence outside the marking needs the same chance to shed
+    /// it that [`begin_turn`](Self::begin_turn) gives; follow with
+    /// [`relatch`](Self::relatch).
+    pub fn begin_tool_ok(&mut self, tool: &str, state: &State) -> Vec<String> {
+        *self.marking.tool_ok.entry(tool.to_string()).or_insert(0) += 1;
+        self.apply_resets(state)
     }
 
     /// Steps that are eligible but not yet done.

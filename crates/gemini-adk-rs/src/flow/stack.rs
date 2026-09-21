@@ -492,11 +492,26 @@ impl FlowStack {
     /// conversation has been terminated: nothing is governing, so there is no
     /// marking for the call to advance. (In `Enforce` the call is denied before
     /// it runs; in `Observe` it runs but must not move a flow that has ended.)
+    ///
+    /// A tool can itself fire a reset (`reset(..).when(called_ok(..))`), so the
+    /// main layer sheds the repair signals of whatever that un-latches, exactly
+    /// as [`advance_main`](Self::advance_main) does at a turn boundary. Repair
+    /// is tracked for the main flow only, so a digression just delegates.
     pub fn on_tool_ok(&mut self, tool: &str, state: &State) {
         if self.terminated.is_some() {
             return;
         }
-        self.current_mut().on_tool_ok(tool, state);
+        match &mut self.active {
+            Some(active) => active.monitor.on_tool_ok(tool, state),
+            None => {
+                for step in self.main.begin_tool_ok(tool, state) {
+                    self.clear_repair(&step, state);
+                }
+                // No `apply_repair` here: repair counters advance per turn, not
+                // per tool call.
+                self.main.relatch(state);
+            }
+        }
     }
 
     /// Observe a tool call for conformance against the active layer (see
@@ -513,7 +528,17 @@ impl FlowStack {
             }
             return;
         }
-        self.current_mut().observe_tool(tool, ok, state);
+        // The conformance check is the *stack's*, not the active monitor's, and
+        // the call is recorded through `Self::on_tool_ok` so a tool-fired reset
+        // still sheds its repair signals.
+        if self.mode == Enforcement::Observe
+            && let Err(reason) = self.admits_tool(tool, state)
+        {
+            self.current_mut().record_violation(tool, reason);
+        }
+        if ok {
+            self.on_tool_ok(tool, state);
+        }
     }
 
     /// Whether `tool` is admitted right now (delegates to the active layer).
@@ -1062,6 +1087,51 @@ mod tests {
         stack.on_turn(&state);
         assert_eq!(stack.explain(&state).active, ["handoff"]);
         assert_eq!(state.get::<bool>(&escalate_flag("collect")), Some(true));
+    }
+
+    /// A reset can be gated on a *tool*, not just a state flag — `reset(..)
+    /// .when(called_ok("start_over"))` is the natural "start over" button. That
+    /// edge fires inside `on_tool_ok`, not at a turn boundary, so the repair
+    /// signals must be shed there too, or the escalated step re-completes on its
+    /// own stale flag exactly as it would at a turn boundary.
+    #[test]
+    fn a_tool_triggered_reset_clears_a_latched_escalation() {
+        let state = State::new();
+        let main = Flow::new()
+            .step("collect")
+            .allow(["start_over"])
+            .done(Guard::any(vec![
+                Guard::is_true("info"),
+                Guard::is_true(escalate_flag("collect")),
+            ]))
+            .step("handoff")
+            .after("collect")
+            .gate(Guard::is_true(escalate_flag("collect")))
+            .done(Guard::is_true("handoff_complete"))
+            .step("done")
+            .after_when("collect", Guard::is_true("info"))
+            .terminal()
+            .reset(["collect"])
+            .when(Guard::called_ok("start_over"))
+            .build()
+            .expect("valid")
+            .compile()
+            .expect("compiles");
+        let mut stack = FlowStack::new(main, Enforcement::Enforce)
+            .with_repair("collect", RepairPolicy::new(1, 2).escalate_to("handoff"));
+
+        stack.on_turn(&state);
+        stack.on_turn(&state); // escalated
+        assert_eq!(stack.explain(&state).active, ["handoff"]);
+
+        // The caller hits "start over" mid-turn.
+        stack.on_tool_ok("start_over", &state);
+        assert_eq!(state.get::<bool>(&escalate_flag("collect")), Some(false));
+        assert_eq!(stack.explain(&state).active, ["collect"]);
+
+        // And it stays reset across the next boundary rather than snapping back.
+        stack.on_turn(&state);
+        assert_eq!(stack.explain(&state).active, ["collect"]);
     }
 
     #[test]

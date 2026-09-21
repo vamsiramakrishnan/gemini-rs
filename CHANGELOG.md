@@ -44,7 +44,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the step again on that stale signal and routed straight back to the hand-off
   target. Resets are applied first now (`FlowMonitor::begin_turn`), and the
   steps they un-latch have their repair signals and counters cleared before the
-  re-latch — as does every repair-tracked step on a `Resume::Restart`.
+  re-latch — as does every repair-tracked step on a `Resume::Restart`. A reset
+  can also be gated on a tool (`reset(..).when(called_ok("start_over"))`), whose
+  edge fires inside `on_tool_ok` rather than at a turn boundary; that path sheds
+  the same signals (`FlowMonitor::begin_tool_ok`), and `FlowStack::observe_tool`
+  now runs the conformance check itself and records through it, instead of
+  delegating to a monitor that would bypass the shedding.
 
 - **`--all-features` did not compile** after a lone `opentelemetry_sdk` 0.31 →
   0.32 bump split the OpenTelemetry family across two versions; the sdk is back
@@ -67,9 +72,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `flow::TERMINATED_STATE_KEY` (`flow:terminated`), published at every turn
   boundary, and `FlowStack::is_terminated()` — how an application learns that a
   `Resume::Terminate` digression ended the conversation and it should hang up.
-- `FlowMonitor::begin_turn` (the turn count and reset edges, split out of
-  `on_turn` so a caller holding evidence outside the marking can shed it before
-  the re-latch) and `FlowMonitor::closing_steps`/`closing_postures`/
+- `FlowMonitor::begin_turn` and `FlowMonitor::begin_tool_ok` (the turn/tool
+  count and reset edges, split out of `on_turn`/`on_tool_ok` so a caller holding
+  evidence outside the marking can shed it before the re-latch), and
+  `FlowMonitor::closing_steps`/`closing_postures`/
   `closing_grounds` (a completed flow's terminal steps — its last word, which a
   terminal step never being *active* otherwise hides).
 - `Sim::postures()` and `Sim::is_terminated()`, so a scenario can assert what a
