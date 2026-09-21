@@ -1700,13 +1700,16 @@ mod tests {
         stack.on_turn(&state);
         assert_eq!(stack.active_overlay(), Some("faq"));
 
-        // Answer the FAQ and clear the intent so the overlay completes and resumes.
+        // Answer the FAQ and clear the intent so the overlay completes. It is
+        // still the projected layer for this closing turn.
         let _ = state.set("faq_answered", true);
         let _ = state.set("intent:faq", false);
         stack.on_turn(&state);
-        assert!(stack.active_overlay().is_none());
+        assert_eq!(stack.active_overlay(), Some("faq"));
 
-        // Main resumed exactly where it was: still on `a`, not advanced.
+        // Next boundary: main resumed exactly where it was, still on `a`.
+        stack.on_turn(&state);
+        assert!(stack.active_overlay().is_none());
         assert!(stack.explain(&state).active.contains(&"a".to_string()));
 
         // Main continues normally afterward.
@@ -1867,10 +1870,24 @@ mod tests {
         assert!(sim.active().contains(&"triage".to_string()));
         assert!(!sim.is_complete());
 
-        // A safety intent fires -> the conversation hands off (terminates).
+        // A safety intent fires -> the `safety` digression drives this turn,
+        // and its hand-off instruction is what the model is told.
         sim.set("intent:abuse", true);
         sim.turn();
+        assert_eq!(sim.active_overlay(), Some("safety"));
+        assert!(!sim.is_complete());
+        assert!(
+            sim.postures()
+                .iter()
+                .any(|p| p.contains("hand off to a human")),
+            "{:?}",
+            sim.postures()
+        );
+
+        // Next boundary: the conversation has terminated.
+        sim.turn();
         assert!(sim.is_complete());
+        assert!(sim.active().is_empty());
     }
 
     #[tokio::test]

@@ -91,8 +91,10 @@ Core vocabulary across the three layers. Types link to where they live; see the
   conversation's digressions on it. Lives in the runtime (`gemini-adk-rs`).
 - **Digression** — a named sub-flow that suspends the main flow when its trigger
   holds, runs to completion, then resumes per its `Resume` policy
-  (`Previous`, `Restart`, `Terminate`). Spelled `overlay` in the spec and
-  builder (`.overlay(..)`); the two words mean the same thing.
+  (`Previous`, `Restart`, `Terminate`) at the turn boundary *after* the one it
+  completed on — so its closing instruction is projected before the main flow
+  comes back. Spelled `overlay` in the spec and builder (`.overlay(..)`); the
+  two words mean the same thing.
 - **Stage / step / phase** — three words for three layers. A **stage** is what
   you author in a `Conversation`; it lowers to a **step**, the only node type
   in a compiled `Flow`; a **phase** is the separate `PhaseMachine` speaking

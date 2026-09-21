@@ -207,16 +207,38 @@ While a digression is active:
 - `flow:overlay` in state names the digression (`null` when the main flow
   drives), and `handle.explain()` describes the active layer.
 
+A digression governs the turn on which it **completes**, not just the turns
+before it. That closing turn projects its terminal stage's instruction — a
+safety hand-off's "hand off to a human now" is the flow's last word — and its
+`Resume` policy applies at the *next* turn boundary. Without that, a digression
+whose flow is a single terminal stage (exactly what `Policy::safety_handoff`
+lowers to) would complete on the turn it triggered and never be heard at all.
+Budget one turn for the hand-off: a digression that suspends the main flow for
+one exchange resumes on the turn after its completion, not on it.
+
 `Resume::Restart` resets the main flow's *monitor* (marking, fired
-`on_enter` actions, reset edges) against the existing state. It does not clear
-state: slots the caller already filled stay filled, and the next re-latch runs
-over the same facts. It is a fresh pass over the same conversation, not a new
-business task. `Resume::Terminate` ends the conversation.
+`on_enter` actions, reset edges) against the existing state, and clears the
+repair signals and counters with it — a fresh pass starts with no step already
+escalated. It does not clear state: slots the caller already filled stay
+filled, and the next re-latch runs over the same facts. It is a fresh pass over
+the same conversation, not a new business task.
+
+`Resume::Terminate` ends the conversation. From the next turn boundary the
+stack governs nothing: no active steps, no postures, and every tool denied with
+the reason, whatever the main flow would otherwise have allowed. `flow:terminated`
+is raised in state and `stack.is_terminated()` answers the same question. The
+runtime does **not** hang up by itself — how a call ends is the application's
+decision — so watch that key and close the session.
 
 Repair policies raise `repair:{step}:reprompt` and `repair:{step}:escalate`
 after a step has been active for the configured number of turns; the
 conversation compiler lowers `escalate_to` into an extra gated edge, so a
-stalled step can hand off deterministically.
+stalled step can hand off deterministically. Because that lowered edge reads
+the escalate signal, the signal is latched: it stays true once the step has
+completed by escalating, or the hand-off target would drop out of the active
+set one turn later. Anything that un-latches the step clears the signal first —
+a `reset(..)` constraint firing on it, or a `Resume::Restart` — so the step
+does not immediately re-complete on its own stale escalation.
 
 The simulator (`Sim`) drives exactly the stack that
 `CompiledConversation::stack()` builds and `converse()` installs, so a

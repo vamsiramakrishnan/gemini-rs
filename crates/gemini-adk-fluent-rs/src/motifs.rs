@@ -218,8 +218,14 @@ mod tests {
         sim.turn();
         assert_eq!(sim.active_overlay(), Some("faq"));
 
+        // The turn it completes is still its own: the digression's closing
+        // instruction is what the model hears.
         sim.set("faq_answered", true);
         sim.set("intent:faq", false);
+        sim.turn();
+        assert_eq!(sim.active_overlay(), Some("faq"));
+
+        // The next boundary resumes the main flow where it was.
         sim.turn();
         assert!(sim.active_overlay().is_none());
         assert!(sim.active().contains(&"triage".to_string())); // resumed where it was

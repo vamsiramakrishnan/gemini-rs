@@ -20,6 +20,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   real turn path, and a fluent test asserts the installed stack and the
   simulator agree turn by turn.
 
+- **A digression that completed on its entry turn was never heard.** The stack
+  applied its `Resume` policy without ever making it the active layer, so the
+  control plane read the *main* flow for postures and `flow:overlay` — and the
+  one-terminal-stage flow `Policy::safety_handoff` lowers to could fire without
+  its hand-off instruction ever reaching the model. A digression now governs
+  the turn on which it completes (that turn projects its terminal stage's
+  instruction) and resumes at the next turn boundary.
+
+- **A terminated conversation still governed with the main flow.**
+  `Resume::Terminate` set a flag that made `on_turn` a no-op, but `current()`,
+  `admits_tool()` and the posture accessors still delegated to the suspended
+  main monitor, so a session that was not disconnected kept receiving main-flow
+  steering and could call tools that flow admitted. A terminated stack is inert:
+  no active steps, no postures or grounds, no `on_enter` actions, and every tool
+  denied with the reason. The new `flow:terminated` state key (and
+  `FlowStack::is_terminated`) tells the application to close the session; the
+  runtime still never hangs up on its own.
+
+- **A `reset(..)` on an escalated step was ineffective.** Repair bookkeeping ran
+  before the monitor applied `Constraint::Reset`, so the escalate signal the
+  lowered `escalate_to` edge reads stayed latched; the re-latch then completed
+  the step again on that stale signal and routed straight back to the hand-off
+  target. Resets are applied first now (`FlowMonitor::begin_turn`), and the
+  steps they un-latch have their repair signals and counters cleared before the
+  re-latch — as does every repair-tracked step on a `Resume::Restart`.
+
 - **`--all-features` did not compile** after a lone `opentelemetry_sdk` 0.31 →
   0.32 bump split the OpenTelemetry family across two versions; the sdk is back
   on 0.31 with its exporters, the manifest says why they move together, and
@@ -38,6 +64,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `LiveSessionBuilder::flow_stack`, and the `flow:overlay` state key naming
   the active digression. The fluent `conversation::{FlowStack, Resume,
   RepairPolicy}` paths are re-exports of the runtime types.
+- `flow::TERMINATED_STATE_KEY` (`flow:terminated`), published at every turn
+  boundary, and `FlowStack::is_terminated()` — how an application learns that a
+  `Resume::Terminate` digression ended the conversation and it should hang up.
+- `FlowMonitor::begin_turn` (the turn count and reset edges, split out of
+  `on_turn` so a caller holding evidence outside the marking can shed it before
+  the re-latch) and `FlowMonitor::closing_steps`/`closing_postures`/
+  `closing_grounds` (a completed flow's terminal steps — its last word, which a
+  terminal step never being *active* otherwise hides).
+- `Sim::postures()` and `Sim::is_terminated()`, so a scenario can assert what a
+  digression actually says, not merely that it fired.
+- `FlowMonitor::record_violation`, for a deviation the caller sees and the
+  monitor cannot. A terminated `FlowStack` uses it so that `Observe` still
+  records a tool used after the conversation ended — the denial is the stack's,
+  not the flow's — without advancing a flow that has finished.
 - `Live::digressions()` and `Live::repair_policies()` introspection, and
   `CompiledConversation::repair_policies()`.
 - `Conversation::instruction(..)` as the name for a stage's model guidance;

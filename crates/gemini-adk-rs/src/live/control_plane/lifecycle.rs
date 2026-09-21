@@ -512,6 +512,7 @@ async fn govern_flow(
                 crate::flow::OVERLAY_STATE_KEY,
                 mon.active_overlay().map(str::to_string),
             );
+            let _ = state.set(crate::flow::TERMINATED_STATE_KEY, mon.is_terminated());
             for posture in mon.active_postures(state) {
                 context_buffer.push(gemini_genai_rs::prelude::Content::model(posture));
             }
@@ -1076,15 +1077,109 @@ mod harness {
         assert!(shared.lock().admits_tool("search_faq", &h.state).is_ok());
         assert!(shared.lock().admits_tool("lookup", &h.state).is_err());
 
-        // Turn 3: the digression completes; the main flow resumes where it was.
+        // Turn 3: the digression completes. It is still the projected layer
+        // for this closing turn — the model is not steered by the main flow
+        // until it has had the digression's last word.
         let _ = h.state.set("faq_answered", true);
         let _ = h.state.set("intent:faq", false);
         h.run_turn().await;
+        assert_eq!(
+            h.state.get::<Option<String>>("flow:overlay"),
+            Some(Some("faq".to_string()))
+        );
+        let last = h.batches().last().cloned().unwrap_or_default();
+        assert!(!last.iter().any(|t| t.contains("MAIN-POSTURE")), "{last:?}");
+
+        // Turn 4: the main flow resumes where it was.
+        h.run_turn().await;
         assert_eq!(h.state.get::<Option<String>>("flow:overlay"), Some(None));
+        assert_eq!(h.state.get::<bool>("flow:terminated"), Some(false));
         let active: Vec<String> = h.state.get("flow:active").unwrap_or_default();
         assert_eq!(active, ["collect"]);
         let last = h.batches().last().cloned().unwrap_or_default();
         assert!(last.iter().any(|t| t.contains("MAIN-POSTURE")), "{last:?}");
+    }
+
+    /// A `Terminate` digression (the shape the safety hand-off policy lowers
+    /// to: one terminal stage) must reach the model through the real turn
+    /// path — its closing instruction steers the turn it fires on — and from
+    /// the next boundary the session is governed by nothing: `flow:terminated`
+    /// is raised, no posture is projected, and the main flow's tools are denied.
+    #[tokio::test]
+    async fn a_terminate_digression_is_projected_then_governs_nothing() {
+        use crate::flow::{FlowStack, Overlay, Resume};
+
+        let main = Flow::new()
+            .step("collect")
+            .allow(["lookup"])
+            .posture("MAIN-POSTURE")
+            .done(Guard::is_true("info"))
+            .step("done")
+            .after("collect")
+            .terminal()
+            .require(["done"])
+            .build()
+            .expect("valid flow")
+            .compile()
+            .expect("compiles");
+        let safety = Flow::new()
+            .step("safety_handoff")
+            .posture("SAFETY-HANDOFF")
+            .terminal()
+            .require(["safety_handoff"])
+            .build()
+            .expect("valid flow")
+            .compile()
+            .expect("compiles");
+        let stack = FlowStack::new(main, Enforcement::Enforce).with_overlay(Overlay::new(
+            "safety",
+            Guard::is_true("intent:abuse"),
+            safety,
+            Resume::Terminate,
+        ));
+        let shared = stack.into_shared();
+
+        let mut h = Harness::new();
+        h.control.steering_mode = SteeringMode::ContextInjection;
+        h.control.flow = Some(shared.clone());
+
+        h.run_turn().await;
+        assert_eq!(h.state.get::<bool>("flow:terminated"), Some(false));
+        assert!(shared.lock().admits_tool("lookup", &h.state).is_ok());
+
+        // The safety intent fires: the hand-off instruction is what the model
+        // is told this turn, and the state key names the digression.
+        let _ = h.state.set("intent:abuse", true);
+        h.run_turn().await;
+        assert_eq!(
+            h.state.get::<Option<String>>("flow:overlay"),
+            Some(Some("safety".to_string()))
+        );
+        assert_eq!(h.state.get::<bool>("flow:terminated"), Some(false));
+        let last = h.batches().last().cloned().unwrap_or_default();
+        assert!(
+            last.iter().any(|t| t.contains("SAFETY-HANDOFF")),
+            "{last:?}"
+        );
+        assert!(!last.iter().any(|t| t.contains("MAIN-POSTURE")), "{last:?}");
+
+        // Next boundary: terminated. Nothing steers, nothing is admitted.
+        let batches_before = h.batches().len();
+        h.run_turn().await;
+        assert_eq!(h.state.get::<bool>("flow:terminated"), Some(true));
+        assert_eq!(h.state.get::<Option<String>>("flow:overlay"), Some(None));
+        let active: Vec<String> = h.state.get("flow:active").unwrap_or_default();
+        assert!(active.is_empty(), "{active:?}");
+        for batch in h.batches().iter().skip(batches_before) {
+            assert!(
+                !batch
+                    .iter()
+                    .any(|t| t.contains("POSTURE") || t.contains("HANDOFF")),
+                "{batch:?}"
+            );
+        }
+        let denied = shared.lock().admits_tool("lookup", &h.state).unwrap_err();
+        assert!(denied.contains("terminated"), "{denied}");
     }
 
     /// An amendment must reach the model in a session with no phase machine.
