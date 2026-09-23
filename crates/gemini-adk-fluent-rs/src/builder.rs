@@ -500,7 +500,7 @@ impl AgentBuilder {
     ///
     /// Read the reply back with [`RunResult::parse`](gemini_adk_rs::text::RunResult::parse),
     /// or ask for a `T` directly with
-    /// [`TextAgent::ask_as`](gemini_adk_rs::text::TextAgent::ask_as), which also
+    /// [`TextAgent::ask_as`], which also
     /// repairs a reply that does not parse.
     pub fn output<T: schemars::JsonSchema>(self) -> Self {
         self.output_schema(gemini_adk_rs::tool::wire_schema::<T>())
