@@ -1,6 +1,8 @@
 //! One run of a text agent: what goes in ([`RunRequest`]), what comes out
 //! ([`RunResult`]), and a conversation that remembers ([`Chat`]).
 
+use futures_util::StreamExt;
+use futures_util::stream::BoxStream;
 use gemini_genai_rs::prelude::{Content, Part, Role};
 use serde::de::DeserializeOwned;
 
@@ -133,6 +135,30 @@ impl RunResult {
     }
 }
 
+/// Something that happened during a streamed run; see
+/// [`TextAgent::run_stream`](super::TextAgent::run_stream).
+///
+/// Concatenating every [`TextDelta`](Self::TextDelta) gives the text of the
+/// model's turns; [`Finished`](Self::Finished) is always the last event of a
+/// successful run and carries the same [`RunResult`] `run_with` returns.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub enum RunEvent {
+    /// The next piece of the model's reply.
+    TextDelta(String),
+    /// The model called a tool; it runs next.
+    ToolCall {
+        /// The tool's name.
+        name: String,
+        /// The arguments the model supplied.
+        args: serde_json::Value,
+    },
+    /// A tool finished.
+    ToolResult(ToolCallRecord),
+    /// The run is over.
+    Finished(RunResult),
+}
+
 /// A conversation with an agent: every [`send`](Self::send) carries the turns
 /// before it, and the conversation keeps its own [`State`].
 ///
@@ -196,6 +222,30 @@ impl<A: TextAgent> Chat<A> {
         self.history.extend(result.messages.iter().cloned());
         self.usage += result.usage;
         Ok(result)
+    }
+
+    /// Send a message and stream the reply; the turn joins the history when
+    /// the stream delivers [`RunEvent::Finished`].
+    pub fn send_stream(
+        &mut self,
+        message: impl Into<String>,
+    ) -> BoxStream<'_, Result<RunEvent, AgentError>> {
+        let request = RunRequest::new(message).history(self.history.clone());
+        let Chat {
+            agent,
+            history,
+            state,
+            usage,
+        } = self;
+        agent
+            .run_stream(request, state.clone())
+            .inspect(move |event| {
+                if let Ok(RunEvent::Finished(result)) = event {
+                    history.extend(result.messages.iter().cloned());
+                    *usage += result.usage;
+                }
+            })
+            .boxed()
     }
 
     /// Every turn so far, oldest first.

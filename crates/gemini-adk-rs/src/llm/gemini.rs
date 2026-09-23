@@ -430,6 +430,25 @@ impl BaseLlm for GeminiLlm {
         }
     }
 
+    #[cfg(feature = "gemini-llm")]
+    async fn generate_stream(&self, request: LlmRequest) -> Result<super::LlmStream, LlmError> {
+        use futures_util::StreamExt;
+
+        let (config, model) = Self::to_generate_config(request);
+        let chunks = self
+            .client
+            .stream_generate_content_with(config, model.as_ref())
+            .await
+            .map_err(llm_error)?;
+        Ok(chunks
+            .map(|chunk| {
+                chunk
+                    .map_err(llm_error)
+                    .and_then(Self::from_generate_response)
+            })
+            .boxed())
+    }
+
     /// Pre-warm the HTTP connection pool by making a lightweight request.
     ///
     /// Establishes the TCP+TLS connection so the first real `generate()`

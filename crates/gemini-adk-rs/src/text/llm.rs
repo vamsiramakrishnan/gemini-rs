@@ -3,13 +3,19 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use gemini_genai_rs::prelude::{Content, FunctionCall, FunctionResponse, Part, Role};
 
-use super::{RunRequest, RunResult, TextAgent, ToolCallRecord};
+use futures_util::stream::BoxStream;
+use futures_util::{FutureExt, StreamExt};
+
+use super::{RunEvent, RunRequest, RunResult, TextAgent, ToolCallRecord};
 use crate::context::AgentEvent;
 use crate::error::AgentError;
-use crate::llm::{BaseLlm, LlmRequest};
+use crate::llm::{BaseLlm, LlmRequest, LlmResponse};
 use crate::middleware::MiddlewareChain;
 use crate::state::State;
 use crate::tool::ToolDispatcher;
+
+/// Where a streamed run sends its events.
+type EventSender = tokio::sync::mpsc::UnboundedSender<Result<RunEvent, AgentError>>;
 
 /// Maximum number of tool-dispatch round-trips before giving up.
 const MAX_TOOL_ROUNDS: usize = 10;
@@ -202,6 +208,42 @@ impl LlmTextAgent {
         req
     }
 
+    /// Call the model with streaming, passing each text chunk to `on_text`
+    /// when it is set, and return the whole reply.
+    async fn generate_streamed(
+        &self,
+        llm: &Arc<dyn BaseLlm>,
+        request: LlmRequest,
+        on_text: Option<&(dyn Fn(RunEvent) + Send + Sync)>,
+    ) -> Result<LlmResponse, AgentError> {
+        let mut chunks = llm
+            .generate_stream(request)
+            .await
+            .map_err(AgentError::Llm)?;
+        let mut whole: Option<LlmResponse> = None;
+        while let Some(chunk) = chunks.next().await {
+            let chunk = chunk.map_err(AgentError::Llm)?;
+            if let Some(on_text) = on_text {
+                let text = chunk.text();
+                if !text.is_empty() {
+                    on_text(RunEvent::TextDelta(text));
+                }
+            }
+            match &mut whole {
+                Some(so_far) => so_far.append(chunk),
+                None => whole = Some(chunk),
+            }
+        }
+        Ok(whole.unwrap_or(LlmResponse {
+            content: Content {
+                role: Some(Role::Model),
+                parts: Vec::new(),
+            },
+            finish_reason: None,
+            usage: None,
+        }))
+    }
+
     /// Dispatch function calls and return function responses, firing middleware hooks.
     async fn dispatch_tools(
         &self,
@@ -277,6 +319,42 @@ impl TextAgent for LlmTextAgent {
     }
 
     async fn run_with(&self, request: RunRequest, state: &State) -> Result<RunResult, AgentError> {
+        self.run_with_events(request, state, None).await
+    }
+
+    fn run_stream<'a>(
+        &'a self,
+        request: RunRequest,
+        state: State,
+    ) -> BoxStream<'a, Result<RunEvent, AgentError>> {
+        // The run drives itself inside the returned stream, sending events
+        // through a channel as they happen; `Finished` (or the error) is last.
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let driver = async move {
+            let finished = self.run_with_events(request, &state, Some(&tx)).await;
+            let _ = tx.send(finished.map(RunEvent::Finished));
+        };
+        let events = futures_util::stream::unfold(rx, |mut rx| async move {
+            rx.recv().await.map(|event| (event, rx))
+        });
+        futures_util::stream::select(
+            driver
+                .into_stream()
+                .filter_map(|()| async { None::<Result<RunEvent, AgentError>> }),
+            events,
+        )
+        .boxed()
+    }
+}
+
+impl LlmTextAgent {
+    /// One run, reporting events to `events` as they happen when it is set.
+    async fn run_with_events(
+        &self,
+        request: RunRequest,
+        state: &State,
+        events: Option<&EventSender>,
+    ) -> Result<RunResult, AgentError> {
         // Resolve the instruction for this run: provider (against live
         // state) wins over the static string.
         let instruction = match &self.instruction_provider {
@@ -303,7 +381,11 @@ impl TextAgent for LlmTextAgent {
         // Enforce the tightest middleware timeout (M::timeout) over the whole run.
         let result = match self.middleware.timeout() {
             Some(limit) => {
-                match tokio::time::timeout(limit, self.run_inner(request, &instruction, &llm)).await
+                match tokio::time::timeout(
+                    limit,
+                    self.run_inner(request, &instruction, &llm, events),
+                )
+                .await
                 {
                     Ok(r) => r,
                     Err(_) => {
@@ -315,7 +397,7 @@ impl TextAgent for LlmTextAgent {
                     }
                 }
             }
-            None => self.run_inner(request, &instruction, &llm).await,
+            None => self.run_inner(request, &instruction, &llm, events).await,
         };
 
         match &result {
@@ -338,16 +420,23 @@ impl TextAgent for LlmTextAgent {
 
         result
     }
-}
 
-impl LlmTextAgent {
     /// Inner execution loop — separated so `on_error` fires exactly once.
     async fn run_inner(
         &self,
         request: RunRequest,
         instruction: &Option<String>,
         llm: &Arc<dyn BaseLlm>,
+        events: Option<&EventSender>,
     ) -> Result<RunResult, AgentError> {
+        let emit = |event: RunEvent| {
+            if let Some(tx) = events {
+                let _ = tx.send(Ok(event));
+            }
+        };
+        // Without middleware nothing can rewrite a reply, so text is emitted
+        // as it streams; otherwise only after `after_model` has seen it.
+        let stream_live = events.is_some() && self.middleware.is_empty();
         let history_len = request.history.len();
         let mut contents = request.history;
         contents.push(request.input);
@@ -367,13 +456,23 @@ impl LlmTextAgent {
                 .await?;
 
             // before_model hook — may short-circuit with a cached response.
+            let mut streamed = false;
             let response = match self.middleware.run_before_model(&llm_request).await? {
                 Some(cached) => cached,
                 None => {
-                    let llm_response = llm
-                        .generate(llm_request.clone())
-                        .await
-                        .map_err(AgentError::Llm)?;
+                    let llm_response = if events.is_some() {
+                        streamed = stream_live;
+                        self.generate_streamed(
+                            llm,
+                            llm_request.clone(),
+                            stream_live.then_some(&emit),
+                        )
+                        .await?
+                    } else {
+                        llm.generate(llm_request.clone())
+                            .await
+                            .map_err(AgentError::Llm)?
+                    };
                     result.model_calls += 1;
                     if let Some(usage) = llm_response.usage {
                         result.usage += usage;
@@ -390,6 +489,13 @@ impl LlmTextAgent {
                     }
                 }
             };
+
+            if events.is_some() && !streamed {
+                let text = response.text();
+                if !text.is_empty() {
+                    emit(RunEvent::TextDelta(text));
+                }
+            }
 
             let calls: Vec<FunctionCall> = response.function_calls().into_iter().cloned().collect();
 
@@ -410,7 +516,17 @@ impl LlmTextAgent {
             // attached under `_media` is lifted out of the JSON and
             // delivered as inline_data parts in the same turn, so the
             // model *sees* images rather than base64 noise.
+            for call in &calls {
+                emit(RunEvent::ToolCall {
+                    name: call.name.clone(),
+                    args: call.args.clone(),
+                });
+            }
+            let already = result.tool_calls.len();
             let tool_responses = self.dispatch_tools(&calls, &mut result.tool_calls).await;
+            for record in &result.tool_calls[already..] {
+                emit(RunEvent::ToolResult(record.clone()));
+            }
             let mut media_parts: Vec<Part> = Vec::new();
             let mut response_parts: Vec<Part> = tool_responses
                 .into_iter()

@@ -13,6 +13,7 @@ pub use mock::MockLlm;
 pub use registry::LlmRegistry;
 
 use async_trait::async_trait;
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 
 use gemini_genai_rs::prelude::{Content, Part, Tool};
@@ -194,6 +195,24 @@ impl LlmResponse {
             },
             finish_reason: finish_reason.map(str::to_owned),
             usage: None,
+        }
+    }
+
+    /// Add a streamed chunk to this response: its parts are appended (adjacent
+    /// text merged), and its finish reason and usage, when present, replace
+    /// these — a provider's streamed usage is cumulative.
+    pub fn append(&mut self, chunk: LlmResponse) {
+        for part in chunk.content.parts {
+            match (self.content.parts.last_mut(), part) {
+                (Some(Part::Text { text }), Part::Text { text: more }) => text.push_str(&more),
+                (_, part) => self.content.parts.push(part),
+            }
+        }
+        if chunk.finish_reason.is_some() {
+            self.finish_reason = chunk.finish_reason;
+        }
+        if chunk.usage.is_some() {
+            self.usage = chunk.usage;
         }
     }
 
@@ -388,6 +407,9 @@ impl ModelCapabilities {
     }
 }
 
+/// A reply streamed in chunks; see [`BaseLlm::generate_stream`].
+pub type LlmStream = futures_util::stream::BoxStream<'static, Result<LlmResponse, LlmError>>;
+
 /// Trait for LLM providers — decouples agents from specific models.
 ///
 /// Implementations must be `Send + Sync` for use across async tasks.
@@ -407,6 +429,17 @@ pub trait BaseLlm: Send + Sync {
 
     /// Generate content from the LLM.
     async fn generate(&self, request: LlmRequest) -> Result<LlmResponse, LlmError>;
+
+    /// Generate content as a stream of chunks, in the order the model
+    /// produced them. [`LlmResponse::append`] folds them into the whole reply;
+    /// usage, when a chunk carries it, is cumulative.
+    ///
+    /// The default yields [`generate`](Self::generate)'s reply as one chunk,
+    /// so every provider supports it; `GeminiLlm` streams for real.
+    async fn generate_stream(&self, request: LlmRequest) -> Result<LlmStream, LlmError> {
+        let response = self.generate(request).await?;
+        Ok(futures_util::stream::once(async move { Ok(response) }).boxed())
+    }
 
     /// Pre-warm the HTTP connection pool to avoid cold-start latency.
     ///
@@ -434,6 +467,10 @@ impl<L: BaseLlm + ?Sized> BaseLlm for std::sync::Arc<L> {
         (**self).generate(request).await
     }
 
+    async fn generate_stream(&self, request: LlmRequest) -> Result<LlmStream, LlmError> {
+        (**self).generate_stream(request).await
+    }
+
     async fn warm_up(&self) -> Result<(), LlmError> {
         (**self).warm_up().await
     }
@@ -452,6 +489,10 @@ impl<L: BaseLlm + ?Sized> BaseLlm for Box<L> {
 
     async fn generate(&self, request: LlmRequest) -> Result<LlmResponse, LlmError> {
         (**self).generate(request).await
+    }
+
+    async fn generate_stream(&self, request: LlmRequest) -> Result<LlmStream, LlmError> {
+        (**self).generate_stream(request).await
     }
 
     async fn warm_up(&self) -> Result<(), LlmError> {
@@ -540,6 +581,42 @@ mod tests {
         assert!(LlmError::ContentFiltered("SAFETY".into()).is_content_filtered());
         assert_eq!(api(418).status(), Some(418));
         assert_eq!(LlmError::Other("x".into()).status(), None);
+    }
+
+    #[test]
+    fn append_folds_streamed_chunks_into_one_reply() {
+        let mut whole = LlmResponse::from_parts(vec![Part::Text { text: "Hel".into() }], None);
+        whole.append(LlmResponse::from_parts(
+            vec![Part::Text { text: "lo".into() }],
+            None,
+        ));
+        whole.append(LlmResponse::tool_call("f", serde_json::json!({})).with_usage(3, 1));
+        whole.append(LlmResponse::from_text("!").with_usage(3, 2));
+        assert_eq!(whole.text(), "Hello!");
+        assert_eq!(whole.function_calls().len(), 1);
+        assert_eq!(whole.finish_reason.as_deref(), Some("STOP"));
+        assert_eq!(
+            whole.usage,
+            Some(TokenUsage::new(3, 2)),
+            "usage is cumulative, not summed"
+        );
+    }
+
+    #[tokio::test]
+    async fn every_model_can_stream() {
+        let chunks: Vec<_> = MockLlm::text("one two three")
+            .generate_stream(LlmRequest::from_text("x"))
+            .await
+            .unwrap()
+            .map(Result::unwrap)
+            .collect()
+            .await;
+        assert_eq!(chunks.len(), 3, "the mock streams one word at a time");
+        let mut whole = chunks[0].clone();
+        for chunk in chunks.into_iter().skip(1) {
+            whole.append(chunk);
+        }
+        assert_eq!(whole.text(), "one two three");
     }
 
     #[test]

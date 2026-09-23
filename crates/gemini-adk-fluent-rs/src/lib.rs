@@ -253,8 +253,8 @@ pub mod prelude {
     pub use gemini_adk_rs::text::{
         Chat, DispatchTextAgent, FallbackTextAgent, FnTextAgent, JoinTextAgent, LlmTextAgent,
         LoopTextAgent, MapOverTextAgent, ParallelTextAgent, RaceTextAgent, RouteRule,
-        RouteTextAgent, RunRequest, RunResult, SequentialTextAgent, TapTextAgent, TaskRegistry,
-        TextAgent, TimeoutTextAgent,
+        RouteTextAgent, RunEvent, RunRequest, RunResult, SequentialTextAgent, TapTextAgent,
+        TaskRegistry, TextAgent, TimeoutTextAgent,
     };
 
     // ── L0 wire protocol (ModelId, Voice, Content, Part, Role, …) ──

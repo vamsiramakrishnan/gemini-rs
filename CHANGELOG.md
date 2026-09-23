@@ -132,6 +132,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Streaming text agents.** `agent.stream(prompt)` and
+  `TextAgent::run_stream(request, state)` yield `RunEvent`s — `TextDelta` as
+  the model writes, `ToolCall` and `ToolResult` around each tool, and
+  `Finished(RunResult)` last — across tool rounds; `Chat::send_stream` adds
+  the turn to the history when it finishes. An agent with middleware emits
+  each model turn only after `after_model` has seen it, so a redacting guard
+  cannot be bypassed through the deltas. Underneath: `BaseLlm::generate_stream`
+  (default: one chunk; `GeminiLlm` streams for real, `MockLlm` word by word),
+  `LlmResponse::append` to fold chunks, and at L0
+  `Client::stream_generate_content_with` over `streamGenerateContent?alt=sse`,
+  `HttpClient::post_sse` and a chunk-boundary-safe `SseDecoder`.
 - **`agent.ask(..)`, `agent.ask_as::<T>(..)` and `agent.chat()`** on every
   `TextAgent`. `ask` sends one prompt and returns the reply, with no `State`
   and no magic `"input"` key. `ask_as` sends `T`'s JSON Schema as the response

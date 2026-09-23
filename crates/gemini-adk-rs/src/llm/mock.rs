@@ -7,7 +7,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use parking_lot::Mutex;
 
-use super::{BaseLlm, LlmError, LlmRequest, LlmResponse};
+use super::{BaseLlm, LlmError, LlmRequest, LlmResponse, LlmStream};
 
 type ReplyFn = dyn Fn(&LlmRequest) -> Result<LlmResponse, LlmError> + Send + Sync;
 
@@ -159,6 +159,38 @@ impl fmt::Debug for MockLlm {
 impl BaseLlm for MockLlm {
     fn model_id(&self) -> &str {
         &self.model_id
+    }
+
+    /// Streams a text reply one word at a time (usage and the finish reason
+    /// ride on the last chunk), so tests exercise the multi-chunk path; a
+    /// reply with tool calls arrives as one chunk.
+    async fn generate_stream(&self, request: LlmRequest) -> Result<LlmStream, LlmError> {
+        use futures_util::StreamExt;
+
+        let reply = self.generate(request).await?;
+        let words: Vec<String> = reply
+            .text()
+            .split_inclusive(' ')
+            .map(str::to_owned)
+            .collect();
+        if !reply.function_calls().is_empty() || words.len() < 2 {
+            return Ok(futures_util::stream::once(async move { Ok(reply) }).boxed());
+        }
+        let last = words.len() - 1;
+        let chunks: Vec<Result<LlmResponse, LlmError>> = words
+            .into_iter()
+            .enumerate()
+            .map(|(i, word)| {
+                let mut chunk = LlmResponse::from_text(word);
+                chunk.finish_reason = None;
+                if i == last {
+                    chunk.finish_reason = reply.finish_reason.clone();
+                    chunk.usage = reply.usage;
+                }
+                Ok(chunk)
+            })
+            .collect();
+        Ok(futures_util::stream::iter(chunks).boxed())
     }
 
     async fn generate(&self, request: LlmRequest) -> Result<LlmResponse, LlmError> {
