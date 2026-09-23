@@ -427,42 +427,31 @@ async fn test_my_agent() {
 }
 ```
 
-### Test text agent pipelines with mock LLMs
+### Test text agents with `MockLlm`
 
-Implement `BaseLlm` to create deterministic test fixtures:
+`MockLlm` is the model for tests: scripted, repeating, or computed from the
+request, and it records every request it receives. Assert on what the agent
+sent, not only on what came back:
 
 ```rust,ignore
-struct MockLlm(String);
-
-#[async_trait]
-impl BaseLlm for MockLlm {
-    fn model_id(&self) -> &str { "mock" }
-
-    async fn generate(&self, _req: LlmRequest) -> Result<LlmResponse, LlmError> {
-        Ok(LlmResponse {
-            content: Content {
-                role: Some(Role::Model),
-                parts: vec![Part::Text { text: self.0.clone() }],
-            },
-            finish_reason: Some("STOP".into()),
-            usage: None,
-        })
-    }
-}
+use gemini_adk_fluent_rs::testing::{LlmResponse, MockLlm};
 
 #[tokio::test]
-async fn test_pipeline() {
-    let llm: Arc<dyn BaseLlm> = Arc::new(MockLlm("mock output".into()));
+async fn the_analyst_is_told_what_to_do() -> Result<(), Box<dyn std::error::Error>> {
+    let llm = MockLlm::script([LlmResponse::from_text("mock output")]);
     let agent = AgentBuilder::new("test")
         .instruction("Analyze this")
-        .build(llm)?;
+        .build(llm.clone())?;
 
-    let state = State::new();
-    state.set("input", "test data");
-    let result = agent.run(&state).await.unwrap();
-    assert_eq!(result, "mock output");
+    assert_eq!(agent.ask("test data").await?, "mock output");
+    let sent = llm.last_request().unwrap();
+    assert_eq!(sent.system_instruction.as_deref(), Some("Analyze this"));
+    Ok(())
 }
 ```
+
+A script that runs out fails the next call instead of inventing a reply, so an
+agent that calls the model more often than the test expects is caught.
 
 ### Test composable operators structurally
 

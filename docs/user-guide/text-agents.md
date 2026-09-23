@@ -5,19 +5,77 @@ parallel, branching, loop, and fallback combinators determine when each agent
 runs and where its result goes. Text generation does not require a Live
 WebSocket session or local audio dependencies.
 
-## The TextAgent Trait
+## Asking, chatting, streaming
 
-Every text agent implements one method:
+Every text agent answers the same four calls:
+
+```rust,ignore
+use gemini_adk_fluent_rs::prelude::*;
+
+let agent = AgentBuilder::new("assistant")
+    .instruction("Be brief.")
+    .build(GeminiLlm::from_env()?)?;
+
+// One question, one answer.
+let answer: String = agent.ask("What is a tokio runtime?").await?;
+
+// A typed answer: the type's JSON Schema is the response schema, and a reply
+// that does not parse is sent back once for correction.
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+struct Summary { title: String, bullets: Vec<String> }
+let summary: Summary = agent.ask_as("Summarize the Rust ownership model.").await?;
+
+// A conversation that remembers its turns.
+let mut chat = agent.chat();
+chat.send("My name is Ada.").await?;
+let reply = chat.send("What is my name?").await?;
+
+// The reply as it is written: text deltas, tool calls and results, then the
+// finished result.
+let mut events = agent.stream("Tell me a short story.");
+while let Some(event) = events.next().await {
+    match event? {
+        RunEvent::TextDelta(text) => print!("{text}"),
+        RunEvent::ToolCall { name, .. } => eprintln!("[calling {name}]"),
+        RunEvent::Finished(result) => eprintln!("\n[{} tokens]", result.usage.total_tokens),
+        _ => {}
+    }
+}
+```
+
+`AgentBuilder::output::<T>()` fixes the response schema for every call, and
+`RunResult::parse::<T>()` reads a reply back as `T`.
+
+When an agent has middleware — which may rewrite a reply, for example to
+redact it — each model turn is streamed only after the middleware has seen it.
+Without middleware, text streams as the model writes.
+
+## The TextAgent Trait
 
 ```rust,ignore
 #[async_trait]
 pub trait TextAgent: Send + Sync {
     fn name(&self) -> &str;
     async fn run(&self, state: &State) -> Result<String, AgentError>;
+
+    // Provided:
+    async fn run_with(&self, request: RunRequest, state: &State) -> Result<RunResult, AgentError>;
+    fn run_stream(&self, request: RunRequest, state: State) -> BoxStream<'_, Result<RunEvent, AgentError>>;
+    // ask, ask_as, chat and stream are built on these.
 }
 ```
 
-`State` is a concurrent typed key-value store shared across the pipeline. Agents read input from `state.get::<String>("input")` and write output to `state.set("output", &result)`. That is the entire contract.
+`run_with` is the primitive: a `RunRequest` carries the new turn (text or
+media), the conversation before it and an optional response schema; a
+`RunResult` reports the reply, the turns to append to the history, token usage,
+every tool call and the number of model calls. `LlmTextAgent` implements it
+natively; any other agent gets it through `run`.
+
+`run` is the form the combinators below use. `State` is a concurrent typed
+key-value store shared across a pipeline: an agent reads its prompt from the
+`"input"` key and writes its reply to `"output"`. `Arc<A>`, `Box<A>` and `&A`
+are agents whenever `A` is, so a built `Arc<dyn TextAgent>` can go straight
+into any combinator.
 
 ## Combinator Reference
 
@@ -45,23 +103,18 @@ pub trait TextAgent: Send + Sync {
 use gemini_adk_rs::text::LlmTextAgent;
 use gemini_adk_rs::llm::{GeminiLlm, GeminiLlmParams};
 
-// `model: None` resolves GEMINI_TEXT_MODEL, then GEMINI_MODEL, then the platform's Flash alias.
-let llm = Arc::new(GeminiLlm::new(GeminiLlmParams {
-    model: Some("gemini-flash-latest".into()),
-    ..Default::default()
-}));
+// Reads GEMINI_API_KEY (or Vertex AI settings) and GEMINI_TEXT_MODEL, and
+// fails here — naming the variable to set — if the configuration is incomplete.
+let llm = GeminiLlm::from_env()?;
 
 let agent = LlmTextAgent::new("analyst", llm)
     .instruction("Analyze the given topic and produce a summary.")
+    .model("gemini-2.5-pro")
     .temperature(0.3)
     .max_output_tokens(2048)
     .tools(Arc::new(tool_dispatcher));
 
-let state = State::new();
-state.set("input", "Explain Rust's ownership model");
-
-let result = agent.run(&state).await?;
-println!("{result}");
+println!("{}", agent.ask("Explain Rust's ownership model").await?);
 ```
 
 ## FnTextAgent -- Zero-Cost Transforms
@@ -388,3 +441,30 @@ let approved = supervised(
 - [cookbook 12 — fallback chain](../../examples/cookbook/src/12_fallback_chain.rs)
 - [cookbook 13 — review loop](../../examples/cookbook/src/13_review_loop.rs)
 - [cookbook 14 — map-over](../../examples/cookbook/src/14_map_over.rs)
+
+## Testing without a model
+
+`MockLlm` stands in for the model: `MockLlm::text` repeats one reply,
+`MockLlm::script` replies in order (and fails if the agent calls once more than
+the script allows), and `MockLlm::from_fn` computes each reply from the
+request. It records every request, so a test asserts on what the agent sent —
+instructions, history, tool declarations, sampling — as well as on what it
+answered.
+
+```rust,ignore
+use gemini_adk_fluent_rs::testing::{LlmResponse, MockLlm};
+
+let llm = MockLlm::script([
+    LlmResponse::tool_call("order_status", serde_json::json!({ "id": "A-17" })),
+    LlmResponse::from_text("Your order has shipped."),
+]);
+let agent = AgentBuilder::new("support")
+    .tool(order_status())
+    .build(llm.clone())?;
+
+assert_eq!(agent.ask("Where is order A-17?").await?, "Your order has shipped.");
+assert_eq!(llm.call_count(), 2);
+```
+
+`MockLlm` streams text replies one word at a time, so `stream` and
+`send_stream` are exercised the way a real model would drive them.

@@ -30,7 +30,14 @@ fn fenced_block(readme: &str, name: &str) -> String {
 #[test]
 fn readme_quickstart_programs_are_the_compiled_binaries() {
     let readme = readme();
-    for file in ["src/bin/hello_text.rs", "src/bin/hello_voice.rs"] {
+    for file in [
+        "src/bin/hello_text.rs",
+        "src/bin/chat.rs",
+        "src/bin/typed.rs",
+        "src/bin/tool.rs",
+        "tests/agent_test.rs",
+        "src/bin/hello_voice.rs",
+    ] {
         let printed = fenced_block(&readme, file);
         let compiled = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(file))
             .expect("quickstart binary source");

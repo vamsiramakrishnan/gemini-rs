@@ -254,7 +254,8 @@ impl T {
     /// to the runtime via [`PolicyTool::requires_confirmation`] — it is never
     /// silently dropped. The `message` becomes the confirmation hint. Built-in and
     /// placeholder entries are left unchanged.
-    pub fn confirm(tool: ToolComposite, message: &str) -> ToolComposite {
+    pub fn confirm(tool: impl Into<ToolComposite>, message: &str) -> ToolComposite {
+        let tool = tool.into();
         let msg = if message.is_empty() {
             None
         } else {
@@ -268,8 +269,9 @@ impl T {
     /// At dispatch the tool's future is raced against the duration; on elapse the
     /// call returns [`ToolError::Timeout`](gemini_adk_rs::ToolError::Timeout).
     /// Built-in and placeholder entries are left unchanged.
-    pub fn timeout(tool: ToolComposite, duration: std::time::Duration) -> ToolComposite {
-        tool.map_function_policy(move |p| p.with_timeout(duration))
+    pub fn timeout(tool: impl Into<ToolComposite>, duration: std::time::Duration) -> ToolComposite {
+        tool.into()
+            .map_function_policy(move |p| p.with_timeout(duration))
     }
 
     /// Memoize each function tool's successful results.
@@ -277,8 +279,9 @@ impl T {
     /// Results are cached by `(tool name, canonical-JSON args)`; repeat calls with
     /// identical arguments return the cached value without re-invoking the tool.
     /// Errors are not cached. Built-in/placeholder entries are left unchanged.
-    pub fn cached(tool: ToolComposite) -> ToolComposite {
-        tool.map_function_policy(gemini_adk_rs::tool::ToolPolicy::with_cache)
+    pub fn cached(tool: impl Into<ToolComposite>) -> ToolComposite {
+        tool.into()
+            .map_function_policy(gemini_adk_rs::tool::ToolPolicy::with_cache)
     }
 
     /// Combine multiple tool functions into a single composite.

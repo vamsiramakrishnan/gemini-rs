@@ -212,6 +212,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   compile error that names the owned type to use.
 - `ToolError::from_error`, which keeps a `ToolError` and turns any other
   error into `ExecutionFailed` with its message.
+- `T::timeout`, `T::cached` and `T::confirm` accept any tool, so a `#[tool]`
+  function's value wraps directly: `T::timeout(search(), secs)`.
 - `T::typed::<A>(name, description, closure)`: a closure tool whose arguments
   are a `JsonSchema` type, for tools that capture a client or pool.
 - `gemini_adk_rs::tool::wire_schema::<T>()`, public.
@@ -283,6 +285,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Documentation leads with the golden path.** The README's text-agent
+  section is a ladder — ask, a streamed conversation, a typed answer, a tool,
+  a model-free test — whose every program is a compiled quickstart target
+  checked against the README; the fluent crate README, the text-agent, tools,
+  tool-policy and best-practice guides and the agent reference use
+  `GeminiLlm::from_env`, `ask`/`chat`/`stream`, `#[tool]` and `MockLlm`, and no
+  longer show `T::simple` with arguments it never declares.
 - `LlmError` and `AgentError` are `#[non_exhaustive]`, and
   `LlmError::ContentFiltered` carries the provider's reason.
 - **The fluent prelude no longer glob-imports the L0 prelude.** It named

@@ -113,7 +113,9 @@ Compose tools with `|`. Mix runtime function tools with built-in Gemini tools.
 
 | Method | What it does |
 |---|---|
-| `T::simple(name, desc, fn)` | Create a tool from a name, description, and async closure |
+| a `#[tool]` fn's value | A documented `async fn`; converts into a composite directly |
+| `T::typed(name, desc, fn)` | A closure tool whose argument type derives `JsonSchema` |
+| `T::simple(name, desc, fn)` | A closure tool that takes no parameters |
 | `T::function(arc_fn)` | Register an existing `Arc<dyn ToolFunction>` |
 | `T::google_search()` | Add built-in Google Search |
 | `T::url_context()` | Add built-in URL context fetching |
@@ -125,10 +127,15 @@ Compose tools with `|`. Mix runtime function tools with built-in Gemini tools.
 ```rust,ignore
 use gemini_adk_fluent_rs::compose::T;
 
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+struct City {
+    /// The city to report on.
+    city: String,
+}
+
 // Combine custom tools with built-ins
-let tools = T::simple("get_weather", "Get weather for a city", |args| async move {
-        let city = args["city"].as_str().unwrap_or("Unknown");
-        Ok(json!({"temp": 22, "city": city}))
+let tools = T::typed("get_weather", "Get weather for a city", |args: City| async move {
+        Ok(json!({"temp": 22, "city": args.city}))
     })
     | T::google_search()
     | T::code_execution();
@@ -342,9 +349,7 @@ let state_prep = S::pick(&["customer", "order"]) >> S::defaults(json!({"priority
 let context = C::window(10) + C::exclude_tools();
 
 // T: equip the agent with tools
-let tools = T::simple("lookup", "Look up order status", |args| async move {
-        Ok(json!({"status": "shipped"}))
-    })
+let tools = order_status()          // a #[tool] fn
     | T::google_search();
 
 // P: compose the instruction
