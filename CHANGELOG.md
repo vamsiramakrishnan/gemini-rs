@@ -257,11 +257,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `gemini_adk_server_rs::{FlowAppSpec, MockToolSpec}`: use `SessionSpec` and
   `ToolSpec`. The document format is unchanged.
 - `Live::agent_tool_arc`: `agent_tool` accepts an `Arc<dyn TextAgent>` now.
+- Aliases that duplicated a name: `AgentBuilder::instruct` (use `instruction`),
+  `AgentBuilder::describe` (`description`), `AgentBuilder::no_peers`
+  (`isolate`), `Pipeline::sub_agent` (`step`), `FanOut::sub_agent` (`branch`)
+  and `T::fn_tool` (`T::simple`, `T::typed` or `#[tool]`).
 
 ### Changed
 
 - `LlmError` and `AgentError` are `#[non_exhaustive]`, and
   `LlmError::ContentFiltered` carries the provider's reason.
+- **The fluent prelude no longer glob-imports the L0 prelude.** It named
+  about 200 wire, transport, buffer and turn-detection types in every
+  application's namespace. It now carries the L0 types an application names —
+  content (`Content`, `Part`, `Role`, `FunctionCall`, …), models and voices
+  (`ModelId`, `Voice`, `Modality`), the arguments of `Live` builder methods
+  (`ActivityHandling`, `AutomaticActivityDetection`, `FunctionCallingBehavior`,
+  …) and safety settings — plus `futures_util::StreamExt` for consuming
+  `agent.stream(..)`. Everything else is one import away in
+  `gemini_adk_fluent_rs::wire`.
 - `ToolError`, `Composable` and `LiveViolation` are `#[non_exhaustive]`; a
   `match` on them needs a `_` arm. `ToolError` gained `Declined`, and
   `Composable` gained `Branch`.

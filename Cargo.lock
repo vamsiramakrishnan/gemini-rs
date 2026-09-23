@@ -1437,6 +1437,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "cpal",
+ "futures-util",
  "gemini-adk-rs",
  "gemini-genai-rs",
  "nnnoiseless",

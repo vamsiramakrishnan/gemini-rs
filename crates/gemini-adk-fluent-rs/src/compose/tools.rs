@@ -230,6 +230,10 @@ impl T {
     }
 
     /// Alias for [`simple`](Self::simple) — matches upstream Python `T.fn()`.
+    #[deprecated(
+        since = "2.1.0",
+        note = "use `T::simple` (no parameters), `T::typed` or `#[tool]`"
+    )]
     ///
     /// Named `fn_tool` because `fn` is a reserved keyword in Rust.
     pub fn fn_tool<F, Fut>(

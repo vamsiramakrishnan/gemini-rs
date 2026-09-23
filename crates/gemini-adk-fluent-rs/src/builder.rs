@@ -523,11 +523,13 @@ impl AgentBuilder {
     // ── Upstream naming aliases ──
 
     /// Alias for [`instruction`](Self::instruction) — matches upstream Python `Agent.instruct()`.
+    #[deprecated(since = "2.1.0", note = "use `instruction`")]
     pub fn instruct(self, inst: impl Into<String>) -> Self {
         self.instruction(inst)
     }
 
     /// Alias for [`description`](Self::description) — matches upstream Python `Agent.describe()`.
+    #[deprecated(since = "2.1.0", note = "use `description`")]
     pub fn describe(self, desc: impl Into<String>) -> Self {
         self.description(desc)
     }
@@ -650,6 +652,7 @@ impl AgentBuilder {
     }
 
     /// Disallow transfer to peer agents.
+    #[deprecated(since = "2.1.0", note = "use `isolate`, which this has always called")]
     pub fn no_peers(self) -> Self {
         self.isolate()
     }

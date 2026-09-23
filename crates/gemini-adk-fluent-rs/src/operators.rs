@@ -478,6 +478,10 @@ impl Pipeline {
     }
 
     /// Add a sub-agent step (alias for `step` — matches upstream naming).
+    #[deprecated(
+        since = "2.1.0",
+        note = "use `step`, which accepts any agent or workflow"
+    )]
     pub fn sub_agent(self, agent: AgentBuilder) -> Self {
         self.step(agent)
     }
@@ -529,6 +533,10 @@ impl FanOut {
     }
 
     /// Add a sub-agent branch (alias for `branch` — matches upstream naming).
+    #[deprecated(
+        since = "2.1.0",
+        note = "use `branch`, which accepts any agent or workflow"
+    )]
     pub fn sub_agent(self, agent: AgentBuilder) -> Self {
         self.branch(agent)
     }

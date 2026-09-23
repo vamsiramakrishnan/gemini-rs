@@ -163,7 +163,7 @@ macro_rules! let_clone {
     };
 }
 
-/// The kernel prelude — the ~40 types a typical application touches.
+/// The kernel prelude — the names a typical application touches.
 ///
 /// Deliberately a kernel, not an everything-glob. Anything not here lives in
 /// a focused submodule and is one import away:
@@ -257,6 +257,15 @@ pub mod prelude {
         TaskRegistry, TextAgent, TimeoutTextAgent,
     };
 
-    // ── L0 wire protocol (ModelId, Voice, Content, Part, Role, …) ──
-    pub use gemini_genai_rs::prelude::*;
+    // ── L0 wire types an application names (the rest: `crate::wire`) ──
+    pub use gemini_genai_rs::prelude::{
+        ActivityHandling, ApiEndpoint, AudioFormat, AutomaticActivityDetection, Blob, Content,
+        FinishReason, FunctionCall, FunctionCallingBehavior, FunctionDeclaration, FunctionResponse,
+        FunctionResponseScheduling, GenerationConfig, HarmBlockThreshold, HarmCategory, Modality,
+        ModelId, Part, Role, SafetySetting, Sensitivity, ServerMessage, SessionConfig,
+        SessionEvent, SpeechConfig, ThinkingConfig, Tool, TurnCoverage, UsageMetadata, Voice,
+    };
+
+    // `while let Some(event) = agent.stream(..).next().await` needs this trait.
+    pub use futures_util::StreamExt;
 }
