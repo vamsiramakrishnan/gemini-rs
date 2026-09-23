@@ -268,6 +268,12 @@ async fn main() {
             Composable::Fallback(f) => {
                 println!("{indent}Fallback({} candidates)", f.candidates.len());
             }
+            Composable::Branch(b) => {
+                println!("{indent}Branch:");
+                describe_composable(&b.if_true, depth + 1);
+                describe_composable(&b.if_false, depth + 1);
+            }
+            other => println!("{indent}{other:?}"),
         }
     }
 

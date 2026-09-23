@@ -268,6 +268,9 @@ pub struct GenerationConfig {
     /// Maximum number of output tokens.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_output_tokens: Option<u32>,
+    /// Strings that stop generation when the model produces one (up to five).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stop_sequences: Option<Vec<String>>,
     /// Thinking/reasoning configuration (Gemini 2.5+).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking_config: Option<ThinkingConfig>,

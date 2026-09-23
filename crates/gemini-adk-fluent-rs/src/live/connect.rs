@@ -111,12 +111,18 @@ impl Live {
     }
 
     async fn build_and_connect(mut self) -> Result<LiveHandle, gemini_adk_rs::error::AgentError> {
-        // Builder setters cannot fail; problems they found are reported here.
-        if !self.config_errors.is_empty() {
-            return Err(gemini_adk_rs::error::ConfigError {
-                issues: std::mem::take(&mut self.config_errors),
-            }
-            .into());
+        // Builder setters cannot fail; problems they found are reported here,
+        // with a `T::confirm` tool that nothing can confirm (agent and MCP
+        // tools resolved below are never gated, so this check is complete).
+        let mut issues = std::mem::take(&mut self.config_errors);
+        let unconfirmed = self.unconfirmed_tools();
+        if !unconfirmed.is_empty() {
+            issues.push(
+                crate::testing::LiveViolation::UnconfirmedTools { tools: unconfirmed }.to_string(),
+            );
+        }
+        if !issues.is_empty() {
+            return Err(gemini_adk_rs::error::ConfigError { issues }.into());
         }
         if uses_audio_output(&self.config) {
             self.config = self.config.voice_realtime_defaults();

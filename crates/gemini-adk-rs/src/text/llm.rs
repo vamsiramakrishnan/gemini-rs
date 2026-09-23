@@ -43,8 +43,11 @@ pub struct LlmTextAgent {
     /// cost routing, per-tenant model selection without rebuilding the agent.
     llm_provider: Option<LlmProviderFn>,
     dispatcher: Option<Arc<ToolDispatcher>>,
-    temperature: Option<f32>,
-    max_output_tokens: Option<u32>,
+    /// Every per-request setting (model, sampling, built-in tools, response
+    /// schema); each call starts from a copy with the conversation filled in.
+    template: LlmRequest,
+    /// A state key that receives the final text, besides `"output"`.
+    output_key: Option<String>,
     middleware: MiddlewareChain,
 }
 
@@ -61,8 +64,8 @@ impl LlmTextAgent {
             instruction_provider: None,
             llm_provider: None,
             dispatcher: None,
-            temperature: None,
-            max_output_tokens: None,
+            template: LlmRequest::default(),
+            output_key: None,
             middleware: MiddlewareChain::new(),
         }
     }
@@ -104,15 +107,70 @@ impl LlmTextAgent {
         self
     }
 
+    /// Call `model` instead of the provider's default model, e.g.
+    /// `"gemini-2.5-pro"`.
+    pub fn model(mut self, model: impl Into<String>) -> Self {
+        self.template.model = Some(model.into());
+        self
+    }
+
     /// Set temperature.
     pub fn temperature(mut self, t: f32) -> Self {
-        self.temperature = Some(t);
+        self.template.temperature = Some(t);
         self
     }
 
     /// Set max output tokens.
     pub fn max_output_tokens(mut self, n: u32) -> Self {
-        self.max_output_tokens = Some(n);
+        self.template.max_output_tokens = Some(n);
+        self
+    }
+
+    /// Set the nucleus sampling threshold.
+    pub fn top_p(mut self, p: f32) -> Self {
+        self.template.top_p = Some(p);
+        self
+    }
+
+    /// Sample from the `k` most likely tokens.
+    pub fn top_k(mut self, k: u32) -> Self {
+        self.template.top_k = Some(k);
+        self
+    }
+
+    /// End generation when the model produces any of `sequences`.
+    pub fn stop_sequences(
+        mut self,
+        sequences: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        self.template.stop_sequences = sequences.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Give the model a thinking budget, in tokens.
+    pub fn thinking_budget(mut self, tokens: u32) -> Self {
+        self.template.thinking_budget = Some(tokens);
+        self
+    }
+
+    /// Add a built-in tool (Google Search, code execution, URL context),
+    /// sent alongside the dispatcher's function declarations.
+    pub fn built_in_tool(mut self, tool: gemini_genai_rs::prelude::Tool) -> Self {
+        self.template.tools.push(tool);
+        self
+    }
+
+    /// Constrain the reply to JSON matching `schema`.
+    pub fn response_schema(mut self, schema: serde_json::Value) -> Self {
+        self.template.response_mime_type = Some("application/json".into());
+        self.template.response_json_schema = Some(schema);
+        self
+    }
+
+    /// Also write the final text to state under `key` (it is always written
+    /// to `"output"`).
+    pub fn output_key(mut self, key: impl Into<String>) -> Self {
+        self.output_key = Some(key.into());
         self
     }
 
@@ -133,15 +191,14 @@ impl LlmTextAgent {
 
     /// Build an LlmRequest, taking ownership of contents to avoid cloning.
     fn build_request(&self, contents: Vec<Content>, instruction: &Option<String>) -> LlmRequest {
-        let mut req = LlmRequest::from_contents(contents);
-        req.system_instruction = instruction.clone();
-        req.temperature = self.temperature;
-        req.max_output_tokens = self.max_output_tokens;
-
+        let mut req = LlmRequest {
+            contents,
+            system_instruction: instruction.clone(),
+            ..self.template.clone()
+        };
         if let Some(dispatcher) = &self.dispatcher {
-            req.tools = dispatcher.to_tool_declarations();
+            req.tools.extend(dispatcher.to_tool_declarations());
         }
-
         req
     }
 
@@ -248,6 +305,9 @@ impl TextAgent for LlmTextAgent {
             let _ = self.middleware.run_on_error(e).await;
         } else if let Ok(ref text) = result {
             let _ = state.set("output", text);
+            if let Some(key) = &self.output_key {
+                let _ = state.set(key, text);
+            }
             let _ = self
                 .middleware
                 .run_on_event(&AgentEvent::AgentCompleted {

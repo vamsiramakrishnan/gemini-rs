@@ -15,14 +15,18 @@ use gemini_adk_rs::error::ConfigError;
 use gemini_adk_rs::llm::BaseLlm;
 use gemini_adk_rs::middleware::{Middleware, MiddlewareChain};
 use gemini_adk_rs::text::{
-    FallbackTextAgent, LoopTextAgent, ParallelTextAgent, SequentialTextAgent, TextAgent,
+    FallbackTextAgent, LoopTextAgent, ParallelTextAgent, RouteRule, RouteTextAgent,
+    SequentialTextAgent, TextAgent,
 };
 
 use crate::builder::AgentBuilder;
 use crate::compose::middleware::MiddlewareComposite;
 
 /// A composable workflow node — can be sequenced, fan-out, looped, etc.
+///
+/// New node kinds may be added, so a `match` needs a `_` arm.
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub enum Composable {
     /// A single agent node.
     Agent(AgentBuilder),
@@ -37,6 +41,25 @@ pub enum Composable {
     /// One agent applied to every item of a state list
     /// ([`patterns::map_over`](crate::patterns::map_over)).
     MapOver(crate::patterns::MapOver),
+    /// Run one of two workflows, chosen by a state predicate
+    /// ([`patterns::conditional`](crate::patterns::conditional)).
+    Branch(Branch),
+}
+
+/// Choose between two workflows by a predicate over state.
+///
+/// The predicate is evaluated when the compiled agent runs, against the state
+/// at that moment; exactly one branch runs.
+#[derive(Clone, Debug)]
+pub struct Branch {
+    /// Chooses `if_true` when it returns `true`.
+    pub predicate: LoopPredicate,
+    /// Runs when the predicate holds.
+    pub if_true: Box<Composable>,
+    /// Runs otherwise.
+    pub if_false: Box<Composable>,
+    /// Name given to the compiled agent (default `"branch"`).
+    pub name: Option<String>,
 }
 
 /// Sequential pipeline: execute steps in order, passing state between them.
@@ -175,6 +198,12 @@ impl From<Fallback> for Composable {
     }
 }
 
+impl From<Branch> for Composable {
+    fn from(b: Branch) -> Self {
+        Composable::Branch(b)
+    }
+}
+
 impl From<crate::patterns::MapOver> for Composable {
     fn from(m: crate::patterns::MapOver) -> Self {
         Composable::MapOver(m)
@@ -258,15 +287,7 @@ impl Composable {
 
                 if let Some(predicate) = loop_node.until {
                     loop_agent = loop_agent.until(move |state: &gemini_adk_rs::State| {
-                        // Convert State to serde_json::Value for LoopPredicate compatibility.
-                        let keys = state.keys();
-                        let mut map = serde_json::Map::new();
-                        for key in keys {
-                            if let Some(val) = state.get_raw(&key) {
-                                map.insert(key, val);
-                            }
-                        }
-                        predicate.check(&serde_json::Value::Object(map))
+                        predicate.check(&state_snapshot(state))
                     });
                 }
 
@@ -275,6 +296,20 @@ impl Composable {
                 }
 
                 Arc::new(loop_agent)
+            }
+
+            Composable::Branch(branch) => {
+                let if_true = branch.if_true.compile(llm.clone())?;
+                let if_false = branch.if_false.compile(llm)?;
+                let predicate = branch.predicate;
+                Arc::new(RouteTextAgent::new(
+                    branch.name.as_deref().unwrap_or("branch"),
+                    vec![RouteRule::new(
+                        move |state: &gemini_adk_rs::State| predicate.check(&state_snapshot(state)),
+                        if_true,
+                    )],
+                    if_false,
+                ))
             }
 
             Composable::Fallback(fallback) => {
@@ -292,6 +327,17 @@ impl Composable {
             }
         })
     }
+}
+
+/// The whole state as one JSON object, the form `LoopPredicate` reads.
+fn state_snapshot(state: &gemini_adk_rs::State) -> serde_json::Value {
+    let mut map = serde_json::Map::new();
+    for key in state.keys() {
+        if let Some(val) = state.get_raw(&key) {
+            map.insert(key, val);
+        }
+    }
+    serde_json::Value::Object(map)
 }
 
 /// Build a [`MiddlewareChain`] from an ordered list of middleware layers.

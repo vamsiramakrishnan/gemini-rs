@@ -63,6 +63,18 @@ impl Live {
         names
     }
 
+    /// `T::confirm(..)` tools registered with no confirmation provider to
+    /// decide them — each would run unconfirmed.
+    pub(crate) fn unconfirmed_tools(&self) -> Vec<String> {
+        if self.confirmation_provider.is_some() {
+            return Vec::new();
+        }
+        self.dispatcher
+            .as_ref()
+            .map(|d| d.gated_tools().map(str::to_owned).collect())
+            .unwrap_or_default()
+    }
+
     /// How many tools are still unresolved, and so absent from
     /// [`declared_tool_names`](Self::declared_tool_names).
     ///
@@ -180,6 +192,43 @@ mod tests {
         async fn generate(&self, _request: LlmRequest) -> Result<LlmResponse, LlmError> {
             Err(LlmError::Other("inert".into()))
         }
+    }
+
+    #[test]
+    fn a_custom_dispatcher_keeps_tools_registered_before_it() {
+        let mut custom = gemini_adk_rs::tool::ToolDispatcher::new();
+        custom.register_function(std::sync::Arc::new(gemini_adk_rs::tool::SimpleTool::new(
+            "stream_quotes",
+            "Stream quotes",
+            None,
+            |_| async { Ok(json!({})) },
+        )));
+        let live = Live::builder().tools(sample_tool()).dispatcher(custom);
+        let names = live.declared_tool_names();
+        assert!(names.contains(&"book_table".to_string()), "{names:?}");
+        assert!(names.contains(&"stream_quotes".to_string()), "{names:?}");
+    }
+
+    /// `connect` refuses a `T::confirm` tool with no provider; the static
+    /// check says so before connecting.
+    #[test]
+    fn a_confirm_tool_without_a_provider_is_reported() {
+        let gated = T::confirm(sample_tool(), "Books cost money");
+        let live = Live::builder().tools(gated.clone());
+        assert!(
+            crate::testing::check_live(&live).contains(
+                &crate::testing::LiveViolation::UnconfirmedTools {
+                    tools: vec!["book_table".into()]
+                }
+            ),
+            "{:?}",
+            crate::testing::check_live(&live)
+        );
+
+        let confirmed = Live::builder().tools(gated).confirmation_provider(
+            gemini_adk_rs::confirmation::StaticConfirmation::deny_all("no"),
+        );
+        assert!(confirmed.unconfirmed_tools().is_empty());
     }
 
     #[test]

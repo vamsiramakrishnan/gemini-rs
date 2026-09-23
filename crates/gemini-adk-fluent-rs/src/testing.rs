@@ -240,6 +240,7 @@ pub fn diagnose(agent: &AgentBuilder) -> String {
 /// actually matters — phases, a governing flow, memory slots, watchers, all
 /// naming each other by string — had no static check at all.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum LiveViolation {
     /// A governing flow names a tool this session does not register.
     ///
@@ -287,6 +288,13 @@ pub enum LiveViolation {
         /// How many tools will only exist after connect.
         count: usize,
     },
+    /// Tools that must be confirmed before running (`T::confirm`), in a
+    /// session with no confirmation provider. `connect` refuses this rather
+    /// than let them run unconfirmed.
+    UnconfirmedTools {
+        /// The gated tools.
+        tools: Vec<String>,
+    },
 }
 
 impl std::fmt::Display for LiveViolation {
@@ -319,6 +327,12 @@ impl std::fmt::Display for LiveViolation {
             Self::UnknownTransitionTarget { from, target } => write!(
                 f,
                 "phase `{from}` transitions to `{target}`, which does not exist."
+            ),
+            Self::UnconfirmedTools { tools } => write!(
+                f,
+                "`{}` must be confirmed before running (`T::confirm`), but the session has no \
+                 `confirmation_provider(..)`; connect will refuse it.",
+                tools.join("`, `")
             ),
             Self::ToolsUnresolvedAtCheckTime { count } => write!(
                 f,
@@ -355,6 +369,11 @@ pub fn check_live(live: &crate::live::Live) -> Vec<LiveViolation> {
         violations.push(LiveViolation::ToolsUnresolvedAtCheckTime {
             count: live.pending_tool_count(),
         });
+    }
+
+    let unconfirmed = live.unconfirmed_tools();
+    if !unconfirmed.is_empty() {
+        violations.push(LiveViolation::UnconfirmedTools { tools: unconfirmed });
     }
 
     // Flow tool names. `compile_with_tools` already owns this reasoning

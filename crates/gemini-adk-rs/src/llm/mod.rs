@@ -80,10 +80,18 @@ impl TokenProvider for GcloudTokenProvider {
 }
 
 /// Configuration for an LLM generation request.
+///
+/// Every field a provider can honour is here, and [`GeminiLlm`] sends every
+/// one of them. New fields may be added; build requests with
+/// `..Default::default()` or [`LlmRequest::from_text`].
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LlmRequest {
     /// The messages/contents to send.
     pub contents: Vec<Content>,
+    /// The model for this request, overriding the provider's default model
+    /// (e.g. `"gemini-2.5-pro"`). `None` uses [`BaseLlm::model_id`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
     /// System instruction.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system_instruction: Option<String>,
@@ -96,6 +104,18 @@ pub struct LlmRequest {
     /// Maximum output tokens.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_output_tokens: Option<u32>,
+    /// Nucleus sampling threshold.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_p: Option<f32>,
+    /// Number of highest-probability tokens to sample from.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_k: Option<u32>,
+    /// Strings that end generation when produced.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub stop_sequences: Vec<String>,
+    /// Token budget for the model's thinking, on models that think.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking_budget: Option<u32>,
     /// MIME type for structured output (e.g., `"application/json"`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_mime_type: Option<String>,

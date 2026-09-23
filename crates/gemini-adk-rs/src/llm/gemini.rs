@@ -190,11 +190,47 @@ impl GeminiLlm {
         self.variant
     }
 
-    /// Preprocess request: remove labels and displayName for non-Vertex (Gemini API).
-    fn preprocess_request(_request: &mut LlmRequest) {
-        // For Gemini API backend: remove labels and displayName from tools.
-        // This is a no-op for now since LlmRequest doesn't have those fields yet.
-        // In a full implementation, this would strip Vertex-only fields.
+    /// Map every field of an [`LlmRequest`] onto the wire request, and the
+    /// per-request model override onto the model to call.
+    #[cfg(feature = "gemini-llm")]
+    fn to_generate_config(
+        mut request: LlmRequest,
+    ) -> (
+        gemini_genai_rs::generate::GenerateContentConfig,
+        Option<gemini_genai_rs::prelude::ModelId>,
+    ) {
+        use gemini_genai_rs::generate::GenerateContentConfig;
+        use gemini_genai_rs::prelude::{GenerationConfig, ModelId, ThinkingConfig};
+
+        let mut config = if request.contents.is_empty() {
+            GenerateContentConfig::from_text("")
+        } else {
+            GenerateContentConfig::from_contents(std::mem::take(&mut request.contents))
+        };
+        if let Some(sys) = request.system_instruction.take() {
+            config = config.system_instruction(&sys);
+        }
+        config.tools = std::mem::take(&mut request.tools);
+
+        let generation = GenerationConfig {
+            temperature: request.temperature,
+            max_output_tokens: request.max_output_tokens,
+            top_p: request.top_p,
+            top_k: request.top_k,
+            stop_sequences: (!request.stop_sequences.is_empty())
+                .then(|| std::mem::take(&mut request.stop_sequences)),
+            thinking_config: request.thinking_budget.map(|budget| ThinkingConfig {
+                thinking_budget: Some(budget),
+                include_thoughts: None,
+            }),
+            response_mime_type: request.response_mime_type.take(),
+            response_json_schema: request.response_json_schema.take(),
+            ..GenerationConfig::default()
+        };
+        config.generation_config =
+            (generation != GenerationConfig::default()).then_some(generation);
+
+        (config, request.model.take().map(ModelId::new))
     }
 }
 
@@ -204,49 +240,17 @@ impl BaseLlm for GeminiLlm {
         &self.model
     }
 
-    async fn generate(&self, mut request: LlmRequest) -> Result<LlmResponse, LlmError> {
-        Self::preprocess_request(&mut request);
-
+    async fn generate(&self, request: LlmRequest) -> Result<LlmResponse, LlmError> {
         // Feature-gate the actual HTTP call behind gemini-live's generate + http features.
         #[cfg(feature = "gemini-llm")]
         {
-            use gemini_genai_rs::generate::GenerateContentConfig;
             use gemini_genai_rs::prelude::*;
 
-            // Build GenerateContentConfig from LlmRequest — move, don't clone.
-            let mut config = if request.contents.is_empty() {
-                GenerateContentConfig::from_text("")
-            } else {
-                GenerateContentConfig::from_contents(std::mem::take(&mut request.contents))
-            };
-
-            if let Some(sys) = request.system_instruction.take() {
-                config = config.system_instruction(&sys);
-            }
-            if !request.tools.is_empty() {
-                config.tools = std::mem::take(&mut request.tools);
-            }
-            if let Some(temp) = request.temperature {
-                config = config.temperature(temp);
-            }
-            if let Some(max) = request.max_output_tokens {
-                config = config.max_output_tokens(max);
-            }
-            if request.response_mime_type.is_some() || request.response_json_schema.is_some() {
-                let gc = config
-                    .generation_config
-                    .get_or_insert_with(gemini_genai_rs::prelude::GenerationConfig::default);
-                if let Some(mime) = request.response_mime_type.take() {
-                    gc.response_mime_type = Some(mime);
-                }
-                if let Some(schema) = request.response_json_schema.take() {
-                    gc.response_json_schema = Some(schema);
-                }
-            }
+            let (config, model) = Self::to_generate_config(request);
 
             let response = self
                 .client
-                .generate_content_with(config, None)
+                .generate_content_with(config, model.as_ref())
                 .await
                 .map_err(|e| LlmError::RequestFailed(e.to_string()))?;
 
@@ -309,6 +313,51 @@ impl BaseLlm for GeminiLlm {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every setting an agent can make must reach the wire body; a field that
+    /// is accepted and dropped is the bug this guards against.
+    #[cfg(feature = "gemini-llm")]
+    #[test]
+    fn every_request_field_reaches_the_wire() {
+        let request = LlmRequest {
+            model: Some("gemini-2.5-pro".into()),
+            system_instruction: Some("Be brief.".into()),
+            tools: vec![gemini_genai_rs::prelude::Tool::google_search()],
+            temperature: Some(0.2),
+            max_output_tokens: Some(64),
+            top_p: Some(0.9),
+            top_k: Some(20),
+            stop_sequences: vec!["END".into()],
+            thinking_budget: Some(512),
+            response_mime_type: Some("application/json".into()),
+            response_json_schema: Some(serde_json::json!({ "type": "object" })),
+            ..LlmRequest::from_text("hi")
+        };
+        let (config, model) = GeminiLlm::to_generate_config(request);
+        assert_eq!(model.as_ref().map(|m| m.as_str()), Some("gemini-2.5-pro"));
+
+        let body = config.to_request_body();
+        let gc = &body["generationConfig"];
+        assert_eq!(gc["temperature"], 0.2_f32 as f64);
+        assert_eq!(gc["maxOutputTokens"], 64);
+        assert_eq!(gc["topP"], 0.9_f32 as f64);
+        assert_eq!(gc["topK"], 20);
+        assert_eq!(gc["stopSequences"], serde_json::json!(["END"]));
+        assert_eq!(gc["thinkingConfig"]["thinkingBudget"], 512);
+        assert_eq!(gc["responseMimeType"], "application/json");
+        assert_eq!(gc["responseJsonSchema"]["type"], "object");
+        assert!(body["tools"][0].get("googleSearch").is_some(), "{body}");
+        assert!(body["systemInstruction"].is_object(), "{body}");
+    }
+
+    /// A request with no settings sends no `generationConfig` at all.
+    #[cfg(feature = "gemini-llm")]
+    #[test]
+    fn an_unconfigured_request_sends_no_generation_config() {
+        let (config, model) = GeminiLlm::to_generate_config(LlmRequest::from_text("hi"));
+        assert!(model.is_none());
+        assert!(config.to_request_body().get("generationConfig").is_none());
+    }
 
     #[test]
     fn default_model_is_the_rolling_flash_alias() {

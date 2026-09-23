@@ -88,6 +88,7 @@ impl From<ConfigError> for AgentError {
 
 /// Errors that can occur during tool execution.
 #[derive(Debug, Clone, thiserror::Error)]
+#[non_exhaustive]
 pub enum ToolError {
     /// The tool's execution logic failed.
     #[error("Tool execution failed: {0}")]
@@ -104,6 +105,11 @@ pub enum ToolError {
     /// The tool call was cancelled before completion.
     #[error("Tool cancelled")]
     Cancelled,
+
+    /// A confirmation-gated call was declined; carries the reason given, so
+    /// the model can tell the user why and what to do instead.
+    #[error("Tool call declined: {0}")]
+    Declined(String),
 
     /// The tool call exceeded its timeout.
     #[error("Tool execution timed out after {0:?}")]

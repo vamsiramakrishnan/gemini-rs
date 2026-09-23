@@ -9,6 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`AgentBuilder::build` dropped most of its configuration.** Only the
+  instruction, temperature, max tokens and function tools reached the agent;
+  `model`, `top_p`, `top_k`, `stop_sequences`, `thinking`, `output_schema`,
+  `output_key` and every built-in tool (`google_search`, `code_execution`,
+  `url_context`) were accepted and ignored, so changing the model changed
+  nothing. They are all sent now — `LlmRequest` gained `model`, `top_p`,
+  `top_k`, `stop_sequences` and `thinking_budget`, `LlmTextAgent` the matching
+  setters, and `GeminiLlm` maps every field (a test asserts each one reaches
+  the wire body). Settings a text agent cannot honour — `voice`, audio
+  modalities, a Live model, `sub_agent`/`transfer_to`/`stay`/`isolate` — are
+  now a `ConfigError` naming what to use instead, not a silent no-op.
+- **`conditional(..)` did not branch.** It always ran the true branch, and
+  rebuilt both branches from their name and instruction only. It now compiles
+  to a `RouteTextAgent` (new `Composable::Branch`) that runs exactly the branch
+  the predicate chooses, with each branch's full configuration, and accepts
+  any `Composable`.
+- **`Live::dispatcher(..)` discarded tools registered before it.** They are
+  merged in (new `ToolDispatcher::merge`); the supplied dispatcher wins a name
+  clash.
+- **`ToolDispatcher` declarations were cached forever and unordered.** The
+  cache is now cleared on every registration, and declarations are ordered by
+  name, so a setup message is identical from run to run.
+- **A `T::confirm` tool ran unconfirmed when no confirmation provider was
+  set.** `AgentBuilder::build` and `Live::connect` refuse that configuration,
+  and `check_live` reports it (`LiveViolation::UnconfirmedTools`).
+  `AgentBuilder::confirmation_provider` is new. A declined call now returns
+  `ToolError::Declined(reason)`, so the model can tell the user why, instead
+  of a bare `Cancelled`.
+- `GeminiLlm` no longer carries a `preprocess_request` stub that did nothing.
 - **`#[tool]` sent a schema the API rejects.** It used raw
   `schemars::schema_for!`, so an `Option<String>` parameter declared
   `"type": ["string", "null"]` — refused outright, and on Live by closing the
@@ -168,6 +197,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `ToolError`, `Composable` and `LiveViolation` are `#[non_exhaustive]`; a
+  `match` on them needs a `_` arm. `ToolError` gained `Declined`, and
+  `Composable` gained `Branch`.
+- `LlmRequest` has new fields; build it with `..Default::default()` or
+  `LlmRequest::from_text`. `GenerationConfig` gained `stop_sequences`.
 - `LlmTextAgent::new` and `AgentBuilder::build` take `impl BaseLlm + 'static`
   instead of `Arc<dyn BaseLlm>`. Existing calls that pass an `Arc` still
   compile; a bare `GeminiLlm` or `MockLlm` no longer needs wrapping.
