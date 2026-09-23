@@ -170,7 +170,10 @@ pub struct UsageMetadata {
     #[serde(default)]
     pub cached_content_token_count: Option<u32>,
     /// Total number of tokens across all generated response candidates.
-    #[serde(default)]
+    ///
+    /// Live reports this as `responseTokenCount`; `generateContent` as
+    /// `candidatesTokenCount`. Both land here.
+    #[serde(default, alias = "candidatesTokenCount")]
     pub response_token_count: Option<u32>,
     /// Number of tokens present in tool-use prompt(s).
     #[serde(default)]

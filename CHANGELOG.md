@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Model errors lost their kind on the text path.** `GeminiLlm` flattened
+  every failure into `LlmError::RequestFailed(String)`, and `LlmTextAgent`
+  flattened that again into `AgentError::Other("LLM error: …")`, so a caller
+  could not tell a rate limit from a bad key without parsing text. `LlmError`
+  now carries `Api { status, message }`, `Auth`, `Transport` and `Config`,
+  with `status()`, `is_rate_limited()`, `is_auth()`, `is_retryable()` and
+  `is_content_filtered()`; it reaches the caller as `AgentError::Llm`
+  (`AgentError::as_llm()`).
+- **A blocked prompt returned an empty answer.** `promptFeedback.blockReason`
+  and a reply withheld for safety (`SAFETY`, `PROHIBITED_CONTENT`, …) are now
+  `LlmError::ContentFiltered(reason)`. A reply truncated at `MAX_TOKENS` is
+  still returned.
+- **Text-path token usage reported zero output tokens.** `generateContent`
+  names the count `candidatesTokenCount`, which `UsageMetadata` did not read.
+  It does now, and thinking tokens, billed as output, count toward
+  `completion_tokens`.
+- `LlmResponse::finish_reason` from `GeminiLlm` uses the API's names
+  (`"STOP"`, `"MAX_TOKENS"`), as mocks and recordings do, instead of Rust
+  `Debug` names (`"Stop"`).
 - **`AgentBuilder::build` dropped most of its configuration.** Only the
   instruction, temperature, max tokens and function tools reached the agent;
   `model`, `top_p`, `top_k`, `stop_sequences`, `thinking`, `output_schema`,
@@ -110,6 +129,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`GeminiLlm::from_env()`** (and `try_new(params)`): the same configuration
+  as `new`, checked before any request — a missing API key, a Vertex AI setup
+  without a project, or a Live model on the text API fails at once with the
+  variable to set, instead of on the first request.
+- `AgentError::State` (so `state.set(..)?` works in a function returning
+  `AgentError`) and `AgentError::InvalidOutput`.
 - **`MockLlm`, a public test model** (`gemini_adk_rs::llm::MockLlm`, also in
   the fluent `testing` module). `MockLlm::text` repeats one reply,
   `MockLlm::script` replies in order and fails loudly once spent, and
@@ -197,6 +222,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `LlmError` and `AgentError` are `#[non_exhaustive]`, and
+  `LlmError::ContentFiltered` carries the provider's reason.
 - `ToolError`, `Composable` and `LiveViolation` are `#[non_exhaustive]`; a
   `match` on them needs a `_` arm. `ToolError` gained `Declined`, and
   `Composable` gained `Branch`.

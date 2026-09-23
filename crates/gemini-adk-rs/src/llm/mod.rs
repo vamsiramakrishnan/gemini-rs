@@ -272,9 +272,39 @@ impl std::ops::AddAssign for TokenUsage {
 }
 
 /// Errors from LLM operations.
+///
+/// Errors keep what the provider said — the HTTP status, the reason content
+/// was blocked — so a caller can decide what to do without parsing a message:
+///
+/// ```
+/// use gemini_adk_rs::llm::LlmError;
+///
+/// let err = LlmError::Api { status: 429, message: "quota exceeded".into() };
+/// assert!(err.is_rate_limited() && err.is_retryable());
+/// assert_eq!(err.status(), Some(429));
+/// ```
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum LlmError {
-    /// The HTTP request to the LLM API failed.
+    /// The provider answered with an error status.
+    #[error("the model API returned HTTP {status}: {message}")]
+    Api {
+        /// The HTTP status code.
+        status: u16,
+        /// The provider's error message.
+        message: String,
+    },
+    /// Credentials are missing or were rejected. The message says how to fix it.
+    #[error("{0}")]
+    Auth(String),
+    /// The provider could not be reached: connection, TLS or timeout.
+    #[error("could not reach the model API: {0}")]
+    Transport(String),
+    /// The client is configured in a way no request can succeed with. The
+    /// message says what to change.
+    #[error("{0}")]
+    Config(String),
+    /// The HTTP request to the LLM API failed for another reason.
     #[error("LLM request failed: {0}")]
     RequestFailed(String),
     /// The requested model is not available.
@@ -283,12 +313,46 @@ pub enum LlmError {
     /// The request was rate-limited by the provider.
     #[error("Rate limited")]
     RateLimited,
-    /// The response was filtered by content safety.
-    #[error("Content filtered")]
-    ContentFiltered,
+    /// The prompt or the reply was blocked by content safety; carries the
+    /// provider's reason (e.g. `"SAFETY"`, `"PROHIBITED_CONTENT"`).
+    #[error("blocked by content safety: {0}")]
+    ContentFiltered(String),
     /// A catch-all for other LLM errors.
     #[error("{0}")]
     Other(String),
+}
+
+impl LlmError {
+    /// The HTTP status the provider answered with, when there was one.
+    pub fn status(&self) -> Option<u16> {
+        match self {
+            Self::Api { status, .. } => Some(*status),
+            Self::RateLimited => Some(429),
+            _ => None,
+        }
+    }
+
+    /// The provider is rate-limiting or out of quota (HTTP 429).
+    pub fn is_rate_limited(&self) -> bool {
+        self.status() == Some(429)
+    }
+
+    /// Credentials are missing, invalid or lack permission (HTTP 401/403).
+    pub fn is_auth(&self) -> bool {
+        matches!(self, Self::Auth(_)) || matches!(self.status(), Some(401 | 403))
+    }
+
+    /// The prompt or reply was blocked by content safety.
+    pub fn is_content_filtered(&self) -> bool {
+        matches!(self, Self::ContentFiltered(_))
+    }
+
+    /// Trying the same request again later may succeed: rate limits, server
+    /// errors (5xx) and transport failures. Auth, configuration, content
+    /// safety and other client errors will fail the same way again.
+    pub fn is_retryable(&self) -> bool {
+        matches!(self, Self::Transport(_)) || matches!(self.status(), Some(429 | 500..=599))
+    }
 }
 
 /// Capability declaration for a model — what callers may rely on without
@@ -458,6 +522,24 @@ mod tests {
         let calls = resp.function_calls();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].name, "get_weather");
+    }
+
+    #[test]
+    fn errors_classify_by_status_not_by_message() {
+        let api = |status| LlmError::Api {
+            status,
+            message: String::new(),
+        };
+        assert!(api(429).is_rate_limited() && api(429).is_retryable());
+        assert!(api(503).is_retryable() && !api(503).is_rate_limited());
+        assert!(api(401).is_auth() && api(403).is_auth() && !api(401).is_retryable());
+        assert!(!api(400).is_retryable() && !api(404).is_auth());
+        assert!(LlmError::Transport("reset".into()).is_retryable());
+        assert!(LlmError::RateLimited.is_rate_limited());
+        assert!(LlmError::Auth("no key".into()).is_auth());
+        assert!(LlmError::ContentFiltered("SAFETY".into()).is_content_filtered());
+        assert_eq!(api(418).status(), Some(418));
+        assert_eq!(LlmError::Other("x".into()).status(), None);
     }
 
     #[test]

@@ -226,7 +226,7 @@ pub mod prelude {
     pub use gemini_adk_rs::state::{State, StateKey};
 
     // ── LLM (core; request/response/registry in `crate::text`) ──
-    pub use gemini_adk_rs::llm::{BaseLlm, GeminiLlm, GeminiLlmParams};
+    pub use gemini_adk_rs::llm::{BaseLlm, GeminiLlm, GeminiLlmParams, LlmError};
 
     // ── Tools ──
     pub use gemini_adk_rs::tool::{

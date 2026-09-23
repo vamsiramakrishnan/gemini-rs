@@ -9,7 +9,19 @@ use gemini_genai_rs::session::SessionError;
 pub type AgentResult<T> = std::result::Result<T, AgentError>;
 
 /// Errors that can occur during agent execution.
+///
+/// A model failure arrives as [`AgentError::Llm`] with its kind intact, so a
+/// caller can branch on it:
+///
+/// ```
+/// use gemini_adk_rs::error::AgentError;
+/// use gemini_adk_rs::llm::LlmError;
+///
+/// let err = AgentError::from(LlmError::Api { status: 429, message: "slow down".into() });
+/// assert!(err.as_llm().is_some_and(LlmError::is_rate_limited));
+/// ```
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum AgentError {
     /// A wire-level session error (WebSocket, auth, setup).
     #[error("Session error: {0}")]
@@ -18,6 +30,26 @@ pub enum AgentError {
     /// A tool execution error.
     #[error("Tool error: {0}")]
     Tool(#[from] ToolError),
+
+    /// The model call failed; the [`LlmError`](crate::llm::LlmError) says how.
+    #[error("model call failed: {0}")]
+    Llm(#[from] crate::llm::LlmError),
+
+    /// Reading or writing session state failed.
+    #[error(transparent)]
+    State(#[from] crate::state::StateError),
+
+    /// The model's reply did not match the requested output type, even after
+    /// it was asked to correct it.
+    #[error("the model's reply is not a valid {expected}: {reason}")]
+    InvalidOutput {
+        /// The Rust type the reply had to deserialize into.
+        expected: &'static str,
+        /// Why it did not.
+        reason: String,
+        /// The reply as received.
+        text: String,
+    },
 
     /// The requested agent was not found in the registry.
     #[error("Unknown agent: {0}")]
@@ -46,6 +78,16 @@ pub enum AgentError {
     /// A catch-all for other errors.
     #[error("{0}")]
     Other(String),
+}
+
+impl AgentError {
+    /// The model error behind this one, if a model call failed.
+    pub fn as_llm(&self) -> Option<&crate::llm::LlmError> {
+        match self {
+            Self::Llm(e) => Some(e),
+            _ => None,
+        }
+    }
 }
 
 /// A build-time configuration error: one or more problems found while

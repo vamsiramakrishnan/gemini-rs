@@ -342,7 +342,7 @@ impl LlmTextAgent {
                     let llm_response = llm
                         .generate(request.clone())
                         .await
-                        .map_err(|e| AgentError::Other(format!("LLM error: {e}")))?;
+                        .map_err(AgentError::Llm)?;
 
                     // after_model hook — may replace the response.
                     match self
