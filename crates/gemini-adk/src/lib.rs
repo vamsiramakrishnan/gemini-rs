@@ -92,7 +92,7 @@
 //!
 //! This crate re-exports [`gemini-adk-fluent-rs`](gemini_adk_fluent_rs); its
 //! features have the same names here, plus `memory`, which adds
-//! [`memory`](crate::memory) (contextual memory for Live sessions).
+//! `gemini_adk::memory` (contextual memory for Live sessions).
 
 #[doc(inline)]
 pub use gemini_adk_fluent_rs::*;
