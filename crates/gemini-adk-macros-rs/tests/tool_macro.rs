@@ -111,3 +111,134 @@ async fn registers_in_dispatcher() {
         .unwrap();
     assert_eq!(result["city"], "Tokyo");
 }
+
+// ── Doc-comment descriptions, typed outputs, any error ────────────────────
+
+#[derive(serde::Serialize, serde::Deserialize, schemars::JsonSchema, Debug, PartialEq)]
+enum Units {
+    Metric,
+    Imperial,
+}
+
+#[derive(serde::Serialize)]
+struct Forecast {
+    city: String,
+    high_c: i32,
+}
+
+/// Forecast the weather
+/// for a city.
+///
+/// # Arguments
+///
+/// * `city` - The city name,
+///   e.g. "Paris".
+/// * `units` - How to report temperatures.
+/// * `days` - How far ahead to look.
+///
+/// # Errors
+///
+/// When the city is unknown.
+#[tool]
+async fn forecast(city: String, units: Units, days: Option<u8>) -> std::io::Result<Forecast> {
+    if city == "Atlantis" {
+        return Err(std::io::Error::other("unknown city: Atlantis"));
+    }
+    let _ = (units, days);
+    Ok(Forecast { city, high_c: 21 })
+}
+
+/// Add two numbers.
+#[tool]
+async fn add(a: i64, b: i64) -> i64 {
+    a + b
+}
+
+/// Always refuses, with a specific tool error.
+#[tool]
+async fn refuse() -> Result<Value, ToolError> {
+    Err(ToolError::InvalidArgs("refused on purpose".into()))
+}
+
+/// Record a note; returns nothing.
+#[tool]
+async fn note(text: String) {
+    let _ = text;
+}
+
+/// Only exists when the flag is on.
+#[cfg(any())]
+#[tool]
+async fn never_compiled(x: NotAType) -> Result<Value, ToolError> {
+    unreachable!()
+}
+
+#[test]
+fn the_doc_comment_is_the_description_and_the_attribute_overrides_it() {
+    assert_eq!(forecast().description(), "Forecast the weather for a city.");
+    assert_eq!(
+        get_weather().description(),
+        "Get the current weather for a city"
+    );
+}
+
+#[test]
+fn arguments_section_becomes_parameter_descriptions() {
+    let schema = forecast().parameters().unwrap();
+    let props = &schema["properties"];
+    assert_eq!(
+        props["city"]["description"],
+        "The city name, e.g. \"Paris\"."
+    );
+    assert_eq!(props["units"]["description"], "How to report temperatures.");
+    assert_eq!(props["days"]["description"], "How far ahead to look.");
+}
+
+/// The macro used to send raw `schema_for!` output, which the API rejects for
+/// `Option<T>` (`"type": [.., "null"]`) and misreads for nested enums (`$ref`).
+#[test]
+fn the_schema_is_wire_clean() {
+    let schema = forecast().parameters().unwrap();
+    let rendered = schema.to_string();
+    assert!(!rendered.contains("$ref"), "{rendered}");
+    assert!(!rendered.contains("definitions"), "{rendered}");
+    assert!(!rendered.contains("$schema"), "{rendered}");
+    assert_eq!(schema["properties"]["days"]["type"], "integer");
+    assert_eq!(schema["properties"]["units"]["type"], "string");
+    assert_eq!(
+        schema["properties"]["units"]["enum"],
+        json!(["Metric", "Imperial"])
+    );
+    assert_eq!(schema["required"], json!(["city", "units"]));
+}
+
+#[tokio::test]
+async fn any_serialize_output_is_returned_as_json() {
+    let out = forecast()
+        .call(json!({ "city": "Paris", "units": "Metric" }))
+        .await
+        .unwrap();
+    assert_eq!(out, json!({ "city": "Paris", "high_c": 21 }));
+    assert_eq!(
+        add().call(json!({ "a": 2, "b": 3 })).await.unwrap(),
+        json!(5)
+    );
+    assert_eq!(
+        note().call(json!({ "text": "hi" })).await.unwrap(),
+        Value::Null
+    );
+}
+
+#[tokio::test]
+async fn any_error_becomes_a_tool_error_and_a_tool_error_keeps_its_kind() {
+    let err = forecast()
+        .call(json!({ "city": "Atlantis", "units": "Metric" }))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, ToolError::ExecutionFailed(m) if m == "unknown city: Atlantis"),
+        "{err:?}"
+    );
+    let err = refuse().call(json!({})).await.unwrap_err();
+    assert!(matches!(err, ToolError::InvalidArgs(_)), "{err:?}");
+}

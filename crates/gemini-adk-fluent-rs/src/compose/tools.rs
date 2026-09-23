@@ -7,7 +7,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use gemini_adk_rs::text::TextAgent;
-use gemini_adk_rs::tool::{PolicyTool, SimpleTool, ToolFunction, ToolPolicy};
+use gemini_adk_rs::tool::{PolicyTool, SimpleTool, ToolFunction, ToolPolicy, TypedTool};
 use gemini_genai_rs::prelude::{FunctionDeclaration, Tool};
 
 /// A tool composite — one or more tool entries.
@@ -169,7 +169,13 @@ impl T {
         ToolComposite::from_built_in(Tool::code_execution())
     }
 
-    /// Create a simple tool from a name, description, and async closure.
+    /// A tool that takes **no parameters**, from a name, description, and
+    /// async closure.
+    ///
+    /// The declaration the model sees has no parameters, so the model calls
+    /// it with `{}`. For a tool with arguments, use [`#[tool]`](macro@crate::prelude::tool)
+    /// on a documented `async fn`, or [`T::typed`](Self::typed) when the tool
+    /// must capture something (a client, a pool) from its environment.
     pub fn simple<F, Fut>(
         name: impl Into<String>,
         description: impl Into<String>,
@@ -181,6 +187,46 @@ impl T {
     {
         let tool = SimpleTool::new(name, description, None, f);
         ToolComposite::from_function(Arc::new(tool))
+    }
+
+    /// A tool whose arguments are the type `A`, from a closure.
+    ///
+    /// `A`'s JSON Schema (through [`wire_schema`](gemini_adk_rs::tool::wire_schema))
+    /// is the declaration, and doc comments on its fields describe the
+    /// parameters. Reach for this over [`#[tool]`](macro@crate::prelude::tool)
+    /// when the tool needs state from its environment:
+    ///
+    /// ```
+    /// use gemini_adk_fluent_rs::prelude::*;
+    /// use std::sync::Arc;
+    ///
+    /// #[derive(serde::Deserialize, schemars::JsonSchema)]
+    /// struct Lookup {
+    ///     /// The customer's account id.
+    ///     account: String,
+    /// }
+    ///
+    /// let accounts = Arc::new(vec![("a-1".to_string(), 120)]);
+    /// let balance = T::typed("balance", "Look up an account balance", move |args: Lookup| {
+    ///     let accounts = accounts.clone();
+    ///     async move {
+    ///         let found = accounts.iter().find(|(id, _)| *id == args.account);
+    ///         Ok(serde_json::json!({ "balance": found.map(|(_, b)| *b) }))
+    ///     }
+    /// });
+    /// AgentBuilder::new("support").tools(balance);
+    /// ```
+    pub fn typed<A, F, Fut>(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        f: F,
+    ) -> ToolComposite
+    where
+        A: serde::de::DeserializeOwned + schemars::JsonSchema + Send + Sync + 'static,
+        F: Fn(A) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<serde_json::Value, gemini_adk_rs::ToolError>> + Send + 'static,
+    {
+        ToolComposite::from_function(Arc::new(TypedTool::new::<F, Fut>(name, description, f)))
     }
 
     /// Alias for [`simple`](Self::simple) — matches upstream Python `T.fn()`.

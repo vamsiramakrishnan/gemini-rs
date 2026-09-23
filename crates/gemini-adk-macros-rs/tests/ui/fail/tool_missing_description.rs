@@ -1,4 +1,5 @@
-//! `#[tool]` requires a string-literal description argument.
+//! A tool with neither a doc comment nor `#[tool("...")]` has nothing to tell
+//! the model, which chooses tools by their descriptions.
 
 use gemini_adk_macros_rs::tool;
 

@@ -163,11 +163,16 @@ impl Live {
     ///
     /// ```no_run
     /// # use gemini_adk_fluent_rs::prelude::*;
+    /// #[derive(serde::Deserialize, schemars::JsonSchema)]
+    /// struct City {
+    ///     /// The city to report on.
+    ///     city: String,
+    /// }
+    ///
     /// Live::builder()
     ///     .tools(
-    ///         T::simple("get_weather", "Get weather", |args| async move {
-    ///             let _ = args;
-    ///             Ok(serde_json::json!({"temp": 22}))
+    ///         T::typed("get_weather", "Get weather", |args: City| async move {
+    ///             Ok(serde_json::json!({ "city": args.city, "temp": 22 }))
     ///         })
     ///         | T::google_search()
     ///     );

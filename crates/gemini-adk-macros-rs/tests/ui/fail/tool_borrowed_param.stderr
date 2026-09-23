@@ -1,0 +1,5 @@
+error: #[tool] parameters are deserialized from the model's JSON, so they must be owned: use `String` for `&str`, `Vec<T>` for `&[T]`
+ --> tests/ui/fail/tool_borrowed_param.rs:7:21
+  |
+7 | async fn echo(word: &str) -> String {
+  |                     ^^^^

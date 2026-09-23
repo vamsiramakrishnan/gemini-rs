@@ -14,7 +14,12 @@
 //! use serde_json::{json, Value};
 //!
 //! /// Get the current weather for a city.
-//! #[tool("Get the current weather for a city")]
+//! ///
+//! /// # Arguments
+//! ///
+//! /// * `city` - The city name.
+//! /// * `units` - "metric" or "imperial"; metric when omitted.
+//! #[tool]
 //! async fn get_weather(city: String, units: Option<String>) -> Result<Value, ToolError> {
 //!     Ok(json!({ "city": city, "units": units.unwrap_or("metric".into()) }))
 //! }
@@ -62,64 +67,85 @@ fn runtime() -> (proc_macro2::TokenStream, String) {
     }
 }
 
-/// Turn an `async fn` into a registrable Gemini tool.
+/// Turn a documented `async fn` into a registrable Gemini tool.
 ///
-/// The attribute takes a single string literal — the tool's description, as
-/// surfaced to the model:
+/// The function's doc comment is what the model reads: its opening prose is
+/// the tool's description, and a `# Arguments` section describes each
+/// parameter. The parameter types are the schema.
 ///
 /// ```ignore
-/// #[tool("Get the current weather for a city")]
-/// async fn get_weather(city: String, units: Option<String>) -> Result<Value, ToolError> {
-///     Ok(json!({ "city": city, "units": units.unwrap_or("metric".into()) }))
+/// /// Get the current weather for a city.
+/// ///
+/// /// # Arguments
+/// ///
+/// /// * `city` - The city name, e.g. "Paris".
+/// /// * `units` - "metric" or "imperial"; metric when omitted.
+/// #[tool]
+/// async fn get_weather(city: String, units: Option<String>) -> Result<Weather, reqwest::Error> {
+///     fetch_weather(&city, units.as_deref()).await
 /// }
+///
+/// agent.tool(get_weather());
 /// ```
+///
+/// # Description
+///
+/// The doc comment's prose up to its first `#` heading, with wrapped lines
+/// joined. `#[tool("...")]` replaces it when the text for the model should
+/// differ from the text for readers. A tool with neither is a compile error:
+/// the model chooses tools by their descriptions.
+///
+/// # Arguments
+///
+/// Each item of a `# Arguments` (or `# Args`, `# Parameters`) section — in the
+/// rustdoc form ``* `name` - text`` or ``- `name`: text`` — becomes that
+/// parameter's schema `description`. Naming a parameter the function does not
+/// have is a compile error, so the documentation cannot drift from the
+/// signature.
+///
+/// Every parameter type must be `serde::Deserialize + schemars::JsonSchema`
+/// and owned (`String`, not `&str`): arguments are deserialized from the
+/// model's JSON. `Option<T>` parameters are optional. The schema is produced
+/// by `gemini_adk_rs::tool::wire_schema`, so nested types are inlined and
+/// optional fields declare a single type, as the API requires.
+///
+/// # Return type
+///
+/// - A type spelled `Result<T, E>` (under any path: `anyhow::Result<T>`,
+///   `io::Result<T>`) is fallible. `T` is any `serde::Serialize` type; `E` is
+///   any error — a `ToolError` keeps its variant, anything else becomes
+///   `ToolError::ExecutionFailed` with its message.
+/// - Any other type is the tool's output, and the tool cannot fail.
+/// - No return type sends `null`.
+///
+/// A result that is not a JSON object reaches the model as `{"output": ..}`.
+/// A `Result` behind an alias with another name is not recognized; spell the
+/// return type as `Result<..>`.
 ///
 /// # What it generates
 ///
-/// For a function `fn foo(...)`, the macro emits:
-///
-/// - A hidden args struct `__FooArgs` deriving `serde::Deserialize` and
-///   `schemars::JsonSchema`, with one field per parameter. This drives both
-///   argument deserialization and JSON-Schema generation.
-/// - A hidden tool type `__FooTool` implementing
-///   `gemini_adk_rs::tool::ToolFunction`:
-///   - `name()` returns the function name (`"foo"`).
-///   - `description()` returns the attribute string.
-///   - `parameters()` returns the schemars-generated JSON Schema.
-///   - `call(args)` deserializes `args` into `__FooArgs`, runs the original
-///     function body, and returns its `Result<Value, ToolError>`.
-/// - A public constructor `fn foo() -> __FooTool` (visibility matches the
-///   original fn) that you register with a `gemini_adk_rs::tool::ToolDispatcher`:
-///
-/// ```ignore
-/// dispatcher.register_function(std::sync::Arc::new(foo()));
-/// ```
-///
-/// # Supported parameters
-///
-/// Any parameter type that is `serde::Deserialize + schemars::JsonSchema` is
-/// supported. `Option<T>` parameters are optional in the schema. Zero-parameter
-/// tools are supported (the generated schema is an empty object).
+/// A constructor `fn get_weather() -> impl ToolFunction` (with the original
+/// visibility and doc comment) whose value you register:
+/// `agent.tool(get_weather())`, or
+/// `dispatcher.register_function(Arc::new(get_weather()))`. The original body
+/// runs in a hidden `async fn`, which keeps the function's other attributes
+/// (`#[allow]`, `#[tracing::instrument]`, ...); `#[cfg]` applies to every
+/// generated item.
 ///
 /// # Path hygiene
 ///
 /// Generated code reaches `serde`, `schemars`, `serde_json`, and `async_trait`
-/// through the runtime crate's `__macros` module (the derives are pointed
-/// there with `#[serde(crate = ..)]` / `#[schemars(crate = ..)]`), so none of
-/// them need to be in your `Cargo.toml`. The runtime crate itself is located
-/// at expansion time: `gemini-adk-rs` if it is a direct dependency (under
-/// whatever name), else through `gemini-adk-fluent-rs`'s re-export — so a
-/// crate that depends only on the fluent layer can use `#[tool]` from its
-/// prelude.
-///
-/// # Follow-ups (not yet supported)
-///
-/// - Per-parameter doc descriptions are not extracted into the schema in v1.
-///   Function parameters cannot carry doc comments in Rust, so this would
-///   require a `#[doc = "..."]`-style attribute on each param.
+/// through the runtime crate's `__macros` module, so none of them need to be
+/// in your `Cargo.toml`. The runtime crate is located at expansion time:
+/// `gemini-adk-rs` if it is a direct dependency (under whatever name), else
+/// through `gemini-adk-fluent-rs`'s re-export.
 #[proc_macro_attribute]
 pub fn tool(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let description = parse_macro_input!(attr as LitStr);
+    let description = if attr.is_empty() {
+        None
+    } else {
+        Some(parse_macro_input!(attr as LitStr))
+    };
     let func = parse_macro_input!(item as ItemFn);
 
     match expand(description, func) {
@@ -128,7 +154,129 @@ pub fn tool(attr: TokenStream, item: TokenStream) -> TokenStream {
     }
 }
 
-fn expand(description: LitStr, func: ItemFn) -> syn::Result<proc_macro2::TokenStream> {
+/// What a `#[tool]` fn's doc comment says, split into the parts the model sees.
+#[derive(Debug, Default, PartialEq)]
+struct ToolDocs {
+    /// Prose before the first heading, paragraphs separated by a blank line.
+    description: String,
+    /// `(parameter, description)` from the `# Arguments` section, in order.
+    arguments: Vec<(String, String)>,
+}
+
+/// The text of each `#[doc = ".."]` attribute, one entry per doc line.
+fn doc_lines(attrs: &[syn::Attribute]) -> Vec<String> {
+    attrs
+        .iter()
+        .filter(|a| a.path().is_ident("doc"))
+        .filter_map(|a| match &a.meta {
+            Meta::NameValue(nv) => match &nv.value {
+                Expr::Lit(ExprLit {
+                    lit: Lit::Str(s), ..
+                }) => Some(s.value()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .flat_map(|text| text.lines().map(str::to_owned).collect::<Vec<_>>())
+        .collect()
+}
+
+/// Split doc lines into the description and the `# Arguments` items.
+fn parse_docs(lines: &[String]) -> ToolDocs {
+    let mut docs = ToolDocs::default();
+    let mut paragraphs: Vec<String> = Vec::new();
+    let mut paragraph = String::new();
+    // `None` before the first heading; then whether we are in an arguments section.
+    let mut section: Option<bool> = None;
+
+    let flush = |paragraph: &mut String, paragraphs: &mut Vec<String>| {
+        if !paragraph.is_empty() {
+            paragraphs.push(std::mem::take(paragraph));
+        }
+    };
+
+    let mut in_code = false;
+    for raw in lines {
+        let line = raw.trim();
+        // Code blocks are for readers, and their `# hidden` lines are not headings.
+        if line.starts_with("```") || line.starts_with("~~~") {
+            in_code = !in_code;
+            continue;
+        }
+        if in_code {
+            continue;
+        }
+        if let Some(heading) = line.strip_prefix('#') {
+            let heading = heading.trim_start_matches('#').trim().to_ascii_lowercase();
+            section = Some(matches!(
+                heading.as_str(),
+                "arguments" | "args" | "parameters" | "params"
+            ));
+            continue;
+        }
+        match section {
+            None if line.is_empty() => flush(&mut paragraph, &mut paragraphs),
+            None => {
+                if !paragraph.is_empty() {
+                    paragraph.push(' ');
+                }
+                paragraph.push_str(line);
+            }
+            Some(true) => {
+                if let Some(item) = line.strip_prefix(['*', '-']) {
+                    if let Some(parsed) = parse_argument_item(item) {
+                        docs.arguments.push(parsed);
+                    }
+                } else if !line.is_empty() {
+                    if let Some((_, text)) = docs.arguments.last_mut() {
+                        if !text.is_empty() {
+                            text.push(' ');
+                        }
+                        text.push_str(line);
+                    }
+                }
+            }
+            Some(false) => {}
+        }
+    }
+    flush(&mut paragraph, &mut paragraphs);
+    docs.description = paragraphs.join("\n\n");
+    docs
+}
+
+/// Parse ``` `name` - text``` / ``name: text`` into `(name, text)`.
+fn parse_argument_item(item: &str) -> Option<(String, String)> {
+    let item = item.trim();
+    let (name, rest) = if let Some(quoted) = item.strip_prefix('`') {
+        let end = quoted.find('`')?;
+        (&quoted[..end], &quoted[end + 1..])
+    } else {
+        let end = item
+            .find(|c: char| !(c.is_alphanumeric() || c == '_'))
+            .unwrap_or(item.len());
+        (&item[..end], &item[end..])
+    };
+    if name.is_empty() {
+        return None;
+    }
+    let text = rest
+        .trim_start()
+        .trim_start_matches(['-', ':', '\u{2013}', '\u{2014}'])
+        .trim();
+    Some((name.to_owned(), text.to_owned()))
+}
+
+/// Whether a return type is spelled `Result<..>` under any path.
+fn is_result(ty: &Type) -> bool {
+    let Type::Path(TypePath { qself: None, path }) = ty else {
+        return false;
+    };
+    path.segments
+        .last()
+        .is_some_and(|seg| seg.ident == "Result" && !seg.arguments.is_none())
+}
+
+fn expand(description: Option<LitStr>, func: ItemFn) -> syn::Result<proc_macro2::TokenStream> {
     let sig = &func.sig;
 
     if sig.asyncness.is_none() {
@@ -153,9 +301,9 @@ fn expand(description: LitStr, func: ItemFn) -> syn::Result<proc_macro2::TokenSt
     let fn_name = &sig.ident;
     let vis = &func.vis;
     let body = &func.block;
-    let output = &sig.output;
 
-    // Collect (ident, type) for each parameter; reject `self` receivers.
+    // Collect (ident, type) for each parameter; reject `self` receivers,
+    // patterns and borrowed types.
     let mut field_idents = Vec::new();
     let mut field_types = Vec::new();
     for input in &sig.inputs {
@@ -176,23 +324,66 @@ fn expand(description: LitStr, func: ItemFn) -> syn::Result<proc_macro2::TokenSt
                         ));
                     }
                 };
+                if let Type::Reference(reference) = ty.as_ref() {
+                    return Err(syn::Error::new_spanned(
+                        reference,
+                        "#[tool] parameters are deserialized from the model's JSON, so they \
+                         must be owned: use `String` for `&str`, `Vec<T>` for `&[T]`",
+                    ));
+                }
                 field_idents.push(ident);
                 field_types.push((*ty).clone());
             }
         }
     }
 
-    // The return type must be present (`-> Result<...>`); the body is reused
-    // verbatim, so we just forward whatever the user wrote.
-    let return_type: proc_macro2::TokenStream = match output {
-        ReturnType::Default => {
+    // What the model is told: the attribute wins, else the doc comment.
+    let docs = parse_docs(&doc_lines(&func.attrs));
+    for (name, _) in &docs.arguments {
+        if !field_idents.iter().any(|ident| ident == name) {
             return Err(syn::Error::new_spanned(
-                sig,
-                "#[tool] requires a return type of `Result<serde_json::Value, ToolError>`",
+                fn_name,
+                format!(
+                    "the `# Arguments` section documents `{name}`, which is not a parameter \
+                     of `{fn_name}`"
+                ),
             ));
         }
-        ReturnType::Type(_, ty) => quote! { #ty },
+    }
+    let description = match description {
+        Some(text) => text.value(),
+        None if !docs.description.is_empty() => docs.description.clone(),
+        None => {
+            return Err(syn::Error::new_spanned(
+                fn_name,
+                "#[tool] needs a description for the model: add a `///` doc comment to the \
+                 function, or pass one as `#[tool(\"...\")]`",
+            ));
+        }
     };
+
+    // The body keeps its declared return type; the tool adapts it.
+    let (return_type, adapt) = match &sig.output {
+        ReturnType::Default => (quote! { () }, quote! { tool_output }),
+        ReturnType::Type(_, ty) if is_result(ty) => (quote! { #ty }, quote! { tool_result }),
+        ReturnType::Type(_, ty) => (quote! { #ty }, quote! { tool_output }),
+    };
+
+    // `#[cfg]` gates every generated item; docs and `#[deprecated]` describe
+    // the constructor users call; everything else belongs with the body.
+    let mut cfg_attrs = Vec::new();
+    let mut constructor_attrs = Vec::new();
+    let mut body_attrs = Vec::new();
+    for attr in &func.attrs {
+        let path = attr.path();
+        if path.is_ident("cfg") {
+            cfg_attrs.push(attr);
+        } else if path.is_ident("doc") || path.is_ident("deprecated") {
+            constructor_attrs.push(attr);
+        } else {
+            body_attrs.push(attr);
+        }
+    }
 
     // Naming for generated items, derived from the (Pascal-cased) fn name.
     let pascal = to_pascal_case(&fn_name.to_string());
@@ -203,27 +394,28 @@ fn expand(description: LitStr, func: ItemFn) -> syn::Result<proc_macro2::TokenSt
 
     let fn_name_str = fn_name.to_string();
 
-    // Build the hidden args struct fields.
+    // Build the hidden args struct fields; a documented parameter carries its
+    // text as a doc comment, which the schema derive turns into `description`.
     let struct_fields = field_idents
         .iter()
         .zip(field_types.iter())
         .map(|(ident, ty)| {
+            let doc = docs
+                .arguments
+                .iter()
+                .find(|(name, _)| ident == name)
+                .map(|(_, text)| text.as_str())
+                .filter(|text| !text.is_empty())
+                .map(|text| quote! { #[doc = #text] });
             // `Option<T>` fields default to `None` when absent from the JSON.
             // No trailing comma here — `#(#struct_fields),*` adds the separators.
-            if is_option(ty) {
-                quote! {
-                    #[serde(default)]
-                    #ident: #ty
-                }
-            } else {
-                quote! { #ident: #ty }
+            let default = is_option(ty).then(|| quote! { #[serde(default)] });
+            quote! {
+                #doc
+                #default
+                #ident: #ty
             }
         });
-
-    // Destructure the args struct into the original parameter bindings, then
-    // forward them positionally into the inner impl fn.
-    let destructure = &field_idents;
-    let forward_args = &field_idents;
 
     // Upstream crates are reached through `gemini_adk_rs::__macros` so the consumer
     // doesn't need them in scope under those exact names.
@@ -237,6 +429,7 @@ fn expand(description: LitStr, func: ItemFn) -> syn::Result<proc_macro2::TokenSt
 
     let expanded = quote! {
         // Hidden args struct: drives both deserialization and schema generation.
+        #(#cfg_attrs)*
         #[derive(#serde::Deserialize, #schemars::JsonSchema)]
         #[serde(crate = #serde_crate)]
         #[schemars(crate = #schemars_crate)]
@@ -246,13 +439,18 @@ fn expand(description: LitStr, func: ItemFn) -> syn::Result<proc_macro2::TokenSt
         }
 
         // The original function body, preserved verbatim as a free async fn.
+        #(#cfg_attrs)*
+        #(#body_attrs)*
         #[allow(non_snake_case)]
         async fn #inner_fn ( #(#field_idents : #field_types),* ) -> #return_type #body
 
         // Hidden tool type implementing `ToolFunction`.
+        #(#cfg_attrs)*
         #[allow(non_camel_case_types)]
+        #[derive(Clone, Copy, Debug, Default)]
         #vis struct #tool_struct;
 
+        #(#cfg_attrs)*
         #[#async_trait::async_trait]
         impl #rt::tool::ToolFunction for #tool_struct {
             fn name(&self) -> &str {
@@ -264,28 +462,26 @@ fn expand(description: LitStr, func: ItemFn) -> syn::Result<proc_macro2::TokenSt
             }
 
             fn parameters(&self) -> ::core::option::Option<#serde_json::Value> {
-                let root = #schemars::schema_for!(#args_struct);
-                ::core::option::Option::Some(
-                    #serde_json::to_value(root)
-                        .expect("schemars schema should serialize to JSON"),
-                )
+                ::core::option::Option::Some(#rt::tool::wire_schema::<#args_struct>())
             }
 
             async fn call(
                 &self,
                 args: #serde_json::Value,
             ) -> ::core::result::Result<#serde_json::Value, #rt::error::ToolError> {
-                let #args_struct { #(#destructure),* } =
+                let #args_struct { #(#field_idents),* } =
                     #serde_json::from_value(args).map_err(|e| {
                         #rt::error::ToolError::InvalidArgs(
                             ::std::format!("Failed to deserialize arguments: {e}"),
                         )
                     })?;
-                #inner_fn ( #(#forward_args),* ).await
+                #rt::__macros::#adapt(#inner_fn ( #(#field_idents),* ).await)
             }
         }
 
         // Public constructor: `fn foo() -> __FooTool`.
+        #(#cfg_attrs)*
+        #(#constructor_attrs)*
         #[allow(non_snake_case)]
         #vis fn #fn_name () -> #tool_struct {
             #tool_struct
@@ -877,8 +1073,58 @@ fn to_pascal_case(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::is_option;
+    use super::{ToolDocs, is_option, is_result, parse_docs};
     use syn::parse_quote;
+
+    fn docs(text: &str) -> ToolDocs {
+        let lines: Vec<String> = text.lines().map(|l| format!(" {l}")).collect();
+        parse_docs(&lines)
+    }
+
+    #[test]
+    fn description_is_the_prose_before_the_first_heading() {
+        let parsed =
+            docs("Get the weather\nfor a city.\n\nUses the cached forecast.\n\n# Errors\n\nNever.");
+        assert_eq!(
+            parsed.description,
+            "Get the weather for a city.\n\nUses the cached forecast."
+        );
+        assert!(parsed.arguments.is_empty());
+    }
+
+    #[test]
+    fn arguments_accept_the_common_rustdoc_forms() {
+        let parsed = docs(
+            "Look up.\n\n# Arguments\n\n\
+             * `city` - The city,\n  e.g. Paris.\n\
+             - `units`: metric or imperial.\n\
+             * days \u{2014} how far ahead.\n\n# Examples\n\n* `ignored` - not an argument",
+        );
+        assert_eq!(parsed.description, "Look up.");
+        assert_eq!(
+            parsed.arguments,
+            vec![
+                ("city".to_string(), "The city, e.g. Paris.".to_string()),
+                ("units".to_string(), "metric or imperial.".to_string()),
+                ("days".to_string(), "how far ahead.".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn code_blocks_are_neither_description_nor_headings() {
+        let parsed = docs("Add two numbers.\n```\n# let x = 1;\nadd(1, 2);\n```\nThen return.");
+        assert_eq!(parsed.description, "Add two numbers. Then return.");
+    }
+
+    #[test]
+    fn is_result_matches_any_path_ending_in_result() {
+        assert!(is_result(&parse_quote!(Result<Value, ToolError>)));
+        assert!(is_result(&parse_quote!(anyhow::Result<u32>)));
+        assert!(is_result(&parse_quote!(std::io::Result<()>)));
+        assert!(!is_result(&parse_quote!(SearchResult)));
+        assert!(!is_result(&parse_quote!(Vec<Result<u8, String>>)));
+    }
 
     #[test]
     fn is_option_accepts_std_core_paths() {

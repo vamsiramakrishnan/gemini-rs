@@ -1,40 +1,4 @@
-//! A scripted, inspectable model for tests that must not reach a provider.
-//!
-//! [`MockLlm`] implements [`BaseLlm`] three ways, one per kind of test:
-//!
-//! | Constructor | Replies with | Use it to test |
-//! |---|---|---|
-//! | [`MockLlm::text`] | the same text, every call | wiring, prompts, state flow |
-//! | [`MockLlm::script`] | each response in turn, then an error | tool rounds, retries, multi-turn |
-//! | [`MockLlm::from_fn`] | whatever the closure returns | replies that depend on the request |
-//!
-//! Every call's [`LlmRequest`] is recorded, so a test can assert on what the
-//! agent actually sent — instructions, history, tool declarations, sampling —
-//! not only on what came back.
-//!
-//! `MockLlm` is a cheap handle: clones share the script and the recording.
-//! Give one clone to the agent and keep one to inspect.
-//!
-//! ```
-//! use gemini_adk_rs::llm::{BaseLlm, LlmRequest, LlmResponse, MockLlm};
-//!
-//! # tokio_test::block_on(async {
-//! let llm = MockLlm::script([
-//!     LlmResponse::tool_call("get_weather", serde_json::json!({ "city": "Paris" })),
-//!     LlmResponse::from_text("It is sunny in Paris."),
-//! ]);
-//!
-//! let first = llm.generate(LlmRequest::from_text("Weather in Paris?")).await.unwrap();
-//! assert_eq!(first.function_calls()[0].name, "get_weather");
-//!
-//! let second = llm.generate(LlmRequest::from_text("…")).await.unwrap();
-//! assert_eq!(second.text(), "It is sunny in Paris.");
-//!
-//! // The script is spent: a third call is a test failure, not a silent reply.
-//! assert!(llm.generate(LlmRequest::from_text("again")).await.is_err());
-//! assert_eq!(llm.requests().len(), 3);
-//! # });
-//! ```
+//! [`MockLlm`]: a scripted, inspectable model for tests.
 
 use std::collections::VecDeque;
 use std::fmt;
@@ -59,7 +23,43 @@ struct Inner {
 }
 
 /// A [`BaseLlm`] that replies from a script or a closure and records every
-/// request. See the [module documentation](self).
+/// request, for tests that must not reach a provider.
+///
+/// It replies three ways, one per kind of test:
+///
+/// | Constructor | Replies with | Use it to test |
+/// |---|---|---|
+/// | [`MockLlm::text`] | the same text, every call | wiring, prompts, state flow |
+/// | [`MockLlm::script`] | each response in turn, then an error | tool rounds, retries, multi-turn |
+/// | [`MockLlm::from_fn`] | whatever the closure returns | replies that depend on the request |
+///
+/// Every call's [`LlmRequest`] is recorded, so a test can assert on what the
+/// agent actually sent — instructions, history, tool declarations, sampling —
+/// not only on what came back.
+///
+/// `MockLlm` is a cheap handle: clones share the script and the recording.
+/// Give one clone to the agent and keep one to inspect.
+///
+/// ```
+/// use gemini_adk_rs::llm::{BaseLlm, LlmRequest, LlmResponse, MockLlm};
+///
+/// # tokio_test::block_on(async {
+/// let llm = MockLlm::script([
+///     LlmResponse::tool_call("get_weather", serde_json::json!({ "city": "Paris" })),
+///     LlmResponse::from_text("It is sunny in Paris."),
+/// ]);
+///
+/// let first = llm.generate(LlmRequest::from_text("Weather in Paris?")).await.unwrap();
+/// assert_eq!(first.function_calls()[0].name, "get_weather");
+///
+/// let second = llm.generate(LlmRequest::from_text("…")).await.unwrap();
+/// assert_eq!(second.text(), "It is sunny in Paris.");
+///
+/// // The script is spent: a third call is a test failure, not a silent reply.
+/// assert!(llm.generate(LlmRequest::from_text("again")).await.is_err());
+/// assert_eq!(llm.requests().len(), 3);
+/// # });
+/// ```
 #[derive(Clone)]
 pub struct MockLlm {
     model_id: String,

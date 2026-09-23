@@ -64,9 +64,7 @@ impl Live {
             .unwrap_or("Extraction")
             .to_string();
 
-        // Generate JSON schema from the type
-        let root_schema = schemars::schema_for!(T);
-        let schema = serde_json::to_value(root_schema).unwrap_or(serde_json::Value::Null);
+        let schema = gemini_adk_rs::tool::wire_schema::<T>();
 
         // Auto-register LLM for connection warming
         self.warm_up_llms.push(llm.clone());
@@ -105,8 +103,7 @@ impl Live {
             .unwrap_or("Extraction")
             .to_string();
 
-        let root_schema = schemars::schema_for!(T);
-        let schema = serde_json::to_value(root_schema).unwrap_or(serde_json::Value::Null);
+        let schema = gemini_adk_rs::tool::wire_schema::<T>();
 
         self.warm_up_llms.push(llm.clone());
 
@@ -146,8 +143,7 @@ impl Live {
             .unwrap_or("Extraction")
             .to_string();
 
-        let root_schema = schemars::schema_for!(T);
-        let schema = serde_json::to_value(root_schema).unwrap_or(serde_json::Value::Null);
+        let schema = gemini_adk_rs::tool::wire_schema::<T>();
 
         self.warm_up_llms.push(llm.clone());
 

@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`#[tool]` sent a schema the API rejects.** It used raw
+  `schemars::schema_for!`, so an `Option<String>` parameter declared
+  `"type": ["string", "null"]` — refused outright, and on Live by closing the
+  socket during setup — and a nested enum became a `$ref` the API ignores.
+  `#[tool]`, `TypedTool` and `extract_turns*` now share one pipeline,
+  `gemini_adk_rs::tool::wire_schema::<T>()`.
+- **A tool result that was not a JSON object failed the request.** The API
+  accepts only an object in `functionResponse.response`; a tool returning a
+  number, string, array or `null` is now sent as `{"output": value}`, the key
+  the API documents, on every path (text, Live, REST).
+- **`#[tool]` dropped the function's other attributes**, including `#[cfg]`:
+  a tool behind a disabled feature still compiled. `#[cfg]` now gates every
+  generated item, doc comments and `#[deprecated]` stay on the constructor,
+  and the rest (`#[allow]`, `#[tracing::instrument]`) stay on the body.
+- `T::simple` was documented with arguments it never declared. It declares
+  no parameters, and its documentation now says so and points at `#[tool]`
+  and `T::typed`.
 - **`Live::converse(&convo)` did not install a conversation's digressions or
   repair policies.** It attached the main flow and extractors only, while the
   simulator drove a `FlowStack` with everything the conversation declared, so
@@ -75,6 +92,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `LlmResponse::{from_text, tool_call, tool_calls, with_usage}` and
   `TokenUsage::new`, with `TokenUsage` now `Copy + Default + PartialEq` and
   summable (`+`, `+=`).
+- **`#[tool]` reads the function's documentation.** The doc comment's prose is
+  the description (`#[tool("...")]` still overrides it), and a rustdoc
+  `# Arguments` section describes each parameter in the schema; documenting a
+  parameter that does not exist is a compile error. The return type can be
+  any `Serialize` type, a `Result` with any error type (`io::Result<T>`,
+  `anyhow::Result<T>`, ...), or nothing. A borrowed parameter (`&str`) is a
+  compile error that names the owned type to use.
+- `ToolError::from_error`, which keeps a `ToolError` and turns any other
+  error into `ExecutionFailed` with its message.
+- `T::typed::<A>(name, description, closure)`: a closure tool whose arguments
+  are a `JsonSchema` type, for tools that capture a client or pool.
+- `gemini_adk_rs::tool::wire_schema::<T>()`, public.
 - `BaseLlm` is implemented for `Arc<L>` and `Box<L>`, and `TextAgent` for
   `Arc<A>` and `Box<A>`. A built `Arc<dyn TextAgent>` satisfies any
   `impl TextAgent` parameter, and any model satisfies `impl BaseLlm`.

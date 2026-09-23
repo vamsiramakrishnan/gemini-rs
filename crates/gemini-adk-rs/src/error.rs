@@ -114,6 +114,31 @@ pub enum ToolError {
     Other(String),
 }
 
+impl ToolError {
+    /// Turn any error into a `ToolError`, the way `?` would if it could.
+    ///
+    /// A `ToolError` passes through unchanged, so a tool that returns
+    /// `ToolError::InvalidArgs` keeps that meaning. Anything else — an
+    /// `io::Error`, a `reqwest::Error`, a `String`, an `anyhow::Error` —
+    /// becomes [`ToolError::ExecutionFailed`] carrying its message, which is
+    /// what the model is shown.
+    ///
+    /// ```
+    /// use gemini_adk_rs::error::ToolError;
+    ///
+    /// let io = std::io::Error::other("disk full");
+    /// assert!(matches!(ToolError::from_error(io), ToolError::ExecutionFailed(m) if m == "disk full"));
+    /// assert!(matches!(ToolError::from_error(ToolError::Cancelled), ToolError::Cancelled));
+    /// assert!(matches!(ToolError::from_error("no such city"), ToolError::ExecutionFailed(_)));
+    /// ```
+    pub fn from_error(error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> Self {
+        match error.into().downcast::<ToolError>() {
+            Ok(tool_error) => *tool_error,
+            Err(other) => ToolError::ExecutionFailed(other.to_string()),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

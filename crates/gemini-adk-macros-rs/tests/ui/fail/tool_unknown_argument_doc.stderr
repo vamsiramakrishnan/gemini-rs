@@ -1,0 +1,5 @@
+error: the `# Arguments` section documents `town`, which is not a parameter of `lookup`
+  --> tests/ui/fail/tool_unknown_argument_doc.rs:12:10
+   |
+12 | async fn lookup(city: String) -> String {
+   |          ^^^^^^
