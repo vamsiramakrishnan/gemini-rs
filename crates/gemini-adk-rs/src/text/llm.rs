@@ -5,6 +5,7 @@ use gemini_genai_rs::prelude::{Content, FunctionCall, FunctionResponse, Part, Ro
 
 use futures_util::stream::BoxStream;
 use futures_util::{FutureExt, StreamExt};
+use tracing::Instrument;
 
 use super::{RunEvent, RunRequest, RunResult, TextAgent, ToolCallRecord};
 use crate::context::AgentEvent;
@@ -12,7 +13,21 @@ use crate::error::AgentError;
 use crate::llm::{BaseLlm, LlmRequest, LlmResponse};
 use crate::middleware::MiddlewareChain;
 use crate::state::State;
+use crate::telemetry::spans;
 use crate::tool::ToolDispatcher;
+
+/// The `error.type` a failed tool call is reported under.
+fn tool_error_type(error: &crate::error::ToolError) -> &'static str {
+    use crate::error::ToolError;
+    match error {
+        ToolError::NotFound(_) => "not_found",
+        ToolError::InvalidArgs(_) => "invalid_args",
+        ToolError::Timeout(_) => "timeout",
+        ToolError::Cancelled => "cancelled",
+        ToolError::Declined(_) => "declined",
+        _ => "execution_failed",
+    }
+}
 
 /// Where a streamed run sends its events.
 type EventSender = tokio::sync::mpsc::UnboundedSender<Result<RunEvent, AgentError>>;
@@ -215,14 +230,11 @@ impl LlmTextAgent {
         llm: &Arc<dyn BaseLlm>,
         request: LlmRequest,
         on_text: Option<&(dyn Fn(RunEvent) + Send + Sync)>,
-    ) -> Result<LlmResponse, AgentError> {
-        let mut chunks = llm
-            .generate_stream(request)
-            .await
-            .map_err(AgentError::Llm)?;
+    ) -> Result<LlmResponse, crate::llm::LlmError> {
+        let mut chunks = llm.generate_stream(request).await?;
         let mut whole: Option<LlmResponse> = None;
         while let Some(chunk) = chunks.next().await {
-            let chunk = chunk.map_err(AgentError::Llm)?;
+            let chunk = chunk?;
             if let Some(on_text) = on_text {
                 let text = chunk.text();
                 if !text.is_empty() {
@@ -283,9 +295,14 @@ impl LlmTextAgent {
                 continue;
             }
 
+            let span = spans::execute_tool_span(&call.name, call.id.as_deref());
             let result = dispatcher
                 .call_function(&call.name, call.args.clone())
+                .instrument(span.clone())
                 .await;
+            if let Err(e) = &result {
+                span.record("error.type", tool_error_type(e));
+            }
 
             match &result {
                 Ok(value) => {
@@ -350,6 +367,17 @@ impl TextAgent for LlmTextAgent {
 impl LlmTextAgent {
     /// One run, reporting events to `events` as they happen when it is set.
     async fn run_with_events(
+        &self,
+        request: RunRequest,
+        state: &State,
+        events: Option<&EventSender>,
+    ) -> Result<RunResult, AgentError> {
+        self.execute(request, state, events)
+            .instrument(spans::invoke_agent_span(&self.name))
+            .await
+    }
+
+    async fn execute(
         &self,
         request: RunRequest,
         state: &State,
@@ -460,19 +488,36 @@ impl LlmTextAgent {
             let response = match self.middleware.run_before_model(&llm_request).await? {
                 Some(cached) => cached,
                 None => {
-                    let llm_response = if events.is_some() {
+                    let model = llm_request
+                        .model
+                        .clone()
+                        .unwrap_or_else(|| llm.model_id().to_string());
+                    let span = spans::chat_span(&model, &llm_request);
+                    let started = std::time::Instant::now();
+                    let outcome = if events.is_some() {
                         streamed = stream_live;
                         self.generate_streamed(
                             llm,
                             llm_request.clone(),
                             stream_live.then_some(&emit),
                         )
-                        .await?
+                        .instrument(span.clone())
+                        .await
                     } else {
                         llm.generate(llm_request.clone())
+                            .instrument(span.clone())
                             .await
-                            .map_err(AgentError::Llm)?
                     };
+                    spans::record_chat_response(&span, outcome.as_ref());
+                    let llm_response = outcome.map_err(AgentError::Llm)?;
+                    let usage = llm_response.usage.unwrap_or_default();
+                    crate::telemetry::metrics::record_llm_call(
+                        &model,
+                        &self.name,
+                        started.elapsed().as_secs_f64() * 1000.0,
+                        usage.prompt_tokens,
+                        usage.completion_tokens,
+                    );
                     result.model_calls += 1;
                     if let Some(usage) = llm_response.usage {
                         result.usage += usage;
@@ -803,5 +848,115 @@ mod tests {
         let _ = state2.set("escalate", true);
         let result2 = agent.run(&state2).await.unwrap();
         assert_eq!(result2, "from-b", "with escalate, should use model B");
+    }
+}
+
+#[cfg(test)]
+mod span_tests {
+    use std::collections::BTreeMap;
+    use std::fmt::Debug;
+    use std::sync::{Arc, Mutex};
+
+    use tracing::field::{Field, Visit};
+    use tracing::span::{Attributes, Id, Record};
+    use tracing::{Event, Metadata, Subscriber};
+
+    use super::*;
+    use crate::llm::{LlmResponse, MockLlm};
+
+    type Spans = Arc<Mutex<Vec<(String, BTreeMap<String, String>)>>>;
+
+    /// Records every span's name and fields, in creation order.
+    struct Capture(Spans);
+
+    struct Fields<'a>(&'a mut BTreeMap<String, String>);
+
+    impl Visit for Fields<'_> {
+        fn record_str(&mut self, field: &Field, value: &str) {
+            self.0.insert(field.name().to_string(), value.to_string());
+        }
+        fn record_debug(&mut self, field: &Field, value: &dyn Debug) {
+            self.0
+                .insert(field.name().to_string(), format!("{value:?}"));
+        }
+    }
+
+    impl Subscriber for Capture {
+        fn enabled(&self, _: &Metadata<'_>) -> bool {
+            true
+        }
+        fn new_span(&self, attrs: &Attributes<'_>) -> Id {
+            let mut fields = BTreeMap::new();
+            attrs.record(&mut Fields(&mut fields));
+            let mut spans = self.0.lock().unwrap();
+            spans.push((attrs.metadata().name().to_string(), fields));
+            Id::from_u64(spans.len() as u64)
+        }
+        fn record(&self, id: &Id, values: &Record<'_>) {
+            let mut spans = self.0.lock().unwrap();
+            let index = usize::try_from(id.into_u64()).unwrap() - 1;
+            values.record(&mut Fields(&mut spans[index].1));
+        }
+        fn record_follows_from(&self, _: &Id, _: &Id) {}
+        fn event(&self, _: &Event<'_>) {}
+        fn enter(&self, _: &Id) {}
+        fn exit(&self, _: &Id) {}
+    }
+
+    /// A run exports the GenAI semantic-convention spans an OpenTelemetry
+    /// backend reads: the agent, each model call with its settings and token
+    /// usage, and each tool call.
+    #[tokio::test]
+    async fn a_run_emits_genai_spans() {
+        let spans: Spans = Arc::default();
+        let _guard = tracing::subscriber::set_default(Capture(spans.clone()));
+
+        let llm = MockLlm::script([
+            LlmResponse::tool_call("get_weather", serde_json::json!({})).with_usage(10, 2),
+            LlmResponse::from_text("Cold.").with_usage(20, 1),
+        ])
+        .with_model_id("gemini-test");
+        let mut dispatcher = ToolDispatcher::new();
+        dispatcher.register_function(Arc::new(crate::tool::SimpleTool::new(
+            "get_weather",
+            "Get weather",
+            None,
+            |_| async { Ok(serde_json::json!({})) },
+        )));
+        let agent = LlmTextAgent::new("weather", llm)
+            .temperature(0.5)
+            .tools(Arc::new(dispatcher));
+        agent
+            .run_with(RunRequest::new("Weather?"), &State::new())
+            .await
+            .unwrap();
+
+        let spans = spans.lock().unwrap();
+        let named = |name: &str| -> Vec<&BTreeMap<String, String>> {
+            spans
+                .iter()
+                .filter(|(n, _)| n == name)
+                .map(|(_, f)| f)
+                .collect()
+        };
+
+        let agent_span = named("invoke_agent");
+        assert_eq!(agent_span.len(), 1);
+        assert_eq!(agent_span[0]["otel.name"], "invoke_agent weather");
+        assert_eq!(agent_span[0]["gen_ai.agent.name"], "weather");
+
+        let chats = named("chat");
+        assert_eq!(chats.len(), 2, "one span per model call");
+        assert_eq!(chats[0]["otel.name"], "chat gemini-test");
+        assert_eq!(chats[0]["gen_ai.request.model"], "gemini-test");
+        assert_eq!(chats[0]["gen_ai.request.temperature"], "0.5");
+        assert_eq!(chats[0]["gen_ai.usage.input_tokens"], "10");
+        assert_eq!(chats[1]["gen_ai.usage.output_tokens"], "1");
+        assert_eq!(chats[1]["gen_ai.response.finish_reasons"], "STOP");
+
+        let tools = named("execute_tool");
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["gen_ai.tool.name"], "get_weather");
+        assert!(!tools[0].contains_key("error.type"));
     }
 }

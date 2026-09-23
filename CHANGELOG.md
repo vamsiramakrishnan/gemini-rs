@@ -132,6 +132,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **OpenTelemetry GenAI spans on the text path.** Each run is an
+  `invoke_agent {agent}` span, each model call a `chat {model}` span carrying
+  `gen_ai.request.*` settings, `gen_ai.usage.input_tokens`/`output_tokens`,
+  `gen_ai.response.finish_reasons` and `error.type`, and each tool call an
+  `execute_tool {tool}` span — the GenAI semantic conventions, so a backend
+  reads latency by model, token cost and tool timelines without
+  configuration. Message content is not recorded. Model calls also record
+  the `gemini_llm_*` metrics (calls, duration, tokens) under the `metrics`
+  feature; they were defined but never recorded.
 - **Streaming text agents.** `agent.stream(prompt)` and
   `TextAgent::run_stream(request, state)` yield `RunEvent`s — `TextDelta` as
   the model writes, `ToolCall` and `ToolResult` around each tool, and

@@ -82,3 +82,76 @@ pub fn extraction_span(extractor_name: &str, session_id: &str) -> tracing::Span 
         session_id = session_id,
     )
 }
+
+// ── OpenTelemetry GenAI semantic conventions ───────────────────────────────
+//
+// Spans named and attributed as the GenAI semantic conventions define them,
+// so any OpenTelemetry backend that understands model calls (latency by
+// model, token cost, tool timelines) reads these without configuration.
+// `otel.name` sets the exported span name; message content is not recorded.
+
+/// The `invoke_agent {agent}` span around one run of a text agent.
+pub fn invoke_agent_span(agent_name: &str) -> tracing::Span {
+    tracing::info_span!(
+        "invoke_agent",
+        otel.name = %format_args!("invoke_agent {agent_name}"),
+        gen_ai.operation.name = "invoke_agent",
+        gen_ai.agent.name = agent_name,
+    )
+}
+
+/// The `chat {model}` span around one model call, with the request's
+/// settings; [`record_chat_response`] adds what came back.
+pub fn chat_span(model: &str, request: &crate::llm::LlmRequest) -> tracing::Span {
+    tracing::info_span!(
+        "chat",
+        otel.name = %format_args!("chat {model}"),
+        gen_ai.operation.name = "chat",
+        gen_ai.request.model = model,
+        gen_ai.request.temperature = request.temperature.map(f64::from),
+        gen_ai.request.top_p = request.top_p.map(f64::from),
+        gen_ai.request.top_k = request.top_k,
+        gen_ai.request.max_tokens = request.max_output_tokens,
+        gen_ai.response.finish_reasons = tracing::field::Empty,
+        gen_ai.usage.input_tokens = tracing::field::Empty,
+        gen_ai.usage.output_tokens = tracing::field::Empty,
+        error.type = tracing::field::Empty,
+    )
+}
+
+/// Record a model call's outcome on its [`chat_span`].
+pub fn record_chat_response(
+    span: &tracing::Span,
+    outcome: Result<&crate::llm::LlmResponse, &crate::llm::LlmError>,
+) {
+    match outcome {
+        Ok(response) => {
+            if let Some(reason) = &response.finish_reason {
+                span.record("gen_ai.response.finish_reasons", reason.as_str());
+            }
+            if let Some(usage) = response.usage {
+                span.record("gen_ai.usage.input_tokens", usage.prompt_tokens);
+                span.record("gen_ai.usage.output_tokens", usage.completion_tokens);
+            }
+        }
+        Err(error) => {
+            let kind = match error.status() {
+                Some(status) => status.to_string(),
+                None => "error".to_string(),
+            };
+            span.record("error.type", kind.as_str());
+        }
+    }
+}
+
+/// The `execute_tool {tool}` span around one tool call.
+pub fn execute_tool_span(tool_name: &str, call_id: Option<&str>) -> tracing::Span {
+    tracing::info_span!(
+        "execute_tool",
+        otel.name = %format_args!("execute_tool {tool_name}"),
+        gen_ai.operation.name = "execute_tool",
+        gen_ai.tool.name = tool_name,
+        gen_ai.tool.call.id = call_id,
+        error.type = tracing::field::Empty,
+    )
+}
