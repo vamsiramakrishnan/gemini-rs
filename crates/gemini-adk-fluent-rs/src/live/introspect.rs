@@ -203,7 +203,7 @@ mod tests {
             .instruction("Verify the caller")
             .build(std::sync::Arc::new(InertLlm))
             .expect("builds");
-        let live = Live::builder().agent_tool_arc("verify_identity", "Verify caller", verifier);
+        let live = Live::builder().agent_tool("verify_identity", "Verify caller", verifier);
         assert!(
             live.declared_tool_names()
                 .contains(&"verify_identity".to_string())

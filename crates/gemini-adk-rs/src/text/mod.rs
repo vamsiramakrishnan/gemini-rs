@@ -73,54 +73,45 @@ const _: () = {
     fn _assert_object_safe(_: &dyn TextAgent) {}
 };
 
+/// A shared agent is an agent, so a built `Arc<dyn TextAgent>` can be passed
+/// straight back into any combinator or `agent_tool` without a cast.
+#[async_trait]
+impl<A: TextAgent + ?Sized> TextAgent for std::sync::Arc<A> {
+    fn name(&self) -> &str {
+        (**self).name()
+    }
+
+    async fn run(&self, state: &State) -> Result<String, AgentError> {
+        (**self).run(state).await
+    }
+}
+
+/// A boxed agent is an agent; see the `Arc` implementation.
+#[async_trait]
+impl<A: TextAgent + ?Sized> TextAgent for Box<A> {
+    fn name(&self) -> &str {
+        (**self).name()
+    }
+
+    async fn run(&self, state: &State) -> Result<String, AgentError> {
+        (**self).run(state).await
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm::{BaseLlm, LlmError, LlmRequest, LlmResponse};
-    use gemini_genai_rs::prelude::{Content, FunctionCall, Part, Role};
+    use crate::llm::{BaseLlm, LlmError, LlmResponse, MockLlm};
+    use gemini_genai_rs::prelude::Part;
     use std::sync::Arc;
     use std::time::Duration;
 
-    /// A mock LLM that returns a fixed response.
-    struct FixedLlm {
-        response: String,
-    }
-
-    #[async_trait]
-    impl BaseLlm for FixedLlm {
-        fn model_id(&self) -> &str {
-            "fixed-mock"
-        }
-
-        async fn generate(&self, _req: LlmRequest) -> Result<LlmResponse, LlmError> {
-            Ok(LlmResponse {
-                content: Content {
-                    role: Some(Role::Model),
-                    parts: vec![Part::Text {
-                        text: self.response.clone(),
-                    }],
-                },
-                finish_reason: Some("STOP".into()),
-                usage: None,
-            })
-        }
-    }
-
-    /// A mock LLM that echoes the input back with a prefix.
-    struct EchoLlm {
-        prefix: String,
-    }
-
-    #[async_trait]
-    impl BaseLlm for EchoLlm {
-        fn model_id(&self) -> &str {
-            "echo-mock"
-        }
-
-        async fn generate(&self, req: LlmRequest) -> Result<LlmResponse, LlmError> {
-            let input_text: String = req
+    /// A model that echoes every text part it was sent, after `prefix`.
+    fn echo(prefix: &'static str) -> MockLlm {
+        MockLlm::from_fn(move |req| {
+            let input: Vec<&str> = req
                 .contents
                 .iter()
                 .flat_map(|c| &c.parts)
@@ -128,87 +119,17 @@ mod tests {
                     Part::Text { text } => Some(text.as_str()),
                     _ => None,
                 })
-                .collect::<Vec<_>>()
-                .join(" ");
-
-            Ok(LlmResponse {
-                content: Content {
-                    role: Some(Role::Model),
-                    parts: vec![Part::Text {
-                        text: format!("{}{}", self.prefix, input_text),
-                    }],
-                },
-                finish_reason: Some("STOP".into()),
-                usage: None,
-            })
-        }
+                .collect();
+            Ok(LlmResponse::from_text(format!(
+                "{prefix}{}",
+                input.join(" ")
+            )))
+        })
     }
 
-    /// A mock LLM that issues a tool call on first request, then returns text.
-    struct ToolCallingLlm {
-        tool_name: String,
-        tool_args: serde_json::Value,
-        final_response: String,
-    }
-
-    #[async_trait]
-    impl BaseLlm for ToolCallingLlm {
-        fn model_id(&self) -> &str {
-            "tool-mock"
-        }
-
-        async fn generate(&self, req: LlmRequest) -> Result<LlmResponse, LlmError> {
-            // Check if we already have a function response in the conversation.
-            let has_tool_response = req.contents.iter().any(|c| {
-                c.parts
-                    .iter()
-                    .any(|p| matches!(p, Part::FunctionResponse { .. }))
-            });
-
-            if has_tool_response {
-                // Already dispatched — return final text.
-                Ok(LlmResponse {
-                    content: Content {
-                        role: Some(Role::Model),
-                        parts: vec![Part::Text {
-                            text: self.final_response.clone(),
-                        }],
-                    },
-                    finish_reason: Some("STOP".into()),
-                    usage: None,
-                })
-            } else {
-                // First call — issue tool call.
-                Ok(LlmResponse {
-                    content: Content {
-                        role: Some(Role::Model),
-                        parts: vec![Part::FunctionCall {
-                            function_call: FunctionCall {
-                                name: self.tool_name.clone(),
-                                args: self.tool_args.clone(),
-                                id: Some("call-1".into()),
-                            },
-                        }],
-                    },
-                    finish_reason: None,
-                    usage: None,
-                })
-            }
-        }
-    }
-
-    /// A mock LLM that always fails.
-    struct FailLlm;
-
-    #[async_trait]
-    impl BaseLlm for FailLlm {
-        fn model_id(&self) -> &str {
-            "fail-mock"
-        }
-
-        async fn generate(&self, _req: LlmRequest) -> Result<LlmResponse, LlmError> {
-            Err(LlmError::RequestFailed("intentional failure".into()))
-        }
+    /// A model whose every call fails.
+    fn failing() -> MockLlm {
+        MockLlm::from_fn(|_| Err(LlmError::RequestFailed("intentional failure".into())))
     }
 
     // ── TextAgent trait ──
@@ -218,13 +139,25 @@ mod tests {
         fn _assert(_: &dyn TextAgent) {}
     }
 
+    /// A built agent is handed around as `Arc<dyn TextAgent>`; it must satisfy
+    /// a generic `impl TextAgent` bound without a cast or a second API.
+    #[tokio::test]
+    async fn shared_and_boxed_agents_are_agents() {
+        async fn run_it(agent: impl TextAgent) -> String {
+            agent.run(&State::new()).await.unwrap()
+        }
+        let built: Arc<dyn TextAgent> = Arc::new(LlmTextAgent::new("a", MockLlm::text("from arc")));
+        assert_eq!(built.name(), "a");
+        assert_eq!(run_it(built).await, "from arc");
+        let boxed: Box<dyn TextAgent> = Box::new(FnTextAgent::new("b", |_| Ok("from box".into())));
+        assert_eq!(run_it(boxed).await, "from box");
+    }
+
     // ── LlmTextAgent ──
 
     #[tokio::test]
     async fn llm_text_agent_returns_text() {
-        let llm = Arc::new(FixedLlm {
-            response: "Hello world".into(),
-        });
+        let llm = Arc::new(MockLlm::text("Hello world"));
         let agent = LlmTextAgent::new("greeter", llm).instruction("Say hello");
         let state = State::new();
         let result = agent.run(&state).await.unwrap();
@@ -234,9 +167,7 @@ mod tests {
 
     #[tokio::test]
     async fn llm_text_agent_reads_input_from_state() {
-        let llm = Arc::new(EchoLlm {
-            prefix: "Echo: ".into(),
-        });
+        let llm = Arc::new(echo("Echo: "));
         let agent = LlmTextAgent::new("echoer", llm);
         let state = State::new();
         let _ = state.set("input", "test message");
@@ -246,11 +177,10 @@ mod tests {
 
     #[tokio::test]
     async fn llm_text_agent_dispatches_tools() {
-        let llm = Arc::new(ToolCallingLlm {
-            tool_name: "get_weather".into(),
-            tool_args: serde_json::json!({"city": "London"}),
-            final_response: "The weather is sunny".into(),
-        });
+        let llm = MockLlm::script([
+            LlmResponse::tool_call("get_weather", serde_json::json!({"city": "London"})),
+            LlmResponse::from_text("The weather is sunny"),
+        ]);
 
         let mut dispatcher = crate::tool::ToolDispatcher::new();
         dispatcher.register_function(Arc::new(crate::tool::SimpleTool::new(
@@ -260,15 +190,29 @@ mod tests {
             |_args| async { Ok(serde_json::json!({"temp": 22})) },
         )));
 
-        let agent = LlmTextAgent::new("weather", llm).tools(Arc::new(dispatcher));
+        let agent = LlmTextAgent::new("weather", llm.clone()).tools(Arc::new(dispatcher));
         let state = State::new();
         let result = agent.run(&state).await.unwrap();
         assert_eq!(result, "The weather is sunny");
+
+        // The second model call carries the tool's result back.
+        let followup = llm.last_request().expect("two model calls");
+        let returned = followup
+            .contents
+            .iter()
+            .flat_map(|c| &c.parts)
+            .find_map(|p| match p {
+                Part::FunctionResponse { function_response } => Some(function_response),
+                _ => None,
+            })
+            .expect("the tool result is sent back to the model");
+        assert_eq!(returned.name, "get_weather");
+        assert_eq!(returned.response["temp"], 22);
     }
 
     #[tokio::test]
     async fn llm_text_agent_propagates_llm_error() {
-        let llm = Arc::new(FailLlm);
+        let llm = Arc::new(failing());
         let agent = LlmTextAgent::new("failer", llm);
         let state = State::new();
         let result = agent.run(&state).await;
@@ -306,12 +250,8 @@ mod tests {
 
     #[tokio::test]
     async fn sequential_chains_agents() {
-        let llm1: Arc<dyn BaseLlm> = Arc::new(FixedLlm {
-            response: "step1 done".into(),
-        });
-        let llm2: Arc<dyn BaseLlm> = Arc::new(EchoLlm {
-            prefix: "step2: ".into(),
-        });
+        let llm1: Arc<dyn BaseLlm> = Arc::new(MockLlm::text("step1 done"));
+        let llm2: Arc<dyn BaseLlm> = Arc::new(echo("step2: "));
 
         let children: Vec<Arc<dyn TextAgent>> = vec![
             Arc::new(LlmTextAgent::new("step1", llm1)),
@@ -329,18 +269,11 @@ mod tests {
     #[tokio::test]
     async fn sequential_stops_on_error() {
         let children: Vec<Arc<dyn TextAgent>> = vec![
-            Arc::new(LlmTextAgent::new(
-                "ok",
-                Arc::new(FixedLlm {
-                    response: "fine".into(),
-                }),
-            )),
-            Arc::new(LlmTextAgent::new("fail", Arc::new(FailLlm))),
+            Arc::new(LlmTextAgent::new("ok", Arc::new(MockLlm::text("fine")))),
+            Arc::new(LlmTextAgent::new("fail", Arc::new(failing()))),
             Arc::new(LlmTextAgent::new(
                 "never",
-                Arc::new(FixedLlm {
-                    response: "unreachable".into(),
-                }),
+                Arc::new(MockLlm::text("unreachable")),
             )),
         ];
 

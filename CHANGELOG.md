@@ -64,6 +64,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`MockLlm`, a public test model** (`gemini_adk_rs::llm::MockLlm`, also in
+  the fluent `testing` module). `MockLlm::text` repeats one reply,
+  `MockLlm::script` replies in order and fails loudly once spent, and
+  `MockLlm::from_fn` computes each reply from the request. Every request is
+  recorded (`requests`, `last_request`, `call_count`), so a test can assert on
+  what an agent sent, not only on what it returned. Clones share the script
+  and the recording. The runtime's own text-agent tests now use it instead of
+  four hand-written mocks.
+- `LlmResponse::{from_text, tool_call, tool_calls, with_usage}` and
+  `TokenUsage::new`, with `TokenUsage` now `Copy + Default + PartialEq` and
+  summable (`+`, `+=`).
+- `BaseLlm` is implemented for `Arc<L>` and `Box<L>`, and `TextAgent` for
+  `Arc<A>` and `Box<A>`. A built `Arc<dyn TextAgent>` satisfies any
+  `impl TextAgent` parameter, and any model satisfies `impl BaseLlm`.
 - `gemini_adk_rs::flow::{FlowStack, Overlay, Resume, RepairPolicy,
   SharedFlowStack}`, `FlowMonitor::into_stack`/`restart`,
   `LiveSessionBuilder::flow_stack`, and the `flow:overlay` state key naming
@@ -121,9 +135,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `gemini_adk_server_rs::{FlowAppSpec, MockToolSpec}`: use `SessionSpec` and
   `ToolSpec`. The document format is unchanged.
+- `Live::agent_tool_arc`: `agent_tool` accepts an `Arc<dyn TextAgent>` now.
 
 ### Changed
 
+- `LlmTextAgent::new` and `AgentBuilder::build` take `impl BaseLlm + 'static`
+  instead of `Arc<dyn BaseLlm>`. Existing calls that pass an `Arc` still
+  compile; a bare `GeminiLlm` or `MockLlm` no longer needs wrapping.
 - `Resume::Restart` is documented for what it does: it restarts the main
   flow's monitor against the existing state, not the business task.
 - The Governed Flows guide has a "Digressions and repair: the flow stack"

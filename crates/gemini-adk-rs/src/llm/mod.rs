@@ -5,9 +5,11 @@
 //! for Gemini models.
 
 pub mod gemini;
+mod mock;
 pub mod registry;
 
 pub use gemini::{GeminiLlm, GeminiLlmParams};
+pub use mock::MockLlm;
 pub use registry::LlmRegistry;
 
 use async_trait::async_trait;
@@ -137,6 +139,50 @@ pub struct LlmResponse {
 }
 
 impl LlmResponse {
+    /// A model turn that says `text` and finishes.
+    pub fn from_text(text: impl Into<String>) -> Self {
+        Self::from_parts(vec![Part::Text { text: text.into() }], Some("STOP"))
+    }
+
+    /// A model turn that calls one tool.
+    pub fn tool_call(name: impl Into<String>, args: serde_json::Value) -> Self {
+        Self::tool_calls([(name, args)])
+    }
+
+    /// A model turn that calls several tools at once, in order.
+    pub fn tool_calls<N: Into<String>>(
+        calls: impl IntoIterator<Item = (N, serde_json::Value)>,
+    ) -> Self {
+        let parts = calls
+            .into_iter()
+            .map(|(name, args)| Part::FunctionCall {
+                function_call: gemini_genai_rs::prelude::FunctionCall {
+                    name: name.into(),
+                    args,
+                    id: None,
+                },
+            })
+            .collect();
+        Self::from_parts(parts, None)
+    }
+
+    fn from_parts(parts: Vec<Part>, finish_reason: Option<&str>) -> Self {
+        Self {
+            content: Content {
+                role: Some(gemini_genai_rs::prelude::Role::Model),
+                parts,
+            },
+            finish_reason: finish_reason.map(str::to_owned),
+            usage: None,
+        }
+    }
+
+    /// Attach token usage, as a provider reports it.
+    pub fn with_usage(mut self, prompt_tokens: u32, completion_tokens: u32) -> Self {
+        self.usage = Some(TokenUsage::new(prompt_tokens, completion_tokens));
+        self
+    }
+
     /// Extract text from the response, concatenating all text parts.
     pub fn text(&self) -> String {
         self.content
@@ -164,7 +210,7 @@ impl LlmResponse {
 }
 
 /// Token usage statistics.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TokenUsage {
     /// Input/prompt tokens.
     pub prompt_tokens: u32,
@@ -172,6 +218,37 @@ pub struct TokenUsage {
     pub completion_tokens: u32,
     /// Total tokens.
     pub total_tokens: u32,
+}
+
+impl TokenUsage {
+    /// Usage for one call; the total is the sum of the two.
+    pub fn new(prompt_tokens: u32, completion_tokens: u32) -> Self {
+        Self {
+            prompt_tokens,
+            completion_tokens,
+            total_tokens: prompt_tokens.saturating_add(completion_tokens),
+        }
+    }
+}
+
+impl std::ops::Add for TokenUsage {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        Self {
+            prompt_tokens: self.prompt_tokens.saturating_add(other.prompt_tokens),
+            completion_tokens: self
+                .completion_tokens
+                .saturating_add(other.completion_tokens),
+            total_tokens: self.total_tokens.saturating_add(other.total_tokens),
+        }
+    }
+}
+
+impl std::ops::AddAssign for TokenUsage {
+    fn add_assign(&mut self, other: Self) {
+        *self = *self + other;
+    }
 }
 
 /// Errors from LLM operations.
@@ -257,6 +334,47 @@ pub trait BaseLlm: Send + Sync {
     }
 }
 
+/// A shared model is a model, so `Arc<GeminiLlm>`, `Arc<dyn BaseLlm>` and a
+/// bare `GeminiLlm` are interchangeable wherever a [`BaseLlm`] is accepted.
+#[async_trait]
+impl<L: BaseLlm + ?Sized> BaseLlm for std::sync::Arc<L> {
+    fn model_id(&self) -> &str {
+        (**self).model_id()
+    }
+
+    fn capabilities(&self) -> ModelCapabilities {
+        (**self).capabilities()
+    }
+
+    async fn generate(&self, request: LlmRequest) -> Result<LlmResponse, LlmError> {
+        (**self).generate(request).await
+    }
+
+    async fn warm_up(&self) -> Result<(), LlmError> {
+        (**self).warm_up().await
+    }
+}
+
+/// A boxed model is a model; see the `Arc` implementation.
+#[async_trait]
+impl<L: BaseLlm + ?Sized> BaseLlm for Box<L> {
+    fn model_id(&self) -> &str {
+        (**self).model_id()
+    }
+
+    fn capabilities(&self) -> ModelCapabilities {
+        (**self).capabilities()
+    }
+
+    async fn generate(&self, request: LlmRequest) -> Result<LlmResponse, LlmError> {
+        (**self).generate(request).await
+    }
+
+    async fn warm_up(&self) -> Result<(), LlmError> {
+        (**self).warm_up().await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -329,11 +447,51 @@ mod tests {
 
     #[test]
     fn token_usage() {
-        let usage = TokenUsage {
-            prompt_tokens: 10,
-            completion_tokens: 20,
-            total_tokens: 30,
-        };
+        let usage = TokenUsage::new(10, 20);
         assert_eq!(usage.total_tokens, 30);
+        assert_eq!((usage + TokenUsage::new(1, 2)).total_tokens, 33);
+    }
+
+    #[test]
+    fn response_constructors_build_model_turns() {
+        let said = LlmResponse::from_text("hi").with_usage(3, 4);
+        assert_eq!(said.text(), "hi");
+        assert_eq!(
+            said.content.role,
+            Some(gemini_genai_rs::prelude::Role::Model)
+        );
+        assert_eq!(said.finish_reason.as_deref(), Some("STOP"));
+        assert_eq!(said.usage, Some(TokenUsage::new(3, 4)));
+
+        let called = LlmResponse::tool_calls([
+            ("a", serde_json::json!({})),
+            ("b", serde_json::json!({ "x": 1 })),
+        ]);
+        let names: Vec<_> = called
+            .function_calls()
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect();
+        assert_eq!(names, ["a", "b"]);
+        assert!(called.text().is_empty());
+    }
+
+    /// `Arc<L>`, `Arc<dyn BaseLlm>` and `Box<L>` all satisfy a generic bound,
+    /// so no call site needs to know which one it was handed.
+    #[tokio::test]
+    async fn shared_and_boxed_models_are_models() {
+        async fn ask(llm: impl BaseLlm) -> String {
+            llm.generate(LlmRequest::from_text("q"))
+                .await
+                .unwrap()
+                .text()
+        }
+        let mock = MockLlm::text("a").with_model_id("m");
+        let shared: std::sync::Arc<dyn BaseLlm> = std::sync::Arc::new(mock.clone());
+        assert_eq!(shared.model_id(), "m");
+        assert_eq!(ask(shared).await, "a");
+        assert_eq!(ask(std::sync::Arc::new(mock.clone())).await, "a");
+        assert_eq!(ask(Box::new(mock.clone()) as Box<dyn BaseLlm>).await, "a");
+        assert_eq!(mock.call_count(), 3);
     }
 }

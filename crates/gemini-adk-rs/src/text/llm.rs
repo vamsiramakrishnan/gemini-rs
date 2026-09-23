@@ -50,10 +50,13 @@ pub struct LlmTextAgent {
 
 impl LlmTextAgent {
     /// Create a new LLM text agent.
-    pub fn new(name: impl Into<String>, llm: Arc<dyn BaseLlm>) -> Self {
+    ///
+    /// `llm` is any [`BaseLlm`]: a `GeminiLlm`, a shared `Arc<dyn BaseLlm>`,
+    /// or a [`MockLlm`](crate::llm::MockLlm) in tests.
+    pub fn new(name: impl Into<String>, llm: impl BaseLlm + 'static) -> Self {
         Self {
             name: name.into(),
-            llm,
+            llm: Arc::new(llm),
             instruction: None,
             instruction_provider: None,
             llm_provider: None,

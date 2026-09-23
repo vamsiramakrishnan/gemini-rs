@@ -263,6 +263,10 @@ impl Live {
     }
 
     /// Register a text agent (already `Arc`'d) as a tool.
+    #[deprecated(
+        since = "2.1.0",
+        note = "`agent_tool` accepts an `Arc<dyn TextAgent>` directly; use `agent_tool`"
+    )]
     pub fn agent_tool_arc(
         mut self,
         name: impl Into<String>,

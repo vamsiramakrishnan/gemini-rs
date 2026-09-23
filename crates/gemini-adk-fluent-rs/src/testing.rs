@@ -1,6 +1,31 @@
-//! Testing utilities — mock backends, agent harnesses, contract validation.
+//! Testing utilities — a mock model, agent harnesses, contract validation.
+//!
+//! Test an agent without a provider by building it on [`MockLlm`] and asserting
+//! on both what it returned and what it sent:
+//!
+//! ```
+//! use gemini_adk_fluent_rs::prelude::*;
+//! use gemini_adk_fluent_rs::testing::{LlmResponse, MockLlm};
+//!
+//! # tokio_test::block_on(async {
+//! let llm = MockLlm::script([LlmResponse::from_text("Paris.")]);
+//! let agent = AgentBuilder::new("geo")
+//!     .instruction("Answer with a city.")
+//!     .build(llm.clone())
+//!     .unwrap();
+//!
+//! let state = State::new();
+//! state.set("input", "Capital of France?").unwrap();
+//! assert_eq!(agent.run(&state).await.unwrap(), "Paris.");
+//!
+//! let sent = llm.last_request().unwrap();
+//! assert_eq!(sent.system_instruction.as_deref(), Some("Answer with a city."));
+//! # });
+//! ```
 
 use std::collections::{HashMap, HashSet};
+
+pub use gemini_adk_rs::llm::{LlmRequest, LlmResponse, MockLlm, TokenUsage};
 
 use crate::builder::AgentBuilder;
 

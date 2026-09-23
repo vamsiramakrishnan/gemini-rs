@@ -689,7 +689,7 @@ impl AgentBuilder {
     /// # let _ = result; Ok(())
     /// # }
     /// ```
-    pub fn build(self, llm: Arc<dyn BaseLlm>) -> Result<Arc<dyn TextAgent>, ConfigError> {
+    pub fn build(self, llm: impl BaseLlm + 'static) -> Result<Arc<dyn TextAgent>, ConfigError> {
         if !self.inner.config_errors.is_empty() {
             return Err(ConfigError {
                 issues: self.inner.config_errors.clone(),
