@@ -3,7 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use gemini_genai_rs::prelude::{Content, FunctionCall, FunctionResponse, Part, Role};
 
-use super::TextAgent;
+use super::{RunRequest, RunResult, TextAgent, ToolCallRecord};
 use crate::context::AgentEvent;
 use crate::error::AgentError;
 use crate::llm::{BaseLlm, LlmRequest};
@@ -203,14 +203,24 @@ impl LlmTextAgent {
     }
 
     /// Dispatch function calls and return function responses, firing middleware hooks.
-    async fn dispatch_tools(&self, calls: &[FunctionCall]) -> Vec<FunctionResponse> {
-        let dispatcher = match &self.dispatcher {
-            Some(d) => d,
-            None => return Vec::new(),
-        };
-
+    async fn dispatch_tools(
+        &self,
+        calls: &[FunctionCall],
+        records: &mut Vec<ToolCallRecord>,
+    ) -> Vec<FunctionResponse> {
         let mut responses = Vec::with_capacity(calls.len());
         for call in calls {
+            // A model can call a tool the agent never declared; tell it so.
+            let Some(dispatcher) = &self.dispatcher else {
+                let missing = Err(crate::error::ToolError::NotFound(call.name.clone()));
+                records.push(ToolCallRecord::new(
+                    &call.name,
+                    call.args.clone(),
+                    missing.clone(),
+                ));
+                responses.push(ToolDispatcher::build_response(call, missing));
+                continue;
+            };
             // before_tool hook
             if let Err(e) = self.middleware.run_before_tool(call).await {
                 // Hook error — record it and return an error response.
@@ -221,10 +231,13 @@ impl LlmTextAgent {
                         &crate::error::ToolError::ExecutionFailed(e.to_string()),
                     )
                     .await;
-                responses.push(ToolDispatcher::build_response(
-                    call,
-                    Err(crate::error::ToolError::ExecutionFailed(e.to_string())),
+                let refused = Err(crate::error::ToolError::ExecutionFailed(e.to_string()));
+                records.push(ToolCallRecord::new(
+                    &call.name,
+                    call.args.clone(),
+                    refused.clone(),
                 ));
+                responses.push(ToolDispatcher::build_response(call, refused));
                 continue;
             }
 
@@ -241,6 +254,11 @@ impl LlmTextAgent {
                 }
             }
 
+            records.push(ToolCallRecord::new(
+                &call.name,
+                call.args.clone(),
+                result.clone(),
+            ));
             responses.push(ToolDispatcher::build_response(call, result));
         }
         responses
@@ -254,11 +272,11 @@ impl TextAgent for LlmTextAgent {
     }
 
     async fn run(&self, state: &State) -> Result<String, AgentError> {
-        // Build initial contents from state "input" key, or empty user message.
         let input = state.get::<String>("input").unwrap_or_default();
+        Ok(self.run_with(RunRequest::new(input), state).await?.text)
+    }
 
-        let mut contents = vec![Content::user(&input)];
-
+    async fn run_with(&self, request: RunRequest, state: &State) -> Result<RunResult, AgentError> {
         // Resolve the instruction for this run: provider (against live
         // state) wins over the static string.
         let instruction = match &self.instruction_provider {
@@ -285,8 +303,7 @@ impl TextAgent for LlmTextAgent {
         // Enforce the tightest middleware timeout (M::timeout) over the whole run.
         let result = match self.middleware.timeout() {
             Some(limit) => {
-                match tokio::time::timeout(limit, self.run_inner(&mut contents, &instruction, &llm))
-                    .await
+                match tokio::time::timeout(limit, self.run_inner(request, &instruction, &llm)).await
                 {
                     Ok(r) => r,
                     Err(_) => {
@@ -298,22 +315,25 @@ impl TextAgent for LlmTextAgent {
                     }
                 }
             }
-            None => self.run_inner(&mut contents, &instruction, &llm).await,
+            None => self.run_inner(request, &instruction, &llm).await,
         };
 
-        if let Err(ref e) = result {
-            let _ = self.middleware.run_on_error(e).await;
-        } else if let Ok(ref text) = result {
-            let _ = state.set("output", text);
-            if let Some(key) = &self.output_key {
-                let _ = state.set(key, text);
+        match &result {
+            Err(e) => {
+                let _ = self.middleware.run_on_error(e).await;
             }
-            let _ = self
-                .middleware
-                .run_on_event(&AgentEvent::AgentCompleted {
-                    name: self.name.clone(),
-                })
-                .await;
+            Ok(done) => {
+                let _ = state.set("output", &done.text);
+                if let Some(key) = &self.output_key {
+                    let _ = state.set(key, &done.text);
+                }
+                let _ = self
+                    .middleware
+                    .run_on_event(&AgentEvent::AgentCompleted {
+                        name: self.name.clone(),
+                    })
+                    .await;
+            }
         }
 
         result
@@ -324,30 +344,45 @@ impl LlmTextAgent {
     /// Inner execution loop — separated so `on_error` fires exactly once.
     async fn run_inner(
         &self,
-        contents: &mut Vec<Content>,
+        request: RunRequest,
         instruction: &Option<String>,
         llm: &Arc<dyn BaseLlm>,
-    ) -> Result<String, AgentError> {
+    ) -> Result<RunResult, AgentError> {
+        let history_len = request.history.len();
+        let mut contents = request.history;
+        contents.push(request.input);
+        let mut result = RunResult::default();
+
         for _round in 0..MAX_TOOL_ROUNDS {
-            let mut request = self.build_request(contents.clone(), instruction);
+            let mut llm_request = self.build_request(contents.clone(), instruction);
+            if let Some(schema) = &request.response_schema {
+                llm_request.response_mime_type = Some("application/json".into());
+                llm_request.response_json_schema = Some(schema.clone());
+            }
 
             // transform_request hook — may rewrite the request (e.g. context
             // policies trimming conversation history) before it is sent.
-            self.middleware.run_transform_request(&mut request).await?;
+            self.middleware
+                .run_transform_request(&mut llm_request)
+                .await?;
 
             // before_model hook — may short-circuit with a cached response.
-            let response = match self.middleware.run_before_model(&request).await? {
+            let response = match self.middleware.run_before_model(&llm_request).await? {
                 Some(cached) => cached,
                 None => {
                     let llm_response = llm
-                        .generate(request.clone())
+                        .generate(llm_request.clone())
                         .await
                         .map_err(AgentError::Llm)?;
+                    result.model_calls += 1;
+                    if let Some(usage) = llm_response.usage {
+                        result.usage += usage;
+                    }
 
                     // after_model hook — may replace the response.
                     match self
                         .middleware
-                        .run_after_model(&request, &llm_response)
+                        .run_after_model(&llm_request, &llm_response)
                         .await?
                     {
                         Some(replaced) => replaced,
@@ -360,7 +395,12 @@ impl LlmTextAgent {
 
             if calls.is_empty() {
                 // No tool calls — we have a final text response.
-                return Ok(response.text());
+                result.text = response.text();
+                if !response.content.parts.is_empty() {
+                    contents.push(response.content);
+                }
+                result.messages = contents.split_off(history_len);
+                return Ok(result);
             }
 
             // Move model response into conversation (no clone needed).
@@ -370,7 +410,7 @@ impl LlmTextAgent {
             // attached under `_media` is lifted out of the JSON and
             // delivered as inline_data parts in the same turn, so the
             // model *sees* images rather than base64 noise.
-            let tool_responses = self.dispatch_tools(&calls).await;
+            let tool_responses = self.dispatch_tools(&calls, &mut result.tool_calls).await;
             let mut media_parts: Vec<Part> = Vec::new();
             let mut response_parts: Vec<Part> = tool_responses
                 .into_iter()

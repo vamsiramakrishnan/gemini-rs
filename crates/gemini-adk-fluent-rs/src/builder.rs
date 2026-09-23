@@ -496,6 +496,16 @@ impl AgentBuilder {
         Self::with(inner)
     }
 
+    /// Constrain every reply to JSON shaped like `T`, using `T`'s schema.
+    ///
+    /// Read the reply back with [`RunResult::parse`](gemini_adk_rs::text::RunResult::parse),
+    /// or ask for a `T` directly with
+    /// [`TextAgent::ask_as`](gemini_adk_rs::text::TextAgent::ask_as), which also
+    /// repairs a reply that does not parse.
+    pub fn output<T: schemars::JsonSchema>(self) -> Self {
+        self.output_schema(gemini_adk_rs::tool::wire_schema::<T>())
+    }
+
     /// Set the output key — agent's final text response is auto-saved to this state key.
     pub fn output_key(self, key: impl Into<String>) -> Self {
         let mut inner = self.mutate();
@@ -1651,6 +1661,30 @@ mod honest_build_tests {
         let error = returned["error"].as_str().unwrap_or_default();
         assert!(error.contains("over the refund limit"), "{returned}");
         assert!(returned.get("refunded").is_none(), "the tool must not run");
+    }
+
+    /// `output::<T>()` sends `T`'s wire schema, and the reply parses back.
+    #[tokio::test]
+    async fn output_type_constrains_the_reply() {
+        #[derive(serde::Deserialize, schemars::JsonSchema)]
+        struct City {
+            name: String,
+        }
+        let llm = MockLlm::text(r#"{"name":"Paris"}"#);
+        let agent = AgentBuilder::new("geo")
+            .output::<City>()
+            .build(llm.clone())
+            .unwrap();
+        let result = agent
+            .run_with(
+                gemini_adk_rs::text::RunRequest::new("Capital of France?"),
+                &gemini_adk_rs::State::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.parse::<City>().unwrap().name, "Paris");
+        let schema = llm.last_request().unwrap().response_json_schema.unwrap();
+        assert_eq!(schema["properties"]["name"]["type"], "string");
     }
 
     #[test]

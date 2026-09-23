@@ -251,10 +251,10 @@ pub mod prelude {
 
     // ── Text-agent combinators (runtime details in `crate::text`) ──
     pub use gemini_adk_rs::text::{
-        DispatchTextAgent, FallbackTextAgent, FnTextAgent, JoinTextAgent, LlmTextAgent,
+        Chat, DispatchTextAgent, FallbackTextAgent, FnTextAgent, JoinTextAgent, LlmTextAgent,
         LoopTextAgent, MapOverTextAgent, ParallelTextAgent, RaceTextAgent, RouteRule,
-        RouteTextAgent, SequentialTextAgent, TapTextAgent, TaskRegistry, TextAgent,
-        TimeoutTextAgent,
+        RouteTextAgent, RunRequest, RunResult, SequentialTextAgent, TapTextAgent, TaskRegistry,
+        TextAgent, TimeoutTextAgent,
     };
 
     // ── L0 wire protocol (ModelId, Voice, Content, Part, Role, …) ──

@@ -56,6 +56,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `AgentBuilder::confirmation_provider` is new. A declined call now returns
   `ToolError::Declined(reason)`, so the model can tell the user why, instead
   of a bare `Cancelled`.
+- **A model that called a tool on an agent with no tools got an empty turn
+  back** and called again until the ten-round limit. Each call is now answered
+  with `ToolError::NotFound`, which the model can act on.
 - `GeminiLlm` no longer carries a `preprocess_request` stub that did nothing.
 - **`#[tool]` sent a schema the API rejects.** It used raw
   `schemars::schema_for!`, so an `Option<String>` parameter declared
@@ -129,6 +132,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`agent.ask(..)`, `agent.ask_as::<T>(..)` and `agent.chat()`** on every
+  `TextAgent`. `ask` sends one prompt and returns the reply, with no `State`
+  and no magic `"input"` key. `ask_as` sends `T`'s JSON Schema as the response
+  schema and deserializes the reply; if it does not parse, the model is shown
+  the error and asked once more, and a second failure is
+  `AgentError::InvalidOutput`. `chat()` returns a `Chat` that carries the
+  conversation's history and state across `send` calls and adds up usage.
+- **`TextAgent::run_with(RunRequest, &State) -> RunResult`**, the primitive
+  the three are built on. A `RunRequest` carries the new turn (text or media),
+  the history and an optional response schema; a `RunResult` reports the
+  reply, the turns to append to the history, token usage, every tool call
+  (`ToolCallRecord`) and the number of model calls. `LlmTextAgent` implements
+  it natively; every other agent gets it through `run`.
+- `AgentBuilder::output::<T>()`, and `RunResult::parse::<T>()` to read the
+  reply back.
 - **`GeminiLlm::from_env()`** (and `try_new(params)`): the same configuration
   as `new`, checked before any request — a missing API key, a Vertex AI setup
   without a project, or a Live model on the text API fails at once with the

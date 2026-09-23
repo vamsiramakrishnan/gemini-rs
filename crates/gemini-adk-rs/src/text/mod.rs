@@ -27,6 +27,9 @@ use async_trait::async_trait;
 use crate::error::AgentError;
 use crate::state::State;
 
+mod run;
+pub use run::{Chat, RunRequest, RunResult, ToolCallRecord};
+
 mod dispatch;
 mod fallback;
 mod fn_agent;
@@ -59,13 +62,113 @@ pub use timeout::TimeoutTextAgent;
 ///
 /// Unlike `Agent` (which requires a Live WebSocket session), `TextAgent` can be
 /// dispatched from anywhere — event hooks, background tasks, CLI tools.
+///
+/// Ask a question, get a typed answer, or hold a conversation:
+///
+/// ```
+/// use gemini_adk_rs::llm::{LlmResponse, MockLlm};
+/// use gemini_adk_rs::text::{LlmTextAgent, TextAgent};
+///
+/// #[derive(serde::Deserialize, schemars::JsonSchema)]
+/// struct City {
+///     name: String,
+///     country: String,
+/// }
+///
+/// # tokio_test::block_on(async {
+/// let llm = MockLlm::script([
+///     LlmResponse::from_text("Paris."),
+///     LlmResponse::from_text(r#"{"name":"Paris","country":"France"}"#),
+/// ]);
+/// let agent = LlmTextAgent::new("geo", llm);
+///
+/// assert_eq!(agent.ask("Capital of France?").await.unwrap(), "Paris.");
+///
+/// let city: City = agent.ask_as("Describe the capital of France.").await.unwrap();
+/// assert_eq!(city.country, "France");
+/// # });
+/// ```
+///
+/// [`run_with`](Self::run_with) is the primitive the others are built on;
+/// [`run`](Self::run) is the state-in, state-out form combinators use, reading
+/// the prompt from the `"input"` state key.
 #[async_trait]
 pub trait TextAgent: Send + Sync {
     /// Human-readable name for logging and debugging.
     fn name(&self) -> &str;
 
     /// Execute this agent. Reads/writes `state`. Returns the final text output.
+    ///
+    /// The prompt is read from the `"input"` state key; prefer
+    /// [`run_with`](Self::run_with) or [`ask`](Self::ask), which take it
+    /// directly.
     async fn run(&self, state: &State) -> Result<String, AgentError>;
+
+    /// Run one request and report everything it produced: the reply, the
+    /// turns to append to a conversation, token usage and tool calls.
+    ///
+    /// The default writes the request's text to the `"input"` state key and
+    /// calls [`run`](Self::run), so every agent supports it; history and a
+    /// response schema are honoured by agents that call a model
+    /// ([`LlmTextAgent`]).
+    async fn run_with(&self, request: RunRequest, state: &State) -> Result<RunResult, AgentError> {
+        state.set("input", request.input_text())?;
+        let text = self.run(state).await?;
+        Ok(RunResult {
+            messages: vec![request.input, run::model_turn(text.clone())],
+            ..RunResult::from_text(text)
+        })
+    }
+
+    /// Ask one question, with no history and fresh state, and get the reply.
+    async fn ask(&self, prompt: impl Into<String> + Send) -> Result<String, AgentError>
+    where
+        Self: Sized,
+    {
+        Ok(self
+            .run_with(RunRequest::new(prompt), &State::new())
+            .await?
+            .text)
+    }
+
+    /// Ask one question and get the reply as a `T`.
+    ///
+    /// `T`'s JSON Schema is sent as the response schema. If the reply still
+    /// does not parse, the model is shown the error and asked once more;
+    /// a second failure is [`AgentError::InvalidOutput`].
+    async fn ask_as<T>(&self, prompt: impl Into<String> + Send) -> Result<T, AgentError>
+    where
+        Self: Sized,
+        T: serde::de::DeserializeOwned + schemars::JsonSchema + Send,
+    {
+        let schema = crate::tool::wire_schema::<T>();
+        let state = State::new();
+        let first = self
+            .run_with(
+                RunRequest::new(prompt).response_schema(schema.clone()),
+                &state,
+            )
+            .await?;
+        let reason = match first.parse::<T>() {
+            Err(AgentError::InvalidOutput { reason, .. }) => reason,
+            parsed => return parsed,
+        };
+        let repair = RunRequest::new(format!(
+            "That reply could not be read as the requested JSON ({reason}). \
+             Reply again with only JSON that matches the schema."
+        ))
+        .history(first.messages)
+        .response_schema(schema);
+        self.run_with(repair, &state).await?.parse::<T>()
+    }
+
+    /// Start a conversation that remembers its turns. See [`Chat`].
+    fn chat(&self) -> Chat<&Self>
+    where
+        Self: Sized,
+    {
+        Chat::new(self)
+    }
 }
 
 // Verify object safety at compile time.
@@ -73,30 +176,35 @@ const _: () = {
     fn _assert_object_safe(_: &dyn TextAgent) {}
 };
 
-/// A shared agent is an agent, so a built `Arc<dyn TextAgent>` can be passed
-/// straight back into any combinator or `agent_tool` without a cast.
-#[async_trait]
-impl<A: TextAgent + ?Sized> TextAgent for std::sync::Arc<A> {
-    fn name(&self) -> &str {
-        (**self).name()
-    }
+/// Forward every required method, so a wrapper behaves exactly like the agent
+/// it holds (including an overridden `run_with`).
+macro_rules! forward_text_agent {
+    ($($wrapper:ty),*) => {$(
+        #[async_trait]
+        impl<A: TextAgent + ?Sized> TextAgent for $wrapper {
+            fn name(&self) -> &str {
+                (**self).name()
+            }
 
-    async fn run(&self, state: &State) -> Result<String, AgentError> {
-        (**self).run(state).await
-    }
+            async fn run(&self, state: &State) -> Result<String, AgentError> {
+                (**self).run(state).await
+            }
+
+            async fn run_with(
+                &self,
+                request: RunRequest,
+                state: &State,
+            ) -> Result<RunResult, AgentError> {
+                (**self).run_with(request, state).await
+            }
+        }
+    )*};
 }
 
-/// A boxed agent is an agent; see the `Arc` implementation.
-#[async_trait]
-impl<A: TextAgent + ?Sized> TextAgent for Box<A> {
-    fn name(&self) -> &str {
-        (**self).name()
-    }
-
-    async fn run(&self, state: &State) -> Result<String, AgentError> {
-        (**self).run(state).await
-    }
-}
+// A shared agent is an agent, so a built `Arc<dyn TextAgent>` can be passed
+// straight back into any combinator or `agent_tool` without a cast; a borrow
+// is one too, which is what `chat()` holds.
+forward_text_agent!(std::sync::Arc<A>, Box<A>, &A);
 
 // ── Tests ─────────────────────────────────────────────────────────────────
 
@@ -151,6 +259,118 @@ mod tests {
         assert_eq!(run_it(built).await, "from arc");
         let boxed: Box<dyn TextAgent> = Box::new(FnTextAgent::new("b", |_| Ok("from box".into())));
         assert_eq!(run_it(boxed).await, "from box");
+    }
+
+    // ── run_with, ask, ask_as, chat ──
+
+    #[tokio::test]
+    async fn run_with_reports_messages_usage_and_tool_calls() {
+        let llm = MockLlm::script([
+            LlmResponse::tool_call("get_weather", serde_json::json!({"city": "Oslo"}))
+                .with_usage(10, 2),
+            LlmResponse::from_text("Cold.").with_usage(20, 1),
+        ]);
+        let mut dispatcher = crate::tool::ToolDispatcher::new();
+        dispatcher.register_function(Arc::new(crate::tool::SimpleTool::new(
+            "get_weather",
+            "Get weather",
+            None,
+            |_| async { Ok(serde_json::json!({"temp": -3})) },
+        )));
+        let agent = LlmTextAgent::new("weather", llm).tools(Arc::new(dispatcher));
+
+        let result = agent
+            .run_with(RunRequest::new("Weather in Oslo?"), &State::new())
+            .await
+            .unwrap();
+        assert_eq!(result.text, "Cold.");
+        assert_eq!(result.model_calls, 2);
+        assert_eq!(result.usage, crate::llm::TokenUsage::new(30, 3));
+        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(result.tool_calls[0].name, "get_weather");
+        assert_eq!(result.tool_calls[0].outcome.as_ref().unwrap()["temp"], -3);
+        // user, model(call), user(tool response), model(text)
+        assert_eq!(result.messages.len(), 4);
+    }
+
+    #[tokio::test]
+    async fn ask_as_repairs_once_then_gives_up() {
+        #[derive(serde::Deserialize, schemars::JsonSchema, Debug)]
+        #[allow(dead_code)]
+        struct Answer {
+            value: u32,
+        }
+
+        let fixed = MockLlm::script([
+            LlmResponse::from_text("forty-two"),
+            LlmResponse::from_text(r#"{"value": 42}"#),
+        ]);
+        let agent = LlmTextAgent::new("a", fixed.clone());
+        let answer: Answer = agent.ask_as("What is 6 x 7?").await.unwrap();
+        assert_eq!(answer.value, 42);
+        let repair = fixed.last_request().unwrap();
+        assert_eq!(
+            repair.contents.len(),
+            3,
+            "the bad reply is shown to the model"
+        );
+        assert!(repair.response_json_schema.is_some());
+
+        let stubborn = MockLlm::text("no");
+        let agent = LlmTextAgent::new("b", stubborn.clone());
+        let err = agent.ask_as::<Answer>("?").await.unwrap_err();
+        assert!(matches!(err, AgentError::InvalidOutput { .. }), "{err}");
+        assert_eq!(stubborn.call_count(), 2, "one repair, not a loop");
+    }
+
+    #[tokio::test]
+    async fn any_agent_can_ask_and_chat() {
+        let upper = FnTextAgent::new("upper", |state| {
+            Ok(state
+                .get::<String>("input")
+                .unwrap_or_default()
+                .to_uppercase())
+        });
+        assert_eq!(upper.ask("hi").await.unwrap(), "HI");
+        let shared: Arc<dyn TextAgent> = Arc::new(upper);
+        let mut chat = shared.chat();
+        assert_eq!(chat.send("one").await.unwrap(), "ONE");
+        assert_eq!(chat.send("two").await.unwrap(), "TWO");
+        assert_eq!(chat.history().len(), 4);
+    }
+
+    #[tokio::test]
+    async fn a_failed_turn_is_not_added_to_the_history() {
+        let llm = MockLlm::script([LlmResponse::from_text("first")]).then_fail(LlmError::Api {
+            status: 503,
+            message: "overloaded".into(),
+        });
+        let agent = LlmTextAgent::new("a", llm);
+        let mut chat = Chat::new(&agent);
+        chat.send("1").await.unwrap();
+        let err = chat.send("2").await.unwrap_err();
+        assert!(err.as_llm().is_some_and(LlmError::is_retryable), "{err}");
+        assert_eq!(chat.history().len(), 2);
+    }
+
+    /// A model that calls a tool on an agent with no tools is told so, instead
+    /// of receiving an empty turn and calling again until the round limit.
+    #[tokio::test]
+    async fn a_tool_call_without_tools_is_answered_not_found() {
+        let llm = MockLlm::script([
+            LlmResponse::tool_call("imaginary", serde_json::json!({})),
+            LlmResponse::from_text("Sorry, I cannot do that."),
+        ]);
+        let agent = LlmTextAgent::new("toolless", llm.clone());
+        let result = agent
+            .run_with(RunRequest::new("Use your tool."), &State::new())
+            .await
+            .unwrap();
+        assert_eq!(result.text, "Sorry, I cannot do that.");
+        assert!(matches!(
+            result.tool_calls[0].outcome,
+            Err(crate::error::ToolError::NotFound(_))
+        ));
     }
 
     // ── LlmTextAgent ──
