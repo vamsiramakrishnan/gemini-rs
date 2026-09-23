@@ -334,7 +334,12 @@ mod tests {
             ..LlmRequest::from_text("hi")
         };
         let (config, model) = GeminiLlm::to_generate_config(request);
-        assert_eq!(model.as_ref().map(|m| m.as_str()), Some("gemini-2.5-pro"));
+        assert_eq!(
+            model
+                .as_ref()
+                .map(gemini_genai_rs::prelude::ModelId::as_str),
+            Some("gemini-2.5-pro")
+        );
 
         let body = config.to_request_body();
         let gc = &body["generationConfig"];

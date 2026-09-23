@@ -303,8 +303,8 @@ fn main() {
                     i,
                     f.candidates.len()
                 ),
-                Composable::Branch(_) => println!("    Step {}: Branch", i),
-                other => println!("    Step {}: {:?}", i, other),
+                Composable::Branch(_) => println!("    Step {i}: Branch"),
+                other => println!("    Step {i}: {other:?}"),
             }
         }
     }

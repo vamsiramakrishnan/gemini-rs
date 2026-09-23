@@ -227,13 +227,13 @@ fn parse_docs(lines: &[String]) -> ToolDocs {
                     if let Some(parsed) = parse_argument_item(item) {
                         docs.arguments.push(parsed);
                     }
-                } else if !line.is_empty() {
-                    if let Some((_, text)) = docs.arguments.last_mut() {
-                        if !text.is_empty() {
-                            text.push(' ');
-                        }
-                        text.push_str(line);
+                } else if !line.is_empty()
+                    && let Some((_, text)) = docs.arguments.last_mut()
+                {
+                    if !text.is_empty() {
+                        text.push(' ');
                     }
+                    text.push_str(line);
                 }
             }
             Some(false) => {}

@@ -708,13 +708,13 @@ impl AgentBuilder {
                     .to_string(),
             );
         }
-        if let Some(model) = &inner.model {
-            if gemini_adk_rs::llm::ModelCapabilities::infer_from_id(model.as_str()).live_bidi {
-                issues.push(format!(
-                    "`{model}` is a Live model, which the text API does not serve; use a text \
-                     model such as `gemini-flash-latest`, or run it on `Live::builder()`"
-                ));
-            }
+        if let Some(model) = &inner.model
+            && gemini_adk_rs::llm::ModelCapabilities::infer_from_id(model.as_str()).live_bidi
+        {
+            issues.push(format!(
+                "`{model}` is a Live model, which the text API does not serve; use a text \
+                 model such as `gemini-flash-latest`, or run it on `Live::builder()`"
+            ));
         }
         if inner.confirmation_provider.is_none() {
             let gated: Vec<String> = inner
