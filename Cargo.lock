@@ -1392,6 +1392,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "gemini-adk"
+version = "2.0.0"
+dependencies = [
+ "gemini-adk-fluent-rs",
+ "gemini-memory-rs",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "gemini-adk-api-rs"
 version = "2.0.0"
 dependencies = [

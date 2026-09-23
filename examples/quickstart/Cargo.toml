@@ -2,6 +2,7 @@
 name = "example-quickstart"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 publish = false
 
 # The two programs the README's Quickstart prints, compiled in CI exactly as

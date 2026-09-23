@@ -2,6 +2,7 @@
 name = "example-session-bench"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 publish = false
 description = "Concurrent Live-session capacity harness: N sessions, no model, no network"
 

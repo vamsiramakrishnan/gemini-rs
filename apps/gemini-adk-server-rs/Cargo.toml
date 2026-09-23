@@ -2,6 +2,7 @@
 name = "gemini-adk-server-rs"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Shared server core for gemini-adk-web-rs, gemini-adk-api-rs, and gemini-adk-cli-rs — agent loading, REST handlers, session management"

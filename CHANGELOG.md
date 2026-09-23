@@ -28,6 +28,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `LlmResponse::finish_reason` from `GeminiLlm` uses the API's names
   (`"STOP"`, `"MAX_TOKENS"`), as mocks and recordings do, instead of Rust
   `Debug` names (`"Stop"`).
+- **`adk create` wrote a project that did not build.** It pinned version
+  0.5, depended on a `gemini-live` crate that does not exist, defaulted to the
+  retired `gemini-2.0-flash`, and accepted names that are not package names.
+  The scaffold's `src/main.rs` is now a real file compiled (and linted) in this
+  repository as the CLI's `scaffold-agent` example: a streaming conversation
+  built on `GeminiLlm::from_env()` and `chat()`. The generated `Cargo.toml`
+  depends on the SDK release the CLI was built from, the default model is
+  `gemini-flash-latest`, and `.env` names `GEMINI_API_KEY`. The `deploy`
+  Dockerfile built with Rust 1.82, below the MSRV, and without the OpenSSL
+  headers the default TLS backend needs; it uses `rust:1-slim` with
+  `libssl-dev`, and `libssl3` at runtime.
 - **`AgentBuilder::build` dropped most of its configuration.** Only the
   instruction, temperature, max tokens and function tools reached the agent;
   `model`, `top_p`, `top_k`, `stop_sequences`, `thinking`, `output_schema`,
@@ -132,6 +143,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`gemini-adk`, one crate to depend on** (`crates/gemini-adk`, library
+  `gemini_adk`). It re-exports the fluent crate with the same feature names,
+  adds a `memory` feature for `gemini_adk::memory`, and `#[tool]` resolves its
+  runtime through it. It is `publish = false` until its crates.io name is
+  confirmed.
+- **Every workspace member now declares the MSRV** (`rust-version = "1.93"`,
+  inherited); none did, so crates.io showed no minimum and an older toolchain
+  failed with an unrelated error.
 - **OpenTelemetry GenAI spans on the text path.** Each run is an
   `invoke_agent {agent}` span, each model call a `chat {model}` span carrying
   `gen_ai.request.*` settings, `gen_ai.usage.input_tokens`/`output_tokens`,

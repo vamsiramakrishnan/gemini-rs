@@ -42,10 +42,10 @@ use syn::{
 /// want.
 ///
 /// A direct dependency wins (under whatever name it was renamed to); a crate
-/// that depends only on `gemini-adk-fluent-rs` reaches it through that
-/// crate's `gemini_adk_rs` re-export. Inside `gemini-adk-rs` itself the crate
-/// declares `extern crate self as gemini_adk_rs`, so the plain name works
-/// there and in its own tests.
+/// that depends only on `gemini-adk-fluent-rs`, or only on the `gemini-adk`
+/// facade, reaches it through that crate's `gemini_adk_rs` re-export. Inside
+/// `gemini-adk-rs` itself the crate declares `extern crate self as
+/// gemini_adk_rs`, so the plain name works there and in its own tests.
 fn runtime() -> (proc_macro2::TokenStream, String) {
     use proc_macro_crate::{FoundCrate, crate_name};
     match crate_name("gemini-adk-rs") {
@@ -54,16 +54,26 @@ fn runtime() -> (proc_macro2::TokenStream, String) {
             (quote! { ::#ident }, name)
         }
         Ok(FoundCrate::Itself) => (quote! { ::gemini_adk_rs }, "gemini_adk_rs".to_string()),
-        Err(_) => match crate_name("gemini-adk-fluent-rs") {
-            Ok(FoundCrate::Name(name)) => {
-                let ident = format_ident!("{name}");
-                (
-                    quote! { ::#ident::gemini_adk_rs },
-                    format!("{name}::gemini_adk_rs"),
-                )
-            }
-            _ => (quote! { ::gemini_adk_rs }, "gemini_adk_rs".to_string()),
-        },
+        // Otherwise through a crate that re-exports it: the `gemini-adk`
+        // facade (first, so its own tests exercise this path), or the fluent
+        // layer it wraps.
+        Err(_) => ["gemini-adk", "gemini-adk-fluent-rs"]
+            .into_iter()
+            .find_map(|facade| match crate_name(facade) {
+                Ok(FoundCrate::Name(name)) => Some(name),
+                Ok(FoundCrate::Itself) => Some(facade.replace('-', "_")),
+                Err(_) => None,
+            })
+            .map_or_else(
+                || (quote! { ::gemini_adk_rs }, "gemini_adk_rs".to_string()),
+                |name| {
+                    let ident = format_ident!("{name}");
+                    (
+                        quote! { ::#ident::gemini_adk_rs },
+                        format!("{name}::gemini_adk_rs"),
+                    )
+                },
+            ),
     }
 }
 
@@ -138,7 +148,7 @@ fn runtime() -> (proc_macro2::TokenStream, String) {
 /// through the runtime crate's `__macros` module, so none of them need to be
 /// in your `Cargo.toml`. The runtime crate is located at expansion time:
 /// `gemini-adk-rs` if it is a direct dependency (under whatever name), else
-/// through `gemini-adk-fluent-rs`'s re-export.
+/// through the re-export in `gemini-adk` or `gemini-adk-fluent-rs`.
 #[proc_macro_attribute]
 pub fn tool(attr: TokenStream, item: TokenStream) -> TokenStream {
     let description = if attr.is_empty() {

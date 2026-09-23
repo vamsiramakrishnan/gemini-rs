@@ -16,8 +16,8 @@ enum Command {
     Create {
         /// Name of the agent project to create.
         name: String,
-        /// Model to use (default: gemini-2.0-flash).
-        #[arg(long, default_value = "gemini-2.0-flash")]
+        /// Model to use.
+        #[arg(long, default_value = "gemini-flash-latest")]
         model: String,
         /// Google AI API key to write into .env.
         #[arg(long)]

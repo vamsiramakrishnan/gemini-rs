@@ -20,13 +20,16 @@ pub struct DeployConfig {
     pub trace_to_cloud: bool,
 }
 
-const DOCKERFILE_TEMPLATE: &str = r#"FROM rust:1.82-slim AS builder
+// `rust:1` tracks the latest stable toolchain, which always meets the SDK's
+// MSRV. The default TLS backend is OpenSSL: headers to build, the library to run.
+const DOCKERFILE_TEMPLATE: &str = r#"FROM rust:1-slim AS builder
+RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY . .
 RUN cargo build --release
 
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y ca-certificates libssl3 && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/target/release/{{SERVICE_NAME}} /usr/local/bin/agent
 ENV PORT=8080
 EXPOSE 8080

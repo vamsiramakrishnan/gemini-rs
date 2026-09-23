@@ -3,6 +3,7 @@ name = "gemini-adk-web-rs"
 version.workspace = true
 description = "Interactive web UI for Gemini ADK agent development and debugging"
 edition.workspace = true
+rust-version.workspace = true
 publish = false
 
 [dependencies]

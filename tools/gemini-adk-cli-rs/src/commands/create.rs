@@ -6,7 +6,24 @@ pub fn run(
     model: &str,
     api_key: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let dir = Path::new(name);
+    create_in(Path::new("."), name, model, api_key)
+}
+
+/// Write the project `name` under `parent`.
+fn create_in(
+    parent: &Path,
+    name: &str,
+    model: &str,
+    api_key: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if !is_package_name(name) {
+        return Err(format!(
+            "'{name}' is not a valid package name: use letters, digits, '-' and '_', \
+             starting with a letter"
+        )
+        .into());
+    }
+    let dir = parent.join(name);
     if dir.exists() {
         return Err(format!("Directory '{}' already exists", name).into());
     }
@@ -35,89 +52,14 @@ sub_agents = []
     )?;
 
     // ── Cargo.toml ───────────────────────────────────────────────────
-    fs::write(
-        dir.join("Cargo.toml"),
-        format!(
-            r#"[package]
-name = "{name}"
-version = "0.1.0"
-edition = "2021"
+    fs::write(dir.join("Cargo.toml"), cargo_toml(name))?;
 
-[dependencies]
-gemini-adk-fluent-rs = {{ version = "0.5", features = ["gemini-llm"] }}
-gemini-adk-rs = {{ version = "0.5", features = ["gemini-llm"] }}
-gemini-live = "0.5"
-tokio = {{ version = "1", features = ["full"] }}
-serde = {{ version = "1", features = ["derive"] }}
-serde_json = "1"
-schemars = "0.8"
-dotenvy = "0.15"
-"#
-        ),
-    )?;
-
-    // ── src/main.rs — working agent that compiles and runs ───────────
-    fs::write(
-        dir.join("src/main.rs"),
-        format!(
-            r#"//! {name} — built with the Gemini ADK for Rust.
-//!
-//! Run with: adk run .
-//! Or directly: cargo run
-
-use gemini_adk_fluent_rs::prelude::*;
-use std::io::{{self, Write}};
-use std::sync::Arc;
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {{
-    dotenvy::dotenv().ok();
-
-    // Create LLM — auto-detects credentials from environment.
-    // Set GOOGLE_GENAI_API_KEY, GEMINI_API_KEY, or GOOGLE_API_KEY.
-    let llm: Arc<dyn BaseLlm> = Arc::new(GeminiLlm::new(GeminiLlmParams::default()));
-
-    // Build your agent with instruction and tools.
-    let agent = AgentBuilder::new("{name}")
-        .instruction("You are a helpful assistant. Be concise and informative.")
-        .google_search()
-        .temperature(0.7)
-        .build(llm)?;
-
-    // Interactive REPL.
-    let state = State::new();
-    println!("{name} ready. Type /quit to exit.\n");
-
-    loop {{
-        print!("> ");
-        io::stdout().flush()?;
-
-        let mut input = String::new();
-        io::stdin().read_line(&mut input)?;
-        let input = input.trim();
-
-        if input.is_empty() {{ continue; }}
-        if input == "/quit" || input == "/exit" {{ break; }}
-
-        state.set("input", input);
-        match agent.run(&state).await {{
-            Ok(output) => println!("\n{{output}}\n"),
-            Err(e) => eprintln!("\nError: {{e}}\n"),
-        }}
-    }}
-
-    Ok(())
-}}
-"#
-        ),
-    )?;
+    // ── src/main.rs — the template compiled in this repository ───────
+    fs::write(dir.join("src/main.rs"), main_rs(name))?;
 
     // ── .env ─────────────────────────────────────────────────────────
     let key_line = api_key.unwrap_or("your-api-key-here");
-    fs::write(
-        dir.join(".env"),
-        format!("GOOGLE_GENAI_API_KEY={key_line}\n"),
-    )?;
+    fs::write(dir.join(".env"), format!("GEMINI_API_KEY={key_line}\n"))?;
 
     // ── .gitignore ───────────────────────────────────────────────────
     fs::write(dir.join(".gitignore"), "/target\n.env\n")?;
@@ -149,7 +91,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {{
     println!("  Next steps:\n");
     println!("    cd {name}");
     if api_key.is_none() {
-        println!("    echo 'GOOGLE_GENAI_API_KEY=...' > .env   # add your API key");
+        println!("    echo 'GEMINI_API_KEY=...' > .env         # add your API key");
     }
     println!("    adk run .                              # interactive REPL");
     println!("    adk web .                              # full devtools UI");
@@ -158,4 +100,105 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {{
     println!();
 
     Ok(())
+}
+
+/// The source of the scaffolded `src/main.rs`, compiled in this repository as
+/// the CLI crate's `scaffold-agent` example.
+const MAIN_TEMPLATE: &str = include_str!("../../templates/agent/main.rs");
+
+/// The line of the template that names the agent.
+const NAME_LINE: &str = "const AGENT: &str = \"my-agent\";";
+
+/// `src/main.rs` for an agent named `name`.
+fn main_rs(name: &str) -> String {
+    assert!(
+        MAIN_TEMPLATE.contains(NAME_LINE),
+        "the template names its agent"
+    );
+    MAIN_TEMPLATE.replace(NAME_LINE, &format!("const AGENT: &str = {name:?};"))
+}
+
+/// `Cargo.toml` depending on the release of the SDK this CLI was built from.
+fn cargo_toml(name: &str) -> String {
+    let version = env!("CARGO_PKG_VERSION");
+    format!(
+        r#"[package]
+name = "{name}"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+gemini-adk-fluent-rs = "{version}"
+tokio = {{ version = "1", features = ["macros", "rt-multi-thread"] }}
+dotenvy = "0.15"
+"#
+    )
+}
+
+/// Whether `name` is usable as a Cargo package name and directory.
+fn is_package_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars.next().is_some_and(|c| c.is_ascii_alphabetic())
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn main_rs_is_the_compiled_template_with_the_name() {
+        let main = main_rs("weather-bot");
+        assert!(main.contains(r#"const AGENT: &str = "weather-bot";"#));
+        assert_eq!(
+            main.replace(r#""weather-bot""#, r#""my-agent""#),
+            MAIN_TEMPLATE,
+            "only the name changes"
+        );
+    }
+
+    /// The scaffold used to pin 0.5 and depend on a `gemini-live` crate that
+    /// does not exist.
+    #[test]
+    fn cargo_toml_depends_on_this_release() {
+        let manifest = cargo_toml("weather-bot");
+        assert!(manifest.contains(&format!(
+            "gemini-adk-fluent-rs = \"{}\"",
+            env!("CARGO_PKG_VERSION")
+        )));
+        assert!(!manifest.contains("gemini-live"));
+        // Everything the template uses is declared.
+        assert!(MAIN_TEMPLATE.contains("#[tokio::main]") && manifest.contains("tokio"));
+        assert!(MAIN_TEMPLATE.contains("dotenvy::") && manifest.contains("dotenvy"));
+    }
+
+    #[test]
+    fn package_names_are_validated() {
+        assert!(is_package_name("weather-bot") && is_package_name("bot_2"));
+        assert!(!is_package_name("2bot") && !is_package_name("my bot"));
+        assert!(!is_package_name("../escape") && !is_package_name(""));
+    }
+
+    #[test]
+    fn create_writes_a_project() {
+        let root = std::env::temp_dir().join(format!("adk-create-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        create_in(&root, "demo-agent", "gemini-flash-latest", None).unwrap();
+        assert!(
+            create_in(&root, "demo-agent", "gemini-flash-latest", None).is_err(),
+            "an existing project is never overwritten"
+        );
+
+        let project = root.join("demo-agent");
+        let main = std::fs::read_to_string(project.join("src/main.rs")).unwrap();
+        assert_eq!(main, main_rs("demo-agent"));
+        let toml = std::fs::read_to_string(project.join("agent.toml")).unwrap();
+        assert!(toml.contains(r#"model = "gemini-flash-latest""#));
+        assert!(
+            std::fs::read_to_string(project.join(".env"))
+                .unwrap()
+                .starts_with("GEMINI_API_KEY=")
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

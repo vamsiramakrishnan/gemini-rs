@@ -10,7 +10,7 @@ pub struct AgentManifest {
     /// Human-readable description.
     #[serde(default)]
     pub description: String,
-    /// Model identifier, e.g. "gemini-2.0-flash".
+    /// Model identifier, e.g. "gemini-flash-latest".
     #[serde(default = "default_model")]
     pub model: String,
     /// System instruction for the agent.
@@ -40,7 +40,7 @@ pub struct AgentManifest {
 }
 
 fn default_model() -> String {
-    "gemini-2.0-flash".to_string()
+    "gemini-flash-latest".to_string()
 }
 
 /// Discover all `agent.toml` manifests under the given directory (non-recursive top-level scan).
