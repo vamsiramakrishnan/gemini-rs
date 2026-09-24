@@ -989,7 +989,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1056,6 +1056,9 @@ name = "example-quickstart"
 version = "2.0.0"
 dependencies = [
  "gemini-adk-fluent-rs",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
  "tokio",
 ]
 
@@ -1068,6 +1071,18 @@ dependencies = [
  "gemini-genai-rs",
  "parking_lot",
  "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "example-session-bench"
+version = "2.0.0"
+dependencies = [
+ "async-trait",
+ "gemini-adk-rs",
+ "gemini-genai-rs",
  "serde",
  "serde_json",
  "tokio",
@@ -1380,6 +1395,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "gemini-adk"
+version = "2.0.0"
+dependencies = [
+ "gemini-adk-fluent-rs",
+ "gemini-memory-rs",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "gemini-adk-api-rs"
 version = "2.0.0"
 dependencies = [
@@ -1425,6 +1452,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "cpal",
+ "futures-util",
  "gemini-adk-rs",
  "gemini-genai-rs",
  "nnnoiseless",
@@ -1562,11 +1590,11 @@ dependencies = [
  "futures-util",
  "metrics",
  "metrics-exporter-prometheus",
- "opentelemetry 0.32.0",
+ "opentelemetry",
  "opentelemetry-gcloud-trace",
  "opentelemetry-otlp",
  "opentelemetry_gcloud_monitoring_exporter",
- "opentelemetry_sdk 0.31.0",
+ "opentelemetry_sdk",
  "parking_lot",
  "proptest",
  "reqwest 0.12.28",
@@ -1732,9 +1760,9 @@ dependencies = [
 
 [[package]]
 name = "google-cloud-gax-internal"
-version = "0.7.18"
+version = "0.7.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2766757d877a7a8ac23da9884cb0e3f10ed9b75a0ce59801ce6b19bf9d5819e"
+checksum = "6e3e4d09e162fb71314e2c91879bdd495c1f8a1f69e71ccbae5767b8b6c833d6"
 dependencies = [
  "bytes",
  "futures",
@@ -1745,9 +1773,9 @@ dependencies = [
  "http-body-util",
  "hyper",
  "lazy_static",
- "opentelemetry 0.32.0",
- "opentelemetry-semantic-conventions 0.32.1",
- "opentelemetry_sdk 0.32.1",
+ "opentelemetry",
+ "opentelemetry-semantic-conventions",
+ "opentelemetry_sdk",
  "percent-encoding",
  "pin-project",
  "reqwest 0.13.4",
@@ -1763,9 +1791,9 @@ dependencies = [
 
 [[package]]
 name = "google-cloud-monitoring-v3"
-version = "1.12.0"
+version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73ceb0b2e6bf99b24d3b83a8f0157b8a4e247525988acbd1f1b6d6bbf75b1d4b"
+checksum = "b81a415437613d579b4251e7ecb1a173a43a249eae3eaebb1547a318ef96d8d2"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2365,7 +2393,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2841,7 +2869,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3100,20 +3128,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "opentelemetry"
-version = "0.32.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b0142c63252a9e054e68a4c61a5778f7b14f576274d593f8ce883d191a099682"
-dependencies = [
- "futures-core",
- "futures-sink",
- "js-sys",
- "pin-project-lite",
- "thiserror 2.0.20",
- "tracing",
-]
-
-[[package]]
 name = "opentelemetry-gcloud-trace"
 version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3122,9 +3136,9 @@ dependencies = [
  "async-trait",
  "futures",
  "gcloud-sdk",
- "opentelemetry 0.31.0",
- "opentelemetry-semantic-conventions 0.31.0",
- "opentelemetry_sdk 0.31.0",
+ "opentelemetry",
+ "opentelemetry-semantic-conventions",
+ "opentelemetry_sdk",
  "rsb_derive",
  "rvstruct",
  "tokio-stream",
@@ -3140,7 +3154,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "http",
- "opentelemetry 0.31.0",
+ "opentelemetry",
  "reqwest 0.12.28",
 ]
 
@@ -3151,10 +3165,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f69cd6acbb9af919df949cd1ec9e5e7fdc2ef15d234b6b795aaa525cc02f71f"
 dependencies = [
  "http",
- "opentelemetry 0.31.0",
+ "opentelemetry",
  "opentelemetry-http",
  "opentelemetry-proto",
- "opentelemetry_sdk 0.31.0",
+ "opentelemetry_sdk",
  "prost",
  "reqwest 0.12.28",
  "thiserror 2.0.20",
@@ -3169,8 +3183,8 @@ version = "0.31.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a7175df06de5eaee9909d4805a3d07e28bb752c34cab57fa9cff549da596b30f"
 dependencies = [
- "opentelemetry 0.31.0",
- "opentelemetry_sdk 0.31.0",
+ "opentelemetry",
+ "opentelemetry_sdk",
  "prost",
  "tonic",
  "tonic-prost",
@@ -3183,12 +3197,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e62e29dfe041afb8ed2a6c9737ab57db4907285d999ef8ad3a59092a36bdc846"
 
 [[package]]
-name = "opentelemetry-semantic-conventions"
-version = "0.32.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c913ac17a6c451661ee255f4625d143e51647ae78ebd969b75e41c4442f4fe47"
-
-[[package]]
 name = "opentelemetry_gcloud_monitoring_exporter"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3199,9 +3207,9 @@ dependencies = [
  "google-cloud-monitoring-v3",
  "google-cloud-wkt",
  "itertools 0.14.0",
- "opentelemetry 0.31.0",
+ "opentelemetry",
  "opentelemetry_resourcedetector_gcp_rust",
- "opentelemetry_sdk 0.31.0",
+ "opentelemetry_sdk",
  "rand 0.9.5",
  "reqwest 0.12.28",
  "serde",
@@ -3219,8 +3227,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47982d404be6a2a75f19d555d68b83ccb0bc911400cf03b786d0287534f3ea1d"
 dependencies = [
  "once_cell",
- "opentelemetry 0.31.0",
- "opentelemetry_sdk 0.31.0",
+ "opentelemetry",
+ "opentelemetry_sdk",
  "regex",
  "reqwest 0.12.28",
  "serde",
@@ -3237,28 +3245,12 @@ dependencies = [
  "futures-channel",
  "futures-executor",
  "futures-util",
- "opentelemetry 0.31.0",
+ "opentelemetry",
  "percent-encoding",
  "rand 0.9.5",
  "thiserror 2.0.20",
  "tokio",
  "tokio-stream",
-]
-
-[[package]]
-name = "opentelemetry_sdk"
-version = "0.32.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b59f80e1ac4d5ff7a2db8fb6c80badb7f0f3f858211fba08dd9aaec750894f9"
-dependencies = [
- "futures-channel",
- "futures-executor",
- "futures-util",
- "opentelemetry 0.32.0",
- "percent-encoding",
- "portable-atomic",
- "rand 0.9.5",
- "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -3575,7 +3567,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4059,14 +4051,14 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "rustls"
-version = "0.23.43"
+version = "0.23.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0283386ce02abc0151e1761d08802dfe86c173b0b494af5cbc086574e453da06"
+checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
 dependencies = [
  "aws-lc-rs",
  "log",
@@ -4118,7 +4110,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4839,10 +4831,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5363,12 +5355,12 @@ dependencies = [
 
 [[package]]
 name = "tracing-opentelemetry"
-version = "0.33.0"
+version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "adbc64cba7137545b8044cb1fe9814f7aacf3c6b5f9b45be8bb5db538befdb26"
+checksum = "1ac28f2d093c6c477eaa76b23525478f38de514fa9aeb1285738d4b97a9552fc"
 dependencies = [
  "js-sys",
- "opentelemetry 0.32.0",
+ "opentelemetry",
  "smallvec",
  "tracing",
  "tracing-core",

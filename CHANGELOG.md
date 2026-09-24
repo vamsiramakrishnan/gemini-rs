@@ -9,6 +9,127 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Model errors lost their kind on the text path.** `GeminiLlm` flattened
+  every failure into `LlmError::RequestFailed(String)`, and `LlmTextAgent`
+  flattened that again into `AgentError::Other("LLM error: …")`, so a caller
+  could not tell a rate limit from a bad key without parsing text. `LlmError`
+  now carries `Api { status, message }`, `Auth`, `Transport` and `Config`,
+  with `status()`, `is_rate_limited()`, `is_auth()`, `is_retryable()` and
+  `is_content_filtered()`; it reaches the caller as `AgentError::Llm`
+  (`AgentError::as_llm()`).
+- **A blocked prompt returned an empty answer.** `promptFeedback.blockReason`
+  and a reply withheld for safety (`SAFETY`, `PROHIBITED_CONTENT`, …) are now
+  `LlmError::ContentFiltered(reason)`. A reply truncated at `MAX_TOKENS` is
+  still returned.
+- **Text-path token usage reported zero output tokens.** `generateContent`
+  names the count `candidatesTokenCount`, which `UsageMetadata` did not read.
+  It does now, and thinking tokens, billed as output, count toward
+  `completion_tokens`.
+- `LlmResponse::finish_reason` from `GeminiLlm` uses the API's names
+  (`"STOP"`, `"MAX_TOKENS"`), as mocks and recordings do, instead of Rust
+  `Debug` names (`"Stop"`).
+- **`adk create` wrote a project that did not build.** It pinned version
+  0.5, depended on a `gemini-live` crate that does not exist, defaulted to the
+  retired `gemini-2.0-flash`, and accepted names that are not package names.
+  The scaffold's `src/main.rs` is now a real file compiled (and linted) in this
+  repository as the CLI's `scaffold-agent` example: a streaming conversation
+  built on `GeminiLlm::from_env()` and `chat()`. The generated `Cargo.toml`
+  depends on the SDK release the CLI was built from, the default model is
+  `gemini-flash-latest`, and `.env` names `GEMINI_API_KEY`. The `deploy`
+  Dockerfile built with Rust 1.82, below the MSRV, and without the OpenSSL
+  headers the default TLS backend needs; it uses `rust:1-slim` with
+  `libssl-dev`, and `libssl3` at runtime.
+- **`AgentBuilder::build` dropped most of its configuration.** Only the
+  instruction, temperature, max tokens and function tools reached the agent;
+  `model`, `top_p`, `top_k`, `stop_sequences`, `thinking`, `output_schema`,
+  `output_key` and every built-in tool (`google_search`, `code_execution`,
+  `url_context`) were accepted and ignored, so changing the model changed
+  nothing. They are all sent now — `LlmRequest` gained `model`, `top_p`,
+  `top_k`, `stop_sequences` and `thinking_budget`, `LlmTextAgent` the matching
+  setters, and `GeminiLlm` maps every field (a test asserts each one reaches
+  the wire body). Settings a text agent cannot honour — `voice`, audio
+  modalities, a Live model, `sub_agent`/`transfer_to`/`stay`/`isolate` — are
+  now a `ConfigError` naming what to use instead, not a silent no-op.
+- **`conditional(..)` did not branch.** It always ran the true branch, and
+  rebuilt both branches from their name and instruction only. It now compiles
+  to a `RouteTextAgent` (new `Composable::Branch`) that runs exactly the branch
+  the predicate chooses, with each branch's full configuration, and accepts
+  any `Composable`.
+- **`Live::dispatcher(..)` discarded tools registered before it.** They are
+  merged in (new `ToolDispatcher::merge`); the supplied dispatcher wins a name
+  clash.
+- **`ToolDispatcher` declarations were cached forever and unordered.** The
+  cache is now cleared on every registration, and declarations are ordered by
+  name, so a setup message is identical from run to run.
+- **A `T::confirm` tool ran unconfirmed when no confirmation provider was
+  set.** `AgentBuilder::build` and `Live::connect` refuse that configuration,
+  and `check_live` reports it (`LiveViolation::UnconfirmedTools`).
+  `AgentBuilder::confirmation_provider` is new. A declined call now returns
+  `ToolError::Declined(reason)`, so the model can tell the user why, instead
+  of a bare `Cancelled`.
+- **A model that called a tool on an agent with no tools got an empty turn
+  back** and called again until the ten-round limit. Each call is now answered
+  with `ToolError::NotFound`, which the model can act on.
+- `GeminiLlm` no longer carries a `preprocess_request` stub that did nothing.
+- **`#[tool]` sent a schema the API rejects.** It used raw
+  `schemars::schema_for!`, so an `Option<String>` parameter declared
+  `"type": ["string", "null"]` — refused outright, and on Live by closing the
+  socket during setup — and a nested enum became a `$ref` the API ignores.
+  `#[tool]`, `TypedTool` and `extract_turns*` now share one pipeline,
+  `gemini_adk_rs::tool::wire_schema::<T>()`.
+- **A tool result that was not a JSON object failed the request.** The API
+  accepts only an object in `functionResponse.response`; a tool returning a
+  number, string, array or `null` is now sent as `{"output": value}`, the key
+  the API documents, on every path (text, Live, REST).
+- **`#[tool]` dropped the function's other attributes**, including `#[cfg]`:
+  a tool behind a disabled feature still compiled. `#[cfg]` now gates every
+  generated item, doc comments and `#[deprecated]` stay on the constructor,
+  and the rest (`#[allow]`, `#[tracing::instrument]`) stay on the body.
+- `T::simple` was documented with arguments it never declared. It declares
+  no parameters, and its documentation now says so and points at `#[tool]`
+  and `T::typed`.
+- **`Live::converse(&convo)` did not install a conversation's digressions or
+  repair policies.** It attached the main flow and extractors only, while the
+  simulator drove a `FlowStack` with everything the conversation declared, so
+  a scenario could pass in Conversation CI and the same digression never fire
+  on a call. The stack now lives in the runtime (`gemini_adk_rs::flow::FlowStack`)
+  and is the only governance object the control plane drives: a bare `govern`
+  is a stack with no digressions, and `converse` installs the overlays and
+  repair policies on it. A control-plane test drives a digression through the
+  real turn path, and a fluent test asserts the installed stack and the
+  simulator agree turn by turn.
+
+- **A digression that completed on its entry turn was never heard.** The stack
+  applied its `Resume` policy without ever making it the active layer, so the
+  control plane read the *main* flow for postures and `flow:overlay` — and the
+  one-terminal-stage flow `Policy::safety_handoff` lowers to could fire without
+  its hand-off instruction ever reaching the model. A digression now governs
+  the turn on which it completes (that turn projects its terminal stage's
+  instruction) and resumes at the next turn boundary.
+
+- **A terminated conversation still governed with the main flow.**
+  `Resume::Terminate` set a flag that made `on_turn` a no-op, but `current()`,
+  `admits_tool()` and the posture accessors still delegated to the suspended
+  main monitor, so a session that was not disconnected kept receiving main-flow
+  steering and could call tools that flow admitted. A terminated stack is inert:
+  no active steps, no postures or grounds, no `on_enter` actions, and every tool
+  denied with the reason. The new `flow:terminated` state key (and
+  `FlowStack::is_terminated`) tells the application to close the session; the
+  runtime still never hangs up on its own.
+
+- **A `reset(..)` on an escalated step was ineffective.** Repair bookkeeping ran
+  before the monitor applied `Constraint::Reset`, so the escalate signal the
+  lowered `escalate_to` edge reads stayed latched; the re-latch then completed
+  the step again on that stale signal and routed straight back to the hand-off
+  target. Resets are applied first now (`FlowMonitor::begin_turn`), and the
+  steps they un-latch have their repair signals and counters cleared before the
+  re-latch — as does every repair-tracked step on a `Resume::Restart`. A reset
+  can also be gated on a tool (`reset(..).when(called_ok("start_over"))`), whose
+  edge fires inside `on_tool_ok` rather than at a turn boundary; that path sheds
+  the same signals (`FlowMonitor::begin_tool_ok`), and `FlowStack::observe_tool`
+  now runs the conformance check itself and records through it, instead of
+  delegating to a monitor that would bypass the shedding.
+
 - **`--all-features` did not compile** after a lone `opentelemetry_sdk` 0.31 →
   0.32 bump split the OpenTelemetry family across two versions; the sdk is back
   on 0.31 with its exporters, the manifest says why they move together, and
@@ -20,7 +141,181 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ci.yml` declared no `permissions`, so every job ran with the repository's
   default `GITHUB_TOKEN` scope; it is `contents: read`.
 
+### Added
+
+- **`gemini-adk`, one crate to depend on** (`crates/gemini-adk`, library
+  `gemini_adk`). It re-exports the fluent crate with the same feature names,
+  adds a `memory` feature for `gemini_adk::memory`, and `#[tool]` resolves its
+  runtime through it. It is `publish = false` until its crates.io name is
+  confirmed.
+- **Every workspace member now declares the MSRV** (`rust-version = "1.93"`,
+  inherited); none did, so crates.io showed no minimum and an older toolchain
+  failed with an unrelated error.
+- **OpenTelemetry GenAI spans on the text path.** Each run is an
+  `invoke_agent {agent}` span, each model call a `chat {model}` span carrying
+  `gen_ai.request.*` settings, `gen_ai.usage.input_tokens`/`output_tokens`,
+  `gen_ai.response.finish_reasons` and `error.type`, and each tool call an
+  `execute_tool {tool}` span — the GenAI semantic conventions, so a backend
+  reads latency by model, token cost and tool timelines without
+  configuration. Message content is not recorded. Model calls also record
+  the `gemini_llm_*` metrics (calls, duration, tokens) under the `metrics`
+  feature; they were defined but never recorded.
+- **Streaming text agents.** `agent.stream(prompt)` and
+  `TextAgent::run_stream(request, state)` yield `RunEvent`s — `TextDelta` as
+  the model writes, `ToolCall` and `ToolResult` around each tool, and
+  `Finished(RunResult)` last — across tool rounds; `Chat::send_stream` adds
+  the turn to the history when it finishes. An agent with middleware emits
+  each model turn only after `after_model` has seen it, so a redacting guard
+  cannot be bypassed through the deltas. Underneath: `BaseLlm::generate_stream`
+  (default: one chunk; `GeminiLlm` streams for real, `MockLlm` word by word),
+  `LlmResponse::append` to fold chunks, and at L0
+  `Client::stream_generate_content_with` over `streamGenerateContent?alt=sse`,
+  `HttpClient::post_sse` and a chunk-boundary-safe `SseDecoder`.
+- **`agent.ask(..)`, `agent.ask_as::<T>(..)` and `agent.chat()`** on every
+  `TextAgent`. `ask` sends one prompt and returns the reply, with no `State`
+  and no magic `"input"` key. `ask_as` sends `T`'s JSON Schema as the response
+  schema and deserializes the reply; if it does not parse, the model is shown
+  the error and asked once more, and a second failure is
+  `AgentError::InvalidOutput`. `chat()` returns a `Chat` that carries the
+  conversation's history and state across `send` calls and adds up usage.
+- **`TextAgent::run_with(RunRequest, &State) -> RunResult`**, the primitive
+  the three are built on. A `RunRequest` carries the new turn (text or media),
+  the history and an optional response schema; a `RunResult` reports the
+  reply, the turns to append to the history, token usage, every tool call
+  (`ToolCallRecord`) and the number of model calls. `LlmTextAgent` implements
+  it natively; every other agent gets it through `run`.
+- `AgentBuilder::output::<T>()`, and `RunResult::parse::<T>()` to read the
+  reply back.
+- **`GeminiLlm::from_env()`** (and `try_new(params)`): the same configuration
+  as `new`, checked before any request — a missing API key, a Vertex AI setup
+  without a project, or a Live model on the text API fails at once with the
+  variable to set, instead of on the first request.
+- `AgentError::State` (so `state.set(..)?` works in a function returning
+  `AgentError`) and `AgentError::InvalidOutput`.
+- **`MockLlm`, a public test model** (`gemini_adk_rs::llm::MockLlm`, also in
+  the fluent `testing` module). `MockLlm::text` repeats one reply,
+  `MockLlm::script` replies in order and fails loudly once spent, and
+  `MockLlm::from_fn` computes each reply from the request. Every request is
+  recorded (`requests`, `last_request`, `call_count`), so a test can assert on
+  what an agent sent, not only on what it returned. Clones share the script
+  and the recording. The runtime's own text-agent tests now use it instead of
+  four hand-written mocks.
+- `LlmResponse::{from_text, tool_call, tool_calls, with_usage}` and
+  `TokenUsage::new`, with `TokenUsage` now `Copy + Default + PartialEq` and
+  summable (`+`, `+=`).
+- **`#[tool]` reads the function's documentation.** The doc comment's prose is
+  the description (`#[tool("...")]` still overrides it), and a rustdoc
+  `# Arguments` section describes each parameter in the schema; documenting a
+  parameter that does not exist is a compile error. The return type can be
+  any `Serialize` type, a `Result` with any error type (`io::Result<T>`,
+  `anyhow::Result<T>`, ...), or nothing. A borrowed parameter (`&str`) is a
+  compile error that names the owned type to use.
+- `ToolError::from_error`, which keeps a `ToolError` and turns any other
+  error into `ExecutionFailed` with its message.
+- `T::timeout`, `T::cached` and `T::confirm` accept any tool, so a `#[tool]`
+  function's value wraps directly: `T::timeout(search(), secs)`.
+- `T::typed::<A>(name, description, closure)`: a closure tool whose arguments
+  are a `JsonSchema` type, for tools that capture a client or pool.
+- `gemini_adk_rs::tool::wire_schema::<T>()`, public.
+- `BaseLlm` is implemented for `Arc<L>` and `Box<L>`, and `TextAgent` for
+  `Arc<A>` and `Box<A>`. A built `Arc<dyn TextAgent>` satisfies any
+  `impl TextAgent` parameter, and any model satisfies `impl BaseLlm`.
+- `gemini_adk_rs::flow::{FlowStack, Overlay, Resume, RepairPolicy,
+  SharedFlowStack}`, `FlowMonitor::into_stack`/`restart`,
+  `LiveSessionBuilder::flow_stack`, and the `flow:overlay` state key naming
+  the active digression. The fluent `conversation::{FlowStack, Resume,
+  RepairPolicy}` paths are re-exports of the runtime types.
+- `flow::TERMINATED_STATE_KEY` (`flow:terminated`), published at every turn
+  boundary, and `FlowStack::is_terminated()` — how an application learns that a
+  `Resume::Terminate` digression ended the conversation and it should hang up.
+- `FlowMonitor::begin_turn` and `FlowMonitor::begin_tool_ok` (the turn/tool
+  count and reset edges, split out of `on_turn`/`on_tool_ok` so a caller holding
+  evidence outside the marking can shed it before the re-latch), and
+  `FlowMonitor::closing_steps`/`closing_postures`/
+  `closing_grounds` (a completed flow's terminal steps — its last word, which a
+  terminal step never being *active* otherwise hides).
+- `Sim::postures()` and `Sim::is_terminated()`, so a scenario can assert what a
+  digression actually says, not merely that it fired.
+- `FlowMonitor::record_violation`, for a deviation the caller sees and the
+  monitor cannot. A terminated `FlowStack` uses it so that `Observe` still
+  records a tool used after the conversation ended — the denial is the stack's,
+  not the flow's — without advancing a flow that has finished.
+- `Live::digressions()` and `Live::repair_policies()` introspection, and
+  `CompiledConversation::repair_policies()`.
+- `Conversation::instruction(..)` as the name for a stage's model guidance;
+  `say(..)` remains as an alias. Spec documents accept `"instruction"` as
+  well as `"say"`.
+- **`example-session-bench`, a concurrent-session capacity harness.** Holds
+  `N` Live sessions open in one process, each the real L1 control plane over
+  a scripted L0 transport that answers every turn after a fixed delay, and
+  reports resident memory (baseline, connected, peak, after disconnect, per
+  session), `connect` time, `send_text` → first text and → `TurnComplete`
+  percentiles, and a cross-check of the runtime's own telemetry against the
+  turns it drove. `just bench-sessions 100`; JSON output; a four-session
+  smoke test runs under `cargo test --workspace`. The guide is
+  `docs/user-guide/capacity.md`. No credentials, no network.
+- `Conversation`, `ConversationSpec`, `CompiledConversation` and `Sim` are in
+  the fluent prelude. The authoring model and the model-free simulator were
+  the one headline feature that needed a second import line.
+- `gemini-adk-fluent-rs` feature bundles: `voice` (`voice-io`, `denoise`,
+  `dsp`, `vad-wavekat`) and `full` (`voice` plus `sip`, `http-tools`,
+  `templates`, `otel-otlp`, with the default TLS backend).
+- `TungsteniteError::NoTlsBackend` and `transport::HAS_TLS_BACKEND`: a build
+  with neither `tls-native` nor `tls-rustls` still compiles, but a `wss://`
+  dial now fails before any socket is opened, with an error that names the
+  feature to enable, instead of a handshake error from inside the WebSocket
+  stack.
+
+### Removed
+
+- The root `benches/` directory. Its two files were never part of any
+  package (the workspace root has no `[package]`) and called a ring-buffer
+  API that no longer exists; the live benchmark is
+  `crates/gemini-genai-rs/benches/audio_pipeline.rs`.
+
+### Deprecated
+
+- `gemini_adk_server_rs::{FlowAppSpec, MockToolSpec}`: use `SessionSpec` and
+  `ToolSpec`. The document format is unchanged.
+- `Live::agent_tool_arc`: `agent_tool` accepts an `Arc<dyn TextAgent>` now.
+- Aliases that duplicated a name: `AgentBuilder::instruct` (use `instruction`),
+  `AgentBuilder::describe` (`description`), `AgentBuilder::no_peers`
+  (`isolate`), `Pipeline::sub_agent` (`step`), `FanOut::sub_agent` (`branch`)
+  and `T::fn_tool` (`T::simple`, `T::typed` or `#[tool]`).
+
 ### Changed
+
+- **Documentation leads with the golden path.** The README's text-agent
+  section is a ladder — ask, a streamed conversation, a typed answer, a tool,
+  a model-free test — whose every program is a compiled quickstart target
+  checked against the README; the fluent crate README, the text-agent, tools,
+  tool-policy and best-practice guides and the agent reference use
+  `GeminiLlm::from_env`, `ask`/`chat`/`stream`, `#[tool]` and `MockLlm`, and no
+  longer show `T::simple` with arguments it never declares.
+- `LlmError` and `AgentError` are `#[non_exhaustive]`, and
+  `LlmError::ContentFiltered` carries the provider's reason.
+- **The fluent prelude no longer glob-imports the L0 prelude.** It named
+  about 200 wire, transport, buffer and turn-detection types in every
+  application's namespace. It now carries the L0 types an application names —
+  content (`Content`, `Part`, `Role`, `FunctionCall`, …), models and voices
+  (`ModelId`, `Voice`, `Modality`), the arguments of `Live` builder methods
+  (`ActivityHandling`, `AutomaticActivityDetection`, `FunctionCallingBehavior`,
+  …) and safety settings — plus `futures_util::StreamExt` for consuming
+  `agent.stream(..)`. Everything else is one import away in
+  `gemini_adk_fluent_rs::wire`.
+- `ToolError`, `Composable` and `LiveViolation` are `#[non_exhaustive]`; a
+  `match` on them needs a `_` arm. `ToolError` gained `Declined`, and
+  `Composable` gained `Branch`.
+- `LlmRequest` has new fields; build it with `..Default::default()` or
+  `LlmRequest::from_text`. `GenerationConfig` gained `stop_sequences`.
+- `LlmTextAgent::new` and `AgentBuilder::build` take `impl BaseLlm + 'static`
+  instead of `Arc<dyn BaseLlm>`. Existing calls that pass an `Arc` still
+  compile; a bare `GeminiLlm` or `MockLlm` no longer needs wrapping.
+- `Resume::Restart` is documented for what it does: it restarts the main
+  flow's monitor against the existing state, not the business task.
+- The Governed Flows guide has a "Digressions and repair: the flow stack"
+  section; the glossary defines flow stack, digression, stage/step/phase and
+  instruction.
 
 - **The documentation website is now Astro + Starlight** (`apps/docs`),
   replacing mdBook. Content is not authored in the app: every page is synced

@@ -188,6 +188,63 @@ flow at connect, so it composes with `.govern(..)` written on either side of it.
 - **Repair from real gaps.** Unmet `require` steps are surfaced at the turn
   boundary so the model gathers what's missing.
 
+## Digressions and repair: the flow stack
+
+A session is never governed by a bare monitor. The control plane drives a
+`FlowStack`: the main flow plus zero or more **digressions** (a side question,
+a cancel, a hand-off) and per-step **repair policies**. A flow attached with
+`govern`/`observe` is a stack with no digressions; a compiled conversation
+attached with `Live::converse(&convo)` installs its digressions and repair
+policies on the same stack. There is one execution model, whichever way you
+authored.
+
+While a digression is active:
+
+- its steps' postures steer the model and its `allow` lists decide admission;
+  the main flow's tools are blocked unless they are ambient;
+- the main flow's marking is untouched, so `Resume::Previous` continues
+  exactly where the caller left off;
+- `flow:overlay` in state names the digression (`null` when the main flow
+  drives), and `handle.explain()` describes the active layer.
+
+A digression governs the turn on which it **completes**, not just the turns
+before it. That closing turn projects its terminal stage's instruction — a
+safety hand-off's "hand off to a human now" is the flow's last word — and its
+`Resume` policy applies at the *next* turn boundary. Without that, a digression
+whose flow is a single terminal stage (exactly what `Policy::safety_handoff`
+lowers to) would complete on the turn it triggered and never be heard at all.
+Budget one turn for the hand-off: a digression that suspends the main flow for
+one exchange resumes on the turn after its completion, not on it.
+
+`Resume::Restart` resets the main flow's *monitor* (marking, fired
+`on_enter` actions, reset edges) against the existing state, and clears the
+repair signals and counters with it — a fresh pass starts with no step already
+escalated. It does not clear state: slots the caller already filled stay
+filled, and the next re-latch runs over the same facts. It is a fresh pass over
+the same conversation, not a new business task.
+
+`Resume::Terminate` ends the conversation. From the next turn boundary the
+stack governs nothing: no active steps, no postures, and every tool denied with
+the reason, whatever the main flow would otherwise have allowed. `flow:terminated`
+is raised in state and `stack.is_terminated()` answers the same question. The
+runtime does **not** hang up by itself — how a call ends is the application's
+decision — so watch that key and close the session.
+
+Repair policies raise `repair:{step}:reprompt` and `repair:{step}:escalate`
+after a step has been active for the configured number of turns; the
+conversation compiler lowers `escalate_to` into an extra gated edge, so a
+stalled step can hand off deterministically. Because that lowered edge reads
+the escalate signal, the signal is latched: it stays true once the step has
+completed by escalating, or the hand-off target would drop out of the active
+set one turn later. Anything that un-latches the step clears the signal first —
+a `reset(..)` constraint firing on it, or a `Resume::Restart` — so the step
+does not immediately re-complete on its own stale escalation.
+
+The simulator (`Sim`) drives exactly the stack that
+`CompiledConversation::stack()` builds and `converse()` installs, so a
+scenario that passes in [Conversation CI](./conversation-ci.md) describes what
+a live session will do for the same facts.
+
 ## Phases and flows together
 
 A `Flow` does **not** compile down to a `PhaseMachine`. They are independent
@@ -255,8 +312,8 @@ serializable — so the script can be authored as data (e.g. RON/JSON) and edite
 by compliance or ops without a recompile. `flow.to_mermaid()` renders the DAG.
 
 See [Flows as JSON](./flow-json.md) for the JSON format reference, the
-`FlowAppSpec` document that packages a flow into a runnable application (with
-declarative mock tools), and the **Flow Studio** — the drag-and-drop editor at
+`SessionSpec` document that packages a flow into a runnable application (with
+declared tools), and the **Flow Studio** — the drag-and-drop editor at
 `/flows` in `gemini-adk-web-rs` that authors, validates, and live-runs these
 documents.
 

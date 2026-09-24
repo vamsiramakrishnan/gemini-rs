@@ -89,7 +89,7 @@ async fn run_connection(mut socket: WebSocket) -> Result<(), Box<dyn std::error:
                 let mut opened: Option<OpenInfo> = None;
                 for effect in driver.handle_text(&text)? {
                     match effect {
-                        Effect::Reply(reply) => socket.send(Message::Text(reply)).await?,
+                        Effect::Reply(reply) => socket.send(Message::Text(reply.into())).await?,
                         Effect::Opened(info) => opened = Some(info),
                         Effect::End => return Ok(()),
                         Effect::Dtmf(_) => {}
@@ -158,7 +158,7 @@ async fn run_connection(mut socket: WebSocket) -> Result<(), Box<dyn std::error:
                     let mut ended = false;
                     for effect in driver.handle_text(&text)? {
                         match effect {
-                            Effect::Reply(reply) => socket.send(Message::Text(reply)).await?,
+                            Effect::Reply(reply) => socket.send(Message::Text(reply.into())).await?,
                             Effect::Dtmf(digit) => bridge::record_dtmf(&state, digit),
                             Effect::End => ended = true,
                             Effect::Opened(_) => {}
@@ -183,10 +183,10 @@ async fn run_connection(mut socket: WebSocket) -> Result<(), Box<dyn std::error:
             },
             outgoing = speaker_rx.recv() => match outgoing {
                 Some(Playback::Chunk(samples)) => {
-                    socket.send(Message::Binary(g711::encode_ulaw(&samples))).await?;
+                    socket.send(Message::Binary(g711::encode_ulaw(&samples).into())).await?;
                 }
                 Some(Playback::Flush) => {
-                    socket.send(Message::Text(driver.barge_in_event())).await?;
+                    socket.send(Message::Text(driver.barge_in_event().into())).await?;
                 }
                 None => {
                     // The session ended on our side (model done, flow
@@ -196,7 +196,7 @@ async fn run_connection(mut socket: WebSocket) -> Result<(), Box<dyn std::error:
                     // output variables instead.
                     if driver.is_open() {
                         socket
-                            .send(Message::Text(driver.disconnect("completed", json!({}))))
+                            .send(Message::Text(driver.disconnect("completed", json!({})).into()))
                             .await?;
                         wait_for_close(&mut socket, &mut driver).await?;
                     }
@@ -226,7 +226,7 @@ async fn wait_for_close(
             Ok(Message::Text(text)) => {
                 for effect in driver.handle_text(&text)? {
                     match effect {
-                        Effect::Reply(reply) => socket.send(Message::Text(reply)).await?,
+                        Effect::Reply(reply) => socket.send(Message::Text(reply.into())).await?,
                         Effect::End => return Ok(()),
                         _ => {}
                     }

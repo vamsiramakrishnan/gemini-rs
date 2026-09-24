@@ -1,104 +1,93 @@
 # Tool System
 
-Tools let the model call your Rust functions during a live session. Gemini
-sends a `FunctionCall`, your tool executes, and you return a `FunctionResponse`.
+Tools let the model call your Rust functions, on a text agent or in a live
+session. The model sends a `FunctionCall`, your tool runs, and its result goes
+back as a `FunctionResponse`.
 
-## SimpleTool
+## A tool is a documented function
 
-The quickest way to define a tool -- wrap an async closure:
-
-```rust,ignore
-use gemini_adk_rs::tool::SimpleTool;
-use serde_json::json;
-
-let weather = SimpleTool::new(
-    "get_weather",
-    "Get current weather for a city",
-    Some(json!({
-        "type": "object",
-        "properties": {
-            "city": { "type": "string", "description": "City name" }
-        },
-        "required": ["city"]
-    })),
-    |args| async move {
-        let city = args["city"].as_str().unwrap_or("Unknown");
-        Ok(json!({ "city": city, "temperature_c": 22, "condition": "Partly cloudy" }))
-    },
-);
-```
-
-The fourth argument is the JSON Schema for parameters. Pass `None` for
-parameterless tools.
-
-## TypedTool
-
-Type-safe tools with auto-generated schemas. Define a struct with `JsonSchema`
-and `Deserialize`:
+Mark an `async fn` with `#[tool]`. Its doc comment is what the model reads: the
+opening prose is the tool's description, and a `# Arguments` section describes
+each parameter. The parameter types are the schema.
 
 ```rust,ignore
-use gemini_adk_rs::tool::TypedTool;
-use schemars::JsonSchema;
-use serde::Deserialize;
+use gemini_adk_fluent_rs::prelude::*;
 
-#[derive(Deserialize, JsonSchema)]
-struct WeatherArgs {
-    /// The city to get weather for
+#[derive(serde::Serialize)]
+struct Weather {
     city: String,
-    /// Temperature units (celsius or fahrenheit)
-    #[serde(default = "default_units")]
-    units: String,
+    celsius: f64,
+    condition: String,
 }
-fn default_units() -> String { "celsius".to_string() }
-
-let tool = TypedTool::new(
-    "get_weather",
-    "Get current weather for a city",
-    |args: WeatherArgs| async move {
-        Ok(serde_json::json!({ "temp": 22, "city": args.city, "units": args.units }))
-    },
-);
-```
-
-Doc comments on fields become parameter descriptions. Required vs optional is
-inferred from `#[serde(default)]`. Invalid arguments return
-`ToolError::InvalidArgs`.
-
-## The `#[tool]` Attribute Macro
-
-The most ergonomic way to define a tool: annotate an `async fn` and the macro
-generates the args struct, JSON Schema, and `ToolFunction` impl for you — no
-separate struct, no `TypedTool::new::<Args>` ceremony.
-
-```rust,ignore
-use gemini_adk_fluent_rs::prelude::*;   // brings `tool`, `ToolError`, `ToolDispatcher`
-use serde_json::{json, Value};
-use std::sync::Arc;
 
 /// Get the current weather for a city.
-#[tool("Get the current weather for a city")]
-async fn get_weather(city: String, units: Option<String>) -> Result<Value, ToolError> {
-    Ok(json!({ "city": city, "temp_c": 22, "units": units.unwrap_or("metric".into()) }))
+///
+/// # Arguments
+///
+/// * `city` - The city name, e.g. "Paris".
+/// * `units` - "metric" or "imperial"; metric when omitted.
+#[tool]
+async fn get_weather(city: String, units: Option<String>) -> Result<Weather, reqwest::Error> {
+    fetch_weather(&city, units.as_deref()).await
 }
 
-let mut dispatcher = ToolDispatcher::new();
-dispatcher.register_function(Arc::new(get_weather()));   // macro emits `fn get_weather() -> impl ToolFunction`
+let agent = AgentBuilder::new("weather")
+    .tool(get_weather())                     // a text agent
+    .build(GeminiLlm::from_env()?)?;
+let session = Live::builder().tool(get_weather());   // or a live session
 ```
 
-How it expands, for `async fn foo(...)`:
+What the macro checks and does:
 
-- a hidden `Deserialize + JsonSchema` args struct (one field per parameter;
-  `Option<T>` params are non-required and default to `None`),
-- a `ToolFunction` impl whose `call()` deserializes the JSON args, runs the
-  original body, and returns its `Result<Value, ToolError>`,
-- a constructor `fn foo() -> impl ToolFunction` (visibility mirrors the `fn`).
+- **Description.** The doc prose up to the first `#` heading. `#[tool("...")]`
+  overrides it when the model should read something other than your readers
+  do. A tool with neither does not compile.
+- **Parameters.** Any owned `Deserialize + JsonSchema` type; `Option<T>` is
+  optional. A `# Arguments` item naming a parameter that does not exist is a
+  compile error, and so is a borrowed parameter (`&str`: use `String`).
+- **Schema.** Produced by `gemini_adk_rs::tool::wire_schema`, the one pipeline
+  every Rust type goes through on its way to the API: nested types are inlined
+  and `Option<T>` declares a single type, both of which the API requires.
+- **Return type.** Any `Serialize` type is the tool's output. A type spelled
+  `Result<T, E>` (`anyhow::Result<T>`, `io::Result<T>`, …) is fallible with any
+  error: a `ToolError` keeps its kind, anything else becomes
+  `ToolError::ExecutionFailed` with its message. A result that is not a JSON
+  object reaches the model as `{"output": …}`.
+- **Attributes.** `#[cfg]` gates the whole tool; `#[allow]`,
+  `#[tracing::instrument]` and the like stay on the body.
 
-The tool's `name()` is the function name and `description()` is the macro's
-string. Parameters of any `Deserialize + JsonSchema` type are supported.
-(Per-parameter doc descriptions are not extracted yet — use `TypedTool` with a
-documented args struct when you need them.)
+The macro emits a constructor, `get_weather()`, returning a value that
+implements `ToolFunction`.
 
-See the `#[tool]` macro section above for a runnable demonstration.
+## Closures that capture: `T::typed`
+
+A `#[tool]` function cannot capture a database pool or an HTTP client. For that,
+`T::typed` takes a closure whose argument is a `JsonSchema` type — the same
+schema pipeline, with the environment captured:
+
+```rust,ignore
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+struct Lookup {
+    /// The customer's account id.
+    account: String,
+}
+
+let db = pool.clone();
+let balance = T::typed("balance", "Look up an account balance", move |args: Lookup| {
+    let db = db.clone();
+    async move { Ok(serde_json::json!({ "balance": db.balance(&args.account).await? })) }
+});
+
+AgentBuilder::new("support").tools(balance | T::google_search());
+```
+
+## Lower-level forms
+
+`TypedTool::new::<Args>(name, description, closure)` is what `T::typed` builds,
+for use with a `ToolDispatcher` directly. `SimpleTool::new(name, description,
+schema, closure)` takes a hand-written JSON Schema and raw JSON arguments;
+`T::simple(name, description, closure)` is the parameterless form, declaring
+no parameters to the model.
 
 ## ToolFunction Trait
 
@@ -201,24 +190,13 @@ Live::builder()
     .tools(
         // 10-second timeout on a slow tool
         T::timeout(
-            T::simple("search_kb", "Search the knowledge base", |args| async move {
-                Ok(search(args).await?)
-            }),
+            search_kb(),                   // a #[tool] fn
             Duration::from_secs(10),
         )
         // In-session result cache
-        | T::cached(
-            T::simple("get_rate", "Get exchange rate", |args| async move {
-                Ok(fetch_rate(args).await?)
-            })
-        )
+        | T::cached(get_rate())
         // Confirmation flag (recorded; see note in tool-policies.md)
-        | T::confirm(
-            T::simple("send_email", "Send email to customer", |args| async move {
-                Ok(send(args).await?)
-            }),
-            "This will send a real email — are you sure?",
-        )
+        | T::confirm(send_email(), "This will send a real email — are you sure?")
     )
 ```
 
@@ -226,12 +204,13 @@ Live::builder()
   call; elapse returns `ToolError::Timeout`.
 - **`T::cached(tool)`** — enforced: memoizes successful results by
   `(name, canonical-JSON args)`; errors are not cached.
-- **`T::confirm(tool, message)`** — enforced at dispatch when a
-  `ConfirmationProvider` is wired (`Live::confirmation_provider` or
-  `ToolDispatcher::with_confirmation_provider`); a denied decision returns
-  `ToolError::Cancelled` and the tool never runs. Opt-in: with no provider,
-  the gate is inert and surfaced via `requires_confirmation()`. See
-  [Per-Tool Policies](./tool-policies.md).
+- **`T::confirm(tool, message)`** — enforced at dispatch by a
+  `ConfirmationProvider` (`Live::confirmation_provider`,
+  `AgentBuilder::confirmation_provider`); a declined call returns
+  `ToolError::Declined(reason)` to the model and the tool never runs. A
+  session or agent with a confirm-gated tool and no provider is refused at
+  `connect`/`build` (and reported by `check_live`), rather than running the
+  tool unconfirmed. See [Per-Tool Policies](./tool-policies.md).
 
 For async/background execution (`ToolExecutionMode::Background`,
 `FunctionResponseScheduling`) and MCP tool integration, see the dedicated
@@ -279,9 +258,7 @@ Live::builder().dispatcher(dispatcher).connect(config).await?;
 Live::builder()
     .tools(
         T::function(Arc::new(weather_tool))
-        | T::simple("calculate", "Evaluate expression", |args| async move {
-            Ok(json!({"result": 42}))
-        })
+        | calculate()                         // a #[tool] fn converts directly
         | T::google_search()
     )
 ```

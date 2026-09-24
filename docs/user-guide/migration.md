@@ -25,7 +25,7 @@ constructed. Everything below is mechanical.
 | GoAway | `SessionEvent::GoAway(Option<String>)`, `GoAwayPayload.time_left: Option<String>` | `SessionEvent::GoAway(Option<Duration>)`, `GoAwayPayload.time_left: Option<Duration>` |
 | Audio / video payloads | `SessionCommand::SendAudio(Vec<u8>)` / `SendVideo(Vec<u8>)`; `SessionWriter::send_audio(Vec<u8>)` | `Bytes` throughout: `SessionCommand::SendAudio(Bytes)`, `SessionWriter::send_audio(Bytes)`, `SessionHandle::send_audio(impl Into<Bytes>)`; L1 `LiveHandle`/`AgentSession::send_audio`/`send_video` take `impl Into<Bytes>` (a `Vec<u8>` still works), `InputEvent::Audio` carries `Bytes` |
 | SPSC ring | `SpscRing::new(cap)` returned one shared, `Sync` object with `write(&self)` / `read(&self)`; capacity rounded up to a power of two | `SpscRing::channel(cap)` returns `(SpscProducer, SpscConsumer)` — each `Send`, neither `Sync`, so one-producer/one-consumer is enforced by the type system (backed by `rtrb`); exact capacity; `is_abandoned()` on both halves. No `unsafe` remains in the workspace |
-| `#[tool]` from the L2 prelude | Expanded to `::gemini_adk_rs::…`, so every crate using it needed `gemini-adk-rs` as a direct dependency (and its own `schemars`) | The macro locates the runtime at expansion time (a direct `gemini-adk-rs` dependency under any name, else `gemini-adk-fluent-rs`'s re-export) and routes `schemars` through it too — `use gemini_adk_fluent_rs::prelude::*; #[tool("…")] async fn …` compiles with one dependency |
+| `#[tool]` from the L2 prelude | Expanded to `::gemini_adk_rs::…`, so every crate using it needed `gemini-adk-rs` as a direct dependency (and its own `schemars`) | The macro locates the runtime at expansion time (a direct `gemini-adk-rs` dependency under any name, else `gemini-adk-fluent-rs`'s re-export) and routes `schemars` through it too — `use gemini_adk_fluent_rs::prelude::*; #[tool] async fn …` compiles with one dependency |
 | Transcription setters | `enable_input_transcription()`, `enable_output_transcription()` | `input_transcription(true)`, `output_transcription(true)` |
 | Thoughts | `include_thoughts()` | `include_thoughts(true)` (L2 `Live::builder().include_thoughts()` is unchanged) |
 | Resumption setters | `session_resumption(None)`, `session_resumption(Some(h))` | `session_resumption()`, `resume_from(h)` |
@@ -339,16 +339,21 @@ weather assistant:
 use gemini_adk_fluent_rs::prelude::*;
 use serde_json::json;
 
+/// Get current weather for a city.
+///
+/// # Arguments
+///
+/// * `city` - The city name.
+#[tool]
+async fn get_weather(city: String) -> serde_json::Value {
+    json!({ "city": city, "temp_c": 22, "condition": "sunny" })
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let handle = Live::builder()
         .instruction("You are a weather assistant. Use get_weather for queries.")
-        .tools(
-            T::simple("get_weather", "Get current weather for a city", |args| async move {
-                let city = args["city"].as_str().unwrap_or("unknown");
-                Ok(json!({ "city": city, "temp_c": 22, "condition": "sunny" }))
-            })
-        )
+        .tool(get_weather())
         .on_text(|t| print!("{t}"))
         .on_turn_complete(|| async { println!() })
         .connect_google_ai(std::env::var("GEMINI_API_KEY")?)
@@ -375,9 +380,7 @@ Tools compose with the `|` operator:
 let handle = Live::builder()
     .instruction("You are a helpful assistant with access to tools.")
     .tools(
-        T::simple("get_weather", "Get weather", |args| async move {
-            Ok(json!({ "temp_c": 22 }))
-        })
+        get_weather()                 // the #[tool] fn above
         | T::simple("get_time", "Get current time", |_| async move {
             Ok(json!({ "time": "14:30" }))
         })
@@ -396,7 +399,7 @@ let handle = Live::builder()
 | Event loop | Manual `while let` + `match` | Automatic (three-lane processor) | Automatic |
 | Audio callback | Manual `match SessionEvent::AudioData` | `callbacks.on_audio = Some(...)` | `.on_audio(\|data\| ...)` |
 | Tool dispatch | Manual match + response send | `ToolDispatcher` auto-dispatch | `.tools()` or `.tools()` |
-| Tool declaration | Manual `Tool` + `FunctionDeclaration` | Auto from `ToolFunction::parameters()` | Auto from `T::simple()` |
+| Tool declaration | Manual `Tool` + `FunctionDeclaration` | Auto from `ToolFunction::parameters()` | Auto from a `#[tool]` fn or `T::typed` |
 | State management | None (DIY) | `State` with prefixes | `State` with prefixes |
 | Phase machine | None (DIY) | `PhaseMachine::new()` | `.phase("name").instruction().done()` |
 | Watchers | None (DIY) | `WatcherRegistry` | `.watch("key").became_true().then()` |
@@ -515,7 +518,7 @@ let phase = session.phase();
 When migrating from L0 to L2:
 
 1. Replace `SessionConfig::from_endpoint(...)` with `Live::builder().instruction()` (the model stays optional at every layer)
-2. Replace manual `Tool` declarations with `.dispatcher(dispatcher)` or `.tools(T::simple(...))`
+2. Replace manual `Tool` declarations with `#[tool]` functions registered by `.tool(my_tool())`, or `.dispatcher(dispatcher)`
 3. Replace the `while let Some(event) = recv_event(...)` loop with callbacks
 4. Replace `match SessionEvent::AudioData` with `.on_audio()`
 5. Replace `match SessionEvent::TextDelta` with `.on_text()`

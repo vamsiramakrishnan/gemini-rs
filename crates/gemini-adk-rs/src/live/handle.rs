@@ -10,7 +10,7 @@ use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use crate::flow::{FlowExplanation, SharedFlowMonitor};
+use crate::flow::{FlowExplanation, SharedFlowStack};
 use crate::state::State;
 
 use super::background_tool::BackgroundToolTracker;
@@ -66,7 +66,7 @@ pub struct LiveHandle {
     audio_clock_ms: Arc<std::sync::atomic::AtomicU64>,
     /// Governed-flow monitor shared with the control lane (None when the
     /// session is not governed by a flow).
-    flow: Option<SharedFlowMonitor>,
+    flow: Option<SharedFlowStack>,
     /// Tracker for in-flight background tool tasks. Shared with the control
     /// lane (which spawns/cancels per-call tasks) so [`disconnect`](Self::disconnect)
     /// can cancel every outstanding background tool — otherwise orphaned tasks
@@ -96,7 +96,7 @@ impl LiveHandle {
         telemetry: Arc<SessionTelemetry>,
         event_tx: broadcast::Sender<super::events::LiveEvent>,
         pending_context: Option<Arc<PendingContext>>,
-        flow: Option<SharedFlowMonitor>,
+        flow: Option<SharedFlowStack>,
         background_tracker: Arc<BackgroundToolTracker>,
         telem_cancel: CancellationToken,
     ) -> Self {
@@ -531,8 +531,11 @@ impl LiveHandle {
     /// Returns `None` when the session is not governed by a flow
     /// (`Live::govern`/`observe` was not used).
     ///
+    /// When a digression is active the snapshot describes that layer; the
+    /// `flow:overlay` state key names it.
+    ///
     /// This is a synchronous snapshot: it briefly locks the shared
-    /// [`FlowMonitor`](crate::flow::FlowMonitor) and never blocks on session
+    /// [`FlowStack`](crate::flow::FlowStack) and never blocks on session
     /// I/O.
     pub fn explain(&self) -> Option<FlowExplanation> {
         self.flow

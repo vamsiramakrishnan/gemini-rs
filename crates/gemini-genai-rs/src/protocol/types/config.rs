@@ -170,7 +170,10 @@ pub struct UsageMetadata {
     #[serde(default)]
     pub cached_content_token_count: Option<u32>,
     /// Total number of tokens across all generated response candidates.
-    #[serde(default)]
+    ///
+    /// Live reports this as `responseTokenCount`; `generateContent` as
+    /// `candidatesTokenCount`. Both land here.
+    #[serde(default, alias = "candidatesTokenCount")]
     pub response_token_count: Option<u32>,
     /// Number of tokens present in tool-use prompt(s).
     #[serde(default)]
@@ -268,6 +271,9 @@ pub struct GenerationConfig {
     /// Maximum number of output tokens.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_output_tokens: Option<u32>,
+    /// Strings that stop generation when the model produces one (up to five).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stop_sequences: Option<Vec<String>>,
     /// Thinking/reasoning configuration (Gemini 2.5+).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking_config: Option<ThinkingConfig>,

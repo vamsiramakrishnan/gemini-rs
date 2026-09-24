@@ -3,13 +3,34 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use gemini_genai_rs::prelude::{Content, FunctionCall, FunctionResponse, Part, Role};
 
-use super::TextAgent;
+use futures_util::stream::BoxStream;
+use futures_util::{FutureExt, StreamExt};
+use tracing::Instrument;
+
+use super::{RunEvent, RunRequest, RunResult, TextAgent, ToolCallRecord};
 use crate::context::AgentEvent;
 use crate::error::AgentError;
-use crate::llm::{BaseLlm, LlmRequest};
+use crate::llm::{BaseLlm, LlmRequest, LlmResponse};
 use crate::middleware::MiddlewareChain;
 use crate::state::State;
+use crate::telemetry::spans;
 use crate::tool::ToolDispatcher;
+
+/// The `error.type` a failed tool call is reported under.
+fn tool_error_type(error: &crate::error::ToolError) -> &'static str {
+    use crate::error::ToolError;
+    match error {
+        ToolError::NotFound(_) => "not_found",
+        ToolError::InvalidArgs(_) => "invalid_args",
+        ToolError::Timeout(_) => "timeout",
+        ToolError::Cancelled => "cancelled",
+        ToolError::Declined(_) => "declined",
+        _ => "execution_failed",
+    }
+}
+
+/// Where a streamed run sends its events.
+type EventSender = tokio::sync::mpsc::UnboundedSender<Result<RunEvent, AgentError>>;
 
 /// Maximum number of tool-dispatch round-trips before giving up.
 const MAX_TOOL_ROUNDS: usize = 10;
@@ -43,23 +64,29 @@ pub struct LlmTextAgent {
     /// cost routing, per-tenant model selection without rebuilding the agent.
     llm_provider: Option<LlmProviderFn>,
     dispatcher: Option<Arc<ToolDispatcher>>,
-    temperature: Option<f32>,
-    max_output_tokens: Option<u32>,
+    /// Every per-request setting (model, sampling, built-in tools, response
+    /// schema); each call starts from a copy with the conversation filled in.
+    template: LlmRequest,
+    /// A state key that receives the final text, besides `"output"`.
+    output_key: Option<String>,
     middleware: MiddlewareChain,
 }
 
 impl LlmTextAgent {
     /// Create a new LLM text agent.
-    pub fn new(name: impl Into<String>, llm: Arc<dyn BaseLlm>) -> Self {
+    ///
+    /// `llm` is any [`BaseLlm`]: a `GeminiLlm`, a shared `Arc<dyn BaseLlm>`,
+    /// or a [`MockLlm`](crate::llm::MockLlm) in tests.
+    pub fn new(name: impl Into<String>, llm: impl BaseLlm + 'static) -> Self {
         Self {
             name: name.into(),
-            llm,
+            llm: Arc::new(llm),
             instruction: None,
             instruction_provider: None,
             llm_provider: None,
             dispatcher: None,
-            temperature: None,
-            max_output_tokens: None,
+            template: LlmRequest::default(),
+            output_key: None,
             middleware: MiddlewareChain::new(),
         }
     }
@@ -101,15 +128,70 @@ impl LlmTextAgent {
         self
     }
 
+    /// Call `model` instead of the provider's default model, e.g.
+    /// `"gemini-2.5-pro"`.
+    pub fn model(mut self, model: impl Into<String>) -> Self {
+        self.template.model = Some(model.into());
+        self
+    }
+
     /// Set temperature.
     pub fn temperature(mut self, t: f32) -> Self {
-        self.temperature = Some(t);
+        self.template.temperature = Some(t);
         self
     }
 
     /// Set max output tokens.
     pub fn max_output_tokens(mut self, n: u32) -> Self {
-        self.max_output_tokens = Some(n);
+        self.template.max_output_tokens = Some(n);
+        self
+    }
+
+    /// Set the nucleus sampling threshold.
+    pub fn top_p(mut self, p: f32) -> Self {
+        self.template.top_p = Some(p);
+        self
+    }
+
+    /// Sample from the `k` most likely tokens.
+    pub fn top_k(mut self, k: u32) -> Self {
+        self.template.top_k = Some(k);
+        self
+    }
+
+    /// End generation when the model produces any of `sequences`.
+    pub fn stop_sequences(
+        mut self,
+        sequences: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        self.template.stop_sequences = sequences.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Give the model a thinking budget, in tokens.
+    pub fn thinking_budget(mut self, tokens: u32) -> Self {
+        self.template.thinking_budget = Some(tokens);
+        self
+    }
+
+    /// Add a built-in tool (Google Search, code execution, URL context),
+    /// sent alongside the dispatcher's function declarations.
+    pub fn built_in_tool(mut self, tool: gemini_genai_rs::prelude::Tool) -> Self {
+        self.template.tools.push(tool);
+        self
+    }
+
+    /// Constrain the reply to JSON matching `schema`.
+    pub fn response_schema(mut self, schema: serde_json::Value) -> Self {
+        self.template.response_mime_type = Some("application/json".into());
+        self.template.response_json_schema = Some(schema);
+        self
+    }
+
+    /// Also write the final text to state under `key` (it is always written
+    /// to `"output"`).
+    pub fn output_key(mut self, key: impl Into<String>) -> Self {
+        self.output_key = Some(key.into());
         self
     }
 
@@ -130,27 +212,69 @@ impl LlmTextAgent {
 
     /// Build an LlmRequest, taking ownership of contents to avoid cloning.
     fn build_request(&self, contents: Vec<Content>, instruction: &Option<String>) -> LlmRequest {
-        let mut req = LlmRequest::from_contents(contents);
-        req.system_instruction = instruction.clone();
-        req.temperature = self.temperature;
-        req.max_output_tokens = self.max_output_tokens;
-
+        let mut req = LlmRequest {
+            contents,
+            system_instruction: instruction.clone(),
+            ..self.template.clone()
+        };
         if let Some(dispatcher) = &self.dispatcher {
-            req.tools = dispatcher.to_tool_declarations();
+            req.tools.extend(dispatcher.to_tool_declarations());
         }
-
         req
     }
 
-    /// Dispatch function calls and return function responses, firing middleware hooks.
-    async fn dispatch_tools(&self, calls: &[FunctionCall]) -> Vec<FunctionResponse> {
-        let dispatcher = match &self.dispatcher {
-            Some(d) => d,
-            None => return Vec::new(),
-        };
+    /// Call the model with streaming, passing each text chunk to `on_text`
+    /// when it is set, and return the whole reply.
+    async fn generate_streamed(
+        &self,
+        llm: &Arc<dyn BaseLlm>,
+        request: LlmRequest,
+        on_text: Option<&(dyn Fn(RunEvent) + Send + Sync)>,
+    ) -> Result<LlmResponse, crate::llm::LlmError> {
+        let mut chunks = llm.generate_stream(request).await?;
+        let mut whole: Option<LlmResponse> = None;
+        while let Some(chunk) = chunks.next().await {
+            let chunk = chunk?;
+            if let Some(on_text) = on_text {
+                let text = chunk.text();
+                if !text.is_empty() {
+                    on_text(RunEvent::TextDelta(text));
+                }
+            }
+            match &mut whole {
+                Some(so_far) => so_far.append(chunk),
+                None => whole = Some(chunk),
+            }
+        }
+        Ok(whole.unwrap_or(LlmResponse {
+            content: Content {
+                role: Some(Role::Model),
+                parts: Vec::new(),
+            },
+            finish_reason: None,
+            usage: None,
+        }))
+    }
 
+    /// Dispatch function calls and return function responses, firing middleware hooks.
+    async fn dispatch_tools(
+        &self,
+        calls: &[FunctionCall],
+        records: &mut Vec<ToolCallRecord>,
+    ) -> Vec<FunctionResponse> {
         let mut responses = Vec::with_capacity(calls.len());
         for call in calls {
+            // A model can call a tool the agent never declared; tell it so.
+            let Some(dispatcher) = &self.dispatcher else {
+                let missing = Err(crate::error::ToolError::NotFound(call.name.clone()));
+                records.push(ToolCallRecord::new(
+                    &call.name,
+                    call.args.clone(),
+                    missing.clone(),
+                ));
+                responses.push(ToolDispatcher::build_response(call, missing));
+                continue;
+            };
             // before_tool hook
             if let Err(e) = self.middleware.run_before_tool(call).await {
                 // Hook error — record it and return an error response.
@@ -161,16 +285,24 @@ impl LlmTextAgent {
                         &crate::error::ToolError::ExecutionFailed(e.to_string()),
                     )
                     .await;
-                responses.push(ToolDispatcher::build_response(
-                    call,
-                    Err(crate::error::ToolError::ExecutionFailed(e.to_string())),
+                let refused = Err(crate::error::ToolError::ExecutionFailed(e.to_string()));
+                records.push(ToolCallRecord::new(
+                    &call.name,
+                    call.args.clone(),
+                    refused.clone(),
                 ));
+                responses.push(ToolDispatcher::build_response(call, refused));
                 continue;
             }
 
+            let span = spans::execute_tool_span(&call.name, call.id.as_deref());
             let result = dispatcher
                 .call_function(&call.name, call.args.clone())
+                .instrument(span.clone())
                 .await;
+            if let Err(e) = &result {
+                span.record("error.type", tool_error_type(e));
+            }
 
             match &result {
                 Ok(value) => {
@@ -181,6 +313,11 @@ impl LlmTextAgent {
                 }
             }
 
+            records.push(ToolCallRecord::new(
+                &call.name,
+                call.args.clone(),
+                result.clone(),
+            ));
             responses.push(ToolDispatcher::build_response(call, result));
         }
         responses
@@ -194,11 +331,58 @@ impl TextAgent for LlmTextAgent {
     }
 
     async fn run(&self, state: &State) -> Result<String, AgentError> {
-        // Build initial contents from state "input" key, or empty user message.
         let input = state.get::<String>("input").unwrap_or_default();
+        Ok(self.run_with(RunRequest::new(input), state).await?.text)
+    }
 
-        let mut contents = vec![Content::user(&input)];
+    async fn run_with(&self, request: RunRequest, state: &State) -> Result<RunResult, AgentError> {
+        self.run_with_events(request, state, None).await
+    }
 
+    fn run_stream<'a>(
+        &'a self,
+        request: RunRequest,
+        state: State,
+    ) -> BoxStream<'a, Result<RunEvent, AgentError>> {
+        // The run drives itself inside the returned stream, sending events
+        // through a channel as they happen; `Finished` (or the error) is last.
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let driver = async move {
+            let finished = self.run_with_events(request, &state, Some(&tx)).await;
+            let _ = tx.send(finished.map(RunEvent::Finished));
+        };
+        let events = futures_util::stream::unfold(rx, |mut rx| async move {
+            rx.recv().await.map(|event| (event, rx))
+        });
+        futures_util::stream::select(
+            driver
+                .into_stream()
+                .filter_map(|()| async { None::<Result<RunEvent, AgentError>> }),
+            events,
+        )
+        .boxed()
+    }
+}
+
+impl LlmTextAgent {
+    /// One run, reporting events to `events` as they happen when it is set.
+    async fn run_with_events(
+        &self,
+        request: RunRequest,
+        state: &State,
+        events: Option<&EventSender>,
+    ) -> Result<RunResult, AgentError> {
+        self.execute(request, state, events)
+            .instrument(spans::invoke_agent_span(&self.name))
+            .await
+    }
+
+    async fn execute(
+        &self,
+        request: RunRequest,
+        state: &State,
+        events: Option<&EventSender>,
+    ) -> Result<RunResult, AgentError> {
         // Resolve the instruction for this run: provider (against live
         // state) wins over the static string.
         let instruction = match &self.instruction_provider {
@@ -225,8 +409,11 @@ impl TextAgent for LlmTextAgent {
         // Enforce the tightest middleware timeout (M::timeout) over the whole run.
         let result = match self.middleware.timeout() {
             Some(limit) => {
-                match tokio::time::timeout(limit, self.run_inner(&mut contents, &instruction, &llm))
-                    .await
+                match tokio::time::timeout(
+                    limit,
+                    self.run_inner(request, &instruction, &llm, events),
+                )
+                .await
                 {
                     Ok(r) => r,
                     Err(_) => {
@@ -238,53 +425,108 @@ impl TextAgent for LlmTextAgent {
                     }
                 }
             }
-            None => self.run_inner(&mut contents, &instruction, &llm).await,
+            None => self.run_inner(request, &instruction, &llm, events).await,
         };
 
-        if let Err(ref e) = result {
-            let _ = self.middleware.run_on_error(e).await;
-        } else if let Ok(ref text) = result {
-            let _ = state.set("output", text);
-            let _ = self
-                .middleware
-                .run_on_event(&AgentEvent::AgentCompleted {
-                    name: self.name.clone(),
-                })
-                .await;
+        match &result {
+            Err(e) => {
+                let _ = self.middleware.run_on_error(e).await;
+            }
+            Ok(done) => {
+                let _ = state.set("output", &done.text);
+                if let Some(key) = &self.output_key {
+                    let _ = state.set(key, &done.text);
+                }
+                let _ = self
+                    .middleware
+                    .run_on_event(&AgentEvent::AgentCompleted {
+                        name: self.name.clone(),
+                    })
+                    .await;
+            }
         }
 
         result
     }
-}
 
-impl LlmTextAgent {
     /// Inner execution loop — separated so `on_error` fires exactly once.
     async fn run_inner(
         &self,
-        contents: &mut Vec<Content>,
+        request: RunRequest,
         instruction: &Option<String>,
         llm: &Arc<dyn BaseLlm>,
-    ) -> Result<String, AgentError> {
+        events: Option<&EventSender>,
+    ) -> Result<RunResult, AgentError> {
+        let emit = |event: RunEvent| {
+            if let Some(tx) = events {
+                let _ = tx.send(Ok(event));
+            }
+        };
+        // Without middleware nothing can rewrite a reply, so text is emitted
+        // as it streams; otherwise only after `after_model` has seen it.
+        let stream_live = events.is_some() && self.middleware.is_empty();
+        let history_len = request.history.len();
+        let mut contents = request.history;
+        contents.push(request.input);
+        let mut result = RunResult::default();
+
         for _round in 0..MAX_TOOL_ROUNDS {
-            let mut request = self.build_request(contents.clone(), instruction);
+            let mut llm_request = self.build_request(contents.clone(), instruction);
+            if let Some(schema) = &request.response_schema {
+                llm_request.response_mime_type = Some("application/json".into());
+                llm_request.response_json_schema = Some(schema.clone());
+            }
 
             // transform_request hook — may rewrite the request (e.g. context
             // policies trimming conversation history) before it is sent.
-            self.middleware.run_transform_request(&mut request).await?;
+            self.middleware
+                .run_transform_request(&mut llm_request)
+                .await?;
 
             // before_model hook — may short-circuit with a cached response.
-            let response = match self.middleware.run_before_model(&request).await? {
+            let mut streamed = false;
+            let response = match self.middleware.run_before_model(&llm_request).await? {
                 Some(cached) => cached,
                 None => {
-                    let llm_response = llm
-                        .generate(request.clone())
+                    let model = llm_request
+                        .model
+                        .clone()
+                        .unwrap_or_else(|| llm.model_id().to_string());
+                    let span = spans::chat_span(&model, &llm_request);
+                    let started = std::time::Instant::now();
+                    let outcome = if events.is_some() {
+                        streamed = stream_live;
+                        self.generate_streamed(
+                            llm,
+                            llm_request.clone(),
+                            stream_live.then_some(&emit),
+                        )
+                        .instrument(span.clone())
                         .await
-                        .map_err(|e| AgentError::Other(format!("LLM error: {e}")))?;
+                    } else {
+                        llm.generate(llm_request.clone())
+                            .instrument(span.clone())
+                            .await
+                    };
+                    spans::record_chat_response(&span, outcome.as_ref());
+                    let llm_response = outcome.map_err(AgentError::Llm)?;
+                    let usage = llm_response.usage.unwrap_or_default();
+                    crate::telemetry::metrics::record_llm_call(
+                        &model,
+                        &self.name,
+                        started.elapsed().as_secs_f64() * 1000.0,
+                        usage.prompt_tokens,
+                        usage.completion_tokens,
+                    );
+                    result.model_calls += 1;
+                    if let Some(usage) = llm_response.usage {
+                        result.usage += usage;
+                    }
 
                     // after_model hook — may replace the response.
                     match self
                         .middleware
-                        .run_after_model(&request, &llm_response)
+                        .run_after_model(&llm_request, &llm_response)
                         .await?
                     {
                         Some(replaced) => replaced,
@@ -293,11 +535,23 @@ impl LlmTextAgent {
                 }
             };
 
+            if events.is_some() && !streamed {
+                let text = response.text();
+                if !text.is_empty() {
+                    emit(RunEvent::TextDelta(text));
+                }
+            }
+
             let calls: Vec<FunctionCall> = response.function_calls().into_iter().cloned().collect();
 
             if calls.is_empty() {
                 // No tool calls — we have a final text response.
-                return Ok(response.text());
+                result.text = response.text();
+                if !response.content.parts.is_empty() {
+                    contents.push(response.content);
+                }
+                result.messages = contents.split_off(history_len);
+                return Ok(result);
             }
 
             // Move model response into conversation (no clone needed).
@@ -307,7 +561,17 @@ impl LlmTextAgent {
             // attached under `_media` is lifted out of the JSON and
             // delivered as inline_data parts in the same turn, so the
             // model *sees* images rather than base64 noise.
-            let tool_responses = self.dispatch_tools(&calls).await;
+            for call in &calls {
+                emit(RunEvent::ToolCall {
+                    name: call.name.clone(),
+                    args: call.args.clone(),
+                });
+            }
+            let already = result.tool_calls.len();
+            let tool_responses = self.dispatch_tools(&calls, &mut result.tool_calls).await;
+            for record in &result.tool_calls[already..] {
+                emit(RunEvent::ToolResult(record.clone()));
+            }
             let mut media_parts: Vec<Part> = Vec::new();
             let mut response_parts: Vec<Part> = tool_responses
                 .into_iter()
@@ -584,5 +848,115 @@ mod tests {
         let _ = state2.set("escalate", true);
         let result2 = agent.run(&state2).await.unwrap();
         assert_eq!(result2, "from-b", "with escalate, should use model B");
+    }
+}
+
+#[cfg(test)]
+mod span_tests {
+    use std::collections::BTreeMap;
+    use std::fmt::Debug;
+    use std::sync::{Arc, Mutex};
+
+    use tracing::field::{Field, Visit};
+    use tracing::span::{Attributes, Id, Record};
+    use tracing::{Event, Metadata, Subscriber};
+
+    use super::*;
+    use crate::llm::{LlmResponse, MockLlm};
+
+    type Spans = Arc<Mutex<Vec<(String, BTreeMap<String, String>)>>>;
+
+    /// Records every span's name and fields, in creation order.
+    struct Capture(Spans);
+
+    struct Fields<'a>(&'a mut BTreeMap<String, String>);
+
+    impl Visit for Fields<'_> {
+        fn record_str(&mut self, field: &Field, value: &str) {
+            self.0.insert(field.name().to_string(), value.to_string());
+        }
+        fn record_debug(&mut self, field: &Field, value: &dyn Debug) {
+            self.0
+                .insert(field.name().to_string(), format!("{value:?}"));
+        }
+    }
+
+    impl Subscriber for Capture {
+        fn enabled(&self, _: &Metadata<'_>) -> bool {
+            true
+        }
+        fn new_span(&self, attrs: &Attributes<'_>) -> Id {
+            let mut fields = BTreeMap::new();
+            attrs.record(&mut Fields(&mut fields));
+            let mut spans = self.0.lock().unwrap();
+            spans.push((attrs.metadata().name().to_string(), fields));
+            Id::from_u64(spans.len() as u64)
+        }
+        fn record(&self, id: &Id, values: &Record<'_>) {
+            let mut spans = self.0.lock().unwrap();
+            let index = usize::try_from(id.into_u64()).unwrap() - 1;
+            values.record(&mut Fields(&mut spans[index].1));
+        }
+        fn record_follows_from(&self, _: &Id, _: &Id) {}
+        fn event(&self, _: &Event<'_>) {}
+        fn enter(&self, _: &Id) {}
+        fn exit(&self, _: &Id) {}
+    }
+
+    /// A run exports the GenAI semantic-convention spans an OpenTelemetry
+    /// backend reads: the agent, each model call with its settings and token
+    /// usage, and each tool call.
+    #[tokio::test]
+    async fn a_run_emits_genai_spans() {
+        let spans: Spans = Arc::default();
+        let _guard = tracing::subscriber::set_default(Capture(spans.clone()));
+
+        let llm = MockLlm::script([
+            LlmResponse::tool_call("get_weather", serde_json::json!({})).with_usage(10, 2),
+            LlmResponse::from_text("Cold.").with_usage(20, 1),
+        ])
+        .with_model_id("gemini-test");
+        let mut dispatcher = ToolDispatcher::new();
+        dispatcher.register_function(Arc::new(crate::tool::SimpleTool::new(
+            "get_weather",
+            "Get weather",
+            None,
+            |_| async { Ok(serde_json::json!({})) },
+        )));
+        let agent = LlmTextAgent::new("weather", llm)
+            .temperature(0.5)
+            .tools(Arc::new(dispatcher));
+        agent
+            .run_with(RunRequest::new("Weather?"), &State::new())
+            .await
+            .unwrap();
+
+        let spans = spans.lock().unwrap();
+        let named = |name: &str| -> Vec<&BTreeMap<String, String>> {
+            spans
+                .iter()
+                .filter(|(n, _)| n == name)
+                .map(|(_, f)| f)
+                .collect()
+        };
+
+        let agent_span = named("invoke_agent");
+        assert_eq!(agent_span.len(), 1);
+        assert_eq!(agent_span[0]["otel.name"], "invoke_agent weather");
+        assert_eq!(agent_span[0]["gen_ai.agent.name"], "weather");
+
+        let chats = named("chat");
+        assert_eq!(chats.len(), 2, "one span per model call");
+        assert_eq!(chats[0]["otel.name"], "chat gemini-test");
+        assert_eq!(chats[0]["gen_ai.request.model"], "gemini-test");
+        assert_eq!(chats[0]["gen_ai.request.temperature"], "0.5");
+        assert_eq!(chats[0]["gen_ai.usage.input_tokens"], "10");
+        assert_eq!(chats[1]["gen_ai.usage.output_tokens"], "1");
+        assert_eq!(chats[1]["gen_ai.response.finish_reasons"], "STOP");
+
+        let tools = named("execute_tool");
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["gen_ai.tool.name"], "get_weather");
+        assert!(!tools[0].contains_key("error.type"));
     }
 }

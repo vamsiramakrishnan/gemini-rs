@@ -108,7 +108,27 @@ pub enum TungsteniteError {
     /// Failed to construct the HTTP request (e.g. bad URL or header).
     #[error("Request error: {0}")]
     Request(String),
+
+    /// A `wss://` URL was dialed but the crate was compiled with neither TLS
+    /// backend.
+    ///
+    /// Without `tls-native` or `tls-rustls`, `tokio-tungstenite` can open
+    /// plain `ws://` sockets only; the Live API is TLS-only, so this build
+    /// cannot reach it. The check runs before any socket is opened, so the
+    /// failure names the fix instead of surfacing as a generic handshake error
+    /// from deep inside the WebSocket stack.
+    #[error(
+        "cannot dial {url}: this build of gemini-genai-rs has no TLS backend; \
+         enable the `tls-native` (default) or `tls-rustls` feature"
+    )]
+    NoTlsBackend {
+        /// The URL that was refused.
+        url: String,
+    },
 }
+
+/// Whether a TLS backend was compiled in. `wss://` and `https://` need one.
+pub const HAS_TLS_BACKEND: bool = cfg!(any(feature = "tls-native", feature = "tls-rustls"));
 
 #[async_trait]
 impl Transport for TungsteniteTransport {
@@ -119,6 +139,12 @@ impl Transport for TungsteniteTransport {
         url: &str,
         headers: Vec<(String, String)>,
     ) -> Result<(), Self::Error> {
+        if !HAS_TLS_BACKEND && url.trim_start().to_ascii_lowercase().starts_with("wss://") {
+            return Err(TungsteniteError::NoTlsBackend {
+                url: url.to_string(),
+            });
+        }
+
         let mut request = url
             .into_client_request()
             .map_err(|e| TungsteniteError::Request(e.to_string()))?;
@@ -352,6 +378,31 @@ mod tests {
         assert_eq!(
             transport.close_reason().as_deref(),
             Some("server closed the connection (1011): quota exceeded")
+        );
+    }
+
+    /// Only meaningful in a build with no TLS backend (`--no-default-features`):
+    /// the `wss://` dial must fail before any socket is opened, with an error
+    /// that names the feature to enable.
+    #[cfg(not(any(feature = "tls-native", feature = "tls-rustls")))]
+    #[tokio::test]
+    async fn wss_without_tls_backend_fails_before_dialing() {
+        let mut transport = TungsteniteTransport::new();
+        let err = transport
+            .connect("wss://example.invalid/ws", vec![])
+            .await
+            .expect_err("no TLS backend compiled in");
+        assert!(matches!(err, TungsteniteError::NoTlsBackend { .. }));
+        let text = err.to_string();
+        assert!(text.contains("tls-native"), "{text}");
+        assert!(text.contains("tls-rustls"), "{text}");
+    }
+
+    #[test]
+    fn has_tls_backend_tracks_features() {
+        assert_eq!(
+            HAS_TLS_BACKEND,
+            cfg!(any(feature = "tls-native", feature = "tls-rustls"))
         );
     }
 

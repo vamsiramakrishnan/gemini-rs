@@ -38,6 +38,11 @@ pub struct FunctionResponse {
     /// Name of the function that was called.
     pub name: String,
     /// JSON response from the function execution.
+    ///
+    /// The API accepts only a JSON object here. Any other value — a number, a
+    /// string, an array, `null` — is sent as `{"output": value}`, the key the
+    /// API documents for a function's output, instead of failing the request.
+    #[serde(serialize_with = "serialize_function_output")]
     pub response: serde_json::Value,
     /// Call ID matching the original `FunctionCall::id`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -50,6 +55,18 @@ pub struct FunctionResponse {
     /// current output (when_idle), or silently (no user notification).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scheduling: Option<FunctionResponseScheduling>,
+}
+
+/// Serialize a function's result as the JSON object the API requires.
+fn serialize_function_output<S: serde::Serializer>(
+    value: &serde_json::Value,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    if value.is_object() {
+        value.serialize(serializer)
+    } else {
+        serde_json::json!({ "output": value }).serialize(serializer)
+    }
 }
 
 /// Executable code returned by the model.
@@ -269,6 +286,39 @@ impl Content {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The API rejects a function response that is not an object, so a tool
+    /// returning `42` must reach the wire as `{"output": 42}`; an object is
+    /// sent untouched.
+    #[test]
+    fn a_non_object_function_result_is_sent_as_output() {
+        let wire = |response: serde_json::Value| {
+            serde_json::to_value(FunctionResponse {
+                name: "f".into(),
+                response,
+                id: None,
+                scheduling: None,
+            })
+            .unwrap()["response"]
+                .clone()
+        };
+        assert_eq!(
+            wire(serde_json::json!(42)),
+            serde_json::json!({ "output": 42 })
+        );
+        assert_eq!(
+            wire(serde_json::json!(["a"])),
+            serde_json::json!({ "output": ["a"] })
+        );
+        assert_eq!(
+            wire(serde_json::Value::Null),
+            serde_json::json!({ "output": null })
+        );
+        assert_eq!(
+            wire(serde_json::json!({ "t": 1 })),
+            serde_json::json!({ "t": 1 })
+        );
+    }
 
     #[test]
     fn part_text_round_trip() {

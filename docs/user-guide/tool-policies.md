@@ -4,6 +4,10 @@ Per-tool policies let you attach execution constraints to individual tools
 without changing their implementation. They are expressed in the `T::` namespace
 and composed with the same `|` operator as the rest of the tool algebra.
 
+Each wrapper takes any tool: in the examples below, `search_kb()`,
+`get_weather()` and the like are [`#[tool]` functions](./tools.md), and a
+`T::` composite works the same way.
+
 ---
 
 ## PolicyTool
@@ -38,10 +42,7 @@ use std::time::Duration;
 Live::builder()
     .tools(
         T::timeout(
-            T::simple("search_kb", "Search the knowledge base", |args| async move {
-                // potentially slow call
-                Ok(call_search_api(args).await?)
-            }),
+            search_kb(),
             Duration::from_secs(10),
         )
         | T::google_search()
@@ -66,9 +67,7 @@ Canonical JSON sorts object keys lexicographically, so `{"b":2,"a":1}` and
 // Weather results cached for the lifetime of the session
 Live::builder()
     .tools(
-        T::cached(T::simple("get_weather", "Get weather for a city", |args| async move {
-            Ok(call_weather_api(&args["city"]).await?)
-        }))
+        T::cached(get_weather())
     )
 ```
 
@@ -90,9 +89,7 @@ and surfaced at runtime via `PolicyTool::requires_confirmation()`.
 Live::builder()
     .tools(
         T::confirm(
-            T::simple("send_email", "Send an email to the customer", |args| async move {
-                Ok(do_send_email(args).await?)
-            }),
+            send_email(),
             "This will send an email to the customer. Are you sure?",
         )
     )
@@ -100,14 +97,20 @@ Live::builder()
 
 ### Enforcing confirmation with a provider
 
-Confirmation is **enforced at dispatch** when you wire a `ConfirmationProvider`.
-Before running any tool that reports `requires_confirmation()`, the
-`ToolDispatcher` consults the provider; a denied decision returns
-`ToolError::Cancelled` instead of executing the tool. Enforcement is **opt-in** —
-with no provider configured, confirmation-gated tools run normally (the flag is
-still surfaced via `requires_confirmation()`).
+Confirmation is **enforced at dispatch** by a `ConfirmationProvider`. Before
+running any tool that reports `requires_confirmation()`, the `ToolDispatcher`
+consults the provider; a declined call returns `ToolError::Declined(reason)` —
+which the model sees, so it can tell the user why — instead of executing the
+tool.
 
-Wire one onto a dispatcher directly, or via `Live::confirmation_provider`:
+A `T::confirm` tool with nothing to confirm it is a configuration error, not a
+tool that quietly runs unconfirmed: `AgentBuilder::build` and `Live::connect`
+refuse it, and `check_live` reports it (`LiveViolation::UnconfirmedTools`)
+before connecting. A bare `ToolDispatcher` with no provider still runs gated
+tools — the checks live where configuration is declared.
+
+Wire one via `Live::confirmation_provider`, `AgentBuilder::confirmation_provider`,
+or on a dispatcher directly:
 
 ```rust,ignore
 use std::sync::Arc;
@@ -262,16 +265,12 @@ Live::builder()
     .tools(
         // 10-second timeout + in-session cache
         T::cached(T::timeout(
-            T::simple("get_stock_price", "Get a stock price", |args| async move {
-                Ok(fetch_price(&args["ticker"]).await?)
-            }),
+            get_stock_price(),
             Duration::from_secs(10),
         ))
         // confirmation required on dangerous action
         | T::confirm(
-            T::simple("cancel_order", "Cancel an order", |args| async move {
-                Ok(do_cancel(&args["order_id"]).await?)
-            }),
+            cancel_order(),
             "Cancel this order — are you sure?",
         )
         | T::google_search()

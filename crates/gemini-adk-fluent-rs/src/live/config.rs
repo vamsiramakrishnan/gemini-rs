@@ -163,11 +163,16 @@ impl Live {
     ///
     /// ```no_run
     /// # use gemini_adk_fluent_rs::prelude::*;
+    /// #[derive(serde::Deserialize, schemars::JsonSchema)]
+    /// struct City {
+    ///     /// The city to report on.
+    ///     city: String,
+    /// }
+    ///
     /// Live::builder()
     ///     .tools(
-    ///         T::simple("get_weather", "Get weather", |args| async move {
-    ///             let _ = args;
-    ///             Ok(serde_json::json!({"temp": 22}))
+    ///         T::typed("get_weather", "Get weather", |args: City| async move {
+    ///             Ok(serde_json::json!({ "city": args.city, "temp": 22 }))
     ///         })
     ///         | T::google_search()
     ///     );
@@ -227,10 +232,16 @@ impl Live {
 
     /// Use a [`ToolDispatcher`] you built yourself as the session's dispatcher
     /// — the escape hatch for streaming tools, input-streaming tools, or a
-    /// dispatcher shared with other components. Replaces any dispatcher the
-    /// builder created for [`tools`](Self::tools) so far; tools registered
-    /// after this call are added to it.
-    pub fn dispatcher(mut self, dispatcher: ToolDispatcher) -> Self {
+    /// dispatcher shared with other components.
+    ///
+    /// Tools already registered through [`tools`](Self::tools) or
+    /// [`tool`](Self::tool) are kept: they are merged into `dispatcher`, whose
+    /// own tools, timeout and confirmation provider win on a name clash.
+    /// Tools registered after this call are added to it.
+    pub fn dispatcher(mut self, mut dispatcher: ToolDispatcher) -> Self {
+        if let Some(registered) = self.dispatcher.take() {
+            dispatcher.merge(registered);
+        }
         self.dispatcher = Some(dispatcher);
         self
     }
@@ -263,6 +274,10 @@ impl Live {
     }
 
     /// Register a text agent (already `Arc`'d) as a tool.
+    #[deprecated(
+        since = "2.1.0",
+        note = "`agent_tool` accepts an `Arc<dyn TextAgent>` directly; use `agent_tool`"
+    )]
     pub fn agent_tool_arc(
         mut self,
         name: impl Into<String>,

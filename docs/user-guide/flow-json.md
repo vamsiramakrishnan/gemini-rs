@@ -130,8 +130,9 @@ application's to clear):
 
 ## `SessionSpec` — a runnable application as one JSON file
 
-A **session spec** (`gemini_adk_fluent_rs::spec::SessionSpec`; re-exported by
-`gemini-adk-server-rs` as `FlowAppSpec` for compatibility) wraps a flow with
+A **session spec** (`gemini_adk_fluent_rs::spec::SessionSpec`; the historical
+`FlowAppSpec` and `MockToolSpec` names in `gemini-adk-server-rs` are deprecated
+aliases and parse the same documents) wraps a flow with
 everything a governed Live session needs:
 
 ```json
@@ -414,7 +415,7 @@ The Studio is a drag-and-drop editor over exactly this document:
 - **App tab** — instruction, greeting, modality, and the mock tool editor.
 - **JSON tab** — the live document. Two-way: edit and Apply, import a file,
   copy, or download. The JSON you export is exactly what
-  `serde_json::from_value::<FlowAppSpec>` (or a bare `Flow`) loads.
+  `serde_json::from_value::<SessionSpec>` (or a bare `Flow`) loads.
 - **Validate** — `POST /api/flows/validate` runs the real compiler
   (`Flow::compile_with_tools`) server-side and reports every diagnostic:
   unknown tools, unreachable steps, unguarded commit tools, ordering cycles,
@@ -444,7 +445,7 @@ debt-collection call and a restaurant booking flow.
 
 ```
 POST /api/flows/validate
-Body: a FlowAppSpec, or a bare flow ({"steps": [...]})
+Body: a SessionSpec, or a bare flow ({"steps": [...]})
 ```
 
 Response:

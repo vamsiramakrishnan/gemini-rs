@@ -1,6 +1,6 @@
 //! Tool dispatcher — routes function calls to the right tool implementation.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -14,10 +14,12 @@ use super::{ActiveStreamingTool, DEFAULT_TOOL_TIMEOUT, ToolClass, ToolFunction, 
 
 /// Routes function calls to the right tool implementation.
 pub struct ToolDispatcher {
-    tools: HashMap<String, ToolKind>,
+    /// Ordered by name, so declarations are identical from run to run.
+    tools: BTreeMap<String, ToolKind>,
     active: Arc<tokio::sync::Mutex<HashMap<String, ActiveStreamingTool>>>,
     default_timeout: Duration,
-    /// Cached tool declarations — computed once on first access.
+    /// Tool declarations, computed on first access and cleared whenever a tool
+    /// is registered.
     cached_declarations: std::sync::OnceLock<Vec<Tool>>,
     /// Optional provider consulted before running confirmation-gated tools.
     confirmation_provider: Option<Arc<dyn crate::confirmation::ConfirmationProvider>>,
@@ -40,7 +42,7 @@ impl ToolDispatcher {
     /// ```
     pub fn new() -> Self {
         Self {
-            tools: HashMap::new(),
+            tools: BTreeMap::new(),
             active: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             default_timeout: DEFAULT_TOOL_TIMEOUT,
             cached_declarations: std::sync::OnceLock::new(),
@@ -107,7 +109,9 @@ impl ToolDispatcher {
         if decision.confirmed {
             Ok(())
         } else {
-            Err(ToolError::Cancelled)
+            Err(ToolError::Declined(
+                decision.hint.unwrap_or_else(|| "no reason given".into()),
+            ))
         }
     }
 
@@ -118,27 +122,58 @@ impl ToolDispatcher {
 
     /// Register a tool that implements [`ToolFunction`].
     pub fn register(&mut self, tool: impl ToolFunction) {
-        let tool = Arc::new(tool);
-        self.tools
-            .insert(tool.name().to_string(), ToolKind::Function(tool));
+        self.insert(ToolKind::Function(Arc::new(tool)));
     }
 
     /// Register a regular function tool (pre-wrapped in Arc).
     pub fn register_function(&mut self, tool: Arc<dyn ToolFunction>) {
-        self.tools
-            .insert(tool.name().to_string(), ToolKind::Function(tool));
+        self.insert(ToolKind::Function(tool));
     }
 
     /// Register a streaming tool.
     pub fn register_streaming(&mut self, tool: Arc<dyn super::StreamingTool>) {
-        self.tools
-            .insert(tool.name().to_string(), ToolKind::Streaming(tool));
+        self.insert(ToolKind::Streaming(tool));
     }
 
     /// Register an input-streaming tool.
     pub fn register_input_streaming(&mut self, tool: Arc<dyn super::InputStreamingTool>) {
-        self.tools
-            .insert(tool.name().to_string(), ToolKind::InputStream(tool));
+        self.insert(ToolKind::InputStream(tool));
+    }
+
+    /// Register `tool` under its name, replacing a tool of the same name.
+    fn insert(&mut self, tool: ToolKind) {
+        let name = match &tool {
+            ToolKind::Function(f) => f.name(),
+            ToolKind::Streaming(s) => s.name(),
+            ToolKind::InputStream(i) => i.name(),
+        }
+        .to_string();
+        self.tools.insert(name, tool);
+        self.cached_declarations.take();
+    }
+
+    /// Add every tool of `other` whose name this dispatcher does not already
+    /// have. This dispatcher's own tools, timeout and confirmation provider
+    /// win.
+    pub fn merge(&mut self, other: ToolDispatcher) {
+        for (name, tool) in other.tools {
+            self.tools.entry(name).or_insert(tool);
+        }
+        self.cached_declarations.take();
+    }
+
+    /// The function tools that ask for confirmation before they run
+    /// (`T::confirm(..)`), which need a confirmation provider to be gated.
+    pub fn gated_tools(&self) -> impl Iterator<Item = &str> {
+        self.tools.iter().filter_map(|(name, tool)| match tool {
+            ToolKind::Function(f) if f.requires_confirmation() => Some(name.as_str()),
+            _ => None,
+        })
+    }
+
+    /// The names of the registered tools, in declaration order.
+    pub fn names(&self) -> impl Iterator<Item = &str> {
+        self.tools.keys().map(String::as_str)
     }
 
     /// Get a tool by name (for introspection/streaming tool spawning).
@@ -269,8 +304,8 @@ impl ToolDispatcher {
 
     /// Generate Tool declarations for the setup message.
     ///
-    /// Results are cached after first computation. The cache is invalidated
-    /// when tools are registered via `register*()` methods.
+    /// Declarations are ordered by tool name and cached until the next
+    /// `register*()` or [`merge`](Self::merge).
     pub fn to_tool_declarations(&self) -> Vec<Tool> {
         self.cached_declarations
             .get_or_init(|| {
@@ -360,7 +395,10 @@ mod confirmation_tests {
         d.set_confirmation_provider(StaticConfirmation::deny_all("blocked by policy"));
 
         let result = d.call_function("danger", json!({})).await;
-        assert!(matches!(result, Err(ToolError::Cancelled)));
+        assert!(
+            matches!(&result, Err(ToolError::Declined(reason)) if reason == "blocked by policy"),
+            "the model must learn why: {result:?}"
+        );
         assert_eq!(
             runs.load(Ordering::SeqCst),
             0,
@@ -428,7 +466,7 @@ mod confirmation_tests {
         d.set_confirmation_provider(StaticConfirmation::deny_all("blocked"));
 
         let result = d.call_function("danger", json!({})).await;
-        assert!(matches!(result, Err(ToolError::Cancelled)));
+        assert!(matches!(result, Err(ToolError::Declined(_))));
         assert_eq!(
             runs.load(Ordering::SeqCst),
             0,
@@ -453,5 +491,69 @@ mod confirmation_tests {
 
         assert!(d.call_function("danger", json!({})).await.is_err());
         assert_eq!(runs.load(Ordering::SeqCst), 0);
+    }
+}
+
+#[cfg(test)]
+mod declaration_tests {
+    use super::*;
+    use crate::tool::SimpleTool;
+
+    fn named(name: &'static str) -> Arc<dyn ToolFunction> {
+        Arc::new(SimpleTool::new(name, name, None, |_| async {
+            Ok(serde_json::json!({}))
+        }))
+    }
+
+    fn declared(d: &ToolDispatcher) -> Vec<String> {
+        d.to_tool_declarations()
+            .iter()
+            .flat_map(|t| t.function_declarations.iter().flatten())
+            .map(|f| f.name.clone())
+            .collect()
+    }
+
+    /// Registering after the declarations were read must change them; the
+    /// cache used to be computed once and never cleared.
+    #[test]
+    fn registering_a_tool_refreshes_the_declarations() {
+        let mut d = ToolDispatcher::new();
+        d.register_function(named("a"));
+        assert_eq!(declared(&d), ["a"]);
+        d.register_function(named("b"));
+        assert_eq!(declared(&d), ["a", "b"]);
+    }
+
+    /// Declarations are ordered by name, whatever the registration order, so a
+    /// setup message is byte-identical from run to run.
+    #[test]
+    fn declarations_are_deterministic() {
+        let mut d = ToolDispatcher::new();
+        for name in ["zeta", "alpha", "mid"] {
+            d.register_function(named(name));
+        }
+        assert_eq!(declared(&d), ["alpha", "mid", "zeta"]);
+        assert_eq!(d.names().collect::<Vec<_>>(), ["alpha", "mid", "zeta"]);
+    }
+
+    #[test]
+    fn merge_keeps_both_and_this_dispatcher_wins_a_clash() {
+        let mut mine = ToolDispatcher::new().with_timeout(Duration::from_secs(3));
+        mine.register_function(Arc::new(SimpleTool::new(
+            "shared",
+            "mine",
+            None,
+            |_| async { Ok(serde_json::json!({})) },
+        )));
+        let mut theirs = ToolDispatcher::new();
+        theirs.register_function(named("shared"));
+        theirs.register_function(named("extra"));
+        mine.merge(theirs);
+        assert_eq!(declared(&mine), ["extra", "shared"]);
+        match mine.get_tool("shared") {
+            Some(ToolKind::Function(f)) => assert_eq!(f.description(), "mine"),
+            _ => panic!("shared must stay a function tool"),
+        }
+        assert_eq!(mine.default_timeout(), Duration::from_secs(3));
     }
 }

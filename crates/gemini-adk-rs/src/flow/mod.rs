@@ -29,6 +29,12 @@ use crate::orchestration::{AgentMode, call_agent};
 use crate::state::State;
 use crate::text::TextAgent;
 
+pub mod stack;
+pub use stack::{
+    FlowStack, OVERLAY_STATE_KEY, Overlay, RepairPolicy, Resume, SharedFlowStack,
+    TERMINATED_STATE_KEY, escalate_flag, reprompt_flag,
+};
+
 /// Evaluation context handed to a [`Guard`]: the session state plus the
 /// current flow marking.
 pub struct FlowCtx<'a> {
@@ -1230,6 +1236,22 @@ impl FlowMonitor {
         Arc::new(parking_lot::Mutex::new(self))
     }
 
+    /// Wrap this monitor as the main layer of a [`FlowStack`] with no
+    /// digressions — the form the Live control plane drives.
+    pub fn into_stack(self) -> FlowStack {
+        FlowStack::from_monitor(self)
+    }
+
+    /// Re-enter the flow from its start: forget the marking, the fired
+    /// `on_enter` actions and the reset edges. The flow, mode and registered
+    /// actions are kept, and recorded violations stay for audit. `State` is not
+    /// touched — the next re-latch runs against whatever facts it holds.
+    pub fn restart(&mut self) {
+        self.marking = Marking::default();
+        self.announced.clear();
+        self.reset_prev.clear();
+    }
+
     /// Explain the current control-plane state: active steps, which tools are
     /// admitted vs blocked (with reasons), and unmet requirements.
     ///
@@ -1350,6 +1372,17 @@ impl FlowMonitor {
     pub fn violations(&self) -> &[Violation] {
         &self.violations
     }
+
+    /// Record a deviation the *caller* detected — one this monitor cannot see
+    /// for itself. A [`FlowStack`] uses it for a tool called after a
+    /// `Resume::Terminate` digression ended the conversation: the denial is the
+    /// stack's, not this flow's, so `observe_tool` would find nothing wrong.
+    pub fn record_violation(&mut self, subject: impl Into<String>, reason: impl Into<String>) {
+        self.violations.push(Violation {
+            subject: subject.into(),
+            reason: reason.into(),
+        });
+    }
     /// The underlying flow.
     pub fn flow(&self) -> &Flow {
         &self.flow
@@ -1430,7 +1463,9 @@ impl FlowMonitor {
     }
 
     /// Apply [`Constraint::Reset`] constraints on their guards' rising edges.
-    fn apply_resets(&mut self, state: &State) {
+    /// Returns the steps that were un-latched.
+    fn apply_resets(&mut self, state: &State) -> Vec<String> {
+        let mut reset: Vec<String> = Vec::new();
         // Evaluate all guards first (immutable borrow), then mutate.
         let mut edges: Vec<(usize, bool)> = Vec::new();
         {
@@ -1458,6 +1493,7 @@ impl FlowMonitor {
                 if !self.marking.done.remove(step_id) {
                     continue;
                 }
+                reset.push(step_id.clone());
                 self.announced.remove(step_id);
                 // Forgive the completion evidence this step's done guard
                 // references, so `called_ok` (and any `once` on those tools)
@@ -1473,18 +1509,47 @@ impl FlowMonitor {
                 }
             }
         }
+        reset
     }
 
     /// Record a turn boundary, then re-latch.
     pub fn on_turn(&mut self, state: &State) {
-        self.marking.turns += 1;
+        self.begin_turn(state);
         self.relatch(state);
+    }
+
+    /// The first half of [`on_turn`](Self::on_turn): count the turn and apply
+    /// [`Constraint::Reset`] edges, returning the steps that were un-latched.
+    ///
+    /// A caller that keeps evidence *about* steps outside the marking — the
+    /// [`FlowStack`] and its repair signals — needs to see a reset before the
+    /// re-latch runs, or a completion guard that references that evidence
+    /// re-completes the step on the spot. Follow with
+    /// [`relatch`](Self::relatch); the reset edges are consumed, so the
+    /// re-latch does not apply them twice.
+    pub fn begin_turn(&mut self, state: &State) -> Vec<String> {
+        self.marking.turns += 1;
+        self.apply_resets(state)
     }
 
     /// Record a successful tool call, then re-latch.
     pub fn on_tool_ok(&mut self, tool: &str, state: &State) {
-        *self.marking.tool_ok.entry(tool.to_string()).or_insert(0) += 1;
+        self.begin_tool_ok(tool, state);
         self.relatch(state);
+    }
+
+    /// The first half of [`on_tool_ok`](Self::on_tool_ok): count the call and
+    /// apply [`Constraint::Reset`] edges, returning the steps that were
+    /// un-latched.
+    ///
+    /// A reset can be gated on a tool — `reset(..).when(called_ok("start_over"))`
+    /// — in which case its edge fires here rather than at a turn boundary. A
+    /// caller holding evidence outside the marking needs the same chance to shed
+    /// it that [`begin_turn`](Self::begin_turn) gives; follow with
+    /// [`relatch`](Self::relatch).
+    pub fn begin_tool_ok(&mut self, tool: &str, state: &State) -> Vec<String> {
+        *self.marking.tool_ok.entry(tool.to_string()).or_insert(0) += 1;
+        self.apply_resets(state)
     }
 
     /// Steps that are eligible but not yet done.
@@ -1508,6 +1573,37 @@ impl FlowMonitor {
     /// interpolated facts to inject as turn-boundary steering (anti-hallucination).
     pub fn active_grounds(&self, state: &State) -> Vec<String> {
         self.active_steps(state)
+            .into_iter()
+            .filter_map(|s| s.ground.as_ref().map(|t| render_ground(t, state)))
+            .filter(|s| !s.trim().is_empty())
+            .collect()
+    }
+
+    /// Terminal steps that are done — the flow's closing.
+    ///
+    /// A terminal step completes on eligibility, so it is never *active* and
+    /// its posture is never among [`active_postures`](Self::active_postures).
+    /// Its instruction is the flow's last word ("hand off to a human now"),
+    /// which the [`FlowStack`] projects on the turn a digression completes.
+    pub fn closing_steps(&self) -> Vec<&Step> {
+        self.flow
+            .steps
+            .iter()
+            .filter(|s| s.terminal && self.marking.done.contains(&s.id))
+            .collect()
+    }
+
+    /// Postures of the [`closing_steps`](Self::closing_steps).
+    pub fn closing_postures(&self) -> Vec<String> {
+        self.closing_steps()
+            .into_iter()
+            .filter_map(|s| s.posture.clone())
+            .collect()
+    }
+
+    /// Rendered grounding lines of the [`closing_steps`](Self::closing_steps).
+    pub fn closing_grounds(&self, state: &State) -> Vec<String> {
+        self.closing_steps()
             .into_iter()
             .filter_map(|s| s.ground.as_ref().map(|t| render_ground(t, state)))
             .filter(|s| !s.trim().is_empty())

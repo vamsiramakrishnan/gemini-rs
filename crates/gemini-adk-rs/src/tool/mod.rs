@@ -2,11 +2,13 @@
 
 pub mod dispatcher;
 pub mod policy;
+pub mod schema;
 pub mod simple;
 pub mod typed;
 
 pub use dispatcher::*;
 pub use policy::*;
+pub use schema::wire_schema;
 pub use simple::*;
 pub use typed::*;
 

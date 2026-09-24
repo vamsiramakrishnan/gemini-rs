@@ -34,7 +34,7 @@
 //! ```
 
 use crate::builder::AgentBuilder;
-use crate::operators::{Composable, Fallback, FanOut, Loop, LoopPredicate, Pipeline};
+use crate::operators::{Branch, Composable, Fallback, FanOut, Loop, LoopPredicate, Pipeline};
 
 /// Review loop: author writes, reviewer checks, loop until approved.
 ///
@@ -201,16 +201,17 @@ pub fn chain(agents: Vec<AgentBuilder>) -> Composable {
     ))
 }
 
-/// Conditional: route to one of two agents based on a state predicate.
+/// Conditional: run one of two workflows, chosen by a state predicate.
 ///
-/// Evaluates `predicate` against the current state. If it returns `true`,
-/// the `if_true` agent runs; otherwise, the `if_false` agent runs.
+/// `predicate` sees the state (as a JSON object) when the compiled agent
+/// runs. If it returns `true`, `if_true` runs; otherwise `if_false` runs.
+/// Exactly one branch runs, and each branch keeps its full configuration.
 ///
 /// # Arguments
 ///
 /// * `predicate` — Function that inspects state (as `serde_json::Value`) and returns a bool.
-/// * `if_true` — Agent to run when the predicate is true.
-/// * `if_false` — Agent to run when the predicate is false.
+/// * `if_true` — Agent or workflow to run when the predicate is true.
+/// * `if_false` — Agent or workflow to run when the predicate is false.
 ///
 /// # Example
 ///
@@ -221,36 +222,19 @@ pub fn chain(agents: Vec<AgentBuilder>) -> Composable {
 ///     AgentBuilder::new("premium-agent").instruction("Full-featured response"),
 ///     AgentBuilder::new("basic-agent").instruction("Basic response"),
 /// );
-/// assert!(matches!(routed, Composable::Fallback(_)));
+/// assert!(matches!(routed, Composable::Branch(_)));
 /// ```
 pub fn conditional(
     predicate: impl Fn(&serde_json::Value) -> bool + Send + Sync + 'static,
-    if_true: AgentBuilder,
-    if_false: AgentBuilder,
+    if_true: impl Into<Composable>,
+    if_false: impl Into<Composable>,
 ) -> Composable {
-    let pred = std::sync::Arc::new(predicate);
-    let pred_clone = pred.clone();
-
-    let true_branch = AgentBuilder::new(if_true.name())
-        .instruction(if_true.get_instruction().unwrap_or_default());
-    let false_branch = AgentBuilder::new(if_false.name())
-        .instruction(if_false.get_instruction().unwrap_or_default());
-
-    // Store predicate in a loop with max=1 for the true branch,
-    // fall back to false branch.
-    let guarded = Composable::Loop(Loop {
-        body: Box::new(Composable::Agent(true_branch)),
-        max: 1,
-        middleware: Vec::new(),
+    Composable::Branch(Branch {
+        predicate: LoopPredicate::new(predicate),
+        if_true: Box::new(if_true.into()),
+        if_false: Box::new(if_false.into()),
         name: None,
-        description: None,
-        until: Some(LoopPredicate::new(move |state| pred_clone(state))),
-    });
-
-    Composable::Fallback(Fallback::new(vec![
-        guarded,
-        Composable::Agent(false_branch),
-    ]))
+    })
 }
 
 /// Supervised: worker with supervisor oversight loop.
@@ -490,22 +474,42 @@ mod tests {
         }
     }
 
-    #[test]
-    fn conditional_creates_fallback_with_guard() {
-        let result = conditional(
+    /// Exactly one branch runs, chosen by state at run time. The old
+    /// implementation ran the true branch whatever the predicate said, and
+    /// rebuilt each branch from its name and instruction alone.
+    #[tokio::test]
+    async fn conditional_runs_exactly_the_chosen_branch() {
+        use gemini_adk_rs::llm::{LlmResponse, MockLlm};
+        use std::sync::Arc;
+
+        // The model answers with the instruction it was given, so the reply
+        // names the branch that ran.
+        let llm = MockLlm::from_fn(|req| {
+            Ok(LlmResponse::from_text(
+                req.system_instruction.clone().unwrap_or_default(),
+            ))
+        });
+        let routed = conditional(
             |state| {
                 state
                     .get("flag")
                     .and_then(serde_json::Value::as_bool)
                     .unwrap_or(false)
             },
-            agent("yes").instruction("true branch"),
+            agent("yes").instruction("true branch").temperature(0.3),
             agent("no").instruction("false branch"),
-        );
-        match &result {
-            Composable::Fallback(f) => assert_eq!(f.candidates.len(), 2),
-            _ => panic!("expected Fallback"),
-        }
+        )
+        .compile(Arc::new(llm.clone()))
+        .unwrap();
+
+        let state = gemini_adk_rs::State::new();
+        state.set("flag", true).unwrap();
+        assert_eq!(routed.run(&state).await.unwrap(), "true branch");
+        assert_eq!(llm.last_request().unwrap().temperature, Some(0.3));
+
+        state.set("flag", false).unwrap();
+        assert_eq!(routed.run(&state).await.unwrap(), "false branch");
+        assert_eq!(llm.call_count(), 2, "one model call per run");
     }
 
     #[test]

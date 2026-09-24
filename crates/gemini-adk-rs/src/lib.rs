@@ -170,8 +170,9 @@ pub use error::{AgentError, AgentResult, ConfigError, ToolError};
 pub use events::{Event, EventActions, EventType, StructuredEvent};
 pub use extract::{Extract, Recognizer, RecordExtractor};
 pub use flow::{
-    CompiledFlow, Enforcement, Flow, FlowError, FlowErrors, FlowExplanation, FlowMonitor, Guard,
-    SharedFlowMonitor, StepAction, ToolSurface, Verdict, Violation, on_enter,
+    CompiledFlow, Enforcement, Flow, FlowError, FlowErrors, FlowExplanation, FlowMonitor,
+    FlowStack, Guard, Overlay, RepairPolicy, Resume, SharedFlowMonitor, SharedFlowStack,
+    StepAction, ToolSurface, Verdict, Violation, on_enter,
 };
 pub use frame::{ConfirmPolicy, Frame, FrameSpec, SlotRecognizer, SlotSpec, SlotValidator};
 /// Re-exports the `#[tool]`/`#[derive(..)]` macros route their generated code
@@ -184,6 +185,24 @@ pub mod __macros {
     pub use schemars;
     pub use serde;
     pub use serde_json;
+
+    use crate::error::ToolError;
+
+    /// An infallible `#[tool]` fn's return value, as the tool's JSON output.
+    pub fn tool_output<T: serde::Serialize>(value: T) -> Result<serde_json::Value, ToolError> {
+        serde_json::to_value(value).map_err(|e| {
+            ToolError::ExecutionFailed(format!("the tool's output is not valid JSON: {e}"))
+        })
+    }
+
+    /// A fallible `#[tool]` fn's `Result`, with any error type accepted.
+    pub fn tool_result<T, E>(result: Result<T, E>) -> Result<serde_json::Value, ToolError>
+    where
+        T: serde::Serialize,
+        E: Into<Box<dyn std::error::Error + Send + Sync>>,
+    {
+        result.map_err(ToolError::from_error).and_then(tool_output)
+    }
 }
 
 /// The `#[derive(Extract)]` macro — builds an [`extract::Extract`] record from a

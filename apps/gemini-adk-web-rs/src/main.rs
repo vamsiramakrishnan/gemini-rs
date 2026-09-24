@@ -56,7 +56,7 @@ async fn main() {
 
     let app = Router::new()
         .route("/", get(landing_page))
-        .route("/app/:name", get(app_page))
+        .route("/app/{name}", get(app_page))
         .route("/flows", get(flow_studio_page))
         .route("/api/flows/validate", post(validate_flow))
         .route("/api/flows/test", post(test_flow))
@@ -64,7 +64,7 @@ async fn main() {
         .route("/api/flows/codegen", post(codegen_flow))
         .route("/api/flows/schema", get(flow_schema))
         .route("/api/apps", get(list_apps))
-        .route("/ws/:name", get(ws_upgrade))
+        .route("/ws/{name}", get(ws_upgrade))
         .route("/favicon.ico", get(favicon))
         .with_state(state)
         .merge(api)
@@ -263,7 +263,8 @@ async fn ws_upgrade(
         ws.on_upgrade(move |socket| ws_handler::handle_ws(socket, app, span_rx))
     } else {
         // Return 404 — upgrade and immediately close
-        ws.on_upgrade(|socket| async move {
+        ws.on_upgrade(|mut socket| async move {
+            use futures::SinkExt as _;
             let _ = socket.close().await;
         })
     }

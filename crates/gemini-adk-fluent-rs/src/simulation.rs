@@ -163,6 +163,22 @@ impl Sim {
         self.stack.active_overlay()
     }
 
+    /// The instructions (stage postures) projected to the model this turn.
+    ///
+    /// On the turn a digression completes, these are its *closing* stage's —
+    /// the safety hand-off's "hand off to a human now", say — which is what a
+    /// live session would send. Assert on these to test that a digression is
+    /// heard, not merely that it fired.
+    pub fn postures(&self) -> Vec<String> {
+        self.stack.active_postures(&self.state)
+    }
+
+    /// Whether the conversation has ended because a `Resume::Terminate`
+    /// digression ran (as opposed to the main flow finishing).
+    pub fn is_terminated(&self) -> bool {
+        self.stack.is_terminated()
+    }
+
     /// Whether `tool` is admitted right now.
     pub fn allowed(&self, tool: &str) -> bool {
         self.stack.admits_tool(tool, &self.state).is_ok()

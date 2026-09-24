@@ -105,7 +105,7 @@ async fn run_call(mut socket: WebSocket) -> Result<(), Box<dyn std::error::Error
         tokio::select! {
             incoming = socket.recv() => match incoming {
                 Some(Ok(Message::Text(text))) => {
-                    if call.from_twilio.send(text).await.is_err() {
+                    if call.from_twilio.send(text.to_string()).await.is_err() {
                         break; // bridge ended (stream stopped)
                     }
                 }
@@ -117,7 +117,7 @@ async fn run_call(mut socket: WebSocket) -> Result<(), Box<dyn std::error::Error
                 }
             },
             outgoing = call.to_twilio.recv() => match outgoing {
-                Some(frame) => socket.send(Message::Text(frame)).await?,
+                Some(frame) => socket.send(Message::Text(frame.into())).await?,
                 None => break, // session closed
             },
         }

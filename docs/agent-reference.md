@@ -61,19 +61,31 @@ use gemini_adk_fluent_rs::wire::*;          // raw L0 wire types
 
 ```rust
 // Text generation is on by default (feature `gemini-llm`, pure Rust).
-// Model may be omitted: GeminiLlm defaults to GEMINI_TEXT_MODEL (then GEMINI_MODEL) or `gemini-flash-latest`.
+// from_env() reads GEMINI_API_KEY (or Vertex AI settings) and GEMINI_TEXT_MODEL,
+// and fails before any request, naming the variable, if something is missing.
 let agent = AgentBuilder::new("analyst")
-    .model(ModelId::FLASH_LATEST)      // or any name: ModelId::new("…") / "…".into()
+    .model(ModelId::FLASH_LATEST)      // optional; any name: ModelId::new("…")
     .instruction("Analyze the given topic")
     .temperature(0.3)
     .google_search()
     .thinking(2048)
-    .build(llm)?;
+    .build(GeminiLlm::from_env()?)?;   // any BaseLlm; MockLlm in tests
 
-let result = agent.run(&state).await?;
+let answer = agent.ask("Summarize Rust's borrow checker").await?;   // String
+let typed: Summary = agent.ask_as("Summarize it as JSON").await?;  // T: Deserialize + JsonSchema
+let mut chat = agent.chat();                                        // history across sends
+let mut events = agent.stream("Tell a story");                      // RunEvent stream
 ```
 
 Copy-on-write immutable builders -- every setter returns a new builder, original unchanged.
+Every setting reaches the request or `build()` fails: Live-only settings (`voice`,
+audio modalities, a Live model, transfer settings) and a `T::confirm` tool without
+a `confirmation_provider` are a `ConfigError`. Model failures arrive as
+`AgentError::Llm(LlmError)`; branch with `err.as_llm()` and `is_rate_limited()`,
+`is_auth()`, `is_retryable()`, `status()`.
+
+Test without a model: `gemini_adk_fluent_rs::testing::MockLlm::script([...])`
+replies in order and records every `LlmRequest` (`requests()`, `last_request()`).
 
 ### Live Session (Voice)
 
@@ -179,7 +191,26 @@ Appending `_concurrent` to a control-lane setter (e.g. `.on_turn_complete_concur
 
 ### Tool Definition
 
-**SimpleTool** (raw JSON args):
+**`#[tool]`** (the default): a documented `async fn`. Doc prose is the
+description, a rustdoc `# Arguments` section describes parameters, parameter
+types are the schema; any `Serialize` return, or a `Result` with any error.
+
+```rust
+/// Get weather for a city.
+///
+/// # Arguments
+///
+/// * `city` - The city name.
+#[tool]
+async fn get_weather(city: String) -> serde_json::Value {
+    json!({"temp": 22, "city": city})
+}
+
+agent_builder.tool(get_weather());
+```
+
+**`T::typed`** for a closure that captures state (a pool, a client), with a
+`JsonSchema` argument type; **SimpleTool** (raw JSON args, hand-written schema):
 
 ```rust
 let tool = SimpleTool::new(
@@ -215,9 +246,7 @@ let tool = TypedTool::<WeatherArgs>::new(
 ```rust
 Live::builder()
     .tools(
-        T::simple("get_weather", "Get weather", |args| async move {
-            Ok(json!({"temp": 22}))
-        })
+        get_weather()                 // a #[tool] fn converts into the composite
         | T::google_search()
         | T::code_execution()
     )

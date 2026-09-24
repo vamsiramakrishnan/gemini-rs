@@ -2,6 +2,7 @@
 name = "gemini-memory-rs"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 description = "Contextual memory engine for Gemini Live — OKF markdown memory, BM25 retrieval, session ingestion and reconciliation"
 keywords = ["gemini", "memory", "bm25", "retrieval", "agents"]

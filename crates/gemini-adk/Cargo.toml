@@ -1,0 +1,68 @@
+[package]
+name = "gemini-adk"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Build Gemini agents in Rust — text, streaming, typed output, tools, governed flows and live voice — from one crate"
+keywords = ["gemini", "agents", "llm", "voice", "ai"]
+categories = ["api-bindings", "asynchronous"]
+repository.workspace = true
+documentation = "https://docs.rs/gemini-adk"
+readme = "README.md"
+# The one crate an application adds. Not published until its crates.io name is
+# confirmed; until then depend on `gemini-adk-fluent-rs`, which it re-exports.
+publish = false
+
+[lib]
+name = "gemini_adk"
+
+[dependencies]
+# By path, not `workspace = true`: the workspace entry keeps the fluent
+# crate's default features on, and this crate's own features must decide them.
+# Publishing this crate needs a `version` here too.
+gemini-adk-fluent-rs = { path = "../gemini-adk-fluent-rs", default-features = false }
+gemini-memory-rs = { workspace = true, optional = true }
+
+# Every feature is the fluent crate's feature of the same name, plus `memory`.
+[features]
+default = ["tls-native", "gemini-llm"]
+# The Gemini text model client (`GeminiLlm`).
+gemini-llm = ["gemini-adk-fluent-rs/gemini-llm"]
+# TLS backend: exactly one.
+tls-native = ["gemini-adk-fluent-rs/tls-native"]
+tls-rustls = ["gemini-adk-fluent-rs/tls-rustls"]
+# Microphone and speaker (`talk()`); needs ALSA headers on Linux.
+voice-io = ["gemini-adk-fluent-rs/voice-io"]
+denoise = ["gemini-adk-fluent-rs/denoise"]
+dsp = ["gemini-adk-fluent-rs/dsp"]
+vad-wavekat = ["gemini-adk-fluent-rs/vad-wavekat"]
+voice = ["gemini-adk-fluent-rs/voice"]
+# Telephony over SIP.
+sip = ["gemini-adk-fluent-rs/sip"]
+# Spec-driven HTTP tools.
+http-tools = ["gemini-adk-fluent-rs/http-tools"]
+# Handlebars-style instruction templates.
+templates = ["gemini-adk-fluent-rs/templates"]
+# OpenTelemetry export.
+otel = ["gemini-adk-fluent-rs/otel"]
+otel-otlp = ["gemini-adk-fluent-rs/otel-otlp"]
+otel-gcp = ["gemini-adk-fluent-rs/otel-gcp"]
+# Contextual memory for Live sessions (`gemini_adk::memory`).
+memory = ["dep:gemini-memory-rs"]
+full = ["gemini-adk-fluent-rs/full", "memory"]
+
+# Everything except `voice-io` and the bundles that include it: cpal needs
+# ALSA headers the docs.rs builder does not have.
+[package.metadata.docs.rs]
+features = ["default", "gemini-llm", "tls-native", "tls-rustls", "denoise", "dsp", "vad-wavekat", "sip", "http-tools", "templates", "otel", "otel-otlp", "otel-gcp", "memory"]
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+serde = { version = "1", features = ["derive"] }
+schemars = "0.8"
+serde_json = "1"
+
+[lints]
+workspace = true

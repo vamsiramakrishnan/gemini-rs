@@ -331,12 +331,14 @@ pub(crate) struct ControlPlaneConfig {
     /// Middleware layers run around tool dispatch in the control lane
     /// (`before_tool` / `after_tool` / `on_tool_error`).
     pub middleware: Arc<crate::middleware::MiddlewareChain>,
-    /// Optional governed-flow monitor: gates tool calls, projects active-step
-    /// postures into steering, and drives repair from unmet requirements.
-    /// Shared (`Arc<Mutex<..>>`) so the [`LiveHandle`](super::handle::LiveHandle)
-    /// can snapshot `explain` while the control lane advances it.
-    /// Lock briefly; never hold the guard across an `await`.
-    pub flow: Option<crate::flow::SharedFlowMonitor>,
+    /// Optional governed-flow stack (main flow plus digressions): gates tool
+    /// calls, projects the active layer's postures into steering, drives
+    /// repair from unmet requirements, and suspends/resumes the main flow
+    /// around digressions. Shared (`Arc<Mutex<..>>`) so the
+    /// [`LiveHandle`](super::handle::LiveHandle) can snapshot `explain` while
+    /// the control lane advances it. Lock briefly; never hold the guard across
+    /// an `await`.
+    pub flow: Option<crate::flow::SharedFlowStack>,
     /// Fast-lane delivery (backpressure) policy per event class. Defaults to
     /// all-`Lossless`, preserving the historical `send().await` behavior.
     pub delivery: DeliveryConfig,

@@ -7,7 +7,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use gemini_adk_rs::text::TextAgent;
-use gemini_adk_rs::tool::{PolicyTool, SimpleTool, ToolFunction, ToolPolicy};
+use gemini_adk_rs::tool::{PolicyTool, SimpleTool, ToolFunction, ToolPolicy, TypedTool};
 use gemini_genai_rs::prelude::{FunctionDeclaration, Tool};
 
 /// A tool composite — one or more tool entries.
@@ -169,7 +169,13 @@ impl T {
         ToolComposite::from_built_in(Tool::code_execution())
     }
 
-    /// Create a simple tool from a name, description, and async closure.
+    /// A tool that takes **no parameters**, from a name, description, and
+    /// async closure.
+    ///
+    /// The declaration the model sees has no parameters, so the model calls
+    /// it with `{}`. For a tool with arguments, use [`#[tool]`](macro@crate::prelude::tool)
+    /// on a documented `async fn`, or [`T::typed`](Self::typed) when the tool
+    /// must capture something (a client, a pool) from its environment.
     pub fn simple<F, Fut>(
         name: impl Into<String>,
         description: impl Into<String>,
@@ -183,7 +189,51 @@ impl T {
         ToolComposite::from_function(Arc::new(tool))
     }
 
+    /// A tool whose arguments are the type `A`, from a closure.
+    ///
+    /// `A`'s JSON Schema (through [`wire_schema`](gemini_adk_rs::tool::wire_schema))
+    /// is the declaration, and doc comments on its fields describe the
+    /// parameters. Reach for this over [`#[tool]`](macro@crate::prelude::tool)
+    /// when the tool needs state from its environment:
+    ///
+    /// ```
+    /// use gemini_adk_fluent_rs::prelude::*;
+    /// use std::sync::Arc;
+    ///
+    /// #[derive(serde::Deserialize, schemars::JsonSchema)]
+    /// struct Lookup {
+    ///     /// The customer's account id.
+    ///     account: String,
+    /// }
+    ///
+    /// let accounts = Arc::new(vec![("a-1".to_string(), 120)]);
+    /// let balance = T::typed("balance", "Look up an account balance", move |args: Lookup| {
+    ///     let accounts = accounts.clone();
+    ///     async move {
+    ///         let found = accounts.iter().find(|(id, _)| *id == args.account);
+    ///         Ok(serde_json::json!({ "balance": found.map(|(_, b)| *b) }))
+    ///     }
+    /// });
+    /// AgentBuilder::new("support").tools(balance);
+    /// ```
+    pub fn typed<A, F, Fut>(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        f: F,
+    ) -> ToolComposite
+    where
+        A: serde::de::DeserializeOwned + schemars::JsonSchema + Send + Sync + 'static,
+        F: Fn(A) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<serde_json::Value, gemini_adk_rs::ToolError>> + Send + 'static,
+    {
+        ToolComposite::from_function(Arc::new(TypedTool::new::<F, Fut>(name, description, f)))
+    }
+
     /// Alias for [`simple`](Self::simple) — matches upstream Python `T.fn()`.
+    #[deprecated(
+        since = "2.1.0",
+        note = "use `T::simple` (no parameters), `T::typed` or `#[tool]`"
+    )]
     ///
     /// Named `fn_tool` because `fn` is a reserved keyword in Rust.
     pub fn fn_tool<F, Fut>(
@@ -204,7 +254,8 @@ impl T {
     /// to the runtime via [`PolicyTool::requires_confirmation`] — it is never
     /// silently dropped. The `message` becomes the confirmation hint. Built-in and
     /// placeholder entries are left unchanged.
-    pub fn confirm(tool: ToolComposite, message: &str) -> ToolComposite {
+    pub fn confirm(tool: impl Into<ToolComposite>, message: &str) -> ToolComposite {
+        let tool = tool.into();
         let msg = if message.is_empty() {
             None
         } else {
@@ -218,8 +269,9 @@ impl T {
     /// At dispatch the tool's future is raced against the duration; on elapse the
     /// call returns [`ToolError::Timeout`](gemini_adk_rs::ToolError::Timeout).
     /// Built-in and placeholder entries are left unchanged.
-    pub fn timeout(tool: ToolComposite, duration: std::time::Duration) -> ToolComposite {
-        tool.map_function_policy(move |p| p.with_timeout(duration))
+    pub fn timeout(tool: impl Into<ToolComposite>, duration: std::time::Duration) -> ToolComposite {
+        tool.into()
+            .map_function_policy(move |p| p.with_timeout(duration))
     }
 
     /// Memoize each function tool's successful results.
@@ -227,8 +279,9 @@ impl T {
     /// Results are cached by `(tool name, canonical-JSON args)`; repeat calls with
     /// identical arguments return the cached value without re-invoking the tool.
     /// Errors are not cached. Built-in/placeholder entries are left unchanged.
-    pub fn cached(tool: ToolComposite) -> ToolComposite {
-        tool.map_function_policy(gemini_adk_rs::tool::ToolPolicy::with_cache)
+    pub fn cached(tool: impl Into<ToolComposite>) -> ToolComposite {
+        tool.into()
+            .map_function_policy(gemini_adk_rs::tool::ToolPolicy::with_cache)
     }
 
     /// Combine multiple tool functions into a single composite.

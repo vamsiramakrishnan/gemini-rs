@@ -60,6 +60,56 @@ impl Client {
     }
 }
 
+impl Client {
+    /// Stream a generation: each item is one chunk of the reply, as the
+    /// server sends it (`streamGenerateContent?alt=sse`).
+    ///
+    /// Concatenating the chunks' text gives the full reply. Usage metadata,
+    /// when present, is cumulative, so the last chunk's is the call's total.
+    ///
+    /// ```no_run
+    /// use futures_util::StreamExt;
+    /// use gemini_genai_rs::{Client, generate::GenerateContentConfig};
+    ///
+    /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = Client::from_api_key("your-key");
+    /// let mut chunks = client
+    ///     .stream_generate_content_with(GenerateContentConfig::from_text("Tell a story"), None)
+    ///     .await?;
+    /// while let Some(chunk) = chunks.next().await {
+    ///     print!("{}", chunk?.text().unwrap_or_default());
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn stream_generate_content_with(
+        &self,
+        config: GenerateContentConfig,
+        model: Option<&ModelId>,
+    ) -> Result<
+        futures_util::stream::BoxStream<'static, Result<GenerateContentResponse, GenerateError>>,
+        GenerateError,
+    > {
+        use futures_util::StreamExt;
+
+        let model = model.unwrap_or(self.default_model());
+        let url = self.rest_url_for(ServiceEndpoint::StreamGenerateContent, model);
+        let separator = if url.contains('?') { '&' } else { '?' };
+        let url = format!("{url}{separator}alt=sse");
+        let headers = self.auth_headers().await?;
+
+        let body = config.to_request_body();
+        let events = self
+            .http_client()
+            .post_sse(&url, headers, &body)
+            .await
+            .map_err(GenerateError::from)?;
+        Ok(events
+            .map(|event| Ok(serde_json::from_value(event?)?))
+            .boxed())
+    }
+}
+
 /// Errors specific to the Generate API.
 #[derive(Debug, thiserror::Error)]
 pub enum GenerateError {

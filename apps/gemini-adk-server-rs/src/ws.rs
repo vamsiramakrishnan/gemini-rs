@@ -261,7 +261,7 @@ pub enum ClientMessage {
         voice: Option<String>,
         /// App-specific configuration payload. For data-driven apps (e.g. the
         /// Flow Studio) this carries the JSON document — a
-        /// [`FlowAppSpec`](crate::flow_app::FlowAppSpec) — that defines the
+        /// [`SessionSpec`](crate::flow_app::SessionSpec) — that defines the
         /// session to run. Apps that take no config ignore it.
         #[serde(default)]
         config: Option<serde_json::Value>,
@@ -441,13 +441,13 @@ pub async fn handle_ws(
         while let Some(msg) = server_rx.recv().await {
             match msg {
                 ServerMessage::Audio { data } => {
-                    if ws_tx.send(Message::Binary(data)).await.is_err() {
+                    if ws_tx.send(Message::Binary(data.into())).await.is_err() {
                         break;
                     }
                 }
                 other => {
                     if let Ok(json) = serde_json::to_string(&other)
-                        && ws_tx.send(Message::Text(json)).await.is_err()
+                        && ws_tx.send(Message::Text(json.into())).await.is_err()
                     {
                         break;
                     }

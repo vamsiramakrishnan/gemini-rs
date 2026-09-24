@@ -78,6 +78,7 @@ cargo run -p example-telephony       # 0.0.0.0:8080 — Twilio voice webhook + M
 cargo run -p example-sip-agent       # 0.0.0.0:5060/udp — raw SIP agent, dial from any softphone
 cargo run -p example-audiohook       # 0.0.0.0:8080 — AudioHook bot server for contact-center platforms
 cargo run -p example-redteam-call    # no server — two Live sessions call each other, adversarially
+cargo run -p example-session-bench   # no server, no model — N concurrent sessions, memory and turn latency
 ```
 
 ### Multi-app Web UI
@@ -91,6 +92,14 @@ All apps listed below are available in the multi-app UI with a shared devtools p
 ---
 
 ## Standalone Examples
+
+### session-bench (L1 runtime, model-free)
+
+Capacity harness: holds `--sessions N` Live sessions open in one process, each a full L1 control plane over a scripted L0 transport that answers every turn after `--response-delay-ms`. Reports resident memory (baseline, connected, peak, after disconnect, per session), `connect` time, `send_text` → first text and → `TurnComplete` percentiles, and cross-checks the runtime's own telemetry against the turns it drove. No credentials, no network.
+
+- **Layer:** L1 (`gemini_adk_rs::live::attach_session` over `gemini_genai_rs::transport::Transport`)
+- **Run:** `just bench-sessions 100` or `cargo run --release -p example-session-bench -- --sessions 100 --turns 10 --json out.json`
+- **Docs:** [Capacity and cost per session](../docs/user-guide/capacity.md)
 
 ### text-chat (L2 Fluent)
 

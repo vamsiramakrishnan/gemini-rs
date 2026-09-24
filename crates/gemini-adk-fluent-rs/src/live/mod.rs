@@ -36,7 +36,7 @@ pub use config::{
     DEFAULT_COMPRESSION_TARGET_TOKENS, DEFAULT_COMPRESSION_TRIGGER_TOKENS, InputAudioConfig,
     InputStage,
 };
-mod connect;
+pub(crate) mod connect;
 mod contract;
 mod extraction;
 mod introspect;
@@ -199,6 +199,14 @@ pub struct Live {
     /// that a `CompiledFlow` already surfaced its diagnostics and connect will
     /// not re-check it. Connect validates the flow only when this is false.
     pub(crate) flow_precompiled: bool,
+    /// Digressions installed on the session's `FlowStack` at connect. Set by
+    /// `converse`; cleared whenever the governing flow is replaced, because a
+    /// digression only means something relative to the main flow it suspends.
+    pub(crate) digressions: Vec<gemini_adk_rs::flow::Overlay>,
+    /// Per-step repair policies installed on the session's `FlowStack` at
+    /// connect. Same lifecycle as `digressions`.
+    pub(crate) repair_policies:
+        std::collections::BTreeMap<String, gemini_adk_rs::flow::RepairPolicy>,
     /// Caller-supplied session `State`, so tools and flow guards can share one.
     pub(crate) state: Option<State>,
     /// Input audio hardening: mic-chain stages, client input-VAD tuning, and
@@ -299,6 +307,8 @@ impl Live {
             flow_mode: gemini_adk_rs::flow::Enforcement::Enforce,
             ambient_tools: Vec::new(),
             flow_precompiled: false,
+            digressions: Vec::new(),
+            repair_policies: std::collections::BTreeMap::new(),
             state: None,
             flow_actions: Vec::new(),
             record_wire_path: None,
@@ -314,6 +324,8 @@ impl Live {
         self.flow = Some(flow);
         self.flow_mode = gemini_adk_rs::flow::Enforcement::Enforce;
         self.flow_precompiled = false;
+        self.digressions.clear();
+        self.repair_policies.clear();
         self
     }
 
@@ -379,6 +391,8 @@ impl Live {
         self.flow = Some(flow);
         self.flow_mode = gemini_adk_rs::flow::Enforcement::Observe;
         self.flow_precompiled = false;
+        self.digressions.clear();
+        self.repair_policies.clear();
         self
     }
 

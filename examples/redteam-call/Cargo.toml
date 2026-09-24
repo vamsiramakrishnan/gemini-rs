@@ -2,6 +2,7 @@
 name = "example-redteam-call"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 publish = false
 
 # Two Live sessions, cross-connected: a governed debt-collection agent and an

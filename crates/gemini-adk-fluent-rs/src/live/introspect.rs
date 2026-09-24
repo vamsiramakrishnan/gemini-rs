@@ -63,6 +63,18 @@ impl Live {
         names
     }
 
+    /// `T::confirm(..)` tools registered with no confirmation provider to
+    /// decide them — each would run unconfirmed.
+    pub(crate) fn unconfirmed_tools(&self) -> Vec<String> {
+        if self.confirmation_provider.is_some() {
+            return Vec::new();
+        }
+        self.dispatcher
+            .as_ref()
+            .map(|d| d.gated_tools().map(str::to_owned).collect())
+            .unwrap_or_default()
+    }
+
     /// How many tools are still unresolved, and so absent from
     /// [`declared_tool_names`](Self::declared_tool_names).
     ///
@@ -86,6 +98,21 @@ impl Live {
     /// Whether an attached flow is enforced or merely observed.
     pub fn flow_enforcement(&self) -> Enforcement {
         self.flow_mode
+    }
+
+    /// The digressions that will be installed on the session's flow stack, in
+    /// trigger-priority order. Set by [`converse`](Live::converse); empty for
+    /// a bare `govern`/`observe`.
+    pub fn digressions(&self) -> &[gemini_adk_rs::flow::Overlay] {
+        &self.digressions
+    }
+
+    /// The per-step repair policies that will be installed on the session's
+    /// flow stack. Set by [`converse`](Live::converse).
+    pub fn repair_policies(
+        &self,
+    ) -> &std::collections::BTreeMap<String, gemini_adk_rs::flow::RepairPolicy> {
+        &self.repair_policies
     }
 
     /// The configured phases, in declaration order.
@@ -168,6 +195,43 @@ mod tests {
     }
 
     #[test]
+    fn a_custom_dispatcher_keeps_tools_registered_before_it() {
+        let mut custom = gemini_adk_rs::tool::ToolDispatcher::new();
+        custom.register_function(std::sync::Arc::new(gemini_adk_rs::tool::SimpleTool::new(
+            "stream_quotes",
+            "Stream quotes",
+            None,
+            |_| async { Ok(json!({})) },
+        )));
+        let live = Live::builder().tools(sample_tool()).dispatcher(custom);
+        let names = live.declared_tool_names();
+        assert!(names.contains(&"book_table".to_string()), "{names:?}");
+        assert!(names.contains(&"stream_quotes".to_string()), "{names:?}");
+    }
+
+    /// `connect` refuses a `T::confirm` tool with no provider; the static
+    /// check says so before connecting.
+    #[test]
+    fn a_confirm_tool_without_a_provider_is_reported() {
+        let gated = T::confirm(sample_tool(), "Books cost money");
+        let live = Live::builder().tools(gated.clone());
+        assert!(
+            crate::testing::check_live(&live).contains(
+                &crate::testing::LiveViolation::UnconfirmedTools {
+                    tools: vec!["book_table".into()]
+                }
+            ),
+            "{:?}",
+            crate::testing::check_live(&live)
+        );
+
+        let confirmed = Live::builder().tools(gated).confirmation_provider(
+            gemini_adk_rs::confirmation::StaticConfirmation::deny_all("no"),
+        );
+        assert!(confirmed.unconfirmed_tools().is_empty());
+    }
+
+    #[test]
     fn declared_tool_names_sees_dispatcher_and_builtins() {
         let live = Live::builder().tools(sample_tool() | T::google_search());
         let names = live.declared_tool_names();
@@ -188,7 +252,7 @@ mod tests {
             .instruction("Verify the caller")
             .build(std::sync::Arc::new(InertLlm))
             .expect("builds");
-        let live = Live::builder().agent_tool_arc("verify_identity", "Verify caller", verifier);
+        let live = Live::builder().agent_tool("verify_identity", "Verify caller", verifier);
         assert!(
             live.declared_tool_names()
                 .contains(&"verify_identity".to_string())

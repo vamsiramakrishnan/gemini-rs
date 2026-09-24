@@ -734,7 +734,7 @@ impl DemoApp for CallScreening {
                             sentiment == "impatient" || sentiment == "hostile"
                         },
                         Duration::from_secs(20),
-                        move |_state: State, writer: Arc<dyn SessionWriter>| {
+                        move |_state: State, writer: Arc<dyn gemini_adk_fluent_rs::wire::SessionWriter>| {
                             async move {
                                 let _ = writer
                                     .send_client_content(
@@ -757,7 +757,7 @@ impl DemoApp for CallScreening {
                             phase == "identify_caller" || phase == "determine_purpose"
                         },
                         8,
-                        move |_state: State, writer: Arc<dyn SessionWriter>| {
+                        move |_state: State, writer: Arc<dyn gemini_adk_fluent_rs::wire::SessionWriter>| {
                             async move {
                                 let _ = writer
                                     .send_client_content(

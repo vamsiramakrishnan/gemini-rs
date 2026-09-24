@@ -27,6 +27,9 @@ use async_trait::async_trait;
 use crate::error::AgentError;
 use crate::state::State;
 
+mod run;
+pub use run::{Chat, RunEvent, RunRequest, RunResult, ToolCallRecord};
+
 mod dispatch;
 mod fallback;
 mod fn_agent;
@@ -59,13 +62,171 @@ pub use timeout::TimeoutTextAgent;
 ///
 /// Unlike `Agent` (which requires a Live WebSocket session), `TextAgent` can be
 /// dispatched from anywhere — event hooks, background tasks, CLI tools.
+///
+/// Ask a question, get a typed answer, or hold a conversation:
+///
+/// ```
+/// use gemini_adk_rs::llm::{LlmResponse, MockLlm};
+/// use gemini_adk_rs::text::{LlmTextAgent, TextAgent};
+///
+/// #[derive(serde::Deserialize, schemars::JsonSchema)]
+/// struct City {
+///     name: String,
+///     country: String,
+/// }
+///
+/// # tokio_test::block_on(async {
+/// let llm = MockLlm::script([
+///     LlmResponse::from_text("Paris."),
+///     LlmResponse::from_text(r#"{"name":"Paris","country":"France"}"#),
+/// ]);
+/// let agent = LlmTextAgent::new("geo", llm);
+///
+/// assert_eq!(agent.ask("Capital of France?").await.unwrap(), "Paris.");
+///
+/// let city: City = agent.ask_as("Describe the capital of France.").await.unwrap();
+/// assert_eq!(city.country, "France");
+/// # });
+/// ```
+///
+/// [`run_with`](Self::run_with) is the primitive the others are built on;
+/// [`run`](Self::run) is the state-in, state-out form combinators use, reading
+/// the prompt from the `"input"` state key.
 #[async_trait]
 pub trait TextAgent: Send + Sync {
     /// Human-readable name for logging and debugging.
     fn name(&self) -> &str;
 
     /// Execute this agent. Reads/writes `state`. Returns the final text output.
+    ///
+    /// The prompt is read from the `"input"` state key; prefer
+    /// [`run_with`](Self::run_with) or [`ask`](Self::ask), which take it
+    /// directly.
     async fn run(&self, state: &State) -> Result<String, AgentError>;
+
+    /// Run one request and report everything it produced: the reply, the
+    /// turns to append to a conversation, token usage and tool calls.
+    ///
+    /// The default writes the request's text to the `"input"` state key and
+    /// calls [`run`](Self::run), so every agent supports it; history and a
+    /// response schema are honoured by agents that call a model
+    /// ([`LlmTextAgent`]).
+    async fn run_with(&self, request: RunRequest, state: &State) -> Result<RunResult, AgentError> {
+        state.set("input", request.input_text())?;
+        let text = self.run(state).await?;
+        Ok(RunResult {
+            messages: vec![request.input, run::model_turn(text.clone())],
+            ..RunResult::from_text(text)
+        })
+    }
+
+    /// Run one request as a stream of [`RunEvent`]s: text as the model writes
+    /// it, each tool call and result, then [`RunEvent::Finished`].
+    ///
+    /// The default emits the reply of [`run_with`](Self::run_with) as a single
+    /// delta. [`LlmTextAgent`] streams from the model; when it has middleware
+    /// (which may rewrite a reply, e.g. to redact it), each model turn is
+    /// emitted only after the middleware has seen it.
+    fn run_stream<'a>(
+        &'a self,
+        request: RunRequest,
+        state: State,
+    ) -> futures_util::stream::BoxStream<'a, Result<RunEvent, AgentError>> {
+        use futures_util::StreamExt;
+
+        futures_util::stream::once(async move { self.run_with(request, &state).await })
+            .flat_map(|outcome| {
+                let events = match outcome {
+                    Ok(result) if result.text.is_empty() => vec![Ok(RunEvent::Finished(result))],
+                    Ok(result) => vec![
+                        Ok(RunEvent::TextDelta(result.text.clone())),
+                        Ok(RunEvent::Finished(result)),
+                    ],
+                    Err(e) => vec![Err(e)],
+                };
+                futures_util::stream::iter(events)
+            })
+            .boxed()
+    }
+
+    /// Stream the reply to one question, with no history and fresh state.
+    ///
+    /// ```
+    /// use futures_util::StreamExt;
+    /// use gemini_adk_rs::llm::MockLlm;
+    /// use gemini_adk_rs::text::{LlmTextAgent, RunEvent, TextAgent};
+    ///
+    /// # tokio_test::block_on(async {
+    /// let agent = LlmTextAgent::new("storyteller", MockLlm::text("Once upon a time"));
+    /// let mut events = agent.stream("Tell me a story.");
+    /// let mut story = String::new();
+    /// while let Some(event) = events.next().await {
+    ///     if let RunEvent::TextDelta(text) = event.unwrap() {
+    ///         story.push_str(&text);
+    ///     }
+    /// }
+    /// assert_eq!(story, "Once upon a time");
+    /// # });
+    /// ```
+    fn stream(
+        &self,
+        prompt: impl Into<String>,
+    ) -> futures_util::stream::BoxStream<'_, Result<RunEvent, AgentError>>
+    where
+        Self: Sized,
+    {
+        self.run_stream(RunRequest::new(prompt), State::new())
+    }
+
+    /// Ask one question, with no history and fresh state, and get the reply.
+    async fn ask(&self, prompt: impl Into<String> + Send) -> Result<String, AgentError>
+    where
+        Self: Sized,
+    {
+        Ok(self
+            .run_with(RunRequest::new(prompt), &State::new())
+            .await?
+            .text)
+    }
+
+    /// Ask one question and get the reply as a `T`.
+    ///
+    /// `T`'s JSON Schema is sent as the response schema. If the reply still
+    /// does not parse, the model is shown the error and asked once more;
+    /// a second failure is [`AgentError::InvalidOutput`].
+    async fn ask_as<T>(&self, prompt: impl Into<String> + Send) -> Result<T, AgentError>
+    where
+        Self: Sized,
+        T: serde::de::DeserializeOwned + schemars::JsonSchema + Send,
+    {
+        let schema = crate::tool::wire_schema::<T>();
+        let state = State::new();
+        let first = self
+            .run_with(
+                RunRequest::new(prompt).response_schema(schema.clone()),
+                &state,
+            )
+            .await?;
+        let reason = match first.parse::<T>() {
+            Err(AgentError::InvalidOutput { reason, .. }) => reason,
+            parsed => return parsed,
+        };
+        let repair = RunRequest::new(format!(
+            "That reply could not be read as the requested JSON ({reason}). \
+             Reply again with only JSON that matches the schema."
+        ))
+        .history(first.messages)
+        .response_schema(schema);
+        self.run_with(repair, &state).await?.parse::<T>()
+    }
+
+    /// Start a conversation that remembers its turns. See [`Chat`].
+    fn chat(&self) -> Chat<&Self>
+    where
+        Self: Sized,
+    {
+        Chat::new(self)
+    }
 }
 
 // Verify object safety at compile time.
@@ -73,54 +234,58 @@ const _: () = {
     fn _assert_object_safe(_: &dyn TextAgent) {}
 };
 
+/// Forward every required method, so a wrapper behaves exactly like the agent
+/// it holds (including an overridden `run_with`).
+macro_rules! forward_text_agent {
+    ($($wrapper:ty),*) => {$(
+        #[async_trait]
+        impl<A: TextAgent + ?Sized> TextAgent for $wrapper {
+            fn name(&self) -> &str {
+                (**self).name()
+            }
+
+            async fn run(&self, state: &State) -> Result<String, AgentError> {
+                (**self).run(state).await
+            }
+
+            async fn run_with(
+                &self,
+                request: RunRequest,
+                state: &State,
+            ) -> Result<RunResult, AgentError> {
+                (**self).run_with(request, state).await
+            }
+
+            fn run_stream<'a>(
+                &'a self,
+                request: RunRequest,
+                state: State,
+            ) -> futures_util::stream::BoxStream<'a, Result<RunEvent, AgentError>> {
+                (**self).run_stream(request, state)
+            }
+        }
+    )*};
+}
+
+// A shared agent is an agent, so a built `Arc<dyn TextAgent>` can be passed
+// straight back into any combinator or `agent_tool` without a cast; a borrow
+// is one too, which is what `chat()` holds.
+forward_text_agent!(std::sync::Arc<A>, Box<A>, &A);
+
 // ── Tests ─────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm::{BaseLlm, LlmError, LlmRequest, LlmResponse};
-    use gemini_genai_rs::prelude::{Content, FunctionCall, Part, Role};
+    use crate::llm::{BaseLlm, LlmError, LlmResponse, MockLlm};
+    use gemini_genai_rs::prelude::Part;
     use std::sync::Arc;
     use std::time::Duration;
 
-    /// A mock LLM that returns a fixed response.
-    struct FixedLlm {
-        response: String,
-    }
-
-    #[async_trait]
-    impl BaseLlm for FixedLlm {
-        fn model_id(&self) -> &str {
-            "fixed-mock"
-        }
-
-        async fn generate(&self, _req: LlmRequest) -> Result<LlmResponse, LlmError> {
-            Ok(LlmResponse {
-                content: Content {
-                    role: Some(Role::Model),
-                    parts: vec![Part::Text {
-                        text: self.response.clone(),
-                    }],
-                },
-                finish_reason: Some("STOP".into()),
-                usage: None,
-            })
-        }
-    }
-
-    /// A mock LLM that echoes the input back with a prefix.
-    struct EchoLlm {
-        prefix: String,
-    }
-
-    #[async_trait]
-    impl BaseLlm for EchoLlm {
-        fn model_id(&self) -> &str {
-            "echo-mock"
-        }
-
-        async fn generate(&self, req: LlmRequest) -> Result<LlmResponse, LlmError> {
-            let input_text: String = req
+    /// A model that echoes every text part it was sent, after `prefix`.
+    fn echo(prefix: &'static str) -> MockLlm {
+        MockLlm::from_fn(move |req| {
+            let input: Vec<&str> = req
                 .contents
                 .iter()
                 .flat_map(|c| &c.parts)
@@ -128,87 +293,17 @@ mod tests {
                     Part::Text { text } => Some(text.as_str()),
                     _ => None,
                 })
-                .collect::<Vec<_>>()
-                .join(" ");
-
-            Ok(LlmResponse {
-                content: Content {
-                    role: Some(Role::Model),
-                    parts: vec![Part::Text {
-                        text: format!("{}{}", self.prefix, input_text),
-                    }],
-                },
-                finish_reason: Some("STOP".into()),
-                usage: None,
-            })
-        }
+                .collect();
+            Ok(LlmResponse::from_text(format!(
+                "{prefix}{}",
+                input.join(" ")
+            )))
+        })
     }
 
-    /// A mock LLM that issues a tool call on first request, then returns text.
-    struct ToolCallingLlm {
-        tool_name: String,
-        tool_args: serde_json::Value,
-        final_response: String,
-    }
-
-    #[async_trait]
-    impl BaseLlm for ToolCallingLlm {
-        fn model_id(&self) -> &str {
-            "tool-mock"
-        }
-
-        async fn generate(&self, req: LlmRequest) -> Result<LlmResponse, LlmError> {
-            // Check if we already have a function response in the conversation.
-            let has_tool_response = req.contents.iter().any(|c| {
-                c.parts
-                    .iter()
-                    .any(|p| matches!(p, Part::FunctionResponse { .. }))
-            });
-
-            if has_tool_response {
-                // Already dispatched — return final text.
-                Ok(LlmResponse {
-                    content: Content {
-                        role: Some(Role::Model),
-                        parts: vec![Part::Text {
-                            text: self.final_response.clone(),
-                        }],
-                    },
-                    finish_reason: Some("STOP".into()),
-                    usage: None,
-                })
-            } else {
-                // First call — issue tool call.
-                Ok(LlmResponse {
-                    content: Content {
-                        role: Some(Role::Model),
-                        parts: vec![Part::FunctionCall {
-                            function_call: FunctionCall {
-                                name: self.tool_name.clone(),
-                                args: self.tool_args.clone(),
-                                id: Some("call-1".into()),
-                            },
-                        }],
-                    },
-                    finish_reason: None,
-                    usage: None,
-                })
-            }
-        }
-    }
-
-    /// A mock LLM that always fails.
-    struct FailLlm;
-
-    #[async_trait]
-    impl BaseLlm for FailLlm {
-        fn model_id(&self) -> &str {
-            "fail-mock"
-        }
-
-        async fn generate(&self, _req: LlmRequest) -> Result<LlmResponse, LlmError> {
-            Err(LlmError::RequestFailed("intentional failure".into()))
-        }
+    /// A model whose every call fails.
+    fn failing() -> MockLlm {
+        MockLlm::from_fn(|_| Err(LlmError::RequestFailed("intentional failure".into())))
     }
 
     // ── TextAgent trait ──
@@ -218,13 +313,245 @@ mod tests {
         fn _assert(_: &dyn TextAgent) {}
     }
 
+    /// A built agent is handed around as `Arc<dyn TextAgent>`; it must satisfy
+    /// a generic `impl TextAgent` bound without a cast or a second API.
+    #[tokio::test]
+    async fn shared_and_boxed_agents_are_agents() {
+        async fn run_it(agent: impl TextAgent) -> String {
+            agent.run(&State::new()).await.unwrap()
+        }
+        let built: Arc<dyn TextAgent> = Arc::new(LlmTextAgent::new("a", MockLlm::text("from arc")));
+        assert_eq!(built.name(), "a");
+        assert_eq!(run_it(built).await, "from arc");
+        let boxed: Box<dyn TextAgent> = Box::new(FnTextAgent::new("b", |_| Ok("from box".into())));
+        assert_eq!(run_it(boxed).await, "from box");
+    }
+
+    // ── run_with, ask, ask_as, chat ──
+
+    #[tokio::test]
+    async fn run_with_reports_messages_usage_and_tool_calls() {
+        let llm = MockLlm::script([
+            LlmResponse::tool_call("get_weather", serde_json::json!({"city": "Oslo"}))
+                .with_usage(10, 2),
+            LlmResponse::from_text("Cold.").with_usage(20, 1),
+        ]);
+        let mut dispatcher = crate::tool::ToolDispatcher::new();
+        dispatcher.register_function(Arc::new(crate::tool::SimpleTool::new(
+            "get_weather",
+            "Get weather",
+            None,
+            |_| async { Ok(serde_json::json!({"temp": -3})) },
+        )));
+        let agent = LlmTextAgent::new("weather", llm).tools(Arc::new(dispatcher));
+
+        let result = agent
+            .run_with(RunRequest::new("Weather in Oslo?"), &State::new())
+            .await
+            .unwrap();
+        assert_eq!(result.text, "Cold.");
+        assert_eq!(result.model_calls, 2);
+        assert_eq!(result.usage, crate::llm::TokenUsage::new(30, 3));
+        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(result.tool_calls[0].name, "get_weather");
+        assert_eq!(result.tool_calls[0].outcome.as_ref().unwrap()["temp"], -3);
+        // user, model(call), user(tool response), model(text)
+        assert_eq!(result.messages.len(), 4);
+    }
+
+    #[tokio::test]
+    async fn ask_as_repairs_once_then_gives_up() {
+        #[derive(serde::Deserialize, schemars::JsonSchema, Debug)]
+        #[allow(dead_code)]
+        struct Answer {
+            value: u32,
+        }
+
+        let fixed = MockLlm::script([
+            LlmResponse::from_text("forty-two"),
+            LlmResponse::from_text(r#"{"value": 42}"#),
+        ]);
+        let agent = LlmTextAgent::new("a", fixed.clone());
+        let answer: Answer = agent.ask_as("What is 6 x 7?").await.unwrap();
+        assert_eq!(answer.value, 42);
+        let repair = fixed.last_request().unwrap();
+        assert_eq!(
+            repair.contents.len(),
+            3,
+            "the bad reply is shown to the model"
+        );
+        assert!(repair.response_json_schema.is_some());
+
+        let stubborn = MockLlm::text("no");
+        let agent = LlmTextAgent::new("b", stubborn.clone());
+        let err = agent.ask_as::<Answer>("?").await.unwrap_err();
+        assert!(matches!(err, AgentError::InvalidOutput { .. }), "{err}");
+        assert_eq!(stubborn.call_count(), 2, "one repair, not a loop");
+    }
+
+    #[tokio::test]
+    async fn any_agent_can_ask_and_chat() {
+        let upper = FnTextAgent::new("upper", |state| {
+            Ok(state
+                .get::<String>("input")
+                .unwrap_or_default()
+                .to_uppercase())
+        });
+        assert_eq!(upper.ask("hi").await.unwrap(), "HI");
+        let shared: Arc<dyn TextAgent> = Arc::new(upper);
+        let mut chat = shared.chat();
+        assert_eq!(chat.send("one").await.unwrap(), "ONE");
+        assert_eq!(chat.send("two").await.unwrap(), "TWO");
+        assert_eq!(chat.history().len(), 4);
+    }
+
+    #[tokio::test]
+    async fn a_failed_turn_is_not_added_to_the_history() {
+        let llm = MockLlm::script([LlmResponse::from_text("first")]).then_fail(LlmError::Api {
+            status: 503,
+            message: "overloaded".into(),
+        });
+        let agent = LlmTextAgent::new("a", llm);
+        let mut chat = Chat::new(&agent);
+        chat.send("1").await.unwrap();
+        let err = chat.send("2").await.unwrap_err();
+        assert!(err.as_llm().is_some_and(LlmError::is_retryable), "{err}");
+        assert_eq!(chat.history().len(), 2);
+    }
+
+    /// A model that calls a tool on an agent with no tools is told so, instead
+    /// of receiving an empty turn and calling again until the round limit.
+    #[tokio::test]
+    async fn a_tool_call_without_tools_is_answered_not_found() {
+        let llm = MockLlm::script([
+            LlmResponse::tool_call("imaginary", serde_json::json!({})),
+            LlmResponse::from_text("Sorry, I cannot do that."),
+        ]);
+        let agent = LlmTextAgent::new("toolless", llm.clone());
+        let result = agent
+            .run_with(RunRequest::new("Use your tool."), &State::new())
+            .await
+            .unwrap();
+        assert_eq!(result.text, "Sorry, I cannot do that.");
+        assert!(matches!(
+            result.tool_calls[0].outcome,
+            Err(crate::error::ToolError::NotFound(_))
+        ));
+    }
+
+    // ── Streaming ──
+
+    async fn collect(
+        mut events: futures_util::stream::BoxStream<'_, Result<RunEvent, AgentError>>,
+    ) -> Vec<RunEvent> {
+        use futures_util::StreamExt;
+        let mut out = Vec::new();
+        while let Some(event) = events.next().await {
+            out.push(event.unwrap());
+        }
+        out
+    }
+
+    fn deltas(events: &[RunEvent]) -> String {
+        events
+            .iter()
+            .filter_map(|e| match e {
+                RunEvent::TextDelta(t) => Some(t.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Text arrives as the model writes it, tool calls and results in between,
+    /// and `Finished` carries the same result `run_with` would return.
+    #[tokio::test]
+    async fn stream_reports_text_tools_and_the_result_in_order() {
+        let llm = MockLlm::script([
+            LlmResponse::tool_call("get_weather", serde_json::json!({"city": "Oslo"})),
+            LlmResponse::from_text("It is cold today").with_usage(9, 4),
+        ]);
+        let mut dispatcher = crate::tool::ToolDispatcher::new();
+        dispatcher.register_function(Arc::new(crate::tool::SimpleTool::new(
+            "get_weather",
+            "Get weather",
+            None,
+            |_| async { Ok(serde_json::json!({"temp": -3})) },
+        )));
+        let agent = LlmTextAgent::new("weather", llm).tools(Arc::new(dispatcher));
+
+        let events = collect(agent.stream("Weather in Oslo?")).await;
+        assert!(matches!(&events[0], RunEvent::ToolCall { name, .. } if name == "get_weather"));
+        assert!(matches!(&events[1], RunEvent::ToolResult(r) if r.outcome.is_ok()));
+        let text_deltas = events
+            .iter()
+            .filter(|e| matches!(e, RunEvent::TextDelta(_)))
+            .count();
+        assert_eq!(text_deltas, 4, "one per word from the mock: {events:?}");
+        assert_eq!(deltas(&events), "It is cold today");
+        match events.last() {
+            Some(RunEvent::Finished(result)) => {
+                assert_eq!(result.text, "It is cold today");
+                assert_eq!(result.usage, crate::llm::TokenUsage::new(9, 4));
+                assert_eq!(result.tool_calls.len(), 1);
+            }
+            other => panic!("the last event must be Finished, got {other:?}"),
+        }
+    }
+
+    /// A middleware that rewrites replies must see a turn before any of it is
+    /// streamed, or a redaction could be bypassed through the deltas.
+    #[tokio::test]
+    async fn middleware_sees_a_reply_before_it_is_streamed() {
+        struct Redact;
+        #[async_trait]
+        impl crate::middleware::Middleware for Redact {
+            fn name(&self) -> &str {
+                "redact"
+            }
+            async fn after_model(
+                &self,
+                _request: &crate::llm::LlmRequest,
+                _response: &LlmResponse,
+            ) -> Result<Option<LlmResponse>, AgentError> {
+                Ok(Some(LlmResponse::from_text("[redacted]")))
+            }
+        }
+        let agent = LlmTextAgent::new("guarded", MockLlm::text("the secret is 42"))
+            .add_middleware(Arc::new(Redact));
+        let events = collect(agent.stream("?")).await;
+        assert_eq!(deltas(&events), "[redacted]", "{events:?}");
+    }
+
+    #[tokio::test]
+    async fn any_agent_streams_and_chat_streams_into_its_history() {
+        let echo = FnTextAgent::new("echo", |state| {
+            Ok(state.get::<String>("input").unwrap_or_default())
+        });
+        let events = collect(echo.stream("hi")).await;
+        assert_eq!(deltas(&events), "hi");
+
+        let agent = LlmTextAgent::new("a", MockLlm::text("hello there"));
+        let mut chat = agent.chat();
+        let events = collect(chat.send_stream("hi")).await;
+        assert_eq!(deltas(&events), "hello there");
+        assert_eq!(chat.history().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_failed_stream_ends_with_the_error() {
+        use futures_util::StreamExt;
+        let agent = LlmTextAgent::new("a", failing());
+        let mut events = agent.stream("?");
+        let last = events.next().await.expect("one event");
+        assert!(matches!(last, Err(AgentError::Llm(_))), "{last:?}");
+        assert!(events.next().await.is_none());
+    }
+
     // ── LlmTextAgent ──
 
     #[tokio::test]
     async fn llm_text_agent_returns_text() {
-        let llm = Arc::new(FixedLlm {
-            response: "Hello world".into(),
-        });
+        let llm = Arc::new(MockLlm::text("Hello world"));
         let agent = LlmTextAgent::new("greeter", llm).instruction("Say hello");
         let state = State::new();
         let result = agent.run(&state).await.unwrap();
@@ -234,9 +561,7 @@ mod tests {
 
     #[tokio::test]
     async fn llm_text_agent_reads_input_from_state() {
-        let llm = Arc::new(EchoLlm {
-            prefix: "Echo: ".into(),
-        });
+        let llm = Arc::new(echo("Echo: "));
         let agent = LlmTextAgent::new("echoer", llm);
         let state = State::new();
         let _ = state.set("input", "test message");
@@ -246,11 +571,10 @@ mod tests {
 
     #[tokio::test]
     async fn llm_text_agent_dispatches_tools() {
-        let llm = Arc::new(ToolCallingLlm {
-            tool_name: "get_weather".into(),
-            tool_args: serde_json::json!({"city": "London"}),
-            final_response: "The weather is sunny".into(),
-        });
+        let llm = MockLlm::script([
+            LlmResponse::tool_call("get_weather", serde_json::json!({"city": "London"})),
+            LlmResponse::from_text("The weather is sunny"),
+        ]);
 
         let mut dispatcher = crate::tool::ToolDispatcher::new();
         dispatcher.register_function(Arc::new(crate::tool::SimpleTool::new(
@@ -260,15 +584,29 @@ mod tests {
             |_args| async { Ok(serde_json::json!({"temp": 22})) },
         )));
 
-        let agent = LlmTextAgent::new("weather", llm).tools(Arc::new(dispatcher));
+        let agent = LlmTextAgent::new("weather", llm.clone()).tools(Arc::new(dispatcher));
         let state = State::new();
         let result = agent.run(&state).await.unwrap();
         assert_eq!(result, "The weather is sunny");
+
+        // The second model call carries the tool's result back.
+        let followup = llm.last_request().expect("two model calls");
+        let returned = followup
+            .contents
+            .iter()
+            .flat_map(|c| &c.parts)
+            .find_map(|p| match p {
+                Part::FunctionResponse { function_response } => Some(function_response),
+                _ => None,
+            })
+            .expect("the tool result is sent back to the model");
+        assert_eq!(returned.name, "get_weather");
+        assert_eq!(returned.response["temp"], 22);
     }
 
     #[tokio::test]
     async fn llm_text_agent_propagates_llm_error() {
-        let llm = Arc::new(FailLlm);
+        let llm = Arc::new(failing());
         let agent = LlmTextAgent::new("failer", llm);
         let state = State::new();
         let result = agent.run(&state).await;
@@ -306,12 +644,8 @@ mod tests {
 
     #[tokio::test]
     async fn sequential_chains_agents() {
-        let llm1: Arc<dyn BaseLlm> = Arc::new(FixedLlm {
-            response: "step1 done".into(),
-        });
-        let llm2: Arc<dyn BaseLlm> = Arc::new(EchoLlm {
-            prefix: "step2: ".into(),
-        });
+        let llm1: Arc<dyn BaseLlm> = Arc::new(MockLlm::text("step1 done"));
+        let llm2: Arc<dyn BaseLlm> = Arc::new(echo("step2: "));
 
         let children: Vec<Arc<dyn TextAgent>> = vec![
             Arc::new(LlmTextAgent::new("step1", llm1)),
@@ -329,18 +663,11 @@ mod tests {
     #[tokio::test]
     async fn sequential_stops_on_error() {
         let children: Vec<Arc<dyn TextAgent>> = vec![
-            Arc::new(LlmTextAgent::new(
-                "ok",
-                Arc::new(FixedLlm {
-                    response: "fine".into(),
-                }),
-            )),
-            Arc::new(LlmTextAgent::new("fail", Arc::new(FailLlm))),
+            Arc::new(LlmTextAgent::new("ok", Arc::new(MockLlm::text("fine")))),
+            Arc::new(LlmTextAgent::new("fail", Arc::new(failing()))),
             Arc::new(LlmTextAgent::new(
                 "never",
-                Arc::new(FixedLlm {
-                    response: "unreachable".into(),
-                }),
+                Arc::new(MockLlm::text("unreachable")),
             )),
         ];
 

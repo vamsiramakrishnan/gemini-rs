@@ -2,6 +2,7 @@
 name = "gemini-adk-fluent-rs"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 description = "Fluent DX for Gemini Live — builder API, operator algebra, composition modules"
 keywords = ["gemini", "agents", "fluent", "builder", "composition"]
@@ -13,9 +14,10 @@ readme = "README.md"
 # docs.rs builds with default features unless told otherwise, which hides
 # every feature-gated module and prints no "available on crate feature X only"
 # badge for what it does show. `docsrs` turns those badges on.
-# Every feature except `voice-io`: that one pulls `cpal`, whose ALSA backend
-# needs libasound headers at build time and the docs.rs builder has none.
-# `talk()` therefore has no docs.rs page; the book covers it instead.
+# Every feature except `voice-io` and the `voice`/`full` bundles that include
+# it: `voice-io` pulls `cpal`, whose ALSA backend needs libasound headers at
+# build time and the docs.rs builder has none. `talk()` therefore has no
+# docs.rs page; the book covers it instead.
 [package.metadata.docs.rs]
 features = ["templates", "default", "gemini-llm", "http-tools", "denoise", "dsp", "sip", "tracing-support", "vad-wavekat", "tls-native", "tls-rustls", "otel", "otel-otlp", "otel-gcp"]
 rustdoc-args = ["--cfg", "docsrs"]
@@ -28,6 +30,8 @@ bytes = "1"
 # Targeted features only; tests get `full` via dev-dependencies.
 tokio = { version = "1", features = ["rt", "macros", "sync", "time"] }
 async-trait = "0.1"
+# `StreamExt`, re-exported by the prelude for consuming `agent.stream(..)`.
+futures-util = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 schemars = "0.8"
@@ -61,6 +65,14 @@ reqwest = { version = "0.12", default-features = false, features = [
 parking_lot = "0.12"
 
 [features]
+# Bundles. `voice` is everything a microphone/speaker application wants;
+# `full` is every optional capability with the default TLS backend. Neither
+# is on by default: `voice-io` needs system audio headers and `full` pulls
+# the SIP stack and an OpenTelemetry exporter, which most text agents never
+# use. Both keep `tls-native`; pick `tls-rustls` with `--no-default-features`
+# and name the pieces instead.
+voice = ["voice-io", "denoise", "dsp", "vad-wavekat"]
+full = ["voice", "sip", "http-tools", "templates", "gemini-llm", "tls-native", "otel-otlp"]
 templates = ["gemini-adk-rs/templates"]
 # One TLS backend and text generation are on by default: `AgentBuilder::build`
 # runs on `GeminiLlm`, which is pure Rust, so a plain `cargo add` answers a

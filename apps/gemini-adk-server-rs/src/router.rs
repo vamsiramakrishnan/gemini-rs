@@ -28,44 +28,44 @@ pub fn build_api_router(state: ServerState) -> Router {
         .route("/run_sse", post(handlers::run_agent_sse))
         // Agent discovery
         .route("/list-apps", get(handlers::list_agents))
-        .route("/apps/:name", get(handlers::get_agent))
+        .route("/apps/{name}", get(handlers::get_agent))
         // Session management
         .route(
-            "/apps/:app/users/:user/sessions",
+            "/apps/{app}/users/{user}/sessions",
             get(handlers::list_sessions).post(handlers::create_session),
         )
         .route(
-            "/apps/:app/users/:user/sessions/:id",
+            "/apps/{app}/users/{user}/sessions/{id}",
             get(handlers::get_session).delete(handlers::delete_session),
         )
         .route(
-            "/apps/:app/users/:user/sessions/:id/events",
+            "/apps/{app}/users/{user}/sessions/{id}/events",
             get(handlers::get_session_events),
         )
         .route(
-            "/apps/:app/users/:user/sessions/:id/state",
+            "/apps/{app}/users/{user}/sessions/{id}/state",
             get(handlers::get_session_state),
         )
         .route(
-            "/apps/:app/users/:user/sessions/:id/rewind",
+            "/apps/{app}/users/{user}/sessions/{id}/rewind",
             post(handlers::rewind_session),
         )
         // Artifacts
         .route(
-            "/apps/:app/users/:user/sessions/:session/artifacts",
+            "/apps/{app}/users/{user}/sessions/{session}/artifacts",
             get(handlers::list_artifacts),
         )
         .route(
-            "/apps/:app/users/:user/sessions/:session/artifacts/:name",
+            "/apps/{app}/users/{user}/sessions/{session}/artifacts/{name}",
             get(handlers::get_artifact),
         )
         .route(
-            "/apps/:app/users/:user/sessions/:session/artifacts/:name/:version",
+            "/apps/{app}/users/{user}/sessions/{session}/artifacts/{name}/{version}",
             get(handlers::get_artifact_version),
         )
         // Debug
         .route("/debug/traces", get(handlers::list_traces))
-        .route("/debug/trace/:trace_id", get(handlers::get_trace))
+        .route("/debug/trace/{trace_id}", get(handlers::get_trace))
         .route("/debug/health", get(handlers::health_check))
         // Eval
         .route("/eval/run", post(handlers::run_eval))

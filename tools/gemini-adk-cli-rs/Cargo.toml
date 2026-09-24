@@ -2,6 +2,7 @@
 name = "gemini-adk-cli-rs"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 description = "CLI tool for Gemini ADK agent development — create, run, web, eval, deploy, api_server"
 keywords = ["gemini", "agents", "adk", "cli", "tools"]
@@ -44,3 +45,9 @@ bytes = "1"
 [[bin]]
 name = "adk"
 path = "src/main.rs"
+
+# The `src/main.rs` that `adk create` writes, compiled here so every
+# scaffolded project is known to build and pass clippy.
+[[example]]
+name = "scaffold-agent"
+path = "templates/agent/main.rs"

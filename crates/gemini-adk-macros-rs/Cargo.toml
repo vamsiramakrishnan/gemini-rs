@@ -2,6 +2,7 @@
 name = "gemini-adk-macros-rs"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 description = "Procedural macros for gemini-adk-rs — the #[tool] attribute for turning async fns into Gemini tools"
 keywords = ["gemini", "adk", "macros", "proc-macro", "tools"]

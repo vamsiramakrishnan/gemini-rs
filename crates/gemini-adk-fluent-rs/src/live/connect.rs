@@ -17,6 +17,25 @@ pub(crate) fn merge_ambient(flow: &mut gemini_adk_rs::flow::Flow, ambient: &[Str
     }
 }
 
+/// The one governance object a session drives: the main monitor plus every
+/// digression and repair policy the builder holds. Ambient tools are merged
+/// into each digression's flow too, so a cross-cutting tool stays admitted
+/// while the main flow is suspended.
+pub(crate) fn assemble_stack(
+    main: gemini_adk_rs::flow::FlowMonitor,
+    digressions: Vec<gemini_adk_rs::flow::Overlay>,
+    repair: std::collections::BTreeMap<String, gemini_adk_rs::flow::RepairPolicy>,
+    ambient: &[String],
+) -> gemini_adk_rs::flow::FlowStack {
+    let overlays = digressions.into_iter().map(|mut ov| {
+        merge_ambient(ov.flow_mut(), ambient);
+        ov
+    });
+    gemini_adk_rs::flow::FlowStack::from_monitor(main)
+        .with_overlays(overlays)
+        .with_repairs(repair)
+}
+
 impl Live {
     /// Connect using a Google AI API key.
     pub async fn connect_google_ai(
@@ -92,12 +111,18 @@ impl Live {
     }
 
     async fn build_and_connect(mut self) -> Result<LiveHandle, gemini_adk_rs::error::AgentError> {
-        // Builder setters cannot fail; problems they found are reported here.
-        if !self.config_errors.is_empty() {
-            return Err(gemini_adk_rs::error::ConfigError {
-                issues: std::mem::take(&mut self.config_errors),
-            }
-            .into());
+        // Builder setters cannot fail; problems they found are reported here,
+        // with a `T::confirm` tool that nothing can confirm (agent and MCP
+        // tools resolved below are never gated, so this check is complete).
+        let mut issues = std::mem::take(&mut self.config_errors);
+        let unconfirmed = self.unconfirmed_tools();
+        if !unconfirmed.is_empty() {
+            issues.push(
+                crate::testing::LiveViolation::UnconfirmedTools { tools: unconfirmed }.to_string(),
+            );
+        }
+        if !issues.is_empty() {
+            return Err(gemini_adk_rs::error::ConfigError { issues }.into());
         }
         if uses_audio_output(&self.config) {
             self.config = self.config.voice_realtime_defaults();
@@ -275,7 +300,12 @@ impl Live {
             for (step, agent, mode) in self.flow_actions {
                 monitor = monitor.on_enter(step, gemini_adk_rs::flow::on_enter(agent, mode));
             }
-            builder = builder.flow_monitor(monitor);
+            builder = builder.flow_stack(assemble_stack(
+                monitor,
+                self.digressions,
+                self.repair_policies,
+                &self.ambient_tools,
+            ));
         }
         builder = builder.tool_advisory(self.tool_advisory);
         if let Some(interval) = self.telemetry_interval {

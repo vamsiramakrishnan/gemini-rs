@@ -163,7 +163,7 @@ macro_rules! let_clone {
     };
 }
 
-/// The kernel prelude — the ~40 types a typical application touches.
+/// The kernel prelude — the names a typical application touches.
 ///
 /// Deliberately a kernel, not an everything-glob. Anything not here lives in
 /// a focused submodule and is one import away:
@@ -176,8 +176,9 @@ macro_rules! let_clone {
 /// | State prefixes / `SlotEvidence` | `use gemini_adk_fluent_rs::state::*;` |
 /// | Full flow vocabulary (`CompiledFlow`, `StepAction`, `Violation`, …) | `use gemini_adk_fluent_rs::flow::*;` |
 /// | `Agent` trait + operator/pattern internals | `use gemini_adk_fluent_rs::agents::*;` |
-/// | Conversation compiler (`Conversation`, `ConversationSpec`, …) | `use gemini_adk_fluent_rs::conversation::*;` |
-/// | A2A, motifs, policy, simulation, testing, orchestration, credentials, run_config | the same-named module, e.g. `use gemini_adk_fluent_rs::simulation::*;` |
+/// | Conversation compiler internals (`ResolverRegistry`, `StageSpec`, `OverlaySpec`, …) | `use gemini_adk_fluent_rs::conversation::*;` (`Conversation`, `ConversationSpec`, `CompiledConversation` are in the prelude) |
+/// | Serializable scenarios (`Scenario`, `SimStep`) | `use gemini_adk_fluent_rs::simulation::*;` (`Sim` is in the prelude) |
+/// | A2A, motifs, policy, testing, orchestration, credentials, run_config | the same-named module, e.g. `use gemini_adk_fluent_rs::policy::*;` |
 /// | Raw L0 wire types | `use gemini_adk_fluent_rs::wire::*;` |
 pub mod prelude {
     // ── Voice I/O: `.talk()` on a connected handle (feature `voice-io`) ──
@@ -212,11 +213,20 @@ pub mod prelude {
     // ── Governed flow (core vocabulary; full set in `crate::flow`) ──
     pub use gemini_adk_rs::flow::{Enforcement, Flow, FlowMonitor, Guard, Verdict};
 
+    // ── Conversations and the model-free simulator ──
+    // The authoring model above `Flow` and the deterministic driver that runs
+    // it without a model. They are the flagship of the crate, so they live on
+    // the same import line as `Live`; the compiler internals stay in
+    // `crate::conversation` and the serializable `Scenario` in
+    // `crate::simulation`.
+    pub use crate::conversation::{CompiledConversation, Conversation, ConversationSpec};
+    pub use crate::simulation::Sim;
+
     // ── State (prefix scopes + `SlotEvidence` in `crate::state`) ──
     pub use gemini_adk_rs::state::{State, StateKey};
 
     // ── LLM (core; request/response/registry in `crate::text`) ──
-    pub use gemini_adk_rs::llm::{BaseLlm, GeminiLlm, GeminiLlmParams};
+    pub use gemini_adk_rs::llm::{BaseLlm, GeminiLlm, GeminiLlmParams, LlmError};
 
     // ── Tools ──
     pub use gemini_adk_rs::tool::{
@@ -241,12 +251,21 @@ pub mod prelude {
 
     // ── Text-agent combinators (runtime details in `crate::text`) ──
     pub use gemini_adk_rs::text::{
-        DispatchTextAgent, FallbackTextAgent, FnTextAgent, JoinTextAgent, LlmTextAgent,
+        Chat, DispatchTextAgent, FallbackTextAgent, FnTextAgent, JoinTextAgent, LlmTextAgent,
         LoopTextAgent, MapOverTextAgent, ParallelTextAgent, RaceTextAgent, RouteRule,
-        RouteTextAgent, SequentialTextAgent, TapTextAgent, TaskRegistry, TextAgent,
-        TimeoutTextAgent,
+        RouteTextAgent, RunEvent, RunRequest, RunResult, SequentialTextAgent, TapTextAgent,
+        TaskRegistry, TextAgent, TimeoutTextAgent,
     };
 
-    // ── L0 wire protocol (ModelId, Voice, Content, Part, Role, …) ──
-    pub use gemini_genai_rs::prelude::*;
+    // ── L0 wire types an application names (the rest: `crate::wire`) ──
+    pub use gemini_genai_rs::prelude::{
+        ActivityHandling, ApiEndpoint, AudioFormat, AutomaticActivityDetection, Blob, Content,
+        FinishReason, FunctionCall, FunctionCallingBehavior, FunctionDeclaration, FunctionResponse,
+        FunctionResponseScheduling, GenerationConfig, HarmBlockThreshold, HarmCategory, Modality,
+        ModelId, Part, Role, SafetySetting, Sensitivity, ServerMessage, SessionConfig,
+        SessionEvent, SpeechConfig, ThinkingConfig, Tool, TurnCoverage, UsageMetadata, Voice,
+    };
+
+    // `while let Some(event) = agent.stream(..).next().await` needs this trait.
+    pub use futures_util::StreamExt;
 }

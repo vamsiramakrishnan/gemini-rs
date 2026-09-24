@@ -48,6 +48,8 @@ struct AgentBuilderInner {
     transfer_to_agent: Option<String>,
     /// Middleware layers to install on the compiled `LlmTextAgent`.
     middleware_layers: Vec<Arc<dyn Middleware>>,
+    /// Decides `T::confirm(..)` tool calls.
+    confirmation_provider: Option<Arc<dyn gemini_adk_rs::confirmation::ConfirmationProvider>>,
     /// Configuration problems found by setters (which cannot fail), reported
     /// as one [`ConfigError`] by [`AgentBuilder::build`].
     config_errors: Vec<String>,
@@ -185,6 +187,7 @@ impl AgentBuilder {
                 output_key: None,
                 transfer_to_agent: None,
                 middleware_layers: Vec::new(),
+                confirmation_provider: None,
                 config_errors: Vec::new(),
             }),
         }
@@ -493,6 +496,16 @@ impl AgentBuilder {
         Self::with(inner)
     }
 
+    /// Constrain every reply to JSON shaped like `T`, using `T`'s schema.
+    ///
+    /// Read the reply back with [`RunResult::parse`](gemini_adk_rs::text::RunResult::parse),
+    /// or ask for a `T` directly with
+    /// [`TextAgent::ask_as`], which also
+    /// repairs a reply that does not parse.
+    pub fn output<T: schemars::JsonSchema>(self) -> Self {
+        self.output_schema(gemini_adk_rs::tool::wire_schema::<T>())
+    }
+
     /// Set the output key — agent's final text response is auto-saved to this state key.
     pub fn output_key(self, key: impl Into<String>) -> Self {
         let mut inner = self.mutate();
@@ -510,11 +523,13 @@ impl AgentBuilder {
     // ── Upstream naming aliases ──
 
     /// Alias for [`instruction`](Self::instruction) — matches upstream Python `Agent.instruct()`.
+    #[deprecated(since = "2.1.0", note = "use `instruction`")]
     pub fn instruct(self, inst: impl Into<String>) -> Self {
         self.instruction(inst)
     }
 
     /// Alias for [`description`](Self::description) — matches upstream Python `Agent.describe()`.
+    #[deprecated(since = "2.1.0", note = "use `description`")]
     pub fn describe(self, desc: impl Into<String>) -> Self {
         self.description(desc)
     }
@@ -637,6 +652,7 @@ impl AgentBuilder {
     }
 
     /// Disallow transfer to peer agents.
+    #[deprecated(since = "2.1.0", note = "use `isolate`, which this has always called")]
     pub fn no_peers(self) -> Self {
         self.isolate()
     }
@@ -661,18 +677,114 @@ impl AgentBuilder {
         Self::with(inner)
     }
 
+    /// Gate `T::confirm(..)` tools behind a confirmation provider, as
+    /// [`Live::confirmation_provider`](crate::live::Live::confirmation_provider)
+    /// does for a session.
+    ///
+    /// A declined call returns [`ToolError::Declined`](gemini_adk_rs::error::ToolError::Declined)
+    /// with the reason to the model instead of running the tool. An agent with
+    /// a confirmation-gated tool and no provider does not build.
+    pub fn confirmation_provider(
+        self,
+        provider: Arc<dyn gemini_adk_rs::confirmation::ConfirmationProvider>,
+    ) -> Self {
+        let mut inner = self.mutate();
+        inner.confirmation_provider = Some(provider);
+        Self::with(inner)
+    }
+
     // ── Compilation ──
+
+    /// Settings a text agent cannot honour, each with what to do instead.
+    ///
+    /// Voice, audio output and agent transfer belong to Live sessions; a text
+    /// agent that silently ignored them would behave differently from the
+    /// configuration that describes it.
+    fn text_agent_issues(&self) -> Vec<String> {
+        let inner = &self.inner;
+        let mut issues = Vec::new();
+        if inner.voice.is_some() {
+            issues.push(
+                "`voice(..)` has no effect on a text agent, which returns text; \
+                 remove it, or set the voice on `Live::builder()`"
+                    .to_string(),
+            );
+        }
+        if inner
+            .response_modalities
+            .as_ref()
+            .is_some_and(|m| m.iter().any(|m| *m != Modality::Text))
+        {
+            issues.push(
+                "a text agent only produces text; audio and image `response_modalities` \
+                 need a `Live::builder()` session"
+                    .to_string(),
+            );
+        }
+        if let Some(model) = &inner.model
+            && gemini_adk_rs::llm::ModelCapabilities::infer_from_id(model.as_str()).live_bidi
+        {
+            issues.push(format!(
+                "`{model}` is a Live model, which the text API does not serve; use a text \
+                 model such as `gemini-flash-latest`, or run it on `Live::builder()`"
+            ));
+        }
+        if inner.confirmation_provider.is_none() {
+            let gated: Vec<String> = inner
+                .tools
+                .iter()
+                .filter_map(|entry| match entry {
+                    ToolEntry::Runtime(t) => match t.to_tool_kind() {
+                        ToolKind::Function(f) if f.requires_confirmation() => {
+                            Some(f.name().to_string())
+                        }
+                        _ => None,
+                    },
+                    ToolEntry::Declaration(_) => None,
+                })
+                .collect();
+            if !gated.is_empty() {
+                issues.push(format!(
+                    "`{}` must be confirmed before running (`T::confirm`), but nothing can \
+                     confirm it; set `.confirmation_provider(..)`",
+                    gated.join("`, `")
+                ));
+            }
+        }
+        let transfer: Vec<&str> = [
+            (!inner.sub_agents.is_empty(), "sub_agent"),
+            (inner.transfer_to_agent.is_some(), "transfer_to"),
+            (inner.stay, "stay"),
+            (inner.isolate, "isolate/no_peers"),
+        ]
+        .into_iter()
+        .filter_map(|(set, name)| set.then_some(name))
+        .collect();
+        if !transfer.is_empty() {
+            issues.push(format!(
+                "`{}` configure agent transfer, which a text agent does not perform; \
+                 compose text agents with `>>`, `|` and `T::agent(..)` instead",
+                transfer.join("`, `")
+            ));
+        }
+        issues
+    }
 
     /// Compile this builder into an executable `TextAgent`.
     ///
-    /// The LLM is required because `TextAgent` makes `BaseLlm::generate()` calls.
-    /// Builder configuration (instruction, temperature, tools) is transferred to
-    /// the resulting agent.
+    /// `llm` is any [`BaseLlm`]. Every setting reaches the requests the agent
+    /// sends: model, instruction, sampling (`temperature`, `top_p`, `top_k`,
+    /// `max_output_tokens`, `stop_sequences`), `thinking`, `output_schema`,
+    /// built-in tools and function tools, middleware, and `output_key`.
+    /// `writes`, `reads` and `description` are declarations for
+    /// [`check_contracts`](crate::testing::check_contracts) and tool metadata.
     ///
-    /// Fails with a [`ConfigError`] when the configuration cannot be realized
-    /// by a text agent — today, an MCP toolset (`T::mcp`) in
-    /// [`tools`](Self::tools), which needs the async connect only a `Live`
-    /// session performs.
+    /// Fails with a [`ConfigError`] listing every setting a text agent cannot
+    /// honour, rather than dropping it: `voice`, audio modalities, a Live
+    /// model, agent-transfer settings (`sub_agent`, `transfer_to`, `stay`,
+    /// `isolate`), an MCP toolset (`T::mcp`), which needs the async connect
+    /// only a `Live` session performs, and a `T::confirm` tool with no
+    /// [`confirmation_provider`](Self::confirmation_provider).
     ///
     /// ```no_run
     /// # use gemini_adk_fluent_rs::prelude::*;
@@ -689,29 +801,58 @@ impl AgentBuilder {
     /// # let _ = result; Ok(())
     /// # }
     /// ```
-    pub fn build(self, llm: Arc<dyn BaseLlm>) -> Result<Arc<dyn TextAgent>, ConfigError> {
-        if !self.inner.config_errors.is_empty() {
-            return Err(ConfigError {
-                issues: self.inner.config_errors.clone(),
-            });
+    pub fn build(self, llm: impl BaseLlm + 'static) -> Result<Arc<dyn TextAgent>, ConfigError> {
+        let mut issues = self.inner.config_errors.clone();
+        issues.extend(self.text_agent_issues());
+        if !issues.is_empty() {
+            return Err(ConfigError { issues });
         }
-        let mut agent = LlmTextAgent::new(&self.inner.name, llm);
+        let inner = &self.inner;
+        let mut agent = LlmTextAgent::new(&inner.name, llm);
 
-        if let Some(inst) = &self.inner.instruction {
+        if let Some(inst) = &inner.instruction {
             agent = agent.instruction(inst);
         }
-        if let Some(provider) = &self.inner.instruction_provider {
+        if let Some(provider) = &inner.instruction_provider {
             agent = agent.instruction_provider(provider.clone());
         }
-        if let Some(provider) = &self.inner.llm_provider {
+        if let Some(provider) = &inner.llm_provider {
             let provider_clone = provider.clone();
             agent = agent.llm_provider(move |state| provider_clone(state));
         }
-        if let Some(t) = self.inner.temperature {
+        if let Some(model) = &inner.model {
+            agent = agent.model(model.as_str());
+        }
+        if let Some(t) = inner.temperature {
             agent = agent.temperature(t);
         }
-        if let Some(n) = self.inner.max_output_tokens {
+        if let Some(p) = inner.top_p {
+            agent = agent.top_p(p);
+        }
+        if let Some(k) = inner.top_k {
+            agent = agent.top_k(k);
+        }
+        if let Some(n) = inner.max_output_tokens {
             agent = agent.max_output_tokens(n);
+        }
+        if !inner.stop_sequences.is_empty() {
+            agent = agent.stop_sequences(inner.stop_sequences.iter().cloned());
+        }
+        if let Some(budget) = inner.thinking_budget {
+            agent = agent.thinking_budget(budget);
+        }
+        if let Some(schema) = &inner.output_schema {
+            agent = agent.response_schema(schema.clone());
+        }
+        if let Some(key) = &inner.output_key {
+            agent = agent.output_key(key);
+        }
+        let declarations = inner.tools.iter().filter_map(|entry| match entry {
+            ToolEntry::Declaration(tool) => Some(tool),
+            ToolEntry::Runtime(_) => None,
+        });
+        for tool in inner.built_in_tools.iter().chain(declarations) {
+            agent = agent.built_in_tool(tool.clone());
         }
 
         // Build ToolDispatcher from registered tools.
@@ -727,11 +868,12 @@ impl AgentBuilder {
                             ToolKind::InputStream(i) => dispatcher.register_input_streaming(i),
                         }
                     }
-                    ToolEntry::Declaration(_) => {
-                        // Built-in tool declarations (google_search, etc.) are sent
-                        // as-is; they don't have runtime handlers for text dispatch.
-                    }
+                    // Sent with the request above; nothing to dispatch.
+                    ToolEntry::Declaration(_) => {}
                 }
+            }
+            if let Some(provider) = &self.inner.confirmation_provider {
+                dispatcher.set_confirmation_provider(provider.clone());
             }
             if !dispatcher.is_empty() {
                 agent = agent.tools(Arc::new(dispatcher));
@@ -1362,5 +1504,199 @@ mod mcp_rejection_tests {
             .tool(arc.clone())
             .tools(arc);
         assert_eq!(b.tool_count(), 3);
+    }
+}
+
+#[cfg(test)]
+mod honest_build_tests {
+    use super::*;
+    use gemini_adk_rs::llm::{LlmResponse, MockLlm};
+
+    /// Every setting on the builder reaches the request the built agent sends.
+    /// Before, `build` forwarded only the instruction, temperature, max tokens
+    /// and function tools, and dropped the rest without a word.
+    #[tokio::test]
+    async fn every_setting_reaches_the_request() {
+        let llm = MockLlm::script([LlmResponse::from_text(r#"{"city":"Paris"}"#)]);
+        let agent = AgentBuilder::new("configured")
+            .model(ModelId::new("gemini-2.5-pro"))
+            .instruction("Answer in JSON.")
+            .temperature(0.1)
+            .top_p(0.8)
+            .top_k(10)
+            .max_output_tokens(128)
+            .stop_sequences(vec!["END".into()])
+            .thinking(256)
+            .output_schema(serde_json::json!({ "type": "object" }))
+            .output_key("answer")
+            .google_search()
+            .build(llm.clone())
+            .expect("a text agent can honour all of these");
+
+        let state = gemini_adk_rs::State::new();
+        state.set("input", "Capital of France?").unwrap();
+        agent.run(&state).await.unwrap();
+
+        let sent = llm.last_request().unwrap();
+        assert_eq!(sent.model.as_deref(), Some("gemini-2.5-pro"));
+        assert_eq!(sent.system_instruction.as_deref(), Some("Answer in JSON."));
+        assert_eq!(sent.temperature, Some(0.1));
+        assert_eq!(sent.top_p, Some(0.8));
+        assert_eq!(sent.top_k, Some(10));
+        assert_eq!(sent.max_output_tokens, Some(128));
+        assert_eq!(sent.stop_sequences, ["END"]);
+        assert_eq!(sent.thinking_budget, Some(256));
+        assert_eq!(sent.response_mime_type.as_deref(), Some("application/json"));
+        assert_eq!(
+            sent.response_json_schema,
+            Some(serde_json::json!({ "type": "object" }))
+        );
+        assert_eq!(sent.tools, vec![Tool::google_search()]);
+        assert_eq!(
+            state.get::<String>("answer").as_deref(),
+            Some(r#"{"city":"Paris"}"#)
+        );
+    }
+
+    /// Function tools and built-in tools travel together.
+    #[tokio::test]
+    async fn built_in_and_function_tools_are_both_declared() {
+        use crate::compose::tools::T;
+        let llm = MockLlm::text("ok");
+        let agent = AgentBuilder::new("both")
+            .tools(
+                T::simple("ping", "Ping", |_| async { Ok(serde_json::json!({})) })
+                    | T::code_execution(),
+            )
+            .url_context()
+            .build(llm.clone())
+            .unwrap();
+        agent.run(&gemini_adk_rs::State::new()).await.unwrap();
+        let tools = llm.last_request().unwrap().tools;
+        assert!(tools.contains(&Tool::url_context()), "{tools:?}");
+        assert!(tools.contains(&Tool::code_execution()), "{tools:?}");
+        assert!(
+            tools.iter().any(|t| t
+                .function_declarations
+                .as_ref()
+                .is_some_and(|d| d.iter().any(|f| f.name == "ping"))),
+            "{tools:?}"
+        );
+    }
+
+    /// Settings a text agent cannot honour fail the build, all at once, each
+    /// saying what to do instead.
+    #[test]
+    fn live_only_settings_are_build_errors() {
+        let err = AgentBuilder::new("confused")
+            .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
+            .voice(Voice::Kore)
+            .response_modalities(vec![Modality::Audio])
+            .sub_agent(AgentBuilder::new("child"))
+            .transfer_to("child")
+            .build(MockLlm::text("unused"))
+            .err()
+            .expect("build must fail");
+        assert_eq!(err.issues.len(), 4, "{err}");
+        let message = err.to_string();
+        for needle in [
+            "voice",
+            "response_modalities",
+            "Live model",
+            "sub_agent",
+            "transfer_to",
+        ] {
+            assert!(message.contains(needle), "missing {needle}: {message}");
+        }
+    }
+
+    fn refund_tool() -> crate::compose::tools::ToolComposite {
+        use crate::compose::tools::T;
+        T::confirm(
+            T::simple("refund", "Refund the order", |_| async {
+                Ok(serde_json::json!({ "refunded": true }))
+            }),
+            "Refunds move money",
+        )
+    }
+
+    /// A tool marked `T::confirm` used to run unconfirmed on a text agent,
+    /// because nothing attached a provider. Now it cannot be built that way.
+    #[test]
+    fn a_confirm_tool_without_a_provider_is_a_build_error() {
+        let err = AgentBuilder::new("support")
+            .tools(refund_tool())
+            .build(MockLlm::text("x"))
+            .err()
+            .expect("build must fail");
+        assert!(err.to_string().contains("refund"), "{err}");
+        assert!(err.to_string().contains("confirmation_provider"), "{err}");
+    }
+
+    /// A declined call does not run, and the model is told why.
+    #[tokio::test]
+    async fn a_declined_call_tells_the_model_why() {
+        use gemini_adk_rs::confirmation::StaticConfirmation;
+        use gemini_genai_rs::prelude::Part;
+
+        let llm = MockLlm::script([
+            LlmResponse::tool_call("refund", serde_json::json!({})),
+            LlmResponse::from_text("I could not refund that."),
+        ]);
+        let agent = AgentBuilder::new("support")
+            .tools(refund_tool())
+            .confirmation_provider(StaticConfirmation::deny_all("over the refund limit"))
+            .build(llm.clone())
+            .unwrap();
+        agent.run(&gemini_adk_rs::State::new()).await.unwrap();
+
+        let returned = llm
+            .last_request()
+            .unwrap()
+            .contents
+            .iter()
+            .flat_map(|c| c.parts.clone())
+            .find_map(|p| match p {
+                Part::FunctionResponse { function_response } => Some(function_response.response),
+                _ => None,
+            })
+            .expect("the refusal is sent back");
+        let error = returned["error"].as_str().unwrap_or_default();
+        assert!(error.contains("over the refund limit"), "{returned}");
+        assert!(returned.get("refunded").is_none(), "the tool must not run");
+    }
+
+    /// `output::<T>()` sends `T`'s wire schema, and the reply parses back.
+    #[tokio::test]
+    async fn output_type_constrains_the_reply() {
+        #[derive(serde::Deserialize, schemars::JsonSchema)]
+        struct City {
+            name: String,
+        }
+        let llm = MockLlm::text(r#"{"name":"Paris"}"#);
+        let agent = AgentBuilder::new("geo")
+            .output::<City>()
+            .build(llm.clone())
+            .unwrap();
+        let result = agent
+            .run_with(
+                gemini_adk_rs::text::RunRequest::new("Capital of France?"),
+                &gemini_adk_rs::State::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.parse::<City>().unwrap().name, "Paris");
+        let schema = llm.last_request().unwrap().response_json_schema.unwrap();
+        assert_eq!(schema["properties"]["name"]["type"], "string");
+    }
+
+    #[test]
+    fn text_only_is_a_text_agent_setting() {
+        assert!(
+            AgentBuilder::new("t")
+                .text_only()
+                .build(MockLlm::text("x"))
+                .is_ok()
+        );
     }
 }

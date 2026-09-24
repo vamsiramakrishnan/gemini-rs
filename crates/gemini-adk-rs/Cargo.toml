@@ -2,6 +2,7 @@
 name = "gemini-adk-rs"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 description = "Agent runtime for Gemini Live — tools, streaming, agent transfer, middleware"
 keywords = ["gemini", "agents", "adk", "tools", "streaming"]
