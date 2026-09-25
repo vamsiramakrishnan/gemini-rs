@@ -45,6 +45,12 @@ impl ModelId {
     pub const FLASH_2_5_NATIVE_AUDIO_LATEST: ModelId =
         ModelId::from_static("models/gemini-2.5-flash-native-audio-latest");
 
+    /// Gemini 3.8 Live (GA on Vertex AI, 2026-09-24): 24 FPS Live Avatar
+    /// video, always-on affective dialogue and proactive audio, blocking tool
+    /// calls the server cancels when the user speaks again, custom
+    /// transcription vocabulary. No thinking. See [`LiveModelProfile`].
+    pub const LIVE_3_8: ModelId = ModelId::from_static("models/gemini-3.8-live");
+
     /// Google AI's rolling alias for the current Flash text model
     /// (`generateContent`). Dated `gemini-2.5-flash` names 404 there.
     pub const FLASH_LATEST: ModelId = ModelId::from_static("gemini-flash-latest");
@@ -157,6 +163,65 @@ impl PartialEq<&str> for ModelId {
     }
 }
 
+/// What a Live model accepts in its setup message, as far as this crate
+/// knows.
+///
+/// The model catalog moves faster than releases, so this is keyed on the
+/// model name and errs toward sending what the caller set: only models known
+/// to reject or ignore a field have it removed. Anything unrecognised gets
+/// [`LiveModelProfile::DEFAULT`] — every field passes through.
+///
+/// ```
+/// # use gemini_genai_rs::protocol::types::{LiveModelProfile, ModelId};
+/// let p = LiveModelProfile::of(&ModelId::LIVE_3_8);
+/// assert!(!p.thinking && !p.affective_dialog_flag && p.vertex_async_tools);
+/// assert_eq!(LiveModelProfile::of(&ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO), LiveModelProfile::DEFAULT);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct LiveModelProfile {
+    /// Accepts `thinkingConfig` (Google AI; Vertex AI Live never does).
+    pub thinking: bool,
+    /// Accepts the `enableAffectiveDialog` flag. Gemini 3.8 Live has
+    /// affective dialogue always on and its docs say not to send the flag.
+    pub affective_dialog_flag: bool,
+    /// Accepts the `proactivity` config. Always on in Gemini 3.8 Live, whose
+    /// docs say not to send it.
+    pub proactivity_flag: bool,
+    /// Accepts `behavior` / `scheduling` on Vertex AI (Google AI always
+    /// does).
+    pub vertex_async_tools: bool,
+}
+
+impl LiveModelProfile {
+    /// The profile of a model this crate has no special knowledge of.
+    pub const DEFAULT: Self = Self {
+        thinking: true,
+        affective_dialog_flag: true,
+        proactivity_flag: true,
+        vertex_async_tools: false,
+    };
+
+    /// Gemini 3.8 Live.
+    pub const GEMINI_3_8_LIVE: Self = Self {
+        thinking: false,
+        affective_dialog_flag: false,
+        proactivity_flag: false,
+        vertex_async_tools: true,
+    };
+
+    /// The profile for `model`, matched on its name (`gemini-3.8-live`,
+    /// with or without a `models/`/publisher path or a version suffix).
+    pub fn of(model: &ModelId) -> Self {
+        let name = model.as_str().rsplit('/').next().unwrap_or_default();
+        if name.starts_with("gemini-3.8-live") {
+            Self::GEMINI_3_8_LIVE
+        } else {
+            Self::DEFAULT
+        }
+    }
+}
+
 /// Available voice presets for Gemini Live audio output.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[non_exhaustive]
@@ -245,6 +310,8 @@ pub enum Modality {
     Audio,
     /// Image output.
     Image,
+    /// Video output: Gemini 3.8 Live Avatar.
+    Video,
 }
 
 /// Voice activity detection sensitivity level.

@@ -1,0 +1,61 @@
+{
+  "setup": {
+    "avatarConfig": {
+      "avatarName": "Ben"
+    },
+    "explicitVadSignal": true,
+    "generationConfig": {
+      "mediaResolution": "MEDIA_RESOLUTION_LOW",
+      "responseModalities": [
+        "VIDEO"
+      ],
+      "speechConfig": {
+        "voiceConfig": {
+          "prebuiltVoiceConfig": {
+            "voiceName": "Aoede"
+          }
+        }
+      }
+    },
+    "historyConfig": {
+      "initialHistoryInClientContent": true
+    },
+    "inputAudioTranscription": {
+      "customVocabulary": [
+        "ORD-8472",
+        "Express Shipping"
+      ],
+      "languageCodes": [
+        "en-US",
+        "es-US"
+      ]
+    },
+    "model": "projects/test-project/locations/us-central1/publishers/google/models/gemini-3.8-live",
+    "outputAudioTranscription": {},
+    "sessionResumption": {
+      "transparent": true
+    },
+    "tools": [
+      {
+        "functionDeclarations": [
+          {
+            "behavior": "BLOCKING",
+            "description": "Fetches real-time shipping status for a customer order ID.",
+            "name": "lookup_order_status",
+            "parameters": {
+              "properties": {
+                "order_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "order_id"
+              ],
+              "type": "object"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

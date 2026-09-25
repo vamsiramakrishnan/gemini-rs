@@ -108,6 +108,17 @@ impl Live {
         self
     }
 
+    /// Called for each non-audio media chunk from the model: Gemini 3.8 Live
+    /// Avatar video (`video/mp4`, 24 FPS), synchronized with
+    /// [`on_audio`](Self::on_audio). Suppressed during barge-in, like audio.
+    pub fn on_media(
+        mut self,
+        f: impl Fn(&gemini_genai_rs::session::InlineMedia) + Send + Sync + 'static,
+    ) -> Self {
+        self.callbacks.on_media = Some(Box::new(f));
+        self
+    }
+
     /// Called for each incremental text delta.
     pub fn on_text(mut self, f: impl Fn(&str) + Send + Sync + 'static) -> Self {
         self.callbacks.on_text = Some(Box::new(f));

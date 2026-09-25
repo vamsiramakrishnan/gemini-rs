@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::content::{Content, Part};
-use super::enums::{AudioFormat, Modality, ModelId, Sensitivity, Voice};
+use super::enums::{AudioFormat, LiveModelProfile, Modality, ModelId, Sensitivity, Voice};
 use super::tools::{Tool, ToolConfig};
 
 // ---------------------------------------------------------------------------
@@ -19,13 +19,18 @@ pub struct SpeechConfig {
     pub voice_config: Option<VoiceConfig>,
 }
 
-/// Voice configuration within speech config.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Voice configuration within speech config: a prebuilt voice, or a voice
+/// replicated from a sample.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VoiceConfig {
     /// Prebuilt voice selection.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prebuilt_voice_config: Option<PrebuiltVoiceConfig>,
+    /// A custom voice replicated from a short recording (Gemini 3.8 Live on
+    /// Vertex AI; allow-listed customers only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replicated_voice_config: Option<ReplicatedVoiceConfig>,
 }
 
 /// Prebuilt voice selection.
@@ -36,15 +41,175 @@ pub struct PrebuiltVoiceConfig {
     pub voice_name: String,
 }
 
-/// Input audio transcription configuration.
+/// A voice the model replicates from a recorded sample, configured per
+/// session. Nothing is uploaded or trained in advance.
+///
+/// You are responsible for the consents and rights needed to process the
+/// voice sample.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct InputAudioTranscription {}
+pub struct ReplicatedVoiceConfig {
+    /// MIME type of the sample, e.g. `"audio/pcm;rate=24000"`.
+    pub mime_type: String,
+    /// The voice sample, base64-encoded.
+    pub voice_sample_audio: String,
+}
+
+impl ReplicatedVoiceConfig {
+    /// A replicated voice from raw sample bytes (base64-encoded here).
+    pub fn from_sample(sample: &[u8], mime_type: impl Into<String>) -> Self {
+        use base64::Engine as _;
+        Self {
+            mime_type: mime_type.into(),
+            voice_sample_audio: base64::engine::general_purpose::STANDARD.encode(sample),
+        }
+    }
+}
+
+/// Audio transcription settings, for the user's audio
+/// (`inputAudioTranscription`) or the model's (`outputAudioTranscription`).
+///
+/// The default — every field unset — asks for transcription with the
+/// server's defaults, which is what an empty `{}` on the wire means.
+///
+/// ```
+/// # use gemini_genai_rs::protocol::types::AudioTranscriptionConfig;
+/// let config = AudioTranscriptionConfig::default()
+///     .language_codes(["en-US", "es-US"])
+///     .custom_vocabulary(["ORD-8472", "QwikPay"]);
+/// assert_eq!(
+///     serde_json::to_value(&config).unwrap(),
+///     serde_json::json!({
+///         "languageCodes": ["en-US", "es-US"],
+///         "customVocabulary": ["ORD-8472", "QwikPay"],
+///     }),
+/// );
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub struct AudioTranscriptionConfig {
+    /// BCP-47 language hints (e.g. `"en-US"`). Hints reduce misdetected
+    /// languages, especially on short utterances.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language_codes: Option<Vec<String>>,
+    /// Domain terms the recogniser should prefer — product names, SKUs,
+    /// proper nouns (Gemini 3.8 Live).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub custom_vocabulary: Option<Vec<String>>,
+}
+
+impl AudioTranscriptionConfig {
+    /// Set the BCP-47 language hints.
+    pub fn language_codes<S: Into<String>>(mut self, codes: impl IntoIterator<Item = S>) -> Self {
+        self.language_codes = Some(codes.into_iter().map(Into::into).collect());
+        self
+    }
+
+    /// Set the terms transcription is biased toward.
+    pub fn custom_vocabulary<S: Into<String>>(
+        mut self,
+        terms: impl IntoIterator<Item = S>,
+    ) -> Self {
+        self.custom_vocabulary = Some(terms.into_iter().map(Into::into).collect());
+        self
+    }
+}
+
+/// Input audio transcription configuration.
+pub type InputAudioTranscription = AudioTranscriptionConfig;
 
 /// Output audio transcription configuration.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub type OutputAudioTranscription = AudioTranscriptionConfig;
+
+/// Live Avatar video output (Gemini 3.8 Live): a prebuilt avatar by name, or
+/// a custom one generated from a reference image.
+///
+/// Setting an avatar makes the model answer with synchronized 24 FPS video
+/// (`responseModalities: ["VIDEO"]`), delivered as
+/// [`SessionEvent::Media`](crate::session::SessionEvent::Media) chunks.
+///
+/// ```
+/// # use gemini_genai_rs::protocol::types::AvatarConfig;
+/// let ben = AvatarConfig::prebuilt("Ben");
+/// assert_eq!(serde_json::to_value(&ben).unwrap(), serde_json::json!({"avatarName": "Ben"}));
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct OutputAudioTranscription {}
+#[non_exhaustive]
+pub struct AvatarConfig {
+    /// Name of a prebuilt avatar (e.g. `"Ben"`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar_name: Option<String>,
+    /// A custom avatar generated from a reference image (allow-listed
+    /// customers only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub customized_avatar: Option<CustomizedAvatar>,
+    /// Audio bitrate of the avatar stream, in bits per second.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub audio_bitrate_bps: Option<u32>,
+    /// Video bitrate of the avatar stream, in bits per second.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub video_bitrate_bps: Option<u32>,
+}
+
+impl AvatarConfig {
+    /// A prebuilt avatar by name.
+    pub fn prebuilt(name: impl Into<String>) -> Self {
+        Self {
+            avatar_name: Some(name.into()),
+            ..Self::default()
+        }
+    }
+
+    /// A custom avatar from a reference image.
+    ///
+    /// The documented requirements: PNG recommended (alpha avoids a visible
+    /// box), RGB, at least 704×1280, under 5 MB, a neutral bust shot facing
+    /// the camera. `image_mime_type` is sent as given; the API's own example
+    /// uses `"png"`. You are responsible for the consents and rights needed
+    /// to process the likeness.
+    pub fn custom(image: &[u8], image_mime_type: impl Into<String>) -> Self {
+        use base64::Engine as _;
+        Self {
+            customized_avatar: Some(CustomizedAvatar {
+                image_mime_type: Some(image_mime_type.into()),
+                image_data: Some(base64::engine::general_purpose::STANDARD.encode(image)),
+            }),
+            ..Self::default()
+        }
+    }
+
+    /// Set the audio and video bitrates of the avatar stream.
+    pub fn bitrates(mut self, audio_bps: u32, video_bps: u32) -> Self {
+        self.audio_bitrate_bps = Some(audio_bps);
+        self.video_bitrate_bps = Some(video_bps);
+        self
+    }
+}
+
+/// The reference image of a custom avatar.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomizedAvatar {
+    /// Image format, as the API's example gives it (`"png"`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_mime_type: Option<String>,
+    /// The image, base64-encoded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_data: Option<String>,
+}
+
+/// How conversation history seeded with `clientContent` is treated.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryConfig {
+    /// Gemini 3.8 Live accepts `clientContent` as initial history only when
+    /// this is set: send the turns after `setupComplete`, with
+    /// `turnComplete: true` on the last one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub initial_history_in_client_content: Option<bool>,
+}
 
 /// Controls how incoming audio interacts with model output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -91,11 +256,22 @@ pub struct AutomaticActivityDetection {
     /// Whether automatic activity detection is disabled.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub disabled: Option<bool>,
-    /// Sensitivity for detecting speech onset.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Sensitivity for detecting speech onset. The wire enum has only
+    /// `START_SENSITIVITY_HIGH` / `_LOW`; see [`Sensitivity`] for how the
+    /// other levels are sent.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "sensitivity_wire::start"
+    )]
     pub start_of_speech_sensitivity: Option<Sensitivity>,
-    /// Sensitivity for detecting end of speech.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Sensitivity for detecting end of speech (`END_SENSITIVITY_HIGH` /
+    /// `_LOW` on the wire).
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "sensitivity_wire::end"
+    )]
     pub end_of_speech_sensitivity: Option<Sensitivity>,
     /// Milliseconds of audio to include before speech onset.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -105,13 +281,96 @@ pub struct AutomaticActivityDetection {
     pub silence_duration_ms: Option<u32>,
 }
 
+/// Wire encoding of [`Sensitivity`] for the two VAD sensitivity fields.
+///
+/// The API's enums are per field — `START_SENSITIVITY_{HIGH,LOW}` and
+/// `END_SENSITIVITY_{HIGH,LOW}` — so a plain `SENSITIVITY_LOW` is not a value
+/// either field accepts. Levels the wire cannot express (`Medium`,
+/// `Automatic`, `Disabled`) go out as `*_UNSPECIFIED`, the server default.
+mod sensitivity_wire {
+    use super::Sensitivity;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    fn encode(prefix: &str, s: Sensitivity) -> String {
+        let level = match s {
+            Sensitivity::SensitivityHigh => "HIGH",
+            Sensitivity::SensitivityLow => "LOW",
+            Sensitivity::SensitivityMedium | Sensitivity::Automatic | Sensitivity::Disabled => {
+                "UNSPECIFIED"
+            }
+        };
+        format!("{prefix}_SENSITIVITY_{level}")
+    }
+
+    fn decode(raw: &str) -> Sensitivity {
+        if raw.ends_with("HIGH") {
+            Sensitivity::SensitivityHigh
+        } else if raw.ends_with("LOW") {
+            Sensitivity::SensitivityLow
+        } else if raw.ends_with("MEDIUM") {
+            Sensitivity::SensitivityMedium
+        } else if raw == "DISABLED" {
+            Sensitivity::Disabled
+        } else {
+            Sensitivity::Automatic
+        }
+    }
+
+    fn ser<S: Serializer>(prefix: &str, v: &Option<Sensitivity>, s: S) -> Result<S::Ok, S::Error> {
+        match v {
+            Some(level) => s.serialize_str(&encode(prefix, *level)),
+            None => s.serialize_none(),
+        }
+    }
+
+    fn de<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Sensitivity>, D::Error> {
+        Ok(Option::<String>::deserialize(d)?.map(|raw| decode(&raw)))
+    }
+
+    pub(super) mod start {
+        use super::*;
+        pub(crate) fn serialize<S: Serializer>(
+            v: &Option<Sensitivity>,
+            s: S,
+        ) -> Result<S::Ok, S::Error> {
+            ser("START", v, s)
+        }
+        pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
+            d: D,
+        ) -> Result<Option<Sensitivity>, D::Error> {
+            de(d)
+        }
+    }
+
+    pub(super) mod end {
+        use super::*;
+        pub(crate) fn serialize<S: Serializer>(
+            v: &Option<Sensitivity>,
+            s: S,
+        ) -> Result<S::Ok, S::Error> {
+            ser("END", v, s)
+        }
+        pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
+            d: D,
+        ) -> Result<Option<Sensitivity>, D::Error> {
+            de(d)
+        }
+    }
+}
+
 /// Session resumption configuration.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionResumptionConfig {
     /// Opaque handle from a previous session for transparent resume.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub handle: Option<String>,
+    /// Transparent mode: every resumption update also names the last client
+    /// message the server consumed
+    /// ([`ResumeInfo::last_consumed_index`](crate::session::ResumeInfo)), so a
+    /// reconnecting client knows which messages to send again.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transparent: Option<bool>,
 }
 
 /// Context window compression configuration for long sessions.
@@ -237,15 +496,20 @@ pub struct ThinkingConfig {
     pub include_thoughts: Option<bool>,
 }
 
-/// Media resolution for image/video inputs.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+/// Media resolution for image/video inputs: the per-frame token budget.
+///
+/// Sent as the API's enum names (`MEDIA_RESOLUTION_LOW`, …); the bare
+/// `LOW` / `MEDIUM` / `HIGH` earlier releases sent are still read back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MediaResolution {
-    /// Low resolution.
+    /// Low resolution: fewest tokens per frame.
+    #[serde(rename = "MEDIA_RESOLUTION_LOW", alias = "LOW")]
     Low,
     /// Medium resolution.
+    #[serde(rename = "MEDIA_RESOLUTION_MEDIUM", alias = "MEDIUM")]
     Medium,
-    /// High resolution.
+    /// High resolution: finest visual detail.
+    #[serde(rename = "MEDIA_RESOLUTION_HIGH", alias = "HIGH")]
     High,
 }
 
@@ -590,6 +854,13 @@ pub struct SessionConfig {
     pub context_window_compression: Option<ContextWindowCompressionConfig>,
     /// Proactivity configuration.
     pub proactivity: Option<ProactivityConfig>,
+    /// Live Avatar video output (Gemini 3.8 Live).
+    pub avatar_config: Option<AvatarConfig>,
+    /// How `clientContent` history is treated (Gemini 3.8 Live).
+    pub history_config: Option<HistoryConfig>,
+    /// Ask the server to send `voiceActivity` events at speech boundaries
+    /// (Vertex AI; stripped on Google AI, which does not accept it).
+    pub explicit_vad_signal: Option<bool>,
     /// Encoding of the audio sent with `send_audio` (default: PCM16 at
     /// [`LIVE_INPUT_SAMPLE_RATE`](super::enums::LIVE_INPUT_SAMPLE_RATE)).
     /// The output format is not configurable: the API returns 24 kHz PCM16.
@@ -672,6 +943,9 @@ impl SessionConfig {
             session_resumption: None,
             context_window_compression: None,
             proactivity: None,
+            avatar_config: None,
+            history_config: None,
+            explicit_vad_signal: None,
             input_audio_format: AudioFormat::Pcm16,
             audio_pacing: None,
             wire_recorder: None,
@@ -715,8 +989,49 @@ impl SessionConfig {
                 prebuilt_voice_config: Some(PrebuiltVoiceConfig {
                     voice_name: voice.to_string(),
                 }),
+                replicated_voice_config: None,
             }),
         });
+        self
+    }
+
+    /// Speak in a voice replicated from a recorded sample instead of a
+    /// prebuilt one (Gemini 3.8 Live on Vertex AI; allow-listed customers).
+    pub fn replicated_voice(mut self, voice: ReplicatedVoiceConfig) -> Self {
+        self.generation_config.speech_config = Some(SpeechConfig {
+            voice_config: Some(VoiceConfig {
+                prebuilt_voice_config: None,
+                replicated_voice_config: Some(voice),
+            }),
+        });
+        self
+    }
+
+    /// Answer with Live Avatar video (Gemini 3.8 Live).
+    ///
+    /// Also sets `responseModalities` to `["VIDEO"]`, which the API requires
+    /// for avatar output; the synchronized speech rides in the same stream.
+    /// Chunks arrive as [`SessionEvent::Media`](crate::session::SessionEvent::Media).
+    pub fn avatar(mut self, avatar: AvatarConfig) -> Self {
+        self.avatar_config = Some(avatar);
+        self.generation_config.response_modalities = Some(vec![Modality::Video]);
+        self
+    }
+
+    /// Accept conversation history sent with `clientContent` before the
+    /// first turn (required by Gemini 3.8 Live to seed history). Send the
+    /// turns after `setupComplete`, with `turnComplete: true` on the last.
+    pub fn initial_history_in_client_content(mut self, enabled: bool) -> Self {
+        self.history_config = Some(HistoryConfig {
+            initial_history_in_client_content: Some(enabled),
+        });
+        self
+    }
+
+    /// Ask the server for explicit `voiceActivity` events at the start and
+    /// end of user speech (Vertex AI only; stripped on Google AI).
+    pub fn explicit_vad_signal(mut self, enabled: bool) -> Self {
+        self.explicit_vad_signal = Some(enabled);
         self
     }
 
@@ -774,15 +1089,48 @@ impl SessionConfig {
 
     /// Whether the server transcribes the user's audio
     /// (`SessionEvent::InputTranscription`).
+    ///
+    /// Enabling keeps settings already given through
+    /// [`input_transcription_config`](Self::input_transcription_config).
     pub fn input_transcription(mut self, enabled: bool) -> Self {
-        self.input_audio_transcription = enabled.then_some(InputAudioTranscription {});
+        let current = self.input_audio_transcription.take();
+        self.input_audio_transcription = enabled.then(|| current.unwrap_or_default());
         self
     }
 
     /// Whether the server transcribes the model's audio
     /// (`SessionEvent::OutputTranscription`).
+    ///
+    /// Enabling keeps settings already given through
+    /// [`output_transcription_config`](Self::output_transcription_config).
     pub fn output_transcription(mut self, enabled: bool) -> Self {
-        self.output_audio_transcription = enabled.then_some(OutputAudioTranscription {});
+        let current = self.output_audio_transcription.take();
+        self.output_audio_transcription = enabled.then(|| current.unwrap_or_default());
+        self
+    }
+
+    /// Transcribe the user's audio with these settings — language hints,
+    /// custom vocabulary.
+    pub fn input_transcription_config(mut self, config: AudioTranscriptionConfig) -> Self {
+        self.input_audio_transcription = Some(config);
+        self
+    }
+
+    /// Transcribe the model's audio with these settings.
+    pub fn output_transcription_config(mut self, config: AudioTranscriptionConfig) -> Self {
+        self.output_audio_transcription = Some(config);
+        self
+    }
+
+    /// Bias transcription of the user's audio toward these terms — product
+    /// names, SKUs, proper nouns (Gemini 3.8 Live). Enables input
+    /// transcription, keeping any language hints already set.
+    pub fn custom_vocabulary<S: Into<String>>(
+        mut self,
+        terms: impl IntoIterator<Item = S>,
+    ) -> Self {
+        let config = self.input_audio_transcription.take().unwrap_or_default();
+        self.input_audio_transcription = Some(config.custom_vocabulary(terms));
         self
     }
 
@@ -880,16 +1228,28 @@ impl SessionConfig {
     /// (`SessionEvent::SessionResumeUpdate`) that a later session can pass to
     /// [`resume_from`](Self::resume_from).
     pub fn session_resumption(mut self) -> Self {
-        self.session_resumption = Some(SessionResumptionConfig { handle: None });
+        self.session_resumption
+            .get_or_insert_with(SessionResumptionConfig::default);
+        self
+    }
+
+    /// Enable session resumption in transparent mode: each resumption update
+    /// also names the last client message the server consumed
+    /// (`ResumeInfo::last_consumed_index`), so a client resuming from the
+    /// handle knows which messages to send again.
+    pub fn transparent_resumption(mut self) -> Self {
+        self.session_resumption
+            .get_or_insert_with(SessionResumptionConfig::default)
+            .transparent = Some(true);
         self
     }
 
     /// Resume an earlier session from a handle the server issued for it.
     /// Implies [`session_resumption`](Self::session_resumption).
     pub fn resume_from(mut self, handle: impl Into<String>) -> Self {
-        self.session_resumption = Some(SessionResumptionConfig {
-            handle: Some(handle.into()),
-        });
+        self.session_resumption
+            .get_or_insert_with(SessionResumptionConfig::default)
+            .handle = Some(handle.into());
         self
     }
 
@@ -1058,21 +1418,74 @@ impl SessionConfig {
         matches!(self.endpoint, ApiEndpoint::VertexAI(_))
     }
 
-    /// Returns `true` if the platform supports async (non-blocking) tool calling.
-    ///
-    /// Google AI supports `FunctionCallingBehavior::NonBlocking` on declarations
-    /// and `FunctionResponseScheduling` on responses. Vertex AI does not — these
-    /// fields are automatically stripped from the wire messages when targeting
-    /// Vertex AI so callers can set them unconditionally.
-    pub fn supports_async_tools(&self) -> bool {
-        !self.is_vertex()
+    /// What the configured model accepts in its setup; see
+    /// [`LiveModelProfile`].
+    pub fn model_profile(&self) -> LiveModelProfile {
+        LiveModelProfile::of(&self.resolved_model())
     }
 
-    /// Returns `true` if the platform accepts `thinkingConfig` in the setup
-    /// message. Vertex AI does not: the whole config is stripped there, so
-    /// `thinking(..)` and `include_thoughts(..)` are silent no-ops on Vertex.
+    /// Returns `true` if the target accepts async tool calling fields:
+    /// `behavior` on declarations and `scheduling` on responses.
+    ///
+    /// Google AI does, and so does Gemini 3.8 Live on Vertex AI. Earlier
+    /// Vertex AI Live models do not; there the fields are stripped from the
+    /// wire so callers can set them unconditionally.
+    pub fn supports_async_tools(&self) -> bool {
+        !self.is_vertex() || self.model_profile().vertex_async_tools
+    }
+
+    /// Returns `true` if the target accepts `thinkingConfig` in the setup
+    /// message. Vertex AI does not, and Gemini 3.8 Live does not support
+    /// thinking on either platform: the config is stripped there, so
+    /// `thinking(..)` and `include_thoughts(..)` are no-ops (listed by
+    /// [`ignored_settings`](Self::ignored_settings)).
     pub fn supports_thinking(&self) -> bool {
-        !self.is_vertex()
+        !self.is_vertex() && self.model_profile().thinking
+    }
+
+    /// Settings in this config that the target does not accept and that
+    /// [`to_setup_message`](Self::to_setup_message) therefore leaves off the
+    /// wire, by their wire names. Empty when everything configured is sent.
+    ///
+    /// Connect logs these as a warning, so a setting that has no effect is
+    /// visible rather than silent.
+    ///
+    /// ```
+    /// # use gemini_genai_rs::protocol::types::{ModelId, SessionConfig};
+    /// let config = SessionConfig::from_vertex("p", "us-central1", "t")
+    ///     .model(ModelId::LIVE_3_8)
+    ///     .affective_dialog(true)
+    ///     .thinking(512);
+    /// assert_eq!(config.ignored_settings(), ["thinkingConfig", "enableAffectiveDialog"]);
+    /// ```
+    pub fn ignored_settings(&self) -> Vec<&'static str> {
+        let profile = self.model_profile();
+        let mut ignored = Vec::new();
+        if self.generation_config.thinking_config.is_some() && !self.supports_thinking() {
+            ignored.push("thinkingConfig");
+        }
+        if self.generation_config.enable_affective_dialog.is_some()
+            && !profile.affective_dialog_flag
+        {
+            ignored.push("enableAffectiveDialog");
+        }
+        if self.proactivity.is_some() && !profile.proactivity_flag {
+            ignored.push("proactivity");
+        }
+        if self.explicit_vad_signal.is_some() && !self.is_vertex() {
+            ignored.push("explicitVadSignal");
+        }
+        if !self.supports_async_tools()
+            && self.tools.iter().any(|t| {
+                t.function_declarations
+                    .iter()
+                    .flatten()
+                    .any(|d| d.behavior.is_some())
+            })
+        {
+            ignored.push("functionDeclarations[].behavior");
+        }
+        ignored
     }
 
     /// Returns `true` if this config uses an access token (either GoogleAIToken or VertexAI).
@@ -1320,7 +1733,7 @@ mod tests {
         let config = SessionConfig::new("key").media_resolution(MediaResolution::High);
         let json = config.to_setup_json();
         assert!(json.contains("\"mediaResolution\""));
-        assert!(json.contains("\"HIGH\""));
+        assert!(json.contains("\"MEDIA_RESOLUTION_HIGH\""));
     }
 
     #[test]

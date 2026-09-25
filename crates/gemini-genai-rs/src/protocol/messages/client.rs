@@ -47,14 +47,32 @@ pub struct SetupPayload {
     /// Proactivity configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub proactivity: Option<ProactivityConfig>,
+    /// Ask for explicit `voiceActivity` events (Vertex AI).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub explicit_vad_signal: Option<bool>,
+    /// How `clientContent` history is treated.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub history_config: Option<HistoryConfig>,
+    /// Live Avatar video output.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar_config: Option<AvatarConfig>,
 }
 
 impl SessionConfig {
     /// Build the setup message from this configuration.
     ///
-    /// When targeting Vertex AI, `FunctionCallingBehavior` is stripped from
-    /// tool declarations since Vertex AI does not support async tool calling.
+    /// Settings the target does not accept are left off the wire rather
+    /// than failing the handshake; [`SessionConfig::ignored_settings`] lists
+    /// exactly what this drops:
+    ///
+    /// - `behavior` on function declarations, on Vertex AI models without
+    ///   async tool calling;
+    /// - `thinkingConfig` on Vertex AI and on models without thinking;
+    /// - `enableAffectiveDialog` and `proactivity` on models where both are
+    ///   always on (Gemini 3.8 Live);
+    /// - `explicitVadSignal` on Google AI.
     pub fn to_setup_message(&self) -> SetupMessage {
+        let profile = self.model_profile();
         let tools = if self.supports_async_tools() {
             self.tools.clone()
         } else {
@@ -72,13 +90,13 @@ impl SessionConfig {
                 .collect()
         };
 
-        let generation_config = if self.supports_thinking() {
-            self.generation_config.clone()
-        } else {
-            let mut gc = self.generation_config.clone();
-            gc.thinking_config = None;
-            gc
-        };
+        let mut generation_config = self.generation_config.clone();
+        if !self.supports_thinking() {
+            generation_config.thinking_config = None;
+        }
+        if !profile.affective_dialog_flag {
+            generation_config.enable_affective_dialog = None;
+        }
 
         SetupMessage {
             setup: SetupPayload {
@@ -92,7 +110,13 @@ impl SessionConfig {
                 realtime_input_config: self.realtime_input_config.clone(),
                 session_resumption: self.session_resumption.clone(),
                 context_window_compression: self.context_window_compression.clone(),
-                proactivity: self.proactivity.clone(),
+                proactivity: self
+                    .proactivity
+                    .clone()
+                    .filter(|_| profile.proactivity_flag),
+                explicit_vad_signal: self.explicit_vad_signal.filter(|_| self.is_vertex()),
+                history_config: self.history_config.clone(),
+                avatar_config: self.avatar_config.clone(),
             },
         }
     }

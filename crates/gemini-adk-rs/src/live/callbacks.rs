@@ -42,6 +42,9 @@ use crate::state::State;
 
 /// Fast-lane sync callback over a raw audio chunk.
 pub type AudioCallback = Box<dyn Fn(&Bytes) + Send + Sync>;
+/// Fast-lane sync callback over a chunk of non-audio model media (Live Avatar
+/// video).
+pub type MediaCallback = Box<dyn Fn(&gemini_genai_rs::session::InlineMedia) + Send + Sync>;
 /// Fast-lane sync callback over a text payload (delta, accumulated text, thought).
 pub type TextCallback = Box<dyn Fn(&str) + Send + Sync>;
 /// Fast-lane sync callback over a transcript chunk with its `is_final` flag.
@@ -79,6 +82,10 @@ pub struct EventCallbacks {
     // -- Fast lane (sync callbacks) --
     /// Called for each audio chunk from the model (PCM16 24kHz).
     pub on_audio: Option<AudioCallback>,
+    /// Called for each non-audio media chunk from the model — Gemini 3.8
+    /// Live Avatar video (`video/mp4`). Suppressed during barge-in, like
+    /// audio.
+    pub on_media: Option<MediaCallback>,
     /// Called for each incremental text delta from the model.
     pub on_text: Option<TextCallback>,
     /// Called when the model completes a text response.
@@ -226,6 +233,7 @@ impl Default for EventCallbacks {
     fn default() -> Self {
         Self {
             on_audio: None,
+            on_media: None,
             on_text: None,
             on_text_complete: None,
             on_input_transcript: None,
@@ -275,6 +283,7 @@ impl std::fmt::Debug for EventCallbacks {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EventCallbacks")
             .field("on_audio", &self.on_audio.is_some())
+            .field("on_media", &self.on_media.is_some())
             .field("on_text", &self.on_text.is_some())
             .field("on_text_complete", &self.on_text_complete.is_some())
             .field("on_input_transcript", &self.on_input_transcript.is_some())

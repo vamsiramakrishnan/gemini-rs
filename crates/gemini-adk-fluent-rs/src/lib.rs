@@ -259,11 +259,12 @@ pub mod prelude {
 
     // ── L0 wire types an application names (the rest: `crate::wire`) ──
     pub use gemini_genai_rs::prelude::{
-        ActivityHandling, ApiEndpoint, AudioFormat, AutomaticActivityDetection, Blob, Content,
-        FinishReason, FunctionCall, FunctionCallingBehavior, FunctionDeclaration, FunctionResponse,
-        FunctionResponseScheduling, GenerationConfig, HarmBlockThreshold, HarmCategory, Modality,
-        ModelId, Part, Role, SafetySetting, Sensitivity, ServerMessage, SessionConfig,
-        SessionEvent, SpeechConfig, ThinkingConfig, Tool, TurnCoverage, UsageMetadata, Voice,
+        ActivityHandling, ApiEndpoint, AudioFormat, AudioTranscriptionConfig,
+        AutomaticActivityDetection, AvatarConfig, Blob, Content, FinishReason, FunctionCall,
+        FunctionCallingBehavior, FunctionDeclaration, FunctionResponse, FunctionResponseScheduling,
+        GenerationConfig, HarmBlockThreshold, HarmCategory, Modality, ModelId, Part, Role,
+        SafetySetting, Sensitivity, ServerMessage, SessionConfig, SessionEvent, SpeechConfig,
+        ThinkingConfig, Tool, TurnCoverage, UsageMetadata, Voice,
     };
 
     // `while let Some(event) = agent.stream(..).next().await` needs this trait.

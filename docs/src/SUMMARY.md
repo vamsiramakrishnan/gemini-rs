@@ -15,6 +15,7 @@
 # Voice & Live Sessions
 
 - [Voice & Live Sessions](./user-guide/live-sessions.md)
+- [Gemini 3.8 Live](./user-guide/gemini-3-8-live.md)
 - [Live Callbacks: Fast Lane vs Control Lane](./user-guide/live-callbacks.md)
 - [Voice I/O: pump() and talk()](./voice.md)
 - [Telephony: Answering Phone Calls](./user-guide/telephony.md)

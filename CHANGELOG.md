@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Gemini 3.8 Live Avatar video would have played as audio.** Every
+  `inlineData` part from the model was decoded and sent to `on_audio`,
+  whatever its MIME type. Only `audio/*` parts go there now; anything else
+  (`video/mp4`) arrives as `SessionEvent::Media` / `LiveEvent::Media` /
+  `on_media`.
+- **VAD sensitivity was sent with values the API does not have.**
+  `Sensitivity::SensitivityHigh` went out as `SENSITIVITY_HIGH`; the fields
+  take `START_SENSITIVITY_HIGH` / `END_SENSITIVITY_LOW` and so on. Both fields
+  now use their own wire enums, and levels the API has no value for (`Medium`,
+  `Automatic`) are sent as `*_UNSPECIFIED`, the server default. Specs that set
+  `"start_sensitivity": "high"` were affected.
+- **`MediaResolution` was sent as `LOW` / `MEDIUM` / `HIGH`.** The API's names
+  are `MEDIA_RESOLUTION_LOW` and so on. The old spellings are still read.
+- **Server voice-activity events failed to parse.** The API sends
+  `ACTIVITY_START` / `ACTIVITY_END`; the parser expected `VOICE_ACTIVITY_*`,
+  so a `voiceActivity` frame errored instead of emitting
+  `VoiceActivityStart`. Both spellings are accepted now, unknown values read as
+  `VoiceActivityType::Unspecified`, and `audio_offset` is exposed.
+- `lastConsumedClientMessageIndex` is accepted as a JSON number as well as the
+  proto-JSON string.
 - **Model errors lost their kind on the text path.** `GeminiLlm` flattened
   every failure into `LlmError::RequestFailed(String)`, and `LlmTextAgent`
   flattened that again into `AgentError::Other("LLM error: …")`, so a caller
@@ -143,6 +163,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Gemini 3.8 Live support** — `ModelId::LIVE_3_8` (`gemini-3.8-live`, GA on
+  Vertex AI 2026-09-24). See the new *Gemini 3.8 Live* guide.
+  - `LiveModelProfile`: what a Live model accepts in its setup, keyed on the
+    model name. For 3.8 the setup leaves off `thinkingConfig` (unsupported)
+    and `enableAffectiveDialog` / `proactivity` (always on; its guide says not
+    to send them), and keeps tool `behavior` and response `scheduling` on
+    Vertex AI, which earlier Vertex Live models reject. Unknown models get
+    every field passed through.
+  - `SessionConfig::ignored_settings()` lists every configured setting left
+    off the wire; connect logs it once as a warning.
+  - Live Avatar: `AvatarConfig::prebuilt("Ben")` / `AvatarConfig::custom(image,
+    "png")` via `.avatar(..)` (L0 and L2), which also sets the `VIDEO` response
+    modality; `Modality::Video`; video chunks as `InlineMedia` on
+    `SessionEvent::Media`, `LiveEvent::Media`, `EventCallbacks::on_media`
+    and `Live::on_media`, suppressed after barge-in like audio, with their own
+    `DeliveryConfig::media` policy.
+  - `AudioTranscriptionConfig` with `language_codes` and `custom_vocabulary`;
+    `input_transcription_config` / `output_transcription_config` /
+    `custom_vocabulary` on `SessionConfig` and `Live`.
+    `InputAudioTranscription` and `OutputAudioTranscription` are now aliases
+    of it.
+  - `ReplicatedVoiceConfig` and `.replicated_voice(..)` for a voice replicated
+    from a sample.
+  - `.transparent_resumption()` (`sessionResumption.transparent`),
+    `.history_in_client_content()` / `initial_history_in_client_content(..)`
+    (`historyConfig`), and `.explicit_vad_signal()` (Vertex AI only; left off
+    the wire on Google AI).
 - **`gemini-adk`, one crate to depend on** (`crates/gemini-adk`, library
   `gemini_adk`). It re-exports the fluent crate with the same feature names,
   adds a `memory` feature for `gemini_adk::memory`, and `#[tool]` resolves its

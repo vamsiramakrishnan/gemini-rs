@@ -28,6 +28,9 @@ pub enum LiveEvent {
     /// Raw PCM audio from model. Uses `Bytes` (refcounted) — clone is
     /// a pointer increment (~2ns), not a deep copy.
     Audio(Bytes),
+    /// Non-audio media from the model: Gemini 3.8 Live Avatar video
+    /// (`video/mp4`), synchronized with [`Audio`](Self::Audio).
+    Media(gemini_genai_rs::session::InlineMedia),
     /// Incremental text token from model.
     TextDelta(String),
     /// Complete text response (all deltas concatenated).

@@ -83,6 +83,8 @@ pub enum Delivery {
 pub struct DeliveryConfig {
     /// Policy for raw PCM audio frames.
     pub audio: Delivery,
+    /// Policy for non-audio media chunks (Live Avatar video).
+    pub media: Delivery,
     /// Policy for incremental text deltas (and text-complete frames).
     pub text: Delivery,
     /// Policy for input/output transcript frames (fast-lane callback copy only;
@@ -100,6 +102,7 @@ impl Default for DeliveryConfig {
     fn default() -> Self {
         Self {
             audio: Delivery::Lossless,
+            media: Delivery::Lossless,
             text: Delivery::Lossless,
             transcript: Delivery::Lossless,
             thought: Delivery::Lossless,
@@ -119,6 +122,12 @@ impl DeliveryConfig {
     /// Set the audio policy.
     pub fn audio(mut self, d: Delivery) -> Self {
         self.audio = d;
+        self
+    }
+
+    /// Set the media (Live Avatar video) policy.
+    pub fn media(mut self, d: Delivery) -> Self {
+        self.media = d;
         self
     }
 
@@ -161,6 +170,7 @@ impl DeliveryConfig {
 #[derive(Debug, Default)]
 pub(crate) struct DroppedFrames {
     pub audio: AtomicU64,
+    pub media: AtomicU64,
     pub text: AtomicU64,
     pub transcript: AtomicU64,
     pub thought: AtomicU64,
@@ -176,6 +186,7 @@ impl DroppedFrames {
     #[cfg(test)]
     pub(crate) fn total(&self) -> u64 {
         self.audio.load(Ordering::Relaxed)
+            + self.media.load(Ordering::Relaxed)
             + self.text.load(Ordering::Relaxed)
             + self.transcript.load(Ordering::Relaxed)
             + self.thought.load(Ordering::Relaxed)
@@ -215,6 +226,7 @@ async fn deliver_fast(
 /// Events routed to the fast lane (sync processing).
 pub(crate) enum FastEvent {
     Audio(Bytes),
+    Media(gemini_genai_rs::session::InlineMedia),
     Text(String),
     TextComplete(String),
     InputTranscript(String),
@@ -648,6 +660,15 @@ async fn route_event(
             )
             .await;
         }
+        SessionEvent::Media(media) => {
+            deliver_fast(
+                fast_tx,
+                FastEvent::Media(media),
+                delivery.media,
+                &dropped.media,
+            )
+            .await;
+        }
         SessionEvent::TextDelta(text) => {
             deliver_fast(fast_tx, FastEvent::Text(text), delivery.text, &dropped.text).await;
         }
@@ -789,6 +810,15 @@ async fn run_fast_lane(
                         cb(&data);
                     }
                     let _ = event_tx.send(LiveEvent::Audio(data));
+                }
+            }
+            FastEvent::Media(media) => {
+                // Avatar video is speech made visible: stale after barge-in too.
+                if !shared.interrupted.load(Ordering::Acquire) {
+                    if let Some(cb) = &callbacks.on_media {
+                        cb(&media);
+                    }
+                    let _ = event_tx.send(LiveEvent::Media(media));
                 }
             }
             FastEvent::Text(delta) => {
@@ -966,6 +996,63 @@ mod tests {
         // Send audio events
         let _ = event_tx.send(SessionEvent::AudioData(Bytes::from_static(b"audio1")));
         let _ = event_tx.send(SessionEvent::AudioData(Bytes::from_static(b"audio2")));
+
+        // Allow tasks to process
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        assert_eq!(count.load(Ordering::SeqCst), 2);
+
+        // Cleanup
+        drop(event_tx);
+        let _ = fast_handle.await;
+        let _ = ctrl_handle.await;
+    }
+
+    #[tokio::test]
+    async fn media_chunks_reach_on_media_not_on_audio() {
+        let count = Arc::new(AtomicUsize::new(0));
+        let count_clone = count.clone();
+
+        let callbacks = EventCallbacks {
+            on_media: Some(Box::new(
+                move |media: &gemini_genai_rs::session::InlineMedia| {
+                    assert!(media.is_video());
+                    count_clone.fetch_add(1, Ordering::SeqCst);
+                },
+            )),
+            ..Default::default()
+        };
+        let callbacks = Arc::new(callbacks);
+
+        let (event_tx, _) = broadcast::channel(16);
+        let event_rx = event_tx.subscribe();
+
+        let writer: Arc<dyn SessionWriter> = Arc::new(crate::agent_session::NoOpSessionWriter);
+
+        let (fast_handle, ctrl_handle, _ctrl_tx) = spawn_event_processor(
+            event_rx,
+            callbacks,
+            None,
+            writer,
+            vec![],
+            State::new(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            std::collections::HashMap::new(),
+            ControlPlaneConfig::default(),
+            dummy_event_tx(),
+        );
+
+        // Live Avatar video chunks
+        for _ in 0..2 {
+            let _ = event_tx.send(SessionEvent::Media(gemini_genai_rs::session::InlineMedia {
+                mime_type: "video/mp4".into(),
+                data: Bytes::from_static(b"mp4"),
+            }));
+        }
 
         // Allow tasks to process
         tokio::time::sleep(Duration::from_millis(50)).await;

@@ -429,7 +429,7 @@ FunctionResponse {
 - `WhenIdle`: Model waits until it finishes current output before handling
 - `Silent`: Model integrates the result without notifying the user
 
-**Platform support**: Async tool calling (`NonBlocking` behavior + scheduling) is only supported on **Google AI**. On **Vertex AI**, these fields are automatically stripped from the wire — `behavior` is removed from `FunctionDeclaration` in the setup message, and `scheduling` is removed from `FunctionResponse`. This means you can set `NonBlocking` and `WhenIdle` unconditionally in your code; the SDK handles the platform difference. Use `config.supports_async_tools()` to check at runtime.
+**Platform support**: Async tool calling (`behavior` + `scheduling`) is supported on **Google AI** and on **Gemini 3.8 Live on Vertex AI**. For earlier **Vertex AI** Live models these fields are stripped from the wire — `behavior` is removed from `FunctionDeclaration` in the setup message, and `scheduling` is removed from `FunctionResponse`. This means you can set `NonBlocking` and `WhenIdle` unconditionally in your code; the SDK handles the difference. Use `config.supports_async_tools()` to check at runtime, and `config.ignored_settings()` to list everything the target model leaves off the wire (connect logs it as a warning). On Gemini 3.8 Live, `Blocking` pauses the model until the response arrives and the server cancels the call if the user speaks again; see [Gemini 3.8 Live](user-guide/gemini-3-8-live.md).
 
 **L1/L2 integration**: `ToolExecutionMode::Background` automatically sets `behavior: NonBlocking` on the wire declaration and passes the scheduling mode through to responses:
 
@@ -613,7 +613,7 @@ let artifacts = A::json_output("report", "Analysis report")
 | `SessionReader` | Trait: subscribe to events |
 | `connect` / `ConnectBuilder` | `connect(config).await` for the default transport; `ConnectBuilder::new(config).transport_config(..).transport(..).codec(..).connect().await` when you need options |
 | `Content` / `Part` / `Role` | Wire-format message types with builders (`Content::user()`, `Part::text()`) |
-| `ModelId` | Model identifier newtype: `ModelId::new("…")`, `"…".into()`, or the constants `LIVE_2_5_FLASH_NATIVE_AUDIO` (Vertex GA), `FLASH_2_5_NATIVE_AUDIO_LATEST` (Google AI alias), `FLASH_LATEST` (text). Leave `SessionConfig.model` as `None` and connect resolves `ModelId::live_default(vertex)` |
+| `ModelId` | Model identifier newtype: `ModelId::new("…")`, `"…".into()`, or the constants `LIVE_3_8` (Gemini 3.8 Live, Vertex GA), `LIVE_2_5_FLASH_NATIVE_AUDIO` (Vertex GA), `FLASH_2_5_NATIVE_AUDIO_LATEST` (Google AI alias), `FLASH_LATEST` (text). Leave `SessionConfig.model` as `None` and connect resolves `ModelId::live_default(vertex)` |
 | `Voice` | Output voice selection |
 | `Tool` / `FunctionDeclaration` | Tool declarations for setup message |
 | `FunctionCall` / `FunctionResponse` | Tool call/response wire types |
@@ -800,7 +800,8 @@ just release-status
 - **API versions**: Google AI = `v1beta`, Vertex AI = `v1beta1` -- handled by `ApiEndpoint`.
 - **Cannot update tool definitions mid-session**: Voice sessions only allow instruction updates. Tool declarations are fixed at connect time.
 - **Fast lane callbacks must be sync and under 1ms**: No allocations, no locks, no async in `on_audio`, `on_text`, `on_thought`, `on_vad_*`.
-- **Thinking is Google AI only**: `thinkingConfig` is auto-stripped for Vertex AI. `.on_thought()` won't fire on Vertex.
+- **Thinking is Google AI only**: `thinkingConfig` is auto-stripped for Vertex AI, and for Gemini 3.8 Live everywhere (the model has no thinking). `.on_thought()` won't fire there.
+- **Gemini 3.8 Live has affective dialogue and proactive audio always on**: `.affective_dialog()` / `.proactive_audio()` are left off its setup (its guide says not to send them), and `SessionConfig::ignored_settings()` reports them. Avatar video (`.avatar(..)`) arrives on `on_media`, never on `on_audio`. See [Gemini 3.8 Live](user-guide/gemini-3-8-live.md).
 - **Forgetting `.done()`**: Phase builder chains must end with `.done()` to return to the `Live` builder.
 - **Forgetting `.initial_phase()`**: Phase machine requires an explicit initial phase name.
 - **Using `instruction_template` with phases**: Template replaces the entire instruction -- use `instruction_amendment` or phase modifiers (`P::show_state`, `P::when`) for additive composition.
