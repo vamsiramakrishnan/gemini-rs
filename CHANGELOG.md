@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-09-25
+
+### Highlights
+
+- **Gemini 3.8 Live**: Live Avatar video, custom transcription vocabulary,
+  transparent resumption, and per-model setup shaping (`LiveModelProfile`,
+  `SessionConfig::ignored_settings()`).
+- **Text agents on the golden path**: `agent.ask(..)`, `ask_as::<T>()`,
+  `chat()`, `stream(..)`, `RunResult` with usage and tool calls, `MockLlm`
+  for model-free tests, and `#[tool]` from doc comments.
+- **Four wire encodings fixed** (VAD sensitivity, media resolution, voice
+  activity, avatar media routing). Setups that set VAD sensitivity or media
+  resolution were sending values the API does not define.
+- **`gemini-adk`**, the one-crate facade over the fluent layer and memory, is
+  published for the first time.
+- **Breaking**: this is a major release. The *Changed*, *Removed* and
+  *Deprecated* sections below list what to update. Several public enums and
+  structs are now `#[non_exhaustive]`, and the fluent prelude is a curated
+  list instead of a glob of the wire prelude.
+
 ### Fixed
 
 - **Gemini 3.8 Live Avatar video would have played as audio.** Every
@@ -332,6 +352,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Wire types gained Gemini 3.8 Live fields** (source-breaking for struct
+  literals): `InputAudioTranscription {}` / `OutputAudioTranscription {}` are
+  now aliases of the `#[non_exhaustive]` `AudioTranscriptionConfig` — write
+  `::default()`; `VoiceConfig` has `replicated_voice_config`;
+  `SessionResumptionConfig` has `transparent` (both derive `Default`);
+  `SessionConfig` has `avatar_config`, `history_config` and
+  `explicit_vad_signal`; `DeliveryConfig` has `media`; `EventCallbacks` has
+  `on_media`. `Modality` gained `Video`, and `VoiceActivityType` is
+  `#[non_exhaustive]` with an `Unspecified` variant.
+- `SessionConfig::supports_async_tools()` is now also true for Gemini 3.8 Live
+  on Vertex AI, and `supports_thinking()` is false for Gemini 3.8 Live on
+  either platform.
+- The workspace dependency on `gemini-adk-fluent-rs` has default features off,
+  like L0 and L1, so the `gemini-adk` facade decides them; workspace members
+  that inherit it say `default-features = true`.
 - **Documentation leads with the golden path.** The README's text-agent
   section is a ladder — ask, a streamed conversation, a typed answer, a tool,
   a model-free test — whose every program is a compiled quickstart target
@@ -392,6 +427,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to read docs.rs versus the site.
 - The README and the book landing said **v1.0** for a day after 2.0.0 shipped;
   a drift test now holds them to the released major.minor.
+
+
+### Features
+
+- feat(devex): the small things a first look hits — docs.rs, Studio keys, READMEs
+### Documentation
+
+- docs: overhaul guides and shared agent instructions (#62)
+- docs: clarify product outcomes, first-use paths, and boundaries (#61)
+- docs: de-Claude gemini-rs README (#60)
+- docs(site): Astro + Starlight website synced from docs/, replacing mdBook (#58)
+### Other
+
+- Support Gemini 3.8 Live and fix four wire encodings
+- Flow stack in the runtime, plus a developer-experience overhaul: ask/chat/stream, typed output, #[tool], honest configuration (#69)
+- Update version from 1.0 to 2.0 in README
 
 ## [2.0.0] - 2026-09-03
 

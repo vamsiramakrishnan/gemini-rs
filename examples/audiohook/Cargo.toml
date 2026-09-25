@@ -6,7 +6,7 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
-gemini-adk-fluent-rs = { workspace = true }
+gemini-adk-fluent-rs = { workspace = true, default-features = true }
 tokio = { version = "1", features = ["full"] }
 axum = { version = "0.8", features = ["ws"] }
 serde = { version = "1", features = ["derive"] }

@@ -13,7 +13,7 @@ repository.workspace = true
 # Internal workspace crates
 gemini-genai-rs       = { workspace = true, default-features = true }
 gemini-adk-rs        = { workspace = true, default-features = true, features = ["gemini-llm"] }
-gemini-adk-fluent-rs = { workspace = true, features = ["gemini-llm", "denoise"] }
+gemini-adk-fluent-rs = { workspace = true, default-features = true, features = ["gemini-llm", "denoise"] }
 gemini-adk-server-rs = { workspace = true }
 
 # CLI

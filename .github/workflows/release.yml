@@ -66,6 +66,7 @@ jobs:
 #   L1  gemini-adk-rs          (depends on gemini-genai-rs, gemini-adk-macros-rs)
 #   L2  gemini-adk-fluent-rs   (depends on gemini-genai-rs, gemini-adk-rs)
 #   mem gemini-memory-rs       (depends on gemini-genai-rs, gemini-adk-rs)
+#   fac gemini-adk             (facade; depends on gemini-adk-fluent-rs, gemini-memory-rs)
 #   app gemini-adk-server-rs   (depends on gemini-adk-rs)
 #   bin gemini-adk-cli-rs      (depends on all above)
 #
@@ -162,6 +163,11 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
+      - name: Publish gemini-adk (facade)
+        run: /tmp/publish.sh gemini-adk
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
       - name: Publish gemini-adk-server-rs
         run: /tmp/publish.sh gemini-adk-server-rs
         env:
@@ -230,6 +236,7 @@ jobs:
               echo "| \`gemini-adk-rs\` | $VERSION | \`cargo add gemini-adk-rs@${VERSION}\` |"
               echo "| \`gemini-adk-fluent-rs\` | $VERSION | \`cargo add gemini-adk-fluent-rs@${VERSION}\` |"
               echo "| \`gemini-memory-rs\` | $VERSION | \`cargo add gemini-memory-rs@${VERSION}\` |"
+              echo "| \`gemini-adk\` | $VERSION | \`cargo add gemini-adk@${VERSION}\` |"
               echo "| \`gemini-adk-server-rs\` | $VERSION | \`cargo add gemini-adk-server-rs@${VERSION}\` |"
               echo "| \`gemini-adk-cli-rs\` | $VERSION | \`cargo install gemini-adk-cli-rs@${VERSION}\` |"
               echo "RELEASE_EOF"

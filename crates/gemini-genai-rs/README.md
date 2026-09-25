@@ -93,7 +93,7 @@ subscriber is installed.
 
 ```toml
 [dependencies]
-gemini-genai-rs = { version = "2", features = ["generate", "tokens"] }
+gemini-genai-rs = { version = "3", features = ["generate", "tokens"] }
 ```
 
 ## Voice activity detection

@@ -748,7 +748,7 @@ just release-status
 9. **Tag**: annotated `v0.6.0` with full release notes in tag body
 10. **Push**: atomic push of `release/v0.6.0` branch + tag
 11. **PR**: opens PR `release/v0.6.0 → main` via `gh`
-12. **CI takes over**: validate → publish to crates.io (L0→L1→L2→server→cli) → GitHub Release
+12. **CI takes over**: validate → publish to crates.io (L0→L1→L2→memory→facade→server→cli) → GitHub Release
 13. **You merge the PR** to bring version bump + changelog into main
 
 ### Published crates (dependency order)
@@ -758,8 +758,9 @@ just release-status
 3. `gemini-adk-rs` (L1)
 4. `gemini-adk-fluent-rs` (L2)
 5. `gemini-memory-rs`
-6. `gemini-adk-server-rs`
-7. `gemini-adk-cli-rs`
+6. `gemini-adk` (facade over L2 + memory)
+7. `gemini-adk-server-rs`
+8. `gemini-adk-cli-rs`
 
 ### Version management
 

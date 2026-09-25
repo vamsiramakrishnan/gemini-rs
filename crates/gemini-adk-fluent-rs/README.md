@@ -10,7 +10,7 @@ This is the crate to add to an application; it sits on the runtime
 
 ```toml
 [dependencies]
-gemini-adk-fluent-rs = "2.0"
+gemini-adk-fluent-rs = "3.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 

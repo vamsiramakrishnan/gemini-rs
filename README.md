@@ -50,7 +50,7 @@ Text agents need Rust 1.93+.
 <!-- quickstart:Cargo.toml -->
 ```toml
 [dependencies]
-gemini-adk-fluent-rs = "2.0"
+gemini-adk-fluent-rs = "3.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 # For typed answers and tool arguments:
 serde = { version = "1", features = ["derive"] }
@@ -61,7 +61,7 @@ Voice I/O is optional:
 
 <!-- quickstart:Cargo.toml:voice -->
 ```toml
-gemini-adk-fluent-rs = { version = "2.0", features = ["voice-io"] }
+gemini-adk-fluent-rs = { version = "3.0", features = ["voice-io"] }
 ```
 
 On Linux, voice builds need `pkg-config`, `libssl-dev`, and `libasound2-dev`. The text path does not pull in the system audio stack.

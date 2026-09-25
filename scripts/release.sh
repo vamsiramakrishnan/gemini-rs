@@ -64,7 +64,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
 # ── Published crates in dependency order ──────────────────────────────────
-PUBLISH_CRATES=("gemini-genai-rs" "gemini-adk-macros-rs" "gemini-adk-rs" "gemini-adk-fluent-rs" "gemini-memory-rs" "gemini-adk-server-rs" "gemini-adk-cli-rs")
+PUBLISH_CRATES=("gemini-genai-rs" "gemini-adk-macros-rs" "gemini-adk-rs" "gemini-adk-fluent-rs" "gemini-memory-rs" "gemini-adk" "gemini-adk-server-rs" "gemini-adk-cli-rs")
 
 # ── Read current workspace version ────────────────────────────────────────
 CURRENT=$(grep -m1 '^version = "' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
@@ -295,6 +295,7 @@ ${CHANGELOG_BODY}
 
 | Crate | Version | Install |
 |-------|---------|---------|
+| [\`gemini-adk\`](https://crates.io/crates/gemini-adk) | ${VERSION} | \`cargo add gemini-adk@${VERSION}\` |
 | [\`gemini-genai-rs\`](https://crates.io/crates/gemini-genai-rs) | ${VERSION} | \`cargo add gemini-genai-rs@${VERSION}\` |
 | [\`gemini-adk-rs\`](https://crates.io/crates/gemini-adk-rs) | ${VERSION} | \`cargo add gemini-adk-rs@${VERSION}\` |
 | [\`gemini-adk-fluent-rs\`](https://crates.io/crates/gemini-adk-fluent-rs) | ${VERSION} | \`cargo add gemini-adk-fluent-rs@${VERSION}\` |

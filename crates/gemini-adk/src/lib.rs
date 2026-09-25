@@ -4,7 +4,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! gemini-adk = "2"
+//! gemini-adk = "3"
 //! tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 //! ```
 //!

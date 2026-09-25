@@ -10,18 +10,14 @@ categories = ["api-bindings", "asynchronous"]
 repository.workspace = true
 documentation = "https://docs.rs/gemini-adk"
 readme = "README.md"
-# The one crate an application adds. Not published until its crates.io name is
-# confirmed; until then depend on `gemini-adk-fluent-rs`, which it re-exports.
-publish = false
 
 [lib]
 name = "gemini_adk"
 
 [dependencies]
-# By path, not `workspace = true`: the workspace entry keeps the fluent
-# crate's default features on, and this crate's own features must decide them.
-# Publishing this crate needs a `version` here too.
-gemini-adk-fluent-rs = { path = "../gemini-adk-fluent-rs", default-features = false }
+# The workspace entry has default features off, so this crate's own features
+# decide the fluent crate's.
+gemini-adk-fluent-rs = { workspace = true }
 gemini-memory-rs = { workspace = true, optional = true }
 
 # Every feature is the fluent crate's feature of the same name, plus `memory`.
