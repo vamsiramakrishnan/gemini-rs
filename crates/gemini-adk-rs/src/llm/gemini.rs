@@ -385,7 +385,7 @@ impl GeminiLlm {
                 .then(|| std::mem::take(&mut request.stop_sequences)),
             thinking_config: request.thinking_budget.map(|budget| ThinkingConfig {
                 thinking_budget: Some(budget),
-                include_thoughts: None,
+                ..ThinkingConfig::default()
             }),
             response_mime_type: request.response_mime_type.take(),
             response_json_schema: request.response_json_schema.take(),

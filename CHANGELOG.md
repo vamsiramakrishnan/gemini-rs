@@ -11,15 +11,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Highlights
 
-- **Gemini 3.8 Live**: Live Avatar video, custom transcription vocabulary,
-  transparent resumption, and per-model setup shaping (`LiveModelProfile`,
-  `SessionConfig::ignored_settings()`).
+- **Gemini 3.8 Live**, including the extended-thinking variant: custom
+  transcription vocabulary, blocking tools, history seeding, Live Avatar video
+  and transparent resumption (both Vertex AI), and setups shaped per model and
+  platform (`LiveModelProfile`, `SessionConfig::ignored_settings()`). All of it
+  was checked against the live Google AI endpoint.
+- **Google AI sessions no longer die on `update_instruction` or
+  `.proactive_audio()`**: both used to close the session with 1007.
 - **Text agents on the golden path**: `agent.ask(..)`, `ask_as::<T>()`,
   `chat()`, `stream(..)`, `RunResult` with usage and tool calls, `MockLlm`
   for model-free tests, and `#[tool]` from doc comments.
 - **Four wire encodings fixed** (VAD sensitivity, media resolution, voice
   activity, avatar media routing). Setups that set VAD sensitivity or media
-  resolution were sending values the API does not define.
+  resolution were refused by the server (1007, confirmed live).
 - **`gemini-adk`**, the one-crate facade over the fluent layer and memory, is
   published for the first time.
 - **Breaking**: this is a major release. The *Changed*, *Removed* and
@@ -29,6 +33,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Instruction updates closed Google AI sessions.** `update_instruction`, and
+  with it every phase transition in the default `InstructionUpdate` steering
+  mode, sent a `system`-role client content turn, which the Google AI endpoint
+  answers with close code 1007. This was measured live on Gemini 2.5, 3.1 and
+  3.8 Live. On Google AI the update is now a user-role turn that says it
+  replaces the instructions, sent with `turnComplete: false`. Gemini 3.1 and
+  3.8 follow it; Gemini 2.5 accepts it without following it. Vertex AI keeps
+  the documented `system` role
+  (`SessionConfig::supports_system_role_updates()`).
+- **`.proactive_audio()` broke every Google AI session.** Google AI's setup has
+  no `proactivity` field, and a setup that carries one is refused with 1007
+  (measured on 2.5 and 3.8). It is now left off on Google AI and reported by
+  `ignored_settings()`.
 - **Gemini 3.8 Live Avatar video would have played as audio.** Every
   `inlineData` part from the model was decoded and sent to `on_audio`,
   whatever its MIME type. Only `audio/*` parts go there now; anything else
@@ -183,8 +200,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Gemini 3.8 Live support** — `ModelId::LIVE_3_8` (`gemini-3.8-live`, GA on
-  Vertex AI 2026-09-24). See the new *Gemini 3.8 Live* guide.
+- **Gemini 3.8 Live Extended Thinking** — `ModelId::LIVE_3_8_EXTENDED_THINKING`
+  with its own `LiveModelProfile`, `ThinkingLevel` / `ThinkingConfig::thinking_level`
+  and `.thinking_level(..)` (L0 and L2); the model refuses a setup without a
+  level. A question that needs thought gets a spoken holding line first; the
+  answer arrives unprompted as the next turn, and
+  `SessionEvent::InteractionStatus("IN_PROGRESS")` (from the new
+  `serverContent.interactionStatus`) marks the wait.
+- **Gemini 3.8 Live support** — `ModelId::LIVE_3_8` (`gemini-3.8-live`, GA
+  2026-09-24 on Vertex AI and Google AI; the wire behavior below was verified
+  live against Google AI). See the new *Gemini 3.8 Live* guide.
   - `LiveModelProfile`: what a Live model accepts in its setup, keyed on the
     model name. For 3.8 the setup leaves off `thinkingConfig` (unsupported)
     and `enableAffectiveDialog` / `proactivity` (always on; its guide says not
@@ -352,6 +377,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- On Google AI, `explicitVadSignal`, `sessionResumption.transparent` and
+  `avatarConfig.avatarName` / `customizedAvatar` are left off the setup and
+  reported by `ignored_settings()`: that endpoint refuses each with 1007.
+  Live Avatar is a Vertex AI feature; Google AI's `gemini-3.8-live` refuses the
+  `VIDEO` modality. `LiveModelProfile` gained `thinking_level_required`.
 - **Wire types gained Gemini 3.8 Live fields** (source-breaking for struct
   literals): `InputAudioTranscription {}` / `OutputAudioTranscription {}` are
   now aliases of the `#[non_exhaustive]` `AudioTranscriptionConfig` — write
@@ -363,7 +393,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `#[non_exhaustive]` with an `Unspecified` variant.
 - `SessionConfig::supports_async_tools()` is now also true for Gemini 3.8 Live
   on Vertex AI, and `supports_thinking()` is false for Gemini 3.8 Live on
-  either platform.
+  either platform (true for the extended-thinking variant on both).
 - The workspace dependency on `gemini-adk-fluent-rs` has default features off,
   like L0 and L1, so the `gemini-adk` facade decides them; workspace members
   that inherit it say `default-features = true`.

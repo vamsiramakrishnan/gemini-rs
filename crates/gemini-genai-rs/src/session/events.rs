@@ -45,6 +45,10 @@ pub enum SessionEvent {
     ToolCall(Vec<FunctionCall>),
     /// Server cancelled pending tool calls.
     ToolCallCancelled(Vec<String>),
+    /// Progress of a longer interaction (`serverContent.interactionStatus`),
+    /// e.g. `"IN_PROGRESS"` when Gemini 3.8 Live Extended Thinking has said a
+    /// holding line and will answer in a later turn.
+    InteractionStatus(String),
     /// Model turn is complete (it's the user's turn now).
     TurnComplete,
     /// Model finished generating its full response.

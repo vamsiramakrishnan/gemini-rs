@@ -300,6 +300,78 @@ fn setup_vertex_gemini_3_8_live_golden() {
     assert_golden("setup_vertex_gemini_3_8_live.json", &actual);
 }
 
+/// What the live Google AI endpoint refuses, measured on 2026-09-25 with
+/// `gemini-3.8-live` (and `proactivity` / `transparent` with 2.5 too): each
+/// of these closed the setup with 1007 "Unknown name … Cannot find field".
+#[test]
+fn google_ai_leaves_off_fields_its_setup_does_not_have() {
+    let config = SessionConfig::new("key")
+        .model(ModelId::LIVE_3_8)
+        .proactive_audio(true)
+        .transparent_resumption()
+        .explicit_vad_signal(true)
+        .avatar(AvatarConfig::prebuilt("Ben").bitrates(64_000, 1_000_000));
+    let actual: Value = serde_json::from_str(&config.to_setup_json()).unwrap();
+    let setup = &actual["setup"];
+    assert!(setup.get("proactivity").is_none());
+    assert!(setup.get("explicitVadSignal").is_none());
+    assert_eq!(setup["sessionResumption"], json!({}));
+    assert_eq!(
+        setup["avatarConfig"],
+        json!({"audioBitrateBps": 64_000, "videoBitrateBps": 1_000_000})
+    );
+    assert_eq!(
+        config.ignored_settings(),
+        [
+            "proactivity",
+            "sessionResumption.transparent",
+            "avatarConfig.avatarName",
+            "explicitVadSignal"
+        ]
+    );
+    // Proactivity is refused on Google AI for every model, not just 3.8.
+    let older = SessionConfig::new("key")
+        .model(ModelId::FLASH_2_5_NATIVE_AUDIO_LATEST)
+        .proactive_audio(true);
+    assert!(
+        serde_json::from_str::<Value>(&older.to_setup_json()).unwrap()["setup"]
+            .get("proactivity")
+            .is_none()
+    );
+    assert_eq!(older.ignored_settings(), ["proactivity"]);
+}
+
+#[test]
+fn extended_thinking_keeps_its_required_thinking_level() {
+    for config in [
+        SessionConfig::new("key"),
+        SessionConfig::from_vertex("p", "us-central1", "t"),
+    ] {
+        let config = config
+            .model(ModelId::LIVE_3_8_EXTENDED_THINKING)
+            .thinking_level(ThinkingLevel::Low)
+            .affective_dialog(true);
+        let actual: Value = serde_json::from_str(&config.to_setup_json()).unwrap();
+        let generation = &actual["setup"]["generationConfig"];
+        assert_eq!(
+            generation["thinkingConfig"],
+            json!({"thinkingLevel": "LOW"})
+        );
+        assert!(generation.get("enableAffectiveDialog").is_none());
+    }
+    // Plain 3.8 refuses a thinking level: it goes with the rest of thinkingConfig.
+    let plain = SessionConfig::new("key")
+        .model(ModelId::LIVE_3_8)
+        .thinking_level(ThinkingLevel::Low);
+    let actual: Value = serde_json::from_str(&plain.to_setup_json()).unwrap();
+    assert!(
+        actual["setup"]["generationConfig"]
+            .get("thinkingConfig")
+            .is_none()
+    );
+    assert_eq!(plain.ignored_settings(), ["thinkingConfig"]);
+}
+
 #[test]
 fn explicit_vad_signal_is_vertex_only() {
     let config = SessionConfig::new("key").explicit_vad_signal(true);
@@ -556,6 +628,19 @@ fn parse_session_resumption_update_numeric_index() {
             Some("42")
         ),
         other => panic!("expected SessionResumptionUpdate, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_interaction_status() {
+    let msg =
+        ServerMessage::parse(r#"{"serverContent":{"interactionStatus":"IN_PROGRESS"}}"#).unwrap();
+    match msg {
+        ServerMessage::ServerContent(m) => assert_eq!(
+            m.server_content.interaction_status.as_deref(),
+            Some("IN_PROGRESS")
+        ),
+        other => panic!("expected ServerContent, got {other:?}"),
     }
 }
 

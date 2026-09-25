@@ -70,7 +70,9 @@ impl SessionConfig {
     /// - `thinkingConfig` on Vertex AI and on models without thinking;
     /// - `enableAffectiveDialog` and `proactivity` on models where both are
     ///   always on (Gemini 3.8 Live);
-    /// - `explicitVadSignal` on Google AI.
+    /// - on Google AI, which has no such fields: `proactivity`,
+    ///   `explicitVadSignal`, `sessionResumption.transparent`, and
+    ///   `avatarConfig.avatarName` / `customizedAvatar`.
     pub fn to_setup_message(&self) -> SetupMessage {
         let profile = self.model_profile();
         let tools = if self.supports_async_tools() {
@@ -108,15 +110,26 @@ impl SessionConfig {
                 input_audio_transcription: self.input_audio_transcription.clone(),
                 output_audio_transcription: self.output_audio_transcription.clone(),
                 realtime_input_config: self.realtime_input_config.clone(),
-                session_resumption: self.session_resumption.clone(),
+                session_resumption: self.session_resumption.clone().map(|mut r| {
+                    if !self.is_vertex() {
+                        r.transparent = None;
+                    }
+                    r
+                }),
                 context_window_compression: self.context_window_compression.clone(),
                 proactivity: self
                     .proactivity
                     .clone()
-                    .filter(|_| profile.proactivity_flag),
+                    .filter(|_| self.is_vertex() && profile.proactivity_flag),
                 explicit_vad_signal: self.explicit_vad_signal.filter(|_| self.is_vertex()),
                 history_config: self.history_config.clone(),
-                avatar_config: self.avatar_config.clone(),
+                avatar_config: self.avatar_config.clone().map(|mut a| {
+                    if !self.is_vertex() {
+                        a.avatar_name = None;
+                        a.customized_avatar = None;
+                    }
+                    a
+                }),
             },
         }
     }

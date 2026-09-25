@@ -91,6 +91,10 @@ pub(super) fn handle_server_msg(
                 let _ = event_tx.send(SessionEvent::OutputTranscription(text));
             }
 
+            if let Some(status) = content.interaction_status {
+                let _ = event_tx.send(SessionEvent::InteractionStatus(status));
+            }
+
             // Handle usage metadata (present on most server content messages)
             if let Some(usage) = sc.usage_metadata {
                 let _ = event_tx.send(SessionEvent::Usage(usage));

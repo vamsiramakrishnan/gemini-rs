@@ -485,7 +485,7 @@ pub struct UrlContextMetadata {
 }
 
 /// Configuration for model thinking/reasoning (Gemini 2.5+).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThinkingConfig {
     /// Token budget for thinking/reasoning steps.
@@ -494,6 +494,25 @@ pub struct ThinkingConfig {
     /// Whether to include the model's thought process in responses.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub include_thoughts: Option<bool>,
+    /// How much the model thinks, for models that take a level instead of a
+    /// budget (Gemini 3.8 Live Extended Thinking requires one).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking_level: Option<ThinkingLevel>,
+}
+
+/// How much a model thinks before answering, for models that take a level
+/// rather than a token budget.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ThinkingLevel {
+    /// As little as the model allows.
+    Minimal,
+    /// Low.
+    Low,
+    /// Medium.
+    Medium,
+    /// High.
+    High,
 }
 
 /// Media resolution for image/video inputs: the per-frame token budget.
@@ -1007,11 +1026,15 @@ impl SessionConfig {
         self
     }
 
-    /// Answer with Live Avatar video (Gemini 3.8 Live).
+    /// Answer with Live Avatar video (Gemini 3.8 Live on Vertex AI).
     ///
     /// Also sets `responseModalities` to `["VIDEO"]`, which the API requires
     /// for avatar output; the synchronized speech rides in the same stream.
     /// Chunks arrive as [`SessionEvent::Media`](crate::session::SessionEvent::Media).
+    ///
+    /// Vertex AI only. Google AI's avatar config has no `avatarName` or
+    /// `customizedAvatar` (those are left off the wire there), and its
+    /// `gemini-3.8-live` refuses the `VIDEO` modality.
     pub fn avatar(mut self, avatar: AvatarConfig) -> Self {
         self.avatar_config = Some(avatar);
         self.generation_config.response_modalities = Some(vec![Modality::Video]);
@@ -1233,7 +1256,8 @@ impl SessionConfig {
         self
     }
 
-    /// Enable session resumption in transparent mode: each resumption update
+    /// Enable session resumption in transparent mode (Vertex AI only; left
+    /// off the wire on Google AI): each resumption update
     /// also names the last client message the server consumed
     /// (`ResumeInfo::last_consumed_index`), so a client resuming from the
     /// handle knows which messages to send again.
@@ -1282,6 +1306,10 @@ impl SessionConfig {
     }
 
     /// Enable proactive model responses.
+    ///
+    /// Vertex AI only: Google AI's setup has no `proactivity` field and
+    /// refuses the session over it, so it is left off the wire there (and
+    /// listed by [`ignored_settings`](Self::ignored_settings)).
     pub fn proactive_audio(mut self, enabled: bool) -> Self {
         self.proactivity = Some(ProactivityConfig {
             proactive_audio: Some(enabled),
@@ -1291,28 +1319,27 @@ impl SessionConfig {
 
     /// Enable thinking/reasoning with a token budget (Gemini 2.5+).
     pub fn thinking(mut self, budget: u32) -> Self {
-        let mut tc = self
-            .generation_config
-            .thinking_config
-            .unwrap_or(ThinkingConfig {
-                thinking_budget: None,
-                include_thoughts: None,
-            });
+        let mut tc = self.generation_config.thinking_config.unwrap_or_default();
         tc.thinking_budget = Some(budget);
         self.generation_config.thinking_config = Some(tc);
+        self
+    }
+
+    /// Set the thinking level, for models that take one instead of a budget.
+    /// Gemini 3.8 Live Extended Thinking refuses a setup without it; plain
+    /// Gemini 3.8 Live refuses one with it.
+    pub fn thinking_level(mut self, level: ThinkingLevel) -> Self {
+        self.generation_config
+            .thinking_config
+            .get_or_insert_with(ThinkingConfig::default)
+            .thinking_level = Some(level);
         self
     }
 
     /// Whether thought summaries are delivered (`SessionEvent::Thought`).
     /// Google AI only; see [`supports_thinking`](Self::supports_thinking).
     pub fn include_thoughts(mut self, enabled: bool) -> Self {
-        let mut tc = self
-            .generation_config
-            .thinking_config
-            .unwrap_or(ThinkingConfig {
-                thinking_budget: None,
-                include_thoughts: None,
-            });
+        let mut tc = self.generation_config.thinking_config.unwrap_or_default();
         tc.include_thoughts = Some(enabled);
         self.generation_config.thinking_config = Some(tc);
         self
@@ -1440,7 +1467,21 @@ impl SessionConfig {
     /// `thinking(..)` and `include_thoughts(..)` are no-ops (listed by
     /// [`ignored_settings`](Self::ignored_settings)).
     pub fn supports_thinking(&self) -> bool {
-        !self.is_vertex() && self.model_profile().thinking
+        let profile = self.model_profile();
+        profile.thinking_level_required || (!self.is_vertex() && profile.thinking)
+    }
+
+    /// Whether a mid-session system-instruction update can go out as a
+    /// `system`-role client content turn, as Vertex AI documents.
+    ///
+    /// Google AI closes the session (1007, "Request contains an invalid
+    /// argument") on a `system` role — measured on Gemini 2.5, 3.1 and 3.8
+    /// Live — so there the update is sent as a user-role turn that says it
+    /// replaces the instructions, with `turnComplete: false`. Gemini 3.x
+    /// follows it; Gemini 2.5 accepts it without following it, so on 2.5
+    /// prefer context injection or a new session for a persona change.
+    pub fn supports_system_role_updates(&self) -> bool {
+        self.is_vertex()
     }
 
     /// Settings in this config that the target does not accept and that
@@ -1469,8 +1510,26 @@ impl SessionConfig {
         {
             ignored.push("enableAffectiveDialog");
         }
-        if self.proactivity.is_some() && !profile.proactivity_flag {
+        if self.proactivity.is_some() && (!self.is_vertex() || !profile.proactivity_flag) {
             ignored.push("proactivity");
+        }
+        if !self.is_vertex()
+            && self
+                .session_resumption
+                .as_ref()
+                .is_some_and(|r| r.transparent.is_some())
+        {
+            ignored.push("sessionResumption.transparent");
+        }
+        if !self.is_vertex()
+            && let Some(avatar) = &self.avatar_config
+        {
+            if avatar.avatar_name.is_some() {
+                ignored.push("avatarConfig.avatarName");
+            }
+            if avatar.customized_avatar.is_some() {
+                ignored.push("avatarConfig.customizedAvatar");
+            }
         }
         if self.explicit_vad_signal.is_some() && !self.is_vertex() {
             ignored.push("explicitVadSignal");

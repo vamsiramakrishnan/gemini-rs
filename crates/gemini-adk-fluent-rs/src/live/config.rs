@@ -406,6 +406,14 @@ impl Live {
         self
     }
 
+    /// Set the thinking level, for models that take one instead of a budget.
+    /// Gemini 3.8 Live Extended Thinking
+    /// ([`ModelId::LIVE_3_8_EXTENDED_THINKING`]) refuses a session without it.
+    pub fn thinking_level(mut self, level: ThinkingLevel) -> Self {
+        self.config = self.config.thinking_level(level);
+        self
+    }
+
     /// Include the model's thought summaries in responses.
     ///
     /// When enabled, the model emits `SessionEvent::Thought` events containing
@@ -426,6 +434,9 @@ impl Live {
     /// Enable proactive audio: the model may decide not to respond to input
     /// it judges not addressed to it. Pair with
     /// [`soft_turn_timeout`](Self::soft_turn_timeout).
+    ///
+    /// Vertex AI only: Google AI refuses a setup carrying `proactivity`, so
+    /// it is left off there, as it is for Gemini 3.8 Live (always on).
     pub fn proactive_audio(mut self) -> Self {
         self.config = self.config.proactive_audio(true);
         self
@@ -437,10 +448,10 @@ impl Live {
         self
     }
 
-    /// Answer with Gemini 3.8 Live Avatar video: synchronized 24 FPS video
-    /// of a prebuilt or custom avatar, delivered to
+    /// Answer with Gemini 3.8 Live Avatar video (Vertex AI): synchronized
+    /// 24 FPS video of a prebuilt or custom avatar, delivered to
     /// [`on_media`](Self::on_media). Sets the response modality to `VIDEO`,
-    /// as the API requires.
+    /// as the API requires. Google AI's `gemini-3.8-live` refuses `VIDEO`.
     ///
     /// ```no_run
     /// # use gemini_adk_fluent_rs::prelude::*;
@@ -615,7 +626,8 @@ impl Live {
         self
     }
 
-    /// Enable session resumption in transparent mode: resumption updates
+    /// Enable session resumption in transparent mode (Vertex AI only; left off
+    /// the wire on Google AI): resumption updates
     /// also name the last client message the server consumed, so a resumed
     /// session knows what to send again.
     pub fn transparent_resumption(mut self) -> Self {

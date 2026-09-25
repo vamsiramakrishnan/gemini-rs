@@ -78,6 +78,11 @@ pub struct ServerContentPayload {
     /// Whether the server is waiting for user input.
     #[serde(default)]
     pub waiting_for_input: Option<bool>,
+    /// Progress of a longer interaction, e.g. `"IN_PROGRESS"` while Gemini
+    /// 3.8 Live Extended Thinking works on an answer it will give in a later
+    /// turn.
+    #[serde(default)]
+    pub interaction_status: Option<String>,
 }
 
 /// Transcription text from server.

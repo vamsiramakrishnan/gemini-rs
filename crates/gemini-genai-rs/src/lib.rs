@@ -56,7 +56,7 @@ pub mod prelude {
         LIVE_INPUT_SAMPLE_RATE, LiveModelProfile, MediaResolution, Modality, ModalityTokenCount,
         ModelId, OutputAudioTranscription, Part, PrebuiltVoiceConfig, ProactivityConfig,
         RealtimeInputConfig, ReplicatedVoiceConfig, Role, Sensitivity, SessionConfig,
-        SessionResumptionConfig, SlidingWindow, SpeechConfig, ThinkingConfig, Tool,
+        SessionResumptionConfig, SlidingWindow, SpeechConfig, ThinkingConfig, ThinkingLevel, Tool,
         ToolCodeExecution, ToolConfig, ToolProvider, TurnCoverage, UrlContext, UrlContextMetadata,
         UsageMetadata, VertexConfig, Voice, VoiceConfig,
     };
