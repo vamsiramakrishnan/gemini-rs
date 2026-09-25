@@ -83,7 +83,7 @@ pub(in crate::live) async fn handle_turn_complete(
 
     // 5. Recompute derived state
     if let Some(computed) = computed {
-        computed.recompute(state);
+        computed.recompute_changed(state);
     }
 
     // 6. Build transcript window snapshot for phase evaluation

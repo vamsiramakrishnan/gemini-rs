@@ -7,6 +7,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use parking_lot::Mutex;
+
 use serde_json::Value;
 
 use crate::error::ConfigError;
@@ -43,6 +45,9 @@ pub struct ComputedRegistry {
     /// Maps a state key to the indices (into `vars`) of computed variables
     /// that list that key as a dependency.
     dep_index: HashMap<String, Vec<usize>>,
+    /// Journal position [`recompute_changed`](Self::recompute_changed) has
+    /// read up to; `None` until its first (full) pass.
+    cursor: Mutex<Option<u64>>,
 }
 
 impl Default for ComputedRegistry {
@@ -57,6 +62,7 @@ impl ComputedRegistry {
         Self {
             vars: Vec::new(),
             dep_index: HashMap::new(),
+            cursor: Mutex::new(None),
         }
     }
 
@@ -85,7 +91,38 @@ impl ComputedRegistry {
             return Err(err);
         }
         self.rebuild_dep_index();
+        *self.cursor.get_mut() = None;
         Ok(())
+    }
+
+    /// Recompute the variables whose inputs changed since the last call,
+    /// reading the changes from the state's mutation journal.
+    ///
+    /// The first call, and any call after the bounded journal has dropped
+    /// entries this registry has not read, recomputes everything. Returns the
+    /// keys whose derived values changed. This is what the control lane runs
+    /// after each turn.
+    pub fn recompute_changed(&self, state: &State) -> Vec<String> {
+        let mut cursor = self.cursor.lock();
+        let changed = match cursor.and_then(|at| state.try_mutations_since(at)) {
+            Some(mutations) => {
+                let mut keys: Vec<String> = Vec::new();
+                for mutation in mutations {
+                    if let Some(var) = mutation.key.strip_prefix("derived:") {
+                        keys.push(var.to_string());
+                    }
+                    keys.push(mutation.key);
+                }
+                keys.sort_unstable();
+                keys.dedup();
+                self.recompute_indices(state, &keys, true)
+            }
+            None => self.recompute(state),
+        };
+        // Skip this pass's own writes: their dependents were already
+        // evaluated transitively above.
+        *cursor = Some(state.mutation_cursor());
+        changed
     }
 
     /// Recompute all variables in dependency order. Returns the keys whose
@@ -93,14 +130,8 @@ impl ComputedRegistry {
     pub fn recompute(&self, state: &State) -> Vec<String> {
         let mut changed = Vec::new();
         for var in &self.vars {
-            if let Some(new_val) = (var.compute)(state) {
-                let derived_key = format!("derived:{}", var.key);
-                let old_val = state.get_raw(&derived_key);
-                let did_change = old_val.as_ref() != Some(&new_val);
-                let _ = state.set(&derived_key, new_val);
-                if did_change {
-                    changed.push(var.key.clone());
-                }
+            if Self::evaluate(var, state) {
+                changed.push(var.key.clone());
             }
         }
         changed
@@ -112,12 +143,33 @@ impl ComputedRegistry {
     /// computed var changes, its dependents are also scheduled for recomputation.
     /// Returns keys that actually changed.
     pub fn recompute_affected(&self, state: &State, changed_keys: &[String]) -> Vec<String> {
+        self.recompute_indices(state, changed_keys, false)
+    }
+
+    /// [`recompute_affected`](Self::recompute_affected), optionally also
+    /// scheduling every variable that declares no dependencies (it may read
+    /// anything, so only a full pass is safe for it).
+    fn recompute_indices(
+        &self,
+        state: &State,
+        changed_keys: &[String],
+        include_undeclared: bool,
+    ) -> Vec<String> {
         // Collect indices of affected vars transitively (deduplicated via bitmap).
         let mut visited = vec![false; self.vars.len()];
         let mut affected_set = Vec::new();
+        if include_undeclared {
+            for (idx, var) in self.vars.iter().enumerate() {
+                if var.dependencies.is_empty() {
+                    visited[idx] = true;
+                    affected_set.push(idx);
+                }
+            }
+        }
 
         // Seed the work queue with the initial changed keys.
         let mut work_keys: Vec<String> = changed_keys.to_vec();
+        work_keys.extend(affected_set.iter().map(|&idx| self.vars[idx].key.clone()));
 
         while let Some(key) = work_keys.pop() {
             // Look up vars that depend on this key directly.
@@ -140,17 +192,25 @@ impl ComputedRegistry {
         let mut changed = Vec::new();
         for idx in affected_set {
             let var = &self.vars[idx];
-            if let Some(new_val) = (var.compute)(state) {
-                let derived_key = format!("derived:{}", var.key);
-                let old_val = state.get_raw(&derived_key);
-                let did_change = old_val.as_ref() != Some(&new_val);
-                let _ = state.set(&derived_key, new_val);
-                if did_change {
-                    changed.push(var.key.clone());
-                }
+            if Self::evaluate(var, state) {
+                changed.push(var.key.clone());
             }
         }
         changed
+    }
+
+    /// Evaluate one variable; write `derived:{key}` only when the value
+    /// changed. Returns whether it changed.
+    fn evaluate(var: &ComputedVar, state: &State) -> bool {
+        let Some(new_val) = (var.compute)(state) else {
+            return false;
+        };
+        let derived_key = format!("derived:{}", var.key);
+        if state.get_raw(&derived_key).as_ref() == Some(&new_val) {
+            return false;
+        }
+        let _ = state.set(&derived_key, new_val);
+        true
     }
 
     /// Validate the dependency graph. Returns `Ok(())` if there are no cycles,
@@ -326,6 +386,122 @@ mod tests {
     use serde_json::json;
 
     // ── 1. Single var register + recompute ──────────────────────────────
+
+    /// Counts evaluations, so a test can see what a pass recomputed.
+    fn counted(
+        key: &str,
+        deps: &[&str],
+        calls: Arc<std::sync::atomic::AtomicUsize>,
+        f: impl Fn(&State) -> Option<Value> + Send + Sync + 'static,
+    ) -> ComputedVar {
+        ComputedVar {
+            key: key.into(),
+            dependencies: deps.iter().map(|d| (*d).into()).collect(),
+            compute: Arc::new(move |state| {
+                calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                f(state)
+            }),
+        }
+    }
+
+    #[test]
+    fn recompute_changed_evaluates_only_what_the_journal_says_changed() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let doubled_calls = Arc::new(AtomicUsize::new(0));
+        let label_calls = Arc::new(AtomicUsize::new(0));
+        let mut registry = ComputedRegistry::new();
+        registry
+            .register(counted(
+                "doubled",
+                &["app:count"],
+                doubled_calls.clone(),
+                |s| Some(json!(s.get::<i64>("app:count")? * 2)),
+            ))
+            .unwrap();
+        registry
+            .register(counted("label", &["app:name"], label_calls.clone(), |s| {
+                Some(json!(s.get::<String>("app:name")?.to_uppercase()))
+            }))
+            .unwrap();
+
+        let state = State::new();
+        let _ = state.set("app:count", 2);
+        let _ = state.set("app:name", "ada");
+
+        // First pass: everything.
+        registry.recompute_changed(&state);
+        assert_eq!(doubled_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(label_calls.load(Ordering::SeqCst), 1);
+
+        // Nothing changed: nothing recomputed, nothing written.
+        let cursor = state.mutation_cursor();
+        assert!(registry.recompute_changed(&state).is_empty());
+        assert_eq!(doubled_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            state.mutation_cursor(),
+            cursor,
+            "an unchanged pass writes nothing"
+        );
+
+        // Only the count changed: only `doubled` runs.
+        let _ = state.set("app:count", 5);
+        assert_eq!(registry.recompute_changed(&state), vec!["doubled"]);
+        assert_eq!(state.get::<i64>("derived:doubled"), Some(10));
+        assert_eq!(doubled_calls.load(Ordering::SeqCst), 2);
+        assert_eq!(label_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn recompute_changed_follows_chains_and_rescans_after_a_journal_gap() {
+        let mut registry = ComputedRegistry::new();
+        registry
+            .register(ComputedVar {
+                key: "doubled".into(),
+                dependencies: vec!["app:count".into()],
+                compute: Arc::new(|s| Some(json!(s.get::<i64>("app:count")? * 2))),
+            })
+            .unwrap();
+        registry
+            .register(ComputedVar {
+                key: "big".into(),
+                dependencies: vec!["doubled".into()],
+                compute: Arc::new(|s| Some(json!(s.get::<i64>("derived:doubled")? > 10))),
+            })
+            .unwrap();
+
+        let state = State::new();
+        let _ = state.set("app:count", 1);
+        registry.recompute_changed(&state);
+        assert_eq!(state.get::<bool>("derived:big"), Some(false));
+
+        let _ = state.set("app:count", 6);
+        registry.recompute_changed(&state);
+        assert_eq!(
+            state.get::<bool>("derived:big"),
+            Some(true),
+            "chain propagates"
+        );
+
+        // Drop the journal: the next pass cannot trust it and rescans.
+        let _ = state.set("app:count", 1);
+        state.drain_mutations();
+        registry.recompute_changed(&state);
+        assert_eq!(state.get::<i64>("derived:doubled"), Some(2));
+        assert_eq!(state.get::<bool>("derived:big"), Some(false));
+    }
+
+    #[test]
+    fn a_var_without_declared_dependencies_runs_every_pass() {
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut registry = ComputedRegistry::new();
+        registry
+            .register(counted("anything", &[], calls.clone(), |_| Some(json!(1))))
+            .unwrap();
+        let state = State::new();
+        registry.recompute_changed(&state);
+        registry.recompute_changed(&state);
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+    }
 
     #[test]
     fn single_var_register_and_recompute() {

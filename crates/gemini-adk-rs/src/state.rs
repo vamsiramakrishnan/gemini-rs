@@ -1047,6 +1047,33 @@ impl State {
             .collect()
     }
 
+    /// Mutations appended after `cursor`, or `None` if the bounded journal
+    /// has already dropped some of them.
+    ///
+    /// A consumer that must see every change (a derived-value cache, say)
+    /// uses this instead of [`mutations_since`](Self::mutations_since) and
+    /// falls back to a full rescan on `None`.
+    pub fn try_mutations_since(&self, cursor: u64) -> Option<Vec<StateMutation>> {
+        let mutations = self
+            .mutations
+            .lock()
+            .expect("state mutation journal poisoned");
+        let latest = self.next_mutation_sequence.load(Ordering::Relaxed) - 1;
+        if latest > cursor {
+            let oldest = mutations.front().map_or(u64::MAX, |m| m.sequence);
+            if oldest > cursor + 1 {
+                return None;
+            }
+        }
+        Some(
+            mutations
+                .iter()
+                .filter(|mutation| mutation.sequence > cursor)
+                .cloned()
+                .collect(),
+        )
+    }
+
     /// Drain and return all recorded state mutations.
     pub fn drain_mutations(&self) -> Vec<StateMutation> {
         self.mutations
@@ -1564,6 +1591,32 @@ mod tests {
         let drained = state.drain_mutations();
         assert_eq!(drained.len(), 2);
         assert!(state.recent_mutations().is_empty());
+    }
+
+    #[test]
+    fn try_mutations_since_reports_a_gap_the_ring_dropped() {
+        let state = State::new();
+        let cursor = state.mutation_cursor();
+        let _ = state.set("a", 1);
+        assert_eq!(state.try_mutations_since(cursor).map(|m| m.len()), Some(1));
+
+        state.drain_mutations();
+        let _ = state.set("b", 2);
+        assert!(
+            state.try_mutations_since(cursor).is_none(),
+            "the write to `a` is gone from the journal"
+        );
+        let after_drain = state.mutation_cursor() - 1;
+        assert_eq!(
+            state.try_mutations_since(after_drain).map(|m| m.len()),
+            Some(1)
+        );
+        assert_eq!(
+            state
+                .try_mutations_since(state.mutation_cursor())
+                .map(|m| m.len()),
+            Some(0)
+        );
     }
 
     #[test]
