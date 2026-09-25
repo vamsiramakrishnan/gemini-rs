@@ -63,6 +63,7 @@ pub struct LiveSessionBuilder {
     middleware: Vec<Arc<dyn crate::middleware::Middleware>>,
     flow: Option<crate::flow::FlowStack>,
     redactor: Option<Arc<super::redaction::TranscriptRedactor>>,
+    clock: Option<crate::clock::SharedClock>,
 }
 
 impl LiveSessionBuilder {
@@ -92,6 +93,7 @@ impl LiveSessionBuilder {
             middleware: Vec::new(),
             flow: None,
             redactor: None,
+            clock: None,
         }
     }
 
@@ -103,6 +105,19 @@ impl LiveSessionBuilder {
     /// rules enabled) is dropped rather than installed.
     pub fn redaction(mut self, redactor: super::redaction::TranscriptRedactor) -> Self {
         self.redactor = redactor.is_active().then(|| Arc::new(redactor));
+        self
+    }
+
+    /// Read the time from `clock` instead of the system clock.
+    ///
+    /// Installed on the session [`State`] (see
+    /// [`State::set_clock`](crate::state::State::set_clock)), so temporal
+    /// patterns, phase durations, resolver cache expiry, the `session:`
+    /// timing signals and journal timestamps all follow it. Pass a
+    /// [`ManualClock`](crate::clock::ManualClock) to make timing decisions
+    /// reproducible in tests; replay installs one driven by the recording.
+    pub fn clock(mut self, clock: crate::clock::SharedClock) -> Self {
+        self.clock = Some(clock);
         self
     }
 
@@ -405,6 +420,7 @@ impl LiveSessionBuilder {
             middleware: self.middleware,
             flow: self.flow,
             redactor: self.redactor,
+            clock: self.clock,
         })
     }
 }
@@ -445,6 +461,7 @@ pub(crate) struct SessionPlan {
     middleware: Vec<Arc<dyn crate::middleware::Middleware>>,
     flow: Option<crate::flow::FlowStack>,
     redactor: Option<Arc<super::redaction::TranscriptRedactor>>,
+    clock: Option<crate::clock::SharedClock>,
 }
 
 /// Fully wired runtime for a connected Live session, ready for lane spawning.
@@ -496,6 +513,9 @@ pub(crate) fn build_runtime(plan: SessionPlan, session: SessionHandle) -> Sessio
     let callbacks = Arc::new(callbacks);
     let raw_writer: Arc<dyn SessionWriter> = Arc::new(session.clone());
     let state = plan.state.unwrap_or_default();
+    if let Some(clock) = plan.clock {
+        state.set_clock(clock);
+    }
 
     // Subscribe twice: one for router → fast/ctrl, one for telemetry lane
     let event_rx = session.subscribe();
@@ -511,7 +531,10 @@ pub(crate) fn build_runtime(plan: SessionPlan, session: SessionHandle) -> Sessio
         }
     }
 
-    let phase_machine_mutex = plan.phase_machine.map(tokio::sync::Mutex::new);
+    let phase_machine_mutex = plan.phase_machine.map(|mut machine| {
+        machine.set_clock(state.clock());
+        tokio::sync::Mutex::new(machine)
+    });
     let temporal_arc = plan.temporal.map(Arc::new);
     let background_tracker = Arc::new(BackgroundToolTracker::new());
 

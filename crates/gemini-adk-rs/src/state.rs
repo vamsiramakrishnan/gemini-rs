@@ -10,6 +10,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::SystemTime;
 
 use dashmap::DashMap;
+
+use crate::clock::{SharedClock, system_clock};
 use serde_json::Value;
 
 const DEFAULT_MUTATION_JOURNAL_CAPACITY: usize = 1024;
@@ -123,6 +125,22 @@ pub trait JournalSink: Send + Sync {
 /// (clones and delta views share it, like the in-memory ring).
 #[derive(Clone, Default)]
 struct JournalSinkSlot(Arc<parking_lot::RwLock<Option<Arc<dyn JournalSink>>>>);
+
+/// The clock shared by a `State`, its clones and its delta views.
+#[derive(Clone)]
+struct ClockSlot(Arc<parking_lot::RwLock<SharedClock>>);
+
+impl Default for ClockSlot {
+    fn default() -> Self {
+        Self(Arc::new(parking_lot::RwLock::new(system_clock())))
+    }
+}
+
+impl std::fmt::Debug for ClockSlot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("ClockSlot").field(&*self.0.read()).finish()
+    }
+}
 
 impl std::fmt::Debug for JournalSinkSlot {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -320,6 +338,7 @@ pub struct State {
     next_mutation_sequence: Arc<AtomicU64>,
     mutation_capacity: usize,
     journal_sink: JournalSinkSlot,
+    clock: ClockSlot,
     track_delta: bool,
 }
 
@@ -339,6 +358,7 @@ impl State {
             next_mutation_sequence: Arc::new(AtomicU64::new(1)),
             mutation_capacity: DEFAULT_MUTATION_JOURNAL_CAPACITY,
             journal_sink: JournalSinkSlot::default(),
+            clock: ClockSlot::default(),
             track_delta: false,
         }
     }
@@ -353,6 +373,7 @@ impl State {
             next_mutation_sequence: self.next_mutation_sequence.clone(),
             mutation_capacity: self.mutation_capacity,
             journal_sink: self.journal_sink.clone(),
+            clock: self.clock.clone(),
             track_delta: true,
         }
     }
@@ -372,6 +393,27 @@ impl State {
     pub fn with_journal_sink(self, sink: Arc<dyn JournalSink>) -> Self {
         self.set_journal_sink(sink);
         self
+    }
+
+    /// Replace the [`Clock`](crate::clock::Clock) this state and everything
+    /// sharing it read the time from. Defaults to the system clock.
+    ///
+    /// The clock is shared with every clone and delta view, like the journal
+    /// sink. Swap it before a session starts; components that captured an
+    /// instant from the old clock compare it against the new one.
+    pub fn set_clock(&self, clock: SharedClock) {
+        *self.clock.0.write() = clock;
+    }
+
+    /// Builder-style variant of [`set_clock`](Self::set_clock).
+    pub fn with_clock(self, clock: SharedClock) -> Self {
+        self.set_clock(clock);
+        self
+    }
+
+    /// The clock this state reads the time from.
+    pub fn clock(&self) -> SharedClock {
+        self.clock.0.read().clone()
     }
 
     /// Get a value by key, attempting to deserialize to the requested type.
@@ -739,7 +781,7 @@ impl State {
 
     /// Create a new State containing only the specified keys.
     pub fn pick(&self, keys: &[&str]) -> State {
-        let new = State::new();
+        let new = State::new().with_clock(self.clock());
         for key in keys {
             if let Some(v) = self.get_raw(key) {
                 new.put_value((*key).to_string(), v, StateMutationOrigin::Set);
@@ -1080,7 +1122,7 @@ impl State {
             old,
             new,
             origin,
-            timestamp: SystemTime::now(),
+            timestamp: self.clock().system_time(),
             delta,
         };
         // Durable sink runs under the journal lock so the file order matches

@@ -12,6 +12,8 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Instant;
 
+use crate::clock::SharedClock;
+
 use gemini_genai_rs::prelude::{SessionEvent, SessionPhase};
 use parking_lot::Mutex;
 
@@ -47,6 +49,8 @@ pub struct SessionSignals {
     state: State,
     /// Session start time — used as epoch for all atomic timestamps.
     start: Instant,
+    /// The state's clock, captured at construction.
+    clock: SharedClock,
     /// Nanos since start when connected.
     connected_at_ns: AtomicU64,
     /// Whether currently connected.
@@ -64,9 +68,11 @@ pub struct SessionSignals {
 impl SessionSignals {
     /// Create a new `SessionSignals` backed by the given [`State`].
     pub fn new(state: State) -> Self {
+        let clock = state.clock();
         Self {
             state,
-            start: Instant::now(),
+            start: clock.now(),
+            clock,
             connected_at_ns: AtomicU64::new(0),
             is_connected: AtomicBool::new(false),
             last_activity_ns: AtomicU64::new(0),
@@ -133,7 +139,7 @@ impl SessionSignals {
             SessionEvent::GoAway(time_left) => {
                 let _ = self.state.session().set("go_away_received", true);
                 if let Some(tl) = time_left {
-                    *self.go_away_at.lock() = Some(Instant::now() + *tl);
+                    *self.go_away_at.lock() = Some(self.clock.now() + *tl);
                     let _ = self
                         .state
                         .session()
@@ -250,7 +256,7 @@ impl SessionSignals {
 
     #[inline]
     fn elapsed_ns(&self) -> u64 {
-        self.start.elapsed().as_nanos() as u64
+        self.clock.since(self.start).as_nanos() as u64
     }
 
     /// Record the turn's response latency (end of user speech, or text send,

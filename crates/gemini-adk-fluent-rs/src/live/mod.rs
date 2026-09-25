@@ -184,6 +184,7 @@ pub struct Live {
     pub(crate) session_id: Option<String>,
     pub(crate) tool_advisory: bool,
     pub(crate) telemetry_interval: Option<Duration>,
+    pub(crate) clock: Option<gemini_adk_rs::clock::SharedClock>,
     // Middleware layers run around tool dispatch in the control lane.
     pub(crate) middleware_layers: Vec<Arc<dyn gemini_adk_rs::middleware::Middleware>>,
     // Confirmation provider consulted before running `T::confirm(..)` tools.
@@ -301,6 +302,7 @@ impl Live {
             session_id: None,
             tool_advisory: true,
             telemetry_interval: None,
+            clock: None,
             middleware_layers: Vec::new(),
             confirmation_provider: None,
             flow: None,
@@ -484,6 +486,17 @@ impl Live {
     /// and `LiveEvent::TurnMetrics` at this rate.
     pub fn telemetry_interval(mut self, interval: Duration) -> Self {
         self.telemetry_interval = Some(interval);
+        self
+    }
+
+    /// Read the time from `clock` instead of the system clock.
+    ///
+    /// Temporal patterns, phase durations, resolver cache expiry, the
+    /// `session:` timing signals and journal timestamps all follow it. Pass a
+    /// [`ManualClock`](gemini_adk_rs::clock::ManualClock) to make timing
+    /// decisions reproducible in a test.
+    pub fn clock(mut self, clock: gemini_adk_rs::clock::SharedClock) -> Self {
+        self.clock = Some(clock);
         self
     }
 }

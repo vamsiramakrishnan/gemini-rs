@@ -100,7 +100,7 @@ impl LiveHandle {
         background_tracker: Arc<BackgroundToolTracker>,
         telem_cancel: CancellationToken,
     ) -> Self {
-        let reactor = Arc::new(LiveReactor::voice_defaults());
+        let reactor = Arc::new(LiveReactor::voice_defaults().with_clock(state.clock()));
         let effect_executor = LiveEffectExecutor::new(
             Arc::new(session.clone()),
             pending_context.clone(),

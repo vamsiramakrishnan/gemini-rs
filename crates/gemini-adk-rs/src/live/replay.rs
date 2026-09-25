@@ -41,12 +41,15 @@
 //! # }
 //! ```
 
-use std::time::Duration;
+use std::sync::Arc;
+use std::time::{Duration, UNIX_EPOCH};
 
 use gemini_genai_rs::prelude::{SessionConfig, SessionPhase};
 use gemini_genai_rs::session::SessionHandle;
 use gemini_genai_rs::transport::replay::{ReplayControl, ReplayTransport};
-use gemini_genai_rs::transport::{ConnectBuilder, TransportConfig, WireEntry};
+use gemini_genai_rs::transport::{ConnectBuilder, TransportConfig, WireDirection, WireEntry};
+
+use crate::clock::ManualClock;
 
 use crate::error::AgentError;
 
@@ -83,6 +86,7 @@ pub async fn attach_session(
 pub struct ReplaySession {
     handle: LiveHandle,
     control: ReplayControl,
+    clock: Arc<ManualClock>,
 }
 
 impl ReplaySession {
@@ -112,6 +116,12 @@ impl ReplaySession {
         self.control.outbound_frames()
     }
 
+    /// The replay's clock. It stands at the recorded capture time of the most
+    /// recently delivered frame, measured from the first inbound frame.
+    pub fn clock(&self) -> &Arc<ManualClock> {
+        &self.clock
+    }
+
     /// Disconnect the replayed session.
     pub async fn disconnect(&self) -> Result<(), gemini_genai_rs::session::SessionError> {
         self.handle.disconnect().await
@@ -131,16 +141,32 @@ impl ReplaySession {
 /// - `entries` is the recorded log; only its inbound frames are replayed
 ///   (outbound entries are kept in the log purely for comparison/audit).
 ///
-/// Frames are delivered as fast as the session loop consumes them (no
-/// original-timing pacing). The replay is gated: nothing past the setup
-/// handshake flows until [`ReplaySession::release`] is called, so subscribe
-/// to events first.
+/// Frames are delivered as fast as the session loop consumes them, but the
+/// session reads time from a [`ManualClock`] that moves to each frame's
+/// recorded capture time as it is delivered (this replaces any clock the
+/// builder set). Temporal patterns, phase durations, resolver cache expiry
+/// and the `session:` timing signals therefore see the original gaps between
+/// frames, whatever the replay's own speed. The replay is gated: nothing past
+/// the setup handshake flows until [`ReplaySession::release`] is called, so
+/// subscribe to events first.
 pub async fn replay_session(
     config: SessionConfig,
     builder: LiveSessionBuilder,
     entries: &[WireEntry],
 ) -> Result<ReplaySession, AgentError> {
+    let first_ts_ms = entries
+        .iter()
+        .find(|e| e.dir == WireDirection::Inbound)
+        .map_or(0, |e| e.ts_ms);
+    let clock = Arc::new(ManualClock::starting_at(
+        UNIX_EPOCH + Duration::from_millis(first_ts_ms),
+    ));
+    let observed = clock.clone();
     let (transport, control) = ReplayTransport::from_wire_log(entries);
+    let transport = transport.with_frame_observer(Arc::new(move |ts_ms| {
+        observed.set_elapsed(Duration::from_millis(ts_ms.saturating_sub(first_ts_ms)));
+    }));
+    let builder = builder.clock(clock.clone());
     let transport_config = TransportConfig {
         max_reconnect_attempts: 0,
         connect_timeout_secs: 5,
@@ -154,7 +180,11 @@ pub async fn replay_session(
         .await
         .map_err(AgentError::Session)?;
     let handle = attach_session(builder, session).await?;
-    Ok(ReplaySession { handle, control })
+    Ok(ReplaySession {
+        handle,
+        control,
+        clock,
+    })
 }
 
 /// Collect [`LiveEvent`]s until the stream stays idle for `idle` (or `max`
@@ -186,7 +216,6 @@ pub async fn collect_events_until_idle(
 mod tests {
     use super::*;
     use gemini_genai_rs::prelude::ModelId;
-    use gemini_genai_rs::transport::WireDirection;
 
     #[tokio::test]
     async fn replay_session_reaches_active_and_emits_events() {
@@ -233,6 +262,9 @@ mod tests {
                 .any(|e| matches!(e, LiveEvent::TurnComplete))
         );
 
+        // The clock stands at the last frame's recorded time.
+        assert_eq!(replay.clock().elapsed(), Duration::from_millis(1));
+
         // The replayed session re-encoded and "sent" the setup message.
         let outbound = replay.outbound_frames();
         assert!(!outbound.is_empty());
@@ -240,6 +272,65 @@ mod tests {
             String::from_utf8(outbound[0].clone())
                 .unwrap()
                 .contains("\"setup\"")
+        );
+
+        replay.disconnect().await.unwrap();
+    }
+
+    /// Timing decisions follow the recording, not the replay's speed: a turn
+    /// recorded ten seconds after the handshake is stamped ten seconds later,
+    /// at the recording's wall time, even though the replay takes
+    /// milliseconds.
+    #[tokio::test]
+    async fn replay_reads_time_from_the_recording() {
+        const T0: u64 = 1_000_000_000_000; // 2001-09-09, well before "now"
+        let entries = vec![
+            WireEntry {
+                seq: 1,
+                dir: WireDirection::Inbound,
+                ts_ms: T0,
+                payload: br#"{"setupComplete":{}}"#.to_vec(),
+            },
+            WireEntry {
+                seq: 2,
+                dir: WireDirection::Inbound,
+                ts_ms: T0 + 10_000,
+                payload:
+                    br#"{"serverContent":{"modelTurn":{"parts":[{"text":"Hi"}]},"turnComplete":true}}"#
+                        .to_vec(),
+            },
+        ];
+        let config = SessionConfig::new("offline").model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO);
+        let replay = replay_session(config.clone(), LiveSessionBuilder::new(config), &entries)
+            .await
+            .unwrap();
+        let mut events = replay.handle().events();
+        replay.release();
+        replay.drained().await;
+        collect_events_until_idle(
+            &mut events,
+            Duration::from_millis(200),
+            Duration::from_secs(5),
+        )
+        .await;
+
+        assert_eq!(replay.clock().elapsed(), Duration::from_secs(10));
+        let mutations = replay.handle().state().recent_mutations();
+        assert!(!mutations.is_empty(), "the turn should write state");
+        let recorded = |ms: u64| UNIX_EPOCH + Duration::from_millis(ms);
+        for m in &mutations {
+            assert!(
+                m.timestamp >= recorded(T0) && m.timestamp <= recorded(T0 + 10_000),
+                "{} stamped outside the recording: {:?}",
+                m.key,
+                m.timestamp
+            );
+        }
+        assert!(
+            mutations
+                .iter()
+                .any(|m| m.timestamp == recorded(T0 + 10_000)),
+            "the turn's writes carry the second frame's recorded time"
         );
 
         replay.disconnect().await.unwrap();

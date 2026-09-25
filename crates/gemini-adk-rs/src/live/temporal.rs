@@ -144,7 +144,7 @@ impl TemporalRegistry {
         event: Option<&SessionEvent>,
         writer: &Arc<dyn SessionWriter>,
     ) -> Vec<BoxFuture<()>> {
-        let now = Instant::now();
+        let now = state.clock().now();
         self.patterns
             .iter()
             .filter_map(|p| p.try_fire(state, event, writer, now))
@@ -754,6 +754,38 @@ mod tests {
         assert_eq!(actions.len(), 1);
 
         for fut in actions {
+            fut.await;
+        }
+        assert_eq!(counter.load(Ordering::SeqCst), 1);
+    }
+
+    /// A sustained pattern measures its duration on the state's clock, so a
+    /// manual clock decides when it fires, not the wall clock.
+    #[tokio::test]
+    async fn registry_reads_time_from_the_state_clock() {
+        let counter = Arc::new(AtomicU32::new(0));
+        let clock = Arc::new(crate::clock::ManualClock::new());
+        let state = State::new().with_clock(clock.clone());
+        let writer = mock_writer();
+
+        let mut registry = TemporalRegistry::new();
+        registry.register(TemporalPattern::new(
+            "sustained",
+            Box::new(SustainedDetector::new(
+                Arc::new(|_: &State| true),
+                Duration::from_secs(5),
+            )),
+            counting_action(counter.clone()),
+            None,
+        ));
+
+        assert!(registry.check_all(&state, None, &writer).is_empty());
+        clock.advance(Duration::from_secs(4));
+        assert!(registry.check_all(&state, None, &writer).is_empty());
+        clock.advance(Duration::from_secs(1));
+        let fired = registry.check_all(&state, None, &writer);
+        assert_eq!(fired.len(), 1, "fires once five clock seconds have passed");
+        for fut in fired {
             fut.await;
         }
         assert_eq!(counter.load(Ordering::SeqCst), 1);

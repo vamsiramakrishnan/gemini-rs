@@ -27,6 +27,11 @@ use super::ws::Transport;
 /// Shared collection of frames "sent" during a replay.
 pub type OutboundFrames = Arc<parking_lot::Mutex<Vec<Vec<u8>>>>;
 
+/// Called with each inbound frame's recorded capture time (ms since the Unix
+/// epoch) just before the frame is handed to the session loop. Replay uses it
+/// to move a clock to the moment the frame originally arrived.
+pub type FrameObserver = Arc<dyn Fn(u64) + Send + Sync>;
+
 /// Errors from the [`ReplayTransport`].
 #[derive(Debug, thiserror::Error)]
 pub enum ReplayTransportError {
@@ -75,6 +80,8 @@ impl ReplayControl {
 /// frames. See the [module docs](self) for gating and drain semantics.
 pub struct ReplayTransport {
     inbound: VecDeque<Vec<u8>>,
+    timestamps: VecDeque<u64>,
+    on_frame: Option<FrameObserver>,
     ungated_prefix: usize,
     delivered: usize,
     gate_rx: watch::Receiver<bool>,
@@ -100,6 +107,8 @@ impl ReplayTransport {
         (
             Self {
                 inbound: frames.into(),
+                timestamps: VecDeque::new(),
+                on_frame: None,
                 ungated_prefix: 1,
                 delivered: 0,
                 gate_rx,
@@ -113,13 +122,26 @@ impl ReplayTransport {
 
     /// Build a replay transport from a recorded wire log, keeping only the
     /// [`WireDirection::Inbound`] entries (in log order).
+    ///
+    /// Each frame keeps its recorded capture time, reported to a
+    /// [`with_frame_observer`](Self::with_frame_observer) callback.
     pub fn from_wire_log(entries: &[WireEntry]) -> (Self, ReplayControl) {
-        let frames = entries
+        let inbound: Vec<&WireEntry> = entries
             .iter()
             .filter(|e| e.dir == WireDirection::Inbound)
-            .map(|e| e.payload.clone())
             .collect();
-        Self::from_frames(frames)
+        let (mut transport, control) =
+            Self::from_frames(inbound.iter().map(|e| e.payload.clone()).collect());
+        transport.timestamps = inbound.iter().map(|e| e.ts_ms).collect();
+        (transport, control)
+    }
+
+    /// Report each frame's recorded capture time to `observer` before the
+    /// frame is delivered. Frames built with [`from_frames`](Self::from_frames)
+    /// carry no timestamps, so the observer is not called for them.
+    pub fn with_frame_observer(mut self, observer: FrameObserver) -> Self {
+        self.on_frame = Some(observer);
+        self
     }
 
     /// Override how many leading frames are delivered before
@@ -182,6 +204,11 @@ impl Transport for ReplayTransport {
             .inbound
             .pop_front()
             .expect("checked non-empty inbound queue");
+        if let Some(ts_ms) = self.timestamps.pop_front()
+            && let Some(observer) = &self.on_frame
+        {
+            observer(ts_ms);
+        }
         self.delivered += 1;
         if self.inbound.is_empty() {
             let _ = self.drained_tx.send(true);

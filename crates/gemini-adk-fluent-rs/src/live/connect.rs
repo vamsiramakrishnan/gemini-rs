@@ -308,6 +308,9 @@ impl Live {
             ));
         }
         builder = builder.tool_advisory(self.tool_advisory);
+        if let Some(clock) = self.clock.take() {
+            builder = builder.clock(clock);
+        }
         if let Some(interval) = self.telemetry_interval {
             builder = builder.telemetry_interval(interval);
         }
