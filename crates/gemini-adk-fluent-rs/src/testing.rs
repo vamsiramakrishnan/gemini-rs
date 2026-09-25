@@ -25,7 +25,11 @@
 
 use std::collections::{HashMap, HashSet};
 
+pub use gemini_adk_rs::clock::{Clock, ManualClock, SharedClock, SystemClock};
 pub use gemini_adk_rs::llm::{LlmRequest, LlmResponse, MockLlm, TokenUsage};
+pub use gemini_adk_rs::tape::{
+    FileTape, MemoryTape, Tape, TapeEntry, TapeMode, TapedLlm, taped_resolver,
+};
 
 use crate::builder::AgentBuilder;
 

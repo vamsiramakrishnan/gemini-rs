@@ -104,6 +104,7 @@ pub mod runner;
 pub mod session;
 pub mod skills;
 pub mod state;
+pub mod tape;
 pub mod telemetry;
 pub mod text;
 pub mod text_agent_tool;
