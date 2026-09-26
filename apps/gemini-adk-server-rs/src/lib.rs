@@ -7,7 +7,10 @@
 //! - Pluggable artifact store
 //! - Shared request/response types
 //!
-//! Used by `gemini-adk-web-rs`, `gemini-adk-api-rs`, and `gemini-adk-cli-rs` — never run directly.
+//! Used by `gemini-adk-web-rs`, `gemini-adk-api-rs`, and `gemini-adk-cli-rs`.
+//!
+//! [`runtime`] is the production server for spec bundles, run as the
+//! `adk-runtime` binary.
 
 pub mod agents;
 pub mod eval;
@@ -15,6 +18,7 @@ pub mod execution;
 pub mod flow_app;
 pub mod handlers;
 pub mod router;
+pub mod runtime;
 pub mod serve;
 pub mod sessions;
 pub mod trace;

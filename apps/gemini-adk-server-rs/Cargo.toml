@@ -5,28 +5,43 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Shared server core for gemini-adk-web-rs, gemini-adk-api-rs, and gemini-adk-cli-rs — agent loading, REST handlers, session management"
+description = "Shared server core for gemini-adk-web-rs, gemini-adk-api-rs, and gemini-adk-cli-rs — agent loading, REST handlers, session management — and adk-runtime, the production server for spec bundles"
 keywords = ["gemini", "agents", "adk", "server", "axum"]
 categories = ["api-bindings", "asynchronous", "web-programming::http-server"]
 
 [dependencies]
 gemini-adk-rs = { workspace = true, default-features = true, features = ["gemini-llm"] }
-gemini-adk-fluent-rs = { workspace = true, default-features = true, features = ["http-tools", "denoise"] }
+gemini-adk-fluent-rs = { workspace = true, default-features = true, features = ["http-tools", "denoise", "gcs-store"] }
 axum = { version = "0.8", features = ["macros", "ws"] }
 tower-http = { version = "0.5", features = ["cors"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = "0.8"
 tracing = "0.1"
-tokio = { version = "1", features = ["rt", "sync", "net", "macros"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "net", "macros", "time", "signal"] }
 futures = "0.3"
 uuid = { version = "1", features = ["v4"] }
 parking_lot = "0.12"
 async-trait = "0.1"
 thiserror = "2"
+# adk-runtime: Twilio webhook signatures (HMAC-SHA1), per-call stream tokens
+# (HMAC-SHA256), webhook form bodies, base64 audio from browsers, and logs.
+hmac = "0.12"
+sha1 = "0.10"
+sha2 = "0.10"
+url = "2"
+base64 = "0.22"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
+tokio-tungstenite = "0.24"
+
+# The production server for spec bundles: see `runtime` and
+# docs/user-guide/deploy.md.
+[[bin]]
+name = "adk-runtime"
+path = "src/bin/adk-runtime.rs"
 
 [lints]
 workspace = true
