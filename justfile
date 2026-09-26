@@ -203,6 +203,11 @@ deny:
 conversations:
     cargo run -p gemini-adk-cli-rs --locked -- flow ci conversations
 
+# Projects `adk spec codegen` generates, built and tested in every language
+# (needs python3 with `mcp` installed, and go >= 1.25).
+generated-projects:
+    scripts/check-generated-projects.sh
+
 # This used to be `fmt-check lint doc-check test` while claiming to match
 # Actions exactly — it skipped the feature matrix, cargo-hack, cargo-deny and
 # the conversation suite, so a green run here could still be a red push. It is

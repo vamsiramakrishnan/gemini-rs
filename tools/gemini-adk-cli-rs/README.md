@@ -204,27 +204,31 @@ adk eval my_agent/ tests/weather.evalset.json \
 
 ### `adk deploy` — Deploy to cloud
 
-Deploy an agent to a cloud target.
+Deploy `adk-runtime`, which serves bundles from a bundle store. Run it from
+a gemini-rs checkout (or pass `--source`): it builds `deploy/Dockerfile`
+with Cloud Build, then deploys the image. Each `gcloud` command is printed
+before it runs.
 
 ```bash
 # Cloud Run
-adk deploy cloud_run my_agent/ --project my-gcp-project --region us-central1
+adk deploy cloud-run --project my-gcp-project \
+  --bundles gs://my-bucket/bundles --serve booking:prod,clinic:prod
 
-# With web UI bundled
-adk deploy cloud_run my_agent/ --project my-gcp-project --with-ui
+# Print the commands without running them
+adk deploy cloud-run --project my-gcp-project \
+  --bundles gs://my-bucket/bundles --serve booking:prod --dry-run
 
-# GKE
-adk deploy gke my_agent/ --project my-gcp-project --service-name weather-svc
-
-# Vertex AI Agent Engine
-adk deploy agent_engine my_agent/ --project my-gcp-project
+# GKE: builds the image, then prints the kubectl steps for deploy/gke/
+adk deploy gke --project my-gcp-project
 ```
 
-**Cloud Run** generates a `Dockerfile` and prints the `gcloud run deploy` command.
+**Cloud Run** runs `gcloud builds submit` and `gcloud run deploy` with port
+8080, a 3600 s timeout, session affinity, CPU always allocated, and
+`ADK_RUNTIME_TOKENS` from Secret Manager.
 
-**GKE** generates a `Dockerfile` + `k8s.yaml` (Deployment + Service) and prints `docker build` / `kubectl apply` commands.
+**GKE** builds the image and prints the `kubectl` steps.
 
-**Agent Engine** deploys to Vertex AI Agent Engine (API integration pending).
+**Agent Engine** is not supported; use Cloud Run.
 
 **Flags:**
 
@@ -232,9 +236,19 @@ adk deploy agent_engine my_agent/ --project my-gcp-project
 |------|---------|-------------|
 | `--project` | required | GCP project ID |
 | `--region` | `us-central1` | GCP region |
-| `--service-name` | agent name | Override service name |
-| `--with-ui` | off | Bundle the web UI |
-| `--trace-to-cloud` | off | Enable Cloud Trace export |
+| `--bundles` | `$ADK_BUNDLES` | Bundle store, `gs://bucket/prefix` (Cloud Run) |
+| `--serve` | required (Cloud Run) | Bundles to serve, e.g. `booking:prod` |
+| `--service-name` | `adk-runtime` | Service and image name |
+| `--image` | build one | Deploy this image instead of building |
+| `--source` | `.` | Checkout holding `deploy/Dockerfile` |
+| `--tokens-secret` | `adk-runtime-tokens` | Secret holding `ADK_RUNTIME_TOKENS` |
+| `--twilio-secret` | none | Secret holding `TWILIO_AUTH_TOKEN` |
+| `--service-account` | `adk-runtime@PROJECT.iam.gserviceaccount.com` | Runtime identity |
+| `--max-sessions` | 50 | Sessions per instance (and Cloud Run concurrency) |
+| `--min-instances` | 1 | Instances kept warm |
+| `--dry-run` | off | Print the commands only |
+
+See [Deploying the runtime](../../docs/user-guide/deploy.md).
 
 ## Agent Discovery
 

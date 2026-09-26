@@ -256,10 +256,11 @@ impl Live {
 
     /// Called when the model finishes generating its full intended response.
     ///
-    /// Fires on the wire `GenerationComplete` event, before any interruption
-    /// truncation. Use this to capture the model's complete output even when
-    /// the user barges in. Paired with `.extract_on_generation()` for structured
-    /// extraction of the pre-truncation response.
+    /// Fires on the wire `GenerationComplete` event, before the turn
+    /// completes. Paired with `.extract_on_generation()` for structured
+    /// extraction as soon as the response is generated. Current Live models
+    /// send no `GenerationComplete` for an interrupted turn; the partial
+    /// output transcript callbacks carry everything the model produced.
     pub fn on_generation_complete<F, Fut>(mut self, f: F) -> Self
     where
         F: Fn() -> Fut + Send + Sync + 'static,

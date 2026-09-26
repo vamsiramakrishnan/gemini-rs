@@ -196,6 +196,82 @@ peers against a bound agent:
   under a wrong key does not, and the model's audio comes back as SRTP
   under the answered key.
 
+## Keypad entry, masking and recording
+
+Every bridge moves the caller's audio through a `KeypadGuard` before the
+model hears it.
+
+- **Keypad tones never reach the model.** Frames carrying DTMF tones are
+  silenced, from the moment a tone is recognized until 60 ms after it
+  ends. At most one detection block (26 ms) of a tone's onset can get
+  through, which is too short to decode.
+- **Where digits come from.** They come from the platform when it reports
+  them: Twilio `dtmf` events, or RFC 4733 on SIP. On a SIP leg without
+  telephone-events, the in-band detector (`telephony::dtmf::DtmfDetector`,
+  Goertzel) records them from the audio.
+- **Masking card numbers and PINs.** Set `telephony:keypad_mask` to `true`,
+  for example from the tool that starts a payment. While it is set:
+  - the caller's audio is replaced with silence, both for the model and
+    for the recording;
+  - keypresses go to `telephony:keypad_entry` instead of `telephony:dtmf`.
+    That key is marked sensitive, so tools read it but journals, exports
+    and telemetry see it redacted;
+  - `telephony:keypad_len` counts the digits;
+  - `#` sets `telephony:keypad_done`.
+
+  Set the mask back to `false` to resume the conversation.
+
+```rust,ignore
+use gemini_adk_fluent_rs::telephony::bridge::{KEY_KEYPAD_ENTRY, KEY_KEYPAD_MASK};
+
+// In the tool that starts card entry:
+state.set(KEY_KEYPAD_MASK, true)?;
+// ...later, once `telephony:keypad_done` is true:
+let card: String = state.get(KEY_KEYPAD_ENTRY).unwrap_or_default();
+state.set(KEY_KEYPAD_MASK, false)?;
+```
+
+**Recording a call.** `TwilioCall::attach_with(&session, CallOptions { recorder: Some(..), .. })`
+records the call as a stereo WAV, with the caller on the left channel and
+the agent on the right (`telephony::recorder::CallRecorder`).
+
+- Both channels sit on the call's clock. Agent audio is placed where
+  playback reached it, not when the model generated it.
+- On barge-in, the agent audio that was queued but never played is cut, so
+  the file holds what the caller actually heard.
+- The file is written as the call goes, so memory stays flat for calls of
+  any length.
+
+```rust,ignore
+use std::sync::Arc;
+use gemini_adk_fluent_rs::telephony::{recorder::CallRecorder, CallOptions, TwilioCall};
+
+let recorder = Arc::new(CallRecorder::create("call.wav", 8_000)?);
+let call = TwilioCall::attach_with(&session, CallOptions { recorder: Some(recorder.clone()), ..Default::default() });
+// ...when the call ends:
+recorder.finish()?;
+```
+
+**What the caller heard.** Every bridge reports its playback to the
+session, so on barge-in the model's side of the turn is cut to what the
+caller heard: in the transcript, the final output transcript callback and
+the verbatim check (see
+[what the listener heard](./live-callbacks.md#what-the-listener-heard)).
+The Twilio bridge also sets `telephony:unplayed_ms`: how much of the reply
+had been sent but not yet played. Agent audio goes out in 20 ms frames, and
+the last partial frame is padded once the model pauses.
+
+**Audio quality.** Audio moving between 8 kHz on the line and 16 or 24 kHz
+in the session is resampled by `voice::StreamResampler`.
+
+- It is a windowed-sinc polyphase filter that keeps its state across
+  chunks.
+- On the way down to 8 kHz it removes content above 4 kHz instead of
+  folding it back into the voice band. A 7 kHz component is attenuated by
+  more than 40 dB, where the previous linear interpolator passed it at full
+  level.
+- It adds no clicks at chunk boundaries.
+
 ## Bringing your own transport
 
 Twilio and raw SIP are two connectors on one seam. A contact-center

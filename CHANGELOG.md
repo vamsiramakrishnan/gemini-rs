@@ -7,6 +7,182 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Flow Studio ran commands from a posted spec.** A live run on
+  `gemini-adk-web-rs` applied the spec the browser sent, which listed `mcp`
+  entries to launch as local commands and HTTP bindings to call. The server
+  listened on `0.0.0.0` with no authentication, so anyone who could reach the
+  port could run commands on the host or reach internal addresses. The
+  server now:
+  - runs posted specs through `SessionSpec::sandboxed`, which drops `mcp`
+    entries and turns HTTP bindings into mocks unless the operator allows
+    them (`FLOW_STUDIO_ALLOW_HTTP`, `FLOW_STUDIO_ALLOW_MCP`). An allowed
+    HTTP binding is checked on normalized URLs, and again at call time after
+    interpolation and on every redirect;
+  - binds to `127.0.0.1` unless `ADK_WEB_ADDR` says otherwise.
+
+### Fixed
+
+- **Text sessions failed on every current Live model.** `text_only()` and
+  a spec with `"modality": "text"` asked for `TEXT` responses, which
+  native-audio models, including Gemini 3.8 Live, refuse by closing the
+  session (1007). On a model that can only speak, a text session now asks
+  for audio with its output transcription, and delivers the transcript as
+  the session's text (`TextDelta`/`TextComplete`, `on_text`) with no audio.
+  Probed live against both Gemini 2.5 native audio and Gemini 3.8 Live.
+- **A refused setup was retried and its reason lost.** When the server
+  closed the connection during setup, the error said only that it had
+  closed, and the transport retried with backoff. The error now carries the
+  server's reason, and a setup refused as invalid (1007) or against policy
+  (1008) is reported once instead of retried.
+- **A reconnect after GoAway started a new conversation.** The transport
+  reconnected on its own but re-sent the original setup, without the
+  resumption handle the server had issued, so the server started a fresh
+  conversation. When the session has resumption enabled, a reconnect now
+  presents the latest handle. The session-persistence guide said there was no
+  automatic reconnect; it now describes what happens.
+- `SessionSpec::to_cargo_toml` (the Studio's Code tab) pinned the SDK at
+  0.8. It now pins the current version.
+- **`connect_from_env` could not reach Vertex AI on Cloud Run or GKE.**
+  Without `GOOGLE_ACCESS_TOKEN` it ran `gcloud auth print-access-token`,
+  and those images have no gcloud. It now gets the token from the metadata
+  server when one answers, else from gcloud, and refreshes it in the
+  background, so a reconnect late in a long session is still
+  authenticated. Builds without the `gemini-llm` and `gcs-store` features
+  have no HTTP client and still use gcloud only.
+- **`adk deploy` produced a service that could not run.** It wrote a
+  Dockerfile that built a binary named after the service, set `PORT` for a
+  program that did not read it, and printed a `gcloud` command without
+  running it. It now deploys `adk-runtime` (see Changed).
+- **An interrupted turn recorded words the listener never heard.** The
+  model streams audio faster than it plays, and its transcript runs further
+  ahead still. Measured on the Live API, transcription arrives up to twice
+  as far into the answer as the audio delivered with it. On a barge-in the
+  runtime cleared the model's text from the transcript buffer, but the
+  final `on_output_transcript` and the verbatim check kept all of it. Now
+  all three hold what was heard, cut at the last whole word:
+  - Whatever plays the audio reports to the session's `PlaybackClock`
+    (`LiveHandle::playback()`). The voice pump, `talk()` and the Twilio and
+    SIP bridges report on their own.
+  - Heard audio becomes text through a speaking rate the session calibrates
+    on its uninterrupted turns.
+  - With no reporter, the cut is at the audio received.
+
+  The docs also said `on_generation_complete` fires for an interrupted
+  turn. Probed on Gemini 2.5 native audio and Gemini 3.8 Live, it does not:
+  the server sends `interrupted` and then `turnComplete`.
+
+### Added
+
+- Telephony edge work:
+  - **Keypad masking.** Keypad tones are silenced before the model hears
+    them. While `telephony:keypad_mask` is set, the caller is silenced and
+    keypresses go to the sensitive `telephony:keypad_entry` key, with
+    `telephony:keypad_len` and `telephony:keypad_done`. This is
+    `KeypadGuard`, and the Twilio and SIP bridges use it.
+  - **In-band DTMF detection** (`telephony::dtmf::DtmfDetector`, Goertzel),
+    used on SIP legs without RFC 4733.
+  - **Stereo call recording.** `telephony::recorder::CallRecorder` writes the
+    caller left and the agent right, as heard, cutting unplayed agent audio
+    on barge-in. Enable it with `TwilioCall::attach_with(.., CallOptions {
+    recorder, .. })`.
+  - The Twilio bridge sends 20 ms frames, and on barge-in sets
+    `telephony:unplayed_ms`.
+- `voice::StreamResampler`: stateful, anti-aliased (windowed-sinc
+  polyphase) resampling. The voice pump, and with it every telephony
+  bridge, now uses it instead of per-chunk linear interpolation. Linear
+  interpolation folded 4–12 kHz content into the phone band when going
+  down to 8 kHz, and clicked at chunk boundaries.
+- `adk-runtime` (in `gemini-adk-server-rs`), a production server for
+  bundles. It loads bundles by reference from a bundle store (`ADK_BUNDLES`,
+  `ADK_SERVE=booking:prod`) and serves them over a WebSocket
+  (`/ws/{bundle}`, in the web app's message shapes) and Twilio Media
+  Streams (`/twilio/voice/{bundle}`, with the Twilio signature checked and a
+  one-time stream token bound to the call). Labels are re-resolved every
+  `ADK_REFRESH_SECS` and on SIGHUP, so promoting or rolling back takes
+  effect for new sessions without a redeploy; running sessions keep their
+  version. Session endpoints need a token from `ADK_RUNTIME_TOKENS`, and it
+  refuses to start with no authentication unless `ADK_RUNTIME_INSECURE=1`.
+  It caps concurrent sessions (`ADK_MAX_SESSIONS`, 503 past it), session
+  length and message size, serves `/healthz`, `/readyz` and `/metrics`,
+  drains on SIGTERM for `ADK_DRAIN_SECS`, and binds `0.0.0.0:$PORT`. See
+  [Deploying the runtime](docs/user-guide/deploy.md).
+- Deployment assets in `deploy/`: a Dockerfile for `adk-runtime` and `adk`,
+  a Cloud Build config, a Cloud Run service, GKE manifests (Deployment,
+  Service with a one-hour backend timeout, Ingress, HPA,
+  PodDisruptionBudget) and Terraform for Cloud Run with its service
+  account, bucket and token secret.
+- `GoogleAccessToken::into_access_token` turns the cached token source
+  into an `AccessToken` that a background task keeps fresh.
+- **Telemetry export works end to end.** Before this, no binary installed
+  an exporter, and 11 of the 12 Live metrics were never recorded.
+  - A Live session is now one `live_session` span with
+    `gen_ai.conversation.id`, and its turns are child spans.
+  - Sessions, reconnections, wire bytes, response latency and tool calls
+    are recorded, along with tokens by direction and modality
+    (`gemini_genai_rs_tokens_total`). `SessionTelemetry::snapshot()` reports
+    `tokens_by_modality`.
+  - `TelemetryConfig::from_env()` reads `OTEL_EXPORTER_OTLP_ENDPOINT`,
+    `ADK_TELEMETRY=gcp`, `OTEL_SERVICE_NAME` and `ADK_METRICS_ADDR`.
+  - `build_otlp()`/`build_gcp()` return `Exporters`, whose `layer()` joins a
+    subscriber the application builds itself, and `install_metrics()`
+    serves Prometheus metrics.
+  - The web UI exports when built with `otel-otlp` or `otel-gcp`.
+  - See [Observability](docs/user-guide/observability.md).
+- **The Studio, rebuilt.** A TypeScript, React and Vite app (`apps/studio`,
+  built into the web app, served at `/studio` and `/flows`). It edits
+  conversations as well as flows, on a graph with drag-to-connect. Its
+  forms are generated from the spec's JSON Schema, and fields that refer to
+  tools, stages or state keys suggest the names that exist. It adds undo and
+  redo, live validation, tests with step-through, a live text run,
+  Rust/Python/Go project generation with zip download, and versions: save,
+  open, and promote to staging or prod through the bundle store
+  (`/api/bundles`). `adk spec schema` prints the spec's JSON Schema. See
+  [The Studio](docs/src/flow-studio.md).
+- Bundles: versioned, labelled storage for session specs
+  (`spec::store`). A version's id is the hash of the spec, labels such as
+  `prod` are movable pointers to a version, and a spec that fails validation
+  is refused. The backends are a directory or Cloud Storage (`gcs-store`),
+  and others implement `BundleObjects`. The CLI adds `adk bundle push`,
+  `list`, `get` and `label`. See
+  [Storing and promoting specs](docs/user-guide/bundles.md).
+- `GoogleAccessToken` (L0, `http` feature) gets Google OAuth2 tokens from
+  `GOOGLE_ACCESS_TOKEN`, the metadata server on Cloud Run, GKE and Compute
+  Engine, or the gcloud CLI, and caches each token until shortly before it
+  expires.
+- `adk spec codegen` generates a Rust, Python or Go project around a session
+  spec, with one typed stub per mock tool. Rust registers the stubs in
+  process. Python and Go serve them as MCP tool servers (official SDKs),
+  and the project's `agent.json` binds those tools to them. Each project
+  has tests, and CI builds and tests all three for every gallery spec.
+  `adk spec test`, `adk spec call` and `adk spec run` test, call and run a
+  spec. `POST /api/flows/project` returns the generated files to the
+  Studio. See [From a spec to a project](docs/user-guide/spec-projects.md).
+- A spec's tools can be implemented in code or on an MCP server. A tool's
+  `mcp` field calls the tool of the same name on that server, and
+  `SpecResources::implement` supplies an in-process implementation. The
+  spec's declaration, `set_state` and `save_response_as` apply either way.
+- `SessionSpec` can carry a `conversation` (the conversation compiler's
+  spec) in place of a `flow`, plus `scenarios` to run against it with
+  `SessionSpec::run_scenarios`. One document now describes a voice agent
+  end to end: model, tools, conversation and tests. Stage resolvers bind to
+  declared tools by name. Flow Studio's test endpoint runs the scenarios.
+  `Scenario` and `SimStep` derive `JsonSchema`, so the spec schema covers
+  them.
+- `SessionSpec::sandboxed` and `BindingAllowlist`, for applying a spec you
+  did not write.
+
+### Changed
+
+- `adk deploy` deploys `adk-runtime` instead of an agent directory. It
+  takes `--bundles` and `--serve` in place of the directory argument,
+  builds `deploy/Dockerfile` with Cloud Build (or deploys `--image`), and
+  runs `gcloud run deploy` with port 8080, a 3600 s timeout, session
+  affinity, CPU always allocated and the token secret. It prints each
+  command before running it; `--dry-run` only prints. `--with-ui` and
+  `--trace-to-cloud` are removed: they set variables nothing read.
+
 ## [3.0.0] - 2026-09-25
 
 ### Highlights

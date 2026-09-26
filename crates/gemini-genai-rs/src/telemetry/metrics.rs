@@ -73,6 +73,18 @@ pub fn record_ws_bytes_received(bytes: u64) {
     metrics::counter!("gemini_genai_rs_ws_bytes_received_total").increment(bytes);
 }
 
+/// Record tokens a Live session used, by direction (`prompt` or
+/// `response`) and modality (`TEXT`, `AUDIO`, `IMAGE`, `VIDEO`).
+#[cfg(feature = "metrics")]
+pub fn record_tokens(direction: &'static str, modality: &str, tokens: u64) {
+    metrics::counter!(
+        "gemini_genai_rs_tokens_total",
+        "direction" => direction,
+        "modality" => modality.to_string()
+    )
+    .increment(tokens);
+}
+
 /// Record an HTTP REST API request.
 #[cfg(feature = "metrics")]
 pub fn record_http_request(method: &str, status: u16, duration_ms: f64) {
@@ -124,6 +136,9 @@ pub fn record_ws_bytes_sent(_: u64) {}
 /// Record WebSocket bytes received (no-op without `metrics` feature).
 #[cfg(not(feature = "metrics"))]
 pub fn record_ws_bytes_received(_: u64) {}
+/// Record Live session tokens by direction and modality (no-op without `metrics` feature).
+#[cfg(not(feature = "metrics"))]
+pub fn record_tokens(_: &'static str, _: &str, _: u64) {}
 /// Record an HTTP REST API request (no-op without `metrics` feature).
 #[cfg(not(feature = "metrics"))]
 pub fn record_http_request(_: &str, _: u16, _: f64) {}

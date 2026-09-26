@@ -1,4 +1,5 @@
 pub mod api;
+pub mod bundle;
 pub mod create;
 pub mod deploy;
 pub mod doctor;
@@ -7,4 +8,5 @@ pub mod flow;
 pub mod replay;
 pub mod run;
 pub mod session;
+pub mod spec;
 pub mod web;

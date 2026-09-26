@@ -93,6 +93,11 @@ impl SessionConfig {
         };
 
         let mut generation_config = self.generation_config.clone();
+        let mut output_audio_transcription = self.output_audio_transcription.clone();
+        if self.text_via_transcription() {
+            generation_config.response_modalities = Some(vec![Modality::Audio]);
+            output_audio_transcription.get_or_insert_with(Default::default);
+        }
         if !self.supports_thinking() {
             generation_config.thinking_config = None;
         }
@@ -108,7 +113,7 @@ impl SessionConfig {
                 tools,
                 tool_config: self.tool_config.clone(),
                 input_audio_transcription: self.input_audio_transcription.clone(),
-                output_audio_transcription: self.output_audio_transcription.clone(),
+                output_audio_transcription,
                 realtime_input_config: self.realtime_input_config.clone(),
                 session_resumption: self.session_resumption.clone().map(|mut r| {
                     if !self.is_vertex() {

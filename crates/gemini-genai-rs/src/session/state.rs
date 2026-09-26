@@ -115,6 +115,9 @@ pub struct SessionState {
     pub turns: parking_lot::Mutex<Vec<Turn>>,
     /// Current in-progress turn.
     pub current_turn: parking_lot::Mutex<Option<Turn>>,
+    /// The session is text-only on a speech-only model: the output
+    /// transcription is its text, and audio is dropped.
+    text_from_transcription: std::sync::atomic::AtomicBool,
 }
 
 impl SessionState {
@@ -127,7 +130,20 @@ impl SessionState {
             resume_handle: parking_lot::Mutex::new(None),
             turns: parking_lot::Mutex::new(Vec::new()),
             current_turn: parking_lot::Mutex::new(None),
+            text_from_transcription: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    /// Deliver the output transcription as the session's text (and drop
+    /// audio), for a text-only session on a speech-only model.
+    pub(crate) fn set_text_from_transcription(&self, enabled: bool) {
+        self.text_from_transcription
+            .store(enabled, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub(crate) fn text_from_transcription(&self) -> bool {
+        self.text_from_transcription
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Create new session state that emits `PhaseChanged` events on transitions.
@@ -142,6 +158,7 @@ impl SessionState {
             resume_handle: parking_lot::Mutex::new(None),
             turns: parking_lot::Mutex::new(Vec::new()),
             current_turn: parking_lot::Mutex::new(None),
+            text_from_transcription: std::sync::atomic::AtomicBool::new(false),
         }
     }
 

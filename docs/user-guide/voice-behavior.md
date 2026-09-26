@@ -191,6 +191,9 @@ the flag. A paraphrase keeps the conversation in the stage, where the posture
 asks for the exact text again.
 
 The check reads what was actually said, so it needs output transcription.
+After a barge-in it reads only what the listener heard, so a passage cut
+off halfway fails (see
+[what the listener heard](./live-callbacks.md#what-the-listener-heard)).
 Enable it with `.output_transcription()` or `.transcription()`. With no
 transcript, nothing is checked and the stage does not complete.
 

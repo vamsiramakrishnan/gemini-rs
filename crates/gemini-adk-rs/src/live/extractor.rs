@@ -30,10 +30,9 @@ pub enum ExtractionTrigger {
     AfterToolCall,
     /// Run when a phase transition occurs.
     OnPhaseChange,
-    /// Run on GenerationComplete — before interruption truncation.
-    ///
-    /// Use this to extract from the model's full intended output, even if
-    /// the user barged in and the audio delivery was interrupted.
+    /// Run on GenerationComplete, as soon as the model has generated its
+    /// response and before the turn completes. Current Live models send no
+    /// GenerationComplete for an interrupted turn.
     OnGenerationComplete,
 }
 

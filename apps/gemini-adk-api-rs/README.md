@@ -305,15 +305,12 @@ let artifact_service = FileArtifactService::new("/data/artifacts");
 let artifact_service = GcsArtifactService::new("my-bucket", "prefix/");
 ```
 
-Deploy via the CLI:
+To serve Live voice sessions from session-spec bundles in production, deploy
+`adk-runtime` instead; `adk deploy` builds and deploys it:
 
 ```bash
-# Cloud Run
-adk deploy cloud_run my_agent/ --project my-gcp-project --region us-central1
-
-# GKE
-adk deploy gke my_agent/ --project my-gcp-project
-
-# Vertex AI Agent Engine
-adk deploy agent_engine my_agent/ --project my-gcp-project
+adk deploy cloud-run --project my-gcp-project \
+  --bundles gs://my-bucket/bundles --serve booking:prod
 ```
+
+See [Deploying the runtime](../../docs/user-guide/deploy.md).

@@ -981,6 +981,10 @@ mod harness {
                     delivery: crate::live::processor::DeliveryConfig::default(),
                     dropped: crate::live::processor::DroppedFrames::default(),
                     redactor: None,
+                    playback: crate::live::playback::PlaybackClock::new(
+                        crate::clock::system_clock(),
+                    ),
+                    speech: Mutex::default(),
                 },
                 state: State::new(),
                 transcript,

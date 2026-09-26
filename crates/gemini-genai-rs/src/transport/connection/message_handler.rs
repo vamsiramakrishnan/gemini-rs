@@ -59,6 +59,12 @@ pub(super) fn handle_server_msg(
                                 continue;
                             };
                             let data = bytes::Bytes::from(decoded);
+                            if is_audio_mime(&inline_data.mime_type)
+                                && state.text_from_transcription()
+                            {
+                                // A text session: the transcript is the reply.
+                                continue;
+                            }
                             if is_audio_mime(&inline_data.mime_type) {
                                 state.mark_audio();
                                 let _ = event_tx.send(SessionEvent::AudioData(data));
@@ -84,11 +90,21 @@ pub(super) fn handle_server_msg(
                 let _ = event_tx.send(SessionEvent::InputTranscription(text));
             }
 
-            // Handle output transcription
+            // Handle output transcription. In a text session on a
+            // speech-only model it is the model's text.
             if let Some(transcription) = content.output_transcription
                 && let Some(text) = transcription.text
             {
-                let _ = event_tx.send(SessionEvent::OutputTranscription(text));
+                if state.text_from_transcription() {
+                    if state.phase() == SessionPhase::Active {
+                        let _ = state.transition_to(SessionPhase::ModelSpeaking);
+                        state.start_turn();
+                    }
+                    state.append_text(&text);
+                    let _ = event_tx.send(SessionEvent::TextDelta(text));
+                } else {
+                    let _ = event_tx.send(SessionEvent::OutputTranscription(text));
+                }
             }
 
             if let Some(status) = content.interaction_status {

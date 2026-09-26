@@ -11,6 +11,7 @@ use crate::session::{
     ResumeInfo, SessionCommand, SessionError, SessionEvent, SessionPhase, SessionState, SetupError,
     WebSocketError,
 };
+use crate::telemetry::metrics;
 use crate::transport::TransportConfig;
 use crate::transport::codec::Codec;
 use crate::transport::ws::Transport;
@@ -36,6 +37,14 @@ pub(super) async fn generic_connection_loop<T: Transport, C: Codec>(
     codec: C,
 ) {
     let mut attempt = 0u32;
+
+    if config.text_via_transcription() {
+        state.set_text_from_transcription(true);
+        tracing::info!(
+            model = %config.resolved_model(),
+            "text-only session on a speech-only model: asking for audio and delivering its transcription as text"
+        );
+    }
 
     // Once per session, not per reconnect: a setting that never reaches the
     // wire should be visible, not silently without effect.
@@ -77,9 +86,33 @@ pub(super) async fn generic_connection_loop<T: Transport, C: Codec>(
 
         match connect_result {
             Ok(Ok(())) => {
+                if attempt > 0 {
+                    metrics::record_reconnection();
+                }
                 // Send setup message
                 let _ = state.transition_to(SessionPhase::SetupSent);
-                let setup_bytes = match codec.encode_setup(&config) {
+                // After a GoAway or a dropped connection, resume the same
+                // server-side session: present the latest handle the server
+                // issued. Without it the server starts a new conversation.
+                let resumed;
+                let setup_config = match (
+                    config.session_resumption.as_ref(),
+                    state.resume_handle.lock().clone(),
+                ) {
+                    (Some(resumption), Some(handle))
+                        if resumption.handle.as_deref() != Some(handle.as_str()) =>
+                    {
+                        let mut next = config.clone();
+                        next.session_resumption = Some(SessionResumptionConfig {
+                            handle: Some(handle),
+                            ..resumption.clone()
+                        });
+                        resumed = next;
+                        &resumed
+                    }
+                    _ => &config,
+                };
+                let setup_bytes = match codec.encode_setup(setup_config) {
                     Ok(b) => b,
                     Err(e) => {
                         let _ = event_tx.send(SessionEvent::Error(SessionError::Codec(e)));
@@ -115,6 +148,7 @@ pub(super) async fn generic_connection_loop<T: Transport, C: Codec>(
                     Ok(Ok(())) => {
                         attempt = 0; // Reset backoff on successful setup
                         // Run main session loop
+                        metrics::record_session_connected();
                         let reason = generic_run_session(
                             &config,
                             &mut transport,
@@ -124,6 +158,7 @@ pub(super) async fn generic_connection_loop<T: Transport, C: Codec>(
                             &event_tx,
                         )
                         .await;
+                        metrics::record_session_disconnected();
 
                         match reason {
                             DisconnectReason::Graceful => {
@@ -150,7 +185,16 @@ pub(super) async fn generic_connection_loop<T: Transport, C: Codec>(
                     }
                     Ok(Err(e)) => {
                         tracing::warn!(error = %e, "WebSocket setup failed");
+                        let permanent = setup_rejection_is_permanent(&e);
+                        let reason = e.to_string();
                         let _ = event_tx.send(SessionEvent::Error(e));
+                        // The same setup would be refused again: say so now
+                        // instead of retrying with backoff.
+                        if permanent {
+                            let _ = state.transition_to(SessionPhase::Disconnected);
+                            let _ = event_tx.send(SessionEvent::Disconnected(Some(reason)));
+                            return;
+                        }
                     }
                     Err(_) => {
                         tracing::warn!(
@@ -195,6 +239,24 @@ pub(super) async fn generic_connection_loop<T: Transport, C: Codec>(
     }
 }
 
+/// The WebSocket status code in a [`Transport::close_reason`] string, e.g.
+/// 1007 in "server closed the connection (1007): …".
+pub(super) fn close_code(reason: &str) -> Option<u16> {
+    let start = reason.find('(')? + 1;
+    let end = start + reason[start..].find(')')?;
+    reason[start..end].parse().ok()
+}
+
+/// A setup the server refused as invalid (1007) or against policy (1008):
+/// retrying the same setup cannot succeed.
+fn setup_rejection_is_permanent(error: &SessionError) -> bool {
+    matches!(
+        error,
+        SessionError::SetupFailed(SetupError::ServerRejected { code: Some(code), .. })
+            if code == "1007" || code == "1008"
+    )
+}
+
 /// Wait for setupComplete from the server.
 ///
 /// Reads messages from the transport, decoding each via the codec, until a
@@ -234,6 +296,14 @@ async fn wait_for_setup<T: Transport, C: Codec>(
             },
             Ok(None) => {
                 tracing::warn!("Server closed connection during setup (no setupComplete received)");
+                // The server's own words when it gave them: they name the
+                // unsupported setting or model.
+                if let Some(reason) = transport.close_reason() {
+                    return Err(SessionError::SetupFailed(SetupError::ServerRejected {
+                        code: close_code(&reason).map(|c| c.to_string()),
+                        message: reason,
+                    }));
+                }
                 // A close during the handshake is a rejection, not a timeout.
                 // Reporting it as `Timeout` sends the reader looking for a slow
                 // network when the server in fact answered immediately and said
@@ -277,6 +347,7 @@ async fn generic_run_session<T: Transport, C: Codec>(
             data = transport.recv() => {
                 match data {
                     Ok(Some(bytes)) => {
+                        metrics::record_ws_bytes_received(bytes.len() as u64);
                         if let Ok(msg) = codec.decode_message(&bytes) {
                             match handle_server_msg(msg, state, event_tx) {
                                 MessageAction::Continue => {}
@@ -319,6 +390,7 @@ async fn generic_run_session<T: Transport, C: Codec>(
                     Some(cmd) => {
                         match codec.encode_command(&cmd, config) {
                             Ok(bytes) if !bytes.is_empty() => {
+                                metrics::record_ws_bytes_sent(bytes.len() as u64);
                                 if let Err(e) = transport.send(bytes).await {
                                     return DisconnectReason::Error(SessionError::WebSocket(
                                         WebSocketError::ProtocolError(format!(

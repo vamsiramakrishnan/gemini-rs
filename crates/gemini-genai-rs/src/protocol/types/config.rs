@@ -1451,6 +1451,29 @@ impl SessionConfig {
         LiveModelProfile::of(&self.resolved_model())
     }
 
+    /// Whether the configured model can answer in text.
+    ///
+    /// Native-audio Live models, which are every Live model today including
+    /// Gemini 3.8 Live, close the session (1007, "The requested combination
+    /// of response modalities (TEXT) is not supported") when a setup asks
+    /// for `TEXT`. A model this crate does not recognize is assumed to
+    /// answer in text.
+    pub fn supports_text_output(&self) -> bool {
+        let model = self.resolved_model();
+        let name = model.as_str().rsplit('/').next().unwrap_or_default();
+        !(name.contains("native-audio") || name.starts_with("gemini-3.8-live"))
+    }
+
+    /// A [`text_only`](Self::text_only) session on a model that can only
+    /// speak. The setup then asks for audio and its output transcription,
+    /// and the transcription is delivered as the session's text
+    /// (`SessionEvent::TextDelta`, `TextComplete`) with no audio, so a text
+    /// session works on every model.
+    pub fn text_via_transcription(&self) -> bool {
+        self.generation_config.response_modalities.as_deref() == Some(&[Modality::Text])
+            && !self.supports_text_output()
+    }
+
     /// Returns `true` if the target accepts async tool calling fields:
     /// `behavior` on declarations and `scheduling` on responses.
     ///
@@ -1657,6 +1680,41 @@ mod tests {
             Some(vec![Modality::Text])
         );
         assert!(config.generation_config.speech_config.is_none());
+    }
+
+    #[test]
+    fn a_text_session_on_a_speech_only_model_asks_for_the_transcript() {
+        for model in [
+            ModelId::LIVE_3_8,
+            ModelId::FLASH_2_5_NATIVE_AUDIO_LATEST,
+            ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO,
+        ] {
+            let config = SessionConfig::new("key").model(model.clone()).text_only();
+            assert!(config.text_via_transcription(), "{model:?}");
+            let setup = serde_json::to_value(config.to_setup_message()).unwrap();
+            assert_eq!(
+                setup["setup"]["generationConfig"]["responseModalities"],
+                serde_json::json!(["AUDIO"]),
+                "{model:?}"
+            );
+            assert!(setup["setup"]["outputAudioTranscription"].is_object());
+        }
+        // A model that can answer in text keeps TEXT, and a voice session is
+        // unaffected.
+        let text_model = SessionConfig::new("key")
+            .model(ModelId::from_static("models/gemini-2.0-flash-live-001"))
+            .text_only();
+        assert!(!text_model.text_via_transcription());
+        let setup = serde_json::to_value(text_model.to_setup_message()).unwrap();
+        assert_eq!(
+            setup["setup"]["generationConfig"]["responseModalities"],
+            serde_json::json!(["TEXT"])
+        );
+        assert!(
+            !SessionConfig::new("key")
+                .model(ModelId::LIVE_3_8)
+                .text_via_transcription()
+        );
     }
 
     #[test]

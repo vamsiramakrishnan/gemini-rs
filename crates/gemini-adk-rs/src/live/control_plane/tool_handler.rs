@@ -247,6 +247,10 @@ pub(in crate::live) async fn handle_tool_calls(
                                 continue;
                             };
                             let duration_ms = started.elapsed().as_millis() as u64;
+                            gemini_genai_rs::telemetry::metrics::record_tool_call(
+                                &call.name,
+                                duration_ms as f64,
+                            );
                             match call_result {
                                 Ok(result) => {
                                     tracing::info!(tool = %call.name, duration_ms, "tool call");

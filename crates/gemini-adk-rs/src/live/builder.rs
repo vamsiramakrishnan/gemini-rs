@@ -615,6 +615,7 @@ pub(crate) fn build_runtime(plan: SessionPlan, session: SessionHandle) -> Sessio
         flow: flow_monitor.clone(),
         redactor: plan.redactor,
         lockstep: plan.lockstep,
+        playback: super::playback::PlaybackClock::new(state.clock()),
     };
 
     // Create shared PendingContext for deferred delivery.
@@ -724,6 +725,23 @@ async fn wait_for_connect_failure(
 pub(crate) async fn spawn_lanes(rt: SessionRuntime) -> Result<LiveHandle, AgentError> {
     use super::events::LiveEvent;
 
+    // One root span per session, so a trace backend shows every turn of a
+    // conversation under it, keyed by the conversation id (the persistence
+    // session id when set, else the transport's). The lanes are spawned
+    // inside it and each turn span is its child.
+    let conversation_id = rt
+        .control_plane
+        .session_id
+        .clone()
+        .unwrap_or_else(|| rt.session.session_id().to_string());
+    let session_span = tracing::info_span!(
+        "live_session",
+        "gen_ai.operation.name" = "live",
+        "gen_ai.system" = "gemini",
+        "gen_ai.conversation.id" = %conversation_id,
+    );
+    let entered = session_span.enter();
+
     // Spawn telemetry lane (SessionSignals + SessionTelemetry on own broadcast rx)
     let session_signals = SessionSignals::new(rt.state.clone());
     let _telem_handle = spawn_telemetry_lane(
@@ -736,6 +754,7 @@ pub(crate) async fn spawn_lanes(rt: SessionRuntime) -> Result<LiveHandle, AgentE
 
     // Spawn fast + control lanes (no session_signals, no transcript mutex)
     let greeting_writer = rt.user_writer.clone();
+    let playback = rt.control_plane.playback.clone();
     let (fast_handle, ctrl_handle, ctrl_tx) = spawn_event_processor(
         rt.event_rx,
         rt.callbacks,
@@ -752,6 +771,7 @@ pub(crate) async fn spawn_lanes(rt: SessionRuntime) -> Result<LiveHandle, AgentE
         rt.control_plane,
         rt.live_event_tx.clone(),
     );
+    drop(entered);
 
     // Spawn periodic telemetry emitter if interval is set
     if let Some(interval) = rt.telemetry_interval {
@@ -819,7 +839,8 @@ pub(crate) async fn spawn_lanes(rt: SessionRuntime) -> Result<LiveHandle, AgentE
         rt.background_tracker,
         rt.telem_cancel,
     )
-    .with_control_sender(ctrl_tx))
+    .with_control_sender(ctrl_tx)
+    .with_playback(playback))
 }
 
 #[cfg(test)]

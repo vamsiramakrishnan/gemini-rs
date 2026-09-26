@@ -108,9 +108,10 @@ Core vocabulary across the three layers. Types link to where they live; see the
 
 - **`TurnExtractor` / `LlmExtractor`** — out-of-band extraction of structured
   state from the conversation; triggered by `ExtractionTrigger`.
-- **Generation-complete vs turn-complete** — generation-complete fires before
-  interruption truncation (captures full intent); turn-complete fires at the
-  turn boundary after truncation.
+- **Generation-complete vs turn-complete** — generation-complete fires when
+  the model finishes generating a turn, and not for an interrupted turn on
+  current Live models; turn-complete fires at every turn boundary, and after
+  an interruption the turn holds only what the listener heard.
 - **`SessionTelemetry` / `SessionSignals`** — auto-collected metrics and derived
   timing signals.
 

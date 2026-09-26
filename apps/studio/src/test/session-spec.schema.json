@@ -1,0 +1,3422 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AudioSpec": {
+      "description": "Input-audio hardening: the measured mic chain (denoiser, noise gate), client input-VAD tuning, and interruption authority. Lowers to `Live::mic_denoise` / `mic_noise_gate` / `input_vad` / `client_interruption_authority`; see the hardening chapter for the benchmark behind each default.",
+      "properties": {
+        "authority": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuthoritySpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Who decides when user speech interrupts the model."
+        },
+        "client_vad": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ClientVadSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Client input-VAD tuning (the detector driving speech edges in `send_audio`)."
+        },
+        "denoise": {
+          "description": "Run the RNNoise speech enhancer over incoming user audio (requires the `denoise` feature; skipped with a validation warning otherwise).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "eot_hold_ms": {
+          "description": "Milliseconds to hold the turn-end marker during mid-turn pauses, suppressing false end-of-turn commits. Measured on TurnBench dev: 800 ms = 0.1-fp qualifying point (recall 0.798), 1600 ms = recall 0.508 (frontier).",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "min_interruption_ms": {
+          "description": "Milliseconds to suppress barge-in detection on backchannels and false interruptions. Measured on TurnBench dev: 1400 ms suppresses backchannel false positives (0.702 → 0.062), 2000 ms = maximum interruption match window.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "noise_gate": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/NoiseGateSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Noise gate after the denoiser — silences frames below a level threshold (near-talker preference; rejects denoiser residue)."
+        }
+      },
+      "type": "object"
+    },
+    "AuthoritySpec": {
+      "description": "Interruption authority (measured trade: client is ~2× faster to barge in; server posted zero false interruptions in every benchmark run).",
+      "oneOf": [
+        {
+          "description": "The Live API's automatic activity detection decides (default).",
+          "enum": [
+            "server"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "This client's input VAD decides: automatic detection is disabled and speech edges send activityStart/activityEnd.",
+          "enum": [
+            "client"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "ClientVadPreset": {
+      "description": "Named client-VAD starting points.",
+      "oneOf": [
+        {
+          "description": "The library defaults (quiet environments).",
+          "enum": [
+            "default"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The closed-loop-tuned noisy-environment profile — use behind `denoise: true` (see `VadConfig::noisy_street`).",
+          "enum": [
+            "noisy_street"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "ClientVadSpec": {
+      "description": "Client input-VAD tuning: start from a preset, override individual knobs.",
+      "properties": {
+        "hangover_frames": {
+          "description": "Frames of hangover before speech-end.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "min_speech_frames": {
+          "description": "Consecutive frames (30 ms each) to confirm onset.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "preset": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ClientVadPreset"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Base preset the overrides apply to."
+        },
+        "start_threshold_db": {
+          "description": "Energy above the noise floor (dB) to open.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "stop_threshold_db": {
+          "description": "Energy above the noise floor (dB) to close.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "CommitSpec": {
+      "description": "A confirm-before-act tool, gated by `when`.",
+      "properties": {
+        "tool": {
+          "description": "The committing tool (e.g. `book`, `charge_card`).",
+          "type": "string"
+        },
+        "when": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Pred"
+            }
+          ],
+          "description": "The guard that must hold before the tool is admitted."
+        }
+      },
+      "required": [
+        "tool",
+        "when"
+      ],
+      "type": "object"
+    },
+    "ComputedSpec": {
+      "description": "A computed (derived) state variable authored as data: `key` is written to `derived:{key}` whenever the [`Expr`] evaluates to a value. Dependencies are inferred from the expression's [`Expr::keys_read`], so the runtime's dependency-ordered [`ComputedRegistry`](gemini_adk_rs::live::ComputedRegistry) invariants hold with nothing extra to declare. Guards read the result by its bare key (the `derived:` fallback).",
+      "properties": {
+        "description": {
+          "description": "Human-readable note.",
+          "type": "string"
+        },
+        "from": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Expr"
+            }
+          ],
+          "description": "The expression computing the value."
+        },
+        "key": {
+          "description": "Result key (written as `derived:{key}`).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "key"
+      ],
+      "type": "object"
+    },
+    "ConfirmPolicy": {
+      "description": "When a slot's value should be confirmed back to the user before it is trusted.",
+      "oneOf": [
+        {
+          "description": "Never explicitly confirm.",
+          "enum": [
+            "never"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Confirm only when the slot's evidence confidence is low.",
+          "enum": [
+            "low_confidence"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Always confirm before trusting the value.",
+          "enum": [
+            "always"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "Constraint": {
+      "description": "A cross-cutting flow constraint.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "A tool may complete at most once.",
+          "properties": {
+            "once": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "once"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Step `0` must be done before step `1` starts.",
+          "properties": {
+            "before": {
+              "items": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            }
+          },
+          "required": [
+            "before"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A tool is forbidden until the guard holds.",
+          "properties": {
+            "never_until": {
+              "properties": {
+                "tool": {
+                  "description": "The gated tool.",
+                  "type": "string"
+                },
+                "until": {
+                  "allOf": [
+                    {
+                      "$ref": "#/definitions/Pred"
+                    }
+                  ],
+                  "description": "The guard that must hold to permit it."
+                }
+              },
+              "required": [
+                "tool",
+                "until"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "never_until"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "These steps must be done for the flow to be complete.",
+          "properties": {
+            "require": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "require"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Un-latch the named steps when the guard *becomes* true (rising edge) — the loop primitive. The DAG stays acyclic and statically checkable; iteration is explicit marking surgery instead of back-edges.\n\nA reset also forgives the completion evidence the steps' `done` guards reference: `called_ok` counts for those tools are cleared (so a `once` on such a tool permits one run per latch-cycle). State keys the guards read are the application's to clear — a reset never touches [`State`].",
+          "properties": {
+            "reset": {
+              "properties": {
+                "steps": {
+                  "description": "The steps to un-latch.",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "when": {
+                  "allOf": [
+                    {
+                      "$ref": "#/definitions/Pred"
+                    }
+                  ],
+                  "description": "Fires on this guard's rising edge."
+                }
+              },
+              "required": [
+                "steps",
+                "when"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "reset"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ContextDelivery": {
+      "description": "When to deliver model-role context turns to the wire.\n\nControls timing of context injection (tool advisory, repair nudge, steering modifiers, phase instructions, on_enter_context).\n\n| Mode | Behavior | Best for | |------|----------|----------| | `Immediate` | Send as single batched frame during TurnComplete | Low-latency apps, text-only | | `Deferred` | Queue until next user send (audio/text/video) | Voice apps where mid-silence sends cause glitches |\n\n# Example\n\n```rust,ignore Live::builder() .steering_mode(SteeringMode::ContextInjection) .context_delivery(ContextDelivery::Deferred)  // flush with next user audio .phase(\"greeting\") .instruction(\"Welcome the guest\") .done() .initial_phase(\"greeting\") ```",
+      "oneOf": [
+        {
+          "description": "Send batched context immediately during TurnComplete processing.\n\nAll context turns are accumulated into a single `send_client_content` call and sent as one WebSocket frame.  The model receives the context as soon as the turn completes, before the next user interaction.",
+          "enum": [
+            "immediate"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Queue context and flush before the next user send.\n\nContext turns are pushed into a [`PendingContext`](super::context_writer::PendingContext) buffer.  The [`DeferredWriter`](super::context_writer::DeferredWriter) drains this buffer before forwarding `send_audio`, `send_text`, or `send_video` — ensuring context arrives in the same burst as user content.\n\nThis eliminates the \"extraneous message\" problem where isolated context frames sent during silence can cause the model to interrupt or produce unexpected responses.",
+          "enum": [
+            "deferred"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "ContextDeliverySpec": {
+      "description": "When batched context turns hit the wire.",
+      "oneOf": [
+        {
+          "description": "Send immediately during TurnComplete (default).",
+          "enum": [
+            "immediate"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Queue and flush with the next user send (voice-glitch avoidance).",
+          "enum": [
+            "deferred"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "ConversationSpec": {
+      "description": "The serializable authoring spec — the single source of truth from which the typed builder, YAML, and (later) codegen all derive.",
+      "properties": {
+        "name": {
+          "description": "Conversation name.",
+          "type": "string"
+        },
+        "overlays": {
+          "description": "Digressions/overlays that can suspend and resume the main flow.",
+          "items": {
+            "$ref": "#/definitions/OverlaySpec"
+          },
+          "type": "array"
+        },
+        "policies": {
+          "description": "Cross-cutting policy aspects (safety/redaction/commit governance).",
+          "items": {
+            "$ref": "#/definitions/Policy"
+          },
+          "type": "array"
+        },
+        "require": {
+          "description": "Stages that must be done for the conversation to be complete.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "stages": {
+          "default": [],
+          "description": "The authored stages.",
+          "items": {
+            "$ref": "#/definitions/StageSpec"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "Edge": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "properties": {
+            "step": {
+              "type": "string"
+            },
+            "when": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Pred"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "step"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "EffectSpec": {
+      "description": "A serializable side effect for phase entry, watcher, and pattern actions — the closed-effect counterpart to [`Guard`]'s closed predicates. One vocabulary, honored identically wherever effects fire.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Write these state keys.",
+          "properties": {
+            "set": {
+              "additionalProperties": true,
+              "type": "object"
+            }
+          },
+          "required": [
+            "set"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Inject a model-role context turn (steering text the model reads before its next response — it does not answer it directly).",
+          "properties": {
+            "context": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "context"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Inject the text as a model-role turn **and** ask the model to respond now — the \"make the model speak\" effect (proactive check-in, nudge).",
+          "properties": {
+            "prompt": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "prompt"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Durably remember a note (`{state.key}` templates interpolated) through the session's memory binding. Requires the spec's `memory` section.",
+          "properties": {
+            "remember": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "remember"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Expr": {
+      "description": "A serializable expression over session state. See the module docs.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "A literal value.",
+          "properties": {
+            "const": true
+          },
+          "required": [
+            "const"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Read a state key (with the `derived:` fallback of [`State::get`]).",
+          "properties": {
+            "key": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "key"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Numeric sum of all operands.",
+          "properties": {
+            "add": {
+              "items": {
+                "$ref": "#/definitions/Expr"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "add"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Numeric product of all operands.",
+          "properties": {
+            "mul": {
+              "items": {
+                "$ref": "#/definitions/Expr"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "mul"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "`a - b`.",
+          "properties": {
+            "sub": {
+              "items": [
+                {
+                  "$ref": "#/definitions/Expr"
+                },
+                {
+                  "$ref": "#/definitions/Expr"
+                }
+              ],
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            }
+          },
+          "required": [
+            "sub"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "`a / b` (`None` when `b` is zero).",
+          "properties": {
+            "div": {
+              "items": [
+                {
+                  "$ref": "#/definitions/Expr"
+                },
+                {
+                  "$ref": "#/definitions/Expr"
+                }
+              ],
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            }
+          },
+          "required": [
+            "div"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Numeric minimum of all operands.",
+          "properties": {
+            "min": {
+              "items": {
+                "$ref": "#/definitions/Expr"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "min"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Numeric maximum of all operands.",
+          "properties": {
+            "max": {
+              "items": {
+                "$ref": "#/definitions/Expr"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "max"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Structural equality of two values.",
+          "properties": {
+            "eq": {
+              "items": [
+                {
+                  "$ref": "#/definitions/Expr"
+                },
+                {
+                  "$ref": "#/definitions/Expr"
+                }
+              ],
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            }
+          },
+          "required": [
+            "eq"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "`a > b` (numeric).",
+          "properties": {
+            "gt": {
+              "items": [
+                {
+                  "$ref": "#/definitions/Expr"
+                },
+                {
+                  "$ref": "#/definitions/Expr"
+                }
+              ],
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            }
+          },
+          "required": [
+            "gt"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "`a >= b` (numeric).",
+          "properties": {
+            "gte": {
+              "items": [
+                {
+                  "$ref": "#/definitions/Expr"
+                },
+                {
+                  "$ref": "#/definitions/Expr"
+                }
+              ],
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            }
+          },
+          "required": [
+            "gte"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "`a < b` (numeric).",
+          "properties": {
+            "lt": {
+              "items": [
+                {
+                  "$ref": "#/definitions/Expr"
+                },
+                {
+                  "$ref": "#/definitions/Expr"
+                }
+              ],
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            }
+          },
+          "required": [
+            "lt"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "`a <= b` (numeric).",
+          "properties": {
+            "lte": {
+              "items": [
+                {
+                  "$ref": "#/definitions/Expr"
+                },
+                {
+                  "$ref": "#/definitions/Expr"
+                }
+              ],
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            }
+          },
+          "required": [
+            "lte"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "`true` when every operand is `true` (missing counts as `false`).",
+          "properties": {
+            "all": {
+              "items": {
+                "$ref": "#/definitions/Expr"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "all"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "`true` when any operand is `true` (missing counts as `false`).",
+          "properties": {
+            "any": {
+              "items": {
+                "$ref": "#/definitions/Expr"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "any"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Boolean negation (missing counts as `false`, so `not` of it is `true`).",
+          "properties": {
+            "not": {
+              "$ref": "#/definitions/Expr"
+            }
+          },
+          "required": [
+            "not"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Branch on a condition's truthiness.",
+          "properties": {
+            "if": {
+              "properties": {
+                "else": {
+                  "allOf": [
+                    {
+                      "$ref": "#/definitions/Expr"
+                    }
+                  ],
+                  "description": "Value otherwise."
+                },
+                "then": {
+                  "allOf": [
+                    {
+                      "$ref": "#/definitions/Expr"
+                    }
+                  ],
+                  "description": "Value when the condition holds."
+                },
+                "when": {
+                  "allOf": [
+                    {
+                      "$ref": "#/definitions/Expr"
+                    }
+                  ],
+                  "description": "Condition (truthy = boolean `true`)."
+                }
+              },
+              "required": [
+                "else",
+                "then",
+                "when"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "if"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The first operand that evaluates to a value.",
+          "properties": {
+            "coalesce": {
+              "items": {
+                "$ref": "#/definitions/Expr"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "coalesce"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "String concatenation of all operands (numbers/booleans stringified; missing operands contribute nothing).",
+          "properties": {
+            "concat": {
+              "items": {
+                "$ref": "#/definitions/Expr"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "concat"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "How many of the named state keys are `true`.",
+          "properties": {
+            "count_true": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "count_true"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ExtractSpec": {
+      "description": "Schema-as-JSON out-of-band extraction: an OOB model fills `schema` from the transcript, the result lands in state under `name`, and `promote` rules write individual fields to bare keys — closing the loop that lets a flow advance from *speech alone* (`captured` guards latch with no tool call).",
+      "properties": {
+        "instruction": {
+          "description": "Instruction for the extraction model.",
+          "type": "string"
+        },
+        "name": {
+          "description": "Extraction name — the state key the full result is stored under.",
+          "type": "string"
+        },
+        "promote": {
+          "description": "Field-promotion rules into bare state keys.",
+          "items": {
+            "$ref": "#/definitions/PromoteSpec"
+          },
+          "type": "array"
+        },
+        "schema": {
+          "description": "JSON Schema the extraction must satisfy."
+        },
+        "trigger": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/TriggerSpec"
+            }
+          ],
+          "default": "every_turn",
+          "description": "When to run."
+        },
+        "window": {
+          "default": 3,
+          "description": "Transcript window in turns. Default 3.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "instruction",
+        "name",
+        "schema"
+      ],
+      "type": "object"
+    },
+    "Flow": {
+      "description": "A governed conversation/tool DAG.",
+      "properties": {
+        "ambient": {
+          "description": "Cross-cutting tools exempt from step `allow` whitelists.\n\nA step's `allow` list excludes by omission, which is correct for the domain tools a step is *about* and wrong for infrastructure no step is about — memory recall, escalation, logging. Naming a tool here says \"this is not part of any step's repertoire\", not \"this is ungovernable\": `deny`, `once` and `never(..).until(..)` all still bind, because each of those *names* the tool and so is a decision about it.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "confirm_tools": {
+          "description": "Tools that require confirmation when reached (set by `commit`).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "constraints": {
+          "description": "Cross-cutting constraints.",
+          "items": {
+            "$ref": "#/definitions/Constraint"
+          },
+          "type": "array"
+        },
+        "steps": {
+          "description": "The steps (DAG nodes).",
+          "items": {
+            "$ref": "#/definitions/Step"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "steps"
+      ],
+      "type": "object"
+    },
+    "FrameSpec": {
+      "description": "The slot definition of a frame — the source of truth for what a stage that `collect`s this frame must gather, plus the metadata that drives confirmation and repair.",
+      "properties": {
+        "name": {
+          "description": "Frame name (defaults to the struct name in snake_case).",
+          "type": "string"
+        },
+        "slots": {
+          "description": "The slots, in declaration order.",
+          "items": {
+            "$ref": "#/definitions/SlotSpec"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "slots"
+      ],
+      "type": "object"
+    },
+    "HttpBinding": {
+      "description": "An HTTP binding for a declared tool: the call is executed as an HTTP request with `{args.field}` / `{state.key}` interpolation in the URL, headers, and body strings, and the JSON response is returned to the model.\n\nRequires the `http-tools` feature; without it, validation reports the binding as unsupported instead of failing silently at call time.",
+      "properties": {
+        "body": {
+          "description": "JSON body; every string value is interpolated. Omit for no body."
+        },
+        "headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Request headers, values interpolated.",
+          "type": "object"
+        },
+        "method": {
+          "default": "GET",
+          "description": "HTTP method (GET, POST, PUT, PATCH, DELETE). Default GET.",
+          "type": "string"
+        },
+        "url": {
+          "description": "Request URL, with `{args.*}`/`{state.*}` interpolation.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "type": "object"
+    },
+    "Join": {
+      "description": "How a step's dependency edges combine.",
+      "oneOf": [
+        {
+          "description": "Every edge must be satisfied (the default — a synchronizing join).",
+          "enum": [
+            "all"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Any one satisfied edge suffices — the merge node after a branch.",
+          "enum": [
+            "any"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "MemorySlotSpec": {
+      "description": "Project one remembered fact into a governed state slot: when memory holds a value for `predicate`, it is written to the `to` state key — where `needs`, `captured`, and every other guard reads it exactly as if the caller had just said it.",
+      "properties": {
+        "predicate": {
+          "description": "Memory predicate (e.g. `dietary_identity`).",
+          "type": "string"
+        },
+        "to": {
+          "description": "Target state key (must not be `derived:` — that prefix is read-only).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "predicate",
+        "to"
+      ],
+      "type": "object"
+    },
+    "MemorySpec": {
+      "description": "The session's durable-memory declaration. Installing it wires the memory subsystem in through a [`MemoryBinding`] supplied in [`SpecResources`]: the `recall_context` / `manage_memory` tools (ambient, so step `allow` lists don't switch recall off), turn ingestion, end-of-session reconciliation, and the slot projections below. [`EffectSpec::Remember`] writes through the same binding.",
+      "properties": {
+        "slots": {
+          "description": "Remembered facts projected into state slots.",
+          "items": {
+            "$ref": "#/definitions/MemorySlotSpec"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "NoiseGateSpec": {
+      "description": "Noise-gate stage parameters.",
+      "properties": {
+        "hold_frames": {
+          "default": 3,
+          "description": "Quiet frames the gate stays open after the last loud one.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "threshold_rms": {
+          "default": 700.0,
+          "description": "RMS threshold in sample units (i16 full scale 32767; measured sweet spot 400–700 behind the denoiser).",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "OverlaySpec": {
+      "description": "A digression (overlay): a named sub-flow that suspends the main flow when its `trigger` holds, runs to completion, then resumes per `resume`.",
+      "properties": {
+        "name": {
+          "description": "Overlay name.",
+          "type": "string"
+        },
+        "require": {
+          "description": "Stages required for the overlay to be considered complete.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "resume": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Resume"
+            }
+          ],
+          "default": "previous",
+          "description": "What the main flow does once the overlay completes."
+        },
+        "stages": {
+          "default": [],
+          "description": "The overlay's own stages.",
+          "items": {
+            "$ref": "#/definitions/StageSpec"
+          },
+          "type": "array"
+        },
+        "trigger": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Pred"
+            }
+          ],
+          "description": "The guard that activates this overlay (e.g. an `intent:*` flag)."
+        }
+      },
+      "required": [
+        "name",
+        "trigger"
+      ],
+      "type": "object"
+    },
+    "PatternSpec": {
+      "description": "A data-driven temporal pattern: fire effects when a state condition holds continuously — for a duration (`sustained_secs`) or a number of consecutive turns (`turns`). Exactly one of the two must be set.\n\nThis is the \"the caller has sounded confused for 30 seconds\" / \"we've been stuck on this for 3 turns\" reactor, as data.",
+      "properties": {
+        "effects": {
+          "description": "Effects when the pattern fires (`set` state and/or inject `context`).",
+          "items": {
+            "$ref": "#/definitions/EffectSpec"
+          },
+          "type": "array"
+        },
+        "name": {
+          "description": "Pattern name (diagnostic identity).",
+          "type": "string"
+        },
+        "sustained_secs": {
+          "description": "Fire after the condition holds this many seconds.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "turns": {
+          "description": "Fire after the condition holds for this many consecutive turns.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "when": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Pred"
+            }
+          ],
+          "description": "Condition over session state (no marking atoms)."
+        }
+      },
+      "required": [
+        "name",
+        "when"
+      ],
+      "type": "object"
+    },
+    "PersistenceSpec": {
+      "description": "Session persistence backend.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Filesystem snapshots under the given directory.",
+          "properties": {
+            "fs": {
+              "properties": {
+                "dir": {
+                  "description": "Snapshot directory (created if missing).",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "dir"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "fs"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "In-memory (tests, ephemeral sessions).",
+          "enum": [
+            "memory"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "PhaseSpec": {
+      "description": "A data-driven conversation phase.",
+      "properties": {
+        "instruction": {
+          "description": "Instruction while this phase is active.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "Phase name.",
+          "type": "string"
+        },
+        "needs": {
+          "description": "Required state keys (drives conversation repair).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "on_enter": {
+          "description": "Effects fired on phase entry.",
+          "items": {
+            "$ref": "#/definitions/EffectSpec"
+          },
+          "type": "array"
+        },
+        "prompt_on_enter": {
+          "description": "Prompt the model on entry.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "terminal": {
+          "description": "Terminal phase.",
+          "type": "boolean"
+        },
+        "tools": {
+          "description": "Tool names available in this phase.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "transitions": {
+          "description": "Guarded transitions out of this phase.",
+          "items": {
+            "$ref": "#/definitions/TransitionSpec"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "Policy": {
+      "description": "A reusable, cross-cutting policy aspect.",
+      "oneOf": [
+        {
+          "description": "Hand off (terminate the conversation) when any of these intents is detected (the `intent:{name}` flag becomes true). Lowered to a `safety` digression with `Resume::Terminate`.",
+          "properties": {
+            "intents": {
+              "description": "Intent names that trigger handoff.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "enum": [
+                "safety_handoff"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "intents",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Redact these state keys wherever state leaves the process: the durable journal sink, persistence snapshots and extraction events carry `[redacted]` instead (see `State::redact_keys`). In-process reads see the real value. Pairs with `#[slot(pii)]`. Transcript text is a separate concern: see `Live::redaction`.",
+          "properties": {
+            "keys": {
+              "description": "State keys to redact.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "enum": [
+                "redact"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "keys",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Commit-tool governance for a confirm-before-act tool, enforced at connect by a `CommitGuard`: a call whose idempotency key already succeeded returns the first result without running again, and a failed call runs the compensating tool with the same arguments.",
+          "properties": {
+            "compensate_with": {
+              "description": "Tool that compensates (undoes) this commit on failure.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "idempotency_key": {
+              "description": "Idempotency key template (`{key}` interpolated from `State`).",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "enum": [
+                "commit"
+              ],
+              "type": "string"
+            },
+            "tool": {
+              "description": "The committing tool.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "tool"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Pred": {
+      "description": "A serializable predicate atom — the closed set of guard primitives.",
+      "oneOf": [
+        {
+          "description": "Always true.",
+          "enum": [
+            "always"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "State key holds boolean `true`.",
+          "properties": {
+            "is_true": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "is_true"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "State key is present.",
+          "properties": {
+            "is_set": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "is_set"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "State key equals the given JSON value.",
+          "properties": {
+            "eq": {
+              "items": [
+                {
+                  "type": "string"
+                },
+                true
+              ],
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            }
+          },
+          "required": [
+            "eq"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "All of the given state keys are present (e.g. extracted slots).",
+          "properties": {
+            "captured": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "captured"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The named tool has completed successfully at least once.",
+          "properties": {
+            "called_ok": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "called_ok"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The named step is done.",
+          "properties": {
+            "done": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "done"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Conjunction.",
+          "properties": {
+            "all": {
+              "items": {
+                "$ref": "#/definitions/Pred"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "all"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Disjunction.",
+          "properties": {
+            "any": {
+              "items": {
+                "$ref": "#/definitions/Pred"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "any"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Negation.",
+          "properties": {
+            "not": {
+              "$ref": "#/definitions/Pred"
+            }
+          },
+          "required": [
+            "not"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "PromotePolicy": {
+      "description": "How extracted fields are promoted into bare state keys.",
+      "oneOf": [
+        {
+          "description": "Write once, never overwrite a known value (default).",
+          "enum": [
+            "keep_known"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Always overwrite.",
+          "enum": [
+            "overwrite"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Promote only when the extracted value is `true`.",
+          "enum": [
+            "true_only"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Promote only non-empty values.",
+          "enum": [
+            "non_empty"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "PromoteSpec": {
+      "description": "Promote one extracted field into a session state key, where flow guards (`captured`, `is_true`, …) read it.",
+      "properties": {
+        "field": {
+          "description": "Field name in the extraction result.",
+          "type": "string"
+        },
+        "policy": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/PromotePolicy"
+            }
+          ],
+          "default": "keep_known",
+          "description": "Merge policy."
+        },
+        "to": {
+          "description": "Target state key. Defaults to the field name.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "field"
+      ],
+      "type": "object"
+    },
+    "RepairPolicy": {
+      "description": "A step's repair policy for the weird paths (silence, no-match, the user stalling). The stack sets `repair:{step}:reprompt` once the step has been active `reprompt_after` turns without completing, and `repair:{step}:escalate` after `escalate_after`. When `escalate_to` is set, the authoring layer lowers an extra edge gated on the escalate signal — a deterministic \"give up and hand off\".",
+      "properties": {
+        "escalate_after": {
+          "default": 4,
+          "description": "Turns the step may be active before an escalation signal is raised.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "escalate_after_interruptions": {
+          "description": "Escalate once the user has barged in this many times while the step is active (they keep cutting the model off: it is not working).",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "escalate_after_tool_failures": {
+          "description": "Escalate once this many tool calls have failed or timed out while the step is active.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "escalate_to": {
+          "description": "Step to route to on escalation (also completes the current step).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reprompt_after": {
+          "default": 2,
+          "description": "Turns the step may be active before a reprompt signal is raised.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "RepairSpec": {
+      "description": "Conversation-repair thresholds (unmet phase `needs`).",
+      "properties": {
+        "escalate_after": {
+          "description": "Turns without progress before escalation.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "nudge_after": {
+          "description": "Turns without progress before the first nudge.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "escalate_after",
+        "nudge_after"
+      ],
+      "type": "object"
+    },
+    "ResolveSpec": {
+      "description": "A serializable declaration that a slot is filled by a *named* async resolver.\n\nThe resolver's implementation (the async fetch) is bound at load time from a [`ResolverRegistry`] — so a `ConversationSpec` carrying these is a complete, JSON-deployable unit once paired with a registry. This is the data half of [`Conversation::resolve_slot`]; the closure half lives only in the builder.",
+      "properties": {
+        "args": {
+          "description": "State keys passed to the resolver as a JSON object argument.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "resolver": {
+          "description": "The registered resolver name to bind (defaults to `slot` if omitted).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "slot": {
+          "description": "The slot (state key) the resolver fills. Added to the stage's `collect`.",
+          "type": "string"
+        },
+        "ttl_secs": {
+          "description": "Optional memoization TTL in seconds.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "slot"
+      ],
+      "type": "object"
+    },
+    "Resume": {
+      "description": "How the main flow continues after a digression (overlay) completes.\n\n`Restart` resets the main flow's *monitor* — its marking, fired `on_enter` actions and reset edges — against the session's existing `State`. It does not clear state, so slots the user already filled stay filled. It is a fresh pass over the same conversation, not a fresh business task.",
+      "oneOf": [
+        {
+          "description": "Resume the main flow exactly where it was suspended (history state).",
+          "enum": [
+            "previous"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Re-enter the main flow from its start (see the type docs for what that does and does not reset). Repair signals and counters are cleared with the marking: a fresh pass starts with no step already escalated.",
+          "enum": [
+            "restart"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "End the conversation (e.g. a cancel/handoff digression). From the next turn boundary the stack governs nothing: see [`FlowStack::is_terminated`] and [`TERMINATED_STATE_KEY`].",
+          "enum": [
+            "terminate"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "RuntimeSpec": {
+      "description": "Control-plane and voice tuning — every session capability that is configuration rather than conversation, in one section. Everything here lowers to a `Live` builder setter; omitted fields keep the builder's defaults.",
+      "properties": {
+        "audio": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AudioSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Input-audio hardening: mic chain, client VAD, interruption authority."
+        },
+        "context_delivery": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ContextDeliverySpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "When context turns hit the wire."
+        },
+        "include_thoughts": {
+          "description": "Receive thought summaries (requires `thinking_budget`).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "lossy_audio": {
+          "description": "Drop audio chunks instead of applying backpressure when consumers lag.",
+          "type": "boolean"
+        },
+        "lossy_transcript": {
+          "description": "Drop transcript deltas instead of applying backpressure.",
+          "type": "boolean"
+        },
+        "persistence": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PersistenceSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Session persistence backend."
+        },
+        "proactive_audio": {
+          "description": "Let the model choose to stay silent (proactive audio).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "repair": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RepairSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Conversation-repair thresholds."
+        },
+        "session_id": {
+          "description": "Stable session id (resume across restarts; requires `persistence`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "soft_turn_timeout_ms": {
+          "description": "Fire a soft turn when the model stays silent this long after VAD end.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "steering": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SteeringSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How phase instructions reach the model."
+        },
+        "temperature": {
+          "description": "Sampling temperature.",
+          "format": "float",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "thinking_budget": {
+          "description": "Thinking budget in tokens (Google AI only; stripped on Vertex).",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "transcription": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TranscriptionSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Input/output transcription."
+        },
+        "vad": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/VadSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Voice-activity-detection tuning."
+        }
+      },
+      "type": "object"
+    },
+    "Scenario": {
+      "description": "A serializable simulation script — a deterministic, model-free test case that can be authored in code or loaded from YAML/JSON.",
+      "properties": {
+        "name": {
+          "description": "Scenario name (for diagnostics).",
+          "type": "string"
+        },
+        "steps": {
+          "description": "The steps to execute, in order.",
+          "items": {
+            "$ref": "#/definitions/SimStep"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "steps"
+      ],
+      "type": "object"
+    },
+    "SchedulingSpec": {
+      "description": "Delivery mode for a background tool's response.",
+      "oneOf": [
+        {
+          "description": "Halt current output and report immediately.",
+          "enum": [
+            "interrupt"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Wait until the model finishes its current output.",
+          "enum": [
+            "when_idle"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Integrate silently without notifying the user.",
+          "enum": [
+            "silent"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "SensitivitySpec": {
+      "description": "Speech-detection sensitivity for [`VadSpec`].",
+      "oneOf": [
+        {
+          "description": "Fewer false positives; may miss soft speech.",
+          "enum": [
+            "low"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Balanced.",
+          "enum": [
+            "medium"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Catches everything; more false positives.",
+          "enum": [
+            "high"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "SimEvent": {
+      "description": "One scripted event in a [`SpecTest`].",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "A user turn (advances the turn counter and re-latches guards). The text is documentation — the simulator does not run a model.",
+          "properties": {
+            "user": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "user"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The model calls a declared tool. Applies the tool's `set_state` mock semantics and records a successful completion — unless the flow blocks it, in which case nothing is recorded (assert with [`TestExpectation::blocked`]).",
+          "properties": {
+            "tool": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "tool"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Write state directly — stands in for extraction filling slots mid-conversation.",
+          "properties": {
+            "set": {
+              "additionalProperties": true,
+              "type": "object"
+            }
+          },
+          "required": [
+            "set"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A checkpoint: assert the current flow state.",
+          "properties": {
+            "expect": {
+              "$ref": "#/definitions/TestExpectation"
+            }
+          },
+          "required": [
+            "expect"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "SimStep": {
+      "description": "One step in a serializable [`Scenario`].",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "The fake user speaks (recognizers fill slots), then a turn advances.",
+          "properties": {
+            "user": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "user"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Set a state value directly.",
+          "properties": {
+            "set": {
+              "properties": {
+                "key": {
+                  "description": "State key.",
+                  "type": "string"
+                },
+                "value": {
+                  "description": "Value to store."
+                }
+              },
+              "required": [
+                "key",
+                "value"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "set"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Remove a state value, as the recorded runtime did.",
+          "properties": {
+            "remove": {
+              "properties": {
+                "key": {
+                  "description": "State key.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "key"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "remove"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A tool succeeds now.",
+          "properties": {
+            "tool_ok": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "tool_ok"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A tool fails (or times out) now; counts toward the active stage's repair policy. Does not advance a turn.",
+          "properties": {
+            "tool_failed": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "tool_failed"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The user barges in on the model; counts toward the active stage's repair policy. Does not advance a turn.",
+          "enum": [
+            "interrupt"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A tool call completes, successfully or not, where the live runtime records it: the flow observes it without advancing a turn (unlike [`ToolOk`](Self::ToolOk)). This is what a scenario extracted from a recording uses.",
+          "properties": {
+            "tool_result": {
+              "properties": {
+                "ok": {
+                  "description": "Whether it succeeded.",
+                  "type": "boolean"
+                },
+                "tool": {
+                  "description": "Tool name.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "ok",
+                "tool"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "tool_result"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Schedule a tool to succeed after N turns (latency).",
+          "properties": {
+            "schedule_tool": {
+              "properties": {
+                "after": {
+                  "description": "Turns to wait.",
+                  "format": "uint32",
+                  "minimum": 0.0,
+                  "type": "integer"
+                },
+                "tool": {
+                  "description": "Tool name.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "after",
+                "tool"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "schedule_tool"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Advance a turn with no input.",
+          "enum": [
+            "turn"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Assert these step ids are active.",
+          "properties": {
+            "expect_active": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "expect_active"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Assert a tool is currently blocked.",
+          "properties": {
+            "expect_denied": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "expect_denied"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Assert a tool is currently admitted.",
+          "properties": {
+            "expect_allowed": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "expect_allowed"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Assert a slot equals a value.",
+          "properties": {
+            "expect_slot": {
+              "properties": {
+                "key": {
+                  "description": "State key.",
+                  "type": "string"
+                },
+                "value": {
+                  "description": "Expected value."
+                }
+              },
+              "required": [
+                "key",
+                "value"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "expect_slot"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Assert the conversation is complete.",
+          "enum": [
+            "expect_complete"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "SlotRecognizer": {
+      "description": "A serializable description of the deterministic recognizer that fills a slot.\n\nMirrors [`Recognizer`] but is serde-friendly (it holds patterns/options as data, not a compiled `Regex`), so a [`FrameSpec`] — and the conversation spec that embeds it — round-trips through JSON/YAML. Lower to a runtime recognizer with [`SlotRecognizer::to_recognizer`].",
+      "oneOf": [
+        {
+          "description": "First integer in the text.",
+          "enum": [
+            "integer"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "First integer, but only when one of these anchor words is present.",
+          "properties": {
+            "integer_near": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "integer_near"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A monetary amount.",
+          "enum": [
+            "money"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "First capture (or whole match) of this regex pattern.",
+          "properties": {
+            "regex": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "regex"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The first of these options to appear (case-insensitive substring).",
+          "properties": {
+            "one_of": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "one_of"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The best Jaro-Winkler match among these options.",
+          "properties": {
+            "fuzzy": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "fuzzy"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Affirmative/negative → boolean.",
+          "enum": [
+            "yes_no"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "A calendar/clock expression → a JSON object.",
+          "enum": [
+            "date_time"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "SlotSpec": {
+      "description": "Metadata for a single slot within a [`FrameSpec`].",
+      "properties": {
+        "confirm": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ConfirmPolicy"
+            }
+          ],
+          "description": "When to confirm the slot's value."
+        },
+        "name": {
+          "description": "The slot (field) name.",
+          "type": "string"
+        },
+        "pii": {
+          "description": "Whether the slot holds PII (redact in logs/transcripts).",
+          "type": "boolean"
+        },
+        "prompt": {
+          "description": "Prompt asked to elicit the slot.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "recognizer": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SlotRecognizer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The deterministic recognizer that fills this slot, if any."
+        },
+        "reprompt": {
+          "description": "Reprompt used after a failed/empty first attempt.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state_key": {
+          "description": "The `State` key the slot is stored under (defaults to `name`).",
+          "type": "string"
+        },
+        "validate": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SlotValidator"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "A validator applied to recognized values; invalid values are rejected."
+        }
+      },
+      "required": [
+        "name",
+        "state_key"
+      ],
+      "type": "object"
+    },
+    "SlotValidator": {
+      "description": "A serializable validator applied to a recognized slot value; a value failing it is rejected (the slot stays unfilled until a valid value is recognized).",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Numeric range with optional inclusive bounds (accepts numbers, or numeric strings).",
+          "properties": {
+            "range": {
+              "properties": {
+                "max": {
+                  "description": "Inclusive upper bound.",
+                  "format": "double",
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "min": {
+                  "description": "Inclusive lower bound.",
+                  "format": "double",
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                }
+              },
+              "type": "object"
+            }
+          },
+          "required": [
+            "range"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A non-empty (after trim) string.",
+          "enum": [
+            "non_empty"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A string matching this regex pattern.",
+          "properties": {
+            "regex": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "regex"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "One of a fixed set (case-insensitive for strings).",
+          "properties": {
+            "one_of": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "one_of"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "SpecModality": {
+      "description": "Output modality for a spec-driven session.",
+      "oneOf": [
+        {
+          "description": "Text-only session (the default — no microphone needed).",
+          "enum": [
+            "text"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Audio (voice) session.",
+          "enum": [
+            "audio"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "SpecTest": {
+      "description": "A named, scripted conformance test embedded in the spec.",
+      "properties": {
+        "name": {
+          "description": "Test name.",
+          "type": "string"
+        },
+        "script": {
+          "description": "The scripted events, in order.",
+          "items": {
+            "$ref": "#/definitions/SimEvent"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "script"
+      ],
+      "type": "object"
+    },
+    "StageSpec": {
+      "description": "One authored conversation stage.",
+      "properties": {
+        "after": {
+          "description": "Explicit dependency stage ids (in addition to `next`-derived edges).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "allow": {
+          "description": "Tools available while this stage is active.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "collect": {
+          "description": "Slots to collect; drives the default completion (`captured`).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "commit": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CommitSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "A confirm-before-act tool committed in this stage."
+        },
+        "done": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Pred"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Explicit completion guard (overrides the `collect`/`next` default)."
+        },
+        "frame": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FrameSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The frame whose slots this stage collects, if set via `collect_frame`. Its recognizer-bearing slots lower to an extractor that fills the slots."
+        },
+        "ground": {
+          "description": "Grounding template projected while active (`{key}` interpolation).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "Unique stage id.",
+          "type": "string"
+        },
+        "next": {
+          "description": "Forward transitions out of this stage.",
+          "items": {
+            "$ref": "#/definitions/TransitionSpec2"
+          },
+          "type": "array"
+        },
+        "repair": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RepairPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Repair policy for this stage (reprompt/escalate on stalling)."
+        },
+        "resolve": {
+          "description": "Named-resolver slot declarations. Bound to implementations at load via a [`ResolverRegistry`]; the data lives in the spec so it round-trips JSON.",
+          "items": {
+            "$ref": "#/definitions/ResolveSpec"
+          },
+          "type": "array"
+        },
+        "say": {
+          "description": "Instruction projected as steering while the stage is active. Serialized as `say` for compatibility; `instruction` is accepted on input.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "terminal": {
+          "description": "Whether this is a terminal stage.",
+          "type": "boolean"
+        },
+        "timing": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/VoiceTiming"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Voice pacing while this stage is active: reprompt on silence, filler cues for slow tools, holding the floor, endpointing, context delivery."
+        },
+        "verbatim": {
+          "description": "Text the model must say word for word in this stage (strict canned mode). The stage completes only once the output transcript matches it; see [`gemini_adk_rs::flow::verbatim`]. The model holds the floor unless `timing` says otherwise.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "StateFieldSpec": {
+      "description": "One declared state key: its type, meaning, and optional starting value.\n\nThe `state` section is the session's data dictionary. Declaring it is optional, but once present it powers editor autocomplete, key-existence warnings for every guard/effect/tool reference, typed key constants in generated code, and `default` seeding at connect.",
+      "properties": {
+        "default": {
+          "description": "Initial value seeded at connect when the key is unset."
+        },
+        "description": {
+          "description": "What this key means.",
+          "type": "string"
+        },
+        "type": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/StateType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Declared JSON type."
+        }
+      },
+      "type": "object"
+    },
+    "StateType": {
+      "description": "Declared JSON type of a state key.",
+      "oneOf": [
+        {
+          "description": "JSON boolean.",
+          "enum": [
+            "boolean"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "JSON number.",
+          "enum": [
+            "number"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "JSON string.",
+          "enum": [
+            "string"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "JSON object.",
+          "enum": [
+            "object"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "JSON array.",
+          "enum": [
+            "array"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "SteeringSpec": {
+      "description": "How phase instructions are steered to the model.",
+      "oneOf": [
+        {
+          "description": "Replace the system instruction on phase transitions (default).",
+          "enum": [
+            "instruction_update"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Set the instruction once; deliver phase steering as context turns.",
+          "enum": [
+            "context_injection"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Both.",
+          "enum": [
+            "hybrid"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "Step": {
+      "description": "A node in the flow DAG — the only node type.",
+      "properties": {
+        "after": {
+          "description": "Dependency edges; how they combine is set by `join`.",
+          "items": {
+            "$ref": "#/definitions/Edge"
+          },
+          "type": "array"
+        },
+        "allow": {
+          "description": "Tools available while this step is active (whitelist; empty = no restriction).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "deny": {
+          "description": "Tools forbidden while this step is active.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "done": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Pred"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Completion condition. Required for non-terminal steps."
+        },
+        "gate": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Pred"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Extra eligibility predicate beyond dependencies."
+        },
+        "ground": {
+          "description": "A grounding template projected while active: a curated, `State`-interpolated fact line that pins the model to known values (anti-hallucination). See [`render_ground`]. Serializable, like `posture`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "Unique step id.",
+          "type": "string"
+        },
+        "join": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Join"
+            }
+          ],
+          "description": "How the `after` edges combine: `all` (default) or `any`."
+        },
+        "posture": {
+          "description": "Instruction imposed while this step is active (projected as steering).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "terminal": {
+          "description": "A terminal step — reaching it (deps + gate) marks it done with no milestone.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "TestExpectation": {
+      "description": "Assertions at a checkpoint. Every listed item must hold; omitted fields are not checked.",
+      "properties": {
+        "active": {
+          "description": "Steps that must be active (eligible, not done).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "allowed": {
+          "description": "Tools that must currently be admitted.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "blocked": {
+          "description": "Tools that must currently be blocked.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "complete": {
+          "description": "Whether the flow must be complete (all `require` steps done).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "done": {
+          "description": "Steps that must have latched done.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "state": {
+          "additionalProperties": true,
+          "description": "State keys that must hold exactly these values.",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "ToolSpec": {
+      "description": "A declared tool. Without an `http` binding it is a **mock**: it returns `response` (default `{\"ok\": true}`) and writes `set_state` — enough to model, validate, and demo a governed conversation before any real tool exists. With `http` it performs the request instead (and still applies `set_state` afterwards, so guards latch identically) — swap a mock for a binding without touching the flow.",
+      "properties": {
+        "background": {
+          "description": "Run non-blocking: the model keeps speaking while the tool executes (`behavior: NonBlocking` on the wire; Google AI only, stripped on Vertex). Implied by `scheduling`.",
+          "type": "boolean"
+        },
+        "description": {
+          "default": "",
+          "description": "Description shown to the model.",
+          "type": "string"
+        },
+        "http": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HttpBinding"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Execute as an HTTP request instead of returning the canned response."
+        },
+        "mcp": {
+          "description": "Execute by calling the tool of the same name on this MCP server: a command line (stdio) or an `http(s)://` URL. This is how a tool written in another language (a generated Python or Go tool server) implements a declared tool. The declaration here stays what the model sees, and `set_state` still applies.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "Tool (function) name the model calls.",
+          "type": "string"
+        },
+        "parameters": {
+          "description": "JSON Schema for the arguments (Gemini subset). `None` = no parameters."
+        },
+        "response": {
+          "description": "Canned JSON response (mock tools). Default `{\"ok\": true}`."
+        },
+        "save_response_as": {
+          "description": "Store the tool's full response under this state key.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scheduling": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SchedulingSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How the async response is delivered (implies `background`)."
+        },
+        "set_state": {
+          "additionalProperties": true,
+          "description": "State keys written when the tool runs — how a tool latches guards.",
+          "type": "object"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "TranscriptionSpec": {
+      "description": "Input/output transcription toggles.",
+      "properties": {
+        "input": {
+          "default": true,
+          "description": "Transcribe the user's speech.",
+          "type": "boolean"
+        },
+        "output": {
+          "default": true,
+          "description": "Transcribe the model's audio output.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "TransitionSpec": {
+      "description": "A data-driven phase transition: fire `when` the guard holds over state.\n\nGuards here evaluate against state alone (no flow marking), so `called_ok`/`done` atoms are rejected by validation — use a state key a tool or extractor writes instead.",
+      "properties": {
+        "description": {
+          "description": "Optional description for navigation steering.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "to": {
+          "description": "Target phase.",
+          "type": "string"
+        },
+        "when": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Pred"
+            }
+          ],
+          "description": "Condition over session state."
+        }
+      },
+      "required": [
+        "to",
+        "when"
+      ],
+      "type": "object"
+    },
+    "TransitionSpec2": {
+      "description": "A transition: advance to `to` when `when` holds.",
+      "properties": {
+        "to": {
+          "description": "Target stage id.",
+          "type": "string"
+        },
+        "when": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Pred"
+            }
+          ],
+          "description": "The (serializable) guard that fires this transition."
+        }
+      },
+      "required": [
+        "to",
+        "when"
+      ],
+      "type": "object"
+    },
+    "TriggerSpec": {
+      "description": "When an extractor runs.",
+      "oneOf": [
+        {
+          "description": "After every turn (default).",
+          "enum": [
+            "every_turn"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "After tool calls complete.",
+          "enum": [
+            "after_tool_call"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "On generation complete, before the turn completes.",
+          "enum": [
+            "on_generation_complete"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "When a phase transition occurs.",
+          "enum": [
+            "on_phase_change"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "UseFragment": {
+      "description": "Splice a named flow fragment into the session's flow under a namespace.\n\nEvery step id inside the fragment becomes `{namespace}/{id}`; internal `after` edges, `done(step)` guard atoms, and `before`/`require` constraints are rewritten to match. Fragment root steps (no `after`) gain this entry's `after` dependencies, attaching the fragment into the outer DAG. Steps outside the fragment reference its steps as `{namespace}/{id}`.",
+      "properties": {
+        "after": {
+          "description": "Outer steps the fragment's roots depend on.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "fragment": {
+          "description": "Fragment name (a key in [`SessionSpec::fragments`]).",
+          "type": "string"
+        },
+        "namespace": {
+          "description": "Namespace prefix for the spliced step ids.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "fragment",
+        "namespace"
+      ],
+      "type": "object"
+    },
+    "VadSpec": {
+      "description": "Voice-activity-detection tuning — the knobs that decide how eagerly the session hears speech start and stop.",
+      "properties": {
+        "end_sensitivity": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SensitivitySpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Sensitivity for detecting end of speech."
+        },
+        "prefix_padding_ms": {
+          "description": "Milliseconds of audio kept before speech onset.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "silence_duration_ms": {
+          "description": "Milliseconds of silence before end-of-speech triggers.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "start_sensitivity": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SensitivitySpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Sensitivity for detecting speech onset."
+        }
+      },
+      "type": "object"
+    },
+    "VoiceTiming": {
+      "description": "Voice pacing for one stage. Every field is optional; an unset field leaves the session's own behaviour alone.",
+      "properties": {
+        "context_delivery": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ContextDelivery"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Context delivery while this stage is active."
+        },
+        "end_of_speech_ms": {
+          "description": "How long a pause must last before the user's turn ends (ms), under client activity authority.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "filler_after_ms": {
+          "description": "Cue a filler when a tool call runs longer than this (ms).",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "interruptible": {
+          "description": "`Some(false)` holds the floor for the model: the user cannot barge in while it speaks (statutory readouts, disclosures).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "reprompt": {
+          "description": "What to tell the model when reprompting. Defaults to [`DEFAULT_REPROMPT`].",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reprompt_after_ms": {
+          "description": "Reprompt once the user has been silent this long (ms) with the floor theirs.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "WatchCondition": {
+      "description": "A data-driven state watcher condition.",
+      "oneOf": [
+        {
+          "description": "Any change.",
+          "enum": [
+            "changed"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Changed to exactly this value.",
+          "properties": {
+            "changed_to": true
+          },
+          "required": [
+            "changed_to"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Numeric value crossed above the threshold.",
+          "properties": {
+            "crossed_above": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "crossed_above"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Numeric value crossed below the threshold.",
+          "properties": {
+            "crossed_below": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "crossed_below"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Became `true`.",
+          "enum": [
+            "became_true"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Became `false`.",
+          "enum": [
+            "became_false"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "WatchSpec": {
+      "description": "A data-driven state watcher: when `key` satisfies the condition, run the effects. Watchers receive the live session writer, so the full [`EffectSpec`] vocabulary applies — a watcher can set state, inject context, prompt the model, or remember durably.",
+      "properties": {
+        "condition": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/WatchCondition"
+            }
+          ],
+          "description": "Trigger condition."
+        },
+        "effects": {
+          "description": "Effects fired in order after `set`.",
+          "items": {
+            "$ref": "#/definitions/EffectSpec"
+          },
+          "type": "array"
+        },
+        "key": {
+          "description": "Watched state key.",
+          "type": "string"
+        },
+        "set": {
+          "additionalProperties": true,
+          "description": "State keys written when it fires (sugar for an [`EffectSpec::Set`]).",
+          "type": "object"
+        }
+      },
+      "required": [
+        "condition",
+        "key"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "A complete Live session as one JSON document. See the module docs.",
+  "properties": {
+    "computed": {
+      "description": "Computed (derived) state variables.",
+      "items": {
+        "$ref": "#/definitions/ComputedSpec"
+      },
+      "type": "array"
+    },
+    "conversation": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ConversationSpec"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The conversation: stages, slots, digressions, commits, timing and policies, compiled by the [conversation compiler](crate::conversation). The higher-level alternative to `flow`; set one or the other. Stage resolvers bind to the declared `tools` by name."
+    },
+    "description": {
+      "default": "",
+      "description": "Human-readable description.",
+      "type": "string"
+    },
+    "extract": {
+      "description": "Out-of-band extraction pipelines.",
+      "items": {
+        "$ref": "#/definitions/ExtractSpec"
+      },
+      "type": "array"
+    },
+    "flow": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/Flow"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The governed flow DAG (optional — a spec may be phases-only)."
+    },
+    "fragments": {
+      "additionalProperties": {
+        "$ref": "#/definitions/Flow"
+      },
+      "description": "Reusable flow fragments, spliced via `use_fragments`.",
+      "type": "object"
+    },
+    "greeting": {
+      "description": "Optional greeting prompt — the model speaks first on connect.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "initial_phase": {
+      "description": "Initial phase name (required when `phases` is non-empty).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "instruction": {
+      "default": "",
+      "description": "Base system instruction.",
+      "type": "string"
+    },
+    "mcp": {
+      "description": "MCP toolset connection strings — the whole MCP ecosystem as this app's tool library. Resolved at connect time.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "memory": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/MemorySpec"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Durable memory: slots projected into state, `remember` effects, and the ambient recall/manage tools. Requires a [`MemoryBinding`] in [`SpecResources`] at apply time."
+    },
+    "modality": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/SpecModality"
+        }
+      ],
+      "default": "text",
+      "description": "Output modality. Defaults to text."
+    },
+    "name": {
+      "default": "",
+      "description": "App name (display and registry identity).",
+      "type": "string"
+    },
+    "patterns": {
+      "description": "Temporal patterns (sustained / consecutive-turn conditions).",
+      "items": {
+        "$ref": "#/definitions/PatternSpec"
+      },
+      "type": "array"
+    },
+    "phases": {
+      "description": "Conversation phases.",
+      "items": {
+        "$ref": "#/definitions/PhaseSpec"
+      },
+      "type": "array"
+    },
+    "runtime": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/RuntimeSpec"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Control-plane and voice tuning."
+    },
+    "scenarios": {
+      "description": "Scenarios run against `conversation` by [`SessionSpec::run_scenarios`]: model-free, deterministic.",
+      "items": {
+        "$ref": "#/definitions/Scenario"
+      },
+      "type": "array"
+    },
+    "state": {
+      "additionalProperties": {
+        "$ref": "#/definitions/StateFieldSpec"
+      },
+      "description": "Declared state keys — the session's data dictionary.",
+      "type": "object"
+    },
+    "tests": {
+      "description": "Embedded conformance tests, replayed offline by [`SessionSpec::run_tests`].",
+      "items": {
+        "$ref": "#/definitions/SpecTest"
+      },
+      "type": "array"
+    },
+    "tools": {
+      "description": "Declared tools (mock or HTTP-bound).",
+      "items": {
+        "$ref": "#/definitions/ToolSpec"
+      },
+      "type": "array"
+    },
+    "use_fragments": {
+      "description": "Fragment splice directives.",
+      "items": {
+        "$ref": "#/definitions/UseFragment"
+      },
+      "type": "array"
+    },
+    "version": {
+      "description": "Spec version tag (freeform, e.g. \"1\" or \"2025-08-24\").",
+      "type": "string"
+    },
+    "voice": {
+      "description": "Voice name for audio sessions (e.g. \"Puck\").",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "watch": {
+      "description": "State watchers.",
+      "items": {
+        "$ref": "#/definitions/WatchSpec"
+      },
+      "type": "array"
+    }
+  },
+  "title": "SessionSpec",
+  "type": "object"
+}

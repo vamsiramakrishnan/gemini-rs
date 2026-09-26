@@ -39,6 +39,8 @@ pub use dsp::{AudioBus, ChainMetrics, ChainSnapshot, DspChain, DspStage, IntStag
 
 #[cfg(feature = "denoise")]
 mod denoise;
+mod resampler;
+pub use resampler::StreamResampler;
 
 #[cfg(feature = "denoise")]
 pub use denoise::Denoiser;
@@ -97,6 +99,10 @@ impl VoicePump {
 ///   `speaker_hz`, resampled from [`SESSION_OUTPUT_HZ`]. An interruption
 ///   arrives as [`Playback::Flush`].
 ///
+/// The pump reports what it plays to the session's
+/// [`PlaybackClock`](gemini_adk_rs::live::PlaybackClock), so an interruption
+/// cuts the model's transcript to what the listener heard.
+///
 /// The pump owns no devices: pair it with `cpal` streams
 /// (`Talk::talk` does exactly that), a WebSocket bridge, a test harness —
 /// anything that can fill and drain a channel.
@@ -132,11 +138,13 @@ pub fn pump_processed(
 ) -> VoicePump {
     let uplink_handle = handle.clone();
     let uplink = tokio::spawn(async move {
+        // Stateful and anti-aliased: see `StreamResampler`.
+        let mut to_session = StreamResampler::new(mic_hz, SESSION_INPUT_HZ);
         while let Some(mut frame) = mic.recv().await {
             for processor in &mut processors {
                 processor.process_frame(&mut frame);
             }
-            let samples = resample(&frame, mic_hz, SESSION_INPUT_HZ);
+            let samples = to_session.process(&frame);
             if uplink_handle
                 .send_audio(i16_to_bytes(&samples).to_vec())
                 .await
@@ -148,11 +156,23 @@ pub fn pump_processed(
     });
 
     let mut events = handle.events();
+    let clock = handle.playback().clone();
     let downlink = tokio::spawn(async move {
+        let mut to_speaker = StreamResampler::new(SESSION_OUTPUT_HZ, speaker_hz);
         loop {
             match events.recv().await {
-                Ok(event) => match playback_of(&event, speaker_hz) {
+                Ok(event) => match playback_of(&event, &mut to_speaker) {
                     Some(playback) => {
+                        // Report playback, so an interruption cuts the
+                        // model's transcript to what the listener heard.
+                        match &playback {
+                            Playback::Chunk(samples) => {
+                                clock.queued(std::time::Duration::from_secs_f64(
+                                    samples.len() as f64 / f64::from(speaker_hz.max(1)),
+                                ));
+                            }
+                            Playback::Flush => clock.flushed(),
+                        }
                         if speaker.send(playback).await.is_err() {
                             break;
                         }
@@ -212,26 +232,28 @@ impl InputAudioProcessor for NoiseGate {
 
 /// Map one session event to a playback instruction, if it carries any.
 /// Pure — this is the whole downlink policy, testable without a session.
-pub(crate) fn playback_of(event: &LiveEvent, speaker_hz: u32) -> Option<Playback> {
+pub(crate) fn playback_of(event: &LiveEvent, to_speaker: &mut StreamResampler) -> Option<Playback> {
     match event {
         LiveEvent::Audio(bytes) => {
             let samples = bytes_to_i16(bytes)?;
-            Some(Playback::Chunk(resample(
-                samples,
-                SESSION_OUTPUT_HZ,
-                speaker_hz,
-            )))
+            Some(Playback::Chunk(to_speaker.process(samples)))
         }
-        LiveEvent::Interrupted => Some(Playback::Flush),
+        LiveEvent::Interrupted => {
+            // The flushed audio's tail must not bleed into the next turn.
+            to_speaker.reset();
+            Some(Playback::Flush)
+        }
         _ => None,
     }
 }
 
-/// Linear-interpolation resampling for mono PCM16.
+/// Linear-interpolation resampling for mono PCM16, one buffer at a time.
 ///
-/// Deliberately simple: conversational speech through a linear resampler is
-/// transparent for this use, and zero dependencies keep the core buildable
-/// everywhere. Same-rate input is returned unchanged.
+/// Cheap, with no filter and no state: fine between rates that are both
+/// well above the speech band, but it aliases when going down to telephone
+/// rates and clicks at chunk boundaries. Streams use [`StreamResampler`],
+/// which the voice pump and telephony bridges do. Same-rate input is
+/// returned unchanged.
 pub fn resample(input: &[i16], from_hz: u32, to_hz: u32) -> Vec<i16> {
     if from_hz == to_hz || input.is_empty() {
         return input.to_vec();
@@ -305,23 +327,76 @@ mod tests {
         // 240 samples at the session's 24k output = 10ms → 480 at 48k.
         let samples = vec![500i16; 240];
         let event = LiveEvent::Audio(Bytes::copy_from_slice(i16_to_bytes(&samples)));
-        match playback_of(&event, 48_000) {
+        match playback_of(&event, &mut StreamResampler::new(SESSION_OUTPUT_HZ, 48_000)) {
             Some(Playback::Chunk(chunk)) => assert_eq!(chunk.len(), 480),
             other => panic!("expected a chunk, got {other:?}"),
         }
     }
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_pump_reports_what_it_plays() {
+        use base64::Engine as _;
+        use std::time::Duration;
+        // One second of model audio, twice, then the caller barges in.
+        let second = serde_json::json!({ "serverContent": { "modelTurn": { "parts": [{
+            "inlineData": {
+                "mimeType": "audio/pcm;rate=24000",
+                "data": base64::engine::general_purpose::STANDARD.encode(vec![0u8; 48_000]),
+            }
+        }] } } });
+        let (transport, control) = crate::live::scripted::ScriptedServer::new()
+            .frame(second.clone())
+            .frame(second)
+            .interrupts()
+            .into_transport();
+        let handle = crate::live::Live::builder()
+            .connect_with_transport(transport)
+            .await
+            .unwrap();
+        let (_mic_tx, mic_rx) = mpsc::channel(4);
+        let (speaker_tx, mut speaker_rx) = mpsc::channel(16);
+        let _pump = pump(&handle, mic_rx, 16_000, speaker_tx, 8_000);
+        assert_eq!(handle.playback().heard(), None);
+        control.release();
+
+        let mut got = Vec::new();
+        while got.len() < 3 {
+            match tokio::time::timeout(Duration::from_secs(3), speaker_rx.recv()).await {
+                Ok(Some(Playback::Chunk(c))) if c.is_empty() => {}
+                Ok(Some(p)) => got.push(p),
+                other => panic!("pump stopped early: {other:?}"),
+            }
+        }
+        assert!(matches!(got[2], Playback::Flush));
+        // Two seconds were queued; the flush came almost at once, so little
+        // was heard, and nothing more is heard after it.
+        let heard = handle.playback().heard().expect("the pump reports");
+        assert!(heard < Duration::from_millis(500), "{heard:?}");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(handle.playback().heard(), Some(heard));
+        handle.disconnect().await.ok();
+    }
+
     #[test]
     fn interruption_becomes_flush() {
         assert_eq!(
-            playback_of(&LiveEvent::Interrupted, 48_000),
+            playback_of(
+                &LiveEvent::Interrupted,
+                &mut StreamResampler::new(SESSION_OUTPUT_HZ, 48_000)
+            ),
             Some(Playback::Flush)
         );
     }
 
     #[test]
     fn unrelated_events_produce_no_playback() {
-        assert_eq!(playback_of(&LiveEvent::TurnComplete, 48_000), None);
+        assert_eq!(
+            playback_of(
+                &LiveEvent::TurnComplete,
+                &mut StreamResampler::new(SESSION_OUTPUT_HZ, 48_000)
+            ),
+            None
+        );
     }
 
     #[test]

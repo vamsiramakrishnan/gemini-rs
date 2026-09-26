@@ -80,6 +80,8 @@ pub struct LiveHandle {
     /// still close once the router drops its strong sender, or the lane would
     /// never drain and shut down.
     ctrl_tx: Option<mpsc::WeakSender<ControlEvent>>,
+    /// Where the listener's playback is reported; shared with the router.
+    playback: super::playback::PlaybackClock,
 }
 
 impl LiveHandle {
@@ -101,6 +103,7 @@ impl LiveHandle {
         telem_cancel: CancellationToken,
     ) -> Self {
         let reactor = Arc::new(LiveReactor::voice_defaults().with_clock(state.clock()));
+        let state_clock = state.clock();
         let effect_executor = LiveEffectExecutor::new(
             Arc::new(session.clone()),
             pending_context.clone(),
@@ -127,6 +130,7 @@ impl LiveHandle {
             flow,
             background_tracker,
             ctrl_tx: None,
+            playback: super::playback::PlaybackClock::new(state_clock),
         }
     }
 
@@ -135,6 +139,23 @@ impl LiveHandle {
     pub(crate) fn with_control_sender(mut self, ctrl_tx: mpsc::WeakSender<ControlEvent>) -> Self {
         self.ctrl_tx = Some(ctrl_tx);
         self
+    }
+
+    /// Share the router's playback clock. Called once from `spawn_lanes`.
+    pub(crate) fn with_playback(mut self, playback: super::playback::PlaybackClock) -> Self {
+        self.playback = playback;
+        self
+    }
+
+    /// The session's playback clock. Whatever plays the model's audio to the
+    /// listener reports to it, so an interruption cuts the model's transcript
+    /// to what was heard. The voice pump and the telephony bridges report on
+    /// their own; a custom player calls
+    /// [`queued`](super::PlaybackClock::queued) as it plays audio and
+    /// [`flushed`](super::PlaybackClock::flushed) when it drops audio on
+    /// barge-in. See [`playback`](super::playback).
+    pub fn playback(&self) -> &super::playback::PlaybackClock {
+        &self.playback
     }
 
     /// Send audio data (raw PCM16 16kHz bytes).

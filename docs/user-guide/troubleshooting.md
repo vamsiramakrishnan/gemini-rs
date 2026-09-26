@@ -107,5 +107,7 @@ construction-only examples run with no credentials. Live examples read auth from
 the environment.
 
 **How do I capture the model's full response even when the user interrupts?**
-Use `on_generation_complete` / `.extract_on_generation::<T>(...)` — it fires
-before interruption truncation.
+Read the partial `on_output_transcript` chunks (`is_final = false`): they
+carry everything the model produced. The turn itself keeps only what the
+listener heard. `on_generation_complete` does not fire for an interrupted
+turn on current Live models.

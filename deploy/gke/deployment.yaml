@@ -1,0 +1,84 @@
+# adk-runtime on GKE. Replace PROJECT_ID, REGION and BUCKET, create the
+# tokens secret, then apply the directory:
+#
+#   kubectl create secret generic adk-runtime-tokens \
+#     --from-literal=tokens="$(openssl rand -hex 32)"
+#   kubectl apply -f deploy/gke/
+#
+# Credentials come from Workload Identity (serviceaccount.yaml); nothing
+# here holds a Google key.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: adk-runtime
+  labels:
+    app: adk-runtime
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: adk-runtime
+  template:
+    metadata:
+      labels:
+        app: adk-runtime
+    spec:
+      serviceAccountName: adk-runtime
+      # SIGTERM starts the drain: /readyz fails at once, new sessions get
+      # 503, running sessions get ADK_DRAIN_SECS to finish. Keep this
+      # longer than ADK_DRAIN_SECS plus a few seconds to close.
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: runtime
+          image: REGION-docker.pkg.dev/PROJECT_ID/adk/adk-runtime:latest
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: ADK_BUNDLES
+              value: gs://BUCKET/bundles
+            - name: ADK_SERVE
+              value: booking:prod
+            - name: ADK_MAX_SESSIONS
+              value: "50"
+            - name: ADK_DRAIN_SECS
+              value: "50"
+            - name: GOOGLE_GENAI_USE_VERTEXAI
+              value: "true"
+            - name: GOOGLE_CLOUD_PROJECT
+              value: PROJECT_ID
+            - name: GOOGLE_CLOUD_LOCATION
+              value: us-central1
+            - name: ADK_RUNTIME_TOKENS
+              valueFrom:
+                secretKeyRef:
+                  name: adk-runtime-tokens
+                  key: tokens
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 2
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "1"
+              memory: 512Mi
+            limits:
+              memory: 1Gi
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+# SIP: adk-runtime does not answer SIP. A SIP agent (see
+# examples/sip-agent) needs SIP signalling plus a range of UDP ports for
+# RTP, which a Service does not map well. Run it as a separate Deployment
+# with `hostNetwork: true` on a node pool whose nodes have public IPs, and
+# open the SIP and RTP ports in the VPC firewall. Keep it out of this
+# Deployment so its scaling and drain stay independent.

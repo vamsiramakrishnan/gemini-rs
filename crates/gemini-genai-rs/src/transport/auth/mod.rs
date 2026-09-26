@@ -7,10 +7,14 @@
 //! and REST API endpoints from the same auth provider.
 
 pub mod google_ai;
+#[cfg(feature = "http")]
+pub mod google_token;
 pub(crate) mod url_builders;
 pub mod vertex;
 
 pub use google_ai::*;
+#[cfg(feature = "http")]
+pub use google_token::GoogleAccessToken;
 pub use vertex::*;
 
 use async_trait::async_trait;

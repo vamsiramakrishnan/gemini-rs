@@ -77,13 +77,14 @@ browse the [cookbook](/gemini-rs/examples/cookbooks/) (Crawl → Walk → Run �
 
 ## Edit and test a session specification
 
-A whole governed session — flow DAG, tools, extraction, phases, watchers,
-computed state, memory, runtime tuning, and an embedded test suite — can be one
-JSON document (`SessionSpec`). It validates, simulates, and code-generates
-offline, and the [Flow Studio](/gemini-rs/compose/flow-studio/) is a
-drag-and-drop editor over exactly that document:
+A whole governed session can be one JSON document (`SessionSpec`): the
+conversation or flow, tools, extraction, phases, watchers, computed state,
+memory, runtime tuning, and its tests. It validates, simulates and generates
+Rust, Python or Go projects offline. It is stored as versioned bundles that a
+runtime serves by label. [The Studio](/gemini-rs/compose/flow-studio/) is the
+editor for that document:
 
-<p align="center"><img src="/gemini-rs/assets/studio/flow-studio.gif" alt="Flow Studio click-through: load a cookbook, drag nodes, validate, run embedded tests, scrub a simulated session, read the generated Rust" width="860" /></p>
+<p align="center"><img src="/gemini-rs/assets/studio/studio.png" alt="The Studio: sections, the conversation graph, and a stage's inspector with its allowed tools and completion guard" width="860" /></p>
 
 See [Flows as JSON](/gemini-rs/compose/flow-json/) for the format and
 [the Studio tour](/gemini-rs/compose/flow-studio/) for the editor.

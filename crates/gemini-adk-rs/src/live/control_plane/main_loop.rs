@@ -154,9 +154,13 @@ pub(in crate::live) async fn run_control_lane(
                         dispatch_callback!(callbacks.on_tool_cancelled_mode, cb(ids));
                     }
                 }
-                ControlEvent::Interrupted => {
-                    // Truncate current model turn on interruption (no mutex)
-                    transcript_buffer.truncate_current_model_turn();
+                ControlEvent::Interrupted { heard_chars } => {
+                    // Keep only what the listener heard of the model's turn.
+                    if let Some(chars) = heard_chars {
+                        transcript_buffer.cut_current_model_turn(chars);
+                        let keep = crate::live::playback::heard_prefix(&accumulated_output, chars);
+                        accumulated_output.truncate(keep);
+                    }
                     // A barge-in counts toward the active step's repair policy.
                     if let Some(flow) = &control_plane.flow {
                         flow.lock().on_interrupted(&state);

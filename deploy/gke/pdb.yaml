@@ -1,0 +1,11 @@
+# Node upgrades and other voluntary evictions take one pod at a time, so
+# callers on the others are unaffected.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: adk-runtime
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: adk-runtime

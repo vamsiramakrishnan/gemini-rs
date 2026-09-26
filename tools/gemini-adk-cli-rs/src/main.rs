@@ -131,6 +131,22 @@ enum Command {
     /// Check environment setup (API keys, toolchain, credentials).
     Doctor,
 
+    /// Session specs (`agent.json`): generate a project, test, call a tool, run.
+    Spec {
+        #[command(subcommand)]
+        action: SpecAction,
+    },
+
+    /// Versioned, labelled spec storage: push, list, get, label.
+    Bundle {
+        #[command(subcommand)]
+        action: BundleAction,
+        /// Bundle store: a directory or gs://bucket/prefix (default:
+        /// $ADK_BUNDLES, else ./bundles).
+        #[arg(long, global = true)]
+        store: Option<String>,
+    },
+
     /// Conversation-compiler devtools: inspect, graph, and simulate a spec.
     Flow {
         #[command(subcommand)]
@@ -143,35 +159,148 @@ enum Command {
         action: SessionAction,
     },
 
-    /// Deploy an agent to a cloud target.
+    /// Deploy adk-runtime, serving bundles from a bundle store.
+    ///
+    /// Builds deploy/Dockerfile with Cloud Build (unless --image is given)
+    /// and deploys it. Every command is printed before it runs.
     Deploy {
-        /// Deployment target: cloud_run, gke, or agent_engine.
+        /// Deployment target: cloud-run, gke, or agent-engine.
         target: DeployTarget,
-        /// Path to the agent directory containing agent.toml.
-        agent_dir: String,
         /// Google Cloud project ID.
         #[arg(long)]
         project: Option<String>,
         /// Google Cloud region.
         #[arg(long, default_value = "us-central1")]
         region: String,
-        /// Cloud Run / GKE service name override.
+        /// Cloud Run service name, and the image name when building.
+        #[arg(long, default_value = "adk-runtime")]
+        service_name: String,
+        /// Bundle store the runtime reads (gs://bucket/prefix); default $ADK_BUNDLES.
         #[arg(long)]
-        service_name: Option<String>,
-        /// Bundle the web UI with the deployment.
+        bundles: Option<String>,
+        /// Bundles to serve, comma-separated (e.g. booking:prod,clinic:prod).
         #[arg(long)]
-        with_ui: bool,
-        /// Export traces to Google Cloud Trace.
+        serve: Option<String>,
+        /// Deploy this image instead of building one.
         #[arg(long)]
-        trace_to_cloud: bool,
+        image: Option<String>,
+        /// The gemini-rs checkout that holds deploy/Dockerfile.
+        #[arg(long, default_value = ".")]
+        source: String,
+        /// Secret Manager secret holding ADK_RUNTIME_TOKENS.
+        #[arg(long, default_value = "adk-runtime-tokens")]
+        tokens_secret: String,
+        /// Secret Manager secret holding TWILIO_AUTH_TOKEN (enables phone calls).
+        #[arg(long)]
+        twilio_secret: Option<String>,
+        /// Service account to run as; default adk-runtime@PROJECT.iam.gserviceaccount.com.
+        #[arg(long)]
+        service_account: Option<String>,
+        /// Concurrent sessions per instance.
+        #[arg(long, default_value_t = 50)]
+        max_sessions: u32,
+        /// Instances kept warm.
+        #[arg(long, default_value_t = 1)]
+        min_instances: u32,
+        /// Print the commands without running them.
+        #[arg(long)]
+        dry_run: bool,
     },
 }
 
 #[derive(Clone, Debug, clap::ValueEnum)]
 enum DeployTarget {
+    #[value(alias = "cloud_run")]
     CloudRun,
     Gke,
+    #[value(alias = "agent_engine")]
     AgentEngine,
+}
+
+#[derive(Subcommand)]
+enum SpecAction {
+    /// Generate a project around the spec: one typed stub per mock tool.
+    ///
+    /// Rust projects run the session with the stubs in process. Python and
+    /// Go projects serve them as an MCP tool server, and their agent.json
+    /// binds those tools to it.
+    Codegen {
+        /// Path to the spec (agent.json).
+        spec: String,
+        /// Project language: rust, python or go.
+        #[arg(long, default_value = "rust")]
+        lang: String,
+        /// Directory to write the project into.
+        #[arg(long)]
+        out: String,
+        /// Rust only: depend on a local checkout of this repository.
+        #[arg(long)]
+        sdk_path: Option<String>,
+        /// Overwrite files that already exist.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Validate the spec and run its tests and scenarios offline.
+    Test {
+        /// Path to the spec (agent.json).
+        spec: String,
+    },
+    /// Call one tool through its binding and print the result.
+    Call {
+        /// Path to the spec (agent.json).
+        spec: String,
+        /// Tool name.
+        tool: String,
+        /// Arguments as a JSON object.
+        args: Option<String>,
+    },
+    /// Run the spec as a live session.
+    Run {
+        /// Path to the spec (agent.json).
+        spec: String,
+    },
+    /// Print the JSON Schema of a session spec.
+    Schema,
+}
+
+#[derive(Subcommand)]
+enum BundleAction {
+    /// Store a spec as a new version (refused if it fails validation).
+    Push {
+        /// Path to the spec (agent.json).
+        spec: String,
+        /// Bundle name (default: from the spec's name).
+        #[arg(long)]
+        name: Option<String>,
+        /// What changed.
+        #[arg(short, long)]
+        message: Option<String>,
+        /// Point these labels at the new version.
+        #[arg(long)]
+        label: Vec<String>,
+    },
+    /// List bundles, or one bundle's versions and labels.
+    List {
+        /// Bundle name.
+        name: Option<String>,
+    },
+    /// Print or save a version: name, name@version or name:label.
+    Get {
+        /// Reference to fetch.
+        reference: String,
+        /// Write to this file instead of stdout.
+        #[arg(long)]
+        out: Option<String>,
+    },
+    /// Point a label at a version (promote or roll back).
+    Label {
+        /// Bundle name.
+        name: String,
+        /// Label, e.g. prod.
+        label: String,
+        /// Version id or unique prefix.
+        version: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -371,6 +500,54 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         },
 
+        Command::Spec { action } => match action {
+            SpecAction::Codegen {
+                spec,
+                lang,
+                out,
+                sdk_path,
+                force,
+            } => commands::spec::codegen(&spec, &lang, &out, sdk_path.as_deref(), force)?,
+            SpecAction::Test { spec } => commands::spec::test(&spec).await?,
+            SpecAction::Call { spec, tool, args } => {
+                commands::spec::call(&spec, &tool, args.as_deref()).await?
+            }
+            SpecAction::Run { spec } => commands::spec::run(&spec).await?,
+            SpecAction::Schema => commands::spec::schema()?,
+        },
+
+        Command::Bundle { action, store } => {
+            let store = store.as_deref();
+            match action {
+                BundleAction::Push {
+                    spec,
+                    name,
+                    message,
+                    label,
+                } => {
+                    commands::bundle::push(
+                        &spec,
+                        name.as_deref(),
+                        message.as_deref(),
+                        &label,
+                        store,
+                    )
+                    .await?
+                }
+                BundleAction::List { name } => {
+                    commands::bundle::list(name.as_deref(), store).await?
+                }
+                BundleAction::Get { reference, out } => {
+                    commands::bundle::get(&reference, out.as_deref(), store).await?
+                }
+                BundleAction::Label {
+                    name,
+                    label,
+                    version,
+                } => commands::bundle::label(&name, &label, &version, store).await?,
+            }
+        }
+
         Command::Flow { action } => match action {
             FlowAction::Inspect { spec } => commands::flow::inspect(&spec)?,
             FlowAction::Graph { spec } => commands::flow::graph(&spec)?,
@@ -391,24 +568,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         Command::Deploy {
             target,
-            agent_dir,
             project,
             region,
             service_name,
-            with_ui,
-            trace_to_cloud,
+            bundles,
+            serve,
+            image,
+            source,
+            tokens_secret,
+            twilio_secret,
+            service_account,
+            max_sessions,
+            min_instances,
+            dry_run,
         } => commands::deploy::run(commands::deploy::DeployConfig {
             target: match target {
                 DeployTarget::CloudRun => commands::deploy::Target::CloudRun,
                 DeployTarget::Gke => commands::deploy::Target::Gke,
                 DeployTarget::AgentEngine => commands::deploy::Target::AgentEngine,
             },
-            agent_dir,
             project,
             region,
             service_name,
-            with_ui,
-            trace_to_cloud,
+            bundles: bundles.or_else(|| std::env::var("ADK_BUNDLES").ok()),
+            serve,
+            image,
+            source,
+            tokens_secret,
+            twilio_secret,
+            service_account,
+            max_sessions,
+            min_instances,
+            dry_run,
         })?,
     }
 

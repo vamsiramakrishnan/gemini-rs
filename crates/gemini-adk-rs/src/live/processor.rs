@@ -258,7 +258,11 @@ pub(crate) enum ControlEvent {
         /// Whether the tool completed successfully.
         ok: bool,
     },
-    Interrupted,
+    /// The model was interrupted. `heard_chars`: how many of the turn's
+    /// output transcript characters the listener heard, when it can be told.
+    Interrupted {
+        heard_chars: Option<usize>,
+    },
     TurnComplete,
     /// Model finished generating (even if interrupted). Fires before TurnComplete.
     GenerationComplete,
@@ -306,6 +310,11 @@ pub(crate) struct SharedState {
     /// Transcript redaction, applied at the router before either lane sees
     /// the text. `None` = pass through untouched.
     pub redactor: Option<Arc<crate::live::redaction::TranscriptRedactor>>,
+    /// Where the listener's playback is reported.
+    pub playback: super::playback::PlaybackClock,
+    /// The current model turn's audio and transcript, for cutting the
+    /// transcript to what was heard on an interruption.
+    pub speech: parking_lot::Mutex<super::playback::TurnSpeech>,
 }
 
 /// Runs the three-lane event processor.
@@ -364,6 +373,9 @@ pub(crate) struct ControlPlaneConfig {
     /// Replay only: the router waits for both lanes to finish each event and
     /// counts it here. See [`Lockstep`].
     pub lockstep: Option<Arc<Lockstep>>,
+    /// The session's playback clock, shared with its
+    /// [`LiveHandle`](super::handle::LiveHandle).
+    pub playback: super::playback::PlaybackClock,
 }
 
 /// Counts the session events the lanes have fully handled, for an offline
@@ -419,6 +431,7 @@ impl Default for ControlPlaneConfig {
             delivery: DeliveryConfig::default(),
             redactor: None,
             lockstep: None,
+            playback: super::playback::PlaybackClock::new(crate::clock::system_clock()),
         }
     }
 }
@@ -457,6 +470,8 @@ pub(crate) fn spawn_event_processor(
         delivery: control_plane.delivery,
         dropped: DroppedFrames::default(),
         redactor: control_plane.redactor.clone(),
+        playback: control_plane.playback.clone(),
+        speech: parking_lot::Mutex::default(),
     });
 
     let timer_cancel = CancellationToken::new();
@@ -480,59 +495,65 @@ pub(crate) fn spawn_event_processor(
     let ctrl_tx_clone = ctrl_tx.clone();
     let shared_clone = shared.clone();
     let lockstep = control_plane.lockstep.clone();
-    tokio::spawn(async move {
-        // One span per turn; see `turn_trace` for why each lane keeps its own.
-        let mut turn = super::turn_trace::TurnTrace::new();
-        loop {
-            match event_rx.recv().await {
-                Ok(event) => {
-                    // `Disconnected` is terminal in L0 (the session loop returns
-                    // after emitting it), so the router exits after routing it.
-                    // Dropping the router's lane senders closes the fast/control
-                    // channels, letting both lanes drain their queues and shut
-                    // down gracefully (final persistence drain, etc.) instead of
-                    // idling forever on a broadcast channel that never closes
-                    // while the `SessionHandle` is alive.
-                    let terminal = matches!(event, SessionEvent::Disconnected(_));
-                    let boundary = matches!(event, SessionEvent::TurnComplete);
-                    route_event(event, &fast_tx_clone, &ctrl_tx_clone, &shared_clone)
-                        .instrument(turn.span())
-                        .await;
-                    if let Some(lockstep) = &lockstep {
-                        let (fast_done, fast_rx) = tokio::sync::oneshot::channel();
-                        let (ctrl_done, ctrl_rx) = tokio::sync::oneshot::channel();
-                        let _ = fast_tx_clone.send(FastEvent::Barrier(fast_done)).await;
-                        let _ = ctrl_tx_clone.send(ControlEvent::Barrier(ctrl_done)).await;
-                        let _ = fast_rx.await;
-                        let _ = ctrl_rx.await;
-                        lockstep.settle(1);
+    tokio::spawn(
+        async move {
+            // One span per turn; see `turn_trace` for why each lane keeps its own.
+            let mut turn = super::turn_trace::TurnTrace::new();
+            loop {
+                match event_rx.recv().await {
+                    Ok(event) => {
+                        // `Disconnected` is terminal in L0 (the session loop returns
+                        // after emitting it), so the router exits after routing it.
+                        // Dropping the router's lane senders closes the fast/control
+                        // channels, letting both lanes drain their queues and shut
+                        // down gracefully (final persistence drain, etc.) instead of
+                        // idling forever on a broadcast channel that never closes
+                        // while the `SessionHandle` is alive.
+                        let terminal = matches!(event, SessionEvent::Disconnected(_));
+                        let boundary = matches!(event, SessionEvent::TurnComplete);
+                        route_event(event, &fast_tx_clone, &ctrl_tx_clone, &shared_clone)
+                            .instrument(turn.span())
+                            .await;
+                        if let Some(lockstep) = &lockstep {
+                            let (fast_done, fast_rx) = tokio::sync::oneshot::channel();
+                            let (ctrl_done, ctrl_rx) = tokio::sync::oneshot::channel();
+                            let _ = fast_tx_clone.send(FastEvent::Barrier(fast_done)).await;
+                            let _ = ctrl_tx_clone.send(ControlEvent::Barrier(ctrl_done)).await;
+                            let _ = fast_rx.await;
+                            let _ = ctrl_rx.await;
+                            lockstep.settle(1);
+                        }
+                        if boundary {
+                            turn.advance();
+                            tracing::debug!(parent: &turn.span(), "turn started");
+                        }
+                        if terminal {
+                            break;
+                        }
                     }
-                    if boundary {
-                        turn.advance();
-                        tracing::debug!(parent: &turn.span(), "turn started");
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::warn!(skipped = n, "Event processor lagged, skipped events");
+                        if let Some(lockstep) = &lockstep {
+                            lockstep.settle(n);
+                        }
                     }
-                    if terminal {
-                        break;
-                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
                 }
-                Err(broadcast::error::RecvError::Lagged(n)) => {
-                    tracing::warn!(skipped = n, "Event processor lagged, skipped events");
-                    if let Some(lockstep) = &lockstep {
-                        lockstep.settle(n);
-                    }
-                }
-                Err(broadcast::error::RecvError::Closed) => break,
             }
         }
-    });
+        .in_current_span(),
+    );
 
     // Spawn fast consumer (no transcript buffer — transcripts are in control lane)
     let fast_callbacks = callbacks.clone();
     let fast_shared = shared.clone();
     let fast_event_tx = live_event_tx.clone();
-    let fast_handle = tokio::spawn(async move {
-        run_fast_lane(fast_rx, fast_callbacks, fast_shared, fast_event_tx).await;
-    });
+    let fast_handle = tokio::spawn(
+        async move {
+            run_fast_lane(fast_rx, fast_callbacks, fast_shared, fast_event_tx).await;
+        }
+        .in_current_span(),
+    );
 
     // Clone for the timer task (before moving into ctrl spawn)
     let timer_temporal = temporal.clone();
@@ -557,28 +578,31 @@ pub(crate) fn spawn_event_processor(
     // upgrades it per background spawn; the channel closes once the router and
     // all in-flight background tasks drop their strong senders).
     let ctrl_tx_weak = ctrl_tx.downgrade();
-    let ctrl_handle = tokio::spawn(async move {
-        run_control_lane(
-            ctrl_rx,
-            ctrl_tx_weak,
-            ctrl_callbacks,
-            dispatcher,
-            writer,
-            ctrl_shared,
-            extractors,
-            state,
-            computed,
-            phase_machine,
-            watchers,
-            temporal,
-            background_tracker,
-            execution_modes,
-            control_plane,
-            live_event_tx,
-        )
-        .await;
-        ctrl_timer_cancel.cancel();
-    });
+    let ctrl_handle = tokio::spawn(
+        async move {
+            run_control_lane(
+                ctrl_rx,
+                ctrl_tx_weak,
+                ctrl_callbacks,
+                dispatcher,
+                writer,
+                ctrl_shared,
+                extractors,
+                state,
+                computed,
+                phase_machine,
+                watchers,
+                temporal,
+                background_tracker,
+                execution_modes,
+                control_plane,
+                live_event_tx,
+            )
+            .await;
+            ctrl_timer_cancel.cancel();
+        }
+        .in_current_span(),
+    );
 
     // Optional timer task for sustained temporal patterns
     if let Some(ref temporal_ref) = timer_temporal
@@ -637,6 +661,8 @@ pub(crate) fn spawn_telemetry_lane(
         debounce.tick().await;
         // One span per turn; see `turn_trace` for why each lane keeps its own.
         let mut turn = super::turn_trace::TurnTrace::new();
+        // The turn's latest usage report, added to the totals at its end.
+        let mut turn_usage: Option<gemini_genai_rs::prelude::UsageMetadata> = None;
         loop {
             tokio::select! {
                 biased;
@@ -674,6 +700,9 @@ pub(crate) fn spawn_telemetry_lane(
                                     }
                                     SessionEvent::TurnComplete => {
                                         telemetry.record_turn_complete();
+                                        if let Some(usage) = turn_usage.take() {
+                                            telemetry.record_turn_usage(&usage);
+                                        }
                                     }
                                     SessionEvent::VoiceActivityStart => {
                                         telemetry.mark_turn_start();
@@ -686,6 +715,7 @@ pub(crate) fn spawn_telemetry_lane(
                                             usage.cached_content_token_count,
                                             usage.thoughts_token_count,
                                         );
+                                        turn_usage = Some(usage.clone());
                                         if let Some(cb) = &on_usage {
                                             cb(usage);
                                         }
@@ -712,7 +742,7 @@ pub(crate) fn spawn_telemetry_lane(
                 _ = cancel.cancelled() => break,
             }
         }
-    })
+    }.in_current_span())
 }
 
 /// Routes a SessionEvent to the appropriate lane.
@@ -727,6 +757,7 @@ async fn route_event(
     match event {
         // Fast lane events
         SessionEvent::AudioData(data) => {
+            shared.speech.lock().on_audio(data.len(), &shared.playback);
             deliver_fast(
                 fast_tx,
                 FastEvent::Audio(data),
@@ -781,6 +812,7 @@ async fn route_event(
                 Some(redactor) => redactor.redact(text),
                 None => text,
             };
+            shared.speech.lock().on_text(&text);
             deliver_fast(
                 fast_tx,
                 FastEvent::OutputTranscript(text.clone()),
@@ -839,10 +871,16 @@ async fn route_event(
             // control lane may be blocked awaiting a slow tool and would
             // otherwise not see this interruption until the tool finished.
             shared.barge_in.lock().cancel();
+            // Read the playback clock now, while the listener's speaker is
+            // where the interruption found it.
+            let heard_chars = shared.speech.lock().on_interrupted(&shared.playback);
             let _ = fast_tx.send(FastEvent::Interrupted).await;
-            let _ = ctrl_tx.send(ControlEvent::Interrupted).await;
+            let _ = ctrl_tx
+                .send(ControlEvent::Interrupted { heard_chars })
+                .await;
         }
         SessionEvent::TurnComplete => {
+            shared.speech.lock().on_turn_complete();
             let _ = ctrl_tx.send(ControlEvent::TurnComplete).await;
         }
         // Usage metadata is handled by the telemetry lane (SessionSignals)
@@ -1282,6 +1320,66 @@ mod tests {
         // Turn count should have been incremented
         let tc: u32 = state.session().get("turn_count").unwrap_or(0);
         assert_eq!(tc, 1);
+
+        drop(event_tx);
+        let _ = fast_handle.await;
+        let _ = ctrl_handle.await;
+    }
+
+    #[tokio::test]
+    async fn an_interrupted_turn_keeps_only_what_was_heard() {
+        let finals = Arc::new(parking_lot::Mutex::new(Vec::<String>::new()));
+        let sink = finals.clone();
+        let callbacks = Arc::new(EventCallbacks {
+            on_output_transcript: Some(Box::new(move |text: &str, is_final: bool| {
+                if is_final {
+                    sink.lock().push(text.to_string());
+                }
+            })),
+            ..EventCallbacks::default()
+        });
+        let (event_tx, _) = broadcast::channel(64);
+        let event_rx = event_tx.subscribe();
+        let writer: Arc<dyn SessionWriter> = Arc::new(crate::agent_session::NoOpSessionWriter);
+        let clock = Arc::new(crate::clock::ManualClock::new());
+        let control_plane = ControlPlaneConfig {
+            playback: crate::live::playback::PlaybackClock::new(clock.clone()),
+            ..ControlPlaneConfig::default()
+        };
+        let playback = control_plane.playback.clone();
+        let (fast_handle, ctrl_handle, _ctrl_tx) = spawn_event_processor(
+            event_rx,
+            callbacks,
+            None,
+            writer,
+            vec![],
+            State::new(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            std::collections::HashMap::new(),
+            control_plane,
+            dummy_event_tx(),
+        );
+
+        // The model streams 4 s of audio (24 kHz PCM16) and its whole
+        // sentence at once; the speaker starts playing it.
+        let _ = event_tx.send(SessionEvent::AudioData(Bytes::from(vec![0u8; 4 * 48_000])));
+        let _ = event_tx.send(SessionEvent::OutputTranscription(
+            "Your table for four is booked for Friday at eight, and I have noted the allergy."
+                .to_string(),
+        ));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        playback.queued(Duration::from_secs(4));
+        // The caller cuts in after 1.5 s: 24 characters at 16 a second.
+        clock.advance(Duration::from_millis(1_500));
+        let _ = event_tx.send(SessionEvent::Interrupted);
+        let _ = event_tx.send(SessionEvent::TurnComplete);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        assert_eq!(*finals.lock(), ["Your table for four is"]);
 
         drop(event_tx);
         let _ = fast_handle.await;

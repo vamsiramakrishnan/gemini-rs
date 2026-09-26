@@ -21,7 +21,12 @@
 //!   before; the spec never pretends to serialize them.
 
 mod codegen;
+pub mod project;
 mod simulate;
+pub mod store;
+
+pub use project::{ProjectFile, ProjectLanguage, ProjectOptions, SdkSource};
+pub use store::{BundleRef, BundleStore, BundleVersion, StoreError, open_store};
 
 pub use simulate::{
     SimEvent, SimSnapshot, SpecTest, TestExpectation, TestReport, TestStepResult, trace_test,
@@ -39,7 +44,7 @@ use gemini_adk_rs::live::extractor::{ExtractionTrigger, FieldPromotion, LlmExtra
 use gemini_adk_rs::live::{ContextDelivery, RepairConfig, SteeringMode};
 use gemini_adk_rs::llm::BaseLlm;
 use gemini_adk_rs::state::State;
-use gemini_adk_rs::tool::{SimpleTool, ToolDispatcher};
+use gemini_adk_rs::tool::{SimpleTool, ToolDispatcher, ToolFunction};
 use gemini_genai_rs::prelude::{
     AutomaticActivityDetection, Content, FunctionResponseScheduling, Sensitivity, SessionWriter,
     Voice,
@@ -80,6 +85,11 @@ pub struct HttpBinding {
     /// JSON body; every string value is interpolated. Omit for no body.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body: Option<Value>,
+    /// Set by [`SessionSpec::sandboxed`]: the request URL (after
+    /// interpolation) and every redirect target must stay inside it.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub(crate) reach: Option<BindingAllowlist>,
 }
 
 fn default_method() -> String {
@@ -114,6 +124,13 @@ pub struct ToolSpec {
     /// Execute as an HTTP request instead of returning the canned response.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub http: Option<HttpBinding>,
+    /// Execute by calling the tool of the same name on this MCP server: a
+    /// command line (stdio) or an `http(s)://` URL. This is how a tool
+    /// written in another language (a generated Python or Go tool server)
+    /// implements a declared tool. The declaration here stays what the model
+    /// sees, and `set_state` still applies.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcp: Option<String>,
     /// Run non-blocking: the model keeps speaking while the tool executes
     /// (`behavior: NonBlocking` on the wire; Google AI only, stripped on
     /// Vertex). Implied by `scheduling`.
@@ -207,7 +224,7 @@ pub enum TriggerSpec {
     EveryTurn,
     /// After tool calls complete.
     AfterToolCall,
-    /// On generation complete — before interruption truncation.
+    /// On generation complete, before the turn completes.
     OnGenerationComplete,
     /// When a phase transition occurs.
     OnPhaseChange,
@@ -821,6 +838,16 @@ pub struct SessionSpec {
     /// The governed flow DAG (optional — a spec may be phases-only).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flow: Option<Flow>,
+    /// The conversation: stages, slots, digressions, commits, timing and
+    /// policies, compiled by the [conversation compiler](crate::conversation).
+    /// The higher-level alternative to `flow`; set one or the other. Stage
+    /// resolvers bind to the declared `tools` by name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation: Option<crate::conversation::ConversationSpec>,
+    /// Scenarios run against `conversation` by
+    /// [`SessionSpec::run_scenarios`]: model-free, deterministic.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scenarios: Vec<crate::simulation::Scenario>,
     /// Embedded conformance tests, replayed offline by
     /// [`SessionSpec::run_tests`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -859,6 +886,92 @@ pub trait MemoryBinding: Send + Sync {
     fn remember(&self, note: String);
 }
 
+/// What a spec written by someone else may reach when it runs.
+///
+/// A spec can bind tools to the outside world: `mcp` entries start a local
+/// command (or connect to a URL) and an `http` binding sends a request to any
+/// URL. That is fine for a spec you wrote and deploy. It is not fine for a
+/// spec a browser posts to a shared server: running it would let the author
+/// execute commands on the host or reach internal addresses. Pass such a spec
+/// through [`SessionSpec::sandboxed`] with an allowlist the *operator*
+/// configured.
+///
+/// The default allows nothing: every binding becomes a mock.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BindingAllowlist {
+    http_prefixes: Vec<String>,
+    mcp: Vec<String>,
+}
+
+impl BindingAllowlist {
+    /// Allow HTTP bindings whose URL template starts with `prefix`, e.g.
+    /// `https://api.example.com/`. A prefix without a path gets a trailing
+    /// `/`, so interpolated arguments can never change the host.
+    pub fn allow_http_prefix(mut self, prefix: impl Into<String>) -> Self {
+        let mut prefix = prefix.into();
+        let after_scheme = prefix.split_once("://").map_or("", |(_, rest)| rest);
+        if !after_scheme.contains('/') {
+            prefix.push('/');
+        }
+        self.http_prefixes.push(prefix);
+        self
+    }
+
+    /// Allow one `mcp` entry, matched exactly.
+    pub fn allow_mcp(mut self, params: impl Into<String>) -> Self {
+        self.mcp.push(params.into());
+        self
+    }
+
+    /// Whether `url` falls inside an allowed prefix. Both are parsed and
+    /// normalized first, so `..` and `%2e%2e` segments cannot climb out of a
+    /// path prefix, and scheme, host and port must match exactly. A template
+    /// that interpolates into the host never matches.
+    fn allows_http(&self, url: &str) -> bool {
+        let Ok(target) = url::Url::parse(url) else {
+            return false;
+        };
+        if !target.username().is_empty() || target.password().is_some() {
+            return false;
+        }
+        self.http_prefixes.iter().any(|prefix| {
+            url::Url::parse(prefix).is_ok_and(|prefix| {
+                prefix.scheme() == target.scheme()
+                    && prefix.host() == target.host()
+                    && prefix.port_or_known_default() == target.port_or_known_default()
+                    && target.path().starts_with(prefix.path())
+            })
+        })
+    }
+
+    fn allows_mcp(&self, params: &str) -> bool {
+        self.mcp.iter().any(|m| m.trim() == params.trim())
+    }
+}
+
+/// State-key prefixes the runtime itself writes (flow marking, conversation
+/// signals), so a guard that reads one is not reading an orphan key.
+const RUNTIME_WRITTEN: [&str; 6] = [
+    "flow:",
+    "session:",
+    "verbatim:",
+    "correction:",
+    "repair:",
+    "telephony:",
+];
+
+/// The outcome of one scenario in [`SessionSpec::run_scenarios`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ScenarioReport {
+    /// The scenario's name.
+    pub name: String,
+    /// Whether every step held.
+    pub passed: bool,
+    /// The first step that failed, and why.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 /// Tool names a [`MemoryBinding`] installs (ambient on the flow).
 pub const MEMORY_TOOL_NAMES: [&str; 2] = ["recall_context", "manage_memory"];
 
@@ -871,6 +984,20 @@ pub struct SpecResources {
     /// The memory engine honoring the spec's `memory` section. Required when
     /// that section is present.
     pub memory: Option<Arc<dyn MemoryBinding>>,
+    /// In-process implementations of declared tools, by name. A declared
+    /// tool with an implementation calls it instead of its mock response,
+    /// HTTP or MCP binding; its declaration (what the model sees) and its
+    /// `set_state` stay as the spec says. Add with
+    /// [`implement`](Self::implement).
+    pub tools: BTreeMap<String, Arc<dyn ToolFunction>>,
+}
+
+impl SpecResources {
+    /// Implement the declared tool of the same name with `tool`.
+    pub fn implement(mut self, tool: impl ToolFunction + 'static) -> Self {
+        self.tools.insert(tool.name().to_string(), Arc::new(tool));
+        self
+    }
 }
 
 impl SessionSpec {
@@ -902,6 +1029,18 @@ impl SessionSpec {
 
     /// The flow with every `use_fragments` directive spliced in.
     pub fn effective_flow(&self) -> Result<Flow, Vec<String>> {
+        if let Some(conversation) = &self.conversation {
+            if self.flow.is_some() || !self.use_fragments.is_empty() {
+                return Err(vec![
+                    "set either `conversation` or `flow` (with `use_fragments`), not both".into(),
+                ]);
+            }
+            return crate::conversation::Conversation::from_spec_stubbing_resolvers(
+                conversation.clone(),
+            )
+            .map(|compiled| compiled.flow().flow().clone())
+            .map_err(|e| vec![format!("conversation: {e}")]);
+        }
         let mut flow = self.flow.clone().unwrap_or_default();
         let mut errors = Vec::new();
         for use_frag in &self.use_fragments {
@@ -975,7 +1114,93 @@ impl SessionSpec {
                 keys.insert(key.clone());
             }
         }
+        // A conversation's slots are filled by its extractors and resolvers.
+        for stage in self.conversation_stages() {
+            keys.extend(stage.collect.iter().cloned());
+            keys.extend(stage.resolve.iter().map(|r| r.slot.clone()));
+            if let Some(frame) = &stage.frame {
+                keys.extend(frame.slot_keys());
+            }
+        }
         keys
+    }
+
+    /// Every stage of the conversation, main flow and digressions.
+    fn conversation_stages(&self) -> impl Iterator<Item = &crate::conversation::StageSpec> {
+        self.conversation.iter().flat_map(|c| {
+            c.stages
+                .iter()
+                .chain(c.overlays.iter().flat_map(|o| o.stages.iter()))
+        })
+    }
+
+    /// Resolvers for the conversation's `resolve` slots, each bound to the
+    /// declared tool of the same name (the resolver name, or the slot).
+    fn resolver_registry(
+        &self,
+        tools: &[Arc<SimpleTool>],
+    ) -> crate::conversation::ResolverRegistry {
+        let mut registry = crate::conversation::ResolverRegistry::new();
+        for stage in self.conversation_stages() {
+            for resolve in &stage.resolve {
+                let name = resolve
+                    .resolver
+                    .clone()
+                    .unwrap_or_else(|| resolve.slot.clone());
+                if let Some(tool) = tools
+                    .iter()
+                    .find(|t| ToolFunction::name(t.as_ref()) == name)
+                {
+                    let tool = tool.clone();
+                    registry.add(name, move |args| {
+                        let tool = tool.clone();
+                        async move {
+                            gemini_adk_rs::tool::ToolFunction::call(tool.as_ref(), args)
+                                .await
+                                .map_err(|e| e.to_string())
+                        }
+                    });
+                }
+            }
+        }
+        registry
+    }
+
+    /// Run [`scenarios`](Self::scenarios) against the conversation, in
+    /// order. Resolvers are stubbed: a scenario supplies their values with
+    /// `set` steps.
+    pub async fn run_scenarios(&self) -> Vec<ScenarioReport> {
+        let failed = |error: String| -> Vec<ScenarioReport> {
+            self.scenarios
+                .iter()
+                .map(|s| ScenarioReport {
+                    name: s.name.clone(),
+                    passed: false,
+                    error: Some(error.clone()),
+                })
+                .collect()
+        };
+        let Some(conversation) = &self.conversation else {
+            return failed("the spec has no `conversation` to run against".into());
+        };
+        let compiled = match crate::conversation::Conversation::from_spec_stubbing_resolvers(
+            conversation.clone(),
+        ) {
+            Ok(compiled) => compiled,
+            Err(e) => return failed(format!("conversation: {e}")),
+        };
+        let mut reports = Vec::with_capacity(self.scenarios.len());
+        for scenario in &self.scenarios {
+            let result = scenario
+                .run(&compiled, gemini_adk_rs::flow::Enforcement::Enforce)
+                .await;
+            reports.push(ScenarioReport {
+                name: scenario.name.clone(),
+                passed: result.is_ok(),
+                error: result.err(),
+            });
+        }
+        reports
     }
 
     /// Every [`EffectSpec`] anywhere in the document, with a location label.
@@ -1056,6 +1281,20 @@ impl SessionSpec {
                 self.flow.clone().unwrap_or_default()
             }
         };
+        for stage in self.conversation_stages() {
+            for resolve in &stage.resolve {
+                let name = resolve.resolver.as_deref().unwrap_or(&resolve.slot);
+                if !self.tools.iter().any(|t| t.name == name) {
+                    errors.push(format!(
+                        "stage '{}' resolves '{}' with '{name}', which is not a declared tool",
+                        stage.id, resolve.slot
+                    ));
+                }
+            }
+        }
+        if !self.scenarios.is_empty() && self.conversation.is_none() {
+            errors.push("`scenarios` need a `conversation` to run against".into());
+        }
         let mermaid = flow.to_mermaid();
         let steps = flow.steps.len();
         let has_flow = !flow.steps.is_empty();
@@ -1108,6 +1347,14 @@ impl SessionSpec {
                         p.name, t.to
                     ));
                 }
+            }
+        }
+        for t in &self.tools {
+            if t.http.is_some() && t.mcp.is_some() {
+                errors.push(format!(
+                    "tool '{}' has both an http and an mcp binding; keep one",
+                    t.name
+                ));
             }
         }
         if cfg!(not(feature = "http-tools")) {
@@ -1365,7 +1612,7 @@ impl SessionSpec {
             // unknown-tool check.
             let written = self.state_keys_written();
             for key in flow.state_keys_read() {
-                if written.contains(&key) {
+                if written.contains(&key) || RUNTIME_WRITTEN.iter().any(|p| key.starts_with(p)) {
                     continue;
                 }
                 // `{name}:result` keys are written by on_enter orchestration.
@@ -1419,11 +1666,48 @@ impl SessionSpec {
 
     /// Build the dispatcher of declared tools bound to `state`.
     pub fn build_dispatcher(&self, state: &State) -> ToolDispatcher {
+        self.build_dispatcher_with(state, &SpecResources::default())
+    }
+
+    /// Build the dispatcher of declared tools bound to `state`, calling the
+    /// in-process implementations in `resources` where it has them. Tools
+    /// bound to the same MCP server share one connection.
+    pub fn build_dispatcher_with(
+        &self,
+        state: &State,
+        resources: &SpecResources,
+    ) -> ToolDispatcher {
         let mut dispatcher = ToolDispatcher::new();
-        for tool in &self.tools {
-            dispatcher.register(build_tool(tool, state));
+        for tool in self.bound_tools(state, resources) {
+            dispatcher.register(tool);
         }
         dispatcher
+    }
+
+    /// Every declared tool, bound to its call: the in-process implementation
+    /// in `resources`, else its MCP server, else its HTTP binding or mock.
+    fn bound_tools(&self, state: &State, resources: &SpecResources) -> Vec<Arc<SimpleTool>> {
+        let mut servers: BTreeMap<String, Arc<gemini_adk_rs::tools::mcp::McpSessionManager>> =
+            BTreeMap::new();
+        let mut tools = Vec::new();
+        for tool in &self.tools {
+            let call = match (resources.tools.get(&tool.name), &tool.mcp) {
+                (Some(implementation), _) => ToolCall::Code(implementation.clone()),
+                (None, Some(params)) => ToolCall::Mcp(
+                    servers
+                        .entry(params.clone())
+                        .or_insert_with(|| {
+                            Arc::new(gemini_adk_rs::tools::mcp::McpSessionManager::new(
+                                crate::live::connect::parse_mcp_params(params),
+                            ))
+                        })
+                        .clone(),
+                ),
+                (None, None) => ToolCall::Declared,
+            };
+            tools.push(Arc::new(build_tool(tool, state, call)));
+        }
+        tools
     }
 
     /// Apply the mock semantics of a declared tool to `state` (its
@@ -1442,6 +1726,54 @@ impl SessionSpec {
         simulate::run_tests(self)
     }
 
+    /// A copy of this spec that reaches only what `allow` permits, and one
+    /// note per binding it disabled.
+    ///
+    /// `mcp` entries not in the allowlist are removed. A tool whose `http`
+    /// binding is not allowed becomes a mock: it returns its canned
+    /// `response` and still writes `set_state`, so the flow behaves the same
+    /// way offline. Use this before [`apply`](Self::apply) on any spec you did
+    /// not write, such as one posted by a browser.
+    pub fn sandboxed(&self, allow: &BindingAllowlist) -> (SessionSpec, Vec<String>) {
+        let mut spec = self.clone();
+        let mut notes = Vec::new();
+        spec.mcp.retain(|params| {
+            let keep = allow.allows_mcp(params);
+            if !keep {
+                notes.push(format!(
+                    "mcp entry `{params}` is not allowed on this server; removed"
+                ));
+            }
+            keep
+        });
+        for tool in &mut spec.tools {
+            if let Some(params) = &tool.mcp
+                && !allow.allows_mcp(params)
+            {
+                notes.push(format!(
+                    "tool `{}`: MCP binding `{params}` is not allowed on this server; it runs as a mock",
+                    tool.name
+                ));
+                tool.mcp = None;
+            }
+            let Some(binding) = &mut tool.http else {
+                continue;
+            };
+            if allow.allows_http(&binding.url) {
+                // Arguments are interpolated and servers redirect at call
+                // time, so the request is checked again then.
+                binding.reach = Some(allow.clone());
+            } else {
+                notes.push(format!(
+                    "tool `{}`: HTTP binding to `{}` is not allowed on this server; it runs as a mock",
+                    tool.name, binding.url
+                ));
+                tool.http = None;
+            }
+        }
+        (spec, notes)
+    }
+
     /// Configure a [`Live`] builder from this spec.
     ///
     /// `state` is the session state the declared tools bind to — pass the
@@ -1449,6 +1781,9 @@ impl SessionSpec {
     /// the spec fails validation or requires a resource `resources` lacks.
     /// Everything code-only (callbacks, custom guards, middleware) is added on
     /// the returned builder afterwards.
+    ///
+    /// Tool bindings run as written. For a spec you did not write, call
+    /// [`sandboxed`](Self::sandboxed) first.
     pub fn apply(
         &self,
         live: Live,
@@ -1469,6 +1804,15 @@ impl SessionSpec {
         }
         if self.memory.is_some() && resources.memory.is_none() {
             return Err("spec declares memory but SpecResources.memory is not set".into());
+        }
+        if let Some(name) = resources
+            .tools
+            .keys()
+            .find(|name| !self.tools.iter().any(|t| &&t.name == name))
+        {
+            return Err(format!(
+                "SpecResources implements tool '{name}', which the spec does not declare"
+            ));
         }
 
         // Seed declared defaults before anything reads state.
@@ -1491,17 +1835,33 @@ impl SessionSpec {
         };
 
         // Tools: declared (mock/HTTP) via the dispatcher, MCP merged on top.
-        if !self.tools.is_empty() {
-            live = live.dispatcher(self.build_dispatcher(state));
+        // A conversation's resolvers call the same bound tools.
+        let tools = self.bound_tools(state, resources);
+        if !tools.is_empty() {
+            let mut dispatcher = ToolDispatcher::new();
+            for tool in &tools {
+                dispatcher.register(tool.clone());
+            }
+            live = live.dispatcher(dispatcher);
         }
         for params in &self.mcp {
             live = live.tools(T::mcp(params.clone()));
         }
 
-        // Governance.
-        let flow = self.effective_flow().map_err(|e| e.join("; "))?;
-        if !flow.steps.is_empty() {
-            live = live.govern(flow);
+        // Governance: a conversation compiles to a governed stack with its
+        // extractors, timing and policies; a bare flow is governed as is.
+        if let Some(conversation) = &self.conversation {
+            let compiled = crate::conversation::Conversation::from_spec_with_resolvers(
+                conversation.clone(),
+                &self.resolver_registry(&tools),
+            )
+            .map_err(|e| format!("conversation: {e}"))?;
+            live = live.converse(&compiled);
+        } else {
+            let flow = self.effective_flow().map_err(|e| e.join("; "))?;
+            if !flow.steps.is_empty() {
+                live = live.govern(flow);
+            }
         }
 
         // Computed (derived) state variables — dependencies inferred from the
@@ -1799,8 +2159,38 @@ fn apply_runtime(mut live: Live, runtime: &RuntimeSpec) -> Live {
     live
 }
 
-/// Build one declared tool as a [`SimpleTool`] bound to `state`.
-fn build_tool(tool: &ToolSpec, state: &State) -> SimpleTool {
+/// How a declared tool's call is carried out.
+enum ToolCall {
+    /// Its `http` binding, or its canned response.
+    Declared,
+    /// An in-process implementation.
+    Code(Arc<dyn ToolFunction>),
+    /// The tool of the same name on an MCP server.
+    Mcp(Arc<gemini_adk_rs::tools::mcp::McpSessionManager>),
+}
+
+/// The value of an MCP `tools/call` result: its structured content, else
+/// its single text part parsed as JSON, else the text itself.
+fn mcp_value(result: Value) -> Value {
+    if let Some(structured) = result.get("structuredContent") {
+        return structured.clone();
+    }
+    let texts: Vec<&str> = result["content"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|part| part["text"].as_str())
+        .collect();
+    match texts.as_slice() {
+        [text] => serde_json::from_str(text).unwrap_or_else(|_| json!({ "output": text })),
+        [] => result,
+        many => json!({ "output": many.join("\n") }),
+    }
+}
+
+/// Build one declared tool, carrying out calls with `call`. Whatever carries
+/// it out, the declaration and the state effects are the spec's.
+fn build_tool(tool: &ToolSpec, state: &State, call: ToolCall) -> SimpleTool {
     let description = if tool.description.is_empty() {
         format!("Tool '{}'", tool.name)
     } else {
@@ -1812,6 +2202,7 @@ fn build_tool(tool: &ToolSpec, state: &State) -> SimpleTool {
     let http = tool.http.clone();
     let st = state.clone();
     let name = tool.name.clone();
+    let call = Arc::new(call);
     SimpleTool::new(
         &tool.name,
         description,
@@ -1823,12 +2214,21 @@ fn build_tool(tool: &ToolSpec, state: &State) -> SimpleTool {
             let http = http.clone();
             let st = st.clone();
             let name = name.clone();
+            let call = call.clone();
             async move {
-                let result = match &http {
-                    Some(binding) => execute_http(binding, &args, &st).await.map_err(|e| {
-                        gemini_adk_rs::error::ToolError::Other(format!("{name}: {e}"))
-                    })?,
-                    None => response,
+                let result = match (call.as_ref(), &http) {
+                    (ToolCall::Code(implementation), _) => implementation.call(args).await?,
+                    (ToolCall::Mcp(server), _) => {
+                        mcp_value(server.call_tool(&name, args).await.map_err(|e| {
+                            gemini_adk_rs::error::ToolError::ExecutionFailed(format!("{name}: {e}"))
+                        })?)
+                    }
+                    (ToolCall::Declared, Some(binding)) => {
+                        execute_http(binding, &args, &st).await.map_err(|e| {
+                            gemini_adk_rs::error::ToolError::Other(format!("{name}: {e}"))
+                        })?
+                    }
+                    (ToolCall::Declared, None) => response,
                 };
                 for (key, value) in &sets {
                     let _ = st.set(key, value.clone());
@@ -1895,7 +2295,26 @@ fn interpolate_value(value: &Value, args: &Value, state: &State) -> Value {
 #[cfg(feature = "http-tools")]
 async fn execute_http(binding: &HttpBinding, args: &Value, state: &State) -> Result<Value, String> {
     let url = interpolate(&binding.url, args, state);
-    let client = reqwest::Client::new();
+    let mut client = reqwest::Client::builder();
+    if let Some(reach) = binding.reach.clone() {
+        if !reach.allows_http(&url) {
+            return Err(format!("{url} is outside this server's HTTP allowlist"));
+        }
+        client = client.redirect(reqwest::redirect::Policy::custom(move |attempt| {
+            if attempt.previous().len() >= 10 {
+                attempt.error("too many redirects")
+            } else if reach.allows_http(attempt.url().as_str()) {
+                attempt.follow()
+            } else {
+                let error = format!(
+                    "redirect to {} is outside this server's HTTP allowlist",
+                    attempt.url()
+                );
+                attempt.error(error)
+            }
+        }));
+    }
+    let client = client.build().map_err(|e| e.to_string())?;
     let method = reqwest::Method::from_bytes(binding.method.to_uppercase().as_bytes())
         .map_err(|_| format!("invalid HTTP method '{}'", binding.method))?;
     let mut request = client.request(method, &url);
@@ -2765,6 +3184,322 @@ mod tests {
         assert!(
             spec.apply(Live::builder(), &State::new(), &SpecResources::default())
                 .is_ok()
+        );
+    }
+
+    #[test]
+    fn a_sandboxed_spec_reaches_only_what_the_operator_allows() {
+        let spec = SessionSpec::from_value(json!({
+            "name": "posted",
+            "mcp": ["rm -rf /", "https://mcp.example.com/sse"],
+            "tools": [
+                { "name": "ok", "http": { "url": "https://api.example.com/v1/{args.id}" } },
+                { "name": "internal", "http": { "url": "http://169.254.169.254/latest/meta-data" } },
+                { "name": "host_from_args", "http": { "url": "https://{args.host}/x" } },
+                { "name": "mock", "response": { "ok": true } }
+            ]
+        }))
+        .unwrap();
+
+        let (nothing, notes) = spec.sandboxed(&BindingAllowlist::default());
+        assert!(nothing.mcp.is_empty());
+        assert!(nothing.tools.iter().all(|t| t.http.is_none()));
+        assert_eq!(notes.len(), 5, "{notes:?}");
+
+        let allow = BindingAllowlist::default()
+            .allow_http_prefix("https://api.example.com")
+            .allow_mcp("https://mcp.example.com/sse");
+        let (some, notes) = spec.sandboxed(&allow);
+        assert_eq!(some.mcp, ["https://mcp.example.com/sse"]);
+        let bound: Vec<&str> = some
+            .tools
+            .iter()
+            .filter(|t| t.http.is_some())
+            .map(|t| t.name.as_str())
+            .collect();
+        assert_eq!(bound, ["ok"]);
+        assert_eq!(notes.len(), 3, "{notes:?}");
+
+        // A prefix without a path cannot be stretched to another host.
+        let tricky = BindingAllowlist::default().allow_http_prefix("https://api.example.com");
+        assert!(!tricky.allows_http("https://api.example.com.evil.net/x"));
+        assert!(!tricky.allows_http("https://api.example.com@evil.net/x"));
+        assert!(!tricky.allows_http("https://api.example.com:8443/x"));
+        assert!(!tricky.allows_http("http://api.example.com/x"));
+
+        // Dot segments are resolved before a path prefix is checked.
+        let subtree = BindingAllowlist::default().allow_http_prefix("https://api.example.com/v2/");
+        assert!(subtree.allows_http("https://API.example.com/v2/orders/{args.id}"));
+        assert!(!subtree.allows_http("https://api.example.com/v2/../admin"));
+        assert!(!subtree.allows_http("https://api.example.com/v2/%2e%2e/admin"));
+        assert!(!subtree.allows_http("https://api.example.com/v2/%2E%2E/admin"));
+    }
+
+    #[cfg(feature = "http-tools")]
+    #[tokio::test]
+    async fn a_sandboxed_binding_is_checked_again_when_it_runs() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        // A local server that redirects /v2/hop to /admin and answers
+        // anything else with its path.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                let mut buf = vec![0u8; 4096];
+                let n = socket.read(&mut buf).await.unwrap_or(0);
+                let request = String::from_utf8_lossy(&buf[..n]).to_string();
+                let path = request.split_whitespace().nth(1).unwrap_or("/").to_string();
+                let response = if path == "/v2/hop" {
+                    "HTTP/1.1 302 Found\r\nlocation: /admin\r\ncontent-length: 0\r\nconnection: close\r\n\r\n".to_string()
+                } else {
+                    let body = json!({ "path": path }).to_string();
+                    format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                        body.len()
+                    )
+                };
+                let _ = socket.write_all(response.as_bytes()).await;
+            }
+        });
+
+        let spec = SessionSpec::from_value(json!({
+            "name": "posted",
+            "tools": [{ "name": "get", "http": { "url": format!("{origin}/v2/{{args.path}}") } }]
+        }))
+        .unwrap();
+        let allow = BindingAllowlist::default().allow_http_prefix(format!("{origin}/v2/"));
+        let (sandboxed, notes) = spec.sandboxed(&allow);
+        assert!(notes.is_empty(), "{notes:?}");
+        let state = State::new();
+        let dispatcher = sandboxed.build_dispatcher(&state);
+
+        let ok = dispatcher
+            .call_function("get", json!({ "path": "orders" }))
+            .await
+            .unwrap();
+        assert_eq!(ok["path"], "/v2/orders");
+        // An argument cannot climb out of the prefix...
+        let climbed = dispatcher
+            .call_function("get", json!({ "path": "../admin" }))
+            .await;
+        assert!(climbed.is_err(), "{climbed:?}");
+        // ...and neither can a redirect.
+        let redirected = dispatcher
+            .call_function("get", json!({ "path": "hop" }))
+            .await;
+        assert!(redirected.is_err(), "{redirected:?}");
+
+        // The same spec, not sandboxed, follows the redirect as written.
+        let trusted = spec.build_dispatcher(&state);
+        let followed = trusted
+            .call_function("get", json!({ "path": "hop" }))
+            .await
+            .unwrap();
+        assert_eq!(followed["path"], "/admin");
+    }
+
+    /// The repo's booking conversation, as one spec with its tools and
+    /// scenarios.
+    fn booking_bundle() -> SessionSpec {
+        let conversation: Value =
+            serde_json::from_str(include_str!("../../../../conversations/booking.spec.json"))
+                .unwrap();
+        let scenario = |file: &str| -> Value { serde_json::from_str(file).unwrap() };
+        SessionSpec::from_value(json!({
+            "name": "booking",
+            "modality": "audio",
+            "tools": [{
+                "name": "book",
+                "description": "Book the table",
+                "response": { "confirmation": "B-1" }
+            }],
+            "conversation": conversation,
+            "scenarios": [
+                scenario(include_str!("../../../../conversations/booking.happy.scenario.json")),
+                scenario(include_str!(
+                    "../../../../conversations/booking.no_book_without_confirm.scenario.json"
+                )),
+            ]
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_conversation_spec_validates_like_a_flow() {
+        let spec = booking_bundle();
+        let report = spec.validate();
+        assert!(report.valid, "{:?}", report.errors);
+        // Collected slots are written by the conversation's extractors, so
+        // only the genuinely unwritten key is reported.
+        let unwritten: Vec<&String> = report
+            .warnings
+            .iter()
+            .filter(|w| w.contains("no tool, extractor"))
+            .collect();
+        assert_eq!(unwritten.len(), 1, "{:?}", report.warnings);
+        assert!(unwritten[0].contains("user_confirmed"));
+        assert!(report.mermaid.contains("confirm"), "{}", report.mermaid);
+        assert!(report.tools.contains(&"book".to_string()));
+
+        // Conversation and flow are alternatives.
+        let mut both = spec.clone();
+        both.flow = Some(Flow::default());
+        assert!(!both.validate().valid);
+
+        // A resolver must be a declared tool.
+        let mut resolving = spec;
+        resolving.conversation.as_mut().unwrap().stages[0]
+            .resolve
+            .push(crate::conversation::ResolveSpec {
+                slot: "availability".into(),
+                resolver: None,
+                args: vec![],
+                ttl_secs: None,
+            });
+        let report = resolving.validate();
+        assert!(
+            report.errors.iter().any(|e| e.contains("availability")),
+            "{:?}",
+            report.errors
+        );
+    }
+
+    #[tokio::test]
+    async fn a_conversation_spec_runs_its_scenarios_and_applies() {
+        let spec = booking_bundle();
+        let reports = spec.run_scenarios().await;
+        assert_eq!(reports.len(), 2);
+        assert!(reports.iter().all(|r| r.passed), "{reports:?}");
+
+        let mut broken = spec.clone();
+        broken.scenarios[0]
+            .steps
+            .push(crate::simulation::SimStep::ExpectActive(vec![
+                "nowhere".into(),
+            ]));
+        assert!(!broken.run_scenarios().await[0].passed);
+
+        spec.apply(Live::builder(), &State::new(), &SpecResources::default())
+            .expect("a conversation spec applies");
+    }
+
+    fn booking_tool(extra: Value) -> SessionSpec {
+        let mut tool = json!({
+            "name": "book",
+            "description": "Book the table",
+            "response": { "confirmation": "MOCK" },
+            "set_state": { "booked": true },
+            "save_response_as": "booking"
+        });
+        tool.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        SessionSpec::from_value(json!({
+            "name": "t",
+            "tools": [tool],
+            "flow": { "steps": [{ "id": "s", "allow": ["book"] }] }
+        }))
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn an_implementation_replaces_the_call_not_the_declaration() {
+        let spec = booking_tool(json!({}));
+        let state = State::new();
+        let resources = SpecResources::default().implement(gemini_adk_rs::tool::SimpleTool::new(
+            "book",
+            "real booking",
+            None,
+            |_| async { Ok(json!({ "confirmation": "REAL-7" })) },
+        ));
+        let dispatcher = spec.build_dispatcher_with(&state, &resources);
+        let out = dispatcher.call_function("book", json!({})).await.unwrap();
+        assert_eq!(out["confirmation"], "REAL-7");
+        // The spec's state effects still apply.
+        assert_eq!(state.get::<bool>("booked"), Some(true));
+        assert_eq!(
+            state.get::<Value>("booking").unwrap()["confirmation"],
+            "REAL-7"
+        );
+        // And the model still sees the spec's declaration.
+        assert_eq!(
+            dispatcher.to_tool_declarations()[0]
+                .function_declarations
+                .as_ref()
+                .unwrap()[0]
+                .description,
+            "Book the table"
+        );
+
+        // An implementation for a tool the spec does not declare is refused.
+        let stray = SpecResources::default().implement(gemini_adk_rs::tool::SimpleTool::new(
+            "refund",
+            "",
+            None,
+            |_| async { Ok(json!({})) },
+        ));
+        assert!(spec.apply(Live::builder(), &state, &stray).is_err());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_mcp_binding_calls_the_tool_on_that_server() {
+        // A minimal stdio MCP server: answers initialize and tools/call.
+        let dir = std::env::temp_dir().join(format!("mcp-bind-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("server.sh");
+        std::fs::write(
+            &script,
+            r#"while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  [ -z "$id" ] && continue
+  case "$line" in
+    *'"initialize"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2024-11-05","capabilities":{},"serverInfo":{"name":"t","version":"1"}}}\n' "$id" ;;
+    *'"tools/call"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"{\\"confirmation\\":\\"MCP-1\\"}"}]}}\n' "$id" ;;
+    *) printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id" ;;
+  esac
+done
+"#,
+        )
+        .unwrap();
+        let spec = booking_tool(json!({ "mcp": format!("sh {}", script.display()) }));
+        let state = State::new();
+        let dispatcher = spec.build_dispatcher_with(&state, &SpecResources::default());
+        let out = dispatcher
+            .call_function("book", json!({ "party": 2 }))
+            .await
+            .unwrap();
+        assert_eq!(out, json!({ "confirmation": "MCP-1" }));
+        assert_eq!(state.get::<bool>("booked"), Some(true));
+
+        // Both bindings on one tool is a validation error.
+        let both = booking_tool(json!({
+            "mcp": "x",
+            "http": { "url": "https://api.example.com/book" }
+        }));
+        assert!(!both.validate().valid);
+
+        // A sandbox without that entry allowed turns the tool into its mock.
+        let (sandboxed, notes) = spec.sandboxed(&BindingAllowlist::default());
+        assert!(sandboxed.tools[0].mcp.is_none());
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn mcp_results_become_plain_values() {
+        assert_eq!(
+            mcp_value(json!({ "structuredContent": { "a": 1 }, "content": [] })),
+            json!({ "a": 1 })
+        );
+        assert_eq!(
+            mcp_value(json!({ "content": [{ "type": "text", "text": "{\"a\":2}" }] })),
+            json!({ "a": 2 })
+        );
+        assert_eq!(
+            mcp_value(json!({ "content": [{ "type": "text", "text": "done" }] })),
+            json!({ "output": "done" })
         );
     }
 

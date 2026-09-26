@@ -278,14 +278,15 @@ impl SessionSpec {
         } else {
             r#", features = ["gemini-llm"]"#
         };
+        let version = env!("CARGO_PKG_VERSION");
         let memory_dep = if self.memory.is_some() {
-            "gemini-memory-rs = \"0.8\"\n"
+            format!("gemini-memory-rs = \"{version}\"\n")
         } else {
-            ""
+            String::new()
         };
         format!(
             "[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n\
-             [dependencies]\ngemini-adk-fluent-rs = {{ version = \"0.8\"{features} }}\n\
+             [dependencies]\ngemini-adk-fluent-rs = {{ version = \"{version}\"{features} }}\n\
              {memory_dep}tokio = {{ version = \"1\", features = [\"full\"] }}\n\
              serde_json = \"1\"\n"
         )

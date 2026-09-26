@@ -205,10 +205,18 @@ impl TranscriptBuffer {
         self.current_model.push_str(text);
     }
 
-    /// Truncate the current model turn in progress. Called on interruption.
-    /// Only what was already delivered to the client is retained.
+    /// Clear the model's text from the turn in progress.
     pub fn truncate_current_model_turn(&mut self) {
         self.current_model.clear();
+    }
+
+    /// Cut the model's text in the turn in progress to its first
+    /// `heard_chars` characters, ending at the last whole word. The runtime
+    /// calls this on an interruption with what the listener heard; see
+    /// [`playback`](super::playback).
+    pub fn cut_current_model_turn(&mut self, heard_chars: usize) {
+        let keep = super::playback::heard_prefix(&self.current_model, heard_chars);
+        self.current_model.truncate(keep);
     }
 
     /// Whether there is any pending (un-finalized) transcript content.
@@ -228,7 +236,7 @@ impl TranscriptBuffer {
     /// Snapshot including the current in-progress turn (not yet finalized).
     ///
     /// Used by `GenerationComplete` extractors to see the model's full output
-    /// before interruption truncation clears `current_model`.
+    /// before the turn is finalized.
     pub fn snapshot_window_with_current(&mut self, n: usize) -> TranscriptWindow {
         let mut turns: Vec<TranscriptTurn> = self.window(n).to_vec();
         if self.has_pending() {
