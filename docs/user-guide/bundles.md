@@ -72,3 +72,8 @@ To store bundles elsewhere, such as S3 or a database, implement
 
 Names and labels are lowercase letters, digits, `-`, `_` and `.`, up to 63
 characters.
+
+## Serving bundles
+
+`adk-runtime` serves bundles by reference and picks up a moved label without
+a redeploy. See [Deploying the runtime](./deploy.md).

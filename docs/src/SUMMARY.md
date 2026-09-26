@@ -44,6 +44,7 @@
 - [The Studio](./flow-studio.md)
 - [From a Spec to a Project](./user-guide/spec-projects.md)
 - [Storing and Promoting Specs (Bundles)](./user-guide/bundles.md)
+- [Deploying the Runtime (Cloud Run, GKE)](./user-guide/deploy.md)
 - [Voice Behavior in the Conversation Graph](./user-guide/voice-behavior.md)
 - [Testing Conversations Offline](./user-guide/testing.md)
 - [Conversation CI](./user-guide/conversation-ci.md)

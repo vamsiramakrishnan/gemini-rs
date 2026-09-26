@@ -44,9 +44,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   automatic reconnect; it now describes what happens.
 - `SessionSpec::to_cargo_toml` (the Studio's Code tab) pinned the SDK at
   0.8. It now pins the current version.
+- **`connect_from_env` could not reach Vertex AI on Cloud Run or GKE.**
+  Without `GOOGLE_ACCESS_TOKEN` it ran `gcloud auth print-access-token`,
+  and those images have no gcloud. It now gets the token from the metadata
+  server when one answers, else from gcloud, and refreshes it in the
+  background, so a reconnect late in a long session is still
+  authenticated. Builds without the `gemini-llm` and `gcs-store` features
+  have no HTTP client and still use gcloud only.
+- **`adk deploy` produced a service that could not run.** It wrote a
+  Dockerfile that built a binary named after the service, set `PORT` for a
+  program that did not read it, and printed a `gcloud` command without
+  running it. It now deploys `adk-runtime` (see Changed).
 
 ### Added
 
+- `adk-runtime` (in `gemini-adk-server-rs`), a production server for
+  bundles. It loads bundles by reference from a bundle store (`ADK_BUNDLES`,
+  `ADK_SERVE=booking:prod`) and serves them over a WebSocket
+  (`/ws/{bundle}`, in the web app's message shapes) and Twilio Media
+  Streams (`/twilio/voice/{bundle}`, with the Twilio signature checked and a
+  one-time stream token bound to the call). Labels are re-resolved every
+  `ADK_REFRESH_SECS` and on SIGHUP, so promoting or rolling back takes
+  effect for new sessions without a redeploy; running sessions keep their
+  version. Session endpoints need a token from `ADK_RUNTIME_TOKENS`, and it
+  refuses to start with no authentication unless `ADK_RUNTIME_INSECURE=1`.
+  It caps concurrent sessions (`ADK_MAX_SESSIONS`, 503 past it), session
+  length and message size, serves `/healthz`, `/readyz` and `/metrics`,
+  drains on SIGTERM for `ADK_DRAIN_SECS`, and binds `0.0.0.0:$PORT`. See
+  [Deploying the runtime](docs/user-guide/deploy.md).
+- Deployment assets in `deploy/`: a Dockerfile for `adk-runtime` and `adk`,
+  a Cloud Build config, a Cloud Run service, GKE manifests (Deployment,
+  Service with a one-hour backend timeout, Ingress, HPA,
+  PodDisruptionBudget) and Terraform for Cloud Run with its service
+  account, bucket and token secret.
+- `GoogleAccessToken::into_access_token` turns the cached token source
+  into an `AccessToken` that a background task keeps fresh.
 - **Telemetry export works end to end.** Before this, no binary installed
   an exporter, and 11 of the 12 Live metrics were never recorded.
   - A Live session is now one `live_session` span with
@@ -104,6 +136,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   them.
 - `SessionSpec::sandboxed` and `BindingAllowlist`, for applying a spec you
   did not write.
+
+### Changed
+
+- `adk deploy` deploys `adk-runtime` instead of an agent directory. It
+  takes `--bundles` and `--serve` in place of the directory argument,
+  builds `deploy/Dockerfile` with Cloud Build (or deploys `--image`), and
+  runs `gcloud run deploy` with port 8080, a 3600 s timeout, session
+  affinity, CPU always allocated and the token secret. It prints each
+  command before running it; `--dry-run` only prints. `--with-ui` and
+  `--trace-to-cloud` are removed: they set variables nothing read.
 
 ## [3.0.0] - 2026-09-25
 
