@@ -19,7 +19,7 @@ readme = "README.md"
 # build time and the docs.rs builder has none. `talk()` therefore has no
 # docs.rs page; the book covers it instead.
 [package.metadata.docs.rs]
-features = ["templates", "default", "gemini-llm", "http-tools", "denoise", "dsp", "sip", "tracing-support", "vad-wavekat", "tls-native", "tls-rustls", "otel", "otel-otlp", "otel-gcp"]
+features = ["templates", "default", "gemini-llm", "http-tools", "gcs-store", "denoise", "dsp", "sip", "tracing-support", "vad-wavekat", "tls-native", "tls-rustls", "otel", "otel-otlp", "otel-gcp"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
@@ -28,7 +28,7 @@ gemini-adk-rs  = { workspace = true, default-features = false }
 base64 = "0.22"
 bytes = "1"
 # Targeted features only; tests get `full` via dev-dependencies.
-tokio = { version = "1", features = ["rt", "macros", "sync", "time"] }
+tokio = { version = "1", features = ["rt", "macros", "sync", "time", "fs"] }
 async-trait = "0.1"
 # `StreamExt`, re-exported by the prelude for consuming `agent.stream(..)`.
 futures-util = "0.3"
@@ -36,6 +36,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 schemars = "0.8"
 url = "2"
+# Bundle version ids (`spec::store`).
+sha2 = "0.10"
 parking_lot = "0.12"
 tracing = "0.1"
 # Optional: HTTP tool bindings for spec-driven sessions (`http-tools`).
@@ -78,7 +80,7 @@ parking_lot = "0.12"
 # use. Both keep `tls-native`; pick `tls-rustls` with `--no-default-features`
 # and name the pieces instead.
 voice = ["voice-io", "denoise", "dsp", "vad-wavekat"]
-full = ["voice", "sip", "http-tools", "templates", "gemini-llm", "tls-native", "otel-otlp"]
+full = ["voice", "sip", "http-tools", "gcs-store", "templates", "gemini-llm", "tls-native", "otel-otlp"]
 templates = ["gemini-adk-rs/templates"]
 # One TLS backend and text generation are on by default: `AgentBuilder::build`
 # runs on `GeminiLlm`, which is pure Rust, so a plain `cargo add` answers a
@@ -88,6 +90,8 @@ default = ["tls-native", "gemini-llm"]
 gemini-llm = ["gemini-adk-rs/gemini-llm"]
 # HTTP tool bindings in `spec` (SessionSpec `tools[].http`).
 http-tools = ["dep:reqwest"]
+# Cloud Storage backend for `spec::store` (`gs://` bundle stores).
+gcs-store = ["dep:reqwest", "gemini-genai-rs/http"]
 # Native microphone/speaker duplex (`voice::Talk::talk`). Needs system audio
 # headers (Linux: libasound2-dev).
 voice-io = ["dep:cpal", "dep:thiserror", "tokio/signal"]

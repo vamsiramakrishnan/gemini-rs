@@ -42,6 +42,7 @@
 - [Flows as JSON (SessionSpec)](./user-guide/flow-json.md)
 - [The Flow Studio](./flow-studio.md)
 - [From a Spec to a Project](./user-guide/spec-projects.md)
+- [Storing and Promoting Specs (Bundles)](./user-guide/bundles.md)
 - [Voice Behavior in the Conversation Graph](./user-guide/voice-behavior.md)
 - [Testing Conversations Offline](./user-guide/testing.md)
 - [Conversation CI](./user-guide/conversation-ci.md)

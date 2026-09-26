@@ -35,6 +35,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Bundles: versioned, labelled storage for session specs
+  (`spec::store`). A version's id is the hash of the spec, labels such as
+  `prod` are movable pointers to a version, and a spec that fails validation
+  is refused. The backends are a directory or Cloud Storage (`gcs-store`),
+  and others implement `BundleObjects`. The CLI adds `adk bundle push`,
+  `list`, `get` and `label`. See
+  [Storing and promoting specs](docs/user-guide/bundles.md).
+- `GoogleAccessToken` (L0, `http` feature) gets Google OAuth2 tokens from
+  `GOOGLE_ACCESS_TOKEN`, the metadata server on Cloud Run, GKE and Compute
+  Engine, or the gcloud CLI, and caches each token until shortly before it
+  expires.
 - `adk spec codegen` generates a Rust, Python or Go project around a session
   spec, with one typed stub per mock tool. Rust registers the stubs in
   process. Python and Go serve them as MCP tool servers (official SDKs),

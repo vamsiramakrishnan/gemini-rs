@@ -137,6 +137,16 @@ enum Command {
         action: SpecAction,
     },
 
+    /// Versioned, labelled spec storage: push, list, get, label.
+    Bundle {
+        #[command(subcommand)]
+        action: BundleAction,
+        /// Bundle store: a directory or gs://bucket/prefix (default:
+        /// $ADK_BUNDLES, else ./bundles).
+        #[arg(long, global = true)]
+        store: Option<String>,
+    },
+
     /// Conversation-compiler devtools: inspect, graph, and simulate a spec.
     Flow {
         #[command(subcommand)]
@@ -221,6 +231,46 @@ enum SpecAction {
     Run {
         /// Path to the spec (agent.json).
         spec: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum BundleAction {
+    /// Store a spec as a new version (refused if it fails validation).
+    Push {
+        /// Path to the spec (agent.json).
+        spec: String,
+        /// Bundle name (default: from the spec's name).
+        #[arg(long)]
+        name: Option<String>,
+        /// What changed.
+        #[arg(short, long)]
+        message: Option<String>,
+        /// Point these labels at the new version.
+        #[arg(long)]
+        label: Vec<String>,
+    },
+    /// List bundles, or one bundle's versions and labels.
+    List {
+        /// Bundle name.
+        name: Option<String>,
+    },
+    /// Print or save a version: name, name@version or name:label.
+    Get {
+        /// Reference to fetch.
+        reference: String,
+        /// Write to this file instead of stdout.
+        #[arg(long)]
+        out: Option<String>,
+    },
+    /// Point a label at a version (promote or roll back).
+    Label {
+        /// Bundle name.
+        name: String,
+        /// Label, e.g. prod.
+        label: String,
+        /// Version id or unique prefix.
+        version: String,
     },
 }
 
@@ -435,6 +485,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             SpecAction::Run { spec } => commands::spec::run(&spec).await?,
         },
+
+        Command::Bundle { action, store } => {
+            let store = store.as_deref();
+            match action {
+                BundleAction::Push {
+                    spec,
+                    name,
+                    message,
+                    label,
+                } => {
+                    commands::bundle::push(
+                        &spec,
+                        name.as_deref(),
+                        message.as_deref(),
+                        &label,
+                        store,
+                    )
+                    .await?
+                }
+                BundleAction::List { name } => {
+                    commands::bundle::list(name.as_deref(), store).await?
+                }
+                BundleAction::Get { reference, out } => {
+                    commands::bundle::get(&reference, out.as_deref(), store).await?
+                }
+                BundleAction::Label {
+                    name,
+                    label,
+                    version,
+                } => commands::bundle::label(&name, &label, &version, store).await?,
+            }
+        }
 
         Command::Flow { action } => match action {
             FlowAction::Inspect { spec } => commands::flow::inspect(&spec)?,

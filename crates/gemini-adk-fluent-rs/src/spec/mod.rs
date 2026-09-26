@@ -23,8 +23,10 @@
 mod codegen;
 pub mod project;
 mod simulate;
+pub mod store;
 
 pub use project::{ProjectFile, ProjectLanguage, ProjectOptions, SdkSource};
+pub use store::{BundleRef, BundleStore, BundleVersion, StoreError, open_store};
 
 pub use simulate::{
     SimEvent, SimSnapshot, SpecTest, TestExpectation, TestReport, TestStepResult, trace_test,
