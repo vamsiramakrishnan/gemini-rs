@@ -186,10 +186,10 @@ fn main() {
     // this entry at connect time, calling list_tools() and registering
     // each discovered tool as a FunctionDeclaration.
     let tools_composite = T::mcp("node ./my-mcp-server.js")
-        | T::simple("local_echo", "Echo locally", |args| async move { Ok(args) });
+        + T::simple("local_echo", "Echo locally", |args| async move { Ok(args) });
 
     println!(
-        "  T::mcp() | T::simple() composite: {} entries",
+        "  T::mcp() + T::simple() composite: {} entries",
         tools_composite.len()
     );
     println!();
@@ -218,7 +218,7 @@ fn main() {
     //   // Option A: T::mcp() fluent shorthand
     //   let handle = Live::builder()
     //       .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
-    //       .tools(T::mcp("node ./my-mcp-server.js") | T::google_search())
+    //       .tools(T::mcp("node ./my-mcp-server.js") + T::google_search())
     //       .connect_from_env()
     //       .await?;
     //
@@ -279,7 +279,7 @@ fn main() {
     println!("      \u{2192} tools/call \u{2192} JSON result object");
     println!("  McpToolset::new(Arc::new(manager)).with_filter(names)");
     println!("      \u{2192} Toolset wrapper; register with Live::builder() or ToolDispatcher");
-    println!("  T::mcp(params_string) | T::google_search()");
+    println!("  T::mcp(params_string) + T::google_search()");
     println!("      \u{2192} fluent ToolComposite for Live session tool composition");
 
     println!("\n=== Done ===");

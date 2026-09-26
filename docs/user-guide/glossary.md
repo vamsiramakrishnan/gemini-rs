@@ -64,7 +64,8 @@ Core vocabulary across the three layers. Types link to where they live; see the
 
 - **Operator algebra (`S·C·T·P·M·A·E·G`)** — composition namespaces for state
   transforms, context, tools, prompts, middleware, artifacts, evaluation, and
-  guards. See [the algebra chapter](./composition.md).
+  guards. `>>` means "then" (S, C, M and agent pipelines) and `+` means
+  "together" (P, T, G, E, A). See [the composition chapter](./composition.md).
 - **Combinators** — `>>` sequential, `|` parallel/fan-out, `*` loop, `/`
   fallback, plus `until(pred)`. The underlying node type is `Composable`.
 - **Patterns** — pre-built shapes: `review_loop`, `fan_out_merge`, `supervised`.

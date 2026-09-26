@@ -130,6 +130,20 @@ impl Sim {
         self
     }
 
+    /// A tool fails or times out. Counts toward the active stage's
+    /// `escalate_after_tool_failures`; does not advance a turn.
+    pub fn tool_failed(&mut self, tool: &str) -> &mut Self {
+        self.stack.observe_tool(tool, false, &self.state);
+        self
+    }
+
+    /// The user barges in on the model. Counts toward the active stage's
+    /// `escalate_after_interruptions`; does not advance a turn.
+    pub fn interrupt(&mut self) -> &mut Self {
+        self.stack.on_interrupted(&self.state);
+        self
+    }
+
     /// Schedule a tool to succeed `after` turns — models tool latency.
     pub fn schedule_tool(&mut self, tool: impl Into<String>, after: u32) -> &mut Self {
         self.pending_tools
@@ -151,6 +165,73 @@ impl Sim {
             self.stack.on_tool_ok(&tool, &self.state);
         }
         self.stack.on_turn(&self.state);
+    }
+
+    /// Apply one scripted step: drive the conversation, or check an
+    /// expectation. `Err` carries why an expectation did not hold. This is
+    /// what [`Scenario::run`] does for each step, exposed so another driver
+    /// (an interactive session, a binding) shares the exact semantics.
+    pub async fn apply(&mut self, step: &SimStep) -> Result<(), String> {
+        match step {
+            SimStep::User(text) => {
+                self.user(text).await;
+            }
+            SimStep::Set { key, value } => {
+                self.set(key.clone(), value.clone());
+            }
+            SimStep::Remove { key } => {
+                let _ = self.state.remove(key);
+            }
+            SimStep::ToolOk(tool) => {
+                self.tool_ok(tool);
+            }
+            SimStep::ToolFailed(tool) => {
+                self.tool_failed(tool);
+            }
+            SimStep::Interrupt => {
+                self.interrupt();
+            }
+            SimStep::ToolResult { tool, ok } => {
+                self.stack.observe_tool(tool, *ok, &self.state);
+            }
+            SimStep::ScheduleTool { tool, after } => {
+                self.schedule_tool(tool.clone(), *after);
+            }
+            SimStep::Turn => {
+                self.turn();
+            }
+            SimStep::ExpectActive(expected) => {
+                let active = self.active();
+                for e in expected {
+                    if !active.contains(e) {
+                        return Err(format!("expected active '{e}', got {active:?}"));
+                    }
+                }
+            }
+            SimStep::ExpectDenied(tool) => {
+                if self.allowed(tool) {
+                    return Err(format!("expected '{tool}' denied, but it was admitted"));
+                }
+            }
+            SimStep::ExpectAllowed(tool) => {
+                if !self.allowed(tool) {
+                    let why = self.denied().get(tool).cloned().unwrap_or_default();
+                    return Err(format!("expected '{tool}' allowed, but denied: {why}"));
+                }
+            }
+            SimStep::ExpectSlot { key, value } => {
+                let got = self.state().get_raw(key);
+                if got.as_ref() != Some(value) {
+                    return Err(format!("expected slot '{key}' = {value}, got {got:?}"));
+                }
+            }
+            SimStep::ExpectComplete => {
+                if !self.is_complete() {
+                    return Err("expected conversation complete".into());
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Active step ids in the currently-driving layer.
@@ -223,8 +304,29 @@ pub enum SimStep {
         /// Value to store.
         value: Value,
     },
+    /// Remove a state value, as the recorded runtime did.
+    Remove {
+        /// State key.
+        key: String,
+    },
     /// A tool succeeds now.
     ToolOk(String),
+    /// A tool fails (or times out) now; counts toward the active stage's
+    /// repair policy. Does not advance a turn.
+    ToolFailed(String),
+    /// The user barges in on the model; counts toward the active stage's
+    /// repair policy. Does not advance a turn.
+    Interrupt,
+    /// A tool call completes, successfully or not, where the live runtime
+    /// records it: the flow observes it without advancing a turn (unlike
+    /// [`ToolOk`](Self::ToolOk)). This is what a scenario extracted from a
+    /// recording uses.
+    ToolResult {
+        /// Tool name.
+        tool: String,
+        /// Whether it succeeded.
+        ok: bool,
+    },
     /// Schedule a tool to succeed after N turns (latency).
     ScheduleTool {
         /// Tool name.
@@ -261,60 +363,133 @@ pub struct Scenario {
     pub steps: Vec<SimStep>,
 }
 
+/// State keys the runtime owns. A scenario extracted from a recording skips
+/// them: the simulator recomputes them rather than being told them.
+const RUNTIME_PREFIXES: &[&str] = &[
+    "session:",
+    "flow:",
+    "derived:",
+    "repair:",
+    "correction:",
+    "state_meta:",
+    "idempotency:",
+    "compensated:",
+    "verbatim:",
+    "turn:",
+    "bg:",
+];
+
+fn runtime_owned(key: &str) -> bool {
+    RUNTIME_PREFIXES.iter().any(|p| key.starts_with(p))
+}
+
 impl Scenario {
+    /// Turn a recorded session into a regression scenario: the incident
+    /// becomes a test.
+    ///
+    /// `journal` is the session's mutation journal (see
+    /// [`FileJournalSink`](gemini_adk_rs::state::FileJournalSink) and
+    /// [`read_journal`](gemini_adk_rs::state::read_journal)), which a
+    /// governed session writes as one ordered timeline. The scenario replays
+    /// what the application and user contributed and checks what governance
+    /// decided:
+    ///
+    /// - a slot or flag write becomes `Set`;
+    /// - a tool the flow admitted becomes `ExpectAllowed`, one it refused
+    ///   `ExpectDenied`, and its outcome `ToolResult`;
+    /// - every turn boundary where the flow was evaluated (a `flow:active`
+    ///   write) becomes a `Turn` followed by `ExpectActive` with the steps
+    ///   the session had then.
+    ///
+    /// Keys the runtime owns (`session:`, `flow:`, `derived:`, repair and
+    /// correction signals, …) are not replayed: the simulator must reach them
+    /// itself.
+    ///
+    /// Run the result against the conversation spec in CI. If a change to
+    /// the spec alters what that session would have done, the scenario fails
+    /// at the step where the two diverge.
+    pub fn from_journal(
+        name: impl Into<String>,
+        journal: &[gemini_adk_rs::state::StateMutation],
+    ) -> Self {
+        use gemini_adk_rs::flow::{TOOL_CALL_KEY, TOOL_DENIED_KEY, TOOL_RESULT_KEY};
+
+        let tool_of = |v: &Option<Value>| {
+            v.as_ref()
+                .and_then(|v| v["tool"].as_str())
+                .map(str::to_string)
+        };
+        let mut steps = Vec::new();
+        // `None` is a removal (`State::remove`, `clear_prefix`), which must
+        // replay as one: a key set to `null` is still present.
+        let mut pending: Vec<(String, Option<Value>)> = Vec::new();
+        let flush = |pending: &mut Vec<(String, Option<Value>)>, steps: &mut Vec<SimStep>| {
+            for (key, value) in pending.drain(..) {
+                steps.push(match value {
+                    Some(value) => SimStep::Set { key, value },
+                    None => SimStep::Remove { key },
+                });
+            }
+        };
+        let mut ordered: Vec<&gemini_adk_rs::state::StateMutation> = journal.iter().collect();
+        ordered.sort_by_key(|m| m.sequence);
+        for m in ordered {
+            match m.key.as_str() {
+                "flow:active" => {
+                    flush(&mut pending, &mut steps);
+                    steps.push(SimStep::Turn);
+                    let active: Vec<String> = m
+                        .new
+                        .clone()
+                        .and_then(|v| serde_json::from_value(v).ok())
+                        .unwrap_or_default();
+                    steps.push(SimStep::ExpectActive(active));
+                }
+                TOOL_CALL_KEY => {
+                    if let Some(tool) = tool_of(&m.new) {
+                        flush(&mut pending, &mut steps);
+                        steps.push(SimStep::ExpectAllowed(tool));
+                    }
+                }
+                TOOL_DENIED_KEY => {
+                    if let Some(tool) = tool_of(&m.new) {
+                        flush(&mut pending, &mut steps);
+                        steps.push(SimStep::ExpectDenied(tool));
+                    }
+                }
+                TOOL_RESULT_KEY => {
+                    if let Some(tool) = tool_of(&m.new) {
+                        flush(&mut pending, &mut steps);
+                        let ok = m.new.as_ref().is_some_and(|v| v["ok"] == true);
+                        steps.push(SimStep::ToolResult { tool, ok });
+                    }
+                }
+                key if runtime_owned(key) => {}
+                key => {
+                    let value = m.new.clone();
+                    // Keep the latest value per key, in first-written order.
+                    match pending.iter_mut().find(|(k, _)| k == key) {
+                        Some(slot) => slot.1 = value,
+                        None => pending.push((key.to_string(), value)),
+                    }
+                }
+            }
+        }
+        flush(&mut pending, &mut steps);
+        Self {
+            name: name.into(),
+            steps,
+        }
+    }
+
     /// Run the scenario against `convo`. Returns `Ok(())` if every `Expect*` step
     /// holds, else `Err` with the failing step index and a diagnostic.
     pub async fn run(&self, convo: &CompiledConversation, mode: Enforcement) -> Result<(), String> {
         let mut sim = Sim::new(convo, mode);
         for (i, step) in self.steps.iter().enumerate() {
-            let fail = |msg: String| Err(format!("[{}] step {i} ({step:?}): {msg}", self.name));
-            match step {
-                SimStep::User(text) => {
-                    sim.user(text).await;
-                }
-                SimStep::Set { key, value } => {
-                    sim.set(key.clone(), value.clone());
-                }
-                SimStep::ToolOk(tool) => {
-                    sim.tool_ok(tool);
-                }
-                SimStep::ScheduleTool { tool, after } => {
-                    sim.schedule_tool(tool.clone(), *after);
-                }
-                SimStep::Turn => {
-                    sim.turn();
-                }
-                SimStep::ExpectActive(expected) => {
-                    let active = sim.active();
-                    for e in expected {
-                        if !active.contains(e) {
-                            return fail(format!("expected active '{e}', got {active:?}"));
-                        }
-                    }
-                }
-                SimStep::ExpectDenied(tool) => {
-                    if sim.allowed(tool) {
-                        return fail(format!("expected '{tool}' denied, but it was admitted"));
-                    }
-                }
-                SimStep::ExpectAllowed(tool) => {
-                    if !sim.allowed(tool) {
-                        let why = sim.denied().get(tool).cloned().unwrap_or_default();
-                        return fail(format!("expected '{tool}' allowed, but denied: {why}"));
-                    }
-                }
-                SimStep::ExpectSlot { key, value } => {
-                    let got = sim.state().get_raw(key);
-                    if got.as_ref() != Some(value) {
-                        return fail(format!("expected slot '{key}' = {value}, got {got:?}"));
-                    }
-                }
-                SimStep::ExpectComplete => {
-                    if !sim.is_complete() {
-                        return fail("expected conversation complete".into());
-                    }
-                }
-            }
+            sim.apply(step)
+                .await
+                .map_err(|msg| format!("[{}] step {i} ({step:?}): {msg}", self.name))?;
         }
         Ok(())
     }

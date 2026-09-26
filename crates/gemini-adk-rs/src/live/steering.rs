@@ -148,7 +148,18 @@ pub fn build_steering_context(
 ///         .done()
 ///     .initial_phase("greeting")
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum ContextDelivery {
     /// Send batched context immediately during TurnComplete processing.
     ///

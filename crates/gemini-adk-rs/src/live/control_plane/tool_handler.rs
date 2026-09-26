@@ -141,6 +141,14 @@ pub(in crate::live) async fn handle_tool_calls(
                         };
                         if let Some(reason) = denial {
                             tracing::info!(tool = %call.name, %reason, "tool denied by the flow gate");
+                            let _ = state.set(
+                                crate::flow::TOOL_DENIED_KEY,
+                                serde_json::json!({
+                                    "tool": call.name,
+                                    "id": call.id,
+                                    "reason": reason,
+                                }),
+                            );
                             results.push(FunctionResponse {
                                 name: call.name.clone(),
                                 response: serde_json::json!({ "error": reason }),
@@ -149,6 +157,10 @@ pub(in crate::live) async fn handle_tool_calls(
                             });
                             continue;
                         }
+                        let _ = state.set(
+                            crate::flow::TOOL_CALL_KEY,
+                            serde_json::json!({ "tool": call.name, "id": call.id }),
+                        );
                     }
                     let mode = execution_modes.get(&call.name);
                     match mode {
@@ -198,12 +210,29 @@ pub(in crate::live) async fn handle_tool_calls(
                             // `biased` makes an already-cancelled token win
                             // without polling the tool future at all.
                             let started = std::time::Instant::now();
+                            let filler_after = state
+                                .get::<crate::flow::VoiceTiming>(crate::flow::VOICE_TIMING_KEY)
+                                .and_then(|t| t.filler_after_ms)
+                                .map(std::time::Duration::from_millis);
+                            let mut tool_ctx = crate::tool::ToolContext::new(state.clone())
+                                .with_cancel(barge_in.clone());
+                            if let Some(id) = &call.id {
+                                tool_ctx = tool_ctx.with_call_id(id.clone());
+                            }
+                            let run = with_filler_cue(
+                                disp.call_function_in(&call.name, call.args.clone(), tool_ctx),
+                                filler_after,
+                                || {
+                                    let _ = event_tx.send(LiveEvent::FillerCue {
+                                        tool: call.name.clone(),
+                                        elapsed_ms: started.elapsed().as_millis() as u64,
+                                    });
+                                },
+                            );
                             let dispatched = tokio::select! {
                                 biased;
                                 _ = barge_in.cancelled() => None,
-                                result = disp.call_function(&call.name, call.args.clone()) => {
-                                    Some(result)
-                                }
+                                result = run => Some(result),
                             };
                             let Some(call_result) = dispatched else {
                                 // Cancelled: the tool future was dropped at its
@@ -312,6 +341,10 @@ pub(in crate::live) async fn handle_tool_calls(
         let call_id = call.id.clone().unwrap_or_default();
         let completion_tx = completion_tx.clone();
         let cancel = CancellationToken::new();
+        let mut bg_ctx = crate::tool::ToolContext::new(state.clone()).with_cancel(cancel.clone());
+        if let Some(id) = &call.id {
+            bg_ctx = bg_ctx.with_call_id(id.clone());
+        }
 
         let handle = tokio::spawn(async move {
             // A `before_tool` veto blocks execution for background tools too,
@@ -334,7 +367,7 @@ pub(in crate::live) async fn handle_tool_calls(
                 return;
             }
             let result = if let Some(ref d) = disp {
-                d.call_function(&call.name, call.args.clone())
+                d.call_function_in(&call.name, call.args.clone(), bg_ctx)
                     .await
                     .map_err(|e| crate::error::ToolError::ExecutionFailed(e.to_string()))
             } else {
@@ -404,6 +437,25 @@ pub(in crate::live) async fn handle_tool_calls(
         event_tx,
     )
     .await;
+}
+
+/// Await `run`; if it is still pending after `after`, call `cue` once and
+/// keep waiting. The tool is never cancelled or delayed by the cue.
+async fn with_filler_cue<F: std::future::Future>(
+    run: F,
+    after: Option<std::time::Duration>,
+    cue: impl FnOnce(),
+) -> F::Output {
+    let Some(after) = after else {
+        return run.await;
+    };
+    tokio::pin!(run);
+    tokio::select! {
+        biased;
+        out = &mut run => return out,
+        () = tokio::time::sleep(after) => cue(),
+    }
+    run.await
 }
 
 #[cfg(test)]

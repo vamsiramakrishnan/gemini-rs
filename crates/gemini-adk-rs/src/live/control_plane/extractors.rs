@@ -62,10 +62,7 @@ pub(in crate::live) async fn run_extractors(
                 let name = extractor.name().to_string();
                 let _ = state.set(&name, &value);
                 // Emit top-level extraction event
-                let _ = event_tx.send(LiveEvent::Extraction {
-                    name: name.clone(),
-                    value: value.clone(),
-                });
+                let _ = event_tx.send(extraction_event(state, name.clone(), &value));
                 promote_extraction_fields(extractor.as_ref(), &name, &value, state, event_tx);
                 fire_on_complete(extractor.as_ref(), &value, state).await;
                 if let Some(cb) = &callbacks.on_extracted {
@@ -105,10 +102,7 @@ fn promote_extraction_fields(
                 continue;
             }
             let _ = state.set(field, val.clone());
-            let _ = event_tx.send(LiveEvent::Extraction {
-                name: format!("{name}.{field}"),
-                value: val.clone(),
-            });
+            let _ = event_tx.send(extraction_event(state, format!("{name}.{field}"), val));
         }
         return;
     }
@@ -167,10 +161,11 @@ fn promote_extraction_fields(
                 "field": rule.field,
             }),
         );
-        let _ = event_tx.send(LiveEvent::Extraction {
-            name: format!("{name}.{}", rule.field),
-            value: val.clone(),
-        });
+        let _ = event_tx.send(extraction_event(
+            state,
+            format!("{name}.{}", rule.field),
+            val,
+        ));
         emit_promotion_decision(
             event_tx,
             name,
@@ -280,10 +275,7 @@ pub(in crate::live) async fn run_extractors_with_window(
             Ok((extractor, value)) => {
                 let name = extractor.name().to_string();
                 let _ = state.set(&name, &value);
-                let _ = event_tx.send(LiveEvent::Extraction {
-                    name: name.clone(),
-                    value: value.clone(),
-                });
+                let _ = event_tx.send(extraction_event(state, name.clone(), &value));
                 promote_extraction_fields(extractor.as_ref(), &name, &value, state, event_tx);
                 fire_on_complete(extractor.as_ref(), &value, state).await;
                 if let Some(cb) = &callbacks.on_extracted {
@@ -301,6 +293,20 @@ pub(in crate::live) async fn run_extractors_with_window(
             }
         }
     }
+}
+
+/// An extraction event with the state's redacted keys masked: a field
+/// named by a redacted key (`extractor.card_number`), or such a field inside
+/// an extractor's object result, carries [`REDACTED`](crate::state::REDACTED)
+/// instead of its value. State itself keeps the real value.
+fn extraction_event(state: &State, name: String, value: &serde_json::Value) -> LiveEvent {
+    let field = name.rsplit_once('.').map_or(name.as_str(), |(_, f)| f);
+    let value = if state.is_redacted(field) {
+        serde_json::Value::String(crate::state::REDACTED.into())
+    } else {
+        state.redact_fields(value)
+    };
+    LiveEvent::Extraction { name, value }
 }
 
 #[cfg(test)]

@@ -6,7 +6,7 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
-gemini-adk-fluent-rs = { workspace = true, features = ["sip"] }
+gemini-adk-fluent-rs = { workspace = true, default-features = true, features = ["sip"] }
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }

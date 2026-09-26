@@ -62,11 +62,17 @@ pub struct VoiceRuntimeState {
 impl VoiceRuntimeState {
     /// Apply an incoming event to the voice runtime state before rules run.
     pub fn apply_event(&mut self, event: &ReactorEvent) {
+        self.apply_event_at(event, Instant::now());
+    }
+
+    /// [`apply_event`](Self::apply_event) with an explicit `now`, for callers
+    /// that read time from a [`Clock`](crate::clock::Clock).
+    pub fn apply_event_at(&mut self, event: &ReactorEvent, now: Instant) {
         match event {
             ReactorEvent::PlaybackDrained { prompt_pending } => {
                 self.playback_active = false;
                 self.prompt_pending = *prompt_pending;
-                self.last_playback_drained_at = Some(Instant::now());
+                self.last_playback_drained_at = Some(now);
             }
             ReactorEvent::UserSpeechStarted => {
                 self.user_speaking = true;
@@ -75,7 +81,7 @@ impl VoiceRuntimeState {
                     self.prompt_epoch = self.prompt_epoch.saturating_add(1);
                 }
                 self.prompt_pending = false;
-                self.last_barge_in_at = Some(Instant::now());
+                self.last_barge_in_at = Some(now);
             }
             ReactorEvent::UserSpeechEnded { prompt_pending } => {
                 self.user_speaking = false;
@@ -171,6 +177,7 @@ pub trait ReactorRule: Send + Sync {
 pub struct LiveReactor {
     rules: Vec<Box<dyn ReactorRule>>,
     voice: Mutex<VoiceRuntimeState>,
+    clock: crate::clock::SharedClock,
 }
 
 impl Default for LiveReactor {
@@ -178,6 +185,7 @@ impl Default for LiveReactor {
         Self {
             rules: Vec::new(),
             voice: Mutex::new(VoiceRuntimeState::default()),
+            clock: crate::clock::system_clock(),
         }
     }
 }
@@ -196,6 +204,12 @@ impl LiveReactor {
         reactor
     }
 
+    /// Timestamp voice events with `clock` instead of the system clock.
+    pub fn with_clock(mut self, clock: crate::clock::SharedClock) -> Self {
+        self.clock = clock;
+        self
+    }
+
     /// Add a rule to the end of the ordered rule list.
     pub fn add_rule(&mut self, rule: impl ReactorRule + 'static) {
         self.rules.push(Box::new(rule));
@@ -205,7 +219,7 @@ impl LiveReactor {
     pub fn react(&self, event: &ReactorEvent) -> Vec<Reaction> {
         let voice = {
             let mut voice = self.voice.lock().expect("voice reactor state poisoned");
-            voice.apply_event(event);
+            voice.apply_event_at(event, self.clock.now());
             voice.clone()
         };
 

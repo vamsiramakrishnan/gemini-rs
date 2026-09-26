@@ -7,8 +7,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-09-25
+
+### Highlights
+
+- **Gemini 3.8 Live**, including the extended-thinking variant: custom
+  transcription vocabulary, blocking tools, history seeding, Live Avatar video
+  and transparent resumption (both Vertex AI), and setups shaped per model and
+  platform (`LiveModelProfile`, `SessionConfig::ignored_settings()`). All of it
+  was checked against the live Google AI endpoint.
+- **Google AI sessions no longer die on `update_instruction` or
+  `.proactive_audio()`**: both used to close the session with 1007.
+- **Text agents on the golden path**: `agent.ask(..)`, `ask_as::<T>()`,
+  `chat()`, `stream(..)`, `RunResult` with usage and tool calls, `MockLlm`
+  for model-free tests, and `#[tool]` from doc comments.
+- **Four wire encodings fixed** (VAD sensitivity, media resolution, voice
+  activity, avatar media routing). Setups that set VAD sensitivity or media
+  resolution were refused by the server (1007, confirmed live).
+- **`gemini-adk`**, the one-crate facade over the fluent layer and memory, is
+  published for the first time, with one `Error` type for application code.
+- **Conversations are testable offline, end to end.** An injectable clock,
+  record/replay tapes for model and resolver calls, `ScriptedServer` for
+  Live sessions over an in-memory transport, and scenarios extracted from a
+  recorded journal and replayed in CI (`adk flow replay`, `adk flow why`).
+- **The conversation graph governs voice behavior.** Per-stage timing
+  (reprompts, filler cues, floor holding, end-of-speech hold), verbatim
+  stages checked against the transcript, corrections that reopen a
+  confirmation, nested digressions, and escalation on repeated barge-ins or
+  tool failures. Redaction and commit (idempotency and compensation)
+  policies are enforced at runtime.
+- **Raw SIP calls can register and encrypt**: `SipAgent::register` and SRTP
+  (SDES) media. A published jitter benchmark shows the runtime adds no
+  measurable mic-to-wire jitter up to 1,000 sessions.
+- **Breaking**: this is a major release. The *Changed*, *Removed* and
+  *Deprecated* sections below list what to update. Several public enums and
+  structs are now `#[non_exhaustive]`, and the fluent prelude is a curated
+  list instead of a glob of the wire prelude.
+
 ### Fixed
 
+- **Instruction updates closed Google AI sessions.** `update_instruction`, and
+  with it every phase transition in the default `InstructionUpdate` steering
+  mode, sent a `system`-role client content turn, which the Google AI endpoint
+  answers with close code 1007. This was measured live on Gemini 2.5, 3.1 and
+  3.8 Live. On Google AI the update is now a user-role turn that says it
+  replaces the instructions, sent with `turnComplete: false`. Gemini 3.1 and
+  3.8 follow it; Gemini 2.5 accepts it without following it. Vertex AI keeps
+  the documented `system` role
+  (`SessionConfig::supports_system_role_updates()`).
+- **`.proactive_audio()` broke every Google AI session.** Google AI's setup has
+  no `proactivity` field, and a setup that carries one is refused with 1007
+  (measured on 2.5 and 3.8). It is now left off on Google AI and reported by
+  `ignored_settings()`.
+- **Gemini 3.8 Live Avatar video would have played as audio.** Every
+  `inlineData` part from the model was decoded and sent to `on_audio`,
+  whatever its MIME type. Only `audio/*` parts go there now; anything else
+  (`video/mp4`) arrives as `SessionEvent::Media` / `LiveEvent::Media` /
+  `on_media`.
+- **VAD sensitivity was sent with values the API does not have.**
+  `Sensitivity::SensitivityHigh` went out as `SENSITIVITY_HIGH`; the fields
+  take `START_SENSITIVITY_HIGH` / `END_SENSITIVITY_LOW` and so on. Both fields
+  now use their own wire enums, and levels the API has no value for (`Medium`,
+  `Automatic`) are sent as `*_UNSPECIFIED`, the server default. Specs that set
+  `"start_sensitivity": "high"` were affected.
+- **`MediaResolution` was sent as `LOW` / `MEDIUM` / `HIGH`.** The API's names
+  are `MEDIA_RESOLUTION_LOW` and so on. The old spellings are still read.
+- **Server voice-activity events failed to parse.** The API sends
+  `ACTIVITY_START` / `ACTIVITY_END`; the parser expected `VOICE_ACTIVITY_*`,
+  so a `voiceActivity` frame errored instead of emitting
+  `VoiceActivityStart`. Both spellings are accepted now, unknown values read as
+  `VoiceActivityType::Unspecified`, and `audio_offset` is exposed.
+- `lastConsumedClientMessageIndex` is accepted as a JSON number as well as the
+  proto-JSON string.
 - **Model errors lost their kind on the text path.** `GeminiLlm` flattened
   every failure into `LlmError::RequestFailed(String)`, and `LlmTextAgent`
   flattened that again into `AgentError::Other("LLM error: …")`, so a caller
@@ -143,6 +213,108 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Injectable clock** (`gemini_adk_rs::clock`): `Clock`, `SystemClock`,
+  `ManualClock`. Set it with `State::with_clock`,
+  `LiveSessionBuilder::clock` or `Live::clock`. Temporal patterns, phase
+  timing, session signals, the reactor, resolver caches and journal
+  timestamps all read it. `replay_session` drives a `ManualClock` from the
+  recording's timestamps, so a replay sees the time the recording saw.
+- **Record/replay tapes** (`gemini_adk_rs::tape`): `TapedLlm::recording` /
+  `replaying` and `taped_resolver` record model and resolver outputs to a
+  `MemoryTape` or a JSONL `FileTape` and play them back. A request missing
+  from the tape is an error, never a live call.
+- **Journal cursors**: `State::try_mutations_since(cursor)` reports a gap
+  when the ring dropped entries. Computed state recomputes only the
+  variables whose dependencies changed since its last cursor. `read_journal`
+  loads a JSONL journal sink.
+- **Offline Live sessions**: `connect_with_transport` on `LiveSessionBuilder`
+  and `Live`; `testing::ScriptedServer` (the model's side as a script:
+  `says`, `hears`, `speaks`, `calls`, `interrupts`) and `ScriptedRun` (events,
+  state, frames sent, tool responses). `ReplayTransport::with_frame_gate`.
+- **Voice timing per stage**: `VoiceTiming` (`reprompt_after`, `filler_after`,
+  `uninterruptible`, `end_of_speech`, `context_delivery`) on a conversation
+  stage (`.timing(..)`, spec field `timing`) or `Live::stage_timing`. The
+  active stage's timing is published under `session:voice_timing`. New events
+  `LiveEvent::Reprompted` and `LiveEvent::FillerCue`.
+- **Verbatim stages**: `.verbatim(text)` (spec field `verbatim`). A stage
+  completes only when the model's output transcript matches the text
+  (word-level similarity at least 0.9). `LiveEvent::VerbatimChecked` reports
+  each check.
+- **Statechart and repair**: digressions nest and resume layer by layer.
+  Correcting a collected slot raises `correction:{slot}` and reopens the
+  confirmation downstream. `RepairPolicy::escalate_after_interruptions` and
+  `escalate_after_tool_failures`.
+- **Policies enforced at runtime**: `Live::policy(..)`. `Policy::redact(keys)`
+  masks the keys in the journal sink, snapshots and extraction events
+  (`State::redact_keys`). `Policy::commit(tool)` wraps the tool in
+  `tool::CommitGuard`: an idempotency key (a retried commit returns the first
+  result) and a compensating tool on failure.
+- **Tool context**: `tool::ToolContext` gives a tool the session state, its
+  call id and a cancellation token. It is available through `ContextTool`,
+  `T::contextual`, and a `ToolContext` parameter on a `#[tool]` function
+  (left out of the schema). Live barge-in cancels the token of an inline
+  tool call.
+- **CI from recordings**: `Scenario::from_journal`, `SimStep::ToolFailed`,
+  `Interrupt` and `ToolResult`, and `Sim::apply`. The runtime journals
+  `flow:tool_call`, `flow:tool_denied` and `flow:tool_result`. CLI:
+  `adk session scenario`, `adk flow replay` (a CLEAN/DIVERGED timeline) and
+  `adk flow why`.
+- `gemini_adk::{Error, Result}`: one error for application code, converting
+  from every layer's error and keeping it as the source, with
+  `is_retryable()` and `llm()`.
+- `AgentBuilder::artifacts(A::..)` attaches artifact declarations, so
+  `check_contracts` sees an artifact input no agent produces. An `S::` chain
+  is a pipeline step: `a >> S::pick(..) >> b`.
+- **SIP registration**: `SipAgent::register(SipAccount)` returns a
+  `SipRegistration` that refreshes the binding, retries after a failure,
+  reports `RegistrationState`, and removes the binding on `unregister` or
+  drop.
+- **SRTP** (`telephony::srtp`, feature `sip`): RFC 3711 with
+  `AES_CM_128_HMAC_SHA1_80` / `_32`, SDES keying (`CryptoAttribute`),
+  rollover tracking and a replay window. It is checked against the RFC 3711
+  and libsrtp test vectors. `SipAgent` answers `RTP/SAVP` offers with SRTP
+  (`sdp::secure_audio_answer`).
+- `session-bench --jitter-secs`: mic-to-wire latency and jitter under N
+  concurrent sessions, with results published in the capacity guide.
+- Schema snapshots for `#[tool]`, `#[derive(Extract)]` and `#[derive(Frame)]`
+  (`crates/gemini-adk-macros-rs/tests/snapshots`, regenerate with
+  `UPDATE_SNAPSHOTS=1`).
+- The Python binding is versioned 3.0.0 and built and smoke-tested in CI.
+- **Gemini 3.8 Live Extended Thinking** — `ModelId::LIVE_3_8_EXTENDED_THINKING`
+  with its own `LiveModelProfile`, `ThinkingLevel` / `ThinkingConfig::thinking_level`
+  and `.thinking_level(..)` (L0 and L2); the model refuses a setup without a
+  level. A question that needs thought gets a spoken holding line first; the
+  answer arrives unprompted as the next turn, and
+  `SessionEvent::InteractionStatus("IN_PROGRESS")` (from the new
+  `serverContent.interactionStatus`) marks the wait.
+- **Gemini 3.8 Live support** — `ModelId::LIVE_3_8` (`gemini-3.8-live`, GA
+  2026-09-24 on Vertex AI and Google AI; the wire behavior below was verified
+  live against Google AI). See the new *Gemini 3.8 Live* guide.
+  - `LiveModelProfile`: what a Live model accepts in its setup, keyed on the
+    model name. For 3.8 the setup leaves off `thinkingConfig` (unsupported)
+    and `enableAffectiveDialog` / `proactivity` (always on; its guide says not
+    to send them), and keeps tool `behavior` and response `scheduling` on
+    Vertex AI, which earlier Vertex Live models reject. Unknown models get
+    every field passed through.
+  - `SessionConfig::ignored_settings()` lists every configured setting left
+    off the wire; connect logs it once as a warning.
+  - Live Avatar: `AvatarConfig::prebuilt("Ben")` / `AvatarConfig::custom(image,
+    "png")` via `.avatar(..)` (L0 and L2), which also sets the `VIDEO` response
+    modality; `Modality::Video`; video chunks as `InlineMedia` on
+    `SessionEvent::Media`, `LiveEvent::Media`, `EventCallbacks::on_media`
+    and `Live::on_media`, suppressed after barge-in like audio, with their own
+    `DeliveryConfig::media` policy.
+  - `AudioTranscriptionConfig` with `language_codes` and `custom_vocabulary`;
+    `input_transcription_config` / `output_transcription_config` /
+    `custom_vocabulary` on `SessionConfig` and `Live`.
+    `InputAudioTranscription` and `OutputAudioTranscription` are now aliases
+    of it.
+  - `ReplicatedVoiceConfig` and `.replicated_voice(..)` for a voice replicated
+    from a sample.
+  - `.transparent_resumption()` (`sessionResumption.transparent`),
+    `.history_in_client_content()` / `initial_history_in_client_content(..)`
+    (`historyConfig`), and `.explicit_vad_signal()` (Vertex AI only; left off
+    the wire on Google AI).
 - **`gemini-adk`, one crate to depend on** (`crates/gemini-adk`, library
   `gemini_adk`). It re-exports the fluent crate with the same feature names,
   adds a `memory` feature for `gemini_adk::memory`, and `#[tool]` resolves its
@@ -285,6 +457,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Composition operators have one meaning each** (breaking): `>>` is
+  "then" and `+` is "together". `C` context policies chain with `>>` (was
+  `+`), `M` middleware with `>>` (was `|`), and `T` tools, `G` guards and
+  `E` criteria combine with `+` (was `|`). See the migration guide.
+- The fluent prelude's `ToolContext` is the tool context
+  (`gemini_adk_rs::tool::ToolContext`). The callback context stays at
+  `gemini_adk_rs::context::ToolContext`.
+- `Motif::disclosure` and verbatim stages are uninterruptible by default.
+- `Live::converse` keeps the stage timings and policies set on the builder
+  (`stage_timing`, `policy`) in either call order. It used to replace them.
+- `RepairPolicy` has two more fields, `SimStep` three more variants, and
+  `SipError` three more variants. `sdp::AudioOffer` has `secure` and `crypto`.
+- Computed state is written only when its value changes, so a watcher on a
+  computed key fires only on a real change.
+- `wire_schema` collapses `Option<T>` for a struct or enum `T`
+  (`anyOf: [T, {type: null}]`) to `T`, like the nullable primitives already
+  were. `#[tool]` schemas no longer carry the hidden args struct's name as
+  their `title`.
+
+- On Google AI, `explicitVadSignal`, `sessionResumption.transparent` and
+  `avatarConfig.avatarName` / `customizedAvatar` are left off the setup and
+  reported by `ignored_settings()`: that endpoint refuses each with 1007.
+  Live Avatar is a Vertex AI feature; Google AI's `gemini-3.8-live` refuses the
+  `VIDEO` modality. `LiveModelProfile` gained `thinking_level_required`.
+- **Wire types gained Gemini 3.8 Live fields** (source-breaking for struct
+  literals): `InputAudioTranscription {}` / `OutputAudioTranscription {}` are
+  now aliases of the `#[non_exhaustive]` `AudioTranscriptionConfig` — write
+  `::default()`; `VoiceConfig` has `replicated_voice_config`;
+  `SessionResumptionConfig` has `transparent` (both derive `Default`);
+  `SessionConfig` has `avatar_config`, `history_config` and
+  `explicit_vad_signal`; `DeliveryConfig` has `media`; `EventCallbacks` has
+  `on_media`. `Modality` gained `Video`, and `VoiceActivityType` is
+  `#[non_exhaustive]` with an `Unspecified` variant.
+- `SessionConfig::supports_async_tools()` is now also true for Gemini 3.8 Live
+  on Vertex AI, and `supports_thinking()` is false for Gemini 3.8 Live on
+  either platform (true for the extended-thinking variant on both).
+- The workspace dependency on `gemini-adk-fluent-rs` has default features off,
+  like L0 and L1, so the `gemini-adk` facade decides them; workspace members
+  that inherit it say `default-features = true`.
 - **Documentation leads with the golden path.** The README's text-agent
   section is a ladder — ask, a streamed conversation, a typed answer, a tool,
   a model-free test — whose every program is a compiled quickstart target
@@ -345,6 +556,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to read docs.rs versus the site.
 - The README and the book landing said **v1.0** for a day after 2.0.0 shipped;
   a drift test now holds them to the released major.minor.
+
+
+### Features
+
+- feat(devex): the small things a first look hits — docs.rs, Studio keys, READMEs
+### Documentation
+
+- docs: overhaul guides and shared agent instructions (#62)
+- docs: clarify product outcomes, first-use paths, and boundaries (#61)
+- docs: de-Claude gemini-rs README (#60)
+- docs(site): Astro + Starlight website synced from docs/, replacing mdBook (#58)
+### Other
+
+- Support Gemini 3.8 Live and fix four wire encodings
+- Flow stack in the runtime, plus a developer-experience overhaul: ask/chat/stream, typed output, #[tool], honest configuration (#69)
+- Update version from 1.0 to 2.0 in README
 
 ## [2.0.0] - 2026-09-03
 

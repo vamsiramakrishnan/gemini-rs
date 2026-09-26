@@ -1,6 +1,9 @@
 //! A — Artifact composition.
 //!
-//! Compose artifact schemas and transforms with `+`.
+//! Declare the artifacts an agent consumes and produces, combined with `+`,
+//! and attach them with
+//! [`AgentBuilder::artifacts`](crate::builder::AgentBuilder::artifacts), where
+//! contract checks read them.
 
 use std::sync::Arc;
 

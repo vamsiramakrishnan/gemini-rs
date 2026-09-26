@@ -30,10 +30,15 @@ use crate::state::State;
 use crate::text::TextAgent;
 
 pub mod stack;
+pub mod timing;
+pub mod verbatim;
 pub use stack::{
     FlowStack, OVERLAY_STATE_KEY, Overlay, RepairPolicy, Resume, SharedFlowStack,
-    TERMINATED_STATE_KEY, escalate_flag, reprompt_flag,
+    TERMINATED_STATE_KEY, TOOL_CALL_KEY, TOOL_DENIED_KEY, TOOL_RESULT_KEY, correction_flag,
+    escalate_flag, reprompt_flag,
 };
+pub use timing::{DEFAULT_REPROMPT, VOICE_TIMING_KEY, VoiceTiming};
+pub use verbatim::{VERBATIM_KEY, VerbatimRequirement, verbatim_flag};
 
 /// Evaluation context handed to a [`Guard`]: the session state plus the
 /// current flow marking.
@@ -394,6 +399,15 @@ impl Guard {
         if let Guard::Spec(p) = self {
             p.referenced_state_keys(out);
         }
+    }
+
+    /// The state keys this guard reads (`is_true`/`is_set`/`eq`/`captured`
+    /// atoms). A custom guard reads nothing that can be named, so it
+    /// reports none.
+    pub fn state_keys(&self) -> BTreeSet<String> {
+        let mut keys = BTreeSet::new();
+        self.referenced_state_keys(&mut keys);
+        keys
     }
 
     fn referenced_tools(&self, out: &mut Vec<String>) {

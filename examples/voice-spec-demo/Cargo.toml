@@ -6,7 +6,7 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
-gemini-adk-fluent-rs = { workspace = true }
+gemini-adk-fluent-rs = { workspace = true, default-features = true }
 tokio = { version = "1", features = ["full"] }
 serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls"] }

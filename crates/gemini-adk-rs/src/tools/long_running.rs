@@ -61,6 +61,14 @@ impl ToolFunction for LongRunningFunctionTool {
     async fn call(&self, args: serde_json::Value) -> Result<serde_json::Value, ToolError> {
         self.inner.call(args).await
     }
+
+    async fn call_with_context(
+        &self,
+        args: serde_json::Value,
+        ctx: crate::tool::ToolContext,
+    ) -> Result<serde_json::Value, ToolError> {
+        self.inner.call_with_context(args, ctx).await
+    }
 }
 
 #[cfg(test)]

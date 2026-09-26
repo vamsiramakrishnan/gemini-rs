@@ -275,6 +275,36 @@ mod tests {
     }
 
     #[test]
+    fn handle_server_msg_routes_avatar_video_away_from_audio() {
+        let (phase_tx, _phase_rx) = watch::channel(SessionPhase::Active);
+        let (event_tx, mut event_rx) = broadcast::channel(16);
+        let state = Arc::new(SessionState::with_events(phase_tx, event_tx.clone()));
+
+        // "AAEC" = [0, 1, 2]; "AwQF" = [3, 4, 5].
+        let json = r#"{"serverContent":{"modelTurn":{"parts":[
+            {"inlineData":{"mimeType":"audio/pcm;rate=24000","data":"AAEC"}},
+            {"inlineData":{"mimeType":"video/mp4","data":"AwQF"}}
+        ]}}}"#;
+        let msg = ServerMessage::parse(json).unwrap();
+        handle_server_msg(msg, &state, &event_tx);
+
+        let mut audio = Vec::new();
+        let mut media = Vec::new();
+        while let Ok(evt) = event_rx.try_recv() {
+            match evt {
+                SessionEvent::AudioData(bytes) => audio.push(bytes.to_vec()),
+                SessionEvent::Media(m) => media.push(m),
+                _ => {}
+            }
+        }
+        assert_eq!(audio, [vec![0u8, 1, 2]], "only the audio part is audio");
+        assert_eq!(media.len(), 1);
+        assert!(media[0].is_video());
+        assert_eq!(media[0].mime_type, "video/mp4");
+        assert_eq!(media[0].data.as_ref(), [3u8, 4, 5]);
+    }
+
+    #[test]
     fn handle_server_msg_go_away() {
         let (phase_tx, _phase_rx) = watch::channel(SessionPhase::Active);
         let (event_tx, _event_rx) = broadcast::channel(16);

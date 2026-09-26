@@ -11,6 +11,8 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::clock::{SharedClock, system_clock};
+
 use gemini_genai_rs::session::SessionWriter;
 
 use super::SessionHook;
@@ -333,6 +335,7 @@ pub struct PhaseMachine {
     initial: String,
     history: VecDeque<TransitionRecord>,
     phase_entered_at: Instant,
+    clock: SharedClock,
 }
 
 impl PhaseMachine {
@@ -347,7 +350,18 @@ impl PhaseMachine {
             initial: initial.to_string(),
             history: VecDeque::new(),
             phase_entered_at: Instant::now(),
+            clock: system_clock(),
         }
+    }
+
+    /// Read phase durations from `clock` instead of the system clock.
+    ///
+    /// Restarts the current phase's timer at the new clock's `now`. The
+    /// runtime installs the session state's clock here when it builds the
+    /// session.
+    pub fn set_clock(&mut self, clock: SharedClock) {
+        self.phase_entered_at = clock.now();
+        self.clock = clock;
     }
 
     /// Register a phase. Overwrites any existing phase with the same name.
@@ -560,7 +574,7 @@ impl PhaseMachine {
         }
 
         let from = self.current.clone();
-        let duration_in_phase = self.phase_entered_at.elapsed();
+        let duration_in_phase = self.clock.since(self.phase_entered_at);
 
         // Run on_exit for the current phase (if it exists and has callback).
         if let Some(phase) = self.phases.get(&from)
@@ -572,7 +586,7 @@ impl PhaseMachine {
 
         // Update current phase.
         self.current = target.to_string();
-        self.phase_entered_at = Instant::now();
+        self.phase_entered_at = self.clock.now();
 
         // Run on_enter for the new phase.
         if let Some(phase) = self.phases.get(target) {
@@ -596,7 +610,7 @@ impl PhaseMachine {
             from,
             to: target.to_string(),
             turn,
-            timestamp: Instant::now(),
+            timestamp: self.clock.now(),
             trigger,
             duration_in_phase,
         });
@@ -621,7 +635,7 @@ impl PhaseMachine {
 
     /// Returns how long the machine has been in the current phase.
     pub fn current_phase_duration(&self) -> Duration {
-        self.phase_entered_at.elapsed()
+        self.clock.since(self.phase_entered_at)
     }
 
     /// Active tools filter for the current phase.

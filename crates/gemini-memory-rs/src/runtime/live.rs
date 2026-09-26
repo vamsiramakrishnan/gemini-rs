@@ -29,13 +29,13 @@ use crate::engine::MemorySession;
 /// # use gemini_memory_rs::runtime::memory_tools;
 /// # use gemini_adk_fluent_rs::compose::T;
 /// # fn demo(session: Arc<gemini_memory_rs::engine::MemorySession>) {
-/// let tools = memory_tools(session) | T::google_search();
+/// let tools = memory_tools(session) + T::google_search();
 /// # let _ = tools;
 /// # }
 /// ```
 pub fn memory_tools(session: Arc<MemorySession>) -> ToolComposite {
     ToolComposite::from_function(Arc::new(recall_context_tool(session.clone())))
-        | ToolComposite::from_function(Arc::new(manage_memory_tool(session)))
+        + ToolComposite::from_function(Arc::new(manage_memory_tool(session)))
 }
 
 /// Installs the memory subsystem onto a `Live` builder.
@@ -193,7 +193,7 @@ mod tests {
         assert!(names.contains(&super::super::tools::RECALL_TOOL.to_string()));
         assert!(names.contains(&super::super::tools::MANAGE_TOOL.to_string()));
 
-        let combined = memory_tools(session()) | gemini_adk_fluent_rs::compose::T::google_search();
+        let combined = memory_tools(session()) + gemini_adk_fluent_rs::compose::T::google_search();
         assert_eq!(combined.len(), 3);
     }
 

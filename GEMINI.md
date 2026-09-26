@@ -48,7 +48,7 @@ let handle = Live::builder()
     .voice(Voice::Kore)
     .instruction("You are a weather assistant")
     .greeting("Greet the user and ask how you can help.")
-    .tools(get_weather() | T::google_search())   // any ToolFunction or a `T::` composite
+    .tools(get_weather() + T::google_search())   // any ToolFunction or a `T::` composite
     .transcription()                              // both directions
     .on_audio(|data| playback_tx.send(data.clone()).ok())
     .on_text(|t| print!("{t}"))
@@ -110,8 +110,8 @@ Live::builder()
         T::simple("get_weather", "Get weather", |args| async move {
             Ok(json!({"temp": 22}))
         })
-        | T::google_search()
-        | T::code_execution()
+        + T::google_search()
+        + T::code_execution()
     )
 ```
 
@@ -280,12 +280,12 @@ Examples:
 let transform = S::pick(&["a", "b"]) >> S::rename(&[("a", "x")]);
 
 // Context: window + user-only
-let context = C::window(10) + C::user_only() + C::exclude_tools();
+let context = C::window(10) >> C::user_only() >> C::exclude_tools();
 
 // Tools: combine functions with built-ins
 let tools = T::simple("greet", "Greet", |_| async { Ok(json!({})) })
-    | T::google_search()
-    | T::code_execution();
+    + T::google_search()
+    + T::code_execution();
 
 // Prompt: compose sections
 let prompt = P::role("analyst") + P::task("analyze data") + P::format("JSON");

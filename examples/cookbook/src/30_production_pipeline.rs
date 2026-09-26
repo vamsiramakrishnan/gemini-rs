@@ -271,9 +271,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== STAGE 4: Output Guards ===\n");
 
     let output_guards = G::length(20, 5000)
-        | G::pii()
-        | G::topic(&["race", "gender", "religion", "national_origin"])
-        | G::custom(|output| {
+        + G::pii()
+        + G::topic(&["race", "gender", "religion", "national_origin"])
+        + G::custom(|output| {
             // Ensure decision contains approval status
             let lower = output.to_lowercase();
             if lower.contains("approved")
@@ -286,7 +286,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Err("Decision output must contain approval status".into())
             }
         })
-        | G::budget(500);
+        + G::budget(500);
 
     println!("Guards configured: {} validators", output_guards.len());
 
@@ -318,15 +318,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             0.0
         }
-    }) | E::custom("professional_tone", |output, _| {
+    }) + E::custom("professional_tone", |output, _| {
         let formal_words = ["application", "conditions", "documentation", "review"];
         let count = formal_words
             .iter()
             .filter(|w| output.to_lowercase().contains(*w))
             .count();
         (count as f64 / formal_words.len() as f64).min(1.0)
-    }) | E::custom("safety", |_, _| 1.0)
-        | E::contains_match();
+    }) + E::custom("safety", |_, _| 1.0)
+        + E::contains_match();
 
     let eval_suite = E::suite()
         .case("Low risk, good credit application", "approved")
@@ -340,8 +340,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 } else {
                     0.0
                 }
-            }) | E::custom("professional_tone", |_, _| 1.0)
-                | E::custom("safety", |_, _| 1.0),
+            }) + E::custom("professional_tone", |_, _| 1.0)
+                + E::custom("safety", |_, _| 1.0),
         );
 
     println!(

@@ -191,6 +191,10 @@ impl ToolDispatcher {
     }
 
     /// Call a regular function tool by name, using the default timeout.
+    ///
+    /// The tool gets a detached [`ToolContext`](super::ToolContext) (fresh
+    /// state, no call id). Inside a session use
+    /// [`call_function_in`](Self::call_function_in).
     pub async fn call_function(
         &self,
         name: &str,
@@ -198,6 +202,40 @@ impl ToolDispatcher {
     ) -> Result<serde_json::Value, ToolError> {
         self.call_function_with_timeout(name, args, self.default_timeout)
             .await
+    }
+
+    /// Call a regular function tool by name within a session: the tool
+    /// receives `ctx` (see [`ToolContext`](super::ToolContext)). The default
+    /// timeout applies, and cancelling `ctx.cancel` drops the call with
+    /// [`ToolError::Cancelled`].
+    pub async fn call_function_in(
+        &self,
+        name: &str,
+        args: serde_json::Value,
+        ctx: super::ToolContext,
+    ) -> Result<serde_json::Value, ToolError> {
+        let func = self.function(name)?;
+        self.ensure_confirmed(&func, &args).await?;
+        let timeout = self.default_timeout;
+        let cancel = ctx.cancel.clone();
+        tokio::select! {
+            biased;
+            () = cancel.cancelled() => Err(ToolError::Cancelled),
+            result = tokio::time::timeout(timeout, func.call_with_context(args, ctx)) => {
+                result.unwrap_or(Err(ToolError::Timeout(timeout)))
+            }
+        }
+    }
+
+    /// The regular function tool registered as `name`.
+    fn function(&self, name: &str) -> Result<Arc<dyn super::ToolFunction>, ToolError> {
+        match self.tools.get(name) {
+            Some(ToolKind::Function(f)) => Ok(f.clone()),
+            Some(_) => Err(ToolError::Other(format!(
+                "{name} is not a regular function tool"
+            ))),
+            None => Err(ToolError::NotFound(name.to_string())),
+        }
     }
 
     /// Call a regular function tool by name with an explicit timeout.
@@ -222,7 +260,12 @@ impl ToolDispatcher {
 
         self.ensure_confirmed(&func, &args).await?;
 
-        match tokio::time::timeout(timeout, func.call(args)).await {
+        match tokio::time::timeout(
+            timeout,
+            func.call_with_context(args, super::ToolContext::detached()),
+        )
+        .await
+        {
             Ok(result) => result,
             Err(_elapsed) => Err(ToolError::Timeout(timeout)),
         }
@@ -251,7 +294,10 @@ impl ToolDispatcher {
         self.ensure_confirmed(&func, &args).await?;
 
         tokio::select! {
-            result = func.call(args) => result,
+            result = func.call_with_context(
+                args,
+                super::ToolContext::detached().with_cancel(cancel.clone()),
+            ) => result,
             _ = cancel.cancelled() => Err(ToolError::Cancelled),
         }
     }

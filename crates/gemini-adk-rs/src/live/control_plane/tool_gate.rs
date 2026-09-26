@@ -49,6 +49,10 @@ impl ToolGate {
             return; // this completion already advanced the flow
         }
         if let Some(mon) = flow {
+            let _ = state.set(
+                crate::flow::TOOL_RESULT_KEY,
+                serde_json::json!({ "tool": name, "id": call_id, "ok": ok }),
+            );
             mon.lock().observe_tool(name, ok, state);
         }
     }

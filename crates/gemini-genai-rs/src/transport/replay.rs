@@ -27,6 +27,14 @@ use super::ws::Transport;
 /// Shared collection of frames "sent" during a replay.
 pub type OutboundFrames = Arc<parking_lot::Mutex<Vec<Vec<u8>>>>;
 
+/// Called with each frame's recorded capture time (milliseconds since the
+/// epoch) before the frame is delivered. The frame waits for the returned
+/// future, so a replay can hold a frame back until the session has finished
+/// processing the frames before it.
+pub type FrameGate = Arc<
+    dyn Fn(u64) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send + Sync,
+>;
+
 /// Errors from the [`ReplayTransport`].
 #[derive(Debug, thiserror::Error)]
 pub enum ReplayTransportError {
@@ -75,6 +83,8 @@ impl ReplayControl {
 /// frames. See the [module docs](self) for gating and drain semantics.
 pub struct ReplayTransport {
     inbound: VecDeque<Vec<u8>>,
+    timestamps: VecDeque<u64>,
+    on_frame: Option<FrameGate>,
     ungated_prefix: usize,
     delivered: usize,
     gate_rx: watch::Receiver<bool>,
@@ -100,6 +110,8 @@ impl ReplayTransport {
         (
             Self {
                 inbound: frames.into(),
+                timestamps: VecDeque::new(),
+                on_frame: None,
                 ungated_prefix: 1,
                 delivered: 0,
                 gate_rx,
@@ -113,13 +125,27 @@ impl ReplayTransport {
 
     /// Build a replay transport from a recorded wire log, keeping only the
     /// [`WireDirection::Inbound`] entries (in log order).
+    ///
+    /// Each frame keeps its recorded capture time, reported to a
+    /// [`with_frame_gate`](Self::with_frame_gate) callback.
     pub fn from_wire_log(entries: &[WireEntry]) -> (Self, ReplayControl) {
-        let frames = entries
+        let inbound: Vec<&WireEntry> = entries
             .iter()
             .filter(|e| e.dir == WireDirection::Inbound)
-            .map(|e| e.payload.clone())
             .collect();
-        Self::from_frames(frames)
+        let (mut transport, control) =
+            Self::from_frames(inbound.iter().map(|e| e.payload.clone()).collect());
+        transport.timestamps = inbound.iter().map(|e| e.ts_ms).collect();
+        (transport, control)
+    }
+
+    /// Pass each frame's recorded capture time to `gate` and wait for it
+    /// before delivering the frame. Frames built with
+    /// [`from_frames`](Self::from_frames) carry no timestamps, so the gate is
+    /// not called for them.
+    pub fn with_frame_gate(mut self, gate: FrameGate) -> Self {
+        self.on_frame = Some(gate);
+        self
     }
 
     /// Override how many leading frames are delivered before
@@ -182,6 +208,11 @@ impl Transport for ReplayTransport {
             .inbound
             .pop_front()
             .expect("checked non-empty inbound queue");
+        if let Some(ts_ms) = self.timestamps.pop_front()
+            && let Some(gate) = &self.on_frame
+        {
+            gate(ts_ms).await;
+        }
         self.delivered += 1;
         if self.inbound.is_empty() {
             let _ = self.drained_tx.send(true);

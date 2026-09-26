@@ -1,21 +1,47 @@
-# S.C.T.P.M.A Operator Algebra
+# Composition: S, C, T, P, M, G, E, A
 
-Six namespace modules for declaratively composing agent primitives. Each maps to a dimension of agent configuration: **S**tate, **C**ontext, **T**ools, **P**rompt, **M**iddleware, **A**rtifacts. They compose using Rust operators so agent definitions read like algebraic expressions.
+Namespace modules for composing agent configuration: **S**tate, **C**ontext,
+**T**ools, **P**rompt, **M**iddleware, **G**uards, **E**valuation, and
+**A**rtifacts.
 
-## The Six Operators
+## Two operators, one meaning each
 
-| Namespace | Operator | Purpose | Key Methods |
-|---|---|---|---|
-| `S::` | `>>` | State transforms | `pick`, `rename`, `merge`, `flatten`, `set`, `defaults`, `drop`, `map` |
-| `C::` | `+` | Context engineering | `window`, `user_only`, `model_only`, `head`, `truncate`, `filter`, `from_state` |
-| `T::` | `\|` | Tool composition | `simple`, `function`, `google_search`, `code_execution`, `toolset` |
-| `P::` | `+` | Prompt composition | `role`, `task`, `constraint`, `format`, `example`, `persona`, `guidelines` |
-| `M::` | `\|` | Middleware layers | `log`, `latency`, `timeout`, `retry`, `audit`, `circuit_breaker` |
-| `A::` | `+` | Artifact schemas | `output`, `input`, `json_output`, `json_input`, `text_output`, `text_input` |
+- **`a >> b` means "then".** Order matters: `b` applies after `a`, to what
+  `a` produced. Used for state transforms, context rewrites, middleware
+  layers and agent pipelines.
+- **`a + b` means "together".** Both apply, and neither sees the other's
+  result. Used for prompt sections, tools, guards (every guard must pass),
+  evaluation criteria and artifact declarations.
+
+Agents also take `|` (run in parallel), `*` (loop) and `/` (fallback).
+
+| Namespace | Operator | Purpose | Consumed by | Key methods |
+|---|---|---|---|---|
+| `S::` | `>>` | State transforms | a pipeline step (`agent >> S::pick(..) >> agent`), loop and branch predicates | `pick`, `rename`, `merge`, `flatten`, `set`, `defaults`, `drop`, `map` |
+| `C::` | `>>` | Context rewrites, applied in order | `AgentBuilder::context` | `window`, `user_only`, `model_only`, `head`, `truncate`, `filter`, `from_state` |
+| `M::` | `>>` | Middleware layers, outermost first | `.middleware(..)` | `log`, `latency`, `timeout`, `retry`, `audit`, `circuit_breaker` |
+| `P::` | `+` | Prompt sections | `.instruction(..)` | `role`, `task`, `constraint`, `format`, `example`, `persona`, `guidelines` |
+| `T::` | `+` | Tools | `.tools(..)` | `simple`, `contextual`, `typed`, `google_search`, `code_execution`, `mcp` |
+| `G::` | `+` | Output guards, all must pass | `AgentBuilder::guard` | `pii`, `length`, `json`, `regex`, `toxicity` |
+| `E::` | `+` | Evaluation criteria | `E::suite().criteria(..)` | `response_match`, `contains_match`, `trajectory`, `safety` |
+| `A::` | `+` | Artifact declarations | `AgentBuilder::artifacts`, `check_contracts` | `json_output`, `json_input`, `text_output`, `text_input` |
+
+Before 3.0, `C` chained with `+`, `M` and `T` with `|`, and `G` and `E`
+with `|` (which read as "either" but meant "all"). See the
+[migration guide](migration.md).
 
 ## S -- State Transforms
 
 State transforms mutate a `serde_json::Value` representing agent state. Chain them with `>>` for sequential application.
+
+A transform chain is also a pipeline step: between two agents it reshapes the
+session state, and the pipeline's text passes through unchanged.
+
+```rust,ignore
+let workflow = researcher
+    >> (S::pick(&["findings", "input"]) >> S::rename(&[("findings", "notes")]))
+    >> writer;
+```
 
 ### Methods
 
@@ -67,7 +93,7 @@ Live::builder()
 
 ## C -- Context Engineering
 
-Context policies filter and transform conversation history. Compose them with `+` to combine multiple policies.
+Context policies filter and transform conversation history. Chain them with `>>`: each rewrites the history the one before produced, so `C::prepend(..) >> C::window(10)` and `C::window(10) >> C::prepend(..)` differ.
 
 ### Methods
 
@@ -96,18 +122,18 @@ Context policies filter and transform conversation history. Compose them with `+
 use gemini_adk_fluent_rs::compose::C;
 
 // Keep recent context, no tool noise, inject state
-let policy = C::window(20) + C::exclude_tools() + C::from_state(&["user:name", "app:balance"]);
+let policy = C::window(20) >> C::exclude_tools() >> C::from_state(&["user:name", "app:balance"]);
 
 // For isolated sub-agents that should not see conversation history
 let isolated = C::empty();
 
 // Character-budget context for cost control
-let budget = C::truncate(4000) + C::dedup();
+let budget = C::truncate(4000) >> C::dedup();
 ```
 
 ## T -- Tool Composition
 
-Compose tools with `|`. Mix runtime function tools with built-in Gemini tools.
+Combine tools with `+`. Mix runtime function tools with built-in Gemini tools.
 
 ### Methods
 
@@ -137,8 +163,8 @@ struct City {
 let tools = T::typed("get_weather", "Get weather for a city", |args: City| async move {
         Ok(json!({"temp": 22, "city": args.city}))
     })
-    | T::google_search()
-    | T::code_execution();
+    + T::google_search()
+    + T::code_execution();
 
 assert_eq!(tools.len(), 3);
 
@@ -232,7 +258,7 @@ Live::builder()
 
 ## M -- Middleware Composition
 
-Compose middleware layers with `|`. Middleware intercepts agent events, tool calls, and errors.
+Stack middleware layers with `>>`, outermost first. Middleware intercepts agent events, tool calls, and errors.
 
 ### Methods
 
@@ -259,11 +285,11 @@ use std::time::Duration;
 
 // Production middleware stack
 let middleware = M::log()
-    | M::latency()
-    | M::timeout(Duration::from_secs(30))
-    | M::retry(3)
-    | M::circuit_breaker(5)
-    | M::audit();
+    >> M::latency()
+    >> M::timeout(Duration::from_secs(30))
+    >> M::retry(3)
+    >> M::circuit_breaker(5)
+    >> M::audit();
 
 assert_eq!(middleware.len(), 6);
 
@@ -278,7 +304,7 @@ let validated = M::validate(|call| {
 
 ## A -- Artifact Schemas
 
-Declare input/output artifact schemas with `+`. Artifacts describe data that flows between agents as typed, named entities.
+Declare input/output artifact schemas with `+`, and attach them to an agent with `.artifacts(..)`. Each input counts as a read and each output as a write of `artifact:{name}`, so `check_contracts` reports an artifact input no agent produces.
 
 ### Methods
 
@@ -346,11 +372,11 @@ use gemini_adk_fluent_rs::prelude::*;
 let state_prep = S::pick(&["customer", "order"]) >> S::defaults(json!({"priority": "normal"}));
 
 // C: control what context the agent sees
-let context = C::window(10) + C::exclude_tools();
+let context = C::window(10) >> C::exclude_tools();
 
 // T: equip the agent with tools
 let tools = order_status()          // a #[tool] fn
-    | T::google_search();
+    + T::google_search();
 
 // P: compose the instruction
 let prompt = P::role("a customer support specialist")
@@ -362,7 +388,7 @@ let prompt = P::role("a customer support specialist")
 let artifacts = A::json_output("resolution", "How the issue was resolved");
 
 // M: add operational middleware
-let middleware = M::log() | M::latency() | M::audit();
+let middleware = M::log() >> M::latency() >> M::audit();
 ```
 
 ## Builder Integration

@@ -1,0 +1,21 @@
+{
+  "description": "Get the current weather for a city.",
+  "name": "get_weather",
+  "parameters": {
+    "properties": {
+      "city": {
+        "description": "The city name, e.g. \"Paris\".",
+        "type": "string"
+      },
+      "units": {
+        "default": null,
+        "description": "\"metric\" or \"imperial\"; metric when omitted.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "city"
+    ],
+    "type": "object"
+  }
+}

@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "gemini-adk"
-version = "0.8.0"
+version = "3.0.0"
 description = "Python access to the gemini-rs governed-conversation data plane: author, compile, validate, and deterministically simulate voice-agent conversation specs."
 readme = "README.md"
 requires-python = ">=3.10"

@@ -1,6 +1,6 @@
 //! T — Tool composition.
 //!
-//! Compose tools in any order with `|`.
+//! Combine tools with `+`: all of them are offered to the model.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -12,7 +12,7 @@ use gemini_genai_rs::prelude::{FunctionDeclaration, Tool};
 
 /// A tool composite — one or more tool entries.
 ///
-/// Built from the `T` namespace and composed with `|`. Any single
+/// Built from the `T` namespace and combined with `+`. Any single
 /// [`ToolFunction`] (a `SimpleTool`, a `TypedTool`, the value a `#[tool]`
 /// function returns, or an `Arc<dyn ToolFunction>`) converts into a
 /// one-entry composite via `From`, so `.tools(get_weather())` works without
@@ -135,11 +135,11 @@ impl<F: ToolFunction + 'static> From<F> for ToolComposite {
     }
 }
 
-/// Compose two tool composites with `|`.
-impl std::ops::BitOr for ToolComposite {
+/// Combine two tool composites with `+`.
+impl std::ops::Add for ToolComposite {
     type Output = ToolComposite;
 
-    fn bitor(mut self, rhs: ToolComposite) -> Self::Output {
+    fn add(mut self, rhs: ToolComposite) -> Self::Output {
         self.entries.extend(rhs.entries);
         self
     }
@@ -186,6 +186,31 @@ impl T {
         Fut: Future<Output = Result<serde_json::Value, gemini_adk_rs::ToolError>> + Send + 'static,
     {
         let tool = SimpleTool::new(name, description, None, f);
+        ToolComposite::from_function(Arc::new(tool))
+    }
+
+    /// A tool from a closure that also receives the call's
+    /// [`ToolContext`](gemini_adk_rs::tool::ToolContext): the session state,
+    /// the call id, and a cancellation token that fires on barge-in.
+    ///
+    /// ```
+    /// use gemini_adk_fluent_rs::prelude::*;
+    ///
+    /// let balance = T::contextual("balance", "The caller's balance", |_args, ctx| async move {
+    ///     let account: String = ctx.state.get("account_id").unwrap_or_default();
+    ///     Ok(serde_json::json!({ "account": account, "cents": 1200 }))
+    /// });
+    /// ```
+    pub fn contextual<F, Fut>(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        f: F,
+    ) -> ToolComposite
+    where
+        F: Fn(serde_json::Value, gemini_adk_rs::tool::ToolContext) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<serde_json::Value, gemini_adk_rs::ToolError>> + Send + 'static,
+    {
+        let tool = gemini_adk_rs::tool::ContextTool::new(name, description, None, f);
         ToolComposite::from_function(Arc::new(tool))
     }
 
@@ -514,6 +539,15 @@ impl ToolFunction for TransformTool {
         let result = self.inner.call(args).await?;
         Ok((self.transformer)(result).await)
     }
+
+    async fn call_with_context(
+        &self,
+        args: serde_json::Value,
+        ctx: gemini_adk_rs::tool::ToolContext,
+    ) -> Result<serde_json::Value, gemini_adk_rs::error::ToolError> {
+        let result = self.inner.call_with_context(args, ctx).await?;
+        Ok((self.transformer)(result).await)
+    }
 }
 
 #[cfg(test)]
@@ -617,7 +651,7 @@ mod tests {
 
     #[test]
     fn compose_with_bitor() {
-        let t = T::google_search() | T::url_context() | T::code_execution();
+        let t = T::google_search() + T::url_context() + T::code_execution();
         assert_eq!(t.len(), 3);
     }
 

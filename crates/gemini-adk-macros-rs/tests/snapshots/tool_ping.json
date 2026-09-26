@@ -1,0 +1,7 @@
+{
+  "description": "Take no arguments.",
+  "name": "ping",
+  "parameters": {
+    "type": "object"
+  }
+}

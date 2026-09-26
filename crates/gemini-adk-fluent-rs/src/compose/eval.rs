@@ -1,6 +1,6 @@
 //! E — Evaluation composition.
 //!
-//! Compose evaluation criteria with `|` for agent quality assessment.
+//! Combine evaluation criteria with `+`: every criterion is measured.
 
 use std::sync::Arc;
 
@@ -122,18 +122,18 @@ impl std::fmt::Debug for EvalCriterion {
     }
 }
 
-/// Compose two criteria with `|`.
-impl std::ops::BitOr for EvalCriterion {
+/// Combine two criteria with `+`: both are measured.
+impl std::ops::Add for EvalCriterion {
     type Output = EvalComposite;
 
-    fn bitor(self, rhs: EvalCriterion) -> Self::Output {
+    fn add(self, rhs: EvalCriterion) -> Self::Output {
         EvalComposite {
             criteria: vec![self, rhs],
         }
     }
 }
 
-/// A composite of evaluation criteria (`E::a() | E::b()`).
+/// A composite of evaluation criteria (`E::a() + E::b()`).
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub struct EvalComposite {
@@ -181,10 +181,10 @@ impl EvalComposite {
     }
 }
 
-impl std::ops::BitOr<EvalCriterion> for EvalComposite {
+impl std::ops::Add<EvalCriterion> for EvalComposite {
     type Output = EvalComposite;
 
-    fn bitor(mut self, rhs: EvalCriterion) -> Self::Output {
+    fn add(mut self, rhs: EvalCriterion) -> Self::Output {
         self.criteria.push(rhs);
         self
     }
@@ -219,7 +219,7 @@ impl EvalSuite {
     }
 
     /// Set the criteria applied to every case — a single `E::` criterion or
-    /// a `|`-composed [`EvalComposite`].
+    /// a `+`-combined [`EvalComposite`].
     pub fn criteria(mut self, criteria: impl Into<EvalComposite>) -> Self {
         self.criteria = criteria.into();
         self
@@ -466,7 +466,7 @@ mod tests {
             }
         }
         let llm: Arc<dyn BaseLlm> = Arc::new(NoopJudge);
-        let composite = E::response_match() | E::safety(llm.clone()) | E::semantic_match(llm);
+        let composite = E::response_match() + E::safety(llm.clone()) + E::semantic_match(llm);
         assert_eq!(composite.len(), 3);
     }
 
@@ -475,14 +475,14 @@ mod tests {
         let suite = E::suite()
             .case("What is 2+2?", "4")
             .case("Hello", "Hi")
-            .criteria(E::response_match() | E::contains_match());
+            .criteria(E::response_match() + E::contains_match());
         assert_eq!(suite.len(), 2);
         assert_eq!(suite.criteria.len(), 2);
     }
 
     #[test]
     fn score_all_returns_results() {
-        let composite = E::response_match() | E::contains_match();
+        let composite = E::response_match() + E::contains_match();
         let scores = composite.score_all("hello world", "hello");
         assert_eq!(scores.len(), 2);
         assert_eq!(scores[0].0, "response_match");

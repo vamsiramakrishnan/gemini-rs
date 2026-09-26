@@ -78,8 +78,54 @@ let balance = T::typed("balance", "Look up an account balance", move |args: Look
     async move { Ok(serde_json::json!({ "balance": db.balance(&args.account).await? })) }
 });
 
-AgentBuilder::new("support").tools(balance | T::google_search());
+AgentBuilder::new("support").tools(balance + T::google_search());
 ```
+
+## Session context: `ToolContext`
+
+A tool sometimes needs more than its arguments: an account id captured
+earlier in the conversation, the call's id for a log line or an idempotency
+key, or a way to stop when the caller barges in. The runtime passes every
+call a `ToolContext` with three fields:
+
+| Field | What it holds |
+|---|---|
+| `state` | The session `State`. Read what the conversation captured, write what the tool learned. |
+| `call_id` | The model's id for this call, when it gave one. |
+| `cancel` | A `CancellationToken`. On a Live session it fires when the user barges in on an inline call, and the runtime drops the call's future. A long tool can also check it between steps. |
+
+A tool that wants the context asks for it. Add a `ToolContext` parameter to
+a `#[tool]` function. The runtime fills it, and it is left out of the schema
+the model sees:
+
+```rust,ignore
+use gemini_adk_fluent_rs::prelude::*;
+
+/// Look up the caller's balance.
+///
+/// # Arguments
+///
+/// * `currency` - ISO currency code for the answer.
+#[tool]
+async fn balance(currency: String, ctx: ToolContext) -> Result<serde_json::Value, ToolError> {
+    let account: String = ctx.state.get("account_id").unwrap_or_default();
+    Ok(serde_json::json!({ "account": account, "currency": currency }))
+}
+```
+
+For a closure, use `T::contextual(name, description, |args, ctx| async move
+{ .. })`. A hand-written `ToolFunction` overrides `call_with_context`. Its
+default forwards to `call`, so existing tools are unchanged.
+
+Called outside a session (`tool.call(args)` in a unit test), a tool gets
+`ToolContext::detached()`: empty state, no call id, and a token that never
+fires. To test with context, build one with `ToolContext::new(state)
+.with_call_id("call-1")` and call `call_with_context`, or call
+`ToolDispatcher::call_function_in(name, args, ctx)`.
+
+`ToolContext` in the fluent prelude is this type,
+`gemini_adk_rs::tool::ToolContext`. The invocation-context wrapper that had
+the name in 2.x stays at `gemini_adk_rs::context::ToolContext`.
 
 ## Lower-level forms
 
@@ -177,7 +223,7 @@ Gemini provides server-side tools requiring no implementation:
 Live::builder().google_search().code_execution().url_context()
 
 // Or T:: composition with pipe operator
-Live::builder().tools(T::google_search() | T::code_execution() | T::url_context())
+Live::builder().tools(T::google_search() + T::code_execution() + T::url_context())
 ```
 
 ## Per-Tool Policies
@@ -194,9 +240,9 @@ Live::builder()
             Duration::from_secs(10),
         )
         // In-session result cache
-        | T::cached(get_rate())
+        + T::cached(get_rate())
         // Confirmation flag (recorded; see note in tool-policies.md)
-        | T::confirm(send_email(), "This will send a real email — are you sure?")
+        + T::confirm(send_email(), "This will send a real email — are you sure?")
     )
 ```
 
@@ -259,7 +305,7 @@ Live::builder()
     .tools(
         T::function(Arc::new(weather_tool))
         | calculate()                         // a #[tool] fn converts directly
-        | T::google_search()
+        + T::google_search()
     )
 ```
 

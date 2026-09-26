@@ -1,0 +1,6 @@
+{
+  "voiceActivity": {
+    "voiceActivityType": "ACTIVITY_START",
+    "audioOffset": "1.250s"
+  }
+}

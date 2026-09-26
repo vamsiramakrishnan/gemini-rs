@@ -2,7 +2,8 @@
 
 > Status legend: ✅ shipped · 🚧 in progress · 📋 planned · 💭 exploratory
 >
-> Current release: **0.7.0** (2026-05-31). **0.8.0 staged on this branch** (2026-06-12).
+> Current release: **3.0.0** (staged for tagging, 2026-09-25). Milestones 7–9 and the
+> telephony endgame below shipped in it.
 
 > **Strategy:** the full competitive analysis and sequencing live in
 > [`docs/plans/2026-06-11-100x-strategy-memo.md`](docs/plans/2026-06-11-100x-strategy-memo.md).
@@ -94,11 +95,15 @@ Authored as focused, green commits, in this order:
 7. ✅ **Policy overlays as reusable aspects** — `Policy::safety_handoff` (→ a
    terminating `safety` digression), `Policy::redact` (redaction set), and
    `Policy::commit(..).idempotency_key/.compensate_with` (commit governance), all
-   serializable + applied via `Conversation::policy(..)`. *(Redaction/idempotency
-   runtime enforcement in the logging/dispatch layers is a follow-up; the aspects
-   are recorded + surfaced.)*
-8. 📋 **Voice timing in the graph** — per-stage filler/reprompt/interrupt/
-   endpointing/context-delivery as declarative policy lowering to Live settings.
+   serializable + applied via `Conversation::policy(..)`. Enforced at runtime
+   since 3.0: redacted keys are masked in the journal sink, snapshots and
+   extraction events, and a commit tool runs inside `CommitGuard` (idempotency
+   key, compensating tool).
+8. ✅ **Voice timing in the graph** — `VoiceTiming` per stage: reprompt after
+   silence, filler cues for slow tools, floor holding, end-of-speech hold and
+   context delivery, published by the stack and applied by the Live runtime.
+   Verbatim stages (checked against the output transcript) and corrections
+   that reopen a confirmation shipped with it.
 9. ✅ **NL→flow codegen as a skill** — `.claude/skills/conversation-from-script/`
    drafts a `ConversationSpec` + `Scenario` tests from a script (authoring
    assistant; model drafts, control plane governs). Example JSON validated by an
@@ -166,7 +171,8 @@ half-wired.
   are now supervised (surfaced as `LiveEvent::Error`). *(The full unified reaction
   loop — phases/watchers/temporal/repair on one scheduler — remains the 0.9.0
   arc; new scheduler nouns get added when a rule actually needs them.)*
-- 💭 **Promote the mutation journal into the substrate.** `State` already records
+- ✅ **Promote the mutation journal into the substrate.** *(3.0: computed state
+  reads journal cursors, with gap detection; durable `JournalSink`.)* `State` already records
   `StateMutation` (seq, old/new, origin, ts) with cursors/drain. Have
   watchers/computed/extractors consume cursors instead of re-snapshotting; add an
   optional durable sink. → **Value:** time-travel debugging, deterministic session
@@ -215,17 +221,19 @@ Mechanical guardrails so Milestones 1–2 can't regress and the crate stays hone
   criteria); `GET /eval/results` served.
 - ✅ `GET /debug/trace/:id` serves a real recorded span tree; `POST /run` returns
   `trace_id`.
-- 📋 **Real SSE streaming.** `run_agent_sse` returns hardcoded
+- ✅ **Real SSE streaming.** `run_agent_sse` returns hardcoded
   `"Streaming response for: …"` (`handlers.rs`). Stream actual agent output. →
   **Value:** a public endpoint currently returns fake data.
-- 📋 **`GET /debug/traces` list** — `TraceStore::list()` already exists; wire the
+- ✅ **`GET /debug/traces` list** — `TraceStore::list()` already exists; wire the
   symmetric endpoint (4 lines).
-- 📋 **Input validation** — `get_artifact_version` does `version.parse().unwrap_or(0)`;
+- ✅ **Input validation** — `get_artifact_version` does `version.parse().unwrap_or(0)`;
   return 400 on malformed input. Add limit/offset to `/eval/results` for parity.
-- 📋 Subsume `extract_turns` into the unified `Extract` API (deprecated shim);
+- ❌ Subsume `extract_turns` into the unified `Extract` API — decided against:
+  `extract_turns` is the model-backed extractor and `Extract` the
+  deterministic one, and they compose as a cheap-first cascade.
   MCP/A2A/OpenAPI/Search tool sources currently error at connect — implement or
   document.
-- 📋 `extraction.md` user guide + Extract↔Flow interplay section in `flow.md`.
+- ✅ `extraction.md` user guide + Extract↔Flow interplay section in `flow.md`.
 
 ## Milestone 6 — The correctness floor `0.8.0` ✅
 
@@ -260,7 +268,7 @@ evolvability. Nothing above this matters if barge-in hangs or snapshots tear.
   `Stream<Item = LiveEvent>` (lag-skipping, ends on close) so events compose
   with `tokio-stream`; callbacks become sugar.
 
-## Milestone 7 — The determinism spine `0.9.0` 🚧
+## Milestone 7 — The determinism spine ✅ (shipped in 3.0.0)
 
 The keystone: **any session can be replayed deterministically through the real
 control plane.** (Verified: Sim already runs real FlowStack/extractor code.)
@@ -277,42 +285,50 @@ control plane.** (Verified: Sim already runs real FlowStack/extractor code.)
   `adk session replay <wire-log> [--journal <journal-log>]` (CLEAN/DRIFT);
   closed-loop record→replay test asserts per-lane events, final state, and
   byte-identical setup/tool-response frames.
-- 📋 **Injectable clock** — `Instant::now()`/`SystemTime::now()`/timeouts leak
-  nondeterminism into control flow (sites catalogued in audit).
-- 📋 **Recorded LLM/resolver outputs** — tape async resolver results so replay
-  never re-executes a model call.
-- 📋 Promote the mutation journal: watchers/computed/extractors consume cursors
-  (carried over from old Milestone 3).
+- ✅ **Injectable clock** — `gemini_adk_rs::clock` (`ManualClock` for tests);
+  state, phases, temporal patterns, the reactor and resolver caches read it,
+  and a replay follows the recording's timestamps.
+- ✅ **Recorded LLM/resolver outputs** — `tape::{TapedLlm, taped_resolver}`
+  over a memory or JSONL tape; a replay never re-executes a model call.
+- ✅ Promote the mutation journal: computed state consumes cursors
+  (`State::try_mutations_since`, gap-aware).
+- ✅ Offline Live sessions: `connect_with_transport` and
+  `testing::ScriptedServer`.
 
-## Milestone 8 — Conversation CI 📋
+## Milestone 8 — Conversation CI ✅ (shipped in 3.0.0)
 
 The most evidenced bet: every commercial voice-agent tester is LLM-vs-LLM
 (τ²-bench: 90% pass@1 → 57% pass^8). Ours is deterministic and free.
 
-- 📋 GitHub-Action conformance suite: `adk flow simulate` over a scenario
-  corpus on every PR, `why_blocked()` diffs as review artifacts.
-- 📋 Scenario extraction from recorded sessions (incident → regression test).
-- 📋 Strict canned-response mode (per-phase enforced template-only output) —
-  the zero-hallucination guarantee for regulated deployments.
+- ✅ GitHub-Action conformance suite: `adk flow ci` over the scenario corpus
+  on every PR (the `Conversation CI` job).
+- ✅ Scenario extraction from recorded sessions: `Scenario::from_journal`,
+  `adk session scenario`, `adk flow replay` (CLEAN/DIVERGED) and
+  `adk flow why`.
+- ✅ Strict canned-response mode: verbatim stages complete only when the
+  model's words match the required text.
 
-## Milestone 9 — The funnel 📋
+## Milestone 9 — The funnel 🚧
 
-- 📋 **Python bindings** (PyO3) over the Rust core — the Pydantic/Polars play;
+- ✅ **Python bindings** (PyO3, `crates/gemini-adk-py`, built and smoke-tested
+  in CI) over the Rust core — the Pydantic/Polars play;
   the adoption funnel for the entire Python voice-AI population.
-- 📋 Proof artifacts: published reproducible p99 mic-to-model jitter benchmark
-  vs LiveKit/Pipecat; time-travel debugger UI (journal × wire log) in the web
-  devtools.
+- ✅ Proof artifact: a reproducible mic-to-wire jitter benchmark
+  (`session-bench --jitter-secs`), results in the capacity guide.
+- 📋 The same measurement against LiveKit and Pipecat; time-travel debugger UI
+  (journal × wire log) in the web devtools.
 - ❌ **OpenAI Realtime L0: deliberately not pursued** (decision 2026-06-11) —
   Gemini-native is the identity; the control plane stays provider-agnostic so
   the option remains open.
 
 ## Milestone 10 — Rust-only endgames 💭
 
-- 🚧 Single-binary telephony: **shipped** — `telephony::sip::SipAgent`
+- ✅ Single-binary telephony: **shipped** — `telephony::sip::SipAgent`
   (feature `sip`) answers raw SIP calls in-process (rsipstack signalling +
   built-in RTP/SDP/G.711), alongside the Twilio Media Streams connector.
   RFC 4733 DTMF shipped (negotiated in the SDP answer; digits land in the
-  shared `telephony:` state keys). Remaining: SIP registration, SRTP.
+  shared `telephony:` state keys). SIP registration (digest auth, refresh)
+  and SRTP (SDES, RFC 3711) shipped in 3.0.0.
 - 💭 WASM edge governance: compiler + Sim in the browser (authoring/validation)
   and Workers/on-device.
 - 💭 On-device turn detection (smart-turn-v3 is BSD-2/8M params/12ms CPU;

@@ -179,58 +179,10 @@ fn drop_sim(sim: u64) {
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
-/// Apply a single step, mirroring `Scenario::run` so the interactive and
-/// scenario paths share semantics.
+/// Apply a single step with the simulator's own semantics (the same
+/// `Sim::apply` that `Scenario::run` uses).
 fn apply_step(s: &mut Sim, step: &SimStep) -> PyResult<()> {
-    let fail = |msg: String| Err(PyValueError::new_err(msg));
-    match step {
-        SimStep::User(text) => {
-            RT.block_on(s.user(text));
-        }
-        SimStep::Set { key, value } => {
-            s.set(key.clone(), value.clone());
-        }
-        SimStep::ToolOk(tool) => {
-            s.tool_ok(tool);
-        }
-        SimStep::ScheduleTool { tool, after } => {
-            s.schedule_tool(tool.clone(), *after);
-        }
-        SimStep::Turn => {
-            s.turn();
-        }
-        SimStep::ExpectActive(expected) => {
-            let active = s.active();
-            for e in expected {
-                if !active.contains(e) {
-                    return fail(format!("expected active '{e}', got {active:?}"));
-                }
-            }
-        }
-        SimStep::ExpectDenied(tool) => {
-            if s.allowed(tool) {
-                return fail(format!("expected '{tool}' denied, but it was admitted"));
-            }
-        }
-        SimStep::ExpectAllowed(tool) => {
-            if !s.allowed(tool) {
-                let why = s.denied().get(tool).cloned().unwrap_or_default();
-                return fail(format!("expected '{tool}' allowed, but denied: {why}"));
-            }
-        }
-        SimStep::ExpectSlot { key, value } => {
-            let got = s.state().get_raw(key);
-            if got.as_ref() != Some(value) {
-                return fail(format!("expected slot '{key}' = {value}, got {got:?}"));
-            }
-        }
-        SimStep::ExpectComplete => {
-            if !s.is_complete() {
-                return fail("expected conversation complete".into());
-            }
-        }
-    }
-    Ok(())
+    RT.block_on(s.apply(step)).map_err(PyValueError::new_err)
 }
 
 fn snapshot_json(s: &Sim) -> String {

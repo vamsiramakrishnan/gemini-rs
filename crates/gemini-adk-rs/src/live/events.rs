@@ -28,6 +28,9 @@ pub enum LiveEvent {
     /// Raw PCM audio from model. Uses `Bytes` (refcounted) — clone is
     /// a pointer increment (~2ns), not a deep copy.
     Audio(Bytes),
+    /// Non-audio media from the model: Gemini 3.8 Live Avatar video
+    /// (`video/mp4`), synchronized with [`Audio`](Self::Audio).
+    Media(gemini_genai_rs::session::InlineMedia),
     /// Incremental text token from model.
     TextDelta(String),
     /// Complete text response (all deltas concatenated).
@@ -114,6 +117,30 @@ pub enum LiveEvent {
     TurnComplete,
     /// Model output interrupted by user speech.
     Interrupted,
+    /// A tool call in a stage with a filler timing has run longer than the
+    /// stage allows: play an earcon or a holding line now.
+    FillerCue {
+        /// The tool still running.
+        tool: String,
+        /// How long it has run, in milliseconds.
+        elapsed_ms: u64,
+    },
+    /// A verbatim stage's required text was compared with what the model
+    /// said this turn.
+    VerbatimChecked {
+        /// The stage.
+        step: String,
+        /// Word-level similarity, 0–1.
+        similarity: f64,
+        /// Whether it was close enough to count as verbatim.
+        passed: bool,
+    },
+    /// The user stayed silent past the active stage's reprompt timing, and
+    /// the model was asked to repeat its question.
+    Reprompted {
+        /// How long the user had been silent, in milliseconds.
+        silence_ms: u64,
+    },
     /// Session connected to Gemini.
     Connected,
     /// Session disconnected.

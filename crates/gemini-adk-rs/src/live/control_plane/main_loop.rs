@@ -97,6 +97,9 @@ pub(in crate::live) async fn run_control_lane(
         let span = turn.span();
         async {
             match event {
+                ControlEvent::Barrier(done) => {
+                    let _ = done.send(());
+                }
                 // -- Transcript accumulation (exclusive to control lane) --
                 ControlEvent::InputTranscript(text) => {
                     transcript_buffer.push_input(&text);
@@ -154,6 +157,10 @@ pub(in crate::live) async fn run_control_lane(
                 ControlEvent::Interrupted => {
                     // Truncate current model turn on interruption (no mutex)
                     transcript_buffer.truncate_current_model_turn();
+                    // A barge-in counts toward the active step's repair policy.
+                    if let Some(flow) = &control_plane.flow {
+                        flow.lock().on_interrupted(&state);
+                    }
                     if let Some(cb) = &callbacks.on_interrupted {
                         dispatch_callback!(callbacks.on_interrupted_mode, cb());
                     }
@@ -191,6 +198,19 @@ pub(in crate::live) async fn run_control_lane(
                         && let Some(cb) = &callbacks.on_input_transcript
                     {
                         cb(&accumulated_input, true);
+                    }
+                    // A verbatim stage completes only once its text was said
+                    // word for word: record this turn's verdict before the
+                    // flow is evaluated below.
+                    if control_plane.flow.is_some()
+                        && let Some(verdict) =
+                            crate::flow::verbatim::check_turn(&state, &accumulated_output)
+                    {
+                        let _ = event_tx.send(LiveEvent::VerbatimChecked {
+                            step: verdict.step,
+                            similarity: verdict.similarity,
+                            passed: verdict.passed,
+                        });
                     }
                     accumulated_input.clear();
                     accumulated_output.clear();

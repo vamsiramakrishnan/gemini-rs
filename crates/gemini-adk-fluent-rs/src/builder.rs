@@ -433,6 +433,28 @@ impl AgentBuilder {
         Self::with(inner)
     }
 
+    /// Declare the artifacts this agent consumes and produces, from the `A`
+    /// namespace: `A::text_input(..) + A::json_output(..)`.
+    ///
+    /// Each input is a read and each output a write of the state key
+    /// `artifact:{name}`, so [`check_contracts`](crate::testing::check_contracts)
+    /// reports an artifact input no agent produces, or one produced twice,
+    /// exactly as it does for state keys.
+    pub fn artifacts(
+        self,
+        artifacts: impl Into<crate::compose::artifacts::ArtifactComposite>,
+    ) -> Self {
+        let artifacts = artifacts.into();
+        let mut builder = self;
+        for input in artifacts.all_inputs() {
+            builder = builder.reads(format!("artifact:{}", input.name));
+        }
+        for output in artifacts.all_outputs() {
+            builder = builder.writes(format!("artifact:{}", output.name));
+        }
+        builder
+    }
+
     /// Add a sub-agent for transfer.
     pub fn sub_agent(self, agent: AgentBuilder) -> Self {
         let mut inner = self.mutate();
@@ -551,7 +573,7 @@ impl AgentBuilder {
         self.tools(ToolComposite::from_function(Arc::new(f)))
     }
 
-    /// Register tools: a `|`-composed [`ToolComposite`] from the `T`
+    /// Register tools: a `+`-combined [`ToolComposite`] from the `T`
     /// namespace, or a single [`ToolFunction`].
     ///
     /// `T::mcp(..)` needs an async connection that this synchronous builder
@@ -562,7 +584,7 @@ impl AgentBuilder {
     /// # use gemini_adk_fluent_rs::prelude::*;
     /// # use serde_json::json;
     /// let tools = T::simple("greet", "Greet", |_| async { Ok(json!({})) })
-    ///     | T::google_search();
+    ///     + T::google_search();
     /// AgentBuilder::new("assistant").tools(tools);
     /// ```
     pub fn tools(self, tools: impl Into<ToolComposite>) -> Self {
@@ -617,11 +639,12 @@ impl AgentBuilder {
     /// guard; if any rejects the output the agent run fails with an
     /// [`AgentError`](gemini_adk_rs::error::AgentError) listing the violations.
     ///
-    /// Accepts a single guard or a `|`-composed [`GuardComposite`]:
+    /// Accepts a single guard or a `+`-combined [`GuardComposite`] (every
+    /// guard must pass):
     ///
     /// ```no_run
     /// # use gemini_adk_fluent_rs::prelude::*;
-    /// AgentBuilder::new("writer").guard(G::pii() | G::length(1, 2000));
+    /// AgentBuilder::new("writer").guard(G::pii() + G::length(1, 2000));
     /// ```
     ///
     /// The guards are installed as an `after_model` middleware layer, so they
@@ -635,11 +658,12 @@ impl AgentBuilder {
     /// Attach a context policy that rewrites conversation history before each
     /// model call (e.g. windowing, role filtering, tool-result exclusion).
     ///
-    /// Accepts a single policy or a `+`-composed [`ContextComposite`]:
+    /// Accepts a single policy or a `>>`-chained [`ContextComposite`] (applied
+    /// in order):
     ///
     /// ```no_run
     /// # use gemini_adk_fluent_rs::prelude::*;
-    /// AgentBuilder::new("chat").context(C::window(10) + C::user_only());
+    /// AgentBuilder::new("chat").context(C::window(10) >> C::user_only());
     /// ```
     ///
     /// The policy is installed as a `transform_request` middleware layer.
@@ -657,7 +681,7 @@ impl AgentBuilder {
         self.isolate()
     }
 
-    /// Attach middleware — a `|`-composed [`MiddlewareComposite`] from the
+    /// Attach middleware — a `>>`-stacked [`MiddlewareComposite`] from the
     /// `M` namespace or a single `Arc<dyn Middleware>`. All layers are
     /// installed on the compiled `LlmTextAgent` in the order given.
     ///
@@ -669,7 +693,7 @@ impl AgentBuilder {
     /// # use gemini_adk_fluent_rs::prelude::*;
     /// let agent = AgentBuilder::new("analyst")
     ///     .instruction("Analyze topics")
-    ///     .middleware(M::log() | M::latency());
+    ///     .middleware(M::log() >> M::latency());
     /// ```
     pub fn middleware(self, middleware: impl Into<MiddlewareComposite>) -> Self {
         let mut inner = self.mutate();
@@ -1239,7 +1263,7 @@ mod tests {
         let mw = M::before_model(move |_req| {
             bm.fetch_add(1, Ordering::SeqCst);
             Ok(())
-        }) | M::after_tool(move |_call, _result| {
+        }) >> M::after_tool(move |_call, _result| {
             at.fetch_add(1, Ordering::SeqCst);
             Ok(())
         });
@@ -1284,7 +1308,7 @@ mod tests {
         use crate::compose::middleware::M;
 
         let base = AgentBuilder::new("base").instruction("base");
-        let with_mw = base.clone().middleware(M::log() | M::latency());
+        let with_mw = base.clone().middleware(M::log() >> M::latency());
 
         // Original should have no middleware layers.
         assert_eq!(base.middleware_layer_count(), 0);
@@ -1396,7 +1420,7 @@ mod tests {
         });
 
         let agent = AgentBuilder::new("guarded")
-            .guard(G::pii() | G::length(1, 1000))
+            .guard(G::pii() + G::length(1, 1000))
             .build(llm)
             .unwrap();
 
@@ -1445,7 +1469,9 @@ mod tests {
         });
 
         let agent = AgentBuilder::new("ctx")
-            .context(C::prepend(Content::user("a")) + C::prepend(Content::user("b")) + C::window(1))
+            .context(
+                C::prepend(Content::user("a")) >> C::prepend(Content::user("b")) >> C::window(1),
+            )
             .build(llm)
             .unwrap();
 
@@ -1566,7 +1592,7 @@ mod honest_build_tests {
         let agent = AgentBuilder::new("both")
             .tools(
                 T::simple("ping", "Ping", |_| async { Ok(serde_json::json!({})) })
-                    | T::code_execution(),
+                    + T::code_execution(),
             )
             .url_context()
             .build(llm.clone())

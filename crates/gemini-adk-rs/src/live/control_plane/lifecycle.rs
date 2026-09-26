@@ -83,7 +83,7 @@ pub(in crate::live) async fn handle_turn_complete(
 
     // 5. Recompute derived state
     if let Some(computed) = computed {
-        computed.recompute(state);
+        computed.recompute_changed(state);
     }
 
     // 6. Build transcript window snapshot for phase evaluation
@@ -250,6 +250,7 @@ pub(in crate::live) async fn handle_turn_complete(
     // docs/plans/2026-06-07-turn-tool-pipeline-rfc.md.)
     deliver_instruction_and_context(
         writer,
+        state,
         shared,
         control_plane,
         resolved_instruction,
@@ -312,7 +313,8 @@ async fn build_snapshot(
         String::new()
     };
     crate::live::persistence::SessionSnapshot {
-        state: state.to_hashmap(),
+        // Sensitive keys never reach a persistence backend.
+        state: state.to_redacted_hashmap(),
         phase: phase_name,
         turn_count,
         transcript_summary: transcript_buffer.format_window(5),
@@ -705,8 +707,13 @@ fn steering_key(content: &gemini_genai_rs::prelude::Content) -> Option<String> {
 ///   conversation it is appended to has no way to retract the earlier copy;
 /// - delivery is `Immediate` (one `send_client_content`) or `Deferred` (queued in
 ///   `PendingContext` for the next user send), never a burst of isolated frames.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the turn's delivery stage: the instruction, the batched context, the transition and the prompt flag, plus the writer, state and config it delivers through"
+)]
 async fn deliver_instruction_and_context(
     writer: &Arc<dyn SessionWriter>,
+    state: &State,
     shared: &SharedState,
     control_plane: &ControlPlaneConfig,
     resolved_instruction: Option<String>,
@@ -780,7 +787,12 @@ async fn deliver_instruction_and_context(
     // so context never arrives as isolated frames during silence).
     if !context_buffer.is_empty() || should_prompt {
         use crate::live::steering::ContextDelivery;
-        match (&control_plane.context_delivery, &shared.pending_context) {
+        // The active stage's voice timing can override the session's choice.
+        let delivery = state
+            .get::<crate::flow::VoiceTiming>(crate::flow::VOICE_TIMING_KEY)
+            .and_then(|t| t.context_delivery)
+            .unwrap_or(control_plane.context_delivery);
+        match (&delivery, &shared.pending_context) {
             (ContextDelivery::Deferred, Some(pending)) => {
                 pending.extend(context_buffer);
                 if should_prompt {

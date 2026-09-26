@@ -1,4 +1,4 @@
-//! Walk Example 15: Middleware Stack — M::log | M::latency | M::retry | M::cost | M::circuit_breaker
+//! Walk Example 15: Middleware Stack — M::log >> M::latency >> M::retry >> M::cost >> M::circuit_breaker
 //!
 //! Demonstrates composing middleware layers using the M namespace and `|` operator.
 //! Middleware provides cross-cutting concerns like logging, latency tracking,
@@ -52,7 +52,7 @@ fn main() {
     println!("\n--- Part 2: Composing Middleware ---");
 
     let production_stack =
-        M::log() | M::latency() | M::retry(3) | M::cost() | M::circuit_breaker(5);
+        M::log() >> M::latency() >> M::retry(3) >> M::cost() >> M::circuit_breaker(5);
 
     println!("  Production stack: {} layers", production_stack.len());
 
@@ -61,7 +61,8 @@ fn main() {
 
     println!("\n--- Part 3: Observability Stack ---");
 
-    let observability = M::trace() | M::metrics() | M::structured_log() | M::latency() | M::audit();
+    let observability =
+        M::trace() >> M::metrics() >> M::structured_log() >> M::latency() >> M::audit();
 
     println!("  Observability stack: {} layers", observability.len());
 
@@ -83,12 +84,12 @@ fn main() {
         } else {
             Ok(())
         }
-    }) | M::before_tool(|call| {
+    }) >> M::before_tool(|call| {
         // Log every tool invocation
         println!("    [before_tool] Calling: {}", call.name);
         Ok(())
-    }) | M::circuit_breaker(3)
-        | M::timeout(Duration::from_secs(30));
+    }) >> M::circuit_breaker(3)
+        >> M::timeout(Duration::from_secs(30));
 
     println!("  Safety stack: {} layers", safety_stack.len());
 
@@ -100,13 +101,13 @@ fn main() {
     let hooks = M::tap(|event| {
         // Observe every agent event
         let _ = event; // In production, log or send to monitoring
-    }) | M::on_route(|agent_name| {
+    }) >> M::on_route(|agent_name| {
         println!("    [on_route] Routed to: {agent_name}");
-    }) | M::on_fallback(|agent_name| {
+    }) >> M::on_fallback(|agent_name| {
         println!("    [on_fallback] Fell back to: {agent_name}");
-    }) | M::on_loop(|iteration| {
+    }) >> M::on_loop(|iteration| {
         println!("    [on_loop] Iteration: {iteration}");
-    }) | M::on_timeout(|| {
+    }) >> M::on_timeout(|| {
         println!("    [on_timeout] Agent timed out!");
     });
 
@@ -118,31 +119,31 @@ fn main() {
     println!("\n--- Part 6: Full Production Stack ---");
 
     let full_stack = M::log()
-        | M::latency()
-        | M::trace()
-        | M::metrics()
-        | M::audit()
-        | M::retry(3)
-        | M::cost()
-        | M::rate_limit(100)
-        | M::circuit_breaker(10)
-        | M::timeout(Duration::from_secs(60))
-        | M::validate(|_call| Ok(()))
-        | M::cache()
-        | M::dedup()
-        | M::before_agent(|_ctx| {
+        >> M::latency()
+        >> M::trace()
+        >> M::metrics()
+        >> M::audit()
+        >> M::retry(3)
+        >> M::cost()
+        >> M::rate_limit(100)
+        >> M::circuit_breaker(10)
+        >> M::timeout(Duration::from_secs(60))
+        >> M::validate(|_call| Ok(()))
+        >> M::cache()
+        >> M::dedup()
+        >> M::before_agent(|_ctx| {
             // Pre-flight checks
             Ok(())
         })
-        | M::after_agent(|_ctx| {
+        >> M::after_agent(|_ctx| {
             // Post-processing
             Ok(())
         })
-        | M::before_model(|_req| {
+        >> M::before_model(|_req| {
             // Request interception
             Ok(())
         })
-        | M::after_model(|_req, _resp| {
+        >> M::after_model(|_req, _resp| {
             // Response interception
             Ok(())
         });
@@ -156,7 +157,7 @@ fn main() {
 
     let agent_specific = M::scope(
         &["premium_agent", "vip_agent"],
-        M::log() | M::latency() | M::cost(),
+        M::log() >> M::latency() >> M::cost(),
     );
 
     println!(
@@ -173,24 +174,24 @@ fn main() {
     let stack = if is_production {
         // Production: full observability + safety
         M::trace()
-            | M::metrics()
-            | M::audit()
-            | M::retry(3)
-            | M::circuit_breaker(10)
-            | M::rate_limit(1000)
-            | M::timeout(Duration::from_secs(30))
+            >> M::metrics()
+            >> M::audit()
+            >> M::retry(3)
+            >> M::circuit_breaker(10)
+            >> M::rate_limit(1000)
+            >> M::timeout(Duration::from_secs(30))
     } else {
         // Development: verbose logging + no rate limits
         M::log()
-            | M::latency()
-            | M::tap(|_event| {
+            >> M::latency()
+            >> M::tap(|_event| {
                 // Verbose debug output
             })
-            | M::cost()
-            | M::timeout(Duration::from_secs(120))
+            >> M::cost()
+            >> M::timeout(Duration::from_secs(120))
             // Pad to same layer count for the demo
-            | M::cache()
-            | M::metrics()
+            >> M::cache()
+            >> M::metrics()
     };
 
     println!(
@@ -207,7 +208,7 @@ fn main() {
 
     println!("\n--- Part 9: Fallback Model ---");
 
-    let resilient = M::fallback_model("gemini-1.5-flash") | M::retry(2) | M::circuit_breaker(5);
+    let resilient = M::fallback_model("gemini-1.5-flash") >> M::retry(2) >> M::circuit_breaker(5);
 
     println!(
         "  Resilient stack with model fallback: {} layers",

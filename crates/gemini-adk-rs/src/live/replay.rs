@@ -41,12 +41,16 @@
 //! # }
 //! ```
 
-use std::time::Duration;
+use std::sync::Arc;
+use std::time::{Duration, UNIX_EPOCH};
 
 use gemini_genai_rs::prelude::{SessionConfig, SessionPhase};
-use gemini_genai_rs::session::SessionHandle;
+use gemini_genai_rs::session::{SessionEvent, SessionHandle};
 use gemini_genai_rs::transport::replay::{ReplayControl, ReplayTransport};
-use gemini_genai_rs::transport::{ConnectBuilder, TransportConfig, WireEntry};
+use gemini_genai_rs::transport::{ConnectBuilder, TransportConfig, WireDirection, WireEntry};
+use tokio::sync::broadcast;
+
+use crate::clock::ManualClock;
 
 use crate::error::AgentError;
 
@@ -83,6 +87,7 @@ pub async fn attach_session(
 pub struct ReplaySession {
     handle: LiveHandle,
     control: ReplayControl,
+    clock: Arc<ManualClock>,
 }
 
 impl ReplaySession {
@@ -112,6 +117,12 @@ impl ReplaySession {
         self.control.outbound_frames()
     }
 
+    /// The replay's clock. It stands at the recorded capture time of the most
+    /// recently delivered frame, measured from the first inbound frame.
+    pub fn clock(&self) -> &Arc<ManualClock> {
+        &self.clock
+    }
+
     /// Disconnect the replayed session.
     pub async fn disconnect(&self) -> Result<(), gemini_genai_rs::session::SessionError> {
         self.handle.disconnect().await
@@ -131,16 +142,74 @@ impl ReplaySession {
 /// - `entries` is the recorded log; only its inbound frames are replayed
 ///   (outbound entries are kept in the log purely for comparison/audit).
 ///
-/// Frames are delivered as fast as the session loop consumes them (no
-/// original-timing pacing). The replay is gated: nothing past the setup
-/// handshake flows until [`ReplaySession::release`] is called, so subscribe
-/// to events first.
+/// Frames are delivered as fast as the session consumes them, but the
+/// session reads time from a [`ManualClock`] that moves to each frame's
+/// recorded capture time as it is delivered (this replaces any clock the
+/// builder set). Temporal patterns, phase durations, resolver cache expiry
+/// and the `session:` timing signals therefore see the original gaps between
+/// frames, whatever the replay's own speed.
+///
+/// The session processes frames asynchronously, so before the clock jumps
+/// by [`REPLAY_SYNC_STEP`] or more, the next frame waits until both event
+/// lanes have handled every event of the frames before it (the router runs
+/// in lockstep during a replay). An earlier frame is then evaluated at its
+/// own time, not a later one. Jumps smaller than the step are not waited
+/// for, which keeps dense audio fast and bounds the timing error at the
+/// step. The replay is gated: nothing past
+/// the setup handshake flows until [`ReplaySession::release`] is called, so
+/// subscribe to events first.
 pub async fn replay_session(
     config: SessionConfig,
     builder: LiveSessionBuilder,
     entries: &[WireEntry],
 ) -> Result<ReplaySession, AgentError> {
+    let first_ts_ms = entries
+        .iter()
+        .find(|e| e.dir == WireDirection::Inbound)
+        .map_or(0, |e| e.ts_ms);
+    let clock = Arc::new(ManualClock::starting_at(
+        UNIX_EPOCH + Duration::from_millis(first_ts_ms),
+    ));
+    // Once the session exists, the gate counts the events it has emitted
+    // and waits for the lanes to have handled them all (lockstep).
+    let lockstep = Arc::new(super::processor::Lockstep::default());
+    let emitted: Arc<tokio::sync::Mutex<Option<EmittedCount>>> = Arc::default();
+    let synced_ms = Arc::new(std::sync::atomic::AtomicU64::new(first_ts_ms));
+    let gate = {
+        let clock = clock.clone();
+        let emitted = emitted.clone();
+        let lockstep = lockstep.clone();
+        Arc::new(move |ts_ms: u64| {
+            let clock = clock.clone();
+            let emitted = emitted.clone();
+            let lockstep = lockstep.clone();
+            let synced_ms = synced_ms.clone();
+            Box::pin(async move {
+                let step = REPLAY_SYNC_STEP.as_millis() as u64;
+                let synced = synced_ms.load(std::sync::atomic::Ordering::Acquire);
+                if ts_ms.saturating_sub(synced) >= step
+                    && let Some((events, count)) = emitted.lock().await.as_mut()
+                {
+                    // The session loop takes the next frame only after it has
+                    // emitted every event of the previous one, so these are
+                    // all the events so far.
+                    loop {
+                        match events.try_recv() {
+                            Ok(_) => *count += 1,
+                            Err(broadcast::error::TryRecvError::Lagged(n)) => *count += n,
+                            Err(_) => break,
+                        }
+                    }
+                    lockstep.wait_for(*count, Duration::from_secs(5)).await;
+                    synced_ms.store(ts_ms, std::sync::atomic::Ordering::Release);
+                }
+                clock.set_elapsed(Duration::from_millis(ts_ms.saturating_sub(first_ts_ms)));
+            }) as std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
+        })
+    };
     let (transport, control) = ReplayTransport::from_wire_log(entries);
+    let transport = transport.with_frame_gate(gate);
+    let builder = builder.clock(clock.clone()).lockstep(lockstep);
     let transport_config = TransportConfig {
         max_reconnect_attempts: 0,
         connect_timeout_secs: 5,
@@ -154,8 +223,23 @@ pub async fn replay_session(
         .await
         .map_err(AgentError::Session)?;
     let handle = attach_session(builder, session).await?;
-    Ok(ReplaySession { handle, control })
+    // Count from here, after the router subscribed: it settles everything it
+    // receives, so a count started later can only trail it. Nothing past the
+    // handshake flows before `release`, so no frame's events are missed.
+    *emitted.lock().await = Some((handle.session().subscribe(), 0));
+    Ok(ReplaySession {
+        handle,
+        control,
+        clock,
+    })
 }
+
+/// A subscription to the session's events and how many it has seen.
+type EmittedCount = (broadcast::Receiver<SessionEvent>, u64);
+
+/// The largest clock jump a replay makes without first waiting for the
+/// session to process the frames already delivered. See [`replay_session`].
+pub const REPLAY_SYNC_STEP: Duration = Duration::from_millis(50);
 
 /// Collect [`LiveEvent`]s until the stream stays idle for `idle` (or `max`
 /// elapses). Useful for settling an as-fast-as-possible replay where "done"
@@ -186,7 +270,6 @@ pub async fn collect_events_until_idle(
 mod tests {
     use super::*;
     use gemini_genai_rs::prelude::ModelId;
-    use gemini_genai_rs::transport::WireDirection;
 
     #[tokio::test]
     async fn replay_session_reaches_active_and_emits_events() {
@@ -233,6 +316,9 @@ mod tests {
                 .any(|e| matches!(e, LiveEvent::TurnComplete))
         );
 
+        // The clock stands at the last frame's recorded time.
+        assert_eq!(replay.clock().elapsed(), Duration::from_millis(1));
+
         // The replayed session re-encoded and "sent" the setup message.
         let outbound = replay.outbound_frames();
         assert!(!outbound.is_empty());
@@ -242,6 +328,128 @@ mod tests {
                 .contains("\"setup\"")
         );
 
+        replay.disconnect().await.unwrap();
+    }
+
+    /// Timing decisions follow the recording, not the replay's speed: a turn
+    /// recorded ten seconds after the handshake is stamped ten seconds later,
+    /// at the recording's wall time, even though the replay takes
+    /// milliseconds.
+    #[tokio::test]
+    async fn replay_reads_time_from_the_recording() {
+        const T0: u64 = 1_000_000_000_000; // 2001-09-09, well before "now"
+        let entries = vec![
+            WireEntry {
+                seq: 1,
+                dir: WireDirection::Inbound,
+                ts_ms: T0,
+                payload: br#"{"setupComplete":{}}"#.to_vec(),
+            },
+            WireEntry {
+                seq: 2,
+                dir: WireDirection::Inbound,
+                ts_ms: T0 + 10_000,
+                payload:
+                    br#"{"serverContent":{"modelTurn":{"parts":[{"text":"Hi"}]},"turnComplete":true}}"#
+                        .to_vec(),
+            },
+        ];
+        let config = SessionConfig::new("offline").model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO);
+        let replay = replay_session(config.clone(), LiveSessionBuilder::new(config), &entries)
+            .await
+            .unwrap();
+        let mut events = replay.handle().events();
+        replay.release();
+        replay.drained().await;
+        collect_events_until_idle(
+            &mut events,
+            Duration::from_millis(200),
+            Duration::from_secs(5),
+        )
+        .await;
+
+        assert_eq!(replay.clock().elapsed(), Duration::from_secs(10));
+        let mutations = replay.handle().state().recent_mutations();
+        assert!(!mutations.is_empty(), "the turn should write state");
+        let recorded = |ms: u64| UNIX_EPOCH + Duration::from_millis(ms);
+        for m in &mutations {
+            assert!(
+                m.timestamp >= recorded(T0) && m.timestamp <= recorded(T0 + 10_000),
+                "{} stamped outside the recording: {:?}",
+                m.key,
+                m.timestamp
+            );
+        }
+        assert!(
+            mutations
+                .iter()
+                .any(|m| m.timestamp == recorded(T0 + 10_000)),
+            "the turn's writes carry the second frame's recorded time"
+        );
+
+        replay.disconnect().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn each_frame_is_processed_at_its_own_recorded_time() {
+        const T0: u64 = 1_000_000_000_000;
+        let turn =
+            br#"{"serverContent":{"modelTurn":{"parts":[{"text":"Hi"}]},"turnComplete":true}}"#;
+        let entry = |seq, ts_ms, payload: &[u8]| WireEntry {
+            seq,
+            dir: WireDirection::Inbound,
+            ts_ms,
+            payload: payload.to_vec(),
+        };
+        let entries = vec![
+            entry(1, T0, br#"{"setupComplete":{}}"#),
+            entry(2, T0 + 1_000, turn),
+            entry(3, T0 + 60_000, turn),
+        ];
+        // A slow turn-complete handler: the lane is still on the first turn
+        // when the replay would otherwise deliver the second.
+        let state = crate::state::State::new();
+        let seen = state.clone();
+        let callbacks = crate::live::callbacks::EventCallbacks {
+            on_turn_complete: Some(Arc::new(move || {
+                let seen = seen.clone();
+                Box::pin(async move {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    let n = seen.get::<u32>("turns_seen").unwrap_or(0);
+                    let _ = seen.set("turns_seen", n + 1);
+                })
+            })),
+            ..Default::default()
+        };
+        let config = SessionConfig::new("offline").model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO);
+        let builder = LiveSessionBuilder::new(config.clone())
+            .state(state)
+            .callbacks(callbacks);
+        let replay = replay_session(config, builder, &entries).await.unwrap();
+        let mut events = replay.handle().events();
+        replay.release();
+        replay.drained().await;
+        collect_events_until_idle(
+            &mut events,
+            Duration::from_millis(400),
+            Duration::from_secs(5),
+        )
+        .await;
+
+        let recorded = |ms: u64| UNIX_EPOCH + Duration::from_millis(ms);
+        let stamps: Vec<_> = replay
+            .handle()
+            .state()
+            .recent_mutations()
+            .iter()
+            .filter(|m| m.key == "turns_seen")
+            .map(|m| m.timestamp)
+            .collect();
+        assert_eq!(
+            stamps,
+            [recorded(T0 + 1_000), recorded(T0 + 60_000)],
+            "each turn's handler runs at its own recorded time"
+        );
         replay.disconnect().await.unwrap();
     }
 }

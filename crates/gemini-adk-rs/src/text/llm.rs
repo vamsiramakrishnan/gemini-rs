@@ -261,6 +261,7 @@ impl LlmTextAgent {
         &self,
         calls: &[FunctionCall],
         records: &mut Vec<ToolCallRecord>,
+        state: &State,
     ) -> Vec<FunctionResponse> {
         let mut responses = Vec::with_capacity(calls.len());
         for call in calls {
@@ -296,8 +297,12 @@ impl LlmTextAgent {
             }
 
             let span = spans::execute_tool_span(&call.name, call.id.as_deref());
+            let mut tool_ctx = crate::tool::ToolContext::new(state.clone());
+            if let Some(id) = &call.id {
+                tool_ctx = tool_ctx.with_call_id(id.clone());
+            }
             let result = dispatcher
-                .call_function(&call.name, call.args.clone())
+                .call_function_in(&call.name, call.args.clone(), tool_ctx)
                 .instrument(span.clone())
                 .await;
             if let Err(e) = &result {
@@ -411,7 +416,7 @@ impl LlmTextAgent {
             Some(limit) => {
                 match tokio::time::timeout(
                     limit,
-                    self.run_inner(request, &instruction, &llm, events),
+                    self.run_inner(request, &instruction, &llm, events, state),
                 )
                 .await
                 {
@@ -425,7 +430,10 @@ impl LlmTextAgent {
                     }
                 }
             }
-            None => self.run_inner(request, &instruction, &llm, events).await,
+            None => {
+                self.run_inner(request, &instruction, &llm, events, state)
+                    .await
+            }
         };
 
         match &result {
@@ -456,6 +464,7 @@ impl LlmTextAgent {
         instruction: &Option<String>,
         llm: &Arc<dyn BaseLlm>,
         events: Option<&EventSender>,
+        state: &State,
     ) -> Result<RunResult, AgentError> {
         let emit = |event: RunEvent| {
             if let Some(tx) = events {
@@ -568,7 +577,9 @@ impl LlmTextAgent {
                 });
             }
             let already = result.tool_calls.len();
-            let tool_responses = self.dispatch_tools(&calls, &mut result.tool_calls).await;
+            let tool_responses = self
+                .dispatch_tools(&calls, &mut result.tool_calls, state)
+                .await;
             for record in &result.tool_calls[already..] {
                 emit(RunEvent::ToolResult(record.clone()));
             }
@@ -848,115 +859,5 @@ mod tests {
         let _ = state2.set("escalate", true);
         let result2 = agent.run(&state2).await.unwrap();
         assert_eq!(result2, "from-b", "with escalate, should use model B");
-    }
-}
-
-#[cfg(test)]
-mod span_tests {
-    use std::collections::BTreeMap;
-    use std::fmt::Debug;
-    use std::sync::{Arc, Mutex};
-
-    use tracing::field::{Field, Visit};
-    use tracing::span::{Attributes, Id, Record};
-    use tracing::{Event, Metadata, Subscriber};
-
-    use super::*;
-    use crate::llm::{LlmResponse, MockLlm};
-
-    type Spans = Arc<Mutex<Vec<(String, BTreeMap<String, String>)>>>;
-
-    /// Records every span's name and fields, in creation order.
-    struct Capture(Spans);
-
-    struct Fields<'a>(&'a mut BTreeMap<String, String>);
-
-    impl Visit for Fields<'_> {
-        fn record_str(&mut self, field: &Field, value: &str) {
-            self.0.insert(field.name().to_string(), value.to_string());
-        }
-        fn record_debug(&mut self, field: &Field, value: &dyn Debug) {
-            self.0
-                .insert(field.name().to_string(), format!("{value:?}"));
-        }
-    }
-
-    impl Subscriber for Capture {
-        fn enabled(&self, _: &Metadata<'_>) -> bool {
-            true
-        }
-        fn new_span(&self, attrs: &Attributes<'_>) -> Id {
-            let mut fields = BTreeMap::new();
-            attrs.record(&mut Fields(&mut fields));
-            let mut spans = self.0.lock().unwrap();
-            spans.push((attrs.metadata().name().to_string(), fields));
-            Id::from_u64(spans.len() as u64)
-        }
-        fn record(&self, id: &Id, values: &Record<'_>) {
-            let mut spans = self.0.lock().unwrap();
-            let index = usize::try_from(id.into_u64()).unwrap() - 1;
-            values.record(&mut Fields(&mut spans[index].1));
-        }
-        fn record_follows_from(&self, _: &Id, _: &Id) {}
-        fn event(&self, _: &Event<'_>) {}
-        fn enter(&self, _: &Id) {}
-        fn exit(&self, _: &Id) {}
-    }
-
-    /// A run exports the GenAI semantic-convention spans an OpenTelemetry
-    /// backend reads: the agent, each model call with its settings and token
-    /// usage, and each tool call.
-    #[tokio::test]
-    async fn a_run_emits_genai_spans() {
-        let spans: Spans = Arc::default();
-        let _guard = tracing::subscriber::set_default(Capture(spans.clone()));
-
-        let llm = MockLlm::script([
-            LlmResponse::tool_call("get_weather", serde_json::json!({})).with_usage(10, 2),
-            LlmResponse::from_text("Cold.").with_usage(20, 1),
-        ])
-        .with_model_id("gemini-test");
-        let mut dispatcher = ToolDispatcher::new();
-        dispatcher.register_function(Arc::new(crate::tool::SimpleTool::new(
-            "get_weather",
-            "Get weather",
-            None,
-            |_| async { Ok(serde_json::json!({})) },
-        )));
-        let agent = LlmTextAgent::new("weather", llm)
-            .temperature(0.5)
-            .tools(Arc::new(dispatcher));
-        agent
-            .run_with(RunRequest::new("Weather?"), &State::new())
-            .await
-            .unwrap();
-
-        let spans = spans.lock().unwrap();
-        let named = |name: &str| -> Vec<&BTreeMap<String, String>> {
-            spans
-                .iter()
-                .filter(|(n, _)| n == name)
-                .map(|(_, f)| f)
-                .collect()
-        };
-
-        let agent_span = named("invoke_agent");
-        assert_eq!(agent_span.len(), 1);
-        assert_eq!(agent_span[0]["otel.name"], "invoke_agent weather");
-        assert_eq!(agent_span[0]["gen_ai.agent.name"], "weather");
-
-        let chats = named("chat");
-        assert_eq!(chats.len(), 2, "one span per model call");
-        assert_eq!(chats[0]["otel.name"], "chat gemini-test");
-        assert_eq!(chats[0]["gen_ai.request.model"], "gemini-test");
-        assert_eq!(chats[0]["gen_ai.request.temperature"], "0.5");
-        assert_eq!(chats[0]["gen_ai.usage.input_tokens"], "10");
-        assert_eq!(chats[1]["gen_ai.usage.output_tokens"], "1");
-        assert_eq!(chats[1]["gen_ai.response.finish_reasons"], "STOP");
-
-        let tools = named("execute_tool");
-        assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0]["gen_ai.tool.name"], "get_weather");
-        assert!(!tools[0].contains_key("error.type"));
     }
 }

@@ -96,7 +96,7 @@ let handle = Live::builder()
     .voice(Voice::Kore)
     .instruction("You are a weather assistant")
     .greeting("Greet the user and ask how you can help.")
-    .tools(get_weather() | T::google_search())   // any ToolFunction or a `T::` composite
+    .tools(get_weather() + T::google_search())   // any ToolFunction or a `T::` composite
     .transcription()                              // both directions; `.input_transcription()` for one
     .on_audio(|data| playback_tx.send(data.clone()).ok())
     .thinking(1024)                    // thinking budget (Google AI only)
@@ -247,8 +247,8 @@ let tool = TypedTool::<WeatherArgs>::new(
 Live::builder()
     .tools(
         get_weather()                 // a #[tool] fn converts into the composite
-        | T::google_search()
-        | T::code_execution()
+        + T::google_search()
+        + T::code_execution()
     )
     .tool(lookup_account())   // one `#[tool]` fn / SimpleTool / TypedTool / Arc<dyn ToolFunction>
 ```
@@ -429,7 +429,7 @@ FunctionResponse {
 - `WhenIdle`: Model waits until it finishes current output before handling
 - `Silent`: Model integrates the result without notifying the user
 
-**Platform support**: Async tool calling (`NonBlocking` behavior + scheduling) is only supported on **Google AI**. On **Vertex AI**, these fields are automatically stripped from the wire — `behavior` is removed from `FunctionDeclaration` in the setup message, and `scheduling` is removed from `FunctionResponse`. This means you can set `NonBlocking` and `WhenIdle` unconditionally in your code; the SDK handles the platform difference. Use `config.supports_async_tools()` to check at runtime.
+**Platform support**: Async tool calling (`behavior` + `scheduling`) is supported on **Google AI** and on **Gemini 3.8 Live on Vertex AI**. For earlier **Vertex AI** Live models these fields are stripped from the wire — `behavior` is removed from `FunctionDeclaration` in the setup message, and `scheduling` is removed from `FunctionResponse`. This means you can set `NonBlocking` and `WhenIdle` unconditionally in your code; the SDK handles the difference. Use `config.supports_async_tools()` to check at runtime, and `config.ignored_settings()` to list everything the target model leaves off the wire (connect logs it as a warning). On Gemini 3.8 Live, `Blocking` pauses the model until the response arrives and the server cancels the call if the user speaks again; see [Gemini 3.8 Live](user-guide/gemini-3-8-live.md).
 
 **L1/L2 integration**: `ToolExecutionMode::Background` automatically sets `behavior: NonBlocking` on the wire declaration and passes the scheduling mode through to responses:
 
@@ -552,18 +552,21 @@ This triggers extraction from the evidence available when `GenerationComplete` i
 ## S.C.T.P.M.A Operator Algebra
 
 Eight namespaces for composing agent configuration aspects (S/C/T/P/M/A plus
-`E::` evaluation and `G::` guards):
+`E::` evaluation and `G::` guards). Each operator has one meaning: `>>` is
+"then" (order matters: S, C, M and agent pipelines) and `+` is "together"
+(all apply: P, T, G, E, A). An `S::` chain is also a pipeline step:
+`a >> S::pick(&["x"]) >> b`.
 
 | Namespace | Operator | Purpose | Key Methods |
 |-----------|----------|---------|-------------|
 | `S::` | `>>` | State transforms | `pick`, `rename`, `merge`, `flatten`, `set`, `defaults`, `drop`, `map`, `is_true`, `eq`, `one_of` |
-| `C::` | `+` | Context engineering | `window`, `user_only`, `model_only`, `head`, `sample`, `truncate`, `exclude_tools`, `prepend`, `append`, `from_state`, `dedup`, `empty`, `filter`, `map` |
-| `T::` | `\|` | Tool composition | `simple`, `function`, `google_search`, `url_context`, `code_execution`, `toolset`, `agent`, `mock`, `transform`, `mcp` |
+| `C::` | `>>` | Context engineering | `window`, `user_only`, `model_only`, `head`, `sample`, `truncate`, `exclude_tools`, `prepend`, `append`, `from_state`, `dedup`, `empty`, `filter`, `map` |
+| `T::` | `+` | Tool composition | `simple`, `function`, `google_search`, `url_context`, `code_execution`, `toolset`, `agent`, `mock`, `transform`, `mcp` |
 | `P::` | `+` | Prompt composition | `role`, `task`, `constraint`, `format`, `example`, `text`, `context`, `persona`, `guidelines`, `show_state`, `when`, `context_fn` |
-| `M::` | `\|` | Middleware composition | `log`, `latency`, `retry`, `cost`, `cache`, `dedup`, `rate_limit`, `circuit_breaker`, `trace`, `audit`, `metrics`, `validate`, `before_tool`, `after_tool`, `before_model`, `after_model` |
-| `A::` | `+` | Artifact schemas | `output`, `input`, `json_output`, `json_input`, `text_output`, `text_input` |
-| `E::` | `\|` | Evaluation criteria | deterministic: `exact_match`, `contains_match`, `trajectory`/`trajectory_in_order`/`trajectory_any_order`, `custom`; LLM-judge (take a judge LLM, scored via `score_async`): `safety(llm)`, `semantic_match(llm)`, `hallucination(llm)` |
-| `G::` | `\|` | Output guards | sync: `pii`, `length`, `regex`, `json`, `budget`, `topic`, `custom`; LLM-judge (take a judge LLM): `toxicity(llm)`, `grounded(llm)`, `hallucination(llm)`, `llm_judge(llm, rubric)` |
+| `M::` | `>>` | Middleware composition | `log`, `latency`, `retry`, `cost`, `cache`, `dedup`, `rate_limit`, `circuit_breaker`, `trace`, `audit`, `metrics`, `validate`, `before_tool`, `after_tool`, `before_model`, `after_model` |
+| `A::` | `+` | Artifact schemas (`AgentBuilder::artifacts`) | `output`, `input`, `json_output`, `json_input`, `text_output`, `text_input` |
+| `E::` | `+` | Evaluation criteria | deterministic: `exact_match`, `contains_match`, `trajectory`/`trajectory_in_order`/`trajectory_any_order`, `custom`; LLM-judge (take a judge LLM, scored via `score_async`): `safety(llm)`, `semantic_match(llm)`, `hallucination(llm)` |
+| `G::` | `+` | Output guards (all must pass) | sync: `pii`, `length`, `regex`, `json`, `budget`, `topic`, `custom`; LLM-judge (take a judge LLM): `toxicity(llm)`, `grounded(llm)`, `hallucination(llm)`, `llm_judge(llm, rubric)` |
 
 **Wiring:** `M::` is fully wired into `LlmTextAgent` (model + tool lifecycle
 hooks, plus `M::timeout` run bounding and `on_event` lifecycle/combinator
@@ -585,12 +588,12 @@ Examples:
 let transform = S::pick(&["a", "b"]) >> S::rename(&[("a", "x")]);
 
 // Context: window + user-only
-let context = C::window(10) + C::user_only() + C::exclude_tools();
+let context = C::window(10) >> C::user_only() >> C::exclude_tools();
 
 // Tools: combine functions with built-ins
 let tools = T::simple("greet", "Greet", |_| async { Ok(json!({})) })
-    | T::google_search()
-    | T::code_execution();
+    + T::google_search()
+    + T::code_execution();
 
 // Prompt: compose sections
 let prompt = P::role("analyst") + P::task("analyze data") + P::format("JSON");
@@ -613,7 +616,7 @@ let artifacts = A::json_output("report", "Analysis report")
 | `SessionReader` | Trait: subscribe to events |
 | `connect` / `ConnectBuilder` | `connect(config).await` for the default transport; `ConnectBuilder::new(config).transport_config(..).transport(..).codec(..).connect().await` when you need options |
 | `Content` / `Part` / `Role` | Wire-format message types with builders (`Content::user()`, `Part::text()`) |
-| `ModelId` | Model identifier newtype: `ModelId::new("…")`, `"…".into()`, or the constants `LIVE_2_5_FLASH_NATIVE_AUDIO` (Vertex GA), `FLASH_2_5_NATIVE_AUDIO_LATEST` (Google AI alias), `FLASH_LATEST` (text). Leave `SessionConfig.model` as `None` and connect resolves `ModelId::live_default(vertex)` |
+| `ModelId` | Model identifier newtype: `ModelId::new("…")`, `"…".into()`, or the constants `LIVE_3_8` (Gemini 3.8 Live, Vertex GA), `LIVE_2_5_FLASH_NATIVE_AUDIO` (Vertex GA), `FLASH_2_5_NATIVE_AUDIO_LATEST` (Google AI alias), `FLASH_LATEST` (text). Leave `SessionConfig.model` as `None` and connect resolves `ModelId::live_default(vertex)` |
 | `Voice` | Output voice selection |
 | `Tool` / `FunctionDeclaration` | Tool declarations for setup message |
 | `FunctionCall` / `FunctionResponse` | Tool call/response wire types |
@@ -748,7 +751,7 @@ just release-status
 9. **Tag**: annotated `v0.6.0` with full release notes in tag body
 10. **Push**: atomic push of `release/v0.6.0` branch + tag
 11. **PR**: opens PR `release/v0.6.0 → main` via `gh`
-12. **CI takes over**: validate → publish to crates.io (L0→L1→L2→server→cli) → GitHub Release
+12. **CI takes over**: validate → publish to crates.io (L0→L1→L2→memory→facade→server→cli) → GitHub Release
 13. **You merge the PR** to bring version bump + changelog into main
 
 ### Published crates (dependency order)
@@ -758,8 +761,9 @@ just release-status
 3. `gemini-adk-rs` (L1)
 4. `gemini-adk-fluent-rs` (L2)
 5. `gemini-memory-rs`
-6. `gemini-adk-server-rs`
-7. `gemini-adk-cli-rs`
+6. `gemini-adk` (facade over L2 + memory)
+7. `gemini-adk-server-rs`
+8. `gemini-adk-cli-rs`
 
 ### Version management
 
@@ -800,7 +804,9 @@ just release-status
 - **API versions**: Google AI = `v1beta`, Vertex AI = `v1beta1` -- handled by `ApiEndpoint`.
 - **Cannot update tool definitions mid-session**: Voice sessions only allow instruction updates. Tool declarations are fixed at connect time.
 - **Fast lane callbacks must be sync and under 1ms**: No allocations, no locks, no async in `on_audio`, `on_text`, `on_thought`, `on_vad_*`.
-- **Thinking is Google AI only**: `thinkingConfig` is auto-stripped for Vertex AI. `.on_thought()` won't fire on Vertex.
+- **Thinking is Google AI only**: `thinkingConfig` is auto-stripped for Vertex AI, and for Gemini 3.8 Live everywhere (the model has no thinking). `.on_thought()` won't fire there.
+- **Gemini 3.8 Live has affective dialogue and proactive audio always on**: `.affective_dialog()` / `.proactive_audio()` are left off its setup (sending the flag closes the session with 1007), and `SessionConfig::ignored_settings()` reports them. Avatar video (`.avatar(..)`, Vertex AI only) arrives on `on_media`, never on `on_audio`. `gemini-3.8-live-extended-thinking` requires `.thinking_level(..)` and answers in a later turn after a holding line. See [Gemini 3.8 Live](user-guide/gemini-3-8-live.md).
+- **Google AI refuses fields Vertex AI accepts**: `proactivity` (every model), `explicitVadSignal`, `sessionResumption.transparent` and `avatarConfig.avatarName` / `customizedAvatar` close the setup with 1007, so the SDK leaves them off there and `ignored_settings()` lists them. A `system`-role instruction update also closes a Google AI session, so there `update_instruction` sends a user-role turn that says it replaces the instructions (`turnComplete: false`). Gemini 3.x follows it, but 2.5 does not.
 - **Forgetting `.done()`**: Phase builder chains must end with `.done()` to return to the `Live` builder.
 - **Forgetting `.initial_phase()`**: Phase machine requires an explicit initial phase name.
 - **Using `instruction_template` with phases**: Template replaces the entire instruction -- use `instruction_amendment` or phase modifiers (`P::show_state`, `P::when`) for additive composition.

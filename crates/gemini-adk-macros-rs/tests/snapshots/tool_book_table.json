@@ -1,0 +1,52 @@
+{
+  "description": "Book a table.",
+  "name": "book_table",
+  "parameters": {
+    "properties": {
+      "guest": {
+        "description": "Who the booking is for.",
+        "properties": {
+          "name": {
+            "description": "Full name.",
+            "type": "string"
+          },
+          "phone": {
+            "description": "A phone number to call back.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "party_size": {
+        "description": "How many people.",
+        "format": "uint8",
+        "minimum": 0.0,
+        "type": "integer"
+      },
+      "requests": {
+        "description": "Special requests, one per item.",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "seating": {
+        "description": "Where to seat them.",
+        "enum": [
+          "indoor",
+          "outdoor"
+        ],
+        "type": "string"
+      }
+    },
+    "required": [
+      "guest",
+      "party_size",
+      "requests"
+    ],
+    "type": "object"
+  }
+}

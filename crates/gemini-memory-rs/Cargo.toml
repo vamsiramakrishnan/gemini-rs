@@ -21,7 +21,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 [dependencies]
 gemini-genai-rs = { workspace = true, default-features = true }
 gemini-adk-rs = { workspace = true, default-features = true }
-gemini-adk-fluent-rs = { workspace = true, optional = true }
+gemini-adk-fluent-rs = { workspace = true, default-features = true, optional = true }
 async-trait = "0.1"
 base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
@@ -38,7 +38,7 @@ uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
-gemini-adk-fluent-rs = { workspace = true }
+gemini-adk-fluent-rs = { workspace = true, default-features = true }
 # For `semantic_fusion_probe`, which calls the embeddings endpoint directly to
 # measure what a semantic layer would buy before one is built.
 reqwest = { version = "0.12", default-features = false, features = [

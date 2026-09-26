@@ -31,6 +31,10 @@ pub enum SessionEvent {
     /// Uses [`bytes::Bytes`] for zero-copy fan-out: cloning a `Bytes` handle
     /// bumps an `Arc` refcount instead of copying the underlying data.
     AudioData(bytes::Bytes),
+    /// Non-audio media from the model, such as Gemini 3.8 Live Avatar video
+    /// (`video/mp4`, 24 FPS, synchronized with the speech in
+    /// [`AudioData`](Self::AudioData)).
+    Media(InlineMedia),
     /// Input transcription from server.
     InputTranscription(String),
     /// Output transcription from server.
@@ -41,6 +45,10 @@ pub enum SessionEvent {
     ToolCall(Vec<FunctionCall>),
     /// Server cancelled pending tool calls.
     ToolCallCancelled(Vec<String>),
+    /// Progress of a longer interaction (`serverContent.interactionStatus`),
+    /// e.g. `"IN_PROGRESS"` when Gemini 3.8 Live Extended Thinking has said a
+    /// holding line and will answer in a later turn.
+    InteractionStatus(String),
     /// Model turn is complete (it's the user's turn now).
     TurnComplete,
     /// Model finished generating its full response.
@@ -74,6 +82,22 @@ pub enum SessionEvent {
     /// Contains full token breakdown: prompt, response, cached, tool-use,
     /// thinking tokens, plus per-modality details.
     Usage(UsageMetadata),
+}
+
+/// A chunk of non-audio media the model produced inline.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InlineMedia {
+    /// MIME type as the server gave it, e.g. `"video/mp4"`.
+    pub mime_type: String,
+    /// The decoded bytes. Cloning shares them (see [`bytes::Bytes`]).
+    pub data: bytes::Bytes,
+}
+
+impl InlineMedia {
+    /// Whether this is a video chunk (`video/*`).
+    pub fn is_video(&self) -> bool {
+        self.mime_type.starts_with("video/")
+    }
 }
 
 /// Session resumption information from the server.

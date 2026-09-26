@@ -1,6 +1,7 @@
 //! M — Middleware composition.
 //!
-//! Compose middleware in any order with `|`.
+//! Stack middleware with `>>`: `M::a() >> M::b()` wraps `b` inside `a`, so
+//! order matters (the first layer sees a call first).
 //!
 //! ## Wiring status
 //!
@@ -34,7 +35,7 @@ use gemini_adk_rs::context::AgentEvent;
 use gemini_adk_rs::error::{AgentError, ToolError};
 use gemini_adk_rs::middleware::{LatencyMiddleware, LogMiddleware, Middleware};
 
-/// A middleware composite — one or more middleware layers (`M::a() | M::b()`).
+/// A middleware composite — one or more middleware layers (`M::a() >> M::b()`).
 ///
 /// A single `Arc<dyn Middleware>` converts into a one-layer composite, so
 /// `.middleware(Arc::new(MyLayer))` works without the namespace.
@@ -70,11 +71,11 @@ impl From<Arc<dyn Middleware>> for MiddlewareComposite {
     }
 }
 
-/// Compose two middleware composites with `|`.
-impl std::ops::BitOr for MiddlewareComposite {
+/// Stack two middleware composites with `>>`: `self` outside, `rhs` inside.
+impl std::ops::Shr for MiddlewareComposite {
     type Output = MiddlewareComposite;
 
-    fn bitor(mut self, rhs: MiddlewareComposite) -> Self::Output {
+    fn shr(mut self, rhs: MiddlewareComposite) -> Self::Output {
         self.layers.extend(rhs.layers);
         self
     }
@@ -1103,7 +1104,7 @@ mod tests {
 
     #[test]
     fn compose_with_bitor() {
-        let m = M::log() | M::latency() | M::timeout(Duration::from_secs(5));
+        let m = M::log() >> M::latency() >> M::timeout(Duration::from_secs(5));
         assert_eq!(m.len(), 3);
     }
 
@@ -1250,28 +1251,28 @@ mod tests {
     #[test]
     fn compose_all_middleware() {
         let m = M::log()
-            | M::latency()
-            | M::timeout(Duration::from_secs(30))
-            | M::retry(3)
-            | M::cost()
-            | M::rate_limit(10)
-            | M::circuit_breaker(5)
-            | M::trace()
-            | M::audit()
-            | M::validate(|_| Ok(()))
-            | M::fallback_model("gemini-1.5-flash")
-            | M::cache()
-            | M::dedup()
-            | M::sample(0.5)
-            | M::metrics()
-            | M::before_agent(|_| Ok(()))
-            | M::after_agent(|_| Ok(()))
-            | M::before_model(|_| Ok(()))
-            | M::after_model(|_, _| Ok(()))
-            | M::on_loop(|_| {})
-            | M::on_timeout(|| {})
-            | M::on_route(|_| {})
-            | M::on_fallback(|_| {});
+            >> M::latency()
+            >> M::timeout(Duration::from_secs(30))
+            >> M::retry(3)
+            >> M::cost()
+            >> M::rate_limit(10)
+            >> M::circuit_breaker(5)
+            >> M::trace()
+            >> M::audit()
+            >> M::validate(|_| Ok(()))
+            >> M::fallback_model("gemini-1.5-flash")
+            >> M::cache()
+            >> M::dedup()
+            >> M::sample(0.5)
+            >> M::metrics()
+            >> M::before_agent(|_| Ok(()))
+            >> M::after_agent(|_| Ok(()))
+            >> M::before_model(|_| Ok(()))
+            >> M::after_model(|_, _| Ok(()))
+            >> M::on_loop(|_| {})
+            >> M::on_timeout(|| {})
+            >> M::on_route(|_| {})
+            >> M::on_fallback(|_| {});
         assert_eq!(m.len(), 23);
     }
 }

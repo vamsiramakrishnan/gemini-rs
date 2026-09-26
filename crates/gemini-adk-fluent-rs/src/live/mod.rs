@@ -46,6 +46,7 @@ mod introspect;
 /// will actually run rather than the one the caller wrote.
 pub(crate) use connect::merge_ambient as merge_ambient_for_check;
 mod phases;
+pub(crate) mod scripted;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -184,6 +185,7 @@ pub struct Live {
     pub(crate) session_id: Option<String>,
     pub(crate) tool_advisory: bool,
     pub(crate) telemetry_interval: Option<Duration>,
+    pub(crate) clock: Option<gemini_adk_rs::clock::SharedClock>,
     // Middleware layers run around tool dispatch in the control lane.
     pub(crate) middleware_layers: Vec<Arc<dyn gemini_adk_rs::middleware::Middleware>>,
     // Confirmation provider consulted before running `T::confirm(..)` tools.
@@ -207,6 +209,14 @@ pub struct Live {
     /// connect. Same lifecycle as `digressions`.
     pub(crate) repair_policies:
         std::collections::BTreeMap<String, gemini_adk_rs::flow::RepairPolicy>,
+    /// Per-step voice timing, installed on the session's flow stack.
+    pub(crate) stage_timings: std::collections::BTreeMap<String, gemini_adk_rs::flow::VoiceTiming>,
+    /// Slots whose correction re-opens later stages, with the keys to clear.
+    pub(crate) corrections: std::collections::BTreeMap<String, Vec<String>>,
+    /// Text each step must say word for word.
+    pub(crate) verbatims: std::collections::BTreeMap<String, String>,
+    /// Redaction and commit-governance policies, enforced at connect.
+    pub(crate) policies: Vec<crate::policy::Policy>,
     /// Caller-supplied session `State`, so tools and flow guards can share one.
     pub(crate) state: Option<State>,
     /// Input audio hardening: mic-chain stages, client input-VAD tuning, and
@@ -301,6 +311,7 @@ impl Live {
             session_id: None,
             tool_advisory: true,
             telemetry_interval: None,
+            clock: None,
             middleware_layers: Vec::new(),
             confirmation_provider: None,
             flow: None,
@@ -309,12 +320,59 @@ impl Live {
             flow_precompiled: false,
             digressions: Vec::new(),
             repair_policies: std::collections::BTreeMap::new(),
+            stage_timings: std::collections::BTreeMap::new(),
+            corrections: std::collections::BTreeMap::new(),
+            policies: Vec::new(),
+            verbatims: std::collections::BTreeMap::new(),
             state: None,
             flow_actions: Vec::new(),
             record_wire_path: None,
             config_errors: Vec::new(),
             input_audio: crate::live::config::InputAudioConfig::default(),
         }
+    }
+
+    /// Enforce a [`Policy`](crate::policy::Policy) on this session.
+    ///
+    /// - `Policy::redact(keys)`: the keys' values are masked wherever state
+    ///   leaves the process (journal sink, persistence snapshots, extraction
+    ///   events). See [`State::redact_keys`](gemini_adk_rs::State::redact_keys).
+    /// - `Policy::commit(tool)`: the tool is wrapped in a
+    ///   [`CommitGuard`](gemini_adk_rs::tool::CommitGuard) at connect, so a
+    ///   repeated commit with the same idempotency key returns the first
+    ///   result, and a failed one runs its compensating tool.
+    /// - `Policy::safety_handoff(..)` is a digression; it needs the
+    ///   conversation compiler, so attach it with `Conversation::policy`.
+    ///   Here it is reported as a configuration error at connect.
+    ///
+    /// [`converse`](Self::converse) installs a conversation's policies.
+    pub fn policy(mut self, policy: impl Into<crate::policy::Policy>) -> Self {
+        let policy = policy.into();
+        if matches!(policy, crate::policy::Policy::SafetyHandoff { .. }) {
+            self.config_errors.push(
+                "Policy::safety_handoff is lowered to a digression by the conversation \
+                 compiler: attach it with Conversation::policy and converse(..)"
+                    .into(),
+            );
+        } else {
+            self.policies.push(policy);
+        }
+        self
+    }
+
+    /// Pace step `step` of the governed flow (or of a digression): reprompt
+    /// on silence, filler cues for slow tools, holding the floor, endpointing
+    /// and context delivery. See [`VoiceTiming`](gemini_adk_rs::flow::VoiceTiming).
+    ///
+    /// A [`Conversation`](crate::conversation::Conversation) carries its own
+    /// per-stage timing; [`converse`](Self::converse) installs it.
+    pub fn stage_timing(
+        mut self,
+        step: impl Into<String>,
+        timing: gemini_adk_rs::flow::VoiceTiming,
+    ) -> Self {
+        self.stage_timings.insert(step.into(), timing);
+        self
     }
 
     /// Govern the session with a [`Flow`](gemini_adk_rs::flow::Flow) DAG and
@@ -466,7 +524,7 @@ impl Live {
     /// dispatch in the control lane (`before_tool` can veto a call,
     /// `after_tool` and `on_tool_error` observe results).
     ///
-    /// Compose layers with `|`, e.g. `M::log() | M::latency()`.
+    /// Stack layers with `>>`, e.g. `M::log() >> M::latency()`.
     ///
     /// Note: model-level hooks (`before_model`/`after_model`) are TextAgent
     /// pipeline concepts and do not apply to a streaming Live session.
@@ -484,6 +542,17 @@ impl Live {
     /// and `LiveEvent::TurnMetrics` at this rate.
     pub fn telemetry_interval(mut self, interval: Duration) -> Self {
         self.telemetry_interval = Some(interval);
+        self
+    }
+
+    /// Read the time from `clock` instead of the system clock.
+    ///
+    /// Temporal patterns, phase durations, resolver cache expiry, the
+    /// `session:` timing signals and journal timestamps all follow it. Pass a
+    /// [`ManualClock`](gemini_adk_rs::clock::ManualClock) to make timing
+    /// decisions reproducible in a test.
+    pub fn clock(mut self, clock: gemini_adk_rs::clock::SharedClock) -> Self {
+        self.clock = Some(clock);
         self
     }
 }

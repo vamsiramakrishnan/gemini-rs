@@ -298,8 +298,8 @@ fn main() {
         )
         .criteria(
             E::contains_match()
-                | E::custom("safety", |_, _| 1.0)
-                | E::custom("semantic_match", |_, _| 1.0),
+                + E::custom("safety", |_, _| 1.0)
+                + E::custom("semantic_match", |_, _| 1.0),
         );
 
     println!(

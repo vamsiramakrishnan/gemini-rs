@@ -153,7 +153,7 @@ impl Live {
 
     // -- Tools --
 
-    /// Register tools: a `|`-composed [`ToolComposite`] from the `T`
+    /// Register tools: a `+`-combined [`ToolComposite`] from the `T`
     /// namespace, or a single [`ToolFunction`] (a `SimpleTool`/`TypedTool`,
     /// the value a `#[tool]` function returns, an `Arc<dyn ToolFunction>`).
     ///
@@ -174,7 +174,7 @@ impl Live {
     ///         T::typed("get_weather", "Get weather", |args: City| async move {
     ///             Ok(serde_json::json!({ "city": args.city, "temp": 22 }))
     ///         })
-    ///         | T::google_search()
+    ///         + T::google_search()
     ///     );
     /// ```
     ///
@@ -406,6 +406,14 @@ impl Live {
         self
     }
 
+    /// Set the thinking level, for models that take one instead of a budget.
+    /// Gemini 3.8 Live Extended Thinking
+    /// ([`ModelId::LIVE_3_8_EXTENDED_THINKING`]) refuses a session without it.
+    pub fn thinking_level(mut self, level: ThinkingLevel) -> Self {
+        self.config = self.config.thinking_level(level);
+        self
+    }
+
     /// Include the model's thought summaries in responses.
     ///
     /// When enabled, the model emits `SessionEvent::Thought` events containing
@@ -426,6 +434,9 @@ impl Live {
     /// Enable proactive audio: the model may decide not to respond to input
     /// it judges not addressed to it. Pair with
     /// [`soft_turn_timeout`](Self::soft_turn_timeout).
+    ///
+    /// Vertex AI only: Google AI refuses a setup carrying `proactivity`, so
+    /// it is left off there, as it is for Gemini 3.8 Live (always on).
     pub fn proactive_audio(mut self) -> Self {
         self.config = self.config.proactive_audio(true);
         self
@@ -434,6 +445,54 @@ impl Live {
     /// Set media resolution for video/image input.
     pub fn media_resolution(mut self, res: MediaResolution) -> Self {
         self.config = self.config.media_resolution(res);
+        self
+    }
+
+    /// Answer with Gemini 3.8 Live Avatar video (Vertex AI): synchronized
+    /// 24 FPS video of a prebuilt or custom avatar, delivered to
+    /// [`on_media`](Self::on_media). Sets the response modality to `VIDEO`,
+    /// as the API requires. Google AI's `gemini-3.8-live` refuses `VIDEO`.
+    ///
+    /// ```no_run
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// Live::builder()
+    ///     .model(ModelId::LIVE_3_8)
+    ///     .avatar(AvatarConfig::prebuilt("Ben"))
+    ///     .on_media(|chunk| println!("{} bytes of {}", chunk.data.len(), chunk.mime_type));
+    /// ```
+    pub fn avatar(mut self, avatar: AvatarConfig) -> Self {
+        self.config = self.config.avatar(avatar);
+        self
+    }
+
+    /// Speak in a voice replicated from a recorded sample (Gemini 3.8 Live
+    /// on Vertex AI; allow-listed customers).
+    pub fn replicated_voice(mut self, voice: ReplicatedVoiceConfig) -> Self {
+        self.config = self.config.replicated_voice(voice);
+        self
+    }
+
+    /// Bias transcription of the user's speech toward domain terms —
+    /// product names, SKUs, proper nouns (Gemini 3.8 Live). Enables input
+    /// transcription.
+    pub fn custom_vocabulary<S: Into<String>>(
+        mut self,
+        terms: impl IntoIterator<Item = S>,
+    ) -> Self {
+        self.config = self.config.custom_vocabulary(terms);
+        self
+    }
+
+    /// Transcribe the user's speech with these settings (language hints,
+    /// custom vocabulary).
+    pub fn input_transcription_config(mut self, config: AudioTranscriptionConfig) -> Self {
+        self.config = self.config.input_transcription_config(config);
+        self
+    }
+
+    /// Transcribe the model's speech with these settings.
+    pub fn output_transcription_config(mut self, config: AudioTranscriptionConfig) -> Self {
+        self.config = self.config.output_transcription_config(config);
         self
     }
 
@@ -564,6 +623,29 @@ impl Live {
     /// connect.
     pub fn session_resume(mut self) -> Self {
         self.config = self.config.session_resumption();
+        self
+    }
+
+    /// Enable session resumption in transparent mode (Vertex AI only; left off
+    /// the wire on Google AI): resumption updates
+    /// also name the last client message the server consumed, so a resumed
+    /// session knows what to send again.
+    pub fn transparent_resumption(mut self) -> Self {
+        self.config = self.config.transparent_resumption();
+        self
+    }
+
+    /// Accept conversation history sent as client content before the first
+    /// turn — required by Gemini 3.8 Live to seed history.
+    pub fn history_in_client_content(mut self) -> Self {
+        self.config = self.config.initial_history_in_client_content(true);
+        self
+    }
+
+    /// Ask the server for explicit voice-activity events at the edges of
+    /// user speech (Vertex AI; left off the wire on Google AI).
+    pub fn explicit_vad_signal(mut self) -> Self {
+        self.config = self.config.explicit_vad_signal(true);
         self
     }
 

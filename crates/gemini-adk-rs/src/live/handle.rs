@@ -100,7 +100,7 @@ impl LiveHandle {
         background_tracker: Arc<BackgroundToolTracker>,
         telem_cancel: CancellationToken,
     ) -> Self {
-        let reactor = Arc::new(LiveReactor::voice_defaults());
+        let reactor = Arc::new(LiveReactor::voice_defaults().with_clock(state.clock()));
         let effect_executor = LiveEffectExecutor::new(
             Arc::new(session.clone()),
             pending_context.clone(),
@@ -147,6 +147,26 @@ impl LiveHandle {
     /// context turns are flushed to the wire before the audio frame.
     pub async fn send_audio(&self, data: impl Into<bytes::Bytes>) -> Result<(), SessionError> {
         let data: bytes::Bytes = data.into();
+        // The active stage's voice timing (see `flow::timing`).
+        let timing = self
+            .state
+            .get::<crate::flow::VoiceTiming>(crate::flow::VOICE_TIMING_KEY);
+        // A stage that holds the floor (a statutory readout) replaces the
+        // mic with silence while the model speaks, so neither the server's
+        // VAD nor ours can cut the model off. The stream keeps its cadence.
+        let data = if timing
+            .as_ref()
+            .is_some_and(crate::flow::VoiceTiming::holds_floor)
+            && self
+                .state
+                .session()
+                .get::<bool>("is_model_speaking")
+                .unwrap_or(false)
+        {
+            bytes::Bytes::from(vec![0u8; data.len()])
+        } else {
+            data
+        };
         let data = {
             let mut processors = self.input_processors.lock();
             if processors.is_empty() {
@@ -183,6 +203,24 @@ impl LiveHandle {
                     .audio_clock_ms
                     .fetch_add(chunk_ms, std::sync::atomic::Ordering::Relaxed);
             let mut policy = self.turn_commit.lock();
+            // A stage's endpointing sets the end-of-turn hold. It needs a
+            // turn-commit policy, so one is installed (otherwise edges pass
+            // through unchanged) under client authority.
+            if let Some(hold) = timing
+                .as_ref()
+                .and_then(|t| t.end_of_speech_ms)
+                .map(std::time::Duration::from_millis)
+                && client_authority
+            {
+                let policy = policy.get_or_insert_with(|| {
+                    super::turn_commit::TurnCommitPolicy::new(
+                        super::turn_commit::TurnCommitConfig::immediate(),
+                    )
+                });
+                if policy.config().eot_hold != hold {
+                    policy.set_eot_hold(hold);
+                }
+            }
             policy.as_mut().map(|p| {
                 let model_speaking = self
                     .state

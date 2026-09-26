@@ -1,6 +1,7 @@
 //! G — Guard composition.
 //!
-//! Compose output guards with `|` for validation and safety checks.
+//! Combine output guards with `+`: every guard must pass
+//! (`G::pii() + G::length(1, 2000)`).
 //!
 //! ## Wiring
 //!
@@ -93,11 +94,11 @@ impl std::fmt::Debug for GuardRule {
     }
 }
 
-/// Compose two guards with `|`.
-impl std::ops::BitOr for GuardRule {
+/// Combine two guards with `+`: both must pass.
+impl std::ops::Add for GuardRule {
     type Output = GuardComposite;
 
-    fn bitor(self, rhs: GuardRule) -> Self::Output {
+    fn add(self, rhs: GuardRule) -> Self::Output {
         GuardComposite {
             guards: vec![self, rhs],
         }
@@ -145,10 +146,10 @@ impl GuardComposite {
     }
 }
 
-impl std::ops::BitOr<GuardRule> for GuardComposite {
+impl std::ops::Add<GuardRule> for GuardComposite {
     type Output = GuardComposite;
 
-    fn bitor(mut self, rhs: GuardRule) -> Self::Output {
+    fn add(mut self, rhs: GuardRule) -> Self::Output {
         self.guards.push(rhs);
         self
     }
@@ -427,13 +428,13 @@ mod tests {
 
     #[test]
     fn compose_with_bitor() {
-        let composite = G::length(1, 1000) | G::json();
+        let composite = G::length(1, 1000) + G::json();
         assert_eq!(composite.len(), 2);
     }
 
     #[test]
     fn check_all_returns_violations() {
-        let composite = G::length(1, 5) | G::json();
+        let composite = G::length(1, 5) + G::json();
         let violations = composite.check_all("not json and too long text here");
         assert!(!violations.is_empty());
     }
@@ -564,7 +565,7 @@ mod tests {
     #[test]
     fn compose_new_guards_with_bitor() {
         let composite =
-            G::toxicity(judge_llm()) | G::grounded(judge_llm()) | G::hallucination(judge_llm());
+            G::toxicity(judge_llm()) + G::grounded(judge_llm()) + G::hallucination(judge_llm());
         assert_eq!(composite.len(), 3);
         // Sync path skips judge guards, so no violations surface synchronously.
         assert!(composite.check_all("test").is_empty());

@@ -150,7 +150,7 @@ fn main() {
 
     println!("\n--- Part 3: Composing Criteria ---");
 
-    let composite = E::response_match() | E::contains_match() | E::custom("safety", |_, _| 1.0);
+    let composite = E::response_match() + E::contains_match() + E::custom("safety", |_, _| 1.0);
     println!("  Composite has {} criteria", composite.len());
 
     // Score all criteria at once
@@ -169,7 +169,7 @@ fn main() {
         .case("What is the capital of France?", "Paris")
         .case("Is Rust memory safe?", "Yes")
         .case("What color is the sky?", "Blue")
-        .criteria(E::response_match() | E::contains_match() | E::custom("safety", |_, _| 1.0));
+        .criteria(E::response_match() + E::contains_match() + E::custom("safety", |_, _| 1.0));
 
     println!("  Suite: {} test cases", suite.len());
     println!("  Criteria: {:?}", suite.criteria);
@@ -182,7 +182,7 @@ fn main() {
         "The sky is Blue",
     ];
 
-    let criteria = E::response_match() | E::contains_match() | E::custom("safety", |_, _| 1.0);
+    let criteria = E::response_match() + E::contains_match() + E::custom("safety", |_, _| 1.0);
 
     println!("\n  Running suite:");
     let mut total_scores: Vec<f64> = vec![0.0; criteria.criteria.len()];
@@ -237,11 +237,11 @@ fn main() {
     println!("\n--- Part 6: Quality Report ---");
 
     let quality_criteria = E::response_match()
-        | E::contains_match()
-        | E::custom("safety", |_, _| 1.0)
-        | E::custom("semantic_match", |_, _| 1.0)
-        | E::custom("hallucination", |_, _| 1.0)
-        | E::trajectory();
+        + E::contains_match()
+        + E::custom("safety", |_, _| 1.0)
+        + E::custom("semantic_match", |_, _| 1.0)
+        + E::custom("hallucination", |_, _| 1.0)
+        + E::trajectory();
 
     let test_output = "The capital of France is Paris, located along the Seine river.";
     let expected = "Paris";

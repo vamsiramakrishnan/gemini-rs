@@ -129,7 +129,7 @@ name = "40-screening"
 path = "src/40_screening.rs"
 
 [dependencies]
-gemini-adk-fluent-rs = { workspace = true }
+gemini-adk-fluent-rs = { workspace = true, default-features = true }
 gemini-adk-rs        = { workspace = true, default-features = true }
 gemini-genai-rs       = { workspace = true, default-features = true }
 tokio         = { version = "1", features = ["full"] }

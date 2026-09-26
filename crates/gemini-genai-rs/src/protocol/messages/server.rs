@@ -78,6 +78,11 @@ pub struct ServerContentPayload {
     /// Whether the server is waiting for user input.
     #[serde(default)]
     pub waiting_for_input: Option<bool>,
+    /// Progress of a longer interaction, e.g. `"IN_PROGRESS"` while Gemini
+    /// 3.8 Live Extended Thinking works on an answer it will give in a later
+    /// turn.
+    #[serde(default)]
+    pub interaction_status: Option<String>,
 }
 
 /// Transcription text from server.
@@ -189,9 +194,20 @@ pub struct SessionResumptionUpdatePayload {
     /// Whether the session is currently resumable.
     #[serde(default)]
     pub resumable: Option<bool>,
-    /// Index of the last client message consumed by the server.
-    #[serde(default)]
+    /// Index of the last client message consumed by the server (transparent
+    /// resumption). An int64, which proto JSON sends as a string; a bare
+    /// number is accepted too.
+    #[serde(default, deserialize_with = "string_or_number")]
     pub last_consumed_client_message_index: Option<String>,
+}
+
+/// An optional int64 field, as a string whether the frame carries `"7"` or `7`.
+fn string_or_number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    Ok(match Option::<serde_json::Value>::deserialize(d)? {
+        Some(serde_json::Value::String(s)) => Some(s),
+        Some(serde_json::Value::Number(n)) => Some(n.to_string()),
+        _ => None,
+    })
 }
 
 /// Server-side voice activity detection event.
@@ -209,17 +225,30 @@ pub struct VoiceActivityPayload {
     /// The type of voice activity event.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub voice_activity_type: Option<VoiceActivityType>,
+    /// When the activity was detected, in audio time from the start of the
+    /// stream (a proto duration such as `"1.250s"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_offset: Option<String>,
 }
 
 /// Type of voice activity event from the server.
+///
+/// The API sends `ACTIVITY_START` / `ACTIVITY_END`; the `VOICE_ACTIVITY_*`
+/// spellings earlier releases expected are still accepted, and any other
+/// value reads as [`Unspecified`](Self::Unspecified) instead of failing the
+/// frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum VoiceActivityType {
     /// Voice activity started (user began speaking).
-    #[serde(rename = "VOICE_ACTIVITY_START")]
+    #[serde(rename = "ACTIVITY_START", alias = "VOICE_ACTIVITY_START")]
     VoiceActivityStart,
     /// Voice activity ended (user stopped speaking).
-    #[serde(rename = "VOICE_ACTIVITY_END")]
+    #[serde(rename = "ACTIVITY_END", alias = "VOICE_ACTIVITY_END")]
     VoiceActivityEnd,
+    /// `TYPE_UNSPECIFIED`, or a value this release does not know.
+    #[serde(rename = "TYPE_UNSPECIFIED", other)]
+    Unspecified,
 }
 
 /// Server message wrapper — includes optional usage metadata alongside the message.

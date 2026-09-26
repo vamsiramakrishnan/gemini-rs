@@ -183,7 +183,7 @@ dispatcher before the Live handshake. A discovery failure is a connect error.
 
 ```rust,ignore
 Live::builder()
-    .tools(T::mcp("npx -y @modelcontextprotocol/server-filesystem") | T::google_search())
+    .tools(T::mcp("npx -y @modelcontextprotocol/server-filesystem") + T::google_search())
     .connect_from_env()
     .await?;
 ```

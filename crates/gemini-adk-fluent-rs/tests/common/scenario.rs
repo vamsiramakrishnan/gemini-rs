@@ -279,9 +279,9 @@ pub fn tools(
     );
 
     T::function(Arc::new(lookup))
-        | T::function(Arc::new(disclose))
-        | T::function(Arc::new(ptp))
-        | T::function(Arc::new(charge))
+        + T::function(Arc::new(disclose))
+        + T::function(Arc::new(ptp))
+        + T::function(Arc::new(charge))
 }
 
 /// The governed flow: what must happen, in what order, and what may not happen

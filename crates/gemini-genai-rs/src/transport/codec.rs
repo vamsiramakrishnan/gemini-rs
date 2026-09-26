@@ -171,14 +171,27 @@ impl Codec for JsonCodec {
                 };
                 serde_json::to_vec(&msg).map_err(|e| CodecError::Serialize(e.to_string()))
             }
+            // Vertex AI documents a `system`-role turn for this; Google AI
+            // closes the session over one (1007), so there the update goes
+            // out as a user-role turn that says what it is. `turnComplete:
+            // false` either way: the model takes it in without answering.
             SessionCommand::UpdateInstruction(instruction) => {
+                let (role, text) = if config.supports_system_role_updates() {
+                    (Role::System, instruction.clone())
+                } else {
+                    (
+                        Role::User,
+                        format!(
+                            "System instruction update, which replaces your previous \
+                             instructions: {instruction}"
+                        ),
+                    )
+                };
                 let msg = ClientContentMessage {
                     client_content: ClientContentPayload {
                         turns: vec![Content {
-                            role: Some(Role::System),
-                            parts: vec![Part::Text {
-                                text: instruction.clone(),
-                            }],
+                            role: Some(role),
+                            parts: vec![Part::Text { text }],
                         }],
                         turn_complete: Some(false),
                     },
@@ -428,15 +441,34 @@ mod tests {
     }
 
     #[test]
-    fn json_codec_encode_update_instruction() {
+    fn json_codec_encode_update_instruction_google_ai() {
+        // A `system` role closes a Google AI session (1007), so the update
+        // travels as a user turn that names itself, without completing the turn.
         let codec = JsonCodec;
         let config = test_config();
+        assert!(!config.supports_system_role_updates());
+        let cmd = SessionCommand::UpdateInstruction("New instruction".into());
+        let bytes = codec.encode_command(&cmd, &config).unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let turns = &json["clientContent"]["turns"];
+        assert_eq!(turns[0]["role"], "user");
+        let text = turns[0]["parts"][0]["text"].as_str().unwrap();
+        assert!(text.starts_with("System instruction update"), "{text}");
+        assert!(text.ends_with("New instruction"), "{text}");
+        assert_eq!(json["clientContent"]["turnComplete"], false);
+    }
+
+    #[test]
+    fn json_codec_encode_update_instruction_vertex() {
+        let codec = JsonCodec;
+        let config = SessionConfig::from_vertex("p", "us-central1", "t");
         let cmd = SessionCommand::UpdateInstruction("New instruction".into());
         let bytes = codec.encode_command(&cmd, &config).unwrap();
         let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         let turns = &json["clientContent"]["turns"];
         assert_eq!(turns[0]["role"], "system");
         assert_eq!(turns[0]["parts"][0]["text"], "New instruction");
+        assert_eq!(json["clientContent"]["turnComplete"], false);
     }
 
     #[test]

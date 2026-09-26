@@ -84,8 +84,8 @@ fn rich_config(mut config: SessionConfig) -> SessionConfig {
         }]),
         Tool::google_search(),
     ];
-    config.input_audio_transcription = Some(InputAudioTranscription {});
-    config.output_audio_transcription = Some(OutputAudioTranscription {});
+    config.input_audio_transcription = Some(InputAudioTranscription::default());
+    config.output_audio_transcription = Some(OutputAudioTranscription::default());
     config
 }
 
@@ -209,6 +209,262 @@ fn tool_response_vertex_ai_strips_scheduling_golden() {
         "Vertex AI must strip scheduling from tool responses"
     );
     assert_golden("client_tool_response_vertex.json", &actual);
+}
+
+// ─── Client → server: Gemini 3.8 Live ───────────────────────────────────────
+
+/// Gemini 3.8 Live on Vertex AI, with every setting its guide introduces.
+fn gemini_3_8_config() -> SessionConfig {
+    let mut config = SessionConfig::from_vertex("test-project", "us-central1", "test-token")
+        .model(ModelId::LIVE_3_8)
+        .voice(Voice::Custom("Aoede".into()))
+        .avatar(AvatarConfig::prebuilt("Ben"))
+        .input_transcription_config(
+            AudioTranscriptionConfig::default().language_codes(["en-US", "es-US"]),
+        )
+        .custom_vocabulary(["ORD-8472", "Express Shipping"])
+        .output_transcription(true)
+        .media_resolution(MediaResolution::Low)
+        .transparent_resumption()
+        .explicit_vad_signal(true)
+        .initial_history_in_client_content(true)
+        // Settings the 3.8 guide says not to send: always on, or unsupported.
+        .affective_dialog(true)
+        .proactive_audio(true)
+        .thinking(512);
+    config.tools = vec![Tool::functions(vec![FunctionDeclaration {
+        name: "lookup_order_status".into(),
+        description: "Fetches real-time shipping status for a customer order ID.".into(),
+        parameters: Some(json!({
+            "type": "object",
+            "properties": {"order_id": {"type": "string"}},
+            "required": ["order_id"]
+        })),
+        behavior: Some(FunctionCallingBehavior::Blocking),
+    }])];
+    config
+}
+
+#[test]
+fn setup_vertex_gemini_3_8_live_golden() {
+    let config = gemini_3_8_config();
+    let actual: Value = serde_json::from_str(&config.to_setup_json()).unwrap();
+    let setup = &actual["setup"];
+
+    assert_eq!(
+        setup["model"],
+        "projects/test-project/locations/us-central1/publishers/google/models/gemini-3.8-live"
+    );
+    // Field names and placement as the Gen AI SDK's Vertex converter sends them.
+    assert_eq!(
+        setup["generationConfig"]["responseModalities"],
+        json!(["VIDEO"])
+    );
+    assert_eq!(setup["avatarConfig"], json!({"avatarName": "Ben"}));
+    assert_eq!(
+        setup["inputAudioTranscription"],
+        json!({
+            "languageCodes": ["en-US", "es-US"],
+            "customVocabulary": ["ORD-8472", "Express Shipping"],
+        })
+    );
+    assert_eq!(setup["outputAudioTranscription"], json!({}));
+    assert_eq!(
+        setup["generationConfig"]["mediaResolution"],
+        "MEDIA_RESOLUTION_LOW"
+    );
+    assert_eq!(setup["sessionResumption"], json!({"transparent": true}));
+    assert_eq!(setup["explicitVadSignal"], true);
+    assert_eq!(
+        setup["historyConfig"],
+        json!({"initialHistoryInClientContent": true})
+    );
+    // 3.8 on Vertex takes blocking/non-blocking tool behavior.
+    assert_eq!(
+        setup["tools"][0]["functionDeclarations"][0]["behavior"],
+        "BLOCKING"
+    );
+    // "Do not pass enable_affective_dialog or proactivity"; thinking is unsupported.
+    assert!(
+        setup["generationConfig"]
+            .get("enableAffectiveDialog")
+            .is_none()
+    );
+    assert!(setup.get("proactivity").is_none());
+    assert!(setup["generationConfig"].get("thinkingConfig").is_none());
+    assert_eq!(
+        config.ignored_settings(),
+        ["thinkingConfig", "enableAffectiveDialog", "proactivity"]
+    );
+
+    assert_golden("setup_vertex_gemini_3_8_live.json", &actual);
+}
+
+/// What the live Google AI endpoint refuses, measured on 2026-09-25 with
+/// `gemini-3.8-live` (and `proactivity` / `transparent` with 2.5 too): each
+/// of these closed the setup with 1007 "Unknown name … Cannot find field".
+#[test]
+fn google_ai_leaves_off_fields_its_setup_does_not_have() {
+    let config = SessionConfig::new("key")
+        .model(ModelId::LIVE_3_8)
+        .proactive_audio(true)
+        .transparent_resumption()
+        .explicit_vad_signal(true)
+        .avatar(AvatarConfig::prebuilt("Ben").bitrates(64_000, 1_000_000));
+    let actual: Value = serde_json::from_str(&config.to_setup_json()).unwrap();
+    let setup = &actual["setup"];
+    assert!(setup.get("proactivity").is_none());
+    assert!(setup.get("explicitVadSignal").is_none());
+    assert_eq!(setup["sessionResumption"], json!({}));
+    assert_eq!(
+        setup["avatarConfig"],
+        json!({"audioBitrateBps": 64_000, "videoBitrateBps": 1_000_000})
+    );
+    assert_eq!(
+        config.ignored_settings(),
+        [
+            "proactivity",
+            "sessionResumption.transparent",
+            "avatarConfig.avatarName",
+            "explicitVadSignal"
+        ]
+    );
+    // Proactivity is refused on Google AI for every model, not just 3.8.
+    let older = SessionConfig::new("key")
+        .model(ModelId::FLASH_2_5_NATIVE_AUDIO_LATEST)
+        .proactive_audio(true);
+    assert!(
+        serde_json::from_str::<Value>(&older.to_setup_json()).unwrap()["setup"]
+            .get("proactivity")
+            .is_none()
+    );
+    assert_eq!(older.ignored_settings(), ["proactivity"]);
+}
+
+#[test]
+fn extended_thinking_keeps_its_required_thinking_level() {
+    for config in [
+        SessionConfig::new("key"),
+        SessionConfig::from_vertex("p", "us-central1", "t"),
+    ] {
+        let config = config
+            .model(ModelId::LIVE_3_8_EXTENDED_THINKING)
+            .thinking_level(ThinkingLevel::Low)
+            .affective_dialog(true);
+        let actual: Value = serde_json::from_str(&config.to_setup_json()).unwrap();
+        let generation = &actual["setup"]["generationConfig"];
+        assert_eq!(
+            generation["thinkingConfig"],
+            json!({"thinkingLevel": "LOW"})
+        );
+        assert!(generation.get("enableAffectiveDialog").is_none());
+    }
+    // Plain 3.8 refuses a thinking level: it goes with the rest of thinkingConfig.
+    let plain = SessionConfig::new("key")
+        .model(ModelId::LIVE_3_8)
+        .thinking_level(ThinkingLevel::Low);
+    let actual: Value = serde_json::from_str(&plain.to_setup_json()).unwrap();
+    assert!(
+        actual["setup"]["generationConfig"]
+            .get("thinkingConfig")
+            .is_none()
+    );
+    assert_eq!(plain.ignored_settings(), ["thinkingConfig"]);
+}
+
+#[test]
+fn explicit_vad_signal_is_vertex_only() {
+    let config = SessionConfig::new("key").explicit_vad_signal(true);
+    let actual: Value = serde_json::from_str(&config.to_setup_json()).unwrap();
+    assert!(actual["setup"].get("explicitVadSignal").is_none());
+    assert_eq!(config.ignored_settings(), ["explicitVadSignal"]);
+}
+
+#[test]
+fn tool_response_vertex_gemini_3_8_keeps_scheduling() {
+    let config = SessionConfig::from_vertex("test-project", "us-central1", "test-token")
+        .model(ModelId::LIVE_3_8);
+    let bytes = JsonCodec
+        .encode_command(
+            &SessionCommand::SendToolResponse(vec![tool_response()]),
+            &config,
+        )
+        .unwrap();
+    let actual: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(
+        actual["toolResponse"]["functionResponses"][0]["scheduling"],
+        "WHEN_IDLE"
+    );
+}
+
+#[test]
+fn vad_sensitivity_uses_per_field_wire_enums() {
+    let config = SessionConfig::new("key").server_vad(AutomaticActivityDetection {
+        disabled: None,
+        start_of_speech_sensitivity: Some(Sensitivity::SensitivityHigh),
+        end_of_speech_sensitivity: Some(Sensitivity::SensitivityLow),
+        prefix_padding_ms: None,
+        silence_duration_ms: Some(400),
+    });
+    let actual: Value = serde_json::from_str(&config.to_setup_json()).unwrap();
+    assert_eq!(
+        actual["setup"]["realtimeInputConfig"]["automaticActivityDetection"],
+        json!({
+            "startOfSpeechSensitivity": "START_SENSITIVITY_HIGH",
+            "endOfSpeechSensitivity": "END_SENSITIVITY_LOW",
+            "silenceDurationMs": 400,
+        })
+    );
+    // A level the wire has no value for falls back to the server default.
+    let medium = AutomaticActivityDetection {
+        disabled: None,
+        start_of_speech_sensitivity: Some(Sensitivity::SensitivityMedium),
+        end_of_speech_sensitivity: None,
+        prefix_padding_ms: None,
+        silence_duration_ms: None,
+    };
+    assert_eq!(
+        serde_json::to_value(&medium).unwrap(),
+        json!({"startOfSpeechSensitivity": "START_SENSITIVITY_UNSPECIFIED"})
+    );
+    let back: AutomaticActivityDetection =
+        serde_json::from_value(json!({"startOfSpeechSensitivity": "START_SENSITIVITY_HIGH"}))
+            .unwrap();
+    assert_eq!(
+        back.start_of_speech_sensitivity,
+        Some(Sensitivity::SensitivityHigh)
+    );
+}
+
+#[test]
+fn media_resolution_reads_old_and_new_names() {
+    for raw in ["MEDIA_RESOLUTION_HIGH", "HIGH"] {
+        let parsed: MediaResolution = serde_json::from_value(json!(raw)).unwrap();
+        assert_eq!(parsed, MediaResolution::High);
+    }
+}
+
+#[test]
+fn replicated_voice_and_custom_avatar_wire_shape() {
+    let config = SessionConfig::from_vertex("p", "us-central1", "t")
+        .model(ModelId::LIVE_3_8)
+        .replicated_voice(ReplicatedVoiceConfig::from_sample(
+            b"pcm",
+            "audio/pcm;rate=24000",
+        ))
+        .avatar(AvatarConfig::custom(b"png-bytes", "png"));
+    let actual: Value = serde_json::from_str(&config.to_setup_json()).unwrap();
+    assert_eq!(
+        actual["setup"]["generationConfig"]["speechConfig"],
+        json!({"voiceConfig": {"replicatedVoiceConfig": {
+            "mimeType": "audio/pcm;rate=24000",
+            "voiceSampleAudio": "cGNt",
+        }}})
+    );
+    assert_eq!(
+        actual["setup"]["avatarConfig"],
+        json!({"customizedAvatar": {"imageMimeType": "png", "imageData": "cG5nLWJ5dGVz"}})
+    );
 }
 
 // ─── Server → client: hand-written fixtures, parse assertions ───────────────
@@ -359,6 +615,62 @@ fn parse_session_resumption_update() {
 }
 
 #[test]
+fn parse_session_resumption_update_numeric_index() {
+    let msg = ServerMessage::parse(
+        r#"{"sessionResumptionUpdate":{"newHandle":"h","resumable":true,"lastConsumedClientMessageIndex":42}}"#,
+    )
+    .unwrap();
+    match msg {
+        ServerMessage::SessionResumptionUpdate(m) => assert_eq!(
+            m.session_resumption_update
+                .last_consumed_client_message_index
+                .as_deref(),
+            Some("42")
+        ),
+        other => panic!("expected SessionResumptionUpdate, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_interaction_status() {
+    let msg =
+        ServerMessage::parse(r#"{"serverContent":{"interactionStatus":"IN_PROGRESS"}}"#).unwrap();
+    match msg {
+        ServerMessage::ServerContent(m) => assert_eq!(
+            m.server_content.interaction_status.as_deref(),
+            Some("IN_PROGRESS")
+        ),
+        other => panic!("expected ServerContent, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_voice_activity() {
+    use gemini_genai_rs::protocol::messages::VoiceActivityType;
+    let msg = ServerMessage::parse(&load_fixture("server_voice_activity.json")).unwrap();
+    match msg {
+        ServerMessage::VoiceActivity(m) => {
+            assert_eq!(
+                m.voice_activity.voice_activity_type,
+                Some(VoiceActivityType::VoiceActivityStart)
+            );
+            assert_eq!(m.voice_activity.audio_offset.as_deref(), Some("1.250s"));
+        }
+        other => panic!("expected VoiceActivity, got {other:?}"),
+    }
+    // An unknown activity type must not fail the frame.
+    let msg =
+        ServerMessage::parse(r#"{"voiceActivity":{"voiceActivityType":"SOMETHING_NEW"}}"#).unwrap();
+    match msg {
+        ServerMessage::VoiceActivity(m) => assert_eq!(
+            m.voice_activity.voice_activity_type,
+            Some(VoiceActivityType::Unspecified)
+        ),
+        other => panic!("expected VoiceActivity, got {other:?}"),
+    }
+}
+
+#[test]
 fn parse_unknown_is_forward_compatible() {
     let msg =
         ServerMessage::parse(r#"{"someFutureMessage": {"field": 1}}"#).expect("must not error");
@@ -381,6 +693,7 @@ fn model_catalog_wire_names() {
             ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO,
             "models/gemini-live-2.5-flash-native-audio",
         ),
+        (ModelId::LIVE_3_8, "models/gemini-3.8-live"),
         (
             ModelId::new("models/gemini-9.9-future"),
             "models/gemini-9.9-future",

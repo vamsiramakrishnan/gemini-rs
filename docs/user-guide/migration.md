@@ -5,6 +5,28 @@ API revisions. Apply the relevant changes, compile the affected example, and
 run its behavior tests. Do not combine a version upgrade with an unmeasured
 change of model, transport, and conversation policy.
 
+## 2.x → 3.0
+
+Composition operators now have one meaning each: `>>` is "then" (order
+matters) and `+` is "together" (all apply). See
+[composition](composition.md). The compiler flags every old spelling, since
+the replaced operator impls are gone.
+
+| Area | 2.x | 3.0 |
+|------|-----|-----|
+| Context policies | `C::window(10) + C::user_only()` | `C::window(10) >> C::user_only()` |
+| Middleware | `M::log() \| M::retry(3)` | `M::log() >> M::retry(3)` |
+| Tools | `T::simple(..) \| T::google_search()` | `T::simple(..) + T::google_search()` |
+| Guards | `G::pii() \| G::length(1, 500)` | `G::pii() + G::length(1, 500)` |
+| Evaluation criteria | `E::response_match() \| E::trajectory()` | `E::response_match() + E::trajectory()` |
+| State transforms between agents | not available | `a >> S::pick(&["x"]) >> b` reshapes state between two steps |
+| Artifacts on an agent | declared on the side | `AgentBuilder::artifacts(A::json_input(..) + A::json_output(..))`, checked by `check_contracts` |
+| `ToolContext` in the prelude | `context::ToolContext<'a>` (callback context) | `tool::ToolContext` (the context a tool receives: state, call id, cancellation). The callback type is still at `gemini_adk_rs::context::ToolContext` |
+| Disclosure motif | interruptible | uninterruptible by default |
+| `RepairPolicy` | a struct literal naming every field | adds `escalate_after_interruptions` and `escalate_after_tool_failures`; build it with `RepairPolicy::new()` and its setters, or add `..Default::default()` |
+| `SimStep` | no failure or barge-in steps | adds `ToolFailed`, `Interrupt` and `ToolResult`; an exhaustive `match` needs the new arms |
+| Computed state | re-written every turn | written only when its value changes, so a watcher on it fires only on a real change |
+
 ## 1.x → 2.0
 
 The 2.0 release tightens the L0 (`gemini-genai-rs`) surface. Nothing changes
@@ -381,10 +403,10 @@ let handle = Live::builder()
     .instruction("You are a helpful assistant with access to tools.")
     .tools(
         get_weather()                 // the #[tool] fn above
-        | T::simple("get_time", "Get current time", |_| async move {
+        + T::simple("get_time", "Get current time", |_| async move {
             Ok(json!({ "time": "14:30" }))
         })
-        | T::google_search()
+        + T::google_search()
     )
     .on_text(|t| print!("{t}"))
     .connect_google_ai(api_key)
@@ -531,4 +553,4 @@ When migrating from L0 to L2:
 ## See also
 
 - [Architecture Overview](./architecture.md) — the three-crate stack explained, with a guide on choosing your layer
-- [S.C.T.P.M.A Operator Algebra](./composition.md) — fluent composition operators available at L2
+- [Composition](./composition.md) — fluent composition operators available at L2

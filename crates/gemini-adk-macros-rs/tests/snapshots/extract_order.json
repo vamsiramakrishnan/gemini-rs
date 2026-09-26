@@ -1,0 +1,30 @@
+{
+  "name": "order",
+  "promotions": [
+    {
+      "field": "quantity",
+      "has_predicate": false,
+      "merge": "KeepKnown",
+      "state_key": "quantity"
+    },
+    {
+      "field": "item",
+      "has_predicate": false,
+      "merge": "KeepKnown",
+      "state_key": "item"
+    },
+    {
+      "field": "pickup",
+      "has_predicate": false,
+      "merge": "KeepKnown",
+      "state_key": "when"
+    },
+    {
+      "field": "confirmed",
+      "has_predicate": false,
+      "merge": "KeepKnown",
+      "state_key": "confirmed"
+    }
+  ],
+  "window": 2
+}

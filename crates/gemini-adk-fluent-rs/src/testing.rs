@@ -25,7 +25,13 @@
 
 use std::collections::{HashMap, HashSet};
 
+pub use gemini_adk_rs::clock::{Clock, ManualClock, SharedClock, SystemClock};
 pub use gemini_adk_rs::llm::{LlmRequest, LlmResponse, MockLlm, TokenUsage};
+pub use gemini_adk_rs::tape::{
+    FileTape, MemoryTape, Tape, TapeEntry, TapeMode, TapedLlm, taped_resolver,
+};
+
+pub use crate::live::scripted::{ScriptedRun, ScriptedServer};
 
 use crate::builder::AgentBuilder;
 
@@ -440,6 +446,30 @@ pub fn check_live(live: &crate::live::Live) -> Vec<LiveViolation> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn declared_artifacts_take_part_in_contract_checks() {
+        use crate::compose::artifacts::A;
+        let researcher =
+            AgentBuilder::new("researcher").artifacts(A::json_output("report", "Findings"));
+        let writer = AgentBuilder::new("writer")
+            .artifacts(A::json_input("report", "Findings") + A::text_input("brief", "The brief"));
+        let violations = check_contracts(&[researcher, writer]);
+        assert!(
+            violations.contains(&ContractViolation::UnproducedKey {
+                consumer: "writer".into(),
+                key: "artifact:brief".into(),
+            }),
+            "{violations:?}"
+        );
+        assert!(
+            !violations.iter().any(|v| matches!(
+                v,
+                ContractViolation::UnproducedKey { key, .. } if key == "artifact:report"
+            )),
+            "the report is produced: {violations:?}"
+        );
+    }
 
     #[test]
     fn no_violations_for_matching_contracts() {

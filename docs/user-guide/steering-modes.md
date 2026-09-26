@@ -55,6 +55,8 @@ Live::builder()
 
 **When to use:** When phases represent genuinely different personas or roles. The model needs a complete context reset to shift behavior convincingly.
 
+**On Google AI** a `system`-role update closes the session, so the instruction goes out as a user-role turn that says it replaces the previous instructions. Gemini 3.1 and 3.8 Live follow it; Gemini 2.5 accepts it without following it, so on 2.5 prefer `ContextInjection`. Vertex AI takes the `system` role, as it documents. See [Gemini 3.8 Live](gemini-3-8-live.md#changing-instructions-mid-session).
+
 ### Hybrid
 
 System instruction is replaced on phase transition (like `InstructionUpdate`), but per-turn modifiers are delivered as model-role context turns (like `ContextInjection`).

@@ -37,6 +37,17 @@ pub(super) async fn generic_connection_loop<T: Transport, C: Codec>(
 ) {
     let mut attempt = 0u32;
 
+    // Once per session, not per reconnect: a setting that never reaches the
+    // wire should be visible, not silently without effect.
+    let ignored = config.ignored_settings();
+    if !ignored.is_empty() {
+        tracing::warn!(
+            model = %config.resolved_model(),
+            ignored = ?ignored,
+            "settings this model or platform does not accept were left out of the setup message"
+        );
+    }
+
     loop {
         // Transition to Connecting
         if state.transition_to(SessionPhase::Connecting).is_err() {

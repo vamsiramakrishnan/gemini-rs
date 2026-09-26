@@ -223,7 +223,7 @@ fn context_operators_head() {
 
 #[test]
 fn context_operators_compose() {
-    let chain = C::window(10) + C::user_only() + C::empty();
+    let chain = C::window(10) >> C::user_only() >> C::empty();
     assert_eq!(chain.policies.len(), 3);
 }
 
@@ -249,7 +249,7 @@ fn tool_operators_url_context() {
 
 #[test]
 fn tool_operators_compose_with_bitor() {
-    let t = T::google_search() | T::code_execution() | T::url_context();
+    let t = T::google_search() + T::code_execution() + T::url_context();
     assert_eq!(t.len(), 3);
 }
 

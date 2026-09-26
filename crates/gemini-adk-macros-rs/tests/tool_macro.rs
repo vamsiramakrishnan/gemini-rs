@@ -242,3 +242,45 @@ async fn any_error_becomes_a_tool_error_and_a_tool_error_keeps_its_kind() {
     let err = refuse().call(json!({})).await.unwrap_err();
     assert!(matches!(err, ToolError::InvalidArgs(_)), "{err:?}");
 }
+
+/// Look up the caller's balance. The context supplies the account; the
+/// model supplies only the currency.
+#[tool]
+async fn balance(
+    currency: String,
+    ctx: gemini_adk_rs::tool::ToolContext,
+) -> Result<Value, ToolError> {
+    let account: String = ctx.state.get("account_id").unwrap_or_default();
+    Ok(json!({ "account": account, "currency": currency, "call": ctx.call_id }))
+}
+
+#[test]
+fn a_context_parameter_is_not_shown_to_the_model() {
+    let schema = balance().parameters().unwrap();
+    assert!(schema["properties"].get("currency").is_some());
+    assert!(schema["properties"].get("ctx").is_none(), "{schema}");
+}
+
+#[tokio::test]
+async fn a_context_parameter_is_filled_by_the_runtime() {
+    let state = gemini_adk_rs::State::new();
+    state.set("account_id", "A-17").unwrap();
+    let mut dispatcher = ToolDispatcher::new();
+    dispatcher.register(balance());
+    let out = dispatcher
+        .call_function_in(
+            "balance",
+            json!({ "currency": "EUR" }),
+            gemini_adk_rs::tool::ToolContext::new(state).with_call_id("call-9"),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        out,
+        json!({ "account": "A-17", "currency": "EUR", "call": "call-9" })
+    );
+
+    // Called outside a session, it gets a detached context.
+    let out = balance().call(json!({ "currency": "EUR" })).await.unwrap();
+    assert_eq!(out["account"], "");
+}

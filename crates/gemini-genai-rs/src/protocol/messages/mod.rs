@@ -254,13 +254,13 @@ mod tests {
     fn voice_activity_type_serialization() {
         let start = VoiceActivityType::VoiceActivityStart;
         let json = serde_json::to_string(&start).unwrap();
-        assert_eq!(json, "\"VOICE_ACTIVITY_START\"");
+        assert_eq!(json, "\"ACTIVITY_START\"");
         let parsed: VoiceActivityType = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, start);
 
         let end = VoiceActivityType::VoiceActivityEnd;
         let json = serde_json::to_string(&end).unwrap();
-        assert_eq!(json, "\"VOICE_ACTIVITY_END\"");
+        assert_eq!(json, "\"ACTIVITY_END\"");
         let parsed: VoiceActivityType = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, end);
     }

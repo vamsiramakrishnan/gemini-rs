@@ -47,15 +47,16 @@ pub mod prelude {
     // …) stay public at `protocol::messages` for anyone writing a codec, but
     // they are not something a glob import should hand every caller.
     pub use crate::protocol::types::{
-        AccessToken, ActivityHandling, ApiEndpoint, AudioFormat, AutomaticActivityDetection, Blob,
-        CodeExecutionResult, Content, ContextWindowCompressionConfig, EndpointEnvError,
-        ExecutableCode, FunctionCall, FunctionCallingBehavior, FunctionCallingConfig,
-        FunctionCallingMode, FunctionDeclaration, FunctionResponse, FunctionResponseScheduling,
-        GenerationConfig, GoogleSearch, GoogleSearchRetrieval, GroundingMetadata,
-        InputAudioTranscription, LIVE_INPUT_SAMPLE_RATE, MediaResolution, Modality,
-        ModalityTokenCount, ModelId, OutputAudioTranscription, Part, PrebuiltVoiceConfig,
-        ProactivityConfig, RealtimeInputConfig, Role, Sensitivity, SessionConfig,
-        SessionResumptionConfig, SlidingWindow, SpeechConfig, ThinkingConfig, Tool,
+        AccessToken, ActivityHandling, ApiEndpoint, AudioFormat, AudioTranscriptionConfig,
+        AutomaticActivityDetection, AvatarConfig, Blob, CodeExecutionResult, Content,
+        ContextWindowCompressionConfig, EndpointEnvError, ExecutableCode, FunctionCall,
+        FunctionCallingBehavior, FunctionCallingConfig, FunctionCallingMode, FunctionDeclaration,
+        FunctionResponse, FunctionResponseScheduling, GenerationConfig, GoogleSearch,
+        GoogleSearchRetrieval, GroundingMetadata, HistoryConfig, InputAudioTranscription,
+        LIVE_INPUT_SAMPLE_RATE, LiveModelProfile, MediaResolution, Modality, ModalityTokenCount,
+        ModelId, OutputAudioTranscription, Part, PrebuiltVoiceConfig, ProactivityConfig,
+        RealtimeInputConfig, ReplicatedVoiceConfig, Role, Sensitivity, SessionConfig,
+        SessionResumptionConfig, SlidingWindow, SpeechConfig, ThinkingConfig, ThinkingLevel, Tool,
         ToolCodeExecution, ToolConfig, ToolProvider, TurnCoverage, UrlContext, UrlContextMetadata,
         UsageMetadata, VertexConfig, Voice, VoiceConfig,
     };
@@ -77,8 +78,9 @@ pub mod prelude {
 
     // Session
     pub use crate::session::{
-        AuthError, ResumeInfo, SessionCommand, SessionError, SessionEvent, SessionHandle,
-        SessionPhase, SessionReader, SessionWriter, SetupError, WebSocketError, recv_event,
+        AuthError, InlineMedia, ResumeInfo, SessionCommand, SessionError, SessionEvent,
+        SessionHandle, SessionPhase, SessionReader, SessionWriter, SetupError, WebSocketError,
+        recv_event,
     };
 
     // Buffers

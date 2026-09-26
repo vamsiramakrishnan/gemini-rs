@@ -45,7 +45,7 @@ Live::builder()
             search_kb(),
             Duration::from_secs(10),
         )
-        | T::google_search()
+        + T::google_search()
     )
 ```
 
@@ -269,11 +269,11 @@ Live::builder()
             Duration::from_secs(10),
         ))
         // confirmation required on dangerous action
-        | T::confirm(
+        + T::confirm(
             cancel_order(),
             "Cancel this order — are you sure?",
         )
-        | T::google_search()
+        + T::google_search()
     )
     .tool_background("get_stock_price")  // also run it in background
 ```

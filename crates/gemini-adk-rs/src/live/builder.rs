@@ -7,6 +7,7 @@ use tokio_util::sync::CancellationToken;
 
 use gemini_genai_rs::prelude::{ConnectBuilder, SessionConfig, SessionEvent, SessionPhase};
 use gemini_genai_rs::session::{SessionError, SessionHandle, SessionWriter};
+use gemini_genai_rs::transport::{Transport, TransportConfig};
 
 use crate::error::AgentError;
 use crate::state::State;
@@ -63,6 +64,8 @@ pub struct LiveSessionBuilder {
     middleware: Vec<Arc<dyn crate::middleware::Middleware>>,
     flow: Option<crate::flow::FlowStack>,
     redactor: Option<Arc<super::redaction::TranscriptRedactor>>,
+    clock: Option<crate::clock::SharedClock>,
+    lockstep: Option<Arc<super::processor::Lockstep>>,
 }
 
 impl LiveSessionBuilder {
@@ -92,7 +95,16 @@ impl LiveSessionBuilder {
             middleware: Vec::new(),
             flow: None,
             redactor: None,
+            clock: None,
+            lockstep: None,
         }
+    }
+
+    /// Replay lockstep: the router waits for both lanes to handle each event
+    /// and counts it in `lockstep`. Offline replay only.
+    pub(crate) fn lockstep(mut self, lockstep: Arc<super::processor::Lockstep>) -> Self {
+        self.lockstep = Some(lockstep);
+        self
     }
 
     /// Install transcript redaction — see
@@ -103,6 +115,19 @@ impl LiveSessionBuilder {
     /// rules enabled) is dropped rather than installed.
     pub fn redaction(mut self, redactor: super::redaction::TranscriptRedactor) -> Self {
         self.redactor = redactor.is_active().then(|| Arc::new(redactor));
+        self
+    }
+
+    /// Read the time from `clock` instead of the system clock.
+    ///
+    /// Installed on the session [`State`] (see
+    /// [`State::set_clock`](crate::state::State::set_clock)), so temporal
+    /// patterns, phase durations, resolver cache expiry, the `session:`
+    /// timing signals and journal timestamps all follow it. Pass a
+    /// [`ManualClock`](crate::clock::ManualClock) to make timing decisions
+    /// reproducible in tests; replay installs one driven by the recording.
+    pub fn clock(mut self, clock: crate::clock::SharedClock) -> Self {
+        self.clock = Some(clock);
         self
     }
 
@@ -301,33 +326,69 @@ impl LiveSessionBuilder {
             .connect()
             .await
             .map_err(AgentError::Session)?;
-
-        // Wait for Active phase — or for the session to give up trying.
-        //
-        // `wait_for_phase` alone waits forever: the L0 session loop retries the
-        // setup handshake `max_reconnect_attempts` times, then emits
-        // `Disconnected` and returns, but the phase watch stays alive because
-        // the handle holds it. Active never arrives and nothing ever wakes the
-        // waiter — so a permanently unacceptable setup (a retired model name is
-        // the common one) wedges `connect()` with no error, forever. Racing the
-        // terminal event turns that into a returned failure.
-        let mut events = session.subscribe();
-        tokio::select! {
-            () = session.wait_for_phase(SessionPhase::Active) => {}
-            failure = wait_for_connect_failure(&mut events) => {
-                return Err(AgentError::Session(SessionError::SetupFailed(
-                    gemini_genai_rs::session::SetupError::ServerRejected {
-                        code: None,
-                        message: failure,
-                    },
-                )));
-            }
-        }
-
-        let runtime = build_runtime(plan, session);
-        spawn_lanes(runtime).await
+        finish_connect(plan, session).await
     }
 
+    /// [`connect`](Self::connect) over `transport` instead of a WebSocket to
+    /// Gemini: the whole runtime (phases, tools, extractors, watchers, flow
+    /// governance) runs as it would live, against whatever the transport
+    /// answers.
+    ///
+    /// Use it to test a session without a network or a credential, over a
+    /// [`ReplayTransport`](gemini_genai_rs::transport::ReplayTransport)
+    /// scripted with server frames. The transport is not reconnected if it
+    /// closes.
+    pub async fn connect_with_transport<T: Transport>(
+        self,
+        transport: T,
+    ) -> Result<LiveHandle, AgentError> {
+        let mut plan = self.into_plan()?;
+        let config = plan.config.take().expect("plan always carries a config");
+        let session = ConnectBuilder::new(config)
+            .transport_config(TransportConfig {
+                max_reconnect_attempts: 0,
+                ..TransportConfig::default()
+            })
+            .transport(transport)
+            .connect()
+            .await
+            .map_err(AgentError::Session)?;
+        finish_connect(plan, session).await
+    }
+}
+
+/// Wait for a freshly connected session to become active, then build and
+/// start its runtime.
+async fn finish_connect(
+    plan: SessionPlan,
+    session: SessionHandle,
+) -> Result<LiveHandle, AgentError> {
+    // Wait for Active phase — or for the session to give up trying.
+    //
+    // `wait_for_phase` alone waits forever: the L0 session loop retries the
+    // setup handshake `max_reconnect_attempts` times, then emits
+    // `Disconnected` and returns, but the phase watch stays alive because
+    // the handle holds it. Active never arrives and nothing ever wakes the
+    // waiter — so a permanently unacceptable setup (a retired model name is
+    // the common one) wedges `connect()` with no error, forever. Racing the
+    // terminal event turns that into a returned failure.
+    let mut events = session.subscribe();
+    tokio::select! {
+        () = session.wait_for_phase(SessionPhase::Active) => {}
+        failure = wait_for_connect_failure(&mut events) => {
+            return Err(AgentError::Session(SessionError::SetupFailed(
+                gemini_genai_rs::session::SetupError::ServerRejected {
+                    code: None,
+                    message: failure,
+                },
+            )));
+        }
+    }
+    let runtime = build_runtime(plan, session);
+    spawn_lanes(runtime).await
+}
+
+impl LiveSessionBuilder {
     /// Derive the resolved [`SessionPlan`] from this builder.
     ///
     /// This is a pure transformation: it runs build-time validations and
@@ -405,6 +466,8 @@ impl LiveSessionBuilder {
             middleware: self.middleware,
             flow: self.flow,
             redactor: self.redactor,
+            clock: self.clock,
+            lockstep: self.lockstep,
         })
     }
 }
@@ -445,6 +508,8 @@ pub(crate) struct SessionPlan {
     middleware: Vec<Arc<dyn crate::middleware::Middleware>>,
     flow: Option<crate::flow::FlowStack>,
     redactor: Option<Arc<super::redaction::TranscriptRedactor>>,
+    clock: Option<crate::clock::SharedClock>,
+    lockstep: Option<Arc<super::processor::Lockstep>>,
 }
 
 /// Fully wired runtime for a connected Live session, ready for lane spawning.
@@ -496,6 +561,12 @@ pub(crate) fn build_runtime(plan: SessionPlan, session: SessionHandle) -> Sessio
     let callbacks = Arc::new(callbacks);
     let raw_writer: Arc<dyn SessionWriter> = Arc::new(session.clone());
     let state = plan.state.unwrap_or_default();
+    if let Some(clock) = plan.clock {
+        state.set_clock(clock);
+    }
+    if let Some(stack) = &flow_monitor {
+        stack.lock().publish_timing(&state);
+    }
 
     // Subscribe twice: one for router → fast/ctrl, one for telemetry lane
     let event_rx = session.subscribe();
@@ -511,7 +582,10 @@ pub(crate) fn build_runtime(plan: SessionPlan, session: SessionHandle) -> Sessio
         }
     }
 
-    let phase_machine_mutex = plan.phase_machine.map(tokio::sync::Mutex::new);
+    let phase_machine_mutex = plan.phase_machine.map(|mut machine| {
+        machine.set_clock(state.clock());
+        tokio::sync::Mutex::new(machine)
+    });
     let temporal_arc = plan.temporal.map(Arc::new);
     let background_tracker = Arc::new(BackgroundToolTracker::new());
 
@@ -540,13 +614,23 @@ pub(crate) fn build_runtime(plan: SessionPlan, session: SessionHandle) -> Sessio
         },
         flow: flow_monitor.clone(),
         redactor: plan.redactor,
+        lockstep: plan.lockstep,
     };
 
     // Create shared PendingContext for deferred delivery.
     // The SAME Arc is given to both the DeferredWriter (which drains it before
     // user sends) and the ControlPlaneConfig (which the processor uses to push
     // context turns from the control lane).
-    let pending_context = if plan.context_delivery == ContextDelivery::Deferred {
+    // A stage whose voice timing defers context needs the queue even when the
+    // session as a whole delivers immediately.
+    let stage_defers = flow_monitor.as_ref().is_some_and(|stack| {
+        stack
+            .lock()
+            .timing_policies()
+            .values()
+            .any(|t| t.context_delivery == Some(ContextDelivery::Deferred))
+    });
+    let pending_context = if plan.context_delivery == ContextDelivery::Deferred || stage_defers {
         Some(Arc::new(PendingContext::new()))
     } else {
         None

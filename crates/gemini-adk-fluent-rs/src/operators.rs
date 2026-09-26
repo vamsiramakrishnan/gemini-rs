@@ -6,8 +6,13 @@
 //! |----------|--------------------|----------------------------|
 //! | `>>`     | Sequential pipeline| `agent_a >> agent_b`       |
 //! | `\|`     | Parallel fan-out   | `agent_a \| agent_b`       |
-//! | `*`      | Loop (fixed)       | `agent * 3`                |
-//! | `//`     | Fallback chain     | `agent_a // agent_b`       |
+//! | `*`      | Loop               | `agent * 3`, `agent * until(..)` |
+//! | `/`      | Fallback chain     | `agent_a / agent_b`        |
+//!
+//! `>>` means "then" everywhere in the SDK: a pipeline step, a state
+//! transform (`S`), a context rewrite (`C`), a middleware layer (`M`). A
+//! state transform is a pipeline step too, reshaping state between agents:
+//! `researcher >> S::pick(&["findings", "input"]) >> writer`.
 
 use std::sync::Arc;
 
@@ -44,6 +49,10 @@ pub enum Composable {
     /// Run one of two workflows, chosen by a state predicate
     /// ([`patterns::conditional`](crate::patterns::conditional)).
     Branch(Branch),
+    /// Reshape state between steps with an `S` transform chain
+    /// (`agent >> S::pick(..) >> agent`). The pipeline's `input` passes
+    /// through unchanged.
+    Transform(crate::compose::state::StateComposite),
 }
 
 /// Choose between two workflows by a predicate over state.
@@ -312,6 +321,8 @@ impl Composable {
                 ))
             }
 
+            Composable::Transform(transform) => Arc::new(TransformTextAgent { transform }),
+
             Composable::Fallback(fallback) => {
                 let middleware = fallback.middleware;
                 let candidates = fallback
@@ -338,6 +349,75 @@ fn state_snapshot(state: &gemini_adk_rs::State) -> serde_json::Value {
         }
     }
     serde_json::Value::Object(map)
+}
+
+/// A pipeline step that applies an `S` transform chain to the session state.
+struct TransformTextAgent {
+    transform: crate::compose::state::StateComposite,
+}
+
+#[async_trait::async_trait]
+impl TextAgent for TransformTextAgent {
+    fn name(&self) -> &str {
+        "transform"
+    }
+
+    async fn run(&self, state: &gemini_adk_rs::State) -> Result<String, gemini_adk_rs::AgentError> {
+        let before = state_snapshot(state);
+        let mut after = before.clone();
+        self.transform.apply(&mut after);
+        let (Some(before), Some(after)) = (before.as_object(), after.as_object()) else {
+            return Ok(String::new());
+        };
+        // `input` carries the pipeline's text from step to step.
+        for key in before.keys() {
+            if key != "input" && !after.contains_key(key) {
+                state.remove(key);
+            }
+        }
+        for (key, value) in after {
+            if key != "input" && before.get(key) != Some(value) {
+                state.set(key, value)?;
+            }
+        }
+        Ok(state.get::<String>("input").unwrap_or_default())
+    }
+}
+
+impl From<crate::compose::state::StateTransform> for Composable {
+    fn from(transform: crate::compose::state::StateTransform) -> Self {
+        Composable::Transform(transform.into())
+    }
+}
+
+impl From<crate::compose::state::StateComposite> for Composable {
+    fn from(transform: crate::compose::state::StateComposite) -> Self {
+        Composable::Transform(transform)
+    }
+}
+
+macro_rules! transform_steps {
+    ($($lhs:ty => $rhs:ty),* $(,)?) => {$(
+        /// A state transform as a pipeline step: `a >> S::pick(..) >> b`.
+        impl std::ops::Shr<$rhs> for $lhs {
+            type Output = Composable;
+
+            fn shr(self, rhs: $rhs) -> Self::Output {
+                Composable::from(self) >> Composable::from(rhs)
+            }
+        }
+    )*};
+}
+
+transform_steps! {
+    AgentBuilder => crate::compose::state::StateTransform,
+    AgentBuilder => crate::compose::state::StateComposite,
+    Composable => crate::compose::state::StateTransform,
+    Composable => crate::compose::state::StateComposite,
+    crate::compose::state::StateTransform => AgentBuilder,
+    crate::compose::state::StateComposite => AgentBuilder,
+    crate::compose::state::StateTransform => Composable,
+    crate::compose::state::StateComposite => Composable,
 }
 
 /// Build a [`MiddlewareChain`] from an ordered list of middleware layers.
@@ -835,6 +915,45 @@ impl Loop {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A state transform between two agents reshapes state and passes the
+    /// first agent's text on as the second agent's input.
+    #[tokio::test]
+    async fn a_state_transform_is_a_pipeline_step() {
+        use crate::compose::state::S;
+        use gemini_adk_rs::llm::{LlmResponse, MockLlm};
+
+        let llm = MockLlm::from_fn(|req| {
+            let last = req
+                .contents
+                .last()
+                .and_then(|c| c.parts.first())
+                .map(|p| format!("{p:?}"))
+                .unwrap_or_default();
+            Ok(LlmResponse::from_text(if last.contains("draft v1") {
+                "reviewed draft v1"
+            } else {
+                "draft v1"
+            }))
+        });
+        let workflow = AgentBuilder::new("writer").instruction("Write")
+            >> (S::set("stage", serde_json::json!("review")) >> S::drop(&["scratch"]))
+            >> AgentBuilder::new("reviewer").instruction("Review");
+        assert_eq!(workflow.pipeline_steps().map(<[Composable]>::len), Some(3));
+
+        let agent = workflow.compile(Arc::new(llm)).unwrap();
+        let state = gemini_adk_rs::State::new();
+        state.set("input", "a story").unwrap();
+        state.set("scratch", 1).unwrap();
+        let out = agent.run(&state).await.unwrap();
+
+        assert_eq!(
+            out, "reviewed draft v1",
+            "the reviewer saw the writer's text"
+        );
+        assert_eq!(state.get::<String>("stage").as_deref(), Some("review"));
+        assert_eq!(state.get::<i32>("scratch"), None);
+    }
 
     fn agent(name: &str) -> AgentBuilder {
         AgentBuilder::new(name)

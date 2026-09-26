@@ -1,0 +1,37 @@
+{
+  "name": "booking",
+  "slots": [
+    {
+      "confirm": "low_confidence",
+      "name": "party_size",
+      "prompt": "For how many people?",
+      "recognizer": {
+        "integer_near": [
+          "people",
+          "guests",
+          "party"
+        ]
+      },
+      "state_key": "party_size",
+      "validate": {
+        "range": {
+          "max": 12.0,
+          "min": 1.0
+        }
+      }
+    },
+    {
+      "name": "slot",
+      "prompt": "What day and time?",
+      "recognizer": "date_time",
+      "reprompt": "When would you like to come in?",
+      "state_key": "when"
+    },
+    {
+      "name": "name",
+      "pii": true,
+      "prompt": "Name for the reservation?",
+      "state_key": "name"
+    }
+  ]
+}

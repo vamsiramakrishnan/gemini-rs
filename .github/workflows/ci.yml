@@ -147,3 +147,29 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - uses: Swatinem/rust-cache@v2
       - run: cargo run -p gemini-adk-cli-rs --locked -- flow ci conversations
+
+  # The Python binding is excluded from the workspace (it links libpython and
+  # maturin builds it), so no job above compiles it. Build it against its own
+  # lockfile and run the model-free smoke suite.
+  python:
+    name: Python binding
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.93.1"
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/gemini-adk-py
+      - name: Build and smoke-test
+        working-directory: crates/gemini-adk-py
+        run: |
+          python -m venv .venv
+          . .venv/bin/activate
+          pip install "maturin>=1.7,<2.0"
+          maturin develop --locked
+          python tests/smoke.py

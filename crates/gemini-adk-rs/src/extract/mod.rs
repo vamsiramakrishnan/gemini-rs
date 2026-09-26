@@ -535,7 +535,7 @@ impl RecordExtractor {
         let cache_key = format!("{field}|{args_value}");
         if let Some(ttl) = ttl
             && let Some(entry) = self.cache.get(&cache_key)
-            && entry.1.elapsed() < ttl
+            && state.clock().since(entry.1) < ttl
         {
             return Some(entry.0.clone());
         }
@@ -543,7 +543,7 @@ impl RecordExtractor {
             Ok(value) => {
                 if ttl.is_some() {
                     self.cache
-                        .insert(cache_key, (value.clone(), Instant::now()));
+                        .insert(cache_key, (value.clone(), state.clock().now()));
                 }
                 Some(value)
             }

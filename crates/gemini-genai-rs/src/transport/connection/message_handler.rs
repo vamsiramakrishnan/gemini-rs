@@ -7,7 +7,7 @@ use tokio::sync::broadcast;
 
 use crate::protocol::messages::*;
 use crate::protocol::types::*;
-use crate::session::{ResumeInfo, SessionEvent, SessionPhase, SessionState};
+use crate::session::{InlineMedia, ResumeInfo, SessionEvent, SessionPhase, SessionState};
 
 /// Action to take after processing a server message.
 pub(super) enum MessageAction {
@@ -50,13 +50,23 @@ pub(super) fn handle_server_msg(
                             state.append_text(text);
                             let _ = event_tx.send(SessionEvent::TextDelta(text.clone()));
                         }
+                        // Audio is the common case; anything else inline — Live
+                        // Avatar video (`video/mp4`) — must not reach the speaker.
                         Part::InlineData { inline_data } => {
-                            state.mark_audio();
-                            if let Ok(audio_bytes) =
+                            let Ok(decoded) =
                                 base64::engine::general_purpose::STANDARD.decode(&inline_data.data)
-                            {
-                                let _ = event_tx
-                                    .send(SessionEvent::AudioData(bytes::Bytes::from(audio_bytes)));
+                            else {
+                                continue;
+                            };
+                            let data = bytes::Bytes::from(decoded);
+                            if is_audio_mime(&inline_data.mime_type) {
+                                state.mark_audio();
+                                let _ = event_tx.send(SessionEvent::AudioData(data));
+                            } else {
+                                let _ = event_tx.send(SessionEvent::Media(InlineMedia {
+                                    mime_type: inline_data.mime_type.clone(),
+                                    data,
+                                }));
                             }
                         }
                         Part::Thought { text, .. } => {
@@ -79,6 +89,10 @@ pub(super) fn handle_server_msg(
                 && let Some(text) = transcription.text
             {
                 let _ = event_tx.send(SessionEvent::OutputTranscription(text));
+            }
+
+            if let Some(status) = content.interaction_status {
+                let _ = event_tx.send(SessionEvent::InteractionStatus(status));
             }
 
             // Handle usage metadata (present on most server content messages)
@@ -147,6 +161,7 @@ pub(super) fn handle_server_msg(
                     VoiceActivityType::VoiceActivityEnd => {
                         let _ = event_tx.send(SessionEvent::VoiceActivityEnd);
                     }
+                    _ => {}
                 }
             }
         }
@@ -157,4 +172,10 @@ pub(super) fn handle_server_msg(
     }
 
     MessageAction::Continue
+}
+
+/// Whether an inline part from the model is audio. An empty MIME type counts
+/// as audio: that is what the Live API has always streamed there.
+fn is_audio_mime(mime_type: &str) -> bool {
+    mime_type.is_empty() || mime_type.starts_with("audio/")
 }

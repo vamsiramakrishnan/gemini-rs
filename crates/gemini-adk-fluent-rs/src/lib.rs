@@ -219,7 +219,9 @@ pub mod prelude {
     // the same import line as `Live`; the compiler internals stay in
     // `crate::conversation` and the serializable `Scenario` in
     // `crate::simulation`.
-    pub use crate::conversation::{CompiledConversation, Conversation, ConversationSpec};
+    pub use crate::conversation::{
+        CompiledConversation, Conversation, ConversationSpec, RepairPolicy, VoiceTiming,
+    };
     pub use crate::simulation::Sim;
 
     // ── State (prefix scopes + `SlotEvidence` in `crate::state`) ──
@@ -230,7 +232,7 @@ pub mod prelude {
 
     // ── Tools ──
     pub use gemini_adk_rs::tool::{
-        SimpleTool, ToolDispatcher, ToolFunction, ToolPolicy, TypedTool,
+        SimpleTool, ToolContext, ToolDispatcher, ToolFunction, ToolPolicy, TypedTool,
     };
     // The `#[tool]` attribute macro — turns an `async fn` into a registrable tool.
     pub use gemini_adk_rs::tool;
@@ -240,7 +242,10 @@ pub mod prelude {
     pub use gemini_adk_rs::Frame;
 
     // ── Callback contexts (used in `M::` hooks) ──
-    pub use gemini_adk_rs::context::{CallbackContext, ToolContext};
+    // `ToolContext` in the prelude is what a tool receives
+    // (`gemini_adk_rs::tool::ToolContext`); the `InvocationContext` wrapper of
+    // the same name stays at `gemini_adk_rs::context::ToolContext`.
+    pub use gemini_adk_rs::context::CallbackContext;
 
     // ── Common Live session types (full control plane in `crate::live`) ──
     pub use gemini_adk_rs::live::{
@@ -259,11 +264,12 @@ pub mod prelude {
 
     // ── L0 wire types an application names (the rest: `crate::wire`) ──
     pub use gemini_genai_rs::prelude::{
-        ActivityHandling, ApiEndpoint, AudioFormat, AutomaticActivityDetection, Blob, Content,
-        FinishReason, FunctionCall, FunctionCallingBehavior, FunctionDeclaration, FunctionResponse,
-        FunctionResponseScheduling, GenerationConfig, HarmBlockThreshold, HarmCategory, Modality,
-        ModelId, Part, Role, SafetySetting, Sensitivity, ServerMessage, SessionConfig,
-        SessionEvent, SpeechConfig, ThinkingConfig, Tool, TurnCoverage, UsageMetadata, Voice,
+        ActivityHandling, ApiEndpoint, AudioFormat, AudioTranscriptionConfig,
+        AutomaticActivityDetection, AvatarConfig, Blob, Content, FinishReason, FunctionCall,
+        FunctionCallingBehavior, FunctionDeclaration, FunctionResponse, FunctionResponseScheduling,
+        GenerationConfig, HarmBlockThreshold, HarmCategory, Modality, ModelId, Part, Role,
+        SafetySetting, Sensitivity, ServerMessage, SessionConfig, SessionEvent, SpeechConfig,
+        ThinkingConfig, Tool, TurnCoverage, UsageMetadata, Voice,
     };
 
     // `while let Some(event) = agent.stream(..).next().await` needs this trait.

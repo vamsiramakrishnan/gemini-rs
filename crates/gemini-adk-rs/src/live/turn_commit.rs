@@ -103,6 +103,17 @@ impl TurnCommitPolicy {
         }
     }
 
+    /// The policy's configuration.
+    pub fn config(&self) -> &TurnCommitConfig {
+        &self.config
+    }
+
+    /// Change the end-of-turn hold mid-session (a stage's endpointing). A
+    /// hold already running is measured against the new value.
+    pub fn set_eot_hold(&mut self, hold: Duration) {
+        self.config.eot_hold = hold;
+    }
+
     /// Apply the VAD edges observed in the chunk ending at `now_ms`, then
     /// advance pending holds/sustains to `now_ms`. `model_speaking` is the
     /// caller's knowledge of whether the model currently holds the floor.

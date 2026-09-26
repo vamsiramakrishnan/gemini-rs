@@ -25,6 +25,9 @@ pub(crate) fn assemble_stack(
     main: gemini_adk_rs::flow::FlowMonitor,
     digressions: Vec<gemini_adk_rs::flow::Overlay>,
     repair: std::collections::BTreeMap<String, gemini_adk_rs::flow::RepairPolicy>,
+    timing: std::collections::BTreeMap<String, gemini_adk_rs::flow::VoiceTiming>,
+    corrections: std::collections::BTreeMap<String, Vec<String>>,
+    verbatim: std::collections::BTreeMap<String, String>,
     ambient: &[String],
 ) -> gemini_adk_rs::flow::FlowStack {
     let overlays = digressions.into_iter().map(|mut ov| {
@@ -34,6 +37,9 @@ pub(crate) fn assemble_stack(
     gemini_adk_rs::flow::FlowStack::from_monitor(main)
         .with_overlays(overlays)
         .with_repairs(repair)
+        .with_timings(timing)
+        .with_corrections(corrections)
+        .with_verbatims(verbatim)
 }
 
 impl Live {
@@ -110,7 +116,35 @@ impl Live {
         self.build_and_connect().await
     }
 
-    async fn build_and_connect(mut self) -> Result<LiveHandle, gemini_adk_rs::error::AgentError> {
+    /// Connect over `transport` instead of a WebSocket to Gemini, with
+    /// everything this builder configured: tools, phases, extractors,
+    /// watchers, governance and callbacks run for real against whatever the
+    /// transport answers.
+    ///
+    /// This is how to test a session offline. Script the server with
+    /// [`ScriptedServer`](crate::testing::ScriptedServer); no network or
+    /// credential is used.
+    pub async fn connect_with_transport<T: gemini_genai_rs::transport::Transport>(
+        self,
+        transport: T,
+    ) -> Result<LiveHandle, gemini_adk_rs::error::AgentError> {
+        self.build_and_connect_via(move |builder| builder.connect_with_transport(transport))
+            .await
+    }
+
+    async fn build_and_connect(self) -> Result<LiveHandle, gemini_adk_rs::error::AgentError> {
+        self.build_and_connect_via(LiveSessionBuilder::connect)
+            .await
+    }
+
+    async fn build_and_connect_via<F, Fut>(
+        mut self,
+        connect: F,
+    ) -> Result<LiveHandle, gemini_adk_rs::error::AgentError>
+    where
+        F: FnOnce(LiveSessionBuilder) -> Fut,
+        Fut: std::future::Future<Output = Result<LiveHandle, gemini_adk_rs::error::AgentError>>,
+    {
         // Builder setters cannot fail; problems they found are reported here,
         // with a `T::confirm` tool that nothing can confirm (agent and MCP
         // tools resolved below are never gated, so this check is complete).
@@ -164,7 +198,12 @@ impl Live {
         // The session's `State`. A caller-supplied one is used as-is so tools
         // they already built around it write where the flow monitor and phase
         // machine read; otherwise agent tools get a fresh one as before.
-        let shared_state = self.state.clone();
+        // Deferred agent tools and policies need the state before the runtime
+        // exists, so one is made here when the caller gave none.
+        let shared_state = self.state.clone().or_else(|| {
+            (!self.deferred_agent_tools.is_empty() || !self.policies.is_empty())
+                .then(gemini_adk_rs::State::new)
+        });
         if let Some(ref state) = shared_state {
             builder = builder.state(state.clone());
         }
@@ -182,7 +221,6 @@ impl Live {
                     state.clone(),
                 ));
             }
-            builder = builder.state(state);
         }
 
         // Resolve deferred async tools (MCP connections, etc.).
@@ -191,6 +229,11 @@ impl Live {
             for deferred in std::mem::take(&mut self.deferred_tools) {
                 resolve_deferred_tool(deferred, d).await?;
             }
+        }
+
+        // Enforce redaction and commit-governance policies.
+        if let Some(state) = &shared_state {
+            apply_policies(&self.policies, state, &mut dispatcher)?;
         }
 
         // Attach the confirmation provider so `T::confirm(..)` tools are gated.
@@ -304,10 +347,16 @@ impl Live {
                 monitor,
                 self.digressions,
                 self.repair_policies,
+                self.stage_timings,
+                self.corrections,
+                self.verbatims,
                 &self.ambient_tools,
             ));
         }
         builder = builder.tool_advisory(self.tool_advisory);
+        if let Some(clock) = self.clock.take() {
+            builder = builder.clock(clock);
+        }
         if let Some(interval) = self.telemetry_interval {
             builder = builder.telemetry_interval(interval);
         }
@@ -320,7 +369,7 @@ impl Live {
             });
         }
 
-        let handle = builder.connect().await?;
+        let handle = connect(builder).await?;
 
         // Input-audio hardening: materialize the configured stages (in
         // order) and hand them plus VAD tuning and authority to the handle.
@@ -341,6 +390,57 @@ impl Live {
         }
         Ok(handle)
     }
+}
+
+/// Enforce `policies` on a session: mark redacted keys on its state and
+/// wrap each commit tool in a [`CommitGuard`](gemini_adk_rs::tool::CommitGuard).
+fn apply_policies(
+    policies: &[crate::policy::Policy],
+    state: &gemini_adk_rs::State,
+    dispatcher: &mut Option<gemini_adk_rs::tool::ToolDispatcher>,
+) -> Result<(), gemini_adk_rs::error::AgentError> {
+    use crate::policy::Policy;
+    use gemini_adk_rs::tool::{CommitGuard, ToolKind};
+
+    let function = |d: &gemini_adk_rs::tool::ToolDispatcher, name: &str| match d.get_tool(name) {
+        Some(ToolKind::Function(f)) => Some(f.clone()),
+        _ => None,
+    };
+    for policy in policies {
+        match policy {
+            Policy::Redact { keys } => state.redact_keys(keys.iter().cloned()),
+            Policy::Commit {
+                tool,
+                idempotency_key,
+                compensate_with,
+            } => {
+                let d = dispatcher.as_mut();
+                let Some(inner) = d.as_ref().and_then(|d| function(d, tool)) else {
+                    return Err(gemini_adk_rs::error::AgentError::Config(format!(
+                        "Policy::commit names `{tool}`, which is not a registered function tool"
+                    )));
+                };
+                let mut guard = CommitGuard::new(inner, state.clone());
+                if let Some(template) = idempotency_key {
+                    guard = guard.idempotency_key(template.clone());
+                }
+                if let Some(undo) = compensate_with {
+                    let Some(undo_fn) = d.as_ref().and_then(|d| function(d, undo)) else {
+                        return Err(gemini_adk_rs::error::AgentError::Config(format!(
+                            "Policy::commit(`{tool}`) compensates with `{undo}`, which is not a \
+                             registered function tool"
+                        )));
+                    };
+                    guard = guard.compensate_with(undo_fn);
+                }
+                if let Some(d) = d {
+                    d.register(guard);
+                }
+            }
+            Policy::SafetyHandoff { .. } => {}
+        }
+    }
+    Ok(())
 }
 
 /// Resolve an [`ApiEndpoint`] from the environment, with a `gcloud` token

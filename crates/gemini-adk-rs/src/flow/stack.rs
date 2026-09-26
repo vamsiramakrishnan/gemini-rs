@@ -14,13 +14,16 @@
 //! type with the same semantics. The authoring layer lowers a conversation into
 //! a stack; it does not implement one.
 //!
-//! Nesting depth is 1: a digression cannot itself be interrupted by another.
+//! Digressions nest: a digression can itself be interrupted by another (one
+//! not already on the active path), which drives until it completes and then
+//! resumes the one beneath it per its own [`Resume`] policy.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
+use super::timing::{VOICE_TIMING_KEY, VoiceTiming};
 use super::{
     CompiledFlow, Enforcement, Flow, FlowExplanation, FlowMonitor, Guard, Marking, Step, StepAction,
 };
@@ -35,6 +38,28 @@ pub fn escalate_flag(stage: &str) -> String {
 pub fn reprompt_flag(stage: &str) -> String {
     format!("repair:{stage}:reprompt")
 }
+
+/// The state key raised for one turn when the user corrects `slot`: its
+/// value changed from one captured value to another. See
+/// [`FlowStack::with_correction`].
+pub fn correction_flag(slot: &str) -> String {
+    format!("correction:{slot}")
+}
+
+/// Written when the governed flow admits a tool call, before it runs:
+/// `{"tool": name, "id": call id}`. With [`TOOL_DENIED_KEY`] and
+/// [`TOOL_RESULT_KEY`] it puts every governance decision about a tool in the
+/// mutation journal, in order, which is what makes a recorded session
+/// replayable as a scenario.
+pub const TOOL_CALL_KEY: &str = "flow:tool_call";
+
+/// Written when the governed flow refuses a tool call:
+/// `{"tool": name, "id": call id, "reason": why}`.
+pub const TOOL_DENIED_KEY: &str = "flow:tool_denied";
+
+/// Written when an admitted tool call completes:
+/// `{"tool": name, "id": call id, "ok": succeeded}`.
+pub const TOOL_RESULT_KEY: &str = "flow:tool_result";
 
 /// The state key that names the active digression (`null` when the main flow
 /// is driving). Published by the control plane at every turn boundary.
@@ -96,6 +121,14 @@ pub struct RepairPolicy {
     /// Step to route to on escalation (also completes the current step).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub escalate_to: Option<String>,
+    /// Escalate once the user has barged in this many times while the step
+    /// is active (they keep cutting the model off: it is not working).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub escalate_after_interruptions: Option<u32>,
+    /// Escalate once this many tool calls have failed or timed out while
+    /// the step is active.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub escalate_after_tool_failures: Option<u32>,
 }
 
 impl Default for RepairPolicy {
@@ -104,6 +137,8 @@ impl Default for RepairPolicy {
             reprompt_after: default_reprompt_after(),
             escalate_after: default_escalate_after(),
             escalate_to: None,
+            escalate_after_interruptions: None,
+            escalate_after_tool_failures: None,
         }
     }
 }
@@ -114,13 +149,26 @@ impl RepairPolicy {
         Self {
             reprompt_after,
             escalate_after,
-            escalate_to: None,
+            ..Self::default()
         }
     }
 
     /// Route to `step` on escalation (also completes the current step).
     pub fn escalate_to(mut self, step: impl Into<String>) -> Self {
         self.escalate_to = Some(step.into());
+        self
+    }
+
+    /// Also escalate after `n` barge-ins while the step is active.
+    pub fn escalate_after_interruptions(mut self, n: u32) -> Self {
+        self.escalate_after_interruptions = Some(n);
+        self
+    }
+
+    /// Also escalate after `n` failed or timed-out tool calls while the step
+    /// is active.
+    pub fn escalate_after_tool_failures(mut self, n: u32) -> Self {
+        self.escalate_after_tool_failures = Some(n);
         self
     }
 }
@@ -204,13 +252,28 @@ pub struct FlowStack {
     main: FlowMonitor,
     mode: Enforcement,
     overlays: Vec<Overlay>,
-    active: Option<ActiveOverlay>,
+    /// The digressions suspending the main flow, outermost first. The last
+    /// one drives; each suspends the one beneath it.
+    active: Vec<ActiveOverlay>,
     /// The digression that ended the conversation, once one has.
     terminated: Option<String>,
     /// Per-main-step repair policies.
     repair: BTreeMap<String, RepairPolicy>,
     /// Consecutive turns each main step has been active without completing.
     active_turns: BTreeMap<String, u32>,
+    /// Per-step voice timing, keyed by step id in whichever layer is active.
+    timing: BTreeMap<String, VoiceTiming>,
+    /// Slots whose correction re-opens later stages, with the state keys to
+    /// clear when that happens (e.g. the confirmation of a commit stage).
+    corrections: BTreeMap<String, Vec<String>>,
+    /// The last value seen for each watched slot.
+    slot_values: BTreeMap<String, serde_json::Value>,
+    /// Text each step must have said word for word.
+    verbatim: BTreeMap<String, String>,
+    /// Barge-ins each main step has seen while active.
+    interruptions: BTreeMap<String, u32>,
+    /// Failed tool calls each main step has seen while active.
+    tool_failures: BTreeMap<String, u32>,
 }
 
 impl std::fmt::Debug for FlowStack {
@@ -218,9 +281,14 @@ impl std::fmt::Debug for FlowStack {
         f.debug_struct("FlowStack")
             .field("mode", &self.mode)
             .field("overlays", &self.overlays.len())
-            .field("active", &self.active.as_ref().map(|a| &a.name))
+            .field(
+                "active",
+                &self.active.iter().map(|a| &a.name).collect::<Vec<_>>(),
+            )
             .field("terminated", &self.terminated)
             .field("repair", &self.repair)
+            .field("timing", &self.timing)
+            .field("corrections", &self.corrections)
             .finish()
     }
 }
@@ -239,10 +307,16 @@ impl FlowStack {
             mode: main.mode(),
             main,
             overlays: Vec::new(),
-            active: None,
+            active: Vec::new(),
             terminated: None,
             repair: BTreeMap::new(),
             active_turns: BTreeMap::new(),
+            timing: BTreeMap::new(),
+            corrections: BTreeMap::new(),
+            verbatim: BTreeMap::new(),
+            slot_values: BTreeMap::new(),
+            interruptions: BTreeMap::new(),
+            tool_failures: BTreeMap::new(),
         }
     }
 
@@ -271,6 +345,146 @@ impl FlowStack {
     ) -> Self {
         self.repair.extend(policies);
         self
+    }
+
+    /// Watch `slot` for corrections: when its value changes from one captured
+    /// value to another, [`correction_flag`]`(slot)` is raised for that turn
+    /// and `clear` keys are removed from state.
+    ///
+    /// Raising the flag does nothing by itself. The main flow reacts through
+    /// a [`Constraint::Reset`](super::Constraint::Reset) gated on it, which
+    /// un-latches the stages downstream of the slot so they run again with
+    /// the corrected value. A `Conversation` lowers exactly that for every
+    /// collected slot, clearing the confirmation of any commit stage it
+    /// re-opens.
+    pub fn with_correction(
+        mut self,
+        slot: impl Into<String>,
+        clear: impl IntoIterator<Item = String>,
+    ) -> Self {
+        self.corrections
+            .insert(slot.into(), clear.into_iter().collect());
+        self
+    }
+
+    /// Watch several slots; see [`with_correction`](Self::with_correction).
+    pub fn with_corrections(
+        mut self,
+        corrections: impl IntoIterator<Item = (String, Vec<String>)>,
+    ) -> Self {
+        self.corrections.extend(corrections);
+        self
+    }
+
+    /// The watched slots and the keys each correction clears.
+    pub fn correction_policies(&self) -> &BTreeMap<String, Vec<String>> {
+        &self.corrections
+    }
+
+    /// Require `step` to say `text` word for word; see
+    /// [`verbatim`](super::verbatim). The stack publishes the requirement
+    /// while the step is active. Its completion guard must also require
+    /// [`verbatim_flag`](super::verbatim_flag)`(step)`, which a
+    /// `Conversation` lowers for you.
+    pub fn with_verbatim(mut self, step: impl Into<String>, text: impl Into<String>) -> Self {
+        self.verbatim.insert(step.into(), text.into());
+        self
+    }
+
+    /// Verbatim requirements keyed by step.
+    pub fn with_verbatims(mut self, texts: impl IntoIterator<Item = (String, String)>) -> Self {
+        self.verbatim.extend(texts);
+        self
+    }
+
+    /// The verbatim requirements keyed by step.
+    pub fn verbatim_policies(&self) -> &BTreeMap<String, String> {
+        &self.verbatim
+    }
+
+    /// Attach voice timing to a step (main flow or digression).
+    pub fn with_timing(mut self, step: impl Into<String>, timing: VoiceTiming) -> Self {
+        self.timing.insert(step.into(), timing);
+        self
+    }
+
+    /// Attach voice timing keyed by step.
+    pub fn with_timings(
+        mut self,
+        timings: impl IntoIterator<Item = (String, VoiceTiming)>,
+    ) -> Self {
+        self.timing.extend(timings);
+        self
+    }
+
+    /// The voice timing keyed by step.
+    pub fn timing_policies(&self) -> &BTreeMap<String, VoiceTiming> {
+        &self.timing
+    }
+
+    /// The merged timing of the steps active right now in the driving layer
+    /// (empty when none of them has timing, or the conversation is over).
+    pub fn active_timing(&self, state: &State) -> VoiceTiming {
+        if self.timing.is_empty() || self.terminated.is_some() {
+            return VoiceTiming::default();
+        }
+        self.current()
+            .active_steps(state)
+            .iter()
+            .filter_map(|step| self.timing.get(&step.id))
+            .fold(VoiceTiming::default(), |acc, t| acc.merge(t))
+    }
+
+    /// Publish [`active_timing`](Self::active_timing) to
+    /// [`VOICE_TIMING_KEY`] in state, where the runtime's audio path, timers
+    /// and turn lifecycle read it. Writes only on change; removes the key
+    /// when no timing applies. The stack calls this itself after every turn
+    /// and tool call; call it once when installing the stack.
+    pub fn publish_timing(&self, state: &State) {
+        self.publish_verbatim(state);
+        if self.timing.is_empty() {
+            return;
+        }
+        let timing = self.active_timing(state);
+        let current = state.get::<VoiceTiming>(VOICE_TIMING_KEY);
+        if timing.is_empty() {
+            if current.is_some() {
+                state.remove(VOICE_TIMING_KEY);
+            }
+        } else if current.as_ref() != Some(&timing) {
+            let _ = state.set(VOICE_TIMING_KEY, &timing);
+        }
+    }
+
+    /// Publish the active step's verbatim requirement to
+    /// [`VERBATIM_KEY`](super::VERBATIM_KEY), or remove it when no active step
+    /// has one. Called with [`publish_timing`](Self::publish_timing).
+    fn publish_verbatim(&self, state: &State) {
+        if self.verbatim.is_empty() {
+            return;
+        }
+        let required = (self.terminated.is_none())
+            .then(|| {
+                self.current().active_steps(state).iter().find_map(|step| {
+                    self.verbatim
+                        .get(&step.id)
+                        .map(|text| super::VerbatimRequirement {
+                            step: step.id.clone(),
+                            text: text.clone(),
+                        })
+                })
+            })
+            .flatten();
+        let current = state.get::<super::VerbatimRequirement>(super::VERBATIM_KEY);
+        match required {
+            Some(req) if current.as_ref() != Some(&req) => {
+                let _ = state.set(super::VERBATIM_KEY, &req);
+            }
+            None if current.is_some() => {
+                state.remove(super::VERBATIM_KEY);
+            }
+            _ => {}
+        }
     }
 
     /// Wrap in a [`SharedFlowStack`] for shared ownership between the control
@@ -307,25 +521,31 @@ impl FlowStack {
     /// The monitor currently driving — the active digression if any, else the
     /// main flow.
     pub fn current(&self) -> &FlowMonitor {
-        self.active.as_ref().map_or(&self.main, |a| &a.monitor)
+        self.active.last().map_or(&self.main, |a| &a.monitor)
     }
 
     fn current_mut(&mut self) -> &mut FlowMonitor {
-        match &mut self.active {
+        match self.active.last_mut() {
             Some(a) => &mut a.monitor,
             None => &mut self.main,
         }
     }
 
-    /// The name of the active digression, if one is suspending the main flow.
+    /// The name of the driving digression, if one is suspending the main flow.
     pub fn active_overlay(&self) -> Option<&str> {
-        self.active.as_ref().map(|a| a.name.as_str())
+        self.active.last().map(|a| a.name.as_str())
+    }
+
+    /// Every active digression, outermost first: a digression can itself be
+    /// interrupted by another, which then drives until it completes.
+    pub fn overlay_path(&self) -> Vec<&str> {
+        self.active.iter().map(|a| a.name.as_str()).collect()
     }
 
     /// Whether the conversation is finished (main complete, or a `Terminate`
     /// digression ran).
     pub fn is_complete(&self) -> bool {
-        self.terminated.is_some() || (self.active.is_none() && self.main.is_complete())
+        self.terminated.is_some() || (self.active.is_empty() && self.main.is_complete())
     }
 
     /// Whether a `Terminate` digression ended the conversation. From then on
@@ -346,16 +566,112 @@ impl FlowStack {
     /// Whether the active digression has run to completion and is being
     /// projected for its closing turn.
     fn active_is_closing(&self) -> bool {
-        self.active
-            .as_ref()
-            .is_some_and(|a| a.monitor.is_complete())
+        self.active.last().is_some_and(|a| a.monitor.is_complete())
     }
 
-    /// Index of the first overlay whose trigger holds against the main context.
+    /// Index of the first overlay whose trigger holds against the main
+    /// context and that is not already on the active path (a digression
+    /// cannot interrupt itself).
     fn triggered(&self, state: &State) -> Option<usize> {
-        self.overlays
+        self.overlays.iter().position(|ov| {
+            !self.active.iter().any(|a| a.name == ov.name) && self.main.eval(&ov.trigger, state)
+        })
+    }
+
+    /// Enter overlay `idx` on top of the active path, driving its first turn
+    /// so single-step overlays latch. If that completes it, it still stays
+    /// active for this turn's projection (see the type docs).
+    fn enter(&mut self, idx: usize, state: &State) {
+        let ov = &self.overlays[idx];
+        let mut monitor = FlowMonitor::new(ov.flow.clone(), self.mode);
+        monitor.on_turn(state);
+        self.active.push(ActiveOverlay {
+            name: ov.name.clone(),
+            monitor,
+            resume: ov.resume,
+        });
+    }
+
+    /// Raise the correction flag of every watched slot whose value changed
+    /// from one captured value to another since the last turn, clearing the
+    /// keys its rule names. The main flow lowers the flags once it has
+    /// advanced past them.
+    fn detect_corrections(&mut self, state: &State) {
+        if self.corrections.is_empty() {
+            return;
+        }
+        for (slot, clear) in &self.corrections {
+            let current = state.get_raw(slot);
+            let corrected = matches!(
+                (self.slot_values.get(slot), &current),
+                (Some(before), Some(now)) if before != now
+            );
+            if corrected {
+                let _ = state.set(correction_flag(slot), true);
+                for key in clear {
+                    state.remove(key);
+                }
+            }
+            match current {
+                Some(v) => {
+                    self.slot_values.insert(slot.clone(), v);
+                }
+                None => {
+                    self.slot_values.remove(slot);
+                }
+            }
+        }
+    }
+
+    /// Count a barge-in against every active main step and escalate those
+    /// whose policy's `escalate_after_interruptions` is reached. Called by
+    /// the control plane when the user interrupts the model.
+    pub fn on_interrupted(&mut self, state: &State) {
+        self.count_against_active(
+            state,
+            |p| p.escalate_after_interruptions,
+            |s| &mut s.interruptions,
+        );
+    }
+
+    /// Count a failed (or timed-out) tool call against every active main step
+    /// and escalate those whose policy's `escalate_after_tool_failures` is
+    /// reached.
+    pub fn on_tool_failed(&mut self, state: &State) {
+        self.count_against_active(
+            state,
+            |p| p.escalate_after_tool_failures,
+            |s| &mut s.tool_failures,
+        );
+    }
+
+    fn count_against_active(
+        &mut self,
+        state: &State,
+        threshold: impl Fn(&RepairPolicy) -> Option<u32>,
+        counters: impl Fn(&mut Self) -> &mut BTreeMap<String, u32>,
+    ) {
+        if self.terminated.is_some() || !self.active.is_empty() || self.repair.is_empty() {
+            return;
+        }
+        let steps: Vec<(String, u32)> = self
+            .main
+            .active_steps(state)
             .iter()
-            .position(|ov| self.main.eval(&ov.trigger, state))
+            .filter_map(|s| {
+                self.repair
+                    .get(&s.id)
+                    .and_then(&threshold)
+                    .map(|limit| (s.id.clone(), limit))
+            })
+            .collect();
+        for (step, limit) in steps {
+            let count = counters(self).entry(step.clone()).or_insert(0);
+            *count += 1;
+            if *count >= limit {
+                let _ = state.set(escalate_flag(&step), true);
+            }
+        }
     }
 
     /// Bump per-step active-turn counters for the main flow and raise repair
@@ -379,6 +695,8 @@ impl FlowStack {
             .collect();
         for step in left {
             self.active_turns.remove(&step);
+            self.interruptions.remove(&step);
+            self.tool_failures.remove(&step);
             let _ = state.set(reprompt_flag(&step), false);
             // A step that completed *by escalating* must keep its escalate
             // signal: the authoring layer lowers `escalate_to` into an edge
@@ -413,16 +731,33 @@ impl FlowStack {
     /// otherwise re-complete the step the moment it is re-latched.
     fn clear_repair(&mut self, step: &str, state: &State) {
         self.active_turns.remove(step);
+        self.interruptions.remove(step);
+        self.tool_failures.remove(step);
         let _ = state.set(reprompt_flag(step), false);
         let _ = state.set(escalate_flag(step), false);
     }
 
-    fn apply_resume(&mut self, by: String, resume: Resume) {
+    /// Apply a closed digression's resume policy to the layer beneath it:
+    /// the next digression on the path, or the main flow.
+    fn apply_resume(&mut self, by: String, resume: Resume, state: &State) {
         match resume {
-            // Main marking was untouched while suspended — nothing to do.
+            // The suspended layer's marking was untouched — nothing to do.
             Resume::Previous => {}
-            Resume::Restart => self.main.restart(),
-            Resume::Terminate => self.terminated = Some(by),
+            Resume::Restart => match self.active.last_mut() {
+                Some(beneath) => beneath.monitor.restart(),
+                None => {
+                    self.main.restart();
+                    // A fresh pass starts with no step already escalated.
+                    let steps: Vec<String> = self.repair.keys().cloned().collect();
+                    for step in steps {
+                        self.clear_repair(&step, state);
+                    }
+                }
+            },
+            Resume::Terminate => {
+                self.active.clear();
+                self.terminated = Some(by);
+            }
         }
     }
 
@@ -432,6 +767,15 @@ impl FlowStack {
     fn advance_main(&mut self, state: &State) {
         for step in self.main.begin_turn(state) {
             self.clear_repair(&step, state);
+        }
+        // The main flow has now seen any correction raised since it last
+        // advanced (its reset edges fired above): lower the flags so the
+        // next correction is a fresh rising edge.
+        for slot in self.corrections.keys() {
+            let flag = correction_flag(slot);
+            if state.get::<bool>(&flag) == Some(true) {
+                let _ = state.set(&flag, false);
+            }
         }
         // Repair bookkeeping is based on the pre-turn active set so an
         // escalation signal can take effect this turn.
@@ -448,43 +792,33 @@ impl FlowStack {
     /// the active digression, enter a triggered one (suspending the main
     /// flow), or advance the main flow.
     pub fn on_turn(&mut self, state: &State) {
+        self.advance_turn(state);
+        self.publish_timing(state);
+    }
+
+    fn advance_turn(&mut self, state: &State) {
         if self.terminated.is_some() {
             return;
         }
+        // A correction can come while a digression drives; its flag stays
+        // raised until the main flow advances and sees it.
+        self.detect_corrections(state);
         if self.active_is_closing() {
-            let closed = self.active.take().expect("checked above");
-            let restarted = closed.resume == Resume::Restart;
-            self.apply_resume(closed.name, closed.resume);
+            let closed = self.active.pop().expect("checked above");
+            self.apply_resume(closed.name, closed.resume, state);
             if self.terminated.is_some() {
                 return;
             }
-            if restarted {
-                // A fresh pass starts with no step already escalated.
-                let steps: Vec<String> = self.repair.keys().cloned().collect();
-                for step in steps {
-                    self.clear_repair(&step, state);
-                }
-            }
         }
-        match &mut self.active {
+        // A triggered digression suspends whichever layer is driving, the
+        // main flow or another digression.
+        if let Some(idx) = self.triggered(state) {
+            self.enter(idx, state);
+            return;
+        }
+        match self.active.last_mut() {
             Some(active) => active.monitor.on_turn(state),
-            None => {
-                if let Some(idx) = self.triggered(state) {
-                    let ov = &self.overlays[idx];
-                    let mut monitor = FlowMonitor::new(ov.flow.clone(), self.mode);
-                    // Drive the digression's first turn so single-step overlays
-                    // latch. If that completes it, it still stays active for
-                    // this turn's projection (see the type docs).
-                    monitor.on_turn(state);
-                    self.active = Some(ActiveOverlay {
-                        name: ov.name.clone(),
-                        monitor,
-                        resume: ov.resume,
-                    });
-                } else {
-                    self.advance_main(state);
-                }
-            }
+            None => self.advance_main(state),
         }
     }
 
@@ -498,10 +832,15 @@ impl FlowStack {
     /// as the main layer does at a turn boundary. Repair
     /// is tracked for the main flow only, so a digression just delegates.
     pub fn on_tool_ok(&mut self, tool: &str, state: &State) {
+        self.advance_tool_ok(tool, state);
+        self.publish_timing(state);
+    }
+
+    fn advance_tool_ok(&mut self, tool: &str, state: &State) {
         if self.terminated.is_some() {
             return;
         }
-        match &mut self.active {
+        match self.active.last_mut() {
             Some(active) => active.monitor.on_tool_ok(tool, state),
             None => {
                 for step in self.main.begin_tool_ok(tool, state) {
@@ -538,6 +877,8 @@ impl FlowStack {
         }
         if ok {
             self.on_tool_ok(tool, state);
+        } else {
+            self.on_tool_failed(state);
         }
     }
 
@@ -677,6 +1018,192 @@ mod tests {
             .compile()
             .expect("compiles");
         Overlay::new("faq", Guard::is_true("intent:faq"), flow, Resume::Previous)
+    }
+
+    fn overlay(name: &str, trigger: &str, done_key: &str, resume: Resume) -> Overlay {
+        let end = format!("{name}_end");
+        let flow = Flow::new()
+            .step(format!("{name}_step"))
+            .done(Guard::is_true(done_key))
+            .step(&end)
+            .after(format!("{name}_step"))
+            .terminal()
+            .require([end.clone()])
+            .build()
+            .expect("valid")
+            .compile()
+            .expect("compiles");
+        Overlay::new(name, Guard::is_true(trigger), flow, resume)
+    }
+
+    #[test]
+    fn a_digression_can_be_interrupted_by_another() {
+        let state = State::new();
+        let mut stack = FlowStack::new(main_flow(), Enforcement::Enforce)
+            .with_overlay(overlay("faq", "intent:faq", "faq_done", Resume::Previous))
+            .with_overlay(overlay(
+                "clarify",
+                "intent:clarify",
+                "clarified",
+                Resume::Previous,
+            ));
+
+        let _ = state.set("intent:faq", true);
+        stack.on_turn(&state);
+        assert_eq!(stack.overlay_path(), ["faq"]);
+
+        // Mid-FAQ the user needs a clarification: it nests on top.
+        let _ = state.set("intent:clarify", true);
+        stack.on_turn(&state);
+        assert_eq!(stack.overlay_path(), ["faq", "clarify"]);
+        assert_eq!(stack.active_overlay(), Some("clarify"));
+
+        // The clarification completes (closing turn), then FAQ drives again.
+        let _ = state.set("intent:clarify", false);
+        let _ = state.set("clarified", true);
+        stack.on_turn(&state);
+        assert_eq!(stack.overlay_path(), ["faq", "clarify"], "closing turn");
+        stack.on_turn(&state);
+        assert_eq!(stack.overlay_path(), ["faq"]);
+
+        // FAQ completes; the main flow resumes where it was.
+        let _ = state.set("intent:faq", false);
+        let _ = state.set("faq_done", true);
+        stack.on_turn(&state);
+        stack.on_turn(&state);
+        assert!(stack.overlay_path().is_empty());
+        assert_eq!(stack.explain(&state).active, ["a"]);
+    }
+
+    #[test]
+    fn a_nested_terminate_ends_the_whole_conversation() {
+        let state = State::new();
+        let mut stack = FlowStack::new(main_flow(), Enforcement::Enforce)
+            .with_overlay(overlay("faq", "intent:faq", "faq_done", Resume::Previous))
+            .with_overlay(overlay(
+                "cancel",
+                "intent:cancel",
+                "cancelled",
+                Resume::Terminate,
+            ));
+        let _ = state.set("intent:faq", true);
+        stack.on_turn(&state);
+        let _ = state.set("intent:cancel", true);
+        let _ = state.set("cancelled", true);
+        stack.on_turn(&state);
+        assert_eq!(stack.overlay_path(), ["faq", "cancel"]);
+        stack.on_turn(&state);
+        assert!(stack.is_terminated());
+        assert!(stack.overlay_path().is_empty());
+    }
+
+    #[test]
+    fn a_digression_does_not_re_enter_itself() {
+        let state = State::new();
+        let mut stack = FlowStack::new(main_flow(), Enforcement::Enforce).with_overlay(overlay(
+            "faq",
+            "intent:faq",
+            "faq_done",
+            Resume::Previous,
+        ));
+        let _ = state.set("intent:faq", true);
+        stack.on_turn(&state);
+        stack.on_turn(&state);
+        assert_eq!(
+            stack.overlay_path(),
+            ["faq"],
+            "the trigger still holding does not stack it twice"
+        );
+    }
+
+    #[test]
+    fn barge_ins_and_tool_failures_escalate_the_active_step() {
+        let state = State::new();
+        let mut stack = FlowStack::new(main_flow(), Enforcement::Enforce).with_repair(
+            "a",
+            RepairPolicy::new(10, 10)
+                .escalate_after_interruptions(2)
+                .escalate_after_tool_failures(3),
+        );
+        stack.on_turn(&state);
+        stack.on_interrupted(&state);
+        assert_eq!(state.get::<bool>(&escalate_flag("a")), None);
+        stack.on_interrupted(&state);
+        assert_eq!(state.get::<bool>(&escalate_flag("a")), Some(true));
+
+        let state = State::new();
+        let mut stack = FlowStack::new(main_flow(), Enforcement::Enforce).with_repair(
+            "a",
+            RepairPolicy::new(10, 10).escalate_after_tool_failures(2),
+        );
+        stack.on_turn(&state);
+        stack.observe_tool("lookup", false, &state);
+        stack.observe_tool("lookup", false, &state);
+        assert_eq!(state.get::<bool>(&escalate_flag("a")), Some(true));
+    }
+
+    #[test]
+    fn a_corrected_slot_raises_its_flag_once_and_clears_its_keys() {
+        let state = State::new();
+        let mut stack = FlowStack::new(main_flow(), Enforcement::Enforce)
+            .with_correction("party_size", ["confirmed".to_string()]);
+        let _ = state.set("party_size", 4);
+        let _ = state.set("confirmed", true);
+        stack.on_turn(&state);
+        assert_eq!(
+            state.get::<bool>(&correction_flag("party_size")),
+            None,
+            "first value is not a correction"
+        );
+
+        let _ = state.set("party_size", 5);
+        stack.detect_corrections(&state);
+        assert_eq!(
+            state.get::<bool>(&correction_flag("party_size")),
+            Some(true)
+        );
+        assert_eq!(
+            state.get::<bool>("confirmed"),
+            None,
+            "the confirmation is cleared"
+        );
+
+        // The main flow advances past it: the flag drops for the next edge.
+        stack.on_turn(&state);
+        assert_eq!(
+            state.get::<bool>(&correction_flag("party_size")),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn timing_follows_the_active_step_and_digression() {
+        use std::time::Duration;
+        let state = State::new();
+        let a = VoiceTiming::new().reprompt_after(Duration::from_secs(6));
+        let answer = VoiceTiming::new().uninterruptible();
+        let mut stack = FlowStack::new(main_flow(), Enforcement::Enforce)
+            .with_overlay(faq_overlay())
+            .with_timing("a", a.clone())
+            .with_timing("answer", answer.clone());
+
+        stack.publish_timing(&state);
+        assert_eq!(state.get::<VoiceTiming>(VOICE_TIMING_KEY), Some(a.clone()));
+
+        // A digression takes over: its step's timing applies.
+        let _ = state.set("intent:faq", true);
+        stack.on_turn(&state);
+        assert_eq!(state.get::<VoiceTiming>(VOICE_TIMING_KEY), Some(answer));
+
+        // Back in the main flow, past `a`: `b` has no timing, so none applies.
+        let _ = state.set("intent:faq", false);
+        let _ = state.set("faq_answered", true);
+        stack.on_turn(&state);
+        stack.on_turn(&state);
+        assert_eq!(state.get::<VoiceTiming>(VOICE_TIMING_KEY), Some(a));
+        let _ = state.set("a_done", true);
+        stack.on_turn(&state);
+        assert_eq!(state.get::<VoiceTiming>(VOICE_TIMING_KEY), None);
     }
 
     #[test]

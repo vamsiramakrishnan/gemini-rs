@@ -125,7 +125,7 @@ fn main() {
 
     // ── C::prepend / C::append — Inject System Context ───────────────────
 
-    println!("\n--- C::prepend() + C::append() ---");
+    println!("\n--- C::prepend() >> C::append() ---");
     let short_history = vec![Content::user("What is 2+2?")];
     let enriched = C::prepend(Content::model("You are a math tutor.")).apply(&short_history);
     let enriched = C::append(Content::user("[End of conversation]")).apply(&enriched);
@@ -148,7 +148,7 @@ fn main() {
 
     println!("\n--- Policy Composition with + ---");
 
-    let production_policy = C::window(10) + C::user_only() + C::exclude_tools();
+    let production_policy = C::window(10) >> C::user_only() >> C::exclude_tools();
     println!(
         "  Composed policy: {} individual policies",
         production_policy.policies.len()

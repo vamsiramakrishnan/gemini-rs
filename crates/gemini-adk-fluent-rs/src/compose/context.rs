@@ -1,6 +1,7 @@
 //! C — Context engineering.
 //!
-//! Compose context policies additively with `+`.
+//! Chain context rewrites with `>>`: each rewrites the history the previous
+//! one produced, so order matters (`C::prepend(..) >> C::window(10)`).
 
 use std::sync::Arc;
 
@@ -48,19 +49,19 @@ impl std::fmt::Debug for ContextPolicy {
     }
 }
 
-/// Compose two context policies additively with `+`.
+/// Chain two context rewrites with `>>`: `self` first, then `rhs`.
 /// The combined policy applies both filters and merges (deduplicates) results.
-impl std::ops::Add for ContextPolicy {
+impl std::ops::Shr for ContextPolicy {
     type Output = ContextComposite;
 
-    fn add(self, rhs: ContextPolicy) -> Self::Output {
+    fn shr(self, rhs: ContextPolicy) -> Self::Output {
         ContextComposite {
             policies: vec![self, rhs],
         }
     }
 }
 
-/// A chain of context policies applied in combination (`C::a() + C::b()`).
+/// A chain of context policies applied in combination (`C::a() >> C::b()`).
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct ContextComposite {
@@ -70,7 +71,7 @@ pub struct ContextComposite {
 
 impl ContextComposite {
     /// Apply all policies in sequence, piping each policy's output into the
-    /// next. For `C::window(10) + C::user_only()` this means "take the last 10
+    /// next. For `C::window(10) >> C::user_only()` this means "take the last 10
     /// turns, then keep only the user turns" — the additive `+` composes the
     /// transforms rather than unioning their independent results.
     pub fn apply(&self, history: &[Content]) -> Vec<Content> {
@@ -116,10 +117,10 @@ impl Middleware for ContextMiddleware {
     }
 }
 
-impl std::ops::Add<ContextPolicy> for ContextComposite {
+impl std::ops::Shr<ContextPolicy> for ContextComposite {
     type Output = ContextComposite;
 
-    fn add(mut self, rhs: ContextPolicy) -> Self::Output {
+    fn shr(mut self, rhs: ContextPolicy) -> Self::Output {
         self.policies.push(rhs);
         self
     }
@@ -720,13 +721,13 @@ mod tests {
 
     #[test]
     fn compose_with_add() {
-        let chain = C::window(10) + C::user_only();
+        let chain = C::window(10) >> C::user_only();
         assert_eq!(chain.policies.len(), 2);
     }
 
     #[test]
     fn chain_extends_with_add() {
-        let chain = C::window(10) + C::user_only() + C::custom(<[Content]>::to_vec);
+        let chain = C::window(10) >> C::user_only() >> C::custom(<[Content]>::to_vec);
         assert_eq!(chain.policies.len(), 3);
     }
 

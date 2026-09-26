@@ -147,13 +147,13 @@ fn main() {
     let tools = remote_proxy(
         "verify_identity",
         "Verify the caller via the identity service",
-    ) | remote_proxy(
+    ) + remote_proxy(
         "process_payment",
         "Process a payment via the payments service",
-    ) | remote_proxy(
+    ) + remote_proxy(
         "score_transaction",
         "Score a transaction via the fraud service",
-    ) | T::simple(
+    ) + T::simple(
         "lookup_account",
         "Look up account details",
         |args| async move {
@@ -168,7 +168,7 @@ fn main() {
                 "tier": "premium"
             }))
         },
-    ) | T::google_search();
+    ) + T::google_search();
 
     println!(
         "Tool composite: {} tools (3 remote proxies + 1 local + 1 built-in)",
@@ -264,7 +264,7 @@ fn main() {
     // `T::mcp` is resolved at `Live::connect` (an async handshake); a text
     // `AgentBuilder::build` rejects it with a `ConfigError`.
     let extended_tools =
-        T::mcp("npx @modelcontextprotocol/server-filesystem /data") | T::google_search();
+        T::mcp("npx @modelcontextprotocol/server-filesystem /data") + T::google_search();
 
     println!("Extended tool composite: {} entries", extended_tools.len());
     println!("  Includes: an MCP toolset (connected at Live::connect) and a built-in");

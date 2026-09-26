@@ -257,6 +257,16 @@ pub struct StageSpec {
     /// Repair policy for this stage (reprompt/escalate on stalling).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repair: Option<RepairPolicy>,
+    /// Voice pacing while this stage is active: reprompt on silence, filler
+    /// cues for slow tools, holding the floor, endpointing, context delivery.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timing: Option<VoiceTiming>,
+    /// Text the model must say word for word in this stage (strict canned
+    /// mode). The stage completes only once the output transcript matches it;
+    /// see [`gemini_adk_rs::flow::verbatim`]. The model holds the floor
+    /// unless `timing` says otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verbatim: Option<String>,
     /// Named-resolver slot declarations. Bound to implementations at load via a
     /// [`ResolverRegistry`]; the data lives in the spec so it round-trips JSON.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -266,8 +276,8 @@ pub struct StageSpec {
 // The digression/repair vocabulary is owned by the runtime: the authoring layer
 // lowers into it and never reimplements it. Re-exported here so existing
 // `conversation::{Resume, RepairPolicy, FlowStack}` paths keep working.
-pub use gemini_adk_rs::flow::{FlowStack, RepairPolicy, Resume};
-use gemini_adk_rs::flow::{Overlay, escalate_flag};
+pub use gemini_adk_rs::flow::{FlowStack, RepairPolicy, Resume, VoiceTiming};
+use gemini_adk_rs::flow::{Overlay, correction_flag, escalate_flag, verbatim_flag};
 
 /// A digression (overlay): a named sub-flow that suspends the main flow when its
 /// `trigger` holds, runs to completion, then resumes per `resume`.
@@ -412,6 +422,9 @@ pub struct CompiledConversation {
     extractors: Vec<Extract>,
     overlays: Vec<CompiledOverlay>,
     repair: BTreeMap<String, RepairPolicy>,
+    timing: BTreeMap<String, VoiceTiming>,
+    corrections: BTreeMap<String, Vec<String>>,
+    verbatim: BTreeMap<String, String>,
     policies: Vec<crate::policy::Policy>,
     spec: ConversationSpec,
 }
@@ -475,10 +488,28 @@ impl CompiledConversation {
         FlowStack::new(self.flow.clone(), mode)
             .with_overlays(self.overlays.iter().map(CompiledOverlay::to_runtime))
             .with_repairs(self.repair.clone())
+            .with_timings(self.timing.clone())
+            .with_corrections(self.corrections.clone())
+            .with_verbatims(self.verbatim.clone())
     }
     /// The per-stage repair policies the runtime applies to the main flow.
     pub fn repair_policies(&self) -> &BTreeMap<String, RepairPolicy> {
         &self.repair
+    }
+    /// The stages that must say their text word for word, keyed by stage id.
+    pub fn verbatim_policies(&self) -> &BTreeMap<String, String> {
+        &self.verbatim
+    }
+    /// The slots whose correction re-opens later stages, each with the state
+    /// keys the correction clears (see
+    /// [`FlowStack::with_correction`](gemini_adk_rs::flow::FlowStack::with_correction)).
+    pub fn correction_policies(&self) -> &BTreeMap<String, Vec<String>> {
+        &self.corrections
+    }
+    /// The per-stage voice timing, main flow and digressions, keyed by
+    /// stage id.
+    pub fn timing_policies(&self) -> &BTreeMap<String, VoiceTiming> {
+        &self.timing
     }
     /// The authoring spec it was compiled from.
     pub fn spec(&self) -> &ConversationSpec {
@@ -753,6 +784,33 @@ impl Conversation {
         self
     }
 
+    /// Require the current stage to say `text` word for word (strict canned
+    /// mode): it completes only once the model's output transcript matches.
+    /// The model holds the floor while it reads, unless the stage sets
+    /// [`timing`](Self::timing). Needs output transcription on the session.
+    pub fn verbatim(mut self, text: impl Into<String>) -> Self {
+        self.current().verbatim = Some(text.into());
+        self
+    }
+
+    /// Set the current stage's voice pacing; see [`VoiceTiming`].
+    ///
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// use std::time::Duration;
+    /// Conversation::new("disclosure")
+    ///     .stage("read_terms")
+    ///     .say("Read the terms word for word.")
+    ///     .timing(VoiceTiming::new().uninterruptible())
+    ///     .stage("confirm")
+    ///     .collect(["agreed"])
+    ///     .timing(VoiceTiming::new().reprompt_after(Duration::from_secs(6)));
+    /// ```
+    pub fn timing(mut self, timing: VoiceTiming) -> Self {
+        self.current().timing = Some(timing);
+        self
+    }
+
     /// Require these stages for completion (lowers to a Flow `require`). Targets
     /// the active overlay when authoring one, else the main flow.
     pub fn require<I, S>(mut self, steps: I) -> Self
@@ -891,6 +949,26 @@ impl crate::live::Live {
             .map(CompiledOverlay::to_runtime)
             .collect();
         self.repair_policies = convo.repair_policies().clone();
+        // A timing set on the builder with `stage_timing` wins over the
+        // conversation's, whichever was called first.
+        for (step, timing) in convo.timing_policies() {
+            self.stage_timings
+                .entry(step.clone())
+                .or_insert_with(|| timing.clone());
+        }
+        self.corrections = convo.correction_policies().clone();
+        self.verbatims = convo.verbatim_policies().clone();
+        // A safety hand-off is already lowered into the digressions above;
+        // redaction and commit governance are enforced at connect. Policies
+        // added with `Live::policy` are kept alongside.
+        let mut policies: Vec<_> = convo
+            .policies()
+            .iter()
+            .filter(|p| !matches!(p, crate::policy::Policy::SafetyHandoff { .. }))
+            .cloned()
+            .collect();
+        policies.append(&mut self.policies);
+        self.policies = policies;
         for extract in convo.all_extractors() {
             self = self.extract_record(extract);
         }
@@ -998,8 +1076,8 @@ fn lower_flow(stages: &[StageSpec], require: &[String]) -> Result<CompiledFlow, 
             fb = fb.gate(gate);
         }
 
-        if let Some(say) = &s.say {
-            fb = fb.posture(say.clone());
+        if let Some(posture) = stage_posture(s) {
+            fb = fb.posture(posture);
         }
         if let Some(ground) = &s.ground {
             fb = fb.ground(ground.clone());
@@ -1028,6 +1106,18 @@ fn lower_flow(stages: &[StageSpec], require: &[String]) -> Result<CompiledFlow, 
                 ))
             })?;
             fb = fb.done(done);
+        }
+    }
+
+    // A corrected slot re-opens the stages downstream of it.
+    for rule in reopen_rules(stages) {
+        if let Some(when) = any_of(
+            rule.slots
+                .iter()
+                .map(|slot| Guard::is_true(correction_flag(slot)))
+                .collect(),
+        ) {
+            fb = fb.reset(rule.steps).when(when);
         }
     }
 
@@ -1185,6 +1275,43 @@ fn compile_spec(
         .filter_map(|s| s.repair.clone().map(|p| (s.id.clone(), p)))
         .collect();
 
+    // Per-stage voice timing, main flow and digressions alike.
+    let timing = spec
+        .stages
+        .iter()
+        .chain(spec.overlays.iter().flat_map(|ov| ov.stages.iter()))
+        .filter_map(|s| {
+            let timing = s.timing.clone().or_else(|| {
+                s.verbatim
+                    .as_ref()
+                    .map(|_| VoiceTiming::new().uninterruptible())
+            });
+            timing.map(|t| (s.id.clone(), t))
+        })
+        .collect();
+
+    // Verbatim stages, main flow and digressions alike.
+    let verbatim = spec
+        .stages
+        .iter()
+        .chain(spec.overlays.iter().flat_map(|ov| ov.stages.iter()))
+        .filter_map(|s| s.verbatim.clone().map(|t| (s.id.clone(), t)))
+        .collect();
+
+    // Slots whose correction re-opens downstream stages (lowered as resets
+    // in the main flow above); the stack watches them.
+    let mut corrections: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for rule in reopen_rules(&spec.stages) {
+        for slot in rule.slots {
+            let clear = corrections.entry(slot).or_default();
+            for key in &rule.clear {
+                if !clear.contains(key) {
+                    clear.push(key.clone());
+                }
+            }
+        }
+    }
+
     let policies = spec.policies.clone();
 
     Ok(CompiledConversation {
@@ -1192,6 +1319,9 @@ fn compile_spec(
         extractors,
         overlays,
         repair,
+        timing,
+        corrections,
+        verbatim,
         policies,
         spec,
     })
@@ -1201,7 +1331,105 @@ fn compile_spec(
 /// explicit `done` → `captured(collect)` → disjunction of `next` conditions.
 /// When repair escalation is configured, the stage may also complete by escalating
 /// (so a stalled stage can hand off even though its normal completion never fired).
+/// How a correction to each collected slot re-opens the conversation: the
+/// stages downstream of the stage that collected it, and the state keys to
+/// clear so those stages run again (their commit confirmations).
+struct Reopen {
+    slots: Vec<String>,
+    steps: Vec<String>,
+    clear: Vec<String>,
+}
+
+/// For every stage that collects slots, the stages that depend on it
+/// (through `after`, `next` or repair escalation, transitively) and would
+/// have to run again if one of those slots were corrected.
+fn reopen_rules(stages: &[StageSpec]) -> Vec<Reopen> {
+    // Direct dependents: source -> stages that come after it.
+    let mut dependents: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    for s in stages {
+        for d in &s.after {
+            dependents
+                .entry(d.as_str())
+                .or_default()
+                .insert(s.id.as_str());
+        }
+        for t in &s.next {
+            dependents
+                .entry(s.id.as_str())
+                .or_default()
+                .insert(t.to.as_str());
+        }
+        if let Some(target) = s.repair.as_ref().and_then(|r| r.escalate_to.as_ref()) {
+            dependents
+                .entry(s.id.as_str())
+                .or_default()
+                .insert(target.as_str());
+        }
+    }
+    let collected: BTreeSet<&str> = stages
+        .iter()
+        .flat_map(|s| s.collect.iter().map(String::as_str))
+        .collect();
+    stages
+        .iter()
+        .filter(|s| !s.collect.is_empty())
+        .filter_map(|s| {
+            let mut downstream: BTreeSet<&str> = BTreeSet::new();
+            let mut queue = vec![s.id.as_str()];
+            while let Some(id) = queue.pop() {
+                for next in dependents.get(id).into_iter().flatten() {
+                    if *next != s.id && downstream.insert(next) {
+                        queue.push(next);
+                    }
+                }
+            }
+            if downstream.is_empty() {
+                return None;
+            }
+            let clear = stages
+                .iter()
+                .filter(|st| downstream.contains(st.id.as_str()))
+                .filter_map(|st| st.commit.as_ref())
+                .flat_map(|c| c.when.state_keys())
+                .filter(|k| !collected.contains(k.as_str()))
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect();
+            Some(Reopen {
+                slots: s.collect.clone(),
+                steps: downstream.into_iter().map(str::to_string).collect(),
+                clear,
+            })
+        })
+        .collect()
+}
+
+/// The posture a stage projects: its `say`, plus the exact-reading
+/// instruction of a verbatim stage.
+fn stage_posture(s: &StageSpec) -> Option<String> {
+    let read = s.verbatim.as_ref().map(|text| {
+        format!(
+            "Say the following exactly as written, word for word. Do not paraphrase, \
+             add to or leave out any part of it:\n\n{text}"
+        )
+    });
+    match (&s.say, read) {
+        (Some(say), Some(read)) => Some(format!("{say}\n\n{read}")),
+        (say, read) => say.clone().or(read),
+    }
+}
+
 fn stage_completion(s: &StageSpec) -> Option<Guard> {
+    let base = stage_base_completion(s);
+    // A verbatim stage also waits for its text to have been said.
+    match (base, s.verbatim.is_some()) {
+        (base, false) => base,
+        (None, true) => Some(Guard::is_true(verbatim_flag(&s.id))),
+        (Some(base), true) => Some(Guard::all(vec![base, Guard::is_true(verbatim_flag(&s.id))])),
+    }
+}
+
+fn stage_base_completion(s: &StageSpec) -> Option<Guard> {
     let base = if let Some(g) = &s.done {
         Some(g.clone())
     } else if !s.collect.is_empty() {
@@ -1765,6 +1993,9 @@ mod tests {
             monitor,
             live.digressions().to_vec(),
             live.repair_policies().clone(),
+            std::collections::BTreeMap::new(),
+            std::collections::BTreeMap::new(),
+            std::collections::BTreeMap::new(),
             &[],
         );
 
@@ -1888,6 +2119,151 @@ mod tests {
         sim.turn();
         assert!(sim.is_complete());
         assert!(sim.active().is_empty());
+    }
+
+    /// The user changes a detail after confirming: the confirmation is
+    /// withdrawn and the commit is blocked until they confirm again.
+    #[tokio::test]
+    async fn a_corrected_slot_reopens_the_confirmation() {
+        use crate::simulation::{Scenario, SimStep};
+        use serde_json::json;
+        let convo = Conversation::new("booking")
+            .stage("collect")
+            .collect(["party_size"])
+            .stage("book")
+            .after("collect")
+            .commit("book_table", Guard::is_true("confirmed"))
+            .complete_when(Guard::called_ok("book_table"))
+            .stage("end")
+            .after("book")
+            .terminal()
+            .compile()
+            .unwrap();
+        assert_eq!(
+            convo.correction_policies()["party_size"],
+            ["confirmed"],
+            "a correction to party_size clears the booking confirmation"
+        );
+
+        let set = |key: &str, value: serde_json::Value| SimStep::Set {
+            key: key.into(),
+            value,
+        };
+        let scenario = Scenario {
+            name: "correction".into(),
+            steps: vec![
+                set("party_size", json!(4)),
+                SimStep::Turn,
+                SimStep::ExpectActive(vec!["book".into()]),
+                set("confirmed", json!(true)),
+                SimStep::Turn,
+                SimStep::ExpectAllowed("book_table".into()),
+                // "Actually, make it five."
+                set("party_size", json!(5)),
+                SimStep::Turn,
+                SimStep::ExpectDenied("book_table".into()),
+                SimStep::ExpectActive(vec!["book".into()]),
+                set("confirmed", json!(true)),
+                SimStep::Turn,
+                SimStep::ExpectAllowed("book_table".into()),
+                SimStep::ToolOk("book_table".into()),
+                SimStep::ExpectComplete,
+            ],
+        };
+        scenario.run(&convo, Enforcement::Enforce).await.unwrap();
+    }
+
+    /// Repeated barge-ins escalate a stage to its hand-off.
+    #[tokio::test]
+    async fn repeated_barge_ins_escalate_to_the_handoff() {
+        use crate::simulation::{Scenario, SimStep};
+        let convo = Conversation::new("support")
+            .stage("collect")
+            .collect(["issue"])
+            .repair(
+                RepairPolicy::new(10, 10)
+                    .escalate_after_interruptions(2)
+                    .escalate_to("handoff"),
+            )
+            .stage("handoff")
+            .terminal()
+            .compile()
+            .unwrap();
+        let scenario = Scenario {
+            name: "barge-ins".into(),
+            steps: vec![
+                SimStep::Turn,
+                SimStep::ExpectActive(vec!["collect".into()]),
+                SimStep::Interrupt,
+                SimStep::Turn,
+                SimStep::ExpectActive(vec!["collect".into()]),
+                SimStep::Interrupt,
+                SimStep::ExpectSlot {
+                    key: escalate_flag("collect"),
+                    value: serde_json::json!(true),
+                },
+                SimStep::Turn,
+                // The terminal hand-off completes the conversation.
+                SimStep::ExpectComplete,
+            ],
+        };
+        scenario.run(&convo, Enforcement::Enforce).await.unwrap();
+    }
+
+    #[test]
+    fn stage_timing_round_trips_and_reaches_the_stack() {
+        use std::time::Duration;
+        let convo = Conversation::new("pacing")
+            .stage("ask")
+            .collect(["name"])
+            .timing(VoiceTiming::new().reprompt_after(Duration::from_secs(6)))
+            .add_stage(crate::motifs::Motif::disclosure("terms", "terms_ack"))
+            .compile()
+            .unwrap();
+
+        let json = serde_json::to_value(convo.spec()).unwrap();
+        assert_eq!(json["stages"][0]["timing"]["reprompt_after_ms"], 6000);
+        assert_eq!(json["stages"][1]["timing"]["interruptible"], false);
+        let back: ConversationSpec = serde_json::from_value(json).unwrap();
+        assert_eq!(
+            back.stages[0].timing,
+            Some(VoiceTiming::new().reprompt_after(Duration::from_secs(6)))
+        );
+
+        assert!(convo.timing_policies()["terms"].holds_floor());
+        let stack = convo.stack(Enforcement::Enforce);
+        assert_eq!(stack.timing_policies().len(), 2);
+    }
+
+    #[test]
+    fn converse_keeps_timings_and_policies_set_on_the_builder() {
+        use std::time::Duration;
+        let convo = Conversation::new("pacing")
+            .stage("ask")
+            .collect(["name"])
+            .timing(VoiceTiming::new().reprompt_after(Duration::from_secs(6)))
+            .stage("done")
+            .after("ask")
+            .terminal()
+            .policy(crate::policy::Policy::redact(["card"]))
+            .compile()
+            .unwrap();
+        let mine = VoiceTiming::new().reprompt_after(Duration::from_secs(3));
+
+        // Before and after `converse`, the builder's own settings survive.
+        for live in [
+            crate::live::Live::builder()
+                .stage_timing("ask", mine.clone())
+                .policy(crate::policy::Policy::redact(["ssn"]))
+                .converse(&convo),
+            crate::live::Live::builder()
+                .converse(&convo)
+                .stage_timing("ask", mine.clone())
+                .policy(crate::policy::Policy::redact(["ssn"])),
+        ] {
+            assert_eq!(live.stage_timings["ask"], mine);
+            assert_eq!(live.policies.len(), 2, "{:?}", live.policies);
+        }
     }
 
     #[tokio::test]
