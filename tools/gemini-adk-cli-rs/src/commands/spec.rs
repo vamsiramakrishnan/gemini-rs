@@ -211,3 +211,13 @@ async fn run_audio(_live: Live) -> CliResult {
          (cargo install gemini-adk-cli-rs --features voice), or run the generated Rust project"
         .into())
 }
+
+/// `adk spec schema` — the JSON Schema of a session spec, for editors,
+/// validators and tools that draft specs.
+pub fn schema() -> CliResult {
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&SessionSpec::json_schema())?
+    );
+    Ok(())
+}

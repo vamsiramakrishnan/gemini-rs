@@ -232,6 +232,8 @@ enum SpecAction {
         /// Path to the spec (agent.json).
         spec: String,
     },
+    /// Print the JSON Schema of a session spec.
+    Schema,
 }
 
 #[derive(Subcommand)]
@@ -484,6 +486,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 commands::spec::call(&spec, &tool, args.as_deref()).await?
             }
             SpecAction::Run { spec } => commands::spec::run(&spec).await?,
+            SpecAction::Schema => commands::spec::schema()?,
         },
 
         Command::Bundle { action, store } => {

@@ -5,7 +5,7 @@ use axum::{
     extract::{Path, State, WebSocketUpgrade},
     middleware::{self, Next},
     response::{Html, IntoResponse, Json, Response},
-    routing::{get, post},
+    routing::get,
 };
 use tokio::sync::broadcast;
 use tower_http::services::ServeDir;
@@ -15,6 +15,7 @@ mod app;
 mod apps;
 mod bridge;
 mod span_layer;
+mod studio;
 mod ws_handler;
 
 use app::{AppRegistry, ServerMessage};
@@ -57,17 +58,11 @@ async fn main() {
     let app = Router::new()
         .route("/", get(landing_page))
         .route("/app/{name}", get(app_page))
-        .route("/flows", get(flow_studio_page))
-        .route("/api/flows/validate", post(validate_flow))
-        .route("/api/flows/test", post(test_flow))
-        .route("/api/flows/simulate", post(simulate_flow))
-        .route("/api/flows/codegen", post(codegen_flow))
-        .route("/api/flows/project", post(project_flow))
-        .route("/api/flows/schema", get(flow_schema))
         .route("/api/apps", get(list_apps))
         .route("/ws/{name}", get(ws_upgrade))
         .route("/favicon.ico", get(favicon))
         .with_state(state)
+        .merge(studio::router(static_dir))
         .merge(api)
         .nest_service("/static", ServeDir::new(static_dir))
         .layer(middleware::from_fn(no_cache_static))
@@ -145,131 +140,6 @@ async fn favicon() -> impl IntoResponse {
 
 async fn landing_page() -> impl IntoResponse {
     Html(include_str!("../static/index.html"))
-}
-
-/// The Flow Studio — a drag-and-drop editor for JSON-authored governed flows.
-async fn flow_studio_page() -> impl IntoResponse {
-    Html(include_str!("../static/flow-studio.html"))
-}
-
-/// Validate a session spec (or a bare flow) and return structured diagnostics.
-///
-/// Accepts the same JSON the Flow Studio edits and `flow-studio` sessions run:
-/// a [`gemini_adk_fluent_rs::spec::SessionSpec`], or a bare `{"steps": …}`
-/// flow document.
-async fn validate_flow(Json(value): Json<serde_json::Value>) -> Json<serde_json::Value> {
-    let result = match gemini_adk_fluent_rs::spec::SessionSpec::from_value(value) {
-        Ok(spec) => serde_json::to_value(spec.validate()).unwrap_or_default(),
-        Err(message) => serde_json::json!({
-            "valid": false,
-            "errors": [message],
-            "warnings": [],
-            "mermaid": "",
-            "tools": [],
-            "steps": 0,
-        }),
-    };
-    Json(result)
-}
-
-/// Run a spec's embedded conformance tests and conversation scenarios
-/// offline — scripted conversations replayed through the real flow monitor
-/// and conversation simulator, no model or API key involved.
-async fn test_flow(Json(value): Json<serde_json::Value>) -> Json<serde_json::Value> {
-    let result = match gemini_adk_fluent_rs::spec::SessionSpec::from_value(value) {
-        Ok(spec) => {
-            let validation = spec.validate();
-            if !validation.valid {
-                serde_json::json!({
-                    "valid": false,
-                    "errors": validation.errors,
-                    "reports": [],
-                    "scenarios": [],
-                })
-            } else {
-                serde_json::json!({
-                    "valid": true,
-                    "errors": [],
-                    "reports": serde_json::to_value(spec.run_tests()).unwrap_or_default(),
-                    "scenarios": serde_json::to_value(spec.run_scenarios().await)
-                        .unwrap_or_default(),
-                })
-            }
-        }
-        Err(message) => serde_json::json!({
-            "valid": false,
-            "errors": [message],
-            "reports": [],
-            "scenarios": [],
-        }),
-    };
-    Json(result)
-}
-
-/// The JSON Schema of the session spec document itself — for editor
-/// autocomplete and for validating machine-authored specs.
-async fn flow_schema() -> Json<serde_json::Value> {
-    Json(gemini_adk_fluent_rs::spec::SessionSpec::json_schema())
-}
-
-/// Replay one embedded test event-by-event and return per-event flow
-/// snapshots — the Studio's Preview scrubber. Body: `{"spec": …, "test": name}`.
-async fn simulate_flow(Json(body): Json<serde_json::Value>) -> Json<serde_json::Value> {
-    let test = body
-        .get("test")
-        .and_then(|t| t.as_str())
-        .unwrap_or_default()
-        .to_string();
-    let spec_value = body.get("spec").cloned().unwrap_or(serde_json::Value::Null);
-    let result = match gemini_adk_fluent_rs::spec::SessionSpec::from_value(spec_value) {
-        Ok(spec) => match gemini_adk_fluent_rs::spec::trace_test(&spec, &test) {
-            Ok(snapshots) => serde_json::json!({
-                "valid": true,
-                "errors": [],
-                "snapshots": serde_json::to_value(snapshots).unwrap_or_default(),
-            }),
-            Err(errors) => serde_json::json!({"valid": false, "errors": errors, "snapshots": []}),
-        },
-        Err(message) => serde_json::json!({"valid": false, "errors": [message], "snapshots": []}),
-    };
-    Json(result)
-}
-
-/// Generate the standalone Rust application a spec is equivalent to.
-async fn codegen_flow(Json(value): Json<serde_json::Value>) -> Json<serde_json::Value> {
-    let result = match gemini_adk_fluent_rs::spec::SessionSpec::from_value(value) {
-        Ok(spec) => serde_json::json!({
-            "valid": true,
-            "errors": [],
-            "main_rs": spec.to_rust(),
-            "cargo_toml": spec.to_cargo_toml(),
-        }),
-        Err(message) => serde_json::json!({"valid": false, "errors": [message]}),
-    };
-    Json(result)
-}
-
-/// Generate a project around a spec: `{"spec": …, "lang": "rust" | "python"
-/// | "go"}`. Returns the files; nothing is written on the server.
-async fn project_flow(Json(body): Json<serde_json::Value>) -> Json<serde_json::Value> {
-    use gemini_adk_fluent_rs::spec::{ProjectLanguage, SessionSpec};
-    let language = body
-        .get("lang")
-        .and_then(|l| l.as_str())
-        .unwrap_or("rust")
-        .parse::<ProjectLanguage>();
-    let spec = SessionSpec::from_value(body.get("spec").cloned().unwrap_or_default());
-    let result = match (spec, language) {
-        (Ok(spec), Ok(language)) => serde_json::json!({
-            "valid": true,
-            "errors": [],
-            "files": spec.to_project(language),
-        }),
-        (Err(message), _) | (_, Err(message)) => {
-            serde_json::json!({"valid": false, "errors": [message], "files": []})
-        }
-    };
-    Json(result)
 }
 
 async fn app_page(Path(name): Path<String>, State(state): State<AppState>) -> impl IntoResponse {

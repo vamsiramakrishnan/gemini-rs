@@ -1,0 +1,9 @@
+name: gemini-rs CodeQL config
+
+# Generated output: the Studio's production bundle is built from
+# apps/studio/src (which is analyzed) and committed so the web server runs
+# without Node. Scanning the minified bundle only re-reports vendored code.
+paths-ignore:
+  - apps/gemini-adk-web-rs/static/studio
+  - tools/gemini-adk-cli-rs/assets/web/studio
+  - "**/node_modules"

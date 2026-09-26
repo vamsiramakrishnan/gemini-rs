@@ -24,6 +24,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Text sessions failed on every current Live model.** `text_only()` and
+  a spec with `"modality": "text"` asked for `TEXT` responses, which
+  native-audio models, including Gemini 3.8 Live, refuse by closing the
+  session (1007). On a model that can only speak, a text session now asks
+  for audio with its output transcription, and delivers the transcript as
+  the session's text (`TextDelta`/`TextComplete`, `on_text`) with no audio.
+  Probed live against both Gemini 2.5 native audio and Gemini 3.8 Live.
+- **A refused setup was retried and its reason lost.** When the server
+  closed the connection during setup, the error said only that it had
+  closed, and the transport retried with backoff. The error now carries the
+  server's reason, and a setup refused as invalid (1007) or against policy
+  (1008) is reported once instead of retried.
 - **A reconnect after GoAway started a new conversation.** The transport
   reconnected on its own but re-sent the original setup, without the
   resumption handle the server had issued, so the server started a fresh
@@ -35,6 +47,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The Studio, rebuilt.** A TypeScript, React and Vite app (`apps/studio`,
+  built into the web app, served at `/studio` and `/flows`). It edits
+  conversations as well as flows, on a graph with drag-to-connect. Its
+  forms are generated from the spec's JSON Schema, and fields that refer to
+  tools, stages or state keys suggest the names that exist. It adds undo and
+  redo, live validation, tests with step-through, a live text run,
+  Rust/Python/Go project generation with zip download, and versions: save,
+  open, and promote to staging or prod through the bundle store
+  (`/api/bundles`). `adk spec schema` prints the spec's JSON Schema. See
+  [The Studio](docs/src/flow-studio.md).
 - Bundles: versioned, labelled storage for session specs
   (`spec::store`). A version's id is the hash of the spec, labels such as
   `prod` are movable pointers to a version, and a spec that fails validation

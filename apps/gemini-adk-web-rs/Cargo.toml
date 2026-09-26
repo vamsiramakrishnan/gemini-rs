@@ -9,7 +9,7 @@ publish = false
 [dependencies]
 gemini-genai-rs       = { workspace = true, default-features = true }
 gemini-adk-rs        = { workspace = true, default-features = true, features = ["gemini-llm"] }
-gemini-adk-fluent-rs = { workspace = true, default-features = true, features = ["gemini-llm", "denoise", "http-tools"] }
+gemini-adk-fluent-rs = { workspace = true, default-features = true, features = ["gemini-llm", "denoise", "http-tools", "gcs-store"] }
 gemini-memory-rs = { workspace = true }
 gemini-adk-server-rs = { workspace = true }
 tokio = { version = "1.0", features = ["full"] }
@@ -37,3 +37,6 @@ otel-gcp = ["gemini-genai-rs/otel-gcp", "gemini-adk-rs/otel-gcp"]
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
