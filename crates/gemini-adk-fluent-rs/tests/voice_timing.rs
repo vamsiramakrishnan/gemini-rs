@@ -33,8 +33,10 @@ async fn a_slow_tool_cues_a_filler() {
         .says("Found it.")
         .play(
             Live::builder()
+                // Slower than the settle window: the run must still wait
+                // for the tool's answer.
                 .tools(T::simple("lookup", "Slow lookup", |_| async {
-                    tokio::time::sleep(Duration::from_millis(250)).await;
+                    tokio::time::sleep(Duration::from_millis(500)).await;
                     Ok(json!({ "found": true }))
                 }))
                 .govern(ask_flow())

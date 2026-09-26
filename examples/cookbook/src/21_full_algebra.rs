@@ -193,22 +193,22 @@ fn main() {
     println!("\n--- T Module: Tool Composition ---");
 
     let tools = T::google_search()
-        | T::code_execution()
-        | T::url_context()
-        | T::simple("summarize", "Summarize a document", |args| async move {
+        + T::code_execution()
+        + T::url_context()
+        + T::simple("summarize", "Summarize a document", |args| async move {
             let url = args
                 .get("url")
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown");
             Ok(json!({"summary": format!("Summary of {}", url)}))
         })
-        | T::mock("calculator", "Perform calculations", json!({"result": 42}));
+        + T::mock("calculator", "Perform calculations", json!({"result": 42}));
 
     println!("   Composed {} tools", tools.len());
 
     // ── 10. C module: Context engineering ──
     println!("\n--- C Module: Context Engineering ---");
-    let context = C::window(10) + C::user_only();
+    let context = C::window(10) >> C::user_only();
     println!(
         "   Context policy: window(10) + user_only ({} policies)",
         context.policies.len()
@@ -217,7 +217,7 @@ fn main() {
     // ── 11. G module: Guards ──
     println!("\n--- G Module: Guard Composition ---");
     let guards =
-        G::length(10, 5000) | G::json() | G::pii() | G::topic(&["classified", "restricted"]);
+        G::length(10, 5000) + G::json() + G::pii() + G::topic(&["classified", "restricted"]);
     println!("   Composed {} guards", guards.len());
 
     // Test guard validation
@@ -235,7 +235,7 @@ fn main() {
 
     // ── 12. E module: Evaluation ──
     println!("\n--- E Module: Evaluation Criteria ---");
-    let eval = E::response_match() | E::contains_match() | E::custom("safety", |_, _| 1.0);
+    let eval = E::response_match() + E::contains_match() + E::custom("safety", |_, _| 1.0);
     let scores = eval.score_all("The answer is 42", "42");
     println!("   Evaluation scores:");
     for (name, score) in &scores {
@@ -250,7 +250,7 @@ fn main() {
             "Summarize quantum computing",
             "Quantum computing uses qubits",
         )
-        .criteria(E::response_match() | E::contains_match() | E::custom("safety", |_, _| 1.0));
+        .criteria(E::response_match() + E::contains_match() + E::custom("safety", |_, _| 1.0));
     println!(
         "   Eval suite: {} cases, {} criteria",
         suite.len(),

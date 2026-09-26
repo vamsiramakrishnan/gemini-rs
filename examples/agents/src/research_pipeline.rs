@@ -118,11 +118,11 @@ fn main() {
     println!("{}", system_prompt.render());
 
     // M — Middleware
-    let _middleware = M::log() | M::latency();
+    let _middleware = M::log() >> M::latency();
     println!("\nMiddleware composed: log + latency");
 
     // T — Tool composition
-    let _tools = T::google_search() | T::url_context();
+    let _tools = T::google_search() + T::url_context();
     println!("Tools composed: google_search + url_context");
 
     // ── Step 5: Pre-built patterns ──

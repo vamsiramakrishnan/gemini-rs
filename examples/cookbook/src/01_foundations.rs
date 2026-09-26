@@ -179,14 +179,14 @@ fn callbacks() {
     println!("── Callbacks (middleware) ─────────────────────────────\n");
 
     // Built-in observability: M::log() logs events, M::latency() tracks timing.
-    let observability = M::log() | M::latency();
+    let observability = M::log() >> M::latency();
     println!("Observability stack: {} layers", observability.len());
 
     // Model hooks fire around every LLM call.
     let model_hooks = M::before_model(|_req| {
         println!("  [before_model] About to call the LLM");
         Ok(())
-    }) | M::after_model(|_req, _resp| {
+    }) >> M::after_model(|_req, _resp| {
         println!("  [after_model] LLM responded");
         Ok(())
     });
@@ -207,26 +207,26 @@ fn callbacks() {
 
     // Resilience: retry, circuit breaker, rate limiting, timeout.
     let resilience = M::retry(3)
-        | M::circuit_breaker(5)
-        | M::rate_limit(10)
-        | M::timeout(Duration::from_secs(30));
+        >> M::circuit_breaker(5)
+        >> M::rate_limit(10)
+        >> M::timeout(Duration::from_secs(30));
     println!("Resilience stack: {} layers", resilience.len());
 
     // Compose everything with `|` into one stack.
     let full_stack = M::log()
-        | M::latency()
-        | M::before_model(|_req| Ok(()))
-        | M::after_model(|_req, _resp| Ok(()))
-        | M::before_tool(|_call| Ok(()))
-        | M::retry(3)
-        | M::trace()
-        | M::audit()
-        | M::metrics()
-        | M::cost();
+        >> M::latency()
+        >> M::before_model(|_req| Ok(()))
+        >> M::after_model(|_req, _resp| Ok(()))
+        >> M::before_tool(|_call| Ok(()))
+        >> M::retry(3)
+        >> M::trace()
+        >> M::audit()
+        >> M::metrics()
+        >> M::cost();
     println!("Full stack: {} layers", full_stack.len());
 
     // Scoped middleware applies only to named agents.
-    let scoped = M::scope(&["researcher", "writer"], M::log() | M::latency());
+    let scoped = M::scope(&["researcher", "writer"], M::log() >> M::latency());
     println!("Scoped middleware: {} layers", scoped.len());
 
     // Agent lifecycle hooks.
@@ -238,7 +238,7 @@ fn callbacks() {
         };
         println!("  [before_agent] {mode} run");
         Ok(())
-    }) | M::after_agent(|ctx| {
+    }) >> M::after_agent(|ctx| {
         let mode = if ctx.session_id.is_some() {
             "session-aware"
         } else {

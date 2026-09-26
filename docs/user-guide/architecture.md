@@ -195,7 +195,7 @@ while let Some(event) = recv_event(&mut events).await {
 
 - The fastest path from zero to working voice agent
 - Chainable builder API with sub-builders for phases and watchers
-- Operator algebra for composing tools (`T::simple() | T::google_search()`)
+- Operator algebra for composing tools (`T::simple() + T::google_search()`)
 - One-line connection (`connect_vertex(project, location, token)`)
 - Sensible defaults (auto-enables transcription when extractors are used)
 

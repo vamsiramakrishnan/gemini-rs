@@ -448,6 +448,30 @@ mod tests {
     use super::*;
 
     #[test]
+    fn declared_artifacts_take_part_in_contract_checks() {
+        use crate::compose::artifacts::A;
+        let researcher =
+            AgentBuilder::new("researcher").artifacts(A::json_output("report", "Findings"));
+        let writer = AgentBuilder::new("writer")
+            .artifacts(A::json_input("report", "Findings") + A::text_input("brief", "The brief"));
+        let violations = check_contracts(&[researcher, writer]);
+        assert!(
+            violations.contains(&ContractViolation::UnproducedKey {
+                consumer: "writer".into(),
+                key: "artifact:brief".into(),
+            }),
+            "{violations:?}"
+        );
+        assert!(
+            !violations.iter().any(|v| matches!(
+                v,
+                ContractViolation::UnproducedKey { key, .. } if key == "artifact:report"
+            )),
+            "the report is produced: {violations:?}"
+        );
+    }
+
+    #[test]
     fn no_violations_for_matching_contracts() {
         let writer = AgentBuilder::new("writer").writes("output");
         let reader = AgentBuilder::new("reader").reads("output");

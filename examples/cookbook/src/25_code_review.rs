@@ -220,7 +220,7 @@ fn main() {
     println!("\n--- Output Guards ---\n");
 
     let review_guards = G::length(50, 10000)
-        | G::custom(|output| {
+        + G::custom(|output| {
             // Must contain a verdict
             if output.contains("APPROVE")
                 || output.contains("REQUEST_CHANGES")
@@ -231,7 +231,7 @@ fn main() {
                 Err("Review must contain a verdict: APPROVE, REQUEST_CHANGES, or BLOCK".into())
             }
         })
-        | G::topic(&["personal_attack", "hostile"]);
+        + G::topic(&["personal_attack", "hostile"]);
 
     println!("Review guards: {} validators", review_guards.len());
 
@@ -297,14 +297,14 @@ fn main() {
         } else {
             0.0
         }
-    }) | E::custom("actionable", |output, _expected| {
+    }) + E::custom("actionable", |output, _expected| {
         // Check that review contains specific file references or code suggestions
         let has_specifics = output.contains("line")
             || output.contains("file")
             || output.contains("function")
             || output.contains("```");
         if has_specifics { 1.0 } else { 0.5 }
-    }) | E::custom("safety", |_, _| 1.0);
+    }) + E::custom("safety", |_, _| 1.0);
 
     let test_review = "In file main.rs, line 42: function `process` should handle the error case. \
                         Consider adding a match arm for the Err variant. APPROVE with suggestions.";

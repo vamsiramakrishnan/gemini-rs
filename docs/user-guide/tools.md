@@ -78,7 +78,7 @@ let balance = T::typed("balance", "Look up an account balance", move |args: Look
     async move { Ok(serde_json::json!({ "balance": db.balance(&args.account).await? })) }
 });
 
-AgentBuilder::new("support").tools(balance | T::google_search());
+AgentBuilder::new("support").tools(balance + T::google_search());
 ```
 
 ## Lower-level forms
@@ -177,7 +177,7 @@ Gemini provides server-side tools requiring no implementation:
 Live::builder().google_search().code_execution().url_context()
 
 // Or T:: composition with pipe operator
-Live::builder().tools(T::google_search() | T::code_execution() | T::url_context())
+Live::builder().tools(T::google_search() + T::code_execution() + T::url_context())
 ```
 
 ## Per-Tool Policies
@@ -194,9 +194,9 @@ Live::builder()
             Duration::from_secs(10),
         )
         // In-session result cache
-        | T::cached(get_rate())
+        + T::cached(get_rate())
         // Confirmation flag (recorded; see note in tool-policies.md)
-        | T::confirm(send_email(), "This will send a real email — are you sure?")
+        + T::confirm(send_email(), "This will send a real email — are you sure?")
     )
 ```
 
@@ -259,7 +259,7 @@ Live::builder()
     .tools(
         T::function(Arc::new(weather_tool))
         | calculate()                         // a #[tool] fn converts directly
-        | T::google_search()
+        + T::google_search()
     )
 ```
 

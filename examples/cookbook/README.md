@@ -50,7 +50,7 @@ Three combined examples that each cover a cluster of related building blocks.
 | 13 | Review Loop | `review_loop` convergence |
 | 14 | Map Over | `MapOverTextAgent` across items |
 | 15 | Middleware Stack | `M::` middleware composition |
-| 16 | Context Engineering | `C::window + C::user_only` |
+| 16 | Context Engineering | `C::window >> C::user_only` |
 | 17 | Evaluation Suite | `E::` evaluation composition |
 | 18 | Artifacts | `A::json_output + A::text_input` |
 | 19 | Agent Tool | `agent_tool()` — agent as a callable tool (orchestration) |

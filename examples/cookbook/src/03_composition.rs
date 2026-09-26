@@ -145,19 +145,19 @@ fn tool_composition() {
     println!("── T:: tool composition ───────────────────────────────\n");
 
     // Built-in Gemini tools need no local handler.
-    let built_ins = T::google_search() | T::code_execution() | T::url_context();
+    let built_ins = T::google_search() + T::code_execution() + T::url_context();
     println!("built-ins: {} entries", built_ins.len());
 
     // T::simple wraps a closure; T::mock returns a fixed response (great for tests).
     let all_tools = T::google_search()
-        | T::simple("get_weather", "Get weather", |args| async move {
+        + T::simple("get_weather", "Get weather", |args| async move {
             let city = args
                 .get("city")
                 .and_then(|v| v.as_str())
                 .unwrap_or("Unknown");
             Ok(json!({ "temp_c": 22, "city": city }))
         })
-        | T::mock(
+        + T::mock(
             "search_kb",
             "Search KB",
             json!({"results": [{"title": "FAQ"}]}),
@@ -221,7 +221,7 @@ fn guards() {
     );
 
     // Composed with | — all must pass; check_all() returns every violation.
-    let composite = G::json() | G::length(1, 500) | G::pii();
+    let composite = G::json() + G::length(1, 500) + G::pii();
     println!(
         "\ncomposite (json | length | pii): {} guards",
         composite.len()
@@ -241,9 +241,9 @@ fn guards() {
 
     // A reusable safety guardrail stack.
     let safety = G::pii()
-        | G::topic(&["violence", "self-harm", "illegal"])
-        | G::length(1, 2000)
-        | G::budget(500);
+        + G::topic(&["violence", "self-harm", "illegal"])
+        + G::length(1, 2000)
+        + G::budget(500);
     println!("\nsafety guardrails: {} guards", safety.len());
     println!(
         "  normal: {} violations, risky: {} violations",

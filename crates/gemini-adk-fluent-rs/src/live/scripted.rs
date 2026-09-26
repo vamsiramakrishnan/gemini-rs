@@ -134,6 +134,31 @@ impl ScriptedServer {
         self
     }
 
+    /// The ids of the scripted tool calls the session must answer: every
+    /// call not listed in a later cancellation.
+    fn awaited_call_ids(&self) -> Vec<String> {
+        let ids = |frame: &Value, pointer: &str| -> Vec<String> {
+            frame
+                .pointer(pointer)
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|v| v.get("id").or(Some(v)).and_then(Value::as_str))
+                .map(str::to_owned)
+                .collect()
+        };
+        let cancelled: Vec<String> = self
+            .frames
+            .iter()
+            .flat_map(|f| ids(f, "/toolCallCancellation/ids"))
+            .collect();
+        self.frames
+            .iter()
+            .flat_map(|f| ids(f, "/toolCall/functionCalls"))
+            .filter(|id| !cancelled.contains(id))
+            .collect()
+    }
+
     /// The script as an in-memory transport plus its control handle, for a
     /// test that drives the connection itself. Nothing past the handshake
     /// flows until [`ReplayControl::release`].
@@ -147,21 +172,46 @@ impl ScriptedServer {
     }
 
     /// Connect `live` to this script, play every frame, and return once the
-    /// session has settled.
+    /// session has settled: every scripted tool call that was not cancelled
+    /// has been answered, and no event arrived for the
+    /// [`settle_after`](Self::settle_after) window.
     pub async fn play(self, live: Live) -> Result<ScriptedRun, AgentError> {
         let idle = self.idle;
+        let mut awaiting = self.awaited_call_ids();
         let (transport, control) = self.into_transport();
         let handle = live.connect_with_transport(transport).await?;
-        let mut events = handle.events();
+        let mut rx = handle.events();
         control.release();
         control.drained().await;
-        let events = collect_events_until_idle(&mut events, idle, Duration::from_secs(30)).await;
+        // A slow tool emits nothing while it runs, so a quiet window alone
+        // can end the run before the tool answers.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+        let mut events = Vec::new();
+        loop {
+            let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+            events.extend(collect_events_until_idle(&mut rx, idle, left).await);
+            awaiting.retain(|id| !answered(&control, id));
+            if awaiting.is_empty() || left.is_zero() {
+                break;
+            }
+        }
         Ok(ScriptedRun {
             handle,
             events,
             control,
         })
     }
+}
+
+/// Whether the session has sent a function response for call `id`.
+fn answered(control: &ReplayControl, id: &str) -> bool {
+    control.outbound_frames().iter().any(|frame| {
+        serde_json::from_slice::<Value>(frame)
+            .ok()
+            .and_then(|m| m.pointer("/toolResponse/functionResponses").cloned())
+            .and_then(|r| r.as_array().cloned())
+            .is_some_and(|rs| rs.iter().any(|r| r["id"] == id))
+    })
 }
 
 /// The outcome of [`ScriptedServer::play`].

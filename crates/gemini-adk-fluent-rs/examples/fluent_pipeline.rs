@@ -76,10 +76,10 @@ fn main() {
     println!("\nComposed prompt:\n{}", prompt.render());
 
     // M — Middleware composition
-    let _middleware = M::log() | M::latency();
+    let _middleware = M::log() >> M::latency();
 
     // T — Tool composition
-    let _tools = T::google_search() | T::url_context();
+    let _tools = T::google_search() + T::url_context();
 
     // ── 5. Pre-built patterns ──
 

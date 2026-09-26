@@ -96,7 +96,7 @@ let handle = Live::builder()
     .voice(Voice::Kore)
     .instruction("You are a weather assistant")
     .greeting("Greet the user and ask how you can help.")
-    .tools(get_weather() | T::google_search())   // any ToolFunction or a `T::` composite
+    .tools(get_weather() + T::google_search())   // any ToolFunction or a `T::` composite
     .transcription()                              // both directions; `.input_transcription()` for one
     .on_audio(|data| playback_tx.send(data.clone()).ok())
     .thinking(1024)                    // thinking budget (Google AI only)
@@ -247,8 +247,8 @@ let tool = TypedTool::<WeatherArgs>::new(
 Live::builder()
     .tools(
         get_weather()                 // a #[tool] fn converts into the composite
-        | T::google_search()
-        | T::code_execution()
+        + T::google_search()
+        + T::code_execution()
     )
     .tool(lookup_account())   // one `#[tool]` fn / SimpleTool / TypedTool / Arc<dyn ToolFunction>
 ```
@@ -552,18 +552,21 @@ This triggers extraction from the evidence available when `GenerationComplete` i
 ## S.C.T.P.M.A Operator Algebra
 
 Eight namespaces for composing agent configuration aspects (S/C/T/P/M/A plus
-`E::` evaluation and `G::` guards):
+`E::` evaluation and `G::` guards). Each operator has one meaning: `>>` is
+"then" (order matters: S, C, M and agent pipelines) and `+` is "together"
+(all apply: P, T, G, E, A). An `S::` chain is also a pipeline step:
+`a >> S::pick(&["x"]) >> b`.
 
 | Namespace | Operator | Purpose | Key Methods |
 |-----------|----------|---------|-------------|
 | `S::` | `>>` | State transforms | `pick`, `rename`, `merge`, `flatten`, `set`, `defaults`, `drop`, `map`, `is_true`, `eq`, `one_of` |
-| `C::` | `+` | Context engineering | `window`, `user_only`, `model_only`, `head`, `sample`, `truncate`, `exclude_tools`, `prepend`, `append`, `from_state`, `dedup`, `empty`, `filter`, `map` |
-| `T::` | `\|` | Tool composition | `simple`, `function`, `google_search`, `url_context`, `code_execution`, `toolset`, `agent`, `mock`, `transform`, `mcp` |
+| `C::` | `>>` | Context engineering | `window`, `user_only`, `model_only`, `head`, `sample`, `truncate`, `exclude_tools`, `prepend`, `append`, `from_state`, `dedup`, `empty`, `filter`, `map` |
+| `T::` | `+` | Tool composition | `simple`, `function`, `google_search`, `url_context`, `code_execution`, `toolset`, `agent`, `mock`, `transform`, `mcp` |
 | `P::` | `+` | Prompt composition | `role`, `task`, `constraint`, `format`, `example`, `text`, `context`, `persona`, `guidelines`, `show_state`, `when`, `context_fn` |
-| `M::` | `\|` | Middleware composition | `log`, `latency`, `retry`, `cost`, `cache`, `dedup`, `rate_limit`, `circuit_breaker`, `trace`, `audit`, `metrics`, `validate`, `before_tool`, `after_tool`, `before_model`, `after_model` |
-| `A::` | `+` | Artifact schemas | `output`, `input`, `json_output`, `json_input`, `text_output`, `text_input` |
-| `E::` | `\|` | Evaluation criteria | deterministic: `exact_match`, `contains_match`, `trajectory`/`trajectory_in_order`/`trajectory_any_order`, `custom`; LLM-judge (take a judge LLM, scored via `score_async`): `safety(llm)`, `semantic_match(llm)`, `hallucination(llm)` |
-| `G::` | `\|` | Output guards | sync: `pii`, `length`, `regex`, `json`, `budget`, `topic`, `custom`; LLM-judge (take a judge LLM): `toxicity(llm)`, `grounded(llm)`, `hallucination(llm)`, `llm_judge(llm, rubric)` |
+| `M::` | `>>` | Middleware composition | `log`, `latency`, `retry`, `cost`, `cache`, `dedup`, `rate_limit`, `circuit_breaker`, `trace`, `audit`, `metrics`, `validate`, `before_tool`, `after_tool`, `before_model`, `after_model` |
+| `A::` | `+` | Artifact schemas (`AgentBuilder::artifacts`) | `output`, `input`, `json_output`, `json_input`, `text_output`, `text_input` |
+| `E::` | `+` | Evaluation criteria | deterministic: `exact_match`, `contains_match`, `trajectory`/`trajectory_in_order`/`trajectory_any_order`, `custom`; LLM-judge (take a judge LLM, scored via `score_async`): `safety(llm)`, `semantic_match(llm)`, `hallucination(llm)` |
+| `G::` | `+` | Output guards (all must pass) | sync: `pii`, `length`, `regex`, `json`, `budget`, `topic`, `custom`; LLM-judge (take a judge LLM): `toxicity(llm)`, `grounded(llm)`, `hallucination(llm)`, `llm_judge(llm, rubric)` |
 
 **Wiring:** `M::` is fully wired into `LlmTextAgent` (model + tool lifecycle
 hooks, plus `M::timeout` run bounding and `on_event` lifecycle/combinator
@@ -585,12 +588,12 @@ Examples:
 let transform = S::pick(&["a", "b"]) >> S::rename(&[("a", "x")]);
 
 // Context: window + user-only
-let context = C::window(10) + C::user_only() + C::exclude_tools();
+let context = C::window(10) >> C::user_only() >> C::exclude_tools();
 
 // Tools: combine functions with built-ins
 let tools = T::simple("greet", "Greet", |_| async { Ok(json!({})) })
-    | T::google_search()
-    | T::code_execution();
+    + T::google_search()
+    + T::code_execution();
 
 // Prompt: compose sections
 let prompt = P::role("analyst") + P::task("analyze data") + P::format("JSON");

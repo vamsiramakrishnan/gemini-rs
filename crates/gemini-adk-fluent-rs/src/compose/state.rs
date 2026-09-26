@@ -57,6 +57,20 @@ pub struct StateComposite {
     pub steps: Vec<StateTransform>,
 }
 
+impl std::fmt::Debug for StateComposite {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list()
+            .entries(self.steps.iter().map(StateTransform::name))
+            .finish()
+    }
+}
+
+impl From<StateTransform> for StateComposite {
+    fn from(step: StateTransform) -> Self {
+        Self { steps: vec![step] }
+    }
+}
+
 impl StateComposite {
     /// Apply all transforms in order.
     pub fn apply(&self, state: &mut serde_json::Value) {

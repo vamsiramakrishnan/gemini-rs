@@ -153,7 +153,7 @@ impl Live {
 
     // -- Tools --
 
-    /// Register tools: a `|`-composed [`ToolComposite`] from the `T`
+    /// Register tools: a `+`-combined [`ToolComposite`] from the `T`
     /// namespace, or a single [`ToolFunction`] (a `SimpleTool`/`TypedTool`,
     /// the value a `#[tool]` function returns, an `Arc<dyn ToolFunction>`).
     ///
@@ -174,7 +174,7 @@ impl Live {
     ///         T::typed("get_weather", "Get weather", |args: City| async move {
     ///             Ok(serde_json::json!({ "city": args.city, "temp": 22 }))
     ///         })
-    ///         | T::google_search()
+    ///         + T::google_search()
     ///     );
     /// ```
     ///

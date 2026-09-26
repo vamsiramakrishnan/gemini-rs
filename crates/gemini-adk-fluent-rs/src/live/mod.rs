@@ -524,7 +524,7 @@ impl Live {
     /// dispatch in the control lane (`before_tool` can veto a call,
     /// `after_tool` and `on_tool_error` observe results).
     ///
-    /// Compose layers with `|`, e.g. `M::log() | M::latency()`.
+    /// Stack layers with `>>`, e.g. `M::log() >> M::latency()`.
     ///
     /// Note: model-level hooks (`before_model`/`after_model`) are TextAgent
     /// pipeline concepts and do not apply to a streaming Live session.

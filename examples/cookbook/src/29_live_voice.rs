@@ -84,7 +84,7 @@ fn main() {
                 "status": "active"
             }))
         },
-    ) | T::simple(
+    ) + T::simple(
         "process_refund",
         "Process a refund for the customer",
         |args| async move {
@@ -98,7 +98,7 @@ fn main() {
                 "status": "processed"
             }))
         },
-    ) | T::simple(
+    ) + T::simple(
         "check_order_status",
         "Check the status of an order",
         |args| async move {
@@ -112,7 +112,7 @@ fn main() {
                 "eta": "2024-03-20"
             }))
         },
-    ) | T::google_search();
+    ) + T::google_search();
 
     println!("Live session tools: {} total", tools.len());
     println!("  - lookup_account (custom)");

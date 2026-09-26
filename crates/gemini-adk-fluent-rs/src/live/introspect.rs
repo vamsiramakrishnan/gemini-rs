@@ -233,7 +233,7 @@ mod tests {
 
     #[test]
     fn declared_tool_names_sees_dispatcher_and_builtins() {
-        let live = Live::builder().tools(sample_tool() | T::google_search());
+        let live = Live::builder().tools(sample_tool() + T::google_search());
         let names = live.declared_tool_names();
         assert!(names.contains(&"book_table".to_string()), "{names:?}");
         assert!(names.contains(&"google_search".to_string()), "{names:?}");

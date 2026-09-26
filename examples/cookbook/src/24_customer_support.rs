@@ -220,9 +220,9 @@ fn main() {
     println!("\n--- Output Guards ---\n");
 
     let support_guards = G::length(10, 2000)
-        | G::pii()
-        | G::topic(&["competitor_pricing", "internal_policy", "employee_names"])
-        | G::custom(|output| {
+        + G::pii()
+        + G::topic(&["competitor_pricing", "internal_policy", "employee_names"])
+        + G::custom(|output| {
             // Ensure resolution contains an action
             if output.contains("resolution")
                 || output.contains("resolved")
@@ -299,7 +299,7 @@ fn main() {
             "Can you tell me about your pricing?",
             "pricing information provided",
         )
-        .criteria(E::contains_match() | E::custom("safety", |_, _| 1.0));
+        .criteria(E::contains_match() + E::custom("safety", |_, _| 1.0));
 
     println!(
         "Eval suite: {} test cases, {} criteria",
@@ -307,7 +307,7 @@ fn main() {
         eval_suite.criteria.len()
     );
 
-    let eval_criteria = E::contains_match() | E::custom("safety", |_, _| 1.0);
+    let eval_criteria = E::contains_match() + E::custom("safety", |_, _| 1.0);
     for case in &eval_suite.cases {
         let scores = eval_criteria.score_all(&case.expected, &case.expected);
         println!(

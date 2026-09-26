@@ -1,6 +1,6 @@
 //! T — Tool composition.
 //!
-//! Compose tools in any order with `|`.
+//! Combine tools with `+`: all of them are offered to the model.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -12,7 +12,7 @@ use gemini_genai_rs::prelude::{FunctionDeclaration, Tool};
 
 /// A tool composite — one or more tool entries.
 ///
-/// Built from the `T` namespace and composed with `|`. Any single
+/// Built from the `T` namespace and combined with `+`. Any single
 /// [`ToolFunction`] (a `SimpleTool`, a `TypedTool`, the value a `#[tool]`
 /// function returns, or an `Arc<dyn ToolFunction>`) converts into a
 /// one-entry composite via `From`, so `.tools(get_weather())` works without
@@ -135,11 +135,11 @@ impl<F: ToolFunction + 'static> From<F> for ToolComposite {
     }
 }
 
-/// Compose two tool composites with `|`.
-impl std::ops::BitOr for ToolComposite {
+/// Combine two tool composites with `+`.
+impl std::ops::Add for ToolComposite {
     type Output = ToolComposite;
 
-    fn bitor(mut self, rhs: ToolComposite) -> Self::Output {
+    fn add(mut self, rhs: ToolComposite) -> Self::Output {
         self.entries.extend(rhs.entries);
         self
     }
@@ -651,7 +651,7 @@ mod tests {
 
     #[test]
     fn compose_with_bitor() {
-        let t = T::google_search() | T::url_context() | T::code_execution();
+        let t = T::google_search() + T::url_context() + T::code_execution();
         assert_eq!(t.len(), 3);
     }
 

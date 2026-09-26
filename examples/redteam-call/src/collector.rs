@@ -228,9 +228,9 @@ pub fn tools(state: State, journal: Arc<Journal>) -> ToolComposite {
     };
 
     T::function(Arc::new(lookup))
-        | T::function(Arc::new(disclose))
-        | T::function(Arc::new(ptp))
-        | T::function(Arc::new(charge))
+        + T::function(Arc::new(disclose))
+        + T::function(Arc::new(ptp))
+        + T::function(Arc::new(charge))
 }
 
 /// What must happen, in what order, and what may not happen before it.
