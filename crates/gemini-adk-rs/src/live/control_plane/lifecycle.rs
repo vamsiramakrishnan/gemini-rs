@@ -313,7 +313,8 @@ async fn build_snapshot(
         String::new()
     };
     crate::live::persistence::SessionSnapshot {
-        state: state.to_hashmap(),
+        // Sensitive keys never reach a persistence backend.
+        state: state.to_redacted_hashmap(),
         phase: phase_name,
         turn_count,
         transcript_summary: transcript_buffer.format_window(5),

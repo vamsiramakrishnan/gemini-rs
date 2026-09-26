@@ -1,11 +1,13 @@
 //! Tool dispatch — regular, streaming, and input-streaming tools.
 
+pub mod commit;
 pub mod dispatcher;
 pub mod policy;
 pub mod schema;
 pub mod simple;
 pub mod typed;
 
+pub use commit::CommitGuard;
 pub use dispatcher::*;
 pub use policy::*;
 pub use schema::wire_schema;

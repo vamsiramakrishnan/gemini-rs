@@ -126,6 +126,14 @@ pub trait JournalSink: Send + Sync {
 #[derive(Clone, Default)]
 struct JournalSinkSlot(Arc<parking_lot::RwLock<Option<Arc<dyn JournalSink>>>>);
 
+/// The value that stands in for a redacted key wherever state leaves the
+/// process.
+pub const REDACTED: &str = "[redacted]";
+
+/// The redacted keys shared by a `State`, its clones and its delta views.
+#[derive(Clone, Default, Debug)]
+struct RedactionSlot(Arc<parking_lot::RwLock<Arc<std::collections::BTreeSet<String>>>>);
+
 /// The clock shared by a `State`, its clones and its delta views.
 #[derive(Clone)]
 struct ClockSlot(Arc<parking_lot::RwLock<SharedClock>>);
@@ -339,6 +347,7 @@ pub struct State {
     mutation_capacity: usize,
     journal_sink: JournalSinkSlot,
     clock: ClockSlot,
+    redacted: RedactionSlot,
     track_delta: bool,
 }
 
@@ -359,6 +368,7 @@ impl State {
             mutation_capacity: DEFAULT_MUTATION_JOURNAL_CAPACITY,
             journal_sink: JournalSinkSlot::default(),
             clock: ClockSlot::default(),
+            redacted: RedactionSlot::default(),
             track_delta: false,
         }
     }
@@ -374,6 +384,7 @@ impl State {
             mutation_capacity: self.mutation_capacity,
             journal_sink: self.journal_sink.clone(),
             clock: self.clock.clone(),
+            redacted: self.redacted.clone(),
             track_delta: true,
         }
     }
@@ -414,6 +425,79 @@ impl State {
     /// The clock this state reads the time from.
     pub fn clock(&self) -> SharedClock {
         self.clock.0.read().clone()
+    }
+
+    /// Mark keys as sensitive: wherever this state's values leave the
+    /// process, a redacted key's value is replaced by [`REDACTED`]. That
+    /// covers the durable journal sink, persistence snapshots
+    /// ([`to_redacted_hashmap`](Self::to_redacted_hashmap)) and the runtime's
+    /// extraction events. Reads inside the process (`get`, guards, tools)
+    /// still see the real value.
+    ///
+    /// A key `k` also covers its scoped forms: `app:k`, `user:k`,
+    /// `state_meta:k`, and any other `prefix:k`. Shared with clones and
+    /// delta views. Adds to the keys already marked.
+    pub fn redact_keys<I, S>(&self, keys: I)
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        let mut guard = self.redacted.0.write();
+        let mut set = (**guard).clone();
+        set.extend(keys.into_iter().map(Into::into));
+        *guard = Arc::new(set);
+    }
+
+    /// The keys marked sensitive with [`redact_keys`](Self::redact_keys).
+    pub fn redacted_keys(&self) -> std::collections::BTreeSet<String> {
+        (**self.redacted.0.read()).clone()
+    }
+
+    /// Whether `key` (or the base key under its scope prefix) is marked
+    /// sensitive.
+    pub fn is_redacted(&self, key: &str) -> bool {
+        let set = self.redacted.0.read().clone();
+        if set.is_empty() {
+            return false;
+        }
+        set.contains(key)
+            || key
+                .rsplit_once(':')
+                .is_some_and(|(_, base)| set.contains(base))
+    }
+
+    /// `value` as it may leave the process under `key`.
+    pub fn redact_value(&self, key: &str, value: &Value) -> Value {
+        if self.is_redacted(key) {
+            Value::String(REDACTED.into())
+        } else {
+            value.clone()
+        }
+    }
+
+    /// Mask the redacted fields of a JSON object (one level deep); other
+    /// values pass through.
+    pub fn redact_fields(&self, value: &Value) -> Value {
+        match value {
+            Value::Object(obj) if !self.redacted.0.read().is_empty() => Value::Object(
+                obj.iter()
+                    .map(|(k, v)| (k.clone(), self.redact_value(k, v)))
+                    .collect(),
+            ),
+            other => other.clone(),
+        }
+    }
+
+    /// [`to_hashmap`](Self::to_hashmap) with redacted keys masked: what a
+    /// persistence snapshot or an export should hold.
+    pub fn to_redacted_hashmap(&self) -> HashMap<String, Value> {
+        self.to_hashmap()
+            .into_iter()
+            .map(|(k, v)| {
+                let v = self.redact_value(&k, &v);
+                (k, v)
+            })
+            .collect()
     }
 
     /// Get a value by key, attempting to deserialize to the requested type.
@@ -782,6 +866,7 @@ impl State {
     /// Create a new State containing only the specified keys.
     pub fn pick(&self, keys: &[&str]) -> State {
         let new = State::new().with_clock(self.clock());
+        new.redact_keys(self.redacted_keys());
         for key in keys {
             if let Some(v) = self.get_raw(key) {
                 new.put_value((*key).to_string(), v, StateMutationOrigin::Set);
@@ -1155,7 +1240,16 @@ impl State {
         // Durable sink runs under the journal lock so the file order matches
         // the ring order exactly. Sinks are sync + cheap by contract.
         if let Some(sink) = self.journal_sink.0.read().as_ref() {
-            sink.write(&mutation);
+            if self.is_redacted(&mutation.key) {
+                let masked = |v: &Option<Value>| v.as_ref().map(|_| Value::String(REDACTED.into()));
+                sink.write(&StateMutation {
+                    old: masked(&mutation.old),
+                    new: masked(&mutation.new),
+                    ..mutation.clone()
+                });
+            } else {
+                sink.write(&mutation);
+            }
         }
         mutations.push_back(mutation);
     }
@@ -1591,6 +1685,47 @@ mod tests {
         let drained = state.drain_mutations();
         assert_eq!(drained.len(), 2);
         assert!(state.recent_mutations().is_empty());
+    }
+
+    #[test]
+    fn redacted_keys_are_masked_wherever_state_leaves_the_process() {
+        let sink = Arc::new(MemoryJournalSink::new());
+        let state = State::new().with_journal_sink(sink.clone());
+        state.redact_keys(["card_number"]);
+        let _ = state.set("card_number", "4111111111111111");
+        let _ = state.set("app:card_number", "4111111111111111");
+        let _ = state.set("name", "Ada");
+
+        // Inside the process the value is real.
+        assert_eq!(
+            state.get::<String>("card_number").as_deref(),
+            Some("4111111111111111")
+        );
+        // The durable journal never sees it, under either scope.
+        for entry in sink.entries() {
+            let leaked = entry
+                .new
+                .as_ref()
+                .is_some_and(|v| v.to_string().contains("4111"));
+            assert!(!leaked, "{} leaked into the journal sink", entry.key);
+        }
+        // Nor does a snapshot.
+        let snapshot = state.to_redacted_hashmap();
+        assert_eq!(snapshot["card_number"], serde_json::json!(REDACTED));
+        assert_eq!(snapshot["app:card_number"], serde_json::json!(REDACTED));
+        assert_eq!(snapshot["name"], serde_json::json!("Ada"));
+        // Nor an object handed out, one level deep.
+        assert_eq!(
+            state.redact_fields(&serde_json::json!({ "card_number": "4111", "name": "Ada" })),
+            serde_json::json!({ "card_number": REDACTED, "name": "Ada" })
+        );
+        // The in-memory journal keeps real values for evidence and watchers.
+        assert!(
+            state
+                .recent_mutations()
+                .iter()
+                .any(|m| m.new == Some(serde_json::json!("4111111111111111")))
+        );
     }
 
     #[test]

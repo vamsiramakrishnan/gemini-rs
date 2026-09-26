@@ -36,14 +36,19 @@ pub enum Policy {
         /// Intent names that trigger handoff.
         intents: Vec<String>,
     },
-    /// Redact these state keys in logs/transcripts. Recorded for the runtime's
-    /// logging layer; pairs with `#[slot(pii)]`.
+    /// Redact these state keys wherever state leaves the process: the durable
+    /// journal sink, persistence snapshots and extraction events carry
+    /// `[redacted]` instead (see `State::redact_keys`). In-process reads see
+    /// the real value. Pairs with `#[slot(pii)]`. Transcript text is a
+    /// separate concern: see `Live::redaction`.
     Redact {
         /// State keys to redact.
         keys: Vec<String>,
     },
-    /// Commit-tool governance: idempotency and compensation metadata for a
-    /// confirm-before-act tool.
+    /// Commit-tool governance for a confirm-before-act tool, enforced at
+    /// connect by a `CommitGuard`: a call whose idempotency key already
+    /// succeeded returns the first result without running again, and a failed
+    /// call runs the compensating tool with the same arguments.
     Commit {
         /// The committing tool.
         tool: String,

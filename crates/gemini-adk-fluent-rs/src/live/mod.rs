@@ -213,6 +213,8 @@ pub struct Live {
     pub(crate) stage_timings: std::collections::BTreeMap<String, gemini_adk_rs::flow::VoiceTiming>,
     /// Slots whose correction re-opens later stages, with the keys to clear.
     pub(crate) corrections: std::collections::BTreeMap<String, Vec<String>>,
+    /// Redaction and commit-governance policies, enforced at connect.
+    pub(crate) policies: Vec<crate::policy::Policy>,
     /// Caller-supplied session `State`, so tools and flow guards can share one.
     pub(crate) state: Option<State>,
     /// Input audio hardening: mic-chain stages, client input-VAD tuning, and
@@ -318,12 +320,41 @@ impl Live {
             repair_policies: std::collections::BTreeMap::new(),
             stage_timings: std::collections::BTreeMap::new(),
             corrections: std::collections::BTreeMap::new(),
+            policies: Vec::new(),
             state: None,
             flow_actions: Vec::new(),
             record_wire_path: None,
             config_errors: Vec::new(),
             input_audio: crate::live::config::InputAudioConfig::default(),
         }
+    }
+
+    /// Enforce a [`Policy`](crate::policy::Policy) on this session.
+    ///
+    /// - `Policy::redact(keys)`: the keys' values are masked wherever state
+    ///   leaves the process (journal sink, persistence snapshots, extraction
+    ///   events). See [`State::redact_keys`](gemini_adk_rs::State::redact_keys).
+    /// - `Policy::commit(tool)`: the tool is wrapped in a
+    ///   [`CommitGuard`](gemini_adk_rs::tool::CommitGuard) at connect, so a
+    ///   repeated commit with the same idempotency key returns the first
+    ///   result, and a failed one runs its compensating tool.
+    /// - `Policy::safety_handoff(..)` is a digression; it needs the
+    ///   conversation compiler, so attach it with `Conversation::policy`.
+    ///   Here it is reported as a configuration error at connect.
+    ///
+    /// [`converse`](Self::converse) installs a conversation's policies.
+    pub fn policy(mut self, policy: impl Into<crate::policy::Policy>) -> Self {
+        let policy = policy.into();
+        if matches!(policy, crate::policy::Policy::SafetyHandoff { .. }) {
+            self.config_errors.push(
+                "Policy::safety_handoff is lowered to a digression by the conversation \
+                 compiler: attach it with Conversation::policy and converse(..)"
+                    .into(),
+            );
+        } else {
+            self.policies.push(policy);
+        }
+        self
     }
 
     /// Pace step `step` of the governed flow (or of a digression): reprompt

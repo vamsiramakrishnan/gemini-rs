@@ -930,6 +930,14 @@ impl crate::live::Live {
         self.repair_policies = convo.repair_policies().clone();
         self.stage_timings = convo.timing_policies().clone();
         self.corrections = convo.correction_policies().clone();
+        // A safety hand-off is already lowered into the digressions above;
+        // redaction and commit governance are enforced at connect.
+        self.policies = convo
+            .policies()
+            .iter()
+            .filter(|p| !matches!(p, crate::policy::Policy::SafetyHandoff { .. }))
+            .cloned()
+            .collect();
         for extract in convo.all_extractors() {
             self = self.extract_record(extract);
         }
